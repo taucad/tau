@@ -32,3 +32,17 @@
   > :first-child:not(:last-child, [style]) {
   display: none;
 }
+
+/* Match the sidebar's md breakpoint before useIsMobile resolves in the browser. */
+@media (width < 48rem) {
+  #application-allotment > .split-view-container > :first-child:not(:last-child, [style]) {
+    display: none;
+  }
+
+  [data-slot='application-shell'][data-sidebar-open='true']
+    #application-allotment
+    > .split-view-container
+    > :last-child:not([style]) {
+    left: 0;
+  }
+}

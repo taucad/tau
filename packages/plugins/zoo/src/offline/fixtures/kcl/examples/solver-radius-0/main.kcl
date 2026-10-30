@@ -1,0 +1,9 @@
+profile = sketch(on = XY) {
+  base = line(start = [var -4mm, var 0mm], end = [var 4mm, var 0mm])
+  arch = arc(start = [var 4mm, var 0mm], end = [var -4mm, var 0mm], center = [var 0mm, var 0mm])
+  coincident([base.end, arch.start])
+  coincident([base.start, arch.end])
+  radius(arch) == 4mm
+}
+
+solid = extrude(region(segments = [profile.base, profile.arch]), length = 2)

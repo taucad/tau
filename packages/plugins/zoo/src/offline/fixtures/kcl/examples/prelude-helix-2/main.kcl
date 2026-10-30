@@ -1,0 +1,17 @@
+// Create a helix around a custom axis.
+helixPath = helix(
+    angleStart = 0,
+    ccw = true,
+    revolutions = 5,
+    length = 10,
+    radius = 5,
+    axis = {
+        direction = [0, 0, 1.0],
+        origin = [0, 0.25, 0]
+    }
+ )
+
+// Create a spring by sweeping around the helix path.
+springSketch = startSketchOn(XZ)
+    |> circle( center = [5, 0], radius = 1 )
+    |> sweep(path = helixPath)

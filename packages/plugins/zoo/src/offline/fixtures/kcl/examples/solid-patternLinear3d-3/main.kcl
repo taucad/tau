@@ -1,0 +1,21 @@
+// Pattern an object on a face.
+size = 100
+case = startSketchOn(XY)
+    |> startProfile(at = [-size, -size])
+    |> line(end = [2 * size, 0])
+    |> line(end = [0, 2 * size])
+    |> tangentialArc(endAbsolute = [-size, size])
+    |> close(%)
+    |> extrude(length = 65)
+
+thing1 = startSketchOn(case, face = END)
+    |> circle(center =[-size / 2, -size / 2], radius = 25)
+    |> extrude(length = 50)
+
+// We pass in `thing1` here with `useOriginal` since we want to pattern just this object on the face.
+patternLinear3d(thing1,
+    axis = [1, 0, 0],
+    distance = size,
+    instances =2,
+    useOriginal = true
+)

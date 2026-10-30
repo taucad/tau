@@ -1,0 +1,10 @@
+// Symmetrically revolve around a path.
+
+profile001 = startSketchOn(XY)
+    |> startProfile(at = [0, 0])
+    |> line(end = [0, 20], tag = $revolveAxis)
+    |> line(end = [20, 0])
+
+sketch001 = startSketchOn(XY)
+    |> circle(center = [-10, 10], radius = 4)
+    |> revolve(angle = 90deg, axis = revolveAxis, symmetric = true)

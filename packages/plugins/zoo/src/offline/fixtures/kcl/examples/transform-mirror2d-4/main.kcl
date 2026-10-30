@@ -1,0 +1,12 @@
+// Mirror an un-closed sketch across a custom axis.
+sketch001 = startSketchOn(XZ)
+    |> startProfile(at = [0, 8.5])
+    |> line(end = [20, -8.5])
+    |> line(end = [-20, -8.5])
+    |> mirror2d(
+      axis = {
+        direction = [0.0, 1.0],
+        origin = [0.0, 0.0]
+      })
+
+example = extrude(sketch001, length = 10)

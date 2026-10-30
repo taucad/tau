@@ -22,7 +22,11 @@ const memoryFs = (): KernelFileSystem =>
 describe('KclUtilities execute serialization', () => {
   it('rejects an aborted operation before touching the engine', async () => {
     const fs = new FileSystemManager(memoryFs());
-    const utils = new KclUtilities({ baseUrl: 'ws://fake.example/modeling-commands', fileSystemManager: fs });
+    const utils = new KclUtilities({
+      baseUrl: 'ws://fake.example/modeling-commands',
+      mode: 'online',
+      fileSystemManager: fs,
+    });
     const bustCacheAndResetScene = vi.fn();
     Reflect.set(utils, 'engineManager', { context: { bustCacheAndResetScene } });
     const controller = new AbortController();
@@ -35,7 +39,11 @@ describe('KclUtilities execute serialization', () => {
 
   it('serializes concurrent executeProgram calls — second waits for first Context.execute', async () => {
     const fs = new FileSystemManager(memoryFs());
-    const utils = new KclUtilities({ baseUrl: 'ws://fake.example/modeling-commands', fileSystemManager: fs });
+    const utils = new KclUtilities({
+      baseUrl: 'ws://fake.example/modeling-commands',
+      mode: 'online',
+      fileSystemManager: fs,
+    });
     await utils.initializeWasm();
     const { program } = await utils.parseKcl('x = 1\n');
 

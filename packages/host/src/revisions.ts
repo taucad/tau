@@ -21,6 +21,7 @@ import { hostname, userInfo } from 'node:os';
 import { join, sep } from 'node:path';
 import { z } from 'zod';
 import { resolveNodeProjectIdentity, openNodeProjectFileSystem } from '#project-identity.js';
+import type { ShellExecutionHolds } from '#shell/shell-service.js';
 
 import { jsonValueSchema } from '@taucad/agent-host';
 import type { JsonValue } from '@taucad/agent-host';
@@ -49,6 +50,9 @@ import type {
   TurnConflictedEvent as SettlementConflicted,
   TurnFailedEvent as SettlementFailed,
   TurnFinalizedEvent as SettlementFinalized,
+  TurnExecutionAnswer,
+  TurnExecutionInput,
+  TurnLease,
 } from '@taucad/revisions/revision-effects';
 import {
   generatedGitattributesPath,
@@ -130,6 +134,8 @@ export type TurnCheckout = {
   readonly mode: 'direct' | 'candidate';
   /** Revision the turn's tree descends from; empty on an unborn branch. */
   readonly baseRevisionId: string;
+  /** The run's revision execution holds, which the project host adds for the shell (I7). */
+  readonly executions?: ShellExecutionHolds | undefined;
 };
 
 /**
@@ -292,6 +298,17 @@ export type ProjectRevisions = {
     describe(): Promise<RevisionPlace>;
     /** Both sides of a conflicted revision as text; absent `revision` reads the one waiting on this branch. */
     conflict(revision: string | undefined): Promise<RevisionConflictRead | undefined>;
+  }>;
+  /**
+   * The trusted host's exact revision execution holds (I7): a contained command holds its execution on the attempt's
+   * lease before it launches, and releases it only after its stop is confirmed. `leases` reads every run record now,
+   * rejecting on any it cannot read, and `checkoutsDirectory` is where this project's linked checkouts live.
+   */
+  readonly executions: Readonly<{
+    readonly checkoutsDirectory: string;
+    hold(input: TurnExecutionInput): Promise<TurnExecutionAnswer>;
+    release(input: TurnExecutionInput): Promise<TurnExecutionAnswer>;
+    leases(): Promise<readonly TurnLease[]>;
   }>;
   /**
    * Open this project's turn-placement session over its revision tree (W8 TS-S4, D9). The host process is the session,
@@ -1761,6 +1778,12 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       emitChannel({ kind: 'event', value: revisionJson({ type: 'checkout.changed', checkoutId, paths }) });
     },
     release,
+    executions: Object.freeze({
+      checkoutsDirectory: options.checkoutsDirectory ?? join(defaultConfigDirectory(), 'checkouts', options.projectId),
+      hold: async (input: TurnExecutionInput) => tree.turns.executions.hold(input),
+      release: async (input: TurnExecutionInput) => tree.turns.executions.release(input),
+      leases: async () => tree.turns.leases(),
+    }),
     opened: async () => {
       if ((await waitForLiveCheckout()) === undefined) {
         throw openRefusal ?? new RevisionPortError('ENGINE_FAILED', 'This project has no live checkout.');

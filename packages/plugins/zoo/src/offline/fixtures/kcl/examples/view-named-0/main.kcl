@@ -1,0 +1,63 @@
+@settings(kclVersion = 3.0)
+
+// Two bodies to look at: a plate, and a boss standing on it. Declaring a
+// view never changes what a program builds, so this part is ordinary KCL.
+plateSketch = sketch(on = XY) {
+  edge1 = line(start = [var 0mm, var 0mm], end = [var 60mm, var 0mm])
+  edge2 = line(start = [var 60mm, var 0mm], end = [var 60mm, var 40mm])
+  edge3 = line(start = [var 60mm, var 40mm], end = [var 0mm, var 40mm])
+  edge4 = line(start = [var 0mm, var 40mm], end = [var 0mm, var 0mm])
+  coincident([edge1.end, edge2.start])
+  coincident([edge2.end, edge3.start])
+  coincident([edge3.end, edge4.start])
+  coincident([edge4.end, edge1.start])
+  horizontal(edge1)
+  vertical(edge2)
+  horizontal(edge3)
+  vertical(edge4)
+}
+plate = extrude(region(segments = [plateSketch.edge1, plateSketch.edge2]), length = 5mm)
+
+bossSketch = sketch(on = XY) {
+  boundary = circle(start = [var 40mm, var 20mm], center = [var 30mm, var 20mm])
+}
+boss = extrude(region(segments = [bossSketch.boundary]), length = 12mm)
+
+// This file hides the boss, so the scene generated on successful execution
+// shows the plate alone. The views below are unaffected by this call; each
+// one states its own visibility from scratch.
+hide(boss)
+
+// 1. Everything visible.
+//
+// This is NOT the same as `Default View`, the view of the scene generated on
+// successful execution of the program. A `Show` baseline shows every object
+// the program built, including the boss that `hide(boss)` took out of that
+// scene.
+overview = view::named(
+  "Everything",
+  camera = view::oriented(view::Orientation::Isometric),
+  baseline = view::Visibility::Show,
+)
+
+// 2. Visible by default, with one object hidden. Add to `except` to hide
+// more.
+plateInspection = view::named(
+  "Plate only",
+  camera = view::oriented(view::Orientation::Front, distance = 200mm),
+  baseline = view::Visibility::Show,
+  except = [boss],
+)
+
+// 3. Hidden by default, with one object shown. This is the form to reach for
+// when a view should isolate a few objects out of many, because `except`
+// then lists what you want rather than everything you do not.
+//
+// This one is not assigned to a variable, which a view never requires: the
+// display name is what identifies it.
+view::named(
+  "Boss only",
+  camera = view::oriented(view::Orientation::Top, distance = 150mm),
+  baseline = view::Visibility::Hide,
+  except = [boss],
+)

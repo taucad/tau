@@ -1,0 +1,10 @@
+// Basic example of a spur gear.
+
+@settings(defaultLengthUnit = mm, kclVersion = 1.0, experimentalFeatures = allow)
+
+gear::spur(
+  nTeeth = 21,
+  module = 1.5,
+  pressureAngle = 14deg,
+  gearHeight = 6,
+)

@@ -1,0 +1,34 @@
+// Gear with a keyhole.
+
+@settings(defaultLengthUnit = mm, kclVersion = 1.0, experimentalFeatures = allow)
+// Define the constants of the keyway and the bore hole
+keywayWidth = 2
+keywayDepth = keywayWidth / 2
+holeDiam = 7
+holeRadius = holeDiam / 2
+startAngle = asin(keywayWidth / 2 / holeRadius)
+keyhole = startSketchOn(XY)
+  |> startProfile(at = [
+       holeRadius * cos(startAngle),
+       holeRadius * sin(startAngle)
+     ])
+  |> xLine(length = keywayDepth)
+  |> yLine(length = -keywayWidth)
+  |> xLine(length = -keywayDepth)
+  |> arc(angleStart = -1 * startAngle + 360deg, angleEnd = 180deg, radius = holeRadius)
+  |> arc(angleStart = 180deg, angleEnd = startAngle, radius = holeRadius)
+  |> close()
+
+// Create the gear.
+gearHeight = 7
+gearBody = gear::helical(
+  nTeeth = 10,
+  module = 2,
+  pressureAngle = 20deg,
+  helixAngle = 35deg,
+  gearHeight,
+)
+// Create a keyhole solid, then cut it out from the gear
+// body to create the final gear with a keyhole.
+keyholeSolid = extrude(keyhole, length = gearHeight)
+gearWithKeyhole = subtract(gearBody, tools = keyholeSolid)

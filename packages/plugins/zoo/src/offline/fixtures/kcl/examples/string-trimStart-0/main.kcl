@@ -1,0 +1,4 @@
+result = "  KCL strings  "
+  |> string::trimStart()
+
+assertIs(result == "KCL strings  ")

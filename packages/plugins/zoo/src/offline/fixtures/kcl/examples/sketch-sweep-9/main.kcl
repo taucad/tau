@@ -1,0 +1,28 @@
+// Demonstrates sweeping along a multi-segment path from a sketch block.
+
+sketch001 = sketch(on = XY) {
+  line1 = line(start = [var 2mm, var 2mm], end = [var 2mm, var 0mm])
+  line2 = line(start = [var 2mm, var 0mm], end = [var 0mm, var 0mm])
+  line3 = line(start = [var 0mm, var 0mm], end = [var 0mm, var 2mm])
+  line4 = line(start = [var 0mm, var 2mm], end = [var 2mm, var 2mm])
+  coincident([line1.end, line2.start])
+  coincident([line2.end, line3.start])
+  coincident([line3.end, line4.start])
+  coincident([line4.end, line1.start])
+  parallel([line2, line4])
+  parallel([line3, line1])
+  perpendicular([line1, line2])
+}
+mySquare = region(segments = [sketch001.line1, sketch001.line2])
+
+// Sketch a path
+sketch002 = sketch(on = offsetPlane(YZ, offset = -2)) {
+  line1 = line(start = [var -0.01mm, var -0.01mm], end = [var -0.12mm, var 2.4mm])
+  arc1 = arc(start = [var 0.6mm, var 4.55mm], end = [var -0.12mm, var 2.4mm], center = [var 3.03mm, var 2.54mm])
+  coincident([line1.end, arc1.end])
+  tangent([line1, arc1])
+}
+
+// Sweep the square along the path.
+path = [sketch002.line1, sketch002.arc1]
+sweep(mySquare, path)

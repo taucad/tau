@@ -18,7 +18,7 @@ import type { SessionsActorRef, SessionsProjectStatus } from '#machines/sessions
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
-import { peekRevisionClient } from '#hooks/use-revision-status.js';
+import { peekRevisionClient } from '#services/revision-client-registry.js';
 import { useSessions } from '#hooks/use-sessions.js';
 import {
   chatStatusLabel,
@@ -43,7 +43,7 @@ vi.mock('#hooks/use-sessions.js', () => ({
   useSessions: vi.fn(),
   useLiveProjectIds: () => Object.keys(fakeRegistry.refs),
 }));
-vi.mock('#hooks/use-revision-status.js', () => ({ peekRevisionClient: vi.fn() }));
+vi.mock('#services/revision-client-registry.js', () => ({ peekRevisionClient: vi.fn() }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: vi.fn() }));
 vi.mock('#hooks/use-chats.js', () => ({
   useChats: () => ({
@@ -1250,7 +1250,7 @@ const compiledHooks = await (async () => {
     '#utils/question-tool.js': questionTool,
     '#machines/sessions.machine.js': await import('#machines/sessions.machine.js'),
     '#services/sessions-store.js': await import('#services/sessions-store.js'),
-    '#hooks/use-revision-status.js': await import('#hooks/use-revision-status.js'),
+    '#services/revision-client-registry.js': await import('#services/revision-client-registry.js'),
     '#hooks/use-sessions.js': await import('#hooks/use-sessions.js'),
     '#hooks/chat-session-store-provider.js': await import('#hooks/chat-session-store-provider.js'),
     '#lib/xstate.lib.js': await import('#lib/xstate.lib.js'),

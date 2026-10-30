@@ -1,7 +1,7 @@
 name: 'Staging deploy history'
 description: >-
   Records which commit an app last published to staging, and reads those records back
-  so `ci.yml`'s plan can diff each app against what staging actually runs.
+  so `staging.yml`'s plan can diff each app against what staging actually runs.
 
 # `record` runs in a deploy job right after it publishes, never when it skipped: it
 # uploads an empty `staging-deploy-<app>` artifact to the run, so the run's commit is

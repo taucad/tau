@@ -77,6 +77,7 @@ export type {
   ProjectHostCommand,
   ProjectHostOptions,
   ProjectHostRuntimeClient,
+  ShellCheckouts,
 } from '#project-host.js';
 export { keyedResource } from '#keyed-resource.js';
 export { openLocalParameterActors } from '#local-parameters.js';
@@ -185,8 +186,11 @@ export type {
   HostShell,
   ProbeHostShellOptions,
   ShellCheckout,
+  ShellExecutionHolds,
+  ShellHoldAnswer,
   ShellIdentity,
   ShellProbe,
+  ShellProjectExecutions,
   ShellServiceOptions,
   ShellUnavailable,
   ShellUnavailableCode,

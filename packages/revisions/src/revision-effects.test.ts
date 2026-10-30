@@ -766,7 +766,17 @@ describe('the tree a cut hashes', () => {
     const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' });
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
     await filesystem.writeFile('node_modules/left/index.js', 'module.exports = 1;\n');
-    await filesystem.writeFile('.tau/runs/run-1.json', '{}\n');
+    await filesystem.writeFile(
+      '.tau/runs/run-1.json',
+      JSON.stringify({
+        runId: 'run-1',
+        turnId: 'turn-1',
+        chatId: 'chat-1',
+        checkoutId: 'other',
+        attempt: 1,
+        startedAt: 1,
+      }),
+    );
     await filesystem.writeFile('.tau/cache/blob', 'cached\n');
     await filesystem.writeFile('thumbnail.webp', 'not really an image\n');
     /* EQ1: a vendored repository is the control plane at any depth. Git itself
@@ -904,6 +914,95 @@ describe('a turn lease', () => {
     await run(actors.checkouts.retireLease, { projectId: 'project-1', runId: 'run-1', key });
     expect(await filesystem.exists('.tau/runs/run-1.json')).toBe(false);
   }, 30_000);
+});
+
+describe('execution custody in turn records', () => {
+  const key = { runId: 'run-1', turnId: 'turn-1', chatId: 'chat-1', attempt: 1 };
+  const recordPath = '.tau/runs/run-1.json';
+
+  it('should preserve held records through every effect-level retirement and replacement path', async () => {
+    const { actors, filesystem } = await fixture();
+    await run(actors.turn.writeLease, { key, checkoutId: 'live' });
+    expect(await actors.turns.executions.hold({ key, executionId: 'execution' })).toEqual({ status: 'applied' });
+    const held = await filesystem.readFile(recordPath, 'utf8');
+    await expect(run(actors.turn.retireLease, { key, checkoutId: 'live', outcome: 'finalized' })).rejects.toMatchObject(
+      { code: 'CHECKOUT_CONFLICT' },
+    );
+    await expect(run(actors.turn.retireLease, { key, checkoutId: 'live', outcome: 'finalized' })).rejects.toThrow(
+      'Running work',
+    );
+    await expect(run(actors.checkouts.retireLease, { projectId: 'project-1', runId: key.runId })).rejects.toMatchObject(
+      { code: 'CHECKOUT_CONFLICT' },
+    );
+    await expect(
+      run(actors.checkouts.retireLease, { projectId: 'project-1', runId: key.runId, key }),
+    ).rejects.toMatchObject({ code: 'CHECKOUT_CONFLICT' });
+    await expect(
+      run(actors.turn.writeLease, { key: { ...key, attempt: 2 }, checkoutId: 'live' }),
+    ).rejects.toMatchObject({ code: 'CHECKOUT_CONFLICT' });
+    expect(await filesystem.readFile(recordPath, 'utf8')).toBe(held);
+    expect(await actors.turns.executions.release({ key, executionId: 'execution' })).toEqual({ status: 'applied' });
+    await run(actors.turn.writeLease, { key: { ...key, attempt: 2 }, checkoutId: 'live' });
+    expect(await actors.turns.executions.release({ key, executionId: 'execution' })).toMatchObject({
+      status: 'refused',
+      code: 'TURN_UNKNOWN',
+    });
+    expect(JSON.parse(await filesystem.readFile(recordPath, 'utf8'))).toMatchObject({ attempt: 2 });
+  });
+
+  it.each([42, ['execution', 'execution'], [''], [1], null])(
+    'should block malformed executionIds %j without dropping or replacing its record',
+    async (executionIds) => {
+      const { actors, filesystem } = await fixture();
+      await run(actors.turn.writeLease, { key, checkoutId: 'live' });
+      const malformed = JSON.stringify({ ...key, checkoutId: 'live', startedAt: 1, executionIds });
+      await filesystem.writeFile(recordPath, malformed);
+      await expect(actors.turns.leases()).rejects.toMatchObject({ code: 'INVALID_REPOSITORY' });
+      await expect(actors.turns.retire(key)).rejects.toMatchObject({ code: 'INVALID_REPOSITORY' });
+      expect(await actors.turns.executions.hold({ key, executionId: 'other' })).toMatchObject({
+        status: 'refused',
+        code: 'REVISIONS_UNAVAILABLE',
+      });
+      expect(await filesystem.readFile(recordPath, 'utf8')).toBe(malformed);
+    },
+  );
+
+  it('should block corrupt JSON and retain valid legacy attempt and head normalization', async () => {
+    const { actors, filesystem } = await fixture();
+    await run(actors.turn.writeLease, { key, checkoutId: 'live' });
+    await filesystem.writeFile(recordPath, '{');
+    await expect(actors.turns.retire(key)).rejects.toMatchObject({ code: 'INVALID_REPOSITORY' });
+    expect(await filesystem.readFile(recordPath, 'utf8')).toBe('{');
+    await filesystem.writeFile(
+      recordPath,
+      JSON.stringify({
+        runId: key.runId,
+        turnId: key.turnId,
+        chatId: key.chatId,
+        checkoutId: 'live',
+        startedAt: 1,
+        baseRevisionId: 'legacy-head',
+        authorityEpoch: 3,
+      }),
+    );
+    expect(await actors.turns.leases()).toEqual([
+      {
+        runId: key.runId,
+        turnId: key.turnId,
+        chatId: key.chatId,
+        checkoutId: 'live',
+        startedAt: 1,
+        attempt: 0,
+        headRevisionId: 'legacy-head',
+      },
+    ]);
+    expect(await actors.turns.executions.hold({ key, executionId: 'new' })).toMatchObject({
+      status: 'refused',
+      code: 'TURN_UNKNOWN',
+    });
+    await run(actors.turn.retireLease, { key, checkoutId: 'live', outcome: 'finalized' });
+    expect(await filesystem.exists(recordPath)).toBe(false);
+  });
 });
 
 describe('settling a turn', () => {

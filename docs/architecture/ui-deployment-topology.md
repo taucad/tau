@@ -28,9 +28,9 @@ Site identity, the per-environment variable matrices, DNS authority, and the pro
                    ┌─────────────┴──────────────────────────┐
                    │                                        │
                    ▼                                        ▼
-   ┌───────────────────────────┐              ┌──────────────────────────────┐
-   │ ci.yml → deploy-ui-staging│              │ ci.yml → deploy-api-staging  │
-   └───────────────────────────┘              └──────────────────────────────┘
+   ┌────────────────────────────────┐         ┌───────────────────────────────────┐
+   │ staging.yml → deploy-ui-staging│         │ staging.yml → deploy-api-staging  │
+   └────────────────────────────────┘         └───────────────────────────────────┘
 
    ┌──────────────────────────────────────────────────────────────────────────┐
    │ release.yml → one release PR per app on `release/<app>`                  │
@@ -79,4 +79,5 @@ Netlify sends static-file `Cross-Origin-Embedder-Policy: require-corp` from [`ap
 - [`.github/workflows/deploy-ui.yml`](../../.github/workflows/deploy-ui.yml)
 - [`.github/workflows/deploy.yml`](../../.github/workflows/deploy.yml)
 - [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)
+- [`.github/workflows/staging.yml`](../../.github/workflows/staging.yml) — staging deploys, after the `ci.yml` checks pass
 - [`apps/ui/netlify.toml`](../../apps/ui/netlify.toml) — build commands and security headers

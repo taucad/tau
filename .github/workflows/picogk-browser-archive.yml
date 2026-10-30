@@ -30,15 +30,15 @@ env:
   # of #40, which judges only threaded paths against the 2x ceiling. `dotnet/inputs.json` still pins the
   # browser source role to a commit on #39's branch; PicoVoxel's `archive/picogk-dual-runtime-builder-w0`
   # keeps that commit reachable, and every checkout that reads the pinned tree fetches full history.
-  PICOVOXEL_REF: bed3df26294da932b6f871e81d8352939ca925ea
+  PICOVOXEL_REF: 9c2964e2a6338b70d27f2a1c52e8a630d7797e98
   PACKAGE_VERSION: 0.2.1
   # Gyroid proves every run; the scheduled run, or a dispatch that asks for it, proves HeatX.
   SUBJECT: ${{ github.event_name == 'schedule' && 'heatx' || inputs.subject || 'gyroid' }}
 jobs:
   archive:
-    uses: taucad/picovoxel/.github/workflows/dotnet-archive.yml@bed3df26294da932b6f871e81d8352939ca925ea
+    uses: taucad/picovoxel/.github/workflows/dotnet-archive.yml@9c2964e2a6338b70d27f2a1c52e8a630d7797e98
     with:
-      picovoxel-ref: bed3df26294da932b6f871e81d8352939ca925ea
+      picovoxel-ref: 9c2964e2a6338b70d27f2a1c52e8a630d7797e98
       adapter-path: packages/plugins/picogk/dotnet/native
 
   # Everything a parity run measures or compares against, built once: the two browser apps and the

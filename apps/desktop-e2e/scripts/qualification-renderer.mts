@@ -51,7 +51,13 @@ const exportGeometry = async (
   const picker = format.getByRole('button', { name: 'Export format' });
   await picker.waitFor({ state: 'visible' });
   await picker.click();
-  await page.locator('[cmdk-item][data-value="glb"]').click();
+  // Name the cause when the kernel offers no GLB: the bare click would otherwise time out
+  // anonymously, which is the failure class this selector fix exists to remove.
+  const glb = page.locator('[cmdk-item][data-value="glb"]');
+  await glb.waitFor({ state: 'visible' }).catch(() => {
+    throw new Error('Export picker offers no GLB format for this project kernel');
+  });
+  await glb.click();
   const download = page.getByLabel('Download to disk');
   if (await download.isChecked()) {
     await download.click();

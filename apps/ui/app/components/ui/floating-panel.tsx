@@ -7,7 +7,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { Button } from '@taucad/ui/components/button';
 import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { DrawerClose, drawerGrabStrip, useIsInsideDrawer } from '@taucad/ui/components/drawer';
+import { DrawerClose, drawerActionClass, drawerGrabStrip, useIsInsideDrawer } from '@taucad/ui/components/drawer';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { CollapsibleCodeBlock } from '#components/ui/collapsible-code-block.js';
 import { reportUiError } from '#lib/error-reporting.js';
@@ -392,6 +392,9 @@ function FloatingPanelContentHeader({ children, className }: FloatingPanelConten
         'relative',
         floatingPanelContentHeaderVariants({ side }),
         isMobile && 'h-10 pr-2',
+        // In a phone drawer the header is a drawer bar: 60px, its actions inset 16px, as every drawer's header is.
+        // `!`: the header's own `max-md:` height and inset come later in the sheet.
+        isMobile && isInsideDrawer && 'h-(--drawer-bar-height)! pr-4!',
         className,
         isGrabStrip && drawerGrabStrip.className,
       )}
@@ -450,7 +453,7 @@ type FloatingPanelMenuButtonProps = React.ComponentProps<typeof PaneButton>;
  * Styled icon button for floating panel headers.
  *
  * Thin wrapper around the shared `PaneButton` that adds the phone shape (a
- * 32px circle with a single border) and the `floating-panel-menu-button`
+ * 32px circle with a single border, or in a phone drawer a 44px drawer action) and the `floating-panel-menu-button`
  * data-slot for styling hooks.
  *
  * When rendered inside a mobile drawer, stops click and pointerDown
@@ -476,6 +479,8 @@ function FloatingPanelMenuButton({
         'max-md:size-8 max-md:rounded-full max-md:border max-md:bg-background max-md:shadow-xs',
         // An embedded phone surface is not a narrow viewport; `!` outranks the button's own radius there.
         isMobile && 'size-8 rounded-full! border bg-background shadow-xs',
+        // In a phone drawer it is a drawer action, the same 44px circle as every drawer header's.
+        isDrawerHandle && drawerActionClass,
         className,
       )}
       onClick={isDrawerHandle ? chainStopPropagation(onClick) : onClick}

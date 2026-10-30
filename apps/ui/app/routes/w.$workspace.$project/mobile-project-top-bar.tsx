@@ -14,7 +14,15 @@ import { Check, ChevronDown, CircleAlert, GitBranch, GitMerge, History, Info, Pa
 import type { LucideIcon } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { Button } from '@taucad/ui/components/button';
-import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@taucad/ui/components/drawer';
+import {
+  Drawer,
+  DrawerAction,
+  DrawerBar,
+  DrawerContent,
+  DrawerDescription,
+  DrawerTitle,
+  drawerBarTitleClass,
+} from '@taucad/ui/components/drawer';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { cn } from '@taucad/ui/utils/cn';
 import { workbenchPanes } from '@taucad/workbench-panes/registry/pane-registry';
@@ -350,9 +358,9 @@ function ProjectSheet({
           }
         }}
       >
-        <div className='flex items-center gap-2 px-4 py-2'>
+        <DrawerBar>
           <div className='flex min-w-0 flex-1 flex-col'>
-            <DrawerTitle className='truncate text-base font-medium'>{projectName}</DrawerTitle>
+            <DrawerTitle className={drawerBarTitleClass}>{projectName}</DrawerTitle>
             <DrawerDescription asChild>
               <div>
                 <ProjectStatusLineView line={status.line} />
@@ -361,20 +369,13 @@ function ProjectSheet({
           </div>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button
-                ref={closeRef}
-                variant='outline'
-                size='icon'
-                className='rounded-full'
-                aria-label='Close project sheet'
-                onClick={close}
-              >
+              <DrawerAction ref={closeRef} aria-label='Close project sheet' onClick={close}>
                 <X aria-hidden className='size-4' />
-              </Button>
+              </DrawerAction>
             </TooltipTrigger>
             <TooltipContent>Close project sheet</TooltipContent>
           </Tooltip>
-        </div>
+        </DrawerBar>
         <div className='min-h-0 overflow-y-auto pb-3'>
           {/* I5: a conflict is a decision, so its Revisions row comes first and says so; it opens where it is made. */}
           {status.conflict === undefined ? null : (

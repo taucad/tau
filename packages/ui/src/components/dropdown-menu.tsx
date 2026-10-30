@@ -3,15 +3,17 @@ import * as React from 'react';
 import { DropdownMenu as DropdownMenuPrimitive, Slot as SlotPrimitive } from 'radix-ui';
 import { CheckIcon, ChevronRightIcon, CircleIcon, MinusIcon, XIcon } from 'lucide-react';
 import { cn } from '#utils/cn.js';
-import { Button } from '#components/button.js';
 import {
   Drawer,
+  DrawerAction,
+  DrawerBar,
   DrawerClose,
   DrawerContent,
   DrawerList,
   DrawerNestedRoot,
   DrawerTitle,
   DrawerTrigger,
+  drawerBarTitleClass,
   drawerRowAttributes,
   useIsInsideDrawer,
 } from '#components/drawer.js';
@@ -336,14 +338,14 @@ function DropdownMenuDrawerContent({
         (first ?? drawer)?.focus({ preventScroll: true });
       }}
     >
-      <div className='flex items-center gap-2 px-4 py-2'>
-        <DrawerTitle className='min-w-0 flex-1 truncate text-base font-medium'>{title}</DrawerTitle>
+      <DrawerBar>
+        <DrawerTitle className={drawerBarTitleClass}>{title}</DrawerTitle>
         <DrawerClose asChild>
-          <Button variant='outline' size='icon-touch' className='rounded-full' aria-label='Close'>
+          <DrawerAction aria-label='Close'>
             <XIcon aria-hidden className='size-4' />
-          </Button>
+          </DrawerAction>
         </DrawerClose>
-      </div>
+      </DrawerBar>
       {/* A dialog's group of buttons: checkbox, radio and switch rows use the plain `checkbox`, `radio` and `switch`
        * roles, since the `menuitem*` roles need a `menu` parent that a drawer does not have. */}
       {/* Dividers in a drawer never span its full width: this one lines up with the header's title and close button. */}

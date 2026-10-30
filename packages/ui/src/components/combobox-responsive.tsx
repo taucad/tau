@@ -7,15 +7,17 @@ import { useIsMobile } from '#hooks/use-mobile.js';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '#components/command.js';
 import {
   Drawer,
+  DrawerAction,
+  DrawerBar,
   DrawerNestedRoot,
   DrawerContent,
   DrawerDescription,
   DrawerList,
   DrawerTitle,
   DrawerTrigger,
+  drawerBarTitleClass,
   useIsInsideDrawer,
 } from '#components/drawer.js';
-import { Button } from '#components/button.js';
 import { Popover, PopoverContent, PopoverTrigger } from '#components/popover.js';
 import { cn } from '#utils/cn.js';
 import { menuGroupHeadingClass } from '#components/menu.variants.js';
@@ -195,17 +197,14 @@ export function ComboBoxResponsive<T>({
           }}
         >
           {isNested ? (
-            <div
+            <DrawerBar
               data-slot='combobox-drawer-header'
-              className='grid grid-cols-[var(--spacing-touch-row)_minmax(0,1fr)_var(--spacing-touch-row)] items-center gap-2 px-3 py-1'
+              className='grid grid-cols-[calc(var(--spacing)*11)_minmax(0,1fr)_calc(var(--spacing)*11)]'
             >
-              {/* A fixed square with a full radius and an even border stays a circle at every scale; the
-                  matching empty column keeps the title on the drawer's centre line. */}
-              <Button
+              {/* The matching empty column keeps the title on the drawer's centre line. */}
+              <DrawerAction
                 type='button'
-                variant='ghost'
                 aria-label='Back'
-                className='flex size-touch-row shrink-0 items-center justify-center rounded-full border border-border p-0 has-[>svg]:p-0'
                 onClick={() => {
                   handleOpenChange(false);
                 }}
@@ -213,12 +212,12 @@ export function ComboBoxResponsive<T>({
                 {/* Optically centred: the open side's two stroke ends outweigh the point, so a box-centred
                     chevron reads as sitting right; a half-pixel nudge left and a lighter stroke settle it. */}
                 <ChevronLeft className='size-6 -translate-x-[0.5px]' strokeWidth={1.25} />
-              </Button>
-              <DrawerTitle className='truncate text-center text-sm font-medium' id='drawer-title'>
+              </DrawerAction>
+              <DrawerTitle className={cn(drawerBarTitleClass, 'text-center')} id='drawer-title'>
                 {title}
               </DrawerTitle>
               <span aria-hidden />
-            </div>
+            </DrawerBar>
           ) : (
             <DrawerTitle className='sr-only' id='drawer-title'>
               {title}

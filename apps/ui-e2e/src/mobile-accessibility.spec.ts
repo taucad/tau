@@ -56,6 +56,16 @@ const adjudications: readonly Adjudication[] = [
   },
   {
     rule: 'color-contrast',
+    message: /due to a pseudo element/u,
+    // A highlighted drawer row paints its fill as a rounded surface inset from the drawer's edge, an ::after behind the
+    // row's content (`drawer-row-dividers`). The re-check paints that same fill on the row itself, so the text is
+    // measured against the colour it stands on.
+    reason: 'a highlighted drawer row paints its fill as an inset ::after behind its text',
+    recheck:
+      ":is([data-slot='command-item'], [data-drawer-row])::after { content: none !important; } :is([data-slot='command-item'], [data-drawer-row]):is([data-selected='true'], [data-highlighted], :focus, :hover) { background-color: var(--drawer-row-highlight, var(--menu-highlight)) !important; }",
+  },
+  {
+    rule: 'color-contrast',
     message: /due to a background gradient/u,
     // A filled button's sheen is a gradient around --primary-action. The re-check paints the button flat with a colour
     // lighter than the sheen's lightest stop plus the hover glint (white 16% + 8%), the worst case for its light label.
@@ -92,6 +102,18 @@ const adjudications: readonly Adjudication[] = [
     measure: 'opaque-on-top',
     fill: 'surface',
     only: '[data-slot="dropdown-menu-drawer-items"] > [data-slot="dropdown-menu-label"]',
+  },
+  {
+    rule: 'color-contrast',
+    message: /partially obscured by another element/u,
+    // At 320×640 the All sheet's 60px header leaves its list a short scrollport, and once the sweep has scrolled it the
+    // Views heading sits partly above the scrollport's top edge, where axe gives up. The sweep scrolls it back into view
+    // and measures it instead: the heading is topmost at its centre, the sheet's fill behind it is opaque, and its text
+    // meets 4.5:1 against that fill.
+    reason: 'the All sheet’s Views heading is on top, over the sheet’s own opaque fill, at 4.5:1 or more',
+    measure: 'opaque-on-top',
+    fill: 'surface',
+    only: '#all-views-title',
   },
   {
     rule: 'aria-hidden-focus',
@@ -192,6 +214,8 @@ const isOpaqueOnTop = async (selector: string, only: string, fill: 'own' | 'surf
       if (!node?.matches(allowed)) {
         return false;
       }
+      // A node its own scrollport has scrolled partly out of view is measured where a reader scrolls it to.
+      node.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       const canvas = document.createElement('canvas');
       canvas.width = 1;
       canvas.height = 1;

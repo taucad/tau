@@ -496,6 +496,37 @@
     pointer-events: none;
   }
 
+  /* A highlighted row is not a full-width band: its fill is a rounded surface, like a sidebar item's, inset halfway
+     between the drawer edge and the header divider (which sits 1rem in). The row keeps its own padding, so its text
+     and its hairline do not move. */
+  & :is([data-slot='command-item'], [data-drawer-row]) {
+    isolation: isolate;
+  }
+
+  & :is([data-slot='command-item'], [data-drawer-row]):is([data-selected='true'], [data-highlighted], :focus, :hover) {
+    background-color: transparent;
+  }
+
+  &
+    :is([data-slot='command-item'], [data-drawer-row]):is(
+      [data-selected='true'],
+      [data-highlighted],
+      :focus,
+      :hover
+    )::after {
+    content: '';
+    position: absolute;
+    inset: 0 0.5rem;
+    z-index: -1;
+    border-radius: var(--radius-md);
+    background-color: var(--drawer-row-highlight, var(--menu-highlight));
+    pointer-events: none;
+  }
+
+  & :is([data-slot='command-item'], [data-drawer-row])[data-variant='destructive'] {
+    --drawer-row-highlight: var(--menu-highlight-destructive);
+  }
+
   & :is([data-slot='command-item'], [data-drawer-row])[data-selected='true']::before,
   &
     :is([data-slot='command-item'], [data-drawer-row])[data-selected='true']

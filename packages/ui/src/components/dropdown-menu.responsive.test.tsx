@@ -149,7 +149,7 @@ describe('responsive dropdown menu', () => {
 
     await user.click(screen.getByRole('button', { name: 'More actions for Bracket' }));
     const close = await screen.findByRole('button', { name: 'Close' });
-    expect(close).toHaveClass('rounded-full', 'border');
+    expect(close).toHaveClass('rounded-full!', 'border', 'size-11');
 
     fireEvent.click(close);
     await waitFor(() => {

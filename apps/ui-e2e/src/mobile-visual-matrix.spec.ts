@@ -753,17 +753,27 @@ test('keeps both ends of the All focus loop visible at 320px', async () => {
   await motionSettled();
   const first = allSheet().getByRole('button', { name: 'Open file', exact: true });
   const last = allSheet().getByRole('button', { name: 'Console', exact: true });
+  const focusedName = async (): Promise<string | undefined> =>
+    target.evaluate(
+      () => document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.textContent ?? undefined,
+    );
   await target.focus(last);
+  // The loop runs from the last surface through the sheet's header Close to its first surface.
   await target.keyboardPress('Tab');
-  await expect.poll(async () => target.evaluate(() => document.activeElement?.textContent)).toBe('Open file');
+  await expect.poll(focusedName).toBe('Close');
+  await target.keyboardPress('Tab');
+  await expect.poll(focusedName).toBe('Open file');
   expect(await reachable(first)).toBe(true);
   const heading = await boxOf(allSheet().getByRole('heading', { name: 'Views', exact: true }), 'Views heading');
   const firstBox = await boxOf(first, 'Open file');
   expect(heading.bottom).toBeLessThanOrEqual(firstBox.top);
   expect(await reachable(allSheet().getByRole('heading', { name: 'Views', exact: true }))).toBe(true);
   await target.keyboardPress('Shift+Tab');
-  await expect.poll(async () => target.evaluate(() => document.activeElement?.textContent)).toBe('Console');
+  await expect.poll(focusedName).toBe('Close');
+  await target.keyboardPress('Shift+Tab');
+  await expect.poll(focusedName).toBe('Console');
   expect(await reachable(last)).toBe(true);
+  await target.keyboardPress('Tab');
   await target.keyboardPress('Tab');
   expect(await reachable(first)).toBe(true);
 });

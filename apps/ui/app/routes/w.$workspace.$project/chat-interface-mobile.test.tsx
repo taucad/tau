@@ -416,7 +416,7 @@ describe('ChatInterfaceMobile', () => {
       // Vaul shows the top `snapPoint` of the viewport-tall sheet; its 1px top border and the grabber row come first, then the surface.
       const visible = typeof snapPoint === 'string' ? Number.parseFloat(snapPoint) : snapPoint * viewportHeight;
       const sheetTop = viewportHeight - visible;
-      const topBorder = drawer.classList.contains('border-t') ? 1 : 0;
+      const topBorder = drawer.classList.contains('data-[vaul-drawer-direction=bottom]:border-t') ? 1 : 0;
       const grabber = resolveLength('var(--drawer-handle-height)', drawer.className, environment);
       const surfaceBottom =
         sheetTop + topBorder + grabber + resolveLength(surface.style.height, drawer.className, environment);

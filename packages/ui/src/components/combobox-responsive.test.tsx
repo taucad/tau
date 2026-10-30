@@ -28,9 +28,12 @@ vi.mock('#components/popover.js', () => ({
 
 vi.mock('#components/drawer.js', async (importOriginal) => {
   // The real list, so the drawer test sees the rows it divides.
-  const { DrawerList } = await importOriginal<typeof DrawerModule>();
+  const { DrawerAction, DrawerBar, DrawerList, drawerBarTitleClass } = await importOriginal<typeof DrawerModule>();
   return {
+    DrawerAction,
+    DrawerBar,
     DrawerList,
+    drawerBarTitleClass,
     Drawer: ({ children }: { readonly children: React.ReactNode }) => <div data-testid='drawer-root'>{children}</div>,
     DrawerNestedRoot: ({ children }: { readonly children: React.ReactNode }) => (
       <div data-testid='drawer-nested-root'>{children}</div>

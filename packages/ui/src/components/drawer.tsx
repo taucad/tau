@@ -1,6 +1,7 @@
 import { useResponsiveSurfaceContainer } from '#hooks/responsive-surface.js';
 import * as React from 'react';
 import { Drawer as DrawerPrimitive } from 'vaul';
+import { Button } from '#components/button.js';
 import { cn } from '#utils/cn.js';
 
 const DrawerContext = React.createContext(false);
@@ -335,8 +336,8 @@ function DrawerHandle({
  * Marks the header row directly under a sheet's grabber as its grab strip (I3, D4). In a sheet only the grabber drags
  * (`handleOnly`), the grabber's target then reaches down over the strip, so dragging anywhere on the strip moves the
  * sheet, while the strip paints above that target and lets only its controls (buttons, links, fields) take a pointer:
- * they stay ordinary controls, and a tap on them never starts a drag. The strip is 40px tall
- * (`--drawer-grab-strip-height`), the reach the target takes.
+ * they stay ordinary controls, and a tap on them never starts a drag. The strip is as tall as a drawer bar
+ * (`--drawer-grab-strip-height`, 60px), the reach the target takes.
  *
  * @public
  * @example <caption>Make a sheet's header its grab strip.</caption>
@@ -360,7 +361,7 @@ const drawerGrabStrip = {
  * separates it from the header below. A header's actions then keep the same space above them as below. The target
  * starts 8px above the sheet's edge, so content docked above a sheet keeps 8px clear of it, and spans the row; in a
  * sheet only the grabber drags, it also reaches down over a grab strip ({@link drawerGrabStrip}) under the row
- * (`--drawer-handle-reach`), 56px in all, without a pixel of space of its own. It paints above the sheet's content
+ * (`--drawer-handle-reach`), 76px in all, without a pixel of space of its own. It paints above the sheet's content
  * (`z-1`) and under the strip (`z-2`), whose controls alone take a pointer there.
  */
 function DrawerHandleIndicator({ className, ...properties }: React.ComponentProps<'div'>): React.JSX.Element {
@@ -461,9 +462,11 @@ function DrawerContent({
         style={frameStyle ? { ...style, ...frameStyle } : style}
         className={cn(
           'group/drawer-content fixed z-50 flex h-auto flex-col bg-background [--drawer-handle-height:calc(var(--spacing)*2)]',
-          /* Concentric with the header's close button: its radius (half of size-11) plus its inset from the edge (px-4). */
-          '[--drawer-radius:calc(var(--spacing)*11/2+var(--spacing)*4)]',
-          '[--drawer-grab-strip-height:calc(var(--spacing)*10)] [--drawer-handle-reach:0px]',
+          /* A touch past concentric with the header's close button (its 22px radius plus its 16px inset). The edge's
+             border runs down its sides too, so the hairline follows the rounded corners instead of tapering out. */
+          '[--drawer-radius:calc(var(--spacing)*11)]',
+          /* Every drawer's header row (`DrawerBar`) is 60px: a 44px action with 8px above and below. A grab strip is one. */
+          '[--drawer-bar-height:calc(var(--spacing)*15)] [--drawer-grab-strip-height:var(--drawer-bar-height)] [--drawer-handle-reach:0px]',
           /* Only where nothing else drags the sheet does the grabber's target reach over a grab strip. */
           isHandleOnly && 'has-[[data-drawer-grab-strip]]:[--drawer-handle-reach:var(--drawer-grab-strip-height)]',
           'select-none',
@@ -478,8 +481,8 @@ function DrawerContent({
           /* A drawer is a touch surface: its list rows and their filter field take the touch row height. */
           '[&_[data-slot=command-item]]:min-h-touch-row [&_[data-slot=command-input]]:h-touch-row',
           'data-[vaul-drawer-direction=bottom]:pb-[env(safe-area-inset-bottom)]',
-          'data-[vaul-drawer-direction=top]:inset-x-0 data-[vaul-drawer-direction=top]:top-0 data-[vaul-drawer-direction=top]:mb-24 data-[vaul-drawer-direction=top]:max-h-[80vh] data-[vaul-drawer-direction=top]:rounded-b-(--drawer-radius) data-[vaul-drawer-direction=top]:border-b',
-          'data-[vaul-drawer-direction=bottom]:inset-x-0 data-[vaul-drawer-direction=bottom]:bottom-0 data-[vaul-drawer-direction=bottom]:mt-24 data-[vaul-drawer-direction=bottom]:max-h-[80vh] data-[vaul-drawer-direction=bottom]:rounded-t-(--drawer-radius) data-[vaul-drawer-direction=bottom]:border-t',
+          'data-[vaul-drawer-direction=top]:inset-x-0 data-[vaul-drawer-direction=top]:top-0 data-[vaul-drawer-direction=top]:mb-24 data-[vaul-drawer-direction=top]:max-h-[80vh] data-[vaul-drawer-direction=top]:rounded-b-(--drawer-radius) data-[vaul-drawer-direction=top]:border-x data-[vaul-drawer-direction=top]:border-b',
+          'data-[vaul-drawer-direction=bottom]:inset-x-0 data-[vaul-drawer-direction=bottom]:bottom-0 data-[vaul-drawer-direction=bottom]:mt-24 data-[vaul-drawer-direction=bottom]:max-h-[80vh] data-[vaul-drawer-direction=bottom]:rounded-t-(--drawer-radius) data-[vaul-drawer-direction=bottom]:border-x data-[vaul-drawer-direction=bottom]:border-t',
           'data-[vaul-drawer-direction=right]:inset-y-0 data-[vaul-drawer-direction=right]:right-0 data-[vaul-drawer-direction=right]:w-3/4 data-[vaul-drawer-direction=right]:border-l data-[vaul-drawer-direction=right]:sm:max-w-sm',
           'data-[vaul-drawer-direction=left]:inset-y-0 data-[vaul-drawer-direction=left]:left-0 data-[vaul-drawer-direction=left]:w-3/4 data-[vaul-drawer-direction=left]:border-r data-[vaul-drawer-direction=left]:sm:max-w-sm',
           className,
@@ -515,6 +518,80 @@ function DrawerContent({
  */
 function DrawerHeader({ className, ...properties }: React.ComponentProps<'div'>): React.JSX.Element {
   return <div data-slot='drawer-header' className={cn('flex flex-col gap-1.5 p-4', className)} {...properties} />;
+}
+
+/**
+ * The size and shape of every drawer header action (close, back, more): a 44px circle with a single border. Shared with
+ * header buttons that are not a {@link DrawerAction}, such as a phone pane header's buttons.
+ *
+ * @public
+ * @example <caption>Size a pane button as a drawer action.</caption>
+ * ```typescript
+ * import { drawerActionClass } from '@taucad/ui/components/drawer';
+ *
+ * const className = drawerActionClass;
+ * ```
+ */
+const drawerActionClass = 'size-11 min-h-11 min-w-11 shrink-0 rounded-full! border bg-background p-0 shadow-xs';
+
+/**
+ * The header row of every drawer: its title and its actions on one 60px row (`--drawer-bar-height`), inset 16px, so a
+ * menu, a switcher and a phone pane all share one header.
+ *
+ * @public
+ * @example <caption>Render a drawer's header row.</caption>
+ * ```typescript
+ * import { createElement } from 'react';
+ * import { DrawerBar } from '@taucad/ui/components/drawer';
+ *
+ * createElement(DrawerBar, null, 'Project details');
+ * ```
+ */
+function DrawerBar({ className, ...properties }: React.ComponentProps<'div'>): React.JSX.Element {
+  return (
+    <div
+      data-slot='drawer-bar'
+      className={cn('flex min-h-(--drawer-bar-height) shrink-0 items-center gap-2 px-4 py-2', className)}
+      {...properties}
+    />
+  );
+}
+
+/**
+ * The title type of a drawer's header row ({@link DrawerBar}).
+ *
+ * @public
+ * @example <caption>Style a drawer's title.</caption>
+ * ```typescript
+ * import { drawerBarTitleClass } from '@taucad/ui/components/drawer';
+ *
+ * const className = drawerBarTitleClass;
+ * ```
+ */
+const drawerBarTitleClass = 'min-w-0 flex-1 truncate text-base font-medium';
+
+/**
+ * A drawer header's icon action (close, back, more), sized and shaped by {@link drawerActionClass}.
+ *
+ * @public
+ * @example <caption>Render a drawer's close action.</caption>
+ * ```typescript
+ * import { createElement } from 'react';
+ * import { DrawerAction } from '@taucad/ui/components/drawer';
+ *
+ * createElement(DrawerAction, { 'aria-label': 'Close' });
+ * ```
+ */
+function DrawerAction({ className, ...properties }: React.ComponentProps<typeof Button>): React.JSX.Element {
+  return (
+    <Button
+      data-slot='drawer-action'
+      variant='outline'
+      size='icon-touch'
+      className={cn(drawerActionClass, className)}
+      {...properties}
+    />
+  );
 }
 
 /**
@@ -624,7 +701,11 @@ function DrawerList({ className, ...properties }: React.ComponentProps<'div'>): 
 const drawerRowAttributes = { 'data-drawer-row': '' } as const;
 
 export {
+  drawerActionClass,
+  drawerBarTitleClass,
   drawerGrabStrip,
+  DrawerAction,
+  DrawerBar,
   Drawer,
   DrawerNestedRoot,
   DrawerPortal,

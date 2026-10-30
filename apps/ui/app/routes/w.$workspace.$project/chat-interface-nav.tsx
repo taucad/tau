@@ -19,11 +19,21 @@ import {
   SlidersHorizontal,
   SquareTerminal,
   Terminal,
+  X,
 } from 'lucide-react';
 import { useRef, useState } from 'react';
 import type { DockviewApi } from 'dockview-react';
 import { useDockviewPanels } from '#components/panes/dockview-tab-overflow-picker.js';
-import { Drawer, DrawerContent, DrawerTitle, DrawerDescription } from '@taucad/ui/components/drawer';
+import {
+  Drawer,
+  DrawerAction,
+  DrawerBar,
+  DrawerClose,
+  DrawerContent,
+  DrawerTitle,
+  DrawerDescription,
+  drawerBarTitleClass,
+} from '@taucad/ui/components/drawer';
 import { Button } from '@taucad/ui/components/button';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent } from '@taucad/ui/components/dropdown-menu';
 import { FileSelector } from '#components/files/file-selector.js';
@@ -175,7 +185,14 @@ export function ChatInterfaceNav({
             }
           }}
         >
-          <DrawerTitle className='px-3 pt-2'>All surfaces</DrawerTitle>
+          <DrawerBar>
+            <DrawerTitle className={drawerBarTitleClass}>All surfaces</DrawerTitle>
+            <DrawerClose asChild>
+              <DrawerAction aria-label='Close'>
+                <X aria-hidden className='size-4' />
+              </DrawerAction>
+            </DrawerClose>
+          </DrawerBar>
           <DrawerDescription className='sr-only'>Choose a workbench surface</DrawerDescription>
           <div
             className='min-h-0 overflow-y-auto pb-3'

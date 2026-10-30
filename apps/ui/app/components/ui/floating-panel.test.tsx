@@ -24,6 +24,7 @@ vi.mock('@taucad/ui/hooks/use-mobile', () => ({
 const mockUseIsInsideDrawer = vi.fn(() => false);
 vi.mock('@taucad/ui/components/drawer', () => ({
   useIsInsideDrawer: () => mockUseIsInsideDrawer(),
+  drawerActionClass: 'drawer-action',
   drawerGrabStrip: { 'data-drawer-grab-strip': '', className: 'drawer-grab-strip' },
   DrawerHandle: ({ children, ...props }: React.ComponentProps<'div'>) => (
     <div data-testid='drawer-handle' {...props}>

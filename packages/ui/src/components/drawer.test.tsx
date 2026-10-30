@@ -159,7 +159,7 @@ describe('drawer grabber target', () => {
     );
   });
 
-  it('should reach the target of a handle-only sheet over its 40px grab strip: 56px in all, the strip’s controls on top', () => {
+  it('should reach the target of a handle-only sheet over its 60px grab strip: 76px in all, the strip’s controls on top', () => {
     render(
       <Drawer open handleOnly snapPoints={[0.5, 1]}>
         <DrawerContent>
@@ -174,9 +174,10 @@ describe('drawer grabber target', () => {
     );
     const handle = screen.getByRole('slider', { name: 'Drawer height' });
     const content = handle.closest('[data-slot=drawer-content]')!;
-    // 8px above the edge, the 8px row and the 40px strip: 56px, without a pixel of its own below the bar.
+    // 8px above the edge, the 8px row and the 60px strip: 76px, without a pixel of its own below the bar.
     expect(content).toHaveClass(
-      '[--drawer-grab-strip-height:calc(var(--spacing)*10)]',
+      '[--drawer-bar-height:calc(var(--spacing)*15)]',
+      '[--drawer-grab-strip-height:var(--drawer-bar-height)]',
       'has-[[data-drawer-grab-strip]]:[--drawer-handle-reach:var(--drawer-grab-strip-height)]',
     );
     // The strip paints above the target (z-2 over z-1) and lets only its controls take a pointer.

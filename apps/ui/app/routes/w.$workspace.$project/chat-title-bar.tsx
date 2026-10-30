@@ -8,11 +8,14 @@ import type { ChatRecord } from '@taucad/chat/schemas';
 import { Button } from '@taucad/ui/components/button';
 import {
   Drawer,
+  DrawerAction,
+  DrawerBar,
   DrawerContent,
   DrawerDescription,
   DrawerList,
   DrawerTitle,
   DrawerTrigger,
+  drawerBarTitleClass,
   drawerRowAttributes,
 } from '@taucad/ui/components/drawer';
 import { cn } from '@taucad/ui/utils/cn';
@@ -202,23 +205,20 @@ function ChatSwitcherSheet({
           }
         }}
       >
-        <div className='flex items-center gap-2 px-4 py-2'>
-          <DrawerTitle className='min-w-0 flex-1 truncate text-base font-medium'>{title}</DrawerTitle>
+        <DrawerBar>
+          <DrawerTitle className={drawerBarTitleClass}>{title}</DrawerTitle>
           <DrawerDescription className='sr-only'>
             Switch to another chat in this project or start a new one.
           </DrawerDescription>
-          <Button
-            variant='outline'
-            size='icon-touch'
-            className='rounded-full'
+          <DrawerAction
             aria-label='Close chats'
             onClick={() => {
               setIsOpen(false);
             }}
           >
             <X aria-hidden className='size-4' />
-          </Button>
-        </div>
+          </DrawerAction>
+        </DrawerBar>
         {/* Dividers in a drawer never span its full width: this one lines up with the title and close button. */}
         <div aria-hidden className='mx-4 h-px shrink-0 bg-border' />
         <div className='min-h-0 overflow-y-auto pb-3'>

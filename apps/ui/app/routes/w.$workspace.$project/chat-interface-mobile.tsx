@@ -647,7 +647,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
               aria-labelledby='drawer-title'
               aria-describedby='drawer-description'
               className={cn(
-                'flex-1 rounded-t-lg border-t bg-sidebar',
+                'flex-1 bg-sidebar',
                 'z-40', // Position below the navigation tabs
                 // The drawer is portalled out of the shell, so it takes the nav's height variables itself.
                 mobileWorkbenchNavigationHeight,
@@ -681,6 +681,8 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
                 data-slot='mobile-surface'
                 className={cn(
                   'flex h-full flex-col p-0 outline-none',
+                  // Its top corners follow the sheet's, less the grabber row above them, so the panel stays inside the curve.
+                  'overflow-hidden rounded-t-[calc(var(--drawer-radius)-var(--drawer-handle-height))]',
                   // While typing, the drawer is the frame above the keyboard and the panel fills it.
                   'group-data-[keyboard=open]/drawer-content:h-auto! group-data-[keyboard=open]/drawer-content:min-h-0 group-data-[keyboard=open]/drawer-content:flex-1',
                 )}

@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { renderToString } from 'react-dom/server';
+import { hydrateRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ResponsiveSurfaceProvider } from '#hooks/use-mobile.js';
 import { KeyboardProvider, useKeybinding } from '#components/keyboard.js';
@@ -54,6 +56,51 @@ describe('useKeybinding', () => {
       expect(onKey).toHaveBeenCalledOnce();
     },
   );
+
+  it('labels a subtree that hydrates after the platform was detected with the markup the server sent', async () => {
+    // The server has no navigator and sends the Mac label; a client that has already
+    // detected Windows must still hydrate against that label, or React regenerates the
+    // tree and reports the mismatch as an error (TAU-UI-F).
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32');
+    setPlatform('mac');
+    const markup = renderToString(
+      <KeyboardProvider>
+        <PlatformBinding onKey={vi.fn()} />
+      </KeyboardProvider>,
+    );
+    expect(markup).toContain('⌘K');
+
+    // A mounted provider detects the platform, which is what used to flip the label of
+    // every subtree still to hydrate.
+    render(
+      <KeyboardProvider>
+        <PlatformBinding onKey={vi.fn()} />
+      </KeyboardProvider>,
+    );
+    const container = document.createElement('div');
+    container.innerHTML = markup;
+    const recoverableErrors: unknown[] = [];
+
+    const root = await act(async () =>
+      hydrateRoot(
+        container,
+        <KeyboardProvider>
+          <PlatformBinding onKey={vi.fn()} />
+        </KeyboardProvider>,
+        {
+          onRecoverableError(error) {
+            recoverableErrors.push(error);
+          },
+        },
+      ),
+    );
+
+    expect(recoverableErrors).toEqual([]);
+    expect(container.textContent).toContain('Ctrl+K');
+    act(() => {
+      root.unmount();
+    });
+  });
 
   it('uses the current function-valued options without re-registering', () => {
     const onKey = vi.fn();

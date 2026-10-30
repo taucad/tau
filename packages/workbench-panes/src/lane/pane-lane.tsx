@@ -13,6 +13,7 @@ import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { cn } from '@taucad/ui/utils/cn';
 import { formatKeyCombination } from '@taucad/ui/utils/keys';
+import { usePlatform } from '@taucad/ui/hooks/use-platform';
 import { PaneButton } from '#components/pane-button.jsx';
 import { WorkbenchTab } from '#components/workbench-tab.jsx';
 import { dockviewStyleOverrides, tauDockviewTheme } from '#paneview/dockview-theme.js';
@@ -118,6 +119,7 @@ export function PaneLane({
       : clampWidth(initialLayout.width),
   );
   const drag = useRef<{ startX: number; startWidth: number } | undefined>(undefined);
+  const platform = usePlatform();
   const layoutListener = useRef(onLayoutChange);
   layoutListener.current = onLayoutChange;
   const isFirstLayout = useRef(true);
@@ -254,7 +256,7 @@ export function PaneLane({
                       <Icon aria-hidden />
                       <span>{title}</span>
                       {shortcut === undefined ? null : (
-                        <KeyShortcut className='ml-auto'>{formatKeyCombination(shortcut)}</KeyShortcut>
+                        <KeyShortcut className='ml-auto'>{formatKeyCombination(shortcut, platform)}</KeyShortcut>
                       )}
                     </DropdownMenuItem>
                   ))}

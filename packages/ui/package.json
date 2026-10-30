@@ -107,6 +107,7 @@
     "./components/toggle-group": "./src/components/toggle-group.tsx",
     "./components/tooltip": "./src/components/tooltip.tsx",
     "./hooks/use-mobile": "./src/hooks/use-mobile.ts",
+    "./hooks/use-platform": "./src/hooks/use-platform.ts",
     "./hooks/use-tick-animation": "./src/hooks/use-tick-animation.ts",
     "./styles/base.css": {
       "types": "./src/styles/base.css.d.ts",
@@ -466,6 +467,11 @@
         "types": "./dist/hooks/use-mobile.d.mts",
         "import": "./dist/hooks/use-mobile.mjs",
         "default": "./dist/hooks/use-mobile.mjs"
+      },
+      "./hooks/use-platform": {
+        "types": "./dist/hooks/use-platform.d.mts",
+        "import": "./dist/hooks/use-platform.mjs",
+        "default": "./dist/hooks/use-platform.mjs"
       },
       "./hooks/use-tick-animation": {
         "types": "./dist/hooks/use-tick-animation.d.mts",

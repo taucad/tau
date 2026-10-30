@@ -26,20 +26,19 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   # The reviewed PicoVoxel builder. `uses:` cannot read a variable, so the archive call repeats it.
-  # It is the commit PicoVoxel#39 was reviewed and merged from, not the squash commit on `main`:
-  # `dotnet/inputs.json` pins each source role to a commit of its own, and the browser role's is an
-  # ancestor of this one, so only this history can read that tree. PicoVoxel's
-  # `archive/picogk-dual-runtime-builder-w0` holds it, which is what keeps it reachable now that the
-  # merged branch is gone. Moving this forward means moving those pins first.
-  PICOVOXEL_REF: 83d3ba1be5fbcca6936542bf129fb6700c6e1fae
+  # It is PicoVoxel#40 on `main`, which judges only threaded paths against the 2x ceiling. Its
+  # builder tree is #39's reviewed commit plus that gate change. `dotnet/inputs.json` still pins the
+  # browser source role to a commit on #39's branch; PicoVoxel's `archive/picogk-dual-runtime-builder-w0`
+  # keeps that commit reachable, and every checkout that reads the pinned tree fetches full history.
+  PICOVOXEL_REF: 41a0eabf84b85423f9b55bbeee74beeb4ec52be7
   PACKAGE_VERSION: 0.2.1
   # Gyroid proves every run; the scheduled run, or a dispatch that asks for it, proves HeatX.
   SUBJECT: ${{ github.event_name == 'schedule' && 'heatx' || inputs.subject || 'gyroid' }}
 jobs:
   archive:
-    uses: taucad/picovoxel/.github/workflows/dotnet-archive.yml@83d3ba1be5fbcca6936542bf129fb6700c6e1fae
+    uses: taucad/picovoxel/.github/workflows/dotnet-archive.yml@41a0eabf84b85423f9b55bbeee74beeb4ec52be7
     with:
-      picovoxel-ref: 83d3ba1be5fbcca6936542bf129fb6700c6e1fae
+      picovoxel-ref: 41a0eabf84b85423f9b55bbeee74beeb4ec52be7
       adapter-path: packages/plugins/picogk/dotnet/native
 
   # Everything a parity run measures or compares against, built once: the two browser apps and the

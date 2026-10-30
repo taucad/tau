@@ -3465,6 +3465,12 @@ importers:
 
   libs/events: {}
 
+  libs/file-links:
+    dependencies:
+      uint8array-extras:
+        specifier: 'catalog:'
+        version: 1.6.0
+
   libs/fs-bridge:
     dependencies:
       '@taucad/filesystem':

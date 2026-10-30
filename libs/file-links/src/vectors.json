@@ -1,0 +1,72 @@
+{
+  "keys": [
+    {
+      "generation": 1,
+      "kid": "files-1-5b3d1dc4d1ca41a6",
+      "keyBase64": "HyYtNDtCSVBXXmVsc3qBiI+WnaSrsrnAx87V3OPq8fg="
+    },
+    {
+      "generation": 2,
+      "kid": "files-2-10568b246f28fd4f",
+      "keyBase64": "PkVMU1phaG92fYSLkpmgp661vMPK0djf5u30+wIJEBc="
+    }
+  ],
+  "links": [
+    {
+      "name": "tenant object on staging",
+      "kid": "files-1-5b3d1dc4d1ca41a6",
+      "baseUrl": "https://files.taucad.dev",
+      "audience": "files.taucad.dev",
+      "location": {
+        "layout": "tenant",
+        "ownerId": "user_01JABCDEF",
+        "projectId": "proj_T1COonW3eP2mJjPCBWkxE",
+        "oid": "51af7b4f13360c748308a39f427ec4a5a079bf71037264e4360beda313f5015c"
+      },
+      "size": 139264,
+      "expiresAt": 1793836800,
+      "path": "/v1/lfs/user_01JABCDEF/proj_T1COonW3eP2mJjPCBWkxE/51af7b4f13360c748308a39f427ec4a5a079bf71037264e4360beda313f5015c",
+      "objectKey": "tenants/user_01JABCDEF/lfs/proj_T1COonW3eP2mJjPCBWkxE/51af7b4f13360c748308a39f427ec4a5a079bf71037264e4360beda313f5015c",
+      "message": "tau-files-v1\nfiles.taucad.dev\nGET\n/v1/lfs/user_01JABCDEF/proj_T1COonW3eP2mJjPCBWkxE/51af7b4f13360c748308a39f427ec4a5a079bf71037264e4360beda313f5015c\n139264\n1793836800\nfiles-1-5b3d1dc4d1ca41a6",
+      "signature": "BH2AUijORI2Pe1XCIc-B_hSzD7vVPUGGpC199DyrZ58",
+      "url": "https://files.taucad.dev/v1/lfs/user_01JABCDEF/proj_T1COonW3eP2mJjPCBWkxE/51af7b4f13360c748308a39f427ec4a5a079bf71037264e4360beda313f5015c?n=139264&x=1793836800&k=files-1-5b3d1dc4d1ca41a6&s=BH2AUijORI2Pe1XCIc-B_hSzD7vVPUGGpC199DyrZ58"
+    },
+    {
+      "name": "legacy object on production",
+      "kid": "files-1-5b3d1dc4d1ca41a6",
+      "baseUrl": "https://files.tau.new",
+      "audience": "files.tau.new",
+      "location": {
+        "layout": "legacy",
+        "projectId": "proj_legacy-1",
+        "oid": "49f7621029893f8ebe6b6786e8d7b02c65c75e7c0ad74c3ceced3f5295e10e0d"
+      },
+      "size": 0,
+      "expiresAt": 1793836800,
+      "path": "/v1/lfs-legacy/proj_legacy-1/49f7621029893f8ebe6b6786e8d7b02c65c75e7c0ad74c3ceced3f5295e10e0d",
+      "objectKey": "blobs/git-lfs/proj_legacy-1/lfs/objects/49/f7/49f7621029893f8ebe6b6786e8d7b02c65c75e7c0ad74c3ceced3f5295e10e0d",
+      "message": "tau-files-v1\nfiles.tau.new\nGET\n/v1/lfs-legacy/proj_legacy-1/49f7621029893f8ebe6b6786e8d7b02c65c75e7c0ad74c3ceced3f5295e10e0d\n0\n1793836800\nfiles-1-5b3d1dc4d1ca41a6",
+      "signature": "RhatNOaLgueHsAkakl86_Zu_LfNLC4dbBF4fQZsCtQI",
+      "url": "https://files.tau.new/v1/lfs-legacy/proj_legacy-1/49f7621029893f8ebe6b6786e8d7b02c65c75e7c0ad74c3ceced3f5295e10e0d?n=0&x=1793836800&k=files-1-5b3d1dc4d1ca41a6&s=RhatNOaLgueHsAkakl86_Zu_LfNLC4dbBF4fQZsCtQI"
+    },
+    {
+      "name": "largest object, second generation",
+      "kid": "files-2-10568b246f28fd4f",
+      "baseUrl": "https://files.taucad.dev",
+      "audience": "files.taucad.dev",
+      "location": {
+        "layout": "tenant",
+        "ownerId": "u",
+        "projectId": "p",
+        "oid": "49f7621029893f8ebe6b6786e8d7b02c65c75e7c0ad74c3ceced3f5295e10e0d"
+      },
+      "size": 104857600,
+      "expiresAt": 1800000000,
+      "path": "/v1/lfs/u/p/49f7621029893f8ebe6b6786e8d7b02c65c75e7c0ad74c3ceced3f5295e10e0d",
+      "objectKey": "tenants/u/lfs/p/49f7621029893f8ebe6b6786e8d7b02c65c75e7c0ad74c3ceced3f5295e10e0d",
+      "message": "tau-files-v1\nfiles.taucad.dev\nGET\n/v1/lfs/u/p/49f7621029893f8ebe6b6786e8d7b02c65c75e7c0ad74c3ceced3f5295e10e0d\n104857600\n1800000000\nfiles-2-10568b246f28fd4f",
+      "signature": "bSBWLtv7KiZYwsj-kq_c5CrpP1Txo7u4Ymo2ACrOhUM",
+      "url": "https://files.taucad.dev/v1/lfs/u/p/49f7621029893f8ebe6b6786e8d7b02c65c75e7c0ad74c3ceced3f5295e10e0d?n=104857600&x=1800000000&k=files-2-10568b246f28fd4f&s=bSBWLtv7KiZYwsj-kq_c5CrpP1Txo7u4Ymo2ACrOhUM"
+    }
+  ]
+}

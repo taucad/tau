@@ -10,7 +10,6 @@ import type { Tooltip, ViewUpdate } from '@codemirror/view';
 import { setDiagnostics } from '@codemirror/lint';
 import { foldService } from '@codemirror/language';
 import type * as LSP from 'vscode-languageserver-protocol';
-import { URI } from 'vscode-uri';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
 import { Topic } from '@taucad/events';
 import { OpenscadLanguageClient } from '@taucad/openscad-language/client';
@@ -18,10 +17,9 @@ import { openscadBuiltinsUri, openscadWorkspaceLimits } from '@taucad/openscad-l
 import type { OpenscadLanguageAssets } from '@taucad/openscad-language/protocol';
 import type { EditorDocument, DocumentChange } from '#lib/editor-document.js';
 import type { EditorLanguageEnvironment, EditorNavigationTarget } from '#lib/editor-language-environment.js';
-import { applyEditorWorkspaceEdits } from '#lib/editor-workspace-edits.js';
-import type { EditorWorkspaceEdit } from '#lib/editor-workspace-edits.js';
 import { applyLspCompletion } from '#lib/lsp-completion-apply.js';
-import { decodeTextFile } from '#utils/filesystem.utils.js';
+import { applyLspWorkspaceEdit, captureLspEditBasis } from '#lib/lsp-workspace-edit.js';
+import type { LspEditBasis } from '#lib/lsp-workspace-edit.js';
 
 /** The language server's diagnostics owner. */
 const owner = 'openscad-lsp';
@@ -30,7 +28,6 @@ const tokenTypes = ['module', 'function', 'variable', 'parameter', 'property'] a
 const defaultLibraryModifier = 0b10;
 
 type OpenDocument = { text: string; unsubscribe: () => void; timer?: ReturnType<typeof setTimeout> };
-type EditBasis = ReadonlyMap<string, Readonly<{ version: number; text: string }>>;
 // oxlint-disable-next-line typescript/no-restricted-types -- CodeMirror's tooltip facet uses null as its empty value.
 type NullableTooltip = Tooltip | null;
 // oxlint-disable-next-line typescript/no-restricted-types -- CodeMirror's completion sources answer null for no result.
@@ -590,86 +587,24 @@ async function showSignature(
   });
 }
 
-/** The request-time text of every OpenSCAD source an edit may touch, so a stale edit is refused, not applied. */
-async function captureBasis(document: EditorDocument, environment: EditorLanguageEnvironment): Promise<EditBasis> {
-  const basis = new Map<string, { version: number; text: string }>([
-    [document.uri, { version: document.version, text: document.text }],
-  ]);
-  const paths = new WorkspacePathResolver(environment.fileManagerRef.getSnapshot().context.rootDirectory);
-  const limit = openscadWorkspaceLimits.maximumFiles;
-  const files = await environment.treeService.searchFiles('.scad', { maxResults: limit + 1 });
-  if (files.length > limit) {
-    throw new Error('OpenSCAD workspace edit exceeds the bounded source snapshot');
-  }
-  const pending: Array<Promise<void>> = [];
-  for (const file of files) {
-    const path = file.path.startsWith('/') ? paths.toRelativePath(file.path) : file.path;
-    if (!path?.endsWith('.scad') || file.type !== 'file' || (file.provenance && file.provenance.source !== 'project')) {
-      continue;
-    }
-    const loaded = environment.session.get(path);
-    if (loaded) {
-      basis.set(loaded.uri, { version: loaded.version, text: loaded.text });
-      continue;
-    }
-    pending.push(
-      (async () => {
-        const result = await environment.contentService.resolve(path);
-        if (result.kind === 'text') {
-          basis.set(URI.file(`/${path}`).toString(), { version: 1, text: decodeTextFile(result.content) });
-        }
-      })(),
-    );
-  }
-  await Promise.all(pending);
-  if (document.version !== basis.get(document.uri)?.version) {
-    throw new Error('OpenSCAD source changed during snapshot');
-  }
-  return basis;
+/** The OpenSCAD sources a workspace edit may touch, snapshotted before each request. */
+const openscadSources = {
+  language: 'OpenSCAD',
+  extension: '.scad',
+  maximumFiles: openscadWorkspaceLimits.maximumFiles,
+};
+
+async function captureBasis(document: EditorDocument, environment: EditorLanguageEnvironment): Promise<LspEditBasis> {
+  return captureLspEditBasis(document, environment, openscadSources);
 }
 
 /** Apply a server workspace edit against the request-time sources before any file changes. */
 export async function applyOpenscadWorkspaceEdit(
   edit: LSP.WorkspaceEdit,
   environment: EditorLanguageEnvironment,
-  basis: EditBasis,
+  basis: LspEditBasis,
 ): Promise<void> {
-  const entries: Array<{ uri: string; version?: number; edits: LSP.TextEdit[] }> =
-    edit.documentChanges?.flatMap((change) =>
-      'textDocument' in change
-        ? [
-            {
-              uri: change.textDocument.uri,
-              version: change.textDocument.version ?? undefined,
-              edits: change.edits as LSP.TextEdit[],
-            },
-          ]
-        : [],
-    ) ?? Object.entries(edit.changes ?? {}).map(([uri, edits]) => ({ uri, version: undefined, edits }));
-  const prepared = entries.map((entry): EditorWorkspaceEdit => {
-    const requestBasis = basis.get(entry.uri);
-    if (!requestBasis) {
-      throw new Error(`OpenSCAD workspace edit lacks a request-time source snapshot: ${entry.uri}`);
-    }
-    if (entry.version !== undefined && entry.version !== requestBasis.version) {
-      throw new Error(`OpenSCAD workspace edit has a stale document version: ${entry.uri}`);
-    }
-    return {
-      uri: entry.uri,
-      baseText: requestBasis.text,
-      workerVersion: entry.version,
-      changes: entry.edits
-        .map((item) => ({
-          from: offsetAt(requestBasis.text, item.range.start),
-          to: offsetAt(requestBasis.text, item.range.end),
-          insert: item.newText,
-        }))
-        .toSorted((left, right) => left.from - right.from),
-    };
-  });
-  if (!(await applyEditorWorkspaceEdits(environment, prepared))) {
-    throw new Error('OpenSCAD workspace edit was refused by the filesystem authority');
-  }
+  await applyLspWorkspaceEdit(edit, { environment, basis, language: openscadSources.language });
 }
 
 async function renameSymbol(view: EditorView, { client, document, environment }: ExtensionContext): Promise<void> {

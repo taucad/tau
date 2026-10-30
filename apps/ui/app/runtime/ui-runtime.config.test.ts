@@ -55,7 +55,6 @@ describe('createUiRuntimeConfig', () => {
       omitted: {
         build123d: 'native: a browser cannot run a sandboxed CPython; the desktop runtime lists build123d()',
         smlibpy: 'native: a browser cannot run a sandboxed CPython; the desktop runtime lists smlibpy()',
-        picogk: 'native: a browser cannot run the .NET worker; the desktop runtime lists picogk()',
       },
     });
   });
@@ -121,6 +120,7 @@ describe('createUiRuntimeConfig', () => {
     });
     const kernelOptions = (id: string) => resolvedRuntime.kernels.find((kernel) => kernel.id === id)?.options;
 
+    expect(kernelOptions('picogk')).toMatchObject({ wasm: 'single', recycleHeapBytes: 512 * 2 ** 20 });
     expect(kernelOptions('replicad')).toMatchObject({ wasm: 'single' });
     // OpenCascade defaults to its single-threaded 'full' build; nothing may ask for 'multi' or 'auto' here.
     expect(kernelOptions('opencascade')?.['wasm'] ?? 'full').toBe('full');
@@ -134,6 +134,7 @@ describe('createUiRuntimeConfig', () => {
     });
     const kernelOptions = (id: string) => resolvedRuntime.kernels.find((kernel) => kernel.id === id)?.options;
 
+    expect(kernelOptions('picogk')).toMatchObject({ wasm: 'auto', recycleHeapBytes: 1.5 * 2 ** 30 });
     expect(kernelOptions('replicad')).toMatchObject({ wasm: 'auto' });
     expect(kernelOptions('picovoxel')?.['wasm']).not.toBe('serial');
   });

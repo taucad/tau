@@ -10,6 +10,7 @@
  *
  * @module
  */
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { probeHostShell } from '@taucad/host';
@@ -18,6 +19,7 @@ import type {
   PermissionMode,
   ShellCheckout,
   ShellOutput,
+  ShellProjectExecutions,
   ShellProbe,
   ShellRunRequest,
   ShellUnavailable,
@@ -53,6 +55,14 @@ export type DesktopShellProjectHooks = Readonly<{
   recordCall?: ((call: Readonly<{ request: ShellRunRequest; output: ShellOutput }>) => Promise<void>) | undefined;
 }>;
 
+/**
+ * One project's run→checkout map, carrying that project's side of shell startup recovery when its host has one (I7).
+ *
+ * @public
+ */
+export type DesktopShellCheckouts = ReadonlyMap<string, ShellCheckout> &
+  Readonly<{ executions?: ShellProjectExecutions | undefined }>;
+
 /** @public */
 export type DesktopShell = Readonly<{
   /** The memoized probe; the first call starts it. */
@@ -63,7 +73,7 @@ export type DesktopShell = Readonly<{
    */
   forProject: (
     projectRoot: string,
-    checkouts: ReadonlyMap<string, ShellCheckout>,
+    checkouts: DesktopShellCheckouts,
     hooks?: DesktopShellProjectHooks,
   ) => () => HostShell | undefined;
   /** Forget a project's runs once its host is gone. */
@@ -95,12 +105,16 @@ export const bundledShellSupervisor = (): SandboxShellProviderOptions['superviso
  * @returns The provider, or `undefined` when this platform has none.
  */
 export const desktopShellProvider = (
-  options: Pick<DesktopShellOptions, 'bwrapPath' | 'home' | 'standInJournal'> & Readonly<{ platform: NodeJS.Platform }>,
+  options: Pick<DesktopShellOptions, 'bwrapPath' | 'home' | 'standInJournal'> &
+    Partial<Pick<DesktopShellOptions, 'appDataRoots'>> &
+    Readonly<{ platform: NodeJS.Platform }>,
 ): ShellProvider | undefined => {
   const supervisor = bundledShellSupervisor();
+  const custody = desktopShellCustody(options.appDataRoots ?? []);
   const shared = {
     ...(supervisor === undefined ? {} : { supervisor }),
     ...(options.home === undefined ? {} : { home: options.home }),
+    ...(custody === undefined ? {} : { custody }),
   };
   switch (options.platform) {
     case 'linux': {
@@ -118,6 +132,21 @@ export const desktopShellProvider = (
       return undefined;
     }
   }
+};
+
+/**
+ * Where the sandbox provider keeps its execution receipts (I7): in Tau's own app data, which every launch denies whole
+ * and which survives a restart. Private roots stay in the system temporary directory, the shell service's default,
+ * because a launch must be able to write them.
+ *
+ * @param appDataRoots - Tau's app data roots, Electron `userData` first.
+ * @returns The custody namespace, or `undefined` for the provider's default when there is no app data.
+ */
+export const desktopShellCustody = (
+  appDataRoots: readonly string[],
+): Readonly<{ directory: string; sessionDirectory: string }> | undefined => {
+  const [appData] = appDataRoots;
+  return appData === undefined ? undefined : { directory: join(appData, 'shell-custody'), sessionDirectory: tmpdir() };
 };
 
 /** Why a platform with no provider has no shell; matches `probeHostShell`'s own Windows answer. */
@@ -140,7 +169,7 @@ const noProvider = (platform: NodeJS.Platform): ShellUnavailable =>
  * Every project's runs as one read-only map: a run id is unique to the project host that admitted it.
  */
 class ProjectCheckouts implements ReadonlyMap<string, ShellCheckout> {
-  public readonly projects = new Map<string, ReadonlyMap<string, ShellCheckout>>();
+  public readonly projects = new Map<string, DesktopShellCheckouts>();
 
   public get size(): number {
     return this.merged().size;
@@ -222,6 +251,7 @@ export const createDesktopShell = (options: DesktopShellOptions): DesktopShell =
           platform,
           bwrapPath: options.bwrapPath,
           home: options.home,
+          appDataRoots: options.appDataRoots,
           standInJournal: options.standInJournal,
         });
       const outcome =
@@ -235,6 +265,11 @@ export const createDesktopShell = (options: DesktopShellOptions): DesktopShell =
               platform,
               ...(options.home === undefined ? {} : { home: options.home }),
               permissionModeOf,
+              /* I7: an earlier host's agent receipts wait for the project whose run records still name them. */
+              projectExecutions: () =>
+                [...checkouts.projects.values()].flatMap((projectCheckouts) =>
+                  projectCheckouts.executions === undefined ? [] : [projectCheckouts.executions],
+                ),
             }).catch(
               (error: unknown): ShellUnavailable => ({
                 status: 'unavailable',
@@ -261,7 +296,12 @@ export const createDesktopShell = (options: DesktopShellOptions): DesktopShell =
         'shell.probe',
         outcome.status === 'available'
           ? { status: 'available', identity: outcome.shell.identity }
-          : { status: 'unavailable', code: outcome.code, message: outcome.message },
+          : {
+              status: 'unavailable',
+              code: outcome.code,
+              message: outcome.message,
+              ...(outcome.diagnostic === undefined ? {} : { diagnostic: outcome.diagnostic }),
+            },
         outcome.status === 'available' ? undefined : 'warn',
       );
       return outcome;
@@ -278,7 +318,13 @@ export const createDesktopShell = (options: DesktopShellOptions): DesktopShell =
       } else {
         hooks.set(projectRoot, projectHooks);
       }
-      void probe();
+      /* async-iife: bootstrap -- a project that can answer for its runs lets startup recovery finish (I7). */
+      void (async (): Promise<void> => {
+        const outcome = await probe();
+        if (outcome.status === 'available') {
+          await outcome.shell.reconcile?.();
+        }
+      })();
       return () => recording;
     },
     release: (projectRoot) => {

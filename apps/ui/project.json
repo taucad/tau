@@ -45,7 +45,7 @@
     },
     "build": {
       "cache": true,
-      "dependsOn": ["copy-assets", "^copy-assets"],
+      "dependsOn": ["copy-assets", "^copy-assets", "csharp-language:prepare", "openscad-language:prepare"],
       "outputs": ["{projectRoot}/build"],
       "inputs": [
         "production",
@@ -105,7 +105,16 @@
           "env": "GEOSPEC_MT_STAGED_PACKAGE_ROOT"
         },
         {
+          "env": "PICOGK_BROWSER_ASSETS_ROOT"
+        },
+        {
           "runtime": "node apps/ui/geospec-mt-assets-cache-key.ts"
+        },
+        {
+          "runtime": "node apps/ui/picogk-browser-assets-cache-key.ts"
+        },
+        {
+          "runtime": "node apps/ui/csharp-language-assets-cache-key.ts"
         },
         {
           "env": "POSTHOG_CLIENT_KEY"
@@ -133,7 +142,7 @@
     },
     "build:desktop": {
       "cache": true,
-      "dependsOn": ["copy-assets", "^copy-assets"],
+      "dependsOn": ["copy-assets", "^copy-assets", "csharp-language:prepare", "openscad-language:prepare"],
       "outputs": ["{projectRoot}/desktop/build"],
       "inputs": [
         "production",
@@ -149,7 +158,16 @@
           "env": "GEOSPEC_MT_STAGED_PACKAGE_ROOT"
         },
         {
+          "env": "PICOGK_BROWSER_ASSETS_ROOT"
+        },
+        {
           "runtime": "node apps/ui/geospec-mt-assets-cache-key.ts"
+        },
+        {
+          "runtime": "node apps/ui/picogk-browser-assets-cache-key.ts"
+        },
+        {
+          "runtime": "node apps/ui/csharp-language-assets-cache-key.ts"
         }
       ],
       "command": "node ../../../tools/build-lock.mjs build -- react-router build --config vite.config.ts --sourcemapClient hidden",
@@ -163,7 +181,7 @@
     },
     "build:serve": {
       "cache": true,
-      "dependsOn": ["copy-assets", "^copy-assets"],
+      "dependsOn": ["copy-assets", "^copy-assets", "csharp-language:prepare", "openscad-language:prepare"],
       "outputs": ["{projectRoot}/serve/build"],
       "inputs": [
         "production",
@@ -178,7 +196,16 @@
           "env": "GEOSPEC_MT_STAGED_PACKAGE_ROOT"
         },
         {
+          "env": "PICOGK_BROWSER_ASSETS_ROOT"
+        },
+        {
           "runtime": "node apps/ui/geospec-mt-assets-cache-key.ts"
+        },
+        {
+          "runtime": "node apps/ui/picogk-browser-assets-cache-key.ts"
+        },
+        {
+          "runtime": "node apps/ui/csharp-language-assets-cache-key.ts"
         }
       ],
       "command": "node ../../../tools/build-lock.mjs build -- react-router build --config vite.config.ts --sourcemapClient hidden",
@@ -190,10 +217,13 @@
         }
       }
     },
+    "dev": {
+      "dependsOn": ["copy-assets", "^copy-assets", "csharp-language:prepare"]
+    },
     "dev:desktop": {
       "executor": "nx:run-commands",
       "continuous": true,
-      "dependsOn": ["copy-assets", "^copy-assets"],
+      "dependsOn": ["copy-assets", "^copy-assets", "csharp-language:prepare", "openscad-language:prepare"],
       "options": {
         "cwd": "{projectRoot}/desktop",
         "command": "react-router dev --config vite.config.ts",
@@ -205,7 +235,7 @@
     "dev:portless": {
       "executor": "nx:run-commands",
       "continuous": true,
-      "dependsOn": ["copy-assets", "^copy-assets"],
+      "dependsOn": ["copy-assets", "^copy-assets", "csharp-language:prepare", "openscad-language:prepare"],
       "options": {
         "cwd": "{projectRoot}",
         "command": "portless run --name tau-ui react-router dev",
@@ -219,7 +249,7 @@
     "build:verify": {
       "executor": "nx:run-commands",
       "cache": false,
-      "dependsOn": ["copy-assets", "^copy-assets"],
+      "dependsOn": ["copy-assets", "^copy-assets", "csharp-language:prepare", "openscad-language:prepare"],
       "outputs": ["{projectRoot}/build"],
       "options": {
         "cwd": "{projectRoot}",

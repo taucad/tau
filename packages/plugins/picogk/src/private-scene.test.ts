@@ -66,9 +66,9 @@ const gltf = (bytes: Uint8Array<ArrayBuffer>) =>
   };
 
 describe('private scene v8', () => {
-  it('shares one geometry/mesh and preserves 1000 occurrence placements', () => {
+  it('shares one geometry/mesh and preserves 1000 occurrence placements', async () => {
     const { bytes, result } = fixture(1000);
-    const output = picogkArtifactToGlb(bytes, result);
+    const output = await picogkArtifactToGlb(bytes, result);
     const document = gltf(output);
     expect(document.meshes).toHaveLength(1);
     expect(document.nodes).toHaveLength(1000);
@@ -77,19 +77,19 @@ describe('private scene v8', () => {
     expect(document.accessors[2]!.componentType).toBe(5123);
     expect(bytes.byteLength).toBe(80);
   });
-  it('rejects corrupted bytes, duplicate identities, unknown references and overlapping ranges', () => {
+  it('rejects corrupted bytes, duplicate identities, unknown references and overlapping ranges', async () => {
     const { bytes, result } = fixture();
-    expect(() => picogkArtifactToGlb(bytes.subarray(1), result)).toThrow('byte length');
+    await expect(picogkArtifactToGlb(bytes.subarray(1), result)).rejects.toThrow('byte length');
     const broken = new Uint8Array(bytes);
     broken[0] = 1;
-    expect(() => picogkArtifactToGlb(broken, result)).toThrow('SHA-256');
-    expect(() =>
+    await expect(picogkArtifactToGlb(broken, result)).rejects.toThrow('SHA-256');
+    await expect(
       picogkArtifactToGlb(bytes, {
         ...result,
         prototypes: [...result.prototypes, ...result.prototypes],
       }),
-    ).toThrow('Duplicate');
-    expect(() =>
+    ).rejects.toThrow('Duplicate');
+    await expect(
       picogkArtifactToGlb(bytes, {
         ...result,
         occurrences: result.occurrences.map((o) => ({
@@ -97,25 +97,25 @@ describe('private scene v8', () => {
           prototypeId: 'prototype:2',
         })),
       }),
-    ).toThrow('Unknown');
-    expect(() =>
+    ).rejects.toThrow('Unknown');
+    await expect(
       picogkArtifactToGlb(bytes, {
         ...result,
         prototypes: result.prototypes.map((p) => ({ ...p, normalOffset: 0 })),
       }),
-    ).toThrow('overlapping');
-    expect(() =>
+    ).rejects.toThrow('overlapping');
+    await expect(
       picogkArtifactToGlb(bytes, {
         ...result,
         occurrences: [result.occurrences[0]!, result.occurrences[0]!],
       }),
-    ).toThrow();
+    ).rejects.toThrow();
   });
-  it('rejects primitive restart and malformed spatial values', () => {
+  it('rejects primitive restart and malformed spatial values', async () => {
     const { bytes, result } = fixture();
     new Uint16Array(bytes.buffer, 72, 3)[2] = 65_535;
     result.sha256 = createHash('sha256').update(bytes).digest('hex');
-    expect(() => picogkArtifactToGlb(bytes, result)).toThrow('invalid mesh');
+    await expect(picogkArtifactToGlb(bytes, result)).rejects.toThrow('invalid mesh');
     expect(
       picogkOccurrenceSchema.safeParse({
         ...result.occurrences[0],
@@ -186,11 +186,11 @@ describe('private scene v8', () => {
       }).success,
     ).toBe(false);
   });
-  it('conjugates rigid orientation and splits material bindings while sharing attribute bytes', () => {
+  it('conjugates rigid orientation and splits material bindings while sharing attribute bytes', async () => {
     const { bytes, result } = fixture();
     result.occurrences[0]!.matrix = [0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
     result.occurrences[1]!.color = [0, 1, 0, 1];
-    const document = gltf(picogkArtifactToGlb(bytes, result));
+    const document = gltf(await picogkArtifactToGlb(bytes, result));
     expect(document.nodes[0]!.matrix).toEqual([0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1]);
     expect(document.meshes).toHaveLength(2);
     expect(document.accessors).toHaveLength(3);

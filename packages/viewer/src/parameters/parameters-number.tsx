@@ -3,10 +3,12 @@ import type { ParameterFieldProjection } from '@taucad/parameters';
 import { convert, createQuantity } from '@taucad/units/quantity';
 import { formatQuantity, parseInput } from '@taucad/units/input';
 import { createRafCoalescer } from '#graphics/three/utils/raf-coalescer.js';
+import { useFieldEdits } from '#parameters/use-field-edits.js';
 import { ParametersNumberField } from '#parameters/parameters-number-field.jsx';
 import { validateParameterInputValue } from '#parameters/parameter-field.js';
 import type { ParameterFieldBinding } from '#parameters/parameter-field.js';
 import type { ParameterCommit } from '#parameters/rjsf-context.js';
+import type { FieldBase } from '#parameters/parameter-edit.js';
 
 const defaultRangeForZero = 100;
 
@@ -128,8 +130,17 @@ export const toDisplayValue = (fieldProjection: ParameterFieldProjection, value:
   return binding.representation === 'safe-integer' ? value : displayValue(value, binding, fieldProjection.displayUnit);
 };
 
-/** The authority value this row last showed, which a commit proves it was still editing. */
-type EditBase = Readonly<{ value: number; binding: ParameterFieldBinding; authorityValue: number }>;
+/** The value an edit starts from, which a commit proves the field still holds. */
+type EditBase = FieldBase<number>;
+
+/** The effective binding a base carries, so a commit also proves the field's unit did not change. */
+const requestBinding = (binding: ParameterFieldBinding): NonNullable<EditBase['binding']> => ({
+  representation: binding.representation,
+  ...(binding.nativeUnit === undefined ? {} : { unit: binding.nativeUnit }),
+  ...(binding.quantityKind === undefined ? {} : { quantityKind: binding.quantityKind }),
+  ...(binding.space === undefined ? {} : { space: binding.space }),
+  ...(binding.reference === undefined ? {} : { reference: binding.reference }),
+});
 
 /* Memoised: the section panel re-renders on every step of the field being dragged, and its other
  * rows pass stable props, so only the dragged row re-renders. */
@@ -166,43 +177,45 @@ export const ParametersNumber = React.memo(function ParametersNumber({
   const authorityValue = typeof value === 'number' ? value : defaultValue;
   const commit = edit.kind === 'authoritative' ? edit.commit : undefined;
 
-  /* The draft is the only local state: `text` is exactly what was typed, `base` is the authority
-   * value the edit started from. A retained draft is seeded back on mount so collapsing a group
-   * never discards an in-progress edit. */
+  /* `text` is exactly what was typed and `base` is the value the typed draft started from. A retained
+   * draft is seeded back on mount so collapsing a group never discards an in-progress edit. */
   const [retainedDraft, setRetainedDraft] = React.useState(() => commit?.draft(instancePointer));
   const [draftText, setDraftText] = React.useState(() =>
     retainedDraft?.final === undefined ? (retainedDraft?.text ?? '') : '',
   );
   const [localValue, setLocalValue] = React.useState<Readonly<{ value: number; authorityValue: number }>>();
   const [inputDiagnostic, setInputDiagnostic] = React.useState<string>();
-  const [base, setBase] = React.useState<EditBase>(() => ({ value: authorityValue, binding, authorityValue }));
-  /* Final edits this row submitted that have not settled. While any is in flight, an authority move
-   * is most likely this row's own earlier edit landing, so the row keeps its own base and shown value:
-   * the next step then builds on the newest submitted value instead of an intermediate one the
-   * authority is about to replace. */
-  const [pendingFinals, setPendingFinals] = React.useState(0);
+  /* The rendered authority trails this row's own commits, so whether it shows the row's own echo or
+   * another writer's value is the edit machine's call, never a guess from the value alone. */
+  const baseBinding = React.useMemo(() => requestBinding(binding), [binding]);
+  const {
+    edits,
+    ownValue,
+    base: currentBase,
+  } = useFieldEdits({ pointer: instancePointer, authority: authorityValue, binding: baseBinding });
+  const isLeading = ownValue !== undefined;
+  const [base, setBase] = React.useState<EditBase>(currentBase);
   /* A local value answers the authority it was entered against; once the authority moves, a later
    * return to that same value (a reset after a transient edit) must not bring the old entry back. */
   const [enteredAgainst, setEnteredAgainst] = React.useState(authorityValue);
-  if (!Object.is(enteredAgainst, authorityValue) && pendingFinals === 0) {
+  if (!Object.is(enteredAgainst, authorityValue) && !isLeading) {
     setEnteredAgainst(authorityValue);
     setLocalValue(undefined);
   }
 
   const isDirty = draftText !== '';
-  const currentBase: EditBase = { value: authorityValue, binding, authorityValue };
-  const editBase = isDirty || pendingFinals > 0 || Object.is(base.authorityValue, authorityValue) ? base : currentBase;
+  const editBase = isDirty ? base : currentBase;
   const draftValue =
-    localValue !== undefined && (pendingFinals > 0 || Object.is(localValue.authorityValue, authorityValue))
+    localValue !== undefined && (isLeading || Object.is(localValue.authorityValue, authorityValue))
       ? localValue.value
-      : displayValue(authorityValue, binding, displayUnit);
-  /* An authority value that arrived while this row was being edited: the draft is kept, and the row
-   * says the field moved underneath it rather than silently overwriting either side. */
-  const hasConflict = isDirty && !Object.is(authorityValue, base.value);
+      : displayValue(currentBase.value, binding, displayUnit);
+  /* Another writer's value that arrived while this row was being edited: the draft is kept, and the
+   * row says the field moved underneath it rather than silently overwriting either side. */
+  const hasConflict = isDirty && !isLeading && !Object.is(authorityValue, base.value);
   const authorityRef = React.useRef(currentBase);
   React.useEffect(() => {
-    authorityRef.current = { value: authorityValue, binding, authorityValue };
-  }, [authorityValue, binding]);
+    authorityRef.current = currentBase;
+  }, [currentBase]);
 
   /* The blur handler runs inside the same event as Enter, whose state update has not landed yet, so
    * every writer of `draftText` mirrors it here; the ref is what keeps a committed draft from being
@@ -268,7 +281,10 @@ export const ParametersNumber = React.memo(function ParametersNumber({
   ): Promise<boolean> | undefined => {
     const { base: submittedBase, retainedText } = options;
     if (commit === undefined) {
+      // The parent applies the value at once; it leads until the parent renders it back.
+      edits.send({ type: 'submitted', from: submittedBase.value, value: native });
       onChange(native);
+      edits.send({ type: 'settled', isKept: true });
       return undefined;
     }
     // The sidecar write is what re-renders the model, so an authoritative row reports no value here.
@@ -281,9 +297,10 @@ export const ParametersNumber = React.memo(function ParametersNumber({
     const submittedText =
       retainedText ?? formatDisplayValue(displayValue(native, binding, displayUnit), binding, displayUnit);
     if (isFinal) {
-      setPendingFinals((count) => count + 1);
+      edits.send({ type: 'submitted', from: submittedBase.value, value: native });
       globalThis.performance.mark('tau:parameter-edit', { detail: { pointer: instancePointer } });
     }
+    let isKept = false;
     const settle = async (): Promise<boolean> => {
       try {
         const outcome = await commit.commit({
@@ -298,21 +315,12 @@ export const ParametersNumber = React.memo(function ParametersNumber({
                 },
               }
             : { pressure: 'transient' }),
-          base: {
-            pointer: instancePointer,
-            value: submittedBase.value,
-            binding: {
-              representation: submittedBase.binding.representation,
-              ...(submittedBase.binding.nativeUnit === undefined ? {} : { unit: submittedBase.binding.nativeUnit }),
-              ...(submittedBase.binding.quantityKind === undefined
-                ? {}
-                : { quantityKind: submittedBase.binding.quantityKind }),
-              ...(submittedBase.binding.space === undefined ? {} : { space: submittedBase.binding.space }),
-              ...(submittedBase.binding.reference === undefined ? {} : { reference: submittedBase.binding.reference }),
-            },
-          },
+          base: submittedBase,
         });
-        if (isFinal && (outcome?.status === 'committed' || outcome?.status === 'cancelled-before-apply')) {
+        // A displaced edit was never written, but the edit that displaced it carries its base.
+        const isWritten = outcome?.status === 'committed' || outcome?.status === 'cancelled-before-apply';
+        isKept = outcome === undefined || isWritten;
+        if (isFinal && isWritten) {
           return true;
         }
       } catch (error) {
@@ -331,7 +339,7 @@ export const ParametersNumber = React.memo(function ParametersNumber({
         }
       } finally {
         if (isFinal) {
-          setPendingFinals((count) => count - 1);
+          edits.send({ type: 'settled', isKept });
         }
       }
       return false;
@@ -352,9 +360,7 @@ export const ParametersNumber = React.memo(function ParametersNumber({
     retainDraft('', true);
     setLocalValue({ value: displayValue(native, binding, displayUnit), authorityValue });
     if (!Object.is(native, editBase.value)) {
-      const final = send(native, 'final', { base: editBase });
-      setBase({ value: native, binding, authorityValue });
-      return final;
+      return send(native, 'final', { base: editBase });
     }
     return undefined;
   };
@@ -396,7 +402,6 @@ export const ParametersNumber = React.memo(function ParametersNumber({
         Number.EPSILON * Math.max(1, Math.abs(native.value.value), Math.abs(submittedBase.value)) * 8
     ) {
       void send(native.value.value, 'final', { base: submittedBase, retainedText });
-      setBase({ value: native.value.value, binding, authorityValue });
     }
   };
 

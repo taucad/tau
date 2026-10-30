@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Tau.CSharp.LanguageService</RootNamespace>
+    <IsTrimmable>false</IsTrimmable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Features" Version="$(TauRoslynVersion)" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Tau.CSharp.LanguageService.RoslynHost/Tau.CSharp.LanguageService.RoslynHost.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tau.CSharp.LanguageService.Tests" />
+  </ItemGroup>
+</Project>

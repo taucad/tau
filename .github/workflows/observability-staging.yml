@@ -3,7 +3,7 @@ name: Staging observability
 on:
   workflow_dispatch:
   workflow_run:
-    workflows: [CI, Deploy UI to Netlify]
+    workflows: [Staging deploy, Deploy UI to Netlify]
     types: [completed]
     branches: [main]
 

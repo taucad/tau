@@ -104,6 +104,12 @@ vi.mock('#routes/w.$workspace.$project/chat-message-reasoning.js', () => ({
   },
 }));
 
+vi.mock('#routes/w.$workspace.$project/chat-message-rating.js', () => ({
+  ChatMessageRating() {
+    return <div data-testid='chat-message-rating' />;
+  },
+}));
+
 vi.mock('#routes/w.$workspace.$project/chat-message-data-usage.js', () => ({
   ChatMessageDataUsage() {
     return <div data-testid='chat-message-data-usage' />;
@@ -153,7 +159,9 @@ vi.mock('#routes/w.$workspace.$project/chat-message-tool-edit-file.js', () => ({
   ChatMessageToolFileEdit: () => <div data-testid='tool-edit-file' />,
 }));
 vi.mock('#routes/w.$workspace.$project/chat-message-tool-test-model.js', () => ({
-  ChatMessageToolTestModel: () => <div data-testid='tool-test-model' />,
+  ChatMessageToolTestModel: ({ part }: { readonly part: { readonly state: string } }) => (
+    <div data-testid='tool-test-model' data-state={part.state} />
+  ),
 }));
 vi.mock('#routes/w.$workspace.$project/chat-message-tool-read-file.js', () => ({
   ChatMessageToolReadFile: () => <div data-testid='tool-read-file' />,
@@ -940,6 +948,32 @@ describe('ChatMessage external Tau MCP porcelain', () => {
 
     expect(screen.getByTestId('chat-activity-group')).toHaveAttribute('data-summary', 'Rendering models');
     expect(screen.getByTestId('tool-get-kernel-result')).toHaveAttribute('data-state', 'input-available');
+  });
+});
+
+describe('ChatMessage preliminary native tool output', () => {
+  it('should hand a test_model progress update to its card as running, not as a result', () => {
+    const message: MyUIMessage = {
+      id: 'msg-preliminary-test-model',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-test_model',
+          toolCallId: 'call-preliminary-test-model',
+          state: 'output-available',
+          input: { files: ['checks.geospec.ts'] },
+          // A GeoSpec run-progress snapshot: no failures, passes, accounting or totals yet.
+          output: { phase: 'running', completed: 0 },
+          preliminary: true,
+        } as unknown as MyUIMessage['parts'][number],
+      ],
+    };
+    setMessages([message], 'streaming');
+
+    render(<ChatMessage messageId={message.id} />);
+
+    expect(screen.getByTestId('chat-activity-group')).toHaveAttribute('data-summary', 'Running tests');
+    expect(screen.getByTestId('tool-test-model')).toHaveAttribute('data-state', 'input-available');
   });
 });
 

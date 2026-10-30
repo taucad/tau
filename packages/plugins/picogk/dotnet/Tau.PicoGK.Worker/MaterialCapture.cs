@@ -168,10 +168,14 @@ internal static class MaterialCapture
 
     // New private image-admission bound: full RGBA decode validation must fit 256 MiB.
     // This does not describe encoded-byte retention or the geometry capture queue budget.
-    private const long MaximumDecodedImageBytes = 256L * 1024 * 1024;
+    internal const long MaximumDecodedImageBytes = 256L * 1024 * 1024;
 
     private static MaterialImageFormat ValidateImage(byte[] data, string path, CancellationToken cancellation)
     {
+#if PICOGK_BROWSER
+        cancellation.ThrowIfCancellationRequested();
+        return BrowserImageHeader.Inspect(data, path);
+#else
         if (data.Length == 0) throw Invalid(path + ".Data", "must contain encoded image bytes");
         using var encoded = new MemoryStream(data, writable: false);
         using var codec = SKCodec.Create(encoded);
@@ -209,6 +213,7 @@ internal static class MaterialCapture
         }
         cancellation.ThrowIfCancellationRequested();
         return format;
+#endif
     }
 
     internal static bool NeedsCoordinates(Material material) =>

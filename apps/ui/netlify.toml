@@ -10,7 +10,7 @@
 # GitHub Actions runs this build with `netlify deploy --prod --context production`
 # (`.github/workflows/deploy-ui.yml`), after bringing in the GeoSpec engine
 # products that only CI's macOS producer can make:
-#   - staging: pushes to `main` that affect the UI (`ci.yml` deploy-ui-staging).
+#   - staging: pushes to `main` that affect the UI (`staging.yml` deploy-ui-staging).
 #   - prod: pushes to Git branch `production`, made only by dispatching
 #     `.github/workflows/deploy-production.yml` with a release tag.
 # There are no PR deploy previews.
@@ -160,7 +160,10 @@ Document-Policy = "js-profiling"
 #     error reports (launch gate OBS-7), sent only when SENTRY_DSN is set.
 #   - https://registry.npmjs.org: packuments and tarballs for the Packages
 #     panel's Install (tarballs are checked against package-lock.json integrity).
-Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.taucad.dev https://cdn.tau.new https://github.com https:; font-src 'self' data:; connect-src 'self' https://tau-prod-content-private.271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com https://tau-staging-content-private.271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com https://api.taucad.dev wss://api.taucad.dev https://cdn.taucad.dev https://cdn.tau.new https://api.github.com https://api.zoo.dev https://api.kittycad.io https://api.tau.new wss://api.tau.new https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://registry.npmjs.org wss:; worker-src 'self' blob:; child-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
+#   - https://files.tau.new / https://files.taucad.dev: the files service's signed
+#     LFS downloads (files service blueprint). The two private R2 endpoints stay for
+#     presigned uploads and for rollback to presigned downloads.
+Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.taucad.dev https://cdn.tau.new https://github.com https:; font-src 'self' data:; connect-src 'self' https://tau-prod-content-private.271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com https://tau-staging-content-private.271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com https://files.tau.new https://files.taucad.dev https://api.taucad.dev wss://api.taucad.dev https://cdn.taucad.dev https://cdn.tau.new https://api.github.com https://api.zoo.dev https://api.kittycad.io https://api.tau.new wss://api.tau.new https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://registry.npmjs.org wss:; worker-src 'self' blob:; child-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
 
 # The apex selects marketing or the app from a presentation cookie. Never reuse
 # one visitor's document for another, or restore stale HTML after switching.

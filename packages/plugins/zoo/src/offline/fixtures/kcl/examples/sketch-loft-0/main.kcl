@@ -1,0 +1,17 @@
+// Loft a square and a triangle.
+squareSketch = startSketchOn(XY)
+    |> startProfile(at = [-100, 200])
+    |> line(end = [200, 0])
+    |> line(end = [0, -200])
+    |> line(end = [-200, 0])
+    |> line(endAbsolute = [profileStartX(%), profileStartY(%)])
+    |> close()
+
+triangleSketch = startSketchOn(offsetPlane(XY, offset = 75))
+    |> startProfile(at = [0, 125])
+    |> line(end = [-15, -30])
+    |> line(end = [30, 0])
+    |> line(endAbsolute = [profileStartX(%), profileStartY(%)])
+    |> close()
+
+loft([triangleSketch, squareSketch])

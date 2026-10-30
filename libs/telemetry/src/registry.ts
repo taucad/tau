@@ -8,6 +8,7 @@ import {
   evaluationClasses,
   geospecRunStatuses,
   kernelIds,
+  lfsTransports,
   lookupOutcomes,
   tauToolNames,
 } from '#ingest.js';
@@ -1530,6 +1531,7 @@ export const TauMetrics = {
     attributes: z.object({
       'agent.placement': z.enum(['browser', 'desktop', 'daemon']),
       cache: z.enum(['cold', 'partial']),
+      'tau.lfs.transport': z.enum(lfsTransports).optional(),
     }),
   }),
 
@@ -1569,6 +1571,7 @@ export const TauMetrics = {
     attributes: z.object({
       phase: z.enum(['first_view', 'fully_fetched']),
       cache: z.enum(['cold', 'warm']),
+      'tau.lfs.transport': z.enum(lfsTransports).optional(),
     }),
   }),
 

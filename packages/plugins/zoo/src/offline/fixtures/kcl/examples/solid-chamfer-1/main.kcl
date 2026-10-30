@@ -1,0 +1,38 @@
+// Specify a custom chamfer angle.
+@settings(kclVersion = 3.0)
+
+cubeSide = 20mm
+
+squareSketch = sketch(on = XY) {
+  line1 = line(start = [var 0mm, var 0mm], end = [var 20mm, var 0mm])
+  line2 = line(start = [var 20mm, var 0mm], end = [var 20mm, var 20mm])
+  line3 = line(start = [var 20mm, var 20mm], end = [var 0mm, var 20mm])
+  line4 = line(start = [var 0mm, var 20mm], end = [var 0mm, var 0mm])
+  coincident([line1.end, line2.start])
+  coincident([line2.end, line3.start])
+  coincident([line3.end, line4.start])
+  coincident([line4.end, line1.start])
+  parallel([line2, line4])
+  parallel([line3, line1])
+  perpendicular([line1, line2])
+  horizontal(line3)
+  coincident([line1.start, ORIGIN])
+  equalLength([line2, line3])
+  distance([line2.start, line2.end]) == cubeSide
+}
+hide(squareSketch)
+squareRegion = region(segments = [squareSketch.line1, squareSketch.line2])
+cube = extrude(squareRegion, length = cubeSide, tagEnd = $capEnd001)
+chamferOnCube = chamfer(
+  cube,
+  edges = [
+    {
+      sideFaces = [
+        squareRegion.tags.line1,
+        cube.faces.capEnd001
+      ]
+    }
+  ],
+  length = 10,
+  angle = 30deg,
+)

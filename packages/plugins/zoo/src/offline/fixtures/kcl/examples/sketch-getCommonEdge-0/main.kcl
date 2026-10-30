@@ -1,0 +1,23 @@
+@settings(defaultLengthUnit = mm, kclVersion = 3.0)
+
+scale = 20mm
+partSketch = sketch(on = XY) {
+  left = line(start = [var 0mm, var 0mm], end = [var 0mm, var 20mm])
+  top = line(start = [var 0mm, var 20mm], end = [var 20mm, var 20mm])
+  right = line(start = [var 20mm, var 20mm], end = [var 20mm, var 0mm])
+  line0 = line(start = [var 20mm, var 0mm], end = [var 0mm, var 0mm])
+  coincident([left.end, top.start])
+  coincident([top.end, right.start])
+  coincident([right.end, line0.start])
+  coincident([line0.end, left.start])
+}
+partRegion = region(segments = [partSketch.left, partSketch.top])
+part001 = extrude(partRegion, length = scale, tagEnd = $end0)
+  |> chamfer(
+       length = 10mm,
+       tags = [getOppositeEdge(partRegion.tags.line0)],
+       tag = $chamfer0,
+     )
+
+// Select the edge shared by the chamfer and the extrusion's end face.
+commonEdge = { sideFaces = [chamfer0, end0] }

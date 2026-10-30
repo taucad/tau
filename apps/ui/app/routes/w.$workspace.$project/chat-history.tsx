@@ -97,9 +97,11 @@ const ChatScroller = forwardRef<HTMLDivElement, ScrollerProps & { className?: st
 });
 
 const ChatHistoryHeader = (): undefined => undefined;
+/* The phone sheet at half on a short phone leaves the transcript too little height for the whole empty state:
+ * there it keeps its icon and title, so nothing runs under the composer (a size container, queried by height). */
 const ChatHistoryEmptyPlaceholder = (): React.JSX.Element => (
-  <div className='mx-auto flex h-full w-[calc(100%_-_1rem)] max-w-xl px-3 py-6'>
-    <ChatHistoryEmpty />
+  <div className='[container-type:size] mx-auto flex h-full w-[calc(100%_-_1rem)] max-w-xl px-3 py-6'>
+    <ChatHistoryEmpty className='[@container_(max-height:15rem)]:py-0 [@container_(max-height:15rem)]:[&_[data-slot=panel-empty-state-description]]:hidden' />
   </div>
 );
 // Initial positioning waits for Virtuoso's measured content, including an initially empty pane.
@@ -294,7 +296,7 @@ const ExpandedChatHistory = memo(function ({
                 followOutput={followLatestOutput.followOutput}
                 /* A turn appended at the end starts at the viewport's foot, outside the rendered range: Virtuoso
                  * follows it only once it is measured, so render a little past the foot. Without this a turn sent
-                 * from a short viewport (the phone sheet's peek) is never followed, and its reply or failure stays
+                 * from a short viewport (the phone sheet at half) is never followed, and its reply or failure stays
                  * folded away below (I5). */
                 increaseViewportBy={appendedTurnOverscan}
                 totalListHeightChanged={followLatestOutput.totalListHeightChanged}

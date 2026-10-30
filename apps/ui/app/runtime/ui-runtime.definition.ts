@@ -15,6 +15,7 @@ import {
   parameterUnits,
 } from '@taucad/middleware';
 import { opencascade } from '@taucad/opencascade';
+import { picogk } from '@taucad/picogk/browser';
 import { picovoxel } from '@taucad/picovoxel';
 import { replicad } from '@taucad/replicad';
 import { rhino } from '@taucad/rhino';
@@ -27,6 +28,8 @@ import { runtimeRecycleHeapBytes } from '#lib/device-memory-class.js';
 import { observabilityMiddleware } from '#runtime/observability/observability.middleware.js';
 import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.schema.js';
 import type { UiRuntimeConfig } from '#runtime/ui-runtime.schema.js';
+
+import { picogkBrowserAssets } from '#runtime/picogk-browser-assets.js';
 
 type UiRuntimeOptions = {
   readonly withSourceMapping?: boolean;
@@ -62,6 +65,15 @@ const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptio
         : undefined,
     ),
     openrscad(),
+    picogk({
+      kernels: {
+        default: {
+          wasm: config.memoryConstrained ? 'single' : 'auto',
+          assets: picogkBrowserAssets(),
+          recycleHeapBytes: runtimeRecycleHeapBytes(config.memoryConstrained),
+        },
+      },
+    }),
     jscad(),
     manifold(),
     // Exact exports always run on the serial build; on a phone the fast lane does too, so one runtime stays warm.

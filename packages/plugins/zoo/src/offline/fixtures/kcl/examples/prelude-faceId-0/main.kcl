@@ -1,0 +1,8 @@
+// Cylinder
+cylinder = startSketchOn(XY)
+  |> circle(center = [0, 0], radius = 4.09, tag = $seg01)
+  |> extrude(length = 5)
+
+// Delete the face at index 2
+// (the top face)
+deleteFace(cylinder, faces = [faceId(cylinder, index = 2)])

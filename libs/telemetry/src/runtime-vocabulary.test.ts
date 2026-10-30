@@ -34,6 +34,20 @@ describe('runtime vocabularies (T30)', () => {
     expect(actual).toEqual(derived);
   });
 
+  it('should derive the same PicoGK exports from the native and the browser entry point', async () => {
+    const capabilities = await registry.registryCapabilities();
+    const picogk = capabilities.filter((capability) => capability.kind === 'kernels' && capability.id === 'picogk');
+    // Both runtimes offer the author's own STL and VDB files alongside the meshed glTF, so the two
+    // entry points declare one export vocabulary. A build that wrote no authored file offers
+    // neither of those two, which is a property of the build rather than of the entry point.
+    expect(picogk).toHaveLength(2);
+    expect(picogk.map((capability) => [...capability.exports].sort())).toEqual([
+      ['glb', 'gltf', 'stl', 'vdb'],
+      ['glb', 'gltf', 'stl', 'vdb'],
+    ]);
+    expect(generated.exportFormats).toContain('vdb');
+  });
+
   it('should keep the product kernelIds byte-identical to main (they are not runtime plugin ids)', () => {
     expect(kernelIds).toEqual([
       'picogk',

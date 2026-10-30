@@ -98,6 +98,12 @@ TAU_STORAGE_URL = 'http://tau-storage-staging.flycast'
 TAU_STORAGE_AFFINITY = 'rendezvous'
 TAU_S3_REGION = 'auto'
 TAU_S3_FORCE_PATH_STYLE = 'false'
+# Files service (tau-cloud files gates): LFS downloads are links to the files
+# Worker instead of presigned R2 URLs. Needs the Fly secret
+# TAU_FILES_LINK_SIGNING_KEY, which tau-cloud's staging stack writes (gate 3,
+# tau-cloud#136; docs/files-service-runbook.md "Apply order").
+# Remove this line and redeploy to roll back to presigned downloads.
+TAU_FILES_BASE_URL = 'https://files.taucad.dev'
 # Runtime Observability PR-2: staging records runtime telemetry entries (on | off | paused-until:<ISO>).
 TAU_RUNTIME_TELEMETRY = 'on'
 

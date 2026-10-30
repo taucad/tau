@@ -1,0 +1,4 @@
+height = 2
+profile = sketch(on = XY) {
+  arc1 = arc(start = [0, 0], end = [0, height], center = [0, height/2])
+}

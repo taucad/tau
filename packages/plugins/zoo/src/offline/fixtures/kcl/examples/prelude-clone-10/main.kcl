@@ -1,0 +1,27 @@
+// Clone an array of sketches and solids
+exampleSketch = startSketchOn(XY)
+ |> startProfile(at = [0, 0])
+ |> line(end = [10, 0])
+ |> line(end = [0, 10])
+ |> line(end = [-10, 0])
+ |> close()
+
+exampleSolid = startSketchOn(XY)
+  |> startProfile(at = [-15, 0])
+  |> line(end = [10, 0])
+  |> line(end = [0, 10])
+  |> line(end = [-10, 0])
+  |> close()
+  |> extrude(length = 5)
+
+
+inputArray = [ exampleSketch, exampleSolid]
+outputArray = clone(inputArray)
+
+outputArray[0]
+|> translate(xyz = [10, 10, 10])
+|> extrude(length = 5)
+
+clonedSolid = outputArray[1]
+|> translate(xyz = [-10, -10, -10])
+

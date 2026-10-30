@@ -1,0 +1,11 @@
+@settings(experimentalFeatures = allow)
+
+exampleSketch = startSketchOn(XY)
+  |> startProfile(at = [0,0])
+  |> hyperbolic(
+        end = [10,0],
+        semiMajor = 2,
+        semiMinor = 1,
+        interior = [0,0]
+  )
+  |>close()

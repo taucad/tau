@@ -1,0 +1,10 @@
+exampleSketch = startSketchOn(XZ)
+  |> startProfile(at = [0, 0])
+  |> line(end = [10, 0])
+  |> arc(
+       angleStart = 0,
+       angleEnd = 280deg,
+       radius = 16
+     )
+  |> close()
+example = extrude(exampleSketch, length = 10)

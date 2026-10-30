@@ -1,0 +1,4 @@
+point001 = parabolicPoint(x = 5, coefficients = [0.1, 0, 0])
+point002 = parabolicPoint(y = 2.5, coefficients = [0.1, 0, 0])
+assert(point001[0], isEqualTo = point002[0])
+assert(point001[1], isEqualTo = point002[1])

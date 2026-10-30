@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { formatKeyCombination, setPlatform, getPlatform } from '#utils/keys.js';
 import type { KeyCombination } from '#utils/keys.js';
 import { detectPlatform } from '#utils/platform.js';
+import { usePlatform } from '#hooks/use-platform.js';
 import type { DetectedPlatform } from '#utils/platform.js';
 
 // ---------------------------------------------------------------------------
@@ -511,9 +512,11 @@ export function useKeybinding(
     optionsRef.current = { ...defaultOptions, ...options };
   }, [callback, options]);
 
-  // Serialize combo for registry key and effect dependency
-  // Platform detection updates the context, so recompute the binding and label on render.
+  // Serialize combo for registry key and effect dependency. The registry matches real
+  // events, so it reads the detected platform; the label is rendered and reads the
+  // hydration-stable one.
   const comboKey = serializeCombo(keyCombination);
+  const platform = usePlatform();
 
   // Register/unregister via effect
   useEffect(() => {
@@ -532,7 +535,7 @@ export function useKeybinding(
   }, [comboKey, register, unregister]);
 
   // Format for display
-  const formattedKeyCombination = formatKeyCombination(keyCombination);
+  const formattedKeyCombination = formatKeyCombination(keyCombination, platform);
 
   return { formattedKeyCombination };
 }

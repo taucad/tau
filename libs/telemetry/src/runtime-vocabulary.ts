@@ -63,6 +63,7 @@ export const exportFormats = [
   'usda',
   'usdc',
   'usdz',
+  'vdb',
   'webp',
 ] as const;
 
@@ -115,6 +116,7 @@ export const fileFormats = [
   'usda',
   'usdc',
   'usdz',
+  'vdb',
   'webp',
   'xgl',
 ] as const;

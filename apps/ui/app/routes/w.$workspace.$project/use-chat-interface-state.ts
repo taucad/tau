@@ -68,7 +68,7 @@ export function useChatInterfaceState(): ChatInterfaceState {
   const [previousTab, setPreviousTab] = useState(activeTab);
 
   /* Every collapse, whichever action caused it, returns the drawer to half height, so the next panel never reopens
-   * over the whole viewer nor at a peek too short for its content. A file opens at full height (WB-07). */
+   * over the whole viewer. A file opens at full height (WB-07). */
   if (previousTab !== activeTab) {
     setPreviousTab(activeTab);
     if (activeTab === 'editor') {

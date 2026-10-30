@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 import {
   formatPrimitiveSelector,
   resolveShapeName,
@@ -181,11 +179,13 @@ const assertIndexRange = (
   }
 };
 
-const assertArtifactIntegrity = (bytes: Uint8Array<ArrayBuffer>, result: PicogkMeshArtifact): void => {
+const assertArtifactIntegrity = async (bytes: Uint8Array<ArrayBuffer>, result: PicogkMeshArtifact): Promise<void> => {
   if (bytes.byteLength !== result.byteLength) {
     throw new Error('PicoGK worker mesh byte length does not match its descriptor.');
   }
-  const digest = createHash('sha256').update(bytes).digest('hex');
+  const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('');
   if (digest !== result.sha256.toLowerCase()) {
     throw new Error('PicoGK worker mesh failed its SHA-256 integrity check.');
   }
@@ -423,12 +423,12 @@ const componentsToGlb = (
  * @param onIssues - Receives mechanism metadata warnings without discarding geometry.
  * @returns A canonical inline GLB with mesh-only Tau topology.
  */
-export const picogkArtifactToGlb = (
+export const picogkArtifactToGlb = async (
   bytes: Uint8Array<ArrayBuffer>,
   result: PicogkMeshArtifact,
   onIssues?: (issues: KernelIssue[]) => void,
-): Uint8Array<ArrayBuffer> => {
-  assertArtifactIntegrity(bytes, result);
+): Promise<Uint8Array<ArrayBuffer>> => {
+  await assertArtifactIntegrity(bytes, result);
   return componentsToGlb(bytes, result.prototypes, {
     occurrences: result.occurrences,
     mechanismSource: result.mechanism,

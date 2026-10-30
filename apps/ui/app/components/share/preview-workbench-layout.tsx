@@ -7,6 +7,7 @@ import { Allotment } from '#components/panes/allotment.js';
 import { Button } from '@taucad/ui/components/button';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle, DrawerTrigger } from '@taucad/ui/components/drawer';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
+import { cn } from '@taucad/ui/utils/cn';
 import { ChatContextInsertionProvider } from '#components/chat/chat-context-insertion.js';
 import { ViewerDockview } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
 import { WorkbenchDockview } from '#routes/w.$workspace.$project/chat-workbench-dockview.js';
@@ -41,7 +42,17 @@ export function PreviewWorkbenchLayout({
                     </Button>
                   </DrawerTrigger>,
                 )}
-                <DrawerContent className='h-[min(78dvh,48rem)] bg-sidebar'>
+                <DrawerContent
+                  className={cn(
+                    'h-[min(78dvh,48rem)] bg-sidebar',
+                    /* The workbench's tab strip, directly under the grabber, is the sheet's grab strip (I3, D4): the
+                     * grabber's target reaches down over its 36px, while its tabs and actions stay on top (the strip
+                     * paints at z-6, over the target's z-1) and its blank space lets a pointer through to the target. */
+                    '[--drawer-handle-reach:calc(var(--spacing)*9)]',
+                    '[&_.dv-tabs-and-actions-container]:pointer-events-none',
+                    '[&_.dv-tabs-and-actions-container_:is(button,a,[role=button],[role=tab],[tabindex])]:pointer-events-auto',
+                  )}
+                >
                   <DrawerTitle className='sr-only'>Project workbench</DrawerTitle>
                   <DrawerDescription className='sr-only'>
                     Inspect parameters, files, exports, and details.

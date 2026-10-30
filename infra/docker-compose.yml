@@ -104,6 +104,7 @@ services:
         mc mb --ignore-existing local/tau-content-private;
         mc mb --ignore-existing local/tau-content-restore;
         mc mb --ignore-existing --with-lock local/tau-content-second-copy;
+        mc mb --ignore-existing local/langfuse;
         mc admin user add local tau-api tau-api-dev-secret || true;
         mc admin policy attach local readwrite --user tau-api || true;
         mc cp /seed/default-og.png local/tau-content/defaults/og.png;
@@ -113,8 +114,146 @@ services:
       '
     restart: 'no'
 
+  # Local Langfuse, for viewing the agent evidence a local API delivers
+  # (blueprint T08). Opt-in: `pnpm langfuse:up` starts it under the `langfuse`
+  # profile, and `pnpm infra:up` does not. It keeps its own Postgres, ClickHouse
+  # and Redis, so nothing in Tau's databases changes, and stores events and media
+  # in the shared MinIO's `langfuse` bucket. Every credential below is a
+  # local-only default; none is used anywhere else. Bump the four Langfuse and
+  # ClickHouse tags together with upstream's docker-compose.yml.
+  langfuse-web:
+    image: docker.langfuse.com/langfuse/langfuse:4
+    container_name: tau-langfuse-web
+    profiles: [langfuse]
+    restart: unless-stopped
+    depends_on: &langfuse-depends-on
+      langfuse-postgres:
+        condition: service_healthy
+      langfuse-clickhouse:
+        condition: service_healthy
+      langfuse-redis:
+        condition: service_healthy
+      minio-bootstrap:
+        condition: service_completed_successfully
+    ports:
+      - '127.0.0.1:6200:3000'
+    environment:
+      <<: &langfuse-env
+        NEXTAUTH_URL: http://localhost:6200
+        DATABASE_URL: postgresql://langfuse:langfuse-dev-secret@langfuse-postgres:5432/langfuse
+        SALT: tau-langfuse-dev-salt
+        # 64 hex characters; local only.
+        ENCRYPTION_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
+        TELEMETRY_ENABLED: 'false'
+        LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: 'false'
+        CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
+        CLICKHOUSE_URL: http://langfuse-clickhouse:8123
+        CLICKHOUSE_USER: clickhouse
+        CLICKHOUSE_PASSWORD: clickhouse-dev-secret
+        CLICKHOUSE_CLUSTER_ENABLED: 'false'
+        LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+        LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+        LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-tauminio}
+        LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-tauminio-dev-secret}
+        LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+        LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: 'true'
+        LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+        LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+        LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+        LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-tauminio}
+        LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-tauminio-dev-secret}
+        LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://minio:9000
+        LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: 'true'
+        LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+        REDIS_HOST: langfuse-redis
+        REDIS_PORT: '6379'
+        REDIS_AUTH: langfuse-redis-dev-secret
+      NEXTAUTH_SECRET: tau-langfuse-dev-nextauth-secret
+      # The browser fetches media from the published MinIO port; the server
+      # keeps using the Compose name.
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://localhost:9000
+      LANGFUSE_S3_MEDIA_UPLOAD_INTERNAL_ENDPOINT: http://minio:9000
+      # One organization, project, user and key pair, created on first start.
+      # apps/api/.env.example names the same keys.
+      LANGFUSE_INIT_ORG_ID: tau-local
+      LANGFUSE_INIT_ORG_NAME: Tau local
+      LANGFUSE_INIT_PROJECT_ID: tau-local-agent
+      LANGFUSE_INIT_PROJECT_NAME: Tau local agent evidence
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: pk-lf-tau-local
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: sk-lf-tau-local-dev-secret
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_LOCAL_EMAIL:-dev@tau.local}
+      LANGFUSE_INIT_USER_NAME: Tau developer
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_LOCAL_PASSWORD:-tau-langfuse-dev}
+      AUTH_DISABLE_SIGNUP: 'true'
+
+  langfuse-worker:
+    image: docker.langfuse.com/langfuse/langfuse-worker:4
+    container_name: tau-langfuse-worker
+    profiles: [langfuse]
+    restart: unless-stopped
+    depends_on: *langfuse-depends-on
+    environment: *langfuse-env
+
+  langfuse-postgres:
+    image: postgres:17
+    container_name: tau-langfuse-postgres
+    profiles: [langfuse]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse-dev-secret
+      POSTGRES_DB: langfuse
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - langfuse_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U langfuse -d langfuse']
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  langfuse-clickhouse:
+    image: clickhouse/clickhouse-server:25.12
+    container_name: tau-langfuse-clickhouse
+    profiles: [langfuse]
+    restart: unless-stopped
+    user: '101:101'
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse-dev-secret
+    volumes:
+      - langfuse_clickhouse_data:/var/lib/clickhouse
+      - langfuse_clickhouse_logs:/var/log/clickhouse-server
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 1s
+
+  # Langfuse's queues need `noeviction`, so it does not share Tau's Redis.
+  langfuse-redis:
+    image: redis:8-alpine
+    container_name: tau-langfuse-redis
+    profiles: [langfuse]
+    restart: unless-stopped
+    command: redis-server --requirepass langfuse-redis-dev-secret --maxmemory-policy noeviction
+    volumes:
+      - langfuse_redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', '-a', 'langfuse-redis-dev-secret', 'ping']
+      interval: 3s
+      timeout: 10s
+      retries: 10
+
 volumes:
   postgres_data:
   redis_data:
   otel_lgtm_data:
   minio-data:
+  langfuse_postgres_data:
+  langfuse_clickhouse_data:
+  langfuse_clickhouse_logs:
+  langfuse_redis_data:

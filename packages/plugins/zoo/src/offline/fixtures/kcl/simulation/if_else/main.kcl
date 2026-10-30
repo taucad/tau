@@ -1,0 +1,29 @@
+// This tests evaluating if-else expressions.
+
+
+a = if true {
+  3
+} else if true {
+  4
+} else {
+  5
+}
+assert(a, isEqualTo = 3, error = "the 'if' branch gets returned")
+
+b = if false {
+  3
+} else if true {
+  4
+} else {
+  5
+}
+assert(b, isEqualTo = 4, error = "the 'else if' branch gets returned")
+
+c = if false {
+  3
+} else if false {
+  4
+} else {
+  5
+}
+assert(c, isEqualTo = 5, error = "the 'else' branch gets returned")

@@ -169,6 +169,18 @@ describe('Revisions pane', () => {
     expect(screen.getByRole('button', { name: 'Close Revisions' })).toBeInTheDocument();
   });
 
+  it('lets the keyboard reach and scroll its column even when it holds no control', () => {
+    render(
+      <TooltipProvider>
+        <ChatRevisions />
+      </TooltipProvider>,
+      { wrapper },
+    );
+
+    // A half-height phone sheet can overflow History while it loads, with nothing to Tab to (WCAG 2.1.1).
+    expect(screen.getByRole('group', { name: 'History and branches' })).toHaveAttribute('tabindex', '0');
+  });
+
   it('renders exactly one "Current" for a projection with two branches', async () => {
     revisionStatusHarness.rows = [
       row({ revisionId: 'rev-4', revisionNumber: 4 }),

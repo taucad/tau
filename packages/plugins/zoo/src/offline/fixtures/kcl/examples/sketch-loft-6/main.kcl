@@ -1,0 +1,25 @@
+// Demonstrates surface lofts with shapes from sketch blocks.
+// Loft a square, a circle, and another circle.
+sideLen = 4
+squareSketch = sketch(on = XY) {
+  line1 = line(start = [var -0.02mm, var 4.02mm], end = [var 0mm, var 0mm])
+  coincident([line1.end, ORIGIN])
+  line2 = line(start = [var 4.02mm, var 0.03mm], end = [var 4.06mm, var 3.97mm])
+  line3 = line(start = [var 4.06mm, var 3.97mm], end = [var -0.02mm, var 4.02mm])
+  coincident([line2.end, line3.start])
+  coincident([line3.end, line1.start])
+  line4 = line(start = [var 0mm, var 0mm], end = [var 4.02mm, var 0.03mm])
+  coincident([line4.start, line1.end])
+  coincident([line4.end, line2.start])
+  equalLength([line1, line2, line3, line4])
+  parallel([line1, line2])
+}
+
+circleSketch0 = sketch(on = offsetPlane(XY, offset = 2)) {
+  circle1 = circle(start = [var 2.28mm, var 2.99mm], center = [var 1.98mm, var 2.03mm])
+}
+
+squareRegion = region(segments = [squareSketch.line1, squareSketch.line4])
+circleRegion = region(segments = [circleSketch0.circle1])
+
+shape = loft([squareRegion, circleRegion], bodyType = SURFACE)

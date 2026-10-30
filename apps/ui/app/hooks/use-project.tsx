@@ -5,7 +5,7 @@ import { recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
 import { isMemoryConstrainedDevice, runtimeRecycleHeapBytes } from '#lib/device-memory-class.js';
 import { usePreviewParameterLifetime } from '#hooks/use-preview-parameter-lifetime.js';
 import { canOpenCloudProject, isCloudProjectPending, tauCloudIntent } from '#hooks/use-cloud-projects.js';
-import { peekRevisionClient } from '#hooks/use-revision-status.js';
+import { peekRevisionClient } from '#services/revision-client-registry.js';
 import { ObservationService } from '@taucad/fs-client/observation-service';
 import { findEntryGraphics } from '@taucad/workbench-panes/units/geometry-units';
 import type { ReactNode } from 'react';
@@ -98,6 +98,12 @@ type ProjectContextType = {
     filePath: string,
     manifest: ParameterManifest,
     parameters: Record<string, unknown>,
+  ) => void;
+  /** Write a form edit: only the fields `values` changes from `base`, the values the form rendered. */
+  editGeometryUnitParameters: (
+    filePath: string,
+    manifest: ParameterManifest,
+    edit: Readonly<{ values: Record<string, unknown>; base: Record<string, unknown> }>,
   ) => void;
   switchParameterGroup: (filePath: string, manifest: ParameterManifest, groupName: string) => void;
   createParameterGroup: (
@@ -942,6 +948,17 @@ export function ProjectProvider({
     [parameterService, reportParameterOperation],
   );
 
+  const editGeometryUnitParameters = useCallback(
+    (
+      filePath: string,
+      manifest: ParameterManifest,
+      edit: Readonly<{ values: Record<string, unknown>; base: Record<string, unknown> }>,
+    ) => {
+      reportParameterOperation(parameterService.editValues(filePath, manifest, edit));
+    },
+    [parameterService, reportParameterOperation],
+  );
+
   const switchParameterGroup = useCallback(
     (filePath: string, manifest: ParameterManifest, groupName: string) => {
       reportParameterOperation(parameterService.selectGroup(filePath, manifest, groupName));
@@ -1062,6 +1079,7 @@ export function ProjectProvider({
       parameterService,
       resolveParameterEntry,
       setGeometryUnitParameters,
+      editGeometryUnitParameters,
       switchParameterGroup,
       createParameterGroup,
       deleteParameterGroup,
@@ -1101,6 +1119,7 @@ export function ProjectProvider({
     parameterService,
     resolveParameterEntry,
     setGeometryUnitParameters,
+    editGeometryUnitParameters,
     switchParameterGroup,
     createParameterGroup,
     deleteParameterGroup,

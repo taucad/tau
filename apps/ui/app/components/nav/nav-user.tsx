@@ -19,7 +19,7 @@ import { legalUrl } from '#lib/legal-url.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { setEntryPreference } from '#lib/entry-preference.js';
-import { websiteOrigin } from '#lib/website-origin.js';
+import { pageOrigin, websiteOrigin } from '#lib/website-origin.js';
 import { CookiePreferencesDialog, CookiePreferencesMenuItem } from '#components/cookie-preferences.js';
 import { NavBillingItem, NavCreditsMeter } from '#cloud/nav-billing.js';
 
@@ -36,8 +36,11 @@ export function NavUser(): React.JSX.Element {
   const { open: openSettings } = useSettingsDialog();
   const [isCookiePreferencesOpen, setIsCookiePreferencesOpen] = useState(false);
   const website = websiteOrigin();
-  // The edge serves the website on this hostname, so the entry preference selects it at `/`.
-  const isWebsiteHere = !isDesktopTarget() && website === globalThis.location.origin;
+  /* The edge serves the website on this hostname, so the entry preference selects it at `/`. The
+     document render has no `location`, so reading its origin threw there, which failed the sidebar
+     boundary and made every route carrying it answer 500. The menu this decides mounts only once a
+     pointer opens it, long after hydration has given the browser's own origin. */
+  const isWebsiteHere = !isDesktopTarget() && website === pageOrigin();
   const helpItems = [
     ...(isDesktopTarget()
       ? []
@@ -165,7 +168,7 @@ export function NavUser(): React.JSX.Element {
             </Tooltip>
           )}
         </div>
-        <DropdownMenu>
+        <DropdownMenu isResponsive>
           <DropdownMenuTrigger asChild>
             <Button
               aria-label='Help'
@@ -176,7 +179,7 @@ export function NavUser(): React.JSX.Element {
               <CircleHelp />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent side='top' align='end' sideOffset={8} className='min-w-52'>
+          <DropdownMenuContent drawerTitle='Help' side='top' align='end' sideOffset={8} className='min-w-52'>
             {helpItems}
             <DropdownMenuSeparator />
             <DropdownMenuLabel className='font-normal text-muted-foreground'>

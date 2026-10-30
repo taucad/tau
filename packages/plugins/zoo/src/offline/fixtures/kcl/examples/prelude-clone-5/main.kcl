@@ -1,0 +1,29 @@
+// You can also use the tags from the original geometry to fillet the cloned geometry.
+
+width = 20
+length = 10
+thickness = 1
+filletRadius = 2
+
+mountingPlateSketch = startSketchOn(XY)
+  |> startProfile(at = [-width/2, -length/2])
+  |> line(endAbsolute = [width/2, -length/2], tag = $edge1)
+  |> line(endAbsolute = [width/2, length/2], tag = $edge2)
+  |> line(endAbsolute = [-width/2, length/2], tag = $edge3)
+  |> close(tag = $edge4)
+
+mountingPlate = extrude(mountingPlateSketch, length = thickness)
+
+clonedMountingPlate = clone(mountingPlate)
+
+fillet(
+      clonedMountingPlate,
+       radius = filletRadius,
+       edges = [
+         { sideFaces = [clonedMountingPlate.sketch.tags.edge1, clonedMountingPlate.sketch.tags.edge2] },
+         { sideFaces = [clonedMountingPlate.sketch.tags.edge2, clonedMountingPlate.sketch.tags.edge3] },
+         { sideFaces = [clonedMountingPlate.sketch.tags.edge3, clonedMountingPlate.sketch.tags.edge4] },
+         { sideFaces = [clonedMountingPlate.sketch.tags.edge1, clonedMountingPlate.sketch.tags.edge4] }
+       ],
+     )
+  |> translate(x = 0, y = 50, z = 0)

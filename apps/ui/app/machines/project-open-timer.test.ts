@@ -70,6 +70,23 @@ describe('createProjectOpenTimer', () => {
     ]);
   });
 
+  it('should label a cold mark with the transport of the latest fetch, and a warm one with none', () => {
+    const { marks, advance, timer } = harness();
+    advance(500);
+    timer.firstView();
+    timer.fetchedFromNetwork('r2_presigned');
+    timer.fetchedFromNetwork('files');
+    /* A status-only signal names no transport and keeps the one already known. */
+    timer.fetchedFromNetwork();
+    advance(500);
+    timer.fullyFetched();
+
+    expect(marks).toEqual([
+      { phase: 'first_view', cache: 'warm', durationMilliseconds: 500 },
+      { phase: 'fully_fetched', cache: 'cold', transport: 'files', durationMilliseconds: 1000 },
+    ]);
+  });
+
   it('should label each mark by what was known then: a warm first view, a cold fully fetched', () => {
     const { marks, advance, timer } = harness();
     advance(800);

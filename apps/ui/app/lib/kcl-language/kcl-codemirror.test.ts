@@ -7,6 +7,7 @@ import type { Completion } from '@codemirror/autocomplete';
 import type * as LSP from 'vscode-languageserver-protocol';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { EditorDocument } from '#lib/editor-document.js';
+import type { TextChange } from '#lib/editor-document.js';
 import { EditorDiagnostics } from '#lib/editor-diagnostics.js';
 import type { KclLspClient } from '#lib/kcl-language/lsp/kcl-lsp-client.js';
 import type { KclSymbol, KclSymbolService } from '#lib/kcl-language/lsp/kcl-symbol-service.js';
@@ -22,6 +23,8 @@ import {
   kclLspCompletion,
   symbolCompletion,
 } from '#lib/kcl-language/kcl-codemirror.js';
+import { indexKclProgram } from '#lib/kcl-language/kcl-bindings.js';
+import { languageFeatures } from '#components/code/editor-language-features.js';
 
 describe('KCL pending worker requests', () => {
   it('observes a rejected semantic refresh and keeps the editor usable', async () => {
@@ -73,6 +76,66 @@ describe('KCL pending worker requests', () => {
   });
 });
 
+describe('KCL shared editor features', () => {
+  it('supplies every TypeScript feature the shared editor shows, with server signatures first', async () => {
+    const client = mock<KclLspClient>();
+    client.textDocumentSemanticTokensFull.mockResolvedValue(undefined);
+    client.textDocumentFoldingRange.mockResolvedValue([]);
+    client.textDocumentSignatureHelp.mockResolvedValue({
+      activeSignature: 0,
+      activeParameter: 1,
+      signatures: [
+        {
+          label: 'extrude(@sketches: [Sketch], length?: number(Length))',
+          documentation: { kind: 'markdown', value: 'Prefer a [`sketch` block](/docs/kcl-lang/sketches).' },
+          parameters: [{ label: '@sketches: [Sketch]' }, { label: [30, 54] }],
+        },
+      ],
+    });
+    const document = new EditorDocument('main.kcl', 'extrude(');
+    const environment = mock<EditorLanguageEnvironment>({ diagnostics: new EditorDiagnostics() });
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: document.text,
+        extensions: kclExtensions({
+          backend: new KclBackend(environment, client),
+          document,
+          environment,
+          isDisposed: () => false,
+        }),
+      }),
+      parent: globalThis.document.body,
+    });
+    try {
+      const features = view.state.facet(languageFeatures);
+      expect(Object.keys(features).sort()).toEqual([
+        'documentSymbols',
+        'format',
+        'occurrences',
+        'quickFix',
+        'references',
+        'rename',
+        'signatureHelp',
+        'typeDefinition',
+        'workspaceSymbols',
+      ]);
+      expect(features.signatureHelp?.triggerCharacters).toEqual(['(', ',']);
+      const signature = await features.signatureHelp?.provide(view, 8, '(');
+      expect(signature).toMatchObject({
+        label: 'extrude(@sketches: [Sketch], length?: number(Length))',
+        parameters: [
+          [8, 27],
+          [30, 54],
+        ],
+        activeParameter: 1,
+        documentation: 'Prefer a [`sketch` block](https://zoo.dev/docs/kcl-lang/sketches).',
+      });
+    } finally {
+      view.destroy();
+    }
+  });
+});
+
 describe('KCL completion parity', () => {
   function completionView(query: string, options: Completion[]): EditorView {
     return new EditorView({
@@ -99,6 +162,54 @@ describe('KCL completion parity', () => {
         expect(currentCompletions(view.state)).toHaveLength(1);
       });
       expect(currentCompletions(view.state)[0]).toMatchObject({ label: 'stringLength', displayLabel: 'length' });
+    } finally {
+      view.destroy();
+    }
+  });
+
+  it('applies an accepted completion and its import edit after typing narrowed the open list', () => {
+    const source = 'import thing from "a.kcl"\n\nx = ge';
+    const document = new EditorDocument('main.kcl', source);
+    const view = new EditorView({
+      state: EditorState.create({ doc: source, selection: { anchor: source.length } }),
+      parent: globalThis.document.body,
+      dispatchTransactions: (transactions, current) => {
+        current.update(transactions);
+        for (const transaction of transactions) {
+          const changes: TextChange[] = [];
+          // oxlint-disable-next-line max-params -- CodeMirror's iterator supplies five positional values.
+          transaction.changes.iterChanges((from, to, _fromB, _toB, inserted) => {
+            changes.push({ from, to, insert: inserted.toString() });
+          });
+          if (changes.length > 0) {
+            document.apply({ expectedVersion: document.version, origin: 'view', changes });
+          }
+        }
+      },
+    });
+    const completion = kclLspCompletion(
+      {
+        label: 'gear',
+        textEdit: { range: { start: { line: 2, character: 4 }, end: { line: 2, character: 6 } }, newText: 'gear' },
+        additionalTextEdits: [
+          {
+            range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+            newText: 'import gear from "gear.kcl"\n',
+          },
+        ],
+      },
+      { document, version: document.version, isDisposed: () => false },
+    );
+    try {
+      view.dispatch({ changes: { from: source.length, insert: 'a' } });
+      const from = source.indexOf('ge');
+      const { apply } = completion;
+      if (typeof apply !== 'function') {
+        throw new TypeError('KCL completions apply through a function');
+      }
+      apply(view, completion, from, view.state.doc.length);
+      expect(view.state.doc.toString()).toBe('import gear from "gear.kcl"\nimport thing from "a.kcl"\n\nx = gear');
+      expect(document.text).toBe(view.state.doc.toString());
     } finally {
       view.destroy();
     }
@@ -240,8 +351,10 @@ describe('KCL import navigation', () => {
   it('navigates quoted imports and local WASM symbols when LSP has no definition', async () => {
     const document = new EditorDocument('bench/main.kcl', 'import "part.kcl"\nmyVar');
     const client = mock<KclLspClient>();
-    client.textDocumentDefinition.mockResolvedValue(undefined);
+    client.getServerCapabilities.mockReturnValue({});
     const symbols = mock<KclSymbolService>();
+    // A file that does not parse resolves nothing through the AST, so the last parsed symbols answer.
+    symbols.getIndex.mockResolvedValue(indexKclProgram(undefined));
     const navigate = vi.fn();
     const environment = mock<EditorLanguageEnvironment>({ navigate });
     const importState = EditorState.create({ doc: document.text, selection: { anchor: 10 } });
@@ -261,6 +374,7 @@ describe('KCL import navigation', () => {
       symbols,
     });
     expect(navigate).toHaveBeenLastCalledWith({ uri: document.uri, line: 2, column: 1 });
+    expect(client.textDocumentDefinition).not.toHaveBeenCalled();
   });
 
   it('shows module import and user symbol text when LSP hover is absent', () => {

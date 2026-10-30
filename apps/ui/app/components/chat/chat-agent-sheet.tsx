@@ -52,6 +52,7 @@ import { SvgIcon } from '#components/icons/svg-icon.js';
 import type { IconId } from '#components/icons/svg-icon.js';
 import { Tau } from '#components/icons/tau.js';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
+import { usePlatform } from '@taucad/ui/hooks/use-platform';
 import { configOptionOf, configValues } from '#components/chat/use-agent-config.js';
 import type { AgentConfig, AgentConfigOption } from '#components/chat/use-agent-config.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
@@ -1504,6 +1505,7 @@ export function ChatAgentSheet({
 }): React.JSX.Element {
   const [isOpen, setIsOpen] = useState(false);
   const isMobile = useIsMobile();
+  const platform = usePlatform();
   const { agents, current } = useSheetAgents(placements);
   const sheetModel = useSheetModel(current, agentConfig);
   const name = triggerName(current, sheetModel);
@@ -1522,7 +1524,7 @@ export function ChatAgentSheet({
       data-slot='agent-trigger'
       data-chat-textarea-focustrap
       aria-label={`Agent and model: ${name}`}
-      aria-keyshortcuts={ariaKeyShortcuts(openModelSelectorKeyCombination)}
+      aria-keyshortcuts={ariaKeyShortcuts(openModelSelectorKeyCombination, platform)}
       className={cn(ghostPillClass, 'max-w-64 min-w-0 shrink gap-1 pr-2 text-foreground')}
     >
       {sheetModel.glyph}
@@ -1579,7 +1581,9 @@ export function ChatAgentSheet({
           <DrawerDescription className='sr-only'>
             Choose who runs the next turn, on which model, and how hard it thinks.
           </DrawerDescription>
-          {sheet}
+          {/* The sheet is shared with a desktop popover; in a drawer its hairlines are inset and its lists take the
+              drawer's row geometry, like a responsive combobox's. */}
+          <div className='drawer-row-dividers drawer-command-rows min-h-0 drawer-inset-hairlines'>{sheet}</div>
         </DrawerContent>
       </Drawer>
     );
@@ -1612,7 +1616,7 @@ export function ChatAgentSheet({
         <span className='flex items-center gap-1.5'>
           {/* The trigger's own name (I6). */}
           Agent and model: {name}
-          <KeyShortcut variant='tooltip'>{formatKeyCombination(openModelSelectorKeyCombination)}</KeyShortcut>
+          <KeyShortcut variant='tooltip'>{formatKeyCombination(openModelSelectorKeyCombination, platform)}</KeyShortcut>
         </span>
       </TooltipContent>
     </Tooltip>

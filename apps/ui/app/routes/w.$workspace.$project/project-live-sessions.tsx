@@ -40,6 +40,7 @@ import {
   createBrowserAgentHostClient,
   createAgentHostClient,
   noteBrowserRunPresented,
+  noteBrowserRunRated,
   readBrowserRunStoppability,
   retainBrowserAgentHostProject,
 } from '#services/agent-host-client.js';
@@ -333,6 +334,17 @@ function ProjectSessionBinding({
           }
         } catch {
           /* A lost time is only a missing presentation fact. */
+        }
+      },
+      /*
+       * Every rating goes to the browser host, which reports one only for a run it observed in its own rows: the
+       * chat's current execution may have changed since the rated run ended, and a daemon's run is never reported.
+       */
+      rated: async (rating) => {
+        try {
+          await noteBrowserRunRated({ projectId, ...rating });
+        } catch {
+          /* A lost rating is only a missing feedback fact. */
         }
       },
     });

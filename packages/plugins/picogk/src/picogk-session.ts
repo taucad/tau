@@ -9,6 +9,7 @@ import {
   picogkShutdownSchema,
 } from '#picogk.protocol.js';
 import type { PicogkIssue } from '#picogk.protocol.js';
+import { PicogkWorkerError } from '#picogk-worker-error.js';
 
 /**
  * Host-owned paths and bounds for a PicoGK worker session.
@@ -19,17 +20,6 @@ import type { PicogkIssue } from '#picogk.protocol.js';
  * @public
  */
 export type PicogkSessionOptions = DotnetSessionOptions;
-
-/** Structured user-code issues returned by the PicoGK worker. @public */
-export class PicogkWorkerError extends Error {
-  public readonly issues: PicogkIssue[];
-
-  public constructor(issues: readonly PicogkIssue[]) {
-    super(issues.map(({ message }) => message).join('; '));
-    this.issues = [...issues];
-    this.name = 'PicogkWorkerError';
-  }
-}
 
 /** The PicoGK C# worker: its names, its protocol frames and the error its reported issues become. */
 const picogkWorker: DotnetWorker<PicogkIssue> = {

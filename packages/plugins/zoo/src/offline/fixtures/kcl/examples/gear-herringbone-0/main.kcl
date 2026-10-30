@@ -1,0 +1,10 @@
+// Basic herringbone gear example.
+
+@settings(defaultLengthUnit = mm, kclVersion = 1.0, experimentalFeatures = allow)
+myGear = gear::herringbone(
+  nTeeth = 10,
+  module = 2,
+  pressureAngle = 20deg,
+  gearHeight = 5,
+  helixAngle = 40deg,
+)

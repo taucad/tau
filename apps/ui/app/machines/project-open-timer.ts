@@ -1,4 +1,4 @@
-import type { RevisionStatusProjection } from '@taucad/revisions';
+import type { LfsTransport, RevisionStatusProjection } from '@taucad/revisions';
 
 /** Which moment of an open a mark times (STO-25). @public */
 export type ProjectOpenPhase = 'first_view' | 'fully_fetched';
@@ -10,6 +10,8 @@ export type ProjectOpenCache = 'cold' | 'warm';
 export type ProjectOpenMark = Readonly<{
   phase: ProjectOpenPhase;
   cache: ProjectOpenCache;
+  /** On a cold mark, the transport of the open's latest network fetch, when one reported it (`tau.lfs.transport`). */
+  transport?: LfsTransport;
   /** From the timer's creation. Milliseconds. */
   durationMilliseconds: number;
 }>;
@@ -20,8 +22,9 @@ export type ProjectOpenTimer = Readonly<{
    * At least one large object of the open was not in the local store: a tree
    * read fetched it, or the checkout opened with it still to download (a
    * transfer shared with another reader counts, though no read reports it).
+   * A tree read that fetched names the transport that served it; the latest is kept.
    */
-  fetchedFromNetwork: () => void;
+  fetchedFromNetwork: (transport?: LfsTransport) => void;
   /** The project's repository is checked out and its editor and file tree are usable; the first call counts. */
   firstView: () => void;
   /** Every large object of the checkout is in the local store; the first call after `firstView` counts. */
@@ -50,13 +53,20 @@ export const createProjectOpenTimer = (
   let cold = false;
   let viewed = false;
   let fetched = false;
+  let transport: LfsTransport | undefined;
   const mark = (phase: ProjectOpenPhase): void => {
-    options.report({ phase, cache: cold ? 'cold' : 'warm', durationMilliseconds: Math.max(0, now() - startedAt) });
+    options.report({
+      phase,
+      cache: cold ? 'cold' : 'warm',
+      ...(cold && transport !== undefined ? { transport } : {}),
+      durationMilliseconds: Math.max(0, now() - startedAt),
+    });
   };
   return Object.freeze({
-    fetchedFromNetwork: () => {
+    fetchedFromNetwork: (served?: LfsTransport) => {
       if (!fetched) {
         cold = true;
+        transport = served ?? transport;
       }
     },
     firstView: () => {

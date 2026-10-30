@@ -38,6 +38,7 @@ import { agentApprovalToolName, parseAgentHostApproval } from '#services/agent-h
 import { ChatMessageReasoning } from '#routes/w.$workspace.$project/chat-message-reasoning.js';
 import { ChatMessageDataUsage } from '#routes/w.$workspace.$project/chat-message-data-usage.js';
 import { ChatMessageContextCompaction } from '#routes/w.$workspace.$project/chat-message-context-compaction.js';
+import { ChatMessageRating } from '#routes/w.$workspace.$project/chat-message-rating.js';
 import { ChatMessageToolUseSkill } from '#routes/w.$workspace.$project/chat-message-tool-use-skill.js';
 import { ChatMessageText } from '#routes/w.$workspace.$project/chat-message-text.js';
 import { ChatMessageMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
@@ -252,13 +253,34 @@ const retiredToolPart = (part: unknown): DynamicToolUIPart | undefined => {
   } as DynamicToolUIPart;
 };
 
+/**
+ * A preliminary result is the tool's progress, not its output (`tool-output-update`, projected with
+ * `preliminary: true`): the native card shows the call as still running until the final result arrives. Rendered as
+ * output, a `test_model` progress object reached `summarizeTestModelOutput` without `failures` or `accounting`, and
+ * the thrown `flatMap` took the chat panel down mid-turn.
+ */
+const settledToolPart = (part: MyMessagePart): MyMessagePart => {
+  if (
+    !part.type.startsWith('tool-') ||
+    !('state' in part) ||
+    part.state !== 'output-available' ||
+    Reflect.get(part, 'preliminary') !== true
+  ) {
+    return part;
+  }
+  // SAFETY: only the state moves back to running; every tool part type has an `input-available` state.
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- the state narrows each tool part's union member.
+  return { ...part, state: 'input-available' } as MyMessagePart;
+};
+
 // oxlint-disable-next-line complexity -- Part type dispatch requires many branches
 function renderAssistantPart(
-  part: MyMessagePart,
+  receivedPart: MyMessagePart,
   index: number,
   context: PartRenderContext,
 ): React.JSX.Element | undefined {
   const { messageId, lastMeaningfulIndex, isMessageActive } = context;
+  const part = settledToolPart(receivedPart);
 
   switch (part.type) {
     case 'text': {
@@ -1039,6 +1061,7 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
               getText={() => serializeMessage(displayMessage)}
               tooltip='Copy message'
             />
+            {isUser ? null : <ChatMessageRating messageId={messageId} />}
             {usageParts.length > 0 ? <ChatMessageDataUsage usageParts={usageParts} /> : null}
             <ChatMessageTimestamp createdAt={message.metadata?.createdAt} />
           </div>

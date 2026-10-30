@@ -1,0 +1,21 @@
+// Clone a basic sketch and move it and extrude it.
+exampleSketch = startSketchOn(XY)
+  |> startProfile(at = [0, 0])
+  |> line(end = [10, 0])
+  |> line(end = [0, 10])
+  |> line(end = [-10, 0])
+  |> close()
+
+clonedSketch = clone(exampleSketch)
+    |> scale(
+    x = 1.0,
+    y = 1.0,
+    z = 2.5,
+    )
+    |> translate(
+        x = 15.0,
+        y = 0,
+        z = 0,
+    )
+
+extrude(clonedSketch, length = 5)

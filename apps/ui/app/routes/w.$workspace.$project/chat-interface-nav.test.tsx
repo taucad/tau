@@ -180,10 +180,12 @@ describe('All surfaces', () => {
       expect(grid).toHaveClass('grid-cols-[repeat(auto-fill,minmax(8rem,1fr))]');
       expect(grid).not.toHaveClass('grid-cols-3');
     }
-    for (const button of within(screen.getByRole('dialog', { name: 'All surfaces' })).getAllByRole('button')) {
-      // The touch size: 44px rows, past the 40px floor for primary targets (I3).
-      expect(button).toHaveClass('h-11');
+    const sheet = screen.getByRole('dialog', { name: 'All surfaces' });
+    for (const button of within(sheet).getAllByRole('button')) {
+      // The touch size: 44px rows and a 44px close action, past the 40px floor for primary targets (I3).
+      expect(button.className).toMatch(/(?:^|\s)(?:h|size)-11(?:\s|$)/u);
     }
+    expect(within(sheet).getByRole('button', { name: 'Close' })).toHaveClass('size-11', 'rounded-full!');
   });
 });
 

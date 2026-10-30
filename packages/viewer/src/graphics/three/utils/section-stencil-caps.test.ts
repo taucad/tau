@@ -172,7 +172,7 @@ describe('createSectionStencilCaps', () => {
           ]),
         );
         caps.dispose();
-        return { ...stats, submitMilliseconds: 0 };
+        return { ...stats, buildMilliseconds: 0, submitMilliseconds: 0 };
       });
       expect(statsBySegments[0]).toEqual(statsBySegments[1]);
       expect(statsBySegments[0]).toMatchObject({
@@ -222,6 +222,88 @@ describe('createSectionStencilCaps', () => {
           ({ material }) => (material as THREE.Material).name === 'TauSectionCapOutline',
         ),
       ).toBe(false);
+    } finally {
+      caps.dispose();
+      source.meshes[0]!.geometry.dispose();
+    }
+  });
+
+  it('should reuse the built draw list while only the camera moves, and report the same work', () => {
+    for (const backend of ['webgl', 'webgpu'] as const) {
+      const caps = createSectionStencilCaps(backend);
+      const renderer = createRecordingRenderer();
+      const source = createSource('a', 'owner-a', new THREE.BoxGeometry());
+      const frame = frameFor([source]);
+      try {
+        const built = caps.render(renderer, frame);
+        expect(built.rebuilt).toBe(true);
+        // Orbiting on the same side of the cut leaves every build input alone.
+        frame.camera.position.set(1.5, -2, 6);
+        frame.camera.lookAt(0, 0, 0);
+        frame.camera.updateMatrixWorld();
+        const reused = caps.render(renderer, frame);
+        expect(reused.rebuilt).toBe(false);
+        // The same draws, in the same numbers: a reused frame draws what the built one drew.
+        expect({ ...reused, rebuilt: true, buildMilliseconds: 0, submitMilliseconds: 0 }).toEqual({
+          ...built,
+          buildMilliseconds: 0,
+          submitMilliseconds: 0,
+        });
+        expect(renderer.frames[1]!.objects).toEqual(renderer.frames[0]!.objects);
+      } finally {
+        caps.dispose();
+        source.meshes[0]!.geometry.dispose();
+      }
+    }
+  });
+
+  it('should rebuild when the camera crosses a cut plane, so the exit faces change', () => {
+    const caps = createSectionStencilCaps('webgl');
+    const renderer = createRecordingRenderer();
+    const source = createSource('a', 'owner-a', new THREE.BoxGeometry());
+    const frame = frameFor([source]);
+    try {
+      expect(caps.render(renderer, frame).rebuilt).toBe(true);
+      expect(caps.render(renderer, frame).rebuilt).toBe(false);
+      // The far side of the cut: the piece is now seen from its kept side.
+      frame.camera.position.set(0.5, -2, -6);
+      frame.camera.lookAt(0, 0, 0);
+      frame.camera.updateMatrixWorld();
+      expect(caps.render(renderer, frame).rebuilt).toBe(true);
+    } finally {
+      caps.dispose();
+      source.meshes[0]!.geometry.dispose();
+    }
+  });
+
+  it('should rebuild when a cut, a source, its emphasis, a pose or the pixel scale changes', () => {
+    const caps = createSectionStencilCaps('webgl');
+    const renderer = createRecordingRenderer();
+    const source = createSource('a', 'owner-a', new THREE.BoxGeometry());
+    const frame = frameFor([source]);
+    const expectRebuildFor = (label: string, next: SectionStencilCapFrame): void => {
+      // Back to this frame's own build after whatever the case before left, then settled on it.
+      caps.render(renderer, frame);
+      expect(caps.render(renderer, frame).rebuilt, `${label}: settles into a reused frame`).toBe(false);
+      expect(caps.render(renderer, next).rebuilt, `${label}: rebuilds`).toBe(true);
+    };
+    try {
+      expect(caps.render(renderer, frame).rebuilt).toBe(true);
+      expectRebuildFor('a moved cut', {
+        ...frame,
+        pieces: resolveSectionPieces([{ ...planeCut, offset: 0.2 }]),
+      });
+      expectRebuildFor('emphasis', { ...frame, sources: [{ ...source, tintHex: 0xaa_55_22 }] });
+      expectRebuildFor('an outline colour', { ...frame, sources: [{ ...source, edgeHex: 0xff_00_00 }] });
+      expectRebuildFor('a source that left', { ...frame, sources: [] });
+      expectRebuildFor('the stripe frequency', { ...frame, stripes: { stripeFrequency: 3, stripeWidth: 0.25 } });
+      expectRebuildFor('the outline width', { ...frame, outlineWidthPixels: 2 });
+      // A posed part moves its meshes without any cut or source change.
+      caps.render(renderer, frame);
+      expect(caps.render(renderer, frame).rebuilt).toBe(false);
+      source.meshes[0]!.position.set(0.4, 0, 0);
+      source.meshes[0]!.updateMatrixWorld();
+      expect(caps.render(renderer, frame).rebuilt, 'a posed part rebuilds').toBe(true);
     } finally {
       caps.dispose();
       source.meshes[0]!.geometry.dispose();

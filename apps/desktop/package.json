@@ -81,5 +81,8 @@
     "electron-vite": "catalog:electron-vite8",
     "vite": "catalog:electron-vite8",
     "vitest": "catalog:"
+  },
+  "optionalDependencies": {
+    "node-pty": "catalog:"
   }
 }

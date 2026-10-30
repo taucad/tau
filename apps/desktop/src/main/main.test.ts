@@ -978,6 +978,23 @@ describe('desktop main compute owner', () => {
   );
 
   it(
+    'gives the shell app data and Tau-owned bubblewrap to the services utility, the only reader of either',
+    async () => {
+      await bootstrap();
+      /* Both names were once set on the geometry utility, which reads neither, so the services host fell back to the
+       * distro `/usr/bin/bwrap` — unprofiled, and on a stock Ubuntu 24.04 or Debian 13 that means a user namespace
+       * with no capabilities and no shell at all — and never denied its own `userData` to a launch. */
+      const carrying = state.utilityEnvironmentAdditions.filter(
+        (additions) => 'TAU_DESKTOP_USER_DATA_DIR' in additions,
+      );
+      expect(carrying).toHaveLength(1);
+      expect(carrying[0]?.['TAU_DESKTOP_USER_DATA_DIR']).toBe(state.userData);
+      expect(carrying[0]?.['TAU_DESKTOP_AUTHORITY_DIR']).toBe(join(state.userData, 'filesystem-authority'));
+    },
+    bootMilliseconds,
+  );
+
+  it(
     'allocates lazily, reuses original identity, invalidates on error, restarts, and awaits quit',
     async () => {
       const projectRoot = await bootstrap();

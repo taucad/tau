@@ -16,6 +16,10 @@ describe('picogk project libraries', () => {
       >;
     };
 
+    /* The template targets the SDK a new project restores with outside Tau. Neither target inside Tau
+     * reads it: the browser kernel compiles the same sources against the prepared bundle's own pinned
+     * references, so this framework is never the one a Tau evaluation uses. */
+    expect(csproj).toContain('<TargetFramework>net10.0</TargetFramework>');
     expect(csproj).toContain('<PackageReference Include="PicoGK" Version="2.3.0" />');
     expect(libraryVersionMismatches('project.csproj', csproj)).toEqual([]);
     expect(Object.keys(lock.dependencies)).toEqual(['net10.0']);

@@ -7,6 +7,9 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+#if PICOGK_BROWSER
+using PicoVoxel.Sdf.Generator;
+#endif
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace Tau.PicoGK.Worker;
@@ -32,7 +35,14 @@ internal sealed record ParameterDefinition(
     int? Order,
     IReadOnlyList<string>? EnumValues);
 
+#if PICOGK_BROWSER
+internal sealed record CompiledEntryPoint(string TypeName, string MethodName, bool HasArguments);
+#endif
+
 internal sealed record CompiledModel(
+#if PICOGK_BROWSER
+    CompiledEntryPoint EntryPoint,
+#endif
     byte[] Assembly,
     byte[] Pdb,
     IReadOnlyList<ParameterDefinition> Parameters,
@@ -63,27 +73,68 @@ internal sealed record CompilationTimings(
 
 internal static class CompilationService
 {
-    private const string CompilerContractVersion = "4";
+#if PICOGK_BROWSER
+    // Async Main's PE entry is a generated blocking wrapper. Invoke the compiler-selected
+    // method instead so the browser can await it without a synchronous runtime wait.
+    private static CompiledEntryPoint DescribeEntryPoint(CSharpCompilation compilation)
+    {
+        var entry = compilation.GetEntryPoint(default)!;
+        var names = new Stack<string>();
+        for (var type = entry.ContainingType; type is not null; type = type.ContainingType)
+            names.Push(type.MetadataName);
+        var prefix = entry.ContainingNamespace.IsGlobalNamespace
+            ? string.Empty : entry.ContainingNamespace.ToDisplayString() + ".";
+        return new CompiledEntryPoint(prefix + string.Join("+", names), entry.MetadataName, entry.Parameters.Length != 0);
+    }
+#endif
+    private const string CompilerContractVersion = "5";
     private const int MaximumSyntaxDepth = 512;
     private const int MaximumDiagnostics = 256;
     private static readonly object CacheLock = new();
-    private static readonly ImmutableArray<MetadataReference> References = CreateReferences(
-        AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string);
+    private sealed record CompilerEnvironment(ImmutableArray<MetadataReference> References, byte[] Identity);
+#if PICOGK_BROWSER
+    private const bool ConcurrentBuild = false;
+    private static CompilerEnvironment? browserEnvironment;
+    private static readonly Lazy<CompilerEnvironment> Environment = new(() =>
+        browserEnvironment ?? throw new InvalidOperationException("Browser compiler references have not been initialized."));
+
+    /// <summary>Install the verified browser reference set before any compilation in this worker.</summary>
+    internal static void InitializeBrowser(IEnumerable<string> referencePaths, byte[] buildIdentity)
+    {
+        if (buildIdentity.Length != 32) throw new ArgumentException("A SHA-256 build identity is required.", nameof(buildIdentity));
+        lock (CacheLock)
+        {
+            if (Environment.IsValueCreated || browserEnvironment is not null)
+                throw new InvalidOperationException("Compiler inputs are immutable for the worker lifetime.");
+            var references = referencePaths.Distinct(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal)
+                .Select(path => (MetadataReference)MetadataReference.CreateFromFile(path))
+                .ToImmutableArray();
+            if (references.IsEmpty) throw new ArgumentException("Browser compiler references are required.", nameof(referencePaths));
+            browserEnvironment = new CompilerEnvironment(references, (byte[])buildIdentity.Clone());
+        }
+    }
+#else
+    private const bool ConcurrentBuild = true;
+    private static readonly Lazy<CompilerEnvironment> Environment = new(() => new CompilerEnvironment(
+        CreateReferences(AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string),
+        SHA256.HashData(File.ReadAllBytes(typeof(global::PicoGK.Library).Assembly.Location))));
+#endif
     /*
      * CH7: every compilation derives from this one, so they share its bound reference set: Roslyn reuses the
      * template's reference manager for added syntax trees instead of re-binding ~180 assemblies per compile.
      * The references, options and assembly name are exactly those a fresh `Create` would use.
      */
-    private static readonly CSharpCompilation Template = CSharpCompilation.Create(
+    private static readonly Lazy<CSharpCompilation> Template = new(() => CSharpCompilation.Create(
         "TauUserModel",
         [],
-        References,
+        Environment.Value.References,
         new CSharpCompilationOptions(
             OutputKind.ConsoleApplication,
             optimizationLevel: OptimizationLevel.Release,
             deterministic: true,
-            allowUnsafe: false));
-    private static readonly byte[] PicoGkAssemblyHash = SHA256.HashData(File.ReadAllBytes(typeof(global::PicoGK.Library).Assembly.Location));
+            allowUnsafe: false,
+            concurrentBuild: ConcurrentBuild)));
     // ponytail: one slot each. Alternating entries in one worker re-select from the cached parse but
     // recompile; keep a slot per entry if that switch cost shows up in the build timings.
     private static (string Key, CompiledModel Model)? cachedCompilation;
@@ -105,7 +156,15 @@ internal static class CompilationService
         var selected = Select(ReadProject(workspace, sourceRead, parse), entryPath);
         using var digest = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         digest.AppendData(Encoding.UTF8.GetBytes(CompilerContractVersion));
-        digest.AppendData(PicoGkAssemblyHash);
+#if PICOGK_BROWSER
+        /*
+         * The generator decides which fields run as a tape, so its output is part of what a compilation is.
+         * Its declared contract version changes whenever that decision can change, and its assembly is one
+         * of the staged bundle files the host's manifest identity already covers.
+         */
+        digest.AppendData(Encoding.UTF8.GetBytes(SdfTapeGenerator.ContractVersion));
+#endif
+        digest.AppendData(Environment.Value.Identity);
         foreach (var source in selected)
         {
             AppendDigest(digest, Encoding.UTF8.GetBytes(source.Path));
@@ -142,7 +201,20 @@ internal static class CompilationService
          * errors, then parameter analysis, then emit errors.
          */
         var emit = Stopwatch.StartNew();
-        var compilation = Template.AddSyntaxTrees(trees);
+        var compilation = Template.Value.AddSyntaxTrees(trees);
+#if PICOGK_BROWSER
+        /*
+         * What an MSBuild author gets from an analyzer package reference, driven by hand: this host resolves
+         * no analyzer assemblies from disk, so its one generator runs explicitly, over the same parse options
+         * the author's own sources used. The generated registry is ordinary C# in the author's assembly, and
+         * `ModelRunner` invokes it after load rather than relying on a static constructor.
+         */
+        _ = CSharpGeneratorDriver
+            .Create([new SdfTapeGenerator().AsSourceGenerator()], parseOptions: AuthorParseOptions)
+            .RunGeneratorsAndUpdateCompilation(compilation, out var generated, out var generatorDiagnostics);
+        ThrowDiagnostics(generatorDiagnostics);
+        compilation = (CSharpCompilation)generated;
+#endif
         using var assembly = new MemoryStream();
         using var pdb = new MemoryStream();
         var emitted = compilation.Emit(assembly, pdbStream: pdb);
@@ -167,6 +239,9 @@ internal static class CompilationService
         ThrowDiagnostics(emitted.Diagnostics);
 
         var model = new CompiledModel(
+#if PICOGK_BROWSER
+            DescribeEntryPoint(compilation),
+#endif
             assembly.ToArray(),
             pdb.ToArray(),
             parameters,
@@ -234,7 +309,7 @@ internal static class CompilationService
     {
         var tree = CSharpSyntaxTree.ParseText(
             Encoding.UTF8.GetString(content),
-            new CSharpParseOptions(LanguageVersion.Latest),
+            AuthorParseOptions,
             path,
             Encoding.UTF8);
         var root = tree.GetCompilationUnitRoot();
@@ -532,6 +607,9 @@ internal static class CompilationService
         }
     }
 
+    /// <summary>One parse configuration for the author's sources, the implicit usings and generated code.</summary>
+    private static readonly CSharpParseOptions AuthorParseOptions = new(LanguageVersion.Latest);
+
     private static SyntaxTree ParseImplicitUsings() => CSharpSyntaxTree.ParseText(
         """
         global using global::System;
@@ -542,7 +620,7 @@ internal static class CompilationService
         global using global::System.Threading;
         global using global::System.Threading.Tasks;
         """,
-        new CSharpParseOptions(LanguageVersion.Latest),
+        AuthorParseOptions,
         "<TauImplicitUsings>.g.cs",
         Encoding.UTF8);
 

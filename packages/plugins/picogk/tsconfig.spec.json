@@ -6,7 +6,9 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "lib": ["DOM", "DOM.Iterable", "ES2024"],
-    "target": "ESNext"
+    "target": "ESNext",
+    "allowJs": true,
+    "checkJs": true
   },
   "include": [
     "vitest.config.ts",
@@ -20,6 +22,8 @@
     "src/**/*.ts",
     "src/**/*.tsx",
     "src/**/*.js",
-    "src/**/*.jsx"
+    "src/**/*.jsx",
+    "src/**/*.mjs",
+    "dotnet/Tau.PicoGK.Browser/main.mjs"
   ]
 }

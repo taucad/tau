@@ -105,7 +105,13 @@
           "env": "GEOSPEC_MT_STAGED_PACKAGE_ROOT"
         },
         {
+          "env": "PICOGK_BROWSER_ASSETS_ROOT"
+        },
+        {
           "runtime": "node apps/ui/geospec-mt-assets-cache-key.ts"
+        },
+        {
+          "runtime": "node apps/ui/picogk-browser-assets-cache-key.ts"
         },
         {
           "runtime": "node apps/ui/csharp-language-assets-cache-key.ts"
@@ -152,7 +158,13 @@
           "env": "GEOSPEC_MT_STAGED_PACKAGE_ROOT"
         },
         {
+          "env": "PICOGK_BROWSER_ASSETS_ROOT"
+        },
+        {
           "runtime": "node apps/ui/geospec-mt-assets-cache-key.ts"
+        },
+        {
+          "runtime": "node apps/ui/picogk-browser-assets-cache-key.ts"
         },
         {
           "runtime": "node apps/ui/csharp-language-assets-cache-key.ts"
@@ -184,7 +196,13 @@
           "env": "GEOSPEC_MT_STAGED_PACKAGE_ROOT"
         },
         {
+          "env": "PICOGK_BROWSER_ASSETS_ROOT"
+        },
+        {
           "runtime": "node apps/ui/geospec-mt-assets-cache-key.ts"
+        },
+        {
+          "runtime": "node apps/ui/picogk-browser-assets-cache-key.ts"
         },
         {
           "runtime": "node apps/ui/csharp-language-assets-cache-key.ts"

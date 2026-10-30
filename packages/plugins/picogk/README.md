@@ -37,6 +37,49 @@ const runtime = defineRuntime({ plugins: [picogk()] });
 Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, or your own host. See
 [`@taucad/runtime`](https://www.npmjs.com/package/@taucad/runtime) for the client lifecycle.
 
+### Prepared browser host
+
+Browser hosts import the explicit browser entry and provide a prepared asset receipt:
+
+```typescript
+import { defineRuntime } from '@taucad/runtime/worker';
+import { picogk } from '@taucad/picogk/browser';
+
+// Obtained from the host build's verified assets-receipt.json.
+declare const assets: { url: string; sha256: string };
+const runtime = defineRuntime({
+  plugins: [picogk({ kernels: { default: { assets, wasm: 'auto' } } })],
+});
+```
+
+The browser compiles authored C# with Roslyn against a prebuilt .NET base and uses the same
+headless capture, parameters and GLB conversion as desktop. Rendering remains in Tau's viewer.
+Without a prepared manifest, initialization reports `KERNEL_NOT_PREPARED`. `auto` selects a
+threaded variant only when the bundle contains one and the host is cross-origin isolated;
+`single` selects serial execution, and unsupported `multi` requests fail explicitly.
+`recycleHeapBytes` defaults to 1.5 GiB; Tau supplies 512 MiB on memory-constrained devices.
+The worker samples the entire WebAssembly heap and recycles only after its artifacts have been delivered.
+
+See [browser host preparation](dotnet/Tau.PicoGK.Browser/README.md) for the explicit input
+configuration. Preparation stages its inputs from the `PicoVoxel.PicoGK` package restored from a
+local directory feed, and produces a serial and a threaded bundle from one payload. Both are
+qualified; [Browser qualification](#browser-qualification) lists the engines and the cases.
+Tau UI builds consume that bundle through `PICOGK_BROWSER_ASSETS_ROOT`, verify its bytes and
+preserve its resource directory layout. Default native imports and desktop preparation are unchanged.
+
+Browser builds collect original `.stl` and `.vdb` files written under `Library.strLogFolder`
+or created/changed relative to the project root. These files are copied into run-owned receipts,
+verified during bounded transfers, and retained with the evaluated handle. `authoredStl` and
+`authoredVdb` export IDs return those bytes without remeshing or coordinate conversion, and are
+offered only when the build produced matching files. A format request for STL uses the authored
+files when available; otherwise the existing GLB-to-STL route remains available. VDB requires
+an authored file. Multiple original files use the existing export artifact-set handling.
+
+Each browser build starts from the authorized project snapshot. Writes in its private mirror do
+not modify the user's project; save exported files through the host's existing file services.
+Files from a failed or superseded run are never offered by a later evaluation. Exports retain
+whole file bytes in the handle; transfers are chunked, but the total memory policy still applies.
+
 PicoGK source stays PicoGK source:
 
 ```csharp
@@ -129,6 +172,12 @@ One preset, `default`, selecting `kernels.default`.
 
 `@taucad/picogk/project/*` holds the files a new PicoGK project carries, so it runs outside Tau with the .NET 10 SDK on macOS arm64 or Windows x64 (`dotnet restore --locked-mode`, then `dotnet run`, which opens PicoGK's viewer): `project.csproj`, which Tau writes as `<Name>.csproj` and which references upstream PicoGK 2.3.0 from NuGet, and its `packages.lock.json`. The project's `main.cs` is the program, so no separate entry file is needed. When a root `.csproj` references PicoGK at another version, evaluation succeeds with a `LIBRARY_VERSION_MISMATCH` warning located at the reference.
 
+`TargetFramework` selects the out-of-Tau run alone. Neither target inside Tau reads the project file: the
+desktop kernel runs the author's sources against its own native PicoGK, and the browser kernel compiles the
+same sources against the prepared bundle's own pinned reference assemblies, so a project carries one program
+and no per-target project configuration. That warning is the one link between the two: it says when the
+library a project would restore outside Tau has drifted from the library the kernel actually runs.
+
 ## Display meshing
 
 `meshAdaptivity` (0 to below 1) and `meshRelax` (default `false`) are evaluate options, so the viewer's
@@ -146,12 +195,48 @@ set a positive deadline in milliseconds or a `maxArtifactBytes` policy under `ke
 The default artifact allowance is `Number.MAX_SAFE_INTEGER`; actual allocation and filesystem
 limits still apply. Workspace mirroring has no fixed byte, file-count or directory-depth quota.
 
+## Browser qualification
+
+Each claim below rests on a run in the engine named, not on a capability check.
+
+| Engine   | Version      | Serial | Threaded | Not cross-origin isolated        |
+| -------- | ------------ | ------ | -------- | -------------------------------- |
+| Chromium | 156.0.8078.4 | Passes | Passes   | Serial, explicit `multi` refused |
+| Firefox  | 157.0        | Passes | Passes   | Serial, explicit `multi` refused |
+| WebKit   | 27.2         | Passes | Passes   | Serial, explicit `multi` refused |
+
+An unchanged PicoGK example produces byte-identical meshes and STL files on the native desktop
+comparator, on a browser build that compiled it ahead of time and on a browser build that compiled
+it at run time, in all three engines.
+
+### What the browser costs
+
+- Threads need cross-origin isolation, which means `Cross-Origin-Opener-Policy: same-origin` and
+  `Cross-Origin-Embedder-Policy: require-corp` on the documents and the assets. Without it the host
+  selects serial execution; a `multi` request fails rather than degrading quietly.
+- The engine's own heap on the qualified runs measured 256 MiB. `recycleHeapBytes` bounds how much
+  the worker keeps between runs, not how much one model may use.
+- A large export cannot cross from the runtime to the page in one piece: the bytes exist twice while
+  they do, so half a gigabyte is enough to end the renderer. Exports stream in pieces instead.
+- Geometry runs slower in the browser than on the matched native comparator on every path measured
+  so far, between 1.3 and 2.5 times the native run on a short subject. Read the browser as the
+  authoring runtime and the desktop as the fast one until that gap closes.
+- Compiling in the browser resolves the author's sources against the bundle's own pinned reference
+  set, which is 176 framework reference assemblies and SkiaSharp. Nothing is fetched at run time.
+
+### One program, two runtimes
+
+The C# project template targets `net10.0` and pins PicoGK 2.3.0. That framework selects the run
+outside Tau alone, where the program runs against its own native PicoGK. In the browser the same
+sources compile against the prepared bundle's pinned `net11.0` references, so a project carries one
+program and no per-target configuration.
+
 ## Environment
 
-| Host           | Supported | Notes                                                        |
-| -------------- | --------- | ------------------------------------------------------------ |
-| Browser worker | No        | `taucad.hostTarget: node` — this package is not browser-safe |
-| Node.js        | Yes       | `>=24`                                                       |
+| Host           | Supported      | Notes                                                            |
+| -------------- | -------------- | ---------------------------------------------------------------- |
+| Browser worker | Explicit entry | `@taucad/picogk/browser`, with a verified prepared serial bundle |
+| Node.js        | Yes            | `>=24`                                                           |
 
 ## Native performance gate
 

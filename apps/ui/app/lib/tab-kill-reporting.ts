@@ -11,11 +11,9 @@
  */
 
 import { reportUiError } from '#lib/error-reporting.js';
+import { killLoopThreshold } from '#lib/memory-kill-signal.js';
 import type { DetectedMemoryKill, KillClassification } from '#lib/memory-kill-signal.js';
 import type { SeverityLevel } from '@sentry/react';
-
-/** How many kills in a row make a kill loop, where Safari starts telling the user (A11). */
-export const killLoopThreshold = 2;
 
 /** The synthetic error a detected kill is reported as. @public */
 export class TabKilledError extends Error {
@@ -49,14 +47,18 @@ const defined = <Value>(record: Readonly<Record<string, Value | undefined>>): Re
  * so a page that dies again while reporting still reports this kill on the load after that (G17).
  *
  * @param kill - The kill the marker carried into this load.
- * @returns Whether the report reached the error tracker.
+ * @returns Whether the report reached the error tracker, and the event that took it when the SDK
+ * captured it on the spot: the crash prompt attaches its feedback to that event (SB12).
  * @public
  */
-export const reportDetectedKill = async (kill: DetectedMemoryKill): Promise<boolean> => {
+export const reportDetectedKill = async (
+  kill: DetectedMemoryKill,
+): Promise<Readonly<{ delivered: boolean; eventId: string | undefined }>> => {
   const error = new TabKilledError(kill.classification);
   /* eslint-disable @typescript-eslint/naming-convention -- Sentry tag and context names, filtered on by operators. */
+  let eventId: string | undefined;
   try {
-    await reportUiError(error, {
+    eventId = await reportUiError(error, {
       fingerprint: ['tab-killed', kill.classification, kill.route ?? 'unknown'],
       level: killLevel(kill),
       tags: defined({
@@ -91,8 +93,8 @@ export const reportDetectedKill = async (kill: DetectedMemoryKill): Promise<bool
     });
   } catch {
     // `reportUiError` does not reject; a report that somehow fails stays pending for the next load.
-    return false;
+    return { delivered: false, eventId: undefined };
   }
   /* eslint-enable @typescript-eslint/naming-convention -- Sentry tag and context names, filtered on by operators. */
-  return true;
+  return { delivered: true, eventId };
 };

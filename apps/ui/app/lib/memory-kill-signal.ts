@@ -48,6 +48,12 @@ export const killHeartbeatMilliseconds = 30_000;
 /** Kills that can wait for delivery at once; the oldest is dropped beyond this (G17). */
 export const pendingKillLimit = 3;
 
+/**
+ * Kills in a row that make a kill loop: the point at which Safari starts telling the user "A problem
+ * repeatedly occurred", the report rises to `error` (A11) and the crash prompt holds off (SB12).
+ */
+export const killLoopThreshold = 2;
+
 /** How the page stood when its marker was last written. @public */
 export type KillClassification = 'foreground' | 'background' | 'unknown';
 

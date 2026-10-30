@@ -56,7 +56,7 @@ jobs:
           echo "key=native-seed-v2-macos$(sw_vers -productVersion | cut -d. -f1)-build123d-darwin-arm64-$digest" >> "$GITHUB_OUTPUT"
 
       - name: Restore the seed
-        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: out/cache/build123d-seed
           key: ${{ steps.seed-key.outputs.key }}

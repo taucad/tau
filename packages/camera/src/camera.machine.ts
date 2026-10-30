@@ -5,6 +5,7 @@ import {
   createCameraView,
   findPerspectiveHandoffVerticalFieldOfView,
   frameCameraBounds,
+  PerspectiveHandoffPrecisionError,
 } from '#camera-domain.js';
 import type { CameraBounds, CameraProjection, CameraVector, CameraView, CameraViewport } from '#camera-domain.js';
 import { eventSchemas } from '#machine-schemas.js';
@@ -77,16 +78,28 @@ const driverSnapshot = (context: CameraMachineContext): CameraDriverSnapshot => 
   revision: context.revision,
 });
 
+/*
+ * A view zoomed deep into large bounds can leave no positive FOV within the budget (TAU-UI-7). The view itself is
+ * valid, so it keeps the last calibrated handoff, or none, rather than failing the actor from a frame callback.
+ */
 const handoffForView = (
   context: CameraMachineContext,
   view = context.view,
   maximumVerticalFieldOfView = context.lastPerspectiveVerticalFieldOfView,
-) =>
-  findPerspectiveHandoffVerticalFieldOfView({
-    view,
-    maximumVerticalFieldOfView,
-    pixelBudget: context.pixelBudget,
-  });
+): number | undefined => {
+  try {
+    return findPerspectiveHandoffVerticalFieldOfView({
+      view,
+      maximumVerticalFieldOfView,
+      pixelBudget: context.pixelBudget,
+    });
+  } catch (error) {
+    if (error instanceof PerspectiveHandoffPrecisionError) {
+      return context.handoffVerticalFieldOfView;
+    }
+    throw error;
+  }
+};
 
 const updateHandoffForView = (context: CameraMachineContext, view: CameraView): number | undefined =>
   context.view.requestedVerticalFieldOfView === 0 ? handoffForView(context, view) : undefined;

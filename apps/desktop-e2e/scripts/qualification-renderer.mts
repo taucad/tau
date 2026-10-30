@@ -43,18 +43,15 @@ const exportGeometry = async (
     ),
   );
   await page.getByRole('button', { name: 'Export', exact: true }).click();
-  const formats = page.getByRole('region', { name: 'Formats' });
-  await formats.waitFor({ state: 'visible' });
-  for (const selected of await formats.locator('button[aria-pressed="true"]').all()) {
-    const selectedText = await selected.textContent();
-    if (selectedText?.trim().toLowerCase() !== 'glb') {
-      await selected.click();
-    }
-  }
-  const glb = formats.getByRole('button', { name: 'glb', exact: true });
-  if ((await glb.getAttribute('aria-pressed')) !== 'true') {
-    await glb.click();
-  }
+  // The pane names this section 'Format', singular, and offers one format through a combo box
+  // rather than the multi-select toggles it carried before #1150. Selection mirrors the
+  // maintained pattern in apps/ui-e2e/src/export-pane.spec.ts so the two cannot drift apart again.
+  const format = page.getByRole('region', { name: 'Format', exact: true });
+  await format.waitFor({ state: 'visible' });
+  const picker = format.getByRole('button', { name: 'Export format' });
+  await picker.waitFor({ state: 'visible' });
+  await picker.click();
+  await page.locator('[cmdk-item][data-value="glb"]').click();
   const download = page.getByLabel('Download to disk');
   if (await download.isChecked()) {
     await download.click();

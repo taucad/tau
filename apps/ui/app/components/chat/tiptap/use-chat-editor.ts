@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useMemo } from 'react';
 import { useEditor } from '@tiptap/react';
+import type { UseEditorOptions } from '@tiptap/react';
 import { Document } from '@tiptap/extension-document';
 import { Paragraph } from '@tiptap/extension-paragraph';
 import { Text } from '@tiptap/extension-text';
@@ -213,6 +214,14 @@ export type UseChatEditorReturn = {
 };
 
 /* oxlint-disable react/refs -- The `use no memo` boundary preserves Tiptap's long-lived editor callbacks while refs expose the latest React inputs. */
+/**
+ * `useEditor` as it behaves: its type promises an editor, but while rendering on the server it returns null.
+ *
+ * @returns The editor, or null outside the browser.
+ */
+// oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Tiptap returns null outside the browser
+const useBrowserEditor = (options: UseEditorOptions): Editor | null => useEditor(options);
+
 /** The composer's empty-state prompt; the served editor area shows the same words. */
 export const chatComposerPlaceholder = 'Ask Tau to build anything...';
 
@@ -327,8 +336,7 @@ export function useChatEditor({
 
   /* There is no editor while rendering on the server: the composer is served with a native input in its
    * editor area (`ChatEarlyInput`), and the browser creates the editor on its first render. */
-  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Tiptap returns null outside the browser
-  const editor: Editor | null = useEditor({
+  const editor = useBrowserEditor({
     content: initialText === undefined ? undefined : buildEditorContentJson([{ type: 'text', value: initialText }]),
     extensions: [
       Document,

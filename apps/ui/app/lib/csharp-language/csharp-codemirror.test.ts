@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { Mock } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { EditorState } from '@codemirror/state';
@@ -6,9 +6,21 @@ import type { Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import type { Tooltip } from '@codemirror/view';
 import type { Completion } from '@codemirror/autocomplete';
+import { foldable } from '@codemirror/language';
 import type * as LSP from 'vscode-languageserver-protocol';
+import type { FileContentService } from '@taucad/fs-client/file-content-service';
+import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
+import type { FileEntry, FileStatEntry } from '@taucad/types';
 import { goToDefinitionAt } from '#components/code/editor-definition.js';
+import {
+  formatDocument,
+  languageFeatureNavigation,
+  quickFix,
+  renameSymbol,
+  triggerParameterHints,
+} from '#components/code/editor-language-features.js';
 import { EditorDocument } from '#lib/editor-document.js';
+import { EditorDocumentSession } from '#lib/editor-document-session.js';
 import type { TextChange } from '#lib/editor-document.js';
 import { EditorDiagnostics } from '#lib/editor-diagnostics.js';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
@@ -344,6 +356,344 @@ describe('C# navigation', () => {
           declaration: { text: '// PicoGK' },
         });
       });
+    } finally {
+      view.destroy();
+    }
+  });
+});
+
+const encoder = new TextEncoder();
+
+/** A project whose files load through a real editor session, so checked workspace edits change and save them. */
+function workspaceFor(files: Readonly<Record<string, string>>) {
+  const stored = new Map(Object.entries(files).map(([path, text]) => [path, encoder.encode(text)]));
+  const contentService = mock<FileContentService>();
+  contentService.resolve.mockImplementation(async (path) => ({ kind: 'text', content: stored.get(path)! }));
+  contentService.saveEditor.mockImplementation(async (path, content) => {
+    stored.set(path, content);
+  });
+  contentService.peekOutcome.mockImplementation((path) => ({ kind: 'text', content: stored.get(path)! }));
+  contentService.onDidContentChange.mockReturnValue(() => undefined);
+  contentService.onDidChangeOutcome.mockReturnValue(() => undefined);
+  const entry = (path: string): FileEntry & FileStatEntry => ({
+    type: 'file',
+    path,
+    name: path,
+    size: stored.get(path)?.length ?? 0,
+    contentKind: 'text',
+    lineCount: 1,
+    isLoaded: true,
+    mtimeMs: 0,
+  });
+  const treeService = mock<FileTreeService>();
+  treeService.subscribeTree.mockReturnValue(() => undefined);
+  treeService.getEntry.mockImplementation(async (path) => entry(path));
+  treeService.searchFiles.mockImplementation(async (query) =>
+    Object.keys(files)
+      .filter((path) => path.endsWith(query))
+      .map((path) => entry(path)),
+  );
+  const fileManagerRef = mock<EditorLanguageEnvironment['fileManagerRef']>();
+  fileManagerRef.getSnapshot.mockReturnValue({
+    context: { rootDirectory: '/project' },
+  } as ReturnType<EditorLanguageEnvironment['fileManagerRef']['getSnapshot']>);
+  const session = new EditorDocumentSession({ contentService, projectId: 'test' });
+  const environment: EditorLanguageEnvironment = {
+    session,
+    diagnostics: new EditorDiagnostics(),
+    fileManagerRef,
+    contentService,
+    treeService,
+    fileManager: mock<EditorLanguageEnvironment['fileManager']>(),
+    navigate: vi.fn(),
+  };
+  return { environment, session, stored };
+}
+
+/** Submit the open CodeMirror dialog, after `fill` sets its control. */
+async function submitDialog(view: EditorView, fill: (form: HTMLFormElement) => void): Promise<void> {
+  await vi.waitFor(() => {
+    expect(view.dom.querySelector('.cm-dialog form')).not.toBeNull();
+  });
+  const form = view.dom.querySelector<HTMLFormElement>('.cm-dialog form')!;
+  fill(form);
+  form.requestSubmit();
+}
+
+describe('C# rename', () => {
+  const main = 'var shape = Shapes.Ball(1f);\n';
+  const shapes = 'static class Shapes\n{\n    public static int Ball(float r) => 1;\n}\n';
+
+  function renameServer(versionOf: (document: EditorDocument) => number) {
+    return (document: EditorDocument) =>
+      fakeClient((method) => {
+        if (method === 'textDocument/prepareRename') {
+          return { range: range(0, 19, 23), placeholder: 'Ball' };
+        }
+        if (method === 'textDocument/rename') {
+          return {
+            documentChanges: [
+              {
+                textDocument: { uri: document.uri, version: versionOf(document) },
+                edits: [{ range: range(0, 19, 23), newText: 'Sphere' }],
+              },
+              {
+                textDocument: { uri: 'file:///Shapes.cs', version: null },
+                edits: [{ range: range(2, 22, 26), newText: 'Sphere' }],
+              },
+            ],
+          };
+        }
+        return undefined;
+      });
+  }
+
+  it('renames across files with versioned edits checked against the request-time sources', async () => {
+    const { environment, session, stored } = workspaceFor({ 'main.cs': main, 'Shapes.cs': shapes });
+    const document = (await session.acquire('main.cs'))!;
+    const client = renameServer((current) => current.version)(document);
+    const view = boundView(document, csharpExtensions({ client, document, environment, isDisposed: () => false }));
+    try {
+      view.dispatch({ selection: { anchor: main.indexOf('Ball') + 1 } });
+      expect(renameSymbol(view)).toBe(true);
+      await submitDialog(view, (form) => {
+        form.querySelector('input')!.value = 'Sphere';
+      });
+      await vi.waitFor(() => {
+        expect(new TextDecoder().decode(stored.get('Shapes.cs'))).toContain('public static int Sphere(float r)');
+      });
+      expect(document.text).toBe('var shape = Shapes.Sphere(1f);\n');
+      expect(new TextDecoder().decode(stored.get('main.cs'))).toBe(document.text);
+      expect(client.request).toHaveBeenCalledWith('textDocument/rename', {
+        textDocument: { uri: document.uri },
+        position: { line: 0, character: 20 },
+        newName: 'Sphere',
+      });
+    } finally {
+      view.destroy();
+      session.dispose();
+    }
+  });
+
+  it('refuses a rename the server computed against another version of the open file', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { environment, session, stored } = workspaceFor({ 'main.cs': main, 'Shapes.cs': shapes });
+    const document = (await session.acquire('main.cs'))!;
+    const client = renameServer((current) => current.version - 1)(document);
+    const view = boundView(document, csharpExtensions({ client, document, environment, isDisposed: () => false }));
+    try {
+      view.dispatch({ selection: { anchor: main.indexOf('Ball') + 1 } });
+      renameSymbol(view);
+      await submitDialog(view, (form) => {
+        form.querySelector('input')!.value = 'Sphere';
+      });
+      await vi.waitFor(() => {
+        expect(String(warn.mock.calls.at(-1)?.[1])).toContain('stale document version');
+      });
+      expect(document.text).toBe(main);
+      expect(new TextDecoder().decode(stored.get('Shapes.cs'))).toBe(shapes);
+    } finally {
+      view.destroy();
+      session.dispose();
+      warn.mockRestore();
+    }
+  });
+});
+
+describe('C# formatting and quick fixes', () => {
+  it('formats the document with the editor indentation', async () => {
+    const source = 'class A{int x;}\n';
+    const { environment, session } = workspaceFor({ 'main.cs': source });
+    const document = (await session.acquire('main.cs'))!;
+    const client = fakeClient((method) =>
+      method === 'textDocument/formatting'
+        ? [
+            { range: range(0, 7, 8), newText: '\n{\n  ' },
+            { range: range(0, 14, 15), newText: '\n}' },
+          ]
+        : undefined,
+    );
+    const view = boundView(document, csharpExtensions({ client, document, environment, isDisposed: () => false }));
+    try {
+      expect(formatDocument(view)).toBe(true);
+      await vi.waitFor(() => {
+        expect(document.text).toBe('class A\n{\n  int x;\n}\n');
+      });
+      expect(client.request).toHaveBeenCalledWith('textDocument/formatting', {
+        textDocument: { uri: document.uri },
+        options: { tabSize: 4, insertSpaces: true },
+      });
+    } finally {
+      view.destroy();
+      session.dispose();
+    }
+  });
+
+  it('resolves and applies the chosen quick fix for the diagnostic at the cursor', async () => {
+    const source = 'class Fix { object O = Vector3.Zero; }';
+    const { environment, session } = workspaceFor({ 'fix.cs': source });
+    const document = (await session.acquire('fix.cs'))!;
+    environment.diagnostics.set(document.uri, 'csharp-lsp', [
+      { from: 23, to: 30, message: "The name 'Vector3' does not exist", severity: 'error', code: 'CS0103' },
+    ]);
+    const action = { title: 'using System.Numerics;', kind: 'quickfix', data: { resultId: 1, index: 0 } };
+    const client = fakeClient((method) => {
+      if (method === 'textDocument/codeAction') {
+        return [{ title: 'Generate field', kind: 'quickfix', data: { resultId: 1, index: 1 } }, action];
+      }
+      if (method === 'codeAction/resolve') {
+        return {
+          ...action,
+          edit: {
+            documentChanges: [
+              {
+                textDocument: { uri: document.uri, version: document.version },
+                edits: [{ range: range(0, 0), newText: 'using System.Numerics;\n\n' }],
+              },
+            ],
+          },
+        };
+      }
+      return undefined;
+    });
+    const view = boundView(document, csharpExtensions({ client, document, environment, isDisposed: () => false }));
+    try {
+      view.dispatch({ selection: { anchor: 25 } });
+      expect(quickFix(view)).toBe(true);
+      await submitDialog(view, (form) => {
+        form.querySelector('select')!.value = '1';
+      });
+      await vi.waitFor(() => {
+        expect(document.text).toBe(`using System.Numerics;\n\n${source}`);
+      });
+      expect(client.request).toHaveBeenCalledWith('textDocument/codeAction', {
+        textDocument: { uri: document.uri },
+        range: { start: { line: 0, character: 25 }, end: { line: 0, character: 25 } },
+        context: {
+          diagnostics: [
+            {
+              range: range(0, 23, 30),
+              message: "The name 'Vector3' does not exist",
+              severity: 1,
+              source: undefined,
+              code: 'CS0103',
+            },
+          ],
+        },
+      });
+      expect(client.request).toHaveBeenCalledWith('codeAction/resolve', action);
+    } finally {
+      view.destroy();
+      session.dispose();
+    }
+  });
+});
+
+describe('C# signature help', () => {
+  const help: LSP.SignatureHelp = {
+    signatures: [
+      {
+        label: 'Voxels Shapes.Ball(float radius)',
+        documentation: { kind: 'markdown', value: 'A ball at the origin.' },
+        parameters: [{ label: [19, 31], documentation: { kind: 'markdown', value: 'The radius in mm.' } }],
+        activeParameter: 0,
+      },
+      {
+        label: 'Voxels Shapes.Ball(float radius, Vector3 center)',
+        parameters: [{ label: [19, 31] }, { label: [33, 47] }],
+      },
+    ],
+    activeSignature: 0,
+    activeParameter: 0,
+  };
+
+  it('opens on the server trigger characters and on Mod-Shift-Space', async () => {
+    // The jsdom environment has no text layout; the tooltip measures its anchor through Range rectangles.
+    const layout = {
+      getClientRects: () => [],
+      getBoundingClientRect: () => new DOMRect(),
+    };
+    for (const name of Object.keys(layout) as Array<keyof typeof layout>) {
+      const original = Object.getOwnPropertyDescriptor(Range.prototype, name);
+      Object.defineProperty(Range.prototype, name, { configurable: true, writable: true, value: layout[name] });
+      onTestFinished(() => {
+        if (original) {
+          Object.defineProperty(Range.prototype, name, original);
+        } else {
+          Reflect.deleteProperty(Range.prototype, name);
+        }
+      });
+    }
+    const document = new EditorDocument('main.cs', 'var b = Shapes.Ball');
+    const client = fakeClient((method) => (method === 'textDocument/signatureHelp' ? help : undefined));
+    const view = boundView(document, [
+      languageFeatureNavigation(),
+      csharpExtensions({ client, document, environment: environmentFor(), isDisposed: () => false }),
+    ]);
+    const signatureRequests = () =>
+      vi.mocked(client.request).mock.calls.filter(([method]) => method === 'textDocument/signatureHelp');
+    try {
+      view.dispatch({
+        changes: { from: view.state.doc.length, insert: '(' },
+        selection: { anchor: view.state.doc.length + 1 },
+        userEvent: 'input.type',
+      });
+      await vi.waitFor(() => {
+        expect(view.dom.querySelector('.cm-signature-active-parameter')?.textContent).toBe('float radius');
+      });
+      const tooltip = view.dom.querySelector('.cm-signature-help')!;
+      expect(tooltip.textContent).toContain('1/2');
+      expect(tooltip.textContent).toContain('The radius in mm.');
+      expect(tooltip.textContent).toContain('A ball at the origin.');
+      expect(signatureRequests()[0]?.[1]).toEqual({
+        textDocument: { uri: document.uri },
+        position: { line: 0, character: 20 },
+      });
+
+      view.dispatch({
+        changes: { from: view.state.doc.length, insert: '1f,' },
+        selection: { anchor: view.state.doc.length + 3 },
+        userEvent: 'input.type',
+      });
+      await vi.waitFor(() => {
+        expect(signatureRequests().at(-1)?.[1]).toMatchObject({ position: { line: 0, character: 23 } });
+      });
+
+      const count = signatureRequests().length;
+      expect(triggerParameterHints(view)).toBe(true);
+      await vi.waitFor(() => {
+        expect(signatureRequests()).toHaveLength(count + 1);
+      });
+    } finally {
+      view.destroy();
+    }
+  });
+});
+
+describe('C# semantic tokens and folding', () => {
+  it('colors the identifiers the server classifies and folds the ranges it reports', async () => {
+    const source = 'static class Shapes\n{\n    public static int Ball(float radius) => 1;\n}\n';
+    const document = new EditorDocument('Shapes.cs', source);
+    const client = fakeClient((method) => {
+      if (method === 'textDocument/semanticTokens/full') {
+        // Keywords `static` and `class`, the static class `Shapes`, the method `Ball` and the parameter `radius`.
+        return { data: [0, 0, 6, 13, 0, 0, 7, 5, 13, 0, 0, 6, 6, 1, 1, 2, 22, 4, 7, 1, 0, 11, 6, 11, 0] };
+      }
+      return method === 'textDocument/foldingRange' ? [{ startLine: 1, endLine: 3 }] : undefined;
+    });
+    const view = boundView(
+      document,
+      csharpExtensions({ client, document, environment: environmentFor(), isDisposed: () => false }),
+    );
+    try {
+      await vi.waitFor(() => {
+        expect(view.dom.querySelector('.cm-csharp-semantic-type')?.textContent).toBe('Shapes');
+      });
+      expect(view.dom.querySelector('.cm-csharp-semantic-function')?.textContent).toBe('Ball');
+      expect(view.dom.querySelector('.cm-csharp-semantic-parameter')?.textContent).toBe('radius');
+      expect(view.dom.querySelectorAll('[class*="cm-csharp-semantic-"]')).toHaveLength(3);
+      const brace = view.state.doc.line(2);
+      expect(foldable(view.state, brace.from, brace.to)).toEqual({ from: brace.to, to: view.state.doc.line(4).to });
     } finally {
       view.destroy();
     }

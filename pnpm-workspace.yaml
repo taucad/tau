@@ -237,7 +237,7 @@ catalog:
   '@types/jsdom': ^21.1.7
   katex: 0.18.2
   knip: 6.41.0
-  libassimp: ^0.4.0
+  libassimp: ^0.4.1
   libcascade: 3.1.0
   lighthouse: ^13.5.0
   lint-staged: ^16.4.0
@@ -309,7 +309,7 @@ catalog:
   isomorphic-git: 1.38.5
   xstate: 6.0.0-alpha.59
   zod: 4.4.3
-  nanoraster: ^0.7.1
+  nanoraster: ^0.8.0
   # Exact: @taucad/picovoxel's kernel version carries this release's build-time digests.
   picovoxel: 0.2.1
   # Exact: @taucad/smlib's kernel version and compute identity carry this release's WASM.
@@ -349,7 +349,7 @@ catalog:
   '@better-auth-ui/core': 1.7.29
   '@better-auth-ui/react': 1.7.29
   smol-toml: 1.9.1
-  nanoraster-darwin-arm64: 0.7.1
+  nanoraster-darwin-arm64: 0.8.0
   '@napi-rs/keyring': 2.1.2
   proper-lockfile: 4.1.2
   '@types/proper-lockfile': 4.1.4

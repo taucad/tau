@@ -50,8 +50,11 @@ export const observabilityRequestKind = (address: string): string => {
   return 'other';
 };
 
-/** Record bounded counts and envelope ids even when navigation or an assertion fails. */
-export const observeHarnessPage = (page: Page, runId: string): void => {
+/**
+ * Record bounded counts and envelope ids even when navigation or an assertion fails. The returned record is the
+ * live one the listeners write to, so a caller reads it after the page has settled and can assert on it.
+ */
+export const observeHarnessPage = (page: Page, runId: string): Readonly<Record<string, number>> => {
   observabilityUrl(runId);
   const counts: Record<string, number> = {};
   const eventIds = new Set<string>();
@@ -92,6 +95,7 @@ export const observeHarnessPage = (page: Page, runId: string): void => {
   page.once('close', () => {
     console.info('Harness observation finished', { runId, counts, eventIds: [...eventIds] });
   });
+  return counts;
 };
 
 type PollOptions = {

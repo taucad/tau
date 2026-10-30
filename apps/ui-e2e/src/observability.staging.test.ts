@@ -72,7 +72,7 @@ describe('P1 deployed staging observability harness', () => {
           ]);
           const page = await context.newPage();
           const runId = createObservabilityRunId();
-          observeHarnessPage(page, runId);
+          const counts = observeHarnessPage(page, runId);
           const response = await page.goto(observabilityUrl(runId), {
             timeout: harnessNavigationTimeout,
             waitUntil: 'domcontentloaded',
@@ -119,6 +119,13 @@ describe('P1 deployed staging observability harness', () => {
           const cookies = await context.cookies();
           const cookie = cookies.find(({ name }) => name === 'tau-cookie-consent');
           expect(JSON.parse(decodeURIComponent(cookie?.value ?? 'null'))).toMatchObject({ status: consent });
+          // Staging took everything the SDK sent it. A PostHog request that is answered with an error leaves the
+          // page looking instrumented while the data is gone, which the suite otherwise only notices in the
+          // eight-minute A2 cases, and only for captures. This is the same check in seventeen seconds.
+          expect(
+            Object.keys(counts).filter((key) => /^posthog:(?:failed|status:(?!2\d\d))/u.test(key)),
+            'staging answered every PostHog request',
+          ).toEqual([]);
         } finally {
           await browser.close();
         }

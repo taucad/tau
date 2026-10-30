@@ -20,6 +20,11 @@
       "types": "./src/authoring-types.ts",
       "import": "./src/authoring-types.ts",
       "default": "./src/authoring-types.ts"
+    },
+    "./kcl-stdlib": {
+      "types": "./src/kcl-stdlib.ts",
+      "import": "./src/kcl-stdlib.ts",
+      "default": "./src/kcl-stdlib.ts"
     }
   },
   "imports": {

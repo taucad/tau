@@ -26,7 +26,12 @@ type ParametersProperties = {
   readonly parameters: Record<string, unknown>;
   readonly defaultParameters: Record<string, unknown>;
   readonly jsonSchema: RJSFSchema | undefined;
-  readonly onParametersChange: (parameters: Record<string, unknown>) => void;
+  /**
+   * The group's modified values after a change, and the modified values the change was made from. An
+   * authority writes only the fields that differ between them, so a stale rendered value of another
+   * field is never written back.
+   */
+  readonly onParametersChange: (parameters: Record<string, unknown>, base: Record<string, unknown>) => void;
   readonly className?: string;
   readonly enableSearch?: boolean;
   readonly filterTerm?: string;
@@ -103,23 +108,23 @@ export function Parameters({
   }, [enableSearch]);
 
   const setParameters = useCallback(
-    (newParameters: Record<string, unknown>) => {
+    (newParameters: Record<string, unknown>, baseParameters: Record<string, unknown>) => {
       // Extract only modified parameters before calling onParametersChange
-      const modifiedParameters = extractModifiedProperties(newParameters, defaultParameters);
-      onParametersChange(modifiedParameters);
+      onParametersChange(
+        extractModifiedProperties(newParameters, defaultParameters),
+        extractModifiedProperties(baseParameters, defaultParameters),
+      );
     },
     [onParametersChange, defaultParameters],
   );
 
   const resetSingleParameter = useCallback<RJSFContext['resetSingleParameter']>(
     (input) => {
-      const updatedParameters = resetRjsfField({
-        ...input,
-        formData: currentFormDataRef.current,
-      });
+      const base = currentFormDataRef.current;
+      const updatedParameters = resetRjsfField({ ...input, formData: base });
       if (updatedParameters !== undefined) {
         currentFormDataRef.current = updatedParameters;
-        setParameters(updatedParameters);
+        setParameters(updatedParameters, base);
       }
     },
     [setParameters],
@@ -196,8 +201,10 @@ export function Parameters({
       return;
     }
     const formData = normalizeRjsfFormData(jsonSchema, event.formData ?? {}) as Record<string, unknown>;
+    // The change was made on what the form rendered, which can trail the record.
+    const base = normalizeRjsfFormData(jsonSchema, deferredData) as Record<string, unknown>;
     currentFormDataRef.current = formData;
-    setParameters(formData);
+    setParameters(formData, base);
   };
 
   return (

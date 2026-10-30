@@ -226,11 +226,18 @@ function FloatingPanelClose({
     return <IconComponent />;
   };
 
+  const isDrawerAction = isMobile && isInsideDrawer;
+
   const button = (
     <FloatingPanelMenuButton
       tooltip={tooltipContent(isOpen)}
       tooltipSide='top'
-      className={cn('text-muted-foreground', 'max-md:bg-background/70 max-md:backdrop-blur-lg', className)}
+      // Inside a drawer the close is a solid DrawerAction; a translucent blur there reads as noise.
+      className={cn(
+        'text-muted-foreground',
+        !isDrawerAction && 'max-md:bg-background/70 max-md:backdrop-blur-lg',
+        className,
+      )}
       aria-label={label}
       onClick={close}
     >
@@ -239,7 +246,7 @@ function FloatingPanelClose({
     </FloatingPanelMenuButton>
   );
 
-  if (isMobile && isInsideDrawer) {
+  if (isDrawerAction) {
     return <DrawerClose asChild>{button}</DrawerClose>;
   }
 

@@ -145,6 +145,22 @@ describe('FloatingPanelClose', () => {
     expect(screen.getByTestId('drawer-close')).toContainElement(screen.getByRole('button', { name: 'Close panel' }));
   });
 
+  // A translucent blur behind the drawer's close drew compositor noise inside the circle on a phone.
+  it('should draw the close as a solid action inside a drawer, without the floating blur', () => {
+    setMobileDrawerContext();
+
+    renderInPanel(
+      <TooltipProvider>
+        <FloatingPanelClose icon={<span />} tooltipContent={() => 'Close'} />
+      </TooltipProvider>,
+    );
+
+    const close = screen.getByRole('button', { name: 'Close panel' });
+    expect(close).toHaveClass('drawer-action');
+    expect(close).not.toHaveClass('max-md:bg-background/70');
+    expect(close).not.toHaveClass('max-md:backdrop-blur-lg');
+  });
+
   it('should name the button with its label, the panel it closes', () => {
     renderInPanel(
       <TooltipProvider>

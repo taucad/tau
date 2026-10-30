@@ -10,7 +10,17 @@ import { Reflector } from '@nestjs/core';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
-import { IngestEntryName, RuntimeEntryName, ingestReceiptSchema } from '@taucad/telemetry';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { metrics as otelMetrics } from '@opentelemetry/api';
+import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
+import { metrics as sdkMetrics } from '@opentelemetry/sdk-node';
+import {
+  IngestEntryName,
+  RuntimeEntryName,
+  ingestReceiptSchema,
+  jobProviderIds,
+  transcoderIds,
+} from '@taucad/telemetry';
 import type { Auth } from 'better-auth';
 import { getLoggerToken } from 'nestjs-pino';
 import { ZodValidationPipe } from 'nestjs-zod';
@@ -149,7 +159,18 @@ class FakeRedis {
 }
 
 type Recorded = (key: string, value: number, attributes: Record<string, string>) => void;
-const createMetricsSpy = () => ({ count: vi.fn<Recorded>(), record: vi.fn<Recorded>(), setGauge: vi.fn() });
+type RuntimeMetricsTarget = Readonly<{ count: Recorded; record: Recorded; setGauge: (...args: never[]) => void }>;
+/**
+ * Spies on the runtime instruments; with a target, every call also reaches the real instruments.
+ *
+ * @param target - The real service the calls pass through to, when a test reads the exporter.
+ * @returns The spies.
+ */
+const createMetricsSpy = (target?: RuntimeMetricsTarget) => ({
+  count: vi.fn<Recorded>((key, value, attributes) => target?.count(key, value, attributes)),
+  record: vi.fn<Recorded>((key, value, attributes) => target?.record(key, value, attributes)),
+  setGauge: vi.fn(),
+});
 const legacyMetrics = () => ({
   kernelExecutionDuration: { record: vi.fn() },
   kernelExecutions: { add: vi.fn() },
@@ -158,9 +179,9 @@ const legacyMetrics = () => ({
 type Harness = Awaited<ReturnType<typeof createApp>>;
 const apps: NestFastifyApplication[] = [];
 
-const createApp = async (environment: Record<string, unknown> = {}) => {
+const createApp = async (environment: Record<string, unknown> = {}, target?: RuntimeMetricsTarget) => {
   const redis = new FakeRedis();
-  const runtimeMetrics = createMetricsSpy();
+  const runtimeMetrics = createMetricsSpy(target);
   const metrics = legacyMetrics();
   const logger = { info: vi.fn(), warn: vi.fn() };
   const auth = mockDeep<Auth>();
@@ -731,6 +752,52 @@ describe('POST /v1/telemetry/ingest (T10)', () => {
       value: 1,
       attributes: { 'tau.runtime.plugin': 'assimp', 'tau.runtime.set': 'failed' },
     });
+  });
+
+  it('should read every registry transcoder and job provider back from the exporter as its own usage series (T36)', async () => {
+    const exporter = new PrometheusExporter({ preventServerStart: true });
+    const provider = new sdkMetrics.MeterProvider({ readers: [exporter] });
+    otelMetrics.setGlobalMeterProvider(provider);
+    try {
+      const harness = await createApp({}, new RuntimeMetricsService() as unknown as RuntimeMetricsTarget);
+      const fixtures = [
+        ...transcoderIds.map((plugin) => ({ plugin, capability: 'transcoder', operation: 'transcode' })),
+        ...jobProviderIds.map((plugin) => ({ plugin, capability: 'job', operation: 'job' })),
+      ];
+      const response = await post(
+        harness,
+        {
+          batch: batchId(),
+          entries: fixtures.map(({ plugin, operation: kind }) =>
+            operation({ operation: kind, kernel: undefined, plugin }),
+          ),
+        },
+        { user: 'user-1' },
+      );
+      expect(response.json()).toMatchObject({ recorded: fixtures.length, rejected: 0 });
+      const body = await new Promise<string>((resolve) => {
+        const scrape = { statusCode: 0, setHeader: () => scrape, end: resolve };
+        exporter.getMetricsRequestHandler({} as IncomingMessage, scrape as unknown as ServerResponse);
+      });
+      const series = [
+        ...body.matchAll(/^tau_runtime_plugin_operations_total\{(?<labels>[^}]*)\} (?<value>\S+)/gmu),
+      ].map(({ groups }) => ({ labels: groups!['labels']!, value: Number(groups!['value']) }));
+      for (const { plugin, capability } of fixtures) {
+        const own = series.filter(
+          ({ labels }) =>
+            labels.includes(`tau_runtime_plugin="${plugin}"`) &&
+            labels.includes(`tau_runtime_capability="${capability}"`),
+        );
+        expect(
+          own.map(({ value }) => value),
+          plugin,
+        ).toEqual([1]);
+      }
+      expect(series.some(({ labels }) => labels.includes('tau_runtime_plugin="_OTHER"'))).toBe(false);
+    } finally {
+      await provider.shutdown();
+      otelMetrics.disable();
+    }
   });
 
   it('should log at most 60 failure events per key per minute and count the rest as overflow', async () => {

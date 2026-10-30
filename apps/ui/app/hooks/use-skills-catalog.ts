@@ -6,7 +6,7 @@ import { useObservation, useObservationValue } from '@taucad/fs-client/react/use
 import type { SkillMetadata } from '@taucad/chat';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { createSkillResolver, titleFromSkillName } from '#lib/skill-resolver.js';
+import { titleFromSkillName } from '@taucad/agent-tools/skills';
 
 export function skillMetadataToSlashCommand(skill: SkillMetadata): {
   id: string;
@@ -85,6 +85,9 @@ function catalogFor(tree: FileTreeService, readFile: Reader, content: Content): 
         // Both resolver selections acquire each file and directory once per refresh.
         const files = new Map<string, Promise<Uint8Array<ArrayBuffer>>>();
         const directories = new Map<string, ReturnType<FileTreeService['listDirectory']>>();
+        // The resolver carries every system skill's body, most of a megabyte, so it is fetched when the
+        // catalog is first read rather than shipped with the composer that renders the catalog.
+        const { createSkillResolver } = await import('#lib/skill-resolver.js');
         const resolver = createSkillResolver({
           readFile: async (path) => {
             let bytes = files.get(path);

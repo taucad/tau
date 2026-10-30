@@ -775,7 +775,7 @@ describe('ProjectLibrary', () => {
     expect(retry).toHaveBeenCalledOnce();
   });
 
-  it('mounts the shared creation composer for an empty project library', () => {
+  it('mounts the shared creation composer for an empty project library', async () => {
     mockUseProjectsResult = { ...createUseProjectsResult(), projects: [] };
 
     render(
@@ -786,7 +786,9 @@ describe('ProjectLibrary', () => {
       </TestRouter>,
     );
 
-    expect(screen.getByTestId('new-project-chat-composer')).toBeInTheDocument();
+    /* The empty state fetches the composer on demand so that it is not in the static closure of
+     * every route that renders a library, so it arrives after the composer's own placeholder. */
+    expect(await screen.findByTestId('new-project-chat-composer')).toBeInTheDocument();
   });
 
   it('shows the project skeleton instead of the empty state while the listing is loading', () => {

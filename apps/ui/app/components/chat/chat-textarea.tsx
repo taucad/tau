@@ -43,6 +43,7 @@ export const ChatTextarea = memo(function ({
   onSubmit,
   enableAutoFocus = true,
   enableEarlyInput = false,
+  adoptedEarlyInput,
   onEscapePressed,
   onBlur,
   className,
@@ -397,6 +398,13 @@ export const ChatTextarea = memo(function ({
       />
     </>
   );
+  /* Three arrangements, and the host picks one. `adoptedEarlyInput` means a host above this
+   * component owns the native input and has already handed its edit over, which is how a route can
+   * accept text without this module in its bundle; `enableEarlyInput` means this component owns it,
+   * which needs the module first; neither means there is no early input to carry. */
+  if (adoptedEarlyInput) {
+    return <>{content(adoptedEarlyInput)}</>;
+  }
   return enableEarlyInput ? (
     <ChatEarlyInput className={className}>{content}</ChatEarlyInput>
   ) : (

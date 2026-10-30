@@ -187,6 +187,27 @@ function sweepFaces<
     mint,
   });
   const shape = shapes.length === 1 ? shapes[0]! : fuseAll(oc, shapes);
+  // A pipe starts from a relocated copy of the profile, so a curve's own edge is not part of the solid: track the
+  // start-cap edge its side face grew from instead, which scales, mirrors and edge lookups can then find.
+  const solidEdges = edges(oc, shape);
+  const inSolid = (edge: TopoDS_Shape): boolean => solidEdges.some((candidate) => candidate.IsSame(edge));
+  for (const curve of profile.curves) {
+    if (inSolid(curve.edge)) {
+      continue;
+    }
+
+    for (const generator of generators) {
+      const side = firstGenerated(oc, generator, curve.edge);
+      const first = generator.FirstShape?.();
+      const capEdges = first && !first.IsNull() ? edges(oc, first) : [];
+      const capEdge = side && edges(oc, side).find((edge) => capEdges.some((cap) => cap.IsSame(edge)));
+      if (capEdge && inSolid(capEdge)) {
+        recorded.edges.set(curve.id, capEdge);
+        break;
+      }
+    }
+  }
+
   return { shape, ...recorded };
 }
 

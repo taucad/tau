@@ -9345,7 +9345,9 @@
         "area": 12.513541133074568
       },
       "offline": {
-        "gap": "engine: command EntityMirrorAcross resulted in errors: [object WebAssembly.Exception]"
+        "solids": 2,
+        "volume": 0.7608582859,
+        "area": 12.51513047
       }
     },
     {
@@ -14229,7 +14231,9 @@
       "upstream": "rust/kcl-lib/std/transform.kcl#scale",
       "functions": ["arc", "circle", "coincident", "line", "region", "scale", "sweep"],
       "offline": {
-        "gap": "engine: command SetObjectTransform resulted in errors: [object WebAssembly.Exception]"
+        "solids": 1,
+        "volume": 455.0199823,
+        "area": 1663.943597
       }
     },
     {
@@ -14253,7 +14257,9 @@
         "yLine"
       ],
       "offline": {
-        "gap": "engine: command SetObjectTransform resulted in errors: [object WebAssembly.Exception]"
+        "solids": 2,
+        "volume": 2715825.701,
+        "area": 244203.5778
       }
     },
     {

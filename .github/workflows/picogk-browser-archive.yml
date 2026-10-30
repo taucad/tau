@@ -19,15 +19,15 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   # The reviewed PicoVoxel builder. `uses:` cannot read a variable, so the archive call repeats it.
-  PICOVOXEL_REF: 4f0b543c18adc6c435cfd6f9cb8268805fa668e5
+  PICOVOXEL_REF: 83d3ba1be5fbcca6936542bf129fb6700c6e1fae
   PACKAGE_VERSION: 0.2.1
   # Gyroid proves every run; the scheduled run proves HeatX.
   SUBJECT: ${{ github.event_name == 'schedule' && 'heatx' || 'gyroid' }}
 jobs:
   archive:
-    uses: taucad/picovoxel/.github/workflows/dotnet-archive.yml@4f0b543c18adc6c435cfd6f9cb8268805fa668e5
+    uses: taucad/picovoxel/.github/workflows/dotnet-archive.yml@83d3ba1be5fbcca6936542bf129fb6700c6e1fae
     with:
-      picovoxel-ref: 4f0b543c18adc6c435cfd6f9cb8268805fa668e5
+      picovoxel-ref: 83d3ba1be5fbcca6936542bf129fb6700c6e1fae
       adapter-path: packages/plugins/picogk/dotnet/native
 
   # Everything a parity run measures or compares against, built once: the two browser apps and the

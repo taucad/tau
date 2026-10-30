@@ -38,7 +38,7 @@ import type { SessionsActorRef } from '#machines/sessions.machine.js';
 import { sessionsCloseSuggestions } from '#machines/sessions.machine.js';
 import { selectProjectLiveness } from '#services/sessions-store.js';
 import type { ProjectLivenessStatus } from '#services/sessions-store.js';
-import { peekRevisionClient } from '#hooks/use-revision-status.js';
+import { peekRevisionClient } from '#services/revision-client-registry.js';
 import { useSessions } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSidebarState } from '#types/chat-sidebar.types.js';

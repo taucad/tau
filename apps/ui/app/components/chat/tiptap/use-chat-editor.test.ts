@@ -37,6 +37,17 @@ function createDefaultOptions(overrides?: Partial<UseChatEditorOptions>): UseCha
 }
 
 describe('useChatEditor', () => {
+  it('should initialize early typing as literal text without publishing a synthetic edit', async () => {
+    const text = 'Build 🛠\n<script>literal</script> @part';
+    const onUpdate = vi.fn();
+    const { result } = renderHook(() => useChatEditor(createDefaultOptions({ initialText: text, onUpdate })));
+    await waitFor(() => {
+      expect(result.current.editor).not.toBeNull();
+    });
+    expect(extractContent(result.current.editor!)).toEqual({ text, contextChips: [] });
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
   it('should refresh an open slash query when catalog commands arrive without another keystroke', async () => {
     const command = {
       id: 'gateway-observation',

@@ -5,7 +5,7 @@ import { recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
 import { isMemoryConstrainedDevice, runtimeRecycleHeapBytes } from '#lib/device-memory-class.js';
 import { usePreviewParameterLifetime } from '#hooks/use-preview-parameter-lifetime.js';
 import { canOpenCloudProject, isCloudProjectPending, tauCloudIntent } from '#hooks/use-cloud-projects.js';
-import { peekRevisionClient } from '#hooks/use-revision-status.js';
+import { peekRevisionClient } from '#services/revision-client-registry.js';
 import { ObservationService } from '@taucad/fs-client/observation-service';
 import { findEntryGraphics } from '@taucad/workbench-panes/units/geometry-units';
 import type { ReactNode } from 'react';

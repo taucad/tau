@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import type { RefCallback } from 'react';
 import type { MetaFunction } from 'react-router';
 import { PageContent } from '#components/layout/page-content.js';
 import { PageHeader } from '#components/layout/page-header.js';
@@ -151,6 +152,18 @@ export default function ProjectsNew(): React.JSX.Element {
   const [projectName, setProjectName] = useState('');
   const [projectDescription, setProjectDescription] = useState('');
 
+  // Hydration preserves native field values; adopt edits made before React could receive their input events.
+  const adoptProjectName = useCallback<RefCallback<HTMLInputElement>>((input) => {
+    if (input) {
+      setProjectName(input.value);
+    }
+  }, []);
+  const adoptProjectDescription = useCallback<RefCallback<HTMLInputElement>>((input) => {
+    if (input) {
+      setProjectDescription(input.value);
+    }
+  }, []);
+
   const handleCreateProject = useCallback(async () => {
     if (location.phase !== 'ready') {
       return;
@@ -205,6 +218,7 @@ export default function ProjectsNew(): React.JSX.Element {
                   autoFocus
                   autoComplete='off'
                   id='project-name'
+                  ref={adoptProjectName}
                   value={projectName}
                   placeholder='Enter your project name…'
                   maxLength={100}
@@ -217,6 +231,7 @@ export default function ProjectsNew(): React.JSX.Element {
                 <Label htmlFor='project-description'>Description (optional)</Label>
                 <Input
                   id='project-description'
+                  ref={adoptProjectDescription}
                   value={projectDescription}
                   placeholder="Describe what you're building…"
                   maxLength={500}

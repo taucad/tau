@@ -73,6 +73,7 @@ const storedHostSettings = new Map<
   { activeExecution?: { kind: 'tau'; model: string; hostId?: string }; activeKernel?: 'openscad' }
 >();
 let fileManagerReady = false;
+let sharedWorkerState: 'ready' | 'pending' | 'failed' = 'ready';
 const projectWorkspace = { syncProjectRoots: vi.fn(async () => undefined) };
 const projectFileManagerRef = {
   getSnapshot: () => ({
@@ -189,7 +190,16 @@ vi.mock('#hooks/use-project-manager.js', () => ({
 
 vi.mock('#hooks/use-file-manager.js', () => ({
   useSharedFileManagerWorker: () => undefined,
-  SharedWorkerGate: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  SharedWorkerGate: ({
+    children,
+    placeholder,
+    shouldReportFailure = true,
+  }: React.PropsWithChildren<{ placeholder?: React.ReactNode; shouldReportFailure?: boolean }>): React.ReactNode => {
+    if (sharedWorkerState === 'failed' && shouldReportFailure) {
+      return <div role='alert'>File service unavailable</div>;
+    }
+    return sharedWorkerState === 'ready' ? <div>{children}</div> : placeholder;
+  },
   HomeFileManagerProvider: ({
     children,
     projectId,
@@ -444,6 +454,7 @@ beforeEach(() => {
   storedHostSettings.clear();
   cancelProjectedRun.mockClear();
   fileManagerReady = false;
+  sharedWorkerState = 'ready';
   editorObservers.clear();
   editorIsIdle = true;
 });
@@ -494,6 +505,61 @@ afterEach(async () => {
 });
 
 describe('project route session identity', () => {
+  it.each(['pending', 'failed'] as const)('should render non-project content while the worker is %s', (workerState) => {
+    sharedWorkerState = workerState;
+    render(
+      <SessionsProvider actor={sessionsActor}>
+        <routeModule.ProjectRouteGate>
+          <input aria-label='New project name' />
+        </routeModule.ProjectRouteGate>
+      </SessionsProvider>,
+    );
+    const input = screen.getByRole('textbox', { name: 'New project name' });
+    fireEvent.change(input, { target: { value: 'Retained draft' } });
+    expect(input).toHaveValue('Retained draft');
+    expect(getProjectRouteAccess).not.toHaveBeenCalled();
+    if (workerState === 'failed') {
+      // The available page owns its inline recovery notice; no full-page sibling displaces it.
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    }
+  });
+
+  it('should retain the live project and await pending writes across a non-project visit', async () => {
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    const Shell = ({ projectId }: { readonly projectId?: string }): React.JSX.Element => (
+      <SessionsProvider actor={sessionsActor}>
+        <routeModule.ProjectRouteGate requestedProjectId={projectId}>
+          <input aria-label='Page input' />
+        </routeModule.ProjectRouteGate>
+      </SessionsProvider>
+    );
+    const view = render(<Shell projectId={projectA} />);
+    await screen.findAllByTestId('project-session');
+    const originalSession = screen.getByTestId('project-session');
+    setEditorIdle(false);
+    view.rerender(<Shell />);
+    await waitFor(() => {
+      expect(editorSend).toHaveBeenCalledWith({ type: 'flushNow' });
+    });
+    expect(screen.getByTestId('project-session')).toBe(originalSession);
+    expect(screen.getByRole('textbox', { name: 'Page input' }).closest('[inert]')).not.toBeNull();
+    await act(async () => {
+      setEditorIdle(true);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('textbox', { name: 'Page input' }).closest('[inert]')).toBeNull();
+    });
+    view.rerender(<Shell projectId={projectA} />);
+    await waitFor(() => {
+      expect(screen.getByTestId('project-session')).toContainElement(
+        screen.getByRole('textbox', { name: 'Page input' }),
+      );
+    });
+    expect(screen.getByTestId('project-session')).toBe(originalSession);
+    expect(mounts).toEqual([projectA]);
+    expect(unmounts).toEqual([]);
+  });
+
   it('closes an unseen live chat by projected host cancel without an SDK session', async () => {
     getProjectRouteAccess.mockImplementation(async (id) => ready(id));
     renderRouteProvider();

@@ -31,7 +31,7 @@ export const telemetryCopy = {
     'Includes which kernels run, how long operations take, how often they fail, memory use, parameter counts, export formats, project sync outcomes and agent usage.',
     'Never includes prompts, code, parameter values, file names or geometry.',
     'Signed in, data is rate-limited per account but not stored against it. Signed out, nothing identifies you.',
-    'Applies to this browser and the Tau desktop app. The Tau command line, MCP server and self-hosted server use `tau telemetry off`.',
+    'Applies to this browser and the Tau desktop app. The Tau command line, MCP server and self-hosted server use "tau telemetry off".',
     'Error reports and product analytics are separate. Analytics follows your cookie preferences.',
   ],
   untilActivation: {

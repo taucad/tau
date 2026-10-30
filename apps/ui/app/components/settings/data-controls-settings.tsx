@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { Button } from '@taucad/ui/components/button';
 import { Switch } from '@taucad/ui/components/switch';
+import { useSession } from '@better-auth-ui/react';
 import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
 import { AgentObservabilitySettings } from '#components/settings/agent-observability-settings.js';
 import { CookiePreferencesDialog } from '#components/cookie-preferences.js';
 import { CloudAccountClosure } from '#cloud/settings-billing.js';
 import { usePrivacyPreferences } from '#hooks/use-privacy-preferences.js';
 import { telemetryCopy, useTelemetrySwitch } from '#hooks/use-telemetry-switch.js';
+import { authClient } from '#lib/auth-client.js';
 import { legalUrl } from '#lib/legal-url.js';
 
 function LearnMore(): React.JSX.Element {
@@ -27,26 +29,34 @@ function LearnMore(): React.JSX.Element {
  * Free, off for a paid plan until its owner turns it on here.
  */
 function ImproveServiceRow(): React.JSX.Element {
-  const { preferences, isLoading, error, updatePreferences, isUpdating } = usePrivacyPreferences();
+  const { data: session } = useSession(authClient);
+  const isSignedIn = session !== null && session !== undefined;
+  const { preferences, isLoading, error, updatePreferences, isUpdating } = usePrivacyPreferences({
+    enabled: isSignedIn,
+  });
 
   return (
     <SettingsRow
       settingId='improve-service'
       title='Improve the service for everyone'
       description={
-        error ? (
-          'Couldn’t load this setting. Check your connection and refresh.'
+        isSignedIn ? (
+          error ? (
+            'Couldn’t load this setting. Check your connection and refresh.'
+          ) : (
+            <>
+              Control whether your chats are used for improving the service. <LearnMore />
+            </>
+          )
         ) : (
-          <>
-            Control whether your chats are used for improving the service. <LearnMore />
-          </>
+          'Sign in to choose'
         )
       }
       control={
         <Switch
           aria-label='Improve the service for everyone'
           checked={preferences?.allowsAiTraining === true}
-          disabled={isLoading || Boolean(error) || isUpdating}
+          disabled={!isSignedIn || isLoading || Boolean(error) || isUpdating}
           onCheckedChange={(checked) => {
             updatePreferences({ allowsAiTraining: checked });
           }}

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CancelPlanSettings } from '#components/billing/cancel-plan-settings.js';
@@ -49,6 +49,31 @@ describe('CancelPlanSettings', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not open cancellation. Try again.');
     expect(screen.getByRole('button', { name: 'Cancel plan' })).toBeEnabled();
+  });
+
+  it.each([
+    ['the owner changes', 'switch'],
+    ['the row unmounts', 'unmount'],
+  ] as const)('never follows a portal session once %s', async (_case, change) => {
+    let settle: (value: unknown) => void = () => undefined;
+    createPortalAction.mockReturnValue(
+      new Promise((resolve) => {
+        settle = resolve;
+      }),
+    );
+    const view = render(<CancelPlanSettings binding={binding} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel plan' }));
+
+    if (change === 'switch') {
+      view.rerender(<CancelPlanSettings binding={{ ...binding, ownerId: 'user-b' }} />);
+    } else {
+      view.unmount();
+    }
+    await act(async () => {
+      settle({ state: 'redirect_required', redirectUrl: 'https://billing.stripe.com/p/session/1' });
+    });
+
+    expect(followPaymentRedirect).not.toHaveBeenCalled();
   });
 
   it('waits for the billing session before offering cancellation', () => {

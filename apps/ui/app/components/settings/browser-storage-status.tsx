@@ -4,7 +4,7 @@ import type { PersistentStorageStatus } from '#filesystem/handle-store.js';
 const statusCopy: Record<PersistentStorageStatus, { title: string; description: string }> = {
   'best-effort': {
     title: 'Saved in this browser',
-    description: 'The browser may clear Home projects when space runs low. Keep important work in a workspace.',
+    description: 'The browser may clear Home projects when space runs low',
   },
   persistent: {
     title: 'Protected from automatic cleanup',

@@ -140,7 +140,7 @@ export function ComputeReuseSettings(): React.JSX.Element {
       />
       <SettingsRow
         title='Project cache'
-        description={available ? 'Results reused by the open project.' : 'Open a project to manage its cache.'}
+        description={available ? 'Results reused by the open project' : 'Open a project to manage its cache'}
         info={
           <>
             <p>Check size shows how much the open project has cached.</p>

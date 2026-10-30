@@ -146,7 +146,9 @@ export class BillingService {
             ),
             orderBy: desc(subscription.paidThrough),
           });
-    const { relevant, tier } = subscriptionTierOf(subscriptionRows, Date.now());
+    const now = Date.now();
+    const { relevant, tier } = subscriptionTierOf(subscriptionRows, now);
+    const { assured } = subscriptionTierAssuranceOf(subscriptionRows, now);
     const status = this.resolveStatus(relevant);
     /* D23: the free tier's sync is a deployment gate, closed unless configured. */
     const base = entitlementsFromTier(tier, { freeTierSync: this.#freeTierSync });
@@ -177,7 +179,7 @@ export class BillingService {
       // Free follows the user's preference; a paid plan is off until the user opts in themselves.
       trainingConsent: effectiveTrainingConsent({
         tier,
-        assured: true,
+        assured,
         allowsAiTraining: userRow?.allowsAiTraining ?? false,
         decidedAt: userRow?.aiTrainingDecidedAt ?? undefined,
       }),

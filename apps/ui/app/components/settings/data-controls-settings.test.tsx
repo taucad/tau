@@ -24,6 +24,12 @@ vi.mock('react-router', () => ({
   useSearchParams: (): [URLSearchParams, () => void] => [new URLSearchParams(), vi.fn()],
 }));
 
+let mockSession: { user: { id: string } } | undefined;
+vi.mock('@better-auth-ui/react', () => ({
+  useSession: () => ({ data: mockSession, isPending: false }),
+}));
+vi.mock('#lib/auth-client.js', () => ({ authClient: {} }));
+
 let mockAllowsUsageMetrics: boolean;
 let mockAllowsAiTraining: boolean;
 
@@ -78,6 +84,7 @@ describe('DataControlsSettings', () => {
     useEntitlementsMock.mockReturnValue(entitlementsFromTier('free'));
     mockAllowsUsageMetrics = true;
     mockAllowsAiTraining = false;
+    mockSession = { user: { id: 'user-a' } };
     mockTelemetrySwitch = { checked: true, pending: false, forcedOff: false };
   });
 
@@ -111,6 +118,14 @@ describe('DataControlsSettings', () => {
     await user.click(toggle);
 
     expect(mockUpdatePreferences).toHaveBeenCalledWith({ allowsAiTraining: true });
+  });
+
+  it('asks a signed-out visitor to sign in before choosing', () => {
+    mockSession = undefined;
+    render(<DataControlsSettings />);
+
+    expect(screen.getByRole('switch', { name: improve })).toBeDisabled();
+    expect(screen.getByRole('group', { name: improve })).toHaveAccessibleDescription('Sign in to choose');
   });
 
   it.each(['free', 'pro'] as const)(

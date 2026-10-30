@@ -1203,6 +1203,24 @@ describe('createGatewayModelTransport', () => {
     ]);
   });
 
+  it('posts no query parameter to the gateway, which refuses every one of them', async () => {
+    const targets: string[] = [];
+    const transport = createGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      fetch: vi.fn(async (input: RequestInfo | URL) => {
+        targets.push(input instanceof Request ? input.url : String(input));
+        return byteSplitResponse(authoritativeGatewayWireFixtures.anthropicToolTurn);
+      }),
+    });
+
+    await collect(transport.stream(request({ providerKind: 'anthropic' })));
+
+    /* An Anthropic messages call is posted by pi to `…/v1/messages?beta=true` whatever betas the request asks for, and
+     * the gateway accepts no query input at all, because price and funded identity come from the body and an
+     * allow-listed header set (`assertNoQuery` in apps/api). Left on, it answers 400 and no turn reaches a model. */
+    expect(targets).toEqual(['https://gateway.example/v1/llm/anthropic/v1/messages']);
+  });
+
   it('posts pi-ai native Anthropic cache bytes and maps every byte-split event type', async () => {
     let body: BodyInit | undefined;
     let headers: Headers | undefined;

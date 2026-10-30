@@ -1,7 +1,19 @@
 /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
 // @vitest-environment node
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
+import { subscribe, unsubscribe } from 'node:diagnostics_channel';
+import { z } from 'zod';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -160,7 +172,7 @@ describe('createSandboxShellProvider admission', () => {
  * I7 custody: every launch here is prepared first in its own custody namespace, so a test owns exactly the records it
  * makes. `launch` prepares a fresh private root and execution, then launches it.
  */
-const custodial = (overrides: Omit<SandboxShellProviderOptions, 'supervisor' | 'custody'> = {}) => {
+const custodial = (overrides: Omit<SandboxShellProviderOptions, 'custody'> = {}) => {
   const base = fixtureRoot();
   const custody = { directory: join(base, 'custody'), sessionDirectory: base };
   const provider = createSandboxShellProvider({ supervisor, custody, ...overrides });
@@ -281,6 +293,91 @@ describe.runIf(posix)('createSandboxShellProvider plumbing', () => {
     ]);
 
     expect({ stdout, stderr, exit }).toStrictEqual({ stdout: 'out é', stderr: 'err', exit: { exitCode: 7 } });
+  });
+
+  it('should record the supervisor process lifetime RSS on exit through the private preload', async () => {
+    const directory = fixtureRoot();
+    const preload = new URL('qualification-resource.fixture.ts', import.meta.url);
+    preload.searchParams.set('directory', directory);
+    const outcome = await custodial({
+      supervisor: { ...supervisor, arguments: ['--import', preload.href, ...supervisor.arguments] },
+    }).launch(launchOf({ arguments: ['--noprofile', '--norc', '-c', 'printf measured'] }));
+    if (outcome.status !== 'started') {
+      throw new Error(`expected a started launch, got ${JSON.stringify(outcome)}`);
+    }
+    await using shell = outcome.process;
+    expect(await text(pipesOf(shell).stdout)).toBe('measured');
+    expect(await text(pipesOf(shell).stderr)).toBe('');
+    expect(await shell.exited).toEqual({ exitCode: 0 });
+    const files = readdirSync(directory);
+    expect(files).toHaveLength(1);
+    const resource = z
+      .object({
+        pid: z.number().int().positive(),
+        exitCode: z.literal(0),
+        baselineRssBytes: z.number().int().positive(),
+        peakRssBytes: z.number().int().positive(),
+      })
+      .parse(JSON.parse(readFileSync(join(directory, files[0]!), 'utf8')));
+    expect(files[0]).toBe(`${String(resource.pid)}.json`);
+    expect(resource.pid).not.toBe(process.pid);
+    expect(resource.peakRssBytes).toBeGreaterThanOrEqual(resource.baselineRssBytes);
+  });
+
+  it('should report exact queue occupancy and resume a stalled consumer without losing bytes', async () => {
+    const schema = z.object({
+      commandId: z.string(),
+      queueId: z.uuid(),
+      stream: z.string(),
+      queuedBytes: z.number(),
+      queuedChunks: z.number(),
+      peakBytes: z.number(),
+      peakChunks: z.number(),
+      pauses: z.number(),
+      resumes: z.number(),
+    });
+    const diagnostics = 'taucad.native-process.shell.byte-queue';
+    let latest: z.infer<typeof schema> | undefined;
+    let invalid = false;
+    const queueIds = new Set<string>();
+    const observe = (message: unknown): void => {
+      const parsed = schema.safeParse(message);
+      if (!parsed.success) {
+        invalid = true;
+      } else if (parsed.data.commandId === 'queue-accounting' && parsed.data.stream === 'stdout') {
+        latest = parsed.data;
+        queueIds.add(parsed.data.queueId);
+      }
+    };
+    subscribe(diagnostics, observe);
+    try {
+      const bytes = 8 * 1024 * 1024 + 163;
+      await using shell = await started(
+        launchOf({
+          commandId: 'queue-accounting',
+          arguments: ['--noprofile', '--norc', '-c', `head -c ${String(bytes)} /dev/zero`],
+        }),
+      );
+      // Do not pull until the actual queue applies backpressure; no timing-based readiness assumption.
+      await expect.poll(() => latest?.pauses).toBe(1);
+      expect(latest).toMatchObject({ queuedChunks: 64, peakChunks: 64, resumes: 0 });
+      expect(latest!.queuedBytes).toBe(latest!.peakBytes);
+      expect(latest!.queuedBytes).toBeGreaterThan(0);
+      let received = 0;
+      for await (const chunk of pipesOf(shell).stdout) {
+        received += chunk.byteLength;
+      }
+      expect(await text(pipesOf(shell).stderr)).toBe('');
+      expect(await shell.exited).toEqual({ exitCode: 0 });
+      expect(received).toBe(bytes);
+      expect(latest).toMatchObject({ queuedBytes: 0, queuedChunks: 0, peakChunks: 64 });
+      expect(latest!.resumes).toBeGreaterThan(0);
+      expect(latest!.resumes).toBe(latest!.pauses);
+      expect(queueIds.size).toBe(1);
+      expect(invalid).toBe(false);
+    } finally {
+      unsubscribe(diagnostics, observe);
+    }
   });
 
   it('should pass the launch environment over the wrapper environment', async () => {

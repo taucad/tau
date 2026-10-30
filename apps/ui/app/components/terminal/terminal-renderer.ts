@@ -57,6 +57,26 @@ const announceDelay = 100;
 const announceMaxLines = 20;
 const announceRetainedLines = 100;
 
+/**
+ * Whether a key press is the platform's terminal paste chord other than macOS's Cmd+V, which needs no help: Ctrl+Shift+V
+ * on Linux and Windows. Plain Ctrl+V is not one; it reaches the program as ^V.
+ *
+ * @param event - The key press.
+ * @param platform - `navigator.platform`.
+ * @returns Whether to let the browser paste instead of encoding the key.
+ * @public
+ */
+export const isTerminalPasteChord = (
+  event: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'shiftKey' | 'altKey' | 'metaKey'>,
+  platform: string,
+): boolean =>
+  !platform.startsWith('Mac') &&
+  event.code === 'KeyV' &&
+  event.ctrlKey &&
+  event.shiftKey &&
+  !event.altKey &&
+  !event.metaKey;
+
 /** Milliseconds between screen-mirror refreshes while output or resizes arrive. */
 const mirrorDelay = 150;
 
@@ -268,6 +288,8 @@ export const createTerminalRenderer = async (options: TerminalRendererOptions): 
   } finally {
     Reflect.deleteProperty(document, 'addEventListener');
   }
+  // AurigaX owns the visible canvas cursor; its contenteditable host must not draw a second browser caret.
+  mount.style.caretColor = 'transparent';
   mount.setAttribute('aria-label', 'Terminal');
   mount.setAttribute('aria-description', 'Press Shift+Escape to leave the terminal.');
 
@@ -289,6 +311,13 @@ export const createTerminalRenderer = async (options: TerminalRendererOptions): 
       event.preventDefault();
       event.stopImmediatePropagation();
       options.onLeave();
+      return;
+    }
+    /* (9) The platform's terminal paste chord: Ctrl+Shift+V on Linux and Windows. AurigaX never encodes it, and the
+     * browser's own paste command on the editable textbox fires the `paste` event below. Cmd+V on macOS already
+     * reaches that event through AurigaX, and Ctrl+V stays ^V for the shell, as in xterm.js. */
+    if (isTerminalPasteChord(event, navigator.platform)) {
+      event.stopImmediatePropagation();
     }
   });
 
@@ -376,23 +405,34 @@ export const createTerminalRenderer = async (options: TerminalRendererOptions): 
     enableAccessibility();
   }
 
-  /* Bounded parse work per task: each slice is parsed, then the queue yields to the event loop so key events are
-   * handled between slices of a large backlog (Q3/5: input under CPU starvation). */
+  /* Bounded parse work per task: up to one slice's worth of queued output is parsed, then the queue yields to the event
+   * loop so key events are handled between slices of a large backlog (Q3/5: input under CPU starvation). Small writes
+   * share a task: a shell printing line by line sends thousands of small frames, and one task each (a nested timer is
+   * clamped to 4 ms) left the screen seconds behind the shell. */
   const queue: Array<{ data: string; painted?: () => void }> = [];
   let writing = false;
   let disposed = false;
   let yieldTimer: ReturnType<typeof setTimeout> | undefined;
   const pump = (): void => {
     yieldTimer = undefined;
-    const next = queue.shift();
-    if (next === undefined || disposed) {
+    if (queue.length === 0 || disposed) {
       writing = false;
       return;
     }
     writing = true;
-    accessibility?.push(next.data);
-    terminal.write(next.data, () => {
-      next.painted?.();
+    const batch = [queue.shift()!];
+    let size = batch[0]!.data.length;
+    while (queue.length > 0 && size + queue[0]!.data.length <= writeSliceCharacters) {
+      const next = queue.shift()!;
+      batch.push(next);
+      size += next.data.length;
+    }
+    const data = batch.length === 1 ? batch[0]!.data : batch.map((entry) => entry.data).join('');
+    accessibility?.push(data);
+    terminal.write(data, () => {
+      for (const entry of batch) {
+        entry.painted?.();
+      }
       if (!disposed) {
         yieldTimer = setTimeout(pump, 0);
       }

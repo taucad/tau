@@ -26,9 +26,24 @@ on:
       - 'packages/core/native-process/**'
       - 'packages/host/src/shell/**'
       - 'packages/host/src/agent-tools.ts'
+      - 'packages/agent-host/**'
       - 'libs/agent-tools/src/registry/shell-tool.ts'
       - 'libs/chat/src/schemas/tools/shell.tool.schema.ts'
       - 'packages/host/project.json'
+      - 'apps/desktop-e2e/**'
+      - 'apps/desktop/electron.vite.config.ts'
+      - 'apps/desktop/src/main/**'
+      - 'apps/desktop/package.json'
+      - 'apps/desktop/project.json'
+      - 'apps/ui/desktop/**'
+      - 'apps/desktop/src/tau/services-host-shell*.ts'
+      - 'apps/desktop/src/tau/services-host.ts'
+      - 'apps/ui/app/components/terminal/**'
+      - 'apps/ui/app/components/panes/**'
+      - 'apps/ui/app/workbench-records/**'
+      - 'packages/runtime/**'
+      - 'packages/plugins/openrscad/**'
+      - 'packages/geospec/**'
       - 'apps/desktop/src/tau/services-host.terminal*.ts'
       - 'apps/desktop/src/tau/services-host.impl.ts'
       - 'libs/types/src/desktop-terminal.ts'
@@ -43,8 +58,24 @@ on:
       - 'packages/core/native-process/**'
       - 'packages/host/src/shell/**'
       - 'packages/host/src/agent-tools.ts'
+      - 'packages/agent-host/**'
       - 'libs/agent-tools/src/registry/shell-tool.ts'
       - 'libs/chat/src/schemas/tools/shell.tool.schema.ts'
+      - 'packages/host/project.json'
+      - 'apps/desktop-e2e/**'
+      - 'apps/desktop/electron.vite.config.ts'
+      - 'apps/desktop/src/main/**'
+      - 'apps/desktop/package.json'
+      - 'apps/desktop/project.json'
+      - 'apps/ui/desktop/**'
+      - 'apps/desktop/src/tau/services-host-shell*.ts'
+      - 'apps/desktop/src/tau/services-host.ts'
+      - 'apps/ui/app/components/terminal/**'
+      - 'apps/ui/app/components/panes/**'
+      - 'apps/ui/app/workbench-records/**'
+      - 'packages/runtime/**'
+      - 'packages/plugins/openrscad/**'
+      - 'packages/geospec/**'
       - 'apps/desktop/src/tau/services-host.terminal*.ts'
       - 'libs/types/src/desktop-terminal.ts'
       - 'apps/desktop/scripts/linux-apt-package.mts'
@@ -68,7 +99,7 @@ jobs:
     name: Shell conformance on ${{ matrix.row }} (stock ${{ matrix.distro }} guest)
     if: github.event_name != 'pull_request' || github.triggering_actor != 'dependabot[bot]'
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -88,10 +119,16 @@ jobs:
         with:
           save-pnpm-store: 'false'
 
+      # The renderer can peak above the guest's 8 GiB. Transfer this exact build; never rebuild inside the guest.
+      - name: Build the production Electron application
+        timeout-minutes: 25
+        run: pnpm nx build desktop --parallel=1
+
       - name: Run the conformance target in the stock guest
+        timeout-minutes: 85
         env:
           TAU_VM_DISTRO: ${{ matrix.distro }}
-        run: bash packages/core/native-process/scripts/shell-conformance-vm.sh
+        run: timeout --signal=TERM --kill-after=120s 80m bash packages/core/native-process/scripts/shell-conformance-vm.sh
 
       - name: Upload the receipt
         if: always()
@@ -215,6 +252,14 @@ jobs:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
           TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/service-receipt.json
         run: pnpm nx run host:test:shell-conformance --skip-nx-cache
+
+      # The W7 application and adversarial qualification rows: the agent host over the real provider (T, E and S rows).
+      - name: Run the shell qualification target
+        if: success() || failure()
+        env:
+          TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
+          TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/qualification-receipt.json
+        run: pnpm nx run host:test:shell-qualification --skip-nx-cache
 
       # The desktop Terminal rows (W5): probe and refusal rows run; the PTY rows are recorded unverified on macOS
       # until the operator's own-pty run, which this workflow never performs.

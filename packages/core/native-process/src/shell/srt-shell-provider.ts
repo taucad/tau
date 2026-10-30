@@ -7,6 +7,8 @@
  * stopped and the supervisor has released the runtime.
  */
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { channel } from 'node:diagnostics_channel';
 import type { ChildProcess } from 'node:child_process';
 import { closeSync, existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
@@ -431,6 +433,12 @@ const startSupervisor = async (
   stderr.setEncoding('utf8').on('data', (chunk: string) => {
     diagnostics = (diagnostics + chunk).slice(-4096);
   });
+  /* A supervisor that is killed — which `finish` does whenever it has not exited in time — resets its own pipes, and a
+   * stream with no error listener turns that into an uncaught exception in whatever process launched the shell. There
+   * is nothing to recover: the reply already settles on `close`, and a supervisor that is gone has nothing left to
+   * say. Same reason `stdin` has had one all along. */
+  stdout.on('error', () => undefined);
+  stderr.on('error', () => undefined);
   const exited = new Promise<void>((resolve) => {
     child.once('close', () => {
       resolve();
@@ -506,7 +514,33 @@ type ByteQueue = Readonly<{
   iterable: AsyncIterable<Uint8Array<ArrayBuffer>>;
 }>;
 
-const byteQueue = (pause: () => void, resume: () => void): ByteQueue => {
+// Private diagnostics: numeric queue occupancy only, never command text or output bytes.
+const queueDiagnostics = channel('taucad.native-process.shell.byte-queue');
+type QueueIdentity = Readonly<{ commandId: string; stream: 'stdout' | 'stderr' | 'pty' }>;
+
+const byteQueue = (pause: () => void, resume: () => void, identity: QueueIdentity): ByteQueue => {
+  const queueId = randomUUID();
+  let queuedBytes = 0;
+  let peakBytes = 0;
+  let peakChunks = 0;
+  let pauses = 0;
+  let resumes = 0;
+  const report = (): void => {
+    if (queueDiagnostics.hasSubscribers) {
+      queueDiagnostics.publish(
+        Object.freeze({
+          ...identity,
+          queueId,
+          queuedBytes,
+          queuedChunks: chunks.length,
+          peakBytes,
+          peakChunks,
+          pauses,
+          resumes,
+        }),
+      );
+    }
+  };
   const chunks: Array<Uint8Array<ArrayBuffer>> = [];
   let ended = false;
   let paused = false;
@@ -519,16 +553,22 @@ const byteQueue = (pause: () => void, resume: () => void): ByteQueue => {
     });
   const end = (): void => {
     ended = true;
+    report();
     wake?.();
   };
   return {
     push: (chunk) => {
       lastChunk = Date.now();
       chunks.push(chunk);
+      queuedBytes += chunk.byteLength;
+      peakBytes = Math.max(peakBytes, queuedBytes);
+      peakChunks = Math.max(peakChunks, chunks.length);
       if (chunks.length >= highWater && !paused) {
         paused = true;
+        pauses += 1;
         pause();
       }
+      report();
       wake?.();
     },
     end,
@@ -547,10 +587,13 @@ const byteQueue = (pause: () => void, resume: () => void): ByteQueue => {
         for (;;) {
           const chunk = chunks.shift();
           if (chunk !== undefined) {
+            queuedBytes -= chunk.byteLength;
             if (paused && chunks.length < highWater / 2) {
               paused = false;
+              resumes += 1;
               resume();
             }
+            report();
             yield chunk;
           } else if (ended) {
             return;
@@ -566,10 +609,11 @@ const byteQueue = (pause: () => void, resume: () => void): ByteQueue => {
 };
 
 /** Queue a readable child stream. */
-const queueStream = (stream: NodeJS.ReadableStream & { destroy: () => void }): ByteQueue => {
+const queueStream = (stream: NodeJS.ReadableStream & { destroy: () => void }, identity: QueueIdentity): ByteQueue => {
   const queue = byteQueue(
     () => stream.pause(),
     () => stream.resume(),
+    identity,
   );
   stream.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
     queue.push(chunk);
@@ -727,8 +771,8 @@ const startPipes = (argv: readonly string[], launch: ShellLaunch, owner: LaunchO
     stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
   });
   const pipes = outputsOf(child);
-  const stdout = queueStream(pipes.stdout);
-  const stderr = queueStream(pipes.stderr);
+  const stdout = queueStream(pipes.stdout, { commandId: launch.commandId, stream: 'stdout' });
+  const stderr = queueStream(pipes.stderr, { commandId: launch.commandId, stream: 'stderr' });
   const settled = settle(
     {
       pid: child.pid ?? -1,
@@ -779,7 +823,7 @@ const startLinuxTerminal = (
   });
   closeSync(pty.slave);
   const master = new ReadStream(pty.master);
-  const queue = queueStream(master);
+  const queue = queueStream(master, { commandId: launch.commandId, stream: 'pty' });
   const settled = settle(
     {
       pid: child.pid ?? -1,
@@ -836,6 +880,7 @@ const startMacTerminal = ({ argv, launch, size, owner }: TerminalStart, binding:
     () => {
       terminal.resume();
     },
+    { commandId: launch.commandId, stream: 'pty' },
   );
   terminal.onData((data) => {
     const passed = gate.pass(typeof data === 'string' ? new Uint8Array(Buffer.from(data, 'utf8')) : data);

@@ -296,7 +296,12 @@ export const createDesktopShell = (options: DesktopShellOptions): DesktopShell =
         'shell.probe',
         outcome.status === 'available'
           ? { status: 'available', identity: outcome.shell.identity }
-          : { status: 'unavailable', code: outcome.code, message: outcome.message },
+          : {
+              status: 'unavailable',
+              code: outcome.code,
+              message: outcome.message,
+              ...(outcome.diagnostic === undefined ? {} : { diagnostic: outcome.diagnostic }),
+            },
         outcome.status === 'available' ? undefined : 'warn',
       );
       return outcome;

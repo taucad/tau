@@ -145,6 +145,8 @@ describe('Vitest Browser test-runner ownership', () => {
       'apps/desktop-e2e/src/support/gateway-fixture.ts',
       'apps/desktop-e2e/src/support/revisions-pane.ts',
       'apps/desktop-e2e/src/support/scenario.ts',
+      // Terminal qualification drives the production Electron surface and native process lifecycle.
+      'apps/desktop-e2e/src/support/shell-qualification.ts',
       'apps/desktop-e2e/src/support/two-client/browser-client.ts',
       'apps/desktop-e2e/src/support/two-client/git-faults.test.ts',
       'apps/desktop-e2e/src/support/two-client/git-faults.ts',

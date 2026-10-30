@@ -109,7 +109,14 @@ const removeOperation = async (
       if (entries.includes(journal.fingerprint)) {
         command('sudo', ['-n', 'security', 'delete-certificate', '-Z', journal.fingerprint, macSystemKeychain]);
       }
-      assertMacTrust(command, join(directory, 'mirror-server.crt'), false);
+      // The negative check is meaningful only for a leaf this run's CA actually issued.
+      const serverPath = join(directory, 'mirror-server.crt');
+      const ca = new X509Certificate(await readFile(caPath));
+      const server = new X509Certificate(await readFile(serverPath));
+      if (!server.checkIssued(ca) || !server.verify(ca.publicKey)) {
+        throw new Error('Refusing a server certificate the run CA did not issue');
+      }
+      assertMacTrust(command, serverPath, false);
       break;
     }
     case 'linuxFile': {

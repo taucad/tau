@@ -315,9 +315,60 @@ const main = async (): Promise<void> => {
     assert.deepEqual(JSON.parse(await readFile(join(macSuccess, 'mirror-trust.json'), 'utf8')).pending, [
       'macSystemTrust',
     ]);
+    const originalServer = await readFile(join(macSuccess, 'mirror-server.crt'), 'utf8');
+    await writeFile(join(macSuccess, 'mirror-server.crt'), await readFile(join(mac, 'mirror-server.crt'), 'utf8'));
     stillTrusted = false;
+    await assert.rejects(cleanupQualificationTls(macSuccess, macSuccessOwner), (error: unknown) => {
+      assert.ok(error instanceof AggregateError);
+      assert.match(String(error.errors[0]), /did not issue/u);
+      return true;
+    });
+    await writeFile(join(macSuccess, 'mirror-server.crt'), originalServer);
     await cleanupQualificationTls(macSuccess, macSuccessOwner);
     assert.deepEqual(JSON.parse(await readFile(join(macSuccess, 'mirror-trust.json'), 'utf8')).pending, []);
+    const macUntrusted = join(root, 'mac-untrusted');
+    await mkdir(macUntrusted);
+    let macUntrustedFingerprint = '';
+    const macUntrustedOwner: QualificationTlsOwner = {
+      platform: 'darwin',
+      home: join(macUntrusted, 'home'),
+      execute(name, args) {
+        if (name === 'openssl') {
+          return execFileSync(name, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+        }
+        assert.equal(name === 'sudo' ? args[1] : name, 'security');
+        const rest = name === 'sudo' ? args.slice(2) : args;
+        if (rest[0] === 'add-trusted-cert' || rest[0] === 'delete-certificate') {
+          assert.equal(name, 'sudo', 'System keychain mutation runs as root');
+        }
+        if (rest[0] === 'add-trusted-cert') {
+          macUntrustedFingerprint = new X509Certificate(readFileSync(rest.at(-1)!)).fingerprint.replaceAll(':', '');
+          return '';
+        }
+        if (rest[0] === 'verify-cert') {
+          // Installation exits 0 but trust never takes effect; the verdict arrives on stderr only.
+          throw Object.assign(new Error('Command failed: security verify-cert'), {
+            stdout: '',
+            stderr: 'Cert Verify Result: CSSMERR_TP_NOT_TRUSTED\n',
+          });
+        }
+        if (rest[0] === 'find-certificate') {
+          return macUntrustedFingerprint ? `SHA-1 hash: ${macUntrustedFingerprint}` : '';
+        }
+        if (rest[0] === 'delete-certificate') {
+          macUntrustedFingerprint = '';
+          return '';
+        }
+        throw new Error('Unexpected Mac trust command');
+      },
+    };
+    await assert.rejects(prepareQualificationTls(macUntrusted, macUntrustedOwner), (error: unknown) => {
+      assert.ok(error instanceof AggregateError);
+      assert.match(String(error.errors[0]), /not trusted after installation/u);
+      assert.equal(error.errors.length, 1, 'rollback deleted the certificate and verified it untrusted');
+      return true;
+    });
+    assert.equal(macUntrustedFingerprint, '');
     const windows = join(root, 'windows-partial');
     await mkdir(windows);
     let windowsFingerprint = '';

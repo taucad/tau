@@ -9,6 +9,7 @@ import {
   add,
   cross,
   directionToGlobal,
+  dot,
   globalFrame,
   length,
   normalize,
@@ -21,6 +22,7 @@ import {
 import type { Oc } from '#offline/offline-occt.js';
 import { edgePoint, pnt } from '#offline/offline-occt.js';
 import type { PathEntity } from '#offline/offline-scene.js';
+import { tangentAtEnd } from '#offline/offline-sketch.js';
 import { orientOutward } from '#offline/offline-sweeps.js';
 import type { WireTransform } from '#offline/offline-transform.js';
 import {
@@ -238,19 +240,36 @@ export function mirrorSketches(
       return { object_id: copyId, faces: [], edges: childIds(mirrored) };
     }
 
-    // The engine mirrors a sketch in place: the mirrored segments join the same path, and the returned id
-    // is another handle on it.
+    // The engine mirrors a sketch in place: the mirrored segments join the same path, and the response
+    // names that path. kcl-lib adds the listed edges to the path with the returned id, so a later extrude's
+    // face info (whose curve ids include the original segments) resolves to the path the sweep consumed.
     const plane = mirrorPlane(source.frame);
     const trsf = planeMirrorTrsf(engine.oc, plane.point, plane.normal);
-    const newId = engine.mint();
-    const mirroredSegments = [...source.segments].reverse().map((segment) => ({
-      ...segment,
-      id: engine.mint(),
-      edge: engine.oc.TopoDS.Edge(applyTrsf(engine.oc, segment.edge, trsf).shape.Reversed()),
-    }));
+    // The copies run in reverse, so the chain continues from the source's end back to its mirrored start,
+    // and the pen follows it: a `close_path` after the mirror closes from there, as on Zoo's engine.
+    const mirrorLocal = (point: Vec2): Vec2 => {
+      const global = toGlobal(source.frame, point.x, point.y);
+      const offset = 2 * dot(sub(global, plane.point), plane.normal);
+      const local = toLocal(source.frame, sub(global, scale(plane.normal, offset)));
+      return { x: local.x, y: local.y };
+    };
+    const mirroredSegments = [...source.segments].reverse().map((segment) => {
+      const edge = engine.oc.TopoDS.Edge(applyTrsf(engine.oc, segment.edge, trsf).shape.Reversed());
+      return {
+        id: engine.mint(),
+        edge,
+        start: mirrorLocal(segment.end),
+        end: mirrorLocal(segment.start),
+        endTangent: tangentAtEnd(engine.oc, source.frame, edge),
+      };
+    });
     source.segments.push(...mirroredSegments);
-    engine.scene.aliases.set(newId, source.id);
-    return { object_id: newId, faces: [], edges: mirroredSegments.map((segment) => segment.id) };
+    const last = mirroredSegments.at(-1);
+    if (last) {
+      source.pen = last.end;
+    }
+
+    return { object_id: source.id, faces: [], edges: mirroredSegments.map((segment) => segment.id) };
   });
   return { entity_face_edge_ids: out };
 }

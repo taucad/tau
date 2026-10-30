@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useSession } from '@better-auth-ui/react';
 import type { PostHog, PostHogConfig } from 'posthog-js';
@@ -63,12 +63,20 @@ function PostHogLifecycle({
 }): undefined {
   const { data: sessionData, isPending } = useSession(authClient);
   const user = sessionData?.user;
-  /* The fetch resolves after this effect has run, so identification needs a rendered signal that
-     the singleton has arrived rather than reading a module variable that changed behind React. */
-  const [isSdkLoaded, setIsSdkLoaded] = useState(sdk !== undefined);
+  /* Identification must not run before the admission it belongs to has configured the SDK, and the
+     fetch resolves after the effect that starts it has returned. A boolean cannot say that: one that
+     only turns true would let a re-acceptance identify through a singleton still opted out, and
+     clearing it would mean setting state synchronously inside the effect. So each decision takes a
+     generation, held in a ref the decision effect advances, and the admission that finishes records
+     its own generation in state. Identification runs only while the two agree, and the state write
+     is what re-renders to let it run. */
+  const decision = useRef(0);
+  const [admittedGeneration, setAdmittedGeneration] = useState(0);
 
   useEffect(() => {
     const { apiKey } = posthogConfig;
+    decision.current += 1;
+    const generation = decision.current;
     if (!isActive) {
       /* Nothing to stop where the singleton was never fetched: it captures nothing until `init`,
          which only an admission reaches. The storage a previous admission left is still cleared. */
@@ -92,7 +100,6 @@ function PostHogLifecycle({
       if (withdrawn) {
         return;
       }
-      setIsSdkLoaded(true);
       if (posthog.__loaded) {
         posthog.set_config({ disable_persistence: false, advanced_disable_flags: false });
       } else {
@@ -103,6 +110,7 @@ function PostHogLifecycle({
       if (posthog.has_opted_out_capturing()) {
         posthog.opt_in_capturing({ captureEventName: false });
       }
+      setAdmittedGeneration(generation);
       if (!isReplayEnabled) {
         return;
       }
@@ -120,7 +128,7 @@ function PostHogLifecycle({
   }, [isActive, options, isReplayEnabled]);
 
   useEffect(() => {
-    if (!isActive || isPending || !isSdkLoaded || sdk?.__loaded !== true) {
+    if (!isActive || isPending || admittedGeneration !== decision.current || sdk?.__loaded !== true) {
       return;
     }
     const posthog = sdk;
@@ -132,7 +140,7 @@ function PostHogLifecycle({
     } else if (posthog._isIdentified()) {
       posthog.reset();
     }
-  }, [isActive, isPending, isSdkLoaded, user]);
+  }, [isActive, isPending, admittedGeneration, user]);
 
   return undefined;
 }

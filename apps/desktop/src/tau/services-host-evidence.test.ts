@@ -37,6 +37,8 @@ describe('desktopChatObserver', () => {
     await vi.waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
+    /* A refused grant purges the queue file; settle that write before the directory is removed. */
+    await observer.reporter.refresh();
     observer.close();
 
     const [url, init] = fetchMock.mock.calls[0]!;

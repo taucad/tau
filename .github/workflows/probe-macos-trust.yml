@@ -17,7 +17,7 @@ jobs:
     steps:
       - shell: bash
         run: |
-          set -u
+          set +e -u
           d="$RUNNER_TEMP/probe"; mkdir -p "$d"; cd "$d"
           openssl req -x509 -newkey rsa:2048 -nodes -keyout ca.key -out ca.crt -days 1 -subj "/CN=Tau probe $RANDOM" \
             -addext 'basicConstraints=critical,CA:TRUE' -addext 'keyUsage=critical,keyCertSign,cRLSign' 2>/dev/null

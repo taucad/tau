@@ -340,6 +340,13 @@ const syncAttemptEntrySchema = z.object({
   }),
 });
 
+/**
+ * Which kind of host served LFS downloads, read by the client from each action's host (files service
+ * blueprint §4, §8): the files service, a presigned R2 URL, the API's third-party relay, or anything else.
+ * @public
+ */
+export const lfsTransports = ['files', 'r2_presigned', 'relay', 'other'] as const;
+
 /** One client tree read that fetched large objects from the remote; `duration` is its large-object phase. */
 const lfsFetchEntrySchema = z.object({
   name: z.literal(IngestEntryName.LFS_FETCH),
@@ -350,6 +357,8 @@ const lfsFetchEntrySchema = z.object({
     networkBytes: z.number().int().nonnegative(),
     localObjects: z.number().int().nonnegative(),
     localBytes: z.number().int().nonnegative(),
+    /** The transport that served most of the fetched objects; absent from clients older than the files service. */
+    transport: z.enum(lfsTransports).optional(),
   }),
 });
 
@@ -363,6 +372,8 @@ const projectOpenEntrySchema = z.object({
   detail: z.object({
     phase: z.enum(['first_view', 'fully_fetched']),
     cache: z.enum(['cold', 'warm']),
+    /** On a cold open, the transport of its latest network fetch; absent on a warm open and from older clients. */
+    transport: z.enum(lfsTransports).optional(),
   }),
 });
 

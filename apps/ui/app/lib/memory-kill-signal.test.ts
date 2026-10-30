@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { createMemoryKillSignal, memoryKillEventName } from '#lib/memory-kill-signal.js';
+import {
+  createMemoryKillSignal,
+  killDetectionWindowMilliseconds,
+  killMarkerVersion,
+  killTrailLimit,
+  markerByteLimit,
+  pendingKillLimit,
+} from '#lib/memory-kill-signal.js';
 
 const memoryStorage = (): Storage => {
   const values = new Map<string, string>();
@@ -21,76 +28,199 @@ const memoryStorage = (): Storage => {
   };
 };
 
-/** One document's life: load, maybe work, then either a clean `pagehide` or a kill (nothing). */
-const load = (storage: Storage, navigationType: string) =>
-  createMemoryKillSignal({ storage, navigationType, deviceClass: 'constrained', now: () => 1000 });
+type LoadOptions = Readonly<{ now?: () => number; path?: string; visible?: boolean }>;
 
-describe('memory kill signal (B-01, D-UI-25)', () => {
-  it('reports one suspected kill when a reload follows a page that never reached pagehide', () => {
+/** One document's life: load, maybe work, then either a clean `pagehide` or a kill (nothing). */
+const load = (storage: Storage, navigationType: string, { now, path = '/w/a/b', visible = true }: LoadOptions = {}) =>
+  createMemoryKillSignal({
+    storage,
+    navigationType,
+    deviceClass: 'constrained',
+    now: now ?? (() => 1000),
+    readRoute: () => 'routes/w.$workspace.$project',
+    readPath: () => path,
+    readBuild: () => '1793324757615',
+    readVisible: () => visible,
+  });
+
+/** The marker as it sits in storage, read only for the fields a test asserts on. */
+type StoredMarker = Readonly<{
+  version?: number;
+  consecutiveKills?: number;
+  trail?: readonly unknown[];
+  pending?: readonly unknown[];
+}>;
+
+const storedMarker = (storage: Storage): StoredMarker =>
+  JSON.parse(storage.getItem('tau:alive') ?? '{}') as StoredMarker;
+
+describe('memory kill signal (B-01, D-UI-25, SB3)', () => {
+  it('reports one foreground kill when a reload follows a page that never reached pagehide', () => {
     const storage = memoryStorage();
     const killed = load(storage, 'navigate');
-    expect(killed.takeSuspectedKill()).toBeUndefined();
+    expect(killed.takeDetectedKills()).toEqual([]);
     killed.setCounts({ liveProjectCount: 2, chatCount: 5 });
     killed.breadcrumb('render');
     /* Safari kills the tab: no pagehide, no JS. The person (or Safari) reloads. */
 
     const next = load(storage, 'reload');
-    const report = next.takeSuspectedKill();
+    const [kill, ...rest] = next.takeDetectedKills();
 
-    expect(memoryKillEventName).toBe('memory.suspected_kill');
-    expect(report).toEqual({
+    expect(rest).toEqual([]);
+    expect(kill).toMatchObject({
+      classification: 'foreground',
+      route: 'routes/w.$workspace.$project',
+      path: '/w/a/b',
+      buildId: '1793324757615',
       deviceClass: 'constrained',
       liveProjectCount: 2,
       chatCount: 5,
-      lastBreadcrumb: 'render',
-      aliveForMilliseconds: 0,
+      lastActivity: 'render',
+      consecutiveKills: 1,
+      trail: [{ at: 1000, name: 'render' }],
     });
-    /* Exactly one event per kill. */
-    expect(next.takeSuspectedKill()).toBeUndefined();
+    /* Exactly one report per kill, per load. */
+    expect(next.takeDetectedKills()).toEqual([]);
   });
 
   it('reports nothing for a normal reload that reached pagehide', () => {
     const storage = memoryStorage();
     const page = load(storage, 'navigate');
-    page.takeSuspectedKill();
+    page.takeDetectedKills();
     page.breadcrumb('open');
     page.finish();
 
-    expect(load(storage, 'reload').takeSuspectedKill()).toBeUndefined();
+    expect(load(storage, 'reload').takeDetectedKills()).toEqual([]);
   });
 
-  it('reports nothing for a fresh navigation even after an unfinished page', () => {
+  it('reports a kill when iOS calls the return a navigation to the same path inside the window', () => {
     const storage = memoryStorage();
-    load(storage, 'navigate').takeSuspectedKill();
+    const killed = load(storage, 'navigate', { now: () => 10_000 });
+    killed.takeDetectedKills();
+    killed.breadcrumb('export');
 
-    expect(load(storage, 'navigate').takeSuspectedKill()).toBeUndefined();
+    const soon = load(storage, 'navigate', { now: () => 10_000 + killDetectionWindowMilliseconds - 1 });
+
+    expect(soon.takeDetectedKills()).toHaveLength(1);
   });
 
-  it('re-arms after a back-forward cache restore, so a later kill is still seen', () => {
+  it('reports nothing for a navigation to another path, or to the same one long after', () => {
+    const storage = memoryStorage();
+    const first = load(storage, 'navigate');
+    first.takeDetectedKills();
+    first.breadcrumb('open');
+
+    expect(load(storage, 'navigate', { path: '/w/a/other' }).takeDetectedKills()).toEqual([]);
+
+    const later = load(storage, 'navigate', { now: () => 1000 + killDetectionWindowMilliseconds });
+    expect(later.takeDetectedKills()).toEqual([]);
+  });
+
+  it('classifies a kill on a hidden page as a background discard and says how long it was hidden', () => {
+    const storage = memoryStorage();
+    let clock = 1000;
+    const page = createMemoryKillSignal({
+      storage,
+      navigationType: 'navigate',
+      deviceClass: 'standard',
+      now: () => clock,
+      readPath: () => '/w/a/b',
+      readVisible: () => clock < 5000,
+    });
+    page.takeDetectedKills();
+    clock = 5000;
+    page.observeVisibility();
+    clock = 9000;
+    /* Work in a hidden tab still writes; only the heartbeat holds off. */
+    page.breadcrumb('render');
+    page.heartbeat();
+
+    const [kill] = load(storage, 'reload', { now: () => 12_000 }).takeDetectedKills();
+
+    expect(kill).toMatchObject({ classification: 'background', hiddenForMilliseconds: 4000 });
+  });
+
+  it('counts kills in a row, and starts again after a clean finish', () => {
+    const storage = memoryStorage();
+    load(storage, 'navigate').takeDetectedKills();
+    /* Each load reports and settles its kill, as a delivering page does. */
+    const reportAndSettle = (): number | undefined => {
+      const page = load(storage, 'reload');
+      const kills = page.takeDetectedKills();
+      for (const kill of kills) {
+        page.settleKill(kill.id);
+      }
+      return kills.at(-1)?.consecutiveKills;
+    };
+
+    expect(reportAndSettle()).toBe(1);
+    expect(reportAndSettle()).toBe(2);
+    expect(reportAndSettle()).toBe(3);
+
+    const clean = load(storage, 'reload');
+    for (const kill of clean.takeDetectedKills()) {
+      clean.settleKill(kill.id);
+    }
+    clean.finish();
+
+    expect(load(storage, 'reload').takeDetectedKills()).toEqual([]);
+    expect(storedMarker(storage).consecutiveKills).toBe(0);
+  });
+
+  it('keeps an unreported kill in the marker until it is settled, and never past the pending limit (G17)', () => {
+    const storage = memoryStorage();
+    load(storage, 'navigate').takeDetectedKills();
+    /* Each load is killed again before it can report, so the undelivered kills pile up. */
+    for (let loads = 0; loads < pendingKillLimit + 2; loads += 1) {
+      load(storage, 'reload').takeDetectedKills();
+    }
+    const { pending } = storedMarker(storage);
+    expect(pending).toHaveLength(pendingKillLimit);
+
+    const reporting = load(storage, 'reload');
+    const carried = reporting.takeDetectedKills();
+    expect(carried.length).toBe(pendingKillLimit + 1);
+    for (const kill of carried) {
+      reporting.settleKill(kill.id);
+    }
+
+    expect(storedMarker(storage).pending).toEqual([]);
+    /* A settled kill is gone for good, even though this page then dies too. */
+    expect(load(storage, 'reload').takeDetectedKills()).toHaveLength(1);
+  });
+
+  it('keeps the trail to the newest names and the marker inside its byte budget', () => {
     const storage = memoryStorage();
     const page = load(storage, 'navigate');
-    page.takeSuspectedKill();
-    page.finish();
-    page.arm();
+    page.takeDetectedKills();
+    for (let index = 0; index < killTrailLimit + 5; index += 1) {
+      page.breadcrumb(`render.step-${String(index)}`);
+    }
+    const { trail, version } = storedMarker(storage);
 
-    expect(load(storage, 'reload').takeSuspectedKill()).toBeDefined();
+    expect(trail).toHaveLength(killTrailLimit);
+    expect(trail?.at(-1)).toEqual({
+      at: 1000,
+      name: `render.step-${String(killTrailLimit + 4)}`,
+    });
+    expect(version).toBe(killMarkerVersion);
+    expect(new TextEncoder().encode(storage.getItem('tau:alive') ?? '').length).toBeLessThanOrEqual(markerByteLimit);
   });
 
-  it('keeps working when storage throws (private mode, blocked site data)', () => {
-    const throwing = {
-      ...memoryStorage(),
-      getItem: () => {
-        throw new Error('denied');
-      },
-      setItem: () => {
-        throw new Error('denied');
-      },
-    };
-    const page = load(throwing, 'reload');
+  it('ignores a marker of another shape rather than reading its fields', () => {
+    const storage = memoryStorage();
+    storage.setItem('tau:alive', JSON.stringify({ finished: false, startedAt: 1, updatedAt: 2 }));
 
-    expect(page.takeSuspectedKill()).toBeUndefined();
+    expect(load(storage, 'reload').takeDetectedKills()).toEqual([]);
+  });
+
+  it('works without storage at all, as in a private window', () => {
+    const page = createMemoryKillSignal({ storage: undefined, navigationType: 'reload', deviceClass: 'standard' });
+
+    expect(page.takeDetectedKills()).toEqual([]);
     expect(() => {
-      page.breadcrumb('render');
+      page.breadcrumb('open');
+      page.heartbeat();
       page.finish();
     }).not.toThrow();
   });

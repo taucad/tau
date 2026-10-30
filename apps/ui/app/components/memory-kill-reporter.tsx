@@ -1,19 +1,22 @@
 /**
- * Report the previous page's suspected memory kill, once, and keep this page's
- * alive marker current (B-01, D-UI-25).
+ * Report the kills the marker carried into this load, and keep this page's marker current (B-01,
+ * D-UI-25; browser observability SB3).
  *
- * Mounted under the analytics boundary and the sessions registry so the event
- * carries the counts that matter on a phone: how many projects were live and
- * how many chats were loaded when the tab died.
+ * Mounted under the sessions registry and the chat store so the marker carries the counts that
+ * matter on a phone: how many projects were live and how many chats were loaded when the tab died.
+ * A detected kill goes to the error tracker as a `TabKilledError` (`#lib/tab-kill-reporting`) and
+ * leaves the marker only once its report is handed over, so a kill loop still reports its first
+ * kill (G17).
  */
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { useAnalytics } from '#hooks/use-analytics.js';
 import { useLiveProjectIds } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { isMemoryConstrainedDevice } from '#lib/device-memory-class.js';
-import { getDocumentMemoryKillSignal, memoryKillEventName } from '#lib/memory-kill-signal.js';
+import { getDocumentMemoryKillSignal, killHeartbeatMilliseconds } from '#lib/memory-kill-signal.js';
 import { setLiveCountsReader } from '#lib/memory-sampler.js';
+import { readRouteId } from '#lib/sentry-context.lib.js';
+import { reportDetectedKill } from '#lib/tab-kill-reporting.js';
 import type { MemoryKillSignal } from '#lib/memory-kill-signal.js';
 
 export function MemoryKillReporter({
@@ -25,7 +28,6 @@ export function MemoryKillReporter({
   readonly liveProjectCount: number;
   readonly chatCount: number;
 }): undefined {
-  const { capture } = useAnalytics();
   const reported = useRef(false);
 
   useEffect(() => {
@@ -33,11 +35,18 @@ export function MemoryKillReporter({
       return;
     }
     reported.current = true;
-    const kill = signal.takeSuspectedKill();
-    if (kill !== undefined) {
-      capture(memoryKillEventName, kill);
-    }
-  }, [capture, signal]);
+    const report = async (): Promise<void> => {
+      for (const kill of signal.takeDetectedKills()) {
+        // Each kill in turn; one whose report does not land stays pending for the next load (G17).
+        // eslint-disable-next-line no-await-in-loop -- the reports share one delivery path.
+        if (await reportDetectedKill(kill)) {
+          signal.settleKill(kill.id);
+        }
+      }
+    };
+    // async-iife: bootstrap -- reporting the previous page's kills never blocks this page's render.
+    void report();
+  }, [signal]);
 
   useEffect(() => {
     signal?.setCounts({ liveProjectCount, chatCount });
@@ -64,11 +73,31 @@ export function MemoryKillReporter({
         signal.arm();
       }
     };
+    const observeVisibility = (): void => {
+      signal.observeVisibility();
+    };
     globalThis.addEventListener('pagehide', finish);
     globalThis.addEventListener('pageshow', arm);
+    document.addEventListener('visibilitychange', observeVisibility);
     return () => {
       globalThis.removeEventListener('pagehide', finish);
       globalThis.removeEventListener('pageshow', arm);
+      document.removeEventListener('visibilitychange', observeVisibility);
+    };
+  }, [signal]);
+
+  // Keeps `updatedAt` fresh while the page is visible, so the detection window measures how long
+  // ago the page was last alive rather than how long ago it last did something. The signal itself
+  // skips a hidden page, and a hidden tab's timers are throttled anyway.
+  useEffect(() => {
+    if (signal === undefined) {
+      return undefined;
+    }
+    const beat = globalThis.setInterval(() => {
+      signal.heartbeat();
+    }, killHeartbeatMilliseconds);
+    return () => {
+      globalThis.clearInterval(beat);
     };
   }, [signal]);
 
@@ -84,7 +113,7 @@ const noChats = (): number => 0;
  * @returns The reporter for this document's signal.
  */
 export function DocumentMemoryKillReporter(): React.JSX.Element {
-  const [signal] = useState(() => getDocumentMemoryKillSignal(deviceClass));
+  const [signal] = useState(() => getDocumentMemoryKillSignal(deviceClass, readRouteId));
   const liveProjectCount = useLiveProjectIds().length;
   const chats = useChatSessionStore();
   const chatCount = useSyncExternalStore(

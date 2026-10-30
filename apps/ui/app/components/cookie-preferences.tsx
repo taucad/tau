@@ -17,6 +17,8 @@ import {
 import { useCookieConsent } from '#hooks/use-cookie-consent.js';
 import { isGlobalPrivacyControlEnabled } from '#lib/global-privacy-control.lib.js';
 import { legalUrl } from '#lib/legal-url.js';
+import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
+import { cn } from '@taucad/ui/utils/cn';
 
 /**
  * Help-menu entry that opens the dialog. The desktop override (`cookie-preferences.desktop.tsx`) renders none.
@@ -38,9 +40,11 @@ function CookiePreferencesContent({
   const consentStatus = useCookieConsent();
   const globalPrivacyControl = isGlobalPrivacyControlEnabled();
   const [analyticsEnabled, setAnalyticsEnabled] = useState(consentStatus === 'accepted');
+  // On a phone it opens from the Help drawer in the sidebar sheet (z-100), which it must clear, overlay included.
+  const isMobile = useIsMobile();
 
   return (
-    <DialogContent>
+    <DialogContent className={cn(isMobile && 'z-110')} overlayClassName={cn(isMobile && 'z-110')}>
       <DialogHeader>
         <DialogTitle>Cookie preferences</DialogTitle>
         <DialogDescription>

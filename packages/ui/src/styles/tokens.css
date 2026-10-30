@@ -463,38 +463,128 @@
   }
 }
 
-/* Hairlines between a touch list's rows. Each row after a row draws one along its top edge, from
-   where its text starts (past a leading icon) to its inline padding; the highlighted row and the
-   row after it drop theirs so the highlight never sits on a line. */
-@utility command-item-dividers {
-  & [data-slot='command-item'] {
-    --command-item-divider-start: 0.75rem;
+/* Hairlines between the rows of a phone drawer's list (`DrawerList`): a responsive combobox's options and a
+   responsive menu's items. Each row after a row draws one along its top edge, from where its text starts (past a
+   leading icon) to its inline padding; the highlighted row and the row after it drop theirs so the highlight never
+   sits on a line. A row family sets its geometry with `--drawer-row-inset`, `--drawer-row-icon` and
+   `--drawer-row-gap`, or pins the start with `--drawer-row-text-start` when its text sits past an indicator. */
+@utility drawer-row-dividers {
+  & :is([data-slot='command-item'], [data-drawer-row]) {
+    --drawer-row-divider-start: var(--drawer-row-inset, 0.75rem);
   }
 
   &
-    [data-slot='command-item']:is(
+    :is([data-slot='command-item'], [data-drawer-row]):is(
       :has(> svg:first-child),
       :has(> :first-child > svg:first-child),
       :has(> :first-child > :first-child > svg:first-child)
     ) {
-    /* Inline padding, the 0.875rem icon and the 0.5rem gap of a menu row. */
-    --command-item-divider-start: 2.125rem;
+    /* Inline padding, the icon and the gap of a row: 0.75rem, 0.875rem and 0.5rem for a menu-sized row. */
+    --drawer-row-divider-start: calc(
+      var(--drawer-row-inset, 0.75rem) + var(--drawer-row-icon, 0.875rem) + var(--drawer-row-gap, 0.5rem)
+    );
   }
 
-  & [data-slot='command-item'] + [data-slot='command-item']::before,
+  & :is([data-slot='command-item'], [data-drawer-row]) + :is([data-slot='command-item'], [data-drawer-row])::before,
   & [data-item-index]:has(> [data-slot='command-item']) + [data-item-index] > [data-slot='command-item']::before {
     content: '';
     position: absolute;
     top: -1px;
-    right: 0.75rem;
-    left: var(--command-item-divider-start);
+    right: var(--drawer-row-inset, 0.75rem);
+    left: var(--drawer-row-text-start, var(--drawer-row-divider-start));
     border-top: 1px solid var(--border);
     pointer-events: none;
   }
 
-  & [data-slot='command-item'][data-selected='true']::before,
-  & [data-slot='command-item'][data-selected='true'] + [data-slot='command-item']::before {
+  /* A highlighted row is not a full-width band: its fill is a rounded surface, like a sidebar item's, inset 6px from
+     the row, a quarter nearer the drawer edge than halfway to the header divider so the fill does not look squashed.
+     The row keeps its own padding, so its text and its hairline do not move. */
+  & :is([data-slot='command-item'], [data-drawer-row]) {
+    isolation: isolate;
+  }
+
+  & :is([data-slot='command-item'], [data-drawer-row]):is([data-selected='true'], [data-highlighted], :focus, :hover) {
+    background-color: transparent;
+  }
+
+  &
+    :is([data-slot='command-item'], [data-drawer-row]):is(
+      [data-selected='true'],
+      [data-highlighted],
+      :focus,
+      :hover
+    )::after {
+    content: '';
+    position: absolute;
+    inset: 0 0.375rem;
+    z-index: -1;
+    border-radius: var(--radius-md);
+    background-color: var(--drawer-row-highlight, var(--menu-highlight));
+    pointer-events: none;
+  }
+
+  & :is([data-slot='command-item'], [data-drawer-row])[data-variant='destructive'] {
+    --drawer-row-highlight: var(--menu-highlight-destructive);
+  }
+
+  & :is([data-slot='command-item'], [data-drawer-row])[data-selected='true']::before,
+  &
+    :is([data-slot='command-item'], [data-drawer-row])[data-selected='true']
+    + :is([data-slot='command-item'], [data-drawer-row])::before {
     content: none;
+  }
+}
+
+/* A command list in a phone drawer (a responsive combobox's options, the agent sheet's lists) is shared with a desktop
+   popover, whose search field, headings and rows sit 4-12px in. In a drawer they move to its 16px edge, where a menu
+   row's icon and the header's title sit; a highlighted row keeps its 6px inset surface from `drawer-row-dividers`. */
+@utility drawer-command-rows {
+  & [data-slot='command-input-wrapper'] {
+    padding-inline: 1rem;
+  }
+
+  /* The field's search glyph sits 0.75rem inside the field, which now starts 1rem in. */
+  & [data-slot='command-input-wrapper'] > svg {
+    left: 1.75rem;
+  }
+
+  & :is([data-slot='command-group'], [data-slot='combobox-virtual-list']) {
+    padding-inline: 0;
+  }
+
+  & :is([data-slot='command-group'] [cmdk-group-heading], [data-slot='combobox-group-heading']) {
+    padding-inline: 1rem;
+  }
+
+  & [data-slot='command-item'] {
+    --drawer-row-inset: 1rem;
+    padding-inline: 1rem;
+    border-radius: 0;
+  }
+
+  & [data-slot='command-empty'] {
+    margin-inline: 1rem;
+  }
+}
+
+/* Content shared with a desktop popover draws its section hairlines as full-width `border-t` and `border-b`. Inside a
+   drawer, where a divider never spans the full width, this redraws each one inset 1rem from both edges, as
+   `DrawerDivider` does, without moving the section's own content. */
+@utility drawer-inset-hairlines {
+  & :is(.border-t, .border-b) {
+    border-top-width: 0;
+    border-bottom-width: 0;
+    background-image: linear-gradient(var(--border), var(--border));
+    background-repeat: no-repeat;
+    background-size: calc(100% - 2rem) 1px;
+  }
+
+  & .border-t {
+    background-position: 1rem 0;
+  }
+
+  & .border-b {
+    background-position: 1rem 100%;
   }
 }
 

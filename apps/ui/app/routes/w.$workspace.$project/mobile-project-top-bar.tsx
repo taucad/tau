@@ -14,7 +14,19 @@ import { Check, ChevronDown, CircleAlert, GitBranch, GitMerge, History, Info, Pa
 import type { LucideIcon } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { Button } from '@taucad/ui/components/button';
-import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@taucad/ui/components/drawer';
+import {
+  Drawer,
+  DrawerAction,
+  DrawerBar,
+  DrawerContent,
+  DrawerDescription,
+  DrawerDivider,
+  drawerListItemClass,
+  drawerRowAttributes,
+  drawerRowClass,
+  DrawerTitle,
+  drawerBarTitleClass,
+} from '@taucad/ui/components/drawer';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { cn } from '@taucad/ui/utils/cn';
 import { workbenchPanes } from '@taucad/workbench-panes/registry/pane-registry';
@@ -233,6 +245,13 @@ function focusSurfaceWhenOpen(title: string): void {
   });
 }
 
+/**
+ * A group of sheet rows: hairlines between its rows, and above it, unless it is the first group, a divider inset like a
+ * responsive menu's separator (the header's own divider sits above the first).
+ */
+const sheetGroupClass =
+  'drawer-row-dividers relative py-1 not-first-of-type:before:absolute not-first-of-type:before:top-0 not-first-of-type:before:right-4 not-first-of-type:before:left-11 not-first-of-type:before:h-px not-first-of-type:before:bg-border';
+
 /** A destination row in the project sheet: its workbench title is its label and its name (I6). */
 function SheetRow({
   icon: Icon,
@@ -251,7 +270,7 @@ function SheetRow({
   const labelId = useId();
   const metaId = useId();
   return (
-    <li>
+    <li {...drawerRowAttributes} className={drawerListItemClass}>
       {/* Named by its label alone; the meta describes it (I6). */}
       <Button
         variant='ghost'
@@ -259,7 +278,11 @@ function SheetRow({
         data-slot='project-sheet-row'
         aria-labelledby={labelId}
         aria-describedby={meta === undefined ? undefined : metaId}
-        className='w-full justify-start gap-3 rounded-none font-normal'
+        // A drawer row (I3's 40px touch row); the row, not the button, draws the inset highlight, so no full-width band.
+        className={cn(
+          drawerRowClass,
+          'h-touch-row justify-start font-normal hover:bg-transparent! dark:hover:bg-transparent!',
+        )}
         onClick={onSelect}
       >
         <Icon aria-hidden className={cn('size-4 shrink-0', tone)} />
@@ -350,9 +373,9 @@ function ProjectSheet({
           }
         }}
       >
-        <div className='flex items-center gap-2 px-4 pb-2'>
+        <DrawerBar>
           <div className='flex min-w-0 flex-1 flex-col'>
-            <DrawerTitle className='truncate text-base font-medium'>{projectName}</DrawerTitle>
+            <DrawerTitle className={drawerBarTitleClass}>{projectName}</DrawerTitle>
             <DrawerDescription asChild>
               <div>
                 <ProjectStatusLineView line={status.line} />
@@ -361,22 +384,23 @@ function ProjectSheet({
           </div>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button ref={closeRef} variant='outline' size='icon' aria-label='Close project sheet' onClick={close}>
+              <DrawerAction ref={closeRef} aria-label='Close project sheet' onClick={close}>
                 <X aria-hidden className='size-4' />
-              </Button>
+              </DrawerAction>
             </TooltipTrigger>
             <TooltipContent>Close project sheet</TooltipContent>
           </Tooltip>
-        </div>
+        </DrawerBar>
+        <DrawerDivider />
         <div className='min-h-0 overflow-y-auto pb-3'>
           {/* I5: a conflict is a decision, so its Revisions row comes first and says so; it opens where it is made. */}
           {status.conflict === undefined ? null : (
-            <ul aria-label='Decision' className='border-t py-1'>
+            <ul aria-label='Decision' className={sheetGroupClass}>
               {revisionsRow}
             </ul>
           )}
           {status.followChat === undefined ? null : (
-            <ul aria-label='Chat' className='border-t py-1'>
+            <ul aria-label='Chat' className={sheetGroupClass}>
               <SheetRow
                 icon={GitBranch}
                 label='Follow chat'
@@ -397,7 +421,7 @@ function ProjectSheet({
               onBeforeOpenFile={close}
             />
           </div>
-          <ul aria-label='Project' className='border-t py-1'>
+          <ul aria-label='Project' className={sheetGroupClass}>
             {status.conflict === undefined ? revisionsRow : null}
             <SheetRow
               icon={workbenchPanes.export.icon}

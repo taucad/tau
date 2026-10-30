@@ -45,19 +45,21 @@ export type DesktopChannel = 'production' | 'staging';
 const channelClientEnvironment = {
   production: {
     TAU_S3_ENDPOINT: 'https://tau-prod-content-private.271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com',
+    TAU_FILES_ORIGIN: 'https://files.tau.new',
     TAU_API_URL: 'https://api.tau.new',
     TAU_WEBSOCKET_URL: 'wss://api.tau.new',
     TAU_FRONTEND_URL: 'https://tau.new',
   },
   staging: {
     TAU_S3_ENDPOINT: 'https://tau-staging-content-private.271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com',
+    TAU_FILES_ORIGIN: 'https://files.taucad.dev',
     TAU_API_URL: 'https://api.taucad.dev',
     TAU_WEBSOCKET_URL: 'wss://api.taucad.dev',
     TAU_FRONTEND_URL: 'https://taucad.dev',
   },
 } as const satisfies Record<
   DesktopChannel,
-  Record<(typeof requiredClientEnvironmentNames)[number] | 'TAU_S3_ENDPOINT', string>
+  Record<(typeof requiredClientEnvironmentNames)[number] | 'TAU_S3_ENDPOINT' | 'TAU_FILES_ORIGIN', string>
 >;
 
 /** PostHog hosts for the renderer's analytics, matching `apps/ui`'s web defaults. */
@@ -80,6 +82,7 @@ export const packagedLockedEnvironmentNames = [
   'TAU_WEBSOCKET_URL',
   'TAU_FRONTEND_URL',
   'TAU_S3_ENDPOINT',
+  'TAU_FILES_ORIGIN',
   'ELECTRON_RENDERER_URL',
   'TAU_DESKTOP_CLIENT_ROOT',
   'TAU_BAMBU_STUDIO_PATH',

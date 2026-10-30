@@ -1,4 +1,4 @@
-import { Search } from 'lucide-react';
+import { Search, X } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, createContext, useContext } from 'react';
 import { defaultFilter } from 'cmdk';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -15,9 +15,11 @@ import {
 } from '@taucad/ui/components/command';
 import {
   Drawer,
+  DrawerAction,
   DrawerClose,
   DrawerContent,
   DrawerDescription,
+  DrawerDivider,
   DrawerTitle,
   DrawerTrigger,
 } from '@taucad/ui/components/drawer';
@@ -191,6 +193,8 @@ type CommandPaletteResultsProperties = {
   readonly listClassName?: string;
   /** A control on the field's row, after the field so the field stays the first stop. */
   readonly inputAction?: React.ReactNode;
+  /** The field's placeholder; a phone's narrower row takes a shorter one, so it is never cut off. */
+  readonly placeholder?: string;
 };
 
 /** Mounted only while the dialog is open, so the query resets on every open. */
@@ -199,10 +203,13 @@ export function CommandPaletteResults({
   onRun,
   listClassName,
   inputAction,
+  placeholder = 'Search projects, chats, and actions…',
 }: CommandPaletteResultsProperties): React.JSX.Element {
   const [search, setSearch] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
   const rows = useMemo(() => rankCommandPaletteRows(items, search), [items, search]);
+  // A field with an action is a phone drawer's header, so the results take a drawer's row geometry.
+  const isDrawer = inputAction !== undefined;
 
   /*
    * Rows mount only around the viewport. The item overscan also keeps the next rows
@@ -223,8 +230,8 @@ export function CommandPaletteResults({
 
   const input = (
     <CommandInput
-      className='h-9 border-0 bg-transparent px-3 text-base shadow-none focus-visible:outline-none dark:bg-transparent'
-      placeholder='Search projects, chats, and actions…'
+      className='h-9 border-0 bg-transparent px-3 text-base text-ellipsis shadow-none focus-visible:outline-none dark:bg-transparent'
+      placeholder={placeholder}
       value={search}
       onValueChange={(value) => {
         setSearch(value);
@@ -236,14 +243,18 @@ export function CommandPaletteResults({
   return (
     <>
       {inputAction ? (
-        <div className='flex items-center gap-1 border-b pr-1 [&_[data-slot=command-input-wrapper]]:flex-1 [&_[data-slot=command-input-wrapper]>svg]:hidden'>
-          {input}
-          {inputAction}
-        </div>
+        <>
+          {/* The drawer header: the field where a title sits, the action at the shared 60px bar's end. */}
+          <div className='flex min-h-(--drawer-bar-height) shrink-0 items-center gap-2 py-2 pr-4 [&_[data-slot=command-input-wrapper]]:min-w-0 [&_[data-slot=command-input-wrapper]]:flex-1 [&_[data-slot=command-input-wrapper]>svg]:hidden'>
+            {input}
+            {inputAction}
+          </div>
+          <DrawerDivider />
+        </>
       ) : (
         input
       )}
-      <CommandList ref={listRef} className={cn('py-0', listClassName)}>
+      <CommandList ref={listRef} className={cn('py-0', isDrawer && 'drawer-row-dividers', listClassName)}>
         {rows.length === 0 ? <CommandEmpty>No results found.</CommandEmpty> : null}
         <div className='relative w-full' style={{ height: virtualizer.getTotalSize() }}>
           {virtualizer.getVirtualItems().map((virtualRow) => {
@@ -253,13 +264,19 @@ export function CommandPaletteResults({
                 key={virtualRow.key}
                 ref={virtualizer.measureElement}
                 data-index={virtualRow.index}
-                className={cn('absolute inset-x-0 top-0 px-1', row.kind === 'heading' ? 'pt-1' : 'pb-0.5')}
+                className={cn(
+                  'absolute inset-x-0 top-0',
+                  !isDrawer && 'px-1',
+                  row.kind === 'heading' ? 'pt-1' : 'pb-0.5',
+                )}
                 style={{ transform: `translateY(${virtualRow.start}px)` }}
               >
                 {row.kind === 'heading' ? (
-                  <div className={menuGroupHeadingClass}>{row.group}</div>
+                  <div className={cn(menuGroupHeadingClass, isDrawer && 'px-4')}>{row.group}</div>
                 ) : (
                   <CommandItem
+                    // In a drawer, a row's icon sits under the header's 16px edge and its text at 44px, as a menu row's.
+                    className={cn(isDrawer && 'rounded-none px-4 [&>div]:gap-3')}
                     value={commandValue(row.item)}
                     disabled={row.item.disabled}
                     onSelect={() => {
@@ -437,8 +454,9 @@ function CommandPaletteMobile({
       <DrawerContent
         data-slot='command-palette-sheet'
         className={cn(
-          'z-110 h-dvh pt-[env(safe-area-inset-top)]',
-          'data-[vaul-drawer-direction=bottom]:mt-0 data-[vaul-drawer-direction=bottom]:max-h-dvh data-[vaul-drawer-direction=bottom]:rounded-none data-[vaul-drawer-direction=bottom]:border-t-0',
+          // Below the status bar with a sliver of page above, so its rounded top reads as a drawer like the others.
+          'z-110 h-[calc(100dvh-env(safe-area-inset-top)-var(--spacing)*3)]',
+          'data-[vaul-drawer-direction=bottom]:mt-0 data-[vaul-drawer-direction=bottom]:max-h-[calc(100dvh-env(safe-area-inset-top)-var(--spacing)*3)]',
         )}
       >
         <DrawerTitle className='sr-only'>Search</DrawerTitle>
@@ -449,11 +467,13 @@ function CommandPaletteMobile({
           <CommandPaletteResults
             items={items}
             listClassName='max-h-none min-h-0 flex-1'
+            // Beside the close at 320 px the full placeholder needs 263 px of the field's width.
+            placeholder='Search projects, chats…'
             inputAction={
               <DrawerClose asChild>
-                <Button variant='ghost' size='lg' className='shrink-0'>
-                  Cancel
-                </Button>
+                <DrawerAction aria-label='Close'>
+                  <X aria-hidden className='size-4' />
+                </DrawerAction>
               </DrawerClose>
             }
             onRun={runCommand}

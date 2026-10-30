@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { parse } from 'dotenv';
 import { describe, it, expect } from 'vitest';
+import { fileLinkVectors } from '@taucad/file-links/vectors';
 import { environmentSchema } from '#config/environment.config.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- fixtures mirror process.env UPPER_SNAKE keys */
@@ -185,6 +186,48 @@ describe('environmentSchema', () => {
     });
 
     expect(result.success).toBe(true);
+  });
+
+  describe('files service', () => {
+    const [key] = fileLinkVectors.keys;
+    const signingKey = JSON.stringify({ kid: key?.kid, alg: 'HS256', keyBase64: key?.keyBase64 });
+    const issues = (values: Record<string, unknown>): string[] => {
+      const result = environmentSchema.safeParse({ ...baseEnvironment(), ...values });
+      return result.success ? [] : result.error.issues.map((issue) => issue.message);
+    };
+
+    it('should accept neither setting, so downloads stay presigned', () => {
+      expect(issues({})).toEqual([]);
+    });
+
+    it('should accept a bare origin with a valid signing key', () => {
+      expect(
+        issues({ TAU_FILES_BASE_URL: 'https://files.taucad.dev', TAU_FILES_LINK_SIGNING_KEY: signingKey }),
+      ).toEqual([]);
+    });
+
+    it('should require the signing key when the base URL is set', () => {
+      expect(issues({ TAU_FILES_BASE_URL: 'https://files.taucad.dev' })).toEqual([
+        'TAU_FILES_LINK_SIGNING_KEY is required when TAU_FILES_BASE_URL is set',
+      ]);
+    });
+
+    it.each(['https://files.taucad.dev/v1', 'not a url', 'https://user:pass@files.taucad.dev'])(
+      'should refuse the base URL %s',
+      (url) => {
+        expect(issues({ TAU_FILES_BASE_URL: url, TAU_FILES_LINK_SIGNING_KEY: signingKey })).toEqual([
+          'TAU_FILES_BASE_URL must be a bare https origin, such as https://files.taucad.dev',
+        ]);
+      },
+    );
+
+    it('should refuse a malformed signing key without repeating it', () => {
+      const leaked = JSON.stringify({ kid: key?.kid, alg: 'HS256', keyBase64: 'c2hvcnQ=' });
+      const messages = issues({ TAU_FILES_LINK_SIGNING_KEY: leaked });
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toContain('TAU_FILES_LINK_SIGNING_KEY is invalid');
+      expect(messages[0]).not.toContain('c2hvcnQ=');
+    });
   });
 
   describe('Stripe mode and environment', () => {

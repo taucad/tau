@@ -1,13 +1,14 @@
 /* oxlint-disable new-cap, @typescript-eslint/consistent-type-imports -- NestJS decorators are factories and DI metadata needs runtime class imports */
 /* eslint-disable @typescript-eslint/naming-convention -- git-lfs wire fields are snake_case */
 import { createHash } from 'node:crypto';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { and, eq, inArray } from 'drizzle-orm';
 import { DatabaseService } from '#database/database.service.js';
 import { assertActiveProjectLocked } from '#database/project-lifecycle.js';
 import { withOwnerLock } from '#database/owner-lock.js';
 import { projectGitLfsObject } from '#database/schema.js';
-import { ObjectStorageService } from '#storage/object-storage.service.js';
+import { FileLinksService } from '#storage/file-links.service.js';
+import { ObjectStorageService, TAU_DEFAULT_STORAGE_ACCOUNT_ID } from '#storage/object-storage.service.js';
 import type { LfsObjectLocation } from '#api/git/lfs-keys.js';
 import { resolveLfsObjectLocation, tenantLfsObjectKey } from '#api/git/lfs-keys.js';
 import { projectFileLimitBytes, quotaRefusalSentence } from '#api/git/git.constants.js';
@@ -87,7 +88,8 @@ export type LfsBatchOutcome =
 
 /**
  * The Tau Hosted Remote's LFS store: git-lfs's batch API in front of presigned
- * R2 transfers (A24, S49). Objects live under their owner's tenant prefix
+ * R2 transfers (A24, S49), or of signed `files.<zone>` downloads when the
+ * files service is configured (files service blueprint §1). Objects live under their owner's tenant prefix
  * (D24) keyed by git-lfs's own `oid`, so the bytes a stock `git lfs push`
  * uploads are the bytes a stock `git lfs pull` reads back, and nothing here
  * touches a repository on disk — reachability is decided over a lease by
@@ -99,6 +101,7 @@ export class GitLfsService {
     private readonly objectStorage: ObjectStorageService,
     private readonly repositories: GitRepositoryService,
     private readonly databaseService: DatabaseService,
+    @Optional() private readonly fileLinks?: FileLinksService,
   ) {}
 
   public async batch(args: {
@@ -156,10 +159,7 @@ export class GitLfsService {
               authenticated: true,
               actions: {
                 download: {
-                  href: await this.objectStorage.presignGet({
-                    ...stored.location,
-                    expiresInSeconds: transferExpirySeconds,
-                  }),
+                  href: await this.#downloadHref(stored),
                   expires_in: transferExpirySeconds,
                 },
               },
@@ -323,6 +323,23 @@ export class GitLfsService {
       },
     });
     return outcome === 'finalized' || outcome === 'already-finalized';
+  }
+
+  /**
+   * Where a client fetches one stored object: a `files.<zone>` link when the
+   * files service is configured and the bytes are in Tau's own account (a
+   * scoped storage account keeps its presigned links), otherwise a presigned
+   * GET. Either expires with the same {@link transferExpirySeconds}.
+   *
+   * @param stored - The object's location and stored size.
+   * @returns The download `href`.
+   */
+  async #downloadHref(stored: { location: LfsObjectLocation; size: number }): Promise<string> {
+    const signed =
+      this.fileLinks?.enabled === true && this.objectStorage.account.id === TAU_DEFAULT_STORAGE_ACCOUNT_ID
+        ? await this.fileLinks.sign({ ...stored.location, size: stored.size, expiresInSeconds: transferExpirySeconds })
+        : undefined;
+    return signed ?? this.objectStorage.presignGet({ ...stored.location, expiresInSeconds: transferExpirySeconds });
   }
 
   /** Signing completes under the same project lock that admits deletion. */

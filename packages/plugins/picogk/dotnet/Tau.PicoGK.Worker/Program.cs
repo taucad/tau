@@ -204,8 +204,11 @@ internal static partial class Program
                     catch(Exception error) when(ComputeWorkerSession.IsDisposableFailure(error)){ComputeWorkerSession.ReportBypass("preload",error);}
                 }
                 var meshing = ParseMeshing(request.Params);
-#if PICOGK_BROWSER
+                // Both runtimes collect the author's own geometry files, so a desktop build offers the
+                // same STL and VDB exports a browser build does. It also gives the model its own output
+                // directory on both, rather than the directory holding this build's private artifacts.
                 using var authored = new AuthoredFileCapture(arguments.Workspace, arguments.Artifacts);
+#if PICOGK_BROWSER
 #if PICOGK_BROWSER_THREADS
                 // Native geometry can synchronously wait for TBB helpers. Keep Mono's runtime
                 // owner free to start those workers and service their proxy requests.
@@ -216,7 +219,7 @@ internal static partial class Program
                 var execution = await ModelRunner.ExecuteAsync(compiled, authored.OutputRoot, parameters, cancellation, compute, meshing);
 #endif
 #else
-                var execution = ModelRunner.Execute(compiled, arguments.Artifacts, parameters, cancellation, compute, meshing);
+                var execution = ModelRunner.Execute(compiled, authored.OutputRoot, parameters, cancellation, compute, meshing);
 #endif
                 var result = MeshArtifactWriter.Write(
                     arguments.Artifacts,
@@ -256,6 +259,18 @@ internal static partial class Program
                 }
                 catch
                 {
+                    File.Delete(result.ArtifactPath);
+                    throw;
+                }
+#else
+                try
+                {
+                    result = result with { AuthoredOutputs = authored.Complete() };
+                }
+                catch
+                {
+                    // A build whose authored files cannot be received publishes nothing, as the
+                    // browser path does, rather than a result that names a receipt it never wrote.
                     File.Delete(result.ArtifactPath);
                     throw;
                 }

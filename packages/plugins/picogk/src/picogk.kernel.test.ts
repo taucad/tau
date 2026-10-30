@@ -7,6 +7,7 @@ import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { createMockFileSystem, createMockKernelRuntime, expectKernelProjectionOrder } from '@taucad/runtime-testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { picogkBrowserKernel } from '#picogk-browser.kernel.js';
 import { picogkKernel } from '#picogk.kernel.js';
 import { createPicogkKernelDefinition } from '#picogk-kernel-definition.js';
 import { picogkOptionsSchema } from '#picogk.schemas.js';
@@ -725,7 +726,7 @@ describe('PicoGK kernel', () => {
   });
 });
 
-describe('authored browser exports', () => {
+describe('authored exports', () => {
   it('should retain original file bytes through handle serialization and preserve ordinary exports', async () => {
     const value = context();
     const original = new Uint8Array([0, 255, 1, 128]);
@@ -762,7 +763,31 @@ describe('authored browser exports', () => {
     await expect(
       definition.export!({ handle: restored, exportId: 'authoredVdb', options: {} }, runtime, value),
     ).rejects.toThrow('at least one file');
+  });
+
+  // The desktop worker collects the author's own geometry as the browser worker does, so the two
+  // kernels must offer the same export identities rather than the browser offering two more.
+  it('should declare the same exports on the desktop kernel as the browser kernel', async () => {
     const nativeDefinition = await loadDefinition();
-    expect(Object.keys(nativeDefinition.exports)).toEqual(['glb', 'gltf']);
+    expect(Object.keys(nativeDefinition.exports)).toEqual(['authoredStl', 'authoredVdb', 'glb', 'gltf']);
+    const browserDefinition = await resolveRuntimePluginDefinition('kernel', picogkBrowserKernel());
+    expect(Object.keys(nativeDefinition.exports)).toEqual(Object.keys(browserDefinition.exports));
+  });
+
+  // A layer published before that change reports no authored outputs, and the kernel must then
+  // offer none for that build rather than an export identity it cannot serve.
+  it('should offer no authored export for a build that reported none', async () => {
+    const value = context();
+    value.session.request.mockResolvedValue(buildResult());
+    value.session.readArtifact.mockResolvedValue(triangle);
+    const factory = createPicogkKernelDefinition({
+      optionsSchema: picogkOptionsSchema,
+      version: 'test-authored-absent',
+      authoredOutputs: true,
+      initialize: async () => value,
+    });
+    const definition = await resolveRuntimePluginDefinition('kernel', factory({ closure: kernelOptions }));
+    const built = await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: uniform }, runtime, value);
+    expect(built.exports).toEqual(['glb', 'gltf']);
   });
 });

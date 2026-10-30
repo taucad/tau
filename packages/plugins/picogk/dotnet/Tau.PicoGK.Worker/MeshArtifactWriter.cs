@@ -43,9 +43,8 @@ internal sealed record BuildResult(
     // The display meshing applied to captured Voxels; omitted for the uniform mesh.
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] MeshingOptions? Meshing = null)
 {
-#if PICOGK_BROWSER
+    // Both runtimes report the author's own geometry files, so both offer the same exports.
     public IReadOnlyList<AuthoredFile> AuthoredOutputs { get; init; } = [];
-#endif
 }
 
 // Build-level operation deltas; memory metrics above remain point-in-time snapshots.

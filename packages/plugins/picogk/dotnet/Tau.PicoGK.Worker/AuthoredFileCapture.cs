@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 
 namespace Tau.PicoGK.Worker;
 
-// Browser-only execution uses this collector; native output behavior remains unchanged.
+// Both runtimes use this collector, so the two offer the same authored STL and VDB exports.
 // Receipts own copies, never paths an author can overwrite in a subsequent build.
 internal sealed class AuthoredFileCapture : IDisposable
 {
@@ -58,7 +58,7 @@ internal sealed class AuthoredFileCapture : IDisposable
         {
             var attributes = File.GetAttributes(path);
             if ((attributes & FileAttributes.ReparsePoint) != 0)
-                throw new IOException("Symbolic links are not admitted as authored browser outputs.");
+                throw new IOException("Symbolic links are not admitted as authored outputs.");
             if ((attributes & FileAttributes.Directory) != 0)
             {
                 foreach (var file in GeometryFiles(path)) yield return file;

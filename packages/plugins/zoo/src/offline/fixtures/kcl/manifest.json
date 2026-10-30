@@ -360,7 +360,7 @@
         "area": 144409.80323955856
       },
       "offline": {
-        "solids": 49,
+        "solids": 50,
         "volume": 121950.778,
         "area": 144435.1193
       }
@@ -4775,7 +4775,9 @@
         "area": 200.0000074531272
       },
       "offline": {
-        "gap": "argument: The input argument of `appearance` requires one or more `Solid`s or a value with type `Imp"
+        "solids": 2,
+        "volume": 112.0,
+        "area": 200.0
       }
     },
     {
@@ -6572,7 +6574,7 @@
         "area": 74083.34756934209
       },
       "offline": {
-        "solids": 2,
+        "solids": 4,
         "volume": 365805.1423,
         "area": 73441.37961
       }
@@ -6601,7 +6603,7 @@
         "area": 425.0045553709329
       },
       "offline": {
-        "solids": 2,
+        "solids": 3,
         "volume": 234.605479,
         "area": 425.0070237
       }
@@ -13090,7 +13092,7 @@
         "translate"
       ],
       "offline": {
-        "solids": 1,
+        "solids": 2,
         "volume": 5.6875,
         "area": 25.0
       }

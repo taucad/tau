@@ -34,6 +34,40 @@ export function boolean(
   targets: string[],
   tools: string[],
 ): Record<string, unknown> {
+  if (kind !== 'subtract' || targets.length <= 1) {
+    return combine(engine, id, kind, targets, tools, false);
+  }
+
+  // Zoo cuts each target on its own and answers every resulting body in `extra_solid_ids`, which kcl-lib takes as the
+  // whole output of a multi-target subtract.
+  const ids = targets.map((_, index) => (index === 0 ? id : engine.mint()));
+  for (const [index, targetId] of targets.entries()) {
+    combine(engine, ids[index]!, kind, [targetId], tools, index < targets.length - 1);
+  }
+
+  return { extra_solid_ids: ids };
+}
+
+/**
+ * Runs one boolean into a single result body with id `id`.
+ *
+ * @param engine - offline engine
+ * @param id - id of the result body
+ * @param kind - boolean kind
+ * @param targets - target solid ids
+ * @param tools - tool solid ids
+ * @param keepTools - leave the tools in the scene for the next target of a multi-target subtract
+ * @returns the response
+ */
+// oxlint-disable-next-line max-params -- `boolean`'s operands plus whether the tools stay for the next target
+function combine(
+  engine: OfflineEngine,
+  id: string,
+  kind: 'union' | 'intersection' | 'subtract',
+  targets: string[],
+  tools: string[],
+  keepTools: boolean,
+): Record<string, unknown> {
   const targetSolids = targets.map((targetId) => engine.scene.getSolid(targetId));
   const toolSolids = tools.map((toolId) => engine.scene.getSolid(toolId));
   let args = targetSolids;
@@ -180,7 +214,7 @@ export function boolean(
     metalness: first.metalness,
     roughness: first.roughness,
   };
-  for (const solid of [...targetSolids, ...toolSolids]) {
+  for (const solid of keepTools ? targetSolids : [...targetSolids, ...toolSolids]) {
     engine.scene.remove(solid.id);
     engine.scene.aliases.set(solid.id, id);
   }

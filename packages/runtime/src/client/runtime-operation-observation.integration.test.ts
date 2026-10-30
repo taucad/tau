@@ -1,4 +1,7 @@
 // @vitest-environment node
+import { MessagePort } from 'node:worker_threads';
+import { setFlagsFromString } from 'node:v8';
+import { runInNewContext } from 'node:vm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRuntimeClient } from '#client/runtime-document-client-core.js';
 import { createKernelSuccess } from '#kernels/kernel-helpers.js';
@@ -42,6 +45,8 @@ type Faults = Readonly<{
   export?: Error;
   /** Holds `describe` until it settles, so a test can act while the operation is in flight. */
   describeGate?: () => Promise<void>;
+  /** Sees the resolved parameter values the kernel evaluates with. */
+  onEvaluate?: (parameters: Readonly<Record<string, unknown>>) => void;
 }>;
 
 /** A thrown error that carries kernel issues, as kernels report typed failures. */
@@ -73,7 +78,8 @@ const createClient = (faults: Faults = {}) => {
     },
     ...(faults.heap === undefined ? {} : { observedHeapBytes: () => faults.heap }),
     ...(faults.childResident === undefined ? {} : { observedChildResidentBytes: faults.childResident }),
-    async evaluate() {
+    async evaluate({ parameters: resolved }) {
+      faults.onEvaluate?.(resolved);
       if (faults.evaluate !== undefined) {
         throw faults.evaluate;
       }
@@ -374,6 +380,124 @@ describe('operation observation over the in-process transport', () => {
     } finally {
       await failing.shutdown();
       await throwing.shutdown();
+    }
+  });
+
+  it('should post every terminal reply before any of its facts work', async () => {
+    const posts = vi.spyOn(MessagePort.prototype, 'postMessage');
+    const operationEntries = vi.spyOn(WorkerTelemetryCollector.prototype, 'operationEntries');
+    const client = createClient();
+    const seen: RuntimeOperationObservation[] = [];
+    client.on('operation', (observation) => seen.push(observation));
+    client.observe('facts');
+    try {
+      await runOperations(client);
+      await vi.waitFor(() => {
+        expect(seen.filter(({ facts }) => facts === 'joined').length).toBeGreaterThanOrEqual(5);
+      });
+    } finally {
+      await client.shutdown();
+    }
+
+    type Frame = Readonly<{ k?: string; i?: number; n?: string; a?: Record<string, unknown> }>;
+    type Step = Readonly<{ order: number; kind: 'reply' | 'facts' | 'work'; operationId?: string }>;
+    const frames = posts.mock.contexts.map((port, index) => ({
+      port,
+      frame: (posts.mock.calls[index]?.[0] ?? {}) as Frame,
+      order: posts.mock.invocationCallOrder[index]!,
+    }));
+    // The worker's side of the document channel is the port that posts the facts notifies.
+    const server = frames.find(({ frame }) => frame.n === 'operationFacts')?.port;
+    expect(server).toBeDefined();
+    const requested = new Map(
+      frames
+        .filter(
+          ({ port, frame }) => port !== server && frame.k === 'rq' && typeof frame.a?.['operationId'] === 'string',
+        )
+        .map(({ frame }) => [frame.i, frame.a!['operationId'] as string]),
+    );
+    const steps: Step[] = frames.flatMap(({ port, frame, order }): Step[] => {
+      if (port !== server) {
+        return [];
+      }
+      const args = frame.a ?? {};
+      if (frame.k === 'rs' && requested.has(frame.i)) {
+        return [{ order, kind: 'reply', operationId: requested.get(frame.i) }];
+      }
+      if (frame.k === 'nt' && frame.n === 'evaluated') {
+        return [{ order, kind: 'reply', operationId: `evaluate:${String(args['documentId'])}:${String(args['id'])}` }];
+      }
+      if (frame.k === 'nt' && frame.n === 'rendered') {
+        const id = `render:${String(args['subscriptionId'])}:${String(args['evaluationId'])}:${String(args['requestId'])}`;
+        return [{ order, kind: 'reply', operationId: id }];
+      }
+      if (frame.k === 'nt' && frame.n === 'operationFacts') {
+        return [{ order, kind: 'facts', operationId: String(args['operationId']) }];
+      }
+      return [];
+    });
+    const work = [
+      operationEntries,
+      vi.mocked(operationFacts.heapFacts),
+      vi.mocked(operationFacts.parameterFacts),
+      vi.mocked(operationFacts.workerFactsFromEntries),
+    ].flatMap((spy) => spy.mock.invocationCallOrder.map((order): Step => ({ order, kind: 'work' })));
+    const timeline = [...steps, ...work].toSorted((left, right) => left.order - right.order);
+
+    // Each facts notify closes the facts work begun since the previous one; all of it follows that operation's reply.
+    const notifies = timeline.filter(({ kind }) => kind === 'facts');
+    expect(new Set(notifies.map(({ operationId }) => operationId))).toEqual(
+      new Set(seen.filter(({ facts }) => facts === 'joined').map(({ operationId }) => operationId)),
+    );
+    expect(new Set(seen.map(({ operation }) => operation))).toEqual(
+      new Set(['initialize', 'evaluate', 'render', 'export', 'describe']),
+    );
+    const closing = timeline.flatMap(({ kind }, index) => (kind === 'facts' ? [index] : []));
+    for (const [position, index] of closing.entries()) {
+      const notify = timeline[index]!;
+      const opened = position === 0 ? 0 : closing[position - 1]! + 1;
+      const firstWork = timeline.slice(opened, index).find(({ kind }) => kind === 'work');
+      const reply = timeline.find(({ kind, operationId }) => kind === 'reply' && operationId === notify.operationId);
+      expect(firstWork, notify.operationId).toBeDefined();
+      expect(reply, notify.operationId).toBeDefined();
+      expect(reply!.order, notify.operationId).toBeLessThan(firstWork!.order);
+    }
+  });
+
+  it('should keep no reference to the resolved parameter values past the reply with observation off', async () => {
+    setFlagsFromString('--expose-gc');
+    const collect = runInNewContext('gc') as () => void;
+    let first: WeakRef<Readonly<Record<string, unknown>>> | undefined;
+    const client = createClient({
+      onEvaluate: (resolved) => {
+        first ??= new WeakRef(resolved);
+      },
+    });
+    const seen: RuntimeOperationObservation[] = [];
+    client.on('operation', (observation) => seen.push(observation));
+    const document = client.open({ source, parameters: { width: 12 }, watch: false });
+    try {
+      await document.evaluation();
+      // A new evaluation replaces the document's retained build input, so only an observation path could still hold
+      // the first one.
+      await document.update({ parameters: { width: 14 } });
+      await document.evaluation();
+      await vi.waitFor(() => {
+        expect(byOperation(seen, 'evaluate')).toHaveLength(2);
+      });
+      expect(first).toBeDefined();
+      for (let round = 0; round < 5 && first?.deref() !== undefined; round++) {
+        // oxlint-disable-next-line no-await-in-loop -- each round lets pending releases run before collecting.
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 10);
+        });
+        collect();
+      }
+      expect(first?.deref()).toBeUndefined();
+      expect(seen.every(({ facts }) => facts === 'not-observed')).toBe(true);
+    } finally {
+      document.close();
+      await client.shutdown();
     }
   });
 

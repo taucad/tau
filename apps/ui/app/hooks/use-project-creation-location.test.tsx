@@ -1,3 +1,5 @@
+import { hydrateRoot } from 'react-dom/client';
+import { renderToString } from 'react-dom/server';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectCreationLocationRead, Workspace, WorkspaceConnection } from '#filesystem/handle-store.js';
@@ -147,7 +149,48 @@ describe('useProjectCreationLocation', () => {
     });
   });
 
-  it('is synchronously Home-only and exposes no picker without folder capability', async () => {
+  it('hydrates the server location state without replacing a draft typed before hydration', async () => {
+    function CreationForm() {
+      const location = useProjectCreationLocation();
+      return (
+        <div>
+          <input aria-label='Project name' defaultValue='' />
+          {location.shouldShowPicker ? (
+            <button type='button' disabled={!location.canCreate}>
+              Location
+            </button>
+          ) : null}
+        </div>
+      );
+    }
+    supported = false;
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(<CreationForm />);
+    document.body.append(container);
+    const input = container.querySelector('input');
+    if (!input) {
+      throw new Error('Server form input is missing');
+    }
+    input.value = 'Typed before hydration';
+    supported = true;
+    const onRecoverableError = vi.fn();
+    const root = hydrateRoot(container, <CreationForm />, { onRecoverableError });
+    try {
+      await waitFor(() => {
+        expect(container.querySelector('button')).not.toBeDisabled();
+      });
+      expect(onRecoverableError).not.toHaveBeenCalled();
+      expect(container.querySelector('input')).toBe(input);
+      expect(input.value).toBe('Typed before hydration');
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
+  it('resolves to Home-only and exposes no picker without folder capability', async () => {
     supported = false;
     const { result } = renderHook(() => useProjectCreationLocation());
 

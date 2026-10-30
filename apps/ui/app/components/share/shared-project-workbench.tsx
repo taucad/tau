@@ -13,6 +13,8 @@ import { WebglContextTrackerProvider } from '@taucad/viewer/hooks/use-webgl-cont
 import { PublicationTopbar } from '#components/share/publication-topbar.js';
 import { ephemeralKernelOptions, ephemeralPreviewStage } from '#constants/ephemeral-kernel-options.js';
 import type { ParsedPublication } from '#components/share/parsed-publication.js';
+import { useViewPing } from '#components/share/use-view-ping.js';
+import { ENV } from '#environment.config.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 
 type SharedProjectFiles = Record<string, { content: Uint8Array<ArrayBuffer> }>;
@@ -170,6 +172,14 @@ const SharedProjectTopbar = ({
   );
 };
 
+const SharedProjectViewPing = ({ publication }: { readonly publication: ParsedPublication }): undefined => {
+  const parameterActor = useParameterSetActor(publication.entryPath);
+  const entry = useSelector(parameterActor, (state) => state?.context.current?.entry);
+  const parameters = useMemo(() => (entry ? getActiveGroupValues(entry) : undefined), [entry]);
+  useViewPing({ publicationId: publication.id, apiBaseUrl: ENV.TAU_API_URL, parameters });
+  return undefined;
+};
+
 const SharedProjectLayout = ({
   publication,
   files,
@@ -209,6 +219,7 @@ const SharedProjectLayout = ({
 };
 
 export const SharedProjectWorkbench = ({
+  shouldTrackView = false,
   projectId,
   publication,
   hydratedFiles,
@@ -217,6 +228,7 @@ export const SharedProjectWorkbench = ({
   sourceLabel,
   managementActions,
 }: {
+  readonly shouldTrackView?: boolean;
   readonly projectId: string;
   readonly publication: ParsedPublication;
   readonly hydratedFiles: SharedProjectFiles;
@@ -260,6 +272,7 @@ export const SharedProjectWorkbench = ({
             kernelOptionsFactory={ephemeralKernelOptions}
             input={projectInput}
           >
+            {shouldTrackView ? <SharedProjectViewPing publication={publication} /> : null}
             <EditorDocumentSessionProvider>
               <SharedProjectLayout
                 publication={publication}

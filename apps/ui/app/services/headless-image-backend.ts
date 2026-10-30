@@ -1,5 +1,4 @@
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { renderSvgPng, renderSvgWebp } from '@taucad/image/svg';
 import { gpuAdapterIdentity, isSoftwareGpuAdapter } from '@taucad/viewer/graphics/graphics-backend';
 import type { GpuAdapterIdentity } from '@taucad/viewer/graphics/graphics-backend';
 import type { imageRuntime } from '#runtime/image-runtime.definition.js';
@@ -38,8 +37,10 @@ const hasGpuAdapter = async (): Promise<boolean> => {
 export const headlessImageBackend: HeadlessImageBackend = {
   isGpuAvailable: hasGpuAdapter,
   isAutomaticGpuAvailable: automaticAdapterAvailable,
-  renderSvg: async (content, format, options) =>
-    format === 'webp' ? renderSvgWebp(content, options) : renderSvgPng(content, options),
+  renderSvg: async (content, format, options) => {
+    const { renderSvgPng, renderSvgWebp } = await import('@taucad/image/svg');
+    return format === 'webp' ? renderSvgWebp(content, options) : renderSvgPng(content, options);
+  },
   async createImageClient() {
     const [{ createRuntimeClient }, { webWorkerTransport }, { observeRuntimeClient }] = await Promise.all([
       import('@taucad/runtime/client'),

@@ -14597,6 +14597,150 @@
       }
     },
     {
+      "path": "tau/bearing-boss-plate",
+      "functions": ["circle", "extrude", "rectangle", "startSketchOn"],
+      "offline": {
+        "solids": 1,
+        "volume": 47865.76261,
+        "area": 13018.24095
+      }
+    },
+    {
+      "path": "tau/bottle",
+      "functions": ["circle", "close", "extrude", "shell", "startProfile", "startSketchOn", "tangentialArc", "xLine"],
+      "offline": {
+        "solids": 1,
+        "volume": 64399.58551,
+        "area": 64567.13712
+      }
+    },
+    {
+      "path": "tau/cable-clip",
+      "functions": [
+        "circle",
+        "close",
+        "extrude",
+        "startProfile",
+        "startSketchOn",
+        "subtract",
+        "subtract2d",
+        "union",
+        "xLine",
+        "yLine"
+      ],
+      "offline": {
+        "solids": 1,
+        "volume": 578.571962,
+        "area": 894.2278167
+      }
+    },
+    {
+      "path": "tau/compression-spring",
+      "functions": ["circle", "helix", "startSketchOn", "sweep"],
+      "offline": {
+        "solids": 1,
+        "volume": 532.9582652,
+        "area": 1428.279
+      }
+    },
+    {
+      "path": "tau/countersunk-plate",
+      "functions": ["blind", "countersink", "extrude", "flat", "holes", "rectangle", "startSketchOn"],
+      "offline": {
+        "solids": 1,
+        "volume": 35479.72398,
+        "area": 14087.25552
+      }
+    },
+    {
+      "path": "tau/dovetail-rail",
+      "functions": [
+        "circle",
+        "extrude",
+        "line",
+        "mirror2d",
+        "offsetPlane",
+        "startProfile",
+        "startSketchOn",
+        "subtract",
+        "xLine",
+        "yLine"
+      ],
+      "offline": {
+        "gap": "internal: Expected a sweep ID on the path when processing Solid3dGetExtrusionFaceInfo command, but w"
+      }
+    },
+    {
+      "path": "tau/drawer-handle",
+      "functions": [
+        "circle",
+        "extrude",
+        "offsetPlane",
+        "startProfile",
+        "startSketchOn",
+        "subtract",
+        "sweep",
+        "tangentialArc",
+        "xLine",
+        "yLine"
+      ],
+      "offline": {
+        "solids": 1,
+        "volume": 13920.2342,
+        "area": 6000.942315
+      }
+    },
+    {
+      "path": "tau/electronics-enclosure",
+      "functions": [
+        "circle",
+        "extrude",
+        "map",
+        "offsetPlane",
+        "rectangle",
+        "shell",
+        "startSketchOn",
+        "subtract2d",
+        "translate",
+        "union"
+      ],
+      "offline": {
+        "solids": 2,
+        "volume": 31563.01401,
+        "area": 32939.5007
+      }
+    },
+    {
+      "path": "tau/heatsink",
+      "functions": ["concat", "extrude", "offsetPlane", "patternLinear3d", "rectangle", "startSketchOn", "union"],
+      "offline": {
+        "solids": 1,
+        "volume": 11280.0,
+        "area": 14804.0
+      }
+    },
+    {
+      "path": "tau/hinge-leaf",
+      "functions": [
+        "circle",
+        "close",
+        "extrude",
+        "offsetPlane",
+        "patternLinear3d",
+        "startProfile",
+        "startSketchOn",
+        "subtract",
+        "union",
+        "xLine",
+        "yLine"
+      ],
+      "offline": {
+        "solids": 1,
+        "volume": 3458.813935,
+        "area": 3041.341045
+      }
+    },
+    {
       "path": "tau/holes-linear",
       "functions": [
         "blind",
@@ -14612,6 +14756,29 @@
       ],
       "offline": {
         "gap": "argument: axis requires a value with type `Axis3d` or a value with type `Point3d` (`Axis3d | Point3d"
+      }
+    },
+    {
+      "path": "tau/knurled-knob",
+      "functions": [
+        "arc",
+        "chamfer",
+        "circle",
+        "close",
+        "extrude",
+        "getOppositeEdge",
+        "offsetPlane",
+        "patternCircular3d",
+        "sqrt",
+        "startProfile",
+        "startSketchOn",
+        "subtract",
+        "xLine"
+      ],
+      "offline": {
+        "solids": 1,
+        "volume": 11470.55234,
+        "area": 3721.823946
       }
     },
     {
@@ -14635,6 +14802,246 @@
         "solids": 1,
         "volume": 12000.0,
         "area": 4000.0
+      }
+    },
+    {
+      "path": "tau/lofted-vase",
+      "functions": ["circle", "loft", "offsetPlane", "shell", "startSketchOn"],
+      "offline": {
+        "solids": 1,
+        "volume": 119623.9002,
+        "area": 96200.40594
+      }
+    },
+    {
+      "path": "tau/machined-block",
+      "functions": [
+        "chamfer",
+        "close",
+        "extrude",
+        "fillet",
+        "getNextAdjacentEdge",
+        "getOppositeEdge",
+        "startProfile",
+        "startSketchOn",
+        "xLine",
+        "yLine"
+      ],
+      "offline": {
+        "gap": "engine: command Solid3dCutEdges resulted in errors: Unknown edge <id>"
+      }
+    },
+    {
+      "path": "tau/mounting-bracket",
+      "functions": [
+        "circle",
+        "close",
+        "extrude",
+        "fillet",
+        "getCommonEdge",
+        "offsetPlane",
+        "startProfile",
+        "startSketchOn",
+        "subtract",
+        "xLine",
+        "yLine"
+      ],
+      "offline": {
+        "gap": "engine: command Solid3dCutEdges resulted in errors: Unknown edge <id>"
+      }
+    },
+    {
+      "path": "tau/pcb-standoff-assembly",
+      "functions": [
+        "circle",
+        "extrude",
+        "map",
+        "polygon",
+        "rectangle",
+        "sqrt",
+        "startSketchOn",
+        "subtract2d",
+        "translate"
+      ],
+      "offline": {
+        "solids": 5,
+        "volume": 21755.03147,
+        "area": 16322.8672
+      }
+    },
+    {
+      "path": "tau/phone-stand",
+      "functions": [
+        "close",
+        "cos",
+        "extrude",
+        "line",
+        "sin",
+        "startProfile",
+        "startSketchOn",
+        "subtract",
+        "xLine",
+        "yLine"
+      ],
+      "offline": {
+        "solids": 1,
+        "volume": 49242.86771,
+        "area": 26625.02712
+      }
+    },
+    {
+      "path": "tau/pipe-elbow",
+      "functions": [
+        "circle",
+        "startProfile",
+        "startSketchOn",
+        "subtract2d",
+        "sweep",
+        "tangentialArc",
+        "xLine",
+        "yLine"
+      ],
+      "offline": {
+        "solids": 1,
+        "volume": 44394.03826,
+        "area": 26755.02506
+      }
+    },
+    {
+      "path": "tau/pipe-flange",
+      "functions": ["circle", "extrude", "patternCircular2d", "startSketchOn", "subtract2d"],
+      "offline": {
+        "solids": 1,
+        "volume": 355229.3061,
+        "area": 57428.31371
+      }
+    },
+    {
+      "path": "tau/pipe-tee",
+      "functions": ["circle", "extrude", "startSketchOn", "subtract", "union"],
+      "offline": {
+        "solids": 1,
+        "volume": 22820.38717,
+        "area": 15839.90113
+      }
+    },
+    {
+      "path": "tau/sheet-metal-z-bracket",
+      "functions": [
+        "circle",
+        "close",
+        "extrude",
+        "offsetPlane",
+        "startProfile",
+        "startSketchOn",
+        "subtract",
+        "tangentialArc",
+        "xLine",
+        "yLine"
+      ],
+      "offline": {
+        "solids": 1,
+        "volume": 3492.699082,
+        "area": 3941.230047
+      }
+    },
+    {
+      "path": "tau/spur-gear",
+      "functions": [
+        "arc",
+        "close",
+        "extrude",
+        "offsetPlane",
+        "spur",
+        "sqrt",
+        "startProfile",
+        "startSketchOn",
+        "subtract",
+        "xLine"
+      ],
+      "offline": {
+        "solids": 1,
+        "volume": 17686.63,
+        "area": 6503.680492
+      }
+    },
+    {
+      "path": "tau/standoffs",
+      "functions": ["circle", "extrude", "polygon", "sqrt", "startSketchOn", "subtract2d"],
+      "offline": {
+        "solids": 2,
+        "volume": 314.0445829,
+        "area": 496.6194405
+      }
+    },
+    {
+      "path": "tau/storage-bin",
+      "functions": [
+        "close",
+        "extrude",
+        "fillet",
+        "getNextAdjacentEdge",
+        "shell",
+        "startProfile",
+        "startSketchOn",
+        "xLine",
+        "yLine"
+      ],
+      "offline": {
+        "solids": 1,
+        "volume": 77688.46718,
+        "area": 63107.85338
+      }
+    },
+    {
+      "path": "tau/threaded-bolt",
+      "functions": [
+        "circle",
+        "close",
+        "extrude",
+        "helix",
+        "line",
+        "offsetPlane",
+        "polygon",
+        "sqrt",
+        "startProfile",
+        "startSketchOn",
+        "sweep",
+        "union"
+      ],
+      "offline": {
+        "solids": 1,
+        "volume": 3310.588848,
+        "area": 2005.935294
+      }
+    },
+    {
+      "path": "tau/v-belt-pulley",
+      "functions": ["close", "line", "revolve", "startProfile", "startSketchOn", "tan", "xLine", "yLine"],
+      "offline": {
+        "solids": 1,
+        "volume": 79024.58302,
+        "area": 19229.67556
+      }
+    },
+    {
+      "path": "tau/wall-hook",
+      "functions": [
+        "circle",
+        "close",
+        "extrude",
+        "map",
+        "startProfile",
+        "startSketchOn",
+        "subtract",
+        "tangentialArc",
+        "xLine",
+        "yLine"
+      ],
+      "offline": {
+        "solids": 1,
+        "volume": 11120.42579,
+        "area": 5565.524281
       }
     }
   ]

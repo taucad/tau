@@ -1,0 +1,9 @@
+// Hex standoff with a through tap hole, standing on the XY plane at the origin.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+export fn standoff(height, acrossFlats, holeDiameter) {
+  return startSketchOn(XY)
+    |> polygon(radius = acrossFlats / sqrt(3), numSides = 6, center = [0, 0], inscribed = true)
+    |> subtract2d(tool = circle(startSketchOn(XY), center = [0, 0], diameter = holeDiameter))
+    |> extrude(length = height)
+}

@@ -1,0 +1,47 @@
+// Knob for a 6 mm D-shaft potentiometer, with 24 grip grooves and a chamfered top.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+// Parameters
+knobDiameter = 30
+knobHeight = 18
+grooveCount = 24
+grooveRadius = 1.2
+topChamfer = 1
+shaftDiameter = 6
+shaftFlat = 4.5
+shaftDepth = 12
+
+knobRadius = knobDiameter / 2
+
+// Body, with the outline tagged so the top edge can be chamfered.
+body = startSketchOn(XY)
+  |> circle(center = [0, 0], radius = knobRadius, tag = $outline)
+  |> extrude(length = knobHeight)
+chamfered = chamfer(body, length = topChamfer, tags = [getOppositeEdge(outline)])
+
+// One groove on +X, patterned around the axis.
+groove = startSketchOn(offsetPlane(XY, offset = -1))
+  |> circle(center = [knobRadius, 0], radius = grooveRadius)
+  |> extrude(length = knobHeight + 2)
+grooves = patternCircular3d(
+  groove,
+  instances = grooveCount,
+  axis = Z,
+  center = [0, 0, 0],
+  arcDegrees = 360deg,
+  rotateDuplicates = true,
+)
+
+// D-shaped shaft bore from the bottom.
+shaftRadius = shaftDiameter / 2
+flatOffset = shaftFlat - shaftRadius
+flatHalfChord = sqrt(shaftRadius * shaftRadius - flatOffset * flatOffset)
+bore = startSketchOn(offsetPlane(XY, offset = -1))
+  |> startProfile(at = [-flatHalfChord, flatOffset])
+  |> xLine(length = 2 * flatHalfChord)
+  |> arc(interiorAbsolute = [0, -shaftRadius], endAbsolute = [-flatHalfChord, flatOffset])
+  |> close()
+  |> extrude(length = shaftDepth + 1)
+
+gripped = subtract([chamfered], tools = grooves)
+knob = subtract([gripped], tools = [bore])

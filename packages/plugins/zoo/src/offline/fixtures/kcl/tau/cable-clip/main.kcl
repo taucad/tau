@@ -1,0 +1,40 @@
+// Screw-down clip for a 6 mm cable: a loop on a flat tab with a screw hole each side.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+// Parameters
+cableDiameter = 6.2
+wall = 1.6
+tabLength = 28
+clipWidth = 8
+screwDiameter = 3.5
+screwOffset = 10
+
+loopInnerRadius = cableDiameter / 2
+loopOuterRadius = loopInnerRadius + wall
+loopCentreY = loopOuterRadius
+
+// Flat tab lying on the mounting face (y = 0).
+tab = startSketchOn(XY)
+  |> startProfile(at = [-tabLength / 2, 0])
+  |> xLine(length = tabLength)
+  |> yLine(length = wall)
+  |> xLine(length = -tabLength)
+  |> close()
+  |> extrude(length = clipWidth)
+
+// Loop around the cable, standing on the tab.
+cableLoop = startSketchOn(XY)
+  |> circle(center = [0, loopCentreY], radius = loopOuterRadius)
+  |> subtract2d(tool = circle(startSketchOn(XY), center = [0, loopCentreY], radius = loopInnerRadius))
+  |> extrude(length = clipWidth)
+
+clipBody = union([tab, cableLoop])
+
+// Screw holes through the tab, along Y, through the middle of the clip's width.
+fn screwHole(@x) {
+  return startSketchOn(XZ)
+    |> circle(center = [x, clipWidth / 2], diameter = screwDiameter)
+    |> extrude(length = 4 * wall, symmetric = true)
+}
+
+clip = subtract([clipBody], tools = [screwHole(-screwOffset), screwHole(screwOffset)])

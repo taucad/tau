@@ -1,0 +1,43 @@
+// Z bracket bent from 2 mm sheet, with a hole in each flange.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+// Parameters
+thickness = 2
+bendRadius = 2
+flangeLength = 20
+overallHeight = 30
+bracketWidth = 25
+holeDiameter = 5
+
+outerRadius = bendRadius + thickness
+webStraight = overallHeight - 2 * outerRadius
+
+// Profile on XZ, traced around the sheet: under the bottom flange, up the outside of the web,
+// along the top flange and back.
+profile = startSketchOn(XZ)
+  |> startProfile(at = [-flangeLength, 0])
+  |> xLine(length = flangeLength)
+  |> tangentialArc(radius = outerRadius, angle = 90deg)
+  |> yLine(length = webStraight)
+  |> tangentialArc(radius = bendRadius, angle = -90deg)
+  |> xLine(length = flangeLength)
+  |> yLine(length = thickness)
+  |> xLine(length = -flangeLength)
+  |> tangentialArc(radius = outerRadius, angle = 90deg)
+  |> yLine(length = -webStraight)
+  |> tangentialArc(radius = bendRadius, angle = -90deg)
+  |> xLine(length = -flangeLength)
+  |> close()
+
+bent = extrude(profile, length = bracketWidth, symmetric = true)
+
+// A hole in the middle of each flat flange.
+bottomHoleX = -flangeLength / 2
+topHoleX = outerRadius + bendRadius + flangeLength / 2
+fn flangeHole(@x) {
+  return startSketchOn(offsetPlane(XY, offset = -1))
+    |> circle(center = [x, 0], diameter = holeDiameter)
+    |> extrude(length = overallHeight + 2)
+}
+
+zBracket = subtract([bent], tools = [flangeHole(bottomHoleX), flangeHole(topHoleX)])

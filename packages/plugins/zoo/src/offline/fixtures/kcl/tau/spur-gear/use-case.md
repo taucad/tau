@@ -16,8 +16,8 @@ D bore Ø8 with the flat at 3.5 mm from the axis.
 
 ## Offline result
 
-1 solid, volume 17 686.63 mm³, area 6 503.68 mm².
+1 solid, volume 17 902.97 mm³, area 6 531.64 mm² (after the offline engine's involute was corrected to start on the base circle).
 
-Against the rough estimate (17 605): +0.5 %; not held to 1 %.
+Against the rough estimate (17 605): +1.7 %; not held to 1 %.
 
 No Zoo oracle: `ZOO_API_TOKEN` was not set when the fixture was recorded.

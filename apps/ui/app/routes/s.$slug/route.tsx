@@ -216,6 +216,7 @@ export const PortableShareSurface = (): React.JSX.Element => {
         setSourceUrl(globalThis.location.href);
         const parsed = parseShareUrl({ slug, fragment: location.hash });
         const provider = await shareProviderRegistry.load(parsed.locator.providerId);
+        controller.signal.throwIfAborted();
         const providerResolve = provider.resolve;
         if (!providerResolve) {
           throw new ShareError('SHARE_PROVIDER_UNAVAILABLE', 'This sharing method cannot resolve projects.');

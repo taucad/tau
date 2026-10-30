@@ -10,6 +10,8 @@ declare const tauBuildRelease: string;
 /** The C# language server bundle `csharp-language:prepare` staged; `null` only in test runs, which carry none. */
 // oxlint-disable-next-line typescript/no-restricted-types -- JSON defines spell absence as null.
 declare const tauCsharpLanguageAssets: Readonly<{ url: string; sha256: string }> | null;
+/** The staged OpenSCAD language server's manifest URL and identity; `undefined` when the build had no stage. */
+declare const tauOpenscadLanguageAssets: Readonly<{ url: string; sha256: string }> | undefined;
 
 /*
  * Declaration merging into `vite/client`'s own `ImportMetaEnv` only works with

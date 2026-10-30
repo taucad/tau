@@ -1,0 +1,9 @@
+s = sketch(on = XY) {
+  line1 = line(start = [var -5mm, var 0mm], end = [var 5mm, var 0mm])
+  arc1 = arc(start = [var 5mm, var 0mm], end = [var -5mm, var 0mm], center = [var 0mm, var 6mm])
+  coincident([line1.end, arc1.start])
+  coincident([line1.start, arc1.end])
+}
+
+r = region(segments = [s.line1, s.arc1])
+extrude(r, length = 2)

@@ -1,0 +1,4 @@
+point001 = ellipticPoint(x = 2, majorRadius = 2, minorRadius = 1)
+point002 = ellipticPoint(y = 0, majorRadius = 2, minorRadius = 1)
+assert(point001[0], isEqualTo = point002[0])
+assert(point001[1], isEqualTo = point002[1])

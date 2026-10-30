@@ -1,0 +1,13 @@
+sketch001 = startSketchOn(-XY)
+profile001 = startProfile(sketch001, at = [-2, 3])
+  |> arc(interiorAbsolute = [0, 5], endAbsolute = [2, 3])
+
+sketch002 = startSketchOn(XZ)
+profile002 = startProfile(sketch002, at = [2, 0])
+  |> arc(interiorAbsolute = [0, -2], endAbsolute = [-2, 0])
+
+sketch003 = startSketchOn(XY)
+profile003 = startProfile(sketch003, at = [2, -3])
+  |> arc(interiorAbsolute = [0, -5], endAbsolute = [-2, -3])
+
+loft([profile001, profile002, profile003], bodyType = SURFACE)

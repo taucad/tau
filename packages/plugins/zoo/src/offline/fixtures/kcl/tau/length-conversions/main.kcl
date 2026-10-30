@@ -1,0 +1,18 @@
+// Covers the length conversions, which no Zoo fixture calls.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+assert(units::toMillimeters(2cm), isEqualTo = 20)
+assert(units::toCentimeters(30mm), isEqualTo = 3)
+assert(units::toMeters(1500mm), isEqualTo = 1.5)
+assert(units::toInches(25.4mm), isEqualTo = 1, tolerance = 0.000001)
+assert(units::toFeet(12in), isEqualTo = 1, tolerance = 0.000001)
+assert(units::toYards(3ft), isEqualTo = 1, tolerance = 0.000001)
+
+// A plate as thick as a centimetre, so the conversions reach the geometry.
+plate = startSketchOn(XY)
+  |> startProfile(at = [0, 0])
+  |> xLine(length = 60)
+  |> yLine(length = 20)
+  |> xLine(length = -60)
+  |> close()
+  |> extrude(length = units::toMillimeters(1cm))

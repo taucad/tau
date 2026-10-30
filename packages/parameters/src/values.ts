@@ -168,7 +168,8 @@ export const valueAtPointer = (root: Readonly<Record<string, JSONValue>>, pointe
   return current;
 };
 
-const setPointer = (
+/** Set one pointer in a copy of `root`, creating the objects on its way. @internal */
+export const setPointer = (
   root: Readonly<Record<string, JSONValue>>,
   pointer: string,
   value: JSONValue,
@@ -629,6 +630,87 @@ const withoutEmptyClaims = (group: ParameterGroup): ParameterGroup => ({
 const sameValues = (left: Readonly<Record<string, JSONValue>>, right: Readonly<Record<string, JSONValue>>): boolean =>
   canonicalizeCacheValue({ value: left as CacheValue }) === canonicalizeCacheValue({ value: right as CacheValue });
 
+/** Whether two parameter values are the same JSON value. @internal */
+export const sameValue = (left: JSONValue | undefined, right: JSONValue | undefined): boolean =>
+  left === undefined || right === undefined
+    ? left === right
+    : canonicalizeCacheValue({ value: left as CacheValue }) === canonicalizeCacheValue({ value: right as CacheValue });
+
+const isValueObject = (value: JSONValue | undefined): value is Readonly<Record<string, JSONValue>> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * The fields `next` changes from `base`, by pointer: objects compare field by field, and an array or a
+ * scalar is one field, as {@link mergeGroupValues} writes them.
+ * @internal
+ */
+export const changedFieldPointers = (
+  base: Readonly<Record<string, JSONValue>>,
+  next: Readonly<Record<string, JSONValue>>,
+  pointer = '',
+): string[] =>
+  [...new Set([...Object.keys(base), ...Object.keys(next)])].flatMap((key) => {
+    const [from, to] = [base[key], next[key]];
+    if (sameValue(from, to)) {
+      return [];
+    }
+    const fieldPointer = `${pointer}/${escapePointer(key)}`;
+    return (isValueObject(from) || from === undefined) && (isValueObject(to) || to === undefined)
+      ? changedFieldPointers(from ?? {}, to ?? {}, fieldPointer)
+      : [fieldPointer];
+  });
+
+/**
+ * Write into `current` only the fields `next` changed from `base`, the values an editor was working
+ * from. Objects merge field by field; an array or a scalar is one field. An absent field reads as its
+ * default, and a field the editor changed that another writer also moved since `base` is a conflict.
+ */
+const mergeGroupValues = (
+  input: Readonly<{
+    current: Readonly<Record<string, JSONValue>>;
+    base: Readonly<Record<string, JSONValue>>;
+    next: Readonly<Record<string, JSONValue>>;
+    defaults: Readonly<Record<string, JSONValue>>;
+    pointer?: string;
+  }>,
+): Record<string, JSONValue> => {
+  const { current, base, next, defaults, pointer = '' } = input;
+  const merged: Record<string, JSONValue> = { ...current };
+  for (const key of new Set([...Object.keys(base), ...Object.keys(next)])) {
+    const [from, to, held] = [base[key], next[key], current[key]];
+    if (sameValue(from, to)) {
+      continue;
+    }
+    const fieldPointer = `${pointer}/${escapePointer(key)}`;
+    if ((isValueObject(from) || from === undefined) && (isValueObject(to) || to === undefined)) {
+      const nested = mergeGroupValues({
+        current: isValueObject(held) ? held : {},
+        base: from ?? {},
+        next: to ?? {},
+        defaults,
+        pointer: fieldPointer,
+      });
+      if (Object.keys(nested).length === 0) {
+        Reflect.deleteProperty(merged, key);
+      } else {
+        merged[key] = nested;
+      }
+      continue;
+    }
+    const fallback = valueAtPointer(defaults, fieldPointer);
+    const [was, now] = [held ?? fallback, from ?? fallback];
+    if (!sameValue(was, now) && !sameValue(was, to ?? fallback)) {
+      throw failure('STALE_MANIFEST', 'The field changed since this edit began.');
+    }
+    if (to === undefined) {
+      Reflect.deleteProperty(merged, key);
+    } else {
+      merged[key] = to;
+    }
+  }
+  return merged;
+};
+
 /** Compute a record transition from one admitted semantic snapshot. @internal */
 export const planParameterRecord = (
   input: Readonly<{ current: ParameterSnapshot; request: ParameterSetRequest }>,
@@ -686,7 +768,15 @@ export const planParameterRecord = (
       }
       case 'replace-group-values': {
         const group = entry.groups[operation.group]!;
-        const values = structuredClone(operation.values);
+        const values =
+          operation.base === undefined
+            ? structuredClone(operation.values)
+            : mergeGroupValues({
+                current: group.values,
+                base: operation.base,
+                next: operation.values,
+                defaults: manifest.defaults as Readonly<Record<string, JSONValue>>,
+              });
         // Authored units survive a value replacement: they say what the numbers mean.
         const next = withoutEmptyClaims({ ...group, values });
         admitGroupValues(manifest, next, values);

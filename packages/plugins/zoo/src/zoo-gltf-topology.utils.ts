@@ -1,4 +1,4 @@
-import { WebIO } from '@gltf-transform/core';
+import { Primitive, WebIO } from '@gltf-transform/core';
 import type { Document, JSONDocument, Mesh as GltfTransformMesh } from '@gltf-transform/core';
 
 import { embedGltfResources, registerTauGltfExtensions, TauCadTopology } from '@taucad/geometry-core';
@@ -444,7 +444,13 @@ export async function enrichZooGltfTopology(
     }
   }
 
-  const meshPrimitiveCounts = root.listMeshes().map((mesh: GltfTransformMesh) => mesh.listPrimitives().length);
+  // Faces bind to surface primitives only: an edge overlay (`LINES`, appended after the faces) has no B-rep face.
+  const meshPrimitiveCounts = root
+    .listMeshes()
+    .map(
+      (mesh: GltfTransformMesh) =>
+        mesh.listPrimitives().filter((primitive) => primitive.getMode() === Primitive.Mode['TRIANGLES']).length,
+    );
   const topology = buildTopologyPayload({ payload: brepPayload, meshPrimitiveCounts, solidNodesBySolidIndex });
   if (!topology) {
     return bytes;

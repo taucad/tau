@@ -105,6 +105,8 @@ let shellVersion = '';
 let ready = false;
 
 const launchOf = (command: string, overrides: Partial<ShellLaunch> = {}): ShellLaunch => ({
+  /* Prepared in `start`; a launch refused at admission never reaches custody. */
+  executionId: '',
   executablePath: shell.path,
   arguments: shellCommandArguments('bash', command),
   workingDirectory: work,
@@ -118,7 +120,9 @@ const launchOf = (command: string, overrides: Partial<ShellLaunch> = {}): ShellL
 });
 
 const start = async (launch: ShellLaunch): Promise<ShellProcess> => {
-  const outcome = await provider.launch(launch);
+  const privateRoot = mkdtempSync(join(tmpdir(), 'tau-shell-'));
+  const { executionId } = await provider.prepare({ privateRoot, resource: undefined });
+  const outcome = await provider.launch({ ...launch, executionId });
   if (outcome.status !== 'started') {
     throw new Error(`the provider did not start the launch: ${JSON.stringify(outcome)}`);
   }

@@ -1,0 +1,14 @@
+@settings(kclVersion = 1.0)
+fn box(h, l, w) {
+  myBox = startSketchOn(XY)
+    |> startProfile(at = [0, 0])
+    |> line(end = [0, l])
+    |> line(end = [w, 0])
+    |> line(end = [0, -l])
+    |> close(%)
+    |> extrude(length = h)
+
+  return myBox
+}
+
+fnBox = box(h = 3, l = 6, w = 10)

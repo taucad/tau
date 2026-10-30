@@ -1,0 +1,28 @@
+// Sketch on the end of an extruded face by tagging the end face.
+
+exampleSketch = startSketchOn(XY)
+  |> startProfile(at = [0, 0])
+  |> line(end = [10, 0])
+  |> line(end = [0, 10])
+  |> line(end = [-10, 0])
+  |> close()
+
+example = extrude(exampleSketch, length = 5, tagEnd = $end01)
+
+exampleSketch002 = startSketchOn(example, face = end01)
+  |> startProfile(at = [1, 1])
+  |> line(end = [8, 0])
+  |> line(end = [0, 8])
+  |> line(end = [-8, 0])
+  |> close()
+
+example002 = extrude(exampleSketch002, length = 5, tagEnd = $end02)
+
+exampleSketch003 = startSketchOn(example002, face = end02)
+  |> startProfile(at = [2, 2])
+  |> line(end = [6, 0])
+  |> line(end = [0, 6])
+  |> line(end = [-6, 0])
+  |> close()
+
+example003 = extrude(exampleSketch003, length = 5)

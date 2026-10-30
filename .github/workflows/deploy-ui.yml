@@ -6,7 +6,7 @@
 # `apps/ui/netlify.toml` and the site's environment variables as a Netlify Git
 # build did, and publishes the result.
 #
-#   - staging (taucad.dev): `ci.yml` → `deploy-ui-staging` on a push to `main`
+#   - staging (taucad.dev): `staging.yml` → `deploy-ui-staging` on a push to `main`
 #     that affects the UI since its last staging deploy. It publishes to the
 #     site's `staging` alias, which costs no Netlify credits, and
 #     `netlify-staging-router` serves taucad.dev from that alias.

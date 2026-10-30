@@ -28,6 +28,8 @@ import { createCsharpLanguageAssets } from './csharp-language-assets.vite-plugin
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
 import { createGeoSpecMtAssets } from './geospec-mt-assets.vite-plugin.js';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
+import { createOpenscadLanguageAssets } from './openscad-language-assets.vite-plugin.js';
+// oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
 import { createAssetIntegrity } from './asset-integrity.vite-plugin.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -442,6 +444,7 @@ const createReleaseManifestPlugin = (release: string): Plugin => ({
 
 export default defineConfig(({ command, mode }) => {
   const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
+  const openscadLanguage = createOpenscadLanguageAssets(path.resolve(__dirname, '../../out/openscad-language/stage'));
   const isTest = mode === 'test';
   const csharpAssets = createCsharpLanguageAssets(
     isTest ? undefined : path.resolve(__dirname, '../../out/csharp-language/stage'),
@@ -535,6 +538,7 @@ export default defineConfig(({ command, mode }) => {
     plugins: [
       mtAssets.plugin,
       csharpAssets.plugin,
+      openscadLanguage.plugin,
       createUiSourceAliasPlugin({
         emitModuleGraph: true,
         tauCloudEnabled,

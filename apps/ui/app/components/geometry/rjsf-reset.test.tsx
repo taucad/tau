@@ -69,7 +69,7 @@ describe.each(['parameters', 'export'] as const)('%s rendered field reset', (own
     fireEvent.click(screen.getByRole('button', { name: 'Reset Point 2' }));
 
     await waitFor(() => {
-      expect(onChange).toHaveBeenLastCalledWith({ point: [9, 2, 7] });
+      expect(onChange.mock.lastCall?.[0]).toEqual({ point: [9, 2, 7] });
     });
     expect(value).toEqual({ point: [9, 8, 7] });
   });
@@ -84,7 +84,7 @@ describe.each(['parameters', 'export'] as const)('%s rendered field reset', (own
     fireEvent.click(screen.getByRole('button', { name: 'Reset Items 1' }));
 
     await waitFor(() => {
-      expect(onChange).toHaveBeenLastCalledWith({ items: [1, 8] });
+      expect(onChange.mock.lastCall?.[0]).toEqual({ items: [1, 8] });
     });
   });
 
@@ -106,7 +106,7 @@ describe.each(['parameters', 'export'] as const)('%s rendered field reset', (own
     fireEvent.click(screen.getByRole('button', { name: 'Reset Depth' }));
 
     await waitFor(() => {
-      expect(onChange).toHaveBeenLastCalledWith({ rows: [{ depth: 1, enabled: false }] });
+      expect(onChange.mock.lastCall?.[0]).toEqual({ rows: [{ depth: 1, enabled: false }] });
     });
   });
 
@@ -145,7 +145,7 @@ describe.each(['parameters', 'export'] as const)('%s rendered field reset', (own
     fireEvent.click(screen.getByRole('button', { name: 'Reset Depth' }));
 
     await waitFor(() => {
-      expect(onChange).toHaveBeenLastCalledWith({ rows: [{ mode: 'first', depth: 1, enabled: false }] });
+      expect(onChange.mock.lastCall?.[0]).toEqual({ rows: [{ mode: 'first', depth: 1, enabled: false }] });
     });
   });
 
@@ -162,7 +162,7 @@ describe.each(['parameters', 'export'] as const)('%s rendered field reset', (own
     fireEvent.click(screen.getByRole('button', { name: 'Reset Amount' }));
 
     await waitFor(() => {
-      expect(onChange).toHaveBeenLastCalledWith({ enabled: true });
+      expect(onChange.mock.lastCall?.[0]).toEqual({ enabled: true });
     });
   });
 
@@ -191,7 +191,7 @@ describe.each(['parameters', 'export'] as const)('%s rendered field reset', (own
     fireEvent.click(screen.getByRole('button', { name: 'Reset Point 1' }));
 
     await waitFor(() => {
-      expect(onChange).toHaveBeenLastCalledWith({ point: [null, null] });
+      expect(onChange.mock.lastCall?.[0]).toEqual({ point: [null, null] });
     });
   });
 
@@ -205,7 +205,7 @@ describe.each(['parameters', 'export'] as const)('%s rendered field reset', (own
     fireEvent.click(screen.getByRole('button', { name: 'Reset 0' }));
 
     await waitFor(() => {
-      expect(onChange).toHaveBeenLastCalledWith({ sibling: 8 });
+      expect(onChange.mock.lastCall?.[0]).toEqual({ sibling: 8 });
     });
   });
 });

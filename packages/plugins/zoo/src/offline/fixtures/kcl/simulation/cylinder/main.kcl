@@ -1,0 +1,4 @@
+@settings(kclVersion = 2.0)
+cylinder = startSketchOn(XY)
+  |> circle(center = [0, 0], radius = 22)
+  |> extrude(length = 14)

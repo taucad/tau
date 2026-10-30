@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import type { Registry, RJSFSchema, WidgetProps } from '@rjsf/utils';
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
@@ -417,5 +417,92 @@ describe('ParametersWidget authoritative commits', () => {
     expect(onChange).not.toHaveBeenCalled();
     fireEvent.change(input, { target: { value: '2' } });
     expect(onChange).toHaveBeenCalledWith(2);
+  });
+});
+
+/*
+ * A non-numeric row sends its base from the `value` the form rendered, and the form renders the
+ * record late: a write settles before the form shows it. Each case writes through an authority that
+ * settles when the test says, while the rendered value stays where the form last drew it.
+ */
+describe('ParametersWidget rows over a rendered value that trails their writes', () => {
+  const lateAuthority = () => {
+    const settles: Array<() => void> = [];
+    const calls: Array<Readonly<{ value: unknown; base: unknown }>> = [];
+    const setValue = vi.fn(async (field: Readonly<{ value: unknown; base: Readonly<{ value: unknown }> }>) => {
+      calls.push({ value: field.value, base: field.base.value });
+      await new Promise<void>((resolve) => {
+        settles.push(resolve);
+      });
+    });
+    const context: RJSFContext = {
+      ...formContext,
+      parameterEdit: {
+        kind: 'authoritative',
+        commit: {
+          target: { authority: 'test', root: '/', entry: 'main.ts' },
+          group: 'default',
+          draft: vi.fn(),
+          setDraft: vi.fn(),
+          subscribeDrafts: vi.fn(() => () => undefined),
+          commit: vi.fn(async () => undefined),
+          setValue,
+        },
+      },
+    };
+    return { settles, calls, context };
+  };
+
+  it('turns a switch back off when it is clicked again before the form renders the first click', async () => {
+    const { settles, calls, context } = lateAuthority();
+    const props = widgetProps({ name: 'width', schema: { type: 'boolean' }, value: false });
+    props.registry.formContext = context;
+    renderWidget(props);
+    const toggle = screen.getByRole('switch', { name: 'Toggle for Width' });
+
+    fireEvent.click(toggle);
+    expect(toggle).toBeChecked();
+    await act(async () => {
+      settles[0]?.();
+    });
+    fireEvent.click(toggle);
+
+    expect(toggle).not.toBeChecked();
+    expect(calls).toEqual([
+      { value: true, base: false },
+      { value: false, base: true },
+    ]);
+  });
+
+  it('shows and builds on its own entered number-or-text value while the form has not rendered it', async () => {
+    const { settles, calls, context } = lateAuthority();
+    const props = widgetProps({ name: 'width', schema: { type: ['number', 'string'], pattern: '^\\d+%$' }, value: 1 });
+    props.registry.formContext = context;
+    renderWidget(props);
+    const field = screen.getByRole('textbox', { name: 'Input for Width' });
+
+    fireEvent.change(field, { target: { value: '50%' } });
+    fireEvent.blur(field);
+    await act(async () => {
+      settles[0]?.();
+    });
+
+    expect(screen.getByRole('textbox', { name: 'Input for Width' })).toHaveValue('50%');
+    expect(calls).toEqual([{ value: '50%', base: 1 }]);
+  });
+
+  it('keeps every typed character while the form has not rendered the earlier ones', () => {
+    const { calls, context } = lateAuthority();
+    const props = widgetProps({ name: 'width', schema: { type: 'string' }, value: '' });
+    props.registry.formContext = context;
+    renderWidget(props);
+    const field = screen.getByRole('textbox', { name: 'Input for Width' });
+
+    fireEvent.change(field, { target: { value: 'l' } });
+    fireEvent.change(field, { target: { value: 'li' } });
+    fireEvent.change(field, { target: { value: 'lid' } });
+
+    expect(field).toHaveValue('lid');
+    expect(calls.at(-1)).toEqual({ value: 'lid', base: 'li' });
   });
 });

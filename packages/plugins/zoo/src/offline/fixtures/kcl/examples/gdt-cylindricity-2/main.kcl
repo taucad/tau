@@ -1,0 +1,9 @@
+@settings(kclVersion = 3.0)
+
+cylinderSketch = sketch(on = XY) {
+  perimeter = circle(start = [var 5mm, var 0mm], center = [var 0mm, var 0mm])
+}
+
+cylinder = extrude(region(segments = [cylinderSketch.perimeter]), length = 10mm, tagEnd = $top)
+topEdge = { sideFaces = [cylinder.sketch.tags.perimeter, top] }
+gdt::cylindricity(edges = [topEdge], tolerance = 0.05mm, framePosition = [-12mm, 8mm], framePlane = XZ)

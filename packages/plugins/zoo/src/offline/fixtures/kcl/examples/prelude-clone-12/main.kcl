@@ -1,0 +1,18 @@
+@settings(defaultLengthUnit = mm, kclVersion = 3.0)
+
+// Work around #9983 by rotating an untransformed seed before placing it.
+seedSketch = sketch(on = XY) {
+  bottom = line(start = [var -5mm, var -5mm], end = [var 5mm, var -5mm])
+  right = line(start = [var 5mm, var -5mm], end = [var 5mm, var 5mm])
+  top = line(start = [var 5mm, var 5mm], end = [var -5mm, var 5mm])
+  left = line(start = [var -5mm, var 5mm], end = [var -5mm, var -5mm])
+}
+seedRegion = region(segments = [seedSketch.bottom, seedSketch.right])
+seed = extrude(seedRegion, length = 10mm)
+
+leftPart = clone(seed)
+  |> translate(x = -20mm, y = 20mm, global = true)
+
+rightPart = clone(seed)
+  |> rotate(axis = Z, angle = 90deg, global = true)
+  |> translate(x = 20mm, y = 20mm, global = true)

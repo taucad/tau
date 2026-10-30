@@ -1,0 +1,14 @@
+// Clone a basic solid and move it.
+
+exampleSketch = startSketchOn(XY)
+  |> startProfile(at = [0, 0])
+  |> line(end = [10, 0])
+  |> line(end = [0, 10])
+  |> line(end = [-10, 0])
+  |> close()
+
+myPart = extrude(exampleSketch, length = 5)
+clonedPart = clone(myPart)
+    |> translate(
+        x = 25.0,
+    )

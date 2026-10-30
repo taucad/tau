@@ -1,0 +1,13 @@
+triangle = startSketchOn(XY)
+  |> startProfile(at = [0, 0])
+  |> line(end = [2, 0])
+  |> line(end = [0, 2], tag = $side)
+  |> line(end = [-2, -2])
+  |> close()
+  |> extrude(length = 2)
+
+// Get the face of the triangle's side face.
+sideFace = faceOf(triangle, face = side)
+
+// Create a new sketch, on the triangle's side face.
+//sketch(on = sideFace) {}

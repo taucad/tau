@@ -23,7 +23,7 @@ import { useProject } from '#hooks/use-project.js';
 import { useRevisionSessionUser } from '#lib/revision-actor.js';
 import type { RevisionSessionUser } from '#lib/revision-actor.js';
 import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
-import type { RevisionClient } from '#hooks/use-revision-status.js';
+import type { RevisionClient } from '#types/revision-client.types.js';
 import type { RevisionFileComparison } from '@taucad/revisions/algorithms';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 

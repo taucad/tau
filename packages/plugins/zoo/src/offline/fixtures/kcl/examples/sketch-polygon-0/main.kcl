@@ -1,0 +1,10 @@
+// Create a regular hexagon inscribed in a circle of radius 10
+hex = startSketchOn(XY)
+  |> polygon(
+    radius = 10,
+    numSides = 6,
+    center = [0, 0],
+    inscribed = true,
+  )
+
+example = extrude(hex, length = 5)

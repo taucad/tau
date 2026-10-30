@@ -168,6 +168,22 @@ describeIfBuilt('apps/ui server (cross-origin isolation parity)', () => {
     });
   });
 
+  it.each(['gzip', 'br'])('should compress SSR HTML with accepted %s encoding', async (encoding) => {
+    const response = await fetch(baseUrl + '/projects/new', { headers: { 'Accept-Encoding': encoding } });
+    const html = await response.text();
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Encoding')).toBe(encoding);
+    expect(response.headers.get('Vary')).toMatch(/accept-encoding/i);
+    expect(response.headers.get('Cache-Control')).toContain('private');
+    expect(html).toContain('Project Name');
+  });
+
+  it('should preserve identity HTML when compression is refused', async () => {
+    const response = await fetch(baseUrl + '/projects/new', { headers: { 'Accept-Encoding': 'identity' } });
+    expect(response.headers.has('Content-Encoding')).toBe(false);
+    expect(await response.text()).toContain('Project Name');
+  });
+
   it('should serve the SSR HTML document with all three COI headers', async () => {
     const response = await fetch(baseUrl + '/');
     expect(response.status).toBeLessThan(500);

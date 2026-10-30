@@ -1,0 +1,4 @@
+@settings(experimentalFeatures = allow)
+
+exampleSketch = startSketchOn(XY)
+  |> ellipse(center = [0, 0], majorRadius = 50, minorRadius = 20)

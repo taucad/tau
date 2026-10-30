@@ -19,6 +19,8 @@ import { resolveTauCloudBuildEnabled } from '../build-environment';
 import { createGeoSpecMtAssets } from '../geospec-mt-assets.vite-plugin';
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- Shared config-load asset gate.
 import { createCsharpLanguageAssets } from '../csharp-language-assets.vite-plugin';
+// oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- Shared config-load asset gate.
+import { createOpenscadLanguageAssets } from '../openscad-language-assets.vite-plugin';
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- Shared config-load integrity plugin.
 import { createAssetIntegrity } from '../asset-integrity.vite-plugin';
 
@@ -27,6 +29,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tauCloudEnabled = resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']);
 const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
 const csharpAssets = createCsharpLanguageAssets(path.resolve(__dirname, '../../../out/csharp-language/stage'));
+const openscadLanguage = createOpenscadLanguageAssets(path.resolve(__dirname, '../../../out/openscad-language/stage'));
 
 /**
  * Serve build of `apps/ui` — the SPA a daemon hands to a browser.
@@ -67,6 +70,7 @@ export default defineConfig({
   plugins: [
     mtAssets.plugin,
     csharpAssets.plugin,
+    openscadLanguage.plugin,
     createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }),
     createAssetIntegrity({ receipt: true }),
     tauRuntime(),

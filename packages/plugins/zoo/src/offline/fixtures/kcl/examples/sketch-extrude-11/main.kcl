@@ -1,0 +1,21 @@
+// You can even extrude faces from sweeps!
+// In this example, the sweep is blue,
+// and the extrusion from its end face is yellow
+sketch001 = startSketchOn(XY)
+profile001 = startProfile(sketch001, at = [-1.0, 1.0])
+  |> yLine(length = -2.0)
+  |> xLine(length = 2.0)
+  |> yLine(length = 2.0)
+  |> line(endAbsolute = [profileStartX(%), profileStartY(%)])
+  |> close()
+sketch003 = startSketchOn(XZ)
+profile002 = startProfile(sketch003, at = [0, 0])
+  |> yLine(length = 2.0)
+  |> tangentialArc(end = [-2.0, 2.0])
+  |> xLine(length = -2.0)
+  |> tangentialArc(end = [-2, 2.0])
+  |> yLine(length = 2)
+sweep001 = sweep(profile001, path = profile002, tagEnd = $endSweep)
+|> appearance(color = "#0000FF")
+extrude(endSweep, length = 2, method = NEW)
+|> appearance(color = "#FFFF00")

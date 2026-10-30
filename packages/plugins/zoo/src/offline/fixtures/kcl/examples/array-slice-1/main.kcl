@@ -1,0 +1,5 @@
+s = slice([1, 2, 3, 4, 5], end = -2)
+assert(s[0], isEqualTo = 1)
+assert(s[1], isEqualTo = 2)
+assert(s[2], isEqualTo = 3)
+assert(count(s), isEqualTo = 3)

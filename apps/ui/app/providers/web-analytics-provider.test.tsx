@@ -231,8 +231,9 @@ describe('WebAnalyticsProvider', () => {
     expect(init).toHaveBeenCalledOnce();
     expect(posthog.has_opted_out_capturing()).toBe(false);
     expect(posthog._isIdentified()).toBe(false);
-    const initialPageviews = pageviews(capture.mock.calls);
-    expect(initialPageviews).toBe(1);
+    await vi.waitFor(() => {
+      expect(pageviews(capture.mock.calls)).toBe(1);
+    });
     await vi.waitFor(async () => {
       const events = await transmittedEvents();
       expect(events.filter(({ event }) => event === '$pageview')).toHaveLength(1);

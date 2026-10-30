@@ -1,0 +1,22 @@
+@settings(kclVersion = 3.0)
+
+datumSketch = sketch(on = XY) {
+  diameter = line(start = [var -6mm, var 0mm], end = [var 6mm, var 0mm])
+  perimeter = arc(start = [var 6mm, var 0mm], end = [var -6mm, var 0mm], center = [var 0mm, var 0mm])
+  coincident([diameter.end, perimeter.start])
+  coincident([diameter.start, perimeter.end])
+}
+
+datumCylinder = extrude(region(segments = [datumSketch.diameter, datumSketch.perimeter]), length = 10mm)
+
+controlledSketch = sketch(on = XY) {
+  diameter = line(start = [var -3mm, var 0mm], end = [var 3mm, var 0mm])
+  perimeter = arc(start = [var -3mm, var 0mm], end = [var 3mm, var 0mm], center = [var 0mm, var 0mm])
+  coincident([diameter.start, perimeter.start])
+  coincident([diameter.end, perimeter.end])
+}
+
+controlledCylinder = extrude(region(segments = [controlledSketch.diameter, controlledSketch.perimeter]), length = 10mm)
+
+gdt::datum(face = datumCylinder.sketch.tags.perimeter, name = "A", framePosition = [-14mm, 8mm], framePlane = XZ)
+gdt::concentricity(faces = [controlledCylinder.sketch.tags.perimeter], tolerance = 0.05mm, datums = ["A"], framePosition = [12mm, 8mm], framePlane = XZ)

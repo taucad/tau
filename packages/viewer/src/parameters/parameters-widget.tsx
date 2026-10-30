@@ -13,6 +13,7 @@ import { toInstancePointer, useRenderedFieldPath } from '#parameters/rjsf-field-
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@taucad/ui/components/input-group';
 import { validateParameterInputValue } from '#parameters/parameter-field.js';
 import { toast } from '@taucad/ui/components/sonner';
+import { useFieldEdits } from '#parameters/use-field-edits.js';
 
 const numericConstraint = (
   constraints: Readonly<Record<string, unknown>> | undefined,
@@ -102,26 +103,32 @@ export function ParametersWidget(
       parameterGroup,
     );
   }, [instancePointer, isNumeric, lengthSymbol, parameterGroup, parameterManifest]);
+  /* A boolean or string row stands on its own edits while the rendered value, which the form's deferred
+   * projection shows late, still echoes them: it shows and builds on its last sent value. */
+  const scalar: boolean | string | number =
+    type === 'boolean' ? Boolean(value) : typeof value === 'string' || typeof value === 'number' ? value : '';
+  const { edits, ownValue, base } = useFieldEdits({ pointer: instancePointer ?? '', authority: scalar });
+  const shown = ownValue ?? scalar;
   /* An authoritative form commits a non-numeric field on its own: RJSF's whole-group `formData` can
    * still hold a pre-commit value of another field, which a group replacement would write back. */
-  const commitField = async (newValue: boolean | string | undefined): Promise<void> => {
-    const pointer = fieldPath === undefined ? undefined : toInstancePointer(fieldPath);
+  const commitField = async (newValue: boolean | string | number | undefined): Promise<void> => {
     const { parameterEdit } = formContext;
     if (isDisabled) {
       return;
     }
-    if (parameterEdit.kind !== 'authoritative' || pointer === undefined || newValue === undefined) {
+    if (parameterEdit.kind !== 'authoritative' || instancePointer === undefined || newValue === undefined) {
       onChange(newValue);
       return;
     }
+    edits.send({ type: 'submitted', from: base.value, value: newValue });
+    let isKept = false;
     try {
-      await parameterEdit.commit.setValue({
-        pointer,
-        value: newValue,
-        base: { pointer, value: value as boolean | string },
-      });
+      await parameterEdit.commit.setValue({ pointer: instancePointer, value: newValue, base });
+      isKept = true;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'The parameter could not be saved.');
+    } finally {
+      edits.send({ type: 'settled', isKept });
     }
   };
 
@@ -130,7 +137,7 @@ export function ParametersWidget(
     return (
       <ParametersNumberOrString
         id={id}
-        value={value}
+        value={formContext.parameterEdit.kind === 'authoritative' ? shown : value}
         pattern={schema.pattern}
         minimum={schema.minimum}
         maximum={schema.maximum}
@@ -141,19 +148,24 @@ export function ParametersWidget(
         aria-label={`Input for ${prettyLabel}`}
         onFocus={handleFocus}
         onBlur={handleBlur}
-        onChange={handleChange}
+        onChange={(next) => {
+          // A cleared nullable field is written through the group path, like any field it removes.
+          if (typeof next === 'object') {
+            handleChange(next);
+            return;
+          }
+          void commitField(next);
+        }}
       />
     );
   }
 
   switch (type) {
     case 'boolean': {
-      const booleanValue = Boolean(value);
-
       return (
         <ParametersBoolean
           id={id}
-          value={booleanValue}
+          value={Boolean(shown)}
           disabled={isDisabled}
           autoFocus={autofocus}
           aria-label={`Toggle for ${prettyLabel}`}
@@ -252,7 +264,7 @@ export function ParametersWidget(
     }
 
     case 'string': {
-      const stringValue = typeof value === 'string' ? value : '';
+      const stringValue = typeof shown === 'string' ? shown : '';
       const defaultStringValue = typeof defaultValue === 'string' ? defaultValue : '';
 
       return (

@@ -1,0 +1,18 @@
+example = startSketchOn(XZ)
+  |> startProfile(at = [0, 0])
+  |> line(end = [10, 0])
+  |> arc(
+    angleStart = 120deg,
+    angleEnd = 0,
+    radius = 5,
+  )
+  |> line(end = [5, 0])
+  |> line(end = [0, 10])
+  |> bezierCurve(
+       control1 = [-10, 0],
+       control2 = [2, 10],
+       end = [-5, 10],
+     )
+  |> line(end = [-5, -2])
+  |> close()
+  |> extrude(length = 10)

@@ -1,0 +1,13 @@
+/// Pattern using a raw axis.
+
+exampleSketch = startSketchOn(XZ)
+  |> circle(center = [0, 0], radius = 1)
+
+example = extrude(exampleSketch, length = -5)
+  |> patternCircular3d(
+       axis = [1, -1, 0],
+       center = [10, -20, 0],
+       instances = 11,
+       arcDegrees = 360,
+       rotateDuplicates = true
+     )

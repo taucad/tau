@@ -37,6 +37,22 @@ const userAgentOf = (headers: Readonly<Record<string, string>> | undefined): str
 };
 
 /**
+ * The environment an automated run reports under: its deployment's, marked `-e2e`, so the errors a suite causes on
+ * purpose never land among real users' (the staging observability harness, ui-e2e and desktop-e2e runs).
+ *
+ * @param environment - The deployment's environment.
+ * @returns `<environment>-e2e`, unchanged when already marked or absent.
+ * @public
+ */
+export const automatedRunEnvironment = (environment: string | undefined): string | undefined =>
+  environment === undefined || environment.endsWith('-e2e') ? environment : `${environment}-e2e`;
+
+/** Whether a browser automation driver (Playwright, WebDriver) controls this page. */
+const isAutomatedBrowser = (): boolean =>
+  // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- navigator is absent during SSR.
+  globalThis.navigator?.webdriver === true;
+
+/**
  * Scrub an error event before it leaves the browser: no query strings, no invitation tokens, no
  * cookies, and no headers but `User-Agent` (so Sentry derives the browser, OS and device contexts).
  * The user keeps only its opaque Tau `id` (D1): no email, name, username or IP. Invitation tokens and
@@ -48,8 +64,12 @@ const userAgentOf = (headers: Readonly<Record<string, string>> | undefined): str
  */
 export const scrubSentryEvent = (event: ErrorEvent): ErrorEvent => {
   const harnessTags = observabilityHarnessTags();
-  if (Object.keys(harnessTags).length > 0) {
+  const isHarnessRun = Object.keys(harnessTags).length > 0;
+  if (isHarnessRun) {
     event.tags = { ...event.tags, ...harnessTags };
+  }
+  if (isHarnessRun || isAutomatedBrowser()) {
+    event.environment = automatedRunEnvironment(event.environment ?? sentryEnvironment());
   }
   if (event.request) {
     const { url, headers } = event.request;

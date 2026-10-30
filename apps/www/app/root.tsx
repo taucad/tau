@@ -146,12 +146,12 @@ function SiteShell({ children }: { children?: React.ReactNode }) {
           <div className='cell footer-brand'>
             <Brand />
             <p>Design Verify Make.</p>
-            <p className='fine'>Open-source CAD for the things you want to make.</p>
+            <p className='fine'>Open-source, AI-native CAD.</p>
           </div>
           <nav className='cell' aria-label='Product'>
             <h2>Product</h2>
             <Link to='/product/' prefetch='intent'>
-              Workspace
+              Product
             </Link>
             <Link to='/use-cases/' prefetch='intent'>
               Use cases
@@ -160,7 +160,7 @@ function SiteShell({ children }: { children?: React.ReactNode }) {
               Pricing
             </Link>
             <Link to='/download/' prefetch='intent'>
-              Get Tau
+              Download
             </Link>
           </nav>
           <nav className='cell' aria-label='Company'>

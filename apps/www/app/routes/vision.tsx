@@ -57,7 +57,7 @@ export const content = (): React.JSX.Element => (
         </p>
       </div>
     </section>
-    {closing('Get started with Tau')}
+    {closing()}
   </>
 );
 export default function Page(): React.JSX.Element {

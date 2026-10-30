@@ -6,7 +6,7 @@ export const pages: Array<{ path: string; title: string; description: string; er
     path: '/',
     title: 'Tau — Design. Verify. Make.',
     description:
-      'Design a useful part, verify its geometry and export for machining, 3D printing or fabrication. Editable parametric CAD, open source and free in your browser.',
+      'Describe a part and get editable parametric CAD, checked against your requirements and ready to export for machining or 3D printing. Open source and free to start.',
   },
   {
     path: '/product/',
@@ -34,7 +34,7 @@ export const pages: Array<{ path: string; title: string; description: string; er
   },
   {
     path: '/use-cases/learning/',
-    title: 'For students & curious minds · Tau',
+    title: 'For students & learners · Tau',
     description:
       'Open an example model, change its dimensions and see what happens. Then make the part and compare it with the model.',
   },

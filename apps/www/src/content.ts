@@ -21,20 +21,20 @@ export const principles: Array<{
 }> = [
   {
     id: 'design',
-    title: 'Start with a purpose.',
-    body: 'A mount that fits. A housing that protects. Describe the job, then shape the part with editable code and dimensions you control.',
+    title: 'Describe the part.',
+    body: 'Tell the agent what the part does and where it fits, or write the code yourself. You get parametric source with dimensions you control.',
     detail: 'Your idea → editable CAD',
   },
   {
     id: 'verify',
-    title: 'Check what matters.',
-    body: 'Set the dimensions, clearances and hole patterns your part needs. GeoSpec checks the geometry against them and shows where more evidence is needed.',
+    title: 'Check the geometry.',
+    body: 'Declare the dimensions, clearances and hole patterns the part needs. GeoSpec checks the geometry against them and flags anything it cannot measure.',
     detail: 'Dimensions · clearances · fit',
   },
   {
     id: 'make',
-    title: 'Put it to work.',
-    body: 'Export STEP for your machining workflow, or STL and 3MF for 3D printing. Make the part, assemble it and try it where it belongs.',
+    title: 'Export and make it.',
+    body: 'Export STEP for machining, or STL and 3MF for 3D printing. Keep the source so you can revise the part after testing it.',
     detail: 'Machine · print · assemble',
   },
 ];
@@ -47,65 +47,65 @@ export const storyChapters = [
   {
     id: 'idea',
     label: 'Idea',
-    title: 'Start with the constraints.',
-    body: 'A reduction you need, a space it has to fit, the hardware it will connect to. Start with the job the gearbox needs to do.',
+    title: 'Start with the requirements.',
+    body: 'The gearbox needs a 4:1 reduction, has to fit inside a 174 mm rim and fastens with M3 socket-head screws.',
     detail: '4:1 reduction · 174 mm rim · M3 socket screws',
   },
   {
     id: 'prompt',
     label: 'Prompt',
-    title: 'Say it in a sentence.',
-    body: 'Describe the mechanism the way you would to a colleague. Tau turns the request into a plan of named parts.',
+    title: 'Describe it to the agent.',
+    body: 'Describe the mechanism in plain language. Tau breaks the request into a plan of named parts.',
     detail: '“Create a planetary gearbox with a 4:1 reduction, three planets and socket screws on top.”',
   },
   {
     id: 'agents',
     label: 'Parts',
-    title: 'Every part gets its own task.',
-    body: 'The ring, the gear train and the carrier hardware are worked on as separate, named parts. Each is parametric source you can open and edit.',
+    title: 'One task per part.',
+    body: 'The ring gear, the gear train and the carrier hardware are built as separate named parts. Each one is parametric source you can open and edit.',
     detail: 'Ring gear · Gear train · Carrier & hardware',
     note: 'Illustration of a design session',
   },
   {
     id: 'formation',
     label: 'Geometry',
-    title: 'Code becomes geometry.',
-    body: 'Each part’s source evaluates to a solid. Teeth, pins, bushings and fasteners resolve from the same shared parameters.',
+    title: 'Source becomes solids.',
+    body: 'Each part’s source evaluates to a solid. Teeth, pins, bushings and fasteners all derive from the same shared parameters.',
     detail: '34 solids · 24 / 24 / 72 teeth',
   },
   {
     id: 'assembly',
     label: 'Assembly',
-    title: 'Then it goes together.',
+    title: 'Assemble it.',
     body: 'Carrier, pins and bearings first; planets, sun and ring next; the output carrier and its screws last. One turn of the sun moves the carrier a quarter turn.',
     detail: 'Fixed ring · sun input · carrier output · 4:1',
   },
   {
     id: 'parameter',
     label: 'Parameter',
-    title: 'Change one number.',
+    title: 'Change a parameter.',
     body: 'Widen the gears from 14 to 18 mm. The ring, pins, bushings and hardware follow the source, and the axial envelope grows from 68 to 72 mm.',
     detail: 'faceWidth 14 → 18 · inputAngle 0° → 30°',
   },
   {
     id: 'verification',
     label: 'Evidence',
-    title: 'Check it against the requirements.',
-    body: 'The example declares ten GeoSpec requirements. Anything GeoSpec cannot yet measure comes back inconclusive, never as a pass.',
+    title: 'Check the requirements.',
+    body: 'The example declares ten GeoSpec requirements. Anything GeoSpec cannot measure yet is reported as inconclusive, not as a pass.',
     detail: 'Recorded GeoSpec run',
   },
   {
     id: 'print',
     label: 'Make',
-    title: 'Choose how to make it.',
-    body: 'Take STEP into your machining workflow, or export a mesh for a slicer. This print example places the ring gear on a 256 mm plate.',
+    title: 'Export it.',
+    body: 'Export STEP for machining, or a mesh for a slicer. This example places the ring gear on a 256 mm print bed.',
     detail: '3D printing illustration · no job is sent',
   },
   {
     id: 'devices',
     label: 'Anywhere',
-    title: 'Pick it up on another computer.',
-    body: 'Back the project up to Tau Cloud and open it wherever you sign in to Tau: its files, its revision history and, unless you turn them off, its chats.',
+    title: 'Open it on any computer.',
+    body: 'Back the project up to Tau Cloud and open it wherever you sign in, with its files, its revision history and, unless you turn chat sync off, its chats.',
     detail: 'Tau Cloud backup & sync · Pro and Enterprise',
   },
 ];
@@ -154,7 +154,7 @@ export const ecosystem = [
 export const useCases = [
   {
     slug: 'prototyping',
-    title: 'Make a part you can try.',
+    title: 'Prototype a part',
     heading: 'Prototyping',
     audience: 'For makers & product designers',
     description:
@@ -175,7 +175,7 @@ export const useCases = [
   },
   {
     slug: 'engineering',
-    title: 'Design for the job ahead.',
+    title: 'Design engineering parts',
     heading: 'Engineering',
     audience: 'For engineers & technical teams',
     description:
@@ -196,9 +196,9 @@ export const useCases = [
   },
   {
     slug: 'learning',
-    title: 'Understand it by changing it.',
+    title: 'Learn by changing a model',
     heading: 'Learning',
-    audience: 'For students & curious minds',
+    audience: 'For students & learners',
     description:
       'Open an example model, change its dimensions and see what happens. Then make the part and compare it with the model.',
     image: 'heat-exchanger.webp',
@@ -253,7 +253,7 @@ export const plans: Array<{
   {
     id: 'free',
     name: 'Free',
-    tagline: 'For the next thing you’ll make.',
+    tagline: 'Design, check and export for free.',
     price: 'US$0',
     billingPeriod: 'forever',
     features: [
@@ -269,7 +269,7 @@ export const plans: Array<{
   {
     id: 'pro',
     name: 'Pro',
-    tagline: 'Keep designing, checking and making.',
+    tagline: 'Monthly credits and cloud sync.',
     price: 'US$20',
     billingPeriod: 'per month, plus applicable tax',
     features: [
@@ -286,7 +286,7 @@ export const plans: Array<{
   {
     id: 'enterprise',
     name: 'Enterprise',
-    tagline: 'For the way your team works.',
+    tagline: 'For teams and organizations.',
     price: 'Custom',
     billingPeriod: 'annual agreement',
     features: [

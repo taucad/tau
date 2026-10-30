@@ -1208,16 +1208,16 @@ describe('createGatewayModelTransport', () => {
     const transport = createGatewayModelTransport({
       baseUrl: 'https://gateway.example',
       fetch: vi.fn(async (input: RequestInfo | URL) => {
-        targets.push(input.toString());
+        targets.push(input instanceof Request ? input.url : String(input));
         return byteSplitResponse(authoritativeGatewayWireFixtures.anthropicToolTurn);
       }),
     });
 
     await collect(transport.stream(request({ providerKind: 'anthropic' })));
 
-    /* pi posts an Anthropic messages call to `…/v1/messages?beta=true` whatever betas the request asks for, and the
-     * gateway accepts no query input at all, because price and funded identity come from the body and an allow-listed
-     * header set (`assertNoQuery` in apps/api). Left on, it answers 400 and no turn ever reaches a model. */
+    /* An Anthropic messages call is posted by pi to `…/v1/messages?beta=true` whatever betas the request asks for, and
+     * the gateway accepts no query input at all, because price and funded identity come from the body and an
+     * allow-listed header set (`assertNoQuery` in apps/api). Left on, it answers 400 and no turn reaches a model. */
     expect(targets).toEqual(['https://gateway.example/v1/llm/anthropic/v1/messages']);
   });
 

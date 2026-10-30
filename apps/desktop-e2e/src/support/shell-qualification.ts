@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import process from 'node:process';
 import { expect } from 'vitest';
+import type { BrowserWindow } from 'electron';
 import type { Locator, Page } from 'playwright';
 import type { DesktopSession } from '#support/desktop-app.js';
 
@@ -131,8 +132,34 @@ export const pasteIntoTerminal = async (session: DesktopSession): Promise<void> 
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+v' : 'Control+Shift+V');
 };
 
-/** Open the production workbench surface through its ordinary menu. */
+/**
+ * Copy the terminal's selection the way a person does, through the window's own copy command.
+ *
+ * This is the path the Edit menu and its accelerator take: Chromium's copy fires the `copy` event the renderer
+ * answers with the terminal's selection. `Ctrl+C` is not that path and must not be — in a terminal it is the
+ * interrupt, which another row certifies, so it reaches the shell as `SIGINT` and copies nothing.
+ *
+ * @param session - The running desktop session.
+ */
+export const copyTerminalSelection = async (session: DesktopSession): Promise<void> => {
+  const window = await session.application.browserWindow(session.page);
+  await window.evaluate((nativeWindow: BrowserWindow) => {
+    nativeWindow.webContents.copy();
+  });
+};
+
+/**
+ * Open the production workbench surface through its ordinary menu, unless it is already open.
+ *
+ * A project whose saved layout already holds the Terminal offers no Terminal item in the tab menu, because the pane
+ * is there — and it starts its own session on mount, so there is nothing to open.
+ *
+ * @param page - The desktop page.
+ */
 export const openTerminalPane = async (page: Page): Promise<void> => {
+  if ((await terminalRegion(page).count()) > 0) {
+    return;
+  }
   await page.getByRole('button', { name: 'Open workbench tab', exact: true }).first().click();
   await page.getByRole('menuitem', { name: 'Terminal', exact: true }).click();
   await terminalRegion(page).waitFor();

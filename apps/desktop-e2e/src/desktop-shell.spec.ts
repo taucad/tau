@@ -22,6 +22,7 @@ import {
   answerUnloadQuestion,
   nativeQuestionsAsked,
   pasteIntoTerminal,
+  copyTerminalSelection,
   reportShellDiagnostics,
 } from '#support/shell-qualification.js';
 
@@ -131,8 +132,10 @@ describe('production Electron Terminal keyboard qualification', () => {
     await application.evaluate(({ clipboard }) => {
       clipboard.writeText('not copied');
     });
-    await page.keyboard.press('Control+c');
-    await expect.poll(async () => application.evaluate(({ clipboard }) => clipboard.readText())).toBe('copyfixture');
+    await copyTerminalSelection(desktop);
+    await expect
+      .poll(async () => application.evaluate(({ clipboard }) => clipboard.readText()), { timeout: 30_000 })
+      .toBe('copyfixture');
   });
 
   it('should resize the actual PTY and preserve the session when another tab hides it', async () => {

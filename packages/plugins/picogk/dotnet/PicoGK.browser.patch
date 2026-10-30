@@ -1,0 +1,662 @@
+--- a/Library/CheckedCallbacks.cs
++++ b/Library/CheckedCallbacks.cs
+@@ -7,6 +7,7 @@
+ 
+ internal static class TauCheckedCallbacks
+ {
++#if !PICOGK_BROWSER
+     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+     internal delegate int Sdf(in Vector3 point, out float distance);
+     // One transition per z-row: fill distances[0, count) in order and report how many were filled.
+@@ -30,6 +31,8 @@
+     [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_VectorField_TraverseActiveChecked")]
+     internal static extern int TraverseVector(LibHandle library, VectorFieldHandle field, Vector callback);
+ 
++#endif
++
+     internal static void Check(int status, ExceptionDispatchInfo? error, object owner)
+     {
+         // Never unwind a managed exception through OpenVDB/C++. Restore the exact first error here.
+@@ -47,6 +50,23 @@
+     {
+         ArgumentNullException.ThrowIfNull(implicitFunction);
+         ObjectDisposedException.ThrowIf(m_bDisposed, this);
++#if PICOGK_BROWSER
++        // A registered tape crosses the boundary once as data and then fills on every thread, while a
++        // field the generator could not lift exactly keeps the per-voxel callback. Only the ordinary
++        // upstream-compatible tape operations are used, never the narrow-band-changing fast ones.
++        if (intersect)
++        {
++            if (!SdfTapeRegistry.TryIntersect(lib.hThis, hThis, implicitFunction))
++                BrowserCallbacks.Intersect(lib.hThis, hThis, implicitFunction);
++        }
++        else
++        {
++            // The tape render fills a fresh grid, which is the only tape render the browser archive
++            // exports; composing an implicit into occupied voxels stays on the callback.
++            if (!bIsEmpty() || !SdfTapeRegistry.TryRender(lib.hThis, hThis, in bounds, implicitFunction))
++                BrowserCallbacks.Render(lib.hThis, hThis, in bounds, implicitFunction);
++        }
++#else
+         ExceptionDispatchInfo? failure = null;
+         // The author sees the per-voxel sequence: the same points in the same order, and no call after a
+         // throw or a nonfinite distance, which ends the row there as the per-voxel adapter ended the render.
+@@ -80,6 +100,7 @@
+             : TauCheckedCallbacks.RenderBatch(lib.hThis, hThis, bounds, callback);
+         GC.KeepAlive(callback);
+         TauCheckedCallbacks.Check(status, failure, this);
++#endif
+     }
+ }
+ 
+@@ -89,6 +110,9 @@
+     {
+         ArgumentNullException.ThrowIfNull(traversal);
+         ObjectDisposedException.ThrowIf(m_bDisposed, this);
++#if PICOGK_BROWSER
++        BrowserCallbacks.Traverse(lib.hThis, hThis, traversal);
++#else
+         ExceptionDispatchInfo? failure = null;
+         TauCheckedCallbacks.Scalar callback = (in Vector3 point, float value) =>
+         {
+@@ -99,6 +123,7 @@
+         var status = TauCheckedCallbacks.TraverseScalar(lib.hThis, hThis, callback);
+         GC.KeepAlive(callback);
+         TauCheckedCallbacks.Check(status, failure, this);
++#endif
+     }
+ }
+ 
+@@ -108,6 +133,9 @@
+     {
+         ArgumentNullException.ThrowIfNull(traversal);
+         ObjectDisposedException.ThrowIf(m_bDisposed, this);
++#if PICOGK_BROWSER
++        BrowserCallbacks.Traverse(lib.hThis, hThis, traversal);
++#else
+         ExceptionDispatchInfo? failure = null;
+         TauCheckedCallbacks.Vector callback = (in Vector3 point, in Vector3 value) =>
+         {
+@@ -118,5 +146,6 @@
+         var status = TauCheckedCallbacks.TraverseVector(lib.hThis, hThis, callback);
+         GC.KeepAlive(callback);
+         TauCheckedCallbacks.Check(status, failure, this);
++#endif
+     }
+ }
+--- a/Internals/Interop.cs
++++ b/Internals/Interop.cs
+@@ -383,16 +383,20 @@
+         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+         private delegate float CallbackImplicitDistance(in Vector3 vec);
+ 
++#if !PICOGK_BROWSER
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_RenderImplicit")]
+         private static extern void _RenderImplicit( LibHandle   hLib,
+                                                     VoxHandle   hThis,
+                                                     in BBox3 oBounds,
+                                                     CallbackImplicitDistance Callback);
+-
++#endif
++
++#if !PICOGK_BROWSER
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_IntersectImplicit")]
+         private static extern void _IntersectImplicit(  LibHandle   hLib,
+                                                         VoxHandle   hThis,
+                                                         CallbackImplicitDistance Callback);
++#endif
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_RenderLattice")]
+         private static extern int _RenderLattice(  LibHandle   hLib,
+@@ -624,6 +628,7 @@
+                                                     in Vector2 vecWindowSize);
+ 
+         // Define the P/Invoke signature for Viewer_hCreate
++#if !PICOGK_BROWSER
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_hCreate", CharSet = CharSet.Ansi)]
+         public static extern IntPtr _hCreate(   string              strWindowTitle,
+                                                 in Vector2          vecSize,
+@@ -634,30 +639,75 @@
+                                                 MouseButtonCallback fnMouseButtonCallback,
+                                                 ScrollWheelCallback fnScrollWheelCallback,
+                                                 WindowSizelCallback fnWindowSizeCallback);
+-
++#else
++        public static IntPtr _hCreate(   string              strWindowTitle,
++                                                in Vector2          vecSize,
++                                                InfoCallback        fnInfoCallback,
++                                                UpdateCallback      fnUpdateCallback,
++                                                KeyPressedCallback  fnKeyPressedCallback,
++                                                MouseMovedCallback  fnMouseMoveCallback,
++                                                MouseButtonCallback fnMouseButtonCallback,
++                                                ScrollWheelCallback fnScrollWheelCallback,
++                                                WindowSizelCallback fnWindowSizeCallback)
++            => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
++
++#if !PICOGK_BROWSER
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_bIsValid")]
+         [return: MarshalAs(UnmanagedType.U1)]
+         internal static extern bool _bIsValid(IntPtr hThis);
+-
++#else
++        internal static bool _bIsValid(IntPtr hThis)
++            => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
++
++#if !PICOGK_BROWSER
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_Destroy")]
+         private static extern void _Destroy(IntPtr hThis);
+-
++#else
++        private static void _Destroy(IntPtr hThis)
++            => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
++
++#if !PICOGK_BROWSER
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_RequestUpdate")]
+         private static extern void _RequestUpdate(IntPtr hThis);
+-
++#else
++        private static void _RequestUpdate(IntPtr hThis)
++            => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
++
++#if !PICOGK_BROWSER
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauViewer_PollChecked")]
+         private static extern int _PollChecked(IntPtr hThis, [MarshalAs(UnmanagedType.I1)] out bool alive);
+-
++#else
++        private static int _PollChecked(IntPtr hThis, [MarshalAs(UnmanagedType.I1)] out bool alive)
++            => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
++
++#if !PICOGK_BROWSER
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_RequestScreenShot")]
+         [return: MarshalAs(UnmanagedType.U1)]
+         private static extern bool _RequestScreenShot(  IntPtr hThis,
+                                                         string strScreenShotPath);
+-
++#else
++        private static bool _RequestScreenShot(  IntPtr hThis,
++                                                        string strScreenShotPath)
++            => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
++
++#if !PICOGK_BROWSER
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_EnableExperimental")]
+         [return: MarshalAs(UnmanagedType.U1)]
+         private static extern bool _EnableExperimental( IntPtr hThis,
+                                                         [MarshalAs(UnmanagedType.U1)] bool bEnable);
+-
++#else
++        private static bool _EnableExperimental( IntPtr hThis,
++                                                        bool bEnable)
++            => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif                                            
++
++#if !PICOGK_BROWSER
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_bLoadLightSetup")]
+         [return: MarshalAs(UnmanagedType.U1)]
+         private static extern bool _bLoadLightSetup(    IntPtr  hThis,
+@@ -665,80 +715,192 @@
+                                                         int     nDiffuseSize,
+                                                         byte [] pSpecularDdsBuffer,
+                                                         int     nSpecularSize);
+-
++#else
++        private static bool _bLoadLightSetup(    IntPtr  hThis,
++                                                        byte [] abyDiffuseDdsBuffer,
++                                                        int     nDiffuseSize,
++                                                        byte [] pSpecularDdsBuffer,
++                                                        int     nSpecularSize)
++            => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
++
++#if !PICOGK_BROWSER
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_RequestClose")]
+         private static extern void _RequestClose(IntPtr hThis);
+-
++#else
++        private static void _RequestClose(IntPtr hThis)
++            => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
++
++#if !PICOGK_BROWSER
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauViewer_AddCaptured")]
+         private static extern int _AddCaptured(LibHandle library, IntPtr viewer, int group,
+             int kind, long identity, ulong snapshot);
+-
++#else
++        private static int _AddCaptured(LibHandle library, IntPtr viewer, int group,
++            int kind, long identity, ulong snapshot)
++            => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
++
++#if !PICOGK_BROWSER
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_RemoveMesh")]
+         private static extern void _RemoveMesh( LibHandle   hLib,
+                                                 IntPtr      hThis,
+                                                 MshHandle   hMesh);
+-
++#else
++        private static void _RemoveMesh( LibHandle   hLib,
++                                                IntPtr      hThis,
++                                                MshHandle   hMesh)
++            => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
++
++#if !PICOGK_BROWSER
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_SetMeshMatrix")]
+         private static extern void _SetMeshMatrix(  LibHandle       hLib,
+                                                     IntPtr          hThis,
+                                                     MshHandle       hMesh,
+                                                     in Matrix4x4    mat);
+-
++#else
++        private static void _SetMeshMatrix(  LibHandle       hLib,
++                                                    IntPtr          hThis,
++                                                    MshHandle       hMesh,
++                                                    in Matrix4x4    mat)
++            => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
++
++#if !PICOGK_BROWSER
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_RemoveVoxels")]
+         private static extern void _RemoveVoxels(   LibHandle   hLib,
+                                                     IntPtr      hThis,
+                                                     VoxHandle   hVox);
+-
++#else
++        private static void _RemoveVoxels(   LibHandle   hLib,
++                                                    IntPtr      hThis,
++                                                    VoxHandle   hVox)
++            => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
++
++#if !PICOGK_BROWSER
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_SetVoxelsMatrix")]
+         private static extern void _SetVoxelsMatrix(    LibHandle       hLib,
+                                                         IntPtr          hThis,
+                                                         VoxHandle       hVoxels,
+                                                         in Matrix4x4    mat);
+-
++#else
++        private static void _SetVoxelsMatrix(    LibHandle       hLib,
++                                                        IntPtr          hThis,
++                                                        VoxHandle       hVoxels,
++                                                        in Matrix4x4    mat)
++            => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
++
++#if !PICOGK_BROWSER
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_RemovePolyLine")]
+         private static extern void _RemovePolyLine( LibHandle   hLib,
+                                                     IntPtr      hThis,
+                                                     PolyHandle  hPolyLine);
+-
++#else
++        private static void _RemovePolyLine( LibHandle   hLib,
++                                                    IntPtr      hThis,
++                                                    PolyHandle  hPolyLine)
++            => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
++
++#if !PICOGK_BROWSER
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_SetPolyLineMatrix")]
+         private static extern void _SetPolyLineMatrix(  LibHandle       hLib,
+                                                         IntPtr          hThis,
+                                                         PolyHandle      hPolyLine,
+                                                         in Matrix4x4    mat);
+-
++#else
++        private static void _SetPolyLineMatrix(  LibHandle       hLib,
++                                                        IntPtr          hThis,
++                                                        PolyHandle      hPolyLine,
++                                                        in Matrix4x4    mat)
++            => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
++
++#if !PICOGK_BROWSER
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_RemoveAllObjects")]
+         private static extern void _RemoveAllObjects(IntPtr      hThis);
+-
++#else
++        private static void _RemoveAllObjects(IntPtr      hThis)
++            => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
++
++#if !PICOGK_BROWSER
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_SetGroupVisible")]
+         private static extern void _SetGroupVisible(    IntPtr  hThis,
+                                                         int     nGroupID,
+                                                         [MarshalAs(UnmanagedType.U1)] bool    bVisible);
+-
++#else
++        private static void _SetGroupVisible(    IntPtr  hThis,
++                                                        int     nGroupID,
++                                                        bool    bVisible)
++            => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
++
++#if !PICOGK_BROWSER
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_SetGroupMaterial")]
+         private static extern void _SetGroupMaterial(   IntPtr          hThis,
+                                                         int             nGroupID,
+                                                         in ColorFloat   clr,
+                                                         float           fMetallic,
+                                                         float           fRoughness);
+-
++#else
++        private static void _SetGroupMaterial(   IntPtr          hThis,
++                                                        int             nGroupID,
++                                                        in ColorFloat   clr,
++                                                        float           fMetallic,
++                                                        float           fRoughness)
++            => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
++
++#if !PICOGK_BROWSER
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_SetGroupMatrix")]
+         private static extern void _SetGroupMatrix( IntPtr          hThis,
+                                                     int             nGroupID,
+                                                     in Matrix4x4    mat);
+-
++#else
++        private static void _SetGroupMatrix( IntPtr          hThis,
++                                                    int             nGroupID,
++                                                    in Matrix4x4    mat)
++            => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
++
++#if !PICOGK_BROWSER
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_EnableGroupWarnOverhang")]
+         private static extern void _EnableGroupWarnOverhang(    IntPtr  hThis,
+                                                                 int     nGroupID,
+                                                                 float   fWarningSeverity,
+                                                                 float   fErrorSeverity);
+-
++#else
++        private static void _EnableGroupWarnOverhang(    IntPtr  hThis,
++                                                                int     nGroupID,
++                                                                float   fWarningSeverity,
++                                                                float   fErrorSeverity)
++            => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
++
++#if !PICOGK_BROWSER
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_DisableGroupWarnOverhang")]
+         private static extern void _DisableGroupWarnOverhang(   IntPtr  hThis,
+                                                                 int     nGroupID);
+-
++#else
++        private static void _DisableGroupWarnOverhang(   IntPtr  hThis,
++                                                                int     nGroupID)
++            => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
++
++#if !PICOGK_BROWSER
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_GetBoundingBox")]
+         private static extern void _GetBoundingBox( IntPtr       hThis,
+                                                     ref BBox3    oBBox);
++#else
++        private static void _GetBoundingBox( IntPtr       hThis,
++                                                    ref BBox3    oBBox)
++            => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
+ 
+         // Dispose Pattern
+ 
+@@ -786,20 +948,41 @@
+ 
+         public partial class GpuTex : IDisposable
+         {
++#if !PICOGK_BROWSER
+             [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_GpuTex_hCreate")]
+             private static extern GpuTexHandle _hCreate(   IntPtr hViewer,
+                                                 int nWidth,
+                                                 int nHeight,
+                                                 IntPtr pRgba8);
+-
++#else
++            private static GpuTexHandle _hCreate(   IntPtr hViewer,
++                                                int nWidth,
++                                                int nHeight,
++                                                IntPtr pRgba8)
++                => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
++
++#if !PICOGK_BROWSER
+             [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_GpuTex_Refresh")]
+             private static extern void _Refresh( IntPtr hViewer,
+                                                  GpuTexHandle hThis,
+                                                  IntPtr pRgba8);
+-
++#else
++            private static void _Refresh( IntPtr hViewer,
++                                                 GpuTexHandle hThis,
++                                                 IntPtr pRgba8)
++                => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
++
++#if !PICOGK_BROWSER
+             [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_GpuTex_MarkForCleanup")]
+             private static extern void _MarkForCleanup( IntPtr hViewer,
+                                                         GpuTexHandle hThis);
++#else
++            private static void _MarkForCleanup( IntPtr hViewer,
++                                                        GpuTexHandle hThis)
++                => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
+             
+             ~GpuTex()
+             {
+@@ -840,6 +1023,7 @@
+ 
+         public partial class ImageQuad : IDisposable
+         {
++#if !PICOGK_BROWSER
+             [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_Quad_hCreate")]
+             private static extern QuadHandle _hCreate(  IntPtr          hThis,
+                                                         GpuTexHandle    hTexDefault,
+@@ -849,15 +1033,39 @@
+                                                         [MarshalAs(UnmanagedType.U1)] bool            bFlipX,
+                                                         [MarshalAs(UnmanagedType.U1)] bool            bFlipY,
+                                                         [MarshalAs(UnmanagedType.U1)] bool            bDoubleSided);
+-
++#else
++            private static QuadHandle _hCreate(  IntPtr          hThis,
++                                                        GpuTexHandle    hTexDefault,
++                                                        ColorFloat      clrDefault,
++                                                        float           fAlpha,
++                                                        in Matrix4x4    mat,
++                                                        bool            bFlipX,
++                                                        bool            bFlipY,
++                                                        bool            bDoubleSided)
++                => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
++
++#if !PICOGK_BROWSER
+             [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_Quad_Destroy")]
+             private static extern void _Destroy(    IntPtr       hThis,
+                                                     QuadHandle  hQuad);
+-
++#else
++            private static void _Destroy(    IntPtr       hThis,
++                                                    QuadHandle  hQuad)
++                => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
++
++#if !PICOGK_BROWSER
+             [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_Quad_SetMatrix")]
+             private static extern void _SetMatrix(  IntPtr          hThis,
+                                                     QuadHandle      hQuad,
+                                                     in Matrix4x4    mat);
++#else
++            private static void _SetMatrix(  IntPtr          hThis,
++                                                    QuadHandle      hQuad,
++                                                    in Matrix4x4    mat)
++                => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
+ 
+             ~ImageQuad()
+             {
+@@ -899,6 +1107,7 @@
+ 
+         public partial class SideBar : IDisposable
+         {
++#if !PICOGK_BROWSER
+             [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_SideBar_hCreate")]
+             extern internal static GuiSideBarHandle _hCreate(   IntPtr hViewer,
+                                                                 [MarshalAs(UnmanagedType.U1)] bool bLeft,
+@@ -907,10 +1116,26 @@
+                                                                 int nDef,
+                                                                 ColorFloat clrBackground,
+                                                                 ColorFloat clrBackgroundHv);
+-
++#else
++            internal static GuiSideBarHandle _hCreate(   IntPtr hViewer,
++                                                                bool bLeft,
++                                                                int nMin,
++                                                                int nMax,
++                                                                int nDef,
++                                                                ColorFloat clrBackground,
++                                                                ColorFloat clrBackgroundHv)
++                => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
++
++#if !PICOGK_BROWSER
+             [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_SideBar_Destroy")]
+             extern internal static void  _Destroy(  IntPtr hThis,
+                                                     GuiSideBarHandle hSideBar);
++#else
++            internal static void  _Destroy(  IntPtr hThis,
++                                                    GuiSideBarHandle hSideBar)
++                => throw new PlatformNotSupportedException("Use the Tau hosted viewer in the browser.");
++#endif
+ 
+             ~SideBar()
+             {
+@@ -1115,10 +1340,12 @@
+                                                         int nZSlice,
+                                                         IntPtr afBuffer);
+ 
++#if !PICOGK_BROWSER
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ScalarField_TraverseActive")]
+         private extern static void _TraverseActive(    LibHandle  hLib,
+                                                         ScalarFieldHandle hThis,
+                                                         CallbackScalarFieldTraverse pfn);
++#endif
+ 
+ 
+         // Dispose Pattern
+@@ -1203,10 +1430,12 @@
+                                                     VectorFieldHandle  hThis,
+                                                     in  Vector3 vecPosition);
+ 
++#if !PICOGK_BROWSER
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VectorField_TraverseActive")]
+         private extern static void _TraverseActive( LibHandle  hLib,
+                                                     VectorFieldHandle  hThis,
+                                                     CallbackVectorFieldTraverse pfn);
++#endif
+ 
+         // Dispose Pattern
+ 
+--- a/Library/SurfaceNormals.cs
++++ b/Library/SurfaceNormals.cs
+@@ -12,9 +12,32 @@
+     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+     private delegate int TauNormalBatch(uint count, IntPtr normals, IntPtr values, IntPtr keep);
+ 
++#if !PICOGK_BROWSER
+     [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVectorField_CreateSurfaceNormals")]
+     private static extern int TauCreateNormalsNative(LibHandle library, VoxHandle voxels, float threshold,
+         TauNormalBatch callback, out VectorFieldHandle output, out VdbMetaHandle metadata);
++#else
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauDotNet_CreateSurfaceNormals")]
++    private static extern unsafe int TauCreateNormalsBrowser(LibHandle library, VoxHandle voxels, float threshold,
++        nint context, delegate* unmanaged[Cdecl]<nint, uint, nint, nint, nint, int> callback,
++        out VectorFieldHandle output, out VdbMetaHandle metadata);
++
++    [System.Runtime.InteropServices.UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
++    private static int TauNormalsTrampoline(nint context, uint count, nint normals, nint values, nint keep)
++    {
++        // The managed batch captures its original error; no exception may unwind through C++.
++        try { return ((TauNormalBatch)GCHandle.FromIntPtr(context).Target!)(count, normals, values, keep); }
++        catch { return 1; }
++    }
++    private static unsafe int TauCreateNormalsNative(LibHandle library, VoxHandle voxels, float threshold,
++        TauNormalBatch callback, out VectorFieldHandle output, out VdbMetaHandle metadata)
++    {
++        var context = GCHandle.Alloc(callback);
++        try { return TauCreateNormalsBrowser(library, voxels, threshold, GCHandle.ToIntPtr(context),
++            &TauNormalsTrampoline, out output, out metadata); }
++        finally { context.Free(); }
++    }
++#endif
+     [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Metadata_Destroy")]
+     private static extern void TauDestroyNormalMetadata(LibHandle library, VdbMetaHandle metadata);
+ 
+--- a/Library/GridAdmission.cs
++++ b/Library/GridAdmission.cs
+@@ -15,12 +15,33 @@
+         out VdbMetaHandle metadata);
+     [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Metadata_Destroy")]
+     private static extern void TauDestroyLoadedMetadata(LibHandle library, VdbMetaHandle metadata);
++#if !PICOGK_BROWSER
+     [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_Destroy")]
+     private static extern void TauDestroyLoadedVoxels(LibHandle library, ulong field);
++#else
++    private static void TauDestroyLoadedVoxels(LibHandle library, ulong field)
++        => TauDestroyLoadedVoxelsBrowser(library, unchecked((long)field));
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_Destroy")]
++    private static extern void TauDestroyLoadedVoxelsBrowser(LibHandle library, long field);
++#endif
++#if !PICOGK_BROWSER
+     [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ScalarField_Destroy")]
+     private static extern void TauDestroyLoadedScalar(LibHandle library, ulong field);
++#else
++    private static void TauDestroyLoadedScalar(LibHandle library, ulong field)
++        => TauDestroyLoadedScalarBrowser(library, unchecked((long)field));
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ScalarField_Destroy")]
++    private static extern void TauDestroyLoadedScalarBrowser(LibHandle library, long field);
++#endif
++#if !PICOGK_BROWSER
+     [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VectorField_Destroy")]
+     private static extern void TauDestroyLoadedVector(LibHandle library, ulong field);
++#else
++    private static void TauDestroyLoadedVector(LibHandle library, ulong field)
++        => TauDestroyLoadedVectorBrowser(library, unchecked((long)field));
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VectorField_Destroy")]
++    private static extern void TauDestroyLoadedVectorBrowser(LibHandle library, long field);
++#endif
+     private static void TauDestroyLoadedField(LibHandle library, int kind, ulong field)
+     {
+         if (kind == 0) TauDestroyLoadedVoxels(library, field);
+--- a/IO/OpenVdbFile.cs
++++ b/IO/OpenVdbFile.cs
+@@ -280,7 +280,11 @@
+             try
+             {
+                 metadata = new FieldMetadata(lib, metadataHandle);
++#if PICOGK_BROWSER
++                return new ScalarField(lib, new ScalarFieldHandle(unchecked((long)handle)), metadata);
++#else
+                 return new ScalarField(lib, new ScalarFieldHandle(unchecked((IntPtr)(long)handle)), metadata);
++#endif
+             }
+             catch
+             {
+@@ -347,7 +351,11 @@
+             try
+             {
+                 metadata = new FieldMetadata(lib, metadataHandle);
++#if PICOGK_BROWSER
++                return new VectorField(lib, new VectorFieldHandle(unchecked((long)handle)), metadata);
++#else
+                 return new VectorField(lib, new VectorFieldHandle(unchecked((IntPtr)(long)handle)), metadata);
++#endif
+             }
+             catch
+             {

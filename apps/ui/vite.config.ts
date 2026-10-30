@@ -24,7 +24,11 @@ import {
 } from './build-environment.js';
 /* oxlint-enable eslint/no-restricted-imports */
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
+import { createCsharpLanguageAssets } from './csharp-language-assets.vite-plugin.js';
+// oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
 import { createGeoSpecMtAssets } from './geospec-mt-assets.vite-plugin.js';
+// oxlint-disable-next-line eslint/no-restricted-imports -- Vite configuration runs outside the app alias resolver.
+import { createPicogkBrowserAssets } from './picogk-browser-assets.vite-plugin.js';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
 import { createOpenscadLanguageAssets } from './openscad-language-assets.vite-plugin.js';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
@@ -442,8 +446,12 @@ const createReleaseManifestPlugin = (release: string): Plugin => ({
 
 export default defineConfig(({ command, mode }) => {
   const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
+  const picogkAssets = createPicogkBrowserAssets(process.env['PICOGK_BROWSER_ASSETS_ROOT']);
   const openscadLanguage = createOpenscadLanguageAssets(path.resolve(__dirname, '../../out/openscad-language/stage'));
   const isTest = mode === 'test';
+  const csharpAssets = createCsharpLanguageAssets(
+    isTest ? undefined : path.resolve(__dirname, '../../out/csharp-language/stage'),
+  );
   /*
    * Ordered build identity for the stale-tab skew guard (blueprint DF20).
    * Evaluated once per build / dev-server start, which is exactly the
@@ -491,6 +499,8 @@ export default defineConfig(({ command, mode }) => {
         !isTest && resolveTauTelemetryHostCloud(process.env['TAU_TELEMETRY_HOST']),
       ),
       tauGeoSpecMtReceipts: JSON.stringify(mtAssets.receipts),
+      tauPicogkBrowserAssets: picogkAssets.assets ? JSON.stringify(picogkAssets.assets) : 'undefined',
+      tauCsharpLanguageAssets: JSON.stringify(csharpAssets.assets ?? null),
       /*
        * Compile-time host seam (charter D2). `desktop/vite.config.ts` sets
        * `"desktop"`. Left undefined under `mode === 'test'` so unit tests can
@@ -531,6 +541,8 @@ export default defineConfig(({ command, mode }) => {
     },
     plugins: [
       mtAssets.plugin,
+      picogkAssets.plugin,
+      csharpAssets.plugin,
       openscadLanguage.plugin,
       createUiSourceAliasPlugin({
         emitModuleGraph: true,

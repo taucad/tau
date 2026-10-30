@@ -50,6 +50,13 @@ const gateOf = (child: ChildProcess): Writable => {
  */
 export const openStartBarrier = async (child: ChildProcess): Promise<void> => {
   const gate = gateOf(child);
+  /*
+   * The caller's own failure is the rejection below; this one is for afterwards. An opened barrier is a pipe into a
+   * process the host may still cancel or kill, and a reset pipe with no error listener is an uncaught exception in
+   * whatever process launched the shell — the barrier has nothing left to carry by then, so there is nothing to
+   * recover.
+   */
+  gate.on('error', () => undefined);
   await new Promise<void>((resolve, reject) => {
     gate.once('error', reject);
     gate.end('start\n', () => {
@@ -65,7 +72,10 @@ export const openStartBarrier = async (child: ChildProcess): Promise<void> => {
  * @param child - A child spawned from {@link stagedStartArguments}.
  */
 export const abandonStartBarrier = (child: ChildProcess): void => {
-  child.stdio[startBarrierDescriptor]?.destroy();
+  const gate = child.stdio[startBarrierDescriptor];
+  /* Same reason as above: refusing the workload tears the pipe down, and the teardown must not raise. */
+  gate?.on('error', () => undefined);
+  gate?.destroy();
 };
 
 /**

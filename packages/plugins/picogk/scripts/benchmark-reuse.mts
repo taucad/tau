@@ -468,7 +468,7 @@ const main = async (): Promise<void> => {
         strictEqual(built.recycleAfterResponse, false, 'Ordinary baseline must not request worker recycling.');
         const artifact = await session.readArtifact(built);
         const readEnd = performance.now();
-        const glb = picogkArtifactToGlb(artifact, built);
+        const glb = await picogkArtifactToGlb(artifact, built);
         const settledEnd = performance.now();
         const decoded = await shapes(glb);
         references.set(mode, validate(decoded.shapes, references.get(mode), { mode, count }));

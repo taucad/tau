@@ -364,6 +364,9 @@ const config = [
       '**/.react-router',
       '**/stats.html',
       '**/out-tsc',
+      // .NET build output beside C# projects (runtime bootstraps such as dotnet.js).
+      '**/dotnet/**/bin',
+      '**/dotnet/**/obj',
       '**/generated',
       // `@taucad/api-extractor` output, one per kernel package.
       '**/agent/resources.js',
@@ -427,6 +430,7 @@ const config = [
             'examples/electron/electron.vite.config.ts',
             'apps/api/vitest.config.ts',
             'packages/runtime/src/nextjs/package-assets-loader.mjs',
+            'packages/plugins/picogk/dotnet/Tau.PicoGK.Parity/main.mjs',
           ],
         },
         tsconfigRootDir: import.meta.dirname,

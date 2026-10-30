@@ -1070,12 +1070,29 @@
       "owner": "desktop-bash-terminal W3"
     },
     {
+      "id": "TERMINAL-ADMISSION-WAIT",
+      "bound": "5-second bound (terminalAdmissionMilliseconds) on main admitting a Terminal start's project root to the trusted-root allowlist; each wait ends on the next allowlist change, the connection ending, or the bound, after which the start is refused project-not-admitted",
+      "site": "apps/desktop/src/tau/services-host.terminal.ts",
+      "token": "timer = setTimeout(resolve, remaining)",
+      "class": "Peer",
+      "owner": "desktop-bash-terminal W7",
+      "fixedBy": "outside this charter: main sending the trusted-root allowlist within the terminal port handshake would delete this wait (desktop main/services-broker owner)"
+    },
+    {
       "id": "TERMINAL-OPEN-TIMEOUT",
       "bound": "30-second bound on a fresh desktop terminal port's open frame; a port that never opens is closed before any shell starts",
       "site": "apps/desktop/src/tau/services-host.terminal.ts",
       "token": "setTimeout(abandonUnopened, openMilliseconds)",
       "class": "External edge",
       "owner": "desktop-bash-terminal W5"
+    },
+    {
+      "id": "SHELL-QUALIFICATION-OBSERVATION",
+      "bound": "Qualification-only external process/file readiness polling every 50 ms until the caller-supplied bounded row deadline; failure remains a failed assertion, never a peer acknowledgement",
+      "site": "packages/host/src/shell/qualification.fixture.ts",
+      "token": "setTimeout(resolve, 50)",
+      "class": "External edge",
+      "owner": "desktop Bash/Terminal W7 Q9"
     },
     {
       "id": "LFS-FILL-REPORT",

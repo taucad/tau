@@ -47,6 +47,20 @@
           "TAU_SHELL_CONFORMANCE": "1"
         }
       }
+    },
+    "test:shell-qualification": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "The shell's application and adversarial qualification rows (desktop shell blueprint W7: T01-T10, T12, T16, T19, the E rows the agent entrypoint reaches and the stress workloads S01-S04, the lifecycle and concurrency ones three times). A scripted model drives the official shell tool through a real Tau agent host, its registry and fixture admission, the shell service, the real sandbox provider and the machine's own Bash; negatives are judged outside the sandbox. Writes a JSON receipt when TAU_SHELL_CONFORMANCE_RECEIPT is set. Never cached: a receipt is only evidence of the run that wrote it."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}/packages/host",
+        "command": "../../node_modules/.bin/vitest run --config vitest.config.ts src/shell/shell-qualification.conformance.test.ts",
+        "env": {
+          "TAU_SHELL_CONFORMANCE": "1"
+        }
+      }
     }
   }
 }

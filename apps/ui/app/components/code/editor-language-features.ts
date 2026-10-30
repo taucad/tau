@@ -1,5 +1,6 @@
 import { renderSymbolIcon } from '#components/code/editor-completion-icon.js';
 import { renderEditorDocumentation } from '#components/code/editor-documentation.js';
+import type { DocumentationLinkHandler } from '#components/code/editor-documentation.js';
 import { Facet, StateEffect, StateField } from '@codemirror/state';
 import type { EditorState, Extension, Transaction } from '@codemirror/state';
 import { Decoration, EditorView, ViewPlugin, keymap, showDialog, showPanel, showTooltip } from '@codemirror/view';
@@ -39,6 +40,8 @@ export type EditorSignature = Readonly<{
   documentation?: string;
   /** Markdown for the active parameter. */
   parameterDocumentation?: string;
+  /** Opens the definition a `#tau-definition-N` link in either documentation names. */
+  onDefinitionLink?: DocumentationLinkHandler;
   overload?: Readonly<{ index: number; count: number }>;
 }>;
 
@@ -511,7 +514,7 @@ function renderSignature(view: EditorView, signature: EditorSignature): HTMLElem
   dom.append(line);
   for (const markdown of [signature.parameterDocumentation, signature.documentation]) {
     if (markdown) {
-      dom.append(renderEditorDocumentation(markdown, ownerDocument));
+      dom.append(renderEditorDocumentation(markdown, ownerDocument, signature.onDefinitionLink));
     }
   }
   return dom;

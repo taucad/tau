@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ChatTextareaSubmitButton } from '#components/chat/chat-textarea-submit-button.js';
 
@@ -30,6 +30,10 @@ const renderButton = (properties: {
   );
 
 describe('ChatTextareaSubmitButton', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('should visibly name the resume action and activate it with the keyboard', async () => {
     const onSubmit = vi.fn();
     renderButton({ status: 'error', canResume: true, onSubmit });
@@ -69,14 +73,22 @@ describe('ChatTextareaSubmitButton', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it.each(['submitted', 'streaming'])('should be named Stop, with its shortcut, while %s (F1)', async (status) => {
-    const onCancel = vi.fn();
-    renderButton({ status, canResume: true, onCancel });
+  it.each([
+    { status: 'submitted', platform: 'MacIntel', shortcut: 'Shift+Meta+Backspace' },
+    { status: 'streaming', platform: 'MacIntel', shortcut: 'Shift+Meta+Backspace' },
+    { status: 'streaming', platform: 'Win32', shortcut: 'Control+Shift+Backspace' },
+  ])(
+    'should be named Stop, with the shortcut $platform presses, while $status (F1)',
+    async ({ status, platform, shortcut }) => {
+      vi.spyOn(navigator, 'platform', 'get').mockReturnValue(platform);
+      const onCancel = vi.fn();
+      renderButton({ status, canResume: true, onCancel });
 
-    const stop = screen.getByRole('button', { name: 'Stop' });
-    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
-    expect(stop).toHaveAttribute('aria-keyshortcuts', 'Shift+Meta+Backspace');
-    await userEvent.click(stop);
-    expect(onCancel).toHaveBeenCalledOnce();
-  });
+      const stop = screen.getByRole('button', { name: 'Stop' });
+      expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
+      expect(stop).toHaveAttribute('aria-keyshortcuts', shortcut);
+      await userEvent.click(stop);
+      expect(onCancel).toHaveBeenCalledOnce();
+    },
+  );
 });

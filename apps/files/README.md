@@ -25,7 +25,7 @@ Objects are served only on the Worker's own custom domain (`FILES_AUDIENCE`). Th
 - **Query.** `n` is the size in decimal, at most 104,857,600. `x` is the expiry in Unix seconds. `k` is the key id. `s` is the HMAC-SHA256 as canonical unpadded base64url, 43 characters. Exactly these four parameters must be present, each once. Nothing is percent-decoded.
 - **Signed message.** UTF-8 of `tau-files-v1\n<audience>\nGET\n<path>\n<n>\n<x>\n<k>`. The audience is the files host, for example `files.taucad.dev`. HEAD is verified against the GET signature.
 - **Validity.** A link is accepted while `now ≤ x + 30` and `x − now ≤ 960`.
-- **Key id.** The format is `files-<generation>-<first 16 hex of sha256(key)>`, for example `files-1-5b3d1dc4d1ca41a6`. The key itself is 32 random bytes.
+- **Key id.** The format is `files-<generation>-<first 16 hex of sha256(lowercase hex of key)>`, for example `files-1-8d4927dfafc954d9`. tau-cloud's `files-link-keys` module derives it with Terraform's `sha256(random_bytes.hex)`, and tau-api refuses at boot a signing secret whose kid does not match its key. The key itself is 32 random bytes.
 - **Golden vectors.** `libs/file-links/src/vectors.json` was computed with Node's `createHmac`, independently of the library. The library, the API signer and this Worker (source and bundle) all check against it.
 
 ## Bindings

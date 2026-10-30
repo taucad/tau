@@ -28,6 +28,8 @@ import {
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { lookup } from 'node:dns/promises';
+import { createServer as createHttpServer } from 'node:http';
+import type { Server as HttpServer } from 'node:http';
 import { createServer } from 'node:net';
 import type { AddressInfo, Server } from 'node:net';
 import { arch, networkInterfaces, platform, release, tmpdir, version } from 'node:os';
@@ -119,10 +121,10 @@ const launchOf = (command: string, overrides: Partial<ShellLaunch> = {}): ShellL
   ...overrides,
 });
 
-const start = async (launch: ShellLaunch): Promise<ShellProcess> => {
+const start = async (launch: ShellLaunch, through: ShellProvider = provider): Promise<ShellProcess> => {
   const privateRoot = mkdtempSync(join(tmpdir(), 'tau-shell-'));
-  const { executionId } = await provider.prepare({ privateRoot, resource: undefined });
-  const outcome = await provider.launch({ ...launch, executionId });
+  const { executionId } = await through.prepare({ privateRoot, resource: undefined });
+  const outcome = await through.launch({ ...launch, executionId });
   if (outcome.status !== 'started') {
     throw new Error(`the provider did not start the launch: ${JSON.stringify(outcome)}`);
   }
@@ -133,8 +135,9 @@ const start = async (launch: ShellLaunch): Promise<ShellProcess> => {
 const run = async (
   command: string,
   overrides: Partial<ShellLaunch> = {},
+  through: ShellProvider = provider,
 ): Promise<{ stdout: string; stderr: string; exitCode: number | undefined }> => {
-  const process_ = await start(launchOf(command, overrides));
+  const process_ = await start(launchOf(command, overrides), through);
   if (process_.kind !== 'pipes') {
     throw new Error('expected a pipes launch');
   }
@@ -154,6 +157,49 @@ const canary = async (): Promise<{ server: Server; port: number; connections: ()
   });
   const { port } = server.address() as AddressInfo;
   return { server, port, connections: () => connections };
+};
+
+type EndpointRequest = Readonly<{ url: string; host: string; authorization: boolean }>;
+
+/**
+ * A controlled granted endpoint outside the sandbox (W7, replacing C04's public origin): an HTTP server on loopback
+ * that records every request, and the real supervisor preloaded with `controlled-endpoint.fixture.ts`, which resolves
+ * the given names to a public stand-in address and connects that address here.
+ */
+const controlledEndpoint = async (
+  names: readonly string[],
+): Promise<{
+  server: HttpServer;
+  port: number;
+  requests: EndpointRequest[];
+  supervisor: Readonly<{ executablePath: string; arguments: readonly string[] }>;
+}> => {
+  const requests: EndpointRequest[] = [];
+  const server = createHttpServer((request, response) => {
+    requests.push({
+      /* A proxied request arrives in absolute form; the path is what the test asked for. */
+      url: new URL(request.url ?? '', 'http://endpoint.invalid').pathname,
+      host: (request.headers.host ?? '').replace(/:\d+$/u, ''),
+      authorization:
+        request.headers.authorization !== undefined || request.headers['proxy-authorization'] !== undefined,
+    });
+    response.writeHead(200, { 'content-type': 'text/plain', connection: 'close' }).end('CONTROLLED-ENDPOINT');
+  });
+  await new Promise<void>((resolve) => {
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const { port } = server.address() as AddressInfo;
+  const preload = new URL('controlled-endpoint.fixture.ts', import.meta.url);
+  preload.search = new URLSearchParams({ port: String(port), names: names.join(',') }).toString();
+  return {
+    server,
+    port,
+    requests,
+    supervisor: {
+      executablePath: process.execPath,
+      arguments: ['--import', preload.href, fileURLToPath(new URL('srt-supervisor.ts', import.meta.url))],
+    },
+  };
 };
 
 const interfaceAddress = (): string | undefined =>
@@ -697,12 +743,40 @@ describe.runIf(enabled)('shell conformance', () => {
     );
   });
 
-  conformance('C04', 'a granted name is reachable through the launch proxy', async () => {
-    const result = await run('curl -sS -o /dev/null -w %{http_code} --max-time 20 https://example.com/', {
-      network: { domains: ['example.com'] },
-    });
+  conformance('C04', 'a granted name is reachable through the launch proxy, and only that name', async () => {
+    /* A controlled endpoint (W7): the granted name lands on this test's own server, so no public origin is a fixture. */
+    const endpoint = await controlledEndpoint(['granted.tau-qualification.test', 'other.tau-qualification.test']);
+    try {
+      const control = await fetch(`http://127.0.0.1:${String(endpoint.port)}/control`);
 
-    expect(result.stdout, result.stderr).toMatch(/^[23]\d\d$/u);
+      expect(control.status).toBe(200);
+      const granted = createSandboxShellProvider({ bwrapPath, home, supervisor: endpoint.supervisor });
+      const reached = await run(
+        'curl -sS --max-time 20 http://granted.tau-qualification.test/granted',
+        {
+          network: { domains: ['granted.tau-qualification.test'] },
+        },
+        granted,
+      );
+
+      expect(reached.stdout, reached.stderr).toBe('CONTROLLED-ENDPOINT');
+      const refused = await run(
+        'curl -fsS --max-time 10 http://other.tau-qualification.test/other',
+        {
+          network: { domains: ['granted.tau-qualification.test'] },
+        },
+        granted,
+      );
+
+      expect(refused.exitCode).not.toBe(0);
+      /* The endpoint is the judge: the control and the granted request, nothing for the ungranted name, and no proxy
+       * credential forwarded to the destination. */
+      expect(endpoint.requests.map(({ url }) => url)).toStrictEqual(['/control', '/granted']);
+      expect(endpoint.requests[1]?.host).toBe('granted.tau-qualification.test');
+      expect(endpoint.requests.some(({ authorization }) => authorization)).toBe(false);
+    } finally {
+      endpoint.server.close();
+    }
   });
 
   conformance(

@@ -13,12 +13,16 @@
     "openscad-language-assets.vite-plugin.ts",
     "asset-integrity.vite-plugin.ts",
     "geospec-mt-assets-cache-key.ts",
+    "csharp-language-assets.vite-plugin.ts",
+    "csharp-language-assets-cache-key.ts",
     "vite.calibration.config.ts",
     "react-router.config.ts",
     "vite-environment.d.ts",
     "types/**/*.d.ts",
     ".react-router/types/**/*",
-    "package.json"
+    "package.json",
+    "picogk-browser-assets.vite-plugin.ts",
+    "picogk-browser-assets-cache-key.ts"
   ],
   "compilerOptions": {
     "rewriteRelativeImportExtensions": true,

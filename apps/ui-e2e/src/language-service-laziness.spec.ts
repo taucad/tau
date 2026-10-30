@@ -29,6 +29,7 @@ const sourceFreeSurfaces = [
 ] as const;
 
 const editorLines = selectors.getByCss('.cm-editor .cm-content').first();
+const fileActions = selectors.getByRole('group', { name: /^File actions for /u }).first();
 
 /** The language services whose resources appear among the paths. */
 const loadedLanguages = (paths: readonly string[]): Language[] =>
@@ -105,5 +106,13 @@ describe('Language service laziness', () => {
 
     await target.click(selectors.getByText('Files', { exact: true }));
     expect(loadedLanguages(await openSource('main.kcl', 'kcl')), 'main.kcl').toEqual(['kcl']);
+
+    /* PicoGK, the C# kernel, runs only in Tau Desktop, so the web build gets its C# file as a new file beside main.kcl. */
+    await target.click(fileActions.getByRole('button', { name: 'Create new file' }));
+    await target.click(selectors.getByRole('menuitem', { name: 'Blank' }));
+    const fileName = selectors.getByPlaceholder('New File');
+    await target.fill(fileName, 'Helper.cs');
+    await target.press(fileName, 'Enter');
+    expect(loadedLanguages(await openSource('Helper.cs', 'csharp')), 'Helper.cs').toEqual(['csharp']);
   });
 });

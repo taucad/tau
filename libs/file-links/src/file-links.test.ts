@@ -1,4 +1,4 @@
-import { createHmac } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   decodeBase64,
@@ -103,6 +103,15 @@ describe('golden vectors', () => {
       });
     },
   );
+
+  it("should derive each kid as Terraform's sha256(random_bytes.hex) does", async () => {
+    for (const key of fileLinkVectors.keys) {
+      const hexText = Buffer.from(keyBytes(key.generation)).toString('hex');
+      const terraformKid = `files-${String(key.generation)}-${createHash('sha256').update(hexText, 'utf8').digest('hex').slice(0, 16)}`;
+      // oxlint-disable-next-line no-await-in-loop -- two keys
+      expect(await fileLinkKeyId(key.generation, keyBytes(key.generation))).toBe(terraformKid);
+    }
+  });
 
   it('should derive every vector kid from its key bytes', async () => {
     for (const key of fileLinkVectors.keys) {

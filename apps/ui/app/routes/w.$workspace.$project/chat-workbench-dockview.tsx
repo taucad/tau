@@ -132,6 +132,7 @@ import {
 } from '@taucad/ui/components/dropdown-menu';
 import { Separator } from '@taucad/ui/components/separator';
 import { formatKeyCombination } from '@taucad/ui/utils/keys';
+import { usePlatform } from '@taucad/ui/hooks/use-platform';
 import { capturePointer, releasePointer } from '@taucad/ui/utils/pointer-capture';
 import type {
   FileViewerPaneContent,
@@ -631,10 +632,11 @@ export function openWorkbenchFiles({
 }
 
 function WorkbenchSurfaceShortcut({ surface }: { readonly surface: WorkbenchSurface }): React.JSX.Element | undefined {
+  const platform = usePlatform();
   if (!surface.shortcut) {
     return undefined;
   }
-  return <KeyShortcut className='ml-auto'>{formatKeyCombination(surface.shortcut)}</KeyShortcut>;
+  return <KeyShortcut className='ml-auto'>{formatKeyCombination(surface.shortcut, platform)}</KeyShortcut>;
 }
 
 function WorkbenchSurfaceSelector({

@@ -5,7 +5,8 @@ import { createMockLogger } from '@taucad/runtime-testing';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import { PicogkSession, PicogkWorkerError } from '#picogk-session.js';
+import { PicogkSession } from '#picogk-session.js';
+import { PicogkWorkerError } from '#picogk-worker-error.js';
 import { picogkProtocolVersion } from '#picogk.protocol.js';
 
 const sessionMock = vi.hoisted(() => ({

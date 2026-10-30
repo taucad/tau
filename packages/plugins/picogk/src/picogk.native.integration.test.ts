@@ -22,7 +22,7 @@ import { installFetchTripwire } from '@taucad/runtime-testing/preparation';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { picogk } from '#index.js';
-import { nativeEngineAvailable, nativeKernelOptions } from '#picogk-native.fixture.js';
+import { nativeEngineAvailable, nativeKernelOptions, pinnedClosure } from '#picogk-native.fixture.js';
 
 // The kernels run from a closure already on disk: no request may leave this file (charter D27 tripwire).
 beforeAll(() => installFetchTripwire());
@@ -47,6 +47,20 @@ Library.Go(1f, () =>
 {
     Library.oViewer().SetGroupMaterial(0, "4f7dd9", 0.2f, 0.7f);
     Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, ${String(radius)}f));
+});
+`;
+
+// The author's own geometry files, written where PicoGK puts a model's output. The browser runtime
+// already offers these as exports; this proves the desktop runtime offers the same two.
+const authoredOutputSource = `using System.IO;
+using System.Numerics;
+using PicoGK;
+Library.Go(1f, () =>
+{
+    using Voxels voxels = Voxels.voxSphere(Vector3.Zero, 10f);
+    Library.oViewer().Add(voxels);
+    voxels.mshAsMesh().SaveToStlFile(Path.Combine(Library.strLogFolder, "part.stl"));
+    voxels.SaveToVdbFile(Path.Combine(Library.strLogFolder, "field.vdb"));
 });
 `;
 
@@ -265,6 +279,34 @@ describe.runIf(nativeEngineAvailable)('PicoGK native C# kernel', () => {
       await client.shutdown();
     }
   }, 180_000);
+
+  // Skipped under `TAU_PICOGK_CLOSURE=pinned`: the published layer was built before the desktop
+  // worker collected authored files, so it reports none and this is not a result it can give. That
+  // run proves nothing here and must not be read as having passed.
+  it.skipIf(pinnedClosure)(
+    "should export the author's own STL and VDB from a desktop build",
+    async () => {
+      const client = createTestRuntimeClient({ runtime, files: { 'main.cs': authoredOutputSource } });
+      try {
+        const document = client.open({ source: { path: 'main.cs' } });
+        const result = await document.view('model').rendering();
+        assert.ok(!result.superseded);
+        assert.ok(result.rendering.success, JSON.stringify(result.rendering));
+        const stl = await document.export('authoredStl');
+        assert.ok(stl.success, JSON.stringify(stl));
+        expect(stl.files.map((file) => file.name)).toEqual(['part.stl']);
+        expect(stl.files[0].bytes.byteLength).toBeGreaterThan(84);
+        const vdb = await document.export('authoredVdb');
+        assert.ok(vdb.success, JSON.stringify(vdb));
+        expect(vdb.files.map((file) => file.name)).toEqual(['field.vdb']);
+        expect(vdb.files[0].bytes.byteLength).toBeGreaterThan(0);
+        document.close();
+      } finally {
+        await client.shutdown();
+      }
+    },
+    180_000,
+  );
 
   it('resolves opt-in C# metadata and applies selected parameters to native geometry', async () => {
     const client = createTestRuntimeClient({

@@ -1,0 +1,58 @@
+{
+  "name": "@taucad/csharp-language",
+  "version": "0.1.0-beta.0",
+  "description": "Roslyn-backed C# language server compiled to WebAssembly for the source editor",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "apps/libs/csharp-language"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/apps/libs/csharp-language#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "keywords": [
+    "cad",
+    "csharp",
+    "lsp",
+    "roslyn",
+    "webassembly"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    "./client": {
+      "types": "./src/client.ts",
+      "import": "./src/client.ts",
+      "default": "./src/client.ts"
+    },
+    "./protocol": {
+      "types": "./src/protocol.ts",
+      "import": "./src/protocol.ts",
+      "default": "./src/protocol.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@taucad/lsp": "workspace:*",
+    "@taucad/lsp-fs": "workspace:*",
+    "@taucad/utils": "workspace:*",
+    "json-rpc-2.0": "^1.7.1",
+    "vscode-languageserver-protocol": "^3.18.0",
+    "vscode-uri": "catalog:"
+  },
+  "devDependencies": {
+    "@taucad/fs-client": "workspace:*",
+    "zod": "catalog:"
+  }
+}

@@ -13,6 +13,8 @@ import type { JSONObject } from '@taucad/runtime/types';
 
 type EnrichZooGltfTopologyOptions = {
   format: 'glb' | 'gltf';
+  /** Body names by B-rep solid index; ignored unless it names every solid, since the engine join is by order. */
+  solidNames?: ReadonlyArray<string | undefined>;
 };
 
 type KittyCadSolid = {
@@ -226,8 +228,10 @@ const buildTopologyPayload = ({
   payload,
   meshPrimitiveCounts,
   solidNodesBySolidIndex,
+  solidNames,
 }: {
   payload: KittyCadBrepPayload;
+  solidNames?: ReadonlyArray<string | undefined>;
   meshPrimitiveCounts: readonly number[];
   solidNodesBySolidIndex: ReadonlyMap<number, ReadonlyArray<{ nodeIndex: number; meshIndex: number | undefined }>>;
 }): BuildTopologyResult | undefined => {
@@ -283,7 +287,7 @@ const buildTopologyPayload = ({
 
     components.push({
       id: bodyId,
-      name: `Solid ${solidIndex + 1}`,
+      name: solidNames?.[solidIndex] ?? `Solid ${solidIndex + 1}`,
       kind: 'body',
       selector: `kittycad/solid/${solidIndex}`,
       nodeIndex,
@@ -451,7 +455,13 @@ export async function enrichZooGltfTopology(
       (mesh: GltfTransformMesh) =>
         mesh.listPrimitives().filter((primitive) => primitive.getMode() === Primitive.Mode['TRIANGLES']).length,
     );
-  const topology = buildTopologyPayload({ payload: brepPayload, meshPrimitiveCounts, solidNodesBySolidIndex });
+  const solidNames = options.solidNames?.length === brepPayload.solids.length ? options.solidNames : undefined;
+  const topology = buildTopologyPayload({
+    payload: brepPayload,
+    meshPrimitiveCounts,
+    solidNodesBySolidIndex,
+    solidNames,
+  });
   if (!topology) {
     return bytes;
   }

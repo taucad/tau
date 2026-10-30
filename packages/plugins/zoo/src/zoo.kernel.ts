@@ -59,15 +59,34 @@ type ZooNativeHandle = {
   kind: 'zoo-live-engine-session';
   hasGeometry: boolean;
   generation: number;
+  /** KCL variable path by engine solid id, naming the bodies in the topology manifest. */
+  solidNamesById?: ReadonlyMap<string, string>;
 };
 
 type ZooExportFormat = keyof typeof zooExportSchemas;
 
-const createZooNativeHandle = (hasGeometry: boolean, generation: number): ZooNativeHandle => ({
+const createZooNativeHandle = (
+  hasGeometry: boolean,
+  generation: number,
+  solidNamesById?: ReadonlyMap<string, string>,
+): ZooNativeHandle => ({
   kind: 'zoo-live-engine-session',
   hasGeometry,
   generation,
+  ...(solidNamesById && { solidNamesById }),
 });
+
+/**
+ * Body names in glTF B-rep solid order: the export lists solids in the reverse of the engine's scene order.
+ */
+const resolveZooSolidNames = async (
+  utilities: KclUtilities,
+  handle: ZooNativeHandle,
+  signal: AbortSignal | undefined,
+): Promise<Array<string | undefined>> => {
+  const solidIds = await utilities.getSceneSolidIds({ signal });
+  return solidIds.toReversed().map((id) => handle.solidNamesById?.get(id));
+};
 
 const isCurrentZooHandle = (handle: ZooNativeHandle, context: ZooContext): boolean =>
   handle.generation === (context.generation ?? 0) &&
@@ -349,7 +368,9 @@ export const zooKernel = defineKernel({
       // Display GLTF fetch is deferred to render so a BRep-only export
       // skips the engine round-trip. An executed-but-empty scene is discovered
       // at fetch/export time; export's per-format empty guards cover it.
-      return { handle: createZooNativeHandle(true, generation) };
+      return {
+        handle: createZooNativeHandle(true, generation, KclUtilities.collectSolidNames(executionResult.variables)),
+      };
     } catch (error) {
       if (error instanceof KclBuildError) {
         throw error;
@@ -390,7 +411,10 @@ export const zooKernel = defineKernel({
         sceneNameSource: 'external-generated',
       });
       const outputGltf = content?.includeTopology
-        ? await enrichZooGltfTopology(normalizedGltf, { format: 'glb' })
+        ? await enrichZooGltfTopology(normalizedGltf, {
+            format: 'glb',
+            solidNames: await resolveZooSolidNames(utilities, handle, signal),
+          })
         : normalizedGltf;
       return { content: asBuffer(outputGltf) };
     } catch (error) {
@@ -485,7 +509,12 @@ export const zooKernel = defineKernel({
             sceneNamePolicy: 'clear-generated',
             sceneNameSource: 'external-generated',
           });
-          const output = content?.includeTopology ? await enrichZooGltfTopology(glb, { format: 'glb' }) : glb;
+          const output = content?.includeTopology
+            ? await enrichZooGltfTopology(glb, {
+                format: 'glb',
+                solidNames: await resolveZooSolidNames(utilities, handle, signal),
+              })
+            : glb;
           return { files: [createExportFile('glb', 'model.glb', asBuffer(output))] };
         }
 
@@ -522,7 +551,12 @@ export const zooKernel = defineKernel({
             sceneNamePolicy: 'clear-generated',
             sceneNameSource: 'external-generated',
           });
-          const output = content?.includeTopology ? await enrichZooGltfTopology(gltf, { format: 'gltf' }) : gltf;
+          const output = content?.includeTopology
+            ? await enrichZooGltfTopology(gltf, {
+                format: 'gltf',
+                solidNames: await resolveZooSolidNames(utilities, handle, signal),
+              })
+            : gltf;
           return { files: [createExportFile('gltf', 'model.gltf', asBuffer(output))] };
         }
 

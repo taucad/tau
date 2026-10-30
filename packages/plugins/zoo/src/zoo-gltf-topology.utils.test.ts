@@ -103,6 +103,21 @@ describe('enrichZooGltfTopology', () => {
     });
   });
 
+  it('should name bodies only when a name list covers every solid', async () => {
+    const io = registerTauGltfExtensions(new NodeIO());
+    const input = await io.writeBinary(createZooBrepDocument());
+    const bodyName = async (solidNames: Array<string | undefined>): Promise<unknown> => {
+      const document = await io.readBinary(await enrichZooGltfTopology(input, { format: 'glb', solidNames }));
+      const payload = document.getRoot().getExtension<TauCadTopologyRoot>(tauCadTopologyExtension)?.getPayload();
+      return (payload?.['components'] as Array<{ name: string }> | undefined)?.[0]?.name;
+    };
+
+    expect(await bodyName(['ring'])).toBe('ring');
+    expect(await bodyName([undefined])).toBe('Solid 1');
+    expect(await bodyName(['ring', 'sun'])).toBe('Solid 1');
+    expect(await bodyName([])).toBe('Solid 1');
+  });
+
   it('should bind every node that references the same instanced solid', async () => {
     const document = new Document();
     const buffer = document.createBuffer();

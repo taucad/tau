@@ -1,4 +1,5 @@
 import type { PartialDeep, SetRequired } from 'type-fest';
+import { decode } from '@msgpack/msgpack';
 import type { Node } from '@taucad/kcl-wasm-lib/bindings/Node';
 import type { Program } from '@taucad/kcl-wasm-lib/bindings/Program';
 import type { KclValueView } from '@taucad/kcl-wasm-lib/bindings/KclValueView';
@@ -30,6 +31,7 @@ import type { KclSceneGraphDelta } from '#kcl-scene-graph-delta.js';
 
 import type { KclExecutionResult } from '#kcl-execution-result.types.js';
 import { buildKclSettingsJson } from '#kcl-headless-settings.js';
+import { randomUuid } from '#binary.utils.js';
 
 /**
  * URL to the KCL WASM binary exposed by the dependency package.
@@ -220,6 +222,45 @@ export class KclUtilities {
     }
 
     return modifiedProgram;
+  }
+
+  /**
+   * Name each engine solid after the KCL variable that holds it: `ring`, `planets[2]`, `gear.hub`. A solid several
+   * variables hold (`moved = part |> translate(...)` keeps the id) takes the last name declared.
+   *
+   * @param variables - name-to-value map produced by the KCL executor
+   * @returns Variable path by engine solid id
+   */
+  public static collectSolidNames(variables: Partial<Record<string, KclValueView>>): Map<string, string> {
+    const names = new Map<string, string>();
+    const visit = (path: string, value: KclValueView | undefined): void => {
+      switch (value?.type) {
+        case 'Solid': {
+          names.set(value.value.id, path);
+          break;
+        }
+        case 'Tuple':
+        case 'HomArray': {
+          for (const [index, item] of value.value.entries()) {
+            visit(`${path}[${index}]`, item);
+          }
+          break;
+        }
+        case 'Object': {
+          for (const [key, item] of Object.entries(value.value)) {
+            visit(`${path}.${key}`, item);
+          }
+          break;
+        }
+        default: {
+          break;
+        }
+      }
+    };
+    for (const [name, value] of Object.entries(variables)) {
+      visit(name, value);
+    }
+    return names;
   }
 
   /**
@@ -709,6 +750,40 @@ export class KclUtilities {
 
         const errorMessage = error instanceof Error ? error.message : String(error);
         throw new KclExportError(`Export failed: ${errorMessage}`, options.type);
+      }
+    });
+  }
+
+  /**
+   * Ids of the solids in the engine scene, in the engine's scene order. Zoo's glTF export lists the same solids in
+   * the reverse of this order (verified live against booleans, patterns and unnamed bodies); the order is not a
+   * documented contract, so callers check the count against the export before relying on it.
+   *
+   * @returns the solid ids, or an empty array when the engine cannot answer
+   */
+  public async getSceneSolidIds({ signal }: KclOperationOptions = {}): Promise<string[]> {
+    return this.withAbort(signal, async () => {
+      const bridge = this.engineManager?.bridge;
+      if (!bridge) {
+        return [];
+      }
+      const id = randomUuid();
+      const cmd = { type: 'scene_get_entity_ids', filter: ['solid3d'], skip: 0, take: 1000 };
+      try {
+        const response = decode(
+          await bridge.sendModelingCommandFromWasm(
+            id,
+            '{}',
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- Kittycad wire JSON field name
+            JSON.stringify({ type: 'modeling_cmd_req', cmd_id: id, cmd }),
+            '{}',
+          ),
+        ) as { resp?: { data?: { modeling_response?: { data?: { entity_ids?: unknown } } } } };
+        const entityIds = response.resp?.data?.modeling_response?.data?.entity_ids;
+        return Array.isArray(entityIds) ? entityIds.flat().filter((entry) => typeof entry === 'string') : [];
+      } catch (error) {
+        log.warn('Scene solid id query failed:', error);
+        return [];
       }
     });
   }

@@ -1,6 +1,7 @@
 import { completionTypeFromLsp } from '#components/code/editor-completion-icon.js';
 import { definitionProvider } from '#components/code/editor-definition.js';
 import { renderEditorDocumentation } from '#components/code/editor-documentation.js';
+import type { DocumentationLinkHandler } from '#components/code/editor-documentation.js';
 import { languageFeatures } from '#components/code/editor-language-features.js';
 import type { EditorSignature } from '#components/code/editor-language-features.js';
 import { autocompletion } from '@codemirror/autocomplete';
@@ -29,8 +30,17 @@ export type CsharpClient = Pick<
   'initialize' | 'request' | 'notify' | 'refreshWorkspace' | 'dispose'
 >;
 
-/** `textDocument/hover` with Tau's `definitionTargets`: the locations its `#tau-definition-N` links open. */
-export type CsharpHover = LSP.Hover & Readonly<{ definitionTargets?: readonly LSP.Location[] }>;
+/** Tau's extension to a documented result: the locations its markdown's `#tau-definition-N` links open, by N. */
+type DefinitionTargets = Readonly<{ definitionTargets?: readonly LSP.Location[] }>;
+
+/** `textDocument/hover` with Tau's `definitionTargets`. */
+export type CsharpHover = LSP.Hover & DefinitionTargets;
+
+/** `completionItem/resolve` with Tau's `definitionTargets` for its documentation. */
+export type CsharpCompletionItem = LSP.CompletionItem & DefinitionTargets;
+
+/** `textDocument/signatureHelp` with Tau's `definitionTargets`, shared by every signature and parameter. */
+export type CsharpSignatureHelp = LSP.SignatureHelp & DefinitionTargets;
 
 const diagnosticsOwner = 'csharp-lsp';
 const diagnosticsDelayMilliseconds = 250;
@@ -467,6 +477,19 @@ export async function openCsharpLocation(
   await environment.navigate({ uri: location.uri, line, column });
 }
 
+/** Open the definition target a documentation link names, as Cmd-click opens it; failures go to the error report. */
+function definitionLinkOpener(
+  targets: readonly LSP.Location[] | undefined,
+  options: ExtensionOptions,
+): DocumentationLinkHandler {
+  return (index) => {
+    const location = targets?.[index];
+    if (location) {
+      void runReported(options, async () => openCsharpLocation(location, options));
+    }
+  };
+}
+
 /** Find the completion the server offers now for the item a narrowed list still shows. */
 async function currentCompletion(
   item: LSP.CompletionItem,
@@ -483,9 +506,9 @@ async function currentCompletion(
 /** Map one server completion to CodeMirror; accepting it applies the server's edits, including an added `using`. */
 export function csharpCompletion(item: LSP.CompletionItem, version: number, options: ExtensionOptions): Completion {
   const { client, document, isDisposed } = options;
-  let resolved: Promise<LSP.CompletionItem> | undefined;
-  const resolve = async (): Promise<LSP.CompletionItem> => {
-    resolved ??= client.request<LSP.CompletionItem>('completionItem/resolve', item);
+  let resolved: Promise<CsharpCompletionItem> | undefined;
+  const resolve = async (): Promise<CsharpCompletionItem> => {
+    resolved ??= client.request<CsharpCompletionItem>('completionItem/resolve', item);
     return resolved;
   };
   return {
@@ -496,9 +519,11 @@ export function csharpCompletion(item: LSP.CompletionItem, version: number, opti
     type: completionTypeFromLsp(item.kind),
     boost: item.preselect ? 99 : undefined,
     async info() {
-      const { documentation } = await resolve();
+      const { documentation, definitionTargets } = await resolve();
       const markdown = typeof documentation === 'string' ? documentation : documentation?.value;
-      return markdown && !isDisposed() ? renderEditorDocumentation(markdown) : null;
+      return markdown && !isDisposed()
+        ? renderEditorDocumentation(markdown, undefined, definitionLinkOpener(definitionTargets, options))
+        : null;
     },
     // oxlint-disable-next-line max-params -- CodeMirror completion apply callback contract.
     apply(view, completion, from, to) {
@@ -523,12 +548,6 @@ export function csharpCompletion(item: LSP.CompletionItem, version: number, opti
 /** Hover documentation whose references link to the definitions the server resolved for them. */
 export function csharpHover(options: ExtensionOptions): HoverTooltipSource {
   const { client, document, isDisposed } = options;
-  const open = (location: LSP.Location | undefined): void => {
-    if (!location) {
-      return;
-    }
-    void runReported(options, async () => openCsharpLocation(location, options));
-  };
   return async (view, pos) => {
     if (isDisposed()) {
       return null;
@@ -549,14 +568,16 @@ export function csharpHover(options: ExtensionOptions): HoverTooltipSource {
     if (!hover || !markdown || isDisposed() || document.version !== version) {
       return null;
     }
-    const targets = hover.definitionTargets ?? [];
+    const { definitionTargets } = hover;
     return {
       pos: hover.range ? offsetAt(document.text, hover.range.start) : pos,
       end: hover.range ? offsetAt(document.text, hover.range.end) : undefined,
       create: () => ({
-        dom: renderEditorDocumentation(markdown, view.dom.ownerDocument, (index) => {
-          open(targets[index]);
-        }),
+        dom: renderEditorDocumentation(
+          markdown,
+          view.dom.ownerDocument,
+          definitionLinkOpener(definitionTargets, options),
+        ),
       }),
     };
   };
@@ -567,12 +588,10 @@ function markupText(value: string | LSP.MarkupContent | undefined): string | und
 }
 
 /** The server's signature at `position`, with the active overload's active parameter. */
-async function csharpSignatureAt(
-  { client, document }: Pick<ExtensionOptions, 'client' | 'document'>,
-  position: number,
-): Promise<EditorSignature | undefined> {
+async function csharpSignatureAt(options: ExtensionOptions, position: number): Promise<EditorSignature | undefined> {
+  const { client, document } = options;
   const { version } = document;
-  const help = await client.request<LSP.SignatureHelp | undefined>('textDocument/signatureHelp', {
+  const help = await client.request<CsharpSignatureHelp | undefined>('textDocument/signatureHelp', {
     textDocument: { uri: document.uri },
     position: positionAt(document.text, position),
   } satisfies LSP.SignatureHelpParams);
@@ -596,6 +615,7 @@ async function csharpSignatureAt(
     activeParameter,
     documentation: markupText(signature.documentation),
     parameterDocumentation: markupText(signature.parameters?.[activeParameter]?.documentation),
+    onDefinitionLink: definitionLinkOpener(help.definitionTargets, options),
     overload: { index, count: help.signatures.length },
   };
 }

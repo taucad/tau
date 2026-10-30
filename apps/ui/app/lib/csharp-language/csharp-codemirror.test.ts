@@ -269,6 +269,57 @@ describe('C# completion', () => {
       view.destroy();
     }
   });
+
+  it('renders resolved documentation references as links that open their definitions', async () => {
+    const metadataUri = 'file:///__csharp_metadata__/PicoGK/PicoGK.Voxels.cs';
+    const navigate = vi.fn();
+    const document = new EditorDocument('main.cs', 'var b = Shapes.');
+    const item: LSP.CompletionItem = { label: 'Ball', kind: 2, data: { resultId: 1, index: 0 } };
+    const client = fakeClient((method) => {
+      if (method === 'completionItem/resolve') {
+        return {
+          ...item,
+          documentation: {
+            kind: 'markdown',
+            value:
+              '```csharp\nvoid Shapes.Ball()\n```\n\nA [`Voxels`](#tau-definition-0) from [`Create`](#tau-definition-1).',
+          },
+          definitionTargets: [
+            { uri: metadataUri, range: range(3, 0) },
+            { uri: 'file:///ShapeFactory.cs', range: range(8, 25) },
+          ],
+        };
+      }
+      return method === 'tau/metadataSource' ? { uri: metadataUri, text: '// PicoGK' } : undefined;
+    });
+    const completion = csharpCompletion(item, document.version, {
+      client,
+      document,
+      environment: environmentFor(navigate),
+      isDisposed: () => false,
+    });
+    const { info } = completion;
+    if (typeof info !== 'function') {
+      throw new TypeError('C# completions resolve their documentation lazily');
+    }
+    const dom = (await info(completion)) as HTMLElement;
+    const links = [...dom.querySelectorAll('a')];
+    expect(links.map((link) => link.textContent)).toEqual(['Voxels', 'Create']);
+
+    links[1]!.click();
+    await vi.waitFor(() => {
+      expect(navigate).toHaveBeenCalledWith({ uri: 'file:///ShapeFactory.cs', line: 9, column: 26 });
+    });
+    links[0]!.click();
+    await vi.waitFor(() => {
+      expect(navigate).toHaveBeenLastCalledWith({
+        uri: metadataUri,
+        line: 4,
+        column: 1,
+        declaration: { text: '// PicoGK' },
+      });
+    });
+  });
 });
 
 describe('C# navigation', () => {
@@ -607,8 +658,8 @@ describe('C# signature help', () => {
     activeParameter: 0,
   };
 
-  it('opens on the server trigger characters and on Mod-Shift-Space', async () => {
-    // The jsdom environment has no text layout; the tooltip measures its anchor through Range rectangles.
+  /** The jsdom environment has no text layout; the tooltip measures its anchor through Range rectangles. */
+  function stubTextLayout(): void {
     const layout = {
       getClientRects: () => [],
       getBoundingClientRect: () => new DOMRect(),
@@ -624,6 +675,10 @@ describe('C# signature help', () => {
         }
       });
     }
+  }
+
+  it('opens on the server trigger characters and on Mod-Shift-Space', async () => {
+    stubTextLayout();
     const document = new EditorDocument('main.cs', 'var b = Shapes.Ball');
     const client = fakeClient((method) => (method === 'textDocument/signatureHelp' ? help : undefined));
     const view = boundView(document, [
@@ -663,6 +718,68 @@ describe('C# signature help', () => {
       expect(triggerParameterHints(view)).toBe(true);
       await vi.waitFor(() => {
         expect(signatureRequests()).toHaveLength(count + 1);
+      });
+    } finally {
+      view.destroy();
+    }
+  });
+
+  it('renders signature and parameter documentation references as links that open their definitions', async () => {
+    stubTextLayout();
+    const metadataUri = 'file:///__csharp_metadata__/PicoGK/PicoGK.Voxels.cs';
+    const navigate = vi.fn();
+    const linked: LSP.SignatureHelp & { definitionTargets: LSP.Location[] } = {
+      signatures: [
+        {
+          label: 'Voxels Shapes.Ball(float radius)',
+          documentation: { kind: 'markdown', value: 'A [`Voxels`](#tau-definition-0) ball.' },
+          parameters: [
+            { label: [19, 31], documentation: { kind: 'markdown', value: 'See [`Create`](#tau-definition-1).' } },
+          ],
+        },
+      ],
+      activeSignature: 0,
+      activeParameter: 0,
+      definitionTargets: [
+        { uri: metadataUri, range: range(3, 0) },
+        { uri: 'file:///ShapeFactory.cs', range: range(8, 25) },
+      ],
+    };
+    const document = new EditorDocument('main.cs', 'var b = Shapes.Ball');
+    const client = fakeClient((method) => {
+      if (method === 'textDocument/signatureHelp') {
+        return linked;
+      }
+      return method === 'tau/metadataSource' ? { uri: metadataUri, text: '// PicoGK' } : undefined;
+    });
+    const view = boundView(document, [
+      languageFeatureNavigation(),
+      csharpExtensions({ client, document, environment: environmentFor(navigate), isDisposed: () => false }),
+    ]);
+    try {
+      view.dispatch({
+        changes: { from: view.state.doc.length, insert: '(' },
+        selection: { anchor: view.state.doc.length + 1 },
+        userEvent: 'input.type',
+      });
+      await vi.waitFor(() => {
+        expect(view.dom.querySelectorAll('.cm-signature-help a')).toHaveLength(2);
+      });
+      const links = [...view.dom.querySelectorAll<HTMLAnchorElement>('.cm-signature-help a')];
+      expect(links.map((link) => link.textContent)).toEqual(['Create', 'Voxels']);
+
+      links[0]!.click();
+      await vi.waitFor(() => {
+        expect(navigate).toHaveBeenCalledWith({ uri: 'file:///ShapeFactory.cs', line: 9, column: 26 });
+      });
+      links[1]!.click();
+      await vi.waitFor(() => {
+        expect(navigate).toHaveBeenLastCalledWith({
+          uri: metadataUri,
+          line: 4,
+          column: 1,
+          declaration: { text: '// PicoGK' },
+        });
       });
     } finally {
       view.destroy();

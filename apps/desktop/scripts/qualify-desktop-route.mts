@@ -220,6 +220,9 @@ const main = async (): Promise<void> => {
         : (process.env['XDG_CONFIG_HOME'] ?? join(homedir(), '.config')),
     name,
   );
+  // Same split as the run directory: the profile leaf must be absent for the
+  // cold-store check below, but its parent need not exist on a fresh host.
+  await mkdir(dirname(profile), { recursive: true });
   await mkdir(profile, { recursive: false });
   const store = channel === 'staging' ? join(profile, 'config/payloads') : defaultPayloadStore();
   const coldEntries = await readdir(join(store, 'closures/sha256')).catch((error: unknown) => {

@@ -124,7 +124,7 @@ describe('ViewerSettings', () => {
     await openViewerSettings(user);
 
     expect(screen.queryByText('Lines')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Edges' }));
+    await user.click(screen.getByRole('switch', { name: 'Edges' }));
 
     expect(mocks.graphicsSend).toHaveBeenCalledWith({ type: 'setLinesVisibility', payload: false });
   });

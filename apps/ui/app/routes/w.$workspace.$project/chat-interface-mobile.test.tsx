@@ -70,7 +70,7 @@ vi.mock('#routes/w.$workspace.$project/use-chat-interface-state.js', () => ({
 }));
 // The shell only mounts on a phone, where a pane's Close is the sheet's own close.
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => true }));
-vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'project-1' }) }));
+vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'project-1', viewRecords: new Map() }) }));
 vi.mock('#hooks/use-sidebar-status.js', () => ({ useProjectSidebarRow: () => state.row }));
 vi.mock('#flags/use-feature.js', () => ({
   useFeature: (flag: 'machines' | 'tauDebug') => state.flags[flag],

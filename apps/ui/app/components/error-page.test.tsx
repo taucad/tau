@@ -1,16 +1,16 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as ReactRouter from 'react-router';
 import type * as StaleBuildRecovery from '#lib/stale-build-recovery.js';
 import type * as BuildSkew from '#filesystem/build-skew.js';
 import type { ServerVerdict } from '#filesystem/build-skew.js';
 import type { ReloadState, StaleBuildOutcome } from '#lib/stale-build-recovery.js';
+import { ChatSessionStore } from '#services/chat-session-store.js';
 
 const mocks = vi.hoisted(() => ({
   routeError: undefined as unknown,
-  captureException: vi.fn(),
   reportUiError: vi.fn(async () => undefined),
   recoverFromStaleBuild: vi.fn(async (_failure: unknown): Promise<StaleBuildOutcome> => 'current'),
   reloadState: 'idle' as ReloadState,
@@ -40,12 +40,6 @@ const setOutcome = (failure: unknown, outcome: StaleBuildOutcome): void => {
 vi.mock('react-router', async (importOriginal) => ({
   ...(await importOriginal<typeof ReactRouter>()),
   useRouteError: () => mocks.routeError,
-}));
-const analytics = { captureException: mocks.captureException };
-/** `false` models a provider that hands out a new analytics object on every render. */
-let isAnalyticsStable = true;
-vi.mock('#hooks/use-analytics.js', () => ({
-  useAnalytics: () => (isAnalyticsStable ? analytics : { captureException: mocks.captureException }),
 }));
 vi.mock('#lib/error-reporting.js', () => ({ reportUiError: mocks.reportUiError }));
 vi.mock('#lib/stale-build-recovery.js', async (importOriginal) => ({
@@ -140,6 +134,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  sessionStorage.removeItem('tau.chat-observation-quarantine');
   mocks.verdict = 'unknown';
   vi.clearAllMocks();
   vi.restoreAllMocks();
@@ -176,7 +171,6 @@ describe('ErrorPage', () => {
 
       expect(await screen.findByRole('heading', { name: 'Tau has been updated' })).toBeInTheDocument();
       expect(mocks.reportUiError).not.toHaveBeenCalled();
-      expect(mocks.captureException).not.toHaveBeenCalled();
     },
   );
 
@@ -250,7 +244,6 @@ describe('ErrorPage', () => {
     expect(screen.getByRole('heading', { name: 'Something went wrong' })).toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Prompt owned' })).toHaveTextContent('false');
     expect(mocks.reportUiError).not.toHaveBeenCalled();
-    expect(mocks.captureException).not.toHaveBeenCalled();
   });
 
   it('should switch a failure first called genuine to the update prompt once the server confirms another build', async () => {
@@ -280,7 +273,6 @@ describe('ErrorPage', () => {
     expect(screen.queryByLabelText('Stack trace')).not.toBeInTheDocument();
     // The recovery reports a genuine failure a boundary caught (`onGenuineFailure`); a second report would double it.
     expect(mocks.reportUiError).not.toHaveBeenCalled();
-    expect(mocks.captureException).not.toHaveBeenCalled();
   });
 
   it('should still show the stack of any other error', async () => {
@@ -308,35 +300,29 @@ describe('ErrorPage', () => {
     expect(screen.getByRole('heading', { name: 'Something went wrong' })).toBeInTheDocument();
   });
 
-  it('should report any other error as the same value, and to analytics once, however often the page renders', async () => {
-    isAnalyticsStable = false;
-    try {
-      const error = new Error('controlled render failure');
-      const view = renderPage(error);
-      await waitFor(() => {
-        expect(mocks.reportUiError).toHaveBeenCalledWith(error);
-      });
+  it('should report any other error as the same value however often the page renders', async () => {
+    const error = new Error('controlled render failure');
+    const view = renderPage(error);
+    await waitFor(() => {
+      expect(mocks.reportUiError).toHaveBeenCalledWith(error);
+    });
 
-      view.rerender(
-        <MemoryRouter>
-          <ErrorPage />
-        </MemoryRouter>,
-      );
-      await act(async () => {
-        await new Promise((resolve) => {
-          setTimeout(resolve, 20);
-        });
+    view.rerender(
+      <MemoryRouter>
+        <ErrorPage />
+      </MemoryRouter>,
+    );
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
       });
+    });
 
-      // The same value each time: the error tracker's report deduplicates it (`reportUiError`).
-      expect(new Set(reportedValues())).toStrictEqual(new Set([error]));
-      expect(mocks.captureException).toHaveBeenCalledOnce();
-    } finally {
-      isAnalyticsStable = true;
-    }
+    // The same value each time: the error tracker's report deduplicates it (`reportUiError`).
+    expect(new Set(reportedValues())).toStrictEqual(new Set([error]));
   });
 
-  it('should report an error as the same value, and to analytics once, when the error page mounts again for it', async () => {
+  it('should report an error as the same value when the error page mounts again for it', async () => {
     const error = new Error('controlled render failure');
     const first = renderPage(error);
     await waitFor(() => {
@@ -352,7 +338,6 @@ describe('ErrorPage', () => {
     });
 
     expect(new Set(reportedValues())).toStrictEqual(new Set([error]));
-    expect(mocks.captureException).toHaveBeenCalledOnce();
   });
 
   it('should report a server error response as the same value however often the page mounts for it', async () => {
@@ -372,7 +357,6 @@ describe('ErrorPage', () => {
     const reported = new Set(reportedValues());
     expect(reported.size).toBe(1);
     expect([...reported][0]).toMatchObject({ name: 'route_error', message: '503 Service Unavailable' });
-    expect(mocks.captureException).toHaveBeenCalledOnce();
   });
 
   it('should report any other error without asking the server', async () => {
@@ -385,4 +369,41 @@ describe('ErrorPage', () => {
     });
     expect(mocks.recoverFromStaleBuild).not.toHaveBeenCalled();
   });
+
+  it('should open home instead of replaying the crashing route when a chat is already observed', () => {
+    mocks.routeError = new Error(
+      'Chat 00000000-0000-4000-8000-000000000000 is already observed in project proj_cqfNAOB65eDYLOe1Y0h8H.',
+    );
+    render(
+      <MemoryRouter initialEntries={['/w/home/bracket', '/w/disk/bracket']} initialIndex={1}>
+        <ErrorPage />
+        <ObservedPath />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go Back' }));
+
+    expect(screen.getByTestId('observed-path').textContent).toBe('/');
+    expect(sessionStorage.getItem('tau.chat-observation-quarantine')).toContain('00000000-0000-4000-8000-000000000000');
+  });
+
+  it('should remember the conflicting chat before reload so the next launch skips it', () => {
+    renderPage(new Error('Chat chat_shared is already observed in project proj_a.'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reload Page' }));
+
+    expect(sessionStorage.getItem('tau.chat-observation-quarantine')).toContain('chat_shared');
+    const store = new ChatSessionStore();
+    const releaseHome = store.observe('chat_shared', 'proj_a');
+    const releaseWorkspace = store.observe('chat_shared', 'proj_b');
+    expect(store.observedChatIdsOf('proj_a')).toEqual([]);
+    expect(store.observedChatIdsOf('proj_b')).toEqual([]);
+    releaseHome();
+    releaseWorkspace();
+  });
 });
+
+function ObservedPath(): React.JSX.Element {
+  const location = useLocation();
+  return <div data-testid='observed-path'>{location.pathname}</div>;
+}

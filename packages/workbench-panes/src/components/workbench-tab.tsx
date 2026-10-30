@@ -46,12 +46,12 @@ export type WorkbenchTabProps = Readonly<{
 }>;
 
 const closeGlyphClasses =
-  'fade-action absolute right-1 z-10 flex size-4.5 items-center justify-center rounded-xs opacity-0 group-hover/tab:opacity-100 group-focus-within/tab:opacity-100 pointer-coarse:opacity-100';
+  'fade-action absolute right-1 z-10 flex size-4.5 items-center justify-center rounded-xs opacity-0 group-hover/tab:opacity-100 group-focus-within/tab:opacity-100 pointer-coarse:size-6 pointer-coarse:opacity-100';
 
 /**
  * One workbench tab, the same in the Tau app's dock and the agent plugin viewer's pane lane: the glyph, the title that
  * dissolves at its end (under the close glyph once the glyph shows) instead of clipping, the close glyph on hover,
- * focus or a coarse pointer, and the full title in a tooltip. With `as: 'button'` the tab is 144 px wide, shrinks
+ * focus or a coarse pointer (a 24 px target there, I3), and the full title in a tooltip. With `as: 'button'` the tab is 144 px wide, shrinks
  * equally with its siblings to 48 px, where its centre still clears the glyph, and its tablist scrolls past that. The
  * glyph is never a second focusable control inside the tab: keyboard and assistive technology close with Delete. Draw it
  * inside a `TooltipProvider`.

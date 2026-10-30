@@ -1,5 +1,6 @@
+import { normalizeContext } from '@earendil-works/pi-ai';
 import { describe, expect, it, vi } from 'vitest';
-import { estimateContextTokens, estimateTokens } from '@earendil-works/pi-agent-core';
+import { estimateContextTokens, estimateMessageTokens as estimateTokens } from '@earendil-works/pi-ai/utils/estimate';
 import type { Api, Context, Model, Usage } from '@earendil-works/pi-ai';
 import { createMemoryEventLogFile, fundedFacet } from '#harness/harness.fixture.js';
 import type { CompactionOutcome, CompactionSummarizer } from '#harness/compaction.js';
@@ -313,11 +314,14 @@ describe('compaction safety regressions', () => {
     ];
     expect(estimateContextTokens(session.agent.state.messages).tokens).toBeGreaterThan(compactionBudget);
     await session.agent.prepareNextTurn?.();
-    const parityStream = await session.agent.streamFunction(session.agent.state.model as Model<Api>, {
-      systemPrompt: session.agent.state.systemPrompt,
-      messages: session.agent.state.messages as Context['messages'],
-      tools: session.agent.state.tools,
-    });
+    const parityStream = await session.agent.streamFunction(
+      session.agent.state.model as Model<Api>,
+      normalizeContext({
+        systemPrompt: session.agent.state.systemPrompt,
+        messages: session.agent.state.messages as Context['messages'],
+        tools: session.agent.state.tools,
+      }),
+    );
     const parityResult = await parityStream.result();
     expect(parityResult.errorMessage).toBeUndefined();
     const log = await file.open();
@@ -425,11 +429,14 @@ describe('compaction safety regressions', () => {
 
     const prepared = await session.agent.prepareNextTurn?.();
     expect(rejectedCompaction).toBe(true);
-    const failureStream = await session.agent.streamFunction(session.agent.state.model as Model<Api>, {
-      systemPrompt: session.agent.state.systemPrompt,
-      messages: (prepared?.context?.messages ?? []) as Context['messages'],
-      tools: session.agent.state.tools,
-    });
+    const failureStream = await session.agent.streamFunction(
+      session.agent.state.model as Model<Api>,
+      normalizeContext({
+        systemPrompt: session.agent.state.systemPrompt,
+        messages: (prepared?.context?.messages ?? []) as Context['messages'],
+        tools: session.agent.state.tools,
+      }),
+    );
     expect(await failureStream.result()).toMatchObject({
       stopReason: 'error',
       errorMessage: 'compaction append rejected',

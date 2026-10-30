@@ -18,6 +18,7 @@ const cappedModelIds = [
   'anthropic-claude-opus-4.8',
   'anthropic-claude-sonnet-5.5',
   'anthropic-claude-sonnet-5',
+  'openai-gpt-6.1-terra',
   'openai-gpt-6-astra',
   'openai-gpt-6-sol',
   'openai-gpt-6-luna',
@@ -42,7 +43,7 @@ const cappedModelIds = [
   'moonshot-kimi-k3',
 ] as const;
 
-/** Every model Tau sends a PDF to; each is on a proven Anthropic or OpenAI codec (blueprint D20, Finding 13). */
+/** Every model Tau sends a PDF to. Vertex rows are included because the gateway rewrites their completions file part into an image_url PDF data URI. */
 const pdfInputModelIds = [
   'anthropic-claude-fable-5.1',
   'anthropic-claude-fable-5',
@@ -53,6 +54,7 @@ const pdfInputModelIds = [
   'anthropic-claude-sonnet-5',
   'anthropic-claude-sonnet-4.6',
   'anthropic-claude-haiku-5.5',
+  'openai-gpt-6.1-terra',
   'openai-gpt-6-astra',
   'openai-gpt-6-sol',
   'openai-gpt-6-luna',
@@ -60,6 +62,11 @@ const pdfInputModelIds = [
   'openai-gpt-5.6-terra',
   'openai-gpt-5.6-luna',
   'openai-gpt-5.5',
+  'google-gemini-4-argon',
+  'google-gemini-3.1-pro',
+  'google-gemini-3.8-flash',
+  'google-gemini-3.5-flash-lite',
+  'google-gemini-3.5-flash',
 ];
 
 const getCloudCatalogEntries = () => Object.values(modelList).flatMap((modelsBySlug) => Object.values(modelsBySlug));
@@ -154,17 +161,34 @@ describe('modelList', () => {
         'anthropic-claude-opus-5',
         'anthropic-claude-opus-4.8',
         'anthropic-claude-sonnet-5.5',
+        'openai-gpt-6.1-terra',
         'openai-gpt-6-astra',
       ]);
       expect(
         getCloudCatalogEntries()
           .filter((model) => model.support?.reasoning?.levels.includes('max'))
           .map((model) => model.id),
-      ).toEqual(['anthropic-claude-sonnet-5.5']);
+      ).toEqual(['anthropic-claude-sonnet-5.5', 'openai-gpt-6.1-terra']);
     });
   });
 
-  it('declares PDF input on exactly the proven Anthropic and OpenAI codec models', () => {
+  it('should offer PDF input on every Gemini catalog model', () => {
+    const geminiModelIds = [
+      'google-gemini-4-argon',
+      'google-gemini-3.1-pro',
+      'google-gemini-3.8-flash',
+      'google-gemini-3.5-flash-lite',
+      'google-gemini-3.5-flash',
+    ];
+
+    for (const id of geminiModelIds) {
+      const model = getCloudCatalogEntries().find((entry) => entry.id === id);
+      expect(modelSupportsInput(model?.support, 'pdf'), id).toBe(true);
+      expect(modelSupportsInput(model?.support, 'image'), id).toBe(true);
+    }
+  });
+
+  it('declares PDF input on exactly the proven Anthropic, OpenAI, and Vertex models', () => {
     const pdfModelIds = getCloudCatalogEntries()
       .filter((model) => modelSupportsInput(model.support, 'pdf'))
       .map((model) => model.id);
@@ -172,14 +196,12 @@ describe('modelList', () => {
     expect(pdfModelIds).toEqual(pdfInputModelIds);
   });
 
-  it('never declares PDF input outside a proven codec, a vision model, or on Vertex AI', () => {
+  it('never declares PDF input outside a proven codec or a vision model', () => {
     const wireByRouteId = new Map(gatewayModelRoutes().map((route) => [route.routeId, route]));
 
     for (const model of getCloudCatalogEntries().filter((entry) => modelSupportsInput(entry.support, 'pdf'))) {
       // Provider PDF support rasterises pages, so it is only offered on a vision-capable model.
       expect(modelSupportsInput(model.support, 'image'), model.id).toBe(true);
-      // Vertex AI stays ungated until the live document check in the blueprint's manual row 12 passes.
-      expect(model.provider.id, model.id).not.toBe('vertexai');
       if (isModelListEntryEnabled(model)) {
         expect(wireByRouteId.get(model.id)?.wire, model.id).toBeOneOf([
           'anthropic',
@@ -312,6 +334,33 @@ describe('ModelService', () => {
     expect(modelList.openai['gpt-5.5']?.recommended).toBe(false);
   });
 
+  it('should recommend GPT-6.1 Terra while retaining GPT-5.6 Terra as non-recommended', async () => {
+    const listedModels = await createModelService().getModels();
+    expect(listedModels.find((model) => model.id === 'openai-gpt-6.1-terra')).toMatchObject({
+      recommended: true,
+      model: 'gpt-6.1-terra',
+      provider: { id: 'openai', name: 'OpenAI' },
+      support: {
+        reasoning: { levels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+        modalities: { input: ['text', 'image', 'pdf'], output: ['text'] },
+      },
+      details: {
+        contextWindow: maxEffectiveContextWindow,
+        maxTokens: 128_000,
+        knowledgeCutoff: '2026-06',
+        cost: { inputTokens: 1, outputTokens: 5, cacheReadTokens: 0.05, cacheWriteTokens: 1.25 },
+      },
+      configuration: { streaming: true, reasoning: { effort: 'high', summary: 'auto' } },
+    });
+    expect(listedModels.find((model) => model.id === 'openai-gpt-5.6-terra')).toMatchObject({ recommended: false });
+    expect(gatewayModelRoutes()).toContainEqual({
+      routeId: 'openai-gpt-6.1-terra',
+      modelId: 'gpt-6.1-terra',
+      providerId: 'openai',
+      wire: 'openai-responses',
+    });
+  });
+
   it('lists GPT-6 Astra as a recommended OpenAI model', async () => {
     const service = createModelService();
     const listedModels = await service.getModels();
@@ -321,7 +370,7 @@ describe('ModelService', () => {
     expect(modelList.openai['gpt-6-astra']?.recommended).toBe(true);
   });
 
-  it('should list Gemini 4 Argon with image input and selectable reasoning', async () => {
+  it('should list Gemini 4 Argon with image and PDF input and selectable reasoning', async () => {
     const listedModels = await createModelService().getModels();
     const argon = listedModels.find((model) => model.id === 'google-gemini-4-argon');
 
@@ -331,7 +380,7 @@ describe('ModelService', () => {
       support: {
         tools: true,
         toolChoice: false,
-        modalities: { input: ['text', 'image'], output: ['text'] },
+        modalities: { input: ['text', 'image', 'pdf'], output: ['text'] },
         reasoning: { levels: ['low', 'medium', 'high'] },
       },
     });

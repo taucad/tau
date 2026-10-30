@@ -472,7 +472,7 @@ const createPipelineResources = ({
     // Temporal direction rotation shimmers under `frameloop='demand'` because the
     // viewport never accumulates frame-to-frame.
     aoNode.useTemporalFiltering = false;
-    aoNode.samples.value = 8;
+    aoNode.samples.value = 16;
     aoNode.distanceFallOff.value = defaultPostProcessingSettings.gtaoDistanceFalloff;
 
     const aoTexture = aoNode.getTextureNode();
@@ -669,17 +669,17 @@ function PostProcessingWebGpuActive({
       if (!selected.aoNode) {
         return;
       }
-      selected.aoNode.resolutionScale = 0.5 / viewport.dpr;
+      selected.aoNode.resolutionScale = 0.5;
       if (selected.denoiseNode) {
-        // Keep the reconstruction footprint in CSS pixels at every DPR.
-        selected.denoiseNode.step.value.set(3 / size.width, 3 / size.height);
+        // One AO texel per tap, matching the half drawing-buffer estimate.
+        selected.denoiseNode.step.value.set(2 / (size.width * viewport.dpr), 2 / (size.height * viewport.dpr));
       }
       if (selected.denoiseInput) {
-        // Estimate and smooth at half CSS resolution, independent of display DPR.
+        // Estimate and smooth at half drawing-buffer resolution, including on Retina displays.
         // r184 RTTNode has no resolutionScale. Own physical dimensions explicitly;
         // its pixelRatio stays 1 and ordinary frames never resize the allocation.
-        const width = Math.max(1, Math.ceil(size.width * 0.5));
-        const height = Math.max(1, Math.ceil(size.height * 0.5));
+        const width = Math.max(1, Math.ceil(size.width * viewport.dpr * 0.5));
+        const height = Math.max(1, Math.ceil(size.height * viewport.dpr * 0.5));
         if (selected.denoiseInput.width !== width || selected.denoiseInput.height !== height) {
           selected.denoiseInput.setSize(width, height);
         }

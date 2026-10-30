@@ -5,6 +5,8 @@ import { describe, expect, it } from 'vitest';
 // oxlint-disable no-restricted-imports -- The Node-only target runs without browser aliases.
 import {
   createObservabilityRunId,
+  observeHarnessPage,
+  harnessNavigationTimeout,
   harnessPath,
   observabilityUrl,
   productionOrigin,
@@ -69,7 +71,10 @@ describe('P1 deployed staging observability harness', () => {
             },
           ]);
           const page = await context.newPage();
-          const response = await page.goto(observabilityUrl(createObservabilityRunId()), {
+          const runId = createObservabilityRunId();
+          const counts = observeHarnessPage(page, runId);
+          const response = await page.goto(observabilityUrl(runId), {
+            timeout: harnessNavigationTimeout,
             waitUntil: 'domcontentloaded',
           });
           expect(response?.status()).toBe(200);
@@ -114,6 +119,13 @@ describe('P1 deployed staging observability harness', () => {
           const cookies = await context.cookies();
           const cookie = cookies.find(({ name }) => name === 'tau-cookie-consent');
           expect(JSON.parse(decodeURIComponent(cookie?.value ?? 'null'))).toMatchObject({ status: consent });
+          // Staging took everything the SDK sent it. A PostHog request that is answered with an error leaves the
+          // page looking instrumented while the data is gone, which the suite otherwise only notices in the
+          // eight-minute A2 cases, and only for captures. This is the same check in seventeen seconds.
+          expect(
+            Object.keys(counts).filter((key) => /^posthog:(?:failed|status:(?!2\d\d))/u.test(key)),
+            'staging answered every PostHog request',
+          ).toEqual([]);
         } finally {
           await browser.close();
         }
@@ -140,11 +152,9 @@ describe('P4 production acceptance — OPEN until authorized deploy', () => {
 // Polling support is unit-tested separately; an event id alone never proves source maps/context/count.
 describe('Later staging signal acceptance — pending implementation', () => {
   it.todo(
-    'P2: each browser/consent failure has exactly one resolved event and release, context and route tags (A1/A2/A9/A10/A12)',
+    'P2: each browser/consent failure has exactly one resolved event and release, context and route tags (A1/A9/A10/A12)',
   );
   it.todo('P2: blocked Sentry ingest still delivers through the tunnel (A5)');
-  it.todo(
-    'P3: kernel termination preserves typed cause; physical-device kills carry samples and feedback (A3/A4/A6/A11/A14)',
-  );
+  it.todo('P3: physical-device kills carry samples and feedback (A3/A4/A11/A14)');
   it.todo('P5: consented events link PostHog replay; retired capture emits no PostHog exception (A8)');
 });

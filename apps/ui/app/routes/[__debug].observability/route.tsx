@@ -7,6 +7,7 @@ import { Button } from '@taucad/ui/components/button';
 import { ENV } from '#environment.config.js';
 import { PageHeader } from '#components/layout/page-header.js';
 import { FloatingPanel, FloatingPanelContent } from '#components/ui/floating-panel.js';
+import { readApiRequestId, recordApiRequestId } from '#lib/api-request-id.js';
 import { reportUiError, startErrorReporting } from '#lib/error-reporting.js';
 import { isObservabilityHarnessEnabled } from '#lib/observability-harness-context.js';
 import {
@@ -38,9 +39,32 @@ const triggers = [
   ['kernel-termination', 'Kernel worker termination'],
   ['ssr-loader', 'SSR loader error'],
   ['revision', 'Revision failure'],
+  ['api-failure', 'API failure'],
   ['direct', 'Direct-path send'],
   ['memory-pressure', 'Memory pressure'],
 ] as const;
+
+/**
+ * The API path the harness calls to fail (SB13, A12). Any failed answer records its `request-id` on the reported
+ * error; the `tau-api` side of A12 needs the staging API to answer this path with a reported server error.
+ */
+const observabilityApiFailurePath = '/v1/__debug/observability/failure';
+
+/** Call the API, and report the failure the way an API client does: the error carries the response's request id. */
+const triggerObservabilityApiFailure = async (status: (message: string) => void): Promise<void> => {
+  const response = await fetch(`${ENV.TAU_API_URL.replace(/\/$/u, '')}${observabilityApiFailurePath}`, {
+    credentials: 'omit',
+  });
+  if (response.ok) {
+    status('The API answered without failing; nothing was reported.');
+    return;
+  }
+  const requestId = readApiRequestId(response);
+  await reportUiError(
+    recordApiRequestId(new Error(`Observability harness API failure (HTTP ${String(response.status)})`), response),
+  );
+  status(`API failure reported (HTTP ${String(response.status)}, request id ${requestId ?? 'not readable'}).`);
+};
 
 const BoundaryFailure = (): JSX.Element => {
   throw new Error('Observability harness FloatingPanel boundary error');
@@ -131,6 +155,10 @@ export default function ObservabilityHarness(): JSX.Element {
       }
       case 'revision': {
         await triggerObservabilityRevisionFailure(setStatus);
+        break;
+      }
+      case 'api-failure': {
+        await triggerObservabilityApiFailure(setStatus);
         break;
       }
       case 'direct': {

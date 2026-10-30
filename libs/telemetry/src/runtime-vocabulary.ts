@@ -45,7 +45,6 @@ export const machineProviderIds = ['bambu', 'bambu-a1-mini', 'grbl', 'makera-car
 
 /** Export formats: every kernel export-map extension and every transcoder edge target. @public */
 export const exportFormats = [
-  '3ds',
   '3mf',
   'csv',
   'dae',
@@ -62,16 +61,14 @@ export const exportFormats = [
   'stl',
   'txt',
   'usda',
+  'usdc',
   'usdz',
   'webp',
-  'x',
-  'x3d',
 ] as const;
 
 /** File formats: every kernel extension, every transcoder edge source and every export format. @public */
 export const fileFormats = [
   '3dm',
-  '3ds',
   '3mf',
   'ac',
   'amf',
@@ -116,19 +113,14 @@ export const fileFormats = [
   'tsx',
   'txt',
   'usda',
+  'usdc',
   'usdz',
   'webp',
-  'wrl',
-  'x',
-  'x3d',
-  'x3db',
-  'x3dv',
   'xgl',
 ] as const;
 
 /** Distinct transcoder conversion edges as `from→to` pairs. @public */
 export const conversionEdges = [
-  'glb→3ds',
   'glb→3mf',
   'glb→dae',
   'glb→fbx',
@@ -142,11 +134,9 @@ export const conversionEdges = [
   'glb→step',
   'glb→stl',
   'glb→usda',
+  'glb→usdc',
   'glb→usdz',
   'glb→webp',
-  'glb→x',
-  'glb→x3d',
-  'gltf→3ds',
   'gltf→3mf',
   'gltf→dae',
   'gltf→fbx',
@@ -157,9 +147,8 @@ export const conversionEdges = [
   'gltf→step',
   'gltf→stl',
   'gltf→usda',
+  'gltf→usdc',
   'gltf→usdz',
-  'gltf→x',
-  'gltf→x3d',
   'svg→png',
   'svg→webp',
 ] as const;

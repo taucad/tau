@@ -180,6 +180,18 @@ describe('ChatSessionStore.observe', () => {
     expect(store.observedChatIdsOf('original-project')).toEqual([]);
   });
 
+  it('should leave the registration probe unowned when a second project observes it', () => {
+    const store = new ChatSessionStore();
+    const probeChatId = '00000000-0000-4000-8000-000000000000';
+    const releaseHome = store.observe(probeChatId, 'proj_home');
+    const releaseWorkspace = store.observe(probeChatId, 'proj_workspace');
+    expect(store.observedChatIdsOf('proj_home')).toEqual([]);
+    expect(store.observedChatIdsOf('proj_workspace')).toEqual([]);
+    releaseHome();
+    releaseWorkspace();
+    expect(store.observedChatIdsOf('proj_home')).toEqual([]);
+  });
+
   it('answers a reloaded approval from the projected run without acquiring a chat or sending Start', async () => {
     const store = new ChatSessionStore();
     const release = store.observe('chat_approval', 'project_1');
@@ -279,8 +291,10 @@ describe('ChatSessionStore.observe', () => {
         hostCommand: unusedHostCommand,
         close: async () => undefined,
       }),
-      async (chatId) =>
-        chatId === 'chat_local' ? 'stoppable' : chatId === 'chat_foreign' ? 'other-build' : 'background-window',
+      {
+        stoppability: async (chatId) =>
+          chatId === 'chat_local' ? 'stoppable' : chatId === 'chat_foreign' ? 'other-build' : 'background-window',
+      },
     );
     await vi.waitFor(() => {
       expect(store.getProjection('chat_background')?.ledger.position.cursor).toBe(2);
@@ -477,7 +491,7 @@ describe('ChatSessionStore.observe', () => {
         hostCommand: unusedHostCommand,
         close: async () => undefined,
       }),
-      async () => classification.promise,
+      { stoppability: async () => classification.promise },
     );
     await vi.waitFor(() => {
       expect(store.getProjection('chat_unopened')?.ledger.position.cursor).toBe(2);

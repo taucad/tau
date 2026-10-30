@@ -13,7 +13,7 @@ import {
 } from '@taucad/runtime-testing';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { createExportFile } from '@taucad/runtime/types';
-import { createAssimp } from 'libassimp';
+import { createAssimp, defaultPostProcess } from 'libassimp';
 import type { Assimp } from 'libassimp';
 
 import { assimpKernel, assimpTranscoder } from '#index.js';
@@ -179,11 +179,18 @@ const expectClosedTexturedExport = async (context: AssimpContext): Promise<void>
   const entries = zipEntries(new Uint8Array(usdz!.bytes));
   const usdEntry = [...entries.entries()].find(([name]) => /\.usd[ac]?$/u.test(name));
   expect(usdEntry).toBeDefined();
-  const usd = new TextDecoder().decode(usdEntry![1]);
-  const textureReference = /asset inputs:file = @\.\/([^@]+)@/u.exec(usd)?.[1];
-  expect(textureReference).toBeDefined();
-  expect(entries.get(textureReference!)).toBeDefined();
-  expect(entries.get(textureReference!)?.subarray(0, 8)).toEqual(texturePng.subarray(0, 8));
+  expect(usdEntry![0]).toBe('preview.usdc');
+  expect(new TextDecoder().decode(usdEntry![1].subarray(0, 8))).toBe('PXR-USDC');
+  expect(entries.get('textures/texture0.png')).toEqual(texturePng);
+
+  const roundTrip = await context.assimp.convert(usdz!, {
+    to: 'glb',
+    postProcess: [...defaultPostProcess, 'embedTextures'],
+  });
+  const roundTripGlb = roundTrip.files.find(({ name }) => name.endsWith('.glb'));
+  expect(roundTripGlb).toBeDefined();
+  const roundTripDocument = await glbToDocument(new Uint8Array(roundTripGlb!.bytes));
+  expect(roundTripDocument.getRoot().listMaterials()[0]?.getBaseColorTexture()?.getImage()).toEqual(texturePng);
 };
 
 const expectOneSidecarRead = (runtime: ReturnType<typeof createRuntime>): void => {
@@ -330,7 +337,7 @@ const expectNativePlyRoundTrip = async (
     expect(converted.files).toHaveLength(1);
     await expectTriangleGeometry(new Uint8Array(converted.files[0]!.bytes));
   } finally {
-    assimp.dispose();
+    await assimp.dispose();
   }
 };
 
@@ -421,7 +428,7 @@ describe('assimp real backend integration', () => {
           const result = await transcodeToPly(context, source);
           assertSuccess(result, 'forced-native GLB to PLY');
           expect(result.data).toHaveLength(1);
-          expect(result.data[0]).toMatchObject({ name: 'result.ply', mimeType: 'application/x-ply' });
+          expect(result.data[0]).toMatchObject({ name: 'triangle.ply', mimeType: 'application/x-ply' });
           await expectNativePlyRoundTrip(result.data[0]!);
         } finally {
           await withWatchdog(Promise.resolve(transcoderDefinition.onDispose?.(context)), 'native transcoder cleanup');
@@ -462,7 +469,7 @@ describe('assimp real backend integration', () => {
           assertSuccess(recovered, 'forced-native recovery');
           expect(recovered.data).toHaveLength(1);
           expect(recovered.data[0]).toMatchObject({
-            name: 'result.ply',
+            name: 'triangle.ply',
             mimeType: 'application/x-ply',
           });
           await expectNativePlyRoundTrip(recovered.data[0]!);

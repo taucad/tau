@@ -13,7 +13,13 @@ import type { OpsLog } from '#ops-ref.js';
 import type { LfsQuotaRefusal } from '#lfs-client.js';
 import { remoteTrackingRef } from '#remotes.js';
 import { RevisionPortError } from '#revision-port.js';
-import type { RemoteStorageRefusal, RevisionPort, RevisionPushRef, RevisionPushRefResult } from '#revision-port.js';
+import type {
+  RemoteStorageRefusal,
+  RevisionPort,
+  RevisionPushRef,
+  RevisionPushRefResult,
+  RevisionPushSession,
+} from '#revision-port.js';
 import type { SyncRefOutcome } from '#sync.types.js';
 import type { RevisionActorsOptions, RevisionFileSystem } from '#revision-effects.types.js';
 
@@ -74,6 +80,7 @@ export const createChatEffects = (
       signal?: AbortSignal;
       leases: Readonly<Record<string, string>>;
       offered: ReadonlyMap<string, string>;
+      session?: RevisionPushSession;
     }>,
   ) => Promise<
     Readonly<{
@@ -92,6 +99,7 @@ export const createChatEffects = (
       signal?: AbortSignal;
       leases: Readonly<Record<string, string>>;
       offered: ReadonlyMap<string, string>;
+      session?: RevisionPushSession;
     }>,
   ) => Promise<ReadonlyMap<string, SyncRefOutcome> | undefined>;
   recordChats: (syncChats: boolean, remote: string) => Promise<readonly SyncRefOutcome[]>;
@@ -268,6 +276,8 @@ export const createChatEffects = (
       signal?: AbortSignal;
       leases: Readonly<Record<string, string>>;
       offered: ReadonlyMap<string, string>;
+      /** The sync attempt this offer belongs to, so it reuses that attempt's advertisement (F5). */
+      session?: RevisionPushSession;
     }>,
   ): Promise<
     Readonly<{
@@ -283,6 +293,7 @@ export const createChatEffects = (
         repositoryUrl: input.repositoryUrl,
         signal: input.signal,
         refs: [offerOf(input.name, input.leases)],
+        ...(input.session === undefined ? {} : { session: input.session }),
       });
       const [entry] = pushed.refs;
       return {
@@ -342,6 +353,8 @@ export const createChatEffects = (
       signal?: AbortSignal;
       leases: Readonly<Record<string, string>>;
       offered: ReadonlyMap<string, string>;
+      /** The sync attempt this offer belongs to, so it reuses that attempt's advertisement (F5). */
+      session?: RevisionPushSession;
     }>,
   ): Promise<ReadonlyMap<string, SyncRefOutcome> | undefined> => {
     try {
@@ -350,6 +363,7 @@ export const createChatEffects = (
         repositoryUrl: input.repositoryUrl,
         signal: input.signal,
         refs: input.names.map((name) => offerOf(name, input.leases)),
+        ...(input.session === undefined ? {} : { session: input.session }),
       });
       const outcomes = new Map(pushed.refs.map((entry) => [entry.name, outcomeOf(entry, input.offered)]));
       if (input.retryRejected === false) {

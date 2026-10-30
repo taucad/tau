@@ -10,6 +10,7 @@
  * heavy work (open, render, export) says what the page was doing.
  */
 
+import { recordActivityBreadcrumb } from '#lib/activity-breadcrumbs.js';
 import { readSessionStorage } from '#lib/session-storage.js';
 
 /** The analytics event a suspected memory kill is reported as. @public */
@@ -51,6 +52,8 @@ export type MemoryKillSignal = Readonly<{
   /** Name the heavy work about to start. */
   breadcrumb: (name: string) => void;
   setCounts: (counts: Readonly<{ liveProjectCount: number; chatCount: number }>) => void;
+  /** The counts last set, for the error tracker's `tau.session` context. */
+  counts: () => Readonly<{ liveProjectCount: number; chatCount: number }>;
   /** The page ended cleanly (`pagehide`). */
   finish: () => void;
   /** The page is alive again (`pageshow` from the back-forward cache). */
@@ -138,6 +141,7 @@ export const createMemoryKillSignal = ({
         update({ liveProjectCount, chatCount });
       }
     },
+    counts: () => ({ liveProjectCount: marker.liveProjectCount, chatCount: marker.chatCount }),
     finish: () => {
       update({ finished: true });
     },
@@ -179,13 +183,24 @@ export const getDocumentMemoryKillSignal = (deviceClass: () => string): MemoryKi
 };
 
 /**
- * Name the heavy work about to start, so a kill during it says what it was.
+ * Name the heavy work about to start, so a kill during it says what it was, and add it to the error
+ * tracker's `tau.activity` trail (`#lib/activity-breadcrumbs`, structure only).
  *
- * A no-op until the reporter has created the document's signal, and during SSR.
+ * The marker is a no-op until the reporter has created the document's signal, and during SSR.
  *
  * @param name - A short stable name: `open`, `render`, `export`, `capture`.
  * @public
  */
 export const recordMemoryBreadcrumb = (name: string): void => {
   documentSignal?.breadcrumb(name);
+  recordActivityBreadcrumb(name);
 };
+
+/**
+ * The live project and chat counts the document's reporter last set.
+ *
+ * @returns The counts, or `undefined` before the reporter created the document's signal.
+ * @public
+ */
+export const readDocumentSessionCounts = (): Readonly<{ liveProjectCount: number; chatCount: number }> | undefined =>
+  documentSignal?.counts();

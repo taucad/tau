@@ -3,20 +3,28 @@ import { webWorkerTransport } from '@taucad/runtime/transport/web';
 import type { RuntimeKernels } from '@taucad/runtime/worker';
 import type { KernelOptionsFactory } from '#types/runtime-client.alias.js';
 import type { runtime } from '#runtime/ui-runtime.definition.js';
+import { reportWorkerFailures } from '#lib/worker-error-reporting.js';
 
 export type DefaultKernelId = RuntimeKernels<typeof runtime>[number]['id'];
 
+// SB4: each kernel worker's own failures are reported once, tagged `worker: kernel`.
 const createDefaultRuntimeWorker = (): Worker =>
-  new Worker(new URL('../runtime/runtime.worker.ts', import.meta.url), {
-    name: 'tau-ui-runtime-worker',
-    type: 'module',
-  });
+  reportWorkerFailures(
+    new Worker(new URL('../runtime/runtime.worker.ts', import.meta.url), {
+      name: 'tau-ui-runtime-worker',
+      type: 'module',
+    }),
+    'kernel',
+  );
 
 const createDebugRuntimeWorker = (): Worker =>
-  new Worker(new URL('../runtime/runtime-debug.worker.ts', import.meta.url), {
-    name: 'tau-ui-runtime-debug-worker',
-    type: 'module',
-  });
+  reportWorkerFailures(
+    new Worker(new URL('../runtime/runtime-debug.worker.ts', import.meta.url), {
+      name: 'tau-ui-runtime-debug-worker',
+      type: 'module',
+    }),
+    'kernel',
+  );
 
 /**
  * Size the worker's compute caches by the device memory class (geometry cache result-path T5).

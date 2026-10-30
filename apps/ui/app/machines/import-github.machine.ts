@@ -5,6 +5,7 @@ import { isReservedBranchName } from '@taucad/revisions';
 import { getGitHubClient } from '#lib/github-api.js';
 import type { ImportWorkerRequest, ImportWorkerResponse } from '#workers/import.worker.js';
 import { normalizeRepositoryFolder, parseGitHubUrl } from '#routes/import.$/import.utils.js';
+import { reportWorkerFailures } from '#lib/worker-error-reporting.js';
 
 /**
  * Import GitHub Machine Context
@@ -355,9 +356,10 @@ type ImportWorkerCallbackEvents =
 
 const importWorkerActor = createCallbackLogic<ImportWorkerCallbackEvents, ImportWorkerCallbackInput>(
   ({ sendBack, input }) => {
-    const worker = new Worker(new URL('../workers/import.worker.ts', import.meta.url), {
-      type: 'module',
-    });
+    const worker = reportWorkerFailures(
+      new Worker(new URL('../workers/import.worker.ts', import.meta.url), { type: 'module' }),
+      'import-github',
+    );
 
     worker.addEventListener('message', (event: MessageEvent<ImportWorkerResponse>) => {
       const message = event.data;

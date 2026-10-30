@@ -16,6 +16,7 @@ import { generatePrefixedId } from '@taucad/utils/id';
 import type { DatabaseService } from '#database/database.service.js';
 import { eq } from 'drizzle-orm';
 import { storageTombstone, user as userTable } from '#database/schema.js';
+import { eraseAccountEvidence } from '#api/agent-observability/evidence-erasure.js';
 import type { Environment } from '#config/environment.config.js';
 import { staticAuthConfig } from '#config/auth.js';
 import { cliDeviceAuthorization } from '#config/cli-device-authorization.js';
@@ -211,6 +212,10 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
             .insert(storageTombstone)
             .values({ ownerId: user.id, purgeAfter: new Date(Date.now() + storageTombstoneGrace) })
             .onConflictDoNothing();
+          /* Last, once nothing above can refuse: an erased account admits no
+             further evidence, and every trace it reported or that its projects
+             hold is named for deletion before the cascade removes the receipts (T13). */
+          await eraseAccountEvidence(databaseService.database, user.id);
         },
       },
     },

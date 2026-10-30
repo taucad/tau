@@ -20,10 +20,13 @@ cmp /usr/bin/bwrap /opt/tau-staging/sandbox/bwrap
 printf 'PASS: unprivileged bwrap --unshare-user --unshare-net through /opt/tau-staging/sandbox/bwrap\n'
 helper=/opt/tau-staging/releases/1.0.1/resources/app.asar.unpacked/node_modules/@anthropic-ai/sandbox-runtime/vendor/seccomp/x64/apply-seccomp
 [[ -x "$helper" ]]
+java_agent=/opt/tau-staging/releases/1.0.1/resources/app.asar.unpacked/node_modules/@anthropic-ai/sandbox-runtime/vendor/java-proxy-agent/srt-proxy-agent.jar
+[[ -r "$java_agent" ]]
 # Match sandbox-runtime's secure namespace setup: a fresh procfs for nested userns maps,
 # isolated PIDs, and no retained capabilities. The read-only root is still read-only.
 helper_sandbox=(--unshare-net --ro-bind / / --unshare-pid --unshare-user --cap-drop ALL --proc /proc)
-/opt/tau-staging/sandbox/bwrap "${helper_sandbox[@]}" "$helper" /bin/true
+/opt/tau-staging/sandbox/bwrap "${helper_sandbox[@]}" --ro-bind "$java_agent" "$java_agent" "$helper" /usr/bin/test -r "$java_agent"
+printf 'PASS: ASAR-unpacked Java proxy agent bind-mount is readable\n'
 /opt/tau-staging/sandbox/bwrap "${helper_sandbox[@]}" "$helper" /usr/bin/python3 -c '
 import errno, socket
 try:

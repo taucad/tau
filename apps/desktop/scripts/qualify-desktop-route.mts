@@ -31,6 +31,7 @@ import {
   assertMacosCleanHost,
   assertWindowsConsumerHost,
   collectQualificationReceipt,
+  validateSoftwareCiEvidence,
   macosCleanHostApplication,
   qualificationProbeObservationSchema,
 } from './qualification-evidence.mjs';
@@ -71,6 +72,7 @@ const rendererSchema = z.object({
   observedAt: z.iso.datetime(),
   exported: z.object({ path: z.string(), sha256: z.string(), vertices: z.number().positive() }),
   nativeEngineLogs: z.array(z.string()).min(1),
+  softwareRenderer: z.string().optional(),
 });
 async function waitFor<T>(read: () => Promise<T | undefined>, message: string, timeout = 900_000): Promise<T> {
   const deadline = Date.now() + timeout;
@@ -132,6 +134,22 @@ const main = async (): Promise<void> => {
   const target = z
     .enum(['darwin-arm64', 'darwin-x64', 'win32-x64', 'linux-x64'])
     .parse(`${process.platform}-${process.arch}`);
+  const graphics = z.enum(['stock', 'isolated-software']).parse(process.env['TAU_QUALIFICATION_GRAPHICS'] ?? 'stock');
+  if (
+    graphics === 'isolated-software' &&
+    (process.platform !== 'linux' ||
+      !route.startsWith('linux-') ||
+      process.env['TAU_QUALIFICATION_DISPOSABLE_VM'] !== '1' ||
+      process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] !== 'linux' ||
+      process.env['TAU_QUALIFICATION_CHANNEL'] !== 'staging' ||
+      process.env['TAU_DESKTOP_ACCEPTANCE_KIND'] === 'vm')
+  ) {
+    throw new Error('Isolated software CI is restricted to Linux staging CI');
+  }
+  const graphicsArguments =
+    graphics === 'isolated-software'
+      ? ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']
+      : [];
   if (route === 'linux-appimage' && process.env['APPIMAGE_EXTRACT_AND_RUN']) {
     throw new Error('Qualification requires native AppImage FUSE mode, not extract-and-run');
   }
@@ -184,6 +202,7 @@ const main = async (): Promise<void> => {
     directory: root,
     sourceCommit: required('GITHUB_SHA'),
     scope: process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] ?? 'all',
+    kind: acceptanceKind,
   });
   const { channel } = candidates[2].manifest;
   if (channel !== required('TAU_QUALIFICATION_CHANNEL')) {
@@ -369,7 +388,7 @@ const main = async (): Promise<void> => {
       }
       const child = spawn(
         route === 'linux-apt' || route === 'linux-appimage' ? installationPath : installedA.executablePath,
-        [`--tau-route-qualification=${nonce}`],
+        [`--tau-route-qualification=${nonce}`, ...graphicsArguments],
         {
           env: { ...process.env, TAU_DESKTOP_UPDATE_FEED: transport.origin },
           // Keep native loader/FUSE/sandbox startup errors in the disposable Linux job log.
@@ -606,6 +625,7 @@ const main = async (): Promise<void> => {
           nativePids: processes.nativeChildPids,
           nativeAncestry: processes.nativeAncestry,
           saveObservedAt: Date.parse(rendered.observedAt),
+          ...(rendered.softwareRenderer ? { softwareRenderer: rendered.softwareRenderer } : {}),
         },
         security,
       });
@@ -664,7 +684,7 @@ const main = async (): Promise<void> => {
     const reinstalled = await driver.reinstall(candidate(2), preserved);
     await rm(join(profile, 'DevToolsActivePort'), { force: true });
     offset = await stat(join(profile, 'logs/desktop.log')).then((info) => info.size);
-    const resumedArgs = ['--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0'];
+    const resumedArgs = ['--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0', ...graphicsArguments];
     let resumedPid: number | undefined;
     if (driver.launch) {
       resumedPid = await driver.launch('reinstall', resumedArgs, { TAU_DESKTOP_UPDATES: 'off' });
@@ -710,7 +730,7 @@ const main = async (): Promise<void> => {
     await driver.remove(preserved);
     await transport.flush();
     const evidence: QualificationEvidence = {
-      mode: 'release',
+      mode: graphics === 'isolated-software' ? 'software-ci' : 'release',
       route,
       target,
       stages: [stages[0]!, stages[1]!, final],
@@ -747,7 +767,11 @@ const main = async (): Promise<void> => {
               : required('TAU_APPIMAGE_KEY_ID'),
     };
     await writeFile(join(root, 'qualification-evidence.json'), JSON.stringify(evidence, undefined, 2));
-    acceptedReceipt = collectQualificationReceipt(evidence);
+    if (graphics === 'isolated-software') {
+      validateSoftwareCiEvidence(evidence);
+    } else {
+      acceptedReceipt = collectQualificationReceipt(evidence);
+    }
   } catch (error) {
     failures.push(error);
   } finally {
@@ -773,7 +797,7 @@ const main = async (): Promise<void> => {
       JSON.stringify(
         {
           status: failures.length > 0 ? 'failed' : 'passed',
-          mode: 'release',
+          mode: graphics === 'isolated-software' ? 'software-ci' : 'release',
           stages,
           mirrorRequests: mirror?.requests ?? [],
           failures: failures.map((error) => (error instanceof Error ? error.message : String(error))),
@@ -785,6 +809,24 @@ const main = async (): Promise<void> => {
   }
   if (failures.length > 0) {
     throw new AggregateError(failures, 'Qualification or its cleanup failed');
+  }
+  if (graphics === 'isolated-software') {
+    await writeFile(
+      join(root, 'software-ci-evidence.json'),
+      JSON.stringify(
+        {
+          kind: 'isolated-software-ci',
+          status: 'passed',
+          stockGpuAcceptance: 'open',
+          releaseEligible: false,
+          evidence: 'qualification-evidence.json',
+        },
+        undefined,
+        2,
+      ),
+      { flag: 'wx' },
+    );
+    return;
   }
   if (!acceptedReceipt) {
     throw new Error('No accepted qualification receipt');

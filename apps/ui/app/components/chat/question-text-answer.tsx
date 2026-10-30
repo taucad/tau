@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import { ArrowUp } from 'lucide-react';
 import { Loader } from '@taucad/ui/components/loader';
@@ -6,10 +6,13 @@ import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
 import { InputGroup, InputGroupTextarea } from '@taucad/ui/components/input-group';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { DictationButton, DictationFeedback, DictationRecording } from '#components/dictation/dictation-controls.js';
+import { DictationControl, DictationFeedback } from '#components/dictation/dictation-controls.js';
 import { useDictation } from '#components/dictation/use-dictation.js';
 
-/** Own-words reply. Stop reviews the transcript; Send finishes dictation and submits the final answer. */
+/**
+ * Own-words reply. The draft stays in view while dictating; Stop reviews the transcript; Send finishes dictation
+ * and submits the final answer.
+ */
 export function QuestionTextAnswer({
   draft,
   onDraftChange,
@@ -32,8 +35,6 @@ export function QuestionTextAnswer({
   readonly onDismiss: () => void;
 }): React.JSX.Element {
   const textId = useId();
-  const inputRef = useRef<HTMLDivElement>(null);
-  const [recordingHeight, setRecordingHeight] = useState<number>();
   const textRef = useRef<HTMLTextAreaElement>(null);
   const latestDraft = useRef(draft);
   useLayoutEffect(() => {
@@ -52,7 +53,6 @@ export function QuestionTextAnswer({
   const dictation = useDictation(insertTranscript, textId);
   const isDictating = dictation.phase !== 'idle';
   const start = useCallback(async (): Promise<void> => {
-    setRecordingHeight(inputRef.current?.getBoundingClientRect().height);
     onHold();
     await dictation.start();
   }, [dictation.start, onHold]);
@@ -102,37 +102,38 @@ export function QuestionTextAnswer({
         Your answer
       </label>
       <InputGroup
-        ref={inputRef}
         aria-label='Answer input'
-        className={cn('h-auto min-h-10 gap-1 rounded-xl p-1 shadow-none', !isDictating && 'items-end')}
-        style={{ minHeight: isDictating ? recordingHeight : undefined }}
+        className='h-auto min-h-10 flex-wrap items-end gap-1 rounded-xl p-1 shadow-none'
       >
-        {isDictating ? (
-          <DictationRecording phase={dictation.phase} waveform={dictation.waveform} onCancel={dictation.cancel} />
-        ) : (
-          <InputGroupTextarea
-            ref={textRef}
-            id={textId}
-            rows={1}
-            value={draft}
-            disabled={!isOpen}
-            placeholder={placeholder}
-            className='max-h-40 min-h-8 px-2 py-1 leading-6 md:leading-6'
-            onFocus={onHold}
-            onChange={(event) => {
-              onDraftChange(event.target.value);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                event.preventDefault();
-                void send();
-              }
-            }}
-          />
-        )}
-        <div className='flex min-h-8 shrink-0 items-center gap-1'>
+        <InputGroupTextarea
+          ref={textRef}
+          id={textId}
+          rows={1}
+          value={draft}
+          disabled={!isOpen}
+          placeholder={placeholder}
+          // Narrow answers keep a readable draft; the controls wrap below it instead of squeezing it.
+          className='max-h-40 min-h-8 min-w-32 px-2 py-1 leading-6 md:leading-6'
+          onFocus={onHold}
+          onChange={(event) => {
+            onDraftChange(event.target.value);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              void send();
+            }
+          }}
+        />
+        <div className='ml-auto flex min-h-8 shrink-0 items-center gap-1'>
           {dictation.available === true && isOpen ? (
-            <DictationButton phase={dictation.phase} onStart={start} onStop={dictation.stop} />
+            <DictationControl
+              phase={dictation.phase}
+              waveform={dictation.waveform}
+              onStart={start}
+              onStop={dictation.stop}
+              onCancel={dictation.cancel}
+            />
           ) : null}
           <Tooltip>
             <TooltipTrigger asChild>
@@ -168,7 +169,7 @@ export function QuestionTextAnswer({
           </Tooltip>
         </div>
       </InputGroup>
-      <DictationFeedback transcript={dictation.transcript} error={dictation.error} />
+      <DictationFeedback transcript={dictation.transcript} />
     </div>
   );
 }

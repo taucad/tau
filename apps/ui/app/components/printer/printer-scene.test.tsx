@@ -27,8 +27,15 @@ vi.mock('@react-three/fiber', async (importOriginal) => ({
       const defaults = mock<Parameters<TauR3fGlFactory>[0]>();
       defaults.canvas = canvas.current!;
       const initialize = async (): Promise<void> => {
-        await gl(defaults);
-        setReady(true);
+        try {
+          await gl(defaults);
+          setReady(true);
+        } catch (error) {
+          // Like R3F 9.8's Canvas: a request settled by its canvas's retirement goes to an unmounted Canvas.
+          if (!(error instanceof RetiredCanvasError)) {
+            throw error;
+          }
+        }
       };
       mocks.initializations.add(initialize());
     }, [gl]);
@@ -45,6 +52,7 @@ vi.mock('@react-three/fiber', async (importOriginal) => ({
 }));
 
 const { PrinterScene } = await import('#components/printer/printer-scene.js');
+const { RetiredCanvasError } = await import('@taucad/viewer/graphics/three/canvas-three-gl');
 const createProps = (): PrinterSceneProps =>
   mock<PrinterSceneProps>({
     geometry: mock<PrinterSceneProps['geometry']>({ enclosure: { center: [0, 0, 0], size: [100, 100, 100] } }),
@@ -64,6 +72,9 @@ describe('PrinterScene renderer lifetime', () => {
   it('should dispose a closed view once while retaining the other live canvas through StrictMode replay', async () => {
     const firstRenderer = createRenderer();
     const secondRenderer = createRenderer();
+    // The renderer factory takes over each renderer's release methods; observe the originals.
+    const { dispose: firstDispose } = firstRenderer;
+    const { dispose: secondDispose } = secondRenderer;
     mocks.createRenderer.mockResolvedValueOnce(firstRenderer).mockResolvedValueOnce(secondRenderer);
     const first = render(
       <StrictMode>
@@ -82,24 +93,25 @@ describe('PrinterScene renderer lifetime', () => {
       expect(screen.getAllByLabelText('Ready printer canvas')).toHaveLength(2);
     });
     const retainedCanvas = second.container.querySelector('canvas');
-    expect(firstRenderer.dispose).not.toHaveBeenCalled();
-    expect(secondRenderer.dispose).not.toHaveBeenCalled();
+    expect(firstDispose).not.toHaveBeenCalled();
+    expect(secondDispose).not.toHaveBeenCalled();
 
     first.unmount();
     await act(async () => undefined);
-    expect(firstRenderer.dispose).toHaveBeenCalledOnce();
-    expect(secondRenderer.dispose).not.toHaveBeenCalled();
+    expect(firstDispose).toHaveBeenCalledOnce();
+    expect(secondDispose).not.toHaveBeenCalled();
     expect(second.container.querySelector('canvas')).toBe(retainedCanvas);
     expect(retainedCanvas).toHaveAttribute('aria-label', 'Ready printer canvas');
 
     second.unmount();
     await act(async () => undefined);
-    expect(firstRenderer.dispose).toHaveBeenCalledOnce();
-    expect(secondRenderer.dispose).toHaveBeenCalledOnce();
+    expect(firstDispose).toHaveBeenCalledOnce();
+    expect(secondDispose).toHaveBeenCalledOnce();
   });
 
   it('should dispose a renderer that finishes initialization after its printer view closes', async () => {
     const renderer = createRenderer();
+    const { dispose } = renderer;
     const initialization = Promise.withResolvers<RendererInstance>();
     mocks.createRenderer.mockReturnValueOnce(initialization.promise);
     const view = render(<PrinterScene {...createProps()} />);
@@ -109,7 +121,7 @@ describe('PrinterScene renderer lifetime', () => {
       initialization.resolve(renderer);
       await initialization.promise;
     });
-    expect(renderer.dispose).toHaveBeenCalledOnce();
+    expect(dispose).toHaveBeenCalledOnce();
     expect(screen.queryByLabelText('Ready printer canvas')).not.toBeInTheDocument();
   });
 });

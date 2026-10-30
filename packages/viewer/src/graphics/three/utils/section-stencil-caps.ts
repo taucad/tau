@@ -306,6 +306,16 @@ const createPolygonGeometry = (): THREE.BufferGeometry => {
   return geometry;
 };
 
+/** Write the GPU payload only when its float32 representation changes. */
+const writePolygonComponent = (attribute: THREE.BufferAttribute, offset: number, value: number): boolean => {
+  const stored = Math.fround(value);
+  if (attribute.array[offset] === stored) {
+    return false;
+  }
+  attribute.array[offset] = stored;
+  return true;
+};
+
 // oxlint-disable-next-line max-params -- A pooled geometry write takes its points, count, normal and style apart.
 const writePolygonGeometry = (
   geometry: THREE.BufferGeometry,
@@ -320,18 +330,33 @@ const writePolygonGeometry = (
   const base = geometry.getAttribute('aCapBaseColor') as THREE.BufferAttribute;
   const stripe = geometry.getAttribute('aCapStripeColor') as THREE.BufferAttribute;
   const axis = geometry.getAttribute('aCapStripeAxis') as THREE.BufferAttribute;
+  let positionChanged = false;
+  let uvChanged = false;
+  let baseChanged = false;
+  let stripeChanged = false;
+  let axisChanged = false;
   for (let index = 0; index < count; index++) {
     const point = points[index]!;
-    position.setXYZ(index, point.x, point.y, point.z);
-    planeUv.setXY(index, point.dot(_u), point.dot(_v));
-    base.setXYZ(index, style.base[0], style.base[1], style.base[2]);
-    stripe.setXYZ(index, style.stripe[0], style.stripe[1], style.stripe[2]);
-    axis.setXY(index, style.axis[0], style.axis[1]);
+    positionChanged = writePolygonComponent(position, index * 3, point.x) || positionChanged;
+    positionChanged = writePolygonComponent(position, index * 3 + 1, point.y) || positionChanged;
+    positionChanged = writePolygonComponent(position, index * 3 + 2, point.z) || positionChanged;
+    uvChanged = writePolygonComponent(planeUv, index * 2, point.dot(_u)) || uvChanged;
+    uvChanged = writePolygonComponent(planeUv, index * 2 + 1, point.dot(_v)) || uvChanged;
+    for (let component = 0; component < 3; component++) {
+      baseChanged = writePolygonComponent(base, index * 3 + component, style.base[component]!) || baseChanged;
+      stripeChanged = writePolygonComponent(stripe, index * 3 + component, style.stripe[component]!) || stripeChanged;
+    }
+    axisChanged = writePolygonComponent(axis, index * 2, style.axis[0]) || axisChanged;
+    axisChanged = writePolygonComponent(axis, index * 2 + 1, style.axis[1]) || axisChanged;
   }
-  for (const attribute of [position, planeUv, base, stripe, axis]) {
-    attribute.clearUpdateRanges();
-    attribute.addUpdateRange(0, count * attribute.itemSize);
-    attribute.needsUpdate = true;
+  const changed = [positionChanged, uvChanged, baseChanged, stripeChanged, axisChanged];
+  const attributes = [position, planeUv, base, stripe, axis];
+  for (const [index, attribute] of attributes.entries()) {
+    if (changed[index]) {
+      // Keep pending ranges until the renderer consumes them, including repeated writes before a draw.
+      attribute.addUpdateRange(0, count * attribute.itemSize);
+      attribute.needsUpdate = true;
+    }
   }
   geometry.setDrawRange(0, (count - 2) * 3);
 };
@@ -732,7 +757,7 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
 
     // The outline follows every face, from either side, over every source a face plane crosses.
     const allFaces: SectionFace[] = resolveSectionFaces(frame.pieces);
-    if (allFaces.length > 0) {
+    if (allFaces.length > 0 && frame.outlineWidthPixels > 0) {
       writeSectionCapOutlineFaces(outlineFaces, allFaces, frame.outlineWidthPixels);
       writeSectionCapOutlineCamera(outlineFaces, frame.camera, frame.viewportHeightPixels);
       writeSectionCapOutlineFaces(openChainFaces, allFaces, frame.outlineWidthPixels * sectionCapOpenChainWidthScale);

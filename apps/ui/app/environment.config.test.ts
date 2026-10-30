@@ -7,6 +7,7 @@ import {
   getClientEnvironment,
   getEnvironment,
   requireClientEnvironment,
+  resolveDeployContext,
   resolveFrontendUrl,
 } from '#environment.config.js';
 import type { ClientEnvironment } from '#environment.config.js';
@@ -137,6 +138,19 @@ describe('resolveFrontendUrl', () => {
       ),
     ).toBe('not-a-url');
   });
+});
+
+describe('resolveDeployContext', () => {
+  /* eslint-disable @typescript-eslint/naming-convention -- environment variable keys are uppercase by contract. */
+  it.each(['production', 'deploy-preview', 'branch-deploy'])('should name the Netlify deploy context %s', (context) => {
+    expect(resolveDeployContext({ CONTEXT: context })).toBe(context);
+  });
+
+  it('should leave any other context, or none, unset', () => {
+    expect(resolveDeployContext({ CONTEXT: 'dev' })).toBeUndefined();
+    expect(resolveDeployContext({ CONTEXT: 'production; injected' })).toBeUndefined();
+  });
+  /* eslint-enable @typescript-eslint/naming-convention -- environment variable keys are uppercase by contract. */
 });
 
 describe('getEnvironment', () => {
@@ -297,6 +311,7 @@ describe('getClientEnvironment', () => {
       'TAU_BILLING_ENVIRONMENT',
       'TAU_BUILD_ID',
       'TAU_DEBUG',
+      'TAU_DEPLOY_CONTEXT',
       'TAU_FRONTEND_URL',
       'TAU_GIT_REMOTE_ALLOW_PRIVATE',
       'TAU_MACHINES_ENABLED',
@@ -330,6 +345,7 @@ describe('window.ENV host contract', () => {
       TAU_FRONTEND_URL: 'https://host.test',
       TAU_BUILD_ID: '1792000000000',
       TAU_RELEASE: 'abcdef012345',
+      TAU_DEPLOY_CONTEXT: 'production',
       TAU_DEBUG: true,
       TAU_MACHINES_ENABLED: false,
       TAU_GIT_REMOTE_ALLOW_PRIVATE: false,

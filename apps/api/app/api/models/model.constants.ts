@@ -6,7 +6,13 @@ type CloudCatalogProviderId = Exclude<ProviderId, 'ollama'>;
 
 const textOnlyModalities = { input: ['text'], output: ['text'] } satisfies ModelModalities;
 const imageInputModalities = { input: ['text', 'image'], output: ['text'] } satisfies ModelModalities;
-/** Vision models on an Anthropic or OpenAI codec; providers rasterise PDF pages, so `pdf` never appears without `image`. */
+/**
+ * Vision models whose codec can deliver a PDF. Anthropic and OpenAI rasterise
+ * pages on their document parts. Vertex's OpenAI-compatible chat endpoint does
+ * not accept a `file` part; the gateway rewrites it to an `image_url` PDF data
+ * URI, the blob form that endpoint uses for any GenerateContent document type.
+ * `pdf` never appears without `image`.
+ */
 const pdfInputModalities = { input: ['text', 'image', 'pdf'], output: ['text'] } satisfies ModelModalities;
 
 /*
@@ -444,6 +450,44 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
     },
   },
   openai: {
+    'gpt-6.1-terra': {
+      enabled: true,
+      id: 'openai-gpt-6.1-terra',
+      providerKind: 'tau-hosted',
+      name: 'GPT-6.1 Terra',
+      slug: 'gpt-6.1-terra',
+      recommended: true,
+      description: 'Fast visual reasoning for interpreting technical drawings and everyday CAD design iterations.',
+      provider: {
+        id: 'openai',
+        name: 'OpenAI',
+      },
+      model: 'gpt-6.1-terra',
+      support: {
+        reasoning: { levels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+        modalities: pdfInputModalities,
+      },
+      details: {
+        family: 'gpt',
+        families: ['GPT-6.1'],
+        contextWindow: 200_000, // Provider supports 1.05M tokens; Tau caps effective chat budget for cost and compaction reliability.
+        maxTokens: 128_000,
+        knowledgeCutoff: '2026-06',
+        cost: {
+          inputTokens: 1,
+          outputTokens: 5,
+          cacheReadTokens: 0.05,
+          cacheWriteTokens: 1.25,
+        },
+      },
+      configuration: {
+        streaming: true,
+        reasoning: {
+          effort: 'high',
+          summary: 'auto',
+        },
+      },
+    },
     'gpt-6-astra': {
       enabled: true,
       id: 'openai-gpt-6-astra',
@@ -777,7 +821,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         tools: true,
         toolChoice: false,
         reasoning: lowToHighReasoning,
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'gemini',
@@ -812,7 +856,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'gemini-3.1-pro-preview-customtools',
       support: {
         reasoning: lowToHighReasoning,
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'gemini',
@@ -848,7 +892,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'gemini-3.8-flash',
       support: {
         reasoning: lowToHighReasoning,
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'gemini',
@@ -883,7 +927,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'gemini-3.5-flash-lite',
       support: {
         reasoning: lowToHighReasoning,
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'gemini',
@@ -918,7 +962,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'gemini-3.5-flash',
       support: {
         reasoning: lowToHighReasoning,
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'gemini',

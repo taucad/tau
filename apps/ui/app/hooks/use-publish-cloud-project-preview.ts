@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ENV } from '#environment.config.js';
 import { useRevisionSessionUser } from '#lib/revision-actor.js';
 import { useProjectThumbnail } from '#hooks/use-project-thumbnail.js';
+import { recordApiRequestId } from '#lib/api-request-id.js';
 
 /** Reuse the existing saved capture; browsing cloud cards never starts a kernel. */
 export const publishCloudProjectPreview = async (input: {
@@ -56,7 +57,7 @@ export const publishCloudProjectPreview = async (input: {
     return;
   }
   if (!response.ok) {
-    throw new Error(`Saved preview upload failed (${String(response.status)})`);
+    throw recordApiRequestId(new Error(`Saved preview upload failed (${String(response.status)})`), response);
   }
 };
 

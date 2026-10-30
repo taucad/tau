@@ -1,4 +1,4 @@
-import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { useModelAvailability } from '#hooks/use-project-availability.js';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { interactiveViewContent } from '#lib/interactive-view-content.js';
 import type { AppCapabilitiesManifest } from '#types/runtime-client.alias.js';
@@ -925,7 +925,7 @@ const ViewerContent = memo(function ({
           >
             {({ segment, list }) => (
               <ChatViewerControls
-                mobileAction={<ArButton artifact={artifact} runtimeDocument={runtimeDocument} />}
+                mobileAction={<ArButton artifact={artifact} />}
                 captureRendering={captureRendering}
                 kernelSettings={
                   cadRef ? <ViewerKernelSettings viewId={viewId} entryPath={entryPath} cadActor={cadRef} /> : undefined
@@ -942,7 +942,7 @@ const ViewerContent = memo(function ({
           </ViewerIssues>
         ) : (
           <ChatViewerControls
-            mobileAction={<ArButton artifact={artifact} runtimeDocument={runtimeDocument} />}
+            mobileAction={<ArButton artifact={artifact} />}
             shouldEnableCapture={false}
             captureRendering={captureRendering}
           />
@@ -971,7 +971,7 @@ const ViewerContent = memo(function ({
 
 /** Keep file absence and rendering errors hidden until the authored checkout is acknowledged. */
 export const ChatViewer = memo(function (props: ChatViewerProps): React.JSX.Element {
-  const availability = useProjectAvailability();
+  const availability = useModelAvailability();
   return props.profile !== 'shared' && availability !== 'ready' ? (
     <ProjectSyncPlaceholder state={availability} />
   ) : (

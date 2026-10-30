@@ -40,18 +40,19 @@ datasources:
     url: http://localhost:4040
     editable: true
 
+  # Compose DNS. The host ports are loopback-only, so host.docker.internal cannot reach them.
   - name: Redis
     type: redis-datasource
     uid: redis
     access: proxy
-    url: redis://host.docker.internal:6379
+    url: redis://redis:6379
     editable: true
 
   - name: PostgreSQL
     type: grafana-postgresql-datasource
     uid: postgresql
     access: proxy
-    url: host.docker.internal:5432
+    url: postgres:5432
     editable: true
     jsonData:
       database: tau_dev

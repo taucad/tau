@@ -529,6 +529,7 @@ describe('MeasureTool', () => {
       let disposed = false;
       return {
         ready: () => undefined,
+        prioritize: () => undefined,
         prepare: async () => {
           if (!disposed) {
             livePrepares++;
@@ -557,6 +558,7 @@ describe('MeasureTool', () => {
     const dispose = vi.fn();
     mocks.workerClientFactory = () => ({
       ready: () => undefined,
+      prioritize: () => undefined,
       prepare: async () =>
         new Promise<ReturnType<MeasurementFeatureWorkerClient['ready']>>((_resolve, reject) => {
           rejectRequests.push(reject);

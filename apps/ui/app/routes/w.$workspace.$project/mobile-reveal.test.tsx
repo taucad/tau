@@ -24,6 +24,8 @@ type RevealEvent = {
   readonly entryPath: string;
   readonly unitId: string;
   readonly componentId: string;
+  readonly path: string;
+  readonly expandTarget?: boolean;
 };
 type Snapshot = {
   readonly context: { readonly panelState: PanelState; readonly openFiles: readonly string[] };
@@ -38,7 +40,7 @@ const chunks = vi.hoisted(() => {
     });
     return { promise, open };
   };
-  return { gate, model: gate(), kinematics: gate() };
+  return { gate, model: gate(), kinematics: gate(), files: gate() };
 });
 const editor = vi.hoisted(() => ({
   listeners: new Set<() => void>(),
@@ -48,6 +50,7 @@ const editor = vi.hoisted(() => ({
 }));
 
 const emitByCommand: Record<string, string> = {
+  revealFileInTree: 'fileRevealRequested',
   revealModelComponentInExplorer: 'modelComponentRevealRequested',
   revealModelComponentInKinematics: 'kinematicsRevealRequested',
 };
@@ -103,9 +106,13 @@ const editorRef = {
 };
 
 vi.mock('#hooks/use-project.js', () => ({
-  useProject: () => ({ editorRef, mainEntryPath: 'main.ts', projectId: 'project-1' }),
+  useProject: () => ({ editorRef, mainEntryPath: 'main.ts', projectId: 'project-1', viewRecords: new Map() }),
 }));
-vi.mock('#hooks/use-project-availability.js', () => ({ useProjectAvailability: () => 'ready' }));
+vi.mock('#hooks/use-project-availability.js', () => ({
+  useProjectAvailability: () => 'ready',
+  useModelAvailability: () => 'ready',
+  useLargeObjectPending: () => false,
+}));
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => true }));
 vi.mock('react-router', async (importOriginal) => ({
   ...(await importOriginal<typeof ReactRouter>()),
@@ -124,6 +131,28 @@ vi.mock('#routes/w.$workspace.$project/chat-explorer.js', async (importOriginal)
 vi.mock('#routes/w.$workspace.$project/chat-kinematics.js', async (importOriginal) => {
   await chunks.kinematics.promise;
   return importOriginal();
+});
+vi.mock('#routes/w.$workspace.$project/chat-file-tree.js', async (importOriginal) => {
+  await chunks.files.promise;
+  return importOriginal();
+});
+vi.mock('#routes/w.$workspace.$project/chat-editor-file-tree.js', async () => {
+  const { subscribeWorkbenchFileReveal } = await import('#routes/w.$workspace.$project/workbench-reveal.js');
+  const { useProject } = await import('#hooks/use-project.js');
+  return {
+    ChatEditorFileTree(): React.JSX.Element {
+      const { editorRef: projectEditor } = useProject();
+      const [heard, setHeard] = useState('nothing');
+      useEffect(
+        () =>
+          subscribeWorkbenchFileReveal(projectEditor, (target) => {
+            setHeard(target.path);
+          }),
+        [projectEditor],
+      );
+      return <p>{`Files revealed ${heard}`}</p>;
+    },
+  };
 });
 // The panes subscribe on mount, as the real ones do, and show the last reveal they heard.
 vi.mock('@taucad/workbench-panes/model/model-pane', () => ({
@@ -170,6 +199,7 @@ vi.mock('#routes/w.$workspace.$project/workbench-panes-host.js', () => ({
 
 // The stage: the viewer's part menu with the app's real part verbs.
 vi.mock('#routes/w.$workspace.$project/chat-viewer-dockview.js', async () => {
+  const { useProjectWorkspace } = await import('#routes/w.$workspace.$project/project-workspace-context.js');
   const { useModelComponentProjectActions } = await import('#components/geometry/cad/model-component-actions.js');
   const target = {
     manifest: { sourceFile: 'main.ts' },
@@ -179,6 +209,7 @@ vi.mock('#routes/w.$workspace.$project/chat-viewer-dockview.js', async () => {
   return {
     ViewerDockview(): React.JSX.Element {
       const actions = useModelComponentProjectActions();
+      const workspace = useProjectWorkspace();
       return (
         <>
           <button
@@ -188,6 +219,15 @@ vi.mock('#routes/w.$workspace.$project/chat-viewer-dockview.js', async () => {
             }}
           >
             Reveal wheel
+          </button>
+          <button
+            type='button'
+            onClick={() => {
+              workspace.openPanel('files');
+              editorRef.send({ type: 'revealFileInTree', path: 'parts/nested/wheel.ts' });
+            }}
+          >
+            Reveal file
           </button>
           <button
             type='button'
@@ -216,6 +256,14 @@ vi.mock('#routes/w.$workspace.$project/project-manifest-issue-banner.js', () => 
 vi.mock('#routes/w.$workspace.$project/workspace-skeleton.js', () => ({ WorkspaceSkeleton: () => null }));
 /* The project top bar (W2) has its own suite; this shell suite only needs its slot. */
 vi.mock('#routes/w.$workspace.$project/mobile-project-top-bar.js', () => ({ MobileProjectTopBar: () => null }));
+
+// Prepare the real modules before interaction: Vitest's source transformation is not chunk delivery time.
+// The lazy mocks still withhold these modules until the test opens their gates after the reveal.
+await Promise.all([
+  vi.importActual('#routes/w.$workspace.$project/chat-explorer.js'),
+  vi.importActual('#routes/w.$workspace.$project/chat-kinematics.js'),
+  vi.importActual('#routes/w.$workspace.$project/chat-file-tree.js'),
+]);
 
 const { ProjectWorkspaceProvider } = await import('#routes/w.$workspace.$project/project-workspace-context.js');
 const { ChatInterfaceMobile } = await import('#routes/w.$workspace.$project/chat-interface-mobile.js');
@@ -276,5 +324,19 @@ describe('phone part-menu reveal into a lazy pane', { timeout: 30_000 }, () => {
     chunks.kinematics.open();
 
     expect(await screen.findByText('Kinematics revealed main.ts axle', undefined, { timeout: 15_000 })).toBeVisible();
+  });
+
+  it('should deliver a file reveal after the cold Files chunk mounts', async () => {
+    renderShell();
+    fireEvent.click(screen.getByRole('button', { name: 'Reveal file' }));
+    await waitFor(() => {
+      expect(editor.emitted).toEqual(['fileRevealRequested']);
+    });
+    expect(editor.snapshot.context.panelState.mobileActiveTab).toBe('files');
+    expect(screen.queryByText(/^Files revealed/u)).not.toBeInTheDocument();
+    chunks.files.open();
+    expect(
+      await screen.findByText('Files revealed parts/nested/wheel.ts', undefined, { timeout: 15_000 }),
+    ).toBeVisible();
   });
 });

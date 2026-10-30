@@ -190,9 +190,9 @@ export class GitLeaseHost {
   /**
    * Work a request started that outlives its response: the lease disposal
    * that follows a fetch, whose child closes after the bytes are on the wire,
-   * a compacting commit's sweep. Held in a set rather than fired and
-   * forgotten, so a failure has somewhere to be logged and a caller can wait
-   * for it.
+   * a push's deferred compaction, a compacting commit's sweep. Held in a set
+   * rather than fired and forgotten, so a failure has somewhere to be logged
+   * and a caller can wait for it.
    */
   readonly #background = new Set<Promise<void>>();
 
@@ -247,9 +247,15 @@ export class GitLeaseHost {
     return this.#admission.reservedBytes;
   }
 
-  /** Waits for the work a finished request left running. */
+  /**
+   * Waits for the work a finished request left running, and for any that
+   * work started in turn (a deferred compaction starts its sweep).
+   */
   public async settled(): Promise<void> {
-    await Promise.all(this.#background);
+    while (this.#background.size > 0) {
+      // oxlint-disable-next-line no-await-in-loop -- each round waits for what the round before started
+      await Promise.all(this.#background);
+    }
   }
 
   /**
@@ -442,11 +448,57 @@ export class GitLeaseHost {
     request: LeaseRequest,
     work: (lease: RepositoryLease, digest: string | undefined) => Promise<T>,
   ): Promise<T> {
+    return this.runLeaseThen(operation, request, async (lease, digest) => ({ value: await work(lease, digest) }));
+  }
+
+  /**
+   * {@link runLease}, where `work` may hand back an `after` step that still
+   * needs the lease once the request has its answer: the answer is returned at
+   * once, and the lease is disposed and its admission given back as soon as
+   * `after` settles, tracked like every other post-reply step ({@link track}).
+   * A push's deferred compaction is one: it runs over the push's lease, inside
+   * the reservation the push was admitted with.
+   *
+   * `after` may answer a last step that needs no lease — posting a receipt,
+   * sweeping the store — which runs, still tracked, only once the lease is
+   * disposed and its disk reservation and owner share are back.
+   *
+   * @param operation - What the lease is for.
+   * @param request - What admission needs.
+   * @param work - The request's work, answering its value and an optional step to run after it.
+   * @returns The value `work` answered.
+   */
+  protected async runLeaseThen<T>(
+    operation: GitOperation,
+    request: LeaseRequest,
+    work: (
+      lease: RepositoryLease,
+      digest: string | undefined,
+    ) => Promise<{ readonly value: T; readonly after?: () => Promise<(() => Promise<void>) | undefined> }>,
+  ): Promise<T> {
     const admitted = await this.admitLeaseSlot(request, operation);
     let lease: RepositoryLease | undefined;
+    let handedOver = false;
     try {
       lease = await this.hydrate(admitted);
-      return await work(lease, admitted.preread.digest);
+      const { value, after } = await work(lease, admitted.preread.digest);
+      if (after !== undefined) {
+        const held = lease;
+        handedOver = true;
+        this.track(
+          (async (): Promise<void> => {
+            let then: (() => Promise<void>) | undefined;
+            try {
+              then = await after();
+            } finally {
+              await this.disposeQuietly(held, admitted.locator.projectId);
+              admitted.release();
+            }
+            await then?.();
+          })(),
+        );
+      }
+      return value;
     } catch (error) {
       throw refusalFor(error, this.logger);
     } finally {
@@ -455,9 +507,12 @@ export class GitLeaseHost {
          (review F2). `rm -rf` suppresses ENOENT but not EBUSY, EACCES or
          EPERM, and a throw here used to skip `release()` for the life of the
          process — after which every request on this host answered
-         `GIT_LEASE_DISK_FULL` forever. */
-      await this.disposeQuietly(lease, admitted.locator.projectId);
-      admitted.release();
+         `GIT_LEASE_DISK_FULL` forever. A lease handed to an `after` step is
+         that step's to dispose. */
+      if (!handedOver) {
+        await this.disposeQuietly(lease, admitted.locator.projectId);
+        admitted.release();
+      }
     }
   }
 

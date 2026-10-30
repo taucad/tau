@@ -1400,6 +1400,7 @@ export function FileManagerProvider({
               workspaceId: snapshot.context.activeWorkspaceId,
               prefix,
               reason: 'dispose-failed',
+              error,
             });
             console.warn(`[FileManager] unmount('${prefix}') failed`, error);
           }

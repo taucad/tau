@@ -47,6 +47,9 @@ const toOriginOrRaw = (value: string | undefined): string | undefined => {
   }
 };
 
+/** Netlify sets `CONTEXT` for builds only; the error tracker's `deploy_context` tag (`resolveDeployContext`). */
+const buildDeployContext = (environment: NodeJS.ProcessEnv): string => environment['CONTEXT'] ?? '';
+
 const resolveBuildFrontendUrl = (environment: NodeJS.ProcessEnv): string | undefined => {
   if (environment['TAU_FRONTEND_URL']) {
     return undefined;
@@ -131,6 +134,7 @@ const cloudBoundarySpecifiers = new Set([
 ]);
 
 const desktopSourceOverrides = new Map([
+  ['#components/cad/ar-usdz-transcode.js', '#components/cad/ar-usdz-transcode.desktop.js'],
   ['#constants/local-kernel-options.js', '#constants/local-kernel-options.desktop.js'],
   ['#constants/ephemeral-kernel-options.js', '#constants/ephemeral-kernel-options.desktop.js'],
   ['#runtime/converter-client-options.js', '#runtime/converter-client-options.desktop.js'],
@@ -476,6 +480,7 @@ export default defineConfig(({ command, mode }) => {
             ),
           }),
       tauBuildFrontendUrl: JSON.stringify(buildFrontendUrl ?? ''),
+      tauBuildDeployContext: JSON.stringify(buildDeployContext(process.env)),
       ...(isProductionBuild ? {} : buildIdDefine),
       tauCloudBuildEnabled: JSON.stringify(tauCloudEnabled),
       /* Telemetry's own Cloud-host signal, beside the billing gate and never derived from it; tests stub the module. */
@@ -604,9 +609,11 @@ export default defineConfig(({ command, mode }) => {
     },
     build: {
       /*
-       * Source maps: client uses `react-router build --sourcemapClient hidden`
-       * (apps/ui/project.json). Omit server maps by not passing `--sourcemapServer`
-       * so the SSR `sourcemap` option stays unset (Rolldown rejects boolean `false`).
+       * Source maps: `ui:build` passes `--sourcemapClient hidden --sourcemapServer hidden`
+       * (apps/ui/project.json; Rolldown rejects boolean `false` for the SSR `sourcemap`).
+       * Server maps are moved out of `build/server` into `build/server-sourcemaps` and never
+       * ship in the function; `ui:sourcemaps` uploads them to Sentry and deletes them (SSR bundle
+       * policy rule 5).
        */
       /*
        * SVGs are forced out of the base64 inline path so the icon sprite

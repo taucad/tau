@@ -98,7 +98,7 @@ const oneLine = (input: string, max: number): string => {
   return collapsed.length > max ? `${collapsed.slice(0, max - 1)}…` : collapsed;
 };
 
-const toolResultValue = (message: ToolResultMessage<unknown>): unknown => {
+const toolResultValue = (message: ToolResultMessage): unknown => {
   const { details } = message;
   if (zodUtility.isObject(details) && 'content' in details) {
     return details['content'];
@@ -179,7 +179,7 @@ export const summarizeToolEvents = async (
 ): Promise<ToolEventSummary[]> => {
   const pending: Array<{
     readonly index: number;
-    readonly message: ToolResultMessage<unknown>;
+    readonly message: ToolResultMessage;
     readonly call?: { readonly name: string; readonly args: unknown } | undefined;
     readonly value: unknown;
     readonly content: string;

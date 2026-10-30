@@ -11,6 +11,7 @@
 import { useMemo } from 'react';
 import { useAnalytics } from '#hooks/use-analytics.js';
 import type { Analytics } from '#hooks/use-analytics.js';
+import { reportUiError } from '#lib/error-reporting.js';
 import type { ExternalPollTelemetry } from '@taucad/fs-client/file-tree-service';
 
 export const workspaceEventName = {
@@ -38,9 +39,14 @@ export type WorkspaceTelemetry = {
     readonly previousWorkspaceId: string | undefined;
     readonly nextWorkspaceId: string;
   }) => void;
+  /**
+   * A workspace could not be opened. `error`, when the failure threw one, also goes to error reporting (SB4); the
+   * product event keeps the outcome fields only.
+   */
   readonly workspaceOpenFailed: (input: {
     readonly workspaceId: string | undefined;
     readonly reason: WorkspaceFailureReason;
+    readonly error?: unknown;
   }) => void;
   /**
    * Emitted when an explicit unmount call fails — for example the
@@ -52,6 +58,7 @@ export type WorkspaceTelemetry = {
     readonly workspaceId: string | undefined;
     readonly prefix: string;
     readonly reason: 'dispose-failed' | 'unknown';
+    readonly error?: unknown;
   }) => void;
   readonly projectCreateWebaccessBlocked: (input: { readonly reason: WorkspaceFailureReason }) => void;
   readonly workspaceExternalPoll: (input: ExternalPollTelemetry) => void;
@@ -79,6 +86,15 @@ export type WorkspaceTelemetry = {
   }) => void;
 };
 
+/** Report the error a workspace failure threw (SB4), tagged with its `code`, `subject` and `operation`. */
+const reportWorkspaceFailure = (error: unknown, operation: 'open' | 'unmount', code: string): void => {
+  if (error === undefined) {
+    return;
+  }
+  // async-iife: bootstrap -- telemetry callers do not await; reporting never rejects.
+  void reportUiError(error, { tags: { code, subject: 'workspace', operation } });
+};
+
 const emit = (analytics: Analytics, name: WorkspaceEventName, properties: Record<string, unknown>): void => {
   if (typeof analytics.capture !== 'function') {
     return;
@@ -99,11 +115,13 @@ export const buildWorkspaceTelemetry = (analytics: Analytics): WorkspaceTelemetr
   workspaceSwap: ({ previousWorkspaceId, nextWorkspaceId }) => {
     emit(analytics, workspaceEventName.swap, { previousWorkspaceId, nextWorkspaceId });
   },
-  workspaceOpenFailed: ({ workspaceId, reason }) => {
+  workspaceOpenFailed: ({ workspaceId, reason, error }) => {
     emit(analytics, workspaceEventName.openFailed, { workspaceId, reason });
+    reportWorkspaceFailure(error, 'open', reason);
   },
-  workspaceUnmountFailed: ({ workspaceId, prefix, reason }) => {
+  workspaceUnmountFailed: ({ workspaceId, prefix, reason, error }) => {
     emit(analytics, workspaceEventName.unmountFailed, { workspaceId, prefix, reason });
+    reportWorkspaceFailure(error, 'unmount', reason);
   },
   projectCreateWebaccessBlocked: ({ reason }) => {
     emit(analytics, workspaceEventName.projectCreateWebaccessBlocked, { reason });

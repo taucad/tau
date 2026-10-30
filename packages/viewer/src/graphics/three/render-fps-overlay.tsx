@@ -6,6 +6,7 @@ import type { RenderLoopObserver } from '#graphics/three/render-loop-observer.js
 /** Observe completed submission callbacks without requesting frames or waiting for the GPU. */
 export function RenderFpsOverlay({ hasTopRightGizmo = false }: { readonly hasTopRightGizmo?: boolean }): undefined {
   const gl = useThree((state) => state.gl);
+  const hasRoomBesideGizmo = useThree((state) => state.size.width >= 320);
   const observerRef = useRef<RenderLoopObserver | undefined>(undefined);
   const outputRef = useRef<HTMLOutputElement | undefined>(undefined);
   useLayoutEffect(() => {
@@ -53,10 +54,14 @@ export function RenderFpsOverlay({ hasTopRightGizmo = false }: { readonly hasTop
     ) {
       return;
     }
-    // The 96px cube and its adjacent Section picker end above this 112px band.
-    output.classList.toggle('top-28', hasTopRightGizmo);
-    output.classList.toggle('top-2', !hasTopRightGizmo);
-  }, [gl, hasTopRightGizmo]);
+    // At phone widths, use the space beside the cube and Section picker rather than the short stage's controls band.
+    // Narrow desktop canvases still need the 112px band below the 96px cube and its adjacent picker.
+    const isBesideGizmo = hasTopRightGizmo && hasRoomBesideGizmo;
+    output.classList.toggle('top-28', hasTopRightGizmo && !isBesideGizmo);
+    output.classList.toggle('top-2', !hasTopRightGizmo || isBesideGizmo);
+    output.classList.toggle('left-2', isBesideGizmo);
+    output.classList.toggle('right-2', !isBesideGizmo);
+  }, [gl, hasTopRightGizmo, hasRoomBesideGizmo]);
   useFrame(() => {
     observerRef.current?.record(performance.now());
   }, 5);

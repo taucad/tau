@@ -23,12 +23,12 @@ import {
   classifyUpstreamRefusal,
   cloudUpstreamRefusalMessage,
   isContextWindowRefusal,
-  maximumRefusalMessageCharacters,
   readUpstreamRefusal,
   upstreamRetryAfterSeconds,
 } from '#api/llm/upstream-refusal.js';
 import { createProviderAccountFrameFilter } from '#api/llm/provider-account-stream.js';
 import type { ProviderTerminalFailure } from '#api/llm/provider-account-stream.js';
+import { errorDiagnostic, textMarker } from '#api/llm/provider-diagnostic.js';
 import { isGatewayProviderId } from '#api/providers/provider-gateway.js';
 import type { GatewayProviderId } from '#api/providers/provider-gateway.js';
 import { billableModelQualificationResolverKey } from '#api/billing/billable-model-invocation.types.js';
@@ -43,6 +43,7 @@ import type { AdmissionDenied } from '#api/billing/credit-ledger.service.js';
 import type { QualifiedAdmissionInput, TerminalEvidence } from '#api/billing/credit-ledger.types.js';
 import { MetricsService } from '#telemetry/metrics.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
+import { ModelInvocationEvidenceRecorder } from '#api/agent-observability/model-invocation-recorder.service.js';
 
 type InvocationRow = NonNullable<Awaited<ReturnType<CreditLedgerService['getOperationForAttempt']>>>;
 const requestKeyVersion = 1;
@@ -151,6 +152,8 @@ export class BillableModelInvocationService {
     @Optional() private readonly metrics?: MetricsService,
     // oxlint-disable-next-line new-cap -- NestJS parameter decorators are invoked without new
     @Optional() private readonly shutdown?: ShutdownService,
+    // oxlint-disable-next-line new-cap -- NestJS parameter decorators are invoked without new
+    @Optional() private readonly evidenceRecorder?: ModelInvocationEvidenceRecorder,
   ) {}
 
   public async invoke(suppliedIntent: BillableInvocationIntent): Promise<BillableInvocationResult> {
@@ -298,7 +301,7 @@ export class BillableModelInvocationService {
          * ruling it must not break is the other direction — never a larger bound after a count
          * succeeded — and `qualification` is still the byte-bound one here. */
         this.logger.warn(
-          `Exact input count unavailable for ${qualification.routeId}; admitting at the byte bound: ${error instanceof Error ? error.message : String(error)}`,
+          `Exact input count unavailable for ${qualification.routeId}; admitting at the byte bound: ${errorDiagnostic(error)}`,
         );
         countSignal = undefined;
         executionDeadline = undefined;
@@ -751,6 +754,11 @@ export class BillableModelInvocationService {
       receipt,
       row.environment,
     );
+    this.evidenceRecorder?.recordSettlement({
+      operation: row,
+      receipt,
+      normalization: evidence.normalizationEvidence?.version,
+    });
   }
 
   /**
@@ -891,8 +899,8 @@ export class BillableModelInvocationService {
    * any status-coded in-band error. The frame filter replaces those bytes with a
    * Tau frame, so without this line the funded path, the one where Tau pays for
    * the tokens, keeps no trace at all of why the turn ended (R6). The supplier's
-   * own sentence stays here, where only Tau reads it, and is clamped the way
-   * every relayed reason is.
+   * sentence can quote the request it rejected, so only its length and digest
+   * are logged, beside the code that classifies it.
    *
    * @param intent - The invocation whose stream failed.
    * @param qualification - The route the request took.
@@ -906,7 +914,7 @@ export class BillableModelInvocationService {
     this.logger.warn(
       `Provider stream failed on ${qualification.providerId} ${qualification.modelId} ` +
         `(${failure.code ?? failure.type ?? 'no code'}) in ${intent.environment}: ` +
-        `${failure.message?.slice(0, maximumRefusalMessageCharacters) ?? 'no message'}`,
+        `${failure.message === undefined ? 'no message' : textMarker(failure.message)}`,
     );
   }
 

@@ -70,7 +70,7 @@ describe('VerifyEmail', () => {
   it('shows a recovery state when the token is missing', () => {
     renderVerifyEmail('/auth/verify-email');
 
-    expect(screen.getByText('Verification link is missing')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'Verification link is missing' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /sign in/i })).toHaveAttribute('href', '/auth/sign-in');
     expect(authMocks.verifyEmail).not.toHaveBeenCalled();
   });

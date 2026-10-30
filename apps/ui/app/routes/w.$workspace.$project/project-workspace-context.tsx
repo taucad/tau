@@ -10,7 +10,7 @@ import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/wo
 import type { WorkbenchLaneNode } from '@taucad/workbench';
 import { searchParameterName } from '#constants/search-parameter.constants.js';
 import { flagParameter } from '#utils/search-parameter.codecs.js';
-import { holdUnheardReveal } from '#routes/w.$workspace.$project/workbench-reveal.js';
+import { holdUnheardFileReveal, holdUnheardReveal } from '#routes/w.$workspace.$project/workbench-reveal.js';
 import { isSurfaceShipped } from '#workbench-records/surface-availability.js';
 
 export const projectWorkspaceKeyCombinations = {
@@ -48,7 +48,10 @@ type ProjectWorkspaceContextValue = {
   openPanel: (panelId: WorkbenchPanelId) => void;
   setWorkbenchOpen: (open: boolean) => void;
   setChatOpen: (open: boolean) => void;
-  connectWorkbench: (openPanel: (panelId: WorkbenchPanelId) => void) => () => void;
+  connectWorkbench: (
+    openPanel: (panelId: WorkbenchPanelId) => void,
+    activateFile?: (path: string) => void,
+  ) => () => void;
   registerLayoutController: (controller: WorkbenchLayoutController) => () => void;
   layoutController: WorkbenchLayoutController;
 };
@@ -226,18 +229,24 @@ export function ProjectWorkspaceProvider({
   const isEditorReady = useSelector(editorRef, (snapshot) => snapshot.matches('ready'));
   const openerRef = useRef<((panelId: WorkbenchPanelId) => void) | undefined>(undefined);
   const pendingFilesRef = useRef<string | undefined>(undefined);
+  const fileActivationRef = useRef<{ activate: (path: string) => void } | undefined>(undefined);
+  const pendingUserFileRef = useRef<{ route: string; path: string } | undefined>(undefined);
+  const committedEditorRef = useRef(editorRef);
   const pendingPreviewPanel = useRef<{ route: string; panel: WorkbenchPanelId } | undefined>(undefined);
   const committedRouteKeyRef = useRef(routeKey);
   useLayoutEffect(() => {
-    if (committedRouteKeyRef.current !== routeKey) {
+    if (committedRouteKeyRef.current !== routeKey || committedEditorRef.current !== editorRef) {
       pendingFilesRef.current = undefined;
       pendingPreviewPanel.current = undefined;
       openerRef.current = undefined;
       committedRouteKeyRef.current = routeKey;
+      committedEditorRef.current = editorRef;
+      fileActivationRef.current = undefined;
+      pendingUserFileRef.current = undefined;
       pendingRecordRecoveryFocus.current = false;
       recordRecoveryHadFocus.current = false;
     }
-  }, [routeKey]);
+  }, [editorRef, routeKey]);
   useLayoutEffect(() => {
     providerActiveRef.current = true;
     return () => {
@@ -246,6 +255,8 @@ export function ProjectWorkspaceProvider({
       recordRecoveryHadFocus.current = false;
       pendingPreviewPanel.current = undefined;
       pendingFilesRef.current = undefined;
+      fileActivationRef.current = undefined;
+      pendingUserFileRef.current = undefined;
     };
   }, []);
 
@@ -326,6 +337,7 @@ export function ProjectWorkspaceProvider({
     (open: boolean) => {
       if (!open) {
         pendingFilesRef.current = undefined;
+        pendingUserFileRef.current = undefined;
       }
       editorRef.send({
         type: 'setPanelState',
@@ -343,6 +355,7 @@ export function ProjectWorkspaceProvider({
         return;
       }
       pendingFilesRef.current = undefined;
+      pendingUserFileRef.current = undefined;
       if (workbenchMode === 'pane') {
         onWorkbenchOpen?.();
         if (openerRef.current) {
@@ -389,11 +402,17 @@ export function ProjectWorkspaceProvider({
   );
 
   const connectWorkbench = useCallback(
-    (opener: (panelId: WorkbenchPanelId) => void) => {
-      if (!providerActiveRef.current || committedRouteKeyRef.current !== routeKey) {
+    (opener: (panelId: WorkbenchPanelId) => void, activateFile?: (path: string) => void) => {
+      if (
+        !providerActiveRef.current ||
+        committedRouteKeyRef.current !== routeKey ||
+        committedEditorRef.current !== editorRef
+      ) {
         return () => undefined;
       }
       openerRef.current = opener;
+      const activation = activateFile ? { activate: activateFile } : undefined;
+      fileActivationRef.current = activation;
       const pendingPreview = pendingPreviewPanel.current;
       pendingPreviewPanel.current = undefined;
       if (pendingPreview?.route === routeKey) {
@@ -404,13 +423,24 @@ export function ProjectWorkspaceProvider({
       if (pendingFiles !== undefined && pendingFiles === routeKey) {
         opener('files');
       }
+      const pendingFile = pendingUserFileRef.current;
+      if (activation && pendingFile?.route === routeKey) {
+        // Claim before delivery: reconnects and reentrant opens cannot replay this intent.
+        pendingUserFileRef.current = undefined;
+        if (editorRef.getSnapshot().context.openFiles.some((file) => file.path === pendingFile.path)) {
+          activation.activate(pendingFile.path);
+        }
+      }
       return () => {
         if (openerRef.current === opener) {
           openerRef.current = undefined;
         }
+        if (fileActivationRef.current === activation) {
+          fileActivationRef.current = undefined;
+        }
       };
     },
-    [routeKey],
+    [editorRef, routeKey],
   );
 
   useKeybinding(
@@ -425,7 +455,8 @@ export function ProjectWorkspaceProvider({
     () => {
       openPanel('model');
     },
-    { enabled: !isMobile },
+    // Ctrl+A selects editable text on Windows and Linux.
+    { enabled: !isMobile, ignoreInputs: true },
   );
   useKeybinding(
     projectWorkspaceKeyCombinations.parameters,
@@ -487,11 +518,26 @@ export function ProjectWorkspaceProvider({
 
   useEffect(() => {
     const subscription = editorRef.on('fileOpened', (event) => {
+      if (
+        !providerActiveRef.current ||
+        committedRouteKeyRef.current !== routeKey ||
+        committedEditorRef.current !== editorRef
+      ) {
+        return;
+      }
       /* Another file opening ends the way back; the preview's own open may report after the code editor loads it.
        * ponytail: reopening the same file from the tree keeps it, until back or another file. */
       setReturnTo((current) => (current === undefined || current.path === event.path ? current : undefined));
       if (event.source !== 'user') {
         return;
+      }
+      // This owner survives the lazy Editor mount that the open itself requests.
+      const activation = fileActivationRef.current;
+      if (activation) {
+        pendingUserFileRef.current = undefined;
+        activation.activate(event.path);
+      } else {
+        pendingUserFileRef.current = { route: routeKey, path: event.path };
       }
       if (isMobile) {
         editorRef.send({ type: 'setPanelState', panelState: { mobileActiveTab: 'editor' } });
@@ -502,10 +548,13 @@ export function ProjectWorkspaceProvider({
     return () => {
       subscription.unsubscribe();
     };
-  }, [editorRef, isMobile, setWorkbenchOpen]);
+  }, [editorRef, isMobile, routeKey, setWorkbenchOpen]);
 
   useEffect(() => {
     // The pane may mount only because of this reveal, after the emit: hold it for that pane's first subscribe.
+    const fileSubscription = editorRef.on('fileRevealRequested', (event) => {
+      holdUnheardFileReveal(editorRef, event);
+    });
     const modelSubscription = editorRef.on('modelComponentRevealRequested', (event) => {
       holdUnheardReveal(editorRef, 'model', event);
       openPanel('model');
@@ -515,6 +564,7 @@ export function ProjectWorkspaceProvider({
       openPanel('kinematics');
     });
     return () => {
+      fileSubscription.unsubscribe();
       modelSubscription.unsubscribe();
       kinematicsSubscription.unsubscribe();
     };

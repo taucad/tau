@@ -101,12 +101,23 @@ export const dockviewStyleOverrides = cn(
   // ── Tab bar container ──
   '[&_.dv-tabs-and-actions-container]:relative',
   '[&_.dv-tabs-and-actions-container]:z-6',
+  // A narrow desktop Viewer reserves two header rows: project actions above, tabs and file/split actions below.
+  // Keep the upper-right workbench slot in place and let Dockview subtract the full header height from its content.
+  'md:@max-[20rem]/viewer:[--dv-tabs-and-actions-container-height:4.5rem]',
+  'md:@max-[20rem]/viewer:[&_.dv-tabs-and-actions-container]:items-end',
+  'md:@max-[20rem]/viewer:[&_:is(.dv-tabs-container,.dv-left-actions-container,.dv-pre-actions-container,.dv-void-container)]:h-9',
+  'md:@max-[20rem]/viewer:[&_.dv-right-actions-container]:absolute',
+  'md:@max-[20rem]/viewer:[&_.dv-right-actions-container]:top-0',
+  'md:@max-[20rem]/viewer:[&_.dv-right-actions-container]:right-0',
+  'md:@max-[20rem]/viewer:[&_.dv-right-actions-container]:h-9',
 
   // ── Adaptive horizontal tab geometry ──
   // Share available width equally from 160px down to a 112px floor, then scroll.
+  // The floor never exceeds the strip: at large text sizes a lone tab shrinks to fit rather than
+  // pushing its close glyph past the strip's edge (T5, 200% text).
   // Width stays auto-basis so Dockview's !important zero-width drag states still win.
   '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab]:w-40',
-  '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab]:min-w-28',
+  '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab]:min-w-[min(7rem,100%)]',
   '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab]:max-w-40',
   '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab]:grow',
   '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab]:!shrink',

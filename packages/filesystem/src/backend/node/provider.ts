@@ -16,9 +16,15 @@
  */
 
 import fs from 'node:fs/promises';
+import {
+  createEntryObserver,
+  readBoundedDescriptor,
+  readPublishedDescriptor,
+} from '#backend/node/entry-observation.js';
+import type { EntryObserver } from '#backend/node/entry-observation.js';
 import type { FileHandle } from 'node:fs/promises';
-import type { Dirent, Stats } from 'node:fs';
-import { realpathSync, statSync } from 'node:fs';
+import type { BigIntStats, Dirent, Stats } from 'node:fs';
+import { constants, realpathSync, statSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
@@ -34,12 +40,26 @@ import type {
   FileStatOptions,
   FileStat,
   HeadFileStat,
+  PathAgentAccess,
   PathPolicy,
   ProviderCapabilities,
   WatchRequest,
 } from '#types.js';
 import type { NodeFsWatchEvent } from '#backend/node/protocol.js';
 import { streamChunkSize, validateFileReadStreamOptions } from '#backend/stream-utils.js';
+
+/**
+ * Why one path is being resolved. A `mutate` resolution additionally refuses a
+ * spelling whose real row grants less authority than the spelling itself (O4).
+ */
+type ResolveIntent = 'read' | 'mutate';
+
+/** How much authority each classification grants, so a real row can be compared with a spelled one (O4). */
+const pathAuthorityRank: Readonly<Record<PathAgentAccess, number>> = Object.freeze({
+  hidden: 0,
+  'read-only': 1,
+  'read-write': 2,
+});
 
 /** The name `_atomicWrite` gives its temp file: `.<target>.<pid>.<uuid>.tmp`. */
 /**
@@ -51,13 +71,54 @@ const hashConcurrency = 32;
 
 const inFlightTemporaryName = /^\..+\.\d+\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/u;
 
+/**
+ * The POSIX `open` hardening flag `flag`, or `0` where the platform omits it.
+ *
+ * Windows leaves `O_NOFOLLOW` and `O_NONBLOCK` undefined, so summing them into a
+ * flag word there yields `NaN`, which `fs.open` refuses with `ERR_OUT_OF_RANGE`
+ * before any durability or verification decision is reached. The refusals those
+ * bits would carry do not depend on them: every open below is preceded by an
+ * `lstat` symbolic-link refusal and a `realpath` containment check on its
+ * admitted parent, and the bounded reads never block on a regular file.
+ */
+const optionalOpenFlag = (flag: number | undefined): number => flag ?? 0;
+
+/** Bounded read of an already-admitted path. */
+const boundedReadFlags = constants.O_RDONLY + optionalOpenFlag(constants.O_NONBLOCK);
+
+/** Post-rename verification read, which must not traverse a symbolic link where the platform can refuse one. */
+const verificationReadFlags = boundedReadFlags + optionalOpenFlag(constants.O_NOFOLLOW);
+
 const isContained = (base: string, target: string): boolean => {
   const relative = path.relative(base, target);
   return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));
 };
 
+/**
+ * Does `target` still hold the very entry a rename put there?
+ *
+ * A different entry — or none — means another writer replaced the path after our
+ * rename landed, so there is nothing of ours left at it to verify.
+ *
+ * A volume that supplies no physical file identity reports `ino` as `0n` — the
+ * same absence `acquireWindowsAuthorityWriter` refuses an authority root for.
+ * Two entries cannot be told apart there, so this answers that the path is still
+ * ours and the write stays answerable for it: a verification refusal is kept
+ * rather than suppressed on a platform that cannot prove it was superseded.
+ */
+const isEntryStillAt = async (target: string, written: BigIntStats): Promise<boolean> => {
+  if (written.ino <= 0n) {
+    return true;
+  }
+  const current = await fs.lstat(target, { bigint: true }).catch(() => undefined);
+  return current !== undefined && current.dev === written.dev && current.ino === written.ino;
+};
+
 const bytesEqual = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
-  left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
+  left.byteLength === right.byteLength &&
+  Buffer.from(left.buffer, left.byteOffset, left.byteLength).equals(
+    Buffer.from(right.buffer, right.byteOffset, right.byteLength),
+  );
 
 type AuthorityCheckedWrite = (
   input: Omit<CheckedFileWrite, 'signal'>,
@@ -70,6 +131,31 @@ type AuthorityCheckedDelete = (
   assertCurrent: () => Promise<void>,
 ) => Promise<CheckedFileWriteResult>;
 const authorityCheckedDeletes = new WeakMap<NodeFsProvider, AuthorityCheckedDelete>();
+const entryObservers = new WeakMap<NodeFsProvider, EntryObserver>();
+const checkedByteLimit = 64 * 1024 * 1024;
+const boundedReads = new WeakMap<
+  NodeFsProvider,
+  (path: string, maximumBytes: number) => Promise<Uint8Array<ArrayBuffer>>
+>();
+const boundedListings = new WeakMap<
+  NodeFsProvider,
+  (path: string, limits: { maximumEntries: number; maximumBytes: number }) => Promise<DirectoryEntry[]>
+>();
+const entryKinds = new WeakMap<
+  NodeFsProvider,
+  (path: string) => Promise<'absent' | 'file' | 'directory' | 'symlink'>
+>();
+const spendCheckedBytes = (budget: { bytes: number }, amount: number): void => {
+  if (amount > budget.bytes) {
+    throw Object.assign(new Error('Checked operation exceeds its bounded byte allowance.'), {
+      code: 'EFBIG',
+      applicationState: 'known-not-applied',
+    });
+  }
+  budget.bytes -= amount;
+};
+const byteLength = (value: Uint8Array<ArrayBuffer> | string): number =>
+  typeof value === 'string' ? Buffer.byteLength(value) : value.byteLength;
 
 type NativeSubscription = { unsubscribe(): Promise<void> };
 type NativeWatcher = {
@@ -213,6 +299,25 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     super();
     this._base = path.resolve(basePath);
     this._policy = options?.policy;
+    entryObservers.set(this, createEntryObserver({ root: this._base, policy: this._policy }));
+    boundedReads.set(this, async (rooted, maximumBytes) => this._readBounded(rooted, maximumBytes));
+    boundedListings.set(this, async (rooted, limits) => this._listBounded(rooted, limits));
+    entryKinds.set(this, async (rooted) => {
+      const stats = await this._lstatOrUndefined(await this._resolve(rooted));
+      if (stats === undefined) {
+        return 'absent';
+      }
+      if (stats.isSymbolicLink()) {
+        return 'symlink';
+      }
+      if (stats.isDirectory()) {
+        return 'directory';
+      }
+      if (stats.isFile()) {
+        return 'file';
+      }
+      throw this._errno('EOPNOTSUPP', 'special entry is not a regular file', rooted);
+    });
     authorityCheckedWrites.set(this, async (input, assertCurrent) => this.#writeFileChecked(input, assertCurrent));
     authorityCheckedDeletes.set(this, async (input, assertCurrent) => this.#deleteFileChecked(input, assertCurrent));
     watchClosures.set(this, { pending: new Set(), admissions: new Set(), failures: [] });
@@ -246,14 +351,16 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     if (path_ === '') {
       throw this._eisdir(path_);
     }
-    const target = await this._resolve(path_);
+    const target = await this._resolve(path_, 'mutate');
     const existingEntry = await this._lstatOrUndefined(target);
     if (existingEntry?.isDirectory() === true) {
       throw this._eisdir(path_);
     }
     // Every other provider creates missing parents on write; `fromNodeFs` waives it.
     await fs.mkdir(path.dirname(target), { recursive: true });
-    await this._atomicWrite(path_, target, { data });
+    await this._atomicWrite(path_, target, {
+      data: typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data),
+    });
   }
 
   /** Direct providers do not own the cross-client authority needed for checked replacement. */
@@ -367,7 +474,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
 
   public async setFileMode(path_: string, mode: FileMode): Promise<void> {
     this._assertRootedPath(path_);
-    const target = await this._resolve(path_);
+    const target = await this._resolve(path_, 'mutate');
     const stats = await fs.stat(target);
     if (!stats.isFile()) {
       throw this._einval(path_);
@@ -377,7 +484,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
 
   public async unlink(path_: string): Promise<void> {
     this._assertRootedPath(path_);
-    const target = await this._resolve(path_);
+    const target = await this._resolve(path_, 'mutate');
     // MacOS answers `unlink` on a directory with EPERM; the library contract is EISDIR.
     const entry = await this._lstatOrUndefined(target);
     if (entry?.isDirectory() === true) {
@@ -393,7 +500,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       // provider. POSIX answers EINVAL for removing `.`; so does `rename` here.
       throw this._einval(path_);
     }
-    await fs.rmdir(await this._resolve(path_));
+    await fs.rmdir(await this._resolve(path_, 'mutate'));
   }
 
   public async rename(from: string, to: string): Promise<void> {
@@ -408,7 +515,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     if (to.startsWith(`${from}/`)) {
       throw this._einval(to);
     }
-    const [resolvedFrom, resolvedTo] = await Promise.all([this._resolve(from), this._resolve(to)]);
+    const [resolvedFrom, resolvedTo] = await Promise.all([this._resolve(from, 'mutate'), this._resolve(to, 'mutate')]);
     await fs.rename(resolvedFrom, resolvedTo);
   }
 
@@ -786,7 +893,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
   }
 
   protected async mkdirSingle(path_: string): Promise<void> {
-    await fs.mkdir(await this._resolve(path_));
+    await fs.mkdir(await this._resolve(path_, 'mutate'));
   }
 
   private _isDirectorySync(absolute: string): boolean {
@@ -810,15 +917,54 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
   }
 
   // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the public checked-write absence sentinel.
-  private async _readFileOrAbsent(path_: string): Promise<Uint8Array<ArrayBuffer> | null> {
+  private async _readFileOrAbsent(path_: string, maximumBytes: number): Promise<Uint8Array<ArrayBuffer> | null> {
     try {
-      return await this.readFile(path_);
+      return await this._readBounded(path_, maximumBytes);
     } catch (error) {
       const { code } = error as NodeJS.ErrnoException;
       if (code === 'ENOENT' || code === 'ENOTDIR') {
         return null;
       }
       throw error;
+    }
+  }
+
+  private async _readBounded(rooted: string, maximumBytes: number): Promise<Uint8Array<ArrayBuffer>> {
+    const handle = await fs.open(await this._resolve(rooted), boundedReadFlags);
+    try {
+      return await readBoundedDescriptor(handle, maximumBytes, () => undefined);
+    } finally {
+      await handle.close();
+    }
+  }
+
+  private async _listBounded(
+    rooted: string,
+    limits: { maximumEntries: number; maximumBytes: number },
+  ): Promise<DirectoryEntry[]> {
+    const absolute = await this._resolve(rooted);
+    const directory = await fs.opendir(absolute, { bufferSize: 1 });
+    const entries: DirectoryEntry[] = [];
+    let remaining = limits.maximumBytes;
+    try {
+      for (;;) {
+        // oxlint-disable-next-line no-await-in-loop -- Sequential native reads preserve the shared bound and descriptor dependency order.
+        const entry = await directory.read();
+        if (entry === null) {
+          return entries;
+        }
+        if (entries.length >= limits.maximumEntries) {
+          throw this._errno('EOVERFLOW', 'directory exceeds entry allowance', rooted);
+        }
+        remaining -= Buffer.byteLength(entry.name);
+        if (remaining < 0) {
+          throw this._errno('EFBIG', 'directory names exceed byte allowance', rooted);
+        }
+        // A link is never traversed during checked membership; its own entry must be observed explicitly.
+        entries.push({ name: entry.name, kind: entry.isDirectory() ? 'dir' : 'file' });
+      }
+    } finally {
+      await directory.close();
     }
   }
 
@@ -932,7 +1078,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     }
   }
 
-  private async _resolve(rootedPath: string): Promise<string> {
+  private async _resolve(rootedPath: string, intent: ResolveIntent = 'read'): Promise<string> {
     const canonical = assertRootedPath(rootedPath);
     const target = path.resolve(this._base, canonical);
     if (!isContained(this._base, target)) {
@@ -952,13 +1098,33 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
      * decides the whole subtree (PP2).
      *
      * Asymmetric on purpose. Only a *visible* name resolving into a hidden path
-     * is refused, so a consumer that reaches the control plane by its own name —
-     * the revisions engine over `'working-copy'` — is untouched.
+     * is refused for a read, so a consumer that reaches the control plane by its
+     * own name — the revisions engine over `'working-copy'` — is untouched.
+     *
+     * A mutation is held to the stronger rule (Q11/3h O4): the row the bytes
+     * actually land in may never grant *less* than the spelling the caller was
+     * classified on. `docs/chats` is read-write, but once the backing `docs`
+     * becomes a link to `.tau`, the write lands in the read-only row
+     * `.tau/chats`; a hidden real path is only the extreme case of the same
+     * laundering. An external, non-Tau writer is the only one who can re-point
+     * the backing tree under a held claim, so this closes a TOCTOU, and it
+     * closes it the way every other refusal here does: before anything moves.
      */
-    if (this._policy !== undefined && this._policy.classify(canonical).agentAccess !== 'hidden') {
-      const realRelative = path.relative(realBase, real).split(path.sep).join('/');
-      if (this._policy.classify(realRelative).agentAccess === 'hidden') {
-        throw this._errno('ELOOP', 'refusing to follow a symbolic link into a hidden path', rootedPath);
+    if (this._policy !== undefined) {
+      const spelled = this._policy.classify(canonical).agentAccess;
+      if (spelled !== 'hidden') {
+        const realRelative = path.relative(realBase, real).split(path.sep).join('/');
+        const landed = this._policy.classify(realRelative).agentAccess;
+        if (landed === 'hidden') {
+          throw this._errno('ELOOP', 'refusing to follow a symbolic link into a hidden path', rootedPath);
+        }
+        if (intent === 'mutate' && pathAuthorityRank[landed] < pathAuthorityRank[spelled]) {
+          throw this._errno(
+            'ELOOP',
+            'refusing to change a path whose real row grants less than its spelling',
+            rootedPath,
+          );
+        }
       }
     }
     return target;
@@ -968,7 +1134,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
   private async _atomicWrite(
     rootedPath: string,
     targetPath: string,
-    options: { data: Uint8Array<ArrayBuffer> | string; beforeReplace?: () => Promise<void> },
+    options: { data: Uint8Array<ArrayBuffer>; beforeReplace?: () => Promise<void> },
   ): Promise<void> {
     const { data, beforeReplace } = options;
     const realBase = await this._realBase;
@@ -981,7 +1147,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       admittedDirectory,
       `.${path.basename(targetPath)}.${process.pid}.${randomUUID()}.tmp`,
     );
-    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data);
+    const bytes = data;
     const existing = await this._lstatOrUndefined(admittedTarget);
     if (existing?.isSymbolicLink() === true) {
       throw this._errno('ELOOP', 'refusing to replace symbolic link', rootedPath);
@@ -1018,6 +1184,9 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       }
 
       await beforeReplace?.();
+      /* Rename keeps the inode, so this identifies the entry the rename is about
+       * to publish — and tells a later writer's entry apart from ours below. */
+      const written = await fs.lstat(temporaryPath, { bigint: true });
       await fs.rename(temporaryPath, admittedTarget);
       replaced = true;
       if (retainedHandle === undefined) {
@@ -1035,9 +1204,31 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
         await retainedHandle.sync();
       }
 
-      const committed = new Uint8Array(await fs.readFile(admittedTarget));
-      if (!bytesEqual(committed, bytes)) {
-        throw this._errno('WRITE_VERIFICATION_FAILED', 'committed bytes could not be verified', rootedPath);
+      const verification = await fs.open(admittedTarget, verificationReadFlags);
+      try {
+        const committed = await readPublishedDescriptor(verification, bytes.byteLength);
+        if (!bytesEqual(committed, bytes)) {
+          throw this._errno('WRITE_VERIFICATION_FAILED', 'committed bytes could not be verified', rootedPath);
+        }
+      } catch (error) {
+        /*
+         * `writeFile` has never held the path exclusively: two writes of the same
+         * path settle last-writer-wins, so a concurrent writer may replace the
+         * entry this rename published. `readPublishedDescriptor` already covers a
+         * replacement part way through the read, by holding the descriptor to its
+         * inode's identity but not to the status-change time an unlink moves. It
+         * cannot cover a replacement that lands before this descriptor is opened:
+         * the open then resolves to the other writer's entry, whose bytes are
+         * reported as unverifiable — or, when they outgrow this write's own
+         * allowance, as `EFBIG`. Our rename did apply; a later write superseded
+         * it, and that entry says nothing about ours. Only a path that still holds
+         * this write's own entry can fail its verification.
+         */
+        if (await isEntryStillAt(admittedTarget, written)) {
+          throw error;
+        }
+      } finally {
+        await verification.close();
       }
     } catch (error) {
       failure = error;
@@ -1073,11 +1264,19 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
   /** Compare all expected bytes and replace one file inside the module-owned authority integration. */
   readonly #writeFileChecked: AuthorityCheckedWrite = async (input, assertCurrent) => {
     try {
+      const budget = { bytes: checkedByteLimit };
+      if (input.preconditions.length > 4096) {
+        throw Object.assign(new Error('Checked operation exceeds its entry allowance.'), {
+          code: 'EOVERFLOW',
+          applicationState: 'known-not-applied',
+        });
+      }
       this._assertRootedPath(input.path);
       // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the public checked-write absence sentinel.
       const expectedByPath = new Map<string, Uint8Array<ArrayBuffer> | null>();
       for (const precondition of input.preconditions) {
         this._assertRootedPath(precondition.path);
+        spendCheckedBytes(budget, precondition.expected === null ? 0 : byteLength(precondition.expected));
         const expected =
           precondition.expected === null
             ? null
@@ -1097,25 +1296,30 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
         throw new TypeError('Checked writes require a destination precondition.');
       }
       await assertCurrent();
-      const compared = await Promise.all(
-        [...expectedByPath].map(async ([candidatePath, expected]) => {
-          const actual = await this._readFileOrAbsent(candidatePath);
-          if (actual === null ? expected !== null : expected === null || !bytesEqual(actual, expected)) {
-            return { path: candidatePath, actual };
-          }
-          return undefined;
-        }),
-      );
-      const conflicts = compared.filter((conflict) => conflict !== undefined);
+      spendCheckedBytes(budget, byteLength(input.data));
+      const bytes = typeof input.data === 'string' ? new TextEncoder().encode(input.data) : new Uint8Array(input.data);
+      const conflicts: Array<Extract<CheckedFileWriteResult, { status: 'conflict' }>['conflicts'][number]> = [];
+      let unchanged = false;
+      for (const [candidatePath, expected] of expectedByPath) {
+        // oxlint-disable-next-line no-await-in-loop -- Sequential native reads preserve the shared bound and descriptor dependency order.
+        const actual = await this._readFileOrAbsent(candidatePath, budget.bytes);
+        spendCheckedBytes(budget, actual?.byteLength ?? 0);
+        if (actual === null ? expected !== null : expected === null || !bytesEqual(actual, expected)) {
+          conflicts.push({ path: candidatePath, actual });
+        }
+        if (candidatePath === input.path && actual !== null) {
+          unchanged = bytesEqual(actual, bytes);
+        }
+      }
       if (conflicts.length > 0) {
         return { status: 'conflict', conflicts };
       }
-      const bytes = typeof input.data === 'string' ? new TextEncoder().encode(input.data) : new Uint8Array(input.data);
-      const current = await this._readFileOrAbsent(input.path);
-      if (current !== null && bytesEqual(current, bytes)) {
-        return { status: 'unchanged', content: current };
+      if (unchanged) {
+        return { status: 'unchanged', content: bytes };
       }
-      const target = await this._resolve(input.path);
+      // Verification allocates at most the replacement size after publication.
+      spendCheckedBytes(budget, bytes.byteLength);
+      const target = await this._resolve(input.path, 'mutate');
       const existingEntry = await this._lstatOrUndefined(target);
       if (existingEntry?.isDirectory() === true) {
         throw this._eisdir(input.path);
@@ -1140,11 +1344,19 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
   readonly #deleteFileChecked: AuthorityCheckedDelete = async (input, assertCurrent) => {
     let unlinkStarted = false;
     try {
+      const budget = { bytes: checkedByteLimit };
+      if (input.preconditions.length > 4096) {
+        throw Object.assign(new Error('Checked operation exceeds its entry allowance.'), {
+          code: 'EOVERFLOW',
+          applicationState: 'known-not-applied',
+        });
+      }
       this._assertRootedPath(input.path);
       // oxlint-disable-next-line typescript/no-restricted-types -- absence is the checked-write sentinel.
       const expectedByPath = new Map<string, Uint8Array<ArrayBuffer> | null>();
       for (const precondition of input.preconditions) {
         this._assertRootedPath(precondition.path);
+        spendCheckedBytes(budget, precondition.expected === null ? 0 : byteLength(precondition.expected));
         const expected =
           precondition.expected === null
             ? null
@@ -1164,19 +1376,15 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
         throw new TypeError('Checked deletes require a destination precondition.');
       }
       await assertCurrent();
-      const actualByPath = await Promise.all(
-        [...expectedByPath].map(async ([candidatePath, expected]) => {
-          const actual = await this._readFileOrAbsent(candidatePath);
-          return actual === null
-            ? expected === null
-              ? undefined
-              : { path: candidatePath, actual }
-            : expected !== null && bytesEqual(actual, expected)
-              ? undefined
-              : { path: candidatePath, actual };
-        }),
-      );
-      const conflicts = actualByPath.filter((conflict) => conflict !== undefined);
+      const conflicts: Array<Extract<CheckedFileWriteResult, { status: 'conflict' }>['conflicts'][number]> = [];
+      for (const [candidatePath, expected] of expectedByPath) {
+        // oxlint-disable-next-line no-await-in-loop -- Sequential native reads preserve the shared bound and descriptor dependency order.
+        const actual = await this._readFileOrAbsent(candidatePath, budget.bytes);
+        spendCheckedBytes(budget, actual?.byteLength ?? 0);
+        if (actual === null ? expected !== null : expected === null || !bytesEqual(actual, expected)) {
+          conflicts.push({ path: candidatePath, actual });
+        }
+      }
       if (conflicts.length > 0) {
         return { status: 'conflict', conflicts };
       }
@@ -1229,3 +1437,24 @@ export const deleteNodeFileCheckedWithAuthority = async (
   }
   return deleteChecked(input, async () => writer.assertCurrent());
 };
+
+/** The provider-owned private entry primitive, never exported from the package entrypoint. @internal */
+export const nodeEntryObserver = (provider: NodeFsProvider): EntryObserver => entryObservers.get(provider)!;
+
+/** Bounded checked-operation read; ordinary provider reads retain their existing contract. @internal */
+export const readNodeFileBounded = async (
+  provider: NodeFsProvider,
+  rooted: string,
+  maximumBytes: number,
+): Promise<Uint8Array<ArrayBuffer>> => boundedReads.get(provider)!(rooted, maximumBytes);
+/** Incremental checked-operation listing with a hard native entry bound. @internal */
+export const listNodeEntriesBounded = async (
+  provider: NodeFsProvider,
+  rooted: string,
+  limits: { maximumEntries: number; maximumBytes: number },
+): Promise<DirectoryEntry[]> => boundedListings.get(provider)!(rooted, limits);
+/** No-follow final kind for existing portable checked operations. @internal */
+export const nodeEntryKind = async (
+  provider: NodeFsProvider,
+  rooted: string,
+): Promise<'absent' | 'file' | 'directory' | 'symlink'> => entryKinds.get(provider)!(rooted);

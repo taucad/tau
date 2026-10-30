@@ -21,7 +21,6 @@ export const publicationKernelExtensions = [
   {
     id: 'assimp',
     extensions: [
-      '3ds',
       '3mf',
       'ac',
       'amf',
@@ -45,11 +44,6 @@ export const publicationKernelExtensions = [
       'stl',
       'usda',
       'usdz',
-      'wrl',
-      'x',
-      'x3d',
-      'x3db',
-      'x3dv',
       'xgl',
     ],
   },

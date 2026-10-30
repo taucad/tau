@@ -40,6 +40,23 @@ export const repositoryByteCeiling = 1024 ** 3;
  */
 export const livePackBound = 8;
 
+/**
+ * The most live packs a push may leave while its compaction is deferred past
+ * the reply. **Twice {@link livePackBound}.**
+ *
+ * A push that takes the repository past the bound commits only its own pack
+ * and compacts after the client is answered, under its own conditional
+ * manifest write (`compactCommitted` in `commit.ts`). That compaction can lose
+ * its race or be abandoned for a push that is already on its way, and then
+ * the next push owes it again; a push that would carry the repository past
+ * this limit compacts inline, in its own manifest write, as every compacting
+ * push did before. So the pack count never exceeds this, and it returns to
+ * the bound with the first deferred compaction that wins. At L5's ~70 ms per
+ * pack it is ~2.2 s of hydrate at 100 ms round trips in the worst case, which
+ * the pack cache (DC2) mostly removes.
+ */
+export const deferredCompactionPackLimit = 2 * livePackBound;
+
 /*
  * Lease disk is no longer reserved here. D33's flat **2.5 GiB per in-flight
  * lease** was D20's worst case taken before the manifest was read; on a

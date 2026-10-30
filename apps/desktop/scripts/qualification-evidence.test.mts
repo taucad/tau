@@ -5,7 +5,11 @@ import { randomUUID, createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { parseDesktopArtifactManifest, desktopArtifactKinds, desktopArtifactName } from '#shared/desktop-release.js';
 /* oxlint-disable no-restricted-imports -- Test the actual collector decision boundary. */
-import { collectQualificationReceipt, windowsConsumerHostDigest } from './qualification-evidence.mjs';
+import {
+  collectQualificationReceipt,
+  validateSoftwareCiEvidence,
+  windowsConsumerHostDigest,
+} from './qualification-evidence.mjs';
 import type { QualificationEvidence, QualificationStageEvidence } from './qualification-evidence.mjs';
 /* oxlint-enable no-restricted-imports */
 const hash = (value: number): string => value.toString(16).padStart(64, '0');
@@ -652,6 +656,52 @@ const main = (): void => {
   assert.equal(collectQualificationReceipt(debian).environment.kind, 'ci');
   const apt = platformFixture('linux-apt');
   assert.equal(collectQualificationReceipt(apt).route, 'linux-apt');
+  const software = platformFixture('linux-appimage');
+  software.mode = 'software-ci';
+  for (const stage of software.stages) {
+    stage.renderer.softwareRenderer = 'ANGLE (Google, Vulkan SwiftShader Device)';
+    stage.security.processes[0]!.commandLine += ' --use-angle=swiftshader --enable-unsafe-swiftshader';
+  }
+  assert.doesNotThrow(() => {
+    validateSoftwareCiEvidence(software);
+  });
+  assert.throws(() => collectQualificationReceipt(software), /software runs cannot qualify releases/u);
+  software.mode = 'release';
+  assert.throws(() => collectQualificationReceipt(software), /stock GPU acceptance/u);
+  for (const stage of software.stages) {
+    delete stage.renderer.softwareRenderer;
+  }
+  assert.throws(() => collectQualificationReceipt(software), /stock GPU acceptance/u);
+  software.mode = 'software-ci';
+  assert.throws(() => {
+    validateSoftwareCiEvidence(software);
+  }, /SwiftShader observations/u);
+  for (const stage of software.stages) {
+    stage.renderer.softwareRenderer = 'SwiftShader';
+  }
+  software.stages[0].security.processes[0]!.commandLine += ' --disable-gpu-sandbox';
+  assert.throws(() => {
+    validateSoftwareCiEvidence(software);
+  }, /sandbox bypass/u);
+  software.stages[0].security.processes[0]!.commandLine = software.stages[0].security.processes[0]!.commandLine.replace(
+    ' --disable-gpu-sandbox',
+    '',
+  );
+  software.stages[0].renderer.projectSha256 = hash(999);
+  assert.throws(() => {
+    validateSoftwareCiEvidence(software);
+  }, /project/u);
+  const wrongPlatform = fixture();
+  wrongPlatform.mode = 'software-ci';
+  assert.throws(() => {
+    validateSoftwareCiEvidence(wrongPlatform);
+  }, /Linux staging/u);
+  const productionSoftware = platformFixture('linux-appimage');
+  productionSoftware.mode = 'software-ci';
+  productionSoftware.stages[0].candidate.channel = 'production';
+  assert.throws(() => {
+    validateSoftwareCiEvidence(productionSoftware);
+  }, /Linux staging/u);
   apt.scheduler![0]!.scheduler['invocation'] = apt.scheduler![0]!.scheduler['beforeInvocation']!;
   assert.throws(() => collectQualificationReceipt(apt), /real unattended scheduler/u);
   const cycle = fixture();

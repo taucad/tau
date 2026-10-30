@@ -1,8 +1,12 @@
 import { observabilityHarnessTags } from '#lib/observability-harness-context.js';
-import type { ErrorEvent } from '@sentry/react';
+import { defaultStackParser } from '@sentry/react';
+import type { ErrorEvent, StackFrame } from '@sentry/react';
 import { randomUuid } from '@taucad/utils/id';
 import { ENV } from '#environment.config.js';
 import { readBuildId } from '#lib/build-identity.js';
+import { applyErrorDetails } from '#lib/error-details.js';
+import { isDesktopTarget } from '#lib/build-target.js';
+import { applyTauEventContext } from '#lib/sentry-context.lib.js';
 import { redactInvitationTokens } from '#lib/invitation-token.lib.js';
 import type { StaleBuildTag } from '#lib/stale-build-recovery.js';
 
@@ -19,9 +23,23 @@ import type { StaleBuildTag } from '#lib/stale-build-recovery.js';
  */
 export const scrubUrl = (url: string): string => redactInvitationTokens(url.split(/[?#]/u, 1)[0] ?? '');
 
+/** The one request header an event keeps, so Sentry derives the browser, OS and device contexts (SB1). */
+const userAgentHeader = 'User-Agent';
+
+/** The `User-Agent` of an event's request headers, whatever its case. */
+const userAgentOf = (headers: Readonly<Record<string, string>> | undefined): string | undefined => {
+  if (headers === undefined) {
+    return undefined;
+  }
+  const entry = Object.entries(headers).find(([name]) => name.toLowerCase() === 'user-agent');
+  return typeof entry?.[1] === 'string' && entry[1] !== '' ? entry[1] : undefined;
+};
+
 /**
- * Scrub an error event before it leaves the browser: no query strings, no invitation tokens, no headers, cookies
- * or user. Invitation tokens and verification codes are bearer credentials that live in URLs.
+ * Scrub an error event before it leaves the browser: no query strings, no invitation tokens, no
+ * cookies, and no headers but `User-Agent` (so Sentry derives the browser, OS and device contexts).
+ * The user keeps only its opaque Tau `id` (D1): no email, name, username or IP. Invitation tokens and
+ * verification codes are bearer credentials that live in URLs.
  *
  * @param event - The event about to be sent.
  * @returns The scrubbed event.
@@ -33,10 +51,19 @@ export const scrubSentryEvent = (event: ErrorEvent): ErrorEvent => {
     event.tags = { ...event.tags, ...harnessTags };
   }
   if (event.request) {
-    const { url } = event.request;
-    event.request = url === undefined ? {} : { url: scrubUrl(url) };
+    const { url, headers } = event.request;
+    const userAgent = userAgentOf(headers);
+    event.request = {
+      ...(url === undefined ? {} : { url: scrubUrl(url) }),
+      ...(userAgent === undefined ? {} : { headers: { [userAgentHeader]: userAgent } }),
+    };
   }
-  delete event.user;
+  const userId = event.user?.id;
+  if (typeof userId === 'string' && userId !== '') {
+    event.user = { id: userId };
+  } else {
+    delete event.user;
+  }
   // Stack frames and messages can quote the page URL too.
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a JSON round trip of the same event.
   return JSON.parse(redactInvitationTokens(JSON.stringify(event))) as ErrorEvent;
@@ -80,6 +107,20 @@ export const sentryEnvelopeUrl = (dsn: string): string | undefined => {
     return undefined;
   }
 };
+
+/**
+ * The same-origin tunnel both delivery paths post envelopes to on the web (SB5), so a content
+ * blocker that refuses the Sentry ingest host does not drop UI errors. Desktop posts directly.
+ */
+export const sentryTunnelPath = '/api/monitoring';
+
+/**
+ * Where this bundle posts envelopes: the tunnel on the web, the DSN's own endpoint on desktop
+ * (whose `app://` origin has no server behind it).
+ *
+ * @returns Whether to use {@link sentryTunnelPath}.
+ */
+export const usesSentryTunnel = (): boolean => !isDesktopTarget();
 
 /** Fingerprint shared by chunk failures a deploy explains, so they group apart from genuine ones. */
 export const staleBuildFingerprint = ['stale-build-chunk-load'] as const;
@@ -194,8 +235,67 @@ type EnvelopeInput = {
   readonly fingerprint?: readonly string[];
 };
 
+/** A chunk's source-map debug image, as the SDK attaches it (`debug_meta.images`). */
+type DebugImage = { readonly type: 'sourcemap'; readonly code_file: string; readonly debug_id: string };
+
+/** Debug ids `sentry-cli sourcemaps inject` registered on the page: an `Error().stack` per chunk, to its id. */
+type InjectedDebugIds = Readonly<Record<string, string>>;
+
+let debugIdFiles: { readonly count: number; readonly byFile: ReadonlyMap<string, string> } | undefined;
+
+/**
+ * Each injected chunk's URL and debug id, as the SDK reads them (`getFilenameToDebugIdMap`): the
+ * innermost frame of the stack a chunk registered names that chunk. Parsed again only when chunks were added.
+ */
+const readDebugIdFiles = (): ReadonlyMap<string, string> => {
+  const injected = (globalThis as { _sentryDebugIds?: InjectedDebugIds })._sentryDebugIds;
+  const entries = injected === undefined ? [] : Object.entries(injected);
+  if (debugIdFiles?.count !== entries.length) {
+    const byFile = new Map<string, string>();
+    for (const [stack, debugId] of entries) {
+      const file = defaultStackParser(stack).findLast((frame) => frame.filename !== undefined)?.filename;
+      if (file !== undefined) {
+        byFile.set(file, debugId);
+      }
+    }
+    debugIdFiles = { count: entries.length, byFile };
+  }
+  return debugIdFiles.byFile;
+};
+
+/**
+ * The stack frames of an error, parsed by the SDK's own stack parser (oldest first, as Sentry
+ * expects), and the debug images that let Sentry resolve them (principle 7).
+ *
+ * @param stack - The error's stack, already capped.
+ * @returns The frames and the images for the chunks they name.
+ */
+const parseStackForEnvelope = (
+  stack: string | undefined,
+): { readonly frames: StackFrame[]; readonly images: DebugImage[] } => {
+  if (stack === undefined || stack === '') {
+    return { frames: [], images: [] };
+  }
+  const frames = defaultStackParser(stack);
+  const byFile = readDebugIdFiles();
+  const files = new Set(frames.flatMap((frame) => (frame.filename === undefined ? [] : [frame.filename])));
+  const images = [...files].flatMap((file): DebugImage[] => {
+    const debugId = byFile.get(file);
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Sentry's debug image fields.
+    return debugId === undefined ? [] : [{ type: 'sourcemap', code_file: file, debug_id: debugId }];
+  });
+  return { frames, images };
+};
+
+/** The browser's user agent, for the `User-Agent` request header the SDK sends too. */
+const readUserAgent = (): string | undefined =>
+  typeof navigator === 'undefined' || navigator.userAgent === '' ? undefined : navigator.userAgent;
+
 const buildEnvelope = ({ dsn, error, tags, stackLimit, fingerprint }: EnvelopeInput): Envelope => {
   const isError = error instanceof Error;
+  const stack = isError && error.stack !== undefined ? error.stack.slice(0, stackLimit) : undefined;
+  const { frames, images } = parseStackForEnvelope(stack);
+  const userAgent = readUserAgent();
   const release = sentryRelease(readBuildId());
   const environment = sentryEnvironment();
   const staleBuild = tags['stale_build'];
@@ -215,15 +315,24 @@ const buildEnvelope = ({ dsn, error, tags, stackLimit, fingerprint }: EnvelopeIn
           type: isError ? error.name : 'Error',
           value: (isError ? error.message : String(error)).slice(0, directEventTextLimit.message),
           mechanism: { type: 'tau.error-reporting.without-sdk', handled: true },
+          ...(frames.length === 0 ? {} : { stacktrace: { frames } }),
         },
       ],
     },
-    ...(isError && error.stack !== undefined ? { extra: { stack: error.stack.slice(0, stackLimit) } } : {}),
-    request: { url: globalThis.location.href },
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Sentry's event field.
+    ...(images.length === 0 ? {} : { debug_meta: { images } }),
+    ...(stack === undefined ? {} : { extra: { stack } }),
+    request: {
+      url: globalThis.location.href,
+      ...(userAgent === undefined ? {} : { headers: { [userAgentHeader]: userAgent } }),
+    },
     ...(fingerprint === undefined ? {} : { fingerprint: [...fingerprint] }),
   };
-  // Decorated exactly as `beforeSend` decorates the SDK's own events.
-  const event = scrubSentryEvent(isStaleBuildTag(staleBuild) ? decorateForStaleBuild(plain, staleBuild) : plain);
+  // Given the processor's context and the reporter's details, decorated as the SDK's own events are (principle 7).
+  const withContext = applyTauEventContext(applyErrorDetails(plain, error));
+  const event = scrubSentryEvent(
+    isStaleBuildTag(staleBuild) ? decorateForStaleBuild(withContext, staleBuild) : withContext,
+  );
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Sentry's envelope header fields.
   const header = { event_id: event.event_id, sent_at: new Date().toISOString(), dsn };
   const body = `${JSON.stringify(header)}\n${JSON.stringify({ type: 'event' })}\n${JSON.stringify(event)}`;
@@ -280,17 +389,20 @@ const beaconOf = (): ((url: string, body: string) => boolean) | undefined => {
 
 const endpointOf = (): { readonly dsn: string; readonly endpoint: string } | undefined => {
   const dsn = ENV.SENTRY_DSN;
-  const endpoint = dsn ? sentryEnvelopeUrl(dsn) : undefined;
+  const direct = dsn ? sentryEnvelopeUrl(dsn) : undefined;
+  // The tunnel only forwards a DSN that parses (`sentryEnvelopeUrl`), so both checks hold for either path.
+  const endpoint = direct !== undefined && usesSentryTunnel() ? sentryTunnelPath : direct;
   return dsn && endpoint !== undefined ? { dsn, endpoint } : undefined;
 };
 
 /**
  * Report an error without the SDK while the page lives, when the SDK's chunk could not be loaded:
- * one event, stamped with this page's own release and environment, decorated and scrubbed as
- * `beforeSend` does, its message and stack capped ({@link directEventTextLimit}), posted once as an
+ * one event, stamped with this page's own release and environment, with the SDK's frames, debug
+ * images, `User-Agent` and the Tau context (principle 7), decorated and scrubbed as `beforeSend` does, its message and stack capped ({@link directEventTextLimit}), posted once as an
  * envelope, with `keepalive` while {@link keepaliveBudget} allows and as an ordinary request
  * otherwise. A value the SDK (or an earlier such event) already captured is skipped. Nothing is
- * stored and nothing is retried: if the request is blocked as well (a content blocker), the error is lost.
+ * stored and nothing is retried. On the web it goes through the same-origin tunnel
+ * ({@link sentryTunnelPath}); if that is blocked as well, the error is lost.
  *
  * @param error - The value to report.
  * @param tags - Tags for the event, such as `stale_build`.

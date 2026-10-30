@@ -31,25 +31,23 @@ const fixture = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('#hooks/use-project-availability.js', () => ({
-  useProjectAvailability: () => {
+vi.mock('#hooks/use-project-availability.js', () => {
+  const useAvailability = () => {
     const [, refresh] = useState(0);
     fixture.notifyAvailability = () => {
       refresh((value) => value + 1);
     };
     return fixture.availability;
-  },
-}));
-
-vi.mock('@xstate/react', () => ({
-  useSelector: (actor: { getSnapshot: () => unknown }, selector: (state: unknown) => unknown) =>
-    selector(actor.getSnapshot()),
-}));
+  };
+  return { useProjectAvailability: useAvailability, useModelAvailability: useAvailability };
+});
 
 vi.mock('#hooks/use-project.js', () => {
+  const projectSnapshot = { matches: (state: string) => state === 'ready' };
   const projectRef = {
     send: fixture.projectSend,
-    getSnapshot: () => ({ matches: (state: string) => state === 'ready' }),
+    getSnapshot: () => projectSnapshot,
+    subscribe: () => ({ unsubscribe: () => undefined }),
     on: () => ({ unsubscribe: () => undefined }),
   };
   const nextProjectRef = { ...projectRef, send: fixture.nextProjectSend };
@@ -58,6 +56,7 @@ vi.mock('#hooks/use-project.js', () => {
     editorRef: {
       send: fixture.editorSend,
       getSnapshot: () => fixture.editorSnapshot,
+      subscribe: () => ({ unsubscribe: () => undefined }),
     },
     get mainEntryPath() {
       return fixture.mainEntryPath;
@@ -273,6 +272,21 @@ describe('restored viewer layout admission', () => {
     });
     expect(fixture.setViewEntryPath).toHaveBeenCalledWith('main-view', 'models/main.ts');
     expect(fixture.setViewEntryPath).not.toHaveBeenCalledWith('main-view', 'main.scad');
+  });
+
+  /* Open the UI, model waits: the files are open, and no render starts until every large object is here. */
+  it('starts no geometry while model files are still downloading', () => {
+    fixture.availability = 'files';
+    render(<ViewerDockview profile='editor' />);
+    expect(fixture.projectSend).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'createGeometryUnit' }));
+    expect(fixture.projectSend).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'setViewerGeometryDemand', entryPath: expect.any(String) as string }),
+    );
+    fixture.availability = 'ready';
+    act(() => {
+      fixture.notifyAvailability();
+    });
+    expect(fixture.projectSend).toHaveBeenCalledWith(expect.objectContaining({ type: 'createGeometryUnit' }));
   });
 
   it('admits hidden editor view settings without geometry or canvas demand', () => {

@@ -31,6 +31,9 @@ const relativeHelper = 'node_modules/@anthropic-ai/sandbox-runtime/vendor/seccom
 const dependency = dirname(dirname(fileURLToPath(import.meta.resolve('@anthropic-ai/sandbox-runtime'))));
 await mkdir(dirname(join(stage, relativeHelper)), { recursive: true });
 await copyFile(join(dependency, 'vendor/seccomp/x64/apply-seccomp'), join(stage, relativeHelper));
+const relativeJavaAgent = 'node_modules/@anthropic-ai/sandbox-runtime/vendor/java-proxy-agent/srt-proxy-agent.jar';
+await mkdir(dirname(join(stage, relativeJavaAgent)), { recursive: true });
+await copyFile(join(dependency, 'vendor/java-proxy-agent/srt-proxy-agent.jar'), join(stage, relativeJavaAgent));
 await createPackageWithOptions(stage, join(app, 'resources/app.asar'), runtimeAsarOptions);
 
 const files = await buildLinuxAptPackages({

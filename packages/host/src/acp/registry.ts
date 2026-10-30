@@ -6,8 +6,8 @@
  * desktop app and `packages/cli` (`dist-acp`) both copy each adapter's runtime
  * closure and follow none of its optional dependencies, so the `claude` and
  * `codex` an adapter would bundle are absent, and `executableEnv` points it at
- * the CLI resolution found on PATH instead. Native ACP CLIs run the user's
- * installed executable directly; no path uses `npx` at runtime. An agent the
+ * the CLI resolution found on PATH (or, failing that, in a vendor app bundle)
+ * instead. Native ACP CLIs run the user's installed executable directly; no path uses `npx` at runtime. An agent the
  * user has not installed is refused. The pins below are the reviewed set; the
  * review cadence is quarterly, because these adapters wrap vendor SDKs that
  * move fast (`docs/research/external-agent-acp-topology.md`,
@@ -26,7 +26,7 @@ import { execFile } from 'node:child_process';
 import { accessSync, constants, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { delimiter, dirname, isAbsolute, join, resolve as resolvePath } from 'node:path';
 import { promisify } from 'node:util';
 import type { SessionConfigOption } from '@agentclientprotocol/sdk';
@@ -97,6 +97,15 @@ export type AcpAgentProfile = {
    */
   readonly executableEnv?: string | undefined;
   /**
+   * Where a vendor app bundles `cli` without putting it on PATH, by platform.
+   *
+   * Tried in order only when PATH has no `cli`, so a user's own install still
+   * wins. A leading `~/` is the user's home directory. The first executable
+   * file found becomes `executablePath`, so the version floor, the login and
+   * `executableEnv` apply to it unchanged.
+   */
+  readonly fallbackExecutables?: Readonly<Partial<Record<NodeJS.Platform, readonly string[]>>> | undefined;
+  /**
    * Where this agent puts a tool call's *programmatic* name, as dotted paths
    * into the notification, tried in order.
    *
@@ -166,6 +175,14 @@ export const acpAgentProfiles: readonly AcpAgentProfile[] = [
      * bundled copy is a second Codex nobody checked, and its platform payload is
      * 258 MB that the packaged app would otherwise have to carry. */
     executableEnv: 'CODEX_PATH',
+    /* The ChatGPT desktop app ships its own Codex CLI inside the bundle and
+     * leaves PATH alone, so a user who installed Codex only that way has one. */
+    fallbackExecutables: {
+      darwin: [
+        '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex',
+        '~/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex',
+      ],
+    },
     /* The copy codex-acp 1.7.0 bundles; an older PATH binary is refused. */
     minimumCliVersion: '0.148.0',
     loginCommand: 'codex login',
@@ -187,7 +204,8 @@ export const acpAgentProfiles: readonly AcpAgentProfile[] = [
 /** A resolved adapter, ready to spawn. @public */
 export type AcpAdapter = AcpAgentProfile & {
   /**
-   * Absolute path of `cli` on the adapter's PATH, found at resolution.
+   * Absolute path of `cli` on the adapter's PATH, or in a `fallbackExecutables`
+   * bundle when PATH has none, found at resolution.
    *
    * The version probe, a native spawn and `executableEnv` all use this one
    * file. `undefined` when no such file exists, which the probe then refuses.
@@ -283,6 +301,25 @@ const environmentValue = (environment: NodeJS.ProcessEnv, name: string): string 
     : environment[name];
 
 /**
+ * Whether one path names an executable file.
+ *
+ * @param path - Absolute path to test.
+ * @returns `true` when it is a file this process may execute.
+ */
+const isExecutableFile = (path: string): boolean => {
+  try {
+    if (!statSync(path).isFile()) {
+      return false;
+    }
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    /* Absent or not executable. */
+    return false;
+  }
+};
+
+/**
  * Find one command on an environment's PATH, as a shell would.
  *
  * Windows tries each `PATHEXT` suffix and never the bare name, which there
@@ -306,17 +343,39 @@ const locateExecutable = (command: string, environment: NodeJS.ProcessEnv): stri
     }
     for (const suffix of suffixes) {
       const candidate = resolvePath(directory, `${command}${suffix}`);
-      try {
-        if (statSync(candidate).isFile()) {
-          accessSync(candidate, constants.X_OK);
-          return candidate;
-        }
-      } catch {
-        /* Absent or not executable: keep searching, as a shell does. */
+      /* Absent or not executable: keep searching, as a shell does. */
+      if (isExecutableFile(candidate)) {
+        return candidate;
       }
     }
   }
   return undefined;
+};
+
+/**
+ * Find a profile's CLI on PATH, then where a vendor app bundles it.
+ *
+ * @param profile - Profile naming the CLI and its platform fallbacks.
+ * @param environment - Environment whose `PATH` and `HOME` to use.
+ * @param platform - Platform whose fallbacks apply.
+ * @returns The absolute path of the executable, if any.
+ */
+const locateCli = (
+  profile: AcpAgentProfile,
+  environment: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+): string | undefined => {
+  if (profile.cli === undefined) {
+    return undefined;
+  }
+  const onPath = locateExecutable(profile.cli, environment);
+  if (onPath !== undefined) {
+    return onPath;
+  }
+  const home = environmentValue(environment, 'HOME') ?? homedir();
+  return (profile.fallbackExecutables?.[platform] ?? [])
+    .map((candidate) => (candidate.startsWith('~/') ? join(home, candidate.slice(2)) : candidate))
+    .find((candidate) => isExecutableFile(candidate));
 };
 
 /**
@@ -337,8 +396,11 @@ export const resolveAcpAdapters = (options: {
   readonly resolveFrom: string;
   readonly pins?: readonly AcpAgentProfile[] | undefined;
   readonly environment?: NodeJS.ProcessEnv | undefined;
+  /** Platform whose `fallbackExecutables` apply; defaults to this process's. */
+  readonly platform?: NodeJS.Platform | undefined;
 }): AcpAgentDiscovery => {
   const environment = options.environment ?? process.env;
+  const platform = options.platform ?? process.platform;
   const overrides = adapterOverrides(environment);
   const require = createRequire(options.resolveFrom);
   const agents: AcpAdapter[] = [];
@@ -360,7 +422,7 @@ export const resolveAcpAdapters = (options: {
     }
     /* Found once here, not per probe: discovery probes versions and models in
      * parallel, and both must start the same executable. */
-    const executablePath = profile.cli === undefined ? undefined : locateExecutable(profile.cli, environment);
+    const executablePath = locateCli(profile, environment, platform);
     const pin = executablePath === undefined ? profile : { ...profile, executablePath };
     if (pin.args !== undefined) {
       agents.push(pin);

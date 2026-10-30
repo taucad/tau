@@ -304,6 +304,25 @@ const geoSpecAssertionRowSchema = z
     ordinal: observedCountSchema,
     status: z.enum(['passed', 'failed', 'inconclusive', 'unsupported']),
     matcher: z.string(),
+    capability: z
+      .string()
+      .optional()
+      .describe(
+        'The engine capability the claim evaluated, as its claim report names it; matcher stays the authoring kind. Absent when the claim never reached a report.',
+      ),
+    subject: z
+      .string()
+      .optional()
+      .describe(
+        'The loadId whose evidence decided this claim, joining the row to lineage. Absent when no load admitted it.',
+      ),
+    durationMs: z
+      .number()
+      .nonnegative()
+      .optional()
+      .describe(
+        'Wall-clock milliseconds the runner measured around this claim, reported but never charged. Absent when the run reported no measurement: absence is an unmeasured claim, never a zero-cost one.',
+      ),
     code: z.string().optional().describe('The first diagnostic code of a claim that did not pass.'),
     message: z.string().optional(),
     limit: geoSpecLimitSchema.optional(),

@@ -105,6 +105,13 @@ describe('DatabaseService', () => {
       });
     });
 
+    it('should name its connections for `tau.db.connections` (W14 OB3)', () => {
+      const options = mockPostgres.mock.calls[0]![1];
+      expect(options['connection']).toMatchObject({
+        application_name: 'tau-api',
+      });
+    });
+
     it('should omit the role startup parameter when no runtime role is configured', async () => {
       configuration['DATABASE_RUNTIME_ROLE'] = '';
       await module.close();

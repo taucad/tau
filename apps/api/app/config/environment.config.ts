@@ -63,6 +63,51 @@ export const environmentSchemaBase = z.object({
   TAU_FREE_TIER_SYNC_ENABLED: strictEnvironmentBoolean(false).describe(
     'Open Tau Cloud backup and publishing to the free tier (charter D23). Ignored under NODE_ENV=production until the go-live checklist opens it.',
   ),
+  /*
+   * Blueprint T01/T04: the agent-observability purpose notice the account is
+   * shown and decides against. Unset — the default everywhere until the
+   * production notice is approved — keeps every new purpose unavailable, so no
+   * account can grant one and no capture can be authorised by one.
+   */
+  TAU_OBSERVABILITY_NOTICE_VERSION: unsetWhenEmpty(z.string().min(1).optional()).describe(
+    'The approved agent-observability purpose notice in force. Unset keeps every new purpose unavailable.',
+  ),
+  /*
+   * Blueprint T06: the key sealing accepted evidence in the delivery backlog.
+   * Unset refuses new evidence admission; it never affects inference.
+   */
+  TAU_OBSERVABILITY_PAYLOAD_KEY: unsetWhenEmpty(
+    z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{43}$/u, 'must be an unpadded base64url-encoded 32-byte key')
+      .optional(),
+  ),
+  TAU_OBSERVABILITY_PAYLOAD_KEY_VERSION: z.coerce.number().int().positive().default(1),
+  TAU_OBSERVABILITY_BACKLOG_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(1024 * 1024 * 1024)
+    .describe('Sealed evidence the delivery backlog may hold before new admission is refused.'),
+  TAU_OBSERVABILITY_PRINCIPAL_BACKLOG_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(64 * 1024 * 1024)
+    .describe('Sealed evidence one principal may hold in the backlog before their admission is refused.'),
+  /*
+   * Blueprint T08: deliver the admitted backlog to Langfuse. Off by default;
+   * on, it requires the payload key and one Langfuse project's credentials,
+   * which stay server-side and never reach a client, log or span.
+   */
+  TAU_OBSERVABILITY_DELIVERY_ENABLED: strictEnvironmentBoolean(false).describe(
+    'Deliver admitted agent evidence to Langfuse. Requires TAU_OBSERVABILITY_PAYLOAD_KEY and the LANGFUSE_* credentials.',
+  ),
+  LANGFUSE_BASE_URL: unsetWhenEmpty(z.url().optional()).describe(
+    'Origin of the Langfuse region evidence is delivered to.',
+  ),
+  LANGFUSE_PUBLIC_KEY: unsetWhenEmpty(z.string().min(1).optional()),
+  LANGFUSE_SECRET_KEY: unsetWhenEmpty(z.string().min(1).optional()),
   PORT: z.string().default('3000'),
   DATABASE_URL: z.string(),
   // Bounded runtime pool (B8 R3). Every value fails closed: a non-numeric or out-of-range
@@ -283,6 +328,18 @@ export const environmentSchemaBase = z.object({
     ),
 
   /*
+   * W14 OB3: R2 usage from Cloudflare's GraphQL Analytics API. Both optional: with either unset the
+   * storage accounting scheduler's `r2_analytics` task counts a skipped pass and exports no `tau_r2_*`
+   * series, and every other accounting task runs as usual.
+   */
+  TAU_CLOUDFLARE_ACCOUNT_ID: unsetWhenEmpty(z.string().optional()).describe(
+    'Cloudflare account id whose R2 analytics the storage accounting scheduler reads (W14 OB3)',
+  ),
+  TAU_CLOUDFLARE_ANALYTICS_TOKEN: unsetWhenEmpty(z.string().optional()).describe(
+    'Cloudflare API token with Account Analytics read, for R2 usage in Grafana (W14 OB3); unset leaves the R2 task off',
+  ),
+
+  /*
    * Tau Hosted Remote (charter D1). Retired: a repository's durable state is
    * its manifest and packs in object storage, and every request builds a
    * disposable lease on the worker's own ephemeral disk. There is no root
@@ -371,6 +428,35 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
       code: 'custom',
       message: 'TAU_TRANSCRIPTION_UPSTREAM_URL is refused under NODE_ENV=production',
       path: ['TAU_TRANSCRIPTION_UPSTREAM_URL'],
+    });
+  }
+
+  // Langfuse credentials are all or none; delivery needs them and the payload key, and a production
+  // deployment sends evidence only over TLS.
+  const langfuseKeys = ['LANGFUSE_BASE_URL', 'LANGFUSE_PUBLIC_KEY', 'LANGFUSE_SECRET_KEY'] as const;
+  if (data.TAU_OBSERVABILITY_DELIVERY_ENABLED || langfuseKeys.some((key) => data[key] !== undefined)) {
+    for (const key of langfuseKeys) {
+      if (data[key] === undefined) {
+        context.addIssue({ code: 'custom', message: `${key} is required when Langfuse is configured`, path: [key] });
+      }
+    }
+  }
+  if (data.TAU_OBSERVABILITY_DELIVERY_ENABLED && data.TAU_OBSERVABILITY_PAYLOAD_KEY === undefined) {
+    context.addIssue({
+      code: 'custom',
+      message: 'TAU_OBSERVABILITY_PAYLOAD_KEY is required when evidence delivery is enabled',
+      path: ['TAU_OBSERVABILITY_PAYLOAD_KEY'],
+    });
+  }
+  if (
+    data.NODE_ENV === 'production' &&
+    data.LANGFUSE_BASE_URL !== undefined &&
+    new URL(data.LANGFUSE_BASE_URL).protocol !== 'https:'
+  ) {
+    context.addIssue({
+      code: 'custom',
+      message: 'LANGFUSE_BASE_URL must be https under NODE_ENV=production',
+      path: ['LANGFUSE_BASE_URL'],
     });
   }
 

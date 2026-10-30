@@ -481,6 +481,7 @@ export function PluginStoreView({
         <div className='h-64'>
           <PanelEmptyState
             icon={SearchX}
+            titleLevel={2}
             title={query.trim() ? `No plugins match “${query.trim()}”` : 'No plugins match these filters'}
             description='Try another name or filter.'
           >

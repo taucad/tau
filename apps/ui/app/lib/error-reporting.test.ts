@@ -99,6 +99,16 @@ afterEach(() => {
 });
 
 describe('error reporting', () => {
+  it('should hand a hidden page error to the live SDK immediately', async () => {
+    vi.stubGlobal('document', { visibilityState: 'hidden' });
+    const reporter = await load();
+    await reporter.startErrorReporting();
+    const failure = new Error('Hidden live error');
+    const reporting = reporter.reportUiError(failure);
+    expect(sentry.captureUiError).toHaveBeenCalledExactlyOnceWith(failure);
+    await reporting;
+  });
+
   it('should send once through the existing fallback without importing the SDK in direct harness mode', async () => {
     harness.direct = true;
     const posted = stubIngest();
@@ -153,7 +163,8 @@ describe('error reporting', () => {
 
     expect(posted).toHaveLength(1);
     const [envelope] = posted;
-    expect(envelope?.url).toBe('https://o0.ingest.sentry.io/api/42/envelope/?sentry_version=7&sentry_key=public');
+    // On the web, through the same-origin tunnel (SB5); the envelope still names its DSN for the tunnel to check.
+    expect(envelope?.url).toBe('/api/monitoring');
     expect(envelope?.init).toMatchObject({ method: 'POST', keepalive: true });
     expect(envelope?.header).toMatchObject({ dsn: 'https://public@o0.ingest.sentry.io/42' });
     expect(envelope?.event).toMatchObject({
@@ -641,5 +652,56 @@ describe('error reporting', () => {
     expect(sentry.captureUiError.mock.calls).toStrictEqual([[first], [second]]);
     expect(onLoadFailure).not.toHaveBeenCalled();
     expect(logged).toHaveBeenCalledOnce();
+  });
+
+  it('should report what reached window before the SDK started once it starts, then stop listening (SB5)', async () => {
+    stubIngest();
+    const page = await load();
+    const early = new Error('thrown while modules evaluate');
+    const rejected = new Error('rejected before the SDK');
+    globalThis.dispatchEvent(new ErrorEvent('error', { error: early }));
+    const rejection = new Event('unhandledrejection') as PromiseRejectionEvent;
+    Object.defineProperty(rejection, 'reason', { value: rejected });
+    globalThis.dispatchEvent(rejection);
+
+    await page.startErrorReporting();
+    await settle();
+
+    expect(sentry.captureUiError.mock.calls).toStrictEqual([[early], [rejected]]);
+    // The SDK's own handlers own what comes later: the buffer's listeners are gone.
+    globalThis.dispatchEvent(new ErrorEvent('error', { error: new Error('after the SDK started') }));
+    await page.startErrorReporting();
+    await settle();
+    expect(sentry.captureUiError).toHaveBeenCalledTimes(2);
+  });
+
+  it('should send what reached window early without the SDK when its load failed', async () => {
+    const posted = stubIngest();
+    const page = await load();
+    globalThis.dispatchEvent(new ErrorEvent('error', { error: new Error('thrown at boot') }));
+    sentry.failNextLoad = true;
+
+    await page.startErrorReporting();
+    await settle();
+
+    expect(posted.map((envelope) => envelope.event.exception.values[0]?.value)).toStrictEqual(['thrown at boot']);
+  });
+
+  it('should post to the DSN directly, not the tunnel, on desktop', async () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    try {
+      const posted = stubIngest();
+      const page = await load();
+      sentry.failNextLoad = true;
+      await page.startErrorReporting();
+
+      await page.reportUiError(new Error('caught by a boundary'));
+      page.sendWaitingErrors('exit');
+      await settle();
+
+      expect(posted[0]?.url).toBe('https://o0.ingest.sentry.io/api/42/envelope/?sentry_version=7&sentry_key=public');
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

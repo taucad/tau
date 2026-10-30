@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { externalAgentDescriptorSchema } from '@taucad/agent-host/wire';
 
 import { ENV } from '#environment.config.js';
+import { recordApiRequestId } from '#lib/api-request-id.js';
 
 const hostDeviceSchema = z.object({
   id: z.string(),
@@ -106,7 +107,7 @@ const request = async (path: string, init?: RequestInit): Promise<Response> => {
     | { code?: string; message?: string; error?: string }
     | undefined;
   const code = body?.code ?? `HTTP_${String(response.status)}`;
-  throw new RemoteHostApiError(code, body?.message ?? refusalMessage(code, body?.error));
+  throw recordApiRequestId(new RemoteHostApiError(code, body?.message ?? refusalMessage(code, body?.error)), response);
 };
 
 export const listRemoteHosts = async (): Promise<RemoteHostDevice[]> => {

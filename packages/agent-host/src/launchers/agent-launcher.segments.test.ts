@@ -13,14 +13,15 @@ import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { SimulatedClock } from 'xstate';
 
 import { createBrowserChatStore } from '#browser.js';
 import { memoryFileSystem } from '#browser/leadership.fixture.js';
 import type { MemoryFileSystem } from '#browser/leadership.fixture.js';
 import { fakePlacement } from '#host/tau-agent-host.fixture.js';
 import { createAgentLauncher } from '#launchers/agent-launcher.js';
-import type { AgentLauncher } from '#launchers/agent-launcher.js';
-import { chatStoreBinding } from '#launchers/chat-store.js';
+import type { AgentLauncher, AgentLauncherOptions } from '#launchers/agent-launcher.js';
+import { chatStoreBinding, createChatStore } from '#launchers/chat-store.js';
 import type { ChatStore } from '#launchers/chat-store.js';
 import type { EventLogAppender } from '#log/event-log-appender.js';
 import type { AgentLogEvent, ProviderMessage } from '#log/event-types.js';
@@ -66,6 +67,7 @@ const sharedPublish: NonNullable<TurnPlacementPort['publish']> = async ({ reques
 
 const launchers: AgentLauncher[] = [];
 const roots: string[] = [];
+const quiescentChats = new WeakMap<AgentLauncher, Set<string>>();
 
 afterEach(async () => {
   await Promise.all(launchers.splice(0).map(async (launcher) => launcher.close()));
@@ -83,13 +85,34 @@ const launch = (
     segmentRefresh?: number;
     publish?: NonNullable<TurnPlacementPort['publish']>;
     pull?: NonNullable<TurnPlacementPort['pull']>;
+    placement?: TurnPlacementPort;
+    clock?: AgentLauncherOptions['clock'];
   }> = {},
 ): AgentLauncher => {
-  const fake = fakePlacement({ registry: emptyTools }).port;
+  const fake = options.placement ?? fakePlacement({ registry: emptyTools }).port;
   const placement = options.pull === undefined ? fake : { ...fake, pull: options.pull };
+  const quiescent = new Set<string>();
+  const binding = chatStoreBinding(chats);
   const launcher = createAgentLauncher({
-    chats,
+    chats: createChatStore({
+      ...binding,
+      leadership: (host) => {
+        const port = binding.leadership(host);
+        return {
+          ...port,
+          quiescent: (id, ready) => {
+            if (ready) {
+              quiescent.add(id);
+            } else {
+              quiescent.delete(id);
+            }
+            port.quiescent(id, ready);
+          },
+        };
+      },
+    }),
     modelTransport: transport,
+    ...(options.clock === undefined ? {} : { clock: options.clock }),
     credential: () => ({ mode: 'session' }),
     model,
     systemPrompt: 'You are Tau.',
@@ -104,6 +127,7 @@ const launch = (
     },
   });
   launchers.push(launcher);
+  quiescentChats.set(launcher, quiescent);
   return launcher;
 };
 
@@ -113,7 +137,7 @@ const key = (): string => {
   return `cmd-${String(keys)}`;
 };
 
-/** Wait until a run completes. */
+/** Wait until a run completes and its placement settlement releases the chat. */
 const settleRun = async (launcher: AgentLauncher, runId: string): Promise<HostRunSnapshot> => {
   for (let attempt = 0; attempt < 300; attempt++) {
     // oxlint-disable-next-line no-await-in-loop -- polling a durable projection is sequential by nature.
@@ -122,7 +146,7 @@ const settleRun = async (launcher: AgentLauncher, runId: string): Promise<HostRu
       attached.status === 'applied' && attached.effect === 'not-applied'
         ? (attached.details as { readonly snapshot?: HostRunSnapshot }).snapshot
         : undefined;
-    if (snapshot?.runId === runId && snapshot.state === 'completed') {
+    if (snapshot?.runId === runId && snapshot.state === 'completed' && quiescentChats.get(launcher)?.has(chatId)) {
       return snapshot;
     }
     // oxlint-disable-next-line no-await-in-loop -- see above.
@@ -154,7 +178,7 @@ const turn = async (launcher: AgentLauncher, runId: string, text: string): Promi
     commandId: key(),
     payload: { chatId, runId, trigger: 'submit', message: { id: `user-${runId}`, role: 'user', content: text } },
   });
-  expect(answer.status).toBe('applied');
+  expect(answer.status, JSON.stringify(answer)).toBe('applied');
   return settleRun(launcher, runId);
 };
 
@@ -1125,7 +1149,11 @@ describe('a chat continued on a second device', () => {
       const inFlight = await desktopInFlight();
       const phone = await workspace();
       const phoneModel = recordingModel('phone answer');
-      const onPhone = launch(createNodeChatStore({ workspaceRoot: phone }), phoneModel.transport);
+      const placement = fakePlacement({ registry: emptyTools });
+      const release = placement.holdAcknowledge();
+      const onPhone = launch(createNodeChatStore({ workspaceRoot: phone }), phoneModel.transport, {
+        placement: placement.port,
+      });
       await project(
         phone,
         'device-desktop',
@@ -1139,7 +1167,26 @@ describe('a chat continued on a second device', () => {
         expect(await start(onPhone, 'run-phone-1', 'second, on the phone')).toMatchObject({ status: 'refused' });
         vi.setSystemTime(Date.now() + foreignRunStaleMilliseconds + 1000);
         await pulled(phone);
-        await turn(onPhone, 'run-phone-1', 'second, on the phone');
+        let settled = false;
+        const finishSecond = async (): Promise<void> => {
+          await turn(onPhone, 'run-phone-1', 'second, on the phone');
+          settled = true;
+        };
+        const second = finishSecond();
+        await vi.waitFor(async () => {
+          const attached = await onPhone.execute({ type: 'attach', commandId: key(), payload: { chatId } });
+          expect(attached).toMatchObject({ details: { snapshot: { runId: 'run-phone-1', state: 'completed' } } });
+        });
+        /* Completion is durable before placement acknowledgement releases the chat. */
+        expect(settled).toBe(false);
+        expect(await start(onPhone, 'run-phone-2', 'third, on the phone')).toMatchObject({
+          status: 'refused',
+          code: 'CHAT_RUN_LIVE',
+          effect: 'not-applied',
+          details: { state: 'settling', runId: 'run-phone-1' },
+        });
+        release();
+        await second;
 
         const last = rowsOf(inFlight.bytes).at(-1)!;
         const heartbeat = {
@@ -1153,6 +1200,7 @@ describe('a chat continued on a second device', () => {
         await project(phone, 'device-desktop', `${inFlight.bytes}${JSON.stringify(heartbeat)}\n`);
         await turn(onPhone, 'run-phone-2', 'third, on the phone');
       } finally {
+        release();
         vi.useRealTimers();
         inFlight.release();
       }
@@ -1242,6 +1290,7 @@ describe('a chat continued on a second device', () => {
      * rows still have to reach the other devices on the heartbeat's cadence, or they see it stale and run beside it. */
     it('should publish a chatty run’s chat at least once every heartbeat interval while it writes rows', async () => {
       const root = await workspace();
+      const clock = new SimulatedClock();
       const heartbeatInterval = 60;
       const steps = 24;
       const published: number[] = [];
@@ -1252,7 +1301,9 @@ describe('a chat continued on a second device', () => {
           funding: { type: 'unfunded' },
           async *stream(): AsyncGenerator<ModelStreamEvent> {
             calls += 1;
-            await sleep(15);
+            /* Advance only after the preceding call's rows landed, independently of filesystem/worker latency. */
+            vi.setSystemTime(Date.now() + 15);
+            clock.increment(15);
             if (calls <= steps) {
               yield { type: 'tool-input', toolCallId: `call-${String(calls)}`, toolName: 'missing', input: {} };
               yield { type: 'completed', stopReason: 'toolUse' };
@@ -1263,6 +1314,7 @@ describe('a chat continued on a second device', () => {
           },
         },
         {
+          clock,
           runHeartbeat: heartbeatInterval,
           publish: async ({ requestId }) => {
             published.push(Date.now());
@@ -1270,23 +1322,35 @@ describe('a chat continued on a second device', () => {
           },
         },
       );
-      const startedAt = Date.now();
-      await launcher.execute({
-        type: 'start',
-        commandId: key(),
-        payload: { chatId, runId: 'run-1', trigger: 'submit', message: { id: 'user-1', role: 'user', content: 'go' } },
-      });
-      const rows = await rowsUntil(root, (found) =>
-        found.some((row) => row.type === 'run.lifecycle' && row.state === 'completed'),
-      );
-      const completedAt = Date.parse(rows.findLast((row) => row.type === 'run.lifecycle')!.recordedAt);
+      vi.useFakeTimers({ toFake: ['Date'] });
+      try {
+        const startedAt = Date.now();
+        await launcher.execute({
+          type: 'start',
+          commandId: key(),
+          payload: {
+            chatId,
+            runId: 'run-1',
+            trigger: 'submit',
+            message: { id: 'user-1', role: 'user', content: 'go' },
+          },
+        });
+        const rows = await rowsUntil(root, (found) =>
+          found.some((row) => row.type === 'run.lifecycle' && row.state === 'completed'),
+        );
+        const completedAt = Date.parse(rows.findLast((row) => row.type === 'run.lifecycle')!.recordedAt);
 
-      const whileLive = published.filter((at) => at < completedAt);
-      expect(whileLive.length).toBeGreaterThanOrEqual(2);
-      const gaps = [startedAt, ...whileLive].slice(1).map((at, index) => at - [startedAt, ...whileLive][index]!);
-      /* Timer slack on a loaded machine, never a missed interval. */
-      expect(Math.max(...gaps)).toBeLessThan(heartbeatInterval * 3);
-      expect(heartbeatsAfter(rows, 'running')).toEqual([]);
+        const whileLive = published.filter((at) => at < completedAt);
+        expect(whileLive.length).toBeGreaterThanOrEqual(2);
+        expect(whileLive[0]).toBe(startedAt);
+        const gaps = whileLive.slice(1).map((at, index) => at - whileLive[index]!);
+        /* Every interval publishes even though rows keep the run from going quiet, including the final partial one. */
+        expect(gaps).toEqual(Array.from({ length: gaps.length }, () => heartbeatInterval));
+        expect(completedAt - whileLive.at(-1)!).toBeLessThanOrEqual(heartbeatInterval);
+        expect(heartbeatsAfter(rows, 'running')).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     /* A heartbeat is for the other devices, and builds older than XD3 read it as an opaque row of the run: where the
@@ -1588,7 +1652,9 @@ describe('a chat continued on a second device', () => {
         payload: { chatId, runId: 'run-1', interruptId: 'int-1', kind: 'approval', prompt: 'Write?' },
       });
       await rowsUntil(root, (found) => found.some((row) => row.type === 'turn.finalized'));
-      await sleep(100);
+      await vi.waitFor(() => {
+        expect(quiescentChats.get(launcher)?.has(chatId)).toBe(true);
+      });
       return { root, stall, launcher };
     };
 
@@ -1694,14 +1760,31 @@ describe('a chat continued on a second device', () => {
 
     /* A forgotten pause holds the chat for a bounded time, then its device stops writing and the fence lets go. */
     it('should stop a paused run’s heartbeats once its hold is over', async () => {
-      const root = await pausedRun({ runHeartbeat: 10, pausedRunHold: 120, publish: sharedPublish });
-      await rowsUntil(root, (found) => heartbeatsAfter(found, 'paused').length >= 2);
-      await sleep(300);
-      const settled = await heartbeatCount(root);
-      await sleep(150);
-
-      expect(await heartbeatCount(root)).toBe(settled);
-      expect(settled).toBeLessThan(20);
+      const clock = new SimulatedClock();
+      vi.useFakeTimers({ toFake: ['Date'] });
+      try {
+        const { root } = await pausedRunOn({ clock, runHeartbeat: 10, pausedRunHold: 120, publish: sharedPublish });
+        await rowsUntil(root, (found) => found.some((row) => row.type === 'turn.finalized'));
+        const advance = (milliseconds: number): void => {
+          vi.setSystemTime(Date.now() + milliseconds);
+          clock.increment(milliseconds);
+        };
+        /* Wait for each real filesystem append before advancing the next interval. Worker starvation cannot
+         * consume the whole hold before the first scheduled callback gets CPU time. */
+        for (let count = 1; count <= 2; count++) {
+          advance(20);
+          // oxlint-disable-next-line no-await-in-loop -- each heartbeat must land before the next clock step.
+          await rowsUntil(root, (found) => heartbeatsAfter(found, 'paused').length >= count);
+        }
+        advance(300);
+        const settled = await heartbeatCount(root);
+        advance(150);
+        expect(await heartbeatCount(root)).toBe(settled);
+        expect(settled).toBeGreaterThanOrEqual(2);
+        expect(settled).toBeLessThan(20);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     /* An evicted incarnation's log is closed: no heartbeat reopens it. */

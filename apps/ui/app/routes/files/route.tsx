@@ -679,7 +679,7 @@ export default function FilesRoute(): React.JSX.Element {
       await reloadWorkspaceColumns();
       toast.success(`Connected workspace "${connected.workspace.name}"`);
     } catch (error) {
-      telemetry.workspaceOpenFailed({ workspaceId: undefined, reason: 'unknown' });
+      telemetry.workspaceOpenFailed({ workspaceId: undefined, reason: 'unknown', error });
       toast.error('Failed to connect workspace.');
       throw error;
     }

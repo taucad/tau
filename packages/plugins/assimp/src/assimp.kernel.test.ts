@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createMockKernelRuntime, expectKernelProjectionOrder, validateGlbData } from '@taucad/runtime-testing';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { defaultPostProcess } from 'libassimp';
-import type { AssimpFile, ConvertOptions, ConvertResult } from 'libassimp';
+import type { AssimpFile, ConversionReport, ConvertOptions, ConvertResult } from 'libassimp';
 
 import { assimpKernel } from '#assimp.kernel.js';
 
@@ -27,6 +27,11 @@ const createGlb = (): Uint8Array<ArrayBuffer> => {
   return bytes;
 };
 const convertedGlb = createGlb();
+const conversionReport = {
+  warnings: [],
+  timings: { import: 0, postProcess: 0, export: 0, total: 0 },
+  peakMemoryBytes: 0,
+} satisfies ConversionReport;
 // This focused fixture supplies only the Assimp method exercised by these hook tests.
 const createContext = (handler: ConvertHandler) =>
   ({ assimp: { convert: vi.fn(handler) } }) as unknown as Parameters<typeof definition.evaluate>[2] & {
@@ -86,7 +91,7 @@ describe('assimpKernel', () => {
       expect(sidecar).toEqual(encode('cached material μ'));
       expect(options.signal).toBe(localRuntime.signal);
       expect(options.postProcess).toEqual([...defaultPostProcess, 'generateNormals', 'embedTextures']);
-      return { files: [{ name: 'converted.glb', bytes: convertedGlb }] };
+      return { ...conversionReport, files: [{ name: 'converted.glb', bytes: convertedGlb }] };
     });
 
     const result = await definition.evaluate(
@@ -139,7 +144,7 @@ describe('assimpKernel', () => {
     localRuntime.filesystem.mocks.readFile.mockResolvedValue(entry);
     const localContext = createContext(async (files) => {
       expect(files).toEqual([{ name: 'main.obj', bytes: entry }]);
-      return { files: [{ name: 'converted.glb', bytes: convertedGlb }] };
+      return { ...conversionReport, files: [{ name: 'converted.glb', bytes: convertedGlb }] };
     });
 
     await definition.evaluate(
@@ -163,7 +168,7 @@ describe('assimpKernel', () => {
       const pending = options.resolve?.('../shared/main.mtl');
       expect(pending).toBeInstanceOf(Promise);
       expect(await pending).toBe(sidecar);
-      return { files: [{ name: 'converted.glb', bytes: convertedGlb }] };
+      return { ...conversionReport, files: [{ name: 'converted.glb', bytes: convertedGlb }] };
     });
 
     await definition.evaluate(
@@ -182,7 +187,7 @@ describe('assimpKernel', () => {
     localRuntime.filesystem.mocks.readFile.mockRejectedValue(Object.assign(new Error(code), { code }));
     const localContext = createContext(async (_files, options) => {
       await expect(options.resolve?.('missing.mtl')).resolves.toBeUndefined();
-      return { files: [{ name: 'converted.glb', bytes: convertedGlb }] };
+      return { ...conversionReport, files: [{ name: 'converted.glb', bytes: convertedGlb }] };
     });
 
     await definition.evaluate({ entryPath: 'main.obj', parameters: {}, options: {} }, localRuntime, localContext);
@@ -226,7 +231,7 @@ describe('assimpKernel', () => {
         expect((): unknown => options.resolve?.(name)).toThrow();
       }
       await expect(options.resolve?.('../shared/main.mtl')).resolves.toEqual(encode('shared material'));
-      return { files: [{ name: 'converted.glb', bytes: convertedGlb }] };
+      return { ...conversionReport, files: [{ name: 'converted.glb', bytes: convertedGlb }] };
     });
 
     await definition.evaluate(
@@ -246,7 +251,7 @@ describe('assimpKernel', () => {
       expect(options.signal).toBe(controller.signal);
       controller.abort(reason);
       options.signal?.throwIfAborted();
-      return { files: [{ name: 'converted.glb', bytes: convertedGlb }] };
+      return { ...conversionReport, files: [{ name: 'converted.glb', bytes: convertedGlb }] };
     });
 
     await expect(
@@ -259,7 +264,10 @@ describe('assimpKernel', () => {
     const reason = new Error('render superseded before staging');
     controller.abort(reason);
     const localRuntime = createCachedRuntime(new Map(), controller.signal);
-    const localContext = createContext(async () => ({ files: [{ name: 'converted.glb', bytes: convertedGlb }] }));
+    const localContext = createContext(async () => ({
+      ...conversionReport,
+      files: [{ name: 'converted.glb', bytes: convertedGlb }],
+    }));
 
     await expect(
       definition.evaluate({ entryPath: 'main.obj', parameters: {}, options: {} }, localRuntime, localContext),
@@ -271,6 +279,7 @@ describe('assimpKernel', () => {
   it('should reject imports when libassimp returns no GLB output', async () => {
     const localRuntime = createCachedRuntime(new Map([['main.obj', 'cached entry']]));
     const localContext = createContext(async () => ({
+      ...conversionReport,
       files: [{ name: 'material.bin', bytes: new Uint8Array([1, 2, 3]) }],
     }));
 

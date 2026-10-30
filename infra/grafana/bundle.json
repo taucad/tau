@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "files": {
     "dashboards/agents.json": "1f4ff0f653774c503a9ac115a33cbe422d50033b2730058aff49e43616bf63ed",
-    "dashboards/ai-agent.json": "f7b09ce82690b8f55dfffc6bd516b5a4693e2360b4c010ed08b2a3978ca71ef9",
+    "dashboards/ai-agent.json": "748ebd42e9192b1c22852191f8dee5a1e5646adf78f2ea44c31ca84ecc5770c8",
     "dashboards/api-overview.json": "c7f62b6475ea6b93c26be58a8f3d337583222afda58f88fe8bb650c410c73a69",
     "dashboards/billing.json": "454fbeea3576d582d7c7013e2900ef7c4031fd41de7dd208360c0d4bbbf6b57e",
     "dashboards/cad-kernel.json": "30a705f5a17fcfb3b448759be880c28a16c2a1a2371f69f7598eb2192c5411a6",
@@ -13,11 +13,15 @@
     "dashboards/runtime-operations.json": "4e83b4053703edb85b260467825a7920903328c59e812a1940e7fd4eb06605da",
     "dashboards/runtime-product.json": "4efc28aebb1353b76f6525af8e2d1899530ded2728a2baa14dd8719496a2d447",
     "dashboards/runtime.json": "3cc9701e351d0c30355cb786776faedcc35e2af08746c7b745b1135788facb44",
-    "dashboards/slo-executive.json": "11ea2521423ee30a22e413b87b3d3f23b32edede4ba3bb154562686e77c8ef8d",
-    "dashboards/system-overview.json": "76c15090dce7ef3cfad2ae92d0ce3846026e220ff099b42d0e1fee6ce09c8f8c",
-    "dashboards/tau-sync.json": "3af2f4a48ed8c22c9d40c3a2c8db20f00720926e07ac4225890c587b6117bcb4",
+    "dashboards/slo-executive.json": "0688587613d3ed6948a8e527fd3cbd83889cc6fcff6e95822dcf8fdc3d4ed9f0",
+    "dashboards/storage-critical.json": "c4ee80b5c3d5b72d0de405ee0b0bd70c2153f64163b1a63a876497eafdcdb7ad",
+    "dashboards/system-overview.json": "2afdc87e4865404619fc64fa4e54ae3c32f8e91a48110c7ff8c8626499fa3894",
+    "dashboards/tau-sync.json": "75f692303160c87114ff53f428a19511b2e06133d8797ce2465f7bddff2d2806",
     "dashboards/websocket-rpc.json": "4b79c58efc8e1ae5215b956e1346d4629a4f83a50215eb1b5ba4fc0fcd05a3fd",
     "alerts/tau-critical.json": "7e1d068831320238c0f118308a13471061ee83120f7b78ccc97ce69abe5ffca1",
-    "alerts/tau-warning.json": "d668a83bcb700d51e37d04dfe260d9515928d42d6d0b11b291006541fe7b9a83"
+    "alerts/tau-storage-critical.json": "910b07725e2cd4c1ab91be80e074989f3db00be2f4a536e1cc1b4e2dd6ae2914",
+    "alerts/tau-storage-triggers.json": "38c6ab3d5e70bfc7bdcf6ac29f4154758534c4ce435f3f9b79914ae9fac8d485",
+    "alerts/tau-storage-warning.json": "90dc3104e67cba5c3d1d30a588990ce51af5158cc3add5e518c61b25bc3f81d0",
+    "alerts/tau-warning.json": "c7934af58c31d908d93be492843885d4e166ddb871685074ad0f1d42825136fa"
   }
 }

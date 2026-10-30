@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type Stripe from 'stripe';
 import { and, desc, eq, isNull } from 'drizzle-orm';
-import type { BillingTier, Entitlements, SubscriptionStatus } from '@taucad/billing';
+import type { Entitlements, SubscriptionStatus } from '@taucad/billing';
 import { entitlementsFromTier, financialEnvironmentSchema } from '@taucad/billing';
 import { DatabaseService } from '#database/database.service.js';
 import {
@@ -16,6 +16,8 @@ import type { Environment } from '#config/environment.config.js';
 import { Span } from '#telemetry/tracer.service.js';
 import { stripeReadClientKey } from '#api/billing/billing.constants.js';
 import { resolveDefaultCard } from '#api/billing/resolve-default-card.js';
+import { subscriptionTierOf, subscriptionTierAssuranceOf } from '#api/billing/subscription-tier.js';
+import type { TierAssurance } from '#api/billing/subscription-tier.js';
 
 type SubscriptionRow = typeof subscription.$inferSelect;
 
@@ -38,17 +40,6 @@ const overridableEntitlementKeys = [
   'canCreateGeoSpecEvidenceReports',
   'geospecEvidenceRetentionDays',
 ] as const;
-
-const planToTier = (plan: string): BillingTier => {
-  if (plan === 'pro') {
-    return 'pro';
-  }
-  if (plan === 'enterprise') {
-    return 'enterprise';
-  }
-  // Fail closed: an unrecognised plan name grants nothing.
-  return 'free';
-};
 
 /** Projects paid access from the owned financial deadlines, independent of caches. */
 @Injectable()
@@ -78,6 +69,43 @@ export class BillingService {
   @Span()
   public async getEntitlements(userId: string): Promise<Entitlements> {
     return this.projectEntitlements(userId);
+  }
+
+  /**
+   * The tier, and whether the plan name behind it was recognised (blueprint T04).
+   *
+   * Access semantics are unchanged: an unrecognised plan still projects the
+   * free tier everywhere else. Only callers that must establish the
+   * entitlement affirmatively read `assured`.
+   *
+   * @param userId - The account to project.
+   * @returns The tier and its assurance.
+   */
+  @Span()
+  public async getTierAssurance(userId: string): Promise<TierAssurance> {
+    const environment = financialEnvironmentSchema.safeParse(
+      this.configService.get('BILLING_ENVIRONMENT', { infer: true }),
+    );
+    if (!environment.success) {
+      /* A build with no financial environment establishes nothing. */
+      return { tier: 'free', assured: false };
+    }
+    const binding = await this.databaseService.database.query.billingOwnerBinding.findFirst({
+      where: and(
+        eq(billingOwnerBinding.authUserId, userId),
+        eq(billingOwnerBinding.environment, environment.data),
+        isNull(billingOwnerBinding.revokedAt),
+      ),
+    });
+    if (binding === undefined) {
+      /* No binding at all is an account that has never subscribed. */
+      return { tier: 'free', assured: true };
+    }
+    const rows = await this.databaseService.database.query.subscription.findMany({
+      where: and(eq(subscription.accountId, binding.accountId), eq(subscription.environment, binding.environment)),
+      orderBy: desc(subscription.paidThrough),
+    });
+    return subscriptionTierAssuranceOf(rows, Date.now());
   }
 
   /**
@@ -117,21 +145,7 @@ export class BillingService {
             ),
             orderBy: desc(subscription.paidThrough),
           });
-    const now = Date.now();
-    const relevant =
-      subscriptionRows.find(
-        (row) =>
-          (row.paidThrough !== null && now < row.paidThrough.getTime()) ||
-          (row.failedRenewalInvoiceId !== null && row.graceEndsAt !== null && now < row.graceEndsAt.getTime()),
-      ) ?? subscriptionRows[0];
-    const paid =
-      relevant?.paidThrough !== null && relevant?.paidThrough !== undefined && now < relevant.paidThrough.getTime();
-    const grace =
-      relevant?.failedRenewalInvoiceId !== null &&
-      relevant?.failedRenewalInvoiceId !== undefined &&
-      relevant.graceEndsAt !== null &&
-      now < relevant.graceEndsAt.getTime();
-    const tier = relevant && (paid || grace) ? planToTier(relevant.plan) : 'free';
+    const { relevant, tier } = subscriptionTierOf(subscriptionRows, Date.now());
     const status = this.resolveStatus(relevant);
     /* D23: the free tier's sync is a deployment gate, closed unless configured. */
     const base = entitlementsFromTier(tier, { freeTierSync: this.#freeTierSync });

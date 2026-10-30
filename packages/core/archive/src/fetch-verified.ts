@@ -34,7 +34,80 @@ export type FetchVerifiedInput = {
 const stallTimeoutMilliseconds = 60_000;
 const attempts = 3;
 
-const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+// Only known platform codes may cross the diagnostic boundary; messages, addresses and URLs never do.
+const transportCodes = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+  'EPIPE',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'ENETUNREACH',
+  'EHOSTUNREACH',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_BODY_TIMEOUT',
+  'UND_ERR_SOCKET',
+  'CERT_HAS_EXPIRED',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'ERR_TLS_CERT_ALTNAME_INVALID',
+  'ERR_SSL_SSLV3_ALERT_HANDSHAKE_FAILURE',
+]);
+
+/**
+ * Read data properties without invoking getters on custom transport failures.
+ * @param value - Untrusted thrown value.
+ * @param key - Property to inspect.
+ * @returns Its own data value, or undefined.
+ */
+const ownData = (value: unknown, key: string): unknown => {
+  try {
+    return Object.getOwnPropertyDescriptor(value, key)?.value;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Bound traversal and output for cyclic causes, aggregate fan-out and hostile proxies.
+ * @param error - Untrusted transport failure.
+ * @param attempt - One-based attempt number.
+ * @returns A fresh cause containing only recognized codes and attempt context.
+ */
+const transportCause = (error: unknown, attempt: number): Error => {
+  const pending: unknown[] = [error];
+  const seen = new Set<unknown>();
+  const codes = new Set<string>();
+  for (let index = 0; index < pending.length && index < 16; index += 1) {
+    const value = pending[index];
+    if (typeof value !== 'object' || value === null || seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    const code = ownData(value, 'code');
+    if (typeof code === 'string' && transportCodes.has(code)) {
+      codes.add(code);
+    }
+    if (pending.length < 16) {
+      pending.push(ownData(value, 'cause'));
+    }
+    const errors = ownData(value, 'errors');
+    // Array.isArray can throw for a revoked proxy; inspection must never replace the transport failure.
+    try {
+      if (Array.isArray(errors)) {
+        const length = ownData(errors, 'length');
+        const count = typeof length === 'number' ? Math.min(length, 16) : 0;
+        for (let child = 0; child < count && pending.length < 16; child += 1) {
+          pending.push(ownData(errors, String(child)));
+        }
+      }
+    } catch {
+      // A hostile aggregate contributes no diagnostics.
+    }
+  }
+  return new Error(`Transport attempt ${attempt}/${attempts}; codes: ${[...codes].join(', ') || 'unknown'}`);
+};
 
 const delay = async (milliseconds: number): Promise<void> =>
   new Promise((resolve) => {
@@ -43,14 +116,19 @@ const delay = async (milliseconds: number): Promise<void> =>
 
 const downloadFailure = (
   input: FetchVerifiedInput,
-  detail: string,
+  detail: string | Error,
   reason: 'http-status' | 'transport' | 'byte-length' | 'redirect',
 ): ArchiveError =>
-  new ArchiveError('DOWNLOAD_FAILED', `Download of ${input.url} failed (${detail}).`, {
-    reason,
-    path: input.url,
-    detail,
-  });
+  new ArchiveError(
+    'DOWNLOAD_FAILED',
+    `Download of ${input.url} failed (${typeof detail === 'string' ? detail : detail.message}).`,
+    {
+      reason,
+      path: input.url,
+      detail: typeof detail === 'string' ? detail : detail.message,
+      ...(typeof detail === 'string' ? {} : { cause: detail }),
+    },
+  );
 
 /**
  * An abort signal that fires once `milliseconds` pass without a call to `progress`, so a slow body that keeps
@@ -152,10 +230,19 @@ export const fetchVerified = async (input: FetchVerifiedInput): Promise<Uint8Arr
       if (error instanceof ArchiveError && error.reason === 'redirect') {
         throw error;
       }
+      const cause = transportCause(error, attempt + 1);
       failure =
         error instanceof ArchiveError && error.code === 'DOWNLOAD_FAILED'
           ? error
-          : downloadFailure(input, errorMessage(error), 'transport');
+          : downloadFailure(
+              input,
+              error instanceof ArchiveError
+                ? error.message
+                : watch.signal.aborted
+                  ? `no bytes received for ${stallTimeoutMilliseconds} ms`
+                  : cause,
+              'transport',
+            );
     } finally {
       watch.stop();
     }

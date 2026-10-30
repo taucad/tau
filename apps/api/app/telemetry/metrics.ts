@@ -661,11 +661,159 @@ export class MetricsService {
     advice: { explicitBucketBoundaries: [...TauMetrics.syncClientPending.buckets] },
   });
 
+  public readonly syncClientLfsDuration = this.clientMeter.createHistogram(TauMetrics.syncClientLfsDuration.name, {
+    description: TauMetrics.syncClientLfsDuration.description,
+    unit: TauMetrics.syncClientLfsDuration.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.syncClientLfsDuration.buckets] },
+  });
+
+  public readonly syncClientLfsObjects = this.clientMeter.createCounter(TauMetrics.syncClientLfsObjects.name, {
+    description: TauMetrics.syncClientLfsObjects.description,
+    unit: TauMetrics.syncClientLfsObjects.unit,
+  });
+
+  public readonly syncClientLfsBytes = this.clientMeter.createCounter(TauMetrics.syncClientLfsBytes.name, {
+    description: TauMetrics.syncClientLfsBytes.description,
+    unit: TauMetrics.syncClientLfsBytes.unit,
+  });
+
+  public readonly projectOpenDuration = this.clientMeter.createHistogram(TauMetrics.projectOpenDuration.name, {
+    description: TauMetrics.projectOpenDuration.description,
+    unit: TauMetrics.projectOpenDuration.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.projectOpenDuration.buckets] },
+  });
+
+  // --- Storage accounting scheduler (W14 OB3) ---
+
+  /* Observed at collection from the scheduler's shared snapshot, so every Machine exports the same figures. */
+  public readonly storageUsageBytes = this.apiMeter.createObservableGauge(TauMetrics.storageUsageBytes.name, {
+    description: TauMetrics.storageUsageBytes.description,
+    unit: TauMetrics.storageUsageBytes.unit,
+  });
+
+  public readonly storageUsageRepositories = this.apiMeter.createObservableGauge(
+    TauMetrics.storageUsageRepositories.name,
+    {
+      description: TauMetrics.storageUsageRepositories.description,
+      unit: TauMetrics.storageUsageRepositories.unit,
+    },
+  );
+
+  public readonly gitRepositorySizeDistribution = this.apiMeter.createObservableGauge(
+    TauMetrics.gitRepositorySizeDistribution.name,
+    {
+      description: TauMetrics.gitRepositorySizeDistribution.description,
+      unit: TauMetrics.gitRepositorySizeDistribution.unit,
+    },
+  );
+
+  public readonly gitRepositoryCeilingProximity = this.apiMeter.createObservableGauge(
+    TauMetrics.gitRepositoryCeilingProximity.name,
+    {
+      description: TauMetrics.gitRepositoryCeilingProximity.description,
+      unit: TauMetrics.gitRepositoryCeilingProximity.unit,
+    },
+  );
+
+  public readonly storageQuotaOwners = this.apiMeter.createObservableGauge(TauMetrics.storageQuotaOwners.name, {
+    description: TauMetrics.storageQuotaOwners.description,
+    unit: TauMetrics.storageQuotaOwners.unit,
+  });
+
+  public readonly databaseConnections = this.apiMeter.createObservableGauge(TauMetrics.databaseConnections.name, {
+    description: TauMetrics.databaseConnections.description,
+    unit: TauMetrics.databaseConnections.unit,
+  });
+
+  public readonly databaseConnectionBudget = this.apiMeter.createObservableGauge(
+    TauMetrics.databaseConnectionBudget.name,
+    {
+      description: TauMetrics.databaseConnectionBudget.description,
+      unit: TauMetrics.databaseConnectionBudget.unit,
+    },
+  );
+
+  public readonly r2Requests = this.apiMeter.createObservableGauge(TauMetrics.r2Requests.name, {
+    description: TauMetrics.r2Requests.description,
+    unit: TauMetrics.r2Requests.unit,
+  });
+
+  public readonly r2StoredBytes = this.apiMeter.createObservableGauge(TauMetrics.r2StoredBytes.name, {
+    description: TauMetrics.r2StoredBytes.description,
+    unit: TauMetrics.r2StoredBytes.unit,
+  });
+
+  public readonly r2Objects = this.apiMeter.createObservableGauge(TauMetrics.r2Objects.name, {
+    description: TauMetrics.r2Objects.description,
+    unit: TauMetrics.r2Objects.unit,
+  });
+
+  public readonly r2BandwidthBytes = this.apiMeter.createObservableGauge(TauMetrics.r2BandwidthBytes.name, {
+    description: TauMetrics.r2BandwidthBytes.description,
+    unit: TauMetrics.r2BandwidthBytes.unit,
+  });
+
+  public readonly storageAccountingPasses = this.apiMeter.createCounter(TauMetrics.storageAccountingPasses.name, {
+    description: TauMetrics.storageAccountingPasses.description,
+    unit: TauMetrics.storageAccountingPasses.unit,
+  });
+
+  public readonly storageAccountingLastSuccess = this.apiMeter.createObservableGauge(
+    TauMetrics.storageAccountingLastSuccess.name,
+    {
+      description: TauMetrics.storageAccountingLastSuccess.description,
+      unit: TauMetrics.storageAccountingLastSuccess.unit,
+    },
+  );
+
   // --- Billing workers ---
 
   public readonly billingWorkerPasses = this.apiMeter.createCounter(TauMetrics.billingWorkerPasses.name, {
     description: TauMetrics.billingWorkerPasses.description,
     unit: TauMetrics.billingWorkerPasses.unit,
+  });
+
+  // --- Agent evidence ---
+
+  public readonly agentEvidenceAdmissions = this.apiMeter.createCounter(TauMetrics.agentEvidenceAdmissions.name, {
+    description: TauMetrics.agentEvidenceAdmissions.description,
+    unit: TauMetrics.agentEvidenceAdmissions.unit,
+  });
+
+  public readonly agentEvidenceDeliveries = this.apiMeter.createCounter(TauMetrics.agentEvidenceDeliveries.name, {
+    description: TauMetrics.agentEvidenceDeliveries.description,
+    unit: TauMetrics.agentEvidenceDeliveries.unit,
+  });
+
+  public readonly agentEvidenceBacklogRows = this.apiMeter.createGauge(TauMetrics.agentEvidenceBacklogRows.name, {
+    description: TauMetrics.agentEvidenceBacklogRows.description,
+    unit: TauMetrics.agentEvidenceBacklogRows.unit,
+  });
+
+  public readonly agentEvidenceBacklogHeldBytes = this.apiMeter.createGauge(
+    TauMetrics.agentEvidenceBacklogHeldBytes.name,
+    {
+      description: TauMetrics.agentEvidenceBacklogHeldBytes.description,
+      unit: TauMetrics.agentEvidenceBacklogHeldBytes.unit,
+    },
+  );
+
+  public readonly agentEvidenceErasureTraces = this.apiMeter.createCounter(TauMetrics.agentEvidenceErasureTraces.name, {
+    description: TauMetrics.agentEvidenceErasureTraces.description,
+    unit: TauMetrics.agentEvidenceErasureTraces.unit,
+  });
+
+  public readonly agentEvidenceLifecycleRecords = this.apiMeter.createCounter(
+    TauMetrics.agentEvidenceLifecycleRecords.name,
+    {
+      description: TauMetrics.agentEvidenceLifecycleRecords.description,
+      unit: TauMetrics.agentEvidenceLifecycleRecords.unit,
+    },
+  );
+
+  public readonly agentEvidencePasses = this.apiMeter.createCounter(TauMetrics.agentEvidencePasses.name, {
+    description: TauMetrics.agentEvidencePasses.description,
+    unit: TauMetrics.agentEvidencePasses.unit,
   });
 }
 
@@ -677,6 +825,20 @@ export type WsCloseReason = NonNullable<z.infer<typeof TauMetrics.wsDisconnectio
 
 /** Attributes of one `ws.upgrade.rejections` increment. */
 export type WsUpgradeRejection = z.infer<typeof TauMetrics.wsUpgradeRejections.attributes>;
+
+/** Attributes of one `tau.agent_evidence.admissions` increment. */
+export type AgentEvidenceAdmissionAttributes = z.infer<typeof TauMetrics.agentEvidenceAdmissions.attributes>;
+
+/** `outcome` of one `tau.agent_evidence.deliveries` increment. */
+export type AgentEvidenceDeliveryOutcome = z.infer<typeof TauMetrics.agentEvidenceDeliveries.attributes>['outcome'];
+
+/** `outcome` of one `tau.agent_evidence.erasure_traces` increment. */
+export type AgentEvidenceErasureOutcome = z.infer<typeof TauMetrics.agentEvidenceErasureTraces.attributes>['outcome'];
+
+/** `tau.agent_evidence.state` of one backlog row-count sample. */
+export type AgentEvidenceBacklogState = z.infer<
+  typeof TauMetrics.agentEvidenceBacklogRows.attributes
+>['tau.agent_evidence.state'];
 
 /** Attributes of one `tau.sync.operations` increment. */
 export type SyncOperationAttributes = z.infer<typeof TauMetrics.syncOperations.attributes>;
@@ -710,3 +872,8 @@ export type GitCommitAttemptAttributes = z.infer<typeof TauMetrics.gitCommitAtte
 
 /** `rank` on the hot-project gauges. */
 export type HotProjectRank = z.infer<typeof TauMetrics.gitHotProjectCommitRate.attributes>['rank'];
+
+/** `tau.storage.accounting.task`: one of the storage accounting scheduler's periodic tasks. */
+export type StorageAccountingTask = z.infer<
+  typeof TauMetrics.storageAccountingPasses.attributes
+>['tau.storage.accounting.task'];

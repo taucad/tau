@@ -22,6 +22,19 @@ export type TauR3fGlFactory = ((defaults: TauR3fGlDefaults) => Promise<FiberComp
   readonly isRetired: () => boolean;
 };
 
+/**
+ * Rejects a renderer request whose canvas was removed before the renderer could be used.
+ *
+ * @public
+ */
+export class RetiredCanvasError extends Error {
+  public override readonly name = 'RetiredCanvasError';
+
+  public constructor() {
+    super('The canvas was removed before its renderer was ready.');
+  }
+}
+
 /* oxlint-disable unicorn-js/prevent-abbreviations -- name mirrors R3F `<Canvas gl={...}>` ergonomics */
 /**
  * R3F `gl` factory / props for {@link ResolvedGraphicsBackend}.
@@ -30,10 +43,15 @@ export type TauR3fGlFactory = ((defaults: TauR3fGlDefaults) => Promise<FiberComp
  * WebGL log-depth / WebGPU reversed-Z — see `renderer.ts`). Node canvases use
  * the viewer's composed post frame for depth/stencil; the canvas only encodes final color.
  *
- * R3F awaits this factory inside a `configure()` call that nothing awaits, so a renderer that cannot be created
- * (no WebGL context, or a context Safari hands back already lost) would surface as an unhandled rejection that no
- * error boundary sees, leaving a blank canvas. The factory instead reports the failure through `onCreateError` and
- * never settles; the owner unmounts the `<Canvas>` and shows its fallback.
+ * A renderer that cannot be created (no WebGL context, or a context Safari hands back already lost) is reported
+ * through `onCreateError`, and the factory stays pending while its canvas is mounted: the owner unmounts the
+ * `<Canvas>` and shows its fallback, so R3F never also throws the failure from inside the Canvas. Once the canvas is
+ * retired, every pending call rejects with {@link RetiredCanvasError}. R3F waits for `root.ready` before tearing a
+ * root down, so settling is what lets it drop the root of a canvas removed mid-creation.
+ *
+ * The factory owns its renderer's lifetime. R3F 9.8 also disposes and loses the context of a renderer a `gl`
+ * function created; both calls are routed to the factory's own retirement, which waits for scene cleanup and runs
+ * `dispose()` and `forceContextLoss()` exactly once.
  *
  * @param graphicsBackend - Backend the viewport renderer is created for.
  * @param cameras - Retained cameras whose projection convention must follow the new renderer.
@@ -60,24 +78,49 @@ export function createTauR3fGlProp(
   let retired = false;
   let disposed = false;
   let sceneOwners = 0;
-  const pending = async (): Promise<never> =>
-    new Promise<never>(() => {
-      // Never settles while R3F waits for a retired or failed canvas.
-      void 0;
-    });
+  let releaseRenderer: (() => void) | undefined;
+  let rejectRetirement: (error: RetiredCanvasError) => void = () => undefined;
+  const retirement = new Promise<never>((_resolve, reject) => {
+    rejectRetirement = reject;
+  });
+  // R3F reads the rejection from `root.ready`; a factory call nobody awaits must not report it as unhandled.
+  // oxlint-disable-next-line promise/prefer-await-to-then -- marks the rejection handled without awaiting it.
+  retirement.catch(() => undefined);
+  /**
+   * Pending while the canvas is mounted; rejects once it is retired so R3F can tear its root down.
+   *
+   * @returns The factory's retirement, which only ever rejects.
+   */
+  const pending = async (): Promise<never> => retirement;
   const isRetired = (): boolean => retired || (hasCanvasBinding && mountedCanvas === undefined);
   const retire = (): void => {
-    retired = true;
+    if (!retired) {
+      retired = true;
+      rejectRetirement(new RetiredCanvasError());
+    }
     if (ownedRenderer && !disposed && sceneOwners === 0) {
       disposed = true;
-      ownedRenderer.dispose();
-      // Release after scene effects, before R3F's 500 ms deferred context loss. Disposing at DOM ref
-      // removal is too early: later cube-target cleanup still needs Three's renderer bookkeeping.
-      if ('forceContextLoss' in ownedRenderer) {
-        const loseContext = ownedRenderer.forceContextLoss.bind(ownedRenderer);
-        ownedRenderer.forceContextLoss = (): void => undefined;
-        loseContext();
-      }
+      // Release after scene effects. Disposing at DOM ref removal is too early: later
+      // cube-target cleanup still needs Three's renderer bookkeeping.
+      releaseRenderer?.();
+    }
+  };
+  /**
+   * Routes `dispose()`/`forceContextLoss()` from R3F's root teardown into this factory's single release.
+   *
+   * @param renderer - The renderer this factory created and now owns.
+   */
+  const adoptRenderer = (renderer: RendererInstance): void => {
+    ownedRenderer = renderer;
+    const { dispose } = renderer;
+    const loseContext = 'forceContextLoss' in renderer ? renderer.forceContextLoss : undefined;
+    releaseRenderer = (): void => {
+      dispose.call(renderer);
+      loseContext?.call(renderer);
+    };
+    renderer.dispose = retire;
+    if (loseContext) {
+      Object.assign(renderer, { forceContextLoss: retire });
     }
   };
   const retainScene = (): (() => void) => {
@@ -127,7 +170,7 @@ export function createTauR3fGlProp(
       onCreateError?.(failure);
       return pending();
     }
-    ownedRenderer = renderer;
+    adoptRenderer(renderer);
     if (isRetired()) {
       retire();
       return pending();
@@ -165,7 +208,8 @@ export function createTauR3fGlProp(
       return pending();
     }
     initialization ??= initialize(defaults.canvas as HTMLCanvasElement);
-    const renderer = await initialization;
+    // Retirement settles a call still waiting on initialization; a late renderer is disposed by `initialize`.
+    const renderer = await Promise.race([initialization, retirement]);
     if (isRetired()) {
       retire();
       return pending();

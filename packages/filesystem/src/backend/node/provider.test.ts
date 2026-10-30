@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -54,19 +55,13 @@ const injectFailureAfter = (stage: FailureStage): void => {
     });
     return;
   }
-  if (stage === 'read-back') {
-    const readFile = fs.readFile.bind(fs);
-    vi.spyOn(fs, 'readFile').mockImplementation(async (...args) => {
-      await readFile(...args);
-      throw failure;
-    });
-    return;
-  }
 
   const open = fs.open.bind(fs);
   vi.spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
     const handle = await open(path, flags, mode);
-    if (flags === 'wx' && stage === 'temp-write') {
+    if (stage === 'read-back' && typeof flags === 'number') {
+      vi.spyOn(handle, 'read').mockRejectedValue(failure);
+    } else if (flags === 'wx' && stage === 'temp-write') {
       const writeFile = handle.writeFile.bind(handle);
       vi.spyOn(handle, 'writeFile').mockImplementation(async (...args) => {
         await writeFile(...args);
@@ -370,6 +365,45 @@ describe('NodeFsProvider atomic writes', () => {
     expect(temporaryFiles(root)).toEqual([]);
   });
 
+  /*
+   * Q11/3h O4, the projection's last open activation gate. `docs/chats` classifies read-write, so every layer above
+   * admits a write to it; once an external, non-Tau writer re-points the backing `docs` at `.tau`, the bytes land in
+   * the read-only records row `.tau/chats`. Only this method can see both spellings. A read stays admitted: the
+   * asymmetry that keeps the revisions engine working over its own name is unchanged.
+   */
+  it('should refuse a mutation whose real row grants less than its spelling, and still serve the read (O4)', async () => {
+    const root = createRoot();
+    mkdirSync(join(root, '.tau', 'chats'), { recursive: true });
+    writeFileSync(join(root, '.tau', 'chats', 'record.json'), 'RECORD');
+    symlinkSync(join(root, '.tau'), join(root, 'docs'));
+    const provider = new NodeFsProvider(root, { policy: tauPathPolicy });
+    try {
+      // The spelled row is read-write and the real row is read-only: the laundered write is the whole finding.
+      expect(tauPathPolicy.classify('docs/chats').agentAccess).toBe('read-write');
+      expect(tauPathPolicy.classify('.tau/chats').agentAccess).toBe('read-only');
+
+      await expect(provider.readFile('docs/chats/record.json', 'utf8')).resolves.toBe('RECORD');
+
+      for (const mutation of [
+        async () => provider.writeFile('docs/chats/record.json', 'LAUNDERED'),
+        async () => provider.unlink('docs/chats/record.json'),
+        async () => provider.mkdir('docs/chats/planted'),
+        async () => provider.rmdir('docs/chats'),
+        async () => provider.rename('docs/chats/record.json', 'docs/chats/moved.json'),
+        async () => provider.setFileMode('docs/chats/record.json', '100755'),
+      ]) {
+        // oxlint-disable-next-line no-await-in-loop -- one laundered mutation at a time, each judged on disk after.
+        await expect(mutation()).rejects.toMatchObject({ code: 'ELOOP' });
+      }
+
+      expect(readFileSync(join(root, '.tau', 'chats', 'record.json'), 'utf8')).toBe('RECORD');
+      expect(readdirSync(join(root, '.tau', 'chats')).sort()).toEqual(['record.json']);
+      expect(temporaryFiles(root)).toEqual([]);
+    } finally {
+      provider.dispose();
+    }
+  });
+
   it('should refuse a changed parent and remove the temporary file', async () => {
     const root = createRoot();
     const provider = new NodeFsProvider(root);
@@ -389,18 +423,148 @@ describe('NodeFsProvider atomic writes', () => {
     expect(temporaryFiles(root)).toEqual([]);
   });
 
+  it('should settle concurrent writes of one path without reporting a superseded write as unapplied', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+
+    /*
+     * Two writers of the same path, interleaved so that each publishes its entry
+     * while the other is still verifying the one it published. Whatever the
+     * platform does with the second rename, no writer may be told its own write
+     * might not have applied when it was merely superseded.
+     */
+    const results = await Promise.allSettled([
+      provider.writeFile('target.txt', 'first'),
+      provider.writeFile('target.txt', 'second'),
+    ]);
+
+    if (process.platform === 'win32') {
+      /*
+       * Windows has no last-writer-wins for this path. `_atomicWrite` keeps the
+       * published file's writable handle open past the rename, because only that
+       * handle's flush commits the entry's metadata there (#1109), and Windows
+       * refuses a rename that would replace a name whose entry a writer still
+       * holds. So the later writer is refused before it publishes anything. The
+       * refusal is the platform's, reported as itself: a write that did land is
+       * never relabelled as one that might not have.
+       */
+      expect(results.some((result) => result.status === 'fulfilled')).toBe(true);
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          expect(result.reason).not.toMatchObject({ code: 'CHECKED_WRITE_POTENTIALLY_APPLIED' });
+          expect(result.reason).not.toMatchObject({ code: 'WRITE_VERIFICATION_FAILED' });
+        }
+      }
+    } else {
+      // Both renames land, and the path keeps the bytes of whichever landed last.
+      expect(results.map((result) => result.status)).toEqual(['fulfilled', 'fulfilled']);
+    }
+    expect(['first', 'second']).toContain(readFileSync(join(root, 'target.txt'), 'utf8'));
+    expect(temporaryFiles(root)).toEqual([]);
+  });
+
   it('should report WRITE_VERIFICATION_FAILED when committed bytes do not verify', async () => {
     const root = createRoot();
     const provider = new NodeFsProvider(root);
-    const readFile = fs.readFile.bind(fs);
-    vi.spyOn(fs, 'readFile').mockImplementation(async (...args) => {
-      await readFile(...args);
-      return Buffer.from('corrupt');
+    const open = fs.open.bind(fs);
+    vi.spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
+      const handle = await open(path, flags, mode);
+      if (typeof flags === 'number') {
+        const read = handle.read.bind(handle);
+        vi.spyOn(handle, 'read').mockImplementation(async (...arguments_: Parameters<typeof handle.read>) => {
+          const result = await read(...arguments_);
+          if (result.bytesRead > 0 && result.buffer instanceof Uint8Array) {
+            result.buffer[0] = 0;
+          }
+          return result;
+        });
+      }
+      return handle;
     });
 
     await expect(provider.writeFile('target.txt', 'new')).rejects.toMatchObject({ code: 'WRITE_VERIFICATION_FAILED' });
 
     expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('new');
+    expect(temporaryFiles(root)).toEqual([]);
+  });
+
+  // Windows keeps the writer's handle open through verification, so a later writer cannot
+  // replace the path mid-read there: its rename fails EPERM instead.
+  it.skipIf(process.platform === 'win32')(
+    'should settle a write that a later writer replaced during its verification read',
+    async () => {
+      const root = createRoot();
+      const provider = new NodeFsProvider(root);
+      const open = fs.open.bind(fs);
+      let replaced = false;
+      vi.spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
+        const handle = await open(path, flags, mode);
+        // The provider opens the admitted real path, which differs from `root` on macOS and Windows temp dirs.
+        if (typeof flags === 'number' && String(path).endsWith('target.txt')) {
+          const read = handle.read.bind(handle);
+          vi.spyOn(handle, 'read').mockImplementation(async (...arguments_: Parameters<typeof handle.read>) => {
+            if (!replaced) {
+              // A second writer of the same bytes publishes over the path, unlinking the inode this read holds.
+              replaced = true;
+              writeFileSync(join(root, 'later.tmp'), 'new');
+              renameSync(join(root, 'later.tmp'), join(root, 'target.txt'));
+            }
+            return read(...arguments_);
+          });
+        }
+        return handle;
+      });
+
+      await expect(provider.writeFile('target.txt', 'new')).resolves.toBeUndefined();
+
+      expect(replaced).toBe(true);
+      expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('new');
+      expect(temporaryFiles(root)).toEqual([]);
+    },
+  );
+
+  it('should settle a write whose path a later writer replaced before its verification read', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const open = fs.open.bind(fs);
+    let replacement: 'applied' | 'refused' | undefined;
+    vi.spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
+      // Numeric flags single out the post-rename verification read; the provider opens the
+      // admitted real path, which differs from `root` on macOS and Windows temp directories.
+      if (replacement === undefined && typeof flags === 'number' && String(path).endsWith('target.txt')) {
+        /*
+         * A second writer publishes different bytes over the path *before* this
+         * descriptor exists, so the verification read opens that writer's entry
+         * instead of the one our rename published. This is the interleaving the
+         * published-descriptor read cannot see: the inode it is handed is intact
+         * and its bytes verify against themselves, they are simply not ours.
+         */
+        writeFileSync(join(root, 'superseding.tmp'), 'kept');
+        try {
+          renameSync(join(root, 'superseding.tmp'), join(root, 'target.txt'));
+          replacement = 'applied';
+        } catch {
+          // Windows refuses a rename over a name whose entry a writer still holds, and
+          // `_atomicWrite` holds the published file open there for its metadata flush,
+          // so the path keeps this write's own entry and verification proceeds on it.
+          rmSync(join(root, 'superseding.tmp'));
+          replacement = 'refused';
+        }
+      }
+      return open(path, flags, mode);
+    });
+
+    const outcome = await provider.writeFile('target.txt', 'mine').then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    const code = (outcome as NodeJS.ErrnoException | undefined)?.code;
+
+    expect(code).not.toBe('WRITE_VERIFICATION_FAILED');
+    expect(code).not.toBe('CHECKED_WRITE_POTENTIALLY_APPLIED');
+    expect(outcome).toBeUndefined();
+    expect(replacement).toBe(process.platform === 'win32' ? 'refused' : 'applied');
+    expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe(replacement === 'applied' ? 'kept' : 'mine');
     expect(temporaryFiles(root)).toEqual([]);
   });
 });

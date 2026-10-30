@@ -406,7 +406,7 @@ If you are about to do X, do Y instead:
 ## Verification Boundary
 
 Manufacture-ready designs require qualified evidence (see
-`packages/geospec/README.md`): contact/clearance/interference with declared
+[GeoSpec's package README](https://github.com/taucad/geospec/blob/main/packages/geospec/README.md)): contact/clearance/interference with declared
 allowances, coaxiality through hole stacks, containment/insertion for
 retention, wall-thickness and fillet/chamfer presence. This skill governs
 DESIGN; write geometry whose intent those requirements state directly.

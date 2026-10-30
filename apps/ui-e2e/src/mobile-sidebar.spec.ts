@@ -164,7 +164,7 @@ test('lists local projects signed out, with sign-in reachable from the footer', 
   await target.expectVisible(sidebarSheet().getByRole('link', { name: projectNames.b, exact: true }));
   // The footer's account control; signed out, it carries the way in.
   await target.click(sidebarSheet().getByRole('button', { name: 'Account', exact: true }), { touch: true });
-  const signIn = selectors.getByRole('menuitem', { name: 'Log in' });
+  const signIn = selectors.getByRole('menuitem', { name: 'Sign in', exact: true });
   await target.expectVisible(signIn);
   expect(await target.getAttribute(signIn, 'href')).toMatch(/sign-in/u);
 });

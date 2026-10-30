@@ -3,7 +3,7 @@ title: 'GeoSpec Policy'
 description: 'Rules for GeoSpec matcher API design, evidence naming, diagnostics, failure messages, compiled native/WASM implementation, and high-assurance geometry test authoring.'
 status: active
 created: '2026-06-23'
-updated: '2026-10-23'
+updated: '2026-10-29'
 related:
   - docs/policy/library-api-policy.md
   - docs/policy/testing-policy.md
@@ -445,7 +445,7 @@ The GeoSpec runner owns recursive model and specification discovery from the roo
 
 **Why**: Complete discovery is a correctness requirement, and uncoordinated native workers can introduce nondeterministic contention or shared-runtime ownership failures.
 
-**Enforced by**: `packages/geospec/src/runner/discovery.ts` and the runner worker contract.
+**Enforced by**: GeoSpec's [runner discovery](https://github.com/taucad/geospec/blob/main/packages/geospec/src/runner/discovery.ts) in `taucad/geospec` and the runner worker contract.
 
 ## 23. Take Exporters From The Host Or An Executable `geospec.config.*`
 
@@ -474,4 +474,4 @@ INCORRECT:
 const model = await loadModel({ file: 'main.ts', exporter: 'replicad' });
 ```
 
-**Enforced by**: `packages/geospec/src/config/read-geospec-config.ts`, `libs/agent-tools/src/geospec/config-session.ts` and the `test_model` output schema in `libs/chat/src/schemas/tools/test-model.tool.schema.ts`.
+**Enforced by**: GeoSpec's [config reader](https://github.com/taucad/geospec/blob/main/packages/geospec/src/config/read-geospec-config.ts) in `taucad/geospec`, `libs/agent-tools/src/geospec/config-session.ts` and the `test_model` output schema in `libs/chat/src/schemas/tools/test-model.tool.schema.ts`.

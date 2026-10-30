@@ -1,12 +1,50 @@
-import { useLayoutEffect, useMemo, useState } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
-import type { IDockviewHeaderActionsProps, IDockviewPanel } from 'dockview-react';
+import type { DockviewApi, IDockviewHeaderActionsProps, IDockviewPanel } from 'dockview-react';
 import { Check, ChevronDown } from 'lucide-react';
 import { DockviewTabIcon } from '#components/panes/dockview-tab.js';
 import type { DockviewTabIconRenderer, DockviewTabProps } from '#components/panes/dockview-tab.js';
 import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+
+/** Subscribe to tab identity, not pixel-only Dockview layout notifications. */
+export const useDockviewPanels = (api: DockviewApi | undefined): readonly IDockviewPanel[] => {
+  const subscribe = useCallback(
+    (onChange: () => void) => {
+      if (!api) {
+        return () => undefined;
+      }
+      const disposables = [
+        api.onDidAddPanel(onChange),
+        api.onDidRemovePanel(onChange),
+        api.onDidActivePanelChange(onChange),
+        api.onDidLayoutFromJSON(onChange),
+        api.onDidLayoutChange(onChange),
+      ];
+      return () => {
+        for (const disposable of disposables) {
+          disposable.dispose();
+        }
+      };
+    },
+    [api],
+  );
+  const snapshot = useCallback(
+    () =>
+      JSON.stringify([
+        api?.activePanel?.id,
+        api?.panels.map((panel) => {
+          const filePath: unknown = panel.params?.['filePath'];
+          const entryPath: unknown = panel.params?.['entryPath'];
+          return [panel.id, panel.api.title, filePath, entryPath];
+        }),
+      ]),
+    [api],
+  );
+  useSyncExternalStore(subscribe, snapshot, snapshot);
+  return api?.panels ?? [];
+};
 
 export type DockviewTabOverflowPickerProperties = IDockviewHeaderActionsProps & {
   readonly getIcon?: DockviewTabIconRenderer;

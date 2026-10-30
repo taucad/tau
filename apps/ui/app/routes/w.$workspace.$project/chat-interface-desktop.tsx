@@ -20,7 +20,13 @@ import {
   useProjectWorkspace,
   WorkspaceLanesContext,
 } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { panelMinSizeChat, panelMinSizeViewer, panelMinSizeWorkbench } from '#constants/editor.constants.js';
+import {
+  panelMinSizeChat,
+  panelMinSizeViewer,
+  panelMinSizeViewerTight,
+  panelMinSizeWorkbench,
+  tightWorkspaceWidth,
+} from '#constants/editor.constants.js';
 import { cn } from '@taucad/ui/utils/cn';
 
 export const compactWorkspaceWidth = 1120;
@@ -49,6 +55,8 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
   const { setChatOpen, setWorkbenchOpen } = useProjectWorkspace();
   const containerRef = useRef<HTMLDivElement>(null);
   const [isCompact, setIsCompact] = useState<boolean>();
+  /* Too narrow for a lane beside the full viewer minimum: the viewer's minimum drops so the lanes fit (D12). */
+  const [isTight, setIsTight] = useState(false);
   const isClient = isCompact !== undefined;
   const [workbenchApi, setWorkbenchApi] = useState<DockviewApi>();
   const isEditorReady = useSelector(editorRef, (state) => state.matches('ready'));
@@ -65,21 +73,27 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
     }
     // Resolve the initial lanes before mounting their layout engines. Pixel
     // changes within the same mode must not rerender the workspace subtree.
-    let compact = container.getBoundingClientRect().width < compactWorkspaceWidth;
+    const initialWidth = container.getBoundingClientRect().width;
+    let compact = initialWidth < compactWorkspaceWidth;
+    let tight = initialWidth < tightWorkspaceWidth;
     setIsCompact(compact);
+    setIsTight(tight);
     const observer = new ResizeObserver(([entry]) => {
       if (!entry) {
         return;
       }
       const nextCompact = entry.contentRect.width < compactWorkspaceWidth;
-      if (nextCompact === compact) {
+      const nextTight = entry.contentRect.width < tightWorkspaceWidth;
+      if (nextCompact === compact && nextTight === tight) {
         return;
       }
       compact = nextCompact;
+      tight = nextTight;
       // ResizeObserver runs before paint; commit the lane change in that same
       // delivery instead of letting concurrent React show an intermediate mode.
       flushSync(() => {
         setIsCompact(nextCompact);
+        setIsTight(nextTight);
       });
     });
     observer.observe(container);
@@ -162,7 +176,11 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
                   </ChatHistoryGate>
                 </Allotment.Pane>
 
-                <Allotment.Pane key='viewer' minSize={panelMinSizeViewer} priority={LayoutPriority.High}>
+                <Allotment.Pane
+                  key='viewer'
+                  minSize={isTight ? panelMinSizeViewerTight : panelMinSizeViewer}
+                  priority={LayoutPriority.High}
+                >
                   <div
                     className={cn(
                       '@container/viewer relative size-full overflow-hidden',

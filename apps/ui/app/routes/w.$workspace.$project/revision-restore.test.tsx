@@ -287,7 +287,7 @@ describe('RevisionRestore', () => {
      cannot act on `Buffer is not defined`, so they get the one thing they can
      do, and the developer who can act on it reads it in analytics and the
      console. The count the Revisions pane showed is still not a reason (I12). */
-  it('sends the engine\u2019s own words to analytics and the console, not to the person (W18 DEF-7, E5)', () => {
+  it('sends the engine\u2019s words to the console, outcome fields to analytics, neither to the person (E5)', () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     render(<RevisionRestore />);
 
@@ -298,10 +298,8 @@ describe('RevisionRestore', () => {
     const [title, options] = toastError.mock.calls[0] ?? [];
     expect(title).toBe('That change could not be saved');
     expect(options?.description).toBe('Tau could not record this change. Reload the page and try again.');
-    expect(capture).toHaveBeenCalledWith('revision_save_failed', {
-      message: 'Buffer is not defined',
-      code: undefined,
-    });
+    // SB4: the product event keeps outcome fields; the diagnostic goes to error reporting (`reportRevisionToast`).
+    expect(capture).toHaveBeenCalledWith('revision_save_failed', { code: undefined });
     expect(consoleError).toHaveBeenCalledWith('[revisions]', 'save', undefined, 'Buffer is not defined');
     consoleError.mockRestore();
   });

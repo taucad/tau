@@ -116,7 +116,9 @@ export function SignIn({ className, socialLayout, socialPosition = 'bottom' }: S
   return (
     <Card className={cn('w-full max-w-sm', className)}>
       <CardHeader>
-        <CardTitle className='text-xl font-semibold'>{localization.auth.signIn}</CardTitle>
+        <CardTitle className='text-xl font-semibold'>
+          <h1>{localization.auth.signIn}</h1>
+        </CardTitle>
       </CardHeader>
 
       <CardContent>

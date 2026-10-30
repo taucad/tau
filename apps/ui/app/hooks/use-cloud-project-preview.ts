@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ENV } from '#environment.config.js';
 import { useRevisionSessionUser } from '#lib/revision-actor.js';
+import { recordApiRequestId } from '#lib/api-request-id.js';
 
 class PreviewResponseError extends Error {
   public readonly status: number;
@@ -33,7 +34,7 @@ export const fetchCloudProjectPreview = async (projectId: string, signal: AbortS
       { credentials: 'include', cache: 'no-store', signal: requestSignal },
     );
     if (!response.ok) {
-      throw new PreviewResponseError(response.status);
+      throw recordApiRequestId(new PreviewResponseError(response.status), response);
     }
     if (response.status === 204) {
       return undefined;

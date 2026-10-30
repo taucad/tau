@@ -42,8 +42,10 @@ export function MobileWorkbenchNavigation({
     <nav
       aria-label='Workbench'
       className={cn(
-        'grid h-(--nav-offset) shrink-0 grid-cols-[repeat(auto-fit,minmax(min(100%,4rem),1fr))] items-center gap-1 rounded-none border-x-0 border-t border-b-0 bg-background px-2 pt-px',
-        // 1px border + 1px + 40px buttons + 2px fills --nav-height exactly; the home-indicator inset goes below the buttons.
+        'grid h-(--nav-offset) shrink-0 auto-cols-fr grid-flow-col items-center gap-1 rounded-none border-x-0 border-t border-b-0 bg-background px-2 pt-px',
+        // One row whatever the text size: the row's height is fixed (--nav-height), so a destination that wrapped to a
+        // second row would sit under the viewport's edge. 1px border + 1px + 40px buttons + 2px fills --nav-height
+        // exactly; the home-indicator inset goes below the buttons.
         'pb-[calc(var(--spacing)*0.5_+_env(safe-area-inset-bottom))]',
         mobileWorkbenchNavigationHeight,
         className,
@@ -82,7 +84,8 @@ export function MobileWorkbenchNavigation({
                 />
               ) : null}
             </span>
-            <span className='max-w-full text-center wrap-anywhere'>{label}</span>
+            {/* One line: the button is 40px for an icon and a line, so large text truncates the label, never the target. */}
+            <span className='max-w-full truncate'>{label}</span>
             {cue ? (
               // Hidden from the name computation, still read as the description.
               <span hidden id={`${cueId}-${id}`}>

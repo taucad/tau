@@ -215,7 +215,7 @@ describe('createProviderRpcFileSystem', () => {
       policy: tauPathPolicy,
       allowRoot: (candidate) => candidate === root,
       authority,
-    });
+    }).close;
     const channel = new NodeFsChannel(port1);
     const client = new NodeFsProviderClient(channel, root);
     const mountTable = new MountTable();

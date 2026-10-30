@@ -66,6 +66,8 @@ describe('ForgotPassword', () => {
   it('requests password reset with the frontend reset route as redirectTo', async () => {
     const user = userEvent.setup();
     render(<ForgotPassword />);
+    // The card's title is the auth page's one h1.
+    expect(screen.getByRole('heading', { level: 1, name: 'Forgot password' })).toBeInTheDocument();
 
     await user.type(screen.getByLabelText('Email'), 'richard@example.com');
     await user.click(screen.getByRole('button', { name: 'Send reset link' }));

@@ -290,3 +290,70 @@ describe('sendSentryEventsOnHide', () => {
     }
   });
 });
+
+/** The part of an event the parity checks read. */
+type ParityEvent = {
+  readonly tags?: Record<string, string>;
+  readonly request?: { readonly headers?: Record<string, string> };
+  readonly debug_meta?: { readonly images: ReadonlyArray<Record<string, string>> };
+  readonly exception?: {
+    readonly values: ReadonlyArray<{
+      readonly stacktrace?: {
+        readonly frames: ReadonlyArray<{ readonly filename?: string; readonly function?: string }>;
+      };
+    }>;
+  };
+};
+
+describe('sendSentryEventDirectly parity with the SDK (principle 7)', () => {
+  const chunk = 'https://taucad.dev/assets/route-Abc123.js';
+  const entry = 'https://taucad.dev/assets/entry.client-Def456.js';
+
+  afterEach(() => {
+    delete (globalThis as { _sentryDebugIds?: unknown })._sentryDebugIds;
+  });
+
+  it('should send parsed frames, the debug images for their chunks, the User-Agent and the Tau tags', async () => {
+    (globalThis as { _sentryDebugIds?: Record<string, string> })._sentryDebugIds = {
+      [`Error\n    at ${chunk}:1:1`]: '2f1d7a3c-1111-4aaa-8bbb-000000000001',
+      [`Error\n    at https://taucad.dev/assets/other-Zzz.js:1:1`]: '2f1d7a3c-1111-4aaa-8bbb-000000000002',
+    };
+    const bodies: string[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      bodies.push(typeof init.body === 'string' ? init.body : '');
+      return new Response('{}');
+    });
+    const error = new Error('parity');
+    error.stack = `Error: parity\n    at handler (${chunk}:10:20)\n    at run (${entry}:3:4)`;
+
+    await sendSentryEventDirectly(error, {});
+
+    const event = JSON.parse(bodies[0]?.split('\n')[2] ?? '{}') as ParityEvent;
+    // Oldest first, as the SDK orders them: the throwing frame is last.
+    expect(
+      event.exception?.values[0]?.stacktrace?.frames.map((frame) => [frame.function, frame.filename]),
+    ).toStrictEqual([
+      ['run', entry],
+      ['handler', chunk],
+    ]);
+    expect(event.debug_meta?.images).toStrictEqual([
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Sentry's debug image fields.
+      { type: 'sourcemap', code_file: chunk, debug_id: '2f1d7a3c-1111-4aaa-8bbb-000000000001' },
+    ]);
+    expect(event.request?.headers).toStrictEqual({ 'User-Agent': navigator.userAgent });
+    expect(event.tags?.['delivery']).toBe('without-sdk');
+    expect(event.tags?.['device_class']).toMatch(/^(constrained|standard)$/u);
+  });
+
+  it('should post through the same-origin tunnel on the web', async () => {
+    const urls: string[] = [];
+    vi.stubGlobal('fetch', async (url: string) => {
+      urls.push(url);
+      return new Response('{}');
+    });
+
+    await sendSentryEventDirectly(new Error('tunnelled'), {});
+
+    expect(urls).toStrictEqual(['/api/monitoring']);
+  });
+});

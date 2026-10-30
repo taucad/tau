@@ -5,6 +5,7 @@ import type { PartialDeep } from 'type-fest';
 import type { Chat } from '@taucad/chat';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
+import { isUnownedChatObservation } from '#lib/chat-observation-guard.js';
 import type { ChatHistoricalUsage, ChatSessionStore } from '#services/chat-session-store.js';
 
 /** Keep an observation slot until its host read settles, without holding every project log open. */
@@ -136,7 +137,9 @@ export function useProjectChatUsage(
       }),
     );
     for (const chatId of chatIds) {
-      enqueue(chatId);
+      if (!isUnownedChatObservation(chatId)) {
+        enqueue(chatId);
+      }
     }
     return () => {
       stopped = true;

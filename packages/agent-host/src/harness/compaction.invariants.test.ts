@@ -1,6 +1,6 @@
 /* oxlint-disable no-await-in-loop, no-loop-func -- The invariant drive intentionally mutates and reloads one log in order. */
 import { describe, expect, it, vi } from 'vitest';
-import { estimateContextTokens } from '@earendil-works/pi-agent-core';
+import { estimateContextTokens } from '@earendil-works/pi-ai/utils/estimate';
 import type { Api, Model, Usage } from '@earendil-works/pi-ai';
 import type { CompactionOutcome } from '#harness/compaction.js';
 import { MessageIdentities, providerMessageToPi } from '#harness/session-record.js';

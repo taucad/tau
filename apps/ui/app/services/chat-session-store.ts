@@ -44,6 +44,7 @@ import { idPrefix } from '@taucad/types/constants';
 import { chatRecordsPath } from '@taucad/revisions';
 import { getErrno } from '@taucad/utils/error';
 import { sendHostCommand } from '#chat-clients/_internal/host-command.js';
+import { isUnownedChatObservation } from '#lib/chat-observation-guard.js';
 import type { MachineActors } from '#lib/xstate.lib.js';
 import { waitUnlessGone } from '#lib/xstate.lib.js';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
@@ -560,6 +561,10 @@ type InternalSession = ChatSession & {
   /** A storage invalidation waits for host settlement, independently of SDK reattachment readiness. */
   refreshDeferred: boolean;
   restoredStoppedRunId: string | undefined;
+  /** The live run this page saw before it had model text, so its first text can be timed (T10). */
+  presentationWatch: string | undefined;
+  /** The newest live run whose first model text this page has timed, or found already showing (T10). */
+  presentedRunId: string | undefined;
   status: ChatStatus;
   /** The project this chat belongs to, from its caller (PV-S4, L3 D9); never from focus. */
   readonly projectId: string;
@@ -690,7 +695,14 @@ type ProjectHostConnector = Readonly<{
     }
   >;
   stoppability?: (chatId: string) => Promise<'stoppable' | 'other-build' | 'background-window'>;
+  /** The page showed a live run's model text at `at` (T10); best effort, and only the project's host reports it. */
+  presented?: (chatId: string, runId: string, at: number) => Promise<void>;
+  /** The account rated an ended run at `at` (T12); best effort, and only the project's host reports it. */
+  rated?: (rating: RunRating) => Promise<void>;
 }>;
+
+/** The account's rating of one ended run, on the page's clock (T12). @public */
+export type RunRating = Readonly<{ chatId: string; runId: string; value: 'positive' | 'negative'; at: number }>;
 
 /** A client that may say when a file last changed on this device (the worker filesystem's head-only stat). */
 type SegmentStatClient = Readonly<{
@@ -716,6 +728,8 @@ export class ChatSessionStore {
   readonly #sessions = new Map<string, InternalSession>();
   readonly #observed = new Map<string, ObservedChat>();
   readonly #projectHostConnectors = new Map<string, ProjectHostConnector>();
+  /** The rating this page gave each run, by chat and run; a run is rated once, as its host reports it. */
+  readonly #ratings = new Map<string, RunRating['value']>();
   readonly #remoteReadVersions = new Map<string, number>();
   readonly #remoteReadCompletedVersions = new Map<string, number>();
   readonly #remoteHistoryPresence = new WeakMap<NonNullable<ChatProjection['remote']>['views'], boolean>();
@@ -912,6 +926,10 @@ export class ChatSessionStore {
 
   /** Observe a listed chat's log without acquiring its SDK transcript or composer. @public */
   public observe(chatId: string, projectId: string): () => void {
+    // The registration probe, and a chat this tab already crashed on, is not owned by one project.
+    if (isUnownedChatObservation(chatId)) {
+      return () => undefined;
+    }
     this.#inactiveProjections.delete(chatId);
     const existing = this.#observed.get(chatId);
     if (existing !== undefined && existing.projectId !== projectId) {
@@ -979,9 +997,9 @@ export class ChatSessionStore {
   public publishProjectHostConnector(
     projectId: string,
     connect: ProjectHostConnector['connect'],
-    stoppability?: ProjectHostConnector['stoppability'],
+    extras: Pick<ProjectHostConnector, 'stoppability' | 'presented' | 'rated'> = {},
   ): () => void {
-    const connector = { connect, stoppability };
+    const connector = { connect, ...extras };
     this.#projectHostConnectors.set(projectId, connector);
     this.#projectRunKeys.delete(projectId);
     this.#refreshProjectRuns(projectId);
@@ -1051,6 +1069,58 @@ export class ChatSessionStore {
         ? chatPlacementOf(live.activeExecution)
         : await this.#storedPlacement(chat.resourceId, chatId);
     return { activeExecution: withChatPlacement(chat.activeExecution, placement), activeKernel: chat.activeKernel };
+  }
+
+  /**
+   * The ended run that answered a turn, which the account may rate (T12): the turn's last run that ended and whose
+   * current attempt appended its end. A live, unread or legacy run that names no turn is not ratable.
+   *
+   * @param chatId - The chat.
+   * @param turnId - The turn's user-message id.
+   * @returns The run id, or `undefined`.
+   * @public
+   */
+  public ratableRun(chatId: string, turnId: string): string | undefined {
+    const projection = this.#projectionContext(chatId);
+    if (projection === undefined || !selectCaughtUp(projection)) {
+      return undefined;
+    }
+    /* The turn's newest run, as a regenerated turn's earlier run stays in the ledger; an open one is not yet rated. */
+    const [runId, run] = Object.entries(projection.ledger.runs).findLast(([, entry]) => entry.turnId === turnId) ?? [
+      undefined,
+      undefined,
+    ];
+    /* A native pause also ends its attempt, but the run resumes: only an ended lifecycle closes the reply. */
+    const ended = run?.lifecycle === 'completed' || run?.lifecycle === 'failed' || run?.lifecycle === 'cancelled';
+    return ended && (run.appendState === 'terminal' || run.appendState === 'settled') ? runId : undefined;
+  }
+
+  /** The rating this page gave a run, if any. @public */
+  public ratingOf(chatId: string, runId: string): RunRating['value'] | undefined {
+    return this.#ratings.get(`${chatId}\u0000${runId}`);
+  }
+
+  /**
+   * Rate an ended run once (T12). The first rating stands, as the host reports only the first; whether it is recorded
+   * at all is the host's to decide from the account's feedback grant.
+   *
+   * @param chatId - The chat.
+   * @param runId - The run, from {@link ChatSessionStore.ratableRun}.
+   * @param value - The rating.
+   * @returns The rating that stands.
+   * @public
+   */
+  public rateRun(chatId: string, runId: string, value: RunRating['value']): RunRating['value'] {
+    const key = `${chatId}\u0000${runId}`;
+    const standing = this.#ratings.get(key);
+    if (standing !== undefined) {
+      return standing;
+    }
+    this.#ratings.set(key, value);
+    const projectId = this.#sessions.get(chatId)?.projectId ?? this.#observed.get(chatId)?.projectId;
+    const rated = projectId === undefined ? undefined : this.#projectHostConnectors.get(projectId)?.rated;
+    void rated?.({ chatId, runId, value, at: Date.now() });
+    return value;
   }
 
   /** Cancel the log's current run, including an unopened listed chat; no SDK session is acquired. @public */
@@ -3138,6 +3208,12 @@ export class ChatSessionStore {
     if (selectCaughtUp(projection)) {
       this.#materializeProjectedTranscript(session, projection);
     }
+    if (run !== undefined && view !== undefined && opensRun(phase) && !run.opaque) {
+      this.#timePresentation(session, run.runId, [
+        view.chunks,
+        ...(projection.live?.runId === run.runId ? [projection.live.chunks] : []),
+      ]);
+    }
     if (
       run?.lifecycle === 'cancelled' &&
       run.failure?.code !== 'USER_STOPPED' &&
@@ -3195,6 +3271,42 @@ export class ChatSessionStore {
     ) {
       void this.refreshFromStorage(chatId);
     }
+  }
+
+  /**
+   * Time when the page first shows a live run's model text (T10): the frame after the projection first carries text,
+   * while the page is visible. This is the UI's clock, kept apart from the API's model-text time; it reads the
+   * projection, not any one component, and a run that was already streaming or ended before this page saw it is not
+   * timed, so replayed history never counts as shown.
+   */
+  #timePresentation(
+    session: InternalSession,
+    runId: string,
+    sources: ReadonlyArray<Parameters<typeof chunksSince>[0]>,
+  ): void {
+    if (session.presentedRunId === runId) {
+      return;
+    }
+    const hasText = sources.some((chunks) =>
+      [...chunksSince(chunks)].some((chunk) => chunk.type === 'text-delta' && chunk.delta !== ''),
+    );
+    if (!hasText) {
+      session.presentationWatch = runId;
+      return;
+    }
+    session.presentedRunId = runId;
+    if (session.presentationWatch !== runId) {
+      return;
+    }
+    const presented = this.#projectHostConnectors.get(session.projectId)?.presented;
+    if (presented === undefined || typeof requestAnimationFrame === 'undefined') {
+      return;
+    }
+    requestAnimationFrame(() => {
+      if (document.visibilityState === 'visible') {
+        void presented(session.chatId, runId, Date.now());
+      }
+    });
   }
 
   /** Reattach a viewed live run through its projection, never through the old host stream. */
@@ -4191,6 +4303,8 @@ export class ChatSessionStore {
       stopOrigin: undefined,
       refreshDeferred: false,
       restoredStoppedRunId: undefined,
+      presentationWatch: undefined,
+      presentedRunId: undefined,
       status: chat.status,
       turnSubscriptions: [],
       dispose: () => {

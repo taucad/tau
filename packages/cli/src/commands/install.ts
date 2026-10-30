@@ -126,7 +126,7 @@ export const installCommand = defineCommand({
       authority,
       policy: tauPathPolicy,
       allowRoot: (candidate) => candidate === root,
-    });
+    }).close;
     const channel = new NodeFsChannel(ports.port1);
     const files = new NodeFsProvider(root);
     const nodeModules = join(root, 'node_modules') + sep;

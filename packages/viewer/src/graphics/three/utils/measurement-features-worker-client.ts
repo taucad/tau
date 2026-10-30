@@ -96,6 +96,11 @@ function hydrate(feature: MeshFeature): MeshFeature {
 export type MeasurementFeatureWorkerClient = {
   ready(mesh: THREE.Mesh): MeshFeatureGraph | undefined;
   prepare(mesh: THREE.Mesh): Promise<MeshFeatureGraph | undefined>;
+  /**
+   * Moves a mesh's queued graph to the front of the queue, so the next build is the one a waiting click needs. A build
+   * already running finishes first; a mesh not queued is left alone.
+   */
+  prioritize(mesh: THREE.Mesh): void;
   dispose(): void;
 };
 
@@ -306,6 +311,14 @@ export function createMeasurementFeatureWorkerClient(
         queue.push(task);
         start();
       });
+    },
+    prioritize(mesh) {
+      const task = pending.get(mesh);
+      const position = task ? queue.indexOf(task) : -1;
+      if (task && position > 0) {
+        queue.splice(position, 1);
+        queue.unshift(task);
+      }
     },
     dispose() {
       disposed = true;

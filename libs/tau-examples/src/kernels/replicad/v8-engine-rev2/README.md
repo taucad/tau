@@ -9,7 +9,7 @@ red baseline is deliberate — do not "fix" these tests by weakening them.
 ## Run
 
 ```bash
-pnpm exec tsx packages/geospec/src/cli.ts run libs/tau-examples/src/kernels/replicad/v8-engine-rev2 --test-timeout 300000
+pnpm exec geospec run libs/tau-examples/src/kernels/replicad/v8-engine-rev2 --test-timeout 300000
 ```
 
 Expected today: the pure-TS registry/suite-lint tests pass (deferral registry,

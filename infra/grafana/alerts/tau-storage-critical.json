@@ -1,0 +1,383 @@
+{
+  "title": "tau-storage-critical",
+  "interval": 60,
+  "rules": [
+    {
+      "uid": "storage-push-slo-fast-burn",
+      "title": "P0: Push Error Budget Burning Fast",
+      "condition": "push_fast_burn",
+      "data": [
+        {
+          "refId": "push_fast_burn",
+          "queryType": "",
+          "relativeTimeRange": { "from": 3600, "to": 0 },
+          "datasourceUid": "prometheus",
+          "model": {
+            "instant": true,
+            "range": false,
+            "expr": "(((sum(rate(tau_sync_operations_total{app=~\".*\",service_name=\"tau-api\",tau_sync_operation=\"push\",outcome=\"error\"}[1h]))) or vector(0)) / clamp_min(sum(rate(tau_sync_operations_total{app=~\".*\",service_name=\"tau-api\",tau_sync_operation=\"push\"}[1h])), 1e-10) > 14.4 * 0.001) and (((sum(rate(tau_sync_operations_total{app=~\".*\",service_name=\"tau-api\",tau_sync_operation=\"push\",outcome=\"error\"}[5m]))) or vector(0)) / clamp_min(sum(rate(tau_sync_operations_total{app=~\".*\",service_name=\"tau-api\",tau_sync_operation=\"push\"}[5m])), 1e-10) > 14.4 * 0.001) and (sum(increase(tau_sync_operations_total{app=~\".*\",service_name=\"tau-api\",tau_sync_operation=\"push\"}[1h])) > 20)",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "push_fast_burn"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "2m",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/playbooks/storage-failure.md",
+        "summary": "Pushes ending outcome=error are burning SLO-1's 0.1% budget at 14.4x over 1 h and 5 m, with at least 20 pushes in the hour. Refusals the client retries (busy, conflict) are not counted."
+      },
+      "labels": { "severity": "critical", "service": "tau-api", "component": "git" }
+    },
+    {
+      "uid": "storage-fetch-slo-fast-burn",
+      "title": "P0: Fetch Error Budget Burning Fast",
+      "condition": "fetch_fast_burn",
+      "data": [
+        {
+          "refId": "fetch_fast_burn",
+          "queryType": "",
+          "relativeTimeRange": { "from": 3600, "to": 0 },
+          "datasourceUid": "prometheus",
+          "model": {
+            "instant": true,
+            "range": false,
+            "expr": "(((sum(rate(tau_sync_operations_total{app=~\".*\",service_name=\"tau-api\",tau_sync_operation=\"fetch\",outcome=\"error\"}[1h]))) or vector(0)) / clamp_min(sum(rate(tau_sync_operations_total{app=~\".*\",service_name=\"tau-api\",tau_sync_operation=\"fetch\"}[1h])), 1e-10) > 14.4 * 0.001) and (((sum(rate(tau_sync_operations_total{app=~\".*\",service_name=\"tau-api\",tau_sync_operation=\"fetch\",outcome=\"error\"}[5m]))) or vector(0)) / clamp_min(sum(rate(tau_sync_operations_total{app=~\".*\",service_name=\"tau-api\",tau_sync_operation=\"fetch\"}[5m])), 1e-10) > 14.4 * 0.001) and (sum(increase(tau_sync_operations_total{app=~\".*\",service_name=\"tau-api\",tau_sync_operation=\"fetch\"}[1h])) > 20)",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "fetch_fast_burn"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "2m",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/playbooks/storage-failure.md",
+        "summary": "Fetches and clones ending outcome=error are burning SLO-2's 0.1% budget at 14.4x over 1 h and 5 m, with at least 20 fetches in the hour."
+      },
+      "labels": { "severity": "critical", "service": "tau-api", "component": "git" }
+    },
+    {
+      "uid": "storage-workers-below-floor",
+      "title": "P0: tau-storage Below Two Workers",
+      "condition": "workers_below_floor",
+      "data": [
+        {
+          "refId": "workers_below_floor",
+          "queryType": "",
+          "relativeTimeRange": { "from": 300, "to": 0 },
+          "datasourceUid": "prometheus",
+          "model": {
+            "instant": true,
+            "range": false,
+            "expr": "(sum(fly_instance_up{app=~\".*storage.*\"}) or on() (count(last_over_time(fly_instance_up{app=~\".*storage.*\"}[1d])) * 0)) < 2",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "workers_below_floor"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "5m",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/operate/scaling.md",
+        "summary": "Fewer than two tau-storage Machines are up (min_machines_running is 2), so forwarded git has no failover. A Machine that is down drops out of fly_instance_up, so the sum falls back to 0 while the app reported in the last day; silent where Fly has reported no tau-storage Machine for a day (an environment without the app)."
+      },
+      "labels": { "severity": "critical", "service": "tau-storage", "component": "git" }
+    },
+    {
+      "uid": "storage-r2-unavailable",
+      "title": "P0: Object Store Failing",
+      "condition": "r2_unavailable",
+      "data": [
+        {
+          "refId": "r2_unavailable",
+          "queryType": "",
+          "relativeTimeRange": { "from": 300, "to": 0 },
+          "datasourceUid": "prometheus",
+          "model": {
+            "instant": true,
+            "range": false,
+            "expr": "(((sum(rate(tau_storage_operation_duration_count{app=~\".*\",service_name=\"tau-api\",outcome=\"error\",error_type!~\"NoSuchKey|NotFound|PreconditionFailed|AbortError\"}[5m]) or rate(tau_storage_operation_duration_count{app=~\".*storage.*\",service_name=\"tau-storage\",outcome=\"error\",error_type!~\"NoSuchKey|NotFound|PreconditionFailed|AbortError\"}[5m]) or rate(tau_storage_operation_duration_count{app=~\".*mirror.*\",service_name=\"tau-mirror\",outcome=\"error\",error_type!~\"NoSuchKey|NotFound|PreconditionFailed|AbortError\"}[5m]))) or vector(0)) / clamp_min(sum(rate(tau_storage_operation_duration_count{app=~\".*\",service_name=\"tau-api\"}[5m]) or rate(tau_storage_operation_duration_count{app=~\".*storage.*\",service_name=\"tau-storage\"}[5m]) or rate(tau_storage_operation_duration_count{app=~\".*mirror.*\",service_name=\"tau-mirror\"}[5m])), 1e-10) > 0.05) and (sum(increase(tau_storage_operation_duration_count{app=~\".*\",service_name=\"tau-api\"}[5m]) or increase(tau_storage_operation_duration_count{app=~\".*storage.*\",service_name=\"tau-storage\"}[5m]) or increase(tau_storage_operation_duration_count{app=~\".*mirror.*\",service_name=\"tau-mirror\"}[5m])) > 20)",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "r2_unavailable"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "5m",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/playbooks/storage-failure.md",
+        "summary": "More than 5% of S3 calls from tau-api, tau-storage and tau-mirror failed after the SDK's retries over 5 min (a missing key, a lost conditional write and a client abort excluded), with at least 20 calls. Adapted from the W14 draft: tau_storage_attempts_total (per-attempt status) is not emitted yet, so absorbed 429s and 5xx are invisible."
+      },
+      "labels": { "severity": "critical", "service": "tau-api", "component": "r2" }
+    },
+    {
+      "uid": "storage-b2-lag-critical",
+      "title": "P0: B2 Second Copy Over 60 min Behind",
+      "condition": "b2_lag_critical",
+      "data": [
+        {
+          "refId": "b2_lag_critical",
+          "queryType": "",
+          "relativeTimeRange": { "from": 600, "to": 0 },
+          "datasourceUid": "prometheus",
+          "model": {
+            "instant": true,
+            "range": false,
+            "expr": "max(tau_mirror_copy_lag_seconds{app=~\".*mirror.*\",service_name=\"tau-mirror\",destination=\"b2\"}) > 3600",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "b2_lag_critical"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "10m",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/system/services/second-copy-b2.md",
+        "summary": "The second copy's recovery point is more than 60 min behind (W13 B5 page line, SLO-6)."
+      },
+      "labels": { "severity": "critical", "service": "tau-mirror", "component": "mirror" }
+    },
+    {
+      "uid": "storage-b2-rpo-breached",
+      "title": "P0: B2 Second Copy More Than 24 h Behind",
+      "condition": "b2_rpo_breached",
+      "data": [
+        {
+          "refId": "b2_rpo_breached",
+          "queryType": "",
+          "relativeTimeRange": { "from": 600, "to": 0 },
+          "datasourceUid": "prometheus",
+          "model": {
+            "instant": true,
+            "range": false,
+            "expr": "max(tau_mirror_copy_lag_seconds{app=~\".*mirror.*\",service_name=\"tau-mirror\",destination=\"b2\"}) > 86400",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "b2_rpo_breached"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "5m",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/system/services/second-copy-b2.md",
+        "summary": "Backstop: the second copy is a day behind, so the copier has missed every page. The primary sweeps uncopied retired packs only after about 30 days (W13 Finding 2)."
+      },
+      "labels": { "severity": "critical", "service": "tau-mirror", "component": "mirror" }
+    },
+    {
+      "uid": "storage-mirror-copy-stalled",
+      "title": "P0: B2 Copier Stalled With Backlog",
+      "condition": "copy_stalled",
+      "data": [
+        {
+          "refId": "copy_stalled",
+          "queryType": "",
+          "relativeTimeRange": { "from": 900, "to": 0 },
+          "datasourceUid": "prometheus",
+          "model": {
+            "instant": true,
+            "range": false,
+            "expr": "((sum(increase(tau_mirror_rounds_total{app=~\".*mirror.*\",service_name=\"tau-mirror\",destination=\"b2\",outcome=\"copied\"}[15m])) or on() vector(0)) == 0) and on() (sum(tau_mirror_backlog_repositories{app=~\".*mirror.*\",service_name=\"tau-mirror\",destination=\"b2\"}) > 0)",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "copy_stalled"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "5m",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/system/services/second-copy-b2.md",
+        "summary": "Repositories are waiting for the second copy and no copy round copied anything in 15 min. A restarted copier has no outcome=\"copied\" series until its first copy, so that case counts as zero copied."
+      },
+      "labels": { "severity": "critical", "service": "tau-mirror", "component": "mirror" }
+    },
+    {
+      "uid": "storage-mirror-absent",
+      "title": "P0: B2 Copier Not Reporting",
+      "condition": "mirror_absent",
+      "data": [
+        {
+          "refId": "mirror_absent",
+          "queryType": "",
+          "relativeTimeRange": { "from": 86400, "to": 0 },
+          "datasourceUid": "prometheus",
+          "model": {
+            "instant": true,
+            "range": false,
+            "expr": "(count(present_over_time(tau_mirror_rounds_total{app=~\".*mirror.*\",service_name=\"tau-mirror\",destination=\"b2\"}[1d])) unless on() count(tau_mirror_rounds_total{app=~\".*mirror.*\",service_name=\"tau-mirror\",destination=\"b2\"})) or (count(fly_instance_up{app=~\".*mirror.*\"} == 1) unless on() count(tau_mirror_rounds_total{app=~\".*mirror.*\",service_name=\"tau-mirror\",destination=\"b2\"}))",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "mirror_absent"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "15m",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/system/services/second-copy-b2.md",
+        "summary": "tau-mirror reported copy rounds in the last day but reports none now, or Fly has a tau-mirror Machine up that reports none. A live copier counts a noop round every poll. Written without absent() so an environment with no copier is silent; a copier gone for more than a day with no Machine left is caught by storage-b2-lag-critical's absence on the dashboard and storage-b2-drill-stale."
+      },
+      "labels": { "severity": "critical", "service": "tau-mirror", "component": "mirror" }
+    },
+    {
+      "uid": "storage-mirror-source-missing",
+      "title": "P0: Manifest Names an Object Missing From R2",
+      "condition": "source_missing",
+      "data": [
+        {
+          "refId": "source_missing",
+          "queryType": "",
+          "relativeTimeRange": { "from": 3600, "to": 0 },
+          "datasourceUid": "prometheus",
+          "model": {
+            "instant": true,
+            "range": false,
+            "expr": "sum(increase(tau_mirror_copy_failures_total{app=~\".*mirror.*\",service_name=\"tau-mirror\",destination=\"b2\",reason=\"source_missing\"}[1h])) > 0",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "source_missing"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "0s",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/playbooks/storage-failure.md",
+        "summary": "The copier found a manifest naming an object R2 does not hold: possible primary data loss. Stop sweeps and investigate before anything else."
+      },
+      "labels": { "severity": "critical", "service": "tau-mirror", "component": "mirror" }
+    },
+    {
+      "uid": "storage-b2-down-page",
+      "title": "P0: B2 Unreachable for 60 min",
+      "condition": "b2_down_page",
+      "data": [
+        {
+          "refId": "b2_down_page",
+          "queryType": "",
+          "relativeTimeRange": { "from": 300, "to": 0 },
+          "datasourceUid": "prometheus",
+          "model": {
+            "instant": true,
+            "range": false,
+            "expr": "max(tau_mirror_destination_up{app=~\".*mirror.*\",service_name=\"tau-mirror\",destination=\"b2\"}) == 0",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "b2_down_page"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "60m",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/system/services/second-copy-b2.md",
+        "summary": "The copier's probe of the B2 destination has failed for an hour, so the recovery point is ageing."
+      },
+      "labels": { "severity": "critical", "service": "tau-mirror", "component": "mirror" }
+    },
+    {
+      "uid": "storage-b2-hidden-versions",
+      "title": "P0: Hide Markers Found in B2 (Security)",
+      "condition": "hidden_versions",
+      "data": [
+        {
+          "refId": "hidden_versions",
+          "queryType": "",
+          "relativeTimeRange": { "from": 300, "to": 0 },
+          "datasourceUid": "prometheus",
+          "model": {
+            "instant": true,
+            "range": false,
+            "expr": "max(tau_mirror_reconcile_hidden_versions{app=~\".*mirror.*\",service_name=\"tau-mirror\",destination=\"b2\"}) > 0",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "hidden_versions"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "0s",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/system/services/second-copy-b2.md",
+        "summary": "The reconciler found hide (delete) markers in the second copy. The copier never hides, so another key wrote them: treat as a credential incident."
+      },
+      "labels": { "severity": "critical", "service": "tau-mirror", "component": "mirror" }
+    },
+    {
+      "uid": "storage-b2-lock-overlong",
+      "title": "P0: B2 Lock Extended Beyond 35 Days (Security)",
+      "condition": "lock_overlong",
+      "data": [
+        {
+          "refId": "lock_overlong",
+          "queryType": "",
+          "relativeTimeRange": { "from": 300, "to": 0 },
+          "datasourceUid": "prometheus",
+          "model": {
+            "instant": true,
+            "range": false,
+            "expr": "max(tau_mirror_retention_max_ahead_seconds{app=~\".*mirror.*\",service_name=\"tau-mirror\",destination=\"b2\"}) > 3024000",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "lock_overlong"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "0s",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/system/services/second-copy-b2.md",
+        "summary": "A version in the second copy is locked more than 35 days ahead, which the copier never does; erased data would outlive the 31-day deadline."
+      },
+      "labels": { "severity": "critical", "service": "tau-mirror", "component": "mirror" }
+    },
+    {
+      "uid": "storage-b2-drill-failed",
+      "title": "P0: B2 Restore Drill Failed",
+      "condition": "drill_failed",
+      "data": [
+        {
+          "refId": "drill_failed",
+          "queryType": "",
+          "relativeTimeRange": { "from": 691200, "to": 0 },
+          "datasourceUid": "prometheus",
+          "model": {
+            "instant": true,
+            "range": false,
+            "expr": "((max_over_time((timestamp(sum(increase(tau_mirror_drill_runs_total{app=~\".*mirror.*\",service_name=\"tau-mirror\",outcome=\"fail\"}[2m])) > 0))[8d:1m]) - 120) > on() max(tau_mirror_drill_last_success_timestamp_seconds{app=~\".*mirror.*\",service_name=\"tau-mirror\"})) or ((max_over_time((timestamp(sum(increase(tau_mirror_drill_runs_total{app=~\".*mirror.*\",service_name=\"tau-mirror\",outcome=\"fail\"}[2m])) > 0))[8d:1m]) - 120) unless on() max(tau_mirror_drill_last_success_timestamp_seconds{app=~\".*mirror.*\",service_name=\"tau-mirror\"}))",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "drill_failed"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "0s",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/system/services/second-copy-b2.md",
+        "summary": "The newest second-copy drill failure in the last 8 days is later than the newest passing drill (D23, STO-1), so a later pass clears it. The failure time is the minute the fail counter rose, less 2 min, so a pass within 2 min before a failure can hide it. The copier exports drill results from mirror_drill_run rows, so the failure survives the drill Machine's exit."
+      },
+      "labels": { "severity": "critical", "service": "tau-mirror", "component": "mirror" }
+    }
+  ]
+}

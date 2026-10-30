@@ -1,0 +1,692 @@
+{
+  "uid": "tau-storage-critical",
+  "title": "Storage — critical",
+  "tags": ["tau", "storage", "sync", "slo", "critical"],
+  "description": "The storage numbers to review daily: SLO-1 to SLO-6, refusals, the object store, B2 recovery point, capacity headroom, distance to every stage trigger, cost. Drill into Storage capability for detail.",
+  "timezone": "browser",
+  "refresh": "1m",
+  "time": { "from": "now-24h", "to": "now" },
+  "links": [
+    { "title": "Storage capability", "type": "link", "url": "/d/tau-sync", "icon": "dashboard", "targetBlank": false },
+    {
+      "title": "SLO / Executive",
+      "type": "link",
+      "url": "/d/tau-slo-executive",
+      "icon": "dashboard",
+      "targetBlank": false
+    },
+    {
+      "title": "System Overview",
+      "type": "link",
+      "url": "/d/tau-system-overview",
+      "icon": "dashboard",
+      "targetBlank": false
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "app",
+        "label": "API application",
+        "type": "constant",
+        "query": ".*",
+        "description": "Local default matches unlabeled series. Hosted provisioning binds this to exactly one application.",
+        "current": { "text": ".*", "value": ".*" },
+        "hide": 2
+      },
+      {
+        "name": "storage_app",
+        "label": "Storage application",
+        "type": "constant",
+        "query": ".*storage.*",
+        "description": "Binding contract v2: the local default matches the collector's tau-storage job. Hosted provisioning binds this to exactly one tau-storage application.",
+        "current": { "text": ".*storage.*", "value": ".*storage.*" },
+        "hide": 2
+      },
+      {
+        "name": "mirror_app",
+        "label": "Mirror application",
+        "type": "constant",
+        "query": ".*mirror.*",
+        "description": "Binding contract v2: the local default matches a tau-mirror job. Hosted provisioning binds this to exactly one tau-mirror application.",
+        "current": { "text": ".*mirror.*", "value": ".*mirror.*" },
+        "hide": 2
+      },
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "custom",
+        "query": "tau-api",
+        "description": "A constant, so panels never lose their filter when the API's own series go stale during an outage.",
+        "current": { "text": "tau-api", "value": "tau-api" },
+        "options": [{ "text": "tau-api", "value": "tau-api", "selected": true }],
+        "includeAll": false
+      }
+    ]
+  },
+  "schemaVersion": 39,
+  "panels": [
+    {
+      "title": "Availability and latency (SLO-1 to SLO-5)",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "panels": [],
+      "id": 1
+    },
+    {
+      "title": "Push availability (28d)",
+      "type": "gauge",
+      "description": "SLO-1: pushes not ending outcome=\"error\"; refusals the client retries (busy, conflict) and client-caused outcomes are not errors. Objective 99.9%.",
+      "targets": [
+        {
+          "expr": "(1 - (((sum(rate(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"push\",outcome=\"error\"}[28d]))) or vector(0)) / clamp_min(sum(rate(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"push\"}[28d])), 1e-10))) * 100",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 99,
+          "max": 100,
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 99.5 },
+              { "color": "green", "value": 99.9 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 1 },
+      "id": 2
+    },
+    {
+      "title": "Fetch availability (28d)",
+      "type": "gauge",
+      "description": "SLO-2: fetches and clones not ending outcome=\"error\". Objective 99.9%.",
+      "targets": [
+        {
+          "expr": "(1 - (((sum(rate(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"fetch\",outcome=\"error\"}[28d]))) or vector(0)) / clamp_min(sum(rate(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"fetch\"}[28d])), 1e-10))) * 100",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 99,
+          "max": 100,
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 99.5 },
+              { "color": "green", "value": 99.9 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 4, "y": 1 },
+      "id": 3
+    },
+    {
+      "title": "Push budget burn (1h)",
+      "type": "stat",
+      "description": "Multiples of SLO-1's 0.1% budget: 14.4 for 1 h pages (storage-push-slo-fast-burn), 6 for 6 h notifies.",
+      "targets": [
+        {
+          "expr": "((sum(rate(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"push\",outcome=\"error\"}[1h]))) or vector(0)) / clamp_min(sum(rate(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"push\"}[1h])), 1e-10) / 0.001",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "x",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 6 },
+              { "color": "red", "value": 14.4 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 8, "y": 1 },
+      "id": 4
+    },
+    {
+      "title": "Push p95",
+      "type": "stat",
+      "description": "SLO-4: 95% of pushes within 2 s at the API edge (storage-push-latency-high).",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(tau_sync_operation_duration_bucket{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"push\",outcome!~\"unauthorized|quota_refused\"}[15m])))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1.5 },
+              { "color": "red", "value": 2 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 12, "y": 1 },
+      "id": 5
+    },
+    {
+      "title": "Fetch p95",
+      "type": "stat",
+      "description": "SLO-5: 95% of fetches and clones within 5 s (storage-fetch-latency-high).",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(tau_sync_operation_duration_bucket{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"fetch\",outcome!~\"unauthorized|quota_refused\"}[15m])))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 4 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 16, "y": 1 },
+      "id": 6
+    },
+    {
+      "title": "Retryable refusals (1h)",
+      "type": "stat",
+      "description": "SLO-3 first-answer acceptance: share of git requests answered busy or conflict. Warns above 2% over 15 min (storage-retryable-refusals).",
+      "targets": [
+        {
+          "expr": "((sum(rate(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",outcome=~\"busy|conflict\"}[1h]))) or vector(0)) / clamp_min(sum(rate(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\"}[1h])), 1e-10)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.01 },
+              { "color": "red", "value": 0.02 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 1 },
+      "id": 7
+    },
+    {
+      "title": "Errors, refusals and the object store",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
+      "panels": [],
+      "id": 8
+    },
+    {
+      "title": "Refusals by code",
+      "type": "timeseries",
+      "description": "Typed refusals the git routes answered (tau_sync_refusal_code). GIT_LEASE_* below documented capacity is STO-20's failure signal.",
+      "targets": [
+        {
+          "expr": "sum by (tau_sync_refusal_code) (rate(tau_sync_refusals_total{app=~\"$app\",service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{tau_sync_refusal_code}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 7 },
+      "id": 9
+    },
+    {
+      "title": "Object store failed calls (1h)",
+      "type": "stat",
+      "description": "S3 calls from tau-api, tau-storage and tau-mirror that failed after the SDK's retries, excluding a missing key, a lost conditional write and a client abort. Timed outside the retry loop, so an absorbed 429 or 5xx is invisible here (W14 Finding 4). Pages above 5% over 5 min (storage-r2-unavailable).",
+      "targets": [
+        {
+          "expr": "((sum(rate(tau_storage_operation_duration_count{app=~\"$app\",service_name=~\"$service\",outcome=\"error\",error_type!~\"NoSuchKey|NotFound|PreconditionFailed|AbortError\"}[1h]) or rate(tau_storage_operation_duration_count{app=~\"$storage_app\",service_name=\"tau-storage\",outcome=\"error\",error_type!~\"NoSuchKey|NotFound|PreconditionFailed|AbortError\"}[1h]) or rate(tau_storage_operation_duration_count{app=~\"$mirror_app\",service_name=\"tau-mirror\",outcome=\"error\",error_type!~\"NoSuchKey|NotFound|PreconditionFailed|AbortError\"}[1h]))) or vector(0)) / clamp_min(sum(rate(tau_storage_operation_duration_count{app=~\"$app\",service_name=~\"$service\"}[1h]) or rate(tau_storage_operation_duration_count{app=~\"$storage_app\",service_name=\"tau-storage\"}[1h]) or rate(tau_storage_operation_duration_count{app=~\"$mirror_app\",service_name=\"tau-mirror\"}[1h])), 1e-10)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.01 },
+              { "color": "red", "value": 0.05 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 7, "w": 4, "x": 8, "y": 7 },
+      "id": 10
+    },
+    {
+      "title": "Manifest CAS lost or throttled (1h)",
+      "type": "stat",
+      "description": "Conditional manifest writes that lost the race or were throttled, from whichever app ran git.",
+      "targets": [
+        {
+          "expr": "((sum(increase(tau_git_commit_attempts_total{app=~\"$app\",service_name=~\"$service\",outcome=~\"lost_race|throttled\"}[1h]) or increase(tau_git_commit_attempts_total{app=~\"$storage_app\",service_name=\"tau-storage\",outcome=~\"lost_race|throttled\"}[1h]))) or vector(0)) / clamp_min(sum(increase(tau_git_commit_attempts_total{app=~\"$app\",service_name=~\"$service\"}[1h]) or increase(tau_git_commit_attempts_total{app=~\"$storage_app\",service_name=\"tau-storage\"}[1h])), 1e-10)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.005 },
+              { "color": "red", "value": 0.01 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 7, "w": 4, "x": 12, "y": 7 },
+      "id": 11
+    },
+    {
+      "title": "B2 copy lag",
+      "type": "stat",
+      "description": "SLO-6 (W13 B5): warn above 15 min, page above 60 min, backstop 24 h.",
+      "targets": [
+        {
+          "expr": "max(tau_mirror_copy_lag_seconds{app=~\"$mirror_app\",service_name=\"tau-mirror\",destination=\"b2\"})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 900 },
+              { "color": "red", "value": 3600 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 7, "w": 4, "x": 16, "y": 7 },
+      "id": 12
+    },
+    {
+      "title": "Last passing drill (age)",
+      "type": "stat",
+      "description": "Weekly second-copy drill (D23, STO-1). Warns past 8 days (storage-b2-drill-stale).",
+      "targets": [
+        {
+          "expr": "time() - max(max_over_time(tau_mirror_drill_last_success_timestamp_seconds{app=~\"$mirror_app\",service_name=\"tau-mirror\"}[9d]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 604800 },
+              { "color": "red", "value": 691200 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 7, "w": 4, "x": 20, "y": 7 },
+      "id": 13
+    },
+    {
+      "title": "Capacity headroom",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
+      "panels": [],
+      "id": 14
+    },
+    {
+      "title": "Busiest worker: active leases",
+      "type": "stat",
+      "description": "Leases the busiest tau-storage Machine holds now. The slot gauges (tau_git_rpcs_inflight, tau_git_capacity_slots) are not emitted yet; OB4 replaces this with in-flight ÷ slots.",
+      "targets": [
+        {
+          "expr": "max(sum by (instance) (tau_git_leases_active{app=~\"$storage_app\",service_name=\"tau-storage\"}))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 6, "w": 4, "x": 0, "y": 15 },
+      "id": 15
+    },
+    {
+      "title": "Running workers",
+      "type": "stat",
+      "description": "tau-storage Machines Fly reports up. Pages below 2 (storage-workers-below-floor).",
+      "targets": [{ "expr": "sum(fly_instance_up{app=~\"$storage_app\"})", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 2 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 6, "w": 4, "x": 4, "y": 15 },
+      "id": 16
+    },
+    {
+      "title": "Spill (1h)",
+      "type": "stat",
+      "description": "Forwarded git requests sent past the rendezvous-preferred member, over forwarded requests (the tau_sync_operation_duration count with tau_git_execution=\"forwarded\"). Warns above 5% (storage-spill-high).",
+      "targets": [
+        {
+          "expr": "((sum(increase(tau_git_spills_total{app=~\"$app\",service_name=~\"$service\"}[1h]))) or vector(0)) / clamp_min(sum(increase(tau_sync_operation_duration_count{app=~\"$app\",service_name=~\"$service\",tau_git_execution=\"forwarded\"}[1h])), 1e-10)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.02 },
+              { "color": "red", "value": 0.05 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 6, "w": 4, "x": 8, "y": 15 },
+      "id": 17
+    },
+    {
+      "title": "Tightest disk (free − reserved)",
+      "type": "stat",
+      "description": "Lease filesystem free bytes less the disk admitted leases have reserved, on the tightest Machine. The D20 reserve has no gauge yet (tau_git_disk_reserve_bytes is not emitted).",
+      "targets": [
+        {
+          "expr": "min((min by (instance) (tau_git_disk_free_bytes{app=~\"$app\",service_name=~\"$service\"}) - sum by (instance) (tau_git_lease_reserved_bytes{app=~\"$app\",service_name=~\"$service\"})) or (min by (instance) (tau_git_disk_free_bytes{app=~\"$storage_app\",service_name=\"tau-storage\"}) - sum by (instance) (tau_git_lease_reserved_bytes{app=~\"$storage_app\",service_name=\"tau-storage\"})))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "gridPos": { "h": 6, "w": 4, "x": 12, "y": 15 },
+      "id": 18
+    },
+    {
+      "title": "Busiest worker CPU",
+      "type": "stat",
+      "description": "Busy share of the busiest tau-storage Machine. Warns at a 70% fleet mean (storage-worker-cpu-high).",
+      "targets": [
+        {
+          "expr": "max(1 - (sum by (instance) (rate(fly_instance_cpu{app=~\"$storage_app\",mode=\"idle\"}[5m])) / sum by (instance) (rate(fly_instance_cpu{app=~\"$storage_app\"}[5m]))))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.5 },
+              { "color": "red", "value": 0.7 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 6, "w": 4, "x": 16, "y": 15 },
+      "id": 19
+    },
+    {
+      "title": "Cache hit ratio (1h)",
+      "type": "stat",
+      "description": "Pack cache lookups answered from the tau-storage cache (DC2).",
+      "targets": [
+        {
+          "expr": "((sum(rate(tau_git_cache_lookups_total{app=~\"$storage_app\",service_name=\"tau-storage\",result=\"hit\"}[1h]))) or vector(0)) / clamp_min(sum(rate(tau_git_cache_lookups_total{app=~\"$storage_app\",service_name=\"tau-storage\"}[1h])), 1e-10)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit" } },
+      "gridPos": { "h": 6, "w": 4, "x": 20, "y": 15 },
+      "id": 20
+    },
+    {
+      "title": "Trigger proximity: 100% means the trigger fires",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 21 },
+      "panels": [],
+      "id": 21
+    },
+    {
+      "title": "Distance to every stage and package trigger",
+      "type": "bargauge",
+      "description": "Each bar is the current value as a percentage of its trigger threshold (W14 trigger table). The compute-tier (W11), serializer (S3-3) and slot-use (C3) triggers have no emitted metric yet and are not drawn.",
+      "targets": [
+        {
+          "expr": "max(tau_git_hot_project_commit_rate{app=~\"$app\",service_name=~\"$service\",rank=\"1\"} or tau_git_hot_project_commit_rate{app=~\"$storage_app\",service_name=\"tau-storage\",rank=\"1\"}) * (histogram_quantile(0.5, sum by (le) (rate(tau_git_commit_duration_bucket{app=~\"$app\",service_name=~\"$service\",tau_git_commit_phase=\"manifest_read\"}[1h]) or rate(tau_git_commit_duration_bucket{app=~\"$storage_app\",service_name=\"tau-storage\",tau_git_commit_phase=\"manifest_read\"}[1h]))) + histogram_quantile(0.5, sum by (le) (rate(tau_git_commit_duration_bucket{app=~\"$app\",service_name=~\"$service\",tau_git_commit_phase=\"manifest_write\"}[1h]) or rate(tau_git_commit_duration_bucket{app=~\"$storage_app\",service_name=\"tau-storage\",tau_git_commit_phase=\"manifest_write\"}[1h])))) / 0.5 * 100",
+          "legendFormat": "Hottest project commits vs 50% of the measured ceiling (S2-1)",
+          "refId": "A"
+        },
+        {
+          "expr": "((sum(increase(tau_git_commit_attempts_total{app=~\"$app\",service_name=~\"$service\",outcome=\"lost_race\"}[1h]) or increase(tau_git_commit_attempts_total{app=~\"$storage_app\",service_name=\"tau-storage\",outcome=\"lost_race\"}[1h]))) or vector(0)) / clamp_min(sum(increase(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"push\"}[1h])), 1e-10) / 0.01 * 100",
+          "legendFormat": "Lost races vs 1% of pushes (S2-2, DA5)",
+          "refId": "B"
+        },
+        {
+          "expr": "max(tau_git_hot_project_writers{app=~\"$app\",service_name=~\"$service\",rank=\"1\"} or tau_git_hot_project_writers{app=~\"$storage_app\",service_name=\"tau-storage\",rank=\"1\"}) / 20 * 100",
+          "legendFormat": "Writers on one project vs 20 (S2-3)",
+          "refId": "C"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(tau_sync_operation_duration_bucket{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"push\",outcome!~\"unauthorized|quota_refused\"}[15m]))) / 2 * 100",
+          "legendFormat": "Push p95 vs 2 s (S2-4)",
+          "refId": "D"
+        },
+        {
+          "expr": "sum(rate(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"push\",outcome=\"ok\"}[15m])) / 50 * 100",
+          "legendFormat": "Fleet writes/s vs 50 (S2-5)",
+          "refId": "E"
+        },
+        {
+          "expr": "sum(fly_instance_up{app=~\"$storage_app\"}) / 24 * 100",
+          "legendFormat": "Workers vs 24 (S2-5)",
+          "refId": "F"
+        },
+        {
+          "expr": "sum(rate(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"push\",outcome=\"ok\"}[15m])) / 2000 * 100",
+          "legendFormat": "Fleet writes/s vs 2,000 (S3-1)",
+          "refId": "G"
+        },
+        {
+          "expr": "sum(max by (tau_db_application, state) (tau_db_connections{app=~\"$app\",service_name=~\"$service\"})) / max(tau_db_connection_budget{app=~\"$app\",service_name=~\"$service\"}) / 0.6 * 100",
+          "legendFormat": "Postgres connections vs 60% of the pooler (S3-5)",
+          "refId": "H"
+        },
+        {
+          "expr": "((sum(increase(tau_git_spills_total{app=~\"$app\",service_name=~\"$service\"}[1h]))) or vector(0)) / clamp_min(sum(increase(tau_sync_operation_duration_count{app=~\"$app\",service_name=~\"$service\",tau_git_execution=\"forwarded\"}[1h])), 1e-10) / 0.05 * 100",
+          "legendFormat": "Spill vs 5% (T1)",
+          "refId": "I"
+        },
+        {
+          "expr": "((sum(increase(tau_git_cache_fallbacks_total{app=~\"$storage_app\",service_name=\"tau-storage\"}[1d]))) or vector(0)) / clamp_min(sum(increase(tau_git_hydrate_bytes_count{app=~\"$storage_app\",service_name=\"tau-storage\"}[1d])), 1e-10) / 0.5 * 100",
+          "legendFormat": "Cache fallbacks vs 50% of hydrates (C3, DD1)",
+          "refId": "J"
+        },
+        {
+          "expr": "sum(increase(tau_storage_operation_duration_count{app=~\"$storage_app\",service_name=\"tau-storage\",tau_storage_operation=~\"PutObject|CopyObject|ListObjects|ListObjectsV2|CreateMultipartUpload|UploadPart|UploadPartCopy|CompleteMultipartUpload|ListMultipartUploads|ListParts\"}[1d])) / clamp_min(sum(increase(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"push\",outcome=\"ok\"}[1d])), 1) / 4.5 * 100",
+          "legendFormat": "Class A calls per push vs 4.5 (Z8)",
+          "refId": "K"
+        },
+        {
+          "expr": "max(tau_mirror_copy_lag_seconds{app=~\"$mirror_app\",service_name=\"tau-mirror\",destination=\"b2\"}) / 900 * 100",
+          "legendFormat": "B2 copy lag vs 15 min (W13 B5)",
+          "refId": "L"
+        },
+        {
+          "expr": "max(tau_git_repository_ceiling_proximity{app=~\"$app\",service_name=~\"$service\",threshold=\"0.8\"}) / 10 * 100",
+          "legendFormat": "Repositories above 80% of 1 GiB vs 10 (X6)",
+          "refId": "M"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 70 },
+              { "color": "red", "value": 100 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "gridPos": { "h": 14, "w": 24, "x": 0, "y": 22 },
+      "id": 22
+    },
+    {
+      "title": "Cost and usage",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 36 },
+      "panels": [],
+      "id": 23
+    },
+    {
+      "title": "R2 cost, month to date (estimate)",
+      "type": "stat",
+      "description": "List price: Class A US$4.50/M, Class B US$0.36/M, storage US$0.015/GB-month, from the accounting scheduler's Cloudflare analytics (OB3). Free tiers are not subtracted.",
+      "targets": [
+        {
+          "expr": "sum(max by (tau_r2_bucket, tau_r2_class, tau_r2_action, tau_r2_status, tau_r2_window) (tau_r2_requests{app=~\"$app\",service_name=~\"$service\",tau_r2_window=\"month\",tau_r2_class=\"A\"})) * 4.5e-06 + sum(max by (tau_r2_bucket, tau_r2_class, tau_r2_action, tau_r2_status, tau_r2_window) (tau_r2_requests{app=~\"$app\",service_name=~\"$service\",tau_r2_window=\"month\",tau_r2_class=\"B\"})) * 3.6e-07 + sum(max by (tau_r2_bucket) (tau_r2_stored_bytes{app=~\"$app\",service_name=~\"$service\"})) / 1e9 * 0.015",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" } },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 37 },
+      "id": 24
+    },
+    {
+      "title": "Class A calls per push (1d)",
+      "type": "stat",
+      "description": "tau-storage's Class A S3 calls (every one is git work) per acknowledged push. Counts calls, not HTTP attempts: a retried call counts once until tau_storage_attempts_total exists (OB2).",
+      "targets": [
+        {
+          "expr": "sum(increase(tau_storage_operation_duration_count{app=~\"$storage_app\",service_name=\"tau-storage\",tau_storage_operation=~\"PutObject|CopyObject|ListObjects|ListObjectsV2|CreateMultipartUpload|UploadPart|UploadPartCopy|CompleteMultipartUpload|ListMultipartUploads|ListParts\"}[1d])) / clamp_min(sum(increase(tau_sync_operations_total{app=~\"$app\",service_name=~\"$service\",tau_sync_operation=\"push\",outcome=\"ok\"}[1d])), 1)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 2 } },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 37 },
+      "id": 25
+    },
+    {
+      "title": "Stored bytes (R2 + B2)",
+      "type": "stat",
+      "description": "R2 per Cloudflare analytics (OB3); B2 from the last full reconcile.",
+      "targets": [
+        {
+          "expr": "sum(max by (tau_r2_bucket) (tau_r2_stored_bytes{app=~\"$app\",service_name=~\"$service\"}))",
+          "legendFormat": "R2",
+          "refId": "A"
+        },
+        {
+          "expr": "max(tau_mirror_destination_stored_bytes{app=~\"$mirror_app\",service_name=\"tau-mirror\",destination=\"b2\"})",
+          "legendFormat": "B2",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 37 },
+      "id": 26
+    },
+    {
+      "title": "Repositories near 1 GiB (>= 80%)",
+      "type": "stat",
+      "description": "D20 ceiling proximity from the accounting scheduler (OB3). More than 10 is trigger X6; any at 95% warns.",
+      "targets": [
+        {
+          "expr": "max(tau_git_repository_ceiling_proximity{app=~\"$app\",service_name=~\"$service\",threshold=\"0.8\"})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 37 },
+      "id": 27
+    },
+    {
+      "title": "Firing storage alerts",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 42 },
+      "panels": [],
+      "id": 28
+    },
+    {
+      "title": "Storage alerts firing or pending",
+      "type": "alertlist",
+      "options": {
+        "viewMode": "list",
+        "groupMode": "default",
+        "groupBy": [],
+        "maxItems": 50,
+        "sortOrder": 1,
+        "dashboardAlerts": false,
+        "alertName": "",
+        "alertInstanceLabelFilter": "{component=~\"git|r2|mirror|storage|migration\",app=~\"$app\"}",
+        "stateFilter": { "firing": true, "pending": true, "noData": false, "normal": false, "error": true }
+      },
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 43 },
+      "id": 29
+    }
+  ]
+}

@@ -94,6 +94,119 @@ const routeScopes = ['repository', 'global'] as const;
 /** `rank` on the hot-project gauges: the top ten, never a project or owner id. */
 const hotProjectRanks = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'] as const;
 
+/* The storage accounting scheduler (W14 OB3, N43–N55). Every label is an enum with an `other` value or a
+   fixed list: an owner, project or bucket name never reaches a label. */
+
+/** `tau.plan`: the billing tier an owner's storage counts under (D16). */
+const storagePlans = ['free', 'pro', 'enterprise'] as const;
+
+/** `tau.storage.class`: what the stored bytes are (D18 keeps `retained` beside the plan, never charged). */
+const storageClasses = ['repository', 'retained', 'lfs', 'compute', 'mirror'] as const;
+
+/** `band` on `tau.storage.quota.owners`: an owner's use of its plan allowance. */
+const quotaBands = ['lt50', '50_80', '80_95', '95_100', 'over'] as const;
+
+/** `threshold` on `tau.git.repository.ceiling_proximity`: fractions of D20's 1 GiB repository ceiling. */
+const ceilingThresholds = ['0.5', '0.8', '0.95', '1.0'] as const;
+
+/** `tau.size_le` on the size distribution: the repository byte buckets as cumulative upper bounds. */
+const repositorySizeBounds = [...Array.from({ length: 15 }, (_, step) => String(65_536 * 2 ** step)), '+Inf'] as const;
+
+/**
+ * `tau.r2.bucket`: which of Tau's buckets a figure is for, by role. The environment's two configured
+ * buckets are `public` (`TAU_S3_BUCKET`) and `private` (`TAU_S3_PRIVATE_BUCKET`); every other bucket in
+ * the account, another environment's included, is `other`.
+ */
+const r2Buckets = ['public', 'private', 'other'] as const;
+
+/** `tau.r2.action`: R2's billed `actionType` values (R2 pricing); any other is `other`. */
+const r2Actions = [
+  'ListBuckets',
+  'PutBucket',
+  'ListObjects',
+  'PutObject',
+  'CopyObject',
+  'CompleteMultipartUpload',
+  'CreateMultipartUpload',
+  'LifecycleStorageTierTransition',
+  'ListMultipartUploads',
+  'UploadPart',
+  'UploadPartCopy',
+  'ListParts',
+  'PutBucketEncryption',
+  'PutBucketCors',
+  'PutBucketLifecycleConfiguration',
+  'HeadBucket',
+  'HeadObject',
+  'GetObject',
+  'UsageSummary',
+  'GetBucketEncryption',
+  'GetBucketLocation',
+  'GetBucketCors',
+  'GetBucketLifecycleConfiguration',
+  'DeleteObject',
+  'DeleteBucket',
+  'AbortMultipartUpload',
+  'other',
+] as const;
+
+/** `tau.r2.window`: the last full UTC hour, or the UTC month to date. */
+const r2Windows = ['hour', 'month'] as const;
+
+/** `tau.db.application`: the PostgreSQL `application_name` of a connection, mapped to Tau's processes. */
+const databaseApplications = ['api', 'billing-operations', 'maintenance', 'mirror', 'release', 'other'] as const;
+
+/** `tau.storage.accounting.task`: the accounting scheduler's periodic tasks. */
+const accountingTasks = ['usage', 'r2_analytics', 'db', 'hot_projects', 'route'] as const;
+
+/** `tau.agent_evidence.plane`: the purpose plane a piece of agent evidence was captured under. */
+const agentEvidencePlanes = ['summary', 'feedback', 'content'] as const;
+
+/**
+ * `outcome` of one agent-evidence admission. `duplicate` answered a held receipt, `revoked` and
+ * `expired` a replay current policy or retention no longer delivers; `policy_stale` a submission
+ * under a superseded policy epoch, `refused` one whose purpose is not granted.
+ */
+const agentEvidenceAdmissionOutcomes = [
+  'accepted',
+  'duplicate',
+  'revoked',
+  'expired',
+  'refused',
+  'policy_stale',
+  'conflict',
+  'fenced',
+  'capacity',
+  'error',
+] as const;
+
+/**
+ * `outcome` of one agent-evidence delivery step. `acknowledged` and `uncertain` are sends whose
+ * visibility is not yet proven; `confirmed` was read back; `gap` was never visible and is not resent;
+ * `key_unavailable` is held for a payload key this deployment no longer has; `abandoned` is a lease a
+ * stopped worker left, returned for another pass.
+ */
+const agentEvidenceDeliveryOutcomes = [
+  'acknowledged',
+  'uncertain',
+  'confirmed',
+  'recheck',
+  'retry',
+  'key_unavailable',
+  'rejected',
+  'revoked',
+  'gap',
+  'expired',
+  'abandoned',
+  'lease_lost',
+] as const;
+
+/** `tau.agent_evidence.state`: an agent-evidence backlog row's delivery state. */
+const agentEvidenceBacklogStates = ['pending', 'sending', 'confirmed', 'uncertain', 'rejected', 'expired'] as const;
+
+/** `outcome` of one Langfuse trace erasure step; only `absent` settles a trace. */
+const agentEvidenceErasureOutcomes = ['requested', 'retry', 'absent', 'present', 'recheck', 'lease_lost'] as const;
+
 /**
  * Canonical metric registry for Tau.
  *
@@ -1128,13 +1241,31 @@ export const TauMetrics = {
     }),
   }),
 
+  /**
+   * One commit's latency, whole (`total`) and by phase, as `commitLease` runs them: `prepare`
+   * (ref read, loose-object count, connectivity check), `compaction` (repack, compacting commits
+   * only), `hash` (digests of the pack and index), `object_puts` (pack, index, retirement markers
+   * and spilled push-log segment in one concurrent round), `manifest_write` (the conditional write
+   * and its rate-limit retries) and `manifest_read` (the re-read of a write that did not certainly
+   * win). Buckets resolve 0.25–5 s, where staging pushes commit (2026-10-28: every commit fell in
+   * the old (2,5] bucket).
+   */
   gitCommitDuration: defineHistogram({
     name: 'tau.git.commit.duration',
     unit: 's',
-    description: 'Manifest commit latency by phase (manifest read, manifest write, or the whole commit) and kind',
-    buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30],
+    description:
+      'Commit latency by phase (prepare, compaction, hash, object puts, manifest write/read, or total) and kind',
+    buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 2.5, 3, 4, 5, 7.5, 10, 30],
     attributes: z.object({
-      'tau.git.commit.phase': z.enum(['manifest_read', 'manifest_write', 'total']),
+      'tau.git.commit.phase': z.enum([
+        'prepare',
+        'compaction',
+        'hash',
+        'object_puts',
+        'manifest_write',
+        'manifest_read',
+        'total',
+      ]),
       'tau.git.commit.kind': z.enum(['push', 'fence', 'compaction', 'batch']),
     }),
   }),
@@ -1351,11 +1482,14 @@ export const TauMetrics = {
   syncClientLag: defineHistogram({
     name: 'tau.sync.client.lag',
     unit: 's',
-    description: 'Client-reported time from the first unsynced mint to the server acknowledging it',
+    description:
+      'Client-reported time from the first unsynced change (a mint, a record change, or the push request itself) to the server acknowledging it, on every acknowledged push',
     /* Dense through 3–30 s, where a save's debounce, a push and one retry land. */
     buckets: [0.5, 1, 2, 3, 4, 5, 7.5, 10, 15, 20, 30, 60, 120, 300, 900, 3600],
     attributes: z.object({
       'agent.placement': z.enum(['browser', 'desktop', 'daemon']),
+      /* What dated the lag: `request` is a push nothing dated, which measures only its own duration. */
+      'sync.lag.since': z.enum(['change', 'queue', 'request']),
     }),
   }),
 
@@ -1379,6 +1513,62 @@ export const TauMetrics = {
     buckets: [0, 1, 2, 5, 10, 25, 50, 100, 500],
     attributes: z.object({
       'agent.placement': z.enum(['browser', 'desktop', 'daemon']),
+    }),
+  }),
+
+  /*
+   * The large-object phase of a client tree read that fetched from the remote: an open's hydrate,
+   * which the pull attempt above settles before (load-path audit). `cache` is cold when nothing was
+   * local yet, partial when some objects were; a read that fetched nothing is not reported.
+   */
+  syncClientLfsDuration: defineHistogram({
+    name: 'tau.sync.client.lfs.duration',
+    unit: 's',
+    description:
+      'Client-reported wall time of one tree read’s large-object phase (local reads, batch calls and transfers), on reads that fetched from the remote',
+    buckets: [0.5, 1, 2, 3, 5, 7.5, 10, 15, 20, 30, 60, 120, 300, 900],
+    attributes: z.object({
+      'agent.placement': z.enum(['browser', 'desktop', 'daemon']),
+      cache: z.enum(['cold', 'partial']),
+    }),
+  }),
+
+  syncClientLfsObjects: defineCounter({
+    name: 'tau.sync.client.lfs.objects',
+    unit: '{object}',
+    description:
+      'Large objects a client tree read resolved, by whether they came from the remote or the local store, on reads that fetched from the remote',
+    attributes: z.object({
+      'agent.placement': z.enum(['browser', 'desktop', 'daemon']),
+      source: z.enum(['network', 'local']),
+    }),
+  }),
+
+  syncClientLfsBytes: defineCounter({
+    name: 'tau.sync.client.lfs.bytes',
+    unit: 'By',
+    description: 'Large-object bytes a client tree read resolved, by source, on reads that fetched from the remote',
+    attributes: z.object({
+      'agent.placement': z.enum(['browser', 'desktop', 'daemon']),
+      source: z.enum(['network', 'local']),
+    }),
+  }),
+
+  /*
+   * STO-25: how long a hosted project takes to open in the browser, from its revision root opening.
+   * `first_view` is the repository checked out, so the editor and file tree are usable; `fully_fetched`
+   * is every large object local, so the viewer can render. `cache` is cold when the open fetched at
+   * least one large object from the network.
+   */
+  projectOpenDuration: defineHistogram({
+    name: 'tau.project.open.duration',
+    unit: 's',
+    description:
+      'Client-reported time from a hosted project opening in the browser to its first usable view, and to every large object being local',
+    buckets: [0.25, 0.5, 1, 2, 3, 5, 7.5, 10, 15, 20, 30, 60, 120, 300, 900],
+    attributes: z.object({
+      phase: z.enum(['first_view', 'fully_fetched']),
+      cache: z.enum(['cold', 'warm']),
     }),
   }),
 
@@ -1585,6 +1775,137 @@ export const TauMetrics = {
     attributes: z.object({ environment: z.enum(mirrorDrillEnvironments) }),
   }),
 
+  // --- Storage accounting scheduler (Hosted Remote Storage W14 OB3) ---
+  /*
+   * One API Machine computes each task under a Redis lock and shares the result, so every Machine
+   * exports the same figures: panels and rules read them with `max`, never `sum`.
+   */
+
+  storageUsageBytes: defineGauge({
+    name: 'tau.storage.usage.bytes',
+    unit: 'By',
+    description: 'Stored bytes over every project, by storage class and the owner’s plan',
+    attributes: z.object({
+      'tau.storage.class': z.enum(storageClasses),
+      'tau.plan': z.enum(storagePlans),
+    }),
+  }),
+
+  storageUsageRepositories: defineGauge({
+    name: 'tau.storage.usage.repositories',
+    unit: '{repository}',
+    description: 'Hosted repositories of live projects, by the owner’s plan',
+    attributes: z.object({
+      'tau.plan': z.enum(storagePlans),
+    }),
+  }),
+
+  gitRepositorySizeDistribution: defineGauge({
+    name: 'tau.git.repository.size_distribution',
+    unit: '{repository}',
+    description: 'Hosted repositories whose pack bytes are at or below each bound (cumulative), over the whole fleet',
+    attributes: z.object({
+      'tau.size_le': z.enum(repositorySizeBounds),
+    }),
+  }),
+
+  gitRepositoryCeilingProximity: defineGauge({
+    name: 'tau.git.repository.ceiling_proximity',
+    unit: '{repository}',
+    description: 'Hosted repositories at or above each fraction of the 1 GiB per-repository ceiling',
+    attributes: z.object({
+      threshold: z.enum(ceilingThresholds),
+    }),
+  }),
+
+  storageQuotaOwners: defineGauge({
+    name: 'tau.storage.quota.owners',
+    unit: '{owner}',
+    description: 'Owners with hosted storage, by plan and by how much of the plan allowance they use',
+    attributes: z.object({
+      'tau.plan': z.enum(storagePlans),
+      band: z.enum(quotaBands),
+    }),
+  }),
+
+  databaseConnections: defineGauge({
+    name: 'tau.db.connections',
+    unit: '{connection}',
+    description: 'PostgreSQL client connections to this database, by application and state',
+    attributes: z.object({
+      'tau.db.application': z.enum(databaseApplications),
+      state: z.enum(['active', 'idle', 'idle_in_transaction', 'other']),
+    }),
+  }),
+
+  databaseConnectionBudget: defineGauge({
+    name: 'tau.db.connection_budget',
+    unit: '{connection}',
+    description: 'Client connections the database admits: max_connections less the superuser reserve',
+    attributes: z.object({}),
+  }),
+
+  r2Requests: defineGauge({
+    name: 'tau.r2.requests',
+    unit: '{request}',
+    description: 'R2 operations Cloudflare counted, by bucket, class, action, status and window',
+    attributes: z.object({
+      'tau.r2.bucket': z.enum(r2Buckets),
+      'tau.r2.class': z.enum(['A', 'B', 'free']),
+      'tau.r2.action': z.enum(r2Actions),
+      'tau.r2.status': z.enum(['success', 'userError', 'internalError', 'other']),
+      'tau.r2.window': z.enum(r2Windows),
+    }),
+  }),
+
+  r2StoredBytes: defineGauge({
+    name: 'tau.r2.stored_bytes',
+    unit: 'By',
+    description: 'Payload and metadata bytes stored per R2 bucket, from Cloudflare’s latest storage sample',
+    attributes: z.object({
+      'tau.r2.bucket': z.enum(r2Buckets),
+    }),
+  }),
+
+  r2Objects: defineGauge({
+    name: 'tau.r2.objects',
+    unit: '{object}',
+    description: 'Objects stored per R2 bucket, from Cloudflare’s latest storage sample',
+    attributes: z.object({
+      'tau.r2.bucket': z.enum(r2Buckets),
+    }),
+  }),
+
+  r2BandwidthBytes: defineGauge({
+    name: 'tau.r2.bandwidth_bytes',
+    unit: 'By',
+    description: 'R2 bytes moved per bucket, by direction and window; Cloudflare omits transfers under 100 KiB',
+    attributes: z.object({
+      'tau.r2.bucket': z.enum(r2Buckets),
+      direction: z.enum(['upload', 'download']),
+      'tau.r2.window': z.enum(r2Windows),
+    }),
+  }),
+
+  storageAccountingPasses: defineCounter({
+    name: 'tau.storage.accounting.passes',
+    unit: '{pass}',
+    description: 'Storage accounting passes by task and outcome; `skipped` is a task its configuration leaves off',
+    attributes: z.object({
+      'tau.storage.accounting.task': z.enum(accountingTasks),
+      outcome: z.enum(['ok', 'error', 'skipped']),
+    }),
+  }),
+
+  storageAccountingLastSuccess: defineGauge({
+    name: 'tau.storage.accounting.last_success',
+    unit: 's',
+    description: 'Unix time the figures a storage accounting task exports were computed',
+    attributes: z.object({
+      'tau.storage.accounting.task': z.enum(accountingTasks),
+    }),
+  }),
+
   // --- Billing workers (F-10) ---
 
   billingWorkerPasses: defineCounter({
@@ -1594,6 +1915,73 @@ export const TauMetrics = {
       'Completed billing-worker passes; a gauge keeps exporting its last value, so this is the liveness signal',
     attributes: z.object({
       'tau.worker': z.enum(['recovery', 'operations']),
+      outcome: z.enum(['ok', 'error']),
+    }),
+  }),
+
+  // --- Agent evidence (Tau Agent observability T14; counts and bounded codes only, never ids or content) ---
+
+  agentEvidenceAdmissions: defineCounter({
+    name: 'tau.agent_evidence.admissions',
+    unit: '{admission}',
+    description: 'Parsed agent-evidence submissions by who reported them, purpose plane and outcome',
+    attributes: z.object({
+      'tau.agent_evidence.authority': z.enum(['host', 'api']),
+      'tau.agent_evidence.plane': z.enum(agentEvidencePlanes),
+      outcome: z.enum(agentEvidenceAdmissionOutcomes),
+    }),
+  }),
+
+  agentEvidenceDeliveries: defineCounter({
+    name: 'tau.agent_evidence.deliveries',
+    unit: '{delivery}',
+    description: 'Agent-evidence delivery and reconciliation steps settled, by outcome',
+    attributes: z.object({
+      outcome: z.enum(agentEvidenceDeliveryOutcomes),
+    }),
+  }),
+
+  agentEvidenceBacklogRows: defineGauge({
+    name: 'tau.agent_evidence.backlog_rows',
+    unit: '{row}',
+    description: 'Agent-evidence backlog rows by delivery state; every replica reports the same shared figure',
+    attributes: z.object({
+      'tau.agent_evidence.state': z.enum(agentEvidenceBacklogStates),
+    }),
+  }),
+
+  agentEvidenceBacklogHeldBytes: defineGauge({
+    name: 'tau.agent_evidence.backlog_held_bytes',
+    unit: 'By',
+    description: 'Sealed agent-evidence payload bytes still held for delivery, against the backlog budget',
+    attributes: z.object({}),
+  }),
+
+  agentEvidenceErasureTraces: defineCounter({
+    name: 'tau.agent_evidence.erasure_traces',
+    unit: '{trace}',
+    description: 'Langfuse traces moved through an erasure step, by outcome',
+    attributes: z.object({
+      outcome: z.enum(agentEvidenceErasureOutcomes),
+    }),
+  }),
+
+  agentEvidenceLifecycleRecords: defineCounter({
+    name: 'tau.agent_evidence.lifecycle_records',
+    unit: '{record}',
+    description:
+      'Agent-evidence records retired: `purged` payloads past retention, `reaped` receipts past grace, `erased` subjects completed',
+    attributes: z.object({
+      action: z.enum(['purged', 'reaped', 'erased']),
+    }),
+  }),
+
+  agentEvidencePasses: defineCounter({
+    name: 'tau.agent_evidence.passes',
+    unit: '{pass}',
+    description: 'Completed agent-evidence worker passes; the liveness signal for delivery and lifecycle',
+    attributes: z.object({
+      'tau.worker': z.enum(['delivery', 'lifecycle']),
       outcome: z.enum(['ok', 'error']),
     }),
   }),

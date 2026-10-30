@@ -1,14 +1,33 @@
+import { definitionProvider } from '#components/code/editor-definition.js';
+import { languageFeatures } from '#components/code/editor-language-features.js';
+import type {
+  CallHierarchyDirection,
+  EditorLocationItem,
+  EditorOccurrence,
+  EditorSignature,
+  EditorSymbol,
+} from '#components/code/editor-language-features.js';
+import {
+  renderTypeScriptDocumentation,
+  typeScriptDocumentationMarkdown,
+} from '#components/code/editor-documentation.js';
 import type ts from 'typescript';
 import { autocompletion, snippet } from '@codemirror/autocomplete';
 import type { Completion, CompletionSource } from '@codemirror/autocomplete';
 import { codeFolding, foldService } from '@codemirror/language';
 import { linter } from '@codemirror/lint';
 import type { Diagnostic } from '@codemirror/lint';
-import { StateEffect, StateField } from '@codemirror/state';
+import { StateEffect } from '@codemirror/state';
 import type { Extension } from '@codemirror/state';
-import { Decoration, hoverTooltip, keymap, showDialog, showTooltip, ViewPlugin, WidgetType } from '@codemirror/view';
-import type { Tooltip, ViewUpdate, EditorView } from '@codemirror/view';
-import type { TypeScriptEditBasis, TypeScriptLocation } from '@taucad/lsp/typescript-worker/typescript-service';
+import { Decoration, hoverTooltip, showDialog, ViewPlugin, WidgetType } from '@codemirror/view';
+import type { ViewUpdate, EditorView } from '@codemirror/view';
+import type {
+  TypeScriptDocumentationPart,
+  TypeScriptEditBasis,
+  TypeScriptHighlight,
+  TypeScriptLocation,
+  TypeScriptSymbolLocation,
+} from '@taucad/lsp/typescript-worker/typescript-service';
 import type { TypeScriptWorkerCommand } from '@taucad/lsp/typescript-worker/protocol';
 import type { EditorDocument } from '#lib/editor-document.js';
 import type { TypeScriptService } from '#lib/typescript-language/typescript-service.js';
@@ -38,7 +57,11 @@ export type TypeScriptActions = Readonly<{
   implementation(position: number): Promise<void>;
   typeDefinition(position: number): Promise<void>;
   references(position: number): Promise<readonly TypeScriptLocation[]>;
-  signatureHelp(position: number): Promise<ts.SignatureHelpItems | undefined>;
+  signatureHelp(
+    position: number,
+    trigger?: Readonly<{ character?: string; retrigger?: boolean }>,
+  ): Promise<ts.SignatureHelpItems | undefined>;
+  occurrences(position: number): Promise<readonly TypeScriptHighlight[]>;
   rename(position: number, newName: string): Promise<boolean>;
   format(from?: number, to?: number): Promise<boolean>;
   codeFixes(from: number, to: number, errorCodes: readonly number[]): Promise<readonly CodeFix[]>;
@@ -46,6 +69,8 @@ export type TypeScriptActions = Readonly<{
   fileRename(oldUri: string, newUri: string): Promise<boolean>;
   symbols(): Promise<ts.NavigationTree | undefined>;
   workspaceSymbols(search: string): Promise<readonly ts.NavigateToItem[]>;
+  workspaceSymbolLocations(search: string): Promise<readonly TypeScriptSymbolLocation[]>;
+  callLocations(position: number, direction: CallHierarchyDirection): Promise<readonly TypeScriptSymbolLocation[]>;
   prepareCallHierarchy(position: number): Promise<ts.CallHierarchyItem | readonly ts.CallHierarchyItem[] | undefined>;
   incomingCalls(position: number): Promise<readonly ts.CallHierarchyIncomingCall[]>;
   outgoingCalls(position: number): Promise<readonly ts.CallHierarchyOutgoingCall[]>;
@@ -176,12 +201,28 @@ export async function applyTypeScriptCompletionSelection(selection: CompletionSe
   }
 }
 
+/** Worker documentation parts carry `{@link}` locations, so links open like F12 targets. */
+function documentationOf(
+  info:
+    | Readonly<{
+        documentation?: readonly TypeScriptDocumentationPart[];
+        tags?: ReadonlyArray<Readonly<{ name: string; text?: readonly TypeScriptDocumentationPart[] }>>;
+      }>
+    | undefined,
+): Readonly<{ markdown: string; targets: readonly TypeScriptLocation[] }> {
+  return typeScriptDocumentationMarkdown(info?.documentation ?? [], info?.tags ?? []);
+}
+
 /** Editor actions retain the worker's exact text basis for every touched file. */
 export function createTypeScriptActions(options: TypeScriptExtensionOptions): TypeScriptActions {
   const { client } = options.service;
   const { uri } = options.document;
   const navigateTarget = async (target: TypeScriptLocation): Promise<void> => {
-    if (target.uri.startsWith('file:///__typescript_lib__/') || target.uri.startsWith('file:///cdn-types/')) {
+    if (
+      target.uri.startsWith('file:///__typescript_lib__/') ||
+      target.uri.startsWith('file:///cdn-types/') ||
+      target.uri.startsWith('file:///node_modules/')
+    ) {
       const text = await client.request<string | undefined>({ kind: 'readDeclaration', uri: target.uri });
       if (text === undefined) {
         throw new Error(`TypeScript declaration unavailable: ${target.uri}`);
@@ -229,15 +270,30 @@ export function createTypeScriptActions(options: TypeScriptExtensionOptions): Ty
       });
       return unchanged(options, version) ? references : [];
     },
-    async signatureHelp(position: number): Promise<ts.SignatureHelpItems | undefined> {
+    async signatureHelp(
+      position: number,
+      trigger?: Readonly<{ character?: string; retrigger?: boolean }>,
+    ): Promise<ts.SignatureHelpItems | undefined> {
       const version = await revision(options);
       const help = await client.request<ts.SignatureHelpItems | undefined>({
         kind: 'signatureHelp',
         uri,
         position,
+        triggerCharacter: trigger?.character,
+        retrigger: trigger?.retrigger,
         expectedVersion: version,
       });
       return unchanged(options, version) ? help : undefined;
+    },
+    async occurrences(position: number): Promise<readonly TypeScriptHighlight[]> {
+      const version = await revision(options);
+      const highlights = await client.request<readonly TypeScriptHighlight[]>({
+        kind: 'documentHighlights',
+        uri,
+        position,
+        expectedVersion: version,
+      });
+      return unchanged(options, version) ? highlights : [];
     },
     async rename(position: number, newName: string): Promise<boolean> {
       if (!newName.trim()) {
@@ -308,6 +364,25 @@ export function createTypeScriptActions(options: TypeScriptExtensionOptions): Ty
       }
       return client.request<readonly ts.NavigateToItem[]>({ kind: 'workspaceSymbols', search });
     },
+    async workspaceSymbolLocations(search: string): Promise<readonly TypeScriptSymbolLocation[]> {
+      if (options.workspaceScriptUris) {
+        await client.request({ kind: 'setProjectFiles', uris: options.workspaceScriptUris() });
+      }
+      return client.request<readonly TypeScriptSymbolLocation[]>({ kind: 'workspaceSymbolLocations', search });
+    },
+    async callLocations(
+      position: number,
+      direction: CallHierarchyDirection,
+    ): Promise<readonly TypeScriptSymbolLocation[]> {
+      const version = await revision(options);
+      const calls = await client.request<readonly TypeScriptSymbolLocation[]>({
+        kind: direction === 'incoming' ? 'incomingCallLocations' : 'outgoingCallLocations',
+        uri,
+        position,
+        expectedVersion: version,
+      });
+      return unchanged(options, version) ? calls : [];
+    },
     async prepareCallHierarchy(
       position: number,
     ): Promise<ts.CallHierarchyItem | readonly ts.CallHierarchyItem[] | undefined> {
@@ -343,19 +418,70 @@ export function createTypeScriptActions(options: TypeScriptExtensionOptions): Ty
   };
 }
 
-const signatureEffect = StateEffect.define<Tooltip | undefined>();
-const signatureField = StateField.define<Tooltip | undefined>({
-  create: () => undefined,
-  update: (value, transaction) => {
-    for (const effect of transaction.effects) {
-      if (effect.is(signatureEffect)) {
-        return effect.value;
-      }
+const environmentChanged = StateEffect.define<number>();
+
+/** TypeScript `ScriptElementKind` as the shared symbol kind the editor renders. */
+function symbolKind(kind: string): string {
+  const base = kind.replace(/^local /u, '');
+  return base === 'enum member' ? 'enumMember' : base === 'type parameter' ? 'typeParameter' : base;
+}
+
+function editorSymbols(items: readonly ts.NavigationTree[] | undefined): EditorSymbol[] {
+  return (items ?? []).flatMap((item) => {
+    const span = item.spans[0];
+    if (!span) {
+      return [];
     }
-    return transaction.docChanged ? undefined : value;
-  },
-  provide: (field) => showTooltip.from(field, (value) => value ?? null),
-});
+    return [
+      {
+        name: item.text,
+        kind: symbolKind(item.kind),
+        from: span.start,
+        to: span.start + span.length,
+        selectionFrom: item.nameSpan?.start ?? span.start,
+        children: editorSymbols(item.childItems),
+      },
+    ];
+  });
+}
+
+function fileLabel(location: TypeScriptLocation): Readonly<{ name: string; directory: string }> {
+  const path = decodeURIComponent(location.uri.replace(/^file:\/\//u, ''));
+  const slash = path.lastIndexOf('/');
+  return { name: path.slice(slash + 1), directory: path.slice(0, Math.max(slash, 0)) };
+}
+
+/** TypeScript signature parts as one label with each parameter's range, like VS Code's parameter hints. */
+function editorSignature(help: ts.SignatureHelpItems): EditorSignature | undefined {
+  const item = help.items[help.selectedItemIndex];
+  if (!item) {
+    return undefined;
+  }
+  const text = (parts: readonly ts.SymbolDisplayPart[]): string => parts.map((part) => part.text).join('');
+  const separator = text(item.separatorDisplayParts);
+  let label = text(item.prefixDisplayParts);
+  const parameters: Array<readonly [number, number]> = [];
+  for (const [index, parameter] of item.parameters.entries()) {
+    if (index > 0) {
+      label += separator;
+    }
+    const start = label.length;
+    label += text(parameter.displayParts);
+    parameters.push([start, label.length]);
+  }
+  label += text(item.suffixDisplayParts);
+  const activeParameter = Math.min(help.argumentIndex, Math.max(item.parameters.length - 1, 0));
+  const documentation = typeScriptDocumentationMarkdown(item.documentation, item.tags).markdown;
+  const parameterDocumentation = text(item.parameters[activeParameter]?.documentation ?? []);
+  return {
+    label,
+    parameters,
+    activeParameter,
+    documentation: documentation || undefined,
+    parameterDocumentation: parameterDocumentation || undefined,
+    overload: { index: help.selectedItemIndex, count: help.items.length },
+  };
+}
 
 class HintWidget extends WidgetType {
   private readonly label: string;
@@ -377,11 +503,97 @@ export function createTypeScriptExtensions(options: TypeScriptExtensionOptions):
   const { client } = options.service;
   const { uri } = options.document;
   const actions = createTypeScriptActions(options);
+  const attachedViews = new WeakSet<EditorView>();
   let outlineSpans: readonly ts.OutliningSpan[] = [];
   let latestDiagnostics: readonly TsDiagnostic[] = [];
   let diagnosticsVersion = -1;
   let completionMarked = false;
   let diagnosticsMarked = false;
+  const openLink =
+    (targets: readonly TypeScriptLocation[]) =>
+    (index: number): void => {
+      const target = targets[index];
+      if (target) {
+        void runAction(options, async () => actions.navigateLocation(target));
+      }
+    };
+  const locationItem = (location: TypeScriptLocation): EditorLocationItem => {
+    const file = fileLabel(location);
+    return {
+      label: `${file.name}:${String(location.line)}`,
+      detail: file.directory,
+      preview: location.preview,
+      open: async () => runAction(options, async () => actions.navigateLocation(location)),
+    };
+  };
+  const symbolItem = (symbol: TypeScriptSymbolLocation): EditorLocationItem => {
+    const file = fileLabel(symbol.location);
+    return {
+      label: symbol.name,
+      kind: symbolKind(symbol.kind),
+      detail: [symbol.containerName, `${file.name}:${String(symbol.location.line)}`].filter(Boolean).join(' · '),
+      preview: symbol.location.preview,
+      open: async () => runAction(options, async () => actions.navigateLocation(symbol.location)),
+    };
+  };
+  const showQuickFixes = async (view: EditorView): Promise<void> => {
+    const position = view.state.selection.main.head;
+    const diagnostic = latestDiagnostics.find(
+      (entry) => position >= entry.start && position <= entry.start + entry.length,
+    );
+    if (!diagnostic || diagnosticsVersion !== options.document.version) {
+      return;
+    }
+    const fixes = await actions.codeFixes(diagnostic.start, diagnostic.start + diagnostic.length, [diagnostic.code]);
+    if (fixes.length === 0) {
+      return;
+    }
+    showDialog(view, {
+      content: (current, close) => {
+        const form = current.dom.ownerDocument.createElement('form');
+        form.className = 'cm-typescript-code-actions';
+        for (const fix of fixes) {
+          const button = current.dom.ownerDocument.createElement('button');
+          button.type = 'button';
+          button.textContent = fix.description;
+          button.addEventListener('click', () => {
+            close();
+            void runAction(options, async () => actions.applyCodeFix(fix));
+          });
+          form.append(button);
+        }
+        return form;
+      },
+    });
+  };
+  const renameAtCursor = async (view: EditorView): Promise<void> => {
+    const position = view.state.selection.main.head;
+    const version = await revision(options);
+    const prepared = await client.request<ts.RenameInfo>({
+      kind: 'renameInfo',
+      uri,
+      position,
+      expectedVersion: version,
+    });
+    if (!prepared.canRename || !unchanged(options, version)) {
+      return;
+    }
+    const oldName = view.state.doc.sliceString(
+      prepared.triggerSpan.start,
+      prepared.triggerSpan.start + prepared.triggerSpan.length,
+    );
+    const dialog = showDialog(view, {
+      label: 'Rename symbol',
+      input: { value: oldName },
+      submitLabel: 'Rename',
+      focus: true,
+    });
+    const submitted = await dialog.result;
+    const newName = submitted?.querySelector('input')?.value.trim();
+    if (newName && unchanged(options, version)) {
+      await actions.rename(position, newName);
+    }
+  };
   const completionSource: CompletionSource = async (context) => {
     const word = context.matchBefore(/[\w$]*/u);
     if (!context.explicit && (!word || word.from === word.to)) {
@@ -425,13 +637,15 @@ export function createTypeScriptExtensions(options: TypeScriptExtensionOptions):
             if (!unchanged(options, version)) {
               return null;
             }
-            const info = details.details?.documentation?.map((part) => part.text).join('');
-            if (!info) {
+            const documentation = documentationOf(details.details);
+            const parts = details.details?.displayParts ?? [];
+            if (!documentation.markdown && parts.length === 0) {
               return null;
             }
-            const dom =
-              context.view?.dom.ownerDocument.createElement('div') ?? globalThis.document.createElement('div');
-            dom.textContent = info;
+            const dom = renderTypeScriptDocumentation(parts, documentation.markdown, {
+              ownerDocument: context.view?.dom.ownerDocument,
+              onDefinitionLink: openLink(documentation.targets),
+            });
             return dom;
           } catch (error) {
             report(options, error);
@@ -441,22 +655,21 @@ export function createTypeScriptExtensions(options: TypeScriptExtensionOptions):
         // oxlint-disable-next-line eslint/max-params -- CodeMirror fixes this callback signature.
         apply: (view, _completion, from, to) => {
           void runAction(options, async () => {
-            if (!unchanged(options, version)) {
-              return;
-            }
-            const span = entry.replacementSpan ?? response.optionalReplacementSpan;
+            // The list stays open while typing narrows it, so resolve the entry against the current text.
+            const current = await revision(options);
+            const span = current === version ? (entry.replacementSpan ?? response.optionalReplacementSpan) : undefined;
             const replaceFrom = span?.start ?? from;
             const replaceTo = span ? span.start + span.length : to;
             const details = await client.request<CompletionDetails>({
               kind: 'completionDetailsWithBases',
               uri,
-              position: context.pos,
+              position: current === version ? context.pos : replaceTo,
               name: entry.name,
               source: entry.source,
               data: entry.data,
-              expectedVersion: version,
+              expectedVersion: current,
             });
-            if (!unchanged(options, version)) {
+            if (!unchanged(options, current)) {
               return;
             }
             const extras = details.codeActions.flatMap((action) => action.edits);
@@ -465,7 +678,7 @@ export function createTypeScriptExtensions(options: TypeScriptExtensionOptions):
               view,
               completion: _completion,
               entry,
-              version,
+              version: current,
               from: replaceFrom,
               to: replaceTo,
               extras,
@@ -548,15 +761,19 @@ export function createTypeScriptExtensions(options: TypeScriptExtensionOptions):
         if (!info || !unchanged(options, version)) {
           return null;
         }
-        const text = [...(info.displayParts ?? []), ...(info.documentation ?? [])].map((part) => part.text).join('');
+        const parts = info.displayParts ?? [];
+        const documentation = documentationOf(info);
+        const text = parts.length > 0 || documentation.markdown;
         return text
           ? {
               pos: info.textSpan.start,
               end: info.textSpan.start + info.textSpan.length,
               create: () => {
-                const dom = view.dom.ownerDocument.createElement('div');
-                dom.className = 'cm-typescript-hover';
-                dom.textContent = text;
+                const dom = renderTypeScriptDocumentation(parts, documentation.markdown, {
+                  ownerDocument: view.dom.ownerDocument,
+                  onDefinitionLink: openLink(documentation.targets),
+                });
+                dom.classList.add('cm-typescript-hover');
                 return { dom };
               },
             }
@@ -566,16 +783,40 @@ export function createTypeScriptExtensions(options: TypeScriptExtensionOptions):
         return null;
       }
     }),
+    ViewPlugin.define((view) => {
+      attachedViews.add(view);
+      const unsubscribe = options.service.subscribeEnvironment(() => {
+        diagnosticsVersion = -1;
+        latestDiagnostics = [];
+        view.dispatch({ effects: environmentChanged.of(options.service.environmentRevision) });
+      });
+      return {
+        destroy: () => {
+          attachedViews.delete(view);
+          unsubscribe();
+        },
+      };
+    }),
     linter(
       async (view) => {
         try {
           const version = await revision(options);
-          const result = await client.request<readonly TsDiagnostic[]>({
-            kind: 'diagnostics',
-            uri,
-            expectedVersion: version,
-          });
-          if (!unchanged(options, version)) {
+          let environmentRevision: number;
+          let result: readonly TsDiagnostic[];
+          do {
+            environmentRevision = options.service.environmentRevision;
+            // oxlint-disable-next-line no-await-in-loop -- retry a response invalidated by newly acquired declarations.
+            result = await client.request<readonly TsDiagnostic[]>({
+              kind: 'diagnostics',
+              uri,
+              expectedVersion: version,
+            });
+          } while (
+            attachedViews.has(view) &&
+            unchanged(options, version) &&
+            environmentRevision !== options.service.environmentRevision
+          );
+          if (!attachedViews.has(view) || !unchanged(options, version)) {
             return [];
           }
           const { length } = view.state.doc;
@@ -589,10 +830,11 @@ export function createTypeScriptExtensions(options: TypeScriptExtensionOptions):
           if (!unchanged(options, version)) {
             return [];
           }
+
           latestDiagnostics = result;
           diagnosticsVersion = version;
           options.publishDiagnostics?.(uri, version, diagnostics);
-          if (!diagnosticsMarked) {
+          if (!diagnosticsMarked && !result.some((entry) => entry.code === 2307)) {
             diagnosticsMarked = true;
             performance.mark('tau.editor.first-correct-diagnostic', { detail: { viewId: view.dom.dataset['viewId'] } });
           }
@@ -602,9 +844,14 @@ export function createTypeScriptExtensions(options: TypeScriptExtensionOptions):
           return [];
         }
       },
-      { delay: 250 },
+      {
+        delay: 250,
+        needsRefresh: (update) =>
+          update.transactions.some((transaction) =>
+            transaction.effects.some((effect) => effect.is(environmentChanged)),
+          ),
+      },
     ),
-    signatureField,
     inlayHints,
     foldService.of((_state, lineStart, lineEnd) => {
       const span = outlineSpans.find(
@@ -616,167 +863,52 @@ export function createTypeScriptExtensions(options: TypeScriptExtensionOptions):
       return span ? { from: lineEnd, to: span.textSpan.start + span.textSpan.length } : null;
     }),
     codeFolding(),
-    keymap.of([
-      {
-        key: 'F12',
-        run: (view) => {
-          void runAction(options, async () => actions.definition(view.state.selection.main.head));
-          return true;
-        },
+    definitionProvider.of(async (_view, position) => runAction(options, async () => actions.definition(position))),
+    languageFeatures.of({
+      typeDefinition: async (view) =>
+        runAction(options, async () => actions.typeDefinition(view.state.selection.main.head)),
+      implementation: async (view) =>
+        runAction(options, async () => actions.implementation(view.state.selection.main.head)),
+      references: async (_view, position) => {
+        const references = await actions.references(position);
+        return references.map((reference) => locationItem(reference));
       },
-      {
-        key: 'Alt-F12',
-        run: (view) => {
-          void runAction(options, async () => actions.typeDefinition(view.state.selection.main.head));
-          return true;
-        },
+      callHierarchy: async (_view, position, direction) => {
+        const calls = await actions.callLocations(position, direction);
+        return calls.map((call) => symbolItem(call));
       },
-      {
-        key: 'Mod-Shift-F12',
-        run: (view) => {
-          void runAction(options, async () => actions.implementation(view.state.selection.main.head));
-          return true;
-        },
+      documentSymbols: async () => {
+        const tree = await actions.symbols();
+        return editorSymbols(tree?.childItems);
       },
-      {
-        key: 'Shift-F12',
-        run: (view) => {
-          void runAction(options, async () => {
-            const references = await actions.references(view.state.selection.main.head);
-            if (references.length > 0) {
-              showDialog(view, {
-                label: `${references.length} references`,
-                content: (current, close) => {
-                  const form = current.dom.ownerDocument.createElement('form');
-                  form.className = 'cm-typescript-references';
-                  for (const reference of references) {
-                    const button = current.dom.ownerDocument.createElement('button');
-                    button.type = 'button';
-                    button.textContent = `${reference.uri}:${reference.line}:${reference.column}`;
-                    button.addEventListener('click', () => {
-                      close();
-                      void runAction(options, async () => actions.navigateLocation(reference));
-                    });
-                    form.append(button);
-                  }
-                  return form;
-                },
-              });
-            }
+      workspaceSymbols: async (_view, query) => {
+        const symbols = await actions.workspaceSymbolLocations(query);
+        return symbols.map((symbol) => symbolItem(symbol));
+      },
+      occurrences: async (_view, position) => {
+        const highlights = await actions.occurrences(position);
+        return highlights.map(
+          (highlight): EditorOccurrence => ({
+            from: highlight.start,
+            to: highlight.start + highlight.length,
+            kind: highlight.kind,
+          }),
+        );
+      },
+      signatureHelp: {
+        triggerCharacters: ['(', ',', '<'],
+        retriggerCharacters: [')'],
+        provide: async (_view, position, trigger) => {
+          const help = await actions.signatureHelp(position, {
+            character: trigger,
+            retrigger: trigger !== undefined && trigger === ')',
           });
-          return true;
+          return help && editorSignature(help);
         },
       },
-      {
-        key: 'Mod-Shift-Space',
-        run: (view) => {
-          void runAction(options, async () => {
-            const help = await actions.signatureHelp(view.state.selection.main.head);
-            const item = help?.items[help.selectedItemIndex];
-            if (!item) {
-              return;
-            }
-            const text =
-              item.prefixDisplayParts.map((part) => part.text).join('') +
-              item.parameters
-                .map((parameter) => parameter.displayParts.map((part) => part.text).join(''))
-                .join(item.separatorDisplayParts.map((part) => part.text).join('')) +
-              item.suffixDisplayParts.map((part) => part.text).join('');
-            view.dispatch({
-              effects: signatureEffect.of({
-                pos: view.state.selection.main.head,
-                above: true,
-                create: () => {
-                  const dom = view.dom.ownerDocument.createElement('div');
-                  dom.className = 'cm-typescript-signature';
-                  dom.textContent = text;
-                  return { dom };
-                },
-              }),
-            });
-          });
-          return true;
-        },
-      },
-      {
-        key: 'Mod-Shift-Alt-f',
-        run: () => {
-          void runAction(options, async () => actions.format());
-          return true;
-        },
-      },
-      {
-        key: 'Mod-.',
-        run: (view) => {
-          void runAction(options, async () => {
-            const position = view.state.selection.main.head;
-            const diagnostic = latestDiagnostics.find(
-              (entry) => position >= entry.start && position <= entry.start + entry.length,
-            );
-            if (!diagnostic || diagnosticsVersion !== options.document.version) {
-              return;
-            }
-            const fixes = await actions.codeFixes(diagnostic.start, diagnostic.start + diagnostic.length, [
-              diagnostic.code,
-            ]);
-            if (fixes.length === 0) {
-              return;
-            }
-            showDialog(view, {
-              content: (current, close) => {
-                const form = current.dom.ownerDocument.createElement('form');
-                form.className = 'cm-typescript-code-actions';
-                for (const fix of fixes) {
-                  const button = current.dom.ownerDocument.createElement('button');
-                  button.type = 'button';
-                  button.textContent = fix.description;
-                  button.addEventListener('click', () => {
-                    close();
-                    void runAction(options, async () => actions.applyCodeFix(fix));
-                  });
-                  form.append(button);
-                }
-                return form;
-              },
-            });
-          });
-          return true;
-        },
-      },
-      {
-        key: 'F2',
-        run: (view) => {
-          void runAction(options, async () => {
-            const position = view.state.selection.main.head;
-            const version = await revision(options);
-            const prepared = await client.request<ts.RenameInfo>({
-              kind: 'renameInfo',
-              uri,
-              position,
-              expectedVersion: version,
-            });
-            if (!prepared.canRename || !unchanged(options, version)) {
-              return;
-            }
-            const oldName = view.state.doc.sliceString(
-              prepared.triggerSpan.start,
-              prepared.triggerSpan.start + prepared.triggerSpan.length,
-            );
-            const dialog = showDialog(view, {
-              label: 'Rename symbol',
-              input: { value: oldName },
-              submitLabel: 'Rename',
-              focus: true,
-            });
-            const submitted = await dialog.result;
-            const newName = submitted?.querySelector('input')?.value.trim();
-            if (newName && unchanged(options, version)) {
-              await actions.rename(position, newName);
-            }
-          });
-          return true;
-        },
-      },
-    ]),
+      format: async () => runAction(options, async () => actions.format()),
+      quickFix: async (view) => runAction(options, async () => showQuickFixes(view)),
+      rename: async (view) => runAction(options, async () => renameAtCursor(view)),
+    }),
   ];
 }

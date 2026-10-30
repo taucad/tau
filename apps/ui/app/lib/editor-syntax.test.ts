@@ -1,30 +1,11 @@
+import { supportedHighlightLanguages } from '#lib/code-language-resolution.js';
+import { editorSyntaxFixtures as fixtures } from '#lib/editor-syntax.fixtures.js';
 import { describe, expect, it } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import { syntaxTree, ensureSyntaxTree, getIndentation } from '@codemirror/language';
 import { classHighlighter, highlightTree } from '@lezer/highlight';
 import { loadEditorSyntax } from '#lib/editor-syntax.js';
 import { getEditorLanguage, isJsLikeFile } from '#lib/editor-languages.js';
-
-const fixtures = [
-  ['typescript', 'const radius: number = 12; // dimension'],
-  ['typescriptreact', 'const mesh = <box name="測定" />;'],
-  ['javascript', 'const radius = 12; // dimension'],
-  ['javascriptreact', 'const mesh = <box name="測定" />;'],
-  ['python', 'def radius(value):\n    return "測定" # label'],
-  ['json', '{"nested":{"radius":12}}'],
-  ['jsonc', '{ // radius\n "radius":12}'],
-  ['jsonl', '{"radius":12}\n{"radius":13}'],
-  ['markdown', '# Title\n**strong** and `code`'],
-  ['yaml', 'radius: 12\nname: "測定"'],
-  ['bash', '#!/bin/bash\necho "測定"'],
-  ['csharp', 'public class Model { public double Radius = 12; }'],
-  ['kcl', '/* measurement */\nradius = 12\nname = "測定"'],
-  ['openscad', 'module part() { cube([1,2,3]); } // solid'],
-  ['stepfile', "ISO-10303-21;\nDATA;\n#1=CARTESIAN_POINT('',(0.,0.,0.));\nENDSEC;"],
-  ['stl', 'solid test\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nendloop\nendfacet\nendsolid test'],
-  ['usd', '#usda 1.0\ndef Xform "part" {\n double radius = 12\n}'],
-  ['sysml', 'package Example { part def Wheel; }'],
-] as const;
 
 const tokens = (state: EditorState): string[] => {
   const tree = ensureSyntaxTree(state, state.doc.length, 1000) ?? syntaxTree(state);
@@ -34,6 +15,10 @@ const tokens = (state: EditorState): string[] => {
 };
 
 describe('editor syntax', () => {
+  it('covers every supported language with a syntax fixture', () => {
+    const ids = fixtures.map(([id]) => (id === 'typescriptreact' ? 'tsx' : id === 'javascriptreact' ? 'jsx' : id));
+    expect([...ids].sort()).toEqual([...supportedHighlightLanguages].sort());
+  });
   it('indents SysML blocks without counting braces inside strings or comments', async () => {
     const source = 'package Example {\n  // }\n  attribute label = "{";\n\n}';
     const state = EditorState.create({ doc: source, extensions: [await loadEditorSyntax('sysml')] });

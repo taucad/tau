@@ -1,5 +1,5 @@
 import { isFeatureEnabled } from '#flags/feature-flags.js';
-import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { useLargeObjectPending, useProjectAvailability } from '#hooks/use-project-availability.js';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { BrowserPane } from '#components/browser/browser-pane.js';
 import { getBrowserBridge } from '#components/browser/browser-bridge.js';
@@ -82,6 +82,7 @@ import type { FileProvenance } from '@taucad/types';
 import { useEditorDocumentSession } from '#hooks/use-editor-document-session.js';
 import type { EditorDocument, DocumentChange, DocumentTransaction } from '#lib/editor-document.js';
 import { requestEditorNavigation } from '#lib/editor-navigation-service.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.js';
 import { CodeEditor } from '#components/code/code-editor.client.js';
 import { useKernelDiagnostics } from '#hooks/use-kernel-diagnostics.js';
@@ -1314,6 +1315,8 @@ export const FileEditor = memo(function ({
   // gate — there is no local "force open" state because the override is
   // expressed by re-resolving with `forceText` / `sizeLimit` options.
   const result = useFileContent(filePath);
+  /* A file whose large object has not arrived holds its pointer: shown loading, never as text, so nothing edits or saves it. */
+  const isAwaitingLargeObject = useLargeObjectPending(filePath);
 
   const handleFileSelectorSelect = useCallback(
     (path: string) => {
@@ -1368,7 +1371,7 @@ export const FileEditor = memo(function ({
 
   const handleEditorApply = useCallback(
     (document: EditorDocument, transaction: DocumentTransaction): DocumentChange | undefined => {
-      if (readOnly || !documentSession) {
+      if (readOnly || isAwaitingLargeObject || !documentSession) {
         return undefined;
       }
       const live = editorRef.getSnapshot().context.openFiles.find((file) => file.paneId === paneId);
@@ -1381,7 +1384,7 @@ export const FileEditor = memo(function ({
       }
       return accepted;
     },
-    [readOnly, documentSession, editorRef, paneId, reportSave],
+    [readOnly, isAwaitingLargeObject, documentSession, editorRef, paneId, reportSave],
   );
 
   const handleEditorHistory = useCallback(
@@ -1559,6 +1562,10 @@ export const FileEditor = memo(function ({
     return <ProjectSyncPlaceholder state={availability} />;
   }
 
+  if (isAwaitingLargeObject) {
+    return renderPane({ body: <LargeObjectPendingPlaceholder name={name} /> });
+  }
+
   if (result.kind === 'binary' || result.kind === 'text') {
     return isPanelShown ? (
       <RoutedFileViewer viewer={resolvedViewer!} request={viewerRequest!} renderPane={renderPane} />
@@ -1569,6 +1576,22 @@ export const FileEditor = memo(function ({
 
   return renderPane({ body });
 });
+
+/** One file still downloading: the pane waits for its bytes, which replace the placeholder as they land. */
+function LargeObjectPendingPlaceholder({ name }: { readonly name: string }): React.JSX.Element {
+  return (
+    <div
+      role='status'
+      aria-busy='true'
+      data-slot='large-object-pending'
+      className='flex size-full flex-col items-center justify-center gap-2 p-6 text-center text-muted-foreground'
+    >
+      <Loader className='size-5 motion-reduce:animate-none' />
+      <p className='text-sm font-medium text-foreground'>Downloading {name}</p>
+      <p className='max-w-60 text-xs'>This file opens when it arrives.</p>
+    </div>
+  );
+}
 
 function RoutedFileViewer({
   viewer,
@@ -1900,7 +1923,7 @@ export const WorkbenchDockview = memo(function ({
     });
   }, [api, openFiles, activePaneId, isMobile]);
 
-  // Side-effects bound to fileOpened (line-nav + open-editor-on-user-action).
+  // Line navigation stays bound to fileOpened; activation is handed off by the persistent workspace.
   // These were tangled into the old sync effect; they stay event-driven
   // because they encode user intent ("the user just opened a file"),
   // not state convergence.
@@ -1909,15 +1932,6 @@ export const WorkbenchDockview = memo(function ({
       return;
     }
     const openFileSub = editorRef.on('fileOpened', (event) => {
-      if (event.source === 'user') {
-        const existingPanel = api.panels.find((panel) => getFileParameters(panel)?.filePath === event.path);
-        if (existingPanel) {
-          existingPanel.api.setActive();
-          pendingUserFilePathRef.current = undefined;
-        } else {
-          pendingUserFilePathRef.current = event.path;
-        }
-      }
       if (event.source !== 'record' && event.lineNumber) {
         requestEditorNavigation({
           projectId,
@@ -2118,20 +2132,39 @@ export const WorkbenchDockview = memo(function ({
     if (!api) {
       return;
     }
-    return connectWorkbench((panelId) => {
-      if (!isWorkbenchSurfaceAllowed(panelId, profile)) {
-        return;
-      }
-      if ((panelId === 'kernel' || panelId === 'console') && !isTauDebugEnabled) {
-        return;
-      }
-      if (panelId === 'files') {
-        openWorkbenchFiles({ api });
-        return;
-      }
-      openWorkbenchUtility(api, panelId);
-    });
-  }, [api, connectWorkbench, isTauDebugEnabled, profile]);
+    return connectWorkbench(
+      (panelId) => {
+        if (!isWorkbenchSurfaceAllowed(panelId, profile)) {
+          return;
+        }
+        if ((panelId === 'kernel' || panelId === 'console') && !isTauDebugEnabled) {
+          return;
+        }
+        pendingUserFilePathRef.current = undefined;
+        if (panelId === 'files') {
+          openWorkbenchFiles({ api });
+          return;
+        }
+        openWorkbenchUtility(api, panelId);
+      },
+      (path) => {
+        pendingUserFilePathRef.current = path;
+        if (isRestoringLayout.current) {
+          return;
+        }
+        // Connection can follow the first reconcile: consume the retained user intent against the current state.
+        const snapshot = editorRef.getSnapshot().context;
+        pendingUserFilePathRef.current = reconcileWorkbenchFiles({
+          api,
+          openFiles: snapshot.openFiles,
+          activePaneId: snapshot.activePaneId,
+          isMobile,
+          pendingUserFilePath: path,
+          pendingFilePlacements: pendingFilePlacementRef.current,
+        });
+      },
+    );
+  }, [api, connectWorkbench, editorRef, isMobile, isTauDebugEnabled, profile]);
 
   // Handle external file drops and cross-dockview viewer panel drops
   const onDidDrop = useCallback(

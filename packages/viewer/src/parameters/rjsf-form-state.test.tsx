@@ -191,7 +191,7 @@ describe('RJSF form-state policy', () => {
       ...Object.entries(imageEdgeSchemas).map(([name, schema]) => [`image:${name}`, schema] as const),
     ];
 
-    expect(Object.keys(assimpEdgeSchemas)).toHaveLength(15);
+    expect(Object.keys(assimpEdgeSchemas)).toHaveLength(13);
     expect(Object.keys(imageEdgeSchemas)).toHaveLength(3);
     for (const [name, schema] of corpus) {
       const jsonSchema = inputJsonSchema(schema);

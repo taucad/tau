@@ -19,6 +19,7 @@ type MeasureControlProps = Readonly<{
 export function MeasureControl({ shortcut, onStart }: MeasureControlProps): React.JSX.Element {
   const graphicsRef = useGraphics();
   const isMeasureActive = useGraphicsSelector((state) => state.context.isMeasureActive);
+  const isMeasureInputReady = useGraphicsSelector((state) => state.context.isMeasureInputReady);
 
   const handleToggle = useCallback(() => {
     // Synchronous, so the measuring row exists when `onStart` moves focus into it.
@@ -37,6 +38,7 @@ export function MeasureControl({ shortcut, onStart }: MeasureControlProps): Reac
       label='Measure'
       icon={<Ruler className='size-4 -rotate-45' />}
       isActive={isMeasureActive}
+      isBusy={isMeasureActive && !isMeasureInputReady}
       shortcut={shortcut}
       onToggle={handleToggle}
     />

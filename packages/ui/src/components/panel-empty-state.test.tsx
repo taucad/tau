@@ -35,4 +35,13 @@ describe('PanelEmptyState', () => {
     expect(container.querySelector('[data-slot="panel-empty-state-description"]')).toBeNull();
     expect(container.querySelector('[data-slot="panel-empty-state-content"]')).toBeNull();
   });
+
+  it('titles a pane state at level three and a page state at the level its host asks for', () => {
+    const { rerender } = render(<PanelEmptyState icon={FolderOpen} title='Open file' />);
+    expect(screen.getByRole('heading', { level: 3, name: 'Open file' })).toBeInTheDocument();
+
+    rerender(<PanelEmptyState icon={FolderOpen} title='Open file' titleLevel={2} />);
+    expect(screen.getByRole('heading', { level: 2, name: 'Open file' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 3 })).not.toBeInTheDocument();
+  });
 });

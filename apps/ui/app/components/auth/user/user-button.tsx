@@ -195,7 +195,8 @@ export function UserButton({
             <DropdownMenuItem asChild>
               <Link href={`${basePaths.auth}/${viewPaths.auth.signIn}`}>
                 <LogIn className='text-muted-foreground' />
-                Log in
+
+                {localization.auth.signIn}
               </Link>
             </DropdownMenuItem>
 

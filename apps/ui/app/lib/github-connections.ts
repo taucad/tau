@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ENV } from '#environment.config.js';
 import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
+import { recordApiRequestId } from '#lib/api-request-id.js';
 
 const githubId = z.number().int().positive();
 const connectionSchema = z.object({
@@ -218,7 +219,10 @@ async function request<Output>(path: string, schema: z.ZodType<Output>, init?: R
   const body: unknown = await response.json().catch(() => undefined);
   if (!response.ok) {
     const refusal = z.object({ code: z.string().optional() }).safeParse(body);
-    throw new GithubRequestError(response.status, refusal.success ? refusal.data.code : undefined);
+    throw recordApiRequestId(
+      new GithubRequestError(response.status, refusal.success ? refusal.data.code : undefined),
+      response,
+    );
   }
   return schema.parse(body);
 }

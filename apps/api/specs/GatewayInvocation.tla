@@ -473,7 +473,8 @@ ApiServiceStop(k) ==
     /\ UNCHANGED <<now, refundHeld, voided, conn, dispatches, claims, host, logVars>>
 
 \* finish(): terminalize under the admitting generation; absorbed_unknown returns without it, unless
-\* the process is stopping (ApiServiceStop).
+\* the process is stopping (ApiServiceStop). After a settled receipt it hands the settlement to the
+\* evidence recorder in the background (T07); that write never touches the row, so it is not modelled.
 ApiFinish(k) ==
     /\ req[k] = "finishing"
     /\ IF fin[k] = "final" /\ (~FenceGen \/ row[k].gen = 1) /\ row[k].cust = "pending"

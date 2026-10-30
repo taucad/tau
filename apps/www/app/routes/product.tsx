@@ -7,15 +7,9 @@ export const content = (): React.JSX.Element => (
   <>
     <section className='band'>
       {intro({
-        eyebrow: 'The Tau workspace',
-        title: (
-          <>
-            Design a part.
-            <br />
-            Make it useful.
-          </>
-        ),
-        body: 'Work from what the part needs to do. Editable CAD, dimensions you control and geometric checks help you prepare a design for the workshop.',
+        eyebrow: 'Product',
+        title: 'Code-based CAD with an AI agent',
+        body: 'Describe a part or write the CAD code yourself. Tau keeps the model as editable source, checks its geometry against the requirements you set and exports STEP, STL and 3MF.',
         aside: <div className='actions'>{cta('Start designing', '/projects/new', 'product')}</div>,
       })}
       <div className='cell'>{workspaceFigure('eager')}</div>
@@ -24,20 +18,20 @@ export const content = (): React.JSX.Element => (
     <section className='band feature-grid' aria-label='Workspace capabilities'>
       {[
         [
-          'Describe your intent',
-          'Describe where the part will fit and what it needs to do, or write the CAD code yourself. Work with the agent on a design you can inspect and edit.',
+          'Describe the part',
+          'Tell the agent what the part is for and where it fits, or write the code yourself. Either way, the result is source code you can read and edit.',
         ],
         [
-          'Change the parameters',
-          'Adjust dimensions, hole spacing and other named parameters as the design develops. Keep the source so you can return to a part and adapt it for its next job.',
+          'Edit parameters',
+          'Change dimensions, hole spacing and other named parameters at any time. The model rebuilds from the source.',
         ],
         [
-          'Test a requirement',
-          'GeoSpec checks declared properties of the geometry: envelopes, solids, clearances and patterns. Each result states its scope; unsupported evidence is inconclusive.',
+          'Check the geometry',
+          'GeoSpec checks the requirements you declare, such as bounding envelopes, solid counts, clearances and hole patterns. Anything GeoSpec cannot measure is reported as inconclusive, not as a pass.',
         ],
         [
-          'Carry it into the workshop',
-          'Export STEP for your CAM tools or manufacturer, and STL or 3MF for a slicer. Keep the source and revision history to refine the design after making and using the part.',
+          'Export for manufacturing',
+          'Export STEP for CAM software or a manufacturer, and STL or 3MF for a slicer. The source and revision history stay with the project.',
         ],
       ].map(([title, body]) => (
         <article key={title} className='cell'>
@@ -49,12 +43,12 @@ export const content = (): React.JSX.Element => (
     {ecosystemGrid()}
     <section className='band note-band'>
       <div className='cell'>
-        <h2>Checks have a scope.</h2>
+        <h2>What geometry checks cover</h2>
       </div>
       <div className='cell'>
         <p>
-          Geometric checks do not certify strength, thermal behavior, materials or manufacturing readiness. Use
-          appropriate analysis and physical validation for the work you are doing.
+          GeoSpec checks geometry only. It does not assess strength, thermal behavior, materials or whether a part is
+          ready to manufacture. Use the appropriate analysis and physical testing for those.
         </p>
       </div>
     </section>

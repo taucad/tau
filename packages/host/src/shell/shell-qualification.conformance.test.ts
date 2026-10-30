@@ -146,12 +146,15 @@ const countingProvider = (
   options: Readonly<{
     supervisor?: Readonly<{ executablePath: string; arguments: readonly string[] }>;
     beforeLaunch?: (launch: ShellLaunch) => Promise<void>;
+    /** A row that deliberately crashes a host keeps its receipts out of the custody every other row recovers over. */
+    custody?: Readonly<{ appData: string; sessions: string }>;
   }> = {},
 ) => {
+  const custody = options.custody ?? { appData, sessions };
   const real = createSandboxShellProvider({
     bwrapPath,
     home,
-    custody: { directory: join(appData, 'shell-custody'), sessionDirectory: sessions },
+    custody: { directory: join(custody.appData, 'shell-custody'), sessionDirectory: custody.sessions },
     ...(options.supervisor === undefined ? {} : { supervisor: options.supervisor }),
   });
   const launches: ShellLaunch[] = [];
@@ -203,18 +206,22 @@ type ServiceOptions = Readonly<{
   maxExecutions?: number;
   counting?: ReturnType<typeof countingProvider>;
   environment?: Record<string, string | undefined>;
+  /** Must name the same custody as `counting`'s provider, or recovery reads receipts the service cannot clean up. */
+  custody?: Readonly<{ appData: string; sessions: string }>;
 }>;
 
 const serviceOver = async (options: ServiceOptions) => {
-  const counting = options.counting ?? countingProvider();
+  const custody = options.custody ?? { appData, sessions };
+  const counting = options.counting ?? countingProvider(options.custody === undefined ? {} : { custody });
   const probe = await probeHostShell({
     provider: counting.provider,
     checkouts: options.checkouts,
     permissionModeOf: async (runId) => options.mode?.(runId) ?? 'ask',
+    /* `appData` is an ancestor of every row's custody, so one entry denies a crash row's receipts too. */
     appDataRoots: [appData],
     projectRoots: () => [project, second, candidate],
     home,
-    sessionDirectory: sessions,
+    sessionDirectory: custody.sessions,
     ...(options.maxExecutions === undefined ? {} : { maxExecutions: options.maxExecutions }),
     environment: options.environment ?? process.env,
   });
@@ -239,6 +246,7 @@ const agentHostOver = async (
     mode?: () => PermissionMode;
     counting?: ReturnType<typeof countingProvider>;
     logPath?: string;
+    custody?: Readonly<{ appData: string; sessions: string }>;
   }> = {},
 ) => {
   const logPath = options.logPath ?? join(root, `${label}-events.jsonl`);
@@ -250,6 +258,7 @@ const agentHostOver = async (
     checkouts,
     ...(options.mode === undefined ? {} : { mode: options.mode }),
     ...(options.counting === undefined ? {} : { counting: options.counting }),
+    ...(options.custody === undefined ? {} : { custody: options.custody }),
   });
   const responses: ScriptedResponse[] = [
     ...calls.map((call) => ({ toolCalls: [{ id: call.id, name: call.name ?? 'shell', input: call.input }] })),
@@ -1573,6 +1582,16 @@ describe.runIf(enabled)('shell qualification', () => {
     async () => {
       const logPath = join(root, 'e11-events.jsonl');
       const marker = `tau-e11-${String(process.pid)}`;
+      /*
+       * This row is the one that leaves a receipt behind on purpose, and a killed host's resource receipt is released
+       * only once a project's complete run inventory can be read — which this harness, unlike the desktop, hands no
+       * `projectExecutions` for. Shared custody would therefore leave `project` blocked with `checkout-unavailable`
+       * for every later row, so the crash and its recovery get a custody of their own. `appData` stays its ancestor,
+       * so the receipts are still denied to every launch.
+       */
+      const crash = { appData: join(appData, 'e11'), sessions: join(root, 'e11-sessions') } as const;
+      mkdirSync(crash.sessions, { recursive: true });
+      mkdirSync(crash.appData, { recursive: true });
       const child = spawn(process.execPath, ['--import', '@oxc-node/core/register', fixtureScript], {
         cwd: fileURLToPath(new URL('../..', import.meta.url)),
         env: {
@@ -1580,8 +1599,8 @@ describe.runIf(enabled)('shell qualification', () => {
           TAU_CRASH_ROOT: root,
           TAU_CRASH_PROJECT: project,
           TAU_CRASH_HOME: home,
-          TAU_CRASH_SESSIONS: sessions,
-          TAU_CRASH_APP_DATA: appData,
+          TAU_CRASH_SESSIONS: crash.sessions,
+          TAU_CRASH_APP_DATA: crash.appData,
           TAU_CRASH_LOG: logPath,
           TAU_CRASH_BWRAP: bwrapPath,
           TAU_CRASH_MARKER: marker,
@@ -1615,8 +1634,8 @@ describe.runIf(enabled)('shell qualification', () => {
       await delay(1000);
       expect(statSync(beat).size).toBe(size);
 
-      const counting = countingProvider();
-      const recovered = await agentHostOver('e11', [], { counting, logPath });
+      const counting = countingProvider({ custody: crash });
+      const recovered = await agentHostOver('e11', [], { counting, logPath, custody: crash });
       try {
         await recovered.host.resume(recovered.chatId).catch(() => undefined);
         const message = await recovered.toolOutput('e11-call');

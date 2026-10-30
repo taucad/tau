@@ -76,7 +76,7 @@ vi.mock('#hooks/use-telemetry-purposes.js', () => ({
   useTelemetryPurposes: () => ({ canDecide: mockCanDecide, decide: mockDecide, isDeciding: false }),
 }));
 
-const improve = 'Improve the service for everyone';
+const improve = 'Improve Tau for everyone';
 const usage = 'Share usage and diagnostics';
 
 describe('DataControlsSettings', () => {

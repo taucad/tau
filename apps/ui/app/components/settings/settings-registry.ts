@@ -178,7 +178,7 @@ const settingsCatalog = [
       },
       {
         id: 'improve-service',
-        label: 'Improve the service for everyone',
+        label: 'Improve Tau for everyone',
         description: 'Control whether your chats are used for improving the service',
         keywords: ['training', 'sharing', 'no train', 'ai', 'privacy', 'agent', 'recording', 'summaries', 'evaluation'],
       },

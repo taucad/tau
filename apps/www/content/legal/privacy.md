@@ -160,7 +160,7 @@ We may use your prompts and generated designs to improve our AI features. This i
 **Defaults:** On the free plan this is on unless you turn it off. On a paid plan it is off unless you turn it on.
 **Ratings:** When you rate an agent reply, we use that rating and the reply it rates to improve the Service.
 
-**Your Right to Opt Out:** Navigate to **Settings → Data controls** and turn off "Improve the service for everyone." Opting out will not affect your access to AI features.
+**Your Right to Opt Out:** Navigate to **Settings → Data controls** and turn off "Improve Tau for everyone." Opting out will not affect your access to AI features.
 
 ### 9.3 Analytics and Observability
 

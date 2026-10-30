@@ -47,7 +47,7 @@ function ImproveServiceRow(): React.JSX.Element {
   return (
     <SettingsRow
       settingId='improve-service'
-      title='Improve the service for everyone'
+      title='Improve Tau for everyone'
       info={
         <>
           <p>Covers your chats, the designs Tau generates for you and summaries of agent tasks.</p>
@@ -70,7 +70,7 @@ function ImproveServiceRow(): React.JSX.Element {
       }
       control={
         <Switch
-          aria-label='Improve the service for everyone'
+          aria-label='Improve Tau for everyone'
           checked={preferences?.allowsAiTraining === true}
           disabled={!isSignedIn || isLoading || Boolean(error) || isUpdating || purposes.isDeciding}
           onCheckedChange={async (checked) => {

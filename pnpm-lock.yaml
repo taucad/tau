@@ -2429,13 +2429,13 @@ importers:
       vscode-uri:
         specifier: 'catalog:'
         version: 3.1.0
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
     devDependencies:
       '@taucad/fs-client':
         specifier: workspace:*
         version: link:../fs-client
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
   apps/libs/planetary-gearbox:
     dependencies:
@@ -36301,9 +36301,9 @@ snapshots:
       obug: 2.2.1
       std-env: 4.3.0
       tinyrainbow: 3.2.0
-      vitest: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+      vitest: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
     optionalDependencies:
-      '@vitest/browser': 4.1.11(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(vitest@4.1.11)
+      '@vitest/browser': 4.1.11(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(vitest@4.1.11)
 
   '@vitest/expect@4.1.11':
     dependencies:
@@ -36365,7 +36365,7 @@ snapshots:
       sirv: 3.0.2
       tinyglobby: 0.2.17
       tinyrainbow: 3.2.0
-      vitest: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+      vitest: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
 
   '@vitest/utils@4.1.11':
     dependencies:
@@ -40779,7 +40779,7 @@ snapshots:
       geospec-engine: 0.5.0
       zod: 4.6.7
     optionalDependencies:
-      vitest: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+      vitest: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
 
   get-amd-module-type@6.0.2:
     dependencies:

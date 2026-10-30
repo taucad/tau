@@ -12,11 +12,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 export function ArIcon({ className }: { readonly className?: string }): React.JSX.Element {
   return (
     <Scan aria-hidden className={className}>
+      {/* Baseline at the frame's centre plus half the capitals' height (~0.73 em), so "AR" itself is centred; a
+          `central` baseline centres the font's em box instead, which sits low and varies by font. */}
       <text
         x='12'
-        y='12.5'
+        y='15.1'
         textAnchor='middle'
-        dominantBaseline='central'
         fontSize='8.5'
         fontWeight='700'
         letterSpacing='-0.2'

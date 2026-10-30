@@ -17,7 +17,7 @@ export const content = (): React.JSX.Element => (
         <h2>Teams & enterprise</h2>
         <p>Enterprise plans, team setup, invoicing and data processing agreements.</p>
         <SiteLink className='button primary' href={`mailto:${salesEmail}`}>
-          {salesEmail} {out}
+          Contact us {out}
         </SiteLink>
       </article>
       <article className='cell'>

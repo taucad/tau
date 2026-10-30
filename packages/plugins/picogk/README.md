@@ -219,8 +219,11 @@ it at run time, in all three engines.
 - A large export cannot cross from the runtime to the page in one piece: the bytes exist twice while
   they do, so half a gigabyte is enough to end the renderer. Exports stream in pieces instead.
 - Geometry runs slower in the browser than on the matched native comparator on every path measured
-  so far, between 1.3 and 2.5 times the native run on a short subject. Read the browser as the
-  authoring runtime and the desktop as the fast one until that gap closes.
+  so far. On a short subject it is between 1.3 and 2.5 times the native run. On the long subject,
+  HelixHeatX at about 225 seconds natively, threaded builds took 1.03 to 1.39 times the native run in
+  Chromium and WebKit, and serial builds 1.54 to 2.22 times. Firefox has not yet completed the long
+  subject inside the CI job limit. Prefer the threaded build in the browser, and read the desktop as
+  the fast runtime until that gap closes.
 - Compiling in the browser resolves the author's sources against the bundle's own pinned reference
   set, which is 176 framework reference assemblies and SkiaSharp. Nothing is fetched at run time.
 

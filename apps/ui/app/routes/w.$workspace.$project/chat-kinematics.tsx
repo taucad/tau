@@ -4,7 +4,7 @@ import type { DockviewPanelApi } from 'dockview-react';
 import type { KernelIssue } from '@taucad/runtime';
 import { KinematicsPane } from '@taucad/workbench-panes/kinematics/kinematics-pane';
 import type { KinematicsSource, KinematicsUnitStatus } from '@taucad/workbench-panes/kinematics/kinematics-source';
-import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { useModelAvailability } from '#hooks/use-project-availability.js';
 import { useProject } from '#hooks/use-project.js';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { WorkspaceLanesContext } from '#routes/w.$workspace.$project/project-workspace-context.js';
@@ -77,7 +77,7 @@ function KinematicsPanelBodyContent({ panelApi }: { readonly panelApi?: Kinemati
 }
 
 export function KinematicsPanelBody(props: Parameters<typeof KinematicsPanelBodyContent>[0]): React.JSX.Element {
-  const availability = useProjectAvailability();
+  const availability = useModelAvailability();
   return availability === 'ready' ? (
     <KinematicsPanelBodyContent {...props} />
   ) : (

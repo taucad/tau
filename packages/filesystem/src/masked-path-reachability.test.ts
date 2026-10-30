@@ -361,7 +361,7 @@ describe('what project duplication reads from a disk-backed project', () => {
     const stopHost = serveNodeFsProvider(port2, {
       policy: tauPathPolicy,
       allowRoot: (candidate) => candidate === root,
-    });
+    }).close;
     const providerRegistry = new ProviderRegistry({ createNodeFsPort: async () => port1 });
     const service = new WorkspaceFileService({
       providerRegistry,

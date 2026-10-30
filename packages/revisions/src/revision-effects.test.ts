@@ -24,7 +24,8 @@ import type { FileStatEntry } from '@taucad/filesystem';
 import { classify, unlistedPathClassification } from '@taucad/filesystem/path-registry';
 
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
-import { lfsObjectPath, lfsPointerFor } from '#lfs.js';
+import { cleanLargeObjects, lfsObjectPath, lfsPointerFor } from '#lfs.js';
+import type { LargeObjectsReport } from '#project-revisions.types.js';
 import { writeChatRef } from '#chat-ref.js';
 import { materializeConflict, readConflictTerms } from '#revision-conflict.js';
 import { RevisionPortError } from '#revision-port.js';
@@ -765,7 +766,17 @@ describe('the tree a cut hashes', () => {
     const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' });
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
     await filesystem.writeFile('node_modules/left/index.js', 'module.exports = 1;\n');
-    await filesystem.writeFile('.tau/runs/run-1.json', '{}\n');
+    await filesystem.writeFile(
+      '.tau/runs/run-1.json',
+      JSON.stringify({
+        runId: 'run-1',
+        turnId: 'turn-1',
+        chatId: 'chat-1',
+        checkoutId: 'other',
+        attempt: 1,
+        startedAt: 1,
+      }),
+    );
     await filesystem.writeFile('.tau/cache/blob', 'cached\n');
     await filesystem.writeFile('thumbnail.webp', 'not really an image\n');
     /* EQ1: a vendored repository is the control plane at any depth. Git itself
@@ -903,6 +914,95 @@ describe('a turn lease', () => {
     await run(actors.checkouts.retireLease, { projectId: 'project-1', runId: 'run-1', key });
     expect(await filesystem.exists('.tau/runs/run-1.json')).toBe(false);
   }, 30_000);
+});
+
+describe('execution custody in turn records', () => {
+  const key = { runId: 'run-1', turnId: 'turn-1', chatId: 'chat-1', attempt: 1 };
+  const recordPath = '.tau/runs/run-1.json';
+
+  it('should preserve held records through every effect-level retirement and replacement path', async () => {
+    const { actors, filesystem } = await fixture();
+    await run(actors.turn.writeLease, { key, checkoutId: 'live' });
+    expect(await actors.turns.executions.hold({ key, executionId: 'execution' })).toEqual({ status: 'applied' });
+    const held = await filesystem.readFile(recordPath, 'utf8');
+    await expect(run(actors.turn.retireLease, { key, checkoutId: 'live', outcome: 'finalized' })).rejects.toMatchObject(
+      { code: 'CHECKOUT_CONFLICT' },
+    );
+    await expect(run(actors.turn.retireLease, { key, checkoutId: 'live', outcome: 'finalized' })).rejects.toThrow(
+      'Running work',
+    );
+    await expect(run(actors.checkouts.retireLease, { projectId: 'project-1', runId: key.runId })).rejects.toMatchObject(
+      { code: 'CHECKOUT_CONFLICT' },
+    );
+    await expect(
+      run(actors.checkouts.retireLease, { projectId: 'project-1', runId: key.runId, key }),
+    ).rejects.toMatchObject({ code: 'CHECKOUT_CONFLICT' });
+    await expect(
+      run(actors.turn.writeLease, { key: { ...key, attempt: 2 }, checkoutId: 'live' }),
+    ).rejects.toMatchObject({ code: 'CHECKOUT_CONFLICT' });
+    expect(await filesystem.readFile(recordPath, 'utf8')).toBe(held);
+    expect(await actors.turns.executions.release({ key, executionId: 'execution' })).toEqual({ status: 'applied' });
+    await run(actors.turn.writeLease, { key: { ...key, attempt: 2 }, checkoutId: 'live' });
+    expect(await actors.turns.executions.release({ key, executionId: 'execution' })).toMatchObject({
+      status: 'refused',
+      code: 'TURN_UNKNOWN',
+    });
+    expect(JSON.parse(await filesystem.readFile(recordPath, 'utf8'))).toMatchObject({ attempt: 2 });
+  });
+
+  it.each([42, ['execution', 'execution'], [''], [1], null])(
+    'should block malformed executionIds %j without dropping or replacing its record',
+    async (executionIds) => {
+      const { actors, filesystem } = await fixture();
+      await run(actors.turn.writeLease, { key, checkoutId: 'live' });
+      const malformed = JSON.stringify({ ...key, checkoutId: 'live', startedAt: 1, executionIds });
+      await filesystem.writeFile(recordPath, malformed);
+      await expect(actors.turns.leases()).rejects.toMatchObject({ code: 'INVALID_REPOSITORY' });
+      await expect(actors.turns.retire(key)).rejects.toMatchObject({ code: 'INVALID_REPOSITORY' });
+      expect(await actors.turns.executions.hold({ key, executionId: 'other' })).toMatchObject({
+        status: 'refused',
+        code: 'REVISIONS_UNAVAILABLE',
+      });
+      expect(await filesystem.readFile(recordPath, 'utf8')).toBe(malformed);
+    },
+  );
+
+  it('should block corrupt JSON and retain valid legacy attempt and head normalization', async () => {
+    const { actors, filesystem } = await fixture();
+    await run(actors.turn.writeLease, { key, checkoutId: 'live' });
+    await filesystem.writeFile(recordPath, '{');
+    await expect(actors.turns.retire(key)).rejects.toMatchObject({ code: 'INVALID_REPOSITORY' });
+    expect(await filesystem.readFile(recordPath, 'utf8')).toBe('{');
+    await filesystem.writeFile(
+      recordPath,
+      JSON.stringify({
+        runId: key.runId,
+        turnId: key.turnId,
+        chatId: key.chatId,
+        checkoutId: 'live',
+        startedAt: 1,
+        baseRevisionId: 'legacy-head',
+        authorityEpoch: 3,
+      }),
+    );
+    expect(await actors.turns.leases()).toEqual([
+      {
+        runId: key.runId,
+        turnId: key.turnId,
+        chatId: key.chatId,
+        checkoutId: 'live',
+        startedAt: 1,
+        attempt: 0,
+        headRevisionId: 'legacy-head',
+      },
+    ]);
+    expect(await actors.turns.executions.hold({ key, executionId: 'new' })).toMatchObject({
+      status: 'refused',
+      code: 'TURN_UNKNOWN',
+    });
+    await run(actors.turn.retireLease, { key, checkoutId: 'live', outcome: 'finalized' });
+    expect(await filesystem.exists(recordPath)).toBe(false);
+  });
 });
 
 describe('settling a turn', () => {
@@ -1542,6 +1642,11 @@ describe('the checkout registry', () => {
         events.push(placement.status);
       },
     });
+    /* The root checks the project directory for large-object placeholders as it starts. */
+    await vi.waitFor(() => {
+      expect(events).toEqual(['open:live', 'close:live']);
+    });
+    events.length = 0;
 
     await run(actors.turn.prepare, {
       key: { turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1', attempt: 0 },
@@ -4375,4 +4480,191 @@ describe('the fact a released turn publishes', () => {
     expect(describeTurnRelease({ ...released, outcome: 'finalized' })).toBeUndefined();
     expect(describeTurnRelease({ ...released, outcome: 'conflicted' })).toBeUndefined();
   });
+});
+
+/*
+ * The operator's "open the UI, model waits": a pull writes the checkout before
+ * its large objects arrive, a missing object as its pointer, and fills each one
+ * as it lands. The pointer is what the store records, so nothing is owed meanwhile.
+ */
+describe('opening before large objects arrive', () => {
+  it('writes the checkout at once, holds a missing object as its pointer, and fills it as it lands', async () => {
+    const reports: LargeObjectsReport[] = [];
+    const part = 'solid part\n';
+    const { pointer, bytes: pointerBytes } = lfsPointerFor(new TextEncoder().encode(part));
+    let release: () => void = () => undefined;
+    const arrived = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { port: real, filesystem } = await fixture();
+    await real.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    await real.setHead('main');
+    const receipt = await real.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([
+        ['main.scad', 'import("models/part.step");\n'],
+        ['models/part.step', part],
+      ]),
+      provenance: { source: 'user', actorId: 'grace', createdAt: Date.UTC(2026, 9, 29) },
+      summary: { generated: 'Remote' },
+    });
+    const remote = revisionId(receipt.commitId);
+    await real.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head: remote });
+    /* As a fetch leaves it: the pointer is recorded, the bytes are not here yet. */
+    const objectFile = `.git/${lfsObjectPath(pointer.oid)}`;
+    await filesystem.unlink(objectFile);
+    /* The transfer lands when the test says so. */
+    const port: RevisionPort = {
+      ...real,
+      readTree: async (id, options) => {
+        if (options?.largeObjects === 'local') {
+          return real.readTree(id, options);
+        }
+        await arrived;
+        await filesystem.writeFile(objectFile, part);
+        options?.onLargeObject?.(pointer.oid, new TextEncoder().encode(part));
+        return real.readTree(id);
+      },
+    };
+    const actors = createRevisionActors({
+      port,
+      projectId: 'project-1',
+      filesystem: async () => filesystem,
+      onLargeObjects: (report) => reports.push(report),
+    });
+
+    await expect(run(actors.sync.fastForward, { remote: 'tau', branch: 'main' })).resolves.toMatchObject({
+      checkoutId: 'live',
+      revisionId: remote,
+    });
+    expect(await filesystem.readFile('main.scad', 'utf8')).toBe('import("models/part.step");\n');
+    expect(await filesystem.readFile('models/part.step')).toStrictEqual(pointerBytes);
+    await vi.waitFor(() => {
+      expect(reports.at(-1)?.facet).toMatchObject({ phase: 'fetching', paths: ['models/part.step'], totalObjects: 1 });
+    });
+    /* A placeholder is not work: the checkout records exactly the head's tree. */
+    const live = await captureRevisionTree(filesystem, { exclude: (path) => !classify(path).versioned });
+    const recorded = await real.readRevision(remote);
+    expect(revisionTreeId(cleanLargeObjects(live).tree, 'sha1')).toBe(recorded?.treeId);
+
+    release();
+    await vi.waitFor(() => {
+      expect(reports.at(-1)?.facet).toBeUndefined();
+    });
+    expect(await filesystem.readFile('models/part.step', 'utf8')).toBe(part);
+  }, 30_000);
+  /* A project a reload left mid-download: its checkout holds the part's pointer, and the store lacks the bytes. */
+  const leftMidDownload = async () => {
+    const reports: LargeObjectsReport[] = [];
+    const part = 'solid part\n';
+    const { pointer, bytes: pointerBytes } = lfsPointerFor(new TextEncoder().encode(part));
+    const gate = Promise.withResolvers<void>();
+    const { port: real, filesystem } = await fixture();
+    await real.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await real.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([
+        ['main.scad', 'import("models/part.step");\n'],
+        ['models/part.step', part],
+      ]),
+      provenance: { source: 'user', actorId: 'grace', createdAt: Date.UTC(2026, 9, 29) },
+      summary: { generated: 'Remote' },
+    });
+    const head = revisionId(receipt.commitId);
+    await real.updateRef({ name: 'refs/heads/main', expectedHead: undefined, head });
+    await real.setHead('main');
+    const objectFile = `.git/${lfsObjectPath(pointer.oid)}`;
+    await filesystem.unlink(objectFile);
+    await filesystem.writeFile('main.scad', 'import("models/part.step");\n');
+    await filesystem.mkdir('models', { recursive: true });
+    await filesystem.writeFile('models/part.step', pointerBytes);
+    const signals: AbortSignal[] = [];
+    const port: RevisionPort = {
+      ...real,
+      readTree: async (id, options) => {
+        if (options?.largeObjects === 'local' || id !== head) {
+          return real.readTree(id, options);
+        }
+        if (options?.signal !== undefined) {
+          signals.push(options.signal);
+        }
+        const aborted = new Promise<never>((_resolve, reject) => {
+          options?.signal?.addEventListener('abort', () => {
+            reject(new Error('aborted'));
+          });
+        });
+        await Promise.race([gate.promise, aborted]);
+        await filesystem.writeFile(objectFile, part);
+        options?.onLargeObject?.(pointer.oid, new TextEncoder().encode(part));
+        return real.readTree(id);
+      },
+    };
+    const actors = createRevisionActors({
+      port,
+      projectId: 'project-1',
+      filesystem: async () => filesystem,
+      onLargeObjects: (report) => reports.push(report),
+    });
+    return {
+      actors,
+      real,
+      filesystem,
+      reports,
+      part,
+      pointerBytes,
+      signals,
+      land: () => {
+        gate.resolve();
+      },
+    };
+  };
+
+  it('resumes as the root starts, with no capture or pull to prompt it', async () => {
+    const project = await leftMidDownload();
+    await vi.waitFor(() => {
+      expect(project.reports.at(-1)?.facet).toMatchObject({ phase: 'fetching', paths: ['models/part.step'] });
+    });
+    project.land();
+    await vi.waitFor(() => {
+      expect(project.reports.at(-1)?.facet).toBeUndefined();
+    });
+    expect(await project.filesystem.readFile('models/part.step', 'utf8')).toBe(project.part);
+  }, 30_000);
+
+  it('stops the fill when the project closes, and writes nothing after', async () => {
+    const project = await leftMidDownload();
+    await vi.waitFor(() => {
+      expect(project.signals).toHaveLength(1);
+    });
+    await project.actors.settled();
+    expect(project.signals[0]?.aborted).toBe(true);
+    project.land();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+    expect(await project.filesystem.readFile('models/part.step')).toStrictEqual(project.pointerBytes);
+  }, 30_000);
+
+  it('begins the fill again after a branch switch replaces the placeholders', async () => {
+    const project = await leftMidDownload();
+    await vi.waitFor(() => {
+      expect(project.reports.at(-1)?.facet).toMatchObject({ phase: 'fetching' });
+    });
+    const other = await project.real.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['main.scad', 'cube(1);\n']]),
+      provenance: { source: 'user', actorId: 'grace', createdAt: Date.UTC(2026, 9, 29) },
+      summary: { generated: 'Other' },
+    });
+    await project.real.updateRef({
+      name: 'refs/heads/other',
+      expectedHead: undefined,
+      head: revisionId(other.commitId),
+    });
+    await run(project.actors.branch.applySwitch, { projectId: 'project-1', branch: 'other', checkoutId: undefined });
+    await vi.waitFor(() => {
+      expect(project.reports.at(-1)?.facet).toBeUndefined();
+    });
+    expect(project.signals[0]?.aborted).toBe(true);
+  }, 30_000);
 });

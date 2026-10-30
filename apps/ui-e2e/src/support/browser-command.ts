@@ -26,6 +26,7 @@ import type {
   TargetLinkedGithubState,
   TargetMouseOptions,
   TargetReadOptions,
+  TargetRequestFailure,
   TargetState,
   TargetSurface,
   TargetTauBillingOperation,
@@ -36,6 +37,7 @@ import type {
   TargetWorker,
   TargetWorkerFlowEvidence,
 } from './external-target.ts';
+import { maskAutomationFromAnalytics } from './analytics-bot-mask.ts';
 import { testBaseURL } from './base-url.ts';
 import { classifyWebGpuAdapter, webGpuLaunchArguments } from './webgpu-profile.ts';
 import { listTauServeChats, readTauServeFile, startTauServeFixture } from './tau-serve-fixture.ts';
@@ -108,6 +110,8 @@ type Session = {
   readonly consoleMessages: Array<{
     readonly text: string;
     readonly type: string;
+    /** The source the message names: the script that logged it, or the resource a network error is about. */
+    readonly url?: string;
   }>;
   readonly context: ProviderContext;
   /** The DevTools session of each page whose CPU profile `uiCpuProfile` is recording. */
@@ -121,6 +125,8 @@ type Session = {
     }
   >;
   readonly pageErrors: string[];
+  /** Requests the page made that failed or answered 4xx/5xx, as `observePage` saw them. */
+  readonly requestFailures: TargetRequestFailure[];
   readonly posthogEvents: Array<{ readonly event: string; readonly decoded: string }>;
   readonly posthogRequests: string[];
   readonly primary: TargetPage;
@@ -256,9 +262,26 @@ const observePage = (session: Session, page: TargetPage): void => {
     session.consoleMessages.push({
       text: message.text(),
       type: message.type(),
+      ...(message.location().url ? { url: message.location().url } : {}),
     }),
   );
   page.on('pageerror', (error) => session.pageErrors.push(error.message));
+  page.on('requestfailed', (request) =>
+    session.requestFailures.push({
+      url: request.url(),
+      resourceType: request.resourceType(),
+      failure: request.failure()?.errorText ?? 'failed',
+    }),
+  );
+  page.on('response', (response) => {
+    if (response.status() >= 400) {
+      session.requestFailures.push({
+        url: response.url(),
+        resourceType: response.request().resourceType(),
+        failure: `HTTP ${String(response.status())}`,
+      });
+    }
+  });
 };
 
 const disposeSession = async (session: Session): Promise<void> => {
@@ -412,6 +435,7 @@ export const uiOpenTarget: BrowserCommand<
     context,
     cpuProfiles: new Map(),
     pageErrors: [],
+    requestFailures: [],
     posthogEvents: [],
     posthogRequests: [],
     primary,
@@ -964,13 +988,9 @@ export const uiInstallPostHogFixture: BrowserCommand<[apiKey: string]> = async (
   const deadClicks = await readFile(
     resolve(import.meta.dirname, '../../../../node_modules/posthog-js/dist/dead-clicks-autocapture.js'),
   );
+  await session.context.addInitScript(maskAutomationFromAnalytics);
   await session.context.addInitScript(
     ({ key }) => {
-      Object.defineProperty(navigator, 'webdriver', { configurable: true, value: false });
-      Object.defineProperty(navigator, 'userAgent', {
-        configurable: true,
-        value: navigator.userAgent.replace('HeadlessChrome', 'Chrome'),
-      });
       (globalThis as typeof globalThis & { ENV?: Record<string, unknown> }).ENV = {
         ...(globalThis as typeof globalThis & { ENV?: Record<string, unknown> }).ENV,
         // eslint-disable-next-line @typescript-eslint/naming-convention -- client environment wire name
@@ -2421,6 +2441,20 @@ const startWorkerCpuProfiles = async (
 };
 
 /**
+ * Run a full V8 garbage collection in one page, so a count read next sees only what the page still references. Not a
+ * memory measurement: it only settles which objects a spec's weak references still reach.
+ */
+export const uiCollectGarbage: BrowserCommand<[surface?: TargetSurface]> = async (commandContext, surface) => {
+  const session = sessionFor(commandContext);
+  const cdp = await session.context.newCDPSession(pageFor(session, surface));
+  try {
+    await cdp.send('HeapProfiler.collectGarbage');
+  } finally {
+    await cdp.detach();
+  }
+};
+
+/**
  * Records a CPU profile of one target page through the DevTools protocol.
  *
  * `start` begins sampling at 100 µs; `stop` ends it and writes the profile as `artifactName`
@@ -3098,14 +3132,56 @@ export const uiReadObservedWasm: BrowserCommand<[settle?: boolean], readonly str
   return drained;
 };
 
+/** The path of every request each target context started since `uiStartObservedRequests`. */
+const observedRequests = new WeakMap<ProviderContext, Set<string>>();
+
+/**
+ * Record the path of every request the target starts from now on, including those of its frames and dedicated
+ * workers, so a spec can prove which chunks, workers and assets a surface downloads.
+ */
+export const uiStartObservedRequests: BrowserCommand = (commandContext) => {
+  const { context } = sessionFor(commandContext);
+  if (observedRequests.has(context)) {
+    return;
+  }
+  const paths = new Set<string>();
+  observedRequests.set(context, paths);
+  context.on('request', (request) => {
+    const url = new URL(request.url());
+    if (url.protocol === 'http:' || url.protocol === 'https:') {
+      paths.add(url.pathname);
+    }
+  });
+};
+
+/** Drain the request paths observed so far, settling first as `uiReadObservedWasm` does. */
+export const uiReadObservedRequests: BrowserCommand<[settle?: boolean], readonly string[]> = async (
+  commandContext,
+  settle = true,
+) => {
+  const session = sessionFor(commandContext);
+  const paths = observedRequests.get(session.context);
+  if (!paths) {
+    throw new Error('Requests are not observed; call uiStartObservedRequests first.');
+  }
+  if (settle) {
+    await session.primary.waitForLoadState('networkidle');
+  }
+  const drained = [...paths].toSorted();
+  paths.clear();
+  return drained;
+};
+
 export const uiReadTargetEvents: BrowserCommand<
   [],
   {
     readonly consoleMessages: ReadonlyArray<{
       readonly text: string;
       readonly type: string;
+      readonly url?: string;
     }>;
     readonly pageErrors: readonly string[];
+    readonly requestFailures: readonly TargetRequestFailure[];
     readonly geospecWasm?: TargetDiagnostics['geospecWasm'];
     readonly geospecFault?: TargetDiagnostics['geospecFault'];
   }
@@ -3114,6 +3190,7 @@ export const uiReadTargetEvents: BrowserCommand<
   return {
     consoleMessages: session.consoleMessages,
     pageErrors: session.pageErrors,
+    requestFailures: session.requestFailures,
     geospecWasm: await session.geospecWasm,
     geospecFault: session.geospecFault,
   };
@@ -3130,6 +3207,7 @@ export const uiBrowserCommands = {
   uiClickTarget,
   uiCloseSecondaryTarget,
   uiCloseTarget,
+  uiCollectGarbage,
   uiCookies,
   uiCpuProfile,
   uiDragTarget,
@@ -3143,6 +3221,8 @@ export const uiBrowserCommands = {
   uiReadObservedDownloads,
   uiStartObservedWasm,
   uiReadObservedWasm,
+  uiStartObservedRequests,
+  uiReadObservedRequests,
   uiEmulateColorScheme,
   uiEmulateContrast,
   uiEmulateForcedColors,

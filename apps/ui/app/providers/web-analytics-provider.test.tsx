@@ -96,6 +96,29 @@ const readBlob = async (body: Blob): Promise<ArrayBuffer> =>
     reader.readAsArrayBuffer(body);
   });
 
+/**
+ * The JSON the SDK put on the wire, whichever encoding it chose: gzip bytes under
+ * `?compression=gzip-js`, or base64 text where the SDK chose not to compress.
+ *
+ * @param encoded - One captured beacon body: text, or the bytes a Blob body was read into.
+ * @returns The decoded JSON text.
+ * @throws When the body is one the SDK never uses for a capture, such as a stream or form data.
+ */
+const decodeBeacon = (encoded: BodyInit | ArrayBuffer | undefined): string => {
+  if (typeof encoded !== 'string' && !(encoded instanceof ArrayBuffer) && !ArrayBuffer.isView(encoded)) {
+    throw new TypeError('Captured beacon body is not text or bytes');
+  }
+  const bytes =
+    typeof encoded === 'string' ? undefined : new Uint8Array(ArrayBuffer.isView(encoded) ? encoded.buffer : encoded);
+  if (bytes?.[0] === 0x1f && bytes[1] === 0x8b) {
+    return gunzipSync(bytes).toString();
+  }
+  const text = bytes === undefined ? (encoded as string) : new TextDecoder().decode(bytes);
+  // `compression=base64` posts the envelope form encoded as `data=<base64>`.
+  const form = /^data=(?<payload>.*)$/su.exec(text);
+  return form === null ? text : Buffer.from(decodeURIComponent(form.groups?.['payload'] ?? ''), 'base64').toString();
+};
+
 // The SDK wraps even unbatched captures in a timestamped batch envelope.
 // Beacon transport additionally wraps encoded bytes in a Blob for its content type.
 const transmittedEvents = async (): Promise<TransmittedEvent[]> => {
@@ -104,9 +127,7 @@ const transmittedEvents = async (): Promise<TransmittedEvent[]> => {
       .filter(({ url }) => url.includes('/e/'))
       .map(async ({ body }) => {
         const encoded = body instanceof Blob ? await readBlob(body) : body;
-        const text =
-          typeof encoded === 'string' ? encoded : gunzipSync(new Uint8Array(encoded as ArrayBuffer)).toString();
-        const payload = JSON.parse(text) as { batch: TransmittedEvent[] };
+        const payload = JSON.parse(decodeBeacon(encoded)) as { batch: TransmittedEvent[] };
         return payload.batch;
       }),
   );
@@ -210,8 +231,9 @@ describe('WebAnalyticsProvider', () => {
     expect(init).toHaveBeenCalledOnce();
     expect(posthog.has_opted_out_capturing()).toBe(false);
     expect(posthog._isIdentified()).toBe(false);
-    const initialPageviews = pageviews(capture.mock.calls);
-    expect(initialPageviews).toBe(1);
+    await vi.waitFor(() => {
+      expect(pageviews(capture.mock.calls)).toBe(1);
+    });
     await vi.waitFor(async () => {
       const events = await transmittedEvents();
       expect(events.filter(({ event }) => event === '$pageview')).toHaveLength(1);

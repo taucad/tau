@@ -57,11 +57,20 @@ export function getErrorCode(error: unknown): RpcClientErrorCode {
   return rpcClientErrorCode.unknown;
 }
 
-/** @public */
+const isRetryable = (error: unknown): boolean =>
+  error instanceof Error && 'retryable' in error && error.retryable === true;
+
+/**
+ * The handler failure for a thrown error. An error that says `retryable: true` (a file still downloading, say) keeps
+ * saying so, so the agent asks again rather than giving up on the file.
+ *
+ * @public
+ */
 export function toRpcError(error: unknown): RpcHandlerError {
   return {
     success: false,
     errorCode: getErrorCode(error),
     message: getErrorMessage(error),
+    ...(isRetryable(error) ? { retryable: true } : {}),
   };
 }

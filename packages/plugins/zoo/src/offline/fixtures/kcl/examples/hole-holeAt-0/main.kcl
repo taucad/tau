@@ -1,0 +1,20 @@
+// Model a cube.
+cube1 = startSketchOn(XY)
+  |> rectangle(width = 3, height = 3, center = [0, 0])
+  |> extrude(length = 3)
+
+// Define a custom plane, into which a hole will be cut.
+customPlane = {
+  origin = { x = 1.5, y = -1.5, z = 3 },
+  xAxis = { x = -0.5, y = -0.5, z = 0 },
+  yAxis = { x = 0, y = 0.5, z = 0.5 }
+}
+
+// Cut the hole through the cube, into the plane.
+hole::holeAt(
+  [cube1],
+  plane = customPlane,
+  holeBottom = hole::flat(),
+  holeBody = hole::blind(depth = 2, diameter = 1),
+  holeType = hole::counterbore(diameter = 1.4, depth = 1),
+)

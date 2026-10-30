@@ -22,7 +22,8 @@ sys.path.insert(0, str(PYTHON_ROOT))
 import numpy
 import smlibpy
 import smlibpy.parts
-from smlibpy import Box, Circle, Cylinder, Line, Mesh, Part, Polyline, Rectangle, Sphere, Torus, load, tessellate
+from smlibpy import Box, Circle, Cylinder, Line, Mesh, Part, Polyline, Rectangle, Rot, Sphere, Torus, load, tessellate
+from smlibpy.mesh import _tessellate
 
 import worker
 from tau_kernel.protocol import Artifacts, WorkerContext
@@ -89,6 +90,17 @@ def compute_config() -> dict[str, Any]:
         "producer": {"id": "@taucad/smlibpy-test", "version": "test@1", "implementationAssets": [f"sha256:{'a' * 64}"]},
         "environment": {"platform": "test", "lengthUnit": "millimeter"},
     }
+
+
+def open_edges(mesh: Mesh) -> int:
+    """Edges used by other than two triangles once coincident positions are joined; zero when watertight."""
+
+    positions = numpy.round(numpy.asarray(mesh.vertices, dtype=numpy.float64), 6)
+    _, welded = numpy.unique(positions, axis=0, return_inverse=True)
+    corners = welded.reshape(-1)[numpy.asarray(mesh.triangles, dtype=numpy.int64)]
+    edges = numpy.sort(numpy.concatenate([corners[:, [0, 1]], corners[:, [1, 2]], corners[:, [2, 0]]]), axis=1)
+    _, counts = numpy.unique(edges, axis=0, return_counts=True)
+    return int((counts != 2).sum())
 
 
 def read_bundle(path: Path) -> tuple[dict[str, Any], bytes]:
@@ -223,7 +235,7 @@ class GeometryTest(unittest.TestCase):
 
     def test_face_runs(self) -> None:
         box = Box(1, 1, 1)
-        mesh = tessellate(box, 0.1, 15)
+        mesh = _tessellate(box, 0.1, 15, True)
         owners = worker._face_runs(box, mesh)
         self.assertEqual(sorted(set(owners.tolist())), list(range(6)))
         face = box.faces()[0]
@@ -231,14 +243,14 @@ class GeometryTest(unittest.TestCase):
         # Polygon owners that do not cover the triangles mean one group, not a misassigned face.
         self.assertIsNone(worker._face_runs(box, types.SimpleNamespace(_poly=mesh._poly, triangles=mesh.triangles[:-1])))
 
-    def test_surface_falls_back_to_face_meshes_for_an_open_body_mesh(self) -> None:
-        torus = Torus(10, 2).translate(3, 4, 5)
-        mesh, owners, triangles = worker._surface(torus, 0.05, 15)
-        self.assertEqual(worker._open_edges([mesh]), 0)
-        self.assertEqual(len(owners), len(triangles))
-        with patch.object(worker, "_open_edges", side_effect=[3, 3, 3]):
-            mesh, _, _ = worker._surface(torus, 0.05, 15)
-        self.assertGreater(len(mesh.triangles), 0)
+    def test_surface_closes_curved_bodies_in_one_pass(self) -> None:
+        # smlibpy 0.3.5 left the seam of a moved torus open in a whole-body mesh; 0.6 closes it.
+        for body in (Torus(10, 2).translate(3, 4, 5), Rot(30, 40, 0) * Torus(7, 3), Box(10, 10, 10) - Sphere(6)):
+            mesh, owners, triangles = worker._surface(body, 0.05, 15)
+            self.assertEqual(open_edges(mesh), 0)
+            self.assertEqual(len(owners), len(triangles))
+            self.assertEqual(sorted(set(owners.tolist())), list(range(len(body.faces()))))
+            self.assertIsNone(mesh._poly)
         sphere = tessellate(Sphere(2), 0.1, 15)
         self.assertEqual(worker._surface(sphere, 0.1, 15)[1], None)
         _, sketch_owners, _ = worker._surface(Rectangle(2, 1), 0.1, 15)
@@ -252,7 +264,7 @@ class GeometryTest(unittest.TestCase):
         empty = worker._face_arrays(Mesh(numpy.zeros((0, 3)), numpy.zeros((0, 3), dtype=int)), None)
         self.assertEqual((len(empty["vertices"]), len(empty["triangles"]), empty["faceGroups"]), (0, 0, []))
         box = Box(1, 1, 1)
-        mesh = tessellate(box, 0.1, 15)
+        mesh = _tessellate(box, 0.1, 15, True)
         grouped = worker._face_arrays(mesh, worker._face_runs(box, mesh))
         self.assertEqual(len(grouped["faceGroups"]), 6)
         self.assertEqual(len(grouped["vertices"]), 24)

@@ -1062,12 +1062,44 @@
       "owner": "desktop-bash-terminal W3"
     },
     {
+      "id": "SHELL-DRAIN-TIMEOUT",
+      "bound": "2-second bound on waiting for output readers after an unconfirmed cleanup",
+      "site": "packages/host/src/shell/shell-service.ts",
+      "token": "setTimeout(resolve, milliseconds)",
+      "class": "External edge",
+      "owner": "desktop-bash-terminal W3"
+    },
+    {
       "id": "TERMINAL-OPEN-TIMEOUT",
       "bound": "30-second bound on a fresh desktop terminal port's open frame; a port that never opens is closed before any shell starts",
       "site": "apps/desktop/src/tau/services-host.terminal.ts",
       "token": "setTimeout(abandonUnopened, openMilliseconds)",
       "class": "External edge",
       "owner": "desktop-bash-terminal W5"
+    },
+    {
+      "id": "LFS-FILL-REPORT",
+      "bound": "Large-object fill progress report coalescing, 250 ms (reportMilliseconds): arrivals between reports are told once; a fill's end or failure is told at once",
+      "site": "packages/revisions/src/large-object-fill.ts",
+      "token": "fill.reportTimer ??= setTimeout(",
+      "class": "Presentation",
+      "owner": "open first, model waits"
+    },
+    {
+      "id": "LFS-FILL-FLUSH",
+      "bound": "Large-object fill write coalescing, 1 s (flushMilliseconds): objects that landed meanwhile are written into the checkout in one fenced materialization; a flush a writer kept conflicting is re-armed here; cleared when the fill ends or the project closes",
+      "site": "packages/revisions/src/large-object-fill.ts",
+      "token": "fill.flushTimer ??= setTimeout(",
+      "class": "Debounce",
+      "owner": "open first, model waits"
+    },
+    {
+      "id": "LFS-FILL-RESUME",
+      "bound": "Large-object fill resume, deferred one task (0 ms) so the capture or root start that asked is not delayed; cleared when the project closes",
+      "site": "packages/revisions/src/revision-effects.ts",
+      "token": "resumeTimers.delete(timer)",
+      "class": "Debounce",
+      "owner": "open first, model waits"
     }
   ]
 }

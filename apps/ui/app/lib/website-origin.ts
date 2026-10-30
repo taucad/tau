@@ -21,3 +21,20 @@ export const websiteOrigin = (): string => {
   }
   return canonicalProductionUrl.origin;
 };
+
+/**
+ * The origin serving this document, where there is one.
+ *
+ * A document render has no `location`: Node defines no such global, so every `globalThis.location`
+ * read there yields undefined and the property access after it throws. A caller comparing an origin
+ * against the page's own needs that answer absent on the server rather than an exception.
+ *
+ * The name being present is not the same as it holding a document. A server runtime, or a test
+ * standing one in, can define `location` as undefined, and an `in` check alone passes there and
+ * then throws on the property. Both readings are guarded so the absent answer is returned either
+ * way.
+ *
+ * @returns The page's `scheme://host`, or undefined outside a browser.
+ */
+export const pageOrigin = (): string | undefined =>
+  'location' in globalThis ? (globalThis.location as Location | undefined)?.origin : undefined;

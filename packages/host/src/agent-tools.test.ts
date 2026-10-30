@@ -775,7 +775,10 @@ describe('createHostToolRegistry', () => {
     );
     /* The desktop and `tau serve` hand the host the authority's client, not a local provider (services-host.impl.ts). */
     const { port1, port2 } = new MessageChannel();
-    const stop = serveNodeFsProvider(port2, { policy: tauPathPolicy, allowRoot: (root) => root === workspaceRoot });
+    const stop = serveNodeFsProvider(port2, {
+      policy: tauPathPolicy,
+      allowRoot: (root) => root === workspaceRoot,
+    }).close;
     const channel = new NodeFsChannel(port1);
     try {
       const { runtimeClient, projectId, requestJob, machines } = printFixture();

@@ -220,3 +220,10 @@ SLO / Executive › Tau Sync Error Budget Remaining (SLO-1 / SLO-2)
 SLO / Executive › Tau Sync Burn Rate (6h, SLO-1 / SLO-2)
 SLO / Executive › Tau Sync Burn Rate (24h, SLO-1 / SLO-2)
 SLO / Executive › B2 Copy Freshness, SLO-6 (30d)
+
+# Agent observability (T14). Nothing admits or delivers agent evidence locally until a payload key, a granted purpose
+# (TAU_OBSERVABILITY_NOTICE_VERSION) and Langfuse credentials are configured, so these stay empty; the backlog and
+# lifecycle panels fill from the lifecycle pass every instance runs.
+AI Agent › Evidence Admissions by Outcome
+AI Agent › Evidence Deliveries by Outcome
+AI Agent › Langfuse Erasure Steps by Outcome

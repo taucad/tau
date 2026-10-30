@@ -1,0 +1,13 @@
+// Loft a square and a circle on the `XZ` plane using offset.
+squareSketch = startSketchOn(XZ)
+    |> startProfile(at = [-100, 200])
+    |> line(end = [200, 0])
+    |> line(end = [0, -200])
+    |> line(end = [-200, 0])
+    |> line(endAbsolute = [profileStartX(%), profileStartY(%)])
+    |> close()
+
+circleSketch = startSketchOn(offsetPlane(XZ, offset = 150))
+    |> circle( center = [0, 100], radius = 50 )
+
+loft([squareSketch, circleSketch])

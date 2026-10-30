@@ -1,8 +1,8 @@
 # @classcad/smlibwasm — Constants
 
-9 top-level symbols. Signatures are verbatim typescript.
+11 top-level symbols. Signatures are verbatim typescript.
 
-version: "0.3.4"
+version: "0.6.2"
 
 // Geometric tolerance used for comparisons (model units)
 TOLERANCE: 0.000001
@@ -33,5 +33,15 @@ ACCURACY: 1e-7
 // The font `Text` uses unless told otherwise
 DEFAULT_FONT: Uint8Array
 
+// Whether every Boolean (`fuse`, `cut`, `intersect`, `merge`) runs in the probe worker too, as the steps of GUARD_SECONDS (off by default
+GUARD_BOOLEANS: boolean
+
+// Seconds the kernel may take for one step that can crash or loop
+GUARD_SECONDS: number
+
 // Named views
-VIEWS: Readonly<Record<string, readonly [number, number, number]>>
+VIEWS: Readonly<Record<string, readonly [
+    number,
+    number,
+    number
+]>>

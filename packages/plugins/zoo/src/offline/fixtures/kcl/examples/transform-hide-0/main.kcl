@@ -1,0 +1,7 @@
+// Hide a body, leaving a sketch on face intact
+cylinder = startSketchOn(XY)
+  |> circle(center = [0, 0], radius = 2)
+  |> extrude(length = 2mm)
+dot = startSketchOn(cylinder, face = END)
+  |> circle(center = [0, 0], radius = 1)
+hide(cylinder)

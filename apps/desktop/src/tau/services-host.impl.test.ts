@@ -147,7 +147,7 @@ const stubPort = () => ({
 });
 
 const hostHarness = (overrides: Partial<ServicesHostOptions> = {}) => {
-  const serve = vi.fn(() => async () => undefined);
+  const serve = vi.fn(() => ({ run: vi.fn(), close: async () => undefined }));
   const log = vi.fn();
   return {
     serve,
@@ -768,7 +768,7 @@ describe('createServicesHost — filesystem authority lifetime', () => {
     const quiesced = vi.fn();
     const serve = vi.fn(() => {
       const settlement = pending.shift()!;
-      return async () => settlement;
+      return { run: vi.fn(), close: async () => settlement };
     });
     const host = createServicesHost({
       log: vi.fn(),
@@ -803,9 +803,12 @@ describe('createServicesHost — filesystem authority lifetime', () => {
     const cleanupFailure = new Error('forced cleanup failed');
     const log = vi.fn();
     const quiesced = vi.fn();
-    const serve = vi.fn(() => async () => {
-      throw cleanupFailure;
-    });
+    const serve = vi.fn(() => ({
+      run: vi.fn(),
+      close: async () => {
+        throw cleanupFailure;
+      },
+    }));
     const host = createServicesHost({
       log,
       quiesced,
@@ -844,7 +847,7 @@ describe('createServicesHost — filesystem authority lifetime', () => {
 
   it('keeps an already-started graceful settlement when forced disposal follows', async () => {
     const cleanup = Promise.withResolvers<void>();
-    const serve = vi.fn(() => async () => cleanup.promise);
+    const serve = vi.fn(() => ({ run: vi.fn(), close: async () => cleanup.promise }));
     const host = createServicesHost({
       log: vi.fn(),
       serve: serve as unknown as ServicesHostOptions['serve'],

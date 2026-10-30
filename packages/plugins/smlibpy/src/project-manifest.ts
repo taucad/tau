@@ -6,7 +6,7 @@ import type { KernelIssue } from '@taucad/runtime/kernel';
  * `python/requirements.in`. A test keeps them equal to that file and to the project template.
  */
 export const smlibpyProjectLibraries: Readonly<Record<string, string>> = {
-  smlibpy: '0.3.5',
+  smlibpy: '0.6.2',
   numpy: '2.5.2',
 };
 

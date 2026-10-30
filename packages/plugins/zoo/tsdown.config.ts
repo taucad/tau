@@ -7,6 +7,9 @@ const baseConfig: UserConfig = {
   clean: true,
   dts: true,
   minify: true,
+  // The offline engine's own libcascade build (glue, WASM and types) stays beside the modules that load it.
+  copy: ({ outDir }) => [{ from: 'src/offline/wasm', to: `${outDir}/offline` }],
+  external: [/\/wasm\/libcascade_kcl\.js$/],
   tsconfig: 'tsconfig.build.json',
   unbundle: true,
 };

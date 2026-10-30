@@ -4,7 +4,6 @@ import type { CacheValue } from '@taucad/cache-core';
 import { cloneBoundedJson } from '@taucad/parameters/json';
 import type { ReadonlyDeep } from 'type-fest';
 import { z } from 'zod';
-import { validateConfiguration } from '#configuration/configuration.js';
 import type { ConfigurationDefinition, ConfigurationIssue } from '#configuration/configuration.js';
 
 import type {
@@ -250,6 +249,8 @@ const validateValues = async <Schema extends SettingsSchema>(
     if (input === null || typeof input !== 'object' || Array.isArray(input)) {
       throw new TypeError('Settings must be an object');
     }
+    // Reading the settings envelope needs no configuration or unit-validation engine.
+    const { validateConfiguration } = await import('#configuration/configuration.js');
     const validation = await validateConfiguration({
       definition,
       manifestDigest: await definition.manifestDigest(),

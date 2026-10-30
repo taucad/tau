@@ -8,14 +8,16 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { processTable } from '#shell/process-tree.js';
+import { createShellCustody } from '#shell/shell-custody.js';
 import { holdProtectedStandIns } from '#shell/shell-stand-ins.js';
-import type { ShellLaunch, ShellPipesProcess, ShellProcess } from '#shell/shell-provider.js';
+import type { ShellLaunch, ShellLaunchOutcome, ShellPipesProcess, ShellProcess } from '#shell/shell-provider.js';
 import {
   bindOwnPty,
   createSandboxShellProvider,
   shellSandboxCommand,
   shellSandboxProfile,
 } from '#shell/srt-shell-provider.js';
+import type { SandboxShellProviderOptions } from '#shell/srt-shell-provider.js';
 
 /*
  * Orchestration tests (testing contract, layering rule 2): the supervisor fixture answers with an unsandboxed vector,
@@ -44,6 +46,7 @@ const fixtureRoot = (): string => {
 const launchOf = (overrides: Partial<ShellLaunch> & Pick<ShellLaunch, 'arguments'>): ShellLaunch => {
   const root = fixtureRoot();
   return {
+    executionId: '',
     executablePath: '/bin/bash',
     workingDirectory: root,
     commandId: 'test#1',
@@ -66,7 +69,7 @@ const text = async (chunks: AsyncIterable<Uint8Array<ArrayBuffer>>): Promise<str
 };
 
 const started = async (launch: ShellLaunch): Promise<ShellProcess> => {
-  const outcome = await createSandboxShellProvider({ supervisor }).launch(launch);
+  const outcome = await custodial().launch(launch);
   if (outcome.status !== 'started') {
     throw new Error(`expected a started launch, got ${JSON.stringify(outcome)}`);
   }
@@ -153,9 +156,113 @@ describe('createSandboxShellProvider admission', () => {
   });
 });
 
+/*
+ * I7 custody: every launch here is prepared first in its own custody namespace, so a test owns exactly the records it
+ * makes. `launch` prepares a fresh private root and execution, then launches it.
+ */
+const custodial = (overrides: Omit<SandboxShellProviderOptions, 'supervisor' | 'custody'> = {}) => {
+  const base = fixtureRoot();
+  const custody = { directory: join(base, 'custody'), sessionDirectory: base };
+  const provider = createSandboxShellProvider({ supervisor, custody, ...overrides });
+  const executions: string[] = [];
+  const privateRoots: string[] = [];
+  return {
+    provider,
+    custody,
+    executions,
+    privateRoots,
+    launch: async (launch: ShellLaunch): Promise<ShellLaunchOutcome> => {
+      const privateRoot = mkdtempSync(join(base, 'tau-shell-'));
+      const { executionId } = await provider.prepare({ privateRoot, resource: undefined });
+      executions.push(executionId);
+      privateRoots.push(privateRoot);
+      return provider.launch({ ...launch, executionId });
+    },
+  };
+};
+
+describe.runIf(process.platform === 'linux')('createSandboxShellProvider custody', () => {
+  it('should refuse a launch it did not prepare before starting anything', async () => {
+    const { provider } = custodial();
+    const outcome = await provider.launch({
+      ...launchOf({ arguments: ['--noprofile', '--norc', '-c', 'true'] }),
+      executionId: '22222222-2222-4222-8222-222222222222',
+    });
+
+    expect(outcome).toMatchObject({ status: 'sandbox-unavailable' });
+    expect(outcome.status === 'sandbox-unavailable' ? outcome.message : '').toContain('not prepared');
+  });
+
+  it('should hand custody to the supervisor while the launch runs and claim it as soon as exited settles', async () => {
+    const fixture = custodial();
+    const outcome = await fixture.launch(launchOf({ arguments: ['--noprofile', '--norc', '-c', 'sleep 300'] }));
+    if (outcome.status !== 'started') {
+      throw new Error(`expected a started launch, got ${JSON.stringify(outcome)}`);
+    }
+    const [executionId] = fixture.executions;
+    const other = createShellCustody(fixture.custody);
+    try {
+      expect(await other.recover({ executionIds: [executionId!] })).toMatchObject([{ status: 'blocked' }]);
+      await outcome.process.terminate();
+
+      // Post-exit claim: the supervisor has exited, so nothing still holds the lock.
+      expect(await fixture.provider.recover({ executionIds: [executionId!] })).toMatchObject([
+        { executionId, status: 'stopped' },
+      ]);
+      expect(await other.recover({ executionIds: [executionId!] })).toMatchObject([{ status: 'blocked' }]);
+      rmSync(fixture.privateRoots[0]!, { recursive: true });
+      await fixture.provider.release({ executionId: executionId! });
+      expect(await other.inventory()).toEqual([]);
+    } finally {
+      await other.close();
+    }
+  }, 20_000);
+
+  it('should give exactly one of two racing claimants the stopped claim after exit', async () => {
+    const fixture = custodial();
+    const outcome = await fixture.launch(launchOf({ arguments: ['--noprofile', '--norc', '-c', 'exit 0'] }));
+    if (outcome.status !== 'started') {
+      throw new Error(`expected a started launch, got ${JSON.stringify(outcome)}`);
+    }
+    const [executionId] = fixture.executions;
+    await outcome.process.exited;
+    const other = createShellCustody(fixture.custody);
+    try {
+      const answers = await Promise.all([
+        fixture.provider.recover({ executionIds: [executionId!] }),
+        other.recover({ executionIds: [executionId!] }),
+      ]);
+
+      expect(
+        answers.map(([answer]) => answer?.status ?? 'missing').toSorted((left, right) => left.localeCompare(right)),
+      ).toEqual(['blocked', 'stopped']);
+    } finally {
+      await other.close();
+    }
+  }, 20_000);
+
+  it('should let the owner stop a launch the supervisor refused', async () => {
+    const fixture = custodial();
+    const outcome = await fixture.launch(
+      launchOf({ arguments: ['--noprofile', '--norc', '-c', 'echo TAU_FIXTURE_UNAVAILABLE'] }),
+    );
+
+    expect(outcome).toMatchObject({ status: 'sandbox-unavailable' });
+    expect(await fixture.provider.recover({ executionIds: fixture.executions })).toMatchObject([{ status: 'stopped' }]);
+  });
+
+  it('should never pass the custody lock to the workload', async () => {
+    const shell = pipesOf(await started(launchOf({ arguments: ['--noprofile', '--norc', '-c', 'ls -l /proc/$$/fd'] })));
+    const listing = await text(shell.stdout);
+    await shell.exited;
+
+    expect(listing).not.toContain('.lock');
+  });
+});
+
 describe.runIf(posix)('createSandboxShellProvider plumbing', () => {
   it('should answer sandbox-unavailable when the supervisor cannot prepare the sandbox', async () => {
-    const outcome = await createSandboxShellProvider({ supervisor }).launch(
+    const outcome = await custodial().launch(
       launchOf({ arguments: ['--noprofile', '--norc', '-c', 'echo TAU_FIXTURE_UNAVAILABLE'] }),
     );
 
@@ -221,6 +328,53 @@ describe.runIf(posix)('createSandboxShellProvider plumbing', () => {
   });
 });
 
+/* I7 lifecycle: an uncertain cleanup is a visible failure that keeps custody, never a returned exit. */
+describe.runIf(posix)('createSandboxShellProvider uncertain cleanup', () => {
+  const launchWith = async (
+    table: NonNullable<Parameters<typeof createSandboxShellProvider>[0]>['processTable'],
+    command: string,
+  ): Promise<ShellPipesProcess> => {
+    const outcome = await custodial({ processTable: table }).launch(
+      launchOf({ arguments: ['--noprofile', '--norc', '-c', command] }),
+    );
+    if (outcome.status !== 'started') {
+      throw new Error(`expected a started launch, got ${JSON.stringify(outcome)}`);
+    }
+    return pipesOf(outcome.process);
+  };
+
+  it('should reject settlement and still end its output when the process table cannot be read', async () => {
+    const shell = await launchWith(async () => {
+      throw new Error('table unavailable');
+    }, 'echo done');
+    const output = text(shell.stdout);
+
+    await expect(shell.exited).rejects.toThrow('could not confirm');
+    expect(await output).toBe('done\n');
+  });
+
+  it('should reject settlement when an owned process survives termination', async () => {
+    const root = { pid: 0 };
+    const lying = await custodial({
+      processTable: async () => {
+        const rows = await processTable();
+        return [
+          ...rows.filter((row) => row.pid !== root.pid),
+          { pid: root.pid, ppid: 1, pgid: root.pid, zombie: false },
+        ];
+      },
+    }).launch(launchOf({ arguments: ['--noprofile', '--norc', '-c', 'echo $$; exit 0'] }));
+    if (lying.status !== 'started') {
+      throw new Error('expected a started launch');
+    }
+    const pipes = pipesOf(lying.process);
+    const printed = await text(pipes.stdout);
+    root.pid = Number(printed.trim());
+
+    await expect(pipes.exited).rejects.toThrow(/survived|could not confirm/u);
+  }, 20_000);
+});
+
 describe.runIf(process.platform === 'linux')('createSandboxShellProvider terminal', () => {
   it('should give the shell its own controlling terminal with job control, resize and Ctrl-C', async () => {
     const shell = await started(
@@ -274,6 +428,48 @@ describe.runIf(process.platform === 'linux')('createSandboxShellProvider termina
 });
 
 describe('shellSandboxProfile', () => {
+  it('should keep absent Linux containers uncreatable without applying macOS literal read denies', () => {
+    const root = fixtureRoot();
+    const missing = join(root, '.tau');
+    const profile = shellSandboxProfile({
+      filesystem: { readable: [], writable: [root], denied: [], masked: [missing] },
+      network: { domains: [] },
+    });
+    const filesystem = profile['filesystem'] as { denyRead: string[]; denyWrite: string[] };
+    if (process.platform === 'linux') {
+      expect(filesystem.denyRead).toContain(missing);
+      expect(filesystem.denyWrite).not.toContain(missing);
+      expect(filesystem.denyWrite).toContain(join(missing, '.tau-mask-boundary'));
+    } else {
+      expect(filesystem.denyRead).not.toContain(missing);
+      expect(filesystem.denyWrite).not.toContain(missing);
+    }
+  });
+
+  it.runIf(process.platform === 'linux')('should pin authored descendants without rebinding a masked container', () => {
+    const root = fixtureRoot();
+    const masked = join(root, '.tau');
+    const authored = join(masked, 'parameters');
+    const nested = join(authored, 'nested');
+    mkdirSync(nested, { recursive: true });
+    const denied = join(nested, 'private');
+    const profile = shellSandboxProfile({
+      filesystem: {
+        readable: [],
+        writable: [root, authored],
+        readOnly: [join(masked, 'chats')],
+        denied: [denied],
+        masked: [masked],
+      },
+      network: { domains: [] },
+    });
+    const filesystem = profile['filesystem'] as { allowWrite: string[]; denyRead: string[]; denyWrite: string[] };
+    expect(filesystem.allowWrite).not.toContain(masked);
+    expect(filesystem.allowWrite).toEqual(expect.arrayContaining([root, authored, nested]));
+    expect(filesystem.denyRead).toEqual(expect.arrayContaining([masked, denied]));
+    expect(filesystem.denyWrite).toContain(denied);
+  });
+
   it('should allow exactly the granted names and deny every other destination', () => {
     const profile = shellSandboxProfile({
       filesystem: { readable: [], writable: [], denied: [] },
@@ -448,8 +644,11 @@ describe('bindOwnPty', () => {
 });
 
 describe.runIf(process.platform === 'linux')('Linux runtime working directory and stand-ins', () => {
+  // Both rows launch through the prepared-launch harness: under I7 custody an unprepared launch is refused before
+  // the runtime directory or the writable-root check is reached, so preparation is what lets the landed main
+  // behaviour be observed at all.
   it('should start the supervisor in its private runtime directory, never the host working directory', async () => {
-    const outcome = await createSandboxShellProvider({ supervisor }).launch(
+    const outcome = await custodial().launch(
       launchOf({ arguments: ['--noprofile', '--norc', '-c', 'echo TAU_FIXTURE_CWD'] }),
     );
 
@@ -460,7 +659,7 @@ describe.runIf(process.platform === 'linux')('Linux runtime working directory an
   });
 
   it('should refuse a launch whose writable root holds the host working directory', async () => {
-    const outcome = await createSandboxShellProvider({ supervisor }).launch(
+    const outcome = await custodial().launch(
       launchOf({
         arguments: ['--noprofile', '--norc', '-c', 'true'],
         filesystem: { readable: [], writable: [process.cwd()], denied: [] },
@@ -475,31 +674,50 @@ describe.runIf(process.platform === 'linux')('Linux runtime working directory an
     const root = fixtureRoot();
     const home = join(root, 'home');
     mkdirSync(home);
-    // A writable private home puts the baseline denies inside a writable root, next to the checkout's own rows.
-    const profile = shellSandboxProfile(
-      {
-        filesystem: {
-          readable: [],
-          writable: [root],
-          readOnly: [join(root, 'project', '.tau', 'runs')],
-          denied: [join(root, 'project', '.git'), join(root, 'project', '.tau', 'binding.json')],
-        },
-        network: { domains: [] },
+    const project = join(root, 'project');
+    const second = join(root, 'second');
+    // A writable private home puts the baseline denies inside a writable root, next to the checkout's own rows; a
+    // second checkout's reserved container is masked and absent.
+    const launch = {
+      filesystem: {
+        readable: [],
+        writable: [root],
+        readOnly: [join(project, '.tau', 'runs')],
+        denied: [join(project, '.git'), join(project, '.tau', 'binding.json'), join(second, '.tau', 'binding.json')],
+        directories: [join(project, '.tau', 'runs'), join(project, '.git')],
+        masked: [join(second, '.tau')],
       },
-      { home },
-    ) as { filesystem: { denyWrite: string[]; allowWrite: string[] } };
-    const inside = profile.filesystem.denyWrite.filter((path) =>
-      profile.filesystem.allowWrite.some((writable) => path !== writable && path.startsWith(`${writable}/`)),
+      network: { domains: [] },
+    };
+    type Lists = { filesystem: { denyWrite: string[]; allowWrite: string[] } };
+    const hold = (profile: Lists) =>
+      holdProtectedStandIns({
+        ...profile.filesystem,
+        directories: launch.filesystem.directories,
+        masked: launch.filesystem.masked,
+        writable: launch.filesystem.writable,
+      });
+    // As a launch does: hold from the first profile, compute the profile again once the stand-ins exist, hold from it.
+    const releaseFirst = hold(shellSandboxProfile(launch, { home }) as Lists);
+    const profile = shellSandboxProfile(launch, { home }) as Lists;
+    const releaseSecond = hold(profile);
+    const mounted = profile.filesystem.denyWrite.filter(
+      (path) =>
+        profile.filesystem.allowWrite.some((writable) => path !== writable && path.startsWith(`${writable}/`)) &&
+        // A masked container's children lie under the runtime's own mask, never on the host.
+        !path.startsWith(`${join(second, '.tau')}/`),
     );
-    expect(inside).toStrictEqual(expect.arrayContaining([join(home, '.ssh'), join(root, 'project', '.git')]));
-
-    const release = holdProtectedStandIns(profile.filesystem);
     try {
+      expect(mounted).toStrictEqual(expect.arrayContaining([join(home, '.ssh'), join(project, '.git')]));
+      expect(existsSync(join(second, '.tau'))).toBe(true);
       // Every entry of the runtime's own deny list inside a writable root is now present: no runtime mount point.
-      expect(inside.filter((path) => !existsSync(path))).toStrictEqual([]);
+      expect(mounted.filter((path) => !existsSync(path))).toStrictEqual([]);
+      expect(existsSync(join(second, '.tau', 'binding.json'))).toBe(false);
     } finally {
-      release();
+      releaseSecond();
+      releaseFirst();
     }
-    expect(inside.filter((path) => existsSync(path))).toStrictEqual([]);
+    expect(mounted.filter((path) => existsSync(path))).toStrictEqual([]);
+    expect(existsSync(join(second, '.tau'))).toBe(false);
   });
 });

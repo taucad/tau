@@ -33,8 +33,17 @@
   "exports": {
     ".": "./src/index.ts",
     "./contract": "./src/contract.ts",
+    "./delivery": "./src/delivery.ts",
     "./authority": "./src/authority.ts",
     "./identity": "./src/identity.ts",
+    "./pending-stores": "./src/pending-stores.ts",
+    "./host-evidence": "./src/host-evidence.ts",
+    "./node-pending-files": "./src/node-pending-files.ts",
+    "./cloud-host-observer": "./src/cloud-host-observer.ts",
+    "./projection": "./src/projection.ts",
+    "./reporter": "./src/reporter.ts",
+    "./scorecard": "./src/scorecard.ts",
+    "./evaluation": "./src/evaluation.ts",
     "./pi-telemetry": "./src/pi-telemetry.ts",
     "./telemetry-policy": "./src/telemetry-policy.ts",
     "./package.json": "./package.json"
@@ -45,12 +54,14 @@
   },
   "dependencies": {
     "@earendil-works/pi-telemetry": "catalog:",
-    "@opentelemetry/api": "catalog:"
+    "@opentelemetry/api": "catalog:",
+    "@taucad/agent-host": "workspace:*"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "catalog:",
     "@opentelemetry/sdk-metrics": "catalog:",
     "@opentelemetry/sdk-trace-base": "catalog:",
+    "fake-indexeddb": "catalog:",
     "zod": "catalog:"
   }
 }

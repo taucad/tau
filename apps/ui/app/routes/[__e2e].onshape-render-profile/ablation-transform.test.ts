@@ -14,6 +14,7 @@ const files = [
   'packages/viewer/src/graphics/three/post-processing.tsx',
   'packages/viewer/src/graphics/three/renderer.ts',
   'packages/viewer/src/graphics/three/scene-overlay.tsx',
+  'packages/viewer/src/graphics/three/utils/section-stencil-caps.ts',
   'packages/viewer/src/graphics/three/react/gltf-mesh.tsx',
   'packages/viewer/src/graphics/three/react/model-emphasis-overlay.tsx',
   'apps/ui/app/routes/[__e2e].onshape-render-profile/route.tsx',
@@ -33,6 +34,17 @@ describe('calibration-only rendering ablation', () => {
       "current.drainStarted = now;\n        if (tauAblation.has('passCost')) resetAllocationCosts(false);",
     );
     expect(transformed).not.toContain('current.frame === 330) resetAllocationCosts(false)');
+  });
+
+  it('removes only the cap outline pass for capOutline=off', () => {
+    const file = 'packages/viewer/src/graphics/three/utils/section-stencil-caps.ts';
+    const transformed = transformRenderingAblation(readFileSync(resolve(root, file), 'utf8'), `/${file}`);
+    expect(transformed).toContain(
+      "if (allFaces.length > 0 && frame.outlineWidthPixels > 0 && tauAblation.get('capOutline') !== 'off') {",
+    );
+    // The cap fill, stencil counting and per-loop slices stay in the graph, so the ablation isolates the outline.
+    expect(transformed).toContain('stats.outlineSourceCount++');
+    expect(transformed).toContain('stats.drawnPieceCount++');
   });
 
   it('does not alter unrelated product modules', () => {

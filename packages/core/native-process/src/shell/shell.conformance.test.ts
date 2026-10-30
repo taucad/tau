@@ -105,6 +105,8 @@ let shellVersion = '';
 let ready = false;
 
 const launchOf = (command: string, overrides: Partial<ShellLaunch> = {}): ShellLaunch => ({
+  /* Prepared in `start`; a launch refused at admission never reaches custody. */
+  executionId: '',
   executablePath: shell.path,
   arguments: shellCommandArguments('bash', command),
   workingDirectory: work,
@@ -118,7 +120,9 @@ const launchOf = (command: string, overrides: Partial<ShellLaunch> = {}): ShellL
 });
 
 const start = async (launch: ShellLaunch): Promise<ShellProcess> => {
-  const outcome = await provider.launch(launch);
+  const privateRoot = mkdtempSync(join(tmpdir(), 'tau-shell-'));
+  const { executionId } = await provider.prepare({ privateRoot, resource: undefined });
+  const outcome = await provider.launch({ ...launch, executionId });
   if (outcome.status !== 'started') {
     throw new Error(`the provider did not start the launch: ${JSON.stringify(outcome)}`);
   }
@@ -366,8 +370,208 @@ describe.runIf(enabled)('shell conformance', () => {
   );
 
   conformance(
+    'C13',
+    'reserved containers keep future names off the host while authored and record access stays exact',
+    async () => {
+      const reserved = join(work, '.tau');
+      const authored = join(reserved, 'parameters');
+      const records = join(reserved, 'chats');
+      const agents = join(reserved, 'AGENTS.md');
+      for (const directory of [authored, records]) {
+        mkdirSync(directory, { recursive: true });
+      }
+      writeFileSync(agents, 'AUTHORED');
+      writeFileSync(join(records, 'record.json'), 'RECORD');
+      writeFileSync(join(reserved, 'hidden'), 'HIDDEN-CANARY');
+      writeFileSync(join(authored, 'private'), 'NESTED-CANARY');
+      // Prove the test owner can create the future name before testing containment.
+      writeFileSync(join(reserved, 'future'), 'OWNER-CONTROL');
+      rmSync(join(reserved, 'future'));
+      const filesystem = {
+        readable: [readonly, home],
+        writable: [work, authored, agents],
+        readOnly: [records],
+        denied: [secret, join(reserved, 'hidden'), join(authored, 'private')],
+        masked: [reserved],
+      };
+      const positive = await run(
+        'printf UPDATED > .tau/AGENTS.md && printf CHILD > .tau/parameters/value && cat .tau/chats/record.json',
+        { filesystem },
+      );
+      expect(positive.exitCode, positive.stderr).toBe(0);
+      expect(positive.stdout).toBe('RECORD');
+      expect(readFileSync(agents, 'utf8')).toBe('UPDATED');
+      expect(readFileSync(join(authored, 'value'), 'utf8')).toBe('CHILD');
+      const before = digestOf(join(records, 'record.json'));
+      const probes = [
+        'printf UNKNOWN > .tau/future',
+        'mkdir .tau/future-dir',
+        'printf CHANGED > .tau/chats/record.json',
+        'cat .tau/hidden',
+        'cat .tau/parameters/private',
+        'printf CHANGED > .tau/parameters/private',
+      ];
+      const outcomes = await Promise.all(probes.map(async (command) => run(command, { filesystem })));
+      expect(outcomes.map((outcome) => outcome.stdout).join('')).not.toMatch(/HIDDEN-CANARY|NESTED-CANARY/u);
+      expect(readFileSync(join(authored, 'private'), 'utf8')).toBe('NESTED-CANARY');
+      expect(existsSync(join(reserved, 'future'))).toBe(false);
+      expect(existsSync(join(reserved, 'future-dir'))).toBe(false);
+      expect(digestOf(join(records, 'record.json'))).toBe(before);
+      expect(readFileSync(join(reserved, 'hidden'), 'utf8')).toBe('HIDDEN-CANARY');
+      if (linux) {
+        const fileOperations = [
+          'rm .tau/AGENTS.md',
+          'printf REPLACEMENT > replacement && mv replacement .tau/AGENTS.md',
+        ];
+        const limited = await Promise.all(fileOperations.map(async (command) => run(command, { filesystem })));
+        expect(limited.every((outcome) => outcome.exitCode !== 0)).toBe(true);
+        expect(readFileSync(agents, 'utf8')).toBe('UPDATED');
+      }
+    },
+  );
+
+  conformance('C14', 'future folded reserved containers cannot receive hidden host writes', async () => {
+    const project = join(work, 'folded-containers');
+    mkdirSync(project, { recursive: true });
+    const aliases = ['.TAU', '.tau.', '.tau:alias'];
+    // Prove every spelling is writable by the owner, then remove it before sandbox admission.
+    for (const name of aliases) {
+      const path = join(project, name);
+      mkdirSync(path, { recursive: true });
+      writeFileSync(join(path, 'unknown'), 'OWNER-CONTROL');
+      expect(readFileSync(join(path, 'unknown'), 'utf8')).toBe('OWNER-CONTROL');
+      rmSync(path, { recursive: true });
+    }
+    const reserved = join(project, '.tau');
+    mkdirSync(reserved);
+    const filesystem = { readable: [readonly, home], writable: [project], denied: [secret], masked: [reserved] };
+    const positive = await run('printf AUTHORED > authored.txt', { filesystem, workingDirectory: project });
+    expect(positive.exitCode, positive.stderr).toBe(0);
+    expect(readFileSync(join(project, 'authored.txt'), 'utf8')).toBe('AUTHORED');
+    await Promise.all(
+      aliases.map(async (name) =>
+        run(`mkdir -p '${name}' && printf HIDDEN > '${name}/unknown'`, { filesystem, workingDirectory: project }),
+      ),
+    );
+    expect(aliases.map((name) => ({ name, persisted: existsSync(join(project, name, 'unknown')) }))).toEqual(
+      aliases.map((name) => ({ name, persisted: false })),
+    );
+  });
+
+  conformance('C15', 'an absent masked container does not prevent ordinary project work', async () => {
+    const project = join(work, 'absent-container');
+    mkdirSync(project);
+    const reserved = join(project, '.tau');
+    const filesystem = {
+      readable: [readonly, home],
+      writable: [project],
+      readOnly: [join(reserved, 'chats')],
+      denied: [secret, join(reserved, 'host')],
+      masked: [reserved],
+    };
+    expect(existsSync(reserved)).toBe(false);
+    const positive = await run('printf AUTHORED > authored.txt && cat authored.txt', {
+      filesystem,
+      workingDirectory: project,
+    });
+    expect(positive.exitCode, positive.stderr).toBe(0);
+    expect(positive.stdout).toBe('AUTHORED');
+    expect(readFileSync(join(project, 'authored.txt'), 'utf8')).toBe('AUTHORED');
+    await run('mkdir -p .tau; printf HIDDEN > .tau/unknown', { filesystem, workingDirectory: project });
+    expect(existsSync(join(reserved, 'unknown'))).toBe(false);
+    expect(existsSync(reserved)).toBe(false);
+  });
+
+  conformance(
+    'C16',
+    'entries hidden only by a reserved container stay unreadable, unlisted and unlinkable',
+    async () => {
+      const project = join(work, 'region-probes');
+      const reserved = join(project, '.tau');
+      const authored = join(reserved, 'parameters');
+      const agents = join(reserved, 'AGENTS.md');
+      const regionOnly = join(reserved, 'region-only');
+      const hiddenDirectory = join(reserved, 'hidden-dir');
+      // A child opened two levels down: its parent must stay traversable without listing hidden siblings.
+      const nested = join(reserved, 'a', 'b');
+      mkdirSync(authored, { recursive: true });
+      mkdirSync(hiddenDirectory);
+      mkdirSync(nested, { recursive: true });
+      writeFileSync(join(reserved, 'a', 'hidden-sibling'), 'SIBLING-CANARY');
+      writeFileSync(agents, 'AUTHORED');
+      writeFileSync(regionOnly, 'REGION-CANARY');
+      writeFileSync(join(hiddenDirectory, 'inner'), 'HIDDEN-DIR-CANARY');
+      const filesystem = {
+        readable: [readonly, home],
+        writable: [project, authored, agents, nested],
+        denied: [secret],
+        masked: [reserved],
+      };
+      const positive = await run(
+        'cat .tau/AGENTS.md && ls .tau/parameters && cd .tau/parameters && printf CHILD > value && cd ../.. && realpath .tau/parameters && printf NESTED > .tau/a/b/value && ls .tau/a/b && (cd .tau/a/b && pwd -P) && realpath .tau/a/b',
+        { filesystem, workingDirectory: project },
+      );
+      expect(positive.exitCode, positive.stderr).toBe(0);
+      expect(positive.stdout).toContain('AUTHORED');
+      expect(readFileSync(join(authored, 'value'), 'utf8')).toBe('CHILD');
+      expect(readFileSync(join(nested, 'value'), 'utf8')).toBe('NESTED');
+      if (process.platform === 'darwin') {
+        // Positive control for the upper-cased probe below: an authored child is reachable through the same
+        // spelling, so a refusal of the hidden entry there is the mask's doing, not an unresolvable path.
+        const upper = await run('U=$(pwd | tr a-z A-Z); cat "$U/.tau/AGENTS.md"', {
+          filesystem,
+          workingDirectory: project,
+        });
+        expect(upper.exitCode, upper.stderr).toBe(0);
+        expect(upper.stdout).toBe('AUTHORED');
+      }
+      // Each probe names a different way to observe an entry the mask alone hides; the macOS one spells the
+      // checkout in upper case, which a case-insensitive volume resolves to the same directory.
+      const probes = [
+        'ls -a .tau/a',
+        'cat .tau/region-only',
+        'ls -a .tau',
+        'ln .tau/region-only linked && cat linked',
+        'ls -ld .tau/hidden-dir',
+        'ls .tau/hidden-dir; cat .tau/hidden-dir/inner',
+        '[ -e .tau/region-only ] && echo VISIBLE-FILE; [ -e .tau/hidden-dir ] && echo VISIBLE-DIR; true',
+        'U=$(pwd | tr a-z A-Z); printf UNKNOWN > "$U/.tau/future"; cat "$U/.tau/region-only"; ls -a "$U/.tau"; ls -ld "$U/.tau/hidden-dir"',
+      ];
+      const outcomes = await Promise.all(
+        probes.map(async (command) => ({
+          command,
+          ...(await run(command, { filesystem, workingDirectory: project })),
+        })),
+      );
+      const leaks = outcomes
+        .filter(({ stdout }) =>
+          /REGION-CANARY|HIDDEN-DIR-CANARY|SIBLING-CANARY|region-only|hidden-dir|hidden-sibling|VISIBLE/u.test(stdout),
+        )
+        .map(({ command, stdout }) => ({ command, stdout }));
+      expect(leaks).toEqual([]);
+      expect(existsSync(join(project, 'linked'))).toBe(false);
+      expect(existsSync(join(reserved, 'future'))).toBe(false);
+      expect(readFileSync(regionOnly, 'utf8')).toBe('REGION-CANARY');
+      // Compare the error for a hidden entry with the error for an absent name. Linux shows neither, so both
+      // are ENOENT. Seatbelt can only refuse, so macOS reports EPERM for an existing hidden name: a guessed
+      // name can be confirmed, never read. The disclosure on ShellFilesystem.masked states this.
+      const errorFor = async (name: string): Promise<string> => {
+        const { stderr } = await run(`stat .tau/${name}`, { filesystem, workingDirectory: project });
+        return stderr.replaceAll(name, 'NAME');
+      };
+      const [hiddenError, absentError] = await Promise.all([errorFor('region-only'), errorFor('absent-name')]);
+      expect(absentError).toMatch(/No such file/u);
+      if (process.platform === 'darwin') {
+        expect(hiddenError).toMatch(/Operation not permitted/u);
+      } else {
+        expect(hiddenError).toBe(absentError);
+      }
+    },
+  );
+
+  conformance(
     'C17',
-    'an absent protected path shared by overlapping launches stays covered until the last of them ends',
+    'an absent reserved path shared by overlapping launches stays covered until the last of them ends',
     async () => {
       const project = join(work, 'shared-absent');
       const sync = join(work, 'shared-sync');
@@ -380,6 +584,7 @@ describe.runIf(enabled)('shell conformance', () => {
         writable: [project, sync],
         readOnly: [join(reserved, 'chats')],
         denied: [secret, join(reserved, 'binding.json'), control],
+        masked: [reserved],
       };
       const signal = (name: string): string => join(sync, name);
       const waitFor = (name: string): string => `while [ ! -f ${signal(name)} ]; do sleep 0.02; done`;
@@ -401,6 +606,7 @@ describe.runIf(enabled)('shell conformance', () => {
         [
           `printf ready > ${signal('second-ready')}`,
           waitFor('second-write'),
+          'mkdir -p .tau 2>/dev/null && printf LEAK > .tau/leak 2>/dev/null',
           'printf LEAK > .tau/binding.json 2>/dev/null',
           'printf LEAK > .git 2>/dev/null',
           'printf SECOND',
@@ -416,6 +622,7 @@ describe.runIf(enabled)('shell conformance', () => {
       const written = await second;
       expect(written.exitCode, written.stderr).toBe(0);
       expect(written.stdout).toBe('SECOND');
+      expect(existsSync(join(reserved, 'leak'))).toBe(false);
       expect(existsSync(join(reserved, 'binding.json'))).toBe(false);
       expect(existsSync(control) ? readFileSync(control, 'utf8') : 'absent').not.toContain('LEAK');
       // Nothing either launch relied on is left behind on the host.
@@ -435,9 +642,10 @@ describe.runIf(enabled)('shell conformance', () => {
       const runs = join(project, '.tau', 'runs');
       const filesystem = {
         readable: [readonly, home],
-        writable: [project, sync],
+        writable: [project, join(project, '.tau', 'parameters'), sync],
         readOnly: [runs],
         denied: [secret],
+        masked: [join(project, '.tau')],
         directories: [runs],
       };
       const live = run(

@@ -380,6 +380,7 @@ vi.mock('#hooks/use-project-slug-route.js', () => ({
         : { status: 'resolved', value: project },
   useCanonicalProjectUrlCorrection: () => undefined,
 }));
+vi.mock('#services/revision-client-registry.js', () => ({ peekRevisionClient: () => revisionClient }));
 vi.mock('#hooks/use-revision-status.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useRevisionClient: () => revisionClient,
@@ -392,7 +393,6 @@ vi.mock('#hooks/use-revision-status.js', async (importOriginal) => ({
     }, []);
     return revisionClient;
   },
-  peekRevisionClient: () => revisionClient,
   useRevisionStatus: () => revisionProjection.current,
   useRevisionCommands: () => ({ connectRemote: async () => undefined }),
 }));

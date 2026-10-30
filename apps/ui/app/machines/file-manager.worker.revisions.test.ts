@@ -13,8 +13,8 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
-import type { RevisionPort } from '@taucad/revisions';
+import { createIsomorphicGitRevisionPort, lfsObjectPath, lfsPointerFor } from '@taucad/revisions';
+import type { RevisionPort, RevisionStatusProjection } from '@taucad/revisions';
 import { revisionId } from '@taucad/revisions/algorithms';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import type { RootedFileSystem } from '@taucad/filesystem';
@@ -109,7 +109,7 @@ const finish = async (
 const harness = (
   projectIds: readonly string[],
   wrapPort = (port: RevisionPort): RevisionPort => port,
-  extra: Pick<WorkerRevisionRegistryOptions, 'servePlacement' | 'clock'> & {
+  extra: Pick<WorkerRevisionRegistryOptions, 'servePlacement' | 'clock' | 'observeStatus'> & {
     onCreatePort?: () => void;
     observeFileEvents?: boolean;
     wrapFileSystem?: (filesystem: RootedFileSystem) => RootedFileSystem;
@@ -137,6 +137,7 @@ const harness = (
   const registry = createWorkerRevisionRegistry({
     ...(extra.servePlacement === undefined ? {} : { servePlacement: extra.servePlacement }),
     ...(extra.clock === undefined ? {} : { clock: extra.clock }),
+    ...(extra.observeStatus === undefined ? {} : { observeStatus: extra.observeStatus }),
     createPort: (projectId) => {
       extra.onCreatePort?.();
       return wrapPort(
@@ -325,6 +326,28 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     await settle();
     expect(changes).toEqual([['main.ts']]);
     expect(generation()).toBe(before + 1);
+  });
+
+  it('should tell the host each status a root publishes, from its first, under its own project', async () => {
+    const observed: Array<Readonly<{ projectId: string; status: RevisionStatusProjection }>> = [];
+    const fixture = harness(['alpha'], (port) => port, {
+      observeStatus: (projectId, status) => {
+        observed.push({ projectId, status });
+      },
+    });
+    const client = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    await client.settle();
+
+    expect(observed.length).toBeGreaterThan(0);
+    expect(observed.every(({ projectId }) => projectId === 'alpha')).toBe(true);
+    const published = client.frames.flatMap((frame) => (frame.type === 'status' ? [frame.status] : []));
+    /* The projection as it stood when the root attached, then every status the page was sent. */
+    expect(published.length).toBeGreaterThan(0);
+    for (const status of published) {
+      expect(observed.map((entry) => entry.status)).toContainEqual(status);
+    }
+    expect(observed.at(-1)?.status).toEqual(root.status());
   });
 
   it('should start one root per opened project and stop its actor when the last port closes', async () => {
@@ -793,6 +816,67 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     hold = undefined;
     gate.resolve();
   });
+
+  /*
+   * The operator's "open the UI, model waits": a checkout left holding a
+   * large-object placeholder (a reload mid-download) is picked up again, its
+   * progress rides the projection, and the viewer's *Try again* reaches the fill.
+   */
+  it('should publish a checkout’s large-object placeholders and retry their fill on the page’s word', async () => {
+    const fixture = harness(['alpha']);
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    const part = 'solid part\n';
+    await project.writeFile('main.scad', 'import("models/part.step");');
+    await project.writeFile('models/part.step', part);
+    const first = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    const session = await root.placementSession();
+    await place(session, turnKey(1));
+    await project.writeFile('main.scad', 'import("models/part.step"); // v2');
+    await finish(session, turnKey(1));
+    await turnFinalized(first, 'turn-1');
+    first.send({ command: 'close' });
+    await vi.waitFor(
+      () => {
+        expect(fixture.registry.openProjectIds()).toEqual([]);
+      },
+      { timeout: 10_000 },
+    );
+
+    /* As a reload mid-download leaves it: the pointer on disk, the object not in the store. */
+    const { pointer, bytes } = lfsPointerFor(new TextEncoder().encode(part));
+    const objectFile = `.git/${lfsObjectPath(pointer.oid)}`;
+    await project.writeFile('models/part.step', bytes);
+    await project.unlink(objectFile);
+
+    const second = await fixture.open('alpha');
+    /* The first capture of the session picks the placeholder up; with no remote, the transfer fails. */
+    fixture.announce('alpha', ['main.scad']);
+    await vi.waitFor(
+      () => {
+        const status = second.frames.findLast((frame) => frame.type === 'status');
+        expect(status?.type === 'status' ? status.status.largeObjects : undefined).toMatchObject({
+          phase: 'failed',
+          paths: ['models/part.step'],
+          totalObjects: 1,
+          totalBytes: part.length,
+        });
+      },
+      { timeout: 10_000 },
+    );
+    expect(await project.readFile('models/part.step')).toStrictEqual(bytes);
+
+    await project.writeFile(objectFile, part);
+    second.send({ command: 'retryLargeObjects' });
+    await vi.waitFor(
+      () => {
+        const status = second.frames.findLast((frame) => frame.type === 'status');
+        expect(status?.type === 'status' && status.status.largeObjects === undefined).toBe(true);
+      },
+      { timeout: 10_000 },
+    );
+    expect(await project.readFile('models/part.step', 'utf8')).toBe(part);
+  }, 30_000);
 
   it('should restore a recorded revision through the port commands', async () => {
     const fixture = harness(['alpha']);

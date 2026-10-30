@@ -1034,3 +1034,120 @@ it('should commit a write that a watch reset overtakes and re-arm once it settle
   expect(files.opened()).toBe(2);
   actor.send({ type: 'close' });
 });
+
+/*
+ * A view reads the authority through a deferred projection, so after its own step settles it can
+ * still show the value of the step before. The base it then sends is that older value of its own,
+ * which the field no longer holds. The editor wrote what the field holds, so its edit must commit.
+ */
+it('should commit an editor step whose base is its own earlier value, superseded by its own later write', async () => {
+  const fixture = await parameterSetHarness();
+  const base = (value: number, editor: string): ParameterSetRequest['base'] => ({ pointer: '/width', value, editor });
+  const { identity } = fixture.snapshot;
+  await expect(
+    fixture.submit({ ...widthEdit('step-1', 26, identity), base: base(25.4, 'tab') }),
+  ).resolves.toMatchObject({ status: 'committed' });
+  await expect(fixture.submit({ ...widthEdit('step-2', 27, identity), base: base(26, 'tab') })).resolves.toMatchObject({
+    status: 'committed',
+  });
+  await expect(fixture.submit({ ...widthEdit('step-3', 28, identity), base: base(26, 'tab') })).resolves.toMatchObject({
+    status: 'committed',
+  });
+  expect(fixture.actor.getSnapshot().context.current?.entry.groups['default']?.values).toEqual({ width: 28 });
+  fixture.actor.stop();
+});
+
+it('should refuse a stale base from another editor that did not write the field', async () => {
+  const fixture = await parameterSetHarness();
+  const { identity } = fixture.snapshot;
+  await fixture.submit({ ...widthEdit('mine', 26, identity), base: { pointer: '/width', value: 25.4, editor: 'tab' } });
+  await expect(
+    fixture.submit({ ...widthEdit('theirs', 30, identity), base: { pointer: '/width', value: 25.4, editor: 'agent' } }),
+  ).resolves.toMatchObject({ status: 'rejected', code: 'STALE_MANIFEST' });
+  fixture.actor.stop();
+});
+
+it('should refuse an editor whose own write was overwritten by another writer', async () => {
+  const fixture = await parameterSetHarness();
+  const { identity } = fixture.snapshot;
+  await fixture.submit({ ...widthEdit('mine', 26, identity), base: { pointer: '/width', value: 25.4, editor: 'tab' } });
+  await fixture.submit({
+    ...widthEdit('theirs', 30, identity),
+    base: { pointer: '/width', value: 26, editor: 'agent' },
+  });
+  await expect(
+    fixture.submit({ ...widthEdit('mine-again', 27, identity), base: { pointer: '/width', value: 26, editor: 'tab' } }),
+  ).resolves.toMatchObject({ status: 'rejected', code: 'STALE_MANIFEST' });
+  expect(fixture.actor.getSnapshot().context.current?.entry.groups['default']?.values).toEqual({ width: 30 });
+  fixture.actor.stop();
+});
+
+const widthGroupEdit = (
+  requestId: string,
+  edit: Readonly<{ value: number; base: number; editor: string }>,
+  expected: ParameterSetRequest['expected'],
+): ParameterSetRequest => ({
+  requestId,
+  expected,
+  pressure: 'final',
+  operation: {
+    kind: 'replace-group-values',
+    group: 'default',
+    values: { width: edit.value },
+    base: { width: edit.base },
+    editor: edit.editor,
+  },
+});
+
+/* A form's group edit takes its base from the values it rendered, which trail its own writes just as
+ * a row's field base does; the editor rule applies to every edit, whatever its operation. */
+it('should commit a group edit whose base for a field is its own earlier value, superseded by its own later write', async () => {
+  const fixture = await parameterSetHarness();
+  const { identity } = fixture.snapshot;
+  await expect(
+    fixture.submit(widthGroupEdit('form-1', { value: 26, base: 25.4, editor: 'tab' }, identity)),
+  ).resolves.toMatchObject({ status: 'committed' });
+  await expect(
+    fixture.submit(widthGroupEdit('form-2', { value: 27, base: 25.4, editor: 'tab' }, identity)),
+  ).resolves.toMatchObject({ status: 'committed' });
+  expect(fixture.actor.getSnapshot().context.current?.entry.groups['default']?.values).toEqual({ width: 27 });
+  fixture.actor.stop();
+});
+
+it('should refuse a stale group edit from another editor', async () => {
+  const fixture = await parameterSetHarness();
+  const { identity } = fixture.snapshot;
+  await fixture.submit(widthGroupEdit('mine', { value: 26, base: 25.4, editor: 'tab' }, identity));
+  await expect(
+    fixture.submit(widthGroupEdit('theirs', { value: 30, base: 25.4, editor: 'agent' }, identity)),
+  ).resolves.toMatchObject({ status: 'rejected', code: 'STALE_MANIFEST' });
+  fixture.actor.stop();
+});
+
+/* A final that displaces a queued one inherits its base, the value the displaced edit was made from,
+ * but the write is still its own sender's: the lineage names that editor. */
+it('should attribute a write to the editor that sent it when it carries a displaced edit base', async () => {
+  const gate = Promise.withResolvers<void>();
+  const fixture = await parameterSetHarness(false, { gate: gate.promise });
+  const { identity } = fixture.snapshot;
+  const active = fixture.submit({
+    ...widthEdit('pane-1', 26, identity),
+    base: { pointer: '/width', value: 25.4, editor: 'pane' },
+  });
+  await waitFor(fixture.actor, (state) => state.matches({ open: 'applying' }));
+  const displaced = fixture.submit({
+    ...widthEdit('pane-2', 27, identity),
+    base: { pointer: '/width', value: 26, editor: 'pane' },
+  });
+  const agent = fixture.submit({
+    ...widthEdit('agent-1', 30, identity),
+    base: { pointer: '/width', value: 26, editor: 'agent' },
+  });
+  await expect(displaced).resolves.toMatchObject({ status: 'cancelled-before-apply' });
+  gate.resolve();
+  await expect(active).resolves.toMatchObject({ status: 'committed' });
+  await expect(agent).resolves.toMatchObject({ status: 'committed' });
+
+  expect(Object.values(fixture.actor.getSnapshot().context.lineage)).toEqual([{ editor: 'agent', value: 30 }]);
+  fixture.actor.stop();
+});

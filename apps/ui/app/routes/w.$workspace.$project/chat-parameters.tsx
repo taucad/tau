@@ -1,4 +1,4 @@
-import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { useModelAvailability } from '#hooks/use-project-availability.js';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { XIcon } from 'lucide-react';
 import { useCallback, memo, useState, useMemo, useRef, useEffect } from 'react';
@@ -312,6 +312,7 @@ function useProjectParametersSource(): ParametersSource {
     projectRef,
     editorRef,
     setGeometryUnitParameters,
+    editGeometryUnitParameters,
     switchParameterGroup,
     createParameterGroup,
     deleteParameterGroup,
@@ -324,6 +325,9 @@ function useProjectParametersSource(): ParametersSource {
       target: (entryPath) => parameterService.target(entryPath),
       commitValue: async (entryPath, manifest, field) =>
         parameterService.commitValue(parameterService.target(entryPath), manifest, field),
+      editValues: (entryPath, manifest, { values, base }) => {
+        editGeometryUnitParameters(entryPath, manifest, { values: { ...values }, base: { ...base } });
+      },
       replaceValues: (entryPath, manifest, values) => {
         setGeometryUnitParameters(entryPath, manifest, { ...values });
       },
@@ -377,6 +381,7 @@ function useProjectParametersSource(): ParametersSource {
       parameterService,
       projectRef,
       renameParameterGroup,
+      editGeometryUnitParameters,
       setGeometryUnitParameters,
       switchParameterGroup,
     ],
@@ -441,6 +446,6 @@ export const ChatParameters = memo(function (props: {
 });
 
 export function ParametersPanelBody(): React.JSX.Element {
-  const availability = useProjectAvailability();
+  const availability = useModelAvailability();
   return availability === 'ready' ? <ProjectParametersPane /> : <ProjectSyncPlaceholder state={availability} />;
 }

@@ -70,7 +70,7 @@ const authority = (evidence: Evidence): EvidenceAuthority => ({
     ],
   ]),
   diagnosisSources: new Set(evidence.lineage.map((source) => source.source)),
-  purposes: { summary: true, content: true, diagnosis: true, evaluation: true, training: true },
+  purposes: { summary: true, feedback: true, content: true, diagnosis: true, evaluation: true, training: true },
   projectRights: 'verified',
   now: 2000,
   sourceProofs: new Map(evidence.lineage.map((source) => [source.source, { ...source, proof: source.proof! }])),
@@ -134,6 +134,62 @@ describe('shared evidence boundary', () => {
       authorizeEvidence({ evidence: content(evidence), authority: { ...current, purposes }, purpose: 'summary' })
         .allowed,
     ).toBe(false);
+  });
+  it('should keep ratings and explicit judgements on their own plane, without an explanation', () => {
+    const rating = {
+      ...fixture(),
+      semantic: { kind: 'rating', id: 'rating-1' },
+      payload: {
+        plane: 'feedback',
+        fact: { kind: 'rating', scale: 'thumbs.1', value: 'negative', evidence: 'presented-1' },
+      },
+    };
+    const accepted = {
+      ...fixture(),
+      semantic: { kind: 'response', id: 'accepted-1' },
+      payload: { plane: 'feedback', fact: { kind: 'response', action: 'accepted', evidence: 'presented-1' } },
+    };
+    expect(parse(rating).ok).toBe(true);
+    expect(parse(accepted).ok).toBe(true);
+    for (const value of [
+      { ...rating, payload: { ...rating.payload, plane: 'summary' } },
+      { ...accepted, payload: { ...accepted.payload, plane: 'summary' } },
+      { ...rating, payload: { plane: 'feedback', fact: { ...rating.payload.fact, explanation: 'PRIVATE' } } },
+      { ...rating, payload: { plane: 'feedback', fact: { ...rating.payload.fact, value: 4 } } },
+      {
+        ...accepted,
+        payload: { plane: 'feedback', fact: { kind: 'response', action: 'presented', evidence: 'presented-1' } },
+      },
+    ]) {
+      expect(parse(value)).toEqual({ ok: false, code: 'EVIDENCE_INVALID' });
+    }
+  });
+  it.each([
+    [false, false],
+    [true, false],
+    [false, true],
+    [true, true],
+  ])('should answer feedback=%s independently of summary=%s', (feedback, summary) => {
+    const evidence = fixture();
+    const rating: Evidence = {
+      ...evidence,
+      semantic: { kind: 'rating', id: 'rating-1' },
+      payload: {
+        plane: 'feedback',
+        fact: { kind: 'rating', scale: 'thumbs.1', value: 'positive', evidence: 'presented-1' },
+      },
+    };
+    const current = authority(evidence);
+    const purposes = { ...current.purposes, feedback, summary };
+    expect(
+      authorizeEvidence({ evidence: rating, authority: { ...current, purposes }, purpose: 'feedback' }).allowed,
+    ).toBe(feedback);
+    expect(
+      authorizeEvidence({ evidence: rating, authority: { ...current, purposes }, purpose: 'summary' }).allowed,
+    ).toBe(false);
+    expect(authorizeEvidence({ evidence, authority: { ...current, purposes }, purpose: 'feedback' }).allowed).toBe(
+      false,
+    );
   });
   it('should deny stale accounts, project grants, policy epochs and missing rights', () => {
     const evidence = fixture();

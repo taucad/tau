@@ -262,6 +262,18 @@ describe('path registry', () => {
     expect(classify('.TAU/Agents.MD')).toStrictEqual(unlistedPathClassification);
   });
 
+  /* Q11/3h C3: full Unicode case folding, as ext4 casefold, APFS and NTFS
+   * approximate it, maps the long s (U+017F) onto `s` and the Kelvin sign
+   * (U+212A) onto `k`. A lower-case mapping alone leaves `ſ` unchanged, so
+   * `exportſ` would have stayed the user's directory beside `exports`. */
+  it('should fold the long s and the Kelvin sign as full case folding does', () => {
+    expect(classify('exportſ/model.step')).toStrictEqual(classify('exports/model.step'));
+    expect(classify('.tau/chatſ/c1.json')).toStrictEqual(classify('.tau/chats/c1.json'));
+    expect(classify('.tau/ſkills/x.md')).toStrictEqual(classify('.tau/skills/x.md'));
+    expect(classify('.tau/loc\u212Afile.json')).toStrictEqual(classify('.tau/lockfile.json'));
+    expect(classify('ſrc/part.ts')).toStrictEqual(unlistedPathClassification);
+  });
+
   /* G0b-3: NTFS resolves an alternate data stream to the file it hangs off, so
    * `.git::$INDEX_ALLOCATION/config` opens the real store. A `:` stays legal in
    * a name a person types, so the fold drops the suffix instead of the

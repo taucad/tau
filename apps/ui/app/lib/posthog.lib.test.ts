@@ -133,6 +133,19 @@ it('masks all replay text and inputs while still blocking invitation links', () 
   expect(recording?.blockSelector).toContain('a[href*="/invitations/"]');
 });
 
+describe('webPosthogOptions', () => {
+  it('compresses captures, because the edge function forwards the body unexamined', () => {
+    /* eslint-disable @typescript-eslint/naming-convention -- posthog-js option names. */
+    expect(webPosthogOptions()).toMatchObject({ api_host: '/api/ph' });
+    /* eslint-enable @typescript-eslint/naming-convention -- restore test naming rules. */
+    expect(webPosthogOptions()).not.toHaveProperty('disable_compression');
+  });
+
+  it('leaves the desktop host compressing, since it posts straight to PostHog', () => {
+    expect(desktopPosthogOptions()).not.toHaveProperty('disable_compression');
+  });
+});
+
 describe('desktopPosthogOptions', () => {
   it('sends without a web consent decision and still redacts invitation tokens', () => {
     consent.status = 'unknown';

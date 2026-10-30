@@ -5,7 +5,11 @@ import type { FileParameterEntry } from '@taucad/types';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { ChatParameters } from '#routes/w.$workspace.$project/chat-parameters.js';
 
-vi.mock('#hooks/use-project-availability.js', () => ({ useProjectAvailability: () => 'ready' }));
+vi.mock('#hooks/use-project-availability.js', () => ({
+  useProjectAvailability: () => 'ready',
+  useModelAvailability: () => 'ready',
+  useLargeObjectPending: () => false,
+}));
 
 vi.mock('@xstate/react', () => ({
   useSelector: (actor: { getSnapshot: () => unknown } | undefined, selector: (state: unknown) => unknown) => {
@@ -130,6 +134,7 @@ let mockGeometryUnits = new Map<string, ActorRefFrom<typeof cadMachine>>();
 const mockMainEntryPath = 'main.ts';
 const mockSetParameters = vi.fn();
 const mockSetGeometryUnitParameters = vi.fn();
+const mockEditGeometryUnitParameters = vi.fn();
 const mockSwitchParameterGroup = vi.fn();
 const mockProjectSend = vi.fn();
 const mockEditorSend = vi.fn();
@@ -230,6 +235,7 @@ vi.mock('#hooks/use-project.js', () => ({
     viewRecords: {},
     setParameters: mockSetParameters,
     setGeometryUnitParameters: mockSetGeometryUnitParameters,
+    editGeometryUnitParameters: mockEditGeometryUnitParameters,
     switchParameterGroup: mockSwitchParameterGroup,
     createParameterGroup: vi.fn(),
     deleteParameterGroup: vi.fn(),
@@ -320,7 +326,7 @@ vi.mock('@taucad/viewer/parameters/parameters', () => ({
     className?: string;
     enableSearch?: boolean;
     filterTerm?: string;
-    onParametersChange: (params: Record<string, unknown>) => void;
+    onParametersChange: (params: Record<string, unknown>, base: Record<string, unknown>) => void;
     units: { length: { displaySymbol: string } };
     parameterEdit?: {
       kind: 'authoritative';
@@ -342,7 +348,7 @@ vi.mock('@taucad/viewer/parameters/parameters', () => ({
         type='button'
         data-testid='change-params'
         onClick={() => {
-          onParametersChange({ width: 42 });
+          onParametersChange({ width: 42 }, { width: 10 });
         }}
       >
         Change
@@ -631,17 +637,18 @@ describe('ChatParameters', () => {
     expect(mockParameterActorSend).toHaveBeenCalledWith({ type: 'resolve', resolution: {} });
   });
 
-  it('calls setGeometryUnitParameters when parameters change', async () => {
+  it('writes a form change with the values the form rendered as its base', async () => {
     mockGeometryUnits.set('main.ts', mockCadRef);
 
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     fireEvent.click(screen.getByTestId('change-params'));
-    expect(mockSetGeometryUnitParameters).toHaveBeenCalledWith(
+    expect(mockEditGeometryUnitParameters).toHaveBeenCalledWith(
       'main.ts',
       expect.objectContaining({ defaults: { width: 10, height: 20 } }),
-      { width: 42 },
+      { values: { width: 42 }, base: { width: 10 } },
     );
+    expect(mockSetGeometryUnitParameters).not.toHaveBeenCalled();
   });
 
   it('should send only the dragged source-unit field through the scrub lane', () => {

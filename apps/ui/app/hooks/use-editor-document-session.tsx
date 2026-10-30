@@ -72,7 +72,11 @@ export function EditorDocumentSessionProvider({ children }: { readonly children:
       }
       const path = assertRootedPath(uri.path.slice(1));
       if (target.declaration) {
-        if ((!path.startsWith('__typescript_lib__/') && !path.startsWith('cdn-types/')) || !path.endsWith('.d.ts')) {
+        const typescriptDeclaration =
+          (path.startsWith('__typescript_lib__/') || path.startsWith('cdn-types/')) && path.endsWith('.d.ts');
+        const kclStandardLibrary = path.startsWith('__kcl_std__/') && path.endsWith('.kcl');
+        const openscadBuiltins = path.startsWith('__openscad_builtins__/') && path.endsWith('.scad');
+        if (!typescriptDeclaration && !kclStandardLibrary && !openscadBuiltins) {
           return;
         }
         opener.current =

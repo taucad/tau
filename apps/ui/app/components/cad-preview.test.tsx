@@ -3,6 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CadPreviewViewer } from '#components/cad-preview.js';
 import type { CadPreviewStatus } from '#hooks/use-cad-preview.js';
 
+// React's dev build only records component performance tracks when `console.timeStamp`
+// exists as it loads, and Vitest's console lacks it. Define it before react-dom loads.
+vi.hoisted(() => {
+  // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- absent from Vitest's console despite the DOM lib type.
+  console.timeStamp ??= () => undefined;
+});
+
 const cadPreviewMocks = vi.hoisted(() => ({
   artifact: undefined as { mimeType: 'model/gltf-binary'; content: Uint8Array<ArrayBuffer> } | undefined,
   artifactHash: undefined as string | undefined,
@@ -106,5 +113,40 @@ describe('CadPreviewViewer', () => {
 
     expect(screen.getByTestId('cad-viewer')).toBeInTheDocument();
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  // React's dev build diffs changed props into `performance.measure` entries for its
+  // component performance tracks. React 19.2 enumerated a typed array one row per
+  // element, so every new GLB artifact logged a property row per byte.
+  it('should log a binary artifact prop to the dev performance track as one row', () => {
+    type MeasureOptions = { detail?: { devtools?: { properties?: Array<[string, string]> } } };
+    const loggedProperties: Array<Array<[string, string]>> = [];
+    const measure = vi
+      .spyOn(performance, 'measure')
+      .mockImplementation((_name: string, options?: MeasureOptions | string) => {
+        if (typeof options === 'object' && options.detail?.devtools?.properties) {
+          loggedProperties.push(options.detail.devtools.properties);
+        }
+
+        return undefined as unknown as PerformanceMeasure;
+      });
+
+    try {
+      const view = render(<CadPreviewViewer className='size-full' />);
+      cadPreviewMocks.artifact = { mimeType: 'model/gltf-binary', content: new Uint8Array(50_000) };
+      cadPreviewMocks.artifactHash = 'large-glb';
+      cadPreviewMocks.status = 'ready';
+      // The mocked hook is not reactive, so change a prop to get past the memo boundary.
+      view.rerender(<CadPreviewViewer enableZoom className='size-full' />);
+    } finally {
+      measure.mockRestore();
+    }
+
+    // Guard against a vacuous pass: the dev perf track must have diffed the artifact.
+    const artifactDiffs = loggedProperties.filter((properties) =>
+      properties.some(([key]) => key.trim().endsWith('content')),
+    );
+    expect(artifactDiffs.length).toBeGreaterThan(0);
+    expect(Math.max(...artifactDiffs.map((properties) => properties.length))).toBeLessThan(100);
   });
 });

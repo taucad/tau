@@ -1,0 +1,4 @@
+v = [3, 4]
+normed = vector::normalize(v)
+assert(normed[0], isEqualTo = 0.6)
+assert(normed[1], isEqualTo = 0.8)

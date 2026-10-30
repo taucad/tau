@@ -1,0 +1,15 @@
+// Remove a tagged face and the end face for the extrusion.
+firstSketch = startSketchOn(XY)
+    |> startProfile(at = [-12, 12])
+    |> line(end = [24, 0])
+    |> line(end = [0, -24])
+    |> line(end = [-24, 0], tag = $myTag)
+    |> close()
+    |> extrude(length = 6)
+
+// Remove a tagged face for the extrusion.
+shell(
+    firstSketch,
+    faces = [myTag],
+    thickness = 0.25,
+)

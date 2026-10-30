@@ -7,6 +7,8 @@ declare const tauCloudBuildEnabled: boolean;
 declare const tauTelemetryHostCloudBuild: boolean;
 /** The build's release label (short commit or semver); `''` when the build had none. Read through `#lib/build-identity`. */
 declare const tauBuildRelease: string;
+/** The staged OpenSCAD language server's manifest URL and identity; `undefined` when the build had no stage. */
+declare const tauOpenscadLanguageAssets: Readonly<{ url: string; sha256: string }> | undefined;
 
 /*
  * Declaration merging into `vite/client`'s own `ImportMetaEnv` only works with

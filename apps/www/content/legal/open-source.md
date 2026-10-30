@@ -29,9 +29,18 @@ corresponding OCCT source and relink kit, these license texts and the GeoSpec en
 carries the kit inside the app bundle, under `Tau.app/Contents/Resources/SOURCES`. The source of the GeoSpec engine,
 including how it builds and links OCCT, is at [github.com/taucad/geospec](https://github.com/taucad/geospec).
 
+## libfuse
+
+On Linux, the desktop app's private shell projection bridge links dynamically against **libfuse** 3
+(`libfuse3.so.4`), Copyright © Miklos Szeredi and the libfuse contributors. The libfuse library is licensed under
+the [GNU Lesser General Public License version 2.1](#gnu-lesser-general-public-license-version-2.1), reproduced
+in full below. The bridge is built against unmodified libfuse 3.17.2
+([source](https://github.com/libfuse/libfuse/releases/tag/fuse-3.17.2)) and calls only its public
+interface from a separate shared object.
+
 ## Third-Party Packages
 
-The web and desktop apps include the following 870 packages, with the license each declares.
+The web and desktop apps include the following 877 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -88,7 +97,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@better-auth/utils](https://github.com/better-auth/utils) | 0.5.0 | MIT |
 | [@better-fetch/fetch](https://github.com/better-auth/better-fetch) | 1.3.2 | MIT |
 | [@cfworker/json-schema](https://github.com/cfworker/cfworker) | 4.1.1 | MIT |
-| [@classcad/smlibwasm](https://github.com/awv-informatik/smlibpy) | 0.3.4 | MIT AND Apache-2.0 AND OFL-1.1 |
+| [@classcad/smlibwasm](https://github.com/awv-informatik/smlibpy) | 0.6.2 | MIT AND Apache-2.0 AND OFL-1.1 |
 | [@codemirror/autocomplete](https://code.haverbeke.berlin/codemirror/autocomplete) | 6.20.4 | MIT |
 | [@codemirror/commands](https://code.haverbeke.berlin/codemirror/commands) | 6.11.1 | MIT |
 | [@codemirror/lang-css](https://github.com/codemirror/lang-css) | 6.3.1 | MIT |
@@ -400,6 +409,8 @@ Their copyright notices and full license texts ship inside each package and are 
 | [commander](https://github.com/tj/commander.js) | 12.1.0 | MIT |
 | [commander](https://github.com/tj/commander.js) | 13.1.0 | MIT |
 | [commist](https://github.com/mcollina/commist) | 3.2.0 | MIT |
+| [compressible](https://github.com/jshttp/compressible) | 2.0.18 | MIT |
+| [compression](https://github.com/expressjs/compression) | 1.8.2 | MIT |
 | concat-stream | 2.0.0 | MIT |
 | [consola](https://github.com/unjs/consola) | 3.4.2 | MIT |
 | [content-disposition](https://github.com/jshttp/content-disposition) | 2.0.1 | MIT |
@@ -434,6 +445,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [data-uri-to-buffer](https://github.com/TooTallNate/node-data-uri-to-buffer) | 4.0.1 | MIT |
 | [date-fns](https://github.com/date-fns/date-fns) | 4.4.0 | MIT |
 | [dateformat](https://github.com/felixge/node-dateformat) | 4.6.3 | MIT |
+| [debug](https://github.com/visionmedia/debug) | 2.6.9 | MIT |
 | [debug](https://github.com/debug-js/debug) | 4.4.3 | MIT |
 | [decimal.js-light](https://github.com/MikeMcl/decimal.js-light) | 2.5.1 | MIT |
 | [decode-named-character-reference](https://github.com/wooorm/decode-named-character-reference) | 1.3.0 | MIT |
@@ -446,6 +458,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [defu](https://github.com/unjs/defu) | 6.1.7 | MIT |
 | [depd](https://github.com/dougwilson/nodejs-depd) | 2.0.0 | MIT |
 | [dequal](https://github.com/lukeed/dequal) | 2.0.3 | MIT |
+| [destroy](https://github.com/stream-utils/destroy) | 1.2.0 | MIT |
 | [detect-gpu](https://github.com/pmndrs/detect-gpu) | 5.0.70 | MIT |
 | [detect-libc](https://github.com/lovell/detect-libc) | 2.1.2 | Apache-2.0 |
 | [detect-node-es](https://github.com/thekashey/detect-node) | 1.1.0 | MIT |
@@ -602,8 +615,8 @@ Their copyright notices and full license texts ship inside each package and are 
 | [ktx-parse](https://github.com/donmccurdy/ktx-parse) | 1.1.0 | MIT |
 | [kysely](https://github.com/kysely-org/kysely) | 0.29.6 | MIT |
 | [lazy-val](https://github.com/develar/lazy-val) | 1.0.5 | MIT |
-| [libassimp](https://github.com/taucad/libassimp) | 0.4.0 | Apache-2.0 |
-| [libassimp-{platform}](https://github.com/taucad/libassimp) | 0.4.0 | Apache-2.0 |
+| [libassimp](https://github.com/taucad/libassimp) | 0.4.1 | Apache-2.0 |
+| [libassimp-{platform}](https://github.com/taucad/libassimp) | 0.4.1 | Apache-2.0 |
 | [libcascade](https://github.com/taucad/opencascade.js) | 3.1.0 | LGPL-2.1-only WITH Open-CASCADE-Exception-1.0 |
 | [libphonenumber-js](https://gitlab.com/catamphetamine/libphonenumber-js) | 1.13.15 | MIT |
 | [lie](https://github.com/calvinmetcalf/lie) | 3.3.0 | MIT |
@@ -659,16 +672,18 @@ Their copyright notices and full license texts ship inside each package and are 
 | [module-details-from-path](https://github.com/watson/module-details-from-path) | 1.0.4 | MIT |
 | [mqtt](https://github.com/mqttjs/MQTT.js) | 5.15.2 | MIT |
 | [mqtt-packet](https://github.com/mqttjs/mqtt-packet) | 9.0.2 | MIT |
+| [ms](https://github.com/zeit/ms) | 2.0.0 | MIT |
 | [ms](https://github.com/vercel/ms) | 2.1.3 | MIT |
 | [n8ao](https://github.com/N8python/n8ao) | 1.10.2 | ISC |
 | [nanoid](https://github.com/ai/nanoid) | 5.1.16 | MIT |
-| [nanoraster](https://github.com/taucad/nanoraster) | 0.7.1 | Apache-2.0 |
-| [nanoraster-{platform}](https://github.com/taucad/nanoraster) | 0.7.1 | Apache-2.0 |
+| [nanoraster](https://github.com/taucad/nanoraster) | 0.8.0 | Apache-2.0 |
+| [nanoraster-{platform}](https://github.com/taucad/nanoraster) | 0.8.0 | Apache-2.0 |
 | [nanostores](https://github.com/nanostores/nanostores) | 1.5.5 | MIT |
 | [ndarray](https://github.com/mikolalysenko/ndarray) | 1.1.1 | MIT |
 | [ndarray-lanczos](https://github.com/donmccurdy/ndarray-lanczos) | 0.3.0 | MIT |
 | [ndarray-ops](https://github.com/mikolalysenko/ndarray-ops) | 1.2.2 | MIT |
 | [ndarray-pixels](https://github.com/donmccurdy/ndarray-pixels) | 5.2.0 | MIT |
+| [negotiator](https://github.com/jshttp/negotiator) | 0.6.4 | MIT |
 | [negotiator](https://github.com/jshttp/negotiator) | 1.1.0 | MIT |
 | [next-themes](https://github.com/pacocoursey/next-themes) | 0.4.6 | MIT |
 | [node-addon-api](https://github.com/nodejs/node-addon-api) | 7.1.1 | MIT |
@@ -682,6 +697,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [occt-import-js](https://github.com/kovacsv/occt-import-js) | 0.0.23 | LGPL-2.1 |
 | [on-exit-leak-free](https://github.com/mcollina/on-exit-or-gc) | 2.1.2 | MIT |
 | [on-finished](https://github.com/jshttp/on-finished) | 2.4.1 | MIT |
+| [on-headers](https://github.com/jshttp/on-headers) | 1.1.0 | MIT |
 | [once](https://github.com/isaacs/once) | 1.4.0 | ISC |
 | [onetime](https://github.com/sindresorhus/onetime) | 5.1.2 | MIT |
 | [oniguruma-parser](https://github.com/slevithan/oniguruma-parser) | 0.12.2 | MIT |
@@ -724,7 +740,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [radix-ui](https://github.com/radix-ui/primitives) | 1.8.0 | MIT |
 | [range-parser](https://github.com/jshttp/range-parser) | 1.3.0 | MIT |
 | [raw-body](https://github.com/stream-utils/raw-body) | 3.0.2 | MIT |
-| [react](https://github.com/facebook/react) | 19.2.7 | MIT |
+| [react](https://github.com/react/react) | 19.3.1 | MIT |
 | [react-colorful](https://github.com/omgovich/react-colorful) | 5.8.1 | MIT |
 | [react-day-picker](https://github.com/gpbl/react-day-picker) | 10.0.2 | MIT |
 | [react-is](https://github.com/facebook/react) | 18.3.1 | MIT |
@@ -997,7 +1013,7 @@ The circuit kernel bundles the following components. Their full license texts ac
 | parseunit | 0.3.1 | MIT |
 | performance-now | 2.1.0 | MIT |
 | polished | 4.3.1 | MIT |
-| react | 19.2.7 | MIT |
+| react | 19.3.1 | MIT |
 | react-reconciler | 0.32.0 | MIT |
 | scheduler | 0.26.0 | MIT |
 | schematic-symbols | 0.0.244 | MIT |

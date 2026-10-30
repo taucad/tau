@@ -1,0 +1,9 @@
+// Add color to a revolved solid.
+sketch001 = startSketchOn(XY)
+    |> circle( center = [15, 0], radius = 5 )
+    |> revolve( angle = 360deg, axis = Y)
+    |> appearance(
+        color = '#ff0000',
+        metalness = 90,
+        roughness = 90
+    )

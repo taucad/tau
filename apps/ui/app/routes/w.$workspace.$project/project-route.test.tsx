@@ -599,7 +599,14 @@ describe('project route session identity', () => {
     getProjectRouteAccess.mockImplementation(async (id) => ready(id));
     const { Provider, view } = renderRouteProvider();
     await screen.findAllByTestId('project-session');
-    expect(publishProjectHostConnector).toHaveBeenCalledWith(projectA, expect.any(Function), expect.any(Function));
+    expect(publishProjectHostConnector).toHaveBeenCalledWith(
+      projectA,
+      expect.any(Function),
+      expect.objectContaining({
+        stoppability: expect.any(Function) as unknown,
+        presented: expect.any(Function) as unknown,
+      }),
+    );
     const connector = publishProjectHostConnector.mock.calls[0]?.[1] as (chatId: string) => Promise<unknown>;
     await connector('chat-browser');
     expect(retainBrowserAgentHostProject).toHaveBeenCalledOnce();
@@ -626,7 +633,14 @@ describe('project route session identity', () => {
     getProjectRouteAccess.mockImplementation(async (id) => ready(id));
     const { view } = renderRouteProvider();
     await waitFor(() => {
-      expect(publishProjectHostConnector).toHaveBeenCalledWith(projectA, expect.any(Function), expect.any(Function));
+      expect(publishProjectHostConnector).toHaveBeenCalledWith(
+        projectA,
+        expect.any(Function),
+        expect.objectContaining({
+          stoppability: expect.any(Function) as unknown,
+          presented: expect.any(Function) as unknown,
+        }),
+      );
     });
     const connector = publishProjectHostConnector.mock.calls[0]?.[1] as (chatId: string) => Promise<unknown>;
 

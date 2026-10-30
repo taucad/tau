@@ -1,0 +1,11 @@
+@settings(kclVersion = 3.0)
+
+overheadView = view::directed([0, 1, -2])
+
+closeUp = view::directed(
+  [-1, -1, -0.3],
+  up = [0, 0, 1],
+  target = [0, 0, 10],
+  distance = 200,
+  projection = view::Projection::Perspective,
+)

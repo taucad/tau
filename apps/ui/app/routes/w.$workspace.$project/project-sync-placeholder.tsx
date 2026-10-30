@@ -1,10 +1,13 @@
 import { Link, useLocation } from 'react-router';
 import { CloudOff, CircleAlert } from 'lucide-react';
+import type { LargeObjectsFacet } from '@taucad/revisions';
 import { Button } from '@taucad/ui/components/button';
 import { Loader } from '@taucad/ui/components/loader';
-import { useProjectAvailability } from '#hooks/use-project-availability.js';
-import type { ProjectAvailability } from '#hooks/use-project-availability.js';
+import { Progress } from '@taucad/ui/components/progress';
+import { useLargeObjects, useProjectAvailability } from '#hooks/use-project-availability.js';
+import type { ModelAvailability, ProjectAvailability } from '#hooks/use-project-availability.js';
 import { useRevisionClient, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
+import { formatBytes } from '#lib/format-bytes.js';
 
 const messages = {
   connecting: ['Connecting to Tau Cloud', 'Opening this project on this device.'],
@@ -16,8 +19,78 @@ const messages = {
   ready: ['Project files ready', ''],
 } satisfies Record<ProjectAvailability, readonly [string, string]>;
 
+/**
+ * How far a large-object download is, as the viewer says it.
+ *
+ * @param facet - The checkout's large-object facet.
+ * @returns e.g. `12 of 295 files, 3.1 MB of 70.0 MB`.
+ */
+export const largeObjectsProgressText = (
+  facet: Pick<LargeObjectsFacet, 'objects' | 'totalObjects' | 'bytes' | 'totalBytes'>,
+): string =>
+  `${facet.objects} of ${facet.totalObjects} ${facet.totalObjects === 1 ? 'file' : 'files'}, ${formatBytes(facet.bytes)} of ${formatBytes(facet.totalBytes)}`;
+
+/**
+ * The viewer's wait for the model's large files: the code and files are open,
+ * and the model renders once every file is here, never over a partial set.
+ */
+function ModelFilesPlaceholder({ hasFailed: failed }: { readonly hasFailed: boolean }): React.JSX.Element {
+  const facet = useLargeObjects();
+  const client = useRevisionClient();
+  const title = failed ? 'Couldn’t download model files' : 'Downloading model files';
+  const progress = facet === undefined ? undefined : largeObjectsProgressText(facet);
+  const percent =
+    facet === undefined || facet.totalBytes === 0 ? 0 : Math.min(100, (facet.bytes / facet.totalBytes) * 100);
+  return (
+    <div
+      className='flex size-full flex-col items-center justify-center gap-4 p-6 text-center'
+      role='region'
+      aria-label={title}
+      aria-busy={!failed}
+    >
+      {failed ? (
+        <CircleAlert className='size-8 text-muted-foreground' />
+      ) : (
+        <Loader className='size-8 motion-reduce:animate-none' />
+      )}
+      <div className='w-full max-w-64 space-y-2'>
+        <p className='text-sm font-medium'>{title}</p>
+        <p className='text-xs text-muted-foreground'>
+          {failed
+            ? 'Your files are open; the model needs the rest of them to render.'
+            : 'Your files are open. The model renders when they are all here.'}
+        </p>
+        {progress === undefined ? null : (
+          <>
+            <Progress value={percent} aria-label='Model files downloaded' />
+            <p className='text-xs text-muted-foreground tabular-nums'>{progress}</p>
+          </>
+        )}
+      </div>
+      {failed ? (
+        <Button
+          variant='outline'
+          size='sm'
+          onClick={() => {
+            client?.send({ command: 'retryLargeObjects' });
+          }}
+        >
+          Try again
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
 /** One calm first-open treatment, shared by every unavailable file surface. */
-export function ProjectSyncPlaceholder({ state }: { readonly state: ProjectAvailability }): React.JSX.Element {
+export function ProjectSyncPlaceholder({ state }: { readonly state: ModelAvailability }): React.JSX.Element {
+  if (state === 'files' || state === 'filesFailed') {
+    return <ModelFilesPlaceholder hasFailed={state === 'filesFailed'} />;
+  }
+  return <ProjectFilesPlaceholder state={state} />;
+}
+
+function ProjectFilesPlaceholder({ state }: { readonly state: ProjectAvailability }): React.JSX.Element {
   const { connectRemote, syncNow } = useRevisionCommands();
   const status = useRevisionStatus();
   const remote = status?.remote;

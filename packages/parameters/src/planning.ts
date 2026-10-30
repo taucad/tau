@@ -43,6 +43,24 @@ const sameBaseBinding = (base: NonNullable<ParameterSetRequest['base']>, current
 };
 
 /**
+ * The value one field of one group holds in a snapshot.
+ *
+ * @param current - The snapshot to read.
+ * @param group - The group whose values hold the field.
+ * @param pointer - The field's instance pointer.
+ * @returns The stored value, or the manifest default for a field the record leaves untouched.
+ * @internal
+ */
+export const fieldValue = (current: ParameterSnapshot, group: string, pointer: string): JSONValue | undefined => {
+  const stored = valueAtPointer(current.entry.groups[group]?.values ?? {}, pointer);
+  // An untouched field is absent from the record and still reads as its manifest default; a stored
+  // `null` is an explicit value, not an absence.
+  return stored === undefined
+    ? valueAtPointer(current.manifest.defaults as Readonly<Record<string, JSONValue>>, pointer)
+    : stored;
+};
+
+/**
  * Field-scoped conflict: an edit commits while its own field still holds the value the editor was
  * working from, under the binding it was working from. An edit of a different field, a group
  * operation or an agent write elsewhere in the record never blocks it.
@@ -52,14 +70,7 @@ const conflictsWithBase = (request: ParameterSetRequest, current: ParameterSnaps
   if (base === undefined || (operation.kind !== 'native-value' && operation.kind !== 'unit-value')) {
     return false;
   }
-  const stored = valueAtPointer(current.entry.groups[operation.group]?.values ?? {}, base.pointer);
-  // An untouched field is absent from the record and still reads as its manifest default; a stored
-  // `null` is an explicit value, not an absence.
-  const effective =
-    stored === undefined
-      ? valueAtPointer(current.manifest.defaults as Readonly<Record<string, JSONValue>>, base.pointer)
-      : stored;
-  return !Object.is(effective, base.value) || !sameBaseBinding(base, current);
+  return !Object.is(fieldValue(current, operation.group, base.pointer), base.value) || !sameBaseBinding(base, current);
 };
 
 /** Plan one atomic sidecar replacement without reading, writing or resolving producers. @public */

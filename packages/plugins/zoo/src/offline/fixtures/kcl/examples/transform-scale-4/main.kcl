@@ -1,0 +1,31 @@
+// Resize a 1 mm seed cube to exact physical dimensions.
+@settings(kclVersion = 3.0)
+
+seedSize = 1mm
+targetWidth = 40mm
+targetDepth = 20mm
+targetHeight = 10mm
+
+seedSketch = sketch(on = XY) {
+  bottom = line(start = [var 0mm, var 0mm], end = [var 1mm, var 0mm])
+  right = line(start = [var 1mm, var 0mm], end = [var 1mm, var 1mm])
+  top = line(start = [var 1mm, var 1mm], end = [var 0mm, var 1mm])
+  left = line(start = [var 0mm, var 1mm], end = [var 0mm, var 0mm])
+  coincident([bottom.end, right.start])
+  coincident([right.end, top.start])
+  coincident([top.end, left.start])
+  coincident([left.end, bottom.start])
+  horizontal(bottom)
+  horizontal(top)
+  vertical(right)
+  vertical(left)
+}
+seedRegion = region(segments = [seedSketch.bottom, seedSketch.right])
+seedCube = extrude(seedRegion, length = seedSize)
+
+resized = scale(
+  seedCube,
+  x = targetWidth / seedSize,
+  y = targetDepth / seedSize,
+  z = targetHeight / seedSize,
+)

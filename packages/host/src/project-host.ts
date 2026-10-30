@@ -8,9 +8,11 @@
  */
 
 import { randomBytes } from 'node:crypto';
+import { realpath } from 'node:fs/promises';
+import { isAbsolute, relative } from 'node:path';
 
 import { followChat, unsettledAttempts } from '@taucad/agent-host';
-import type { ChatLedger, ToolRegistry, TurnPlacementPort } from '@taucad/agent-host';
+import type { ChatLedger, OwnRowsRead, ToolRegistry, TurnAttemptKey, TurnPlacementPort } from '@taucad/agent-host';
 import { createAgentLauncher } from '@taucad/agent-host/launcher';
 import { chatIdSchema } from '@taucad/agent-host/wire';
 import type { AgentLauncher, AgentLauncherOptions } from '@taucad/agent-host/launcher';
@@ -32,6 +34,7 @@ import type { HostMcpEndpoint } from '#mcp-server.js';
 import { hostRevisionActor } from '#revision-actor.js';
 import { createProjectRevisions } from '#revisions.js';
 import type { HostRevisionEvent, ProjectRevisions, ProjectRevisionsOptions, TurnCheckout } from '#revisions.js';
+import type { ShellExecutionHolds, ShellHoldAnswer, ShellProjectExecutions } from '#shell/shell-service.js';
 
 /**
  * Admit a checkout's filesystem as the host tools' filesystem. Revision hosts type checkout filesystems loosely, so the
@@ -101,9 +104,19 @@ export type ProjectHostOptions = Pick<
      */
     shell?:
       | ((
-          checkouts: ReadonlyMap<string, TurnCheckout>,
+          checkouts: ShellCheckouts,
           chatOfRun: (runId: string) => string | undefined,
         ) => HostToolRegistryOptions['shell'])
+      | undefined;
+    /**
+     * Observe the chats this host leads (agent observability, T11): given the host's own-row read, answer the hook the
+     * launcher calls each time a chat goes quiescent or stops being so, and a close the host calls when it closes. It
+     * must not throw and never affects a run. Absent, nothing observes.
+     */
+    observeChats?:
+      | ((
+          read: OwnRowsRead,
+        ) => Readonly<{ onChatQuiescent: (chatId: string, quiescent: boolean) => void; close: () => void }>)
       | undefined;
     /**
      * W8 TS-S4: build this project's placement port. Every attempt is placed and settled through it and runs on its
@@ -121,6 +134,160 @@ export type ProjectHostOptions = Pick<
         ) => TurnPlacementPort)
       | undefined;
   }>;
+
+/**
+ * The run→checkout map the shell reads (I7): each entry carries its run's exact revision execution holds, and the map
+ * carries this project's side of startup recovery. Entries are memoized per checkout, so the shell's identity check
+ * still sees a replaced checkout.
+ *
+ * @public
+ */
+export type ShellCheckouts = ReadonlyMap<string, TurnCheckout> & Readonly<{ executions: ShellProjectExecutions }>;
+
+const refusedHold = (message: string): ShellHoldAnswer => ({ status: 'refused', message });
+
+const holdAnswer = (answer: Awaited<ReturnType<ProjectRevisions['executions']['hold']>>): ShellHoldAnswer =>
+  answer.status === 'refused' ? refusedHold(answer.message) : { status: answer.status };
+
+const inside = (parent: string, path: string): boolean => {
+  const step = relative(parent, path);
+  return step === '' || (!step.startsWith('..') && !isAbsolute(step));
+};
+
+const shellCheckoutView = (
+  checkouts: ReadonlyMap<string, TurnCheckout>,
+  holdsOf: (runId: string) => ShellExecutionHolds,
+  executions: ShellProjectExecutions,
+): ShellCheckouts => {
+  const views = new WeakMap<TurnCheckout, TurnCheckout>();
+  const get = (runId: string): TurnCheckout | undefined => {
+    const checkout = checkouts.get(runId);
+    if (checkout === undefined) {
+      return undefined;
+    }
+    let view = views.get(checkout);
+    if (view === undefined) {
+      view = Object.freeze({ ...checkout, executions: holdsOf(runId) });
+      views.set(checkout, view);
+    }
+    return view;
+  };
+  const snapshot = (): Map<string, TurnCheckout> =>
+    new Map(
+      [...checkouts.keys()].flatMap((key): Array<[string, TurnCheckout]> => {
+        const value = get(key);
+        return value === undefined ? [] : [[key, value]];
+      }),
+    );
+  const entries = (): MapIterator<[string, TurnCheckout]> => snapshot().entries();
+  const view: ShellCheckouts = {
+    executions,
+    get size() {
+      return checkouts.size;
+    },
+    get,
+    has: (runId) => checkouts.has(runId),
+    forEach: (callback, thisArgument?: unknown) => {
+      for (const [key, value] of entries()) {
+        callback.call(thisArgument, value, key, view);
+      }
+    },
+    entries,
+    keys: () => checkouts.keys(),
+    values: () => snapshot().values(),
+    [Symbol.iterator]: entries,
+  };
+  return view;
+};
+
+/**
+ * Give the shell this project's run holds (I7). A command holds the latest admitted attempt of its run, recorded
+ * from the placement port's own admissions, and releases exactly the attempt it held. Startup recovery reads every run
+ * record now and claims this project's workspace and linked-checkout roots.
+ *
+ * @param input - The host's run→checkout map, its revisions' execution holds and the workspace root.
+ * @returns The shell's map, and the placement wrapper that records each admitted attempt.
+ */
+export const createShellCheckouts = (
+  input: Readonly<{
+    checkouts: ReadonlyMap<string, TurnCheckout>;
+    executions: ProjectRevisions['executions'];
+    workspaceRoot: string;
+  }>,
+): Readonly<{ checkouts: ShellCheckouts; placement: (port: TurnPlacementPort) => TurnPlacementPort }> => {
+  const attempts = new Map<string, TurnAttemptKey>();
+  const holdsOf = (runId: string): ShellExecutionHolds => {
+    const heldUnder = new Map<string, TurnAttemptKey>();
+    return Object.freeze({
+      hold: async (executionId: string) => {
+        const key = attempts.get(runId);
+        if (key === undefined) {
+          return refusedHold('This run has no admitted turn attempt, so its files cannot be held for a command.');
+        }
+        heldUnder.set(executionId, key);
+        return holdAnswer(await input.executions.hold({ key, executionId }));
+      },
+      release: async (executionId: string) => {
+        const key = heldUnder.get(executionId) ?? attempts.get(runId);
+        if (key === undefined) {
+          return refusedHold('This run has no admitted turn attempt, so its hold cannot be found.');
+        }
+        const answer = holdAnswer(await input.executions.release({ key, executionId }));
+        if (answer.status !== 'refused') {
+          heldUnder.delete(executionId);
+        }
+        return answer;
+      },
+    });
+  };
+  const physical = async (path: string): Promise<string | undefined> => {
+    try {
+      return await realpath(path);
+    } catch {
+      return undefined;
+    }
+  };
+  const executions: ShellProjectExecutions = Object.freeze({
+    owns: async (root: string) => {
+      const [workspace, linked] = await Promise.all([
+        physical(input.workspaceRoot),
+        physical(input.executions.checkoutsDirectory),
+      ]);
+      return root === workspace || (linked !== undefined && inside(linked, root));
+    },
+    held: async () => {
+      const leases = await input.executions.leases();
+      return new Map(
+        leases.flatMap((lease) =>
+          (lease.executionIds ?? []).map((executionId): [string, () => Promise<ShellHoldAnswer>] => [
+            executionId,
+            async () =>
+              holdAnswer(
+                await input.executions.release({
+                  key: { chatId: lease.chatId, turnId: lease.turnId, runId: lease.runId, attempt: lease.attempt },
+                  executionId,
+                }),
+              ),
+          ]),
+        ),
+      );
+    },
+  });
+  return {
+    checkouts: shellCheckoutView(input.checkouts, holdsOf, executions),
+    placement: (port) =>
+      Object.freeze({
+        ...port,
+        admit: async (admission) => {
+          const answer = await port.admit(admission);
+          if (answer.status !== 'refused') {
+            attempts.set(admission.key.runId, admission.key);
+          }
+          return answer;
+        },
+      }),
+  };
+};
 
 /** One project's host: the launcher, its revisions and the MCP endpoint it minted. @public */
 export type ProjectHost = Readonly<{
@@ -270,7 +437,8 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
   /* One registry over every run's root (`checkouts`), or one rooted at a placed attempt's checkout. The shell reads
    * each call's checkout by run id from this host's map, whichever registry serves the call, and a call's chat from the
    * runs a client started here: the chat the host admitted the run under, never model input. */
-  const shell = options.shell?.(checkouts, chatOfEntered(entered));
+  const shellCheckouts = createShellCheckouts({ checkouts, executions: revisions.executions, workspaceRoot });
+  const shell = options.shell?.(shellCheckouts.checkouts, chatOfEntered(entered));
   const registryOptions = {
     revisions: revisions.history,
     filesystem: (root: string) => fileSystem.open(root),
@@ -295,13 +463,16 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
       ...(filesystem === undefined ? {} : { filesystem: () => filesystem }),
     });
   /* The host process is the placement session (TS-R6 holds trivially); no Node host runs an attempt unplaced (D13). */
-  const turnPlacement = (
-    options.turnPlacement ??
-    ((input) =>
-      input.revisions.placement(({ root, filesystem }) =>
-        input.toolRegistryFor(root, asHostToolFileSystem(filesystem)),
-      ))
-  )({ revisions, toolRegistryFor });
+  /* I7: the shell holds a command's run on the attempt this port admitted last. */
+  const turnPlacement = shellCheckouts.placement(
+    (
+      options.turnPlacement ??
+      ((input) =>
+        input.revisions.placement(({ root, filesystem }) =>
+          input.toolRegistryFor(root, asHostToolFileSystem(filesystem)),
+        ))
+    )({ revisions, toolRegistryFor }),
+  );
 
   const externalAgents =
     options.externalAgents !== undefined && options.externalAgents.agents.length > 0
@@ -313,8 +484,13 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
       ? undefined
       : createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), registry: toolRegistry, workspaceRoot });
 
+  /* Reads only on quiescence, by which time the launcher exists. */
+  const observer = options.observeChats?.(async (input) => launcher.host.readEvents(input));
   const launcher = createAgentLauncher({
     chats: createNodeChatStore({ workspaceRoot }),
+    onChatQuiescent: (chatId, quiescent) => {
+      observer?.onChatQuiescent(chatId, quiescent);
+    },
     /*
      * The record device this project's chat segments sync under, read once the store has opened: an external turn's
      * session is this device's, whatever its host id. Never the machine's name, which a rename changes, two machines
@@ -370,6 +546,7 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
         failures.push(error);
       }
     };
+    observer?.close();
     await settle(async () => launcher.close());
     /* After the launcher: its attempts are settled, so the tree records what is on disk and stops. */
     await settle(async () => revisions.release());

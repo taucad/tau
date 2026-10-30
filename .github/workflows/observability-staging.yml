@@ -3,7 +3,7 @@ name: Staging observability
 on:
   workflow_dispatch:
   workflow_run:
-    workflows: [CI, Deploy UI to Netlify]
+    workflows: [Staging deploy, Deploy UI to Netlify]
     types: [completed]
     branches: [main]
 
@@ -49,7 +49,11 @@ jobs:
     needs: deployed
     if: needs.deployed.outputs.ready == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # The staging acceptance suites run serially (`--no-file-parallelism`) against the
+    # deployed site, and each case can spend up to 180 s polling Sentry for its own
+    # `e2e_run` id. One measured pass over the four suites needs well over 20 minutes,
+    # so the former budget cancelled the job mid-suite and threw away its report.
+    timeout-minutes: 45
     environment: staging
     steps:
       - name: Checkout trusted main revision

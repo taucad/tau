@@ -1,0 +1,3 @@
+v = [3, 4]
+m = vector::magnitude(v)
+assert(m, isEqualTo = 5)

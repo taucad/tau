@@ -2,7 +2,7 @@
 
 // oxlint-disable-next-line import/no-unassigned-import -- registers DOM matchers for this test module
 import '@testing-library/jest-dom/vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,6 +16,7 @@ import {
 import { SettingsDialog, SettingsSurface } from '#components/settings/settings-dialog.js';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 
+const loadGeneralSettings = vi.hoisted(() => vi.fn());
 const renderSecuritySettings = vi.hoisted(() => vi.fn(() => <div>Mounted security settings</div>));
 const deferredBillingState = vi.hoisted(() => ({ showTarget: false }));
 const { scrollTo } = HTMLElement.prototype;
@@ -41,16 +42,28 @@ vi.mock('#components/settings/billing-settings.js', () => ({
 vi.mock('#components/settings/filesystem-settings.js', () => ({
   FileSystemSettings: () => <div>Mounted filesystem</div>,
 }));
-vi.mock('#components/settings/general-settings.js', () => ({
-  GeneralSettings: () => (
-    <div>
-      Mounted general settings
-      <section id='settings-theme' aria-label='Theme' tabIndex={-1}>
-        Theme setting
-      </section>
-    </div>
-  ),
+vi.mock('#components/settings/github-repository-settings.js', () => ({
+  GithubRepositorySettings: () => <div>Mounted repositories</div>,
 }));
+vi.mock('#components/browser/browser-settings.js', () => ({
+  BrowserSettingsPanel: () => <div>Mounted browser settings</div>,
+}));
+vi.mock('#components/settings/machines-settings.js', () => ({
+  MachinesSettings: () => <div>Mounted machines</div>,
+}));
+vi.mock('#components/settings/general-settings.js', () => {
+  loadGeneralSettings();
+  return {
+    GeneralSettings: () => (
+      <div>
+        Mounted general settings
+        <section id='settings-theme' aria-label='Theme' tabIndex={-1}>
+          Theme setting
+        </section>
+      </div>
+    ),
+  };
+});
 vi.mock('#components/settings/experimental-settings.js', () => ({
   ExperimentalSettings: () => <div>Mounted experimental</div>,
 }));
@@ -145,10 +158,19 @@ describe('SettingsDialog', () => {
     HTMLElement.prototype.scrollIntoView = scrollIntoView;
   });
 
+  it('should not load settings panels while the dialog is closed', () => {
+    render(<SettingsTestSurface url='/home/project' />);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(loadGeneralSettings).not.toHaveBeenCalled();
+  });
+
   it('should mount Security only after its tab is selected', async () => {
     render(<SettingsTestSurface />);
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
 
-    expect(screen.getByText('Mounted general settings')).toBeInTheDocument();
+    expect(await screen.findByText('Mounted general settings')).toBeInTheDocument();
     expect(screen.queryByText('Mounted security settings')).not.toBeInTheDocument();
     expect(renderSecuritySettings).not.toHaveBeenCalled();
 
@@ -213,7 +235,7 @@ describe('SettingsDialog', () => {
     const url = '/home/project?settings=billing&setting=credit-balance';
     const view = render(<SettingsTestSurface url={url} />);
 
-    expect(screen.getByText('Mounted billing')).toBeInTheDocument();
+    expect(await screen.findByText('Mounted billing')).toBeInTheDocument();
     deferredBillingState.showTarget = true;
     view.rerender(<SettingsTestSurface url={url} />);
 
@@ -407,10 +429,10 @@ describe('SettingsDialog', () => {
       });
     });
 
-    it('should show the detail when the dialog is opened to a section', () => {
+    it('should show the detail when the dialog is opened to a section', async () => {
       render(<SettingsTestSurface url='/home/project?settings=models' />);
 
-      expect(screen.getByText('Mounted models')).toBeInTheDocument();
+      expect(await screen.findByText('Mounted models')).toBeInTheDocument();
       expect(screen.getByRole('heading', { level: 2, name: 'Models' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Back to Settings' })).toBeInTheDocument();
       expect(screen.queryByRole('navigation', { name: 'Settings navigation' })).not.toBeInTheDocument();

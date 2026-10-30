@@ -1,0 +1,6 @@
+u = [10, 10, 10]
+v = [1, 2, 3]
+v2 = vector::mul(u, v)
+assert(v2[0], isEqualTo = 10)
+assert(v2[1], isEqualTo = 20)
+assert(v2[2], isEqualTo = 30)

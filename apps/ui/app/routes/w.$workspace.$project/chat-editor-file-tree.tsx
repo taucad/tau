@@ -1,6 +1,6 @@
 // oxlint-disable max-lines -- TODO: refactor this component to be more manageable
 import { subscribeWorkbenchFileReveal } from '#routes/w.$workspace.$project/workbench-reveal.js';
-import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { useLargeObjectPending, useProjectAvailability } from '#hooks/use-project-availability.js';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { useCallback, useId, useState, useRef, useMemo, useEffect, memo } from 'react';
 import { createPortal, flushSync } from 'react-dom';
@@ -22,6 +22,7 @@ import {
   Clipboard,
   Lock,
 } from 'lucide-react';
+import { Loader } from '@taucad/ui/components/loader';
 import { useSelector } from '@xstate/react';
 import {
   AssistiveDndState,
@@ -2261,6 +2262,7 @@ function TreeItem({
    * override gesture belongs on its root row and nowhere else. */
   const overridableUnit = presentation.isSubtreeRoot && presentation.provenance?.source === 'system-skills';
   const downloadPolicy = getFileTreeDownloadPolicy(presentation.provenance);
+  const isAwaitingLargeObject = useLargeObjectPending(isFolder ? undefined : item.getId());
   const descriptionId = useId();
   const { description } = presentation;
 
@@ -2575,6 +2577,12 @@ function TreeItem({
             <Badge variant='secondary' className='ml-auto shrink-0 px-1.5 py-0 font-normal'>
               {presentation.badge}
             </Badge>
+          ) : null}
+          {isAwaitingLargeObject ? (
+            <span data-large-object-pending className='flex shrink-0 items-center'>
+              <Loader className='size-3 text-muted-foreground motion-reduce:animate-none' />
+              <span className='sr-only'>Downloading</span>
+            </span>
           ) : null}
           {presentation.isSubtreeRoot && presentation.glyph === 'lock' ? (
             <Lock aria-hidden data-provenance-glyph='lock' className='size-3 shrink-0 text-muted-foreground' />

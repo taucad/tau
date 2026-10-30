@@ -1,0 +1,20 @@
+// Create a spring by sweeping around a helix path from a cloned sketch.
+
+// Create a helix around the Z axis.
+helixPath = helix(
+    angleStart = 0,
+    ccw = true,
+    revolutions = 4,
+    length = 10,
+    radius = 5,
+    axis = Z,
+ )
+
+
+springSketch = startSketchOn(XZ)
+    |> circle( center = [0, 0], radius = 1)
+
+// Create a spring by sweeping around the helix path.
+sweepedSpring = clone(springSketch)
+    |> translate(x=5)
+    |> sweep(path = helixPath)

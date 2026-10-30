@@ -1,0 +1,10 @@
+// Each instance will be shifted along the X axis.
+fn transform(@id) {
+  return { translate = [4 * id, 0, 0] }
+}
+
+// Sketch 4 cylinders.
+sketch001 = startSketchOn(XZ)
+  |> circle(center = [0, 0], radius = 2)
+  |> extrude(length = 5)
+  |> patternTransform(instances = 4, transform = transform)

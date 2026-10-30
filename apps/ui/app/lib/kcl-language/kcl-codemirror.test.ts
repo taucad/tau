@@ -23,6 +23,8 @@ import {
   kclLspCompletion,
   symbolCompletion,
 } from '#lib/kcl-language/kcl-codemirror.js';
+import { indexKclProgram } from '#lib/kcl-language/kcl-bindings.js';
+import { languageFeatures } from '#components/code/editor-language-features.js';
 
 describe('KCL pending worker requests', () => {
   it('observes a rejected semantic refresh and keeps the editor usable', async () => {
@@ -70,6 +72,66 @@ describe('KCL pending worker requests', () => {
       warn.mockRestore();
       error.mockRestore();
       vi.useRealTimers();
+    }
+  });
+});
+
+describe('KCL shared editor features', () => {
+  it('supplies every TypeScript feature the shared editor shows, with server signatures first', async () => {
+    const client = mock<KclLspClient>();
+    client.textDocumentSemanticTokensFull.mockResolvedValue(undefined);
+    client.textDocumentFoldingRange.mockResolvedValue([]);
+    client.textDocumentSignatureHelp.mockResolvedValue({
+      activeSignature: 0,
+      activeParameter: 1,
+      signatures: [
+        {
+          label: 'extrude(@sketches: [Sketch], length?: number(Length))',
+          documentation: { kind: 'markdown', value: 'Prefer a [`sketch` block](/docs/kcl-lang/sketches).' },
+          parameters: [{ label: '@sketches: [Sketch]' }, { label: [30, 54] }],
+        },
+      ],
+    });
+    const document = new EditorDocument('main.kcl', 'extrude(');
+    const environment = mock<EditorLanguageEnvironment>({ diagnostics: new EditorDiagnostics() });
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: document.text,
+        extensions: kclExtensions({
+          backend: new KclBackend(environment, client),
+          document,
+          environment,
+          isDisposed: () => false,
+        }),
+      }),
+      parent: globalThis.document.body,
+    });
+    try {
+      const features = view.state.facet(languageFeatures);
+      expect(Object.keys(features).sort()).toEqual([
+        'documentSymbols',
+        'format',
+        'occurrences',
+        'quickFix',
+        'references',
+        'rename',
+        'signatureHelp',
+        'typeDefinition',
+        'workspaceSymbols',
+      ]);
+      expect(features.signatureHelp?.triggerCharacters).toEqual(['(', ',']);
+      const signature = await features.signatureHelp?.provide(view, 8, '(');
+      expect(signature).toMatchObject({
+        label: 'extrude(@sketches: [Sketch], length?: number(Length))',
+        parameters: [
+          [8, 27],
+          [30, 54],
+        ],
+        activeParameter: 1,
+        documentation: 'Prefer a [`sketch` block](https://zoo.dev/docs/kcl-lang/sketches).',
+      });
+    } finally {
+      view.destroy();
     }
   });
 });
@@ -289,8 +351,10 @@ describe('KCL import navigation', () => {
   it('navigates quoted imports and local WASM symbols when LSP has no definition', async () => {
     const document = new EditorDocument('bench/main.kcl', 'import "part.kcl"\nmyVar');
     const client = mock<KclLspClient>();
-    client.textDocumentDefinition.mockResolvedValue(undefined);
+    client.getServerCapabilities.mockReturnValue({});
     const symbols = mock<KclSymbolService>();
+    // A file that does not parse resolves nothing through the AST, so the last parsed symbols answer.
+    symbols.getIndex.mockResolvedValue(indexKclProgram(undefined));
     const navigate = vi.fn();
     const environment = mock<EditorLanguageEnvironment>({ navigate });
     const importState = EditorState.create({ doc: document.text, selection: { anchor: 10 } });
@@ -310,6 +374,7 @@ describe('KCL import navigation', () => {
       symbols,
     });
     expect(navigate).toHaveBeenLastCalledWith({ uri: document.uri, line: 2, column: 1 });
+    expect(client.textDocumentDefinition).not.toHaveBeenCalled();
   });
 
   it('shows module import and user symbol text when LSP hover is absent', () => {

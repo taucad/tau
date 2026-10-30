@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { Evidence } from '#contract.js';
 import type { ProjectedRun, ProjectionContext } from '#projection.js';
 import { projectRun } from '#projection.js';
-import { phaseDurations, reconcileEvidence, scoreCohort, scorecard } from '#scorecard.js';
+import type { FeedbackGrants } from '#scorecard.js';
+import { checkSequence, phaseDurations, reconcileEvidence, scoreCohort, scorecard } from '#scorecard.js';
 
 const at = Date.parse('2026-10-29T00:00:00.000Z');
 const row = (sequence: number, leaderEpoch = 'epoch-a') => ({ chatId: 'chat-1', leaderEpoch, sequence });
@@ -252,6 +253,36 @@ describe('scorecard', () => {
     expect(forward.supplierCost).toBeCloseTo(0.04);
   });
 
+  it('reads a rate only against runs whose account allowed feedback when they ran', async () => {
+    const early = run({ runId: 'run-0', tools: [], intervals: [], ending: { source: row(2), at: at + 2000 } });
+    const evidence = [
+      ...(await project(early)),
+      ...(await project(run({ rating: { value: 'negative', at: at + 9000 } }), { plane: 'feedback' })),
+      ...(await project(run())),
+      ...(await project(run({ runId: 'run-2', ending: { source: row(20), at: at + 20_000 } }))),
+      ...(await project(run({ runId: 'run-3', ending: { source: row(30), at: at + 30_000 } }), {
+        principal: 'user-b',
+      })),
+    ];
+    /* The first account granted feedback after run-0 ended; the second never did. */
+    const grants: FeedbackGrants = (account, time) =>
+      account === 'user-a' && time >= at + 5000 ? 'granted' : 'withheld';
+
+    const card = scorecard(evidence, grants);
+    const unanswered = scorecard(evidence);
+
+    expect(card.runs.map((score) => [score.run, score.rating, score.feedback])).toEqual([
+      ['run-0', 'none', 'withheld'],
+      ['run-1', 'negative', 'granted'],
+      ['run-2', 'none', 'granted'],
+      ['run-3', 'none', 'withheld'],
+    ]);
+    expect(card.overall.feedback).toEqual({ withheld: 2, granted: 2 });
+    expect(card.overall.granted).toEqual({ runs: 2, rating: { negative: 1, none: 1 }, judgement: { none: 2 } });
+    expect(unanswered.overall.feedback).toEqual({ unknown: 4 });
+    expect(unanswered.overall.granted).toEqual({ runs: 0, rating: {}, judgement: {} });
+  });
+
   it('gives each run the attempts and settlements that name it, and leaves the rest joined to no run', async () => {
     const card = scorecard([
       ...(await project(run())),
@@ -271,5 +302,60 @@ describe('scorecard', () => {
     expect(card.attempts.joined).toEqual({ attempts: 2, settlements: 2 });
     expect(card.overall.credits).toEqual({ runs: 1, total: 0.75, median: 0.75, p90: 0.75 });
     expect(card.attempts.cost.settlements).toBe(3);
+  });
+
+  it("reads a run's checks in the order they settled, and counts a return to a revision checked before", async () => {
+    const checked = (
+      call: string,
+      sequence: number,
+      [start, end, result, file]: readonly [number, number, 'passed' | 'failed', string],
+    ): ProjectedRun['tools'][number] => ({
+      ...tool(call, sequence, [start, end]),
+      check: { result, revision: [file], requirements: ['req-a'] },
+    });
+    const card = scorecard([
+      ...(await project(
+        run({
+          tools: [
+            checked('call-1', 3, [1000, 2000, 'failed', 'revision-a']),
+            checked('call-2', 5, [3000, 4000, 'failed', 'revision-b']),
+            checked('call-3', 7, [5000, 6000, 'passed', 'revision-a']),
+          ],
+          ending: { source: row(9), at: at + 9000 },
+        }),
+      )),
+      ...(await project(run({ runId: 'run-2', tools: [], ending: { source: row(20), at: at + 20_000 } }))),
+    ]);
+
+    expect(card.runs.map((score) => [score.checkPath, score.revisits])).toEqual([
+      ['recovered', 1],
+      ['none', 0],
+    ]);
+    expect(card.overall).toMatchObject({ checkPaths: { recovered: 1, none: 1 }, revisited: 1 });
+  });
+
+  it('names a check path from decided checks only, and a recheck of the same revision is no revisit', () => {
+    const check = (at: number, result: string, revision = 'revision-a') => ({ at, result, revision });
+
+    expect(checkSequence([])).toEqual({ path: 'none', revisits: 0 });
+    expect(checkSequence([check(1, 'inconclusive'), check(2, 'not-run')])).toEqual({ path: 'none', revisits: 0 });
+    expect(checkSequence([check(1, 'passed'), check(2, 'unsupported'), check(3, 'passed')])).toEqual({
+      path: 'passed',
+      revisits: 0,
+    });
+    expect(checkSequence([check(2, 'passed'), check(1, 'failed')])).toEqual({ path: 'recovered', revisits: 0 });
+    expect(checkSequence([check(1, 'passed'), check(2, 'failed', 'revision-b')])).toEqual({
+      path: 'regressed',
+      revisits: 0,
+    });
+    expect(checkSequence([check(1, 'failed'), check(2, 'failed')])).toEqual({ path: 'failed', revisits: 0 });
+    expect(
+      checkSequence([
+        check(1, 'failed'),
+        check(2, 'failed', 'revision-b'),
+        check(3, 'failed'),
+        check(4, 'failed', 'revision-b'),
+      ]),
+    ).toEqual({ path: 'failed', revisits: 2 });
   });
 });

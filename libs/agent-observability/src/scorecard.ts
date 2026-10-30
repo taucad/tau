@@ -61,6 +61,10 @@ export type RunScore = Readonly<{
   /** Tool classes in the order the run first used each. */
   pattern: string;
   checks: Readonly<Record<string, number>>;
+  /** How the run's decided checks went, in the order they ran. */
+  checkPath: CheckPath;
+  /** Checks of a revision the run had already checked, after checking another: a return to an earlier state. */
+  revisits: number;
   /** Milliseconds per `phase@domain`, as the union of that phase's closed intervals. */
   phases: Readonly<Record<string, number>>;
   /** Intervals with no end: censored, never timed. */
@@ -71,7 +75,68 @@ export type RunScore = Readonly<{
   judgement: 'accepted' | 'rejected' | 'corrected' | 'none';
   /** The supplier attempts and settlements that name this run as their execution. */
   model: RunModel;
+  /** Whether the account allowed feedback when the run's last fact landed, as the caller's grant record answers. */
+  feedback: FeedbackGrant;
 }>;
+
+/** An account's feedback grant at one time; `unknown` when no grant record was consulted or it has no answer. @public */
+export type FeedbackGrant = 'granted' | 'withheld' | 'unknown';
+
+/**
+ * The account's feedback grant at a time, from the API's purpose decisions. `account` is the account as the reader
+ * names it: the principal in evidence, its pseudonym in Langfuse.
+ *
+ * @public
+ */
+export type FeedbackGrants = (account: string, at: number) => FeedbackGrant;
+
+/**
+ * How a run's decided (`passed` or `failed`) checks went, in order: `none` decided nothing; `passed` and `failed`
+ * never changed; `recovered` ended passed after a failure; `regressed` ended failed after a pass. @public
+ */
+export type CheckPath = 'none' | 'passed' | 'failed' | 'recovered' | 'regressed';
+
+/** One CAD check as a run reported it. @public */
+export type CheckRecord = Readonly<{
+  /** When it settled, in milliseconds. */
+  at: number;
+  result: string;
+  /** The digest of the revision it checked. */
+  revision: string;
+}>;
+
+/**
+ * Read a run's checks as a sequence.
+ *
+ * @param records - The run's checks, in any order; ties keep the order given.
+ * @returns Its check path and how many checks returned to a revision checked before another.
+ * @public
+ */
+export const checkSequence = (records: readonly CheckRecord[]): Readonly<{ path: CheckPath; revisits: number }> => {
+  const ordered = [...records].sort((a, b) => a.at - b.at);
+  const seen = new Set<string>();
+  let last: string | undefined;
+  let revisits = 0;
+  for (const { revision } of ordered) {
+    if (revision !== last && seen.has(revision)) {
+      revisits++;
+    }
+    seen.add(revision);
+    last = revision;
+  }
+  const decided = ordered.flatMap(
+    ({ result }): Array<'passed' | 'failed'> => (result === 'passed' || result === 'failed' ? [result] : []),
+  );
+  const first = decided[0];
+  const final = decided.at(-1);
+  if (first === undefined || final === undefined) {
+    return { path: 'none', revisits };
+  }
+  if (decided.every((result) => result === first)) {
+    return { path: first, revisits };
+  }
+  return { path: final === 'passed' ? 'recovered' : 'regressed', revisits };
+};
 
 /** A run's supplier attempts and what the ledger settled for them. @public */
 export type RunModel = Readonly<{
@@ -97,11 +162,18 @@ export type CohortScore = Readonly<{
   presented: number;
   patterns: Distribution;
   checks: Distribution;
+  checkPaths: Distribution;
+  /** Runs that checked a revision again after checking another. */
+  revisited: number;
   /** Per `phase@domain`: how many runs timed it, and their median and 90th percentile, in milliseconds. */
   phases: Readonly<Record<string, Readonly<{ runs: number; median: number; p90: number }>>>;
   openIntervals: number;
   /** Credits per run, over the runs with a settlement: how many, their sum, median and 90th percentile. */
   credits: Readonly<{ runs: number; total: number; median: number; p90: number }>;
+  /** Runs by feedback grant. */
+  feedback: Distribution;
+  /** Rating and judgement over the runs whose account allowed feedback: the only runs a rate is read against. */
+  granted: Readonly<{ runs: number; rating: Distribution; judgement: Distribution }>;
 }>;
 
 /** One supplier attempt, as its provider fact reports it. @public */
@@ -280,10 +352,14 @@ type RunDraft = {
   tools: ToolFact[];
   firstUse: Array<Readonly<{ at: number; toolClass: string }>>;
   checks: Record<string, number>;
+  checkRecords: CheckRecord[];
   intervals: Interval[];
   presented: boolean;
   rating: RunScore['rating'];
   judgement: RunScore['judgement'];
+  account: string;
+  /** When its last fact happened. */
+  lastAt: number;
 };
 
 const draftOf = (drafts: Map<string, RunDraft>, item: Evidence, run: string): RunDraft => {
@@ -299,13 +375,17 @@ const draftOf = (drafts: Map<string, RunDraft>, item: Evidence, run: string): Ru
       tools: [],
       firstUse: [],
       checks: {},
+      checkRecords: [],
       intervals: [],
       presented: false,
       rating: 'none',
       judgement: 'none',
+      account: item.scope.principal,
+      lastAt: 0,
     };
     drafts.set(run, draft);
   }
+  draft.lastAt = Math.max(draft.lastAt, item.clocks.occurredAt ?? item.retention.originalAt);
   for (const { protection } of item.lineage) {
     if (protectionRank[protection] > protectionRank[draft.protection]) {
       draft.protection = protection;
@@ -346,6 +426,11 @@ const applyFact = (draft: RunDraft, item: Evidence): void => {
     }
     case 'cad': {
       increment(draft.checks, fact.result);
+      draft.checkRecords.push({
+        at: item.clocks.occurredAt ?? Number.MAX_SAFE_INTEGER,
+        result: fact.result,
+        revision: fact.sourceRevision,
+      });
       break;
     }
     case 'outcome': {
@@ -363,7 +448,7 @@ const applyFact = (draft: RunDraft, item: Evidence): void => {
   }
 };
 
-const scoreOf = (draft: RunDraft): RunScore => {
+const scoreOf = (draft: RunDraft, grants: FeedbackGrants | undefined): RunScore => {
   const byClass: Record<string, number> = {};
   const byOutcome: Record<string, number> = {};
   for (const tool of draft.tools) {
@@ -372,6 +457,7 @@ const scoreOf = (draft: RunDraft): RunScore => {
   }
   const pattern = [...new Set([...draft.firstUse].sort((a, b) => a.at - b.at).map((use) => use.toolClass))].join('>');
   const { durations, open } = phaseDurations(draft.intervals);
+  const { path, revisits } = checkSequence(draft.checkRecords);
   return {
     run: draft.run,
     chat: draft.chat,
@@ -382,12 +468,15 @@ const scoreOf = (draft: RunDraft): RunScore => {
     tools: { total: draft.tools.length, byClass, byOutcome },
     pattern: pattern === '' ? 'none' : pattern,
     checks: draft.checks,
+    checkPath: path,
+    revisits,
     phases: durations,
     openIntervals: open,
     presented: draft.presented,
     rating: draft.rating,
     judgement: draft.judgement,
     model: { attempts: 0, calls: 0, settlements: 0, credits: 0, supplierCost: 0, supplierCostUnknown: 0 },
+    feedback: grants?.(draft.account, draft.lastAt) ?? 'unknown',
   };
 };
 
@@ -395,10 +484,11 @@ const scoreOf = (draft: RunDraft): RunScore => {
  * Score each run once from its host facts.
  *
  * @param facts - Reconciled facts, from {@link reconcileEvidence}.
+ * @param grants - The accounts' feedback grants, keyed by principal; without it every run's grant is `unknown`.
  * @returns One score per run that any host fact names, in first-seen order.
  * @public
  */
-export const scoreRuns = (facts: readonly Evidence[]): readonly RunScore[] => {
+export const scoreRuns = (facts: readonly Evidence[], grants?: FeedbackGrants): readonly RunScore[] => {
   const drafts = new Map<string, RunDraft>();
   for (const item of facts) {
     const run = runOf(item);
@@ -406,7 +496,7 @@ export const scoreRuns = (facts: readonly Evidence[]): readonly RunScore[] => {
       applyFact(draftOf(drafts, item, run), item);
     }
   }
-  return [...drafts.values()].map((draft) => scoreOf(draft));
+  return [...drafts.values()].map((draft) => scoreOf(draft, grants));
 };
 
 /* Summed in sorted order, so a total never depends on the order facts were read in. */
@@ -430,8 +520,14 @@ export const scoreCohort = (runs: readonly RunScore[]): CohortScore => {
   const judgement: Record<string, number> = {};
   const patterns: Record<string, number> = {};
   const checks: Record<string, number> = {};
+  const checkPaths: Record<string, number> = {};
+  const feedback: Record<string, number> = {};
+  const grantedRating: Record<string, number> = {};
+  const grantedJudgement: Record<string, number> = {};
   const timings = new Map<string, number[]>();
   let presented = 0;
+  let revisited = 0;
+  let granted = 0;
   let openIntervals = 0;
   for (const run of runs) {
     increment(termination, run.termination);
@@ -439,6 +535,14 @@ export const scoreCohort = (runs: readonly RunScore[]): CohortScore => {
     increment(rating, run.rating);
     increment(judgement, run.judgement);
     increment(patterns, run.pattern);
+    increment(checkPaths, run.checkPath);
+    revisited += run.revisits > 0 ? 1 : 0;
+    increment(feedback, run.feedback);
+    if (run.feedback === 'granted') {
+      granted++;
+      increment(grantedRating, run.rating);
+      increment(grantedJudgement, run.judgement);
+    }
     for (const [result, count] of Object.entries(run.checks)) {
       checks[result] = (checks[result] ?? 0) + count;
     }
@@ -465,6 +569,8 @@ export const scoreCohort = (runs: readonly RunScore[]): CohortScore => {
     presented,
     patterns,
     checks,
+    checkPaths,
+    revisited,
     phases,
     openIntervals,
     credits: {
@@ -473,6 +579,8 @@ export const scoreCohort = (runs: readonly RunScore[]): CohortScore => {
       median: quantile(credits, 0.5),
       p90: quantile(credits, 0.9),
     },
+    feedback,
+    granted: { runs: granted, rating: grantedRating, judgement: grantedJudgement },
   };
 };
 
@@ -683,16 +791,18 @@ export const summarizeRuns = (
  * Score admitted evidence: reconcile it, score each run once, and aggregate overall and per cohort.
  *
  * A rating of `none` means no rating fact: the run was not rated, or its account did not allow ratings. Evidence alone
- * cannot tell the two apart, so a rate is only read against runs whose grant is known.
+ * cannot tell the two apart, so a rate is only read against runs whose grant is known: `granted` in each cohort, from
+ * the grants the caller supplies.
  *
  * @param evidence - Admitted evidence.
+ * @param grants - The accounts' feedback grants, keyed by principal.
  * @returns The scorecard.
  * @public
  */
-export const scorecard = (evidence: readonly Evidence[]): Scorecard => {
+export const scorecard = (evidence: readonly Evidence[], grants?: FeedbackGrants): Scorecard => {
   const { facts, reconciliation } = reconcileEvidence(evidence);
   const { attempts, costs } = attemptRecords(facts);
-  const runs = joinAttempts(scoreRuns(facts), attempts, costs);
+  const runs = joinAttempts(scoreRuns(facts, grants), attempts, costs);
   return {
     reconciliation,
     ...summarizeRuns(runs),

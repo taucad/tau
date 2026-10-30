@@ -1,6 +1,7 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
+import type { FeedbackGrant, FeedbackGrants } from '@taucad/agent-observability/scorecard';
 import { DatabaseService } from '#database/database.service.js';
 import { project, projectDeletion, projectInvitation, telemetryPurposeDecision } from '#database/schema.js';
 import type { Environment } from '#config/environment.config.js';
@@ -13,6 +14,20 @@ import type {
   EffectiveTelemetryPurposes,
   UpdateTelemetryPurposesInput,
 } from '#api/telemetry-purposes/telemetry-purpose.schema.js';
+
+/** One recorded decision on a purpose, in insertion order. */
+export type PurposeDecisionAt = Readonly<{ granted: boolean; decidedAt: number }>;
+
+/**
+ * The grant in force at a time: the last decision taken at or before it. An account that had not decided by then had
+ * not granted it. Notice versions are not replayed, so a decision counts under the notice it was taken against.
+ *
+ * @param decisions - The account's decisions on one purpose, in insertion order.
+ * @param at - The time asked about, in milliseconds.
+ * @returns `granted` or `withheld`.
+ */
+export const grantAt = (decisions: readonly PurposeDecisionAt[], at: number): FeedbackGrant =>
+  decisions.findLast((decision) => decision.decidedAt <= at)?.granted === true ? 'granted' : 'withheld';
 
 /**
  * Server authority over the agent-observability processing purposes (T04).
@@ -159,6 +174,36 @@ export class TelemetryPurposeService {
         noticeVersion,
       })),
     );
+  }
+
+  /**
+   * The accounts' feedback grants over time, which the scorecard's permission cohorts read (T15): a run without a
+   * rating is unrated only where feedback was granted when it ran.
+   *
+   * @param userIds - The accounts to answer for; any other account's grant is `unknown`.
+   * @returns The grant of an account at a time.
+   */
+  @Span()
+  public async feedbackGrants(userIds: readonly string[]): Promise<FeedbackGrants> {
+    const rows =
+      userIds.length === 0
+        ? []
+        : await this.databaseService.database.query.telemetryPurposeDecision.findMany({
+            where: and(
+              inArray(telemetryPurposeDecision.userId, [...userIds]),
+              eq(telemetryPurposeDecision.purpose, 'feedback'),
+            ),
+            columns: { userId: true, granted: true, decidedAt: true },
+            orderBy: asc(telemetryPurposeDecision.id),
+          });
+    const timelines = new Map<string, PurposeDecisionAt[]>(userIds.map((userId) => [userId, []]));
+    for (const row of rows) {
+      timelines.get(row.userId)?.push({ granted: row.granted, decidedAt: row.decidedAt.getTime() });
+    }
+    return (account, at) => {
+      const timeline = timelines.get(account);
+      return timeline === undefined ? 'unknown' : grantAt(timeline, at);
+    };
   }
 
   /** The approved production notice in force, or `undefined` while none is (T01 gate). */

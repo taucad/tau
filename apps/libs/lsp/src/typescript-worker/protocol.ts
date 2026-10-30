@@ -9,6 +9,7 @@ export type TypeScriptRequestKind =
   | 'quickInfo'
   | 'readDeclaration'
   | 'signatureHelp'
+  | 'documentHighlights'
   | 'definition'
   | 'definitionLocations'
   | 'references'
@@ -31,10 +32,13 @@ export type TypeScriptRequestKind =
   | 'navigationTree'
   | 'outliningSpans'
   | 'workspaceSymbols'
+  | 'workspaceSymbolLocations'
   | 'inlayHints'
   | 'prepareCallHierarchy'
   | 'incomingCalls'
-  | 'outgoingCalls';
+  | 'outgoingCalls'
+  | 'incomingCallLocations'
+  | 'outgoingCallLocations';
 
 export type TypeScriptWorkerCommand = Readonly<
   | { kind: 'setModuleAlias'; specifier: string; uri: string }
@@ -61,6 +65,8 @@ export type TypeScriptWorkerCommand = Readonly<
       codes?: readonly number[];
       search?: string;
       maxResults?: number;
+      triggerCharacter?: string;
+      retrigger?: boolean;
     }
 >;
 

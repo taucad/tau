@@ -87,6 +87,18 @@ export const observationIdentity = (environment: string, evidence: Evidence, rec
 });
 
 /**
+ * The keyed group a contract id reaches the vendor as: the same id under the same principal always joins, and no
+ * other principal's id collides with it.
+ *
+ * @param environment - The deployment.
+ * @param principal - The Tau user id the evidence is scoped to.
+ * @param value - The contract id.
+ * @returns 32 hex digits.
+ */
+export const observationGroup = (environment: string, principal: string, value: string): string =>
+  sha256('tau-group', environment, principal, value).slice(0, 32);
+
+/**
  * Derives the key that pseudonymises account ids for the vendor, so Langfuse
  * groups by user without holding Tau's user id or anything reversible to it.
  *
@@ -95,6 +107,21 @@ export const observationIdentity = (environment: string, evidence: Evidence, rec
  */
 export const pseudonymKey = (payloadKey: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> =>
   new Uint8Array(hkdfSync('sha256', payloadKey, new Uint8Array(0), 'tau-langfuse-pseudonym', 32));
+
+/**
+ * The account's id in one Langfuse environment: a keyed digest, so the vendor groups by account without holding Tau's
+ * user id, and only the API can name the account behind it.
+ *
+ * @param environment - The deployment.
+ * @param principal - The Tau user id.
+ * @param pseudonym - The key from {@link pseudonymKey}.
+ * @returns 32 hex digits.
+ */
+export const accountPseudonym = (environment: string, principal: string, pseudonym: Uint8Array<ArrayBuffer>): string =>
+  createHmac('sha256', pseudonym)
+    .update(JSON.stringify([environment, principal]))
+    .digest('hex')
+    .slice(0, 32);
 
 const stringAttribute = (key: string, value: string): OtlpAttribute => ({ key, value: { stringValue: value } });
 const intAttribute = (key: string, value: number): OtlpAttribute => ({ key, value: { intValue: String(value) } });
@@ -223,12 +250,8 @@ export const langfuseObservation = (
 ): Readonly<{ identity: ObservationIdentity; span: OtlpSpan }> => {
   const identity = observationIdentity(context.environment, evidence, context.receipt);
   const at = BigInt(evidence.clocks.occurredAt ?? evidence.retention.originalAt) * 1_000_000n;
-  const user = createHmac('sha256', pseudonym)
-    .update(JSON.stringify([context.environment, evidence.scope.principal]))
-    .digest('hex')
-    .slice(0, 32);
-  const group = (value: string): string =>
-    sha256('tau-group', context.environment, evidence.scope.principal, value).slice(0, 32);
+  const user = accountPseudonym(context.environment, evidence.scope.principal, pseudonym);
+  const group = (value: string): string => observationGroup(context.environment, evidence.scope.principal, value);
   const { coverage } = evidence;
   /* A reader counts a fact once: by source, then by semantic identity, as the scorecard reconciles evidence. */
   const keys = evidenceKeys(evidence);

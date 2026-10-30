@@ -10,7 +10,7 @@ export type VirtualDeclaration = Readonly<{
   column: number;
 }>;
 
-/** Read-only source view for a library declaration held by a language worker (TypeScript `.d.ts`, C# metadata). */
+/** Read-only source view for a library declaration: TypeScript `.d.ts` files, C# metadata or the KCL standard library. */
 export function VirtualDeclarationDialog({
   declaration,
   onClose,
@@ -20,8 +20,9 @@ export function VirtualDeclarationDialog({
   readonly onClose: () => void;
   readonly restoreFocus: () => void;
 }): React.JSX.Element {
-  const languageId = declaration?.document.path.endsWith('.cs') ? 'csharp' : 'typescript';
-  const languageName = languageId === 'csharp' ? 'C#' : 'TypeScript';
+  const path = declaration?.document.path;
+  const languageId = path?.endsWith('.cs') ? 'csharp' : path?.endsWith('.kcl') ? 'kcl' : 'typescript';
+  const languageName = { csharp: 'C#', kcl: 'KCL standard library', typescript: 'TypeScript' }[languageId];
   const reveal = (view: EditorView): void => {
     if (!declaration) {
       return;
@@ -48,7 +49,7 @@ export function VirtualDeclarationDialog({
         }}
       >
         <DialogHeader>
-          <DialogTitle>{declaration?.document.path.split('/').at(-1) ?? `${languageName} declaration`}</DialogTitle>
+          <DialogTitle>{declaration?.document.path.split('/').at(-1) ?? 'Declaration'}</DialogTitle>
           <DialogDescription>
             Read-only {languageName} declaration at {declaration?.uri}
           </DialogDescription>

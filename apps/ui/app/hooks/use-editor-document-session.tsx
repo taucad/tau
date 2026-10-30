@@ -72,10 +72,11 @@ export function EditorDocumentSessionProvider({ children }: { readonly children:
       }
       const path = assertRootedPath(uri.path.slice(1));
       if (target.declaration) {
-        const typeScriptDeclaration =
+        const typescriptDeclaration =
           (path.startsWith('__typescript_lib__/') || path.startsWith('cdn-types/')) && path.endsWith('.d.ts');
         const csharpDeclaration = path.startsWith('__csharp_metadata__/') && path.endsWith('.cs');
-        if (!typeScriptDeclaration && !csharpDeclaration) {
+        const kclStandardLibrary = path.startsWith('__kcl_std__/') && path.endsWith('.kcl');
+        if (!typescriptDeclaration && !csharpDeclaration && !kclStandardLibrary) {
           return;
         }
         opener.current =

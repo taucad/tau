@@ -149,6 +149,8 @@ export type BillingPaymentsConfig = {
   readonly stripeAccountId: string;
   readonly livemode: boolean;
   readonly uiOrigin: string;
+  /** The Customer Portal configuration every session uses; absent or empty uses the account's default configuration. */
+  readonly portalConfigurationId?: string;
   readonly webhookSecret: string;
   // oxlint-disable-next-line typescript/no-restricted-types -- null structurally disables collection
   readonly collection: BillingCollection | null;
@@ -1380,11 +1382,13 @@ export class BillingPaymentsService {
       throw new ConflictException({ code: 'billing_portal_not_available' });
     const actionId = randomUUID();
     const returnUrl = this.returnUrl(input.returnPath, actionId);
-    // The portal's cancellation flow follows its configuration, which ends the plan at the period end.
+    // The portal's cancellation flow follows its configuration, which Terraform pins to cancel at the period end.
     const cancelSubscriptionId = input.flow === 'subscription_cancel' ? active[0].stripeSubscriptionId : undefined;
     if (cancelSubscriptionId === null) throw new ConflictException({ code: 'billing_portal_not_available' });
+    const { portalConfigurationId } = this.config;
     const request = {
       customer: binding[0].stripeCustomerId,
+      ...(portalConfigurationId ? { configuration: portalConfigurationId } : {}),
       return_url: returnUrl,
       ...(cancelSubscriptionId === undefined
         ? {}

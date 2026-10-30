@@ -351,6 +351,7 @@ describe('billing Stripe transport', () => {
       idempotencyKey: 'leg_portal_cancel',
       request: {
         customer: 'cus_1',
+        configuration: 'bpc_1',
         return_url: 'https://tau.new/?settings=billing',
         flow_data: {
           type: 'subscription_cancel',

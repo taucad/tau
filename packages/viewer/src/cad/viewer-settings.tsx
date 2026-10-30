@@ -1,7 +1,7 @@
 import { useViewerControlSize } from '#cad/viewer-control-size.js';
 import React, { useCallback, useRef, useState, useMemo } from 'react';
 import type { ClassValue } from 'clsx';
-import { Aperture, Axis3D, Box, Grid3X3, Rotate3D, Settings, PenLine, Sparkles, ArrowUp, Timer } from 'lucide-react';
+import { Aperture, Axis3D, Box, Grid3X3, Rotate3D, Settings, Spline, Sparkles, ArrowUp, Timer } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { Button } from '@taucad/ui/components/button';
 import {
@@ -292,7 +292,7 @@ export function ViewerSettings({
               Surfaces
             </DropdownMenuSwitchItem>
             <DropdownMenuSwitchItem isChecked={enableLines} onIsCheckedChange={handleLinesToggle}>
-              <PenLine />
+              <Spline />
               Edges
             </DropdownMenuSwitchItem>
             <DropdownMenuSwitchItem

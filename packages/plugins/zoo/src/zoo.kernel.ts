@@ -220,7 +220,7 @@ export type ZooOptions = {
   closeErrors?: Record<string, string>;
   /** Zoo API token for direct connections. Browser-embedded tokens are visible to the browser environment. */
   token?: string;
-  /** `online` (default) sends modeling commands to the Zoo engine; `offline` executes them locally on libcascade. */
+  /** `offline` (default) executes modeling commands locally on libcascade; `online` sends them to the Zoo engine. */
   mode?: 'online' | 'offline';
 };
 

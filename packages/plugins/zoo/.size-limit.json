@@ -5,8 +5,8 @@
     "limit": "18 kB"
   },
   {
-    "name": "Offline libcascade engine, loaded only in offline mode — measured 24.93 kB brotlied on 2026-10-29",
+    "name": "Offline libcascade engine, loaded only in offline mode — measured 30.96 kB brotlied on 2026-10-29, after moving the native helpers and the custom libcascade build in",
     "path": "dist/offline/*.mjs",
-    "limit": "27.5 kB"
+    "limit": "32 kB"
   }
 ]

@@ -135,8 +135,8 @@ type KclUtilitiesOptions = {
   closeErrors?: Record<string, string>;
   token?: string;
   /**
-   * Where modeling commands run: `online` sends them to the Zoo engine WebSocket, `offline` runs them in-process
-   * against libcascade.
+   * Where modeling commands run: `offline` (default) runs them in-process against libcascade, `online` sends them to
+   * the Zoo engine WebSocket.
    */
   mode?: 'online' | 'offline';
   /** Loads libcascade for offline mode; defaults to the package's single-threaded build. */
@@ -307,7 +307,7 @@ export class KclUtilities {
     this.baseUrl = options.baseUrl;
     this.closeErrors = options.closeErrors;
     this.token = options.token;
-    this.mode = options.mode ?? 'online';
+    this.mode = options.mode ?? 'offline';
     this.loadOcct = options.loadOcct;
     this.fileSystemManager = options.fileSystemManager;
   }

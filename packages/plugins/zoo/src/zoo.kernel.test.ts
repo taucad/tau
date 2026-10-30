@@ -221,12 +221,13 @@ describe('ZooWorker', () => {
       baseUrl: 'wss://api.zoo.dev/ws/modeling/commands',
       token: 'zoo-token',
       closeErrors: { 4401: 'Sign in through the embedding application.' },
-      mode: 'online',
+      mode: 'offline',
     });
   });
 
-  it('accepts offline mode, which runs KCL on libcascade without the Zoo engine', () => {
-    expect(zooOptionsSchema.parse({ mode: 'offline' }).mode).toBe('offline');
+  it('defaults to offline mode, which runs KCL on libcascade, and accepts online mode for the Zoo engine', () => {
+    expect(zooOptionsSchema.parse({}).mode).toBe('offline');
+    expect(zooOptionsSchema.parse({ mode: 'online' }).mode).toBe('online');
     expect(() => zooOptionsSchema.parse({ mode: 'local' })).toThrow();
   });
 

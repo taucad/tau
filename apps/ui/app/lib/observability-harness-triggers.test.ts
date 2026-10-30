@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import { startObservabilityMemoryPressure } from '#lib/observability-harness-triggers.js';
 
 vi.mock('#lib/memory-kill-signal.js', () => ({ recordMemoryBreadcrumb: vi.fn() }));
@@ -10,11 +11,7 @@ const refuseWasm = (): void => {
 };
 
 /** A 2D context that accepts paints, as Safari's does until the process dies. */
-const fakeContext = {
-  fillStyle: '',
-  fillRect: vi.fn(),
-  getImageData: vi.fn(),
-};
+const fakeContext = mock<CanvasRenderingContext2D>();
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -28,9 +25,7 @@ afterEach(() => {
 describe('observability memory pressure', () => {
   it('should escalate to canvas backing stores when WebAssembly memory is refused, as iOS Safari does', () => {
     refuseWasm();
-    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
-      fakeContext as unknown as CanvasRenderingContext2D,
-    );
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(fakeContext);
     const status = vi.fn();
 
     const stop = startObservabilityMemoryPressure(status);
@@ -67,7 +62,7 @@ describe('observability memory pressure', () => {
     const created: HTMLCanvasElement[] = [];
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(function (this: HTMLCanvasElement) {
       created.push(this);
-      return fakeContext as unknown as CanvasRenderingContext2D;
+      return fakeContext;
     });
     const status = vi.fn();
 

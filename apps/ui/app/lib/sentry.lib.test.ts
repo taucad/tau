@@ -67,6 +67,12 @@ describe('beforeSendSentryEvent', () => {
     expect(beforeSendSentryEvent(rejectionEvent(), { originalException: abort })).toBeNull();
   });
 
+  it('groups a transient network failure apart at warning level', () => {
+    const sent = beforeSendSentryEvent(rejectionEvent(), { originalException: new TypeError('Failed to fetch') });
+    expect(sent?.level).toBe('warning');
+    expect(sent?.fingerprint).toStrictEqual(['transient-network-failure']);
+  });
+
   it('scrubs and keeps any other event', () => {
     const event: ErrorEvent = { ...rejectionEvent(), user: { email: 'person@example.com' } };
     const sent = beforeSendSentryEvent(event, { originalException: new Error('boom') });

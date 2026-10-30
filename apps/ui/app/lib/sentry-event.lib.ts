@@ -6,6 +6,7 @@ import { ENV } from '#environment.config.js';
 import { readBuildId } from '#lib/build-identity.js';
 import { applyErrorDetails } from '#lib/error-details.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { decorateForNetworkFailure } from '#lib/network-failure.js';
 import { applyTauEventContext } from '#lib/sentry-context.lib.js';
 import { redactInvitationTokens } from '#lib/invitation-token.lib.js';
 import type { StaleBuildTag } from '#lib/stale-build-recovery.js';
@@ -329,7 +330,7 @@ const buildEnvelope = ({ dsn, error, tags, stackLimit, fingerprint }: EnvelopeIn
     ...(fingerprint === undefined ? {} : { fingerprint: [...fingerprint] }),
   };
   // Given the processor's context and the reporter's details, decorated as the SDK's own events are (principle 7).
-  const withContext = applyTauEventContext(applyErrorDetails(plain, error));
+  const withContext = decorateForNetworkFailure(applyTauEventContext(applyErrorDetails(plain, error)), error);
   const event = scrubSentryEvent(
     isStaleBuildTag(staleBuild) ? decorateForStaleBuild(withContext, staleBuild) : withContext,
   );

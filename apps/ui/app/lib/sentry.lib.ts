@@ -5,6 +5,7 @@ import { ENV } from '#environment.config.js';
 import { setActivityBreadcrumbSink } from '#lib/activity-breadcrumbs.js';
 import { readBuildId } from '#lib/build-identity.js';
 import { applyErrorDetails } from '#lib/error-details.js';
+import { decorateForNetworkFailure } from '#lib/network-failure.js';
 import { applyTauEventContext } from '#lib/sentry-context.lib.js';
 import {
   decorateForStaleBuild,
@@ -37,7 +38,9 @@ export const isUnhandledAbortRejection = (event: ErrorEvent, hint: EventHint | u
 
 /**
  * The `beforeSend` hook: drop an unhandled abort rejection, apply what reporters recorded on the error (its
- * `api_request_id`, SB13, and the SB4 tags, contexts and fingerprint), scrub everything else.
+ * `api_request_id`, SB13, and the SB4 tags, contexts and fingerprint), scrub everything else. A transient network
+ * failure still reports, as one `warning` group of its own, so a connection blip is counted without reading as a
+ * fault in Tau (TAU-UI-E).
  *
  * @param event - The event the SDK is about to send.
  * @param hint - The SDK's hint for the event.
@@ -49,7 +52,8 @@ export const beforeSendSentryEvent = (event: ErrorEvent, hint?: EventHint): Erro
   if (isUnhandledAbortRejection(event, hint)) {
     return null;
   }
-  return scrubSentryEvent(applyErrorDetails(event, hint?.originalException));
+  const failure = hint?.originalException;
+  return scrubSentryEvent(decorateForNetworkFailure(applyErrorDetails(event, failure), failure));
 };
 
 /**

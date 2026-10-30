@@ -45,7 +45,7 @@
     },
     "build": {
       "cache": true,
-      "dependsOn": ["copy-assets", "^copy-assets"],
+      "dependsOn": ["copy-assets", "^copy-assets", "openscad-language:prepare"],
       "outputs": ["{projectRoot}/build"],
       "inputs": [
         "production",
@@ -133,7 +133,7 @@
     },
     "build:desktop": {
       "cache": true,
-      "dependsOn": ["copy-assets", "^copy-assets"],
+      "dependsOn": ["copy-assets", "^copy-assets", "openscad-language:prepare"],
       "outputs": ["{projectRoot}/desktop/build"],
       "inputs": [
         "production",
@@ -163,7 +163,7 @@
     },
     "build:serve": {
       "cache": true,
-      "dependsOn": ["copy-assets", "^copy-assets"],
+      "dependsOn": ["copy-assets", "^copy-assets", "openscad-language:prepare"],
       "outputs": ["{projectRoot}/serve/build"],
       "inputs": [
         "production",
@@ -193,7 +193,7 @@
     "dev:desktop": {
       "executor": "nx:run-commands",
       "continuous": true,
-      "dependsOn": ["copy-assets", "^copy-assets"],
+      "dependsOn": ["copy-assets", "^copy-assets", "openscad-language:prepare"],
       "options": {
         "cwd": "{projectRoot}/desktop",
         "command": "react-router dev --config vite.config.ts",
@@ -205,7 +205,7 @@
     "dev:portless": {
       "executor": "nx:run-commands",
       "continuous": true,
-      "dependsOn": ["copy-assets", "^copy-assets"],
+      "dependsOn": ["copy-assets", "^copy-assets", "openscad-language:prepare"],
       "options": {
         "cwd": "{projectRoot}",
         "command": "portless run --name tau-ui react-router dev",
@@ -219,7 +219,7 @@
     "build:verify": {
       "executor": "nx:run-commands",
       "cache": false,
-      "dependsOn": ["copy-assets", "^copy-assets"],
+      "dependsOn": ["copy-assets", "^copy-assets", "openscad-language:prepare"],
       "outputs": ["{projectRoot}/build"],
       "options": {
         "cwd": "{projectRoot}",

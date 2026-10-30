@@ -63,22 +63,25 @@ export const decodeBase64 = (value: string): Uint8Array<ArrayBuffer> | undefined
  */
 export const encodeBase64Url = (bytes: Uint8Array<ArrayBuffer>): string => uint8ArrayToBase64(bytes, { urlSafe: true });
 
-const hex = (bytes: ArrayBuffer): string =>
+const hex = (bytes: ArrayBuffer | Uint8Array<ArrayBuffer>): string =>
   [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 
 /**
  * The key id a generation's key bytes earn, as tau-cloud's `files-link-keys` module computes it.
  *
+ * Terraform's `sha256()` hashes a string, so the module hashes the key's
+ * lowercase hex text (`random_bytes.hex`), not the raw bytes; this matches it.
+ *
  * @param generation - The key generation, from 1.
  * @param keyBytes - The raw HMAC key.
- * @returns `files-<generation>-<first 16 hex of sha256(key)>`.
+ * @returns `files-<generation>-<first 16 hex of sha256(lowercase hex of key)>`.
  * @public
  */
 export const fileLinkKeyId = async (generation: number, keyBytes: Uint8Array<ArrayBuffer>): Promise<string> => {
   if (!Number.isInteger(generation) || generation < 1 || generation > 999_999) {
     throw new RangeError('A files link key generation is a whole number from 1.');
   }
-  const digest = await crypto.subtle.digest('SHA-256', keyBytes);
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(hex(keyBytes)));
   return `files-${String(generation)}-${hex(digest).slice(0, 16)}`;
 };
 

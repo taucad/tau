@@ -75,6 +75,11 @@ export type ShellUnavailable = Readonly<{
   message: string;
   /** One sentence naming the next action, shown in the Terminal pane. */
   recovery: string;
+  /**
+   * What the sandbox itself reported, for the host log and a support bundle only. Never rendered: the pane shows
+   * `message` and `recovery`, which stay free of paths and command output.
+   */
+  diagnostic?: string | undefined;
 }>;
 
 /**
@@ -1224,10 +1229,17 @@ export const probeHostShell = async (options: ProbeHostShellOptions): Promise<Sh
     const { stdout, stderr, exited } = outcome.process;
     const decoder = new TextDecoder();
     let version = '';
+    /* Kept only to explain a refusal in the host log; a successful probe never reads it. */
+    let failure = '';
+    const failureDecoder = new TextDecoder();
     const drain = async (chunks: AsyncIterable<Uint8Array<ArrayBuffer>>, keep: boolean): Promise<void> => {
       for await (const chunk of chunks) {
         if (keep && version.length < 256) {
           version += decoder.decode(chunk, { stream: true });
+        }
+        if (!keep) {
+          /* The last words are the useful ones: a refusal's own message comes after whatever noise preceded it. */
+          failure = (failure + failureDecoder.decode(chunk, { stream: true })).slice(-1024);
         }
       }
     };
@@ -1250,6 +1262,9 @@ export const probeHostShell = async (options: ProbeHostShellOptions): Promise<Sh
           platform === 'linux'
             ? "Install your distribution's socat package, or reinstall Tau from its .deb or .rpm package to restore its sandbox."
             : 'Reinstall Tau to restore its sandbox components.',
+        /* Without this the one failure that means "the sandbox ran, the shell did not" is indistinguishable from
+         * every other refusal in a host log, and the probe is the only place the shell's own words exist. */
+        diagnostic: `exit ${JSON.stringify(exit)}; stdout ${JSON.stringify(version)}; stderr ${JSON.stringify(failure.slice(-1024))}`,
       };
     }
     const identity: ShellIdentity = {

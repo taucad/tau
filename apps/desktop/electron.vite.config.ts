@@ -85,6 +85,8 @@ export const desktopExternalizedDependencies = [
   'geospec-engine',
   'libassimp',
   'nanoraster',
+  /* Loads `pty.node` relative to its own module file (`lib/utils.js`); inlined into a chunk, it finds none (Q9). */
+  'node-pty',
 ] as const;
 
 export default defineConfig(

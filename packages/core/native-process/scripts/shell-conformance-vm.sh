@@ -29,13 +29,23 @@ work="$(mktemp -d "$RUNNER_TEMP/tau-shell-vm.XXXXXX")"
 output="$REPO_ROOT/out/test-results/shell-conformance/$row"
 mkdir -p "$output"
 qemu_pid=''
+ready=false
 cleanup() {
+  local exit_code=$?
+  # Even a setup/test failure must retain the app identities and any completed trace/JSON receipts.
+  if [[ "$ready" == true ]]; then
+    timeout --kill-after=10s 90s ssh "${ssh_options[@]}" tau@127.0.0.1 \
+      'cd ~/tau; paths=(out/test-results/shell-application); for path in out/test-results/desktop-shell out/test-results/desktop-e2e; do if [[ -d "$path" ]]; then paths+=("$path"); fi; done; tar -czf - "${paths[@]}"' \
+      > "$output/application-evidence.tar.gz" || exit_code=1
+  fi
+  if [[ -f "$work/serial.log" ]]; then cp "$work/serial.log" "$output/serial.log"; fi
   if [[ -n "$qemu_pid" ]]; then
     kill "$qemu_pid" 2>/dev/null || true
     wait "$qemu_pid" 2>/dev/null || true
   fi
   sudo setfacl -x "u:$(id -un)" /dev/kvm || true
   rm -rf -- "$work"
+  exit "$exit_code"
 }
 trap cleanup EXIT
 trap 'exit 1' INT TERM
@@ -47,7 +57,7 @@ sudo setfacl -m "u:$(id -un):rw" /dev/kvm
 curl --fail --location --proto '=https' --proto-redir '=https' --retry 3 "$url" -o "$work/base.qcow2"
 printf '%s  %s\n' "$digest" "$work/base.qcow2" | "$algorithm" --check
 printf '%s\n%s %s\n' "$url" "$algorithm" "$digest" > "$output/image.txt"
-qemu-img create -f qcow2 -F qcow2 -b "$work/base.qcow2" "$work/guest.qcow2" 32G
+qemu-img create -f qcow2 -F qcow2 -b "$work/base.qcow2" "$work/guest.qcow2" 64G
 ssh-keygen -q -t ed25519 -N '' -f "$work/client"
 ssh-keygen -q -t ed25519 -N '' -f "$work/host"
 printf '[127.0.0.1]:2222 %s\n' "$(cat "$work/host.pub")" > "$work/known_hosts"
@@ -88,15 +98,42 @@ ssh "${ssh_options[@]}" tau@127.0.0.1 'sudo cloud-init status --wait' > "$output
 # The real APT selector pair: it copies the distro bwrap to /opt/tau-staging/sandbox/bwrap and loads its profile.
 # dpkg-deb refuses control directories the 077 umask above would create.
 (umask 022 && cd "$REPO_ROOT" && node --import @oxc-node/core/register apps/desktop/scripts/hosted-linux-bwrap-fixture.mts "$work/bwrap-fixture")
-ssh "${ssh_options[@]}" tau@127.0.0.1 'mkdir -m 700 ~/bwrap-fixture ~/node ~/tau'
-for deb in "$work"/bwrap-fixture/*.deb; do
-  # shellcheck disable=SC2029 # Producer-controlled artifact name, expanded on the host by design.
-  ssh "${ssh_options[@]}" tau@127.0.0.1 "cat > ~/bwrap-fixture/$(basename "$deb")" < "$deb"
+# The unpackaged production Electron build resolves the production channel's Tau-owned bwrap
+# (`linuxInstallation('production').bwrap`), so the application tier needs the same real producer's production pair.
+mkdir -p "$work/bwrap-app/app/resources/branding" "$work/bwrap-fixture-production"
+printf 'fixture icon' > "$work/bwrap-app/app/resources/branding/icon.png"
+printf '#!/bin/sh\nexit 0\n' > "$work/bwrap-app/app/Tau"
+chmod 755 "$work/bwrap-app/app/Tau"
+cat > "$work/bwrap-app/build.mts" <<PRODUCER
+import { buildLinuxAptPackages } from '$REPO_ROOT/apps/desktop/scripts/linux-apt-package.mts';
+const files = await buildLinuxAptPackages({
+  appDirectory: process.argv[2]!,
+  outputDirectory: process.argv[3]!,
+  tag: 'desktop@0.1.0',
+  sourceCommit: 'f'.repeat(40),
+  maintainer: 'Tau VM proof <proof@example.invalid>',
+});
+console.log(files.join('\\n'));
+PRODUCER
+(umask 022 && cd "$REPO_ROOT" && node --import @oxc-node/core/register "$work/bwrap-app/build.mts" "$work/bwrap-app/app" "$work/bwrap-fixture-production")
+ssh "${ssh_options[@]}" tau@127.0.0.1 'mkdir -m 700 ~/bwrap-fixture ~/bwrap-fixture-production ~/node ~/tau'
+for fixture in bwrap-fixture bwrap-fixture-production; do
+  for deb in "$work/$fixture"/*.deb; do
+    # shellcheck disable=SC2029 # Producer-controlled artifact name, expanded on the host by design.
+    ssh "${ssh_options[@]}" tau@127.0.0.1 "cat > ~/$fixture/$(basename "$deb")" < "$deb"
+  done
 done
 # The verified Node from setup-nx, and the checked-out tracked sources; dependencies install fresh in the guest.
 node_root="$(dirname "$(dirname "$(command -v node)")")"
 tar -C "$node_root" -cf - . | ssh "${ssh_options[@]}" tau@127.0.0.1 'tar -xf - -C ~/node'
 (cd "$REPO_ROOT" && git ls-files -z | tar --null -T - -cf -) | ssh "${ssh_options[@]}" tau@127.0.0.1 'tar -xf - -C ~/tau'
+# Bind the exact host build to this source identity and verify every copied byte before any application test.
+(cd "$REPO_ROOT" && test -s apps/desktop/dist/main/index.js && test -s apps/ui/desktop/build/client/index.html && \
+  find apps/desktop/dist apps/ui/desktop/build -type f -print0 | sort -z | xargs -0 sha256sum) \
+  > "$output/application-build.sha256"
+(cd "$REPO_ROOT" && tar -cf - apps/desktop/dist apps/ui/desktop/build) | \
+  ssh "${ssh_options[@]}" tau@127.0.0.1 'tar -xf - -C ~/tau'
+ssh "${ssh_options[@]}" tau@127.0.0.1 'cat > ~/tau/application-build.sha256' < "$output/application-build.sha256"
 # Only identity values for the receipt cross into the guest, each constrained to its shape first.
 [[ "${GITHUB_SHA:-}" =~ ^[a-f0-9]{40}$ && "${GITHUB_RUN_ID:-}" =~ ^[0-9]+$ && "${GITHUB_REPOSITORY:-}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
 status=0
@@ -107,5 +144,6 @@ ssh "${ssh_options[@]}" tau@127.0.0.1 \
 ssh "${ssh_options[@]}" tau@127.0.0.1 'cat ~/shell-conformance-receipt.json' > "$output/receipt.json" || true
 ssh "${ssh_options[@]}" tau@127.0.0.1 'cat ~/shell-service-conformance-receipt.json' > "$output/service-receipt.json" || true
 ssh "${ssh_options[@]}" tau@127.0.0.1 'cat ~/terminal-conformance-receipt.json' > "$output/terminal-receipt.json" || true
+ssh "${ssh_options[@]}" tau@127.0.0.1 'cat ~/shell-qualification-receipt.json' > "$output/qualification-receipt.json" || true
 printf '%s\n' "$status" > "$output/exit-code.txt"
 exit "$status"

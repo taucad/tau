@@ -1,0 +1,22 @@
+@settings(defaultLengthUnit = in)
+
+// Example of hiding GDT annotations
+width = 5
+
+startSketchOn(XY)
+  |> startProfile(at = [0, 0])
+  |> line(end = [width, 0], tag = $side1)
+  |> line(end = [0, width], tag = $side2)
+  |> line(end = [-width, 0], tag = $side3)
+  |> line(end = [0, -width], tag = $side4)
+  |> close()
+  |> extrude(length = 5, tagStart = $bottom, tagEnd = $top)
+
+label = gdt::datum(
+  face = side2,
+  name = "A",
+  framePosition = [5, 0],
+  framePlane = XZ,
+)
+
+hide(label)

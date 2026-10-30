@@ -1,0 +1,5 @@
+profile = sketch(on = XY) {
+  p0 = [var 0mm, var 0mm]
+  p1 = [var 4mm, var 0mm]
+  vertical([p0, p1])
+}

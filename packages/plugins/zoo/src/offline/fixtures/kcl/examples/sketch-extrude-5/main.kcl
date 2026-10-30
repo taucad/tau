@@ -1,0 +1,6 @@
+// Sketch a square in the corner of the scene.
+startSketchOn(XY)
+  |> startProfile(at = [0, 0])
+  |> polygon(radius = 1, numSides = 10, center = [4, 4])
+// Because the twist defaults to the plane's center, this makes a spiral shape.
+  |> extrude(length = 10, twistAngle = 360deg)

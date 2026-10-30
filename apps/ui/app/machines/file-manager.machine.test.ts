@@ -208,6 +208,71 @@ describe('fileManagerMachine', () => {
     mockNodeFsConnect.mockClear();
   });
 
+  it.each(['opfs', 'indexeddb'] as const)(
+    'waits without I/O for the authoritative %s startup backend',
+    async (backend) => {
+      const actor = createActor(fileManagerMachine, {
+        input: { rootDirectory: '/old', backendResolution: 'pending' },
+      }).start();
+      try {
+        actor.send({ type: 'initialize' });
+        actor.send({ type: 'setRoot', path: '/' });
+        expect(actor.getSnapshot().context.backendType).toBeUndefined();
+        expect(workerTestState.instances).toHaveLength(0);
+        expect(mockGetHomeStorageBackend).not.toHaveBeenCalled();
+        expect(mockConfigureProjectRoots).not.toHaveBeenCalled();
+        actor.send({ type: 'resolveInitialBackend', backend });
+        await vi.waitFor(() => {
+          expect(actor.getSnapshot().value).toBe('ready');
+        });
+        expect(actor.getSnapshot().context.backendType).toBe(backend);
+        expect(actor.getSnapshot().context.rootDirectory).toBe('/');
+        expect(workerTestState.instances).toHaveLength(1);
+        actor.send({ type: 'resolveInitialBackend', backend: backend === 'opfs' ? 'indexeddb' : 'opfs' });
+        expect(actor.getSnapshot().context.backendType).toBe(backend);
+        expect(workerTestState.instances).toHaveLength(1);
+      } finally {
+        actor.stop();
+      }
+    },
+  );
+
+  it('remembers manual initialization requested before the backend resolves', async () => {
+    mockGetHomeStorageBackend.mockResolvedValue('opfs');
+    const actor = createActor(fileManagerMachine, {
+      input: { rootDirectory: '/', backendResolution: 'pending', shouldInitializeOnStart: false },
+    }).start();
+    try {
+      actor.send({ type: 'initialize' });
+      expect(workerTestState.instances).toHaveLength(0);
+      actor.send({ type: 'resolveInitialBackend', backend: 'opfs' });
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('ready');
+      });
+      expect(workerTestState.instances).toHaveLength(1);
+    } finally {
+      actor.stop();
+    }
+  });
+
+  it('keeps manual startup idle when the backend resolves without a start request', async () => {
+    const actor = createActor(fileManagerMachine, {
+      input: { rootDirectory: '/', backendResolution: 'pending', shouldInitializeOnStart: false },
+    }).start();
+    try {
+      actor.send({ type: 'resolveInitialBackend', backend: 'indexeddb' });
+      expect(actor.getSnapshot().value).toBe('initializing');
+      expect(workerTestState.instances).toHaveLength(0);
+      actor.send({ type: 'initialize' });
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('ready');
+      });
+      expect(workerTestState.instances).toHaveLength(1);
+    } finally {
+      actor.stop();
+    }
+  });
+
   // MAJOR 4 — the services utility can die. Main forks a fresh one on the next
   // `connect()`, but only if somebody asks: without this the worker's one-shot
   // handshake leaves the filesystem wedged for the rest of the session.

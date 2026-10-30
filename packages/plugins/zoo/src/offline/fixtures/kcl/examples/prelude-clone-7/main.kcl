@@ -1,0 +1,10 @@
+// A donut shape from a cloned sketch.
+sketch001 = startSketchOn(XY)
+    |> circle( center = [15, 0], radius = 5 )
+
+sketch002 = clone(sketch001)
+   |> translate( z = 30)
+    |> revolve(
+        angle = 360,
+        axis = Y,
+    )

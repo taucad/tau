@@ -1,0 +1,12 @@
+@settings(experimentalFeatures = allow)
+
+exampleSketch = startSketchOn(XZ)
+  |> startProfile(at = [0, 0])
+  |> conic(
+        end = [20,0],
+        endTangent = [1,1],
+        interior = [5,5],
+        startTangent = [0, -1],
+     )
+  |> close()
+example = extrude(exampleSketch, length = 10)

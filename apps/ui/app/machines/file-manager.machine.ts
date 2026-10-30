@@ -160,7 +160,8 @@ type FileManagerContext = {
   error: Error | undefined;
   rootDirectory: string;
   shouldInitializeOnStart: boolean;
-  backendType: FileSystemBackend;
+  hasInitializationRequest: boolean;
+  backendType: FileSystemBackend | undefined;
   /**
    * Why the current webaccess attempt failed, or `undefined` when
    * webaccess is healthy / the backend isn't webaccess. The dedicated
@@ -451,6 +452,9 @@ const initializeServicesActor = fromSafeAsync<
   const proxy = context.proxy!;
 
   let backend = context.backendType;
+  if (backend === undefined) {
+    throw new Error('Home storage must be resolved before starting file services.');
+  }
   let projectConfig: ProjectConfigLookup;
   if (context.projectId) {
     signal.throwIfAborted();
@@ -673,6 +677,7 @@ const fileManagerActors = {
 
 type FileManagerEventLifecycle =
   | { type: 'initialize' }
+  | { type: 'resolveInitialBackend'; backend: Exclude<FileSystemBackend, 'webaccess'> }
   | { type: 'setRoot'; path: string; projectId?: string }
   | { type: 'setBackendType'; backendType: FileSystemBackend }
   /**
@@ -697,7 +702,6 @@ type FileManagerEvent =
 type FileManagerInput = {
   rootDirectory: string;
   shouldInitializeOnStart?: boolean;
-  initialBackend?: FileSystemBackend;
   projectId?: string;
   sharedWorker?: Worker;
   /**
@@ -709,7 +713,10 @@ type FileManagerInput = {
   onExternalPollTelemetry?: (aggregate: ExternalPollTelemetry) => void;
   /** Telemetry sink for workspaces the route snapshot had to skip (R13). */
   onRootSkipped?: (skip: WorkspaceRootSkip) => void;
-};
+} & (
+  | { backendResolution: 'pending'; initialBackend?: never }
+  | { backendResolution?: undefined; initialBackend?: FileSystemBackend }
+);
 
 type FileManagerEnqueue = EnqueueObject<FileManagerEvent, EventObject, SystemRegistry, typeof fileManagerActors>;
 type FileManagerPatch = Partial<FileManagerContext>;
@@ -860,7 +867,8 @@ export const fileManagerMachine = setup({
     error: undefined,
     rootDirectory: input.rootDirectory,
     shouldInitializeOnStart: input.shouldInitializeOnStart ?? true,
-    backendType: input.initialBackend ?? 'indexeddb',
+    hasInitializationRequest: false,
+    backendType: input.backendResolution === 'pending' ? undefined : (input.initialBackend ?? 'indexeddb'),
     unavailableReason: undefined,
     activeWorkspaceId: undefined,
     activeWorkspaceName: undefined,
@@ -878,7 +886,22 @@ export const fileManagerMachine = setup({
   states: {
     initializing: {
       on: {
-        initialize: { target: 'connectingWorker' },
+        initialize: ({ context }) =>
+          context.backendType === undefined
+            ? { context: { hasInitializationRequest: true } }
+            : { target: 'connectingWorker' },
+        resolveInitialBackend: ({ context, event }) => {
+          if (context.backendType !== undefined) {
+            return {}; // A duplicate resolution cannot change the selected engine.
+          }
+          return {
+            ...(context.shouldInitializeOnStart || context.hasInitializationRequest
+              ? { target: 'connectingWorker' }
+              : {}),
+            context: { backendType: event.backend },
+          };
+        },
+        setRoot: ({ event }) => ({ context: { rootDirectory: event.path, projectId: event.projectId } }),
       },
     },
 

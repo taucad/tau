@@ -1,0 +1,11 @@
+exampleSketch = startSketchOn(XZ)
+  |> startProfile(at = [0, 0])
+  |> line(end = [10, 0])
+  |> line(end = [5, 10], tag = $seg01)
+  |> line(end = [-10, 0])
+  |> angledLine(angle = segAng(seg01), length = 10)
+  |> line(end = [-10, 0])
+  |> angledLine(angle = segAng(seg01), length = -15)
+  |> close()
+
+example = extrude(exampleSketch, length = 4)

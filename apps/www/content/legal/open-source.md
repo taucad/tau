@@ -40,7 +40,7 @@ interface from a separate shared object.
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 870 packages, with the license each declares.
+The web and desktop apps include the following 877 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -409,6 +409,8 @@ Their copyright notices and full license texts ship inside each package and are 
 | [commander](https://github.com/tj/commander.js) | 12.1.0 | MIT |
 | [commander](https://github.com/tj/commander.js) | 13.1.0 | MIT |
 | [commist](https://github.com/mcollina/commist) | 3.2.0 | MIT |
+| [compressible](https://github.com/jshttp/compressible) | 2.0.18 | MIT |
+| [compression](https://github.com/expressjs/compression) | 1.8.2 | MIT |
 | concat-stream | 2.0.0 | MIT |
 | [consola](https://github.com/unjs/consola) | 3.4.2 | MIT |
 | [content-disposition](https://github.com/jshttp/content-disposition) | 2.0.1 | MIT |
@@ -443,6 +445,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [data-uri-to-buffer](https://github.com/TooTallNate/node-data-uri-to-buffer) | 4.0.1 | MIT |
 | [date-fns](https://github.com/date-fns/date-fns) | 4.4.0 | MIT |
 | [dateformat](https://github.com/felixge/node-dateformat) | 4.6.3 | MIT |
+| [debug](https://github.com/visionmedia/debug) | 2.6.9 | MIT |
 | [debug](https://github.com/debug-js/debug) | 4.4.3 | MIT |
 | [decimal.js-light](https://github.com/MikeMcl/decimal.js-light) | 2.5.1 | MIT |
 | [decode-named-character-reference](https://github.com/wooorm/decode-named-character-reference) | 1.3.0 | MIT |
@@ -455,6 +458,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [defu](https://github.com/unjs/defu) | 6.1.7 | MIT |
 | [depd](https://github.com/dougwilson/nodejs-depd) | 2.0.0 | MIT |
 | [dequal](https://github.com/lukeed/dequal) | 2.0.3 | MIT |
+| [destroy](https://github.com/stream-utils/destroy) | 1.2.0 | MIT |
 | [detect-gpu](https://github.com/pmndrs/detect-gpu) | 5.0.70 | MIT |
 | [detect-libc](https://github.com/lovell/detect-libc) | 2.1.2 | Apache-2.0 |
 | [detect-node-es](https://github.com/thekashey/detect-node) | 1.1.0 | MIT |
@@ -668,6 +672,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [module-details-from-path](https://github.com/watson/module-details-from-path) | 1.0.4 | MIT |
 | [mqtt](https://github.com/mqttjs/MQTT.js) | 5.15.2 | MIT |
 | [mqtt-packet](https://github.com/mqttjs/mqtt-packet) | 9.0.2 | MIT |
+| [ms](https://github.com/zeit/ms) | 2.0.0 | MIT |
 | [ms](https://github.com/vercel/ms) | 2.1.3 | MIT |
 | [n8ao](https://github.com/N8python/n8ao) | 1.10.2 | ISC |
 | [nanoid](https://github.com/ai/nanoid) | 5.1.16 | MIT |
@@ -678,6 +683,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [ndarray-lanczos](https://github.com/donmccurdy/ndarray-lanczos) | 0.3.0 | MIT |
 | [ndarray-ops](https://github.com/mikolalysenko/ndarray-ops) | 1.2.2 | MIT |
 | [ndarray-pixels](https://github.com/donmccurdy/ndarray-pixels) | 5.2.0 | MIT |
+| [negotiator](https://github.com/jshttp/negotiator) | 0.6.4 | MIT |
 | [negotiator](https://github.com/jshttp/negotiator) | 1.1.0 | MIT |
 | [next-themes](https://github.com/pacocoursey/next-themes) | 0.4.6 | MIT |
 | [node-addon-api](https://github.com/nodejs/node-addon-api) | 7.1.1 | MIT |
@@ -691,6 +697,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [occt-import-js](https://github.com/kovacsv/occt-import-js) | 0.0.23 | LGPL-2.1 |
 | [on-exit-leak-free](https://github.com/mcollina/on-exit-or-gc) | 2.1.2 | MIT |
 | [on-finished](https://github.com/jshttp/on-finished) | 2.4.1 | MIT |
+| [on-headers](https://github.com/jshttp/on-headers) | 1.1.0 | MIT |
 | [once](https://github.com/isaacs/once) | 1.4.0 | ISC |
 | [onetime](https://github.com/sindresorhus/onetime) | 5.1.2 | MIT |
 | [oniguruma-parser](https://github.com/slevithan/oniguruma-parser) | 0.12.2 | MIT |

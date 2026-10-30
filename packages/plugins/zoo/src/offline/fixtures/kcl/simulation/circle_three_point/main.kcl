@@ -1,0 +1,4 @@
+@settings(kclVersion = 1.0)
+sketch001 = startSketchOn(XY)
+  |> circleThreePoint(p1 = [25, 25], p2 = [30, 20], p3 = [27, 15])
+  |> extrude(length = 10)

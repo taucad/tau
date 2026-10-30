@@ -1,0 +1,13 @@
+// Vertical pill.  Use absolute coordinate for arc.
+pillSketch = startSketchOn(XZ)
+  |> startProfile(at = [0, 0])
+  |> line(end = [0, 20])
+  |> tangentialArc(endAbsolute = [10, 20], tag = $arc1)
+  |> angledLine(
+    angle = tangentToEnd(arc1),
+    length = 20,
+  )
+  |> tangentialArc(end = [-10, 0])
+  |> close()
+
+pillExtrude = extrude(pillSketch, length = 10)

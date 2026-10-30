@@ -1,0 +1,6 @@
+// Cylinder
+cylinder = startSketchOn(XY)
+  |> circle(center = [0, 0], radius = 4.09, tag = $seg01)
+  |> extrude(length = 5)
+  // Fillet the edge at index 2, i.e. the top edge.
+  |> fillet(radius = 1, tags = [edgeId(index = 2)])

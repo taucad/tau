@@ -96,7 +96,13 @@ function PostHogLifecycle({
     let withdrawn = false;
     let cancelReplay: (() => void) | undefined;
     const admit = async (): Promise<void> => {
-      const posthog = await loadSdk();
+      let posthog: PostHog;
+      try {
+        posthog = await loadSdk();
+      } catch {
+        // Optional analytics must not prevent the product from opening.
+        return;
+      }
       if (withdrawn) {
         return;
       }

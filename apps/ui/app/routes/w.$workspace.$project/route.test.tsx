@@ -39,9 +39,9 @@ describe('/w/{workspace}/{project}', () => {
     expect(providerInputs).toEqual([{}]);
   });
 
-  it('renders the project chat route', () => {
+  it('should render the project chat route after its module loads', async () => {
     render(<workspaceRoute.default />);
 
-    expect(screen.getByText('Project chat')).toBeInTheDocument();
+    expect(await screen.findByText('Project chat')).toBeInTheDocument();
   });
 });

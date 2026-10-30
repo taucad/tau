@@ -1,0 +1,6 @@
+// Surface extrude of a closed profile
+closedProfile = startSketchOn(XY)
+  |> startProfile(at = [0, 0])
+  |> circle(center = [0, 0], diameter = 10)
+// Surface extrude
+extrude(closedProfile, length = 5, bodyType = SURFACE)

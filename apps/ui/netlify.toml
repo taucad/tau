@@ -10,7 +10,7 @@
 # GitHub Actions runs this build with `netlify deploy --prod --context production`
 # (`.github/workflows/deploy-ui.yml`), after bringing in the GeoSpec engine
 # products that only CI's macOS producer can make:
-#   - staging: pushes to `main` that affect the UI (`ci.yml` deploy-ui-staging).
+#   - staging: pushes to `main` that affect the UI (`staging.yml` deploy-ui-staging).
 #   - prod: pushes to Git branch `production`, made only by dispatching
 #     `.github/workflows/deploy-production.yml` with a release tag.
 # There are no PR deploy previews.

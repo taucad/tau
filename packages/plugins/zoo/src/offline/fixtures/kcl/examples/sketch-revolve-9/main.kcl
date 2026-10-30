@@ -1,0 +1,12 @@
+// Revolve around a path that has not been extruded.
+
+profile001 = startSketchOn(XY)
+    |> startProfile(at = [0, 0])
+    |> line(end = [0, 20], tag = $revolveAxis)
+    |> line(end = [20, 0])
+    |> line(end = [0, -20])
+    |> close(%)
+
+sketch001 = startSketchOn(XY)
+    |> circle(center = [-10, 10], radius = 4)
+    |> revolve(angle = 90deg, axis = revolveAxis)

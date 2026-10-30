@@ -1,0 +1,4 @@
+@settings(kclVersion = 1.0)
+import thing from "thing.kcl"
+
+thing()

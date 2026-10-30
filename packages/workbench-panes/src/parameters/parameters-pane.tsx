@@ -262,7 +262,8 @@ function EntryParameters({
       commit,
       setValue: async (field) => {
         const outcome = await commit(field);
-        if (outcome.status !== 'committed') {
+        // A newer edit of the same field displaced this one before it was written; it carries the base.
+        if (outcome.status !== 'committed' && outcome.status !== 'cancelled-before-apply') {
           throw operationError(outcome);
         }
       },
@@ -278,14 +279,14 @@ function EntryParameters({
     [parameterCommit],
   );
 
-  const { replaceValues } = source;
+  const { editValues } = source;
   const handleParametersChange = useCallback(
-    (newParams: Record<string, unknown>) => {
+    (values: Record<string, unknown>, base: Record<string, unknown>) => {
       if (parameterManifest !== undefined) {
-        run(async () => replaceValues(entryPath, parameterManifest, newParams));
+        run(async () => editValues(entryPath, parameterManifest, { values, base }));
       }
     },
-    [replaceValues, run, entryPath, parameterManifest],
+    [editValues, run, entryPath, parameterManifest],
   );
 
   if (failure !== undefined) {

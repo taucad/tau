@@ -1,12 +1,13 @@
 import { createActor, createCallbackLogic, createAsyncLogic, setup, types } from 'xstate';
 import type { ActorRefFrom, EnqueueObject } from 'xstate';
 import { parameterEntryPath } from '@taucad/types';
-import type { CheckedFileWrite, CheckedFileWriteResult } from '@taucad/types';
+import type { CheckedFileWrite, CheckedFileWriteResult, JSONValue } from '@taucad/types';
 import { commitParameterChange, loadParameterSnapshot } from '#authority.js';
 import type { ParameterAuthority } from '#authority.js';
 import { eventSchemas } from '#machine-schemas.js';
 import type { ParameterManifest, ParameterResolutionOptions } from '#manifest.js';
-import { planParameterChange } from '#planning.js';
+import { fieldValue, planParameterChange } from '#planning.js';
+import { changedFieldPointers, sameValue, setPointer } from '#values.js';
 import type { ParameterChange } from '#planning.js';
 import { sameRecordBytes } from '#record.js';
 import type { ParameterSnapshot } from '#snapshot.js';
@@ -35,6 +36,11 @@ export type ParameterSetMachineContext = ParameterSetMachineInput &
     /** Bounded FIFO; a final displaces any queued edit for its field, a transient only a transient. */
     pending: readonly ParameterSetRequest[];
     carriedBases: Readonly<Record<string, ParameterSetRequestBase>>;
+    /**
+     * Per field, the editor whose value edit last committed here and the value it left. An editor's own
+     * write is never a conflict for that editor's next edit of the field.
+     */
+    lineage: Readonly<Record<string, ParameterFieldLineage>>;
     change?: Extract<ParameterChange, { status: 'prepared' }>;
     outcome?: ParameterSetOutcome;
     refresh?: 'record' | 'manifest';
@@ -42,6 +48,8 @@ export type ParameterSetMachineContext = ParameterSetMachineInput &
     attempts: number;
     diagnostic?: Readonly<{ code: string; message: string }>;
   }>;
+/** The editor whose value edit last committed to one field, and the value that edit left. @public */
+export type ParameterFieldLineage = Readonly<{ editor: string; value: JSONValue }>;
 /** Commands and authority notifications for one fixed target. @public */
 export type ParameterSetMachineEvent =
   | Readonly<{ type: 'submit'; request: ParameterSetRequest }>
@@ -119,12 +127,13 @@ const errorDiagnostic = (
 // commands for the same field displace older queued ones, so a burst never needs a deep queue.
 const pendingLimit = 8;
 // Commands for the same field (or the same group operation) displace each other while queued.
+const fieldKey = (group: string, pointer: string): string => JSON.stringify(['value', group, pointer]);
 const pressureKey = (request: ParameterSetRequest): string => {
   const { operation } = request;
   switch (operation.kind) {
     case 'native-value':
     case 'unit-value': {
-      return JSON.stringify(['value', operation.group, operation.pointer]);
+      return fieldKey(operation.group, operation.pointer);
     }
     default: {
       return JSON.stringify([operation.kind, operation.group]);
@@ -265,6 +274,118 @@ const dequeue = (context: ParameterSetMachineContext): ParameterSetPatch => {
     attempts: 0,
     outcome: undefined,
   };
+};
+
+const isValueEdit = (
+  request: ParameterSetRequest,
+): request is ParameterSetRequest & { operation: Extract<ParameterSetRequest['operation'], { pointer: string }> } =>
+  request.operation.kind === 'native-value' || request.operation.kind === 'unit-value';
+
+/**
+ * The base the active command was submitted with, or the one a command it displaced carried. A carried
+ * base keeps the value and binding the displaced edit was made from, but the write is the active
+ * command's own, so its editor is the active command's.
+ */
+const activeRequestBase = (context: ParameterSetMachineContext): ParameterSetRequestBase | undefined => {
+  const carried = context.activeBase;
+  if (carried === undefined) {
+    return context.active?.base;
+  }
+  const { editor: _carriedEditor, ...rest } = carried;
+  const editor = context.active?.base?.editor;
+  return editor === undefined ? rest : { ...rest, editor };
+};
+
+type GroupEdit = Extract<ParameterSetRequest['operation'], { kind: 'replace-group-values' }>;
+
+/** Whether the field still holds what `editor` last committed to it, and that value. */
+const ownValue = (
+  context: ParameterSetMachineContext,
+  field: Readonly<{ group: string; pointer: string; editor: string }>,
+): Readonly<{ value: ParameterFieldLineage['value'] }> | undefined => {
+  const own = context.lineage[fieldKey(field.group, field.pointer)];
+  return own?.editor === field.editor && sameValue(fieldValue(context.current!, field.group, field.pointer), own.value)
+    ? { value: own.value }
+    : undefined;
+};
+
+/**
+ * A group edit carries one base for every field. For each field it changes that still holds the
+ * editor's own last write, that write is the field's base, exactly as for a single-field edit.
+ */
+const plannedGroupEdit = (context: ParameterSetMachineContext, operation: GroupEdit): GroupEdit => {
+  const { base, editor, group, values } = operation;
+  if (base === undefined || editor === undefined) {
+    return operation;
+  }
+  let rebased = base;
+  for (const pointer of changedFieldPointers(base, values)) {
+    const own = ownValue(context, { group, pointer, editor });
+    if (own !== undefined) {
+      rebased = setPointer(rebased, pointer, own.value);
+    }
+  }
+  return { ...operation, base: rebased };
+};
+
+/**
+ * The request the planner checks. When the field still holds what the same editor last committed to
+ * it, that value is the base: the editor built on its own write, whatever its view showed. The view
+ * reads the authority through a deferred projection, so the base it sends can trail its own commits.
+ */
+const plannedRequest = (context: ParameterSetMachineContext): ParameterSetRequest => {
+  const request = context.active!;
+  const { operation } = request;
+  if (operation.kind === 'replace-group-values') {
+    return { ...request, operation: plannedGroupEdit(context, operation) };
+  }
+  const base = activeRequestBase(context);
+  if (base?.editor === undefined || !isValueEdit(request)) {
+    return base === undefined ? request : { ...request, base };
+  }
+  const own = ownValue(context, {
+    group: request.operation.group,
+    pointer: request.operation.pointer,
+    editor: base.editor,
+  });
+  return { ...request, base: own === undefined ? base : { ...base, value: own.value } };
+};
+
+/** Record who last wrote each field a committed edit changed; an edit without an editor leaves no lineage. */
+const recordLineage = (context: ParameterSetMachineContext): ParameterSetPatch => {
+  const request = context.active;
+  const { current } = context;
+  if (request === undefined || context.outcome?.status !== 'committed' || current === undefined) {
+    return {};
+  }
+  const { operation } = request;
+  const written = isValueEdit(request)
+    ? {
+        group: request.operation.group,
+        pointers: [request.operation.pointer],
+        editor: activeRequestBase(context)?.editor,
+      }
+    : operation.kind === 'replace-group-values' && operation.base !== undefined
+      ? {
+          group: operation.group,
+          pointers: changedFieldPointers(operation.base, operation.values),
+          editor: operation.editor,
+        }
+      : undefined;
+  if (written === undefined) {
+    return {};
+  }
+  const lineage = { ...context.lineage };
+  for (const pointer of written.pointers) {
+    const key = fieldKey(written.group, pointer);
+    const value = fieldValue(current, written.group, pointer);
+    if (written.editor === undefined || value === undefined) {
+      Reflect.deleteProperty(lineage, key);
+    } else {
+      lineage[key] = { editor: written.editor, value };
+    }
+  }
+  return { lineage };
 };
 
 const clear = (context: ParameterSetMachineContext): ParameterSetPatch =>
@@ -458,6 +579,7 @@ const parameterSetMachineDefinition = setup({
     ...input,
     pending: [],
     carriedBases: {},
+    lineage: {},
     refresh: undefined,
     closing: false,
     attempts: 0,
@@ -627,11 +749,7 @@ const parameterSetMachineDefinition = setup({
         planning: {
           invoke: {
             src: 'planParameterSet',
-            input: ({ context }) => ({
-              current: context.current!,
-              request:
-                context.activeBase === undefined ? context.active! : { ...context.active!, base: context.activeBase },
-            }),
+            input: ({ context }) => ({ current: context.current!, request: plannedRequest(context) }),
             onDone: ({ context, event }) => {
               const plan = event.output;
               switch (plan.status) {
@@ -775,7 +893,7 @@ const parameterSetMachineDefinition = setup({
         settled: {
           entry: ({ context }, enq) => {
             emitOutcome(context, enq);
-            return { context: clear(context) };
+            return { context: { ...recordLineage(context), ...clear(context) } };
           },
           always: { target: 'route' },
         },

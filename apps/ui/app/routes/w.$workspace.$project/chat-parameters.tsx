@@ -312,6 +312,7 @@ function useProjectParametersSource(): ParametersSource {
     projectRef,
     editorRef,
     setGeometryUnitParameters,
+    editGeometryUnitParameters,
     switchParameterGroup,
     createParameterGroup,
     deleteParameterGroup,
@@ -324,6 +325,9 @@ function useProjectParametersSource(): ParametersSource {
       target: (entryPath) => parameterService.target(entryPath),
       commitValue: async (entryPath, manifest, field) =>
         parameterService.commitValue(parameterService.target(entryPath), manifest, field),
+      editValues: (entryPath, manifest, { values, base }) => {
+        editGeometryUnitParameters(entryPath, manifest, { values: { ...values }, base: { ...base } });
+      },
       replaceValues: (entryPath, manifest, values) => {
         setGeometryUnitParameters(entryPath, manifest, { ...values });
       },
@@ -377,6 +381,7 @@ function useProjectParametersSource(): ParametersSource {
       parameterService,
       projectRef,
       renameParameterGroup,
+      editGeometryUnitParameters,
       setGeometryUnitParameters,
       switchParameterGroup,
     ],

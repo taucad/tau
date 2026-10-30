@@ -1,13 +1,8 @@
 import { createContext, useContext } from 'react';
 import type { LengthSymbol } from '#constants/length-units.js';
 import type { JSONValue, ParameterGroup } from '@taucad/types';
-import type {
-  ParameterManifest,
-  ParameterSetOutcome,
-  ParameterSetRequest,
-  ParameterSetTarget,
-} from '@taucad/parameters';
-import type { ParameterDraft, ParameterValueEdit } from '#parameters/parameter-edit.js';
+import type { ParameterManifest, ParameterSetOutcome, ParameterSetTarget } from '@taucad/parameters';
+import type { FieldBase, FieldValueEdit, ParameterDraft } from '#parameters/parameter-edit.js';
 
 /**
  * The units parameter fields display.
@@ -46,11 +41,9 @@ export type ParameterCommit = Readonly<{
    * Commit one field of the active group. `base` scopes the conflict to this field, and `transient`
    * pressure lets a newer value from the same drag displace an older queued one.
    */
-  commit(field: ParameterValueEdit): Promise<ParameterSetOutcome | undefined>;
+  commit(field: FieldValueEdit): Promise<ParameterSetOutcome | undefined>;
   /** Commit one field of the active group; non-numeric widgets never rewrite the whole group. */
-  setValue(
-    field: Readonly<{ pointer: string; value: JSONValue; base: NonNullable<ParameterSetRequest['base']> }>,
-  ): Promise<void>;
+  setValue(field: Readonly<{ pointer: string; value: JSONValue; base: FieldBase }>): Promise<void>;
   /**
    * Show one field's in-flight drag value without persisting it (D2). Absent when the active kernel
    * did not declare that it can serve the drag lane, in which case the row previews the value alone

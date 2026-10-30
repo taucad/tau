@@ -1,0 +1,19 @@
+
+startSketchOn(XY)
+  |> startProfile(at = [0, 0])
+  |> line(end = [10, 0], tag = $side1)
+  |> line(end = [0, 10], tag = $side2)
+  |> line(end = [-10, 0])
+  |> line(end = [0, -10])
+  |> close()
+  |> extrude(length = 5, tagEnd = $top)
+
+profileEdge = { sideFaces = [side1, top] }
+
+gdt::profile(
+  edges = [profileEdge],
+  tolerance = 0.1mm,
+  datums = ["A"],
+  framePosition = [10mm, 20mm],
+  framePlane = XZ,
+)

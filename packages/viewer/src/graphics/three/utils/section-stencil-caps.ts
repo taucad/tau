@@ -85,6 +85,11 @@ export type SectionStencilCapStats = {
   meshDrawCount: number;
   /** Draws of cap polygons: caps, marks and clears. */
   polygonDrawCount: number;
+  /** Whether this frame built its draw list, or reused the one a camera-only frame leaves untouched. */
+  rebuilt: boolean;
+  /** Building the draw list: bounds, crossing, grouping, overlap, polygon clipping, clips and outline faces. */
+  buildMilliseconds: number;
+  /** Building the draw list and submitting it, so `buildMilliseconds` is the part no draw pays for. */
   submitMilliseconds: number;
 };
 
@@ -132,6 +137,10 @@ const _u = new THREE.Vector3();
 const _v = new THREE.Vector3();
 const _centroid = new THREE.Vector3();
 const _scratch = new THREE.Vector3();
+
+/** An attribute's revision, through its interleaved buffer where it has one. */
+const attributeVersion = (attribute: THREE.BufferAttribute | THREE.InterleavedBufferAttribute): number =>
+  'data' in attribute ? attribute.data.version : attribute.version;
 
 const signedDistance = ({ normal, constant }: SectionHalfSpace, point: THREE.Vector3): number =>
   normal[0] * point.x + normal[1] * point.y + normal[2] * point.z - constant;
@@ -594,8 +603,127 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
   const unionBox = new THREE.Box3();
   const boxScratch = new THREE.Box3();
 
+  // ---------------------------------------------------------------------------
+  // The built draw list, reused while nothing it is built from has changed
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Every value the build reads, in a fixed order, so a frame can tell whether the pooled draws already hold its
+   * answer. The camera enters it only through the pieces' exit half-space sets, which flip when the camera crosses a
+   * cut plane; everything else the build reads comes from the committed cut, the sources and the pixel scale.
+   */
+  const signature: unknown[] = [];
+  let signatureLength = -1;
+  let signatureCursor = 0;
+  let signatureMatches = false;
+
+  const feed = (value: unknown): void => {
+    if (signature[signatureCursor] !== value) {
+      signatureMatches = false;
+      signature[signatureCursor] = value;
+    }
+    signatureCursor++;
+  };
+
+  /** Writes `frame`'s signature and says whether it is the one the pooled draws were built from. */
+  const holdsBuildOf = (frame: SectionStencilCapFrame, exits: ReadonlyArray<readonly SectionHalfSpace[]>): boolean => {
+    signatureCursor = 0;
+    signatureMatches = signatureLength >= 0;
+    // The committed pieces are one array until a cut commits, so their identity carries every plane and bound.
+    feed(frame.pieces);
+    feed(frame.stripes.stripeFrequency);
+    feed(frame.stripes.stripeWidth);
+    feed(frame.outlineWidthPixels);
+    for (const exit of exits) {
+      feed(exit.length);
+      for (const halfSpace of exit) {
+        feed(halfSpace);
+      }
+    }
+    feed(frame.sources.length);
+    for (const source of frame.sources) {
+      feed(source.key);
+      feed(source.ownerKey);
+      feed(source.tintHex);
+      feed(source.edgeHex);
+      feed(source.hatch?.angle);
+      feed(source.hatch?.spacingScale);
+      feed(source.meshes.length);
+      for (const mesh of source.meshes) {
+        feed(mesh.geometry);
+        // A source's bounds, its outline geometry and its draw range all follow these.
+        const position = mesh.geometry.getAttribute('position');
+        feed(position);
+        feed(attributeVersion(position));
+        const index = mesh.geometry.getIndex();
+        feed(index === null ? undefined : attributeVersion(index));
+        feed(mesh.geometry.drawRange.start);
+        feed(mesh.geometry.drawRange.count);
+        for (const element of mesh.matrixWorld.elements) {
+          feed(element);
+        }
+      }
+      // A per-loop source's slices land in a fresh object each frame, so its contents carry it, not its identity.
+      feed(source.loops === undefined);
+      feed(source.loops?.bySlot.size);
+      for (const element of source.loops?.matrix.elements ?? []) {
+        feed(element);
+      }
+      for (const [slot, geometry] of source.loops?.bySlot ?? []) {
+        feed(slot);
+        feed(geometry.fill);
+        feed(geometry.open);
+        feed(geometry.closedLoopCount);
+        feed(geometry.openChainCount);
+      }
+    }
+    const holds = signatureMatches && signatureCursor === signatureLength;
+    signatureLength = signatureCursor;
+    return holds;
+  };
+
+  /** What the last build drew, reported again by every frame that reuses it. */
+  let builtStats: SectionStencilCapStats | undefined;
+  /** Whether the last build drew an outline, whose screen-space camera data each frame refreshes. */
+  let builtOutlineFaces: readonly SectionFace[] = [];
+
+  const submit = (renderer: SectionStencilCapRenderer, frame: SectionStencilCapFrame): void => {
+    if (meshesUsed + polygonsUsed === 0) {
+      return;
+    }
+    const previousAutoClear = renderer.autoClear;
+    renderer.autoClear = false;
+    try {
+      renderer.render(scene, frame.camera);
+    } finally {
+      renderer.autoClear = previousAutoClear;
+    }
+  };
+
+  /**
+   * The outline is drawn in screen space from the camera, so a reused draw list still needs this each frame; the faces
+   * themselves are the built ones and do not move.
+   */
+  const refreshOutlineCamera = (frame: SectionStencilCapFrame): void => {
+    if (builtOutlineFaces.length === 0) {
+      return;
+    }
+    writeSectionCapOutlineCamera(outlineFaces, frame.camera, frame.viewportHeightPixels);
+    writeSectionCapOutlineCamera(openChainFaces, frame.camera, frame.viewportHeightPixels);
+  };
+
   const render = (renderer: SectionStencilCapRenderer, frame: SectionStencilCapFrame): SectionStencilCapStats => {
     const startedAt = performance.now();
+    // The exit sets first: the camera reaches the build only through them.
+    const exits = frame.pieces.map((piece) => resolveSectionExitHalfSpaces(frame.camera, piece));
+    if (holdsBuildOf(frame, exits) && builtStats) {
+      const reused: SectionStencilCapStats = { ...builtStats, rebuilt: false, buildMilliseconds: 0 };
+      refreshOutlineCamera(frame);
+      reused.buildMilliseconds = performance.now() - startedAt;
+      submit(renderer, frame);
+      reused.submitMilliseconds = performance.now() - startedAt;
+      return reused;
+    }
     const stats: SectionStencilCapStats = {
       pieceCount: frame.pieces.length,
       drawnPieceCount: 0,
@@ -606,6 +734,8 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
       openChainDrawCount: 0,
       meshDrawCount: 0,
       polygonDrawCount: 0,
+      rebuilt: true,
+      buildMilliseconds: 0,
       submitMilliseconds: 0,
     };
     meshesUsed = 0;
@@ -629,7 +759,7 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
     let order = 0;
 
     for (const [pieceIndex, piece] of frame.pieces.entries()) {
-      const exit = resolveSectionExitHalfSpaces(frame.camera, piece);
+      const exit = exits[pieceIndex]!;
       if (exit.length === 0) {
         continue;
       }
@@ -757,6 +887,7 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
 
     // The outline follows every face, from either side, over every source a face plane crosses.
     const allFaces: SectionFace[] = resolveSectionFaces(frame.pieces);
+    builtOutlineFaces = allFaces.length > 0 && frame.outlineWidthPixels > 0 ? allFaces : [];
     if (allFaces.length > 0 && frame.outlineWidthPixels > 0) {
       writeSectionCapOutlineFaces(outlineFaces, allFaces, frame.outlineWidthPixels);
       writeSectionCapOutlineCamera(outlineFaces, frame.camera, frame.viewportHeightPixels);
@@ -808,15 +939,9 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
     stats.meshDrawCount = meshesUsed;
     stats.polygonDrawCount = polygonsUsed;
     outlineGeometry?.retireUnused();
-    if (meshesUsed + polygonsUsed > 0) {
-      const previousAutoClear = renderer.autoClear;
-      renderer.autoClear = false;
-      try {
-        renderer.render(scene, frame.camera);
-      } finally {
-        renderer.autoClear = previousAutoClear;
-      }
-    }
+    stats.buildMilliseconds = performance.now() - startedAt;
+    builtStats = { ...stats };
+    submit(renderer, frame);
     stats.submitMilliseconds = performance.now() - startedAt;
     return stats;
   };
@@ -825,6 +950,10 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
     render,
     scene,
     dispose() {
+      builtStats = undefined;
+      builtOutlineFaces = [];
+      signature.length = 0;
+      signatureLength = -1;
       for (const material of ownedMaterials.splice(0)) {
         material.dispose();
       }

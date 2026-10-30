@@ -21,21 +21,12 @@ type EarlyTextarea = HTMLTextAreaElement & {
 // bundle. DOM-local state records type-then-delete and an IME still in progress.
 const earlyInputScript = `(()=>{const input=document.currentScript.previousElementSibling;const state=input.tauEarlyDraft={edited:false,composing:false};input.addEventListener('input',()=>{state.edited=true});input.addEventListener('compositionstart',()=>{state.composing=true});input.addEventListener('compositionend',()=>{state.composing=false})})()`;
 
-/**
- * Keep Home's native input alive until its edit can enter the existing draft owner.
- *
- * `isHostReady` is for a host that loads the rich composer on demand: adoption hands the edit over and
- * replaces this input with `children`, so a host whose children are not loaded yet passes `false`
- * and the native input stays, holding and accepting text, until they are. The default is `true`,
- * which is the arrangement where the composer is already in the bundle that rendered this.
- */
+/** Keep Home's native input alive until its edit can enter the existing draft owner. */
 export function ChatEarlyInput({
   className,
-  isHostReady = true,
   children,
 }: {
   readonly className?: string;
-  readonly isHostReady?: boolean;
   readonly children: (input: EarlyChatInput) => React.ReactNode;
 }): React.JSX.Element {
   const inputRef = useRef<EarlyTextarea>(null);
@@ -44,7 +35,7 @@ export function ChatEarlyInput({
 
   useEffect(() => {
     const input = inputRef.current;
-    if (!input || !isHostReady) {
+    if (!input) {
       return undefined;
     }
     let active = true;
@@ -76,7 +67,7 @@ export function ChatEarlyInput({
       active = false;
       input.removeEventListener('compositionend', finishComposition);
     };
-  }, [draftActorRef, isHostReady]);
+  }, [draftActorRef]);
 
   if (adopted) {
     return <>{children(adopted)}</>;

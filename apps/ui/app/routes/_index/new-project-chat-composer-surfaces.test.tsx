@@ -25,8 +25,6 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
   HomeNewProjectComposerProvider: ({ children }: { readonly children: React.ReactNode }) => (
     <div data-testid='home-new-project-composer-provider'>{children}</div>
   ),
-  // The hero's native early input adopts into this actor, so the mock has to offer it too.
-  useChatComposer: () => ({ draftActorRef: { send: vi.fn() } }),
 }));
 vi.mock('#hooks/use-kernel.js', () => ({
   useKernel: () => ({ kernel: 'openscad', setKernel: vi.fn() }),
@@ -38,10 +36,7 @@ describe('new-project chat composer surfaces', () => {
   it('mounts the shared composer inside the persistent homepage provider', async () => {
     renderWithRootProviders(<HomepageChatHero />);
 
-    /* The hero now holds a native input of its own and asks for the composer in an effect, so the
-     * composer arrives on a later tick; it still has to arrive, and inside the same provider. */
-    expect(await screen.findByTestId('new-project-chat-composer')).toBeInTheDocument();
-    expect(screen.getByTestId('home-new-project-composer-provider')).toContainElement(
+    expect(await screen.findByTestId('home-new-project-composer-provider')).toContainElement(
       screen.getByTestId('new-project-chat-composer'),
     );
     expect(screen.queryByTestId('active-chat-provider')).not.toBeInTheDocument();

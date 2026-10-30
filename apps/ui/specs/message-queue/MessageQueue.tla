@@ -66,11 +66,6 @@
 \* Home's server-rendered composer input stays live until the rich composer hydrates; its edit
 \* enters the existing draft owner through one setDraftText, and that early input carries no submit
 \* path, so nothing enqueues, prepares or acknowledges before hydration; queue paths unchanged.
-\* Home and the library now host that early input themselves and fetch the rich composer on
-\* demand, so the composer's own module is no longer in the entry route's eager closure. The
-\* host withholds adoption until the composer is loaded, the composer receives the adopted
-\* snapshot as a prop instead of mounting its own early input, and no submit, admission,
-\* enqueue or acknowledgement path can run before it arrives; queue paths unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

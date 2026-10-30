@@ -1,0 +1,6 @@
+sketch001 = sketch(on = XY) {
+  p0 = point(at = [var -2.23mm, var 3.1mm])
+  p1 = point(at = [var -3.05mm, var -1.89mm])
+  pf = point(at = [4, 4])
+  horizontal([p0, p1, pf])
+}

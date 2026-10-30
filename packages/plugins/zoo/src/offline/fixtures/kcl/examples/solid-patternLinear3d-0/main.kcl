@@ -1,0 +1,15 @@
+/// Pattern using a named axis.
+
+exampleSketch = startSketchOn(XZ)
+  |> startProfile(at = [0, 0])
+  |> line(end = [0, 2])
+  |> line(end = [3, 1])
+  |> line(end = [0, -4])
+  |> close()
+
+example = extrude(exampleSketch, length = 1)
+  |> patternLinear3d(
+      axis = X,
+      instances = 7,
+      distance = 6
+    )

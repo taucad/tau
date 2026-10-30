@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import type { ChatTextareaHandle, ChatTextareaProperties } from '#components/chat/chat-textarea-types.js';
+import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import { KernelSelector } from '#components/chat/kernel-selector.js';
 import { WorkspaceSelector } from '#components/filesystem/workspace-selector.js';
 import { toast } from '#components/ui/sonner.js';
@@ -14,12 +15,17 @@ import { projectUrl } from '#utils/project-url.utils.js';
 
 type NewProjectChatComposerProperties = {
   readonly enableAutoFocus?: boolean;
+  readonly enableEarlyInput?: boolean;
+  /** An early edit the route already adopted, when the route owns the native input. */
+  readonly adoptedEarlyInput?: EarlyChatInput;
   readonly className?: string;
 };
 
 /** Shared direct-create composer rendered inside an existing chat provider. */
 export function NewProjectChatComposer({
   enableAutoFocus = true,
+  enableEarlyInput = false,
+  adoptedEarlyInput,
   className,
 }: NewProjectChatComposerProperties): React.JSX.Element {
   const navigate = useNavigate();
@@ -143,6 +149,8 @@ export function NewProjectChatComposer({
         <KernelSelector selectedKernel={kernel} onKernelChange={setKernel} />
       </div>
       <ChatTextarea
+        enableEarlyInput={enableEarlyInput}
+        adoptedEarlyInput={adoptedEarlyInput}
         ref={textareaRef}
         enableAutoFocus={enableAutoFocus}
         enableContextActions={false}

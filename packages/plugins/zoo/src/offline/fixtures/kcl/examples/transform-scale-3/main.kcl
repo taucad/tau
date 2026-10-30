@@ -1,0 +1,13 @@
+// Make one button (i.e. just a cylinder)
+button1 = startSketchOn(XY)
+  |> circle(center = [0, 0], radius = 1.53)
+  |> extrude(length = 1)
+
+// Duplicate it, but use `scale` to make it smaller.
+button2 = startSketchOn(XY)
+  |> circle(center = [0, 0], radius = 1.53)
+  |> extrude(length = 1)
+  |> translate(x = 4)
+  // Make it 50% smaller and gold
+  |> scale(factor = 0.5)
+  |> appearance(color = "#ff9922")

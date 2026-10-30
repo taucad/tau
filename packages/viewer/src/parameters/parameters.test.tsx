@@ -1769,7 +1769,34 @@ describe('Parameters - Reset Functionality', () => {
     await user.click(resetButton);
 
     // Should call onParametersChange with parameters without the reset field
-    expect(mockOnParametersChange).toHaveBeenCalledWith({});
+    expect(mockOnParametersChange).toHaveBeenCalledWith({}, expect.any(Object));
+  });
+
+  /* The form replaces the whole group from the values it rendered. The authority writes only what
+   * changed from those values, so the form hands them over with each change. */
+  it('hands over the values it rendered with a single-field reset, so only that field is written', async () => {
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        name: { type: 'string', default: 'test' },
+        count: { type: 'number', default: 5 },
+      },
+    };
+    render(
+      <TestWrapper>
+        <Parameters
+          parameters={{ name: 'changed', count: 7 }}
+          defaultParameters={{ name: 'test', count: 5 }}
+          jsonSchema={schema}
+          units={defaultUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    await user.click(screen.getByLabelText('Reset Name'));
+
+    expect(mockOnParametersChange).toHaveBeenLastCalledWith({ count: 7 }, { name: 'changed', count: 7 });
   });
 
   it('should reset nested parameter when reset button is clicked', async () => {
@@ -1822,7 +1849,7 @@ describe('Parameters - Reset Functionality', () => {
     await user.click(resetButton);
 
     // Should call onParametersChange with empty object (host removed, config becomes empty)
-    expect(mockOnParametersChange).toHaveBeenCalledWith({});
+    expect(mockOnParametersChange).toHaveBeenCalledWith({}, expect.any(Object));
   });
 
   it('should reset array item when reset button is clicked', async () => {
@@ -1873,7 +1900,7 @@ describe('Parameters - Reset Functionality', () => {
     }
 
     // Should call onParametersChange with empty object (array item reset to default)
-    expect(mockOnParametersChange).toHaveBeenCalledWith({});
+    expect(mockOnParametersChange).toHaveBeenCalledWith({}, expect.any(Object));
   });
 
   // Note: "Reset all parameters" button is now rendered in ChatParameters header,
@@ -3490,7 +3517,7 @@ describe('Parameters - admitted unit projection', () => {
     pointer('pointermove', 10);
     pointer('pointerup', 10);
 
-    expect(onParametersChange).toHaveBeenLastCalledWith({ width: 120 });
+    expect(onParametersChange).toHaveBeenLastCalledWith({ width: 120 }, expect.any(Object));
   });
 
   it('uses the manifest path, preserves native values, and labels an inferred unit accessibly', async () => {
@@ -3524,7 +3551,7 @@ describe('Parameters - admitted unit projection', () => {
     await user.type(input, '12');
     expect(onParametersChange).not.toHaveBeenCalled();
     await user.keyboard('{Enter}');
-    expect(onParametersChange).toHaveBeenLastCalledWith({ width: 120 });
+    expect(onParametersChange).toHaveBeenLastCalledWith({ width: 120 }, expect.any(Object));
   });
 
   it('does not label a declaration as guessed and disables preserved decimal data', () => {
@@ -3633,7 +3660,7 @@ describe('Parameters - onChange Only Modified Values', () => {
     });
 
     // Should only be called with the modified parameter
-    expect(mockOnParametersChange).toHaveBeenCalledWith({ name: 'modified' });
+    expect(mockOnParametersChange).toHaveBeenCalledWith({ name: 'modified' }, expect.any(Object));
   });
 
   it('should only call onParametersChange with modified nested parameters', async () => {
@@ -3683,11 +3710,14 @@ describe('Parameters - onChange Only Modified Values', () => {
     });
 
     // Should only be called with the modified nested parameter
-    expect(mockOnParametersChange).toHaveBeenCalledWith({
-      config: {
-        host: 'example.com',
+    expect(mockOnParametersChange).toHaveBeenCalledWith(
+      {
+        config: {
+          host: 'example.com',
+        },
       },
-    });
+      expect.any(Object),
+    );
   });
 
   it('should call onParametersChange with empty object when parameter is reset to default', async () => {
@@ -3733,7 +3763,7 @@ describe('Parameters - onChange Only Modified Values', () => {
     });
 
     // Should be called with empty object since all parameters are now at defaults
-    expect(mockOnParametersChange).toHaveBeenCalledWith({});
+    expect(mockOnParametersChange).toHaveBeenCalledWith({}, expect.any(Object));
   });
 
   it('should not call onParametersChange with unchanged parameters when multiple fields exist', async () => {
@@ -3789,10 +3819,13 @@ describe('Parameters - onChange Only Modified Values', () => {
     });
 
     // Should only be called with modified parameters ('name' and 'count'), not 'enabled'
-    expect(mockOnParametersChange).toHaveBeenCalledWith({
-      name: 'modified',
-      count: 10,
-    });
+    expect(mockOnParametersChange).toHaveBeenCalledWith(
+      {
+        name: 'modified',
+        count: 10,
+      },
+      expect.any(Object),
+    );
   });
 
   // Note: "Reset all parameters" button visibility test is now in ChatParameters header,

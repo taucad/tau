@@ -1,0 +1,11 @@
+// Basic example of a ring gear.
+
+@settings(defaultLengthUnit = mm, kclVersion = 1.0, experimentalFeatures = allow)
+
+gear::ring(
+  nTeeth = 40,
+  module = 1.5,
+  pressureAngle = 14deg,
+  helixAngle = -25deg,
+  gearHeight = 5,
+)

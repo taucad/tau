@@ -1,0 +1,4 @@
+matches = "Straße"
+  |> string::isEqual(to = "STRASSE", caseInsensitive = true)
+
+assertIs(matches)

@@ -7,14 +7,18 @@ import { useIsMobile } from '#hooks/use-mobile.js';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '#components/command.js';
 import {
   Drawer,
+  DrawerAction,
+  DrawerBar,
   DrawerNestedRoot,
   DrawerContent,
   DrawerDescription,
+  DrawerDivider,
+  DrawerList,
   DrawerTitle,
   DrawerTrigger,
+  drawerBarTitleClass,
   useIsInsideDrawer,
 } from '#components/drawer.js';
-import { Button } from '#components/button.js';
 import { Popover, PopoverContent, PopoverTrigger } from '#components/popover.js';
 import { cn } from '#utils/cn.js';
 import { menuGroupHeadingClass } from '#components/menu.variants.js';
@@ -187,42 +191,37 @@ export function ComboBoxResponsive<T>({
           {...properties}
           {...drawerProperties}
           /* A caller's width is for the popover; the drawer spans the screen. */
-          className={cn(
-            'command-item-dividers [&_[data-slot=command]]:bg-transparent',
-            className,
-            'w-auto',
-            drawerProperties?.className,
-          )}
+          className={cn('[&_[data-slot=command]]:bg-transparent', className, 'w-auto', drawerProperties?.className)}
           onCloseAutoFocus={(event) => {
             drawerProperties?.onCloseAutoFocus?.(event);
             handleCloseAutoFocus(event);
           }}
         >
           {isNested ? (
-            <div
-              data-slot='combobox-drawer-header'
-              className='grid grid-cols-[var(--spacing-touch-row)_minmax(0,1fr)_var(--spacing-touch-row)] items-center gap-2 px-3 py-1'
-            >
-              {/* A fixed square with a full radius and an even border stays a circle at every scale; the
-                  matching empty column keeps the title on the drawer's centre line. */}
-              <Button
-                type='button'
-                variant='ghost'
-                aria-label='Back'
-                className='flex size-touch-row shrink-0 items-center justify-center rounded-full border border-border p-0 has-[>svg]:p-0'
-                onClick={() => {
-                  handleOpenChange(false);
-                }}
+            <>
+              <DrawerBar
+                data-slot='combobox-drawer-header'
+                className='grid grid-cols-[calc(var(--spacing)*11)_minmax(0,1fr)_calc(var(--spacing)*11)]'
               >
-                {/* Optically centred: the open side's two stroke ends outweigh the point, so a box-centred
-                    chevron reads as sitting right; a half-pixel nudge left and a lighter stroke settle it. */}
-                <ChevronLeft className='size-6 -translate-x-[0.5px]' strokeWidth={1.25} />
-              </Button>
-              <DrawerTitle className='truncate text-center text-sm font-medium' id='drawer-title'>
-                {title}
-              </DrawerTitle>
-              <span aria-hidden />
-            </div>
+                {/* The matching empty column keeps the title on the drawer's centre line. */}
+                <DrawerAction
+                  type='button'
+                  aria-label='Back'
+                  onClick={() => {
+                    handleOpenChange(false);
+                  }}
+                >
+                  {/* Optically centred: the open side's two stroke ends outweigh the point, so a box-centred
+                      chevron reads as sitting right; a half-pixel nudge left and a lighter stroke settle it. */}
+                  <ChevronLeft className='size-6 -translate-x-[0.5px]' strokeWidth={1.25} />
+                </DrawerAction>
+                <DrawerTitle className={cn(drawerBarTitleClass, 'text-center')} id='drawer-title'>
+                  {title}
+                </DrawerTitle>
+                <span aria-hidden />
+              </DrawerBar>
+              <DrawerDivider />
+            </>
           ) : (
             <DrawerTitle className='sr-only' id='drawer-title'>
               {title}
@@ -231,7 +230,7 @@ export function ComboBoxResponsive<T>({
           <DrawerDescription className='sr-only' id='drawer-description'>
             {description}
           </DrawerDescription>
-          <>
+          <DrawerList className='drawer-command-rows contents drawer-inset-hairlines'>
             <ItemList
               groupedItems={groupedItems}
               onPick={handleSelect}
@@ -252,7 +251,7 @@ export function ComboBoxResponsive<T>({
               onLoadMore={onLoadMore}
             />
             {footer}
-          </>
+          </DrawerList>
         </DrawerContent>
       </DrawerRoot>
     );
@@ -422,7 +421,11 @@ function ItemList<T>({
       // Render group header
       if (itemData.type === 'header') {
         return (
-          <div key={`header-${itemData.groupName}`} className={menuGroupHeadingClass}>
+          <div
+            key={`header-${itemData.groupName}`}
+            data-slot='combobox-group-heading'
+            className={menuGroupHeadingClass}
+          >
             {itemData.groupName}
           </div>
         );
@@ -470,7 +473,9 @@ function ItemList<T>({
               // absolute positioning used for virtualization. Use Header/Footer for vertical
               // spacing instead.
               components={{
-                List: (properties) => <div {...properties} className='flex flex-col gap-0.5 px-1' />,
+                List: (properties) => (
+                  <div {...properties} data-slot='combobox-virtual-list' className='flex flex-col gap-0.5 px-1' />
+                ),
                 Header: () => <div className='h-1' />,
                 Footer: isLoadingMore
                   ? () => (

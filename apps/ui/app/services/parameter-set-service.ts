@@ -19,6 +19,7 @@ import type {
 } from '@taucad/parameters';
 import { joinPath, parentDirectory } from '@taucad/utils/path';
 import type { ParameterDraft, ParameterValueEdit } from '@taucad/viewer/parameters/parameter-edit';
+import { randomUuid } from '@taucad/utils/id';
 
 type TargetState = {
   target: ParameterSetTarget;
@@ -79,6 +80,16 @@ export type ParameterSetService = Readonly<{
   resolve(filePath: string, manifest: ParameterManifest): Promise<ParameterSetAuthoritySnapshot>;
   resolveTarget(target: ParameterSetTarget, manifest: ParameterManifest): Promise<ParameterSetAuthoritySnapshot>;
   readSettled(filePath: string): Promise<Uint8Array<ArrayBuffer> | undefined>;
+  /**
+   * Write a form edit of the active group: only the fields `values` changes from `base`, the values the
+   * form rendered, so a stale rendered value of another field is never written back.
+   */
+  editValues(
+    filePath: string,
+    manifest: ParameterManifest,
+    edit: Readonly<{ values: Readonly<Record<string, unknown>>; base: Readonly<Record<string, unknown>> }>,
+  ): Promise<void>;
+  /** Replace the active group's values whatever it holds. */
   replaceValues(
     filePath: string,
     manifest: ParameterManifest,
@@ -184,6 +195,8 @@ export const createParameterSetService = (
   }>,
 ): ParameterSetService => {
   let sequence = 0;
+  /* This service is one editor: a field still holding its own last write is never a conflict for it. */
+  const editor = `browser:${randomUuid()}`;
   const clients = new Map<string, TargetState>();
   /** Retained row drafts, keyed by field. A plain map: rows own their own editing state. */
   const drafts = new Map<string, Readonly<{ key: ParameterDraftKey; draft: ParameterDraft; label: string }>>();
@@ -580,7 +593,7 @@ export const createParameterSetService = (
           requestId,
           expected: current.identity,
           pressure: field.pressure ?? 'final',
-          ...(field.base === undefined ? {} : { base: field.base }),
+          ...(field.base === undefined ? {} : { base: { ...field.base, editor } }),
           operation: { kind: 'native-value', group: field.group, pointer: field.pointer, value: field.value },
         });
         settleDraft(
@@ -649,6 +662,20 @@ export const createParameterSetService = (
       }
       const bytes = await options.client.readFile(path);
       return bytes;
+    },
+    editValues: async (filePath, manifest, { values, base }) => {
+      await submitOperation({
+        filePath,
+        manifest,
+        operation: {
+          kind: 'replace-group-values',
+          group: currentFor(filePath)?.entry.activeGroup ?? 'default',
+          values: valuesFor(values),
+          base: valuesFor(base),
+          editor,
+        },
+        target: targetFor(filePath),
+      });
     },
     replaceValues: async (filePath, manifest, values) => {
       await submitOperation({

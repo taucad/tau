@@ -1,0 +1,12 @@
+// Sketch some disconnected lines in a sketch block.
+originalSketch = sketch(on = YZ) {
+  line1 = line(start = [var -5.33mm, var 3.69mm], end = [var -5.93mm, var -2.59mm])
+  line2 = line(start = [var -0.9mm, var 0.63mm], end = [var 4.01mm, var 0.68mm])
+}
+
+// Surface extrudes of sketch blocks let you extrude any lines.
+extrude([originalSketch.line1, originalSketch.line2], length = 1, bodyType = SURFACE)
+
+// Surface extrudes of sketch blocks are non-destructive: they leave the original sketch
+// in place. So we can add another extrude of the same lines, in a different direction.
+extrude([originalSketch.line1, originalSketch.line2], length = -1, bodyType = SURFACE)

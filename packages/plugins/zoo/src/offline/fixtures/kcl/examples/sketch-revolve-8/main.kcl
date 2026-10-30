@@ -1,0 +1,21 @@
+// Revolve two sketches around the same axis.
+
+sketch001 = startSketchOn(XY)
+profile001 = startProfile(sketch001, at = [4, 8])
+    |> xLine(length = 3)
+    |> yLine(length = -3)
+    |> xLine(length = -3)
+    |> line(endAbsolute = [profileStartX(%), profileStartY(%)])
+    |> close()
+
+profile002 = startProfile(sketch001, at = [-5, 8])
+    |> xLine(length = 3)
+    |> yLine(length = -3)
+    |> xLine(length = -3)
+    |> line(endAbsolute = [profileStartX(%), profileStartY(%)])
+    |> close()
+
+revolve(
+    [profile001, profile002],
+    axis = X,
+)

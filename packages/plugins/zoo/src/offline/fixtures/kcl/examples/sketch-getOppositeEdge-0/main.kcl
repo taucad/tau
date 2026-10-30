@@ -1,0 +1,24 @@
+exampleSketch = startSketchOn(XZ)
+  |> startProfile(at = [0, 0])
+  |> line(end = [10, 0])
+  |> angledLine(
+       angle = 60deg,
+       length = 10,
+     )
+  |> angledLine(
+       angle = 120deg,
+       length = 10,
+     )
+  |> line(end = [-10, 0])
+  |> angledLine(
+       angle = 240deg,
+       length = 10,
+       tag = $referenceEdge,
+     )
+  |> close()
+
+example = extrude(exampleSketch, length = 5)
+  |> fillet(
+    radius = 3,
+    tags = [getOppositeEdge(referenceEdge)],
+  )

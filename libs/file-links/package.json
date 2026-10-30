@@ -1,0 +1,64 @@
+{
+  "name": "@taucad/file-links",
+  "version": "0.1.0-beta.0",
+  "description": "Signed download links for the Tau files service: HMAC-SHA256 link signing and verification on WebCrypto, shared by the API and the files Worker",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "libs/file-links"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/libs/file-links#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "tau",
+    "lfs",
+    "signed-url",
+    "cloudflare-workers"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./vectors": "./src/vectors.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./vectors": {
+        "types": "./dist/vectors.d.mts",
+        "import": "./dist/vectors.mjs",
+        "default": "./dist/vectors.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "imports": {}
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "uint8array-extras": "catalog:"
+  }
+}

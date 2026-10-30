@@ -1,0 +1,37 @@
+fn cube(length, center) {
+  l = length/2
+  x = center[0]
+  y = center[1]
+  p0 = [-l + x, -l + y]
+  p1 = [-l + x,  l + y]
+  p2 = [ l + x,  l + y]
+  p3 = [ l + x, -l + y]
+
+  return startSketchOn(XY)
+  |> startProfile(at = p0)
+  |> line(endAbsolute = p1)
+  |> line(endAbsolute = p2)
+  |> line(endAbsolute = p3)
+  |> line(endAbsolute = p0)
+  |> close()
+  |> extrude(length = length)
+}
+
+width = 20
+fn transform(@i) {
+  return {
+    // Move down each time.
+    translate = [0, 0, -i * width],
+    // Make the cube longer, wider and flatter each time.
+    scale = [pow(1.1, exp = i), pow(1.1, exp = i), pow(0.9, exp = i)],
+    // Turn by 15 degrees each time.
+    rotation = {
+      angle = 15deg * i,
+      origin = "local",
+    }
+  }
+}
+
+myCubes =
+  cube(length = width, center = [100,0])
+  |> patternTransform(instances = 25, transform = transform)

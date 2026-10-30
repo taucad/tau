@@ -1,0 +1,19 @@
+exampleSketch = startSketchOn(XZ)
+  |> startProfile(at = [-10, 0])
+  |> arc(
+    angleStart = 120deg,
+    angleEnd = -60deg,
+    radius = 5,
+  )
+  |> line(end = [10, 0])
+  |> line(end = [5, 0])
+  |> bezierCurve(
+       control1 = [-3, 0],
+       control2 = [2, 10],
+       end = [-5, 10],
+     )
+  |> line(end = [-4, 10])
+  |> line(end = [-5, -2])
+  |> close()
+
+example = extrude(exampleSketch, length = 20, symmetric = true)

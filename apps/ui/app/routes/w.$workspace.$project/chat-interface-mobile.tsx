@@ -9,7 +9,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { ChatInterfaceNav, surfaceTitle } from '#routes/w.$workspace.$project/chat-interface-nav.js';
 import { mobileWorkbenchNavigationHeight } from '#components/mobile-workbench-navigation.js';
 import type { MobileWorkbenchDestinationCue } from '#components/mobile-workbench-navigation.js';
-import { mobileDrawerOpenSnapPoint, mobileDrawerPeekSnapPoint } from '#constants/editor.constants.js';
+import { mobileDrawerDetentNames, mobileDrawerOpenSnapPoint } from '#constants/editor.constants.js';
 import type { MobilePanelId } from '#constants/editor.constants.js';
 import { useChatInterfaceState } from '#routes/w.$workspace.$project/use-chat-interface-state.js';
 import { viewName } from '#workbench-records/view-titles.js';
@@ -287,7 +287,7 @@ const decisionSelector = '[data-decision], [data-ask-state=open]';
 /** A decision that settled (an answered question, a resolved approval): its identity can retire. */
 const settledSelector = '[data-ask-state=settled][data-ask-id], [data-decision-state=settled][data-decision-id]';
 
-/** The fixed rows' overflow at the peek, as an acknowledgement key. */
+/** The fixed rows' overflow at half, the lowest detent, as an acknowledgement key. */
 const fixedRowsKey = 'fixed-rows';
 
 /** How often a scroll re-checks at most, while a list is still catching up with its content. Milliseconds. */
@@ -356,17 +356,16 @@ function decisionsIn(section: HTMLElement): Array<[string, HTMLElement]> {
 }
 
 /**
- * Never fold away a decision (I5). When a decision arrives and the detent cuts it off, the sheet rises one detent, and
- * again from half if half still cuts it off; at the peek the same holds for fixed rows (a title, a composer with an
- * approval or a question above it) that no longer fit. A detent the person chooses is theirs: the decisions on screen
- * when they move the sheet are acknowledged, on any surface and for as long as they wait, and only a decision that
- * arrives after can raise it again.
+ * Never fold away a decision (I5). When a decision arrives and half cuts it off, the sheet rises to full; the same
+ * holds for fixed rows (a title, a composer with an approval or a question above it) that no longer fit at half. A
+ * detent the person chooses is theirs: the decisions on screen when they move the sheet are acknowledged, on any
+ * surface and for as long as they wait, and only a decision that arrives after can raise it again.
  *
  * @returns The acknowledgement to call when the person moves the sheet.
  */
 function useRaiseWhenClipped(
   section: HTMLElement | undefined,
-  detent: 'peek' | 'half' | undefined,
+  detent: 'half' | undefined,
   raise: () => void,
 ): () => void {
   const acknowledged = useRef(new Set<string>());
@@ -398,9 +397,12 @@ function useRaiseWhenClipped(
         acknowledged.current.delete(fixedRowsKey);
       }
       for (const panel of section.querySelectorAll<HTMLElement>('[data-slot=floating-panel-content]')) {
+        /* Half is the only detent below full: the fixed rows raise the sheet when a decision above the composer makes
+         * them outgrow it. A surface that merely holds more than half shows (a long parameter list, a deep tree) scrolls
+         * at half instead; it never raises itself. */
         if (
-          detent === 'peek' &&
           !acknowledged.current.has(fixedRowsKey) &&
+          panel.querySelector(decisionSelector) !== null &&
           panel.scrollHeight > panel.clientHeight + 1
         ) {
           raise();
@@ -453,10 +455,7 @@ function useRaiseWhenClipped(
 
 /** The detents a decision can raise the sheet from; full has nowhere higher to go. */
 // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Vaul API
-function raisableDetent(point: number | string | null): 'peek' | 'half' | undefined {
-  if (point === mobileDrawerPeekSnapPoint) {
-    return 'peek';
-  }
+function raisableDetent(point: number | string | null): 'half' | undefined {
   return point === mobileDrawerOpenSnapPoint ? 'half' : undefined;
 }
 
@@ -571,8 +570,8 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
   }, [activeTab, drawerOpen, section]);
 
   const raiseOneDetent = useCallback(() => {
-    handleSnapChange(activeSnapPoint === mobileDrawerPeekSnapPoint ? mobileDrawerOpenSnapPoint : 1);
-  }, [activeSnapPoint, handleSnapChange]);
+    handleSnapChange(1);
+  }, [handleSnapChange]);
   const acknowledgeDecisions = useRaiseWhenClipped(
     section,
     drawerOpen ? raisableDetent(activeSnapPoint) : undefined,
@@ -629,6 +628,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
           modal={false}
           open={drawerOpen}
           snapPoints={snapPoints}
+          detentNames={mobileDrawerDetentNames}
           activeSnapPoint={activeSnapPoint}
           setActiveSnapPoint={chooseSnapPoint}
           onOpenChange={handleDrawerChange}
@@ -647,7 +647,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
               aria-labelledby='drawer-title'
               aria-describedby='drawer-description'
               className={cn(
-                'flex-1 rounded-t-lg border-t bg-sidebar',
+                'flex-1 bg-sidebar',
                 'z-40', // Position below the navigation tabs
                 // The drawer is portalled out of the shell, so it takes the nav's height variables itself.
                 mobileWorkbenchNavigationHeight,
@@ -681,6 +681,8 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
                 data-slot='mobile-surface'
                 className={cn(
                   'flex h-full flex-col p-0 outline-none',
+                  // Its top corners follow the sheet's, less the grabber row above them, so the panel stays inside the curve.
+                  'overflow-hidden rounded-t-[calc(var(--drawer-radius)-var(--drawer-handle-height))]',
                   // While typing, the drawer is the frame above the keyboard and the panel fills it.
                   'group-data-[keyboard=open]/drawer-content:h-auto! group-data-[keyboard=open]/drawer-content:min-h-0 group-data-[keyboard=open]/drawer-content:flex-1',
                 )}

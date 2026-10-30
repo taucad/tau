@@ -1,0 +1,11 @@
+
+startSketchOn(XY)
+  |> startProfile(at = [0, 0])
+  |> line(end = [10, 0], tag = $side)
+  |> line(end = [0, 10])
+  |> line(end = [-10, 0])
+  |> line(end = [0, -10])
+  |> close()
+  |> extrude(length = 5, tagEnd = $top)
+
+gdt::annotation(faces = [top], annotation = "Break all sharp edges", framePosition = [12mm, 8mm], framePlane = XZ)

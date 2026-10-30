@@ -100,6 +100,19 @@ describe('contentSecurityPolicy', () => {
     },
   );
 
+  it.each([
+    ['staging', 'https://files.taucad.dev'],
+    ['production', 'https://files.tau.new'],
+  ] as const)('should reach the %s files service origin for signed LFS downloads', (channel, files) => {
+    const environment = desktopEnvironment({}, { locked: true, channel });
+    expect(environment['TAU_FILES_ORIGIN']).toBe(files);
+    const sources = contentSecurityPolicy([new URL(environment['TAU_FILES_ORIGIN']!).origin])
+      .split('; ')
+      .find((entry) => entry.startsWith('connect-src '))!
+      .split(' ');
+    expect(sources).toContain(files);
+  });
+
   it('starts from deny-all so every directive is an explicit grant', () => {
     expect(policy.startsWith("default-src 'none'; ")).toBe(true);
   });

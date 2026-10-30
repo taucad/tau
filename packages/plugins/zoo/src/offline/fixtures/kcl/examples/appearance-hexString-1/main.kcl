@@ -1,0 +1,20 @@
+sideLen = 30
+n = 10
+
+// The cubes become more green and less blue with each instance.
+fn cube(i, center) {
+  g = 255 / n * i
+  b = 255 / n * (n - i)
+  return startSketchOn(XY)
+    |> polygon(radius = sideLen / 2, numSides = 4, center = [center, 0])
+    |> extrude(length = sideLen)
+    |> appearance(color = appearance::hexString([0, g, b]), metalness = 80, roughness = 20)
+}
+
+// Create n cubes, shifting each one over in a line.
+map(
+  [0..n],
+  f = fn(@i) {
+    return cube(i, center = sideLen * i * 1.5)
+  },
+)

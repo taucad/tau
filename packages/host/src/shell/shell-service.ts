@@ -11,9 +11,9 @@
  * checkout and every granted folder are re-identified, so a replaced root is refused (`root-changed`).
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 import type { InterruptResolution } from '@taucad/agent-host';
 import {
@@ -24,6 +24,7 @@ import {
 } from '@taucad/native-process-core/shell';
 import type {
   ShellExecutable,
+  ShellExecution,
   ShellExit,
   ShellKind,
   ShellLaunch,
@@ -97,7 +98,40 @@ export type ShellIdentity = Readonly<{
  *
  * @public
  */
-export type ShellCheckout = Readonly<{ cwd: string; admission?: string | undefined }>;
+export type ShellCheckout = Readonly<{
+  cwd: string;
+  admission?: string | undefined;
+  /**
+   * The run's revision execution holds (I7), present exactly when the run has a turn lease to protect: a command holds
+   * its execution there before it launches, and releases it only after its stop is confirmed and its roots are gone.
+   */
+  executions?: ShellExecutionHolds | undefined;
+}>;
+
+/** A revision store's answer to a hold or release. @public */
+export type ShellHoldAnswer =
+  | Readonly<{ status: 'applied' | 'replayed' }>
+  | Readonly<{ status: 'refused'; message: string }>;
+
+/** One run's revision execution holds (I7). @public */
+export type ShellExecutionHolds = Readonly<{
+  hold: (executionId: string) => Promise<ShellHoldAnswer>;
+  release: (executionId: string) => Promise<ShellHoldAnswer>;
+}>;
+
+/**
+ * One open project's side of startup recovery (I7): which checkout roots are its own, and every execution its turn
+ * store still holds, read completely now. An earlier host's command receipt on one of its roots is released only
+ * after that read: through the hold's own release when the store still holds it, directly when it no longer does.
+ *
+ * @public
+ */
+export type ShellProjectExecutions = Readonly<{
+  /** Whether a physical checkout root belongs to this project. */
+  owns: (root: string) => Promise<boolean>;
+  /** Every held execution id and the release of its hold; rejects when any run record cannot be read. */
+  held: () => Promise<ReadonlyMap<string, () => Promise<ShellHoldAnswer>>>;
+}>;
 
 /** Why a human Terminal session was refused. Unavailable codes match the probe. @public */
 export type TerminalRefusalCode =
@@ -157,6 +191,11 @@ export type HostShell = Readonly<{
   run: (request: ShellRunRequest) => Promise<ShellOutput>;
   /** Open one human Terminal session. */
   openTerminal: (request: TerminalSessionRequest) => Promise<TerminalSessionOutcome>;
+  /**
+   * Retry startup recovery against the projects open now ({@link ShellServiceOptions.projectExecutions}). A project
+   * host calls it once it can answer for its runs; nothing else needs it. Absent on a shell with no custody to recover.
+   */
+  reconcile?: (() => Promise<void>) | undefined;
 }>;
 
 /** @public */
@@ -189,7 +228,17 @@ export type ShellServiceOptions = Readonly<{
   environment?: Readonly<Record<string, string | undefined>> | undefined;
   /** Milliseconds since an arbitrary origin, for durations. */
   now?: (() => number) | undefined;
+  /** The projects open now, for releasing an earlier host's command receipts ({@link HostShell.reconcile}). */
+  projectExecutions?: (() => readonly ShellProjectExecutions[]) | undefined;
 }>;
+
+/** How long capture may wait for output readers after an unconfirmed cleanup. Milliseconds. */
+const drainMilliseconds = 2000;
+
+const delay = async (milliseconds: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, milliseconds).unref();
+  });
 
 /** One stream left empty, for calls that ended before any output. */
 const emptyStream = { text: '', bytes: 0, truncated: false, undecodable: false } as const;
@@ -333,6 +382,70 @@ const createGate = (limit: number) => {
   return { enter };
 };
 
+/** The resource key an agent command's receipt carries; the provider never reads it. */
+const agentKey = (runId: string): string => `agent:${runId}`;
+
+/** Delete a receipt's private root, only when it is one of this service's own roots. */
+const removePrivateRoot = async (sessionBase: string, privateRoot: string): Promise<boolean> => {
+  try {
+    if (
+      !basename(privateRoot).startsWith('tau-shell-') ||
+      (await realpath(dirname(privateRoot))) !== (await realpath(sessionBase))
+    ) {
+      return false;
+    }
+    await rm(privateRoot, { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Finish one execution after its launch outcome (I7): claim its stopped receipt, delete its private roots, release the
+ * run's revision hold, then the receipt. `retained` means something could not be confirmed, and the roots, hold or
+ * receipt that remain keep custody.
+ */
+const finishExecution = async (
+  provider: ShellProvider,
+  execution: Readonly<{
+    executionId: string;
+    sessionBase: string;
+    privateRoot: string;
+    holds: ShellExecutionHolds | undefined;
+  }>,
+): Promise<'released' | 'retained'> => {
+  let recoveries: Awaited<ReturnType<ShellProvider['recover']>>;
+  try {
+    recoveries = await provider.recover({ executionIds: [execution.executionId] });
+  } catch {
+    return 'retained';
+  }
+  if (recoveries[0]?.status !== 'stopped') {
+    return 'retained';
+  }
+  if (!(await removePrivateRoot(execution.sessionBase, execution.privateRoot))) {
+    return 'retained';
+  }
+  if (execution.holds !== undefined) {
+    let answer: ShellHoldAnswer;
+    try {
+      answer = await execution.holds.release(execution.executionId);
+    } catch (error) {
+      answer = { status: 'refused', message: error instanceof Error ? error.message : String(error) };
+    }
+    if (answer.status === 'refused') {
+      return 'retained';
+    }
+  }
+  try {
+    await provider.release({ executionId: execution.executionId });
+  } catch {
+    /* The receipt stays stopped, its processes confirmed gone; the next start releases it. */
+  }
+  return 'released';
+};
+
 /** Private HOME and temporary roots for one launch, outside every project, removed after the launch settles. */
 const createSessionRoots = async (
   base: string,
@@ -362,6 +475,138 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
   const executions = createGate(options.maxExecutions ?? 8);
   const maxTerminals = options.maxTerminals ?? 4;
   let terminals = 0;
+  /*
+   * Physical roots with an execution whose stop, root deletion or hold release is not confirmed (I7), by execution. Their
+   * private roots and holds are kept and nothing else launches against them in this host: a survivor may still write.
+   */
+  const blocked = new Map<string, Set<string>>();
+  const block = (root: string | undefined, executionId: string): void => {
+    if (root !== undefined) {
+      blocked.set(root, new Set([...(blocked.get(root) ?? []), executionId]));
+    }
+  };
+  const unblock = (root: string, executionId: string): void => {
+    const ids = blocked.get(root);
+    ids?.delete(executionId);
+    if (ids?.size === 0) {
+      blocked.delete(root);
+    }
+  };
+  /* Set when the provider's custody could not be read: then nothing can be shown free, so nothing runs. */
+  let inventoryFailure: string | undefined;
+  const isBlocked = (root: string): boolean => inventoryFailure !== undefined || blocked.has(root);
+  const uncertainMessage =
+    'Tau could not confirm that an earlier command in this project folder stopped, so nothing else runs here. Restart Tau to confirm cleanup.';
+  const finish = async (
+    execution: Readonly<{ executionId: string; privateRoot: string; root: string; holds?: ShellExecutionHolds }>,
+  ): Promise<'released' | 'retained'> => {
+    const finished = await finishExecution(provider, {
+      executionId: execution.executionId,
+      sessionBase,
+      privateRoot: execution.privateRoot,
+      holds: execution.holds,
+    });
+    if (finished === 'retained') {
+      block(execution.root, execution.executionId);
+    }
+    return finished;
+  };
+
+  /* An earlier host's stopped resource receipts retain their roots until their whole project can be read. */
+  const pending = new Map<string, ShellExecution>();
+  let reconciling: Promise<void> = Promise.resolve();
+  const settledOf = async (promise: Promise<void>): Promise<void> => {
+    try {
+      await promise;
+    } catch {
+      /* Each pass reports its own failure; the next one still runs. */
+    }
+  };
+  const reconcileOnce = async (): Promise<void> => {
+    for (const [executionId, row] of pending) {
+      const { root } = row.resource!;
+      const projects = options.projectExecutions?.() ?? [];
+      let owner: ShellProjectExecutions | undefined;
+      for (const project of projects) {
+        // oxlint-disable-next-line no-await-in-loop -- a handful of open projects, asked in order.
+        if (await project.owns(root).catch(() => false)) {
+          owner = project;
+          break;
+        }
+      }
+      if (owner === undefined) {
+        continue;
+      }
+      let held: ReadonlyMap<string, () => Promise<ShellHoldAnswer>>;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one complete read per receipt, never a cached one.
+        held = await owner.held();
+      } catch {
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- roots are removed only after this project's complete inventory.
+      if (!(await removePrivateRoot(sessionBase, row.privateRoot))) {
+        continue;
+      }
+      const release = held.get(executionId);
+      if (release !== undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- releases are sequential, each before its receipt.
+        const answer = await release().catch(
+          (error: unknown): ShellHoldAnswer => ({ status: 'refused', message: String(error) }),
+        );
+        if (answer.status === 'refused') {
+          continue;
+        }
+      }
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- see above.
+        await provider.release({ executionId });
+      } catch {
+        continue;
+      }
+      pending.delete(executionId);
+      unblock(root, executionId);
+    }
+  };
+  const reconcile = async (): Promise<void> => {
+    const next = (async (): Promise<void> => {
+      await reconciling;
+      await reconcileOnce();
+    })();
+    reconciling = settledOf(next);
+    return next;
+  };
+  /* Startup recovery (I7): nothing runs until an earlier host's receipts are claimed, or their roots are blocked. */
+  const recovered = (async (): Promise<void> => {
+    let rows: readonly ShellExecution[];
+    try {
+      rows = await provider.inventory();
+    } catch (error) {
+      inventoryFailure = error instanceof Error ? error.message : String(error);
+      return;
+    }
+    for (const row of rows) {
+      // oxlint-disable-next-line no-await-in-loop -- each receipt is claimed alone, so one cannot hold the others.
+      const [recovery] = await provider.recover({ executionIds: [row.executionId] }).catch(() => []);
+      if (recovery?.status !== 'stopped') {
+        block(row.resource?.root, row.executionId);
+        continue;
+      }
+      if (row.resource !== undefined) {
+        pending.set(row.executionId, row);
+        block(row.resource.root, row.executionId);
+        continue;
+      }
+      // Only an explicitly resource-free probe needs no project inventory before its roots are removed.
+      // oxlint-disable-next-line no-await-in-loop -- each stopped receipt is cleaned up in order.
+      if (!(await removePrivateRoot(sessionBase, row.privateRoot))) {
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- see above.
+      await provider.release({ executionId: row.executionId }).catch(() => undefined);
+    }
+    await reconcile();
+  })();
 
   const grantHost = (): ShellGrantHost => ({
     platform,
@@ -442,6 +687,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
       Math.max(input.timeoutMs ?? shellLimits.defaultTimeout, shellLimits.minTimeout),
       shellLimits.maxTimeout,
     );
+    await recovered;
     const checkout = options.checkouts.get(request.runId);
     if (checkout === undefined) {
       return notStarted(
@@ -454,6 +700,9 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
       return notStarted('checkout-unavailable', "The run's project folder is gone, so the command did not run.");
     }
     const { real: root, fingerprint } = identity;
+    if (isBlocked(root)) {
+      return notStarted('checkout-unavailable', inventoryFailure ?? uncertainMessage);
+    }
     const cwd = await resolveShellCwd(root, input.cwd);
     if ('status' in cwd) {
       return notStarted('invalid-cwd', cwd.message);
@@ -533,12 +782,28 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
     }>,
   ): Promise<ShellOutput> => {
     const { approval } = admitted;
+    /*
+     * A cancellation from the caller outranks every reason the command did not get going: an abort that lands while
+     * the launch is still being staged, before any process exists, is still a cancellation from the caller's side and
+     * is reported once (I7). `not-started` would be the wrong answer there, because it invites a retry of a command
+     * the caller has already withdrawn.
+     */
+    const didNotStart = (code: ShellNotStartedCode, message: string): ShellOutput =>
+      request.signal.aborted
+        ? {
+            status: 'cancelled',
+            stdout: emptyStream,
+            stderr: emptyStream,
+            durationMs: 0,
+            ...(approval === undefined ? {} : { approval }),
+          }
+        : notStarted(code, message);
     const fingerprints = new Map<string, string>([[admitted.root, admitted.fingerprint]]);
     for (const folder of [...admitted.access.read, ...admitted.access.write]) {
       // oxlint-disable-next-line no-await-in-loop -- a handful of granted folders.
       const identity = await rootIdentity(folder);
       if (identity === undefined || identity.real !== folder) {
-        return notStarted('root-changed', `${folder} changed after it was approved, so the command did not run.`);
+        return didNotStart('root-changed', `${folder} changed after it was approved, so the command did not run.`);
       }
       fingerprints.set(folder, identity.fingerprint);
     }
@@ -547,6 +812,8 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
       () => undefined,
     );
     const session = await createSessionRoots(sessionBase);
+    /* Set once custody is prepared: from then on only `finish` may delete the private roots (I7). */
+    let custody: Readonly<{ executionId: string; holds: ShellExecutionHolds | undefined }> | undefined;
     try {
       const filesystem = await compileShellFilesystem({
         checkout: admitted.root,
@@ -557,10 +824,41 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         host: admitted.host,
       });
       if (!(await unchanged(request, admitted.checkout, fingerprints))) {
-        return notStarted(
+        return didNotStart(
           'root-changed',
           'The project folder or a granted folder was replaced before the command started, so it did not run.',
         );
+      }
+      let executionId: string;
+      try {
+        ({ executionId } = await provider.prepare({
+          privateRoot: session.root,
+          resource: { key: agentKey(request.runId), root: admitted.root },
+        }));
+      } catch (error) {
+        return didNotStart(
+          'shell-unavailable',
+          `Tau could not record custody for this command, so it did not run: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      const holds = admitted.checkout.executions;
+      custody = { executionId, holds: undefined };
+      if (holds !== undefined) {
+        let answer: ShellHoldAnswer;
+        try {
+          answer = await holds.hold(executionId);
+        } catch (error) {
+          /* A hold that failed after it landed is released with the receipt; a release of an absent hold is a replay. */
+          custody = { executionId, holds };
+          return didNotStart(
+            'checkout-unavailable',
+            `This run's files could not be held for the command, so it did not run: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+        if (answer.status === 'refused') {
+          return didNotStart('checkout-unavailable', `${answer.message} The command did not run.`);
+        }
+        custody = { executionId, holds };
       }
       const controller = new AbortController();
       /* Set by the timer; an object so the check after the awaits reads it live. */
@@ -575,6 +873,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         onAbort();
       }
       const launch: ShellLaunch = {
+        executionId,
         executablePath: executable.path,
         arguments: shellCommandArguments(executable.kind, request.input.command),
         workingDirectory: admitted.cwd,
@@ -599,10 +898,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         outcome = await provider.launch(launch);
       } catch (error) {
         request.signal.removeEventListener('abort', onAbort);
-        if (cancelled()) {
-          return { status: 'cancelled', stdout: emptyStream, stderr: emptyStream, durationMs: 0, approval };
-        }
-        return notStarted(
+        return didNotStart(
           'launch-failed',
           `The shell could not start: ${error instanceof Error ? error.message : String(error)}`,
         );
@@ -610,13 +906,13 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
       if (outcome.status !== 'started') {
         request.signal.removeEventListener('abort', onAbort);
         const unavailable = unavailableOf(outcome);
-        return notStarted('shell-unavailable', `${unavailable.message} ${unavailable.recovery}`);
+        return didNotStart('shell-unavailable', `${unavailable.message} ${unavailable.recovery}`);
       }
       const { process: child } = outcome;
       if (child.kind !== 'pipes') {
-        await child.terminate();
+        await child.terminate().catch(() => undefined);
         request.signal.removeEventListener('abort', onAbort);
-        return notStarted('launch-failed', 'The provider started a terminal for a pipe launch.');
+        return didNotStart('launch-failed', 'The provider started a terminal for a pipe launch.');
       }
       const timer = setTimeout(() => {
         deadline.passed = true;
@@ -628,17 +924,26 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
           name: `${request.toolCallId.replaceAll(/[^\w.-]/gu, '_').slice(0, 64)}-${randomUUID()}.log`,
         },
       });
+      const drained = Promise.all([capture.drain('stdout', child.stdout), capture.drain('stderr', child.stderr)]);
       let exit: ShellExit;
       try {
-        [exit] = await Promise.all([
-          child.exited,
-          capture.drain('stdout', child.stdout),
-          capture.drain('stderr', child.stderr),
-        ]);
+        exit = await child.exited;
+      } catch (error) {
+        /* Unconfirmed cleanup: never report a finished command (I7, D23). `finish` below keeps the roots, the hold
+         * and the checkout unless recovery itself confirms the stop. A surviving writer cannot hold the answer open:
+         * capture waits a bounded time for the readers to end. */
+        await Promise.race([drained.catch(() => undefined), delay(drainMilliseconds)]);
+        const { log } = await capture.finish();
+        return {
+          status: 'interrupted',
+          message: `Tau did not confirm that this command stopped, so its result is unknown and it will not be run again: ${error instanceof Error ? error.message : String(error)}`,
+          log,
+        };
       } finally {
         clearTimeout(timer);
         request.signal.removeEventListener('abort', onAbort);
       }
+      await drained;
       const durationMs = Math.max(0, Math.round(now() - started));
       const captured = await capture.finish();
       const ran = { ...captured, durationMs, ...(approval === undefined ? {} : { approval }) };
@@ -653,12 +958,20 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         ? { status: 'signalled', signal: exit.signal, ...ran }
         : { status: 'completed', exitCode: exit.exitCode, ...ran };
     } finally {
-      /* After `exited`: no descendant can still be writing into the private roots (I7). */
-      await rm(session.root, { recursive: true, force: true }).catch(() => undefined);
+      /* Without custody nothing launched; with it, only a confirmed stopped claim deletes the roots (I7). */
+      await (custody === undefined
+        ? rm(session.root, { recursive: true, force: true }).catch(() => undefined)
+        : finish({
+            executionId: custody.executionId,
+            privateRoot: session.root,
+            root: admitted.root,
+            ...(custody.holds === undefined ? {} : { holds: custody.holds }),
+          }));
     }
   };
 
   const openTerminal = async (request: TerminalSessionRequest): Promise<TerminalSessionOutcome> => {
+    await recovered;
     const refuse = (code: TerminalRefusalCode, message: string, recovery: string): TerminalSessionOutcome => ({
       status: 'refused',
       code,
@@ -680,6 +993,13 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         'project-not-admitted',
         'This project is not open in Tau.',
         'Open the project, then start the Terminal.',
+      );
+    }
+    if (isBlocked(identity.real)) {
+      return refuse(
+        'sandbox-unavailable',
+        inventoryFailure ?? uncertainMessage,
+        'Restart Tau, then open the Terminal again.',
       );
     }
     if (terminals >= maxTerminals) {
@@ -708,9 +1028,26 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
       }
     };
     const session = await createSessionRoots(sessionBase);
-    const cleanup = async (): Promise<void> => {
+    const sessionId = randomUUID();
+    let executionId: string;
+    try {
+      ({ executionId } = await provider.prepare({
+        privateRoot: session.root,
+        resource: { key: `terminal:${sessionId}`, root },
+      }));
+    } catch (error) {
       uncount();
       await rm(session.root, { recursive: true, force: true }).catch(() => undefined);
+      return refuse(
+        'sandbox-unavailable',
+        `Tau could not record custody for this Terminal session: ${error instanceof Error ? error.message : String(error)}`,
+        'Restart Tau, then open the Terminal again.',
+      );
+    }
+    /* Only a confirmed stopped claim deletes the session's roots and erases its receipt (I7). */
+    const cleanup = async (): Promise<'released' | 'retained'> => {
+      uncount();
+      return finish({ executionId, privateRoot: session.root, root });
     };
     let outcome: ShellLaunchOutcome;
     try {
@@ -723,10 +1060,11 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         host,
       });
       outcome = await provider.launch({
+        executionId,
         executablePath: executable.path,
         arguments: shellInteractiveArguments(executable.kind),
         workingDirectory: root,
-        commandId: `terminal:${randomUUID()}`,
+        commandId: `terminal:${sessionId}`,
         filesystem,
         network: { domains: access.domains },
         environment: shellEnvironment({
@@ -752,35 +1090,50 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
     }
     const { process: child } = outcome;
     if (child.kind !== 'terminal') {
-      await child.terminate();
+      await child.terminate().catch(() => undefined);
       await cleanup();
       return refuse('pty-unavailable', 'The provider did not start a terminal.', 'Restart Tau and try again.');
     }
     const exited = (async (): Promise<ShellExit> => {
+      let exit: ShellExit;
       try {
-        return await child.exited;
-      } finally {
+        exit = await child.exited;
+      } catch (error) {
+        /* Unconfirmed cleanup keeps this session's roots and blocks its project unless recovery confirms (I7). */
         await cleanup();
+        throw error;
       }
+      if ((await cleanup()) === 'retained') {
+        throw new Error('Tau could not confirm that this Terminal session stopped, so its project stays blocked.');
+      }
+      return exit;
     })();
     return {
       status: 'opened',
       session: {
-        id: randomUUID(),
+        id: sessionId,
         access,
         output: child.output,
         write: child.write,
         resize: child.resize,
         exited,
         [Symbol.asyncDispose]: async () => {
-          await child.terminate();
+          await child.terminate().catch(() => undefined);
           await exited;
         },
       },
     };
   };
 
-  return { identity: options.identity, run, openTerminal };
+  return {
+    identity: options.identity,
+    run,
+    openTerminal,
+    reconcile: async () => {
+      await recovered;
+      await reconcile();
+    },
+  };
 };
 
 /** @public */
@@ -826,9 +1179,18 @@ export const probeHostShell = async (options: ProbeHostShellOptions): Promise<Sh
       recovery: 'Restore the system Bash at /bin/bash; Tau never runs a user-installed copy.',
     };
   }
-  const session = await createSessionRoots(options.sessionDirectory ?? tmpdir());
+  const sessionBase = options.sessionDirectory ?? tmpdir();
+  const session = await createSessionRoots(sessionBase);
+  /* Set once custody is prepared: then only a confirmed stopped claim deletes the probe's roots (I7). */
+  const custody: { executionId?: string } = {};
   try {
+    /* A probe is the one launch with no resource: it may run only in its private roots. */
+    ({ executionId: custody.executionId } = await options.provider.prepare({
+      privateRoot: session.root,
+      resource: undefined,
+    }));
     const outcome = await options.provider.launch({
+      executionId: custody.executionId,
       executablePath: executable.path,
       arguments: shellCommandArguments(executable.kind, shellVersionCommand(executable.kind)),
       workingDirectory: session.home,
@@ -851,7 +1213,7 @@ export const probeHostShell = async (options: ProbeHostShellOptions): Promise<Sh
       return unavailableOf(outcome);
     }
     if (outcome.process.kind !== 'pipes') {
-      await outcome.process.terminate();
+      await outcome.process.terminate().catch(() => undefined);
       return {
         status: 'unavailable',
         code: 'sandbox-unavailable',
@@ -869,7 +1231,15 @@ export const probeHostShell = async (options: ProbeHostShellOptions): Promise<Sh
         }
       }
     };
-    const [exit] = await Promise.all([exited, drain(stdout, true), drain(stderr, false)]);
+    const drained = Promise.all([drain(stdout, true), drain(stderr, false)]);
+    let exit: ShellExit;
+    try {
+      exit = await exited;
+    } catch (error) {
+      await Promise.race([drained.catch(() => undefined), delay(drainMilliseconds)]);
+      throw error;
+    }
+    await drained;
     version = version.trim();
     if (exit.exitCode !== 0 || version === '') {
       return {
@@ -898,6 +1268,13 @@ export const probeHostShell = async (options: ProbeHostShellOptions): Promise<Sh
       recovery: 'Reinstall Tau to restore its sandbox components.',
     };
   } finally {
-    await rm(session.root, { recursive: true, force: true }).catch(() => undefined);
+    await (custody.executionId === undefined
+      ? rm(session.root, { recursive: true, force: true }).catch(() => undefined)
+      : finishExecution(options.provider, {
+          executionId: custody.executionId,
+          sessionBase,
+          privateRoot: session.root,
+          holds: undefined,
+        }));
   }
 };

@@ -1,0 +1,10 @@
+
+startSketchOn(XY)
+  |> startProfile(at = [0, 0])
+  |> line(end = [10, 0])
+  |> line(end = [0, 10])
+  |> line(end = [-10, 0], tag = $face1)
+  |> line(end = [0, -10])
+  |> close()
+  |> extrude(length = 5)
+gdt::flatness(faces = [face1], tolerance = 0.02mm, framePosition = [10mm, 20mm], framePlane = XZ)

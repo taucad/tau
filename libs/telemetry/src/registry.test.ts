@@ -331,6 +331,20 @@ describe('TauMetrics', () => {
       false,
     );
     expect(TauMetrics.projectOpenDuration.attributes.safeParse({ phase: 'proj_1', cache: 'cold' }).success).toBe(false);
+    expect(
+      TauMetrics.projectOpenDuration.attributes.safeParse({
+        phase: 'fully_fetched',
+        cache: 'cold',
+        'tau.lfs.transport': 'files',
+      }).success,
+    ).toBe(true);
+    expect(
+      TauMetrics.syncClientLfsDuration.attributes.safeParse({
+        'agent.placement': 'browser',
+        cache: 'cold',
+        'tau.lfs.transport': 'files.taucad.dev',
+      }).success,
+    ).toBe(false);
   });
 
   it('should bound a refusal to a declared code, never a free-form one', () => {

@@ -1,0 +1,1 @@
+point = hyperbolicPoint(x = 5, semiMajor = 2, semiMinor = 1)

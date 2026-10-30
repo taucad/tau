@@ -241,6 +241,12 @@ describe('KinematicsPane', () => {
     releaseUnits.mockClear();
   });
 
+  it('should let the keyboard reach and scroll the joints column even when it holds no control', () => {
+    renderPane({ withMechanism: false });
+    // A half-height phone sheet can overflow the empty state, which has nothing to Tab to (WCAG 2.1.1).
+    expect(screen.getByRole('group', { name: 'Joints' })).toHaveAttribute('tabindex', '0');
+  });
+
   it('should expose one-sided native travel without infinite slider bounds', () => {
     renderPane({
       loaded: {

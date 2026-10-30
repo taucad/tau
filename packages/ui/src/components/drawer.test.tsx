@@ -1,6 +1,15 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '#components/drawer.js';
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerDivider,
+  DrawerTitle,
+  drawerGrabStrip,
+  drawerListItemClass,
+  drawerRowClass,
+} from '#components/drawer.js';
 
 /** A visual viewport the test drives, standing in for a phone's software keyboard. */
 class VisualViewportStub extends EventTarget {
@@ -121,7 +130,7 @@ describe('DrawerContent', () => {
 });
 
 describe('drawer grabber target', () => {
-  it('should give the grabber a 36px row and a 44px target that reaches 8px above the sheet edge only (D4, I3)', () => {
+  it('should give the grabber an 8px row, its bar at the row foot, and a target from 8px above the sheet edge (D4, I3)', () => {
     render(
       <Drawer open snapPoints={[0.25, 1]}>
         <DrawerContent>
@@ -133,12 +142,84 @@ describe('drawer grabber target', () => {
     const handle = screen.getByRole('slider', { name: 'Drawer height' });
     const row = handle.parentElement!;
     const content = handle.closest('[data-slot=drawer-content]')!;
-    // 9 × 4px spacing: the row is the grabber box, which the surface below starts after.
-    expect(content).toHaveClass('[--drawer-handle-height:calc(var(--spacing)*9)]');
+    // 2 × 4px spacing: the row is the grabber box, which the surface below starts after.
+    expect(content).toHaveClass('[--drawer-handle-height:calc(var(--spacing)*2)]');
     expect(row).toHaveClass('h-(--drawer-handle-height)', 'relative');
-    // The target spans the row's width, starts 8px (2 × 4px) above it and ends at its foot, never over the header.
-    expect(handle).toHaveClass('absolute!', 'inset-x-0!', '-top-2!', 'bottom-0!', 'h-auto!', 'w-full!');
+    // The bar ends where the row does: no empty band between it and a header below, which keeps a header's actions
+    // as far below the bar as above the header's foot.
+    const bar = row.querySelector('[data-slot=drawer-handle-indicator]');
+    expect(bar).toHaveClass('absolute', 'bottom-0', 'h-1');
+    expect(bar).not.toHaveClass('top-1/2');
+    /* The target spans the row's width, starts 8px (2 × 4px) above it and ends its reach below the row's foot: none
+       here, where nothing marks a grab strip and the whole sheet drags. */
+    expect(handle).toHaveClass(
+      'absolute!',
+      'inset-x-0!',
+      '-top-2!',
+      'bottom-[calc(-1*var(--drawer-handle-reach))]!',
+      'h-auto!',
+      'w-full!',
+      'z-1',
+    );
     expect(handle).not.toHaveClass('inset-0!', 'size-full!');
+    expect(content).toHaveClass('[--drawer-handle-reach:0px]');
+    expect(content).not.toHaveClass(
+      'has-[[data-drawer-grab-strip]]:[--drawer-handle-reach:var(--drawer-grab-strip-height)]',
+    );
+  });
+
+  it('should reach the target of a handle-only sheet over its 60px grab strip: 76px in all, the strip’s controls on top', () => {
+    render(
+      <Drawer open handleOnly snapPoints={[0.5, 1]}>
+        <DrawerContent>
+          <DrawerTitle>Workbench</DrawerTitle>
+          <DrawerDescription>Review panes</DrawerDescription>
+          <div data-testid='strip' {...drawerGrabStrip}>
+            Parameters
+            <button type='button'>Close</button>
+          </div>
+        </DrawerContent>
+      </Drawer>,
+    );
+    const handle = screen.getByRole('slider', { name: 'Drawer height' });
+    const content = handle.closest('[data-slot=drawer-content]')!;
+    // 8px above the edge, the 8px row and the 60px strip: 76px, without a pixel of its own below the bar.
+    expect(content).toHaveClass(
+      '[--drawer-bar-height:calc(var(--spacing)*15)]',
+      '[--drawer-grab-strip-height:var(--drawer-bar-height)]',
+      'has-[[data-drawer-grab-strip]]:[--drawer-handle-reach:var(--drawer-grab-strip-height)]',
+    );
+    // The strip paints above the target (z-2 over z-1) and lets only its controls take a pointer.
+    const strip = screen.getByTestId('strip');
+    expect(strip).toHaveAttribute('data-drawer-grab-strip');
+    expect(strip).toHaveClass('relative', 'z-2', 'h-(--drawer-grab-strip-height)', 'pointer-events-none');
+    expect(strip.className).toContain(
+      '[&_:is(button,a,input,select,textarea,[role=button],[role=combobox],[tabindex])]:pointer-events-auto',
+    );
+  });
+
+  it('should leave the detent where it is when the grabber is tapped: only a drag and the keys move it (W1)', async () => {
+    render(
+      <Drawer open handleOnly snapPoints={[0.5, 1]} detentNames={['Half', 'Full']}>
+        <DrawerContent>
+          <DrawerTitle>Workbench</DrawerTitle>
+          <DrawerDescription>Review panes</DrawerDescription>
+        </DrawerContent>
+      </Drawer>,
+    );
+    const handle = screen.getByRole('slider', { name: 'Drawer height' });
+
+    fireEvent.click(handle);
+    // Past vaul's double-tap wait, after which a tap would cycle.
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 300);
+      });
+    });
+
+    expect(handle).toHaveAttribute('aria-valuetext', 'Half');
+    fireEvent.keyDown(handle, { key: 'Enter' });
+    expect(handle).toHaveAttribute('aria-valuetext', 'Full');
   });
 });
 
@@ -181,6 +262,22 @@ describe('drawer height keyboard controls', () => {
     expect(handle).toHaveAttribute('aria-valuetext', 'Full');
   });
 
+  it('should name its detents as the drawer names them', () => {
+    render(
+      <Drawer open snapPoints={[0.5, 1]} detentNames={['Half', 'Full']}>
+        <DrawerContent>
+          <DrawerTitle>Workbench</DrawerTitle>
+          <DrawerDescription>Review panes</DrawerDescription>
+        </DrawerContent>
+      </Drawer>,
+    );
+    const handle = screen.getByRole('slider', { name: 'Drawer height' });
+    expect(handle).toHaveAttribute('aria-valuetext', 'Half');
+    expect(handle).toHaveAttribute('aria-valuemax', '2');
+    fireEvent.keyDown(handle, { key: 'ArrowUp' });
+    expect(handle).toHaveAttribute('aria-valuetext', 'Full');
+  });
+
   it('should cycle through its detents with Enter and Space, wrapping from the tallest to the first', () => {
     const onOpenChange = vi.fn<(open: boolean) => void>();
     render(
@@ -217,5 +314,28 @@ describe('drawer height keyboard controls', () => {
       key: 'ArrowDown',
     });
     expect(setActiveSnapPoint).toHaveBeenCalledWith(0.25);
+  });
+});
+
+describe('drawer row geometry', () => {
+  it('should place every drawer row on the header’s 16px edge, with a 1rem icon and its text at 44px', () => {
+    for (const geometry of ['[--drawer-row-inset:1rem]', '[--drawer-row-icon:1rem]', '[--drawer-row-gap:0.75rem]']) {
+      expect(drawerRowClass).toContain(geometry);
+      expect(drawerListItemClass).toContain(geometry);
+    }
+    expect(drawerRowClass).toContain('px-4');
+    expect(drawerRowClass).toContain('gap-3');
+  });
+
+  it('should inset a header divider 16px from each edge and a group divider from the rows’ text', () => {
+    render(
+      <>
+        <DrawerDivider data-testid='header' />
+        <DrawerDivider data-testid='group' variant='group' />
+      </>,
+    );
+    expect(screen.getByTestId('header')).toHaveClass('mx-4', 'h-px');
+    expect(screen.getByTestId('header')).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.getByTestId('group')).toHaveClass('my-1', 'mr-4', 'ml-11', 'h-px');
   });
 });

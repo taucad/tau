@@ -331,11 +331,13 @@ export class TelemetryController {
   }
 
   private recordLfsFetch(entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.LFS_FETCH }>): void {
-    const { placement, networkObjects, networkBytes, localObjects, localBytes } = entry.detail;
+    const { placement, networkObjects, networkBytes, localObjects, localBytes, transport } = entry.detail;
     const attributes = { 'agent.placement': placement };
     this.metrics.syncClientLfsDuration.record(Math.min(entry.duration, maximumSyncAttemptMilliseconds) / 1000, {
       ...attributes,
       cache: localObjects === 0 ? 'cold' : 'partial',
+      /* Files service blueprint §4: p75 by transport compares the files host with presigned R2. */
+      ...(transport === undefined ? {} : { [AttributeKey.LFS_TRANSPORT]: transport }),
     });
     for (const [source, objects, bytes] of [
       ['network', networkObjects, networkBytes],
@@ -350,11 +352,12 @@ export class TelemetryController {
   }
 
   private recordProjectOpen(entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.PROJECT_OPEN }>): void {
-    const { phase, cache } = entry.detail;
+    const { phase, cache, transport } = entry.detail;
     /* An open waits on the same pull and transfers as a sync attempt, so the same hour bounds a skewed clock. */
     this.metrics.projectOpenDuration.record(Math.min(entry.duration, maximumSyncAttemptMilliseconds) / 1000, {
       phase,
       cache,
+      ...(transport === undefined ? {} : { [AttributeKey.LFS_TRANSPORT]: transport }),
     });
   }
 }

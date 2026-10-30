@@ -1,0 +1,16 @@
+// Sketch on the face of a mirrored sketch, that has been extruded.
+sketch0011 = startSketchOn(XY)
+     |> startProfile(at = [6.77, 0])
+     |> yLine(length = 1.27)
+     |> tangentialArc(endAbsolute = [5.96, 2.37])
+     |> tangentialArc(endAbsolute = [-6.2, 2.44])
+     |> tangentialArc(endAbsolute = [-6.6, 1.82])
+     |> yLine(length = -1.82)
+     |> mirror2d( axis = X )
+     |> extrude(length = 10)
+
+sketch002 = startSketchOn(sketch0011, face = END)
+    |> circle( center = [-0.01, 1.58], radius = 1.2 )
+    |> extrude(length = 1.2)
+
+shell([sketch002], faces = ['end'], thickness = .1 )

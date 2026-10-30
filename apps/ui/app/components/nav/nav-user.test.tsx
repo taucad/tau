@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, within } from '@testing-library/react';
+import { renderToString } from 'react-dom/server';
 import { isValidElement } from 'react';
 import type { ReactElement, ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -45,8 +46,24 @@ vi.mock('#hooks/use-network-connectivity.js', () => ({
 }));
 
 vi.mock('@taucad/ui/components/dropdown-menu', () => ({
-  DropdownMenu: ({ children }: { readonly children?: React.ReactNode }) => <div>{children}</div>,
-  DropdownMenuContent: ({ children }: { readonly children?: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenu: ({
+    children,
+    isResponsive,
+  }: {
+    readonly children?: React.ReactNode;
+    readonly isResponsive?: boolean;
+  }) => (
+    <div data-testid='dropdown-menu' data-responsive={isResponsive ? 'true' : undefined}>
+      {children}
+    </div>
+  ),
+  DropdownMenuContent: ({
+    children,
+    drawerTitle,
+  }: {
+    readonly children?: React.ReactNode;
+    readonly drawerTitle?: string;
+  }) => <div data-drawer-title={drawerTitle}>{children}</div>,
   DropdownMenuItem: ({ children }: { readonly children?: React.ReactNode }) => <div role='menuitem'>{children}</div>,
   DropdownMenuLabel: ({ children }: { readonly children?: React.ReactNode }) => <div>{children}</div>,
   DropdownMenuSeparator: () => <hr />,
@@ -78,7 +95,19 @@ describe('NavUser', () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
     globalThis.window.ENV = clientEnvironment;
+  });
+
+  it('renders without a browser address on the server', () => {
+    vi.stubGlobal('location', undefined);
+    expect(() =>
+      renderToString(
+        <MemoryRouter>
+          <NavUser />
+        </MemoryRouter>,
+      ),
+    ).not.toThrow();
   });
 
   it('shows product navigation, upgrade, and settings to free users', () => {
@@ -132,6 +161,15 @@ describe('NavUser', () => {
     expect(screen.queryByText('About Tau')).not.toBeInTheDocument();
   });
 
+  /* A phone opens the sidebar as a sheet (z-100) the dropdown would sit behind; the Help menu opens in a drawer there. */
+  it('should open Help in a drawer titled Help on a phone', () => {
+    render(<NavUser />, { wrapper: MemoryRouter });
+
+    const help = screen.getByRole('button', { name: 'Help' }).closest('[data-testid=dropdown-menu]');
+    expect(help).toHaveAttribute('data-responsive', 'true');
+    expect(help?.querySelector('[data-drawer-title]')).toHaveAttribute('data-drawer-title', 'Help');
+  });
+
   it('should link the legal pages to the web deployment the desktop shell is bound to', () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
     globalThis.window.ENV = {
@@ -172,6 +210,7 @@ describe('Website preference navigation', () => {
     globalThis.window.ENV = clientEnvironment;
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
     Cookies.remove('tau-entry', { path: '/' });
   });

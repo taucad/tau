@@ -1,0 +1,14 @@
+goldCube = startSketchOn(XY)
+  |> rectangle(width = 10, height = 10, center = [0, 0])
+  |> extrude(length = 10)
+  |> appearance(color = "#da7333", roughness = 50, metalness = 90)
+
+roseCube = startSketchOn(offsetPlane(XY, offset = 2))
+  |> rectangle(width = 10, height = 10, center = [4, 2])
+  |> extrude(length = 10)
+  |> appearance(color = "#da4333", roughness = 50, metalness = 90)
+
+// Split the gold cube along the edges of rose cube.
+// Then delete some of the new faces that were created on gold cube.
+final = split([goldCube], tools = [roseCube], merge = true)
+  |> deleteFace(faceIndices = [6, 8])

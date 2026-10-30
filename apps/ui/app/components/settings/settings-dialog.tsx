@@ -1,24 +1,9 @@
-import { GithubRepositorySettings } from '#components/settings/github-repository-settings.js';
-import { BrowserSettingsPanel } from '#components/browser/browser-settings.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { RefCallback } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
-import { AccountSettings } from '#components/auth/settings/account/account-settings.js';
-import { SecuritySettings } from '#components/auth/settings/security/security-settings.js';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@taucad/ui/components/dialog';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import type { SettingsSection } from '#hooks/use-settings-dialog.js';
-import { CloudBillingSettings } from '#cloud/settings-billing.js';
-import { FileSystemSettings } from '#components/settings/filesystem-settings.js';
-import { GeneralSettings } from '#components/settings/general-settings.js';
-import { DataControlsSettings } from '#components/settings/data-controls-settings.js';
-import { ExperimentalSettings } from '#components/settings/experimental-settings.js';
-import { ModelSettings } from '#components/settings/model-settings.js';
-import { AgentSettings } from '#components/settings/agent-settings.js';
-import { SettingsAuthGate } from '#components/settings/settings-auth-gate.js';
-import { RemoteComputeSettings } from '#components/settings/remote-compute-settings.js';
-import { ComputeReuseSettings } from '#components/settings/compute-reuse-settings.js';
-import { MachinesSettings } from '#components/settings/machines-settings.js';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 
@@ -37,93 +22,7 @@ import {
 } from '#components/ui/sidebar.js';
 import type { SettingId } from '#components/settings/settings-registry.js';
 import { settingsSections, searchSettings } from '#components/settings/settings-registry.js';
-import { SettingsItem } from '#components/settings/settings-item.js';
-
-/** Keep authenticated sections behind their existing gate and mount only the active section. */
-function SettingsContent({ section }: { readonly section: SettingsSection }): React.JSX.Element {
-  switch (section) {
-    case 'browser': {
-      return (
-        <SettingsItem settingId='web-browser'>
-          <BrowserSettingsPanel />
-        </SettingsItem>
-      );
-    }
-    case 'general': {
-      return <GeneralSettings />;
-    }
-    case 'account': {
-      return (
-        <SettingsAuthGate>
-          <SettingsItem settingId='profile'>
-            <AccountSettings />
-          </SettingsItem>
-        </SettingsAuthGate>
-      );
-    }
-    case 'security': {
-      return (
-        <SettingsAuthGate>
-          <SecuritySettings />
-        </SettingsAuthGate>
-      );
-    }
-    case 'repositories': {
-      return (
-        <SettingsAuthGate>
-          <GithubRepositorySettings />
-        </SettingsAuthGate>
-      );
-    }
-    case 'billing': {
-      return (
-        <SettingsAuthGate>
-          <CloudBillingSettings />
-        </SettingsAuthGate>
-      );
-    }
-    case 'data-controls': {
-      return <DataControlsSettings />;
-    }
-    case 'compute': {
-      return (
-        <>
-          <SettingsItem settingId='compute-reuse'>
-            <ComputeReuseSettings />
-          </SettingsItem>
-          <SettingsAuthGate>
-            <SettingsItem settingId='tau-host'>
-              <RemoteComputeSettings />
-            </SettingsItem>
-          </SettingsAuthGate>
-        </>
-      );
-    }
-    case 'machines': {
-      return (
-        <SettingsItem settingId='machines'>
-          <MachinesSettings />
-        </SettingsItem>
-      );
-    }
-    case 'models': {
-      return (
-        <SettingsItem settingId='model-picker'>
-          <ModelSettings />
-        </SettingsItem>
-      );
-    }
-    case 'agents': {
-      return <AgentSettings />;
-    }
-    case 'filesystem': {
-      return <FileSystemSettings />;
-    }
-    case 'experimental': {
-      return <ExperimentalSettings />;
-    }
-  }
-}
+import { DeferredSettingsContent } from '#components/settings/deferred-settings-content.js';
 
 /** URL-backed settings navigation with a searchable catalogue of individual controls. */
 export function SettingsDialog(): React.JSX.Element {
@@ -376,7 +275,7 @@ export function SettingsSurface({
     >
       <div className='mx-auto flex max-w-3xl flex-col gap-6 [&_[data-settings-section]]:gap-3 [&_[data-settings-section]]:border-0 [&_[data-settings-section]]:bg-transparent [&_[data-settings-section]]:py-0 [&_[data-settings-section]>[data-slot=card-content]]:rounded-xl [&_[data-settings-section]>[data-slot=card-content]]:border [&_[data-settings-section]>[data-slot=card-content]]:bg-card [&_[data-settings-section]>[data-slot=card-content]]:py-4 [&_[data-settings-section]>[data-slot=card-content]:has(>[data-slot=settings-item])]:gap-0 [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:pt-4 [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:absolute [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:inset-x-0 [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:top-0 [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:border-t [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:content-[""] [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:last-child)]:pb-4 [&_[data-settings-section]>[data-slot=card-header]]:px-0 [&_[data-settings-section]>[data-slot=card-header]_[data-slot=card-description]]:hidden [&_[data-settings-section]>[data-slot=card-header]_[data-slot=card-title]]:text-sm [&_[data-settings-section]>[data-slot=card-header]_[data-slot=card-title]]:font-medium [&_[data-slot=card]]:shadow-none [&_h2]:text-sm [&_h2]:font-medium'>
         {isMobile ? null : <h1 className='text-lg font-medium'>{active.label}</h1>}
-        <SettingsContent section={activeSection} />
+        <DeferredSettingsContent section={activeSection} />
       </div>
     </div>
   );

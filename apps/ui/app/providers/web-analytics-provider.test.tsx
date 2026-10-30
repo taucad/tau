@@ -97,9 +97,8 @@ const readBlob = async (body: Blob): Promise<ArrayBuffer> =>
   });
 
 /**
- * The JSON the SDK put on the wire, whichever encoding it chose. The web host sets
- * `disable_compression`, so a capture is base64 text today (`#lib/web-posthog.lib`),
- * but the SDK still gzips in other configurations and this reads either.
+ * The JSON the SDK put on the wire, whichever encoding it chose: gzip bytes under
+ * `?compression=gzip-js`, or base64 text where the SDK chose not to compress.
  *
  * @param encoded - One captured beacon body: text, or the bytes a Blob body was read into.
  * @returns The decoded JSON text.
@@ -232,8 +231,9 @@ describe('WebAnalyticsProvider', () => {
     expect(init).toHaveBeenCalledOnce();
     expect(posthog.has_opted_out_capturing()).toBe(false);
     expect(posthog._isIdentified()).toBe(false);
-    const initialPageviews = pageviews(capture.mock.calls);
-    expect(initialPageviews).toBe(1);
+    await vi.waitFor(() => {
+      expect(pageviews(capture.mock.calls)).toBe(1);
+    });
     await vi.waitFor(async () => {
       const events = await transmittedEvents();
       expect(events.filter(({ event }) => event === '$pageview')).toHaveLength(1);

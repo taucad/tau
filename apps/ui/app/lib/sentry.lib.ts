@@ -198,12 +198,40 @@ export const initSentry = (): void => {
  * Report an error a boundary caught. A no-op before `initSentry` ran or without a DSN.
  *
  * @param error - The caught value.
+ * @returns The event's id, which the crash prompt attaches its feedback to (SB12), or `undefined`
+ * when there was no SDK to capture it.
  * @public
  */
-export const captureUiError = (error: unknown): void => {
+export const captureUiError = (error: unknown): string | undefined => {
   if (Sentry.isInitialized()) {
-    Sentry.captureException(error);
+    return Sentry.captureException(error);
   }
+  return undefined;
+};
+
+/**
+ * Send what someone wrote about a crash they saw, as Sentry user feedback on that crash's event
+ * (SB12, D9). Nothing is collected automatically: the message is typed, the email is optional and
+ * empty by default, and no screenshot is taken (the screen after a reload shows nothing useful and
+ * could carry private model or file content).
+ *
+ * @param feedback - The message, the optional email, and the event the feedback belongs to.
+ * @returns Whether the SDK took it.
+ * @public
+ */
+export const captureUserFeedback = (
+  feedback: Readonly<{ message: string; email?: string; associatedEventId?: string }>,
+): boolean => {
+  if (!Sentry.isInitialized()) {
+    return false;
+  }
+  Sentry.captureFeedback({
+    message: feedback.message,
+    source: 'tau.crash-prompt',
+    ...(feedback.email === undefined || feedback.email === '' ? {} : { email: feedback.email }),
+    ...(feedback.associatedEventId === undefined ? {} : { associatedEventId: feedback.associatedEventId }),
+  });
+  return true;
 };
 
 /**

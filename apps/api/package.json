@@ -16,6 +16,7 @@
     "@taucad/billing": "workspace:*",
     "@taucad/chat": "workspace:*",
     "@taucad/events": "workspace:*",
+    "@taucad/file-links": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/jobs": "workspace:*",
     "@taucad/share": "workspace:*",

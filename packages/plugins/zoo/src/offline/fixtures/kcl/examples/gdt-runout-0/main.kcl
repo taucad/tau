@@ -1,0 +1,52 @@
+@settings(kclVersion = 3.0)
+
+annotationPlane = offsetPlane(XZ, offset = 24mm)
+
+controlledSketch = sketch(on = YZ) {
+  upperPerimeter = arc(start = [var 10mm, var 0mm], end = [var -10mm, var 0mm], center = [var 0mm, var 0mm])
+  lowerPerimeter = arc(start = [var -10mm, var 0mm], end = [var 10mm, var 0mm], center = [var 0mm, var 0mm])
+  coincident([upperPerimeter.end, lowerPerimeter.start])
+  coincident([lowerPerimeter.end, upperPerimeter.start])
+}
+
+controlledShaft = extrude(
+  region(segments = [controlledSketch.upperPerimeter, controlledSketch.lowerPerimeter]),
+  length = -58mm,
+  tagStart = $controlledShoulder,
+  tagEnd = $controlledFreeEnd
+)
+
+controlledUpperShoulderEdge = { sideFaces = [
+  controlledShaft.sketch.tags.upperPerimeter,
+  controlledShoulder
+] }
+
+datumSketch = sketch(on = YZ) {
+  perimeter = circle(start = [var 18mm, var 0mm], center = [var 0mm, var 0mm])
+}
+
+datumShaft = extrude(
+  region(segments = [datumSketch.perimeter]),
+  length = 36mm,
+  tagEnd = $datumEnd
+)
+
+gdt::datum(
+  face = datumShaft.sketch.tags.perimeter,
+  name = "A",
+  framePosition = [18mm, -28mm],
+  framePlane = annotationPlane,
+  leaderScale = 1.15,
+  fontSize = 6mm
+)
+
+gdt::runout(
+  edges = [controlledUpperShoulderEdge],
+  tolerance = 0.2mm,
+  datums = ["A"],
+  precision = 1,
+  framePosition = [12mm, 48mm],
+  framePlane = annotationPlane,
+  leaderScale = 1.15,
+  fontSize = 6mm
+)

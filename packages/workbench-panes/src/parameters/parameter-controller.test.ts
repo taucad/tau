@@ -128,4 +128,15 @@ describe('createParameterController', () => {
     });
     expect(controller.useScrub('main.ts')).toEqual({});
   });
+
+  it('should write a form edit as a group replacement carrying its base and the pane editor', async () => {
+    const { transport } = transportWith(committed);
+    const controller = createParameterController({ transport });
+
+    await controller.editValues('main.ts', manifest, { values: { width: 3 }, base: { width: 2 } });
+
+    const operation = vi.mocked(transport.propose).mock.calls[0]?.[0].request.operation;
+    expect(operation).toMatchObject({ kind: 'replace-group-values', values: { width: 3 }, base: { width: 2 } });
+    expect(operation?.kind === 'replace-group-values' ? operation.editor : undefined).toMatch(/^pane:/u);
+  });
 });

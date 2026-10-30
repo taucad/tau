@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { useState, useMemo, useCallback } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Folder } from 'lucide-react';
 import { useDirectoryListing } from '@taucad/fs-client/react/use-directory-listing';
 import { classifyDirectoryListingError } from '@taucad/fs-client/directory-listing';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
@@ -29,6 +29,14 @@ type FileSelectorProps = {
   readonly dataSource?: FileSelectorDataSource & { readonly revision?: number };
   /** Include directories in search results (only applies to context-based data source). */
   readonly shouldIncludeDirectories?: boolean;
+  /** Choose a folder instead of a file: only folders are listed, and `''` selects the root. */
+  readonly shouldShowDirectoriesOnly?: boolean;
+  /** The root folder's name in the breadcrumbs and, when choosing folders, on the trigger when the root is chosen. */
+  readonly rootLabel?: string;
+  /** The trigger's id, so a visible label can name it. */
+  readonly id?: string;
+  /** The ids naming the trigger. */
+  readonly 'aria-labelledby'?: string;
   readonly selectedFile: string | undefined;
   readonly onSelect: (file: string) => void;
   readonly placeholder?: string;
@@ -76,9 +84,33 @@ function useFileSelectorContextSearch(
 const describeListingError = (error: unknown, path: string): string =>
   classifyDirectoryListingError(error, path).message;
 
+/**
+ * What the trigger names the selection with: a file by its name, a folder by its whole path since folder names repeat,
+ * and the root by its label.
+ *
+ * @param selectedFile - The selection.
+ * @param isDirectory - Whether the selection is a folder.
+ * @param rootLabel - The root folder's name.
+ * @returns The name, or `undefined` to show the placeholder.
+ */
+const triggerLabel = (
+  selectedFile: string | undefined,
+  isDirectory: boolean,
+  rootLabel: string | undefined,
+): string | undefined => {
+  if (isDirectory) {
+    return selectedFile === '' ? rootLabel : selectedFile;
+  }
+  return selectedFile ? selectedFile.split('/').pop() : undefined;
+};
+
 export function FileSelector({
   dataSource: explicitSource,
   shouldIncludeDirectories,
+  shouldShowDirectoriesOnly = false,
+  rootLabel,
+  id,
+  'aria-labelledby': ariaLabelledBy,
   selectedFile,
   onSelect,
   placeholder = 'Select file…',
@@ -95,7 +127,7 @@ export function FileSelector({
   initialPath,
 }: FileSelectorProps): React.JSX.Element {
   const fileManager = useOptionalFileManager();
-  const contextSearch = useFileSelectorContextSearch(shouldIncludeDirectories);
+  const contextSearch = useFileSelectorContextSearch(shouldIncludeDirectories ?? shouldShowDirectoriesOnly);
   const isExplicitBrowse = explicitSource !== undefined;
 
   const [open, setOpen] = useState(false);
@@ -165,18 +197,26 @@ export function FileSelector({
     [onSelect],
   );
 
-  const selectedFileName = selectedFile ? selectedFile.split('/').pop() : undefined;
+  const selectedLabel = triggerLabel(selectedFile, shouldShowDirectoriesOnly, rootLabel);
 
   const triggerButton = children ?? (
-    <Button variant='outline' className={cn('w-full justify-between', className)} disabled={isDisabled || isLoading}>
+    <Button
+      id={id}
+      aria-labelledby={ariaLabelledBy}
+      variant='outline'
+      className={cn('w-full justify-between', className)}
+      disabled={isDisabled || isLoading}
+    >
       <div className='flex min-w-0 flex-1 items-center gap-2'>
         {isLoading ? (
           <Loader className='size-4' />
+        ) : shouldShowDirectoriesOnly ? (
+          <Folder className='size-4 shrink-0' />
         ) : selectedFile ? (
           <FileExtensionIcon filename={selectedFile} className='size-4 shrink-0' />
         ) : undefined}
-        <span className={cn('truncate', !selectedFile && 'font-normal text-muted-foreground')}>
-          {selectedFileName ?? placeholder}
+        <span className={cn('truncate', selectedLabel === undefined && 'font-normal text-muted-foreground')}>
+          {selectedLabel ?? placeholder}
         </span>
       </div>
       <ChevronDown className='size-4 shrink-0' />
@@ -190,6 +230,8 @@ export function FileSelector({
       entries={isExplicitBrowse || isSearching ? browser.entries : contextEntries}
       status={isExplicitBrowse || isSearching ? browser.status : contextStatus}
       selectedFile={selectedFile}
+      shouldShowDirectoriesOnly={shouldShowDirectoriesOnly}
+      rootLabel={rootLabel}
       searchPlaceholder={searchPlaceholder}
       emptyMessage={emptyMessage}
       virtualizationThreshold={virtualizationThreshold}

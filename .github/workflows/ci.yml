@@ -8,6 +8,13 @@ on:
     # checks — release gate is staging smoke + human merge.
     branches-ignore:
       - production
+  # The merge queue runs the required checks on the exact commit that will land:
+  # the PR on top of current `main` and every PR queued ahead of it. A green PR run
+  # only proves the PR against the `main` its run started from, and required checks
+  # are not strict, so two individually green PRs could land as a red `main`
+  # (2026-10-29: #1133 over #1239, incidents/2026-10-29-tau-main-red-revisions-tests).
+  merge_group:
+    types: [checks_requested]
 env:
   pnpm_config_verify_deps_before_run: warn
   NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}

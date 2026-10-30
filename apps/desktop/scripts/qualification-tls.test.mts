@@ -29,7 +29,10 @@ const fixtureOwner = (directory: string) => {
     execute(name, args) {
       state.calls.push(`${name} ${args.join(' ')}`);
       if (name === 'openssl') {
-        return execFileSync(name, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+        return execFileSync(name, args, {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
       }
       if (name === 'certutil') {
         if (args[0] === '-L') {
@@ -107,7 +110,9 @@ const main = async (): Promise<void> => {
     const abandonedOwner = fixtureOwner(abandoned);
     await cleanupQualificationTls(abandoned, abandonedOwner.owner);
     assert.equal(abandonedOwner.state.calls.length, 0);
-    await assert.rejects(readFile(join(abandoned, 'mirror-ca.key')), { code: 'ENOENT' });
+    await assert.rejects(readFile(join(abandoned, 'mirror-ca.key')), {
+      code: 'ENOENT',
+    });
     const first = join(root, 'partial-import');
     await mkdir(first);
     const imported = fixtureOwner(first);
@@ -119,7 +124,9 @@ const main = async (): Promise<void> => {
       return true;
     });
     assert.equal(imported.state.nss, '');
-    await assert.rejects(readFile(join(first, 'mirror-ca.key')), { code: 'ENOENT' });
+    await assert.rejects(readFile(join(first, 'mirror-ca.key')), {
+      code: 'ENOENT',
+    });
     const second = join(root, 'partial-system');
     await mkdir(second);
     const partial = fixtureOwner(second);
@@ -135,7 +142,10 @@ const main = async (): Promise<void> => {
     assert.equal(partial.state.refreshes, 1, 'system roots refreshed after partial import');
     assert.ok(partial.state.nss);
     const journalPath = join(second, 'mirror-trust.json');
-    const journal = JSON.parse(await readFile(journalPath, 'utf8')) as { pending: string[]; fingerprint: string };
+    const journal = JSON.parse(await readFile(journalPath, 'utf8')) as {
+      pending: string[];
+      fingerprint: string;
+    };
     assert.deepEqual(journal.pending, ['nss']);
     const originalJournal = await readFile(journalPath, 'utf8');
     await writeFile(journalPath, JSON.stringify({ ...journal, fingerprint: 'A'.repeat(40) }));
@@ -180,45 +190,132 @@ const main = async (): Promise<void> => {
     assert.deepEqual(cleanedJournal.pending, []);
     const mac = join(root, 'mac-partial');
     await mkdir(mac);
-    const macState = { trust: false, certificate: false, failCleanup: true, fingerprint: '' };
+    const macState = {
+      certificate: false,
+      trusted: false,
+      failDelete: true,
+      fingerprint: '',
+      calls: [] as string[],
+    };
+    const notTrusted = () =>
+      Object.assign(new Error('Command failed: security verify-cert'), {
+        stdout: 'Cert Verify Result: CSSMERR_TP_NOT_TRUSTED\n',
+      });
     const macOwner: QualificationTlsOwner = {
       platform: 'darwin',
       home: join(mac, 'home'),
       execute(name, args) {
         if (name === 'openssl') {
-          return execFileSync(name, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+          return execFileSync(name, args, {
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
         }
-        assert.equal(name, 'security');
-        if (args[0] === 'add-trusted-cert') {
-          macState.trust = true;
+        macState.calls.push(`${name} ${args.join(' ')}`);
+        if (name === 'sudo') {
+          assert.equal(args[0], '-n');
+        }
+        const [tool, ...rest] = name === 'sudo' ? args.slice(1) : [name, ...args];
+        assert.equal(tool, 'security');
+        assert.ok(!rest.includes('remove-trusted-cert'), 'trust-settings removal blocks on a hosted runner');
+        if (rest[0] === 'add-trusted-cert') {
+          assert.equal(name, 'sudo');
+          assert.deepEqual(rest.slice(1, 6), ['-d', '-r', 'trustRoot', '-k', '/Library/Keychains/System.keychain']);
+          const journal = JSON.parse(readFileSync(join(mac, 'mirror-trust.json'), 'utf8')) as { pending: string[] };
+          assert.deepEqual(journal.pending, ['macSystemTrust'], 'cleanup intent persisted before trust import');
           macState.certificate = true;
-          macState.fingerprint = new X509Certificate(readFileSync(args.at(-1)!)).fingerprint.replaceAll(':', '');
-          throw new Error('Mac import reported failure after mutation');
-        }
-        if (args[0] === 'remove-trusted-cert') {
-          if (macState.failCleanup) {
-            throw new Error('Mac trust cleanup temporarily failed');
-          }
-          macState.trust = false;
+          macState.trusted = true;
+          macState.fingerprint = new X509Certificate(readFileSync(rest.at(-1)!)).fingerprint.replaceAll(':', '');
           return '';
         }
-        if (args[0] === 'find-certificate') {
+        if (rest[0] === 'verify-cert') {
+          if (macState.trusted) {
+            // The first verification fails after a successful mutation, exercising rollback.
+            if (macState.calls.filter((call) => call.includes('verify-cert')).length === 1) {
+              throw new Error('Mac verification failed after mutation');
+            }
+            return '...certificate verification successful.';
+          }
+          throw notTrusted();
+        }
+        if (rest[0] === 'find-certificate') {
+          assert.equal(rest.at(-1), '/Library/Keychains/System.keychain');
           return macState.certificate ? `SHA-1 hash: ${macState.fingerprint}` : '';
         }
-        if (args[0] === 'delete-certificate') {
-          assert.equal(args[2], macState.fingerprint);
+        if (rest[0] === 'delete-certificate') {
+          assert.equal(name, 'sudo');
+          assert.equal(rest[2], macState.fingerprint);
+          if (macState.failDelete) {
+            throw new Error('Mac certificate removal temporarily failed');
+          }
           macState.certificate = false;
+          macState.trusted = false;
           return '';
         }
         throw new Error('Unexpected Mac trust command');
       },
     };
-    await assert.rejects(prepareQualificationTls(mac, macOwner), AggregateError);
-    assert.equal(macState.certificate, false, 'keychain removal attempted despite trust-settings cleanup failure');
-    assert.equal(macState.trust, true);
-    macState.failCleanup = false;
+    await assert.rejects(prepareQualificationTls(mac, macOwner), (error: unknown) => {
+      assert.ok(error instanceof AggregateError);
+      assert.match(String(error.errors[0]), /trust verification did not run/u);
+      assert.ok(error.errors[1] instanceof AggregateError, 'failed removal is reported, not hidden');
+      return true;
+    });
+    assert.equal(macState.certificate, true, 'failed removal leaves the run certificate present');
+    assert.deepEqual(JSON.parse(await readFile(join(mac, 'mirror-trust.json'), 'utf8')).pending, ['macSystemTrust']);
+    macState.failDelete = false;
     await cleanupQualificationTls(mac, macOwner);
-    assert.equal(macState.trust, false);
+    assert.equal(macState.certificate, false);
+    assert.equal(macState.trusted, false);
+    assert.deepEqual(JSON.parse(await readFile(join(mac, 'mirror-trust.json'), 'utf8')).pending, []);
+    const macSuccess = join(root, 'mac-success');
+    await mkdir(macSuccess);
+    let stillTrusted = false;
+    let macSuccessFingerprint = '';
+    const macSuccessOwner: QualificationTlsOwner = {
+      platform: 'darwin',
+      home: join(macSuccess, 'home'),
+      execute(name, args) {
+        if (name === 'openssl') {
+          return execFileSync(name, args, {
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
+        }
+        const rest = name === 'sudo' ? args.slice(2) : args;
+        if (rest[0] === 'add-trusted-cert') {
+          macSuccessFingerprint = new X509Certificate(readFileSync(rest.at(-1)!)).fingerprint.replaceAll(':', '');
+          stillTrusted = true;
+          return '';
+        }
+        if (rest[0] === 'verify-cert') {
+          if (stillTrusted) {
+            return '...certificate verification successful.';
+          }
+          throw notTrusted();
+        }
+        if (rest[0] === 'find-certificate') {
+          return `SHA-1 hash: ${macSuccessFingerprint}`;
+        }
+        if (rest[0] === 'delete-certificate') {
+          // Deletion reports success but trust stays effective: cleanup must refuse to call this clean.
+          return '';
+        }
+        throw new Error('Unexpected Mac trust command');
+      },
+    };
+    const macTrust = await prepareQualificationTls(macSuccess, macSuccessOwner);
+    await assert.rejects(macTrust.remove(), (error: unknown) => {
+      assert.ok(error instanceof AggregateError);
+      assert.match(String(error.errors[0]), /still trusted after removal/u);
+      return true;
+    });
+    assert.deepEqual(JSON.parse(await readFile(join(macSuccess, 'mirror-trust.json'), 'utf8')).pending, [
+      'macSystemTrust',
+    ]);
+    stillTrusted = false;
+    await cleanupQualificationTls(macSuccess, macSuccessOwner);
+    assert.deepEqual(JSON.parse(await readFile(join(macSuccess, 'mirror-trust.json'), 'utf8')).pending, []);
     const windows = join(root, 'windows-partial');
     await mkdir(windows);
     let windowsFingerprint = '';
@@ -227,7 +324,10 @@ const main = async (): Promise<void> => {
       home: join(windows, 'home'),
       execute(name, args) {
         if (name === 'openssl') {
-          return execFileSync(name, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+          return execFileSync(name, args, {
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
         }
         assert.equal(name, 'certutil');
         assert.equal(args[0], '-user');

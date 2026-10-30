@@ -15,11 +15,38 @@ const nativeOwner = (): QualificationTlsOwner => ({
   platform: process.platform,
   home: process.env['HOME'] ?? process.env['USERPROFILE'] ?? '',
   execute: (name, args) =>
-    execFileSync(name, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000 }),
+    execFileSync(name, args, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 30_000,
+    }),
 });
-const operationSchema = z.enum(['nss', 'windows', 'macTrust', 'macCertificate', 'linuxFile', 'linuxRefresh']);
+const operationSchema = z.enum(['nss', 'windows', 'macSystemTrust', 'linuxFile', 'linuxRefresh']);
+/*
+ * A hosted macOS runner has no session that can answer a trust-settings authorization: user-domain
+ * `add-trusted-cert` and admin-domain `remove-trusted-cert` both block on SecurityAgent until killed, and
+ * `authorizationdb write` is denied. Root may add a new admin-domain root to the System keychain without a
+ * prompt, and deleting that certificate ends its trust, which cleanup verifies rather than assumes.
+ */
+const macSystemKeychain = '/Library/Keychains/System.keychain';
+const assertMacTrust = (command: QualificationTlsOwner['execute'], caPath: string, expected: boolean): void => {
+  let output: string;
+  try {
+    command('security', ['verify-cert', '-c', caPath, '-p', 'basic']);
+    output = 'trusted';
+  } catch (error) {
+    const { stdout, stderr } = error as { stdout?: string; stderr?: string };
+    output = `${stdout ?? ''}${stderr ?? ''}`;
+    if (!/CSSMERR_TP_NOT_TRUSTED/u.test(output)) {
+      throw new Error('macOS trust verification did not run', { cause: error });
+    }
+  }
+  if ((output === 'trusted') !== expected) {
+    throw new Error(expected ? 'Run CA is not trusted after installation' : 'Run CA is still trusted after removal');
+  }
+};
 const journalSchema = z.strictObject({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.literal(2),
   id: z.uuid(),
   platform: z.enum(['linux', 'win32', 'darwin']),
   home: z.string(),
@@ -52,7 +79,6 @@ const removeOperation = async (
   const nickname = `tau-qualification-${journal.id}`;
   const caPath = join(directory, 'mirror-ca.crt');
   const nss = `sql:${join(owner.home, '.pki/nssdb')}`;
-  const keychain = join(owner.home, 'Library/Keychains/login.keychain-db');
   const linuxPath = `/usr/local/share/ca-certificates/${nickname}.crt`;
   switch (operation) {
     case 'nss': {
@@ -73,15 +99,12 @@ const removeOperation = async (
       }
       break;
     }
-    case 'macTrust': {
-      command('security', ['remove-trusted-cert', caPath]);
-      break;
-    }
-    case 'macCertificate': {
-      const entries = command('security', ['find-certificate', '-a', '-Z', keychain]);
+    case 'macSystemTrust': {
+      const entries = command('security', ['find-certificate', '-a', '-Z', macSystemKeychain]);
       if (entries.includes(journal.fingerprint)) {
-        command('security', ['delete-certificate', '-Z', journal.fingerprint, keychain]);
+        command('sudo', ['-n', 'security', 'delete-certificate', '-Z', journal.fingerprint, macSystemKeychain]);
       }
+      assertMacTrust(command, caPath, false);
       break;
     }
     case 'linuxFile': {
@@ -159,7 +182,10 @@ export const cleanupQualificationTls = async (directory: string, owner = nativeO
       continue;
     }
     try {
-      await removeOperation(operation, journal, { directory: canonical, owner });
+      await removeOperation(operation, journal, {
+        directory: canonical,
+        owner,
+      });
       journal.pending = journal.pending.filter((pending) => pending !== operation);
       await save(canonical, journal);
     } catch (error) {
@@ -272,7 +298,7 @@ export const prepareQualificationTls = async (
     const ca = await readFile(caPath, 'utf8');
     const parsed = new X509Certificate(ca);
     journal = journalSchema.parse({
-      schemaVersion: 1,
+      schemaVersion: 2,
       id,
       platform: owner.platform,
       home: owner.home,
@@ -294,15 +320,19 @@ export const prepareQualificationTls = async (
         break;
       }
       case 'darwin': {
-        await acquire(['macTrust', 'macCertificate'], () => {
-          command('security', [
+        await acquire(['macSystemTrust'], () => {
+          command('sudo', [
+            '-n',
+            'security',
             'add-trusted-cert',
+            '-d',
             '-r',
             'trustRoot',
             '-k',
-            join(owner.home, 'Library/Keychains/login.keychain-db'),
+            macSystemKeychain,
             caPath,
           ]);
+          assertMacTrust(command, caPath, true);
         });
         break;
       }

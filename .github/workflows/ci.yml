@@ -498,7 +498,7 @@ jobs:
         run: |
           pnpm size:build
           pnpm size:check || {
-            echo "::error title=Size budget exceeded::Raise a limit inside the docs/policy/npm-policy.md § 7 band yourself (growth merged from main counts): update its measured note, run pnpm size:raises and report the table row as an FYI. Ask the operator only when size:raises exits 1."
+            echo "::error title=Size check failed::If the output above shows an entry over its limit, raise that limit inside the docs/policy/npm-policy.md § 7 band yourself (growth merged from main counts): update its measured note, run pnpm size:raises and report the table row as an FYI. Ask the operator only when size:raises exits 1. Any other failure is a build or configuration error to fix, not a budget to raise."
             exit 1
           }
 

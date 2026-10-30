@@ -2029,8 +2029,15 @@ describe.runIf(enabled)('shell qualification', () => {
         const pending = first.map(async (index) => call(index));
         let observedReady = 0;
         try {
+          /*
+           * The claim is that all eight are held at once, not that they get there quickly: the limiter is proved by
+           * `highWater()` below, and every isolation assertion is unchanged. The window is patience for the machine,
+           * and the two-core Intel macOS runner needs more of it than Apple silicon — it passed attempt 1 and lost
+           * attempt 2 inside a minute while starting eight Seatbelt shells over the previous attempt's teardown. A
+           * limiter that ever admitted fewer than eight would still fail here, however long the wait.
+           */
           expect(
-            await eventually(() => first.every((index) => existsSync(readyPath(index))), 60_000),
+            await eventually(() => first.every((index) => existsSync(readyPath(index))), 180_000),
             'eight native commands must be simultaneously held at the release barrier',
           ).toBe(true);
           observedReady = first.filter((index) => existsSync(readyPath(index))).length;

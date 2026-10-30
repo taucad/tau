@@ -134,6 +134,11 @@ export type ActiveChatExecution = {
    * composer names it; it stays this device's placement for the tab that can reach it.
    */
   heldPlacement?: TauAgentHostId | undefined;
+  /**
+   * The execution is not known yet: Home's record, which may hold one of its own, is still being read. The
+   * composer shows its agent control loading rather than a choice the record is about to replace.
+   */
+  isPending?: boolean;
 };
 
 export type ChatAgentActivity = 'ready' | 'working' | 'approval-required' | 'stopping';
@@ -647,8 +652,10 @@ function useExecutionModel(activeExecution: ActiveChatExecution): ActiveChatMode
 function useHomeExecution(recordRef: ComposerRecordRef): ActiveChatExecution {
   const { defaultExecution, rememberExecution } = useModels();
   const stored = useSelector(recordRef, (snapshot) => snapshot.context.record?.execution);
+  const isLoading = useSelector(recordRef, (snapshot) => snapshot.matches({ lifecycle: 'loading' }));
   const [chosen, setChosen] = useState<CadAgentExecution>();
   const execution = chosen ?? stored ?? defaultExecution;
+  const isPending = chosen === undefined && stored === undefined && isLoading;
   const setActiveExecution = useCallback(
     (next: CadAgentExecution) => {
       setChosen(next);
@@ -657,7 +664,7 @@ function useHomeExecution(recordRef: ComposerRecordRef): ActiveChatExecution {
     },
     [recordRef, rememberExecution],
   );
-  return useMemo(() => ({ execution, setActiveExecution }), [execution, setActiveExecution]);
+  return useMemo(() => ({ execution, setActiveExecution, isPending }), [execution, setActiveExecution, isPending]);
 }
 
 function useConsumeDraft(

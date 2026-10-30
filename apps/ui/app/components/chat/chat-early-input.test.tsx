@@ -9,7 +9,7 @@ const send = vi.hoisted(() => vi.fn());
 const draftActorRef = { send };
 vi.mock('#hooks/active-chat-provider.js', () => ({ useChatComposer: () => ({ draftActorRef }) }));
 
-describe('Home early input', () => {
+describe("the composer's early input", () => {
   beforeEach(() => {
     send.mockClear();
   });
@@ -22,11 +22,14 @@ describe('Home early input', () => {
   ])('should adopt $text with edited=$edited and focused=$focused', async ({ text, edited, focused }) => {
     let snapshot: EarlyChatInput | undefined;
     const content = (
-      <ChatEarlyInput>
-        {(input) => {
+      <ChatEarlyInput
+        isHostReady
+        placeholder='Ask Tau'
+        onAdopt={(input) => {
           snapshot = input;
-          return <div>Rich editor</div>;
         }}
+      >
+        <div>Rich editor</div>
       </ChatEarlyInput>
     );
     const container = document.createElement('div');
@@ -62,14 +65,67 @@ describe('Home early input', () => {
     }
   });
 
+  it('should serve only the editor area, with none of the composer box around it', () => {
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(
+      <ChatEarlyInput isHostReady={false} placeholder='Ask Tau' onAdopt={vi.fn()}>
+        <div>Rich editor</div>
+      </ChatEarlyInput>,
+    );
+    const input = within(container).getByRole<HTMLTextAreaElement>('textbox', { name: 'Ask Tau' });
+    // The composer's frame, border and bar belong to the composer itself, which renders around this input.
+    expect(container.firstElementChild).toBe(input);
+    expect(input).not.toHaveClass('border', 'rounded-2xl', 'shadow-md');
+    expect(input).toHaveAttribute('placeholder', 'Ask Tau');
+  });
+
+  it('should keep accepting text until the editor exists, then hand it over', async () => {
+    const onAdopt = vi.fn();
+    const slot = (isHostReady: boolean): React.JSX.Element => (
+      <ChatEarlyInput isHostReady={isHostReady} placeholder='Ask Tau' onAdopt={onAdopt}>
+        <div>Rich editor</div>
+      </ChatEarlyInput>
+    );
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(slot(false));
+    document.body.append(container);
+    const input = within(container).getByRole<HTMLTextAreaElement>('textbox');
+    Object.assign(input, { tauEarlyDraft: { edited: true, composing: false } });
+    input.value = 'A bracket';
+    const root = hydrateRoot(container, slot(false));
+    try {
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(within(container).getByRole('textbox')).toBe(input);
+      expect(onAdopt).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+      await act(async () => {
+        root.render(slot(true));
+      });
+      expect(within(container).getByText('Rich editor')).toBeInTheDocument();
+      expect(within(container).queryByRole('textbox')).not.toBeInTheDocument();
+      expect(onAdopt).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ text: 'A bracket', edited: true }));
+      expect(send).toHaveBeenCalledExactlyOnceWith({ type: 'setDraftText', text: 'A bracket', adoptedEdit: true });
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
   it('should retain an active native composition until its final input arrives', async () => {
     let snapshot: EarlyChatInput | undefined;
     const content = (
-      <ChatEarlyInput>
-        {(input) => {
+      <ChatEarlyInput
+        isHostReady
+        placeholder='Ask Tau'
+        onAdopt={(input) => {
           snapshot = input;
-          return <div>Rich editor</div>;
         }}
+      >
+        <div>Rich editor</div>
       </ChatEarlyInput>
     );
     const container = document.createElement('div');

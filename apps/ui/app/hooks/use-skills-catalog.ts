@@ -167,10 +167,12 @@ export function useSkillsCatalogState(): SkillsCatalogState {
     () => ({
       commands: snapshot.value?.commands ?? emptySkills,
       prompt: snapshot.value?.prompt ?? emptySkills,
-      status: snapshot.status,
+      /* No service yet means storage is still starting, not that the catalog closed: a closed status here
+       * put "Skill updates unavailable" in the composer for the first seconds of every load. */
+      status: service === undefined ? 'registering' : snapshot.status,
       error: snapshot.error,
       retry,
     }),
-    [snapshot, retry],
+    [service, snapshot, retry],
   );
 }

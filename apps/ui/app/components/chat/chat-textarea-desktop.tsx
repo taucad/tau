@@ -1,5 +1,6 @@
 import { chatComposerPaddingClassName } from '#components/chat/chat-input-styles.js';
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ChatEarlyInput } from '#components/chat/chat-early-input.js';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import type { Editor } from '@tiptap/core';
 import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
@@ -39,6 +40,7 @@ import type { CadReference } from '@taucad/chat/references';
 import {
   buildEditorContentJson,
   cadReferencesOfChips,
+  chatComposerPlaceholder,
   extractContent,
   useChatEditor,
 } from '#components/chat/tiptap/use-chat-editor.js';
@@ -56,7 +58,8 @@ const dragOverlayCopy: Record<ChatTextareaDragKind, string> = {
 };
 
 type ChatTextareaDesktopProperties = {
-  readonly earlyInput?: EarlyChatInput;
+  /** Serve a native input in the editor area until the rich editor exists (see `ChatEarlyInput`). */
+  readonly enableEarlyInput?: boolean;
   readonly className?: string;
   readonly enableAutoFocus?: boolean;
   readonly enableContextActions?: boolean;
@@ -202,7 +205,7 @@ const sendRefusalOf = (input: {
  * the tooltip tree entirely.
  */
 export const ChatTextareaDesktop = memo(function ({
-  earlyInput,
+  enableEarlyInput = false,
   className,
   enableAutoFocus = true,
   enableContextActions = true,
@@ -277,8 +280,11 @@ export const ChatTextareaDesktop = memo(function ({
     .join('\n');
   const knownTokens = useMemo(() => new Set(knownTokensKey === '' ? [] : knownTokensKey.split('\n')), [knownTokensKey]);
 
+  /* Texts the editor reported that no render has shown back yet; see the rehydration below. */
+  const unconfirmedTextsRef = useRef<string[]>([]);
   const handleEditorUpdate = useCallback(
     (content: { text: string }) => {
+      unconfirmedTextsRef.current.push(content.text);
       setDraftText(content.text);
     },
     [setDraftText],
@@ -339,8 +345,10 @@ export const ChatTextareaDesktop = memo(function ({
     }
   }, [dictation.cancel, dictation.phase, onEscapePressed]);
 
+  /* What the served native input held when the editor took over; the draft already has its text. */
+  const [earlyInput, setEarlyInput] = useState<EarlyChatInput>();
+  const editorPlaceholder = mode === 'edit' ? 'Edit your message' : chatComposerPlaceholder;
   const chatEditor = useChatEditor({
-    initialText: earlyInput?.edited ? earlyInput.text : undefined,
     onSubmit: submitWithDictation,
     onEscape: escapeWithDictation,
     onUpdate: handleEditorUpdate,
@@ -348,7 +356,7 @@ export const ChatTextareaDesktop = memo(function ({
     chats,
     actionItems,
     slashCommandItems,
-    placeholder: mode === 'edit' ? 'Edit your message' : undefined,
+    placeholder: editorPlaceholder,
     handleImagePaste: handlePaste,
     onContextAction: createScreenshotContextHandler({
       handleAddImage,
@@ -370,9 +378,17 @@ export const ChatTextareaDesktop = memo(function ({
     if (!editor) {
       return undefined;
     }
+    const current = extractContent(editor);
+    /* This render's text can trail the editor by keystrokes it already holds: when tokens or the tree
+     * arrive mid-typing, the effect re-runs with an older text the editor itself reported, and writing
+     * that back deletes what was typed since. A render with the newer text follows, so wait for it. */
+    if (inputText === current.text) {
+      unconfirmedTextsRef.current = [];
+    } else if (unconfirmedTextsRef.current.includes(inputText)) {
+      return undefined;
+    }
     const tokensChanged = rehydratedTokensRef.current !== knownTokens;
     rehydratedTokensRef.current = knownTokens;
-    const current = extractContent(editor);
     if (inputText === '') {
       if (current.text !== '') {
         editor.commands.clearContent(false);
@@ -463,38 +479,50 @@ export const ChatTextareaDesktop = memo(function ({
     };
   }, [addContextChipsRef, addContextReferencesRef, insertContextReferences]);
 
+  /* The editor takes the native input's text, selection and focus in the commit that replaces it,
+   * before the browser can deliver another key: anything later (a microtask, a frame) lets keys typed
+   * during the handover land on the page and vanish. Plain text needs no chip node views, so it can be
+   * installed synchronously; the draft rehydration that follows finds the same text and leaves it. */
+  useLayoutEffect(() => {
+    if (!editor || !earlyInput) {
+      return;
+    }
+    if (earlyInput.edited) {
+      editor.commands.setContent(buildEditorContentJson([{ type: 'text', value: earlyInput.text }]), {
+        emitUpdate: false,
+      });
+    }
+    if (!(earlyInput.focused || (enableAutoFocus && !earlyInput.edited && earlyInput.focusUnclaimed))) {
+      return;
+    }
+    if (earlyInput.edited) {
+      const position = (offset: number): number => offset + 1 + earlyInput.text.slice(0, offset).split('\n').length - 1;
+      const from = position(earlyInput.start);
+      const to = position(earlyInput.end);
+      editor.commands.setTextSelection(earlyInput.direction === 'backward' ? { from: to, to: from } : { from, to });
+    } else {
+      editor.commands.setTextSelection(editor.state.doc.content.size);
+    }
+    // Tiptap's `focus` command waits a frame; the next key may already be on its way, so focus the view now.
+    editor.view.focus();
+  }, [editor, earlyInput, enableAutoFocus]);
+
   useEffect(() => {
-    if (
-      !editor ||
-      (earlyInput
-        ? !(earlyInput.focused || (enableAutoFocus && !earlyInput.edited && earlyInput.focusUnclaimed))
-        : !enableAutoFocus)
-    ) {
+    // With an early input, focus is the native input's to hand over (above), not the mount's.
+    if (!editor || enableEarlyInput || !enableAutoFocus) {
       return undefined;
     }
     // Rehydration installs the draft in a microtask. Focus after it so opening
     // a history message keeps its first line visible instead of scrolling to the end.
     const frame = requestAnimationFrame(() => {
       if (!editor.isDestroyed) {
-        if (earlyInput && document.activeElement !== document.body && document.activeElement !== editor.view.dom) {
-          return;
-        }
-        if (earlyInput?.edited) {
-          const position = (offset: number): number =>
-            offset + 1 + earlyInput.text.slice(0, offset).split('\n').length - 1;
-          const from = position(earlyInput.start);
-          const to = position(earlyInput.end);
-          editor.commands.setTextSelection(earlyInput.direction === 'backward' ? { from: to, to: from } : { from, to });
-          editor.commands.focus();
-        } else {
-          editor.commands.focus(mode === 'edit' ? 'start' : 'end');
-        }
+        editor.commands.focus(mode === 'edit' ? 'start' : 'end');
       }
     });
     return () => {
       cancelAnimationFrame(frame);
     };
-  }, [enableAutoFocus, editor, mode, earlyInput]);
+  }, [enableAutoFocus, enableEarlyInput, editor, mode]);
 
   // Lock Tiptap while `await onSubmit(...)` is in-flight inside the textarea
   // hook (homepage create-project + `await navigate`, vs fire-and-forget
@@ -542,19 +570,33 @@ export const ChatTextareaDesktop = memo(function ({
       });
   const dictationControl = useMemo(
     () =>
-      dictation.available === true ? (
+      /* Shown while availability is still being asked, so the bar is laid out as it will be; only a
+       * deployment without dictation loses it. */
+      dictation.available === false ? undefined : (
         <DictationControl
+          isPending={dictation.available === undefined}
           phase={dictation.phase}
           waveform={dictation.waveform}
           onStart={dictation.start}
           onStop={dictation.stop}
           onCancel={dictation.cancel}
         />
-      ) : undefined,
+      ),
     [dictation.available, dictation.phase, dictation.waveform, dictation.start, dictation.stop, dictation.cancel],
   );
   const blockReasonId = useId();
-  const collapse = collapsibleClassNames(enableMobileCollapse, dictation.available);
+  const collapse = collapsibleClassNames(enableMobileCollapse, dictation.available !== false);
+  const editorView = (
+    <ChatEditor
+      editor={editor}
+      contextSuggestionState={chatEditor.contextSuggestionState}
+      slashCommandState={chatEditor.slashCommandState}
+      contextKeydownRef={chatEditor.contextKeydownRef}
+      slashKeydownRef={chatEditor.slashKeydownRef}
+      isLoading={isSubmitting}
+      className={collapse.editorContent}
+    />
+  );
   const isCollapsed = isComposerAtRest({
     enableMobileCollapse,
     isFocused,
@@ -624,15 +666,18 @@ export const ChatTextareaDesktop = memo(function ({
           )}
           onClick={handleEditorAreaClick}
         >
-          <ChatEditor
-            editor={editor}
-            contextSuggestionState={chatEditor.contextSuggestionState}
-            slashCommandState={chatEditor.slashCommandState}
-            contextKeydownRef={chatEditor.contextKeydownRef}
-            slashKeydownRef={chatEditor.slashKeydownRef}
-            isLoading={isSubmitting}
-            className={collapse.editorContent}
-          />
+          {enableEarlyInput ? (
+            <ChatEarlyInput
+              placeholder={editorPlaceholder}
+              isHostReady={editor !== null}
+              className={collapse.editorContent}
+              onAdopt={setEarlyInput}
+            >
+              {editorView}
+            </ChatEarlyInput>
+          ) : (
+            editorView
+          )}
         </div>
 
         {/* Drag and drop feedback */}

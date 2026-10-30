@@ -93,10 +93,13 @@ const mockContentService = {
   },
 };
 
+/** False while storage is still starting: the file manager has no services to read through yet. */
+let isStorageStarted = true;
+
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
     readFile: mockReadFile,
-    treeService: mockTreeService,
+    treeService: isStorageStarted ? mockTreeService : undefined,
     contentService: actualContentService ?? mockContentService,
   }),
 }));
@@ -272,6 +275,18 @@ describe('usePromptSkillsCatalog', () => {
       }
     },
   );
+
+  it('should report a catalog whose storage is still starting as registering, not closed', () => {
+    isStorageStarted = false;
+    try {
+      const { result } = renderHook(() => useSkillsCatalogState());
+      // A closed catalog shows "Skill updates unavailable"; a starting one is not unavailable.
+      expect(result.current.status).toBe('registering');
+      expect(result.current.commands).toEqual([]);
+    } finally {
+      isStorageStarted = true;
+    }
+  });
 
   it('marks an already-ready shared content dependency unhealthy when only its exact watch closes', async () => {
     const path = '.agents/skills/alpha/SKILL.md';

@@ -213,6 +213,9 @@ export type UseChatEditorReturn = {
 };
 
 /* oxlint-disable react/refs -- The `use no memo` boundary preserves Tiptap's long-lived editor callbacks while refs expose the latest React inputs. */
+/** The composer's empty-state prompt; the served editor area shows the same words. */
+export const chatComposerPlaceholder = 'Ask Tau to build anything...';
+
 export function useChatEditor({
   onSubmit,
   onEscape,
@@ -224,7 +227,7 @@ export function useChatEditor({
   slashCommandItems,
   onSlashCommand,
   onContextAction,
-  placeholder = 'Ask Tau to build anything...',
+  placeholder = chatComposerPlaceholder,
   initialText,
 }: UseChatEditorOptions): UseChatEditorReturn {
   'use no memo';
@@ -322,7 +325,10 @@ export function useChatEditor({
   const handleImagePasteRef = useRef(handleImagePaste);
   handleImagePasteRef.current = handleImagePaste;
 
-  const editor = useEditor({
+  /* There is no editor while rendering on the server: the composer is served with a native input in its
+   * editor area (`ChatEarlyInput`), and the browser creates the editor on its first render. */
+  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Tiptap returns null outside the browser
+  const editor: Editor | null = useEditor({
     content: initialText === undefined ? undefined : buildEditorContentJson([{ type: 'text', value: initialText }]),
     extensions: [
       Document,
@@ -419,13 +425,14 @@ export function useChatEditor({
   });
 
   const clearEditor = useCallback(() => {
-    editor.commands.clearContent();
+    editor?.commands.clearContent();
   }, [editor]);
 
   // Catalog settlement is external to Tiptap transactions; derive the open menu without mirroring it in state.
   const popupItems = slashCommandState === undefined ? [] : getSlashCommandItems(slashCommandState.query);
-  const triggerPosition = editor.state.selection.from - (slashCommandState?.query.length ?? 0) - 1;
-  const trigger = triggerPosition < 0 ? '' : editor.state.doc.textBetween(triggerPosition, triggerPosition + 1);
+  const triggerPosition = (editor?.state.selection.from ?? 0) - (slashCommandState?.query.length ?? 0) - 1;
+  const trigger =
+    editor === null || triggerPosition < 0 ? '' : editor.state.doc.textBetween(triggerPosition, triggerPosition + 1);
   const currentSlashCommandState =
     slashCommandState === undefined
       ? undefined

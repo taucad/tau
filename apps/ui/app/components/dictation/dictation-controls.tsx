@@ -17,6 +17,8 @@ type DictationControlProperties = {
   readonly onStart: () => Promise<void>;
   readonly onStop: () => Promise<boolean>;
   readonly onCancel: () => void;
+  /** Whether dictation is offered is still being asked: the microphone holds its place and does nothing yet. */
+  readonly isPending?: boolean;
 };
 
 /**
@@ -30,6 +32,7 @@ export const DictationControl = memo(function ({
   onStart,
   onStop,
   onCancel,
+  isPending = false,
 }: DictationControlProperties): React.JSX.Element {
   const active = phase !== 'idle';
   const microphoneRef = useRef<HTMLButtonElement>(null);
@@ -59,9 +62,12 @@ export const DictationControl = memo(function ({
             variant='ghost'
             size='icon-sm'
             aria-label={dictationLabels.idle}
-            aria-disabled={false}
+            aria-disabled={isPending}
             className='shrink-0 rounded-full'
             onClick={() => {
+              if (isPending) {
+                return;
+              }
               pressed();
               void onStart();
             }}

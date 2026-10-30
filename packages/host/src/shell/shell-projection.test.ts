@@ -557,6 +557,62 @@ describe('shell projection grant composition', () => {
     expect(shellProjectionAccess(readable, 'shared/a.ts')).toBe('read-only');
   });
 
+  it('should fold a grant root and the path it is asked about as the filesystem folds them', () => {
+    const narrowed = granted({ writable: [''], readOnly: [], denied: ['secrets'], masked: [] });
+    expect(tauPathPolicy.classify('secrets/key.txt').agentAccess).toBe('read-write');
+    /* Every filesystem the projection runs on folds case; Win32 also folds a trailing dot, and NTFS resolves a
+     * stream suffix to the entry it hangs off. Compared as spelled, each of these would miss the `secrets` deny
+     * root and fall through to the writable checkout root — the one widening this decision point exists to stop. */
+    for (const path of ['secrets/key.txt', 'Secrets/key.txt', 'SECRETS/key.txt', 'secrets./key.txt']) {
+      expect(shellProjectionAccess(narrowed, path)).toBe('denied');
+    }
+    expect(shellProjectionAccess(narrowed, 'secrets::$INDEX_ALLOCATION/key.txt')).toBe('denied');
+    // The negative control: a name that merely starts the same is a different root and keeps the broad grant.
+    expect(shellProjectionAccess(narrowed, 'secretsx/key.txt')).toBe('read-write');
+  });
+
+  it('should fold a grant root exactly as the path registry folds its own rows', () => {
+    /* The projection carries its own copy of the registry's fold, because `path-registry.ts` is a package entry
+     * point and exporting its speller would widen the filesystem package's `@public` surface. This pins the two
+     * copies to each other through behaviour: every spelling below must be refused on the grant side, where the
+     * copy decides, and on the registry side, where the registry's own fold does, so the copies cannot drift
+     * apart without a red row here. */
+    const spellings = ['vendor/.git/config', 'vendor/.Git/config', 'vendor/.git./config', 'vendor/.GIT/config'];
+    const denying = granted({ writable: [''], readOnly: [], denied: ['vendor/.git'], masked: [] });
+    const registryOnly = granted();
+    for (const spelling of spellings) {
+      expect(shellProjectionAccess(denying, spelling)).toBe('denied');
+      expect(shellProjectionAccess(registryOnly, spelling)).toBe('denied');
+      expect(shellProjectionAccess(registryOnly, spelling.replace('vendor/', ''))).toBe('denied');
+    }
+  });
+
+  it('should keep a container readable when the only grant lies below it', () => {
+    /* `visible()` is `access() !== 'denied'` and capture prunes a child it cannot see, so a denied container hides
+     * every grant below it: granted `a/b/c` alone, a launch would never reach it. */
+    const deep = granted({ writable: ['a/b/c'], readOnly: [], denied: [], masked: [] });
+    expect(shellProjectionAccess(deep, '')).toBe('read-only');
+    expect(shellProjectionAccess(deep, 'a')).toBe('read-only');
+    expect(shellProjectionAccess(deep, 'a/b')).toBe('read-only');
+    expect(shellProjectionAccess(deep, 'a/b/c')).toBe('read-write');
+    expect(shellProjectionAccess(deep, 'a/b/c/part.ts')).toBe('read-write');
+    // Only the walk is opened, never a sibling or the container itself.
+    expect(shellProjectionAccess(deep, 'a/b/d')).toBe('denied');
+    expect(shellProjectionAccess(deep, 'other')).toBe('denied');
+
+    // The same inside a masked container: the mask denies below itself, and the walk to the grant survives it.
+    const masked = granted({ writable: ['.tau/parameters/nested'], readOnly: [], denied: [], masked: ['.tau'] });
+    expect(shellProjectionAccess(masked, '.tau')).toBe('read-only');
+    expect(shellProjectionAccess(masked, '.tau/parameters')).toBe('read-only');
+    expect(shellProjectionAccess(masked, '.tau/parameters/nested/part.json')).toBe('read-write');
+    expect(shellProjectionAccess(masked, '.tau/parameters/private/canary')).toBe('denied');
+    expect(shellProjectionAccess(masked, '.tau/hidden/canary')).toBe('denied');
+
+    // A `denied` root is the one hard boundary: it refuses its container whatever is granted below it.
+    const blocked = granted({ writable: ['vendor/.git/hooks'], readOnly: [], denied: ['vendor'], masked: [] });
+    expect(shellProjectionAccess(blocked, 'vendor')).toBe('denied');
+  });
+
   it('should refuse a grant root that is not a canonical root-relative path', () => {
     for (const root of ['/abs', 'a/../b', './a', 'a/', 'a//b']) {
       expect(() => granted({ writable: [root], readOnly: [], denied: [], masked: [] })).toThrow();

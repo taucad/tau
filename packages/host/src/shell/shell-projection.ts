@@ -146,6 +146,13 @@ export type ShellProjectionGrantSet = Readonly<{
  * noncanonical spelling throws rather than being narrowed, because a grant root nobody can place is a grant root
  * nobody can honour. A root named by several lists keeps its most restrictive list.
  *
+ * Each root is kept **as the filesystem folds it**, by the path registry's own speller. A grant root is compared
+ * against paths a caller spelled, and every filesystem the projection runs on folds case — Win32 also folds
+ * trailing dots and spaces, and NTFS resolves a stream suffix to the entry it hangs off. Compared as written,
+ * `denied: ['secrets']` would miss `Secrets/key.txt`, which then falls through to whatever broader root covers it;
+ * two roots that fold together collapse here and keep the more restrictive list, which is the same answer the
+ * filesystem gives.
+ *
  * @internal
  * @param grants - The launch's grant roots, root-relative.
  * @returns The normalized set {@link shellProjectionAccess} decides from.
@@ -159,22 +166,49 @@ export const shellProjectionGrantSet = (grants: ShellProjectionGrants): ShellPro
         throw new TypeError('A shell projection grant root must be a canonical root-relative path.');
       }
       assertRootedPath(root);
-      if (!strongest.has(root)) {
-        strongest.set(root, kind);
+      const folded = foldSpelling(root);
+      if (!strongest.has(folded)) {
+        strongest.set(folded, kind);
       }
     }
   }
   return { roots: [...strongest] };
 };
 
+/**
+ * One path as the filesystem underneath folds it, spelled exactly as the path registry spells it.
+ *
+ * A grant root is compared against a path a caller spelled, and every filesystem this projection runs on folds
+ * case; Win32 also folds trailing dots and spaces, and NTFS resolves an alternate data stream to the entry it hangs
+ * off. Compared as written, `denied: ['secrets']` misses `Secrets/key.txt`, `secrets./key.txt` and
+ * `secrets::$INDEX_ALLOCATION/key.txt`, each of which then falls through to whatever broader root covers it.
+ *
+ * This is the registry's own fold, kept here rather than imported: `path-registry.ts` is a package entry point, so
+ * exporting its speller would add a `@public` symbol to the filesystem package, and widening that surface is a
+ * decision D13 reserves to the operator rather than one this change may take. `case-collisions.ts`,
+ * `revision-capture.ts` and `share-artifact.ts` already each carry their own fold for the same reason. The
+ * agreement between this copy and the registry's is pinned by test rather than left to inspection.
+ */
+const foldSpelling = (relative: string): string =>
+  relative
+    .normalize('NFC')
+    .toUpperCase()
+    .toLowerCase()
+    .replaceAll(/:[^/]*(?=\/|$)/gu, '')
+    .replaceAll(/[. ]+(?=\/|$)/gu, '');
+
 /** Whether `path` is `root` or lies below it, as root-relative names nest. */
 const below = (path: string, root: string): boolean => root === '' || path === root || path.startsWith(`${root}/`);
 
 /**
- * What the launch's grant set alone says about `path`: the deepest grant root covering it decides, and nothing
- * decides when nothing covers it.
+ * What the launch's grant set alone says about `path`: the deepest grant root covering it decides, nothing decides
+ * when nothing covers it, and a container no grant names is still readable when a grant lies below it.
+ *
+ * The path is folded by the same speller the roots were folded with, so the two sides are always compared in the
+ * one representation the filesystem itself resolves them to.
  */
 const grantedAccess = (set: ShellProjectionGrantSet, path: string): ShellProjectionAccess => {
+  const subject = foldSpelling(path);
   /* A masked container is readable in itself and denied below itself: that is what keeps the grant roots strictly
    * inside it reachable while an ancestor grant over it reopens nothing. */
   const verdictOf = (kind: (typeof grantKinds)[number], root: string): ShellProjectionAccess => {
@@ -183,7 +217,7 @@ const grantedAccess = (set: ShellProjectionGrantSet, path: string): ShellProject
         return 'denied';
       }
       case 'masked': {
-        return path === root ? 'read-only' : 'denied';
+        return subject === root ? 'read-only' : 'denied';
       }
       case 'readOnly': {
         return 'read-only';
@@ -198,8 +232,16 @@ const grantedAccess = (set: ShellProjectionGrantSet, path: string): ShellProject
    * no root covers keeps the refusal this starts from. */
   let depth = -1;
   let verdict: ShellProjectionAccess = 'denied';
+  let deniedAbove = false;
+  let grantBelow = false;
   for (const [root, kind] of set.roots) {
-    if (!below(path, root) || root.length < depth) {
+    if (!below(subject, root)) {
+      /* A grant strictly below this path is what makes the path's own reachability matter; see below. */
+      grantBelow ||= kind !== 'denied' && below(root, subject) && root !== subject;
+      continue;
+    }
+    deniedAbove ||= kind === 'denied';
+    if (root.length < depth) {
       continue;
     }
     const answer = verdictOf(kind, root);
@@ -210,7 +252,16 @@ const grantedAccess = (set: ShellProjectionGrantSet, path: string): ShellProject
       verdict = answer;
     }
   }
-  return verdict;
+  /*
+   * A grant is worth nothing that cannot be walked to. `visible()` is `access() !== 'denied'`, and the owner's
+   * capture prunes a child it cannot see, so a denied container hides every grant below it however explicit: a
+   * launch granted `a/b/c` alone would never see `a`, and `resolve('a/b/c')` would answer `ENOENT`. A container no
+   * grant root names, or one denied only by a mask above it, therefore reads as the mask's own container does —
+   * readable in itself, never writable, and still denying every child the grant set did not name, which is the
+   * same listing the grant below it already discloses. A `denied` root covering it is the one hard boundary and
+   * stays denied, grant below or not.
+   */
+  return verdict === 'denied' && !deniedAbove && grantBelow ? 'read-only' : verdict;
 };
 
 /**
@@ -219,8 +270,10 @@ const grantedAccess = (set: ShellProjectionGrantSet, path: string): ShellProject
  * The path registry's classification of the checkout and the launch's own authority grant set are both consulted
  * and the more restrictive answer is kept, so a grant can never reopen what the registry protects and the registry
  * can never reopen what the grant withheld. Everything is fail-closed: an absent grant set refuses, a path no grant
- * root covers refuses, a root named by several lists keeps its most restrictive list, and a masked container denies
- * everything below it that a deeper grant root does not name.
+ * root covers and nothing is granted below refuses, a root named by several lists keeps its most restrictive list,
+ * and a masked container denies everything below it that a deeper grant root does not name. A container that only
+ * holds a grant is readable and never writable, because a grant nothing can walk to is no grant; a `denied` root
+ * over it still refuses.
  *
  * @internal
  * @param grants - The launch's normalized grant set, or `undefined` when the launch's authority is not known.

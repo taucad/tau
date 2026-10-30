@@ -89,6 +89,7 @@ vi.mock('#chat-clients/_internal/use-turn-admission.js', () => ({
 }));
 vi.mock('#hooks/use-sessions.js', () => ({ useSessions: () => dependencies.sessions }));
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'project' }) }));
+vi.mock('#hooks/use-telemetry-purposes.js', () => ({ useTelemetryPurposes: () => ({ isAllowed: () => false }) }));
 vi.mock('#hooks/use-theme.js', async (importOriginal) => ({
   ...(await importOriginal<typeof ThemeModule>()),
   useTheme: () => ({ theme: 'light' }),

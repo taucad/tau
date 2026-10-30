@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -446,6 +447,41 @@ describe('NodeFsProvider atomic writes', () => {
     expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('new');
     expect(temporaryFiles(root)).toEqual([]);
   });
+
+  // Windows keeps the writer's handle open through verification, so a later writer cannot
+  // replace the path mid-read there: its rename fails EPERM instead.
+  it.skipIf(process.platform === 'win32')(
+    'should settle a write that a later writer replaced during its verification read',
+    async () => {
+      const root = createRoot();
+      const provider = new NodeFsProvider(root);
+      const open = fs.open.bind(fs);
+      let replaced = false;
+      vi.spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
+        const handle = await open(path, flags, mode);
+        // The provider opens the admitted real path, which differs from `root` on macOS and Windows temp dirs.
+        if (typeof flags === 'number' && String(path).endsWith('target.txt')) {
+          const read = handle.read.bind(handle);
+          vi.spyOn(handle, 'read').mockImplementation(async (...arguments_: Parameters<typeof handle.read>) => {
+            if (!replaced) {
+              // A second writer of the same bytes publishes over the path, unlinking the inode this read holds.
+              replaced = true;
+              writeFileSync(join(root, 'later.tmp'), 'new');
+              renameSync(join(root, 'later.tmp'), join(root, 'target.txt'));
+            }
+            return read(...arguments_);
+          });
+        }
+        return handle;
+      });
+
+      await expect(provider.writeFile('target.txt', 'new')).resolves.toBeUndefined();
+
+      expect(replaced).toBe(true);
+      expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('new');
+      expect(temporaryFiles(root)).toEqual([]);
+    },
+  );
 });
 
 describe('NodeFsProvider head listing', () => {

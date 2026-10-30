@@ -39,6 +39,8 @@ export type ProjectedRun = Readonly<{
       output: ProjectedSource | undefined;
       startedAt: number;
       settledAt: number | undefined;
+      /** The gateway attempt id of the generation that issued the call, as the host sent it in `x-tau-attempt-id`. */
+      modelCall?: string | undefined;
       /** A settled `test_model` call's check: its decided status and the file keys of what it checked. */
       check?:
         | Readonly<{
@@ -117,7 +119,7 @@ export type RunProjection = Readonly<{
 }>;
 
 /** Bumped whenever the facts written for the same rows change. @public */
-export const hostTurnMapper = 'host-turn-v1';
+export const hostTurnMapper = 'host-turn-v2';
 
 const retentionMilliseconds = 180 * 86_400_000;
 
@@ -307,9 +309,11 @@ export const projectRun = async (run: ProjectedRun, context: ProjectionContext):
     if (tool.output === undefined && run.ending === undefined) {
       return 'pending';
     }
-    const [call, dispatch] = await Promise.all([
+    /* The API names the same attempt `contractId('inv', attemptKey)`, so a tool joins the supplier attempts it came from. */
+    const [call, dispatch, modelCall] = await Promise.all([
       contractId('call', `${run.chatId}:${tool.call}`),
       contractId('dispatch', `${run.chatId}:${rowPosition(tool.input)}`),
+      tool.modelCall === undefined ? null : contractId('inv', tool.modelCall),
     ]);
     return {
       source: tool.input,
@@ -324,7 +328,7 @@ export const projectRun = async (run: ProjectedRun, context: ProjectionContext):
           toolClass: classOf(tool.toolName),
           toolVersion: null,
           schemaVersion: null,
-          modelCall: null,
+          modelCall,
           outcome: tool.output === undefined ? 'unknown' : tool.outcome,
           revisionBefore: null,
           revisionAfter: null,
@@ -425,7 +429,11 @@ export const projectRun = async (run: ProjectedRun, context: ProjectionContext):
       intervals: [],
     };
   };
-  /* Like a presentation, a rating is this device's interaction, anchored to the run's ending row. Only the first is kept. */
+  /*
+   * Like a presentation, a rating is this device's interaction, anchored to the run's ending row. Only the first is
+   * kept. Its interaction id is tagged, as `contractId` keeps an id-shaped value as it is: untagged, a rating of a shown
+   * run would claim the presentation's source, and admission would refuse it as a conflict.
+   */
   const ratingCandidate = async (): Promise<Candidate | undefined> => {
     if (run.rating === undefined) {
       return undefined;
@@ -434,7 +442,7 @@ export const projectRun = async (run: ProjectedRun, context: ProjectionContext):
       return 'pending';
     }
     const [interaction, rated] = await Promise.all([
-      contractId('rated', `${run.chatId}:${run.runId}`),
+      contractId('rated', `rated:${run.chatId}:${run.runId}`),
       contractId('run', run.runId),
     ]);
     return {

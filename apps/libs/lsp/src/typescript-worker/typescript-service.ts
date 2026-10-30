@@ -20,7 +20,31 @@ export type TypeScriptLocation = Readonly<{
   column: number;
   start: number;
   length: number;
+  /** The trimmed source line at the location, for reference and symbol lists. */
+  preview?: string;
 }>;
+
+/** A semantic occurrence in the queried file. */
+export type TypeScriptHighlight = Readonly<{ start: number; length: number; kind: 'read' | 'write' | 'text' }>;
+
+/** A navigable symbol: a workspace symbol, a caller or a callee. */
+export type TypeScriptSymbolLocation = Readonly<{
+  name: string;
+  kind: string;
+  containerName?: string;
+  location: TypeScriptLocation;
+}>;
+
+const highlightKinds: Partial<Record<ts.HighlightSpanKind, TypeScriptHighlight['kind']>> = {
+  [ts.HighlightSpanKind.writtenReference]: 'write',
+  [ts.HighlightSpanKind.reference]: 'read',
+};
+
+const completionPreferences: ts.UserPreferences = { includeCompletionsForModuleExports: true };
+const completionFormatSettings: ts.FormatCodeSettings = { indentSize: 2, tabSize: 2, convertTabsToSpaces: true };
+
+/** A documentation part; `{@link}` names carry the resolved location of their target. */
+export type TypeScriptDocumentationPart = ts.SymbolDisplayPart & Readonly<{ location?: TypeScriptLocation }>;
 
 /** Exact worker text used for an edit; the document owner compares it before mutation. */
 export type TypeScriptEditBasis = Readonly<{
@@ -235,7 +259,7 @@ export class TypeScriptProjectService {
   }
 
   public getCompletions(uri: string, position: number): ts.WithMetadata<ts.CompletionInfo> | undefined {
-    return this.service.getCompletionsAtPosition(toPath(uri), position, { includeCompletionsForModuleExports: true });
+    return this.service.getCompletionsAtPosition(toPath(uri), position, completionPreferences);
   }
 
   public getCompletionDetails(
@@ -248,7 +272,17 @@ export class TypeScriptProjectService {
     }>,
   ): ts.CompletionEntryDetails | undefined {
     const { uri, position, name, source, data } = request;
-    return this.service.getCompletionEntryDetails(toPath(uri), position, name, undefined, source, undefined, data);
+    // Auto-import code actions format their edits, so details need format settings and the same preferences.
+    const details = this.service.getCompletionEntryDetails(
+      toPath(uri),
+      position,
+      name,
+      completionFormatSettings,
+      source,
+      completionPreferences,
+      data,
+    );
+    return details && this.withLinkLocations(details);
   }
 
   public getCompletionDetailsWithBases(
@@ -274,7 +308,8 @@ export class TypeScriptProjectService {
   }
 
   public getQuickInfo(uri: string, position: number): ts.QuickInfo | undefined {
-    return this.service.getQuickInfoAtPosition(toPath(uri), position);
+    const info = this.service.getQuickInfoAtPosition(toPath(uri), position);
+    return info && this.withLinkLocations(info);
   }
 
   /** Read only declarations already installed in this worker's virtual library map. */
@@ -292,8 +327,30 @@ export class TypeScriptProjectService {
     return this.libraries.get(parsed.path) ?? this.extraFiles.get(parsed.path)?.text;
   }
 
-  public getSignatureHelp(uri: string, position: number): ts.SignatureHelpItems | undefined {
-    return this.service.getSignatureHelpItems(toPath(uri), position, undefined);
+  public getSignatureHelp(
+    uri: string,
+    position: number,
+    trigger?: Readonly<{ character?: string; retrigger?: boolean }>,
+  ): ts.SignatureHelpItems | undefined {
+    const character = trigger?.character as ts.SignatureHelpTriggerCharacter | undefined;
+    const triggerReason: ts.SignatureHelpTriggerReason | undefined = trigger?.retrigger
+      ? { kind: 'retrigger', triggerCharacter: character as ts.SignatureHelpRetriggerCharacter | undefined }
+      : character
+        ? { kind: 'characterTyped', triggerCharacter: character }
+        : undefined;
+    return this.service.getSignatureHelpItems(toPath(uri), position, triggerReason && { triggerReason });
+  }
+
+  public getDocumentHighlights(uri: string, position: number): TypeScriptHighlight[] {
+    const path = toPath(uri);
+    return (this.service.getDocumentHighlights(path, position, [path]) ?? [])
+      .filter((entry) => entry.fileName === path)
+      .flatMap((entry) => entry.highlightSpans)
+      .map((span) => ({
+        start: span.textSpan.start,
+        length: span.textSpan.length,
+        kind: highlightKinds[span.kind] ?? 'text',
+      }));
   }
 
   public getDefinition(uri: string, position: number): readonly ts.DefinitionInfo[] | undefined {
@@ -432,6 +489,15 @@ export class TypeScriptProjectService {
     return this.service.getNavigateToItems(search, maxResults);
   }
 
+  public getWorkspaceSymbolLocations(search: string, maxResults = 100): TypeScriptSymbolLocation[] {
+    return this.getNavigateToItems(search, maxResults).map((item) => ({
+      name: item.name,
+      kind: item.kind,
+      containerName: item.containerName || undefined,
+      location: this.locationOf(item),
+    }));
+  }
+
   public getInlayHints(uri: string, start: number, end: number): readonly ts.InlayHint[] {
     return this.service.provideInlayHints(
       toPath(uri),
@@ -456,6 +522,26 @@ export class TypeScriptProjectService {
 
   public getOutgoingCalls(uri: string, position: number): readonly ts.CallHierarchyOutgoingCall[] {
     return this.service.provideCallHierarchyOutgoingCalls(toPath(uri), position);
+  }
+
+  /** Callers, each located at its first call site. */
+  public getIncomingCallLocations(uri: string, position: number): TypeScriptSymbolLocation[] {
+    return this.getIncomingCalls(uri, position).map((call) => ({
+      name: call.from.name,
+      kind: call.from.kind,
+      containerName: call.from.containerName,
+      location: this.locationOf({ fileName: call.from.file, textSpan: call.fromSpans[0] ?? call.from.selectionSpan }),
+    }));
+  }
+
+  /** Callees, each located at its declaration. */
+  public getOutgoingCallLocations(uri: string, position: number): TypeScriptSymbolLocation[] {
+    return this.getOutgoingCalls(uri, position).map((call) => ({
+      name: call.to.name,
+      kind: call.to.kind,
+      containerName: call.to.containerName,
+      location: this.locationOf({ fileName: call.to.file, textSpan: call.to.selectionSpan }),
+    }));
   }
 
   public assertVersion(uri: string, expectedVersion: number): void {
@@ -538,15 +624,38 @@ export class TypeScriptProjectService {
     return this.syncFs.getDirectories(toUri(path));
   }
 
+  /** Resolve `{@link}` targets here, where the program can turn their offsets into lines. */
+  private withLinkLocations<T extends Readonly<{ documentation?: ts.SymbolDisplayPart[]; tags?: ts.JSDocTagInfo[] }>>(
+    info: T,
+  ): T {
+    const resolve = (parts: readonly ts.SymbolDisplayPart[]): TypeScriptDocumentationPart[] =>
+      parts.map((part) => {
+        const { target } = part as Partial<ts.JSDocLinkDisplayPart>;
+        return target ? { ...part, location: this.locationOf(target) } : part;
+      });
+    return {
+      ...info,
+      documentation: info.documentation && resolve(info.documentation),
+      tags: info.tags?.map((tag) => ({ ...tag, text: tag.text && resolve(tag.text) })),
+    };
+  }
+
   private locationOf(entry: { fileName: string; textSpan: ts.TextSpan }): TypeScriptLocation {
     const source = this.service.getProgram()?.getSourceFile(entry.fileName);
     const lineAndCharacter = source?.getLineAndCharacterOfPosition(entry.textSpan.start);
+    const lineStarts = source?.getLineStarts();
+    const line = lineAndCharacter?.line ?? 0;
+    const preview =
+      source && lineStarts
+        ? source.text.slice(lineStarts[line], lineStarts[line + 1] ?? source.text.length).trim()
+        : '';
     return {
       uri: toUri(entry.fileName),
-      line: (lineAndCharacter?.line ?? 0) + 1,
+      line: line + 1,
       column: (lineAndCharacter?.character ?? 0) + 1,
       start: entry.textSpan.start,
       length: entry.textSpan.length,
+      ...(preview ? { preview } : {}),
     };
   }
 }

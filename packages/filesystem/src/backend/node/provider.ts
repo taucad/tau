@@ -16,7 +16,11 @@
  */
 
 import fs from 'node:fs/promises';
-import { createEntryObserver, readBoundedDescriptor } from '#backend/node/entry-observation.js';
+import {
+  createEntryObserver,
+  readBoundedDescriptor,
+  readPublishedDescriptor,
+} from '#backend/node/entry-observation.js';
 import type { EntryObserver } from '#backend/node/entry-observation.js';
 import type { FileHandle } from 'node:fs/promises';
 import type { Dirent, Stats } from 'node:fs';
@@ -1180,7 +1184,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       const verification = await fs.open(admittedTarget, verificationReadFlags);
       let committed: Uint8Array<ArrayBuffer>;
       try {
-        committed = await readBoundedDescriptor(verification, bytes.byteLength, () => undefined);
+        committed = await readPublishedDescriptor(verification, bytes.byteLength);
       } finally {
         await verification.close();
       }

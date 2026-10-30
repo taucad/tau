@@ -37,6 +37,7 @@ import type {
   TargetWorker,
   TargetWorkerFlowEvidence,
 } from './external-target.ts';
+import { maskAutomationFromAnalytics } from './analytics-bot-mask.ts';
 import { testBaseURL } from './base-url.ts';
 import { classifyWebGpuAdapter, webGpuLaunchArguments } from './webgpu-profile.ts';
 import { listTauServeChats, readTauServeFile, startTauServeFixture } from './tau-serve-fixture.ts';
@@ -987,13 +988,9 @@ export const uiInstallPostHogFixture: BrowserCommand<[apiKey: string]> = async (
   const deadClicks = await readFile(
     resolve(import.meta.dirname, '../../../../node_modules/posthog-js/dist/dead-clicks-autocapture.js'),
   );
+  await session.context.addInitScript(maskAutomationFromAnalytics);
   await session.context.addInitScript(
     ({ key }) => {
-      Object.defineProperty(navigator, 'webdriver', { configurable: true, value: false });
-      Object.defineProperty(navigator, 'userAgent', {
-        configurable: true,
-        value: navigator.userAgent.replace('HeadlessChrome', 'Chrome'),
-      });
       (globalThis as typeof globalThis & { ENV?: Record<string, unknown> }).ENV = {
         ...(globalThis as typeof globalThis & { ENV?: Record<string, unknown> }).ENV,
         // eslint-disable-next-line @typescript-eslint/naming-convention -- client environment wire name
@@ -3135,6 +3132,46 @@ export const uiReadObservedWasm: BrowserCommand<[settle?: boolean], readonly str
   return drained;
 };
 
+/** The path of every request each target context started since `uiStartObservedRequests`. */
+const observedRequests = new WeakMap<ProviderContext, Set<string>>();
+
+/**
+ * Record the path of every request the target starts from now on, including those of its frames and dedicated
+ * workers, so a spec can prove which chunks, workers and assets a surface downloads.
+ */
+export const uiStartObservedRequests: BrowserCommand = (commandContext) => {
+  const { context } = sessionFor(commandContext);
+  if (observedRequests.has(context)) {
+    return;
+  }
+  const paths = new Set<string>();
+  observedRequests.set(context, paths);
+  context.on('request', (request) => {
+    const url = new URL(request.url());
+    if (url.protocol === 'http:' || url.protocol === 'https:') {
+      paths.add(url.pathname);
+    }
+  });
+};
+
+/** Drain the request paths observed so far, settling first as `uiReadObservedWasm` does. */
+export const uiReadObservedRequests: BrowserCommand<[settle?: boolean], readonly string[]> = async (
+  commandContext,
+  settle = true,
+) => {
+  const session = sessionFor(commandContext);
+  const paths = observedRequests.get(session.context);
+  if (!paths) {
+    throw new Error('Requests are not observed; call uiStartObservedRequests first.');
+  }
+  if (settle) {
+    await session.primary.waitForLoadState('networkidle');
+  }
+  const drained = [...paths].toSorted();
+  paths.clear();
+  return drained;
+};
+
 export const uiReadTargetEvents: BrowserCommand<
   [],
   {
@@ -3184,6 +3221,8 @@ export const uiBrowserCommands = {
   uiReadObservedDownloads,
   uiStartObservedWasm,
   uiReadObservedWasm,
+  uiStartObservedRequests,
+  uiReadObservedRequests,
   uiEmulateColorScheme,
   uiEmulateContrast,
   uiEmulateForcedColors,

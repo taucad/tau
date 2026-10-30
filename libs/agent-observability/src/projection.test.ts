@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { evidenceSchema } from '#contract.js';
-import { compareEvidence, contractId, verifyEvidenceDigest } from '#identity.js';
+import { compareEvidence, contractId, evidenceKeys, verifyEvidenceDigest } from '#identity.js';
 import type { ProjectedRun, ProjectionContext } from '#projection.js';
 import { projectRun } from '#projection.js';
 
@@ -65,6 +65,18 @@ describe('projectRun', () => {
     expect(projection.evidence[1]?.clocks.intervals).toEqual([
       { phase: 'admission', domain: 'host-recorded', start: at, end: at + 1000 },
     ]);
+  });
+
+  it('names the model call a tool came from as the API names that attempt, and none when the host did not see it', async () => {
+    const attemptId = 'run a:1:0';
+    const projection = await projectRun(run({ tools: [{ ...run().tools[0]!, modelCall: attemptId }] }), context());
+
+    expect(projection.evidence.map((evidence) => evidence.payload)).toMatchObject([
+      { fact: { kind: 'tool', modelCall: await contractId('inv', attemptId) } },
+      { fact: { kind: 'outcome' } },
+    ]);
+    const unseen = await projectRun(run(), context());
+    expect(unseen.evidence[0]?.payload).toMatchObject({ fact: { modelCall: null } });
   });
 
   describe('test_model checks', () => {
@@ -163,7 +175,7 @@ describe('projectRun', () => {
     expect(await verifyEvidenceDigest(rating!)).toBe(true);
     expect(rating!.source).toMatchObject({
       kind: 'interaction',
-      interaction: await contractId('rated', 'chat a/1:run-1'),
+      interaction: await contractId('rated', 'rated:chat a/1:run-1'),
     });
     expect(rating!.payload).toEqual({
       plane: 'feedback',
@@ -177,6 +189,18 @@ describe('projectRun', () => {
         context({ plane: 'feedback' }),
       ),
     ).toMatchObject({ evidence: [], pending: 1 });
+  });
+
+  it('keeps a shown run’s rating and presentation as separate sources, whatever the ids look like', async () => {
+    const shown = run({ chatId: 'chat_1', presentedAt: at + 2500, rating: { value: 'negative', at: at + 7000 } });
+    const summary = await projectRun(shown, context());
+    const feedback = await projectRun(shown, context({ plane: 'feedback' }));
+    const presentation = summary.evidence.find((evidence) => evidence.semantic.kind === 'response');
+    const [rating] = feedback.evidence;
+
+    expect(rating!.source).toMatchObject({ kind: 'interaction', interaction: 'rated:chat_1:run-1' });
+    expect(evidenceKeys(rating!).source).not.toBe(evidenceKeys(presentation!).source);
+    expect(compareEvidence(presentation!, rating!)).not.toBe('conflict');
   });
 
   it('holds a presentation back until the run ends, and never sends one shown before the grant', async () => {

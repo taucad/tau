@@ -99,6 +99,34 @@ describe('LangfuseClient', () => {
     ).resolves.toBe('unavailable');
   });
 
+  it('should read only Tau observations and their metadata, and call a cut-short read partial', async () => {
+    const window = { environment: 'synthetic', from: new Date(0), to: new Date(1000) };
+    const tau = { id: 's1', name: 'tau.tool', startTime: '1970-01-01T00:00:00.000Z', metadata: { family: 'tool' } };
+    const paged = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        json(200, { data: [tau, { ...tau, id: 'other', name: 'checkout' }], meta: { cursor: 'next' } }),
+      )
+      .mockResolvedValueOnce(json(200, { data: [{ ...tau, id: 's2' }], meta: {} }));
+    const client = (fetcher: typeof fetch) => new LangfuseClient(target, 1000, fetcher);
+
+    await expect(client(paged).observations(window, 5)).resolves.toEqual({
+      kind: 'complete',
+      rows: ['s1', 's2'].map((id) => ({ id, startTime: tau.startTime, metadata: tau.metadata })),
+    });
+    const [first] = paged.mock.calls[0]!;
+    expect(first instanceof URL && Object.fromEntries(first.searchParams)).toMatchObject({
+      environment: 'synthetic',
+      fields: 'core,basic,metadata',
+    });
+    const endless = vi.fn<typeof fetch>(async () => json(200, { data: [tau], meta: { cursor: 'more' } }));
+    await expect(client(endless).observations(window, 2)).resolves.toMatchObject({ kind: 'partial' });
+    expect(endless).toHaveBeenCalledTimes(2);
+    await expect(
+      client(vi.fn<typeof fetch>().mockResolvedValue(json(503, {}))).observations(window, 5),
+    ).resolves.toEqual({ kind: 'partial', rows: [] });
+  });
+
   it('should request a bulk trace deletion and retry anything but a 2xx', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json(200, { message: 'queued' }));
     const client = (fetch: typeof globalThis.fetch) => new LangfuseClient(target, 1000, fetch);

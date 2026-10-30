@@ -1,0 +1,34 @@
+{
+  "configs": {
+    "ShellCustody.today.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoFalseStop"
+      },
+      "kind": "defect",
+      "ref": "Q9 I7: survivor arrays ignored at 3294b1dc3; armed writer is reported stopped",
+      "fixedBy": "Q9 I7 approved cleanup custody implementation"
+    },
+    "ShellCustody.target.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "Q9 I7 approved API revision 3: confirmed stop before release"
+    },
+    "ShellCustody.witness-owner.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoLiveTakeover"
+      },
+      "kind": "witness",
+      "ref": "Q9 I7: never take custody from a live owner"
+    },
+    "ShellCustody.witness-timeout.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "RequestsReturn"
+      },
+      "kind": "witness",
+      "ref": "I7: a stale cleanup caller must receive bounded failure without mutating its successor custody"
+    }
+  }
+}

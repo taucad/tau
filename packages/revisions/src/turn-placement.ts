@@ -931,6 +931,19 @@ export const createTurnPlacementPort = <Tools>(
       if (await heldByAnotherRoot(key)) {
         return heldElsewhere(requestId, key);
       }
+      /* I7: a command that may still be writing holds the turn open; nothing settles until its stop is confirmed. */
+      const closed = await turns.executions.close(key);
+      if (closed !== 'closed') {
+        return refused({
+          requestId,
+          code: 'CUT_FAILED',
+          message:
+            closed === 'held'
+              ? 'A command this turn started has not been confirmed stopped, so the turn cannot be saved yet.'
+              : "The turn's run record could not be read, so the turn cannot be saved yet.",
+          details: { cause: closed === 'held' ? 'EXECUTION_HELD' : 'REVISIONS_UNAVAILABLE' },
+        });
+      }
       const heard = listen(key, (event) =>
         event.type === 'published' || event.type === 'cutRefused' ? event : undefined,
       );

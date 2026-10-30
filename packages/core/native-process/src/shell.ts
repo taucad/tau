@@ -5,6 +5,11 @@
  
  */
 export type {
+  PreparedShell,
+  ShellExecution,
+  ShellPreparation,
+  ShellRecovery,
+  ShellResource,
   ShellExit,
   ShellFilesystem,
   ShellLaunch,
@@ -36,4 +41,4 @@ export type {
 export { createSandboxShellProvider } from '#shell/srt-shell-provider.js';
 export type { SandboxShellProviderOptions } from '#shell/srt-shell-provider.js';
 export { createFakeShellProvider } from '#shell/shell-fake.js';
-export type { FakeShellProvider, FakeShellScript } from '#shell/shell-fake.js';
+export type { FakeShellOptions, FakeShellPhase, FakeShellProvider, FakeShellScript } from '#shell/shell-fake.js';

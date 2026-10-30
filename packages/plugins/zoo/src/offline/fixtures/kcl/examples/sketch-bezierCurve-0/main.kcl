@@ -1,0 +1,13 @@
+// Example using relative control points.
+exampleSketch = startSketchOn(XZ)
+  |> startProfile(at = [0, 0])
+  |> line(end = [0, 10])
+  |> bezierCurve(
+       control1 = [5, 0],
+       control2 = [5, 10],
+       end = [10, 10],
+     )
+  |> line(endAbsolute = [10, 0])
+  |> close()
+
+example = extrude(exampleSketch, length = 10)

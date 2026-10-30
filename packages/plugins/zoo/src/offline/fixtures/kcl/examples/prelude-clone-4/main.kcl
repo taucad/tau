@@ -1,0 +1,20 @@
+// You can reuse the tags from the original geometry with the cloned geometry.
+
+sketch001 = startSketchOn(XY)
+  |> startProfile(at = [0, 0])
+  |> line(end = [10, 0])
+  |> line(end = [0, 10], tag = $sketchingFace)
+  |> line(end = [-10, 0])
+  |> close()
+
+sketch002 = clone(sketch001)
+  |> translate(x = 15, y = 0, z = 5)
+  |> extrude(length = 5)
+
+startSketchOn(sketch002, face = sketch002.sketch.tags.sketchingFace)
+  |> startProfile(at = [4, 6])
+  |> line(end = [3, 0])
+  |> line(end = [0, 3])
+  |> line(end = [-3, 0])
+  |> close()
+  |> extrude(length = 5)

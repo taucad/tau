@@ -1,0 +1,4 @@
+result = "KCL ΟΣ"
+  |> string::lowercase()
+
+assertIs(result == "kcl ος")

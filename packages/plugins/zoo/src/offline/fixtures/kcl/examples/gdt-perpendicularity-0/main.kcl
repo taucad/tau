@@ -1,0 +1,12 @@
+
+startSketchOn(XY)
+  |> startProfile(at = [0, 0])
+  |> line(end = [10, 0], tag = $side)
+  |> line(end = [0, 10])
+  |> line(end = [-10, 0])
+  |> line(end = [0, -10])
+  |> close()
+  |> extrude(length = 5, tagEnd = $top)
+
+gdt::datum(face = top, name = "A", framePosition = [8mm, 0mm], framePlane = XZ)
+gdt::perpendicularity(faces = [side], tolerance = 0.05mm, datums = ["A"], framePosition = [12mm, 8mm], framePlane = XZ)

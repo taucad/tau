@@ -1,0 +1,10 @@
+cube1 = startSketchOn(XY)
+|> rectangle(width = 3, height = 3, center = [0, 0])
+|> extrude(length = 2)
+
+cube2 = startSketchOn(offsetPlane(XY, offset = 0.4))
+|> rectangle(width = 3, height = 3, center = [2, 2])
+|> extrude(length = 2)
+
+cubes = split([cube1], tools = [cube2], merge = true)
+|> appearance(color = "#da4333", roughness = 50, metalness = 90, opacity = 80)

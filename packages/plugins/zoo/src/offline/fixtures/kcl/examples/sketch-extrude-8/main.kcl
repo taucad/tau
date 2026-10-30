@@ -1,0 +1,9 @@
+// Surface extrude of an open profile
+openProfile = startSketchOn(XZ)
+  |> startProfile(at = [0, 0])
+  |> line(end = [4, 0])
+  |> arc(angleStart = 120deg, angleEnd = 0, radius = 5)
+  |> line(end = [5, 0])
+  |> line(end = [0, 10])
+// Surface extrude
+extrude(openProfile, length = 2, bodyType = SURFACE)

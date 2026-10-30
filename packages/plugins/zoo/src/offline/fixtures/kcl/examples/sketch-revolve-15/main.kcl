@@ -1,0 +1,11 @@
+// Sketch some disconnected lines in a sketch block.
+originalSketch = sketch(on = YZ) {
+  line1 = line(start = [var -5.33mm, var 3.69mm], end = [var -5.93mm, var -2.59mm])
+  line2 = line(start = [var -0.9mm, var 0.63mm], end = [var 4.01mm, var 0.68mm])
+}
+
+// Revolve just one line in the sketch.
+revolve([originalSketch.line1], axis = Y, angle = 180deg, bodyType = SURFACE)
+// Surface revolves of sketch blocks are non-destructive, so you can keep revolving
+// the same line again.
+revolve([originalSketch.line1], axis = Y, angle = -90deg, bodyType = SURFACE)

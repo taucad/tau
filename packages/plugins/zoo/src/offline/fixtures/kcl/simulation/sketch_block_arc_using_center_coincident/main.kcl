@@ -1,0 +1,39 @@
+@settings(experimentalFeatures = allow)
+
+s = sketch(on = XY) {
+  arc1 = arc(start = [var 1.5mm, var], end = [var, var 2mm], center = [var, var])
+  // Point at the origin.
+  p0 = point(at = [var, var])
+  p0.at[0] == 0
+  p0.at[1] == 0
+  // Constrain the center of the arc to be coincident with the point at the
+  // origin.
+  coincident([arc1.center, p0])
+
+  lineX = line(start = [var, var], end = [var, var])
+  horizontal(lineX)
+  lineY = line(start = [var, var], end = [var, var])
+  vertical(lineY)
+  // Constrain the lines to start at the origin point.
+  coincident([lineX.start, p0])
+  coincident([lineY.start, p0])
+
+  // Point at (1,0).
+  p1 = point(at = [var, var])
+  fixed([p1, [1mm, 0]])
+  // We can't specify a line length yet, so constrain the line's end to a point.
+  coincident([lineX.end, p1])
+  // Make the lines equal length.
+  equalLength([lineX, lineY])
+
+  // Arc between the lines.
+  coincident([arc1.start, lineX.end])
+  coincident([arc1.end, lineY.end])
+}
+
+assert(s.arc1.center.at[0], isEqualTo = 0, tolerance = 0.00000001)
+assert(s.arc1.center.at[1], isEqualTo = 0, tolerance = 0.00000001)
+assert(s.arc1.start.at[0], isEqualTo = 1mm, tolerance = 0.00000001)
+assert(s.arc1.start.at[1], isEqualTo = 0, tolerance = 0.00000001)
+assert(s.arc1.end.at[0], isEqualTo = 0, tolerance = 0.00000001)
+assert(s.arc1.end.at[1], isEqualTo = 1mm, tolerance = 0.00000001)

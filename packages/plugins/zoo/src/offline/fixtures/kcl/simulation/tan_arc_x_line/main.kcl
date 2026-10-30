@@ -1,0 +1,14 @@
+@settings(kclVersion = 1.0)
+startX = 0
+startY = 0
+angleOffset = 135deg
+r = 1
+angleStart = 110deg
+
+startSketchOn(XY)
+  |> startProfile(at = [startX, startY])
+  |> angledLine(angle = angleStart, length = .000001)
+  |> tangentialArc(angle = angleOffset, radius = r, tag = $arc1)
+  |> tangentialArc(angle = angleOffset, radius = 0.5 * r, tag = $arc2)
+  |> tangentialArc(angle = -angleOffset, radius = 0.5 * r, tag = $arc3)
+  |> xLine(endAbsolute = 1)

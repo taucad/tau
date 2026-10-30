@@ -1,0 +1,19 @@
+// Translate and rotate a sketch to create a loft.
+sketch001 = startSketchOn(XY)
+
+fn square() {
+    return  startProfile(sketch001, at = [-10, 10])
+        |> xLine(length = 20)
+        |> yLine(length = -20)
+        |> xLine(length = -20)
+        |> line(endAbsolute = [profileStartX(%), profileStartY(%)])
+        |> close()
+}
+
+profile001 = square()
+
+profile002 = square()
+    |> translate(z = 20)
+    |> rotate(axis = [0, 0, 1.0], angle = 45deg)
+
+loft([profile001, profile002])

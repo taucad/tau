@@ -1,0 +1,10 @@
+@settings(kclVersion = 3.0)
+
+isoView = view::oriented(view::Orientation::Isometric)
+
+frontView = view::oriented(
+  view::Orientation::Front,
+  target = [0, 0, 0],
+  distance = 500,
+  projection = view::Projection::Perspective,
+)

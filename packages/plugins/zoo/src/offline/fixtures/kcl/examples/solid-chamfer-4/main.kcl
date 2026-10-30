@@ -1,0 +1,42 @@
+// An example of chamfers with KCL 3.0 syntax.
+@settings(defaultLengthUnit = mm, kclVersion = 3.0)
+
+// Chamfer the top circular edge of an extruded 8 mm shaft.
+// These two shafts show edge selection by a side face and end face.
+
+// Sketch two circles, one on the left, one on the right.
+// We'll use them for shafts below.
+leftShaftSketch = sketch(on = XY) {
+  leftCircle = circle(start = [var -8mm, var 0mm], center = [var -12mm, var 0mm])
+  radius(leftCircle) == 4mm
+}
+rightShaftSketch = sketch(on = XY) {
+  rightCircle = circle(start = [var 16mm, var 0mm], center = [var 12mm, var 0mm])
+  radius(rightCircle) == 4mm
+}
+
+// For each sketch, get the region inside its circle.
+leftRegion = region(segments = [leftShaftSketch.leftCircle])
+rightRegion = region(segments = [rightShaftSketch.rightCircle])
+
+// Extrude one circle into a shaft,
+// then use `leftRegion.tags.leftCircle` to reference the original circle
+// at the base of the shaft,
+// The end face selects the circular edge at the top of the shaft.
+leftShaftBase = extrude(leftRegion, length = 20mm, tagEnd = $leftShaftTop)
+leftShaft = leftShaftBase
+  |> chamfer(
+       length = 1mm,
+       edges = [{ sideFaces = [leftRegion.tags.leftCircle, leftShaftBase.faces.leftShaftTop] }],
+     )
+
+// Extrude the other circle into a shaft and tag its top end face.
+rightShaftBase = extrude(rightRegion, length = 20mm, tagEnd = $rightShaftTop)
+
+// After extrusion, the circle identifies the cylindrical side face.
+// Their shared edge is the top rim.
+rightShaft = chamfer(
+  rightShaftBase,
+  length = 1mm,
+  edges = [{ sideFaces = [rightRegion.tags.rightCircle, rightShaftBase.faces.rightShaftTop] }],
+)

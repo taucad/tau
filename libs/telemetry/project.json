@@ -17,6 +17,7 @@
         "{workspaceRoot}/packages/plugins/*/agent/skills.json",
         "{workspaceRoot}/packages/plugins/*/src/**/*",
         "{workspaceRoot}/packages/runtime/src/machines/**/*",
+        "{workspaceRoot}/packages/runtime/src/plugins/plugin.ts",
         "{workspaceRoot}/packages/runtime/src/types/kernel-issue-codes.ts",
         "{workspaceRoot}/packages/runtime/src/preparation/**/*",
         "{workspaceRoot}/packages/runtime/src/host/host-admission.ts",

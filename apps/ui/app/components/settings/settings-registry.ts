@@ -7,6 +7,7 @@ import {
   HardDrive,
   Lock,
   Printer,
+  Shield,
   Settings2,
   Globe,
   FolderGit2,
@@ -44,38 +45,26 @@ const settingsCatalog = [
       {
         id: 'theme',
         label: 'Theme',
-        description: 'Select your preferred color scheme',
+        description: 'Choose light, dark or match your system',
         keywords: ['appearance', 'dark mode', 'light mode', 'black', 'system', 'contrast', 'colour'],
       },
       {
         id: 'code-inlay-hints',
-        label: 'Code Inlay Hints',
-        description: 'Show inline parameter names in code editors',
-        keywords: ['appearance'],
+        label: 'Code inlay hints',
+        description: 'Show parameter names inline in code',
+        keywords: ['editor', 'appearance'],
       },
       {
         id: 'pointer-cursors',
-        label: 'Use pointer cursors',
-        description: 'Change the cursor to a pointer when hovering over interactive elements',
+        label: 'Pointer cursors',
+        description: 'Show a hand cursor over buttons and links',
         keywords: ['appearance', 'cursor', 'hand', 'mouse', 'interactive'],
       },
       {
         id: 'accent-color',
-        label: 'Accent Color',
-        description: 'Customize the primary accent color',
+        label: 'Accent color',
+        description: 'Tint buttons, links and highlights',
         keywords: ['appearance', 'colour', 'hue'],
-      },
-      {
-        id: 'privacy',
-        label: 'Privacy',
-        description: 'Choose how your data, usage metrics and diagnostics are used to improve Tau',
-        keywords: ['training', 'sharing', 'no train', 'telemetry', 'usage', 'metrics', 'anonymous', 'diagnostics'],
-      },
-      {
-        id: 'agent-observability',
-        label: 'Agent recording',
-        description: 'Choose separately what may be recorded from your agent tasks, and for what',
-        keywords: ['agent', 'recording', 'capture', 'summaries', 'diagnosis', 'evaluation', 'training', 'purposes'],
       },
     ],
   },
@@ -87,7 +76,7 @@ const settingsCatalog = [
     entries: [
       {
         id: 'profile',
-        label: 'User profile',
+        label: 'Profile',
         description: 'Change your name and avatar',
         keywords: ['picture', 'photo'],
       },
@@ -106,14 +95,14 @@ const settingsCatalog = [
       },
       {
         id: 'linked-accounts',
-        label: 'Linked accounts',
-        description: 'Manage connected sign-in providers',
+        label: 'Sign-in methods',
+        description: 'Manage Google, GitHub and other sign-in providers',
         keywords: ['github', 'google', 'login'],
       },
       {
         id: 'github-permissions',
-        label: 'GitHub connections',
-        description: 'Manage separate GitHub sign-in, Gist and repository connections',
+        label: 'Gist sharing',
+        description: 'Share projects as GitHub Gists and review the authorization on GitHub',
         keywords: ['github', 'gist', 'revoke', 'authorization', 'oauth', 'consent'],
       },
       {
@@ -133,8 +122,8 @@ const settingsCatalog = [
       {
         id: 'github-repositories',
         label: 'GitHub repositories',
-        description: 'Manage repository connections and enable writes per repository',
-        keywords: ['github', 'write', 'permissions', 'installation', 'push'],
+        description: 'Connect GitHub and choose which repositories Tau can use',
+        keywords: ['github', 'write', 'permissions', 'installation', 'push', 'connect', 'repository', 'disconnect'],
       },
     ],
   },
@@ -168,6 +157,38 @@ const settingsCatalog = [
         keywords: ['threshold', 'payment', 'budget'],
       },
       {
+        id: 'cancel-plan',
+        label: 'Cancel plan',
+        description: 'Cancel your plan at the end of the billing period',
+        keywords: ['subscription', 'downgrade', 'stop'],
+      },
+    ],
+  },
+  {
+    id: 'data-controls',
+    label: 'Data controls',
+    icon: Shield,
+    group: 'Personal',
+    entries: [
+      {
+        id: 'usage-diagnostics',
+        label: 'Share usage and diagnostics',
+        description: 'Send anonymous performance and reliability data',
+        keywords: ['telemetry', 'usage', 'metrics', 'anonymous', 'diagnostics', 'privacy'],
+      },
+      {
+        id: 'improve-service',
+        label: 'Improve Tau for everyone',
+        description: 'Control whether your chats are used for improving the service',
+        keywords: ['training', 'sharing', 'no train', 'ai', 'privacy', 'agent', 'recording', 'summaries', 'evaluation'],
+      },
+      {
+        id: 'cookie-preferences',
+        label: 'Cookie preferences',
+        description: 'Choose whether Tau uses optional analytics',
+        keywords: ['cookies', 'analytics', 'posthog', 'consent', 'privacy'],
+      },
+      {
         id: 'close-account',
         label: 'Close account',
         description: 'Close your account and delete your data',
@@ -185,7 +206,7 @@ const settingsCatalog = [
         id: 'compute-reuse',
         label: 'Compute reuse',
         description: 'Choose how local CAD work reuses expensive results',
-        keywords: ['cache', 'durable', 'memory', 'off', 'inspect', 'clear', 'collect'],
+        keywords: ['cache', 'durable', 'memory', 'off', 'inspect', 'clear', 'collect', 'check size', 'free space'],
       },
       {
         id: 'tau-host',
@@ -274,24 +295,24 @@ const settingsCatalog = [
     entries: [
       {
         id: 'show-credits',
-        label: 'Show Credits',
-        description: 'Display the Tau credits charged for each message in the chat history',
+        label: 'Show credits',
+        description: 'Show the credits each message used',
         keywords: ['metadata', 'cost'],
       },
       {
         id: 'filesystem-context',
-        label: 'Filesystem',
-        description: 'Include a snapshot of the project file tree',
-        keywords: ['editor', 'context'],
+        label: 'Project files',
+        description: 'Include the project file tree',
+        keywords: ['editor', 'context', 'filesystem'],
       },
       {
         id: 'active-file',
-        label: 'Active File',
-        description: 'Include the currently focused file',
+        label: 'Active file',
+        description: 'Include the file you are editing',
         keywords: ['editor', 'context'],
       },
-      { id: 'open-tabs', label: 'Open Tabs', description: 'Include all open editor tabs', keywords: ['context'] },
-      { id: 'testing-tools', label: 'Enable Testing Tools', description: 'Allow the agent to run and edit tests' },
+      { id: 'open-tabs', label: 'Open tabs', description: 'Include every open editor tab', keywords: ['context'] },
+      { id: 'testing-tools', label: 'Testing tools', description: 'Let the agent run and edit tests' },
       {
         id: 'default-permissions',
         label: 'Default permissions',
@@ -314,14 +335,14 @@ const settingsCatalog = [
       },
       {
         id: 'browser-storage',
-        label: 'Browser Storage',
+        label: 'Browser storage',
         description: 'View Home storage usage and available space',
         keywords: ['quota', 'disk'],
       },
       {
         id: 'tau-cloud-projects',
-        label: 'Tau Cloud Projects',
-        description: 'Bring your Tau Cloud projects to this device when you sign in',
+        label: 'Tau Cloud projects',
+        description: 'Choose where your cloud projects appear when you sign in',
         keywords: ['sync', 'backup', 'download', 'materialize', 'sign in'],
       },
     ],
@@ -365,7 +386,9 @@ const cloudSections: readonly SettingsSectionDefinition[] = tauCloudEnabled
       .map((section) =>
         section.id === 'agents'
           ? { ...section, entries: section.entries.filter((entry) => entry.id !== 'show-credits') }
-          : section,
+          : section.id === 'data-controls'
+            ? { ...section, entries: section.entries.filter((entry) => entry.id !== 'close-account') }
+            : section,
       );
 /* Machines are hosted by the desktop services utility; the web build has no
  * host to add one to, so the section is hidden rather than shown empty. Desktop's
@@ -374,7 +397,10 @@ const platformSections: readonly SettingsSectionDefinition[] = isDesktopTarget()
   ? cloudSections.map((section) =>
       section.id === 'filesystem'
         ? { ...section, entries: section.entries.filter((entry) => entry.id !== 'browser-storage') }
-        : section,
+        : /* The desktop shell has no optional analytics cookies to choose. */
+          section.id === 'data-controls'
+          ? { ...section, entries: section.entries.filter((entry) => entry.id !== 'cookie-preferences') }
+          : section,
     )
   : cloudSections
       .filter((section) => section.id !== 'machines' && section.id !== 'browser')

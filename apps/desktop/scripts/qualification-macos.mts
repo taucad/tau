@@ -83,9 +83,28 @@ export const verifyMacosQualificationArtifact = async (
   }
   return path;
 };
+/**
+ * Packaging zips with `ditto --sequesterRsrc`, which stores extended attributes as AppleDouble
+ * `__MACOSX/Tau.app/.../._name` members. `ditto -x` folds them back onto Tau.app, so they are
+ * admitted only as directories or `._` files mirroring a path inside Tau.app.
+ */
+export const isMacZipEntryInsideApp = (entry: string): boolean => {
+  const segments = entry.split('/');
+  if (segments.includes('..') || segments.includes('.')) {
+    return false;
+  }
+  if (entry.startsWith('Tau.app/')) {
+    return true;
+  }
+  if (entry === '__MACOSX/') {
+    return true;
+  }
+  const name = segments.at(-1) ?? '';
+  return entry.startsWith('__MACOSX/Tau.app/') && (name === '' || name.startsWith('._'));
+};
 const extractZip = (artifact: string, destination: string): void => {
   const entries = command('/usr/bin/unzip', ['-Z1', artifact]).split('\n');
-  if (entries.some((entry) => !entry.startsWith('Tau.app/') || entry.split('/').includes('..'))) {
+  if (!entries.every((entry) => isMacZipEntryInsideApp(entry))) {
     throw new Error('Mac ZIP contains entries outside Tau.app');
   }
   command('/usr/bin/ditto', ['-xk', artifact, destination]);

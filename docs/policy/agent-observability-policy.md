@@ -3,7 +3,7 @@ title: 'Agent Observability Policy'
 description: 'Observability acceptance for agent capabilities and dependency upgrades, native telemetry reuse, privacy, failure isolation and outcome evidence.'
 status: active
 created: '2026-10-29'
-updated: '2026-10-29'
+updated: '2026-10-30'
 related:
   - docs/policy/context-engineering-policy.md
   - docs/policy/testing-policy.md
@@ -49,11 +49,11 @@ An adapter must preserve Pi's synchronous callback invocation and asynchronous s
 
 ### 5. Apply purpose and destination controls before collection
 
-Keep account-linked task summaries and trace content independently opt-in and off by default. Existing anonymous telemetry permission authorizes neither. Unknown actor, plan, source rights or shared-project rights deny capture or reuse for the affected purpose. Public embedders explicitly opt in.
+Keep account-linked task summaries and trace content opt-in and off by default. One user-facing control may grant several purposes in one explicit act when the notice names each of them; record one decision per purpose and never infer a purpose from another purpose's grant. Existing anonymous telemetry permission and the Free plan's default supplier-training preference authorize none of them. Unknown actor, plan, source rights or shared-project rights deny capture or reuse for the affected purpose. Public embedders explicitly opt in.
 
 Allowlist each field for each destination. Native telemetry is input to this policy, not an authorization bypass. Bounded error messages, tool names, model identifiers and provider response IDs can still contain sensitive or high-cardinality data. General logs, Grafana, Sentry and alerts do not inherit trace-content permission. Never export arbitrary attributes, baggage, exception text, prompts, tool arguments or results through a generic fallback.
 
-Pro source content is permanently excluded from training and reusable evaluation or prompt-optimization datasets, including after downgrade, copying, compaction and derivation. Free source reuse also requires explicit purpose authorization and rights. Separately authorized operational diagnosis must remain scoped; it does not establish reuse eligibility.
+Paid-plan source content is excluded from training and reusable evaluation or prompt-optimization datasets unless the account owner opts in under the current notice; the default is off. Content captured while no such opt-in was in force stays excluded after upgrade, downgrade, copying, compaction and derivation. Free source reuse also requires explicit purpose authorization and rights. A rating is feedback consent for that rating only, recorded as a feedback decision when the user rates. Operational diagnosis is asked for per support report, must remain scoped and does not establish reuse eligibility.
 
 ### 6. Preserve authority and identity across boundaries
 

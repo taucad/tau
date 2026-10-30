@@ -20,6 +20,7 @@ export function ModelSettings(): React.JSX.Element {
     isAvailable,
     setAvailable,
     resetAvailability,
+    isPinningEnabled,
     isPinned,
     setPinned,
   } = useModels();
@@ -53,9 +54,9 @@ export function ModelSettings(): React.JSX.Element {
         placeholder='Search models…'
       />
 
-      <div className='flex flex-col gap-2'>
-        <div className='flex items-center justify-between gap-2'>
-          <h2>Available models</h2>
+      <div className='flex flex-col gap-3'>
+        <div className='flex min-h-8 items-center justify-between gap-4'>
+          <h2 className='text-sm font-medium'>Available models</h2>
           {hasOverrides ? (
             <Button variant='link' size='sm' className='h-auto px-0' onClick={resetAvailability}>
               Reset to recommended
@@ -90,17 +91,19 @@ export function ModelSettings(): React.JSX.Element {
                 >
                   <span className='truncate'>{model.name}</span>
                 </SwitchRow>
-                <ModelPinButton
-                  name={model.name}
-                  isOn={isPinned(model)}
-                  className={cn(
-                    !isPinned(model) &&
-                      'opacity-0 group-hover/row:opacity-100 group-has-focus-visible/row:opacity-100 pointer-coarse:opacity-100',
-                  )}
-                  onToggle={() => {
-                    setPinned(model, !isPinned(model));
-                  }}
-                />
+                {isPinningEnabled ? (
+                  <ModelPinButton
+                    name={model.name}
+                    isOn={isPinned(model)}
+                    className={cn(
+                      !isPinned(model) &&
+                        'opacity-0 group-hover/row:opacity-100 group-has-focus-visible/row:opacity-100 pointer-coarse:opacity-100',
+                    )}
+                    onToggle={() => {
+                      setPinned(model, !isPinned(model));
+                    }}
+                  />
+                ) : null}
               </div>
             ))}
           </div>
@@ -115,7 +118,7 @@ export function ModelSettings(): React.JSX.Element {
             setShowAll((previous) => !previous);
           }}
         >
-          {showAll ? 'Show recommended only' : 'View All Models'}
+          {showAll ? 'Show recommended only' : 'Show all models'}
         </Button>
       ) : null}
     </div>
@@ -146,7 +149,7 @@ function ModelsEmptyState({
       <PanelEmptyState
         icon={SearchX}
         title={`No models match “${search}”`}
-        description='Try another model or provider name.'
+        description='Try another model or provider name'
         className={className}
       >
         <Button variant='outline' size='sm' onClick={onClearSearch}>
@@ -161,7 +164,7 @@ function ModelsEmptyState({
       <PanelEmptyState
         icon={Bot}
         title='No recommended models'
-        description='Browse the full catalog to choose the models you want available.'
+        description='Browse the full catalog to choose the models you want available'
         className={className}
       >
         <Button variant='outline' size='sm' onClick={onShowAll}>
@@ -175,7 +178,7 @@ function ModelsEmptyState({
     <PanelEmptyState
       icon={Bot}
       title='No models available'
-      description='The model catalog is empty or could not be reached.'
+      description='The model catalog is empty or could not be reached'
       className={className}
     />
   );

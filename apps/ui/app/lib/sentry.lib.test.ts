@@ -11,7 +11,13 @@ import {
   scrubSelectorText,
   scrubSentryBreadcrumb,
 } from '#lib/sentry.lib.js';
-import { scrubSentryEvent, sentryEnvelopeUrl, sentryRelease, staleBuildFingerprint } from '#lib/sentry-event.lib.js';
+import {
+  automatedRunEnvironment,
+  scrubSentryEvent,
+  sentryEnvelopeUrl,
+  sentryRelease,
+  staleBuildFingerprint,
+} from '#lib/sentry-event.lib.js';
 
 const rejectionMechanism = 'auto.browser.global_handlers.onunhandledrejection';
 
@@ -67,11 +73,32 @@ describe('beforeSendSentryEvent', () => {
     expect(beforeSendSentryEvent(rejectionEvent(), { originalException: abort })).toBeNull();
   });
 
+  it('groups a transient network failure apart at warning level', () => {
+    const sent = beforeSendSentryEvent(rejectionEvent(), { originalException: new TypeError('Failed to fetch') });
+    expect(sent?.level).toBe('warning');
+    expect(sent?.fingerprint).toStrictEqual(['transient-network-failure']);
+  });
+
   it('scrubs and keeps any other event', () => {
     const event: ErrorEvent = { ...rejectionEvent(), user: { email: 'person@example.com' } };
     const sent = beforeSendSentryEvent(event, { originalException: new Error('boom') });
     expect(sent?.exception).toStrictEqual(rejectionEvent().exception);
     expect(sent?.user).toBeUndefined();
+  });
+});
+
+describe('automatedRunEnvironment', () => {
+  it('marks a deployment environment as an automated run once', () => {
+    expect(automatedRunEnvironment('staging')).toBe('staging-e2e');
+    expect(automatedRunEnvironment('staging-e2e')).toBe('staging-e2e');
+    expect(automatedRunEnvironment(undefined)).toBeUndefined();
+  });
+
+  it('files an event from a browser under automation apart from real use', () => {
+    vi.stubGlobal('navigator', { webdriver: true });
+    expect(scrubSentryEvent({ type: undefined, environment: 'staging' }).environment).toBe('staging-e2e');
+    vi.unstubAllGlobals();
+    expect(scrubSentryEvent({ type: undefined, environment: 'staging' }).environment).toBe('staging');
   });
 });
 

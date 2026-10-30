@@ -194,6 +194,8 @@ export const createPortalAction = async (
   input: {
     readonly requestId: string;
     readonly returnPath: string;
+    /** Opens the portal on its cancellation confirmation instead of its home page. */
+    readonly flow?: 'subscription_cancel';
   },
 ): Promise<WirePaymentAction> =>
   actionRequest('/payment-actions/portal', binding, {

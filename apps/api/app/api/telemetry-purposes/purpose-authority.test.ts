@@ -85,14 +85,20 @@ describe('resolvePurposeAuthority', () => {
   describe('tier', () => {
     const granted = telemetryPurposes.map((purpose) => decided(purpose, true));
 
-    it('excludes a paid tier from reuse and training however the account answered', () => {
+    it('lets a paid tier that granted reuse and training use them', () => {
       for (const tier of ['pro', 'enterprise'] as const) {
-        const input = authority({ decisions: granted, tier });
-
-        expect(allowed(input)).toEqual(['summary', 'feedback', 'content', 'diagnosis']);
-        expect(refusalOf(input, 'reuse')).toBe('tier-excluded');
-        expect(refusalOf(input, 'training')).toBe('tier-excluded');
+        expect(allowed(authority({ decisions: granted, tier }))).toEqual([...telemetryPurposes]);
       }
+    });
+
+    it('keeps a paid tier out of reuse and training until it decides', () => {
+      const capture = telemetryPurposes
+        .filter((purpose) => purpose !== 'reuse' && purpose !== 'training')
+        .map((purpose) => decided(purpose, true));
+      const input = authority({ decisions: capture, tier: 'pro' });
+
+      expect(refusalOf(input, 'reuse')).toBe('no-decision');
+      expect(refusalOf(input, 'training')).toBe('no-decision');
     });
 
     it('refuses reuse when the free tier is only the unrecognised-plan fallback', () => {
@@ -106,14 +112,8 @@ describe('resolvePurposeAuthority', () => {
       expect(refusalOf(input, 'training')).toBe('tier-unverified');
     });
 
-    it('allows reuse and training only for an assured free tier that granted them', () => {
+    it('allows reuse and training for an assured free tier that granted them', () => {
       expect(allowed(authority({ decisions: granted }))).toEqual([...telemetryPurposes]);
-    });
-
-    it('withdraws reuse on upgrade and restores it on downgrade without touching the decisions', () => {
-      expect(allowed(authority({ decisions: granted, tier: 'free' }))).toContain('reuse');
-      expect(allowed(authority({ decisions: granted, tier: 'pro' }))).not.toContain('reuse');
-      expect(allowed(authority({ decisions: granted, tier: 'free' }))).toContain('reuse');
     });
   });
 

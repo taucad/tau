@@ -1,0 +1,1 @@
+ALTER TABLE "user" ADD COLUMN "ai_training_decided_at" timestamp;

@@ -15,13 +15,12 @@ vi.mock('#hooks/use-cookie.js', () => ({
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe('AgentSettings without Tau Cloud', () => {
-  it('should render the remaining cards without the credits setting', () => {
+  it('should render the remaining settings without the credits setting', () => {
     render(<AgentSettings />);
 
-    expect(screen.queryByText('Metadata Display')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Show Credits')).not.toBeInTheDocument();
-    expect(screen.getByText('Editor Context')).toBeInTheDocument();
-    expect(screen.getByText('Testing')).toBeInTheDocument();
+    expect(screen.queryByRole('switch', { name: 'Show credits' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Context' })).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'Testing tools' })).toBeInTheDocument();
     expect(screen.getAllByRole('switch')).toHaveLength(4);
   });
 });

@@ -21,20 +21,20 @@ export const principles: Array<{
 }> = [
   {
     id: 'design',
-    title: 'Start with a purpose.',
-    body: 'A mount that fits. A housing that protects. Describe the job, then shape the part with editable code and dimensions you control.',
+    title: 'Describe the part.',
+    body: 'Tell the agent what the part does and where it fits, or write the code yourself. You get parametric source with dimensions you control.',
     detail: 'Your idea → editable CAD',
   },
   {
     id: 'verify',
-    title: 'Check what matters.',
-    body: 'Set the dimensions, clearances and hole patterns your part needs. GeoSpec checks the geometry against them and shows where more evidence is needed.',
+    title: 'Check the geometry.',
+    body: 'Declare the dimensions, clearances and hole patterns the part needs. GeoSpec checks the geometry against them and flags anything it cannot measure.',
     detail: 'Dimensions · clearances · fit',
   },
   {
     id: 'make',
-    title: 'Put it to work.',
-    body: 'Export STEP for your machining workflow, or STL and 3MF for 3D printing. Make the part, assemble it and try it where it belongs.',
+    title: 'Export and make it.',
+    body: 'Export STEP for machining, or STL and 3MF for 3D printing. Keep the source so you can revise the part after testing it.',
     detail: 'Machine · print · assemble',
   },
 ];
@@ -47,65 +47,65 @@ export const storyChapters = [
   {
     id: 'idea',
     label: 'Idea',
-    title: 'Start with the constraints.',
-    body: 'A reduction you need, a space it has to fit, the hardware it will connect to. Start with the job the gearbox needs to do.',
+    title: 'Start with the requirements.',
+    body: 'The gearbox needs a 4:1 reduction, has to fit inside a 174 mm rim and fastens with M3 socket-head screws.',
     detail: '4:1 reduction · 174 mm rim · M3 socket screws',
   },
   {
     id: 'prompt',
     label: 'Prompt',
-    title: 'Say it in a sentence.',
-    body: 'Describe the mechanism the way you would to a colleague. Tau turns the request into a plan of named parts.',
+    title: 'Describe it to the agent.',
+    body: 'Describe the mechanism in plain language. Tau breaks the request into a plan of named parts.',
     detail: '“Create a planetary gearbox with a 4:1 reduction, three planets and socket screws on top.”',
   },
   {
     id: 'agents',
     label: 'Parts',
-    title: 'Every part gets its own task.',
-    body: 'The ring, the gear train and the carrier hardware are worked on as separate, named parts. Each is parametric source you can open and edit.',
+    title: 'One task per part.',
+    body: 'The ring gear, the gear train and the carrier hardware are built as separate named parts. Each one is parametric source you can open and edit.',
     detail: 'Ring gear · Gear train · Carrier & hardware',
     note: 'Illustration of a design session',
   },
   {
     id: 'formation',
     label: 'Geometry',
-    title: 'Code becomes geometry.',
-    body: 'Each part’s source evaluates to a solid. Teeth, pins, bushings and fasteners resolve from the same shared parameters.',
+    title: 'Source becomes solids.',
+    body: 'Each part’s source evaluates to a solid. Teeth, pins, bushings and fasteners all derive from the same shared parameters.',
     detail: '34 solids · 24 / 24 / 72 teeth',
   },
   {
     id: 'assembly',
     label: 'Assembly',
-    title: 'Then it goes together.',
+    title: 'Assemble it.',
     body: 'Carrier, pins and bearings first; planets, sun and ring next; the output carrier and its screws last. One turn of the sun moves the carrier a quarter turn.',
     detail: 'Fixed ring · sun input · carrier output · 4:1',
   },
   {
     id: 'parameter',
     label: 'Parameter',
-    title: 'Change one number.',
+    title: 'Change a parameter.',
     body: 'Widen the gears from 14 to 18 mm. The ring, pins, bushings and hardware follow the source, and the axial envelope grows from 68 to 72 mm.',
     detail: 'faceWidth 14 → 18 · inputAngle 0° → 30°',
   },
   {
     id: 'verification',
     label: 'Evidence',
-    title: 'Check it against the requirements.',
-    body: 'The example declares ten GeoSpec requirements. Anything GeoSpec cannot yet measure comes back inconclusive, never as a pass.',
+    title: 'Check the requirements.',
+    body: 'The example declares ten GeoSpec requirements. Anything GeoSpec cannot measure yet is reported as inconclusive, not as a pass.',
     detail: 'Recorded GeoSpec run',
   },
   {
     id: 'print',
     label: 'Make',
-    title: 'Choose how to make it.',
-    body: 'Take STEP into your machining workflow, or export a mesh for a slicer. This print example places the ring gear on a 256 mm plate.',
+    title: 'Export it.',
+    body: 'Export STEP for machining, or a mesh for a slicer. This example places the ring gear on a 256 mm print bed.',
     detail: '3D printing illustration · no job is sent',
   },
   {
     id: 'devices',
     label: 'Anywhere',
-    title: 'Pick it up on another computer.',
-    body: 'Back the project up to Tau Cloud and open it wherever you sign in to Tau: its files, its revision history and, unless you turn them off, its chats.',
+    title: 'Open it on any computer.',
+    body: 'Back the project up to Tau Cloud and open it wherever you sign in, with its files, its revision history and, unless you turn chat sync off, its chats.',
     detail: 'Tau Cloud backup & sync · Pro and Enterprise',
   },
 ];
@@ -150,67 +150,68 @@ export const ecosystem = [
   },
 ];
 
+/** `title` labels the card on the home page; `heading` is the use-case page title. */
 export const useCases = [
   {
     slug: 'prototyping',
-    title: 'Make a part you can try.',
+    title: 'Prototype a part',
+    heading: 'Prototyping',
     audience: 'For makers & product designers',
     description:
-      'Design an enclosure, a custom mount or a replacement component around a real need. Check the fit in CAD, make a prototype and learn from using it.',
+      'Design enclosures, mounts and replacement parts around measurements you already have. Check the fit in CAD, then print or machine a prototype.',
     image: 'quadcopter.webp',
     alt: 'Tau example of a parametric racing quadcopter frame',
     steps: [
+      ['Describe the part', 'Say what the part holds, where it fits and which dimensions you already know.'],
       [
-        'Start with the constraints',
-        'Describe what the part needs to hold, where it needs to fit and which dimensions you already know.',
+        'Check the fit',
+        'Check dimensions, mounting holes and clearances against your requirements, and adjust the parameters as needed.',
       ],
       [
-        'Verify the fit',
-        'Check the dimensions, mounting holes and clearances against your requirements. Adjust the parameters as you learn.',
-      ],
-      [
-        'Make it and try it',
-        'Export STEP for machining or STL and 3MF for printing. Choose the material and process, make the part, then bring what you learn back into the design.',
+        'Make a prototype',
+        'Export STEP for machining, or STL and 3MF for 3D printing. After testing the part, update the parameters and make the next version.',
       ],
     ],
   },
   {
     slug: 'engineering',
-    title: 'Design for the job ahead.',
+    title: 'Design engineering parts',
+    heading: 'Engineering',
     audience: 'For engineers & technical teams',
     description:
-      'Develop parts around the interfaces, clearances and dimensions they need in use. Keep requirements beside the CAD source and carry the design into your manufacturing workflow.',
+      'Design parts around their interfaces, clearances and envelope. Keep the requirements next to the CAD source and export STEP for your manufacturing workflow.',
     image: 'engine.webp',
     alt: 'V8 engine model from the Tau example library',
     steps: [
-      ['Make intent explicit', 'Declare the envelope, interfaces and clearances that constrain the design.'],
+      ['Declare the requirements', 'Set the envelope, interfaces and clearances the design must meet.'],
       [
         'Check the geometry',
-        'GeoSpec evaluates declared geometric requirements. A pass is evidence about that requirement, not a general safety certification; unsupported evidence is reported as inconclusive.',
+        'GeoSpec checks each declared requirement. A pass covers that requirement only and is not a safety certification. Anything GeoSpec cannot measure is reported as inconclusive.',
       ],
       [
-        'Take it into manufacture',
-        'Export STEP to prepare machining in your CAM tools or share the model with a manufacturer. Review materials, tolerances and tooling, then validate the finished part in use.',
+        'Send it to manufacturing',
+        'Export STEP for your CAM software or a manufacturer. Review materials, tolerances and tooling, and test the finished part.',
       ],
     ],
   },
   {
     slug: 'learning',
-    title: 'Understand it by changing it.',
-    audience: 'For students & curious minds',
+    title: 'Learn by changing a model',
+    heading: 'Learning',
+    audience: 'For students & learners',
     description:
-      'Explore a mechanism, change its dimensions and check what happens. Connect the model on screen to a part you can make, assemble and learn from.',
+      'Open an example model, change its dimensions and see what happens. Then make the part and compare it with the model.',
     image: 'heat-exchanger.webp',
     alt: 'Parametric heat exchanger example in Tau',
     steps: [
-      ['Open an example', 'Begin with a model you can inspect instead of an empty canvas.'],
+      ['Open an example', 'Start from a working model instead of a blank file.'],
       [
-        'Change it and check it',
-        'Adjust a dimension or ask the agent to explain a modeling choice. Use geometric checks to see how the design meets its requirements.',
+        'Change it',
+        'Adjust a dimension or ask the agent why the model is built the way it is. Geometry checks show whether the design still meets its requirements.',
       ],
       [
-        'Learn by making',
-        'Export a model for a workshop project. Compare the finished part with the design, try it in an assembly and use what you learn in the next revision.',
+        'Make it',
+        'Export the model, make the part and compare it with the design. Use what you find in the next revision.',
       ],
     ],
   },
@@ -219,23 +220,23 @@ export const useCases = [
 export const visionChapters: Array<[string, string, string]> = [
   [
     'Today',
-    'Design. Verify. Make.',
-    'Describe a useful part, shape it in editable CAD and check its geometry. Export files to take the design into machining, printing or your wider fabrication workflow.',
+    'Design, check and export',
+    'Describe a part, build it as editable CAD and check its geometry. Export files for machining, 3D printing or other fabrication.',
   ],
   [
     'Foundation',
-    'Objects that move.',
-    'Kinematic models describe how parts move together. Prescribed movement illustrates a mechanism; it does not predict loads, wear or material behavior.',
+    'Moving assemblies',
+    'Kinematic models describe how parts move together. They show motion only and do not predict loads, wear or material behavior.',
   ],
   [
     'Direction',
-    'Bring the workshop closer.',
-    'We’re working toward a closer connection between design, fabrication, sourcing and service. Today, exports carry your model into the tools you use to make it; deeper manufacturing coordination is still in development.',
+    'Closer to manufacturing',
+    'Today, exports take your model into the tools you use to make it. We’re working on tighter links between design, fabrication, sourcing and service.',
   ],
   [
     'Principle',
-    'People keep the judgment.',
-    'Good tools help more people make useful things. You choose the materials and process, review the evidence and decide when a design is ready to become a physical part.',
+    'People make the decisions',
+    'You choose the material and process, review the check results and decide when a design is ready to make.',
   ],
 ];
 
@@ -252,7 +253,7 @@ export const plans: Array<{
   {
     id: 'free',
     name: 'Free',
-    tagline: 'For the next thing you’ll make.',
+    tagline: 'Design, check and export for free.',
     price: 'US$0',
     billingPeriod: 'forever',
     features: [
@@ -268,7 +269,7 @@ export const plans: Array<{
   {
     id: 'pro',
     name: 'Pro',
-    tagline: 'Keep designing, checking and making.',
+    tagline: 'Monthly credits and cloud sync.',
     price: 'US$20',
     billingPeriod: 'per month, plus applicable tax',
     features: [
@@ -285,7 +286,7 @@ export const plans: Array<{
   {
     id: 'enterprise',
     name: 'Enterprise',
-    tagline: 'For the way your team works.',
+    tagline: 'For teams and organizations.',
     price: 'Custom',
     billingPeriod: 'annual agreement',
     features: [
@@ -320,6 +321,6 @@ export const pricingFaq: Array<[string, string]> = [
   ],
   [
     'What happens to unused Pro credits?',
-    'Unused plan credits roll over up to 4,000. Purchased credits are separate and never expire. Review subscription and cancellation terms in the app before purchasing.',
+    'Unused plan credits roll over, up to 4,000. Purchased credits are separate and never expire. Subscription and cancellation terms are shown in the app before you buy.',
   ],
 ];

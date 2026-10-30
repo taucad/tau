@@ -17,10 +17,10 @@ import {
   AlertDialogTitle,
 } from '@taucad/ui/components/alert-dialog';
 import { Button } from '@taucad/ui/components/button';
-import { Card, CardContent } from '@taucad/ui/components/card';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import { Spinner } from '#components/ui/spinner.js';
 import { cn } from '@taucad/ui/utils/cn';
+import { SettingsRow } from '#components/settings/settings-item.js';
 
 export type LinkedAccountProps = {
   account?: Account;
@@ -44,6 +44,12 @@ const getUnlinkConsequence = (providerName: string, provider: SocialProvider, ac
     : signIn;
 };
 
+/**
+ * One sign-in provider as a settings row: the provider and linked identity, with link or unlink on the right.
+ *
+ * @param props - The linked account, when there is one, and its provider.
+ * @returns The provider row.
+ */
 export function LinkedAccount({ account, provider }: LinkedAccountProps): React.JSX.Element {
   const { authClient, baseURL, localization } = useAuth();
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
@@ -68,33 +74,31 @@ export function LinkedAccount({ account, provider }: LinkedAccountProps): React.
   const displayName = accountInfo ? (accountInfo.user.email ?? accountInfo.user.name) : account?.accountId;
   const unlinkLabel = localization.settings.unlinkProvider.replace('{{provider}}', providerName);
 
+  const icon = ProviderIcon ? (
+    <ProviderIcon aria-hidden className={cn('size-4 shrink-0', !account && 'opacity-50')} />
+  ) : (
+    <Plug aria-hidden className={cn('size-4 shrink-0', !account && 'opacity-50')} />
+  );
+
   return (
-    <Card className='border-0 bg-transparent shadow-none ring-0'>
-      <CardContent className='flex items-center justify-between gap-3'>
-        <div className='flex size-10 shrink-0 items-center justify-center rounded-md bg-muted'>
-          {ProviderIcon ? (
-            <ProviderIcon className={cn('size-4.5', !account && 'opacity-50')} />
-          ) : (
-            <Plug className={cn('size-4.5', !account && 'opacity-50')} />
-          )}
-        </div>
-
-        <div className='flex min-w-0 flex-col'>
-          <span className='text-sm leading-tight font-medium'>{providerName}</span>
-
-          {account && isLoadingInfo ? (
-            <Skeleton className='my-0.5 h-3 w-24' />
-          ) : (
-            <span className='truncate text-xs text-muted-foreground'>
-              {account ? displayName : localization.settings.linkProvider.replace('{{provider}}', providerName)}
-            </span>
-          )}
-        </div>
-
-        {account ? (
+    <SettingsRow
+      title={
+        <>
+          {icon}
+          {providerName}
+        </>
+      }
+      description={
+        account && isLoadingInfo ? (
+          <Skeleton className='my-0.5 h-3 w-24' />
+        ) : (
+          <span className='block truncate'>{account ? displayName : 'Not linked'}</span>
+        )
+      }
+      control={
+        account ? (
           <>
             <Button
-              className='ml-auto shrink-0'
               variant='outline'
               size='sm'
               onClick={() => {
@@ -133,7 +137,6 @@ export function LinkedAccount({ account, provider }: LinkedAccountProps): React.
           </>
         ) : (
           <Button
-            className='ml-auto shrink-0'
             variant='outline'
             size='sm'
             onClick={() => {
@@ -148,8 +151,8 @@ export function LinkedAccount({ account, provider }: LinkedAccountProps): React.
             {isLinking ? <Spinner /> : <Link2 />}
             {localization.settings.link}
           </Button>
-        )}
-      </CardContent>
-    </Card>
+        )
+      }
+    />
   );
 }

@@ -204,17 +204,17 @@ describe('TelemetryPurposeService', () => {
       expect(allowedPurposes(effective.purposes)).toEqual([]);
     });
 
-    it('excludes a paid tier from reuse and training', async () => {
+    it('lets a paid tier use reuse and training only once it granted them', async () => {
       const { service } = createService({
         noticeVersion: notice,
         tier: 'pro',
-        decisions: [row(1, 'content', true), row(2, 'reuse', true), row(3, 'training', true)],
+        decisions: [row(1, 'content', true), row(2, 'reuse', true)],
       });
 
       const effective = await service.getEffectivePurposes('user-a');
 
-      expect(allowedPurposes(effective.purposes)).toEqual(['content']);
-      expect(effective.purposes.find((state) => state.purpose === 'training')?.refusal).toBe('tier-excluded');
+      expect(allowedPurposes(effective.purposes)).toEqual(['content', 'reuse']);
+      expect(effective.purposes.find((state) => state.purpose === 'training')?.refusal).toBe('no-decision');
     });
 
     it('refuses reuse when the free tier is only the unrecognised-plan fallback', async () => {

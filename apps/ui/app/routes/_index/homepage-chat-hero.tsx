@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router';
-import { NewProjectChatComposer } from '#components/chat/new-project-chat-composer.js';
 import { HomeNewProjectComposerProvider } from '#hooks/active-chat-provider.js';
+import { HomeChatComposer } from '#routes/_index/home-chat-composer.js';
 import { Separator } from '@taucad/ui/components/separator';
 import { InteractiveHoverButton } from '#components/magicui/interactive-hover-button.js';
 import { Loader } from '@taucad/ui/components/loader';
@@ -21,9 +21,7 @@ export function HomepageChatHero({ composer }: { readonly composer?: React.React
           </h1>
         </div>
 
-        <HomeNewProjectComposerProvider>
-          {composer ?? <NewProjectChatComposer enableEarlyInput />}
-        </HomeNewProjectComposerProvider>
+        <HomeNewProjectComposerProvider>{composer ?? <HomeChatComposer />}</HomeNewProjectComposerProvider>
         <div className='mx-auto my-6 flex w-20 items-center justify-center'>
           <Separator />
           <div className='mx-4 text-sm font-light text-muted-foreground'>or</div>

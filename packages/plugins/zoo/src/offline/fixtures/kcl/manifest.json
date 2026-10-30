@@ -12655,7 +12655,9 @@
       "upstream": "rust/kcl-lib/std/sketch.kcl#hyperbolic",
       "functions": ["close", "hyperbolic", "startProfile", "startSketchOn"],
       "offline": {
-        "gap": "engine: command ExtendPath resulted in errors: [object WebAssembly.Exception]"
+        "solids": 0,
+        "volume": 0.0,
+        "area": 0.0
       }
     },
     {

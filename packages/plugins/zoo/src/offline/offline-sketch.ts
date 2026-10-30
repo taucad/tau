@@ -112,7 +112,16 @@ const circleEdge = (
   return clockwise ? oc.TopoDS.Edge(edge.Reversed()) : edge;
 };
 
-const bsplineThrough = (oc: Oc, frame: Frame, points: Vec2[]): TopoDS_Edge => {
+const bsplineThrough = (oc: Oc, frame: Frame, fitPoints: Vec2[]): TopoDS_Edge => {
+  // A repeated fit point gives the fit a zero-length knot interval, which libcascade rejects ("Knots interval
+  // values too close"), e.g. a conic whose interior point is its start; drop repeats, and fit two points by a line.
+  const points = fitPoints.filter(
+    (p, index) => index === 0 || Math.hypot(p.x - fitPoints[index - 1]!.x, p.y - fitPoints[index - 1]!.y) > 1e-7,
+  );
+  if (points.length === 2) {
+    return lineEdge(oc, frame, points[0]!, points[1]!);
+  }
+
   const array = new oc.NCollection_Array1_gp_Pnt(1, points.length);
   for (const [index, p] of points.entries()) {
     array.SetValue(index + 1, pnt(oc, toGlobal(frame, p.x, p.y)));

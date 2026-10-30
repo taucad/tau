@@ -1,6 +1,19 @@
-import type { RunScore, Scorecard } from '@taucad/agent-observability/scorecard';
-import { phaseDurations, summarizeRuns } from '@taucad/agent-observability/scorecard';
-import { observationMapperVersion } from '#api/agent-observability/langfuse-observation.js';
+import type {
+  AttemptRecord,
+  CheckRecord,
+  CostRecord,
+  FeedbackGrants,
+  RunScore,
+  Scorecard,
+} from '@taucad/agent-observability/scorecard';
+import {
+  checkSequence,
+  joinAttempts,
+  phaseDurations,
+  summarizeAttempts,
+  summarizeRuns,
+} from '@taucad/agent-observability/scorecard';
+import { accountPseudonym, observationMapperVersion } from '#api/agent-observability/langfuse-observation.js';
 
 /**
  * T15: the scorecard read back from Langfuse, which keeps the full 180-day
@@ -49,10 +62,14 @@ type RunDraft = {
   tools: number;
   firstUse: Array<Readonly<{ at: number; toolClass: string }>>;
   checks: Record<string, number>;
+  checkRecords: CheckRecord[];
   intervals: Interval[];
   presented: boolean;
   rating: RunScore['rating'];
   judgement: RunScore['judgement'];
+  /** The account's pseudonym. */
+  account: string;
+  lastAt: number;
 };
 
 const protectionRank: Readonly<Record<RunScore['protection'], number>> = { free: 0, unknown: 1, pro: 2 };
@@ -61,6 +78,54 @@ const text = (metadata: Readonly<Record<string, unknown>>, key: string): string 
   const value = metadata[key];
   return typeof value === 'string' ? value : undefined;
 };
+
+/* Langfuse returns an integer as a number; a value that reads as neither number nor numeric string is unreported. */
+const numeric = (metadata: Readonly<Record<string, unknown>>, key: string): AttemptRecord['usage']['input'] => {
+  const value = metadata[key];
+  const parsed = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+  return typeof parsed === 'number' && Number.isFinite(parsed) ? parsed : null;
+};
+
+const flag = (metadata: Readonly<Record<string, unknown>>, key: string): boolean =>
+  metadata[key] === true || metadata[key] === 'true';
+
+const attemptOf = (metadata: Readonly<Record<string, unknown>>): AttemptRecord => {
+  const requested = text(metadata, 'fact.requestedModel');
+  const resolved = text(metadata, 'fact.resolvedModel');
+  const domain = text(metadata, 'fact.firstOutput.domain');
+  return {
+    run: text(metadata, 'attempt') ?? 'unknown',
+    call: text(metadata, 'fact.logicalCall') ?? 'unknown',
+    provider: text(metadata, 'fact.provider') ?? 'unknown',
+    model: requested ?? 'unknown',
+    rerouted: requested !== undefined && resolved !== undefined && requested !== resolved,
+    purpose: (text(metadata, 'fact.purpose') ?? 'generation') as AttemptRecord['purpose'],
+    stop: (text(metadata, 'fact.stop') ?? 'error') as AttemptRecord['stop'],
+    firstOutput:
+      domain === undefined
+        ? null
+        : {
+            domain,
+            chunk: numeric(metadata, 'fact.firstOutput.chunk'),
+            text: numeric(metadata, 'fact.firstOutput.text'),
+          },
+    usage: {
+      input: numeric(metadata, 'fact.usage.input'),
+      output: numeric(metadata, 'fact.usage.output'),
+      cacheRead: numeric(metadata, 'fact.usage.cacheRead'),
+      cacheWrite: numeric(metadata, 'fact.usage.cacheWrite'),
+      reasoning: numeric(metadata, 'fact.usage.reasoning'),
+      missing: (text(metadata, 'fact.usage.missing') ?? 'unreported') as AttemptRecord['usage']['missing'],
+    },
+  };
+};
+
+const costOf = (metadata: Readonly<Record<string, unknown>>): CostRecord => ({
+  run: text(metadata, 'attempt') ?? 'unknown',
+  credits: numeric(metadata, 'fact.credits') ?? 0,
+  supplierCost: numeric(metadata, 'fact.supplierCost'),
+  adjustment: flag(metadata, 'fact.adjustment'),
+});
 
 const increment = (counts: Record<string, number>, key: string): void => {
   counts[key] = (counts[key] ?? 0) + 1;
@@ -105,7 +170,8 @@ const runOf = (metadata: Readonly<Record<string, unknown>>): string | undefined 
   return family === 'response' || family === 'rating' ? text(metadata, 'fact.evidence') : text(metadata, 'attempt');
 };
 
-const draftOf = (drafts: Map<string, RunDraft>, metadata: Readonly<Record<string, unknown>>, run: string): RunDraft => {
+const draftOf = (drafts: Map<string, RunDraft>, row: LangfuseObservationRow, run: string): RunDraft => {
+  const metadata = row.metadata ?? {};
   let draft = drafts.get(run);
   if (draft === undefined) {
     draft = {
@@ -120,13 +186,17 @@ const draftOf = (drafts: Map<string, RunDraft>, metadata: Readonly<Record<string
       tools: 0,
       firstUse: [],
       checks: {},
+      checkRecords: [],
       intervals: [],
       presented: false,
       rating: 'none',
       judgement: 'none',
+      account: text(metadata, 'attributes.langfuse.user.id') ?? 'unknown',
+      lastAt: 0,
     };
     drafts.set(run, draft);
   }
+  draft.lastAt = Math.max(draft.lastAt, Date.parse(row.startTime));
   const protection = protectionOf(text(metadata, 'protection'));
   if (protectionRank[protection] > protectionRank[draft.protection]) {
     draft.protection = protection;
@@ -160,7 +230,13 @@ const applySummary = (draft: RunDraft, row: LangfuseObservationRow, metadata: Re
       break;
     }
     case 'cad': {
-      increment(draft.checks, text(metadata, 'fact.result') ?? 'unknown');
+      const result = text(metadata, 'fact.result') ?? 'unknown';
+      increment(draft.checks, result);
+      draft.checkRecords.push({
+        at: Date.parse(row.startTime),
+        result,
+        revision: text(metadata, 'fact.sourceRevision') ?? 'unknown',
+      });
       break;
     }
     case 'outcome': {
@@ -178,9 +254,10 @@ const applySummary = (draft: RunDraft, row: LangfuseObservationRow, metadata: Re
   }
 };
 
-const scoreOf = (draft: RunDraft): RunScore => {
+const scoreOf = (draft: RunDraft, grants: FeedbackGrants | undefined): RunScore => {
   const pattern = [...new Set([...draft.firstUse].sort((a, b) => a.at - b.at).map((use) => use.toolClass))].join('>');
   const { durations, open } = phaseDurations(draft.intervals);
+  const { path, revisits } = checkSequence(draft.checkRecords);
   return {
     run: draft.run,
     chat: draft.chat,
@@ -191,11 +268,38 @@ const scoreOf = (draft: RunDraft): RunScore => {
     tools: { total: draft.tools, byClass: draft.byClass, byOutcome: draft.byOutcome },
     pattern: pattern === '' ? 'none' : pattern,
     checks: draft.checks,
+    checkPath: path,
+    revisits,
     phases: durations,
     openIntervals: open,
     presented: draft.presented,
     rating: draft.rating,
     judgement: draft.judgement,
+    model: { attempts: 0, calls: 0, settlements: 0, credits: 0, supplierCost: 0, supplierCostUnknown: 0 },
+    feedback: grants?.(draft.account, draft.lastAt) ?? 'unknown',
+  };
+};
+
+/**
+ * Key the accounts' feedback grants by their Langfuse pseudonym, as {@link scoreObservations} reads an account.
+ *
+ * @param grants - The grants keyed by Tau user id.
+ * @param scope - The accounts to answer for, the Langfuse environment read and the key from `pseudonymKey`.
+ * @returns The grants keyed by pseudonym; any other account's is `unknown`.
+ * @public
+ */
+export const pseudonymGrants = (
+  grants: FeedbackGrants,
+  {
+    userIds,
+    environment,
+    pseudonym,
+  }: Readonly<{ userIds: readonly string[]; environment: string; pseudonym: Uint8Array<ArrayBuffer> }>,
+): FeedbackGrants => {
+  const accounts = new Map(userIds.map((userId) => [accountPseudonym(environment, userId, pseudonym), userId]));
+  return (account, at) => {
+    const userId = accounts.get(account);
+    return userId === undefined ? 'unknown' : grants(userId, at);
   };
 };
 
@@ -204,13 +308,19 @@ const scoreOf = (draft: RunDraft): RunScore => {
  * scorecard does.
  *
  * @param rows - Observations read from one environment, in any order.
+ * @param grants - The accounts' feedback grants, keyed by their pseudonym in that environment.
  * @returns The scorecard; a run is named by its keyed group, never Tau's id.
  * @public
  */
-export const scoreObservations = (rows: readonly LangfuseObservationRow[]): ObservationScorecard => {
+export const scoreObservations = (
+  rows: readonly LangfuseObservationRow[],
+  grants?: FeedbackGrants,
+): ObservationScorecard => {
   const sources = new Set<string>();
   const semantics = new Set<string>();
   const drafts = new Map<string, RunDraft>();
+  const attempts: AttemptRecord[] = [];
+  const costs: CostRecord[] = [];
   let duplicates = 0;
   let replicas = 0;
   let content = 0;
@@ -237,9 +347,15 @@ export const scoreObservations = (rows: readonly LangfuseObservationRow[]): Obse
     } else {
       sources.add(source);
       semantics.add(semantic);
-      const run = text(metadata, 'authority') === 'host-reported' ? runOf(metadata) : undefined;
-      if (run !== undefined) {
-        const draft = draftOf(drafts, metadata, run);
+      const authority = text(metadata, 'authority');
+      const family = text(metadata, 'family');
+      const run = authority === 'host-reported' ? runOf(metadata) : undefined;
+      if (authority === 'api-reported' && text(metadata, 'plane') === 'summary' && family === 'provider') {
+        attempts.push(attemptOf(metadata));
+      } else if (authority === 'api-reported' && text(metadata, 'plane') === 'summary' && family === 'financial') {
+        costs.push(costOf(metadata));
+      } else if (run !== undefined) {
+        const draft = draftOf(drafts, row, run);
         if (text(metadata, 'plane') === 'feedback') {
           applyFeedback(draft, metadata);
         } else {
@@ -248,10 +364,15 @@ export const scoreObservations = (rows: readonly LangfuseObservationRow[]): Obse
       }
     }
   }
-  const runs = [...drafts.values()].map((draft) => scoreOf(draft));
+  const runs = joinAttempts(
+    [...drafts.values()].map((draft) => scoreOf(draft, grants)),
+    attempts,
+    costs,
+  );
   return {
     reconciliation: { read: rows.length, duplicates, replicas, content, unscorable },
     ...summarizeRuns(runs),
     runs,
+    attempts: summarizeAttempts(attempts, costs, new Set(runs.map((score) => score.run))),
   };
 };

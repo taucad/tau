@@ -102,6 +102,67 @@ describe('TypeScriptProjectService with real TypeScript language service', () =>
     service.dispose();
   });
 
+  it('serves read/write occurrences, located callers and callees, and workspace symbols with line previews', () => {
+    const service = fixture();
+    const source = [
+      'export function area(width: number): number {',
+      '  let total = width;',
+      '  total = total * 2;',
+      '  return total;',
+      '}',
+      'export function report(): number {',
+      '  return area(3);',
+      '}',
+      '',
+    ].join('\n');
+    service.open('file:///shapes.ts', source, 1);
+    const totals = service.getDocumentHighlights('file:///shapes.ts', source.indexOf('total'));
+    expect(totals.map((entry) => entry.kind)).toEqual(['write', 'write', 'read', 'read']);
+    expect(totals.every((entry) => source.slice(entry.start, entry.start + entry.length) === 'total')).toBe(true);
+
+    const callers = service.getIncomingCallLocations('file:///shapes.ts', source.indexOf('area'));
+    expect(callers).toHaveLength(1);
+    expect(callers[0]).toMatchObject({
+      name: 'report',
+      kind: 'function',
+      location: { uri: 'file:///shapes.ts', line: 7, preview: 'return area(3);' },
+    });
+    const callees = service.getOutgoingCallLocations('file:///shapes.ts', source.indexOf('report'));
+    expect(callees).toHaveLength(1);
+    expect(callees[0]).toMatchObject({ name: 'area', location: { line: 1 } });
+    const areaSymbol = service
+      .getWorkspaceSymbolLocations('area')
+      .find((entry) => entry.location.uri === 'file:///shapes.ts');
+    expect(areaSymbol).toMatchObject({
+      kind: 'function',
+      location: { preview: 'export function area(width: number): number {' },
+    });
+    expect(
+      service.getReferenceLocations('file:///shapes.ts', source.indexOf('area')).map((entry) => entry.preview),
+    ).toEqual(['export function area(width: number): number {', 'return area(3);']);
+    service.dispose();
+  });
+
+  it('answers signature help for a typed trigger character and closes on a retrigger past the call', () => {
+    const service = fixture();
+    const source = 'function scale(factor: number, offset: string): void {}\nscale(1, ';
+    service.open('file:///main.ts', source, 1);
+    const help = service.getSignatureHelp('file:///main.ts', source.length, { character: ',' });
+    expect(help?.argumentIndex).toBe(1);
+    expect(help?.items[0]?.parameters.map((parameter) => parameter.name)).toEqual(['factor', 'offset']);
+    const closed = `${source}'a')`;
+    service.change({
+      uri: 'file:///main.ts',
+      previousVersion: 1,
+      version: 2,
+      changes: [{ from: source.length, to: source.length, insert: "'a')" }],
+    });
+    expect(
+      service.getSignatureHelp('file:///main.ts', closed.length, { character: ')', retrigger: true }),
+    ).toBeUndefined();
+    service.dispose();
+  });
+
   it('returns the import edit for an auto-import completion into an existing import', () => {
     const source = "import type { MechanismSource } from './lib/mechanism';\n\nexport type Test = Mec";
     const service = fixture({

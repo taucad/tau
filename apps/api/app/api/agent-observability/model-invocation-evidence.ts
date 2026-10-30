@@ -6,7 +6,22 @@ import type { ProviderFact, ProviderStreamSummary } from '#api/agent-observabili
 import type { ModelInvocationSurface, ModelProviderWire } from '#api/llm/model-invocation.types.js';
 
 /** Bumped whenever the facts written for the same attempt change. */
-export const apiProviderMapper = 'api-provider-v1';
+export const apiProviderMapper = 'api-provider-v2';
+
+/* The host names each gateway attempt `<run>:<attempt>:<position>` when it prepares it (agent-host's session). */
+const hostAttemptKey = /^(.+):\d+:\d+$/u;
+
+/**
+ * The execution an attempt key belongs to: the host run it names, under the id the host's own facts use, so an attempt
+ * and its settlement join that run; any other key is its own execution.
+ *
+ * @param attemptKey - The caller's attempt key.
+ * @returns The contract id of the run, else of the attempt.
+ */
+export const executionOfAttempt = async (attemptKey: string): Promise<string> => {
+  const run = hostAttemptKey.exec(attemptKey)?.[1];
+  return run === undefined ? contractId('inv', attemptKey) : contractId('run', run);
+};
 
 /** One supplier attempt as the API saw it relay. */
 export type ObservedAttempt = Readonly<{
@@ -60,8 +75,9 @@ export const providerAttemptEvidence = async (
 ): Promise<Evidence> => {
   const optionalId = async (prefix: string, value: string | undefined): Promise<string | undefined> =>
     value === undefined ? undefined : contractId(prefix, value);
-  const [invocation, chat, operation, requestedModel, provider] = await Promise.all([
+  const [invocation, execution, chat, operation, requestedModel, provider] = await Promise.all([
     contractId('inv', attempt.attemptKey),
+    executionOfAttempt(attempt.attemptKey),
     optionalId('chat', attempt.chat),
     optionalId('op', attempt.operation),
     optionalId('model', attempt.requestedModel),
@@ -112,7 +128,7 @@ export const providerAttemptEvidence = async (
       destination: 'langfuse',
     },
     run,
-    execution: { attempt: invocation, resumedFrom: null, branchedFrom: null },
+    execution: { attempt: execution, resumedFrom: null, branchedFrom: null },
     versions: {
       hostBuild: null,
       apiBuild: null,

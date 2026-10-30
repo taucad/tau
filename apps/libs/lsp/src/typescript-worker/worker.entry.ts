@@ -102,7 +102,16 @@ function run(command: TypeScriptWorkerCommand): unknown {
       return current.readDeclaration(requireField(command.uri, 'uri'));
     }
     case 'signatureHelp': {
-      return current.getSignatureHelp(requireField(command.uri, 'uri'), requireField(command.position, 'position'));
+      return current.getSignatureHelp(requireField(command.uri, 'uri'), requireField(command.position, 'position'), {
+        character: command.triggerCharacter,
+        retrigger: command.retrigger,
+      });
+    }
+    case 'documentHighlights': {
+      return current.getDocumentHighlights(
+        requireField(command.uri, 'uri'),
+        requireField(command.position, 'position'),
+      );
     }
     case 'definition': {
       return current.getDefinition(requireField(command.uri, 'uri'), requireField(command.position, 'position'));
@@ -220,6 +229,9 @@ function run(command: TypeScriptWorkerCommand): unknown {
     case 'workspaceSymbols': {
       return current.getNavigateToItems(requireField(command.search, 'search'), command.maxResults);
     }
+    case 'workspaceSymbolLocations': {
+      return current.getWorkspaceSymbolLocations(requireField(command.search, 'search'), command.maxResults);
+    }
     case 'inlayHints': {
       return current.getInlayHints(
         requireField(command.uri, 'uri'),
@@ -235,6 +247,18 @@ function run(command: TypeScriptWorkerCommand): unknown {
     }
     case 'outgoingCalls': {
       return current.getOutgoingCalls(requireField(command.uri, 'uri'), requireField(command.position, 'position'));
+    }
+    case 'incomingCallLocations': {
+      return current.getIncomingCallLocations(
+        requireField(command.uri, 'uri'),
+        requireField(command.position, 'position'),
+      );
+    }
+    case 'outgoingCallLocations': {
+      return current.getOutgoingCallLocations(
+        requireField(command.uri, 'uri'),
+        requireField(command.position, 'position'),
+      );
     }
   }
 }

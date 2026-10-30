@@ -90,7 +90,7 @@ describe('langfuseObservation', () => {
       pseudonym,
     ).span;
 
-    expect(attribute(span, 'langfuse.observation.metadata.mapper')).toBe('langfuse-v4.2');
+    expect(attribute(span, 'langfuse.observation.metadata.mapper')).toBe('langfuse-v4.3');
     expect(attribute(span, 'langfuse.observation.metadata.phase.tool@host-recorded')).toBe('20');
     expect(attribute(span, 'langfuse.observation.metadata.phase.provider-wait@api-recorded')).toBe('7');
     expect(attribute(span, 'langfuse.observation.metadata.openIntervals')).toBe('1');

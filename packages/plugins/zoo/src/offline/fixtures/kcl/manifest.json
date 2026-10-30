@@ -4505,7 +4505,9 @@
         "area": 59.45246310368191
       },
       "offline": {
-        "gap": "engine: command Extrude resulted in errors: Unknown entity <id>"
+        "solids": 6,
+        "volume": 0.0,
+        "area": 93.74484141
       }
     },
     {
@@ -5177,7 +5179,9 @@
         "area": 26.55635023529612
       },
       "offline": {
-        "gap": "engine: command Extrude resulted in errors: Unknown entity <id>"
+        "solids": 2,
+        "volume": 6.156854249,
+        "area": 26.55634919
       }
     },
     {
@@ -9253,7 +9257,9 @@
         "area": 115.19538975335308
       },
       "offline": {
-        "gap": "engine: command Extrude resulted in errors: Unknown entity <id>"
+        "solids": 2,
+        "volume": 0.0,
+        "area": 115.2000439
       }
     },
     {
@@ -9266,7 +9272,9 @@
         "area": 98.43875113801914
       },
       "offline": {
-        "gap": "engine: command Extrude resulted in errors: Unknown entity <id>"
+        "solids": 2,
+        "volume": 0.0,
+        "area": 98.44340313
       }
     },
     {
@@ -9279,7 +9287,9 @@
         "area": 133.833418176188
       },
       "offline": {
-        "gap": "engine: command Extrude resulted in errors: Unknown entity <id>"
+        "solids": 2,
+        "volume": 78.27858448,
+        "area": 133.8504295
       }
     },
     {
@@ -9292,7 +9302,9 @@
         "area": 102.5343431138026
       },
       "offline": {
-        "gap": "engine: command Extrude resulted in errors: Unknown entity <id>"
+        "solids": 2,
+        "volume": 0.0,
+        "area": 102.5389957
       }
     },
     {
@@ -9305,7 +9317,9 @@
         "area": 172.55707777596996
       },
       "offline": {
-        "gap": "engine: command Extrude resulted in errors: Unknown entity <id>"
+        "solids": 2,
+        "volume": 78.27858448,
+        "area": 172.5740887
       }
     },
     {
@@ -9318,7 +9332,9 @@
         "area": 133.833418176188
       },
       "offline": {
-        "gap": "engine: command Extrude resulted in errors: Unknown entity undefined"
+        "solids": 2,
+        "volume": 78.27858448,
+        "area": 133.8504295
       }
     },
     {
@@ -9331,7 +9347,9 @@
         "area": 102.5343431138026
       },
       "offline": {
-        "gap": "engine: command Extrude resulted in errors: Unknown entity <id>"
+        "solids": 2,
+        "volume": 0.0,
+        "area": 102.5389957
       }
     },
     {
@@ -9350,7 +9368,7 @@
       ],
       "kclVersion": "2.0",
       "offline": {
-        "gap": "engine: command ExtrudeToReference resulted in errors: Unknown entity <id>"
+        "gap": "engine: command ExtrudeToReference resulted in errors: The edge extrudes parallel to the reference p"
       }
     },
     {
@@ -11582,7 +11600,9 @@
         "yLine"
       ],
       "offline": {
-        "gap": "engine: command Extrude resulted in errors: Unknown entity <id>"
+        "solids": 4,
+        "volume": 51.64213562,
+        "area": 157.7279221
       }
     },
     {
@@ -11590,7 +11610,9 @@
       "upstream": "rust/kcl-lib/std/sketch.kcl#extrude",
       "functions": ["appearance", "close", "extrude", "startProfile", "startSketchOn", "xLine", "yLine"],
       "offline": {
-        "gap": "engine: command Extrude resulted in errors: Unknown entity <id>"
+        "solids": 2,
+        "volume": 6.156854249,
+        "area": 26.55634919
       }
     },
     {
@@ -11611,7 +11633,9 @@
         "yLine"
       ],
       "offline": {
-        "gap": "engine: command Extrude resulted in errors: Unknown entity <id>"
+        "solids": 2,
+        "volume": 57.13274123,
+        "area": 130.2654825
       }
     },
     {
@@ -11661,7 +11685,7 @@
       "offline": {
         "solids": 3,
         "volume": 79.11104887,
-        "area": 198.6486564
+        "area": 197.7901947
       }
     },
     {
@@ -11669,7 +11693,9 @@
       "upstream": "rust/kcl-lib/std/sketch.kcl#extrude",
       "functions": ["circle", "extrude", "getOppositeEdge", "hide", "horizontal", "line", "region", "vertical"],
       "offline": {
-        "gap": "engine: command Extrude resulted in errors: Unknown entity <id>"
+        "solids": 2,
+        "volume": 0.0,
+        "area": 102.5389957
       }
     },
     {
@@ -11817,7 +11843,9 @@
       "upstream": "rust/kcl-lib/std/sketch.kcl#revolve",
       "functions": ["coincident", "line", "revolve", "translate"],
       "offline": {
-        "gap": "engine: command Revolve resulted in errors: The profile does not enclose an area"
+        "solids": 2,
+        "volume": 0.0,
+        "area": 873.5897228
       }
     },
     {
@@ -11835,7 +11863,9 @@
       "upstream": "rust/kcl-lib/std/sketch.kcl#revolve",
       "functions": ["line", "revolve"],
       "offline": {
-        "gap": "engine: command Revolve resulted in errors: The profile does not enclose an area"
+        "solids": 2,
+        "volume": 0.0,
+        "area": 167.3718178
       }
     },
     {
@@ -11931,8 +11961,8 @@
       "functions": ["blend", "coincident", "extrude", "getBoundedEdge", "line", "region"],
       "offline": {
         "solids": 3,
-        "volume": 22.44,
-        "area": 86.18679845
+        "volume": 0.0,
+        "area": 63.74679845
       }
     },
     {
@@ -12027,7 +12057,7 @@
       "offline": {
         "solids": 1,
         "volume": 0.0,
-        "area": 202063.9053
+        "area": 122063.9053
       }
     },
     {
@@ -12035,7 +12065,9 @@
       "upstream": "rust/kcl-lib/std/sketch.kcl#sweep",
       "functions": ["line", "startProfile", "startSketchOn", "sweep", "tangentialArc"],
       "offline": {
-        "gap": "engine: command Sweep resulted in errors: The profile does not enclose an area"
+        "solids": 1,
+        "volume": 0.0,
+        "area": 25234.28463
       }
     },
     {
@@ -12043,7 +12075,9 @@
       "upstream": "rust/kcl-lib/std/sketch.kcl#sweep",
       "functions": ["line", "startProfile", "startSketchOn", "sweep", "tangentialArc"],
       "offline": {
-        "gap": "engine: command Sweep resulted in errors: The profile does not enclose an area"
+        "solids": 1,
+        "volume": 0.0,
+        "area": 25234.28463
       }
     },
     {
@@ -12101,7 +12135,9 @@
         "tangent"
       ],
       "offline": {
-        "gap": "engine: command Sweep resulted in errors: The profile does not enclose an area"
+        "solids": 1,
+        "volume": 0.0,
+        "area": 112.6194684
       }
     },
     {
@@ -12123,7 +12159,9 @@
         "vertical"
       ],
       "offline": {
-        "gap": "engine: command Sweep resulted in errors: Unknown entity <id>"
+        "solids": 2,
+        "volume": 1705.76677,
+        "area": 1598.331201
       }
     },
     {
@@ -12191,7 +12229,9 @@
       "upstream": "rust/kcl-lib/std/sketch.kcl#loft",
       "functions": ["line", "loft", "offsetPlane", "startProfile", "startSketchOn", "tangentialArc", "xLine"],
       "offline": {
-        "gap": "engine: command Loft resulted in errors: A loft section does not enclose an area"
+        "solids": 1,
+        "volume": 0.0,
+        "area": 97.7173045
       }
     },
     {
@@ -12199,7 +12239,9 @@
       "upstream": "rust/kcl-lib/std/sketch.kcl#loft",
       "functions": ["arc", "loft", "startProfile", "startSketchOn"],
       "offline": {
-        "gap": "engine: command Loft resulted in errors: A loft section does not enclose an area"
+        "solids": 1,
+        "volume": 0.0,
+        "area": 51.89234586
       }
     },
     {
@@ -12227,7 +12269,9 @@
       "upstream": "rust/kcl-lib/std/sketch.kcl#loft",
       "functions": ["arc", "coincident", "loft"],
       "offline": {
-        "gap": "engine: command Loft resulted in errors: A loft section does not enclose an area"
+        "solids": 1,
+        "volume": 0.0,
+        "area": 52.26176034
       }
     },
     {
@@ -13655,8 +13699,8 @@
       "functions": ["blend", "coincident", "extrude", "line", "region"],
       "offline": {
         "solids": 3,
-        "volume": 22.44,
-        "area": 86.18679845
+        "volume": 0.0,
+        "area": 63.74679845
       }
     },
     {
@@ -13676,7 +13720,9 @@
         "translate"
       ],
       "offline": {
-        "gap": "engine: command Revolve resulted in errors: The profile does not enclose an area"
+        "solids": 3,
+        "volume": 0.0,
+        "area": 233192.3716
       }
     },
     {

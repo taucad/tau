@@ -782,12 +782,28 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
     }>,
   ): Promise<ShellOutput> => {
     const { approval } = admitted;
+    /*
+     * A cancellation from the caller outranks every reason the command did not get going: an abort that lands while
+     * the launch is still being staged, before any process exists, is still a cancellation from the caller's side and
+     * is reported once (I7). `not-started` would be the wrong answer there, because it invites a retry of a command
+     * the caller has already withdrawn.
+     */
+    const didNotStart = (code: ShellNotStartedCode, message: string): ShellOutput =>
+      request.signal.aborted
+        ? {
+            status: 'cancelled',
+            stdout: emptyStream,
+            stderr: emptyStream,
+            durationMs: 0,
+            ...(approval === undefined ? {} : { approval }),
+          }
+        : notStarted(code, message);
     const fingerprints = new Map<string, string>([[admitted.root, admitted.fingerprint]]);
     for (const folder of [...admitted.access.read, ...admitted.access.write]) {
       // oxlint-disable-next-line no-await-in-loop -- a handful of granted folders.
       const identity = await rootIdentity(folder);
       if (identity === undefined || identity.real !== folder) {
-        return notStarted('root-changed', `${folder} changed after it was approved, so the command did not run.`);
+        return didNotStart('root-changed', `${folder} changed after it was approved, so the command did not run.`);
       }
       fingerprints.set(folder, identity.fingerprint);
     }
@@ -808,7 +824,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         host: admitted.host,
       });
       if (!(await unchanged(request, admitted.checkout, fingerprints))) {
-        return notStarted(
+        return didNotStart(
           'root-changed',
           'The project folder or a granted folder was replaced before the command started, so it did not run.',
         );
@@ -820,7 +836,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
           resource: { key: agentKey(request.runId), root: admitted.root },
         }));
       } catch (error) {
-        return notStarted(
+        return didNotStart(
           'shell-unavailable',
           `Tau could not record custody for this command, so it did not run: ${error instanceof Error ? error.message : String(error)}`,
         );
@@ -834,13 +850,13 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         } catch (error) {
           /* A hold that failed after it landed is released with the receipt; a release of an absent hold is a replay. */
           custody = { executionId, holds };
-          return notStarted(
+          return didNotStart(
             'checkout-unavailable',
             `This run's files could not be held for the command, so it did not run: ${error instanceof Error ? error.message : String(error)}`,
           );
         }
         if (answer.status === 'refused') {
-          return notStarted('checkout-unavailable', `${answer.message} The command did not run.`);
+          return didNotStart('checkout-unavailable', `${answer.message} The command did not run.`);
         }
         custody = { executionId, holds };
       }
@@ -882,10 +898,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         outcome = await provider.launch(launch);
       } catch (error) {
         request.signal.removeEventListener('abort', onAbort);
-        if (cancelled()) {
-          return { status: 'cancelled', stdout: emptyStream, stderr: emptyStream, durationMs: 0, approval };
-        }
-        return notStarted(
+        return didNotStart(
           'launch-failed',
           `The shell could not start: ${error instanceof Error ? error.message : String(error)}`,
         );
@@ -893,13 +906,13 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
       if (outcome.status !== 'started') {
         request.signal.removeEventListener('abort', onAbort);
         const unavailable = unavailableOf(outcome);
-        return notStarted('shell-unavailable', `${unavailable.message} ${unavailable.recovery}`);
+        return didNotStart('shell-unavailable', `${unavailable.message} ${unavailable.recovery}`);
       }
       const { process: child } = outcome;
       if (child.kind !== 'pipes') {
         await child.terminate().catch(() => undefined);
         request.signal.removeEventListener('abort', onAbort);
-        return notStarted('launch-failed', 'The provider started a terminal for a pipe launch.');
+        return didNotStart('launch-failed', 'The provider started a terminal for a pipe launch.');
       }
       const timer = setTimeout(() => {
         deadline.passed = true;

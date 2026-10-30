@@ -2025,27 +2025,35 @@ describe.runIf(enabled)('shell qualification', () => {
                * readiness window below; on the default 120 s the first to start could time out while the eighth is
                * still starting, and the row would fail for the machine's speed rather than the limiter's behaviour. */
               // oxlint-disable-next-line tau-lint/no-time-unit-suffix -- the shell tool's wire field.
-              timeoutMs: 300_000,
+              timeoutMs: 540_000,
             },
           });
         };
         const first = Array.from({ length: 8 }, (_, index) => index);
         const extra = Array.from({ length: 4 }, (_, index) => index + 8);
         const pending = first.map(async (index) => call(index));
+        const readyCount = (): number => first.filter((index) => existsSync(readyPath(index))).length;
         let observedReady = 0;
         try {
           /*
            * The claim is that all eight are held at once, not that they get there quickly: the limiter is proved by
            * `highWater()` below, and every isolation assertion is unchanged. The window is patience for the machine,
-           * and the two-core Intel macOS runner needs more of it than Apple silicon — it passed attempt 1 and lost
-           * attempt 2 inside a minute while starting eight Seatbelt shells over the previous attempt's teardown. A
-           * limiter that ever admitted fewer than eight would still fail here, however long the wait.
+           * and the two-core Intel macOS runner needs far more of it than Apple silicon: this row's attempt 1 is the
+           * first to start shells over the second checkout root, so it pays for that root's Seatbelt profile and
+           * fixture pages cold, and it lost a 180 s window there while attempts 2 and 3 of the same code on the same
+           * machine took 10.7 s and 6.8 s. Apple silicon passes every attempt. A limiter that ever admitted fewer
+           * than eight would still fail here, however long the wait.
+           *
+           * How many were ready is recorded before the assertion, so a red row says which of the two it was: a
+           * machine that was still starting them, or a limiter that stopped short of eight.
            */
+          const held = await eventually(() => readyCount() === first.length, 420_000);
+          observedReady = readyCount();
+          measurements = { observedSimultaneouslyReady: observedReady };
           expect(
-            await eventually(() => first.every((index) => existsSync(readyPath(index))), 180_000),
-            'eight native commands must be simultaneously held at the release barrier',
+            held,
+            `eight native commands must be simultaneously held at the release barrier; ${String(observedReady)} of 8 were ready when the window closed`,
           ).toBe(true);
-          observedReady = first.filter((index) => existsSync(readyPath(index))).length;
           expect(counting.highWater()).toBe(8);
           pending.push(...extra.map(async (index) => call(index)));
           await delay(250);
@@ -2081,7 +2089,7 @@ describe.runIf(enabled)('shell qualification', () => {
           rmSync(join(second, name));
         }
       },
-      { rowTimeout: 600_000, attempt },
+      { rowTimeout: 900_000, attempt },
     );
   };
   for (const attempt of Array.from({ length: repeats }, (_, index) => index + 1)) {

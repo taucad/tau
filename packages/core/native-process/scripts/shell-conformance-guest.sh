@@ -92,24 +92,31 @@ node --input-type=module -e '
   console.log(JSON.stringify({electron:desktop("electron/package.json").version,nodePty:native("node-pty/package.json").version,openScad:desktop("@taulabs/openrscad-engine/package.json").version}));
 ' > "$evidence/native-package-versions.json"
 
+# Each tier keeps its own exit code, so the receipt and the log both say which one failed. One aggregate code
+# meant reading nine thousand lines of a guest log to find out whether the red row was the expected C14 or
+# something new.
 status=0
+containment_status=0
+service_status=0
+qualification_status=0
+terminal_status=0
 NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
   TAU_SHELL_CONFORMANCE_RECEIPT="$HOME/shell-conformance-receipt.json" \
-  pnpm nx run native-process-core:test:shell-conformance --skip-nx-cache || status=$?
+  pnpm nx run native-process-core:test:shell-conformance --skip-nx-cache || containment_status=$?
 # The host shell service's rows over the same provider and bwrap (H01-H06), with their own receipt.
 NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
   TAU_SHELL_CONFORMANCE_RECEIPT="$HOME/shell-service-conformance-receipt.json" \
-  pnpm nx run host:test:shell-conformance --skip-nx-cache || status=$?
+  pnpm nx run host:test:shell-conformance --skip-nx-cache || service_status=$?
 # The W7 qualification rows: the agent host over the same provider and bwrap, with their own receipt.
 sudo -u tau env PATH="$PATH" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
   GITHUB_SHA="$GITHUB_SHA" GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SERVER_URL="$GITHUB_SERVER_URL" \
   TAU_SHELL_CONFORMANCE_ROW="$TAU_SHELL_CONFORMANCE_ROW" NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
   TAU_SHELL_CONFORMANCE_RECEIPT="$HOME/shell-qualification-receipt.json" \
-  pnpm nx run host:test:shell-qualification --skip-nx-cache || status=$?
+  pnpm nx run host:test:shell-qualification --skip-nx-cache || qualification_status=$?
 # The desktop Terminal's rows through the services host's terminal concern (W5), with their own receipt.
 NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
   TAU_SHELL_CONFORMANCE_RECEIPT="$HOME/terminal-conformance-receipt.json" \
-  pnpm nx run desktop:test:terminal-conformance --skip-nx-cache || status=$?
+  pnpm nx run desktop:test:terminal-conformance --skip-nx-cache || terminal_status=$?
 # Chromium's SwiftShader profile and native capture's Mesa Vulkan adapter are independent backends.
 icds=(/usr/share/vulkan/icd.d/lvp_icd*.json)
 [[ "${#icds[@]}" == 1 && -s "${icds[0]}" ]]
@@ -143,7 +150,21 @@ application_reports=(out/test-results/desktop-shell/*.json)
 shopt -u nullglob
 ((${#application_logs[@]} == 0)) || cp -f -- "${application_logs[@]}" "$evidence/application/"
 ((${#application_reports[@]} == 0)) || cp -f -- "${application_reports[@]}" "$evidence/application/"
-if [[ "$application_status" != 0 ]]; then status="$application_status"; fi
+# One line per tier, last in the step's output, so a reader sees which tiers failed without searching the log.
+# The aggregate keeps the first nonzero code, as it did when every tier assigned to it directly.
+printf '%s\n' '--- guest tier exit codes ---'
+for tier in \
+  "containment (native-process-core:test:shell-conformance)=$containment_status" \
+  "service (host:test:shell-conformance)=$service_status" \
+  "qualification (host:test:shell-qualification)=$qualification_status" \
+  "terminal (desktop:test:terminal-conformance)=$terminal_status" \
+  "application (desktop-e2e:test:e2e:shell)=$application_status"; do
+  printf '%s\n' "$tier"
+done
+printf '%s\n' '--- end guest tier exit codes ---'
+for code in "$containment_status" "$service_status" "$qualification_status" "$terminal_status" "$application_status"; do
+  if [[ "$status" == 0 && "$code" != 0 ]]; then status="$code"; fi
+done
 # The run never relaxed the stock policy.
 [[ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || printf 'absent')" == "$before" ]]
 exit "$status"

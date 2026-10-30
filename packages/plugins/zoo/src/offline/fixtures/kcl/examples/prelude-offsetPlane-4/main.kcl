@@ -1,0 +1,11 @@
+// A circle on the XY plane
+startSketchOn(XY)
+  |> startProfile(at = [0, 0])
+  |> circle( radius = 10, center = [0, 0] )
+
+// Triangle on the plane 4 units above
+startSketchOn(offsetPlane(XY, offset = 4))
+  |> startProfile(at = [0, 0])
+  |> line(end = [10, 0])
+  |> line(end = [0, 10])
+  |> close()

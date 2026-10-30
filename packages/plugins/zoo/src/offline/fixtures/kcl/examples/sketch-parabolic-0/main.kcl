@@ -1,0 +1,9 @@
+@settings(experimentalFeatures = allow)
+
+exampleSketch = startSketchOn(XY)
+  |> startProfile(at = [0,0])
+  |> parabolic(
+        end = [10,0],
+        coefficients = [2, 0, 0],
+  )
+  |>close()

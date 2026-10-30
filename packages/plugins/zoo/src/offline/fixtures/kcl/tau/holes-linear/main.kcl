@@ -1,0 +1,23 @@
+// Covers hole::holesLinear, which no Zoo fixture calls. Upstream it declares `axis: Axis2d | Point2d` but passes
+// the axis to patternLinear3d, which needs a 3D axis, so every call fails type checking on Zoo's engine too.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+plate = startSketchOn(XY)
+  |> startProfile(at = [0, 0])
+  |> xLine(length = 60)
+  |> yLine(length = 20)
+  |> xLine(length = -60)
+  |> close()
+  |> extrude(length = 8, tagEnd = $top)
+
+drilled = hole::holesLinear(
+  plate,
+  face = top,
+  cutAt = [10, 10],
+  instances = 4,
+  distance = 13.33,
+  axis = X,
+  holeBottom = hole::drill(pointAngle = 118deg),
+  holeBody = hole::blind(depth = 6, diameter = 4),
+  holeType = hole::simple(),
+)

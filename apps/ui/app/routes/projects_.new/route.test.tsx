@@ -1,4 +1,6 @@
-import { render, screen } from '@testing-library/react';
+import { hydrateRoot } from 'react-dom/client';
+import { renderToString } from 'react-dom/server';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -74,6 +76,51 @@ describe('/projects/new creation location', () => {
     vi.clearAllMocks();
     locationState = homeOnlyState();
     mockCreateProject.mockResolvedValue({ slugs: { workspaceSlug: 'home', projectSlug: 'bracket' } });
+  });
+
+  it('adopts name and description typed before hydration into the creation request', async () => {
+    const content = (
+      <MemoryRouter>
+        <ProjectsNew />
+      </MemoryRouter>
+    );
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(content);
+    document.body.append(container);
+    const name = container.querySelector<HTMLInputElement>('#project-name');
+    const description = container.querySelector<HTMLInputElement>('#project-description');
+    if (!name || !description) {
+      throw new Error('Server form fields are missing');
+    }
+    name.value = 'Early bracket';
+    description.value = 'Early description';
+    name.focus();
+    name.setSelectionRange(3, 6);
+    const onRecoverableError = vi.fn();
+    const root = hydrateRoot(container, content, { onRecoverableError });
+    try {
+      await waitFor(() => {
+        expect(within(container).getByRole('button', { name: /Create Project/ })).toBeEnabled();
+      });
+      expect(onRecoverableError).not.toHaveBeenCalled();
+      expect(container.querySelector('#project-name')).toBe(name);
+      expect(name).toHaveValue('Early bracket');
+      expect(description).toHaveValue('Early description');
+      expect(name).toHaveFocus();
+      expect([name.selectionStart, name.selectionEnd]).toEqual([3, 6]);
+      const create = within(container).getByRole('button', { name: /Create Project/ });
+      expect(create).toBeEnabled();
+      await userEvent.click(create);
+      expect(mockCreateProject.mock.calls[0]?.[0]?.project).toMatchObject({
+        name: 'Early bracket',
+        description: 'Early description',
+      });
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
   });
 
   it('renders static Home and creates there when folder access is unavailable', async () => {

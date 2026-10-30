@@ -63,6 +63,14 @@ export type ParameterSetOperation =
       kind: 'replace-group-values';
       group: string;
       values: Readonly<Record<string, JSONValue>>;
+      /**
+       * The group values the editor was working from. When present, only the fields `values` changed
+       * from them are written, and a field another writer also moved since refuses the replacement;
+       * without it the group becomes `values` whatever it now holds.
+       */
+      base?: Readonly<Record<string, JSONValue>>;
+      /** The editing surface the edit comes from; see {@link ParameterSetRequestBase.editor}. */
+      editor?: string;
     }>
   | Readonly<{
       kind: 'create-group';
@@ -97,6 +105,12 @@ export type ParameterSetRequestBase = Readonly<{
     reference?: string;
     representation?: 'binary64' | 'safe-integer' | 'decimal';
   }>;
+  /**
+   * The editing surface the edit comes from, such as one browser tab. A field that still holds this
+   * editor's own last committed value is never a conflict for it: the editor wrote that value, so an
+   * edit built on it is fresh even when the view that sent it still showed an older one.
+   */
+  editor?: string;
 }>;
 
 /** Correlated request accepted by the parameter-set owner. @public */

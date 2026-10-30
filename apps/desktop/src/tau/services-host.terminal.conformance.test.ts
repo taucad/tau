@@ -211,7 +211,11 @@ describe.runIf(enabled)('desktop terminal conformance', () => {
     }
     writeFileSync(join(other, 'canary.txt'), 'OTHER-PROJECT\n');
     probe = await probeHostShell({
-      provider: createSandboxShellProvider({ bwrapPath, home }),
+      provider: createSandboxShellProvider({
+        bwrapPath,
+        home,
+        custody: { directory: join(appData, 'shell-custody'), sessionDirectory: sessions },
+      }),
       checkouts: new Map(),
       appDataRoots: [appData],
       projectRoots: () => [project, other],

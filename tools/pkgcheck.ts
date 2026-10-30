@@ -631,6 +631,17 @@ const vendoredAssetReasons: Readonly<Record<string, Readonly<Record<string, stri
   '@taucad/rhino': {
     'node_modules/rhino3dm/rhino3dm.wasm': 'rhino3dm declares no exports field, so the deep path is the only address',
   },
+  '@taucad/zoo': {
+    'src/offline/wasm/LICENSE.OCCT': 'LGPL-2.1 text the checked-in Open CASCADE build must ship beside its WASM',
+    'src/offline/wasm/LICENSE.OCCT-Exception':
+      'Open CASCADE exception text the checked-in Open CASCADE build must ship beside its WASM',
+    'src/offline/wasm/libcascade_kcl.d.ts':
+      'built in-repo by packages/plugins/zoo/libcascade/build.sh from libcascade-kcl.yml; checked in so CI needs no Docker link',
+    'src/offline/wasm/libcascade_kcl.js':
+      'built in-repo by packages/plugins/zoo/libcascade/build.sh from libcascade-kcl.yml; checked in so CI needs no Docker link',
+    'src/offline/wasm/libcascade_kcl.wasm':
+      'built in-repo by packages/plugins/zoo/libcascade/build.sh from libcascade-kcl.yml; checked in so CI needs no Docker link',
+  },
   '@taucad/app': {
     '../../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2':
       'geist exports only ./font* JS entries, never the raw font files',

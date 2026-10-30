@@ -1,14 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { ParameterManifest, ParameterSetOutcome } from '@taucad/parameters';
+import type { ParameterManifest, ParameterSetOutcome, ParameterSetRequestBase } from '@taucad/parameters';
 import { fileParameterEntrySchema } from '@taucad/types';
 import type { FileParameterEntry } from '@taucad/types';
 import type { ParameterEdit } from '@taucad/viewer/parameters/rjsf-context';
+import type { FieldBase } from '@taucad/viewer/parameters/parameter-edit';
 import { WorkbenchPanesHostProvider } from '#host/workbench-host.jsx';
 import type { GraphicsRef, WorkbenchPanesHost, WorkbenchUnit } from '#host/workbench-host.jsx';
 import { ParametersPane } from '#parameters/parameters-pane.jsx';
 import type { ParametersEntryState, ParametersSource } from '#parameters/parameters-source.js';
+
+/** A row's edit lineage mints every base a pane receives; a test stands in for it. */
+// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- a test stands in for the lineage
+const testBase = (base: ParameterSetRequestBase): FieldBase => base as FieldBase;
 
 const captured = vi.hoisted(() => ({ edit: undefined as unknown }));
 const mockPaneSetExpanded = vi.fn();
@@ -94,7 +99,7 @@ vi.mock('@taucad/viewer/parameters/parameters', () => ({
     className?: string;
     enableSearch?: boolean;
     filterTerm?: string;
-    onParametersChange: (params: Record<string, unknown>) => void;
+    onParametersChange: (params: Record<string, unknown>, base: Record<string, unknown>) => void;
     units: { length: { displaySymbol: string } };
     parameterEdit?: {
       kind: 'authoritative';
@@ -118,7 +123,7 @@ vi.mock('@taucad/viewer/parameters/parameters', () => ({
           type='button'
           data-testid='change-params'
           onClick={() => {
-            onParametersChange({ width: 42 });
+            onParametersChange({ width: 42 }, { width: 40 });
           }}
         >
           Change
@@ -291,6 +296,7 @@ const renderPane = (
   const source: ParametersSource = {
     useEntry: (entryPath) => entries.get(entryPath) ?? { manifest: undefined, entry: undefined, failure: undefined },
     commitValue: vi.fn(async () => committed),
+    editValues: vi.fn(),
     replaceValues: vi.fn(),
     ...overrides,
   };
@@ -452,12 +458,12 @@ describe('ParametersPane', () => {
     const { source } = renderPane();
 
     fireEvent.click(screen.getByTestId('change-params'));
-    expect(source.replaceValues).toHaveBeenCalledWith('main.ts', manifest, { width: 42 });
+    expect(source.editValues).toHaveBeenCalledWith('main.ts', manifest, { values: { width: 42 }, base: { width: 40 } });
   });
 
   it('shows a failed operation above the sections when the source has no reporter', async () => {
     renderPane({
-      replaceValues: async () => {
+      editValues: async () => {
         throw new Error('The record changed.');
       },
     });
@@ -483,9 +489,21 @@ describe('ParametersPane', () => {
     await edit.commit.commit({ pointer: '/width', value: 3 });
     expect(commitValue).toHaveBeenCalledWith('main.ts', manifest, { group: 'default', pointer: '/width', value: 3 });
     await expect(
-      edit.commit.setValue({ pointer: '/width', value: 3, base: { pointer: '/width', value: 15 } }),
+      edit.commit.setValue({ pointer: '/width', value: 3, base: testBase({ pointer: '/width', value: 15 }) }),
     ).rejects.toThrow('Stale.');
     expect(edit.commit.target).toEqual({ authority: 'workbench-panes', root: '', entry: 'main.ts' });
+  });
+
+  it('settles setValue quietly when a newer edit of the field displaced it before it was written', async () => {
+    const commitValue = vi.fn(
+      async (): Promise<ParameterSetOutcome> => ({ status: 'cancelled-before-apply', requestId: 'request' }),
+    );
+    renderPane({ commitValue });
+    const edit = captured.edit as Extract<ParameterEdit, { kind: 'authoritative' }>;
+
+    await expect(
+      edit.commit.setValue({ pointer: '/width', value: 3, base: testBase({ pointer: '/width', value: 15 }) }),
+    ).resolves.toBeUndefined();
   });
 
   it('keeps row drafts in the pane when the source keeps none', () => {

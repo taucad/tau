@@ -134,10 +134,11 @@ it('masks all replay text and inputs while still blocking invitation links', () 
 });
 
 describe('webPosthogOptions', () => {
-  it('sends captures uncompressed, because the hosted proxy path destroys a gzip body', () => {
+  it('compresses captures, because the edge function forwards the body unexamined', () => {
     /* eslint-disable @typescript-eslint/naming-convention -- posthog-js option names. */
-    expect(webPosthogOptions()).toMatchObject({ api_host: '/api/ph', disable_compression: true });
+    expect(webPosthogOptions()).toMatchObject({ api_host: '/api/ph' });
     /* eslint-enable @typescript-eslint/naming-convention -- restore test naming rules. */
+    expect(webPosthogOptions()).not.toHaveProperty('disable_compression');
   });
 
   it('leaves the desktop host compressing, since it posts straight to PostHog', () => {

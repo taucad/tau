@@ -84,7 +84,10 @@ export type ParameterControllerOptions = Readonly<{
  * @public
  */
 export type ParameterController = Required<
-  Pick<ParametersSource, 'useEntry' | 'commitValue' | 'replaceValues' | 'retry' | 'drafts' | 'useScrub' | 'groups'>
+  Pick<
+    ParametersSource,
+    'useEntry' | 'commitValue' | 'editValues' | 'replaceValues' | 'retry' | 'drafts' | 'useScrub' | 'groups'
+  >
 > &
   Pick<ParametersSource, 'resetRecord' | 'reportError'> &
   Readonly<{
@@ -132,6 +135,9 @@ type PreviewLane = {
 const unknownState: ParametersEntryState = { manifest: undefined, entry: undefined, failure: undefined };
 
 const defaultPreviewInterval = 200;
+
+/** Controllers created in this page; with the clock it keeps each pane's editor id distinct. */
+let controllers = 0;
 
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -278,6 +284,9 @@ export const createParameterController = (options: ParameterControllerOptions): 
   const own = options.drafts === undefined ? createSettlingDrafts() : undefined;
   const drafts = options.drafts ?? own!.drafts;
   let sequence = 0;
+  /* This pane is one editor: a field still holding its own last write is never a conflict for it. */
+  controllers += 1;
+  const editor = `pane:${String(Date.now())}-${String(controllers)}`;
   let gestures = 0;
   let isDisposed = false;
 
@@ -386,7 +395,7 @@ export const createParameterController = (options: ParameterControllerOptions): 
           expected: identity,
           pressure: 'final',
           operation,
-          ...(base === undefined ? {} : { base }),
+          ...(base === undefined ? {} : { base: { ...base, editor } }),
         },
       });
       /* Committed or not, the record now holds what the authority holds: a refusal shows its value again. */
@@ -564,6 +573,14 @@ export const createParameterController = (options: ParameterControllerOptions): 
       }
       return outcome;
     },
+    editValues: async (entryPath, _manifest, { values, base }) =>
+      write(entryPath, {
+        kind: 'replace-group-values',
+        group: recordOf(entryPath).state.entry?.activeGroup ?? 'default',
+        values: values as Readonly<Record<string, JSONValue>>,
+        base: base as Readonly<Record<string, JSONValue>>,
+        editor,
+      }),
     replaceValues: async (entryPath, _manifest, values) =>
       write(entryPath, {
         kind: 'replace-group-values',

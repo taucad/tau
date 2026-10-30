@@ -1,0 +1,4 @@
+result = "Straße"
+  |> string::uppercase()
+
+assertIs(result == "STRASSE")

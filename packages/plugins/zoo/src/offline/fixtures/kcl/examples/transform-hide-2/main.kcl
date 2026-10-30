@@ -1,0 +1,6 @@
+// Hide a helix, leave its cylinder
+cylinder = startSketchOn(XY)
+  |> circle(center = [0, 0], radius = 2)
+  |> extrude(length = 2mm)
+helix001 = helix(revolutions = 16, angleStart = 0, cylinder)
+hide(helix001)

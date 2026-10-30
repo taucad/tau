@@ -1,0 +1,4 @@
+sketch001 = sketch(on = XY) {
+  p0 = point(at = [var -0.04mm, var 2.3mm])
+  horizontal([p0, ORIGIN])
+}

@@ -37,9 +37,24 @@ describe('credential-free billing CI', () => {
   it('should preserve the API lane selection and gate staging on completed billing tests', () => {
     const path = '.github/workflows/ci.yml';
     expect(job(path, 'billing-e2e').if).toBe(job(path, 'api').if);
-    const deployment = job(path, 'deploy-api-staging');
-    expect(deployment.needs).toContain('billing-e2e');
-    expect(deployment.if).toContain("needs.billing-e2e.result == 'success'");
+    const staging = '.github/workflows/staging.yml';
+    expect(read(staging)).toContain('"billing-e2e": "Billing contracts (no Stripe credentials)"');
+    const deployment = job(staging, 'deploy-api-staging');
+    expect(deployment.needs).toContain('ci');
+    expect(deployment.if).toContain("needs.ci.outputs.billing-e2e == 'success'");
+  });
+
+  it('should wait in staging only for checks that ci.yml defines', () => {
+    const ci = load(read('.github/workflows/ci.yml')) as { readonly jobs: Record<string, { readonly name?: string }> };
+    const names = new Set(Object.values(ci.jobs).map((definition) => definition.name));
+    const wait = job('.github/workflows/staging.yml', 'ci').steps?.find((step) => step.id === 'wait') as
+      | { readonly env?: Record<string, string> }
+      | undefined;
+    const checks = Object.values(JSON.parse(wait?.env?.['CHECKS'] ?? '{}') as Record<string, string>);
+    expect(checks).toContain('Billing contracts (no Stripe credentials)');
+    for (const check of checks) {
+      expect(names, check).toContain(check);
+    }
   });
 
   it('should keep provider credentials and sandbox acceptance out of every Actions workflow', () => {

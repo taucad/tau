@@ -109,7 +109,16 @@ export type ParametersSource = Readonly<{
     manifest: ParameterManifest,
     field: ParameterValueEdit & Readonly<{ group: string }>,
   ) => Promise<ParameterSetOutcome>;
-  /** Replace the active group's values; `{}` resets the entry to the model defaults. */
+  /**
+   * Write a form edit of the active group: only the fields `values` changes from `base`, the values the
+   * form rendered, so a stale rendered value of another field is never written back.
+   */
+  editValues: (
+    entryPath: string,
+    manifest: ParameterManifest,
+    edit: Readonly<{ values: Readonly<Record<string, unknown>>; base: Readonly<Record<string, unknown>> }>,
+  ) => Promise<void> | void;
+  /** Replace the active group's values whatever it holds; `{}` resets the entry to the model defaults. */
   replaceValues: (
     entryPath: string,
     manifest: ParameterManifest,

@@ -1,0 +1,26 @@
+exampleSketch = startSketchOn(XY)
+  |> startProfile(at = [0, 0])
+  |> line(end = [10, 0])
+  |> line(end = [0, 10], tag = $sketchingFace)
+  |> line(end = [-10, 0])
+  |> close()
+
+example = extrude(exampleSketch, length = 10)
+
+exampleSketch002 = startSketchOn(example, face = sketchingFace)
+  |> startProfile(at = [1, 1])
+  |> line(end = [8, 0])
+  |> line(end = [0, 8])
+  |> line(end = [-8, 0])
+  |> close(tag = $sketchingFace002)
+
+example002 = extrude(exampleSketch002, length = 10)
+
+exampleSketch003 = startSketchOn(example002, face = sketchingFace002)
+  |> startProfile(at = [-8, 12])
+  |> line(end = [0, 6])
+  |> line(end = [6, 0])
+  |> line(end = [0, -6])
+  |> close()
+
+example003 = extrude(exampleSketch003, length = 5)

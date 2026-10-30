@@ -7,7 +7,7 @@ import { createReadStream } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, realpath, rename, stat, writeFile, readdir, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { z } from 'zod';
 import { linuxInstallation } from '#shared/linux-installation.js';
@@ -185,6 +185,9 @@ const main = async (): Promise<void> => {
     throw new Error('Consumer acceptance requires its staging platform scope');
   }
   const root = resolve(required('TAU_QUALIFICATION_DIRECTORY'));
+  // The run directory itself stays non-recursive so a leftover one fails the
+  // row instead of being reused, but a fresh checkout has no `out/` yet.
+  await mkdir(dirname(root), { recursive: true });
   await mkdir(root, { recursive: false });
   let cleanHostRun: { host: NonNullable<typeof cleanHost>; directory: string } | undefined;
   if (cleanHost ?? windowsHost) {
@@ -217,6 +220,9 @@ const main = async (): Promise<void> => {
         : (process.env['XDG_CONFIG_HOME'] ?? join(homedir(), '.config')),
     name,
   );
+  // Same split as the run directory: the profile leaf must be absent for the
+  // cold-store check below, but its parent need not exist on a fresh host.
+  await mkdir(dirname(profile), { recursive: true });
   await mkdir(profile, { recursive: false });
   const store = channel === 'staging' ? join(profile, 'config/payloads') : defaultPayloadStore();
   const coldEntries = await readdir(join(store, 'closures/sha256')).catch((error: unknown) => {

@@ -1,5 +1,6 @@
 import type { Express, RequestHandler } from 'express';
 import express from 'express';
+import compression from 'compression';
 import { spawnSync } from 'node:child_process';
 import { createReadStream, existsSync, readFileSync, statSync, writeSync as fsWriteSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
@@ -347,6 +348,9 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Express
     });
   }
 
+  // Static files negotiate their own encodings above. Compress streamed SSR and
+  // loader responses too, preserving their content type and cache policy.
+  app.use(compression());
   app.all('*splat', createRequestHandler({ build: loadServerBuild }));
   return app;
 }

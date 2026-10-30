@@ -1,0 +1,48 @@
+// Chamfer a mounting plate.
+@settings(kclVersion = 3.0)
+
+width = 20
+length = 10
+thickness = 1
+chamferLength = 2
+
+plateSketch = sketch(on = XY) {
+  line1 = line(start = [var -10mm, var -5mm], end = [var 10mm, var -5mm])
+  line2 = line(start = [var 10mm, var -5mm], end = [var 10mm, var 5mm])
+  line3 = line(start = [var 10mm, var 5mm], end = [var -10mm, var 5mm])
+  line4 = line(start = [var -10mm, var 5mm], end = [var -10mm, var -5mm])
+}
+
+plateRegion = region(segments = [plateSketch.line4, plateSketch.line1])
+plate = extrude(plateRegion, length = thickness, tagEnd = $capEnd001)
+
+cornerChamfer = chamfer(
+  plate,
+  edges = [
+    {
+      sideFaces = [
+        plateRegion.tags.line1,
+        plateRegion.tags.line2
+      ]
+    },
+    {
+      sideFaces = [
+        plateRegion.tags.line2,
+        plateRegion.tags.line3
+      ]
+    },
+    {
+      sideFaces = [
+        plateRegion.tags.line3,
+        plateRegion.tags.line4
+      ]
+    },
+    {
+      sideFaces = [
+        plateRegion.tags.line4,
+        plateRegion.tags.line1
+      ]
+    }
+  ],
+  length = chamferLength,
+)

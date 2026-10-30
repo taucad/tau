@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -245,6 +246,64 @@ describe('NodeFsProvider atomic writes', () => {
     expect(events).toEqual([]);
   });
 
+  it.each(['created', 'removed', 'never present', 'unsubscribed'] as const)(
+    'should reconcile a requested leaf after ancestor rearm when it is %s',
+    async (outcome) => {
+      const root = createRoot();
+      const replacement = Promise.withResolvers<{ unsubscribe(): Promise<void> }>();
+      const firstClose = vi.fn(async () => undefined);
+      const replacementClose = vi.fn(async () => undefined);
+      let onAncestorEvents: Parameters<typeof parcelWatcher.subscribe>[1] | undefined;
+      const subscribe = vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(async (_directory, callback) => {
+        if (!onAncestorEvents) {
+          onAncestorEvents = callback;
+          return { unsubscribe: firstClose };
+        }
+        return replacement.promise;
+      });
+      const provider = new NodeFsProvider(root);
+      const events: unknown[] = [];
+      const requestedPath = 'absent/nested/deep.ts';
+      const excludedPath = 'absent/nested/ignored.ts';
+      const stop = await provider.watch(
+        { paths: [requestedPath, excludedPath], recursive: false, excludes: [excludedPath] },
+        (event) => events.push(event),
+      );
+      try {
+        mkdirSync(join(root, 'absent', 'nested'), { recursive: true });
+        writeFileSync(join(root, excludedPath), 'excluded sibling');
+        // Native enumeration may absorb the leaf into its initial snapshot, delivering only the ancestor.
+        onAncestorEvents?.(null, [{ type: 'create', path: join(root, 'absent') }]);
+        await vi.waitFor(() => {
+          expect(subscribe).toHaveBeenCalledTimes(2);
+        });
+        if (outcome !== 'never present') {
+          writeFileSync(join(root, requestedPath), 'created during replacement admission');
+        }
+        if (outcome === 'removed') {
+          rmSync(join(root, requestedPath));
+        } else if (outcome === 'unsubscribed') {
+          stop();
+        }
+        replacement.resolve({ unsubscribe: replacementClose });
+        await drainNodeFsProviderWatchClosures(provider);
+        if (outcome === 'created') {
+          expect(events).toEqual([{ type: 'change', path: requestedPath, kind: 'file' }, { type: 'reset' }]);
+        } else if (outcome === 'removed' || outcome === 'never present') {
+          expect(events).toEqual([{ type: 'delete', path: requestedPath }, { type: 'reset' }]);
+        } else {
+          expect(events).toEqual([]);
+        }
+      } finally {
+        replacement.resolve({ unsubscribe: replacementClose });
+        stop();
+        await drainNodeFsProviderWatchClosures(provider);
+      }
+      expect(firstClose).toHaveBeenCalledOnce();
+      expect(replacementClose).toHaveBeenCalledOnce();
+    },
+  );
+
   it('revalidates a missing parent created during native admission before acknowledging', async () => {
     const root = createRoot();
     const first = Promise.withResolvers<{ unsubscribe(): Promise<void> }>();
@@ -422,6 +481,46 @@ describe('NodeFsProvider atomic writes', () => {
     expect(temporaryFiles(root)).toEqual([]);
   });
 
+  it('should settle concurrent writes of one path without reporting a superseded write as unapplied', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+
+    /*
+     * Two writers of the same path, interleaved so that each publishes its entry
+     * while the other is still verifying the one it published. Whatever the
+     * platform does with the second rename, no writer may be told its own write
+     * might not have applied when it was merely superseded.
+     */
+    const results = await Promise.allSettled([
+      provider.writeFile('target.txt', 'first'),
+      provider.writeFile('target.txt', 'second'),
+    ]);
+
+    if (process.platform === 'win32') {
+      /*
+       * Windows has no last-writer-wins for this path. `_atomicWrite` keeps the
+       * published file's writable handle open past the rename, because only that
+       * handle's flush commits the entry's metadata there (#1109), and Windows
+       * refuses a rename that would replace a name whose entry a writer still
+       * holds. So the later writer is refused before it publishes anything. The
+       * refusal is the platform's, reported as itself: a write that did land is
+       * never relabelled as one that might not have.
+       */
+      expect(results.some((result) => result.status === 'fulfilled')).toBe(true);
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          expect(result.reason).not.toMatchObject({ code: 'CHECKED_WRITE_POTENTIALLY_APPLIED' });
+          expect(result.reason).not.toMatchObject({ code: 'WRITE_VERIFICATION_FAILED' });
+        }
+      }
+    } else {
+      // Both renames land, and the path keeps the bytes of whichever landed last.
+      expect(results.map((result) => result.status)).toEqual(['fulfilled', 'fulfilled']);
+    }
+    expect(['first', 'second']).toContain(readFileSync(join(root, 'target.txt'), 'utf8'));
+    expect(temporaryFiles(root)).toEqual([]);
+  });
+
   it('should report WRITE_VERIFICATION_FAILED when committed bytes do not verify', async () => {
     const root = createRoot();
     const provider = new NodeFsProvider(root);
@@ -444,6 +543,86 @@ describe('NodeFsProvider atomic writes', () => {
     await expect(provider.writeFile('target.txt', 'new')).rejects.toMatchObject({ code: 'WRITE_VERIFICATION_FAILED' });
 
     expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('new');
+    expect(temporaryFiles(root)).toEqual([]);
+  });
+
+  // Windows keeps the writer's handle open through verification, so a later writer cannot
+  // replace the path mid-read there: its rename fails EPERM instead.
+  it.skipIf(process.platform === 'win32')(
+    'should settle a write that a later writer replaced during its verification read',
+    async () => {
+      const root = createRoot();
+      const provider = new NodeFsProvider(root);
+      const open = fs.open.bind(fs);
+      let replaced = false;
+      vi.spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
+        const handle = await open(path, flags, mode);
+        // The provider opens the admitted real path, which differs from `root` on macOS and Windows temp dirs.
+        if (typeof flags === 'number' && String(path).endsWith('target.txt')) {
+          const read = handle.read.bind(handle);
+          vi.spyOn(handle, 'read').mockImplementation(async (...arguments_: Parameters<typeof handle.read>) => {
+            if (!replaced) {
+              // A second writer of the same bytes publishes over the path, unlinking the inode this read holds.
+              replaced = true;
+              writeFileSync(join(root, 'later.tmp'), 'new');
+              renameSync(join(root, 'later.tmp'), join(root, 'target.txt'));
+            }
+            return read(...arguments_);
+          });
+        }
+        return handle;
+      });
+
+      await expect(provider.writeFile('target.txt', 'new')).resolves.toBeUndefined();
+
+      expect(replaced).toBe(true);
+      expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('new');
+      expect(temporaryFiles(root)).toEqual([]);
+    },
+  );
+
+  it('should settle a write whose path a later writer replaced before its verification read', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const open = fs.open.bind(fs);
+    let replacement: 'applied' | 'refused' | undefined;
+    vi.spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
+      // Numeric flags single out the post-rename verification read; the provider opens the
+      // admitted real path, which differs from `root` on macOS and Windows temp directories.
+      if (replacement === undefined && typeof flags === 'number' && String(path).endsWith('target.txt')) {
+        /*
+         * A second writer publishes different bytes over the path *before* this
+         * descriptor exists, so the verification read opens that writer's entry
+         * instead of the one our rename published. This is the interleaving the
+         * published-descriptor read cannot see: the inode it is handed is intact
+         * and its bytes verify against themselves, they are simply not ours.
+         */
+        writeFileSync(join(root, 'superseding.tmp'), 'kept');
+        try {
+          renameSync(join(root, 'superseding.tmp'), join(root, 'target.txt'));
+          replacement = 'applied';
+        } catch {
+          // Windows refuses a rename over a name whose entry a writer still holds, and
+          // `_atomicWrite` holds the published file open there for its metadata flush,
+          // so the path keeps this write's own entry and verification proceeds on it.
+          rmSync(join(root, 'superseding.tmp'));
+          replacement = 'refused';
+        }
+      }
+      return open(path, flags, mode);
+    });
+
+    const outcome = await provider.writeFile('target.txt', 'mine').then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    const code = (outcome as NodeJS.ErrnoException | undefined)?.code;
+
+    expect(code).not.toBe('WRITE_VERIFICATION_FAILED');
+    expect(code).not.toBe('CHECKED_WRITE_POTENTIALLY_APPLIED');
+    expect(outcome).toBeUndefined();
+    expect(replacement).toBe(process.platform === 'win32' ? 'refused' : 'applied');
+    expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe(replacement === 'applied' ? 'kept' : 'mine');
     expect(temporaryFiles(root)).toEqual([]);
   });
 });

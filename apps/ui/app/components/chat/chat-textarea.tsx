@@ -5,6 +5,8 @@ import type { ActorRefFrom } from 'xstate';
 import type { ChatTextareaProperties } from '#components/chat/chat-textarea-types.js';
 import { useChatTextareaLogic } from '#components/chat/chat-textarea-types.js';
 import { ChatTextareaDesktop } from '#components/chat/chat-textarea-desktop.js';
+import { ChatEarlyInput } from '#components/chat/chat-early-input.js';
+import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import { ClientOnly } from '@taucad/ui/components/client-only';
 import { ChatTextareaSkeleton } from '#components/chat/chat-textarea-skeleton.js';
 import { useProject } from '#hooks/use-project.js';
@@ -40,6 +42,7 @@ export const ChatTextarea = memo(function ({
   ref,
   onSubmit,
   enableAutoFocus = true,
+  enableEarlyInput = false,
   onEscapePressed,
   onBlur,
   className,
@@ -336,10 +339,11 @@ export const ChatTextarea = memo(function ({
       </>
     ) : undefined;
 
-  return (
-    <ClientOnly fallback={skeleton}>
+  const content = (earlyInput?: EarlyChatInput): React.ReactNode => (
+    <>
       {composerNotices}
       <ChatTextareaDesktop
+        earlyInput={earlyInput}
         className={className}
         enableAutoFocus={enableAutoFocus}
         enableContextActions={enableContextActions}
@@ -391,6 +395,11 @@ export const ChatTextarea = memo(function ({
         handleTextareaBlur={logic.handleTextareaBlur}
         removeAttachment={logic.removeAttachment}
       />
-    </ClientOnly>
+    </>
+  );
+  return enableEarlyInput ? (
+    <ChatEarlyInput className={className}>{content}</ChatEarlyInput>
+  ) : (
+    <ClientOnly fallback={skeleton}>{content()}</ClientOnly>
   );
 });

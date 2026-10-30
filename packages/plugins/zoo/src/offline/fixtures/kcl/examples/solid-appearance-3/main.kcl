@@ -1,0 +1,20 @@
+// You can set the appearance before or after you shell it will yield the same result.
+// This example shows setting the appearance _after_ the shell.
+firstSketch = startSketchOn(XY)
+    |> startProfile(at = [-12, 12])
+    |> line(end = [24, 0])
+    |> line(end = [0, -24])
+    |> line(end = [-24, 0])
+    |> close()
+    |> extrude(length = 6)
+
+shell(
+    firstSketch,
+    faces = [END],
+    thickness = 0.25,
+)
+    |> appearance(
+        color = '#ff0000',
+        metalness = 90,
+        roughness = 90
+    )

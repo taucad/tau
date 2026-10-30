@@ -132,6 +132,11 @@ sudo -u tau env PATH="$PATH" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" VK_DRIVER_FILES=
   > "$evidence/application.log" 2>&1 || application_status=$?
 printf '%s\n' "$application_status" > "$evidence/application-exit-code.txt"
 cat "$evidence/application.log"
+# The model tier's own observers: the API, storage worker and provider-stub logs its global setup writes, and the
+# per-tier JSON reports. The Nx stream above shows only what vitest printed, which does not say what the API answered.
+mkdir -p "$evidence/application"
+cp -f out/test-results/desktop-e2e/*.log "$evidence/application/" 2>/dev/null || true
+cp -f out/test-results/desktop-shell/*.json "$evidence/application/" 2>/dev/null || true
 if [[ "$application_status" != 0 ]]; then status="$application_status"; fi
 # The run never relaxed the stock policy.
 [[ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || printf 'absent')" == "$before" ]]

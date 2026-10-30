@@ -4,7 +4,7 @@ import { legalDocuments } from '#www/legal.js';
 export const pages: Array<{ path: string; title: string; description: string; error?: boolean }> = [
   {
     path: '/',
-    title: 'Tau — Design. Verify. Make.',
+    title: 'Tau — Open-source, AI-native CAD',
     description:
       'Describe a part and get editable parametric CAD, checked against your requirements and ready to export for machining or 3D printing. Open source and free to start.',
   },
@@ -22,19 +22,19 @@ export const pages: Array<{ path: string; title: string; description: string; er
   },
   {
     path: '/use-cases/prototyping/',
-    title: 'For makers & product designers · Tau',
+    title: 'Prototyping · Tau',
     description:
       'Design enclosures, mounts and replacement parts around measurements you already have. Check the fit in CAD, then print or machine a prototype.',
   },
   {
     path: '/use-cases/engineering/',
-    title: 'For engineers & technical teams · Tau',
+    title: 'Engineering · Tau',
     description:
       'Design parts around their interfaces, clearances and envelope. Keep the requirements next to the CAD source and export STEP for your manufacturing workflow.',
   },
   {
     path: '/use-cases/learning/',
-    title: 'For students & learners · Tau',
+    title: 'Learning · Tau',
     description:
       'Open an example model, change its dimensions and see what happens. Then make the part and compare it with the model.',
   },

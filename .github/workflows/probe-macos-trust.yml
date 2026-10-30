@@ -29,21 +29,14 @@ jobs:
           sw_vers; id; sudo -n true && echo sudo-ok
           run security authorizationdb read com.apple.trust-settings.admin
           run security verify-cert -c s.crt -p ssl -s 127.0.0.1
-          echo '### A: sudo -n admin domain, System keychain'
+          echo '### New sequence'
+          run security verify-cert -c ca.crt -p basic
           run sudo -n security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ca.crt
+          run security verify-cert -c ca.crt -p basic
+          run security verify-cert -c s.crt -p ssl -s 127.0.0.1
+          run sh -c "security find-certificate -a -Z /Library/Keychains/System.keychain | grep -c $fp"
+          run sudo -n security delete-certificate -Z "$fp" /Library/Keychains/System.keychain
+          run security verify-cert -c ca.crt -p basic
           run security verify-cert -c s.crt -p ssl -s 127.0.0.1
           run security dump-trust-settings -d
-          run sudo -n security remove-trusted-cert -d ca.crt
-          run sudo -n security delete-certificate -Z "$fp" /Library/Keychains/System.keychain
-          run security verify-cert -c s.crt -p ssl -s 127.0.0.1
-          echo '### B: authorizationdb allow, then A'
-          run sh -c 'security authorizationdb read com.apple.trust-settings.admin > orig.plist'
-          run sudo -n security authorizationdb write com.apple.trust-settings.admin allow
-          run sudo -n security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ca.crt
-          run security verify-cert -c s.crt -p ssl -s 127.0.0.1
-          run sudo -n security remove-trusted-cert -d ca.crt
-          run sudo -n security delete-certificate -Z "$fp" /Library/Keychains/System.keychain
-          run sh -c 'sudo -n security authorizationdb write com.apple.trust-settings.admin < orig.plist'
-          run security authorizationdb read com.apple.trust-settings.admin
-          run security verify-cert -c s.crt -p ssl -s 127.0.0.1
           exit 0

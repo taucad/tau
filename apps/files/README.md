@@ -109,7 +109,7 @@ This writes `apps/files/dist/files-worker.mjs`, its `.map` and `files-worker.mjs
 
 The module has only a default export, `{ fetch }`. workerd reads named exports as entrypoints, so the handler factory lives in `src/worker.ts`.
 
-Deployment is Terraform only. tau-cloud commits the bundle as `bundles/files-worker-<tau-sha12>.mjs`, pins it with `content_sha256` and deploys it with `cloudflare_workers_script`. Nothing in this repository deploys the Worker. The project is tagged `deploy:cloudflare`, not `deploy:staging`, so CI never picks it up.
+Deployment is Terraform only. tau-cloud commits the bundle as `bundles/files-worker-<tau-sha12>.mjs`, pins it with `content_sha256` and deploys it with `cloudflare_workers_script`. Nothing in this repository deploys the Worker. The project carries no `deploy:` tag, so CI never deploys it.
 
 ## Tests
 

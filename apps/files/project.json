@@ -6,7 +6,7 @@
   "metadata": {
     "description": "The files.<zone> Cloudflare Worker (blueprint docs/research/files-service-blueprint.md). Deployed by tau-cloud's Terraform from the bundle this project builds, never by CI: it carries no deploy:staging tag."
   },
-  "tags": ["scope:api", "type:app", "deploy:cloudflare"],
+  "tags": ["scope:api", "type:app"],
   "targets": {
     "bundle": {
       "executor": "nx:run-commands",

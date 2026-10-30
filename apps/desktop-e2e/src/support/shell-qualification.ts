@@ -32,6 +32,32 @@ export const reportShellDiagnostics = async (session: DesktopSession): Promise<v
   console.info('SHELL DIAGNOSTICS', JSON.stringify({ lines, pane: pane.slice(0, 2000) }));
 };
 
+/**
+ * Wait until the pane's own session is live. The Terminal starts itself when the pane mounts — there is no Start
+ * button, and `Restart`, `Find` and `Request access` are the pane's context-menu items, not inner header controls —
+ * so readiness is the shell's own first prompt, which neither a refusal nor an ended session can ever print.
+ *
+ * @param page - The desktop page showing the Terminal pane.
+ */
+export const expectTerminalRunning = async (page: Page): Promise<void> => {
+  await page.getByRole('textbox', { name: 'Terminal', exact: true }).waitFor({ timeout: 60_000 });
+  await expect
+    .poll(async () => page.locator('[data-terminal-screen-mirror] > div').allTextContents(), { timeout: 60_000 })
+    .toEqual(expect.arrayContaining([expect.stringMatching(/\$\s*$/u)]));
+};
+
+/**
+ * Choose one of the pane's own actions the way a person does, from the Terminal actions menu the pane advertises as
+ * Shift+F10 and opens on a real right-click. They are deliberately not buttons in an inner header.
+ *
+ * @param page - The desktop page showing the Terminal pane.
+ * @param name - The action to choose.
+ */
+export const terminalAction = async (page: Page, name: 'Find' | 'Request access' | 'Restart'): Promise<void> => {
+  await terminalRegion(page).click({ button: 'right' });
+  await page.getByRole('menuitem', { name, exact: true }).click();
+};
+
 /** Open the production workbench surface through its ordinary menu. */
 export const openTerminalPane = async (page: Page): Promise<void> => {
   await page.getByRole('button', { name: 'Open workbench tab', exact: true }).first().click();

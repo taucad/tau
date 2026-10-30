@@ -17,6 +17,8 @@ import {
   survivingTerminalWriter,
   terminalWordPosition,
   terminalRegion,
+  terminalAction,
+  expectTerminalRunning,
   reportShellDiagnostics,
 } from '#support/shell-qualification.js';
 
@@ -41,7 +43,7 @@ afterEach(async (context) => {
   session = undefined;
 });
 
-/** Start only by clicking trusted chrome; unavailable prerequisites fail the test. */
+/** The pane starts its own session when it mounts; unavailable prerequisites fail the test, never skip it. */
 const startTerminal = async (preserveProfile = false): Promise<{ session: DesktopSession; root: string }> => {
   session = await launchDesktopApp({
     token: 'offline-shell-qualification',
@@ -50,8 +52,7 @@ const startTerminal = async (preserveProfile = false): Promise<{ session: Deskto
     env: { TAU_DEBUG: 'false' },
   });
   const root = await createTerminalProject(session);
-  await session.page.getByRole('button', { name: 'Start Terminal', exact: true }).click();
-  await session.page.getByRole('button', { name: 'Restart', exact: true }).waitFor();
+  await expectTerminalRunning(session.page);
   return { session, root };
 };
 
@@ -73,7 +74,7 @@ describe('production Electron Terminal keyboard qualification', () => {
     await page.keyboard.press('Control+d');
     await page.getByRole('button', { name: 'Start a new Terminal', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Start a new Terminal', exact: true }).click();
-    await page.getByRole('button', { name: 'Restart', exact: true }).waitFor();
+    await expectTerminalRunning(page);
     await typeTerminalCommand(page, 'printf \'%s|%s\' "$PWD" "${TAU_FIXTURE_VALUE-unset}" > fresh.txt');
     await expectTerminalFile(root, 'fresh.txt', `${root}|unset`);
   });
@@ -165,10 +166,9 @@ describe('production Electron Terminal keyboard qualification', () => {
     // Wait for the ordinary layout write before the renderer goes away.
     await expect.poll(async () => readFile(join(root, '.tau/workbench/layout.json'), 'utf8')).toContain('terminal');
     await page.reload();
-    await page.getByRole('button', { name: 'Start Terminal', exact: true }).waitFor();
+    /* The restored pane starts a session of its own; the typed-but-unsent line is not carried into it. */
+    await expectTerminalRunning(page);
     expect(await readFile(join(root, 'reload-count.txt'), 'utf8')).toBe('once');
-    await page.getByRole('button', { name: 'Start Terminal', exact: true }).click();
-    await page.getByRole('button', { name: 'Restart', exact: true }).waitFor();
     await typeTerminalCommand(page, 'printf fresh > after-reload.txt');
     await expectTerminalFile(root, 'after-reload.txt', 'fresh');
     expect(await readFile(join(root, 'reload-count.txt'), 'utf8')).toBe('once');
@@ -184,8 +184,7 @@ describe('production Electron Terminal keyboard qualification', () => {
     await terminalRegion(page).waitFor({ state: 'detached' });
     await expectTerminalWriterStopped(writer);
     await openTerminalPane(page);
-    await page.getByRole('button', { name: 'Start Terminal', exact: true }).click();
-    await page.getByRole('button', { name: 'Restart', exact: true }).waitFor();
+    await expectTerminalRunning(page);
     await typeTerminalCommand(page, 'printf fresh > after-close.txt');
     await expectTerminalFile(root, 'after-close.txt', 'fresh');
     await expect(stat(join(root, 'close-replay.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
@@ -202,8 +201,7 @@ describe('production Electron Terminal keyboard qualification', () => {
     await page.waitForURL(/\/w\//u);
     await expectTerminalWriterStopped(writer);
     await openTerminalPane(page);
-    await page.getByRole('button', { name: 'Start Terminal', exact: true }).click();
-    await page.getByRole('button', { name: 'Restart', exact: true }).waitFor();
+    await expectTerminalRunning(page);
     await typeTerminalCommand(page, 'printf %s "$PWD" > project-cwd.txt');
     const otherRoot = join(desktop.homeRoot, 'other-shell-project');
     await expectTerminalFile(otherRoot, 'project-cwd.txt', otherRoot);
@@ -226,10 +224,8 @@ describe('production Electron Terminal keyboard qualification', () => {
     await desktop.close();
     session = await launchDesktopApp({ token: 'offline-shell-qualification', profileRoot: dirname(desktop.homeRoot) });
     await session.page.goto(projectUrl);
-    await session.page.getByRole('button', { name: 'Start Terminal', exact: true }).waitFor();
+    await expectTerminalRunning(session.page);
     await expect(stat(join(root, 'quit-replay.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
-    await session.page.getByRole('button', { name: 'Start Terminal', exact: true }).click();
-    await session.page.getByRole('button', { name: 'Restart', exact: true }).waitFor();
     await typeTerminalCommand(session.page, 'printf restarted > after-quit.txt');
     await expectTerminalFile(root, 'after-quit.txt', 'restarted');
     await expect(stat(join(root, 'quit-replay.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
@@ -242,7 +238,7 @@ describe('production Electron Terminal keyboard qualification', () => {
     await expectTerminalFile(root, 'executions.txt', 'once');
     const writer = await startTerminalWriter(page, root);
     await page.keyboard.type('printf replayed >> executions.txt');
-    await page.getByRole('button', { name: 'Request access', exact: true }).click();
+    await terminalAction(page, 'Request access');
     await page.getByLabel('Hosts to reach', { exact: true }).fill('fixture.invalid');
     await page
       .getByRole('form', { name: 'Request Terminal access' })
@@ -253,7 +249,7 @@ describe('production Electron Terminal keyboard qualification', () => {
     await expect
       .poll(async () => page.getByRole('status').allTextContents())
       .toContain('The Terminal restarted with new access.');
-    await page.getByRole('button', { name: 'Restart', exact: true }).waitFor();
+    await expectTerminalRunning(page);
     // At the first observed replacement session, the old writer must already be gone.
     expect(await survivingTerminalWriter(writer)).toEqual([]);
     await expectTerminalWriterStopped(writer);

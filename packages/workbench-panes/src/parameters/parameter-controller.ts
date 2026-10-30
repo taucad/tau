@@ -32,7 +32,6 @@ import type {
   ParametersFailure,
   ParametersSource,
 } from '#parameters/parameters-source.js';
-import { randomUuid } from '@taucad/utils/id';
 
 /**
  * How the controller reaches one host's parameter authority.
@@ -133,6 +132,9 @@ type PreviewLane = {
 const unknownState: ParametersEntryState = { manifest: undefined, entry: undefined, failure: undefined };
 
 const defaultPreviewInterval = 200;
+
+/** Controllers created in this page; with the clock it keeps each pane's editor id distinct. */
+let controllers = 0;
 
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -280,7 +282,8 @@ export const createParameterController = (options: ParameterControllerOptions): 
   const drafts = options.drafts ?? own!.drafts;
   let sequence = 0;
   /* This pane is one editor: a field still holding its own last write is never a conflict for it. */
-  const editor = `pane:${randomUuid()}`;
+  controllers += 1;
+  const editor = `pane:${String(Date.now())}-${String(controllers)}`;
   let gestures = 0;
   let isDisposed = false;
 

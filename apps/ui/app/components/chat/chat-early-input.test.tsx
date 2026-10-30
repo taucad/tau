@@ -101,4 +101,53 @@ describe('Home early input', () => {
       container.remove();
     }
   });
+  it('should keep accepting text while its host is not ready, and adopt once it is', async () => {
+    let snapshot: EarlyChatInput | undefined;
+    const content = (ready: boolean): React.JSX.Element => (
+      <ChatEarlyInput isHostReady={ready}>
+        {(input) => {
+          snapshot = input;
+          return <div>Rich editor</div>;
+        }}
+      </ChatEarlyInput>
+    );
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(content(false));
+    document.body.append(container);
+    const input = within(container).getByRole<HTMLTextAreaElement>('textbox');
+    Object.assign(input, { tauEarlyDraft: { edited: false, composing: false } });
+    const root = hydrateRoot(container, content(false));
+    try {
+      await act(async () => {
+        await Promise.resolve();
+      });
+      /* The point of the gate: the native input is still the thing in the document, so a keystroke
+       * in this window is accepted and held rather than landing on a pending boundary. */
+      expect(within(container).getByRole('textbox')).toBe(input);
+      expect(snapshot).toBeUndefined();
+      expect(send).not.toHaveBeenCalled();
+      await act(async () => {
+        input.value = 'Typed before the composer arrived';
+        Object.assign(input, { tauEarlyDraft: { edited: true, composing: false } });
+        input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+      });
+      expect(input.value).toBe('Typed before the composer arrived');
+      expect(send).not.toHaveBeenCalled();
+      await act(async () => {
+        root.render(content(true));
+      });
+      await within(container).findByText('Rich editor');
+      expect(snapshot?.text).toBe('Typed before the composer arrived');
+      expect(send).toHaveBeenCalledExactlyOnceWith({
+        type: 'setDraftText',
+        text: 'Typed before the composer arrived',
+        adoptedEdit: true,
+      });
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
 });

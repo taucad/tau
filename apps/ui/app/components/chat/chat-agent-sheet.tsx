@@ -1579,7 +1579,9 @@ export function ChatAgentSheet({
           <DrawerDescription className='sr-only'>
             Choose who runs the next turn, on which model, and how hard it thinks.
           </DrawerDescription>
-          {sheet}
+          {/* The sheet is shared with a desktop popover; in a drawer its hairlines are inset and its lists take the
+              drawer's row geometry, like a responsive combobox's. */}
+          <div className='drawer-row-dividers drawer-command-rows min-h-0 drawer-inset-hairlines'>{sheet}</div>
         </DrawerContent>
       </Drawer>
     );

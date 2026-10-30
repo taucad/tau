@@ -650,9 +650,13 @@ const bootstrapElectronApp = async (): Promise<void> => {
 
   if (!isDevelopment) {
     const storageOrigin = originOf(environment['TAU_S3_ENDPOINT']);
+    /* The files service's signed LFS downloads; the bucket origin stays for uploads and rollback. */
+    const filesOrigin = originOf(environment['TAU_FILES_ORIGIN']);
     /* Product analytics post straight to PostHog; never an authenticated origin, so no bearer reaches it. */
     const analyticsOrigin = environment['POSTHOG_CLIENT_KEY'] ? originOf(environment['POSTHOG_API_HOST']) : undefined;
-    const connectOrigins = [storageOrigin, analyticsOrigin].filter((origin): origin is string => origin !== undefined);
+    const connectOrigins = [storageOrigin, filesOrigin, analyticsOrigin].filter(
+      (origin): origin is string => origin !== undefined,
+    );
     registerAppProtocol({
       clientRoot,
       protocol,

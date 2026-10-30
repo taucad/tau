@@ -31,6 +31,7 @@ export {
   lookupOutcomes,
   evaluationClasses,
   geospecRunStatuses,
+  lfsTransports,
 } from '#ingest.js';
 export type { AgentTurnContext, ClientMetricEntry, IngestPayload } from '#ingest.js';
 export { toPrometheusName, PrometheusNames, prometheusNameOf } from '#prometheus.js';

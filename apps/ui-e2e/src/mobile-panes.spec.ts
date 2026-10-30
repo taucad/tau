@@ -195,3 +195,104 @@ test('opens every changed pane at 320×640 with no horizontal overflow and no ta
     await target.expectCount(selectors.getByCss('[data-slot="mobile-surface"]'), 0);
   }
 });
+
+const grabber = (): Locator => selectors.getByRole('slider', { name: 'Drawer height' });
+
+/**
+ * What a pointer reaches on the pane's header strip: each visible header control at its centre must be that control
+ * (on top of the grabber's target, which reaches over the strip), and the strip's blank middle must be the grabber's
+ * target, so dragging there moves the sheet (I3, W1). Self-contained: it is serialized into the target page.
+ */
+const probeHeaderStrip = (region: Element): Readonly<{ covered: readonly string[]; blankIsGrabber: boolean }> => {
+  const header = region.querySelector('[data-slot=floating-panel-content-header]');
+  if (!header) {
+    return { covered: ['no header'], blankIsGrabber: false };
+  }
+  const covered: string[] = [];
+  for (const control of header.querySelectorAll<HTMLElement>('button, a[href], [role=button], [tabindex]')) {
+    const box = control.getBoundingClientRect();
+    if (box.width === 0 || box.height === 0) {
+      continue;
+    }
+    const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+    if (!hit || !control.contains(hit)) {
+      covered.push(control.getAttribute('aria-label') ?? control.textContent.trim());
+    }
+  }
+  // The strip's blank middle: between the title and the actions, clear of every control.
+  const box = header.getBoundingClientRect();
+  const controls = [...header.querySelectorAll('button, a[href], [role=button]')].map((control) =>
+    control.getBoundingClientRect(),
+  );
+  const title = header.firstElementChild?.getBoundingClientRect();
+  const left = Math.max(box.left, ...controls.filter((c) => c.right < box.left + box.width / 2).map((c) => c.right));
+  const right = Math.min(box.right, ...controls.filter((c) => c.left > box.left + box.width / 2).map((c) => c.left));
+  const x = title && title.right < right ? (Math.max(left, title.right) + right) / 2 : (left + right) / 2;
+  const blank = document.elementFromPoint(x, box.top + box.height / 2);
+  return { covered, blankIsGrabber: blank?.closest('[data-vaul-handle]') !== null && blank !== null };
+};
+
+test('holds Parameters, Files, Revisions and Kinematics at half at 320×640, their header strips dragging the sheet', async () => {
+  await target.commands.uiOpenTarget({ hasTouch: true, isMobile: true });
+  await target.setViewport({ width: 320, height: 640 });
+  await target.navigate(seedRoute);
+  try {
+    await target.expectUrl(/\/w\/[^/]+\/[^/]+/u, 10_000);
+  } catch {
+    // A reused browser already holds the seeded project; open it from the list, as the other seed specs do.
+    const project = selectors.getByRole('link', { name: seedProjectName }).first();
+    await target.expectVisible(project, 60_000);
+    const href = await target.getAttribute(project, 'href');
+    if (!href) {
+      throw new Error('Seeded project link did not include an href.');
+    }
+    await target.navigate(href);
+    await target.expectUrl(/\/w\/[^/]+\/[^/]+/u, 60_000);
+  }
+  await target.expectVisible(navigation(), 60_000);
+  await waitForStageReady();
+
+  for (const title of ['Parameters', 'Files', 'Revisions', 'Kinematics'] as const) {
+    if (title === 'Parameters') {
+      // oxlint-disable-next-line no-await-in-loop -- one pane at a time, as a person taps.
+      await target.click(navButton('Parameters'), { touch: true });
+    } else {
+      // oxlint-disable-next-line no-await-in-loop -- one pane at a time.
+      await target.click(navButton('All'), { touch: true });
+      // oxlint-disable-next-line no-await-in-loop -- one pane at a time.
+      await target.click(allSheet().getByRole('button', { name: title, exact: true }), { touch: true });
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one pane at a time.
+    await target.expectVisible(surface(title).getByRole('button', { name: `Close ${title}`, exact: true }), 60_000);
+    // oxlint-disable-next-line no-await-in-loop -- one pane at a time.
+    expect(await target.getAttribute(grabber(), 'aria-valuetext'), `${title} opens at half`).toBe('Half');
+    /* Its body loads and lays out after it opens: across 2s, sampled every frame, the sheet never raises itself.
+     * Only a decision above the composer may raise it (I5); a pane that holds more than half shows scrolls. */
+    // oxlint-disable-next-line no-await-in-loop -- one pane at a time.
+    const heldDetents = await target.evaluateLocator(grabber(), async (handle) => {
+      const seen = new Set<string>();
+      const until = performance.now() + 2000;
+      while (performance.now() < until) {
+        seen.add(handle.getAttribute('aria-valuetext') ?? '');
+        // oxlint-disable-next-line no-await-in-loop -- one sample per frame.
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => {
+            resolve();
+          });
+        });
+      }
+      return [...seen];
+    });
+    expect(heldDetents, `${title} holds at half`).toEqual(['Half']);
+    // oxlint-disable-next-line no-await-in-loop -- one pane at a time.
+    expect(await target.evaluateLocator(surface(title), probeHeaderStrip), `${title}'s header strip`).toEqual({
+      covered: [],
+      blankIsGrabber: true,
+    });
+
+    // oxlint-disable-next-line no-await-in-loop -- one pane at a time.
+    await target.click(navButton('Model'), { touch: true });
+    // oxlint-disable-next-line no-await-in-loop -- one pane at a time.
+    await target.expectCount(selectors.getByCss('[data-slot="mobile-surface"]'), 0);
+  }
+});

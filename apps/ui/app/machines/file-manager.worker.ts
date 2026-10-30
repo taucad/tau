@@ -458,7 +458,7 @@ const revisionRegistry = createWorkerRevisionRegistry({
       http: recorder.client,
       /* Load-path audit: the open's hydrate settles after the pull attempt is reported, so it is reported on its own. */
       onLfsFetch: ({ durationMilliseconds, ...detail }) => {
-        openTimer.fetchedFromNetwork();
+        openTimer.fetchedFromNetwork(detail.transport);
         const apiBaseUrl = credential()?.apiBaseUrl;
         if (apiBaseUrl === undefined || isDesktopTarget()) {
           return;

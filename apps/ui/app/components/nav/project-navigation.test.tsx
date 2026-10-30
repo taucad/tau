@@ -112,9 +112,15 @@ type DropdownMenuItemMockProps = Pick<React.ButtonHTMLAttributes<HTMLButtonEleme
   readonly onSelect?: () => void;
 };
 vi.mock('@taucad/ui/components/dropdown-menu', () => ({
-  DropdownMenu: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
+  DropdownMenu: ({ children, isResponsive }: { readonly children: ReactNode; readonly isResponsive?: boolean }) => (
+    <div data-testid='dropdown-menu' data-responsive={isResponsive ? 'true' : undefined}>
+      {children}
+    </div>
+  ),
   DropdownMenuTrigger: ({ children }: { readonly children: ReactNode }) => <span>{children}</span>,
-  DropdownMenuContent: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
+  DropdownMenuContent: ({ children, drawerTitle }: { readonly children: ReactNode; readonly drawerTitle?: string }) => (
+    <div data-drawer-title={drawerTitle}>{children}</div>
+  ),
   DropdownMenuSeparator: () => <hr />,
   DropdownMenuItem: ({ children, disabled: isDisabled, onSelect, ...properties }: DropdownMenuItemMockProps) => (
     <button type='button' disabled={isDisabled} onClick={onSelect} {...properties}>
@@ -534,6 +540,22 @@ describe('ProjectNavigation', () => {
     const newChat = screen.getByRole('button', { name: 'New chat in Two' });
     expect(more.compareDocumentPosition(newChat)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(screen.queryByRole('button', { name: /^Project sync:/u })).not.toBeInTheDocument();
+  });
+
+  /* A phone opens the sidebar as a sheet (z-100) a dropdown would sit behind; both menus open in drawers there. */
+  it('should open the Projects header and project row menus in drawers on a phone', () => {
+    liveProjectIds = ['proj_one', 'proj_two'];
+    mockLiveNow.mockReturnValue({ projects: 2, idleProjectIds: ['proj_two'] });
+    render(<ProjectNavigation />);
+
+    const header = screen
+      .getByRole('button', { name: 'More actions for projects' })
+      .closest('[data-testid=dropdown-menu]');
+    expect(header).toHaveAttribute('data-responsive', 'true');
+    expect(header?.querySelector('[data-drawer-title]')).toHaveAttribute('data-drawer-title', 'Projects');
+    const row = screen.getByRole('button', { name: 'More actions for Two' }).closest('[data-testid=dropdown-menu]');
+    expect(row).toHaveAttribute('data-responsive', 'true');
+    expect(row?.querySelector('[data-drawer-title]')).toHaveAttribute('data-drawer-title', 'Two');
   });
 
   /* D17: renaming outlines the row, and the Save button stays hidden. */

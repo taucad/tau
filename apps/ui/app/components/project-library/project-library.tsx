@@ -74,7 +74,7 @@ import { flagParameter, stringParameter, enumParameter } from '#utils/search-par
 import type { InlineTextEditorHandle } from '#components/inline-text-editor.js';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
-import { NewProjectChatComposer } from '#components/chat/new-project-chat-composer.js';
+import { OnDemandNewProjectComposer } from '#components/chat/on-demand-new-project-composer.js';
 import { ChatComposerProvider } from '#hooks/active-chat-provider.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { Skeleton } from '@taucad/ui/components/skeleton';
@@ -909,7 +909,7 @@ function UnifiedProjectList({
                   <p className='text-sm'>Start by describing what you want to build, or create from code</p>
                 </div>
               </div>
-              {emptyComposer ?? <NewProjectChatComposer enableAutoFocus={false} className='shadow-none' />}
+              {emptyComposer ?? <OnDemandNewProjectComposer enableAutoFocus={false} className='shadow-none' />}
               <div className='flex items-center justify-center gap-4 text-sm text-muted-foreground'>
                 <div className='h-px flex-1 bg-border' />
                 <span>or</span>

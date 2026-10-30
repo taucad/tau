@@ -1863,6 +1863,9 @@ importers:
       '@taucad/events':
         specifier: workspace:*
         version: link:../../libs/events
+      '@taucad/file-links':
+        specifier: workspace:*
+        version: link:../../libs/file-links
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../../packages/filesystem
@@ -2242,6 +2245,16 @@ importers:
         specifier: 4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
 
+  apps/files:
+    dependencies:
+      '@taucad/file-links':
+        specifier: workspace:*
+        version: link:../../libs/file-links
+    devDependencies:
+      esbuild:
+        specifier: 'catalog:'
+        version: 0.28.2
+
   apps/libs/billing:
     dependencies:
       '@tanstack/react-query':
@@ -2429,13 +2442,13 @@ importers:
       vscode-uri:
         specifier: 'catalog:'
         version: 3.1.0
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
     devDependencies:
       '@taucad/fs-client':
         specifier: workspace:*
         version: link:../fs-client
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
   apps/libs/planetary-gearbox:
     dependencies:
@@ -3513,6 +3526,12 @@ importers:
         version: zod@4.6.7
 
   libs/events: {}
+
+  libs/file-links:
+    dependencies:
+      uint8array-extras:
+        specifier: 'catalog:'
+        version: 1.6.0
 
   libs/fs-bridge:
     dependencies:

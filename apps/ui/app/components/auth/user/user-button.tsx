@@ -106,7 +106,7 @@ export function UserButton({
   });
 
   return (
-    <DropdownMenu>
+    <DropdownMenu isResponsive>
       <DropdownMenuTrigger
         className={cn(
           size === 'icon' && 'rounded-full outline-none focus-visible:focus-outline',
@@ -140,6 +140,7 @@ export function UserButton({
       </DropdownMenuTrigger>
 
       <DropdownMenuContent
+        drawerTitle={localization.auth.account}
         className='w-[--radix-dropdown-menu-trigger-width] max-w-[48svw] min-w-40 md:min-w-56'
         sideOffset={sideOffset}
         side={side}

@@ -944,7 +944,13 @@ export function RevisionsPanelBody(): React.JSX.Element {
       />
       {/* A stable, thin scrollbar gutter, so a row that opens never shifts the pane sideways; the cards sit 8 px
           from both sides (round 11). No `min-h-0` on the regions: this column owns the scroll (C36). */}
-      <div className='flex min-h-0 flex-1 [scrollbar-width:thin] [scrollbar-gutter:stable] flex-col gap-2 overflow-y-auto py-2 pl-2 *:w-[min(100%,calc(100cqw-1rem))]'>
+      <div
+        role='group'
+        aria-label='History and branches'
+        // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrollable column must be keyboard reachable (WCAG 2.1.1), even when it holds no control, as while History loads on a half-height phone sheet
+        tabIndex={0}
+        className='flex min-h-0 flex-1 [scrollbar-width:thin] [scrollbar-gutter:stable] flex-col gap-2 overflow-y-auto py-2 pl-2 outline-none *:w-[min(100%,calc(100cqw-1rem))] focus-visible:focus-outline'
+      >
         <RevisionAlerts />
 
         {/* A sync divergence records its conflict on the same line, so a

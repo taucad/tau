@@ -1,5 +1,5 @@
 // oxlint-disable max-lines -- TODO: refactor this component to be more manageable
-import { subscribeWorkbenchFileReveal } from '#routes/w.$workspace.$project/workbench-reveal.js';
+import { runWhenRendered, subscribeWorkbenchFileReveal } from '#routes/w.$workspace.$project/workbench-reveal.js';
 import { useLargeObjectPending, useProjectAvailability } from '#hooks/use-project-availability.js';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { useCallback, useId, useState, useRef, useMemo, useEffect, memo } from 'react';
@@ -1169,6 +1169,7 @@ export const ChatEditorFileTree = memo(function ({
 
   // Reveal a file in the tree when requested from the tab context menu.
   // Expands all parent directories, focuses the item, and scrolls it into view.
+  const cancelRevealScroll = useRef<(() => void) | undefined>(undefined);
   useEffect(() => {
     const unsubscribe = subscribeWorkbenchFileReveal(
       editorRef,
@@ -1209,13 +1210,23 @@ export const ChatEditorFileTree = memo(function ({
         setFocusedItem(targetPath);
         setSelectedItems([targetPath]);
 
-        requestAnimationFrame(() => {
+        /* A cold Files pane renders the item only once its parents have loaded, which on a phone can take seconds
+         * (the lazy pane, then each directory listing), well past `scrollTo`'s own one-second wait. Scroll once the row
+         * is rendered, for as long as a held reveal lives; a newer reveal replaces the wait. */
+        cancelRevealScroll.current?.();
+        cancelRevealScroll.current = runWhenRendered(() => {
+          let item: ReturnType<typeof tree.getItemInstance> | undefined;
           try {
-            const item = tree.getItemInstance(targetPath);
-            void item.scrollTo({ block: 'center' });
+            item = tree.getItemInstance(targetPath);
           } catch {
-            // Item may not exist in the tree yet
+            // Not in the tree yet: its parents are still loading.
           }
+          const row = item;
+          return row?.getElement()
+            ? () => {
+                void row.scrollTo({ block: 'center' });
+              }
+            : undefined;
         });
       },
       shouldHandleReveal,
@@ -1223,6 +1234,9 @@ export const ChatEditorFileTree = memo(function ({
 
     return () => {
       unsubscribe();
+      // An unmounted pane, or one subscribing again, never scrolls for a reveal it no longer handles.
+      cancelRevealScroll.current?.();
+      cancelRevealScroll.current = undefined;
     };
   }, [editorRef, onRequestOpen, shouldHandleReveal, tree, setExpandedItems, setFocusedItem, setSelectedItems]);
 

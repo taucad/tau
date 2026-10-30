@@ -4,6 +4,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Fragment } from 'react';
 import { ComboBoxResponsive } from '#components/combobox-responsive.js';
+import type * as DrawerModule from '#components/drawer.js';
 
 const mobileState = vi.hoisted(() => ({ current: false }));
 const drawerState = vi.hoisted(() => ({ isInside: false }));
@@ -25,27 +26,37 @@ vi.mock('#components/popover.js', () => ({
   ),
 }));
 
-vi.mock('#components/drawer.js', () => ({
-  Drawer: ({ children }: { readonly children: React.ReactNode }) => <div data-testid='drawer-root'>{children}</div>,
-  DrawerNestedRoot: ({ children }: { readonly children: React.ReactNode }) => (
-    <div data-testid='drawer-nested-root'>{children}</div>
-  ),
-  DrawerContent: ({ children, className }: { readonly children: React.ReactNode; readonly className?: string }) => (
-    <div data-testid='drawer-content-test' className={className}>
-      {children}
-    </div>
-  ),
-  DrawerDescription: () => null,
-  DrawerTitle: ({ children, className }: { readonly children: React.ReactNode; readonly className?: string }) => (
-    <h2 data-testid='drawer-title-test' className={className}>
-      {children}
-    </h2>
-  ),
-  useIsInsideDrawer: (): boolean => drawerState.isInside,
-  DrawerTrigger: ({ children }: { readonly children: React.ReactNode }) => (
-    <span data-testid='drawer-trigger-inner'>{children}</span>
-  ),
-}));
+vi.mock('#components/drawer.js', async (importOriginal) => {
+  // The real list, so the drawer test sees the rows it divides.
+  const { DrawerAction, DrawerBar, DrawerDivider, DrawerList, drawerBarTitleClass } =
+    await importOriginal<typeof DrawerModule>();
+  return {
+    DrawerAction,
+    DrawerBar,
+    DrawerDivider,
+    DrawerList,
+    drawerBarTitleClass,
+    Drawer: ({ children }: { readonly children: React.ReactNode }) => <div data-testid='drawer-root'>{children}</div>,
+    DrawerNestedRoot: ({ children }: { readonly children: React.ReactNode }) => (
+      <div data-testid='drawer-nested-root'>{children}</div>
+    ),
+    DrawerContent: ({ children, className }: { readonly children: React.ReactNode; readonly className?: string }) => (
+      <div data-testid='drawer-content-test' className={className}>
+        {children}
+      </div>
+    ),
+    DrawerDescription: () => null,
+    DrawerTitle: ({ children, className }: { readonly children: React.ReactNode; readonly className?: string }) => (
+      <h2 data-testid='drawer-title-test' className={className}>
+        {children}
+      </h2>
+    ),
+    useIsInsideDrawer: (): boolean => drawerState.isInside,
+    DrawerTrigger: ({ children }: { readonly children: React.ReactNode }) => (
+      <span data-testid='drawer-trigger-inner'>{children}</span>
+    ),
+  };
+});
 
 vi.mock('#components/loader.js', () => ({
   Loader: (): React.ReactNode => null,
@@ -147,6 +158,8 @@ describe('ComboBoxResponsive (controlled)', () => {
     expect(screen.getByTestId('drawer-nested-root')).toBeInTheDocument();
     expect(screen.getByTestId('drawer-title-test')).toHaveTextContent('Pick');
     expect(screen.getByTestId('drawer-title-test')).not.toHaveClass('sr-only');
+    // An inset hairline parts the titled bar from the rows, as under every drawer header.
+    expect(screen.getByTestId('drawer-content-test').querySelector('[data-slot=drawer-divider]')).toHaveClass('mx-4');
     await userEvent.click(screen.getByRole('button', { name: 'Back' }));
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
@@ -156,7 +169,9 @@ describe('ComboBoxResponsive (controlled)', () => {
     renderResponsive();
     expect(screen.queryByRole('button', { name: 'Back' })).toBeNull();
     expect(screen.getByTestId('drawer-title-test')).toHaveClass('sr-only');
-    expect(screen.getByTestId('drawer-content-test')).toHaveClass('command-item-dividers');
+    const list = screen.getByTestId('drawer-content-test').querySelector('[data-slot=drawer-list]');
+    expect(list).toHaveClass('drawer-row-dividers', 'drawer-command-rows', 'drawer-inset-hairlines');
+    expect(list?.querySelectorAll('[data-slot=command-item]').length).toBeGreaterThan(0);
   });
 
   it('should keep a caller width on the popover and span the screen in the drawer', () => {

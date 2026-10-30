@@ -104,9 +104,15 @@ vi.mock('@taucad/ui/components/tooltip', () => ({
   TooltipContent: ({ children }: { readonly children: ReactNode }) => <span data-testid='tooltip'>{children}</span>,
 }));
 vi.mock('@taucad/ui/components/dropdown-menu', () => ({
-  DropdownMenu: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
+  DropdownMenu: ({ children, isResponsive }: { readonly children: ReactNode; readonly isResponsive?: boolean }) => (
+    <div data-testid='dropdown-menu' data-responsive={isResponsive ? 'true' : undefined}>
+      {children}
+    </div>
+  ),
   DropdownMenuTrigger: ({ children }: { readonly children: ReactNode }) => <span>{children}</span>,
-  DropdownMenuContent: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
+  DropdownMenuContent: ({ children, drawerTitle }: { readonly children: ReactNode; readonly drawerTitle?: string }) => (
+    <div data-drawer-title={drawerTitle}>{children}</div>
+  ),
   DropdownMenuSeparator: () => <hr />,
   DropdownMenuItem: ({
     children,
@@ -502,6 +508,17 @@ describe('ProjectChatList', () => {
     render(<ProjectChatList project={project} isProjectActive />);
     fireEvent.click(screen.getByRole('button', { name: 'Stop Chat 12' }));
     expect(mockCloseChat).toHaveBeenCalledExactlyOnceWith('proj_one', 'chat_12');
+  });
+
+  /* A phone opens the sidebar as a sheet (z-100) a dropdown would sit behind; the row's menu opens in a drawer there. */
+  it('should open a chat row menu in a drawer titled with the chat on a phone', () => {
+    render(<ProjectChatList project={project} isProjectActive />);
+
+    const menu = screen
+      .getByRole('button', { name: 'More actions for Chat 12' })
+      .closest('[data-testid=dropdown-menu]');
+    expect(menu).toHaveAttribute('data-responsive', 'true');
+    expect(menu?.querySelector('[data-drawer-title]')).toHaveAttribute('data-drawer-title', 'Chat 12');
   });
 
   it('opens the same actions on right-click anywhere on the row', async () => {

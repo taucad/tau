@@ -79,6 +79,36 @@ describe('PicoGK browser registration', () => {
     );
   });
 
+  // T26 (PR-1b, AR-W15-01): the browser .NET worker's linear memory, read through the session after its latest reply;
+  // none until the worker starts, and the recycling hook stays unimplemented.
+  it("should observe the .NET worker's WebAssembly heap through the observation hook and never through heapBytes", async () => {
+    vi.stubGlobal('location', { href: 'https://tau.test/app/' });
+    vi.stubGlobal('crossOriginIsolated', false);
+    vi.stubGlobal('Worker', vi.fn());
+    vi.mocked(loadPicogkBrowserAssets).mockResolvedValue({
+      mode: 'single',
+      assets: {
+        bootstrapUrl: 'https://tau.test/runtime.js',
+        compilerIdentity: 'a'.repeat(64),
+        runtimeFiles: [],
+        references: [],
+      },
+    });
+    const options = picogkBrowserOptionsSchema.parse({
+      assets: { url: '/picogk/manifest.json', sha256: 'a'.repeat(64) },
+    });
+    const definition = await resolveRuntimePluginDefinition('kernel', picogkBrowserKernel(options));
+    const context = await definition.initialize(options, createMockKernelRuntime());
+    try {
+      expect(definition.observedHeapBytes?.(context)).toBeUndefined();
+      const live = { ...context, session: { ...context.session, observedHeapBytes: () => 96 * 2 ** 20 } };
+      expect(definition.observedHeapBytes?.(live)).toBe(96 * 2 ** 20);
+      expect(definition.heapBytes).toBeUndefined();
+    } finally {
+      await definition.onDispose!(context);
+    }
+  });
+
   it('should reject desktop launch options at the browser boundary', () => {
     expect(picogkBrowserOptionsSchema.safeParse({ closure: {} }).success).toBe(false);
     expect(picogkBrowserOptionsSchema.safeParse({ wasm: 'threads' }).success).toBe(false);

@@ -6,6 +6,7 @@ import {
   nativeDeploymentsOf,
   UnpreparedKernelError,
 } from '@taucad/native-process-core/store';
+import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { resolveRuntimeDefinition } from '@taucad/runtime/worker';
 import { assertKernelRosterCoverage } from '@taucad/runtime-testing/roster';
 import { kernelConfigurations } from '@taucad/types/constants';
@@ -161,6 +162,48 @@ describe('desktop runtime kernels', () => {
 
     expect(open.bundlers.find(({ id }) => id === 'esbuild')).not.toHaveProperty('options.acquisition');
     expect(locked.bundlers.find(({ id }) => id === 'esbuild')?.options).toMatchObject({ acquisition: 'locked' });
+  });
+
+  /*
+   * T26 (PR-1b) and T35 (PR-1c): every desktop kernel with the memory hooks it implements. A kernel with none reports
+   * `tau.runtime.heap_source` `none` (or its utility process's resident set), so it is a named blind spot (B18): a new
+   * kernel fails here until it gets a hook or is listed with none.
+   */
+  it('should pin which kernels report a heap or a native child tree, and which are named blind spots', async () => {
+    const hooks = ['observedHeapBytes', 'heapBytes', 'observedChildResidentBytes'] as const;
+    const { kernels } = await resolveDesktopRuntime();
+    const actual: Record<string, ReadonlyArray<(typeof hooks)[number]>> = {};
+    for (const kernel of kernels) {
+      // oxlint-disable-next-line no-await-in-loop -- resolve each kernel's worker-owned definition in roster order.
+      const definition = await resolveRuntimePluginDefinition<Partial<Record<(typeof hooks)[number], unknown>>>(
+        'kernel',
+        kernel,
+      );
+      actual[kernel.id] = hooks.filter((hook) => typeof definition[hook] === 'function');
+    }
+
+    expect(actual).toEqual({
+      // WebAssembly linear memory through the observation-only hook.
+      brep: ['observedHeapBytes'],
+      gltf: ['observedHeapBytes'],
+      picovoxel: ['observedHeapBytes'],
+      zoo: ['observedHeapBytes'],
+      // The observation hook beside the recycling hook, which stays as it was.
+      opencascade: ['observedHeapBytes', 'heapBytes'],
+      replicad: ['observedHeapBytes', 'heapBytes'],
+      // The native worker's process tree.
+      build123d: ['observedChildResidentBytes'],
+      picogk: ['observedChildResidentBytes'],
+      smlibpy: ['observedChildResidentBytes'],
+      // B18: no hook.
+      assimp: [],
+      jscad: [],
+      manifold: [],
+      openrscad: [],
+      rhino: [],
+      smlib: [],
+      tscircuit: [],
+    });
   });
 });
 

@@ -6,6 +6,8 @@
  *
  * Configuration arrives in `TAU_CRASH_*` variables set by the row; this process never exits on its own.
  */
+import { join } from 'node:path';
+
 import { createTauAgentHost } from '@taucad/agent-host';
 import { createNodeEventLog } from '@taucad/agent-host/node';
 import { createSandboxShellProvider } from '@taucad/native-process-core/shell';
@@ -26,7 +28,19 @@ const project = required('TAU_CRASH_PROJECT');
 const marker = required('TAU_CRASH_MARKER');
 const runId = 'run-e11';
 const probe = await probeHostShell({
-  provider: createSandboxShellProvider({ bwrapPath: required('TAU_CRASH_BWRAP'), home: required('TAU_CRASH_HOME') }),
+  /*
+   * The provider validates that every prepared private root sits directly under its configured session parent (I7),
+   * and the service below creates those roots under `TAU_CRASH_SESSIONS`. Both sides must name the same parent, or
+   * `prepare` refuses the launch before anything starts.
+   */
+  provider: createSandboxShellProvider({
+    bwrapPath: required('TAU_CRASH_BWRAP'),
+    home: required('TAU_CRASH_HOME'),
+    custody: {
+      directory: join(required('TAU_CRASH_APP_DATA'), 'shell-custody'),
+      sessionDirectory: required('TAU_CRASH_SESSIONS'),
+    },
+  }),
   checkouts: new Map([[runId, { cwd: project, admission: 'admission-e11' }]]),
   appDataRoots: [required('TAU_CRASH_APP_DATA')],
   projectRoots: () => [project],

@@ -10,7 +10,7 @@ import { ShareError } from '@taucad/share/provider';
 import { createShareProviderRegistry } from '@taucad/share/registry';
 import { tauShareProvider, tauShareProviderDescriptor } from '@taucad/share/tau';
 import { authClient } from '#lib/auth-client.js';
-import { builtinShareProvider, builtinShareProviderDescriptor } from '#lib/builtin-share-provider.js';
+import { builtinShareProviderDescriptor } from '#lib/builtin-share-provider-descriptor.js';
 import { ENV } from '#environment.config.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { shareOrigin } from '#lib/share-origin.js';
@@ -20,7 +20,20 @@ export const shareProviderRegistry = createShareProviderRegistry([
   { descriptor: directShareProviderDescriptor, load: async () => directShareProvider },
   { descriptor: tauShareProviderDescriptor, load: async () => tauShareProvider },
   { descriptor: githubGistShareProviderDescriptor, load: async () => githubGistShareProvider },
-  { descriptor: builtinShareProviderDescriptor, load: async () => builtinShareProvider },
+  {
+    descriptor: builtinShareProviderDescriptor,
+    load: async () => {
+      try {
+        const { builtinShareProvider } = await import('#lib/builtin-share-provider.js');
+        return builtinShareProvider;
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw error;
+        }
+        throw new ShareError('SHARE_PROVIDER_UNAVAILABLE', 'The catalog could not be loaded. Try again.');
+      }
+    },
+  },
   { descriptor: githubShareProviderDescriptor, load: async () => githubShareProvider },
   { descriptor: gitlabShareProviderDescriptor, load: async () => gitlabShareProvider },
   { descriptor: bitbucketShareProviderDescriptor, load: async () => bitbucketShareProvider },

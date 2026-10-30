@@ -148,3 +148,17 @@ it('changes the version when the shell content changes', () => {
   expect(offlineShellVersion(['/usage'], assets, build)).toBe(offlineShellVersion(['/usage'], assets, build));
   expect(offlineShellVersion(['/usage'], assets, changed)).not.toBe(offlineShellVersion(['/usage'], assets, build));
 });
+
+it('ignores navigation links in the useful server-rendered shell', () => {
+  const linkedFiles = new Map(files);
+  linkedFiles.set(
+    'usage/index.html',
+    `${files.get('usage/index.html')}<a href="/projects">Projects</a><link rel="canonical" href="/usage"><a download href="/private/export">Export</a>`,
+  );
+  expect(
+    collectOfflineShellAssets(['/usage'], {
+      ...build,
+      readText: (path) => linkedFiles.get(path),
+    }),
+  ).toEqual(collectOfflineShellAssets(['/usage'], build));
+});

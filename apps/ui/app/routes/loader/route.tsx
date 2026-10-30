@@ -83,9 +83,9 @@ type MetalMorphDebugBridge = Readonly<{
 
 type MetalMorphDebugGlobal = typeof globalThis & { __TAU_METAL_MORPH__?: MetalMorphDebugBridge };
 
-const pageTitle = 'Liquid metal loader — Tau';
+const pageTitle = 'Liquid metal loader · Tau';
 const pageDescription =
-  'A metalbending-inspired loading indicator: one chrome body flowing between five geometric forms, rendered with WebGPU physically based shading.';
+  'Tau’s liquid metal loading animation: one chrome shape morphing between five forms, rendered with WebGPU.';
 /** Milliseconds between renderer statistics reads for the readout. */
 const statisticsRefresh = 500;
 

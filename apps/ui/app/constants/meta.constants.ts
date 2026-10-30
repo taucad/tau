@@ -38,7 +38,7 @@ export const metaConfig = {
    * The description of the app. Used for SEO and other metadata such as PWA and app store descriptions.
    */
   description:
-    'Tau: the AI-native CAD platform. Describe a part, get verified, manufacturable geometry — in your browser.',
+    'Tau is open-source, AI-native CAD. Describe a part, edit its parametric source, check its geometry and export it for machining or 3D printing.',
   /**
    * The version of the app.
    */

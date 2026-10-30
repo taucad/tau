@@ -26,13 +26,14 @@ const operationSchema = z.enum(['nss', 'windows', 'macSystemTrust', 'linuxFile',
  * A hosted macOS runner has no session that can answer a trust-settings authorization: user-domain
  * `add-trusted-cert` and admin-domain `remove-trusted-cert` both block on SecurityAgent until killed, and
  * `authorizationdb write` is denied. Root may add a new admin-domain root to the System keychain without a
- * prompt, and deleting that certificate ends its trust, which cleanup verifies rather than assumes.
+ * prompt. Deleting that certificate ends trust in the run's server certificate, which cleanup verifies the
+ * way the app sees it; the orphaned settings entry is keyed to this run's CA, whose private key is destroyed.
  */
 const macSystemKeychain = '/Library/Keychains/System.keychain';
-const assertMacTrust = (command: QualificationTlsOwner['execute'], caPath: string, expected: boolean): void => {
+const assertMacTrust = (command: QualificationTlsOwner['execute'], serverPath: string, expected: boolean): void => {
   let output: string;
   try {
-    command('security', ['verify-cert', '-c', caPath, '-p', 'basic']);
+    command('security', ['verify-cert', '-c', serverPath, '-p', 'ssl', '-s', '127.0.0.1']);
     output = 'trusted';
   } catch (error) {
     const { stdout, stderr } = error as { stdout?: string; stderr?: string };
@@ -42,7 +43,11 @@ const assertMacTrust = (command: QualificationTlsOwner['execute'], caPath: strin
     }
   }
   if ((output === 'trusted') !== expected) {
-    throw new Error(expected ? 'Run CA is not trusted after installation' : 'Run CA is still trusted after removal');
+    throw new Error(
+      expected
+        ? 'Run server certificate is not trusted after installation'
+        : 'Run server certificate is still trusted after removal',
+    );
   }
 };
 const journalSchema = z.strictObject({
@@ -104,7 +109,7 @@ const removeOperation = async (
       if (entries.includes(journal.fingerprint)) {
         command('sudo', ['-n', 'security', 'delete-certificate', '-Z', journal.fingerprint, macSystemKeychain]);
       }
-      assertMacTrust(command, caPath, false);
+      assertMacTrust(command, join(directory, 'mirror-server.crt'), false);
       break;
     }
     case 'linuxFile': {
@@ -332,7 +337,7 @@ export const prepareQualificationTls = async (
             macSystemKeychain,
             caPath,
           ]);
-          assertMacTrust(command, caPath, true);
+          assertMacTrust(command, certificatePath, true);
         });
         break;
       }

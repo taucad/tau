@@ -2442,13 +2442,13 @@ importers:
       vscode-uri:
         specifier: 'catalog:'
         version: 3.1.0
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
     devDependencies:
       '@taucad/fs-client':
         specifier: workspace:*
         version: link:../fs-client
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
   apps/libs/planetary-gearbox:
     dependencies:

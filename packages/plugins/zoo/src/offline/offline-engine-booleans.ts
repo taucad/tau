@@ -10,7 +10,7 @@ import type { SolidEntity } from '#offline/offline-scene.js';
 import { helpersFor } from '#offline/offline-helpers.js';
 import { shellPrism } from '#offline/offline-shell.js';
 import type { ShapeHistory } from '#offline/offline-topology.js';
-import { algoHistory, facesOfEdge, rebaseSolid, remapIds, requireFace } from '#offline/offline-topology.js';
+import { algoHistory, facesOfEdge, noEdgeMatches, rebaseSolid, remapIds, requireFace } from '#offline/offline-topology.js';
 import type { ModelingCommand, WireAngle } from '#offline/offline-engine.types.js';
 import { OfflineEngineError, toRadians } from '#offline/offline-engine.types.js';
 import type { OfflineEngine } from '#offline/offline-engine.js';
@@ -297,10 +297,28 @@ export function imprint(engine: OfflineEngine, id: string, cmd: ModelingCommand)
 // oxlint-disable-next-line complexity -- fillet and chamfer variants share edge resolution
 export function cutEdges(engine: OfflineEngine, id: string, cmd: ModelingCommand): Record<string, unknown> {
   const solid = engine.scene.getSolid(cmd['object_id'] as string);
+  const cutKey = JSON.stringify([cmd['cut_type'] ?? 'fillet', cmd['radius']]);
   const resolveTargets = (body: SolidEntity): TopoDS_Edge[] => {
     const found: TopoDS_Edge[] = [];
-    for (const spec of (cmd['edges_references'] as EdgeSpecifier[] | undefined) ?? []) {
-      found.push(engine.resolveEdgeSpecifier(body, spec));
+    // A tag on a sketch curve that a region split into several arcs becomes one reference per arc, all with the
+    // same end faces; the end faces pick the arcs they touch, and the other references match nothing. Only a cut
+    // where no reference matches fails.
+    const specs = (cmd['edges_references'] as EdgeSpecifier[] | undefined) ?? [];
+    let unmatched: unknown;
+    for (const spec of specs) {
+      try {
+        found.push(engine.resolveEdgeSpecifier(body, spec));
+      } catch (error) {
+        if (!(error instanceof OfflineEngineError) || error.message !== noEdgeMatches) {
+          throw error;
+        }
+
+        unmatched = error;
+      }
+    }
+
+    if (specs.length > 0 && found.length === 0) {
+      throw unmatched;
     }
 
     const edgeIds = [
@@ -308,6 +326,12 @@ export function cutEdges(engine: OfflineEngine, id: string, cmd: ModelingCommand
       ...(cmd['edge_id'] ? [cmd['edge_id'] as string] : []),
     ];
     for (const edgeId of edgeIds) {
+      // An edge that an earlier cut of the same kind and size already blended, because libcascade carries a cut
+      // along the tangent chain of its edges (a chamfer round filleted corners), is already cut.
+      if (!body.edges.has(edgeId) && engine.scene.cutEdges.get(edgeId) === cutKey) {
+        continue;
+      }
+
       found.push(engine.edgeById(body, edgeId));
     }
 
@@ -382,11 +406,20 @@ export function cutEdges(engine: OfflineEngine, id: string, cmd: ModelingCommand
   ): ShapeHistory => {
     const history = algoHistory(engine.oc, op);
     const generated = cutEdges.map((edge) => listToArray(engine.oc, op.Generated(edge))[0]);
+    for (const [edgeId, edge] of body.edges) {
+      if (!op.Generated(edge).IsEmpty()) {
+        engine.scene.cutEdges.set(edgeId, cutKey);
+      }
+    }
+
     rebaseSolid(engine.oc, body, op.Shape(), history);
     for (const [index, face] of generated.entries()) {
       const faceId = faceIds[index];
       if (face && faceId) {
         body.faces.set(faceId, face);
+        if (isChamfer && cmd['version'] === 'v2') {
+          engine.scene.halfTurnFaces.add(faceId);
+        }
       }
     }
 

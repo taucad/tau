@@ -14,6 +14,8 @@ import {
   ax1,
   compound,
   dir,
+  edgePoint,
+  faces,
   pnt,
   edges,
   gvec,
@@ -167,11 +169,37 @@ function sweepFaces<
 
   const generators = profile.faces.map((face) => make(face));
   const shapes = generators.map((generator) => orientOutward(oc, generator.Shape()));
+  const caps = [generators[0]!.FirstShape?.(), generators[0]!.LastShape?.()].filter(
+    (cap): cap is TopoDS_Shape => Boolean(cap && !cap.IsNull()),
+  );
   const sideFace = (edge: TopoDS_Edge): TopoDS_Shape | undefined => {
     for (const generator of generators) {
       const face = firstGenerated(oc, generator, edge);
       if (face) {
         return face;
+      }
+    }
+
+    // A revolve reports no history for a segment perpendicular to its axis, whose face is a planar disc or annulus
+    // through the segment itself: take the swept face, other than a cap, that the segment's midpoint lies on.
+    const probe = new oc.BRepBuilderAPI_MakeVertex(pnt(oc, edgePoint(oc, edge, 0.5).point)).Vertex();
+    for (const shape of shapes) {
+      for (const face of faces(oc, shape)) {
+        if (caps.some((cap) => cap.IsSame(face))) {
+          continue;
+        }
+
+        const distance = new oc.BRepExtrema_DistShapeShape(
+          probe,
+          face,
+          oc.Extrema_ExtFlag.Extrema_ExtFlag_MIN,
+          oc.Extrema_ExtAlgo.Extrema_ExtAlgo_Grad,
+        );
+        const touches = distance.IsDone() && distance.Value() < 1e-7;
+        distance.delete();
+        if (touches) {
+          return face;
+        }
       }
     }
 

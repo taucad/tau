@@ -40,10 +40,12 @@ import {
 } from '#offline/offline-sweeps.js';
 import {
   algoHistory,
+  closestEdge,
   edgesBetween,
   faceSketchFrame,
   facesOfEdge,
   idForSubShape,
+  noEdgeMatches,
   oppositeEdge,
   rebaseSolid,
   remapIds,
@@ -294,7 +296,8 @@ export class OfflineEngine {
   /** The sketch frame of a solid's face, using the extrusion direction when the face is a side face. */
   public faceFrame(owner: SolidEntity, faceId: string, face: TopoDS_Face): Frame {
     const sweep = owner.sweeps.find((candidate) => [...candidate.sideFaceByCurve.values()].includes(faceId));
-    return faceSketchFrame(this.oc, face, sweep?.direction);
+    const frame = faceSketchFrame(this.oc, face, sweep?.direction);
+    return this.scene.halfTurnFaces.has(faceId) ? { ...frame, x: scale(frame.x, -1), y: scale(frame.y, -1) } : frame;
   }
 
   public resolveEdgeSpecifier(solid: SolidEntity, spec: EdgeSpecifier): TopoDS_Edge {
@@ -303,7 +306,7 @@ export class OfflineEngine {
     const candidates = edgesBetween(this.oc, sideFaces, endFaces);
     const edge = candidates[spec.index ?? 0] ?? candidates[0];
     if (!edge) {
-      throw new OfflineEngineError('No edge matches the edge reference', 'bad_request');
+      throw new OfflineEngineError(noEdgeMatches, 'bad_request');
     }
 
     return edge;
@@ -589,6 +592,11 @@ export class OfflineEngine {
           [],
         );
         return { edge: found[0] ? this.edgeId(solid, found[0]) : null };
+      },
+      closest_edge: (_id, cmd) => {
+        const solid = this.scene.getSolid(cmd['object_id'] as string);
+        const edge = closestEdge(this.oc, solid.shape, point3(cmd['closest_to'] as WirePoint3d));
+        return { edge_id: edge ? this.edgeId(solid, edge) : null };
       },
       solid3d_get_edge_uuid: (_id, cmd) => {
         const solid = this.scene.getSolid(cmd['object_id'] as string);

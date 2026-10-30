@@ -28,10 +28,12 @@ vi.mock('#components/popover.js', () => ({
 
 vi.mock('#components/drawer.js', async (importOriginal) => {
   // The real list, so the drawer test sees the rows it divides.
-  const { DrawerAction, DrawerBar, DrawerList, drawerBarTitleClass } = await importOriginal<typeof DrawerModule>();
+  const { DrawerAction, DrawerBar, DrawerDivider, DrawerList, drawerBarTitleClass } =
+    await importOriginal<typeof DrawerModule>();
   return {
     DrawerAction,
     DrawerBar,
+    DrawerDivider,
     DrawerList,
     drawerBarTitleClass,
     Drawer: ({ children }: { readonly children: React.ReactNode }) => <div data-testid='drawer-root'>{children}</div>,
@@ -156,6 +158,8 @@ describe('ComboBoxResponsive (controlled)', () => {
     expect(screen.getByTestId('drawer-nested-root')).toBeInTheDocument();
     expect(screen.getByTestId('drawer-title-test')).toHaveTextContent('Pick');
     expect(screen.getByTestId('drawer-title-test')).not.toHaveClass('sr-only');
+    // An inset hairline parts the titled bar from the rows, as under every drawer header.
+    expect(screen.getByTestId('drawer-content-test').querySelector('[data-slot=drawer-divider]')).toHaveClass('mx-4');
     await userEvent.click(screen.getByRole('button', { name: 'Back' }));
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
@@ -166,7 +170,7 @@ describe('ComboBoxResponsive (controlled)', () => {
     expect(screen.queryByRole('button', { name: 'Back' })).toBeNull();
     expect(screen.getByTestId('drawer-title-test')).toHaveClass('sr-only');
     const list = screen.getByTestId('drawer-content-test').querySelector('[data-slot=drawer-list]');
-    expect(list).toHaveClass('drawer-row-dividers');
+    expect(list).toHaveClass('drawer-row-dividers', 'drawer-command-rows', 'drawer-inset-hairlines');
     expect(list?.querySelectorAll('[data-slot=command-item]').length).toBeGreaterThan(0);
   });
 

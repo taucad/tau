@@ -19,6 +19,7 @@ import {
   DrawerClose,
   DrawerContent,
   DrawerDescription,
+  DrawerDivider,
   DrawerTitle,
   DrawerTrigger,
 } from '@taucad/ui/components/drawer';
@@ -207,6 +208,8 @@ export function CommandPaletteResults({
   const [search, setSearch] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
   const rows = useMemo(() => rankCommandPaletteRows(items, search), [items, search]);
+  // A field with an action is a phone drawer's header, so the results take a drawer's row geometry.
+  const isDrawer = inputAction !== undefined;
 
   /*
    * Rows mount only around the viewport. The item overscan also keeps the next rows
@@ -246,12 +249,12 @@ export function CommandPaletteResults({
             {input}
             {inputAction}
           </div>
-          <div aria-hidden className='mx-4 h-px shrink-0 bg-border' />
+          <DrawerDivider />
         </>
       ) : (
         input
       )}
-      <CommandList ref={listRef} className={cn('py-0', listClassName)}>
+      <CommandList ref={listRef} className={cn('py-0', isDrawer && 'drawer-row-dividers', listClassName)}>
         {rows.length === 0 ? <CommandEmpty>No results found.</CommandEmpty> : null}
         <div className='relative w-full' style={{ height: virtualizer.getTotalSize() }}>
           {virtualizer.getVirtualItems().map((virtualRow) => {
@@ -261,13 +264,19 @@ export function CommandPaletteResults({
                 key={virtualRow.key}
                 ref={virtualizer.measureElement}
                 data-index={virtualRow.index}
-                className={cn('absolute inset-x-0 top-0 px-1', row.kind === 'heading' ? 'pt-1' : 'pb-0.5')}
+                className={cn(
+                  'absolute inset-x-0 top-0',
+                  !isDrawer && 'px-1',
+                  row.kind === 'heading' ? 'pt-1' : 'pb-0.5',
+                )}
                 style={{ transform: `translateY(${virtualRow.start}px)` }}
               >
                 {row.kind === 'heading' ? (
-                  <div className={menuGroupHeadingClass}>{row.group}</div>
+                  <div className={cn(menuGroupHeadingClass, isDrawer && 'px-4')}>{row.group}</div>
                 ) : (
                   <CommandItem
+                    // In a drawer, a row's icon sits under the header's 16px edge and its text at 44px, as a menu row's.
+                    className={cn(isDrawer && 'rounded-none px-4 [&>div]:gap-3')}
                     value={commandValue(row.item)}
                     disabled={row.item.disabled}
                     onSelect={() => {

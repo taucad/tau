@@ -12,6 +12,7 @@ import {
   DrawerNestedRoot,
   DrawerContent,
   DrawerDescription,
+  DrawerDivider,
   DrawerList,
   DrawerTitle,
   DrawerTrigger,
@@ -197,27 +198,30 @@ export function ComboBoxResponsive<T>({
           }}
         >
           {isNested ? (
-            <DrawerBar
-              data-slot='combobox-drawer-header'
-              className='grid grid-cols-[calc(var(--spacing)*11)_minmax(0,1fr)_calc(var(--spacing)*11)]'
-            >
-              {/* The matching empty column keeps the title on the drawer's centre line. */}
-              <DrawerAction
-                type='button'
-                aria-label='Back'
-                onClick={() => {
-                  handleOpenChange(false);
-                }}
+            <>
+              <DrawerBar
+                data-slot='combobox-drawer-header'
+                className='grid grid-cols-[calc(var(--spacing)*11)_minmax(0,1fr)_calc(var(--spacing)*11)]'
               >
-                {/* Optically centred: the open side's two stroke ends outweigh the point, so a box-centred
-                    chevron reads as sitting right; a half-pixel nudge left and a lighter stroke settle it. */}
-                <ChevronLeft className='size-6 -translate-x-[0.5px]' strokeWidth={1.25} />
-              </DrawerAction>
-              <DrawerTitle className={cn(drawerBarTitleClass, 'text-center')} id='drawer-title'>
-                {title}
-              </DrawerTitle>
-              <span aria-hidden />
-            </DrawerBar>
+                {/* The matching empty column keeps the title on the drawer's centre line. */}
+                <DrawerAction
+                  type='button'
+                  aria-label='Back'
+                  onClick={() => {
+                    handleOpenChange(false);
+                  }}
+                >
+                  {/* Optically centred: the open side's two stroke ends outweigh the point, so a box-centred
+                      chevron reads as sitting right; a half-pixel nudge left and a lighter stroke settle it. */}
+                  <ChevronLeft className='size-6 -translate-x-[0.5px]' strokeWidth={1.25} />
+                </DrawerAction>
+                <DrawerTitle className={cn(drawerBarTitleClass, 'text-center')} id='drawer-title'>
+                  {title}
+                </DrawerTitle>
+                <span aria-hidden />
+              </DrawerBar>
+              <DrawerDivider />
+            </>
           ) : (
             <DrawerTitle className='sr-only' id='drawer-title'>
               {title}
@@ -226,7 +230,7 @@ export function ComboBoxResponsive<T>({
           <DrawerDescription className='sr-only' id='drawer-description'>
             {description}
           </DrawerDescription>
-          <DrawerList className='contents'>
+          <DrawerList className='drawer-command-rows contents drawer-inset-hairlines'>
             <ItemList
               groupedItems={groupedItems}
               onPick={handleSelect}
@@ -417,7 +421,11 @@ function ItemList<T>({
       // Render group header
       if (itemData.type === 'header') {
         return (
-          <div key={`header-${itemData.groupName}`} className={menuGroupHeadingClass}>
+          <div
+            key={`header-${itemData.groupName}`}
+            data-slot='combobox-group-heading'
+            className={menuGroupHeadingClass}
+          >
             {itemData.groupName}
           </div>
         );
@@ -465,7 +473,9 @@ function ItemList<T>({
               // absolute positioning used for virtualization. Use Header/Footer for vertical
               // spacing instead.
               components={{
-                List: (properties) => <div {...properties} className='flex flex-col gap-0.5 px-1' />,
+                List: (properties) => (
+                  <div {...properties} data-slot='combobox-virtual-list' className='flex flex-col gap-0.5 px-1' />
+                ),
                 Header: () => <div className='h-1' />,
                 Footer: isLoadingMore
                   ? () => (

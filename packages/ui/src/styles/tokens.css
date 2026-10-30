@@ -535,6 +535,59 @@
   }
 }
 
+/* A command list in a phone drawer (a responsive combobox's options, the agent sheet's lists) is shared with a desktop
+   popover, whose search field, headings and rows sit 4-12px in. In a drawer they move to its 16px edge, where a menu
+   row's icon and the header's title sit; a highlighted row keeps its 6px inset surface from `drawer-row-dividers`. */
+@utility drawer-command-rows {
+  & [data-slot='command-input-wrapper'] {
+    padding-inline: 1rem;
+  }
+
+  /* The field's search glyph sits 0.75rem inside the field, which now starts 1rem in. */
+  & [data-slot='command-input-wrapper'] > svg {
+    left: 1.75rem;
+  }
+
+  & :is([data-slot='command-group'], [data-slot='combobox-virtual-list']) {
+    padding-inline: 0;
+  }
+
+  & :is([data-slot='command-group'] [cmdk-group-heading], [data-slot='combobox-group-heading']) {
+    padding-inline: 1rem;
+  }
+
+  & [data-slot='command-item'] {
+    --drawer-row-inset: 1rem;
+    padding-inline: 1rem;
+    border-radius: 0;
+  }
+
+  & [data-slot='command-empty'] {
+    margin-inline: 1rem;
+  }
+}
+
+/* Content shared with a desktop popover draws its section hairlines as full-width `border-t` and `border-b`. Inside a
+   drawer, where a divider never spans the full width, this redraws each one inset 1rem from both edges, as
+   `DrawerDivider` does, without moving the section's own content. */
+@utility drawer-inset-hairlines {
+  & :is(.border-t, .border-b) {
+    border-top-width: 0;
+    border-bottom-width: 0;
+    background-image: linear-gradient(var(--border), var(--border));
+    background-repeat: no-repeat;
+    background-size: calc(100% - 2rem) 1px;
+  }
+
+  & .border-t {
+    background-position: 1rem 0;
+  }
+
+  & .border-b {
+    background-position: 1rem 100%;
+  }
+}
+
 @utility focus-outline-outside {
   outline: var(--focus-outline-width) solid var(--focus-outline-color);
   outline-offset: var(--focus-outline-offset-outside);

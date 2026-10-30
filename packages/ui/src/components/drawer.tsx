@@ -700,6 +700,66 @@ function DrawerList({ className, ...properties }: React.ComponentProps<'div'>): 
  */
 const drawerRowAttributes = { 'data-drawer-row': '' } as const;
 
+/**
+ * The shape of a drawer row, shared by every drawer of rows (a responsive menu, a chat switcher, a project sheet): a
+ * full-width touch row with 1rem inline padding, a 1rem icon and a 0.75rem gap, so its icon lines up with the header's
+ * title at 16px, its text at 44px, and its divider (see {@link DrawerList}) starts under that text.
+ *
+ * @public
+ * @example <caption>Shape a drawer row.</caption>
+ * ```typescript
+ * import { createElement } from 'react';
+ * import { drawerRowAttributes, drawerRowClass } from '@taucad/ui/components/drawer';
+ *
+ * createElement('button', { ...drawerRowAttributes, className: `relative flex ${drawerRowClass}` }, 'Rename');
+ * ```
+ */
+const drawerRowClass =
+  'min-h-touch-row w-full shrink-0 gap-3 rounded-none px-4 text-left text-sm [--drawer-row-gap:0.75rem] [--drawer-row-icon:1rem] [--drawer-row-inset:1rem] [&_svg:not([class*=size-])]:size-4';
+
+/**
+ * The list item around a {@link drawerRowClass} button, when the item, not the button, is the marked row: it is
+ * positioned and carries the row's geometry, so its divider and highlight land where the button's icon and text do.
+ *
+ * @public
+ * @example <caption>Mark a list item that wraps a row button.</caption>
+ * ```typescript
+ * import { createElement } from 'react';
+ * import { drawerListItemClass, drawerRowAttributes } from '@taucad/ui/components/drawer';
+ *
+ * createElement('li', { ...drawerRowAttributes, className: drawerListItemClass });
+ * ```
+ */
+const drawerListItemClass = 'relative [--drawer-row-gap:0.75rem] [--drawer-row-icon:1rem] [--drawer-row-inset:1rem]';
+
+/**
+ * A drawer hairline, never full width. `header` sits under a {@link DrawerBar}, lined up with its title and action
+ * (16px from each edge); `group` parts groups of {@link drawerRowClass} rows, from the rows' text to their right inset.
+ *
+ * @public
+ * @example <caption>Divide a drawer's header from its rows.</caption>
+ * ```typescript
+ * import { createElement } from 'react';
+ * import { DrawerDivider } from '@taucad/ui/components/drawer';
+ *
+ * createElement(DrawerDivider, { variant: 'header' });
+ * ```
+ */
+function DrawerDivider({
+  variant = 'header',
+  className,
+  ...properties
+}: React.ComponentProps<'div'> & { readonly variant?: 'header' | 'group' }): React.JSX.Element {
+  return (
+    <div
+      aria-hidden
+      data-slot='drawer-divider'
+      className={cn('h-px shrink-0 bg-border', variant === 'header' ? 'mx-4' : 'my-1 mr-4 ml-11', className)}
+      {...properties}
+    />
+  );
+}
+
 export {
   drawerActionClass,
   drawerBarTitleClass,
@@ -719,6 +779,9 @@ export {
   DrawerTitle,
   DrawerDescription,
   DrawerList,
+  DrawerDivider,
+  drawerListItemClass,
   drawerRowAttributes,
+  drawerRowClass,
   useIsInsideDrawer,
 };

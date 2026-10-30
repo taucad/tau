@@ -14,7 +14,9 @@ import {
   DrawerTitle,
   DrawerTrigger,
   drawerBarTitleClass,
+  DrawerDivider,
   drawerRowAttributes,
+  drawerRowClass,
   useIsInsideDrawer,
 } from '#components/drawer.js';
 import { useIsMobile } from '#hooks/use-mobile.js';
@@ -92,10 +94,6 @@ function selectDrawerRow(onSelect: ((event: Event) => void) | undefined, close: 
     close();
   }
 }
-
-/** A drawer row's shape: a full-width touch row, whose 1rem padding, 1rem icon and 0.75rem gap place its divider. */
-const drawerRowClass =
-  'min-h-touch-row w-full shrink-0 gap-3 rounded-none px-4 text-left text-sm [--drawer-row-gap:0.75rem] [--drawer-row-icon:1rem] [--drawer-row-inset:1rem] [&_svg:not([class*=size-])]:size-4';
 
 /* A checkbox or radio row's text starts past its indicator column (`pl-11`), so its divider does too. */
 const drawerIndicatorRowClass = 'pl-11 [--drawer-row-text-start:2.75rem]';
@@ -348,8 +346,7 @@ function DropdownMenuDrawerContent({
       </DrawerBar>
       {/* A dialog's group of buttons: checkbox, radio and switch rows use the plain `checkbox`, `radio` and `switch`
        * roles, since the `menuitem*` roles need a `menu` parent that a drawer does not have. */}
-      {/* Dividers in a drawer never span its full width: this one lines up with the header's title and close button. */}
-      <div aria-hidden className='mx-4 h-px shrink-0 bg-border' />
+      <DrawerDivider />
       <DrawerList
         role='group'
         aria-label={title}

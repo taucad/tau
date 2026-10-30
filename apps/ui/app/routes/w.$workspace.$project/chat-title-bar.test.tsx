@@ -369,9 +369,10 @@ describe('ChatTitleBar', () => {
       expect(within(sheet).getByRole('button', { name: 'Gear ratio study' })).not.toHaveAttribute('aria-current');
       // A chat in Trash is not offered.
       expect(within(sheet).queryByText('Trashed sketch')).not.toBeInTheDocument();
-      // Each row is a 44px target (I3).
+      // Each row is a touch-row target (I3), inset 1rem like a responsive menu's drawer row, with no full-width hover band.
       for (const row of rows) {
-        expect(row).toHaveClass('h-11');
+        expect(row).toHaveClass('h-touch-row', 'px-4', 'text-sm', 'hover:bg-transparent!');
+        expect(row.parentElement).toHaveClass('[--drawer-row-inset:1rem]');
       }
     });
 

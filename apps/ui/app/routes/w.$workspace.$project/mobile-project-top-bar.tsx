@@ -20,6 +20,10 @@ import {
   DrawerBar,
   DrawerContent,
   DrawerDescription,
+  DrawerDivider,
+  drawerListItemClass,
+  drawerRowAttributes,
+  drawerRowClass,
   DrawerTitle,
   drawerBarTitleClass,
 } from '@taucad/ui/components/drawer';
@@ -241,6 +245,13 @@ function focusSurfaceWhenOpen(title: string): void {
   });
 }
 
+/**
+ * A group of sheet rows: hairlines between its rows, and above it, unless it is the first group, a divider inset like a
+ * responsive menu's separator (the header's own divider sits above the first).
+ */
+const sheetGroupClass =
+  'drawer-row-dividers relative py-1 not-first-of-type:before:absolute not-first-of-type:before:top-0 not-first-of-type:before:right-4 not-first-of-type:before:left-11 not-first-of-type:before:h-px not-first-of-type:before:bg-border';
+
 /** A destination row in the project sheet: its workbench title is its label and its name (I6). */
 function SheetRow({
   icon: Icon,
@@ -259,7 +270,7 @@ function SheetRow({
   const labelId = useId();
   const metaId = useId();
   return (
-    <li>
+    <li {...drawerRowAttributes} className={drawerListItemClass}>
       {/* Named by its label alone; the meta describes it (I6). */}
       <Button
         variant='ghost'
@@ -267,7 +278,11 @@ function SheetRow({
         data-slot='project-sheet-row'
         aria-labelledby={labelId}
         aria-describedby={meta === undefined ? undefined : metaId}
-        className='w-full justify-start gap-3 rounded-none font-normal'
+        // A drawer row (I3's 40px touch row); the row, not the button, draws the inset highlight, so no full-width band.
+        className={cn(
+          drawerRowClass,
+          'h-touch-row justify-start font-normal hover:bg-transparent! dark:hover:bg-transparent!',
+        )}
         onClick={onSelect}
       >
         <Icon aria-hidden className={cn('size-4 shrink-0', tone)} />
@@ -376,15 +391,16 @@ function ProjectSheet({
             <TooltipContent>Close project sheet</TooltipContent>
           </Tooltip>
         </DrawerBar>
+        <DrawerDivider />
         <div className='min-h-0 overflow-y-auto pb-3'>
           {/* I5: a conflict is a decision, so its Revisions row comes first and says so; it opens where it is made. */}
           {status.conflict === undefined ? null : (
-            <ul aria-label='Decision' className='border-t py-1'>
+            <ul aria-label='Decision' className={sheetGroupClass}>
               {revisionsRow}
             </ul>
           )}
           {status.followChat === undefined ? null : (
-            <ul aria-label='Chat' className='border-t py-1'>
+            <ul aria-label='Chat' className={sheetGroupClass}>
               <SheetRow
                 icon={GitBranch}
                 label='Follow chat'
@@ -405,7 +421,7 @@ function ProjectSheet({
               onBeforeOpenFile={close}
             />
           </div>
-          <ul aria-label='Project' className='border-t py-1'>
+          <ul aria-label='Project' className={sheetGroupClass}>
             {status.conflict === undefined ? revisionsRow : null}
             <SheetRow
               icon={workbenchPanes.export.icon}

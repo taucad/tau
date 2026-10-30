@@ -12,11 +12,14 @@ import {
   DrawerBar,
   DrawerContent,
   DrawerDescription,
+  DrawerDivider,
   DrawerList,
+  drawerListItemClass,
   DrawerTitle,
   DrawerTrigger,
   drawerBarTitleClass,
   drawerRowAttributes,
+  drawerRowClass,
 } from '@taucad/ui/components/drawer';
 import { cn } from '@taucad/ui/utils/cn';
 import { ChatHistorySettings, useExportTranscript } from '#routes/w.$workspace.$project/chat-history-settings.js';
@@ -45,7 +48,7 @@ const newChatKeyCombination = {
   shiftKey: true,
 } satisfies KeyCombination;
 
-/** One row of the phone chat switcher: a 44px target named by its label (I3, I6). */
+/** One row of the phone chat switcher, named by its label (I6), shaped like a responsive menu's drawer row. */
 function SwitcherRow({
   icon: Icon,
   label,
@@ -60,18 +63,18 @@ function SwitcherRow({
   readonly onSelect: () => void;
 }): React.JSX.Element {
   return (
-    // A drawer list row: the touch button's 0.5rem padding, a 1rem icon and a 0.75rem gap.
-    <li
-      {...drawerRowAttributes}
-      className='relative [--drawer-row-gap:0.75rem] [--drawer-row-icon:1rem] [--drawer-row-inset:0.5rem]'
-    >
+    <li {...drawerRowAttributes} className={drawerListItemClass}>
       <Button
         variant='ghost'
         size='touch'
         data-slot='chat-switcher-row'
         aria-current={isCurrent ? 'true' : undefined}
         disabled={isDisabled}
-        className='w-full justify-start gap-3 rounded-none font-normal'
+        // A drawer row (I3's 40px touch row); the row, not the button, draws the inset highlight, so no full-width band.
+        className={cn(
+          drawerRowClass,
+          'h-touch-row justify-start font-normal hover:bg-transparent! dark:hover:bg-transparent!',
+        )}
         onClick={onSelect}
       >
         {Icon ? (
@@ -180,7 +183,7 @@ function ChatSwitcherSheet({
           type='button'
           data-slot='chat-title-button'
           aria-label={`${name}, ${title}`}
-          className='flex h-10 min-w-0 flex-1 cursor-action items-center gap-1 rounded-md px-1 text-left text-sm font-medium outline-none hover:bg-accent focus-visible:focus-outline'
+          className='flex h-10 min-w-0 flex-1 cursor-action items-center gap-1 rounded-md px-2 text-left text-sm font-medium outline-none hover:bg-accent focus-visible:focus-outline'
         >
           {/* Ellipsis only when the name overflows, as the project title above does; a fade always masked its tail. */}
           <span
@@ -220,10 +223,9 @@ function ChatSwitcherSheet({
             <X aria-hidden className='size-4' />
           </DrawerAction>
         </DrawerBar>
-        {/* Dividers in a drawer never span its full width: this one lines up with the title and close button. */}
-        <div aria-hidden className='mx-4 h-px shrink-0 bg-border' />
+        <DrawerDivider />
         <div className='min-h-0 overflow-y-auto pb-3'>
-          <DrawerList role='list' aria-label='Chats' className='py-1'>
+          <DrawerList role='list' aria-label='Chats' className='pt-1'>
             <SwitcherRow
               icon={SquarePen}
               label='New chat'
@@ -251,9 +253,8 @@ function ChatSwitcherSheet({
               />
             ))}
           </DrawerList>
-          {/* Inset like the row dividers: from the rows' text to the rows' right inset. */}
-          <div aria-hidden className='mr-2 ml-9 h-px bg-border' />
-          <DrawerList role='list' aria-label='This chat' className='py-1'>
+          <DrawerDivider variant='group' />
+          <DrawerList role='list' aria-label='This chat' className='pb-1'>
             <SwitcherRow
               icon={Pencil}
               label='Rename this chat'

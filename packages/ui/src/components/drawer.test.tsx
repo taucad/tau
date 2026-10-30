@@ -1,6 +1,15 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Drawer, DrawerContent, DrawerDescription, DrawerTitle, drawerGrabStrip } from '#components/drawer.js';
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerDivider,
+  DrawerTitle,
+  drawerGrabStrip,
+  drawerListItemClass,
+  drawerRowClass,
+} from '#components/drawer.js';
 
 /** A visual viewport the test drives, standing in for a phone's software keyboard. */
 class VisualViewportStub extends EventTarget {
@@ -305,5 +314,28 @@ describe('drawer height keyboard controls', () => {
       key: 'ArrowDown',
     });
     expect(setActiveSnapPoint).toHaveBeenCalledWith(0.25);
+  });
+});
+
+describe('drawer row geometry', () => {
+  it('should place every drawer row on the header’s 16px edge, with a 1rem icon and its text at 44px', () => {
+    for (const geometry of ['[--drawer-row-inset:1rem]', '[--drawer-row-icon:1rem]', '[--drawer-row-gap:0.75rem]']) {
+      expect(drawerRowClass).toContain(geometry);
+      expect(drawerListItemClass).toContain(geometry);
+    }
+    expect(drawerRowClass).toContain('px-4');
+    expect(drawerRowClass).toContain('gap-3');
+  });
+
+  it('should inset a header divider 16px from each edge and a group divider from the rows’ text', () => {
+    render(
+      <>
+        <DrawerDivider data-testid='header' />
+        <DrawerDivider data-testid='group' variant='group' />
+      </>,
+    );
+    expect(screen.getByTestId('header')).toHaveClass('mx-4', 'h-px');
+    expect(screen.getByTestId('header')).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.getByTestId('group')).toHaveClass('my-1', 'mr-4', 'ml-11', 'h-px');
   });
 });

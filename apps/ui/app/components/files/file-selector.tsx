@@ -207,7 +207,7 @@ export function FileSelector({
         <DrawerContent>
           <DrawerTitle className='sr-only'>{title}</DrawerTitle>
           <DrawerDescription className='sr-only'>{description}</DrawerDescription>
-          <DrawerList className='contents'>{content}</DrawerList>
+          <DrawerList className='drawer-command-rows contents drawer-inset-hairlines'>{content}</DrawerList>
         </DrawerContent>
       </Drawer>
     );

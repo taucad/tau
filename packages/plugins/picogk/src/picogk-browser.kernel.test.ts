@@ -50,6 +50,35 @@ describe('PicoGK browser registration', () => {
     await definition.onDispose!(context);
   });
 
+  it('should report which WASM variant ran the program, and why a serial page got the serial one', async () => {
+    vi.stubGlobal('location', { href: 'https://tau.test/app/' });
+    vi.stubGlobal('Worker', vi.fn());
+    const assets = {
+      bootstrapUrl: 'https://tau.test/runtime.js',
+      compilerIdentity: 'a'.repeat(64),
+      runtimeFiles: [],
+      references: [],
+    };
+    const options = picogkBrowserOptionsSchema.parse({
+      assets: { url: '/picogk/manifest.json', sha256: 'a'.repeat(64) },
+    });
+    const definition = await resolveRuntimePluginDefinition('kernel', picogkBrowserKernel(options));
+
+    vi.stubGlobal('crossOriginIsolated', true);
+    vi.mocked(loadPicogkBrowserAssets).mockResolvedValue({ mode: 'multi', assets });
+    const isolated = createMockKernelRuntime();
+    await definition.onDispose!(await definition.initialize(options, isolated));
+    expect(isolated.logger.log).toHaveBeenCalledWith('PicoGK browser WASM variant: multi');
+
+    vi.stubGlobal('crossOriginIsolated', false);
+    vi.mocked(loadPicogkBrowserAssets).mockResolvedValue({ mode: 'single', assets });
+    const serial = createMockKernelRuntime();
+    await definition.onDispose!(await definition.initialize(options, serial));
+    expect(serial.logger.log).toHaveBeenCalledWith(
+      'PicoGK browser WASM variant: single (threaded build unavailable: no cross-origin isolation)',
+    );
+  });
+
   it('should reject desktop launch options at the browser boundary', () => {
     expect(picogkBrowserOptionsSchema.safeParse({ closure: {} }).success).toBe(false);
     expect(picogkBrowserOptionsSchema.safeParse({ wasm: 'threads' }).success).toBe(false);

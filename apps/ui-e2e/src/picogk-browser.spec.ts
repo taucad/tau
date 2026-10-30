@@ -13,6 +13,7 @@ import { readWorkbenchTree, writeWorkbenchFile } from '#support/workbench-files.
  * is why this spec opens the shipped examples through the ordinary project route instead.
  */
 const bundle = inject('picogkBundle');
+const isolated = inject('crossOriginIsolation');
 
 const openCommand = async (name: string): Promise<void> => {
   await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
@@ -100,6 +101,22 @@ test('binds the parameters an example declares in its own C#', async () => {
   await target.fill(radius, '28');
   await target.expectGeometryFramed();
   expect(await target.getAttribute(radius, 'value')).toBe('28');
+});
+
+test("runs the author's program on the threaded WASM build this page can hold", async () => {
+  // Tau prefers the threaded build, and the page's own COOP/COEP are what make it reachable: the
+  // multi variant needs shared memory, so a page that is not cross-origin isolated can only get
+  // the serial one. Reading the variant out of the running build is what makes the preference a
+  // fact rather than a default in a schema.
+  await openExample('boolean-shell');
+  expect(await target.evaluate(() => globalThis.crossOriginIsolated)).toBe(isolated);
+  await openCommand('Open console');
+  const panel = selectors.getByCss('[data-slot="console-panel-body"]');
+  await target.expectVisible(panel, 60_000);
+  await target.expectVisible(
+    panel.getByText(`PicoGK browser WASM variant: ${isolated ? 'multi' : 'single'}`, { exact: false }),
+    60_000,
+  );
 });
 
 test('compiles an example helper and reads its asset', async () => {

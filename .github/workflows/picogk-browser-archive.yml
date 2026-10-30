@@ -8,10 +8,17 @@ on:
       - packages/plugins/picogk/dotnet/**
       - .github/workflows/picogk-browser-archive.yml
   # The large subject on a schedule, as the charter requires: HeatX is minutes of voxel work per
-  # engine and mode, which no pull request should wait on.
+  # engine and mode, which no pull request should wait on. A dispatch can ask for it directly, so
+  # the subject the ceiling is read off does not have to wait for the week's run.
   schedule:
     - cron: '0 4 * * 1'
   workflow_dispatch:
+    inputs:
+      subject:
+        description: Which parity subject to qualify. The ceiling is read off the long subject.
+        type: choice
+        options: [gyroid, heatx]
+        default: gyroid
 permissions:
   contents: read
 concurrency:
@@ -21,8 +28,8 @@ env:
   # The reviewed PicoVoxel builder. `uses:` cannot read a variable, so the archive call repeats it.
   PICOVOXEL_REF: 83d3ba1be5fbcca6936542bf129fb6700c6e1fae
   PACKAGE_VERSION: 0.2.1
-  # Gyroid proves every run; the scheduled run proves HeatX.
-  SUBJECT: ${{ github.event_name == 'schedule' && 'heatx' || 'gyroid' }}
+  # Gyroid proves every run; the scheduled run, or a dispatch that asks for it, proves HeatX.
+  SUBJECT: ${{ github.event_name == 'schedule' && 'heatx' || inputs.subject || 'gyroid' }}
 jobs:
   archive:
     uses: taucad/picovoxel/.github/workflows/dotnet-archive.yml@83d3ba1be5fbcca6936542bf129fb6700c6e1fae

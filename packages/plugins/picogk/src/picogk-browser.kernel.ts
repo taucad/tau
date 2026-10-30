@@ -20,12 +20,20 @@ export const picogkBrowserKernel = createPicogkKernelDefinition({
         },
       ]);
     }
-    const { assets } = await loadPicogkBrowserAssets({
+    const { assets, mode } = await loadPicogkBrowserAssets({
       manifest: { ...options.assets, url: new URL(options.assets.url, globalThis.location.href).href },
       wasm: options.wasm,
       isolated: globalThis.crossOriginIsolated,
       signal: services.signal,
     });
+    // Tau prefers the threaded build, so the author's console says which one ran their program.
+    // A page without cross-origin isolation can hold no shared memory, and `auto` takes the serial
+    // build there rather than failing, which is the only reason a production page reports `single`.
+    services.logger.log(
+      mode === 'multi'
+        ? 'PicoGK browser WASM variant: multi'
+        : `PicoGK browser WASM variant: single (threaded build ${globalThis.crossOriginIsolated ? 'absent from this bundle' : 'unavailable: no cross-origin isolation'})`,
+    );
     return createPicogkBrowserContext({
       assets,
       recycleHeapBytes: options.recycleHeapBytes,

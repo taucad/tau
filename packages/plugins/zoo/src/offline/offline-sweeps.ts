@@ -169,8 +169,8 @@ function sweepFaces<
 
   const generators = profile.faces.map((face) => make(face));
   const shapes = generators.map((generator) => orientOutward(oc, generator.Shape()));
-  const caps = [generators[0]!.FirstShape?.(), generators[0]!.LastShape?.()].filter(
-    (cap): cap is TopoDS_Shape => Boolean(cap && !cap.IsNull()),
+  const caps = [generators[0]!.FirstShape?.(), generators[0]!.LastShape?.()].filter((cap): cap is TopoDS_Shape =>
+    Boolean(cap && !cap.IsNull()),
   );
   const sideFace = (edge: TopoDS_Edge): TopoDS_Shape | undefined => {
     for (const generator of generators) {

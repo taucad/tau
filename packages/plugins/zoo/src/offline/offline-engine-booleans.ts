@@ -10,7 +10,14 @@ import type { SolidEntity } from '#offline/offline-scene.js';
 import { helpersFor } from '#offline/offline-helpers.js';
 import { shellPrism } from '#offline/offline-shell.js';
 import type { ShapeHistory } from '#offline/offline-topology.js';
-import { algoHistory, facesOfEdge, noEdgeMatches, rebaseSolid, remapIds, requireFace } from '#offline/offline-topology.js';
+import {
+  algoHistory,
+  facesOfEdge,
+  noEdgeMatches,
+  rebaseSolid,
+  remapIds,
+  requireFace,
+} from '#offline/offline-topology.js';
 import type { ModelingCommand, WireAngle } from '#offline/offline-engine.types.js';
 import { OfflineEngineError, toRadians } from '#offline/offline-engine.types.js';
 import type { OfflineEngine } from '#offline/offline-engine.js';

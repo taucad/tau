@@ -35,7 +35,7 @@ afterEach(() => {
 });
 
 describe('Commands on a phone', () => {
-  it('should close the search sheet from a compact outline Cancel beside a field that can shrink', async () => {
+  it('should close the search sheet from the shared drawer close beside a field that can shrink', async () => {
     const user = userEvent.setup();
     render(
       <MemoryRouter>
@@ -50,11 +50,11 @@ describe('Commands on a phone', () => {
     await user.click(screen.getByRole('button', { name: 'Search' }));
 
     const sheet = await screen.findByRole('dialog', { name: 'Search' });
-    const cancel = within(sheet).getByRole('button', { name: 'Cancel' });
-    // `outline` draws one border on the page background; `sm` is the compact 32 px height.
-    expect(cancel).toHaveClass('border', 'bg-background', 'h-8', 'shrink-0');
-    expect(cancel).not.toHaveClass('h-10');
-    // The phone's shorter placeholder fits beside Cancel at 320 px; the dialog keeps the full one.
+    // The same 44px circular close every drawer header ends with, not a text Cancel.
+    const cancel = within(sheet).getByRole('button', { name: 'Close' });
+    expect(cancel).toHaveClass('size-11', 'rounded-full!', 'border', 'shrink-0');
+    expect(within(sheet).queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+    // The phone's shorter placeholder fits beside the close at 320 px; the dialog keeps the full one.
     const field = within(sheet).getByPlaceholderText('Search projects, chats…');
     expect(field).toHaveClass('text-ellipsis');
     // The field's wrapper takes the row's remaining width and may shrink below its content.

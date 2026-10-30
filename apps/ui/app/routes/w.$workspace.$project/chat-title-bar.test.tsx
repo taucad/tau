@@ -276,6 +276,15 @@ describe('ChatTitleBar', () => {
 
     const title = (): HTMLElement => screen.getByRole('button', { name: /^Bracket design, Chats in Rotor housing$/ });
 
+    // A short name showed its tail faded out, as if clipped: the name ellipsizes only when it overflows.
+    it('should show the chat name whole, ellipsized only on overflow, never faded', () => {
+      render(<ChatTitleBar />);
+
+      const name = within(title()).getByText('Bracket design');
+      expect(name).toHaveClass('truncate', 'min-w-0');
+      expect(name).not.toHaveClass('fade-label');
+    });
+
     it('should close only the switcher on Escape and give focus back to the title', async () => {
       const user = userEvent.setup();
       render(<ChatTitleBar closeButton={<button type='button'>Close chat</button>} />);

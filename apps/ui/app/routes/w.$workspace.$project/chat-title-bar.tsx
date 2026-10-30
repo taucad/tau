@@ -182,8 +182,9 @@ function ChatSwitcherSheet({
           aria-label={`${name}, ${title}`}
           className='flex h-10 min-w-0 flex-1 cursor-action items-center gap-1 rounded-md px-1 text-left text-sm font-medium outline-none hover:bg-accent focus-visible:focus-outline'
         >
+          {/* Ellipsis only when the name overflows, as the project title above does; a fade always masked its tail. */}
           <span
-            className={cn('fade-label min-w-0 text-foreground', isGeneratingName && 'animate-pulse')}
+            className={cn('min-w-0 truncate text-foreground', isGeneratingName && 'animate-pulse')}
             aria-busy={isGeneratingName}
           >
             {name}

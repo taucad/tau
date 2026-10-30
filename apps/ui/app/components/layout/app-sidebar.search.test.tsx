@@ -151,18 +151,19 @@ describe('sidebar search trigger', () => {
 
       const palette = await screen.findByRole('dialog', { name: 'Search' });
       expect(palette).toHaveAttribute('data-slot', 'command-palette-sheet');
+      // Nearly full height, a sliver below the status bar so its rounded top reads as a drawer.
       expect(palette).toHaveClass(
-        'h-dvh',
-        'data-[vaul-drawer-direction=bottom]:max-h-dvh',
-        'data-[vaul-drawer-direction=bottom]:mt-0',
+        'h-[calc(100dvh-env(safe-area-inset-top)-var(--spacing)*3)]',
+        'data-[vaul-drawer-direction=bottom]:max-h-[calc(100dvh-env(safe-area-inset-top)-var(--spacing)*3)]',
+        'data-[vaul-drawer-direction=bottom]:rounded-t-(--drawer-radius)',
         'z-110',
       );
-      expect(palette).not.toHaveClass('data-[vaul-drawer-direction=bottom]:max-h-[80vh]');
+      expect(palette).not.toHaveClass('data-[vaul-drawer-direction=bottom]:rounded-none');
       const field = within(palette).getByPlaceholderText('Search projects, chats…');
       await waitFor(() => {
         expect(field).toHaveFocus();
       });
-      expect(within(palette).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+      expect(within(palette).getByRole('button', { name: 'Close' })).toBeInTheDocument();
 
       await userEvent.keyboard('{Escape}');
 

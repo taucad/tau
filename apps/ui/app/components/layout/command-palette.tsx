@@ -1,4 +1,4 @@
-import { Search } from 'lucide-react';
+import { Search, X } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, createContext, useContext } from 'react';
 import { defaultFilter } from 'cmdk';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -15,6 +15,7 @@ import {
 } from '@taucad/ui/components/command';
 import {
   Drawer,
+  DrawerAction,
   DrawerClose,
   DrawerContent,
   DrawerDescription,
@@ -239,10 +240,14 @@ export function CommandPaletteResults({
   return (
     <>
       {inputAction ? (
-        <div className='flex items-center gap-1 border-b pr-3 [&_[data-slot=command-input-wrapper]]:min-w-0 [&_[data-slot=command-input-wrapper]]:flex-1 [&_[data-slot=command-input-wrapper]>svg]:hidden'>
-          {input}
-          {inputAction}
-        </div>
+        <>
+          {/* The drawer header: the field where a title sits, the action at the shared 60px bar's end. */}
+          <div className='flex min-h-(--drawer-bar-height) shrink-0 items-center gap-2 py-2 pr-4 [&_[data-slot=command-input-wrapper]]:min-w-0 [&_[data-slot=command-input-wrapper]]:flex-1 [&_[data-slot=command-input-wrapper]>svg]:hidden'>
+            {input}
+            {inputAction}
+          </div>
+          <div aria-hidden className='mx-4 h-px shrink-0 bg-border' />
+        </>
       ) : (
         input
       )}
@@ -440,8 +445,9 @@ function CommandPaletteMobile({
       <DrawerContent
         data-slot='command-palette-sheet'
         className={cn(
-          'z-110 h-dvh pt-[env(safe-area-inset-top)]',
-          'data-[vaul-drawer-direction=bottom]:mt-0 data-[vaul-drawer-direction=bottom]:max-h-dvh data-[vaul-drawer-direction=bottom]:rounded-none data-[vaul-drawer-direction=bottom]:border-t-0',
+          // Below the status bar with a sliver of page above, so its rounded top reads as a drawer like the others.
+          'z-110 h-[calc(100dvh-env(safe-area-inset-top)-var(--spacing)*3)]',
+          'data-[vaul-drawer-direction=bottom]:mt-0 data-[vaul-drawer-direction=bottom]:max-h-[calc(100dvh-env(safe-area-inset-top)-var(--spacing)*3)]',
         )}
       >
         <DrawerTitle className='sr-only'>Search</DrawerTitle>
@@ -452,13 +458,13 @@ function CommandPaletteMobile({
           <CommandPaletteResults
             items={items}
             listClassName='max-h-none min-h-0 flex-1'
-            // Beside Cancel at 320 px the full placeholder needs 263 px of the field's 207.
+            // Beside the close at 320 px the full placeholder needs 263 px of the field's width.
             placeholder='Search projects, chats…'
             inputAction={
               <DrawerClose asChild>
-                <Button variant='outline' size='sm' className='shrink-0'>
-                  Cancel
-                </Button>
+                <DrawerAction aria-label='Close'>
+                  <X aria-hidden className='size-4' />
+                </DrawerAction>
               </DrawerClose>
             }
             onRun={runCommand}

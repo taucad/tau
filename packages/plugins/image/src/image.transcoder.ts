@@ -146,7 +146,8 @@ export const imageTranscoder = defineTranscoder({
   // 12.0.0 = scale-independent ambient occlusion normals.
   // 13.0.0 = nanoraster 0.7: sections are never refused; open cut outlines are drawn in red.
   // 13.0.1 = nanoraster 0.7.1: hidden edges ending on a face boundary no longer show past it.
-  version: '13.0.1',
+  // 14.0.0 = nanoraster 0.8: ambient occlusion is on unless `ao.intensity` is 0.
+  version: '14.0.0',
   edges,
 
   async initialize() {

@@ -280,6 +280,19 @@ describe('the launch Tau compiles (D4, D20, D26, A05)', () => {
     await expect(running).resolves.toMatchObject({ status: 'cancelled' });
   });
 
+  it('reports a cancellation that lands inside the launch as cancelled, not as a refusal', async () => {
+    const controller = new AbortController();
+    const { service } = harness(() => {
+      /* The caller aborts while the provider is staging: the sandbox never came up, so the provider refuses. The
+       * caller's cancellation outranks that refusal, because from the caller's side the command was cancelled. */
+      controller.abort();
+      return { status: 'sandbox-unavailable', message: 'the start barrier closed' };
+    });
+    await expect(service.run(call({ command: 'sleep 300' }, { signal: controller.signal }))).resolves.toMatchObject({
+      status: 'cancelled',
+    });
+  });
+
   it('maps a provider refusal to shell-unavailable and a thrown launch to launch-failed', async () => {
     const refused = harness(() => ({ status: 'sandbox-unavailable', message: 'socat is missing' }));
     await expect(refused.service.run(call({ command: 'ls' }))).resolves.toMatchObject({

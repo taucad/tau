@@ -13,6 +13,7 @@ import { selectChatFacts, useChatSidebarStatus } from '#hooks/use-sidebar-status
 import type { SidebarFacts } from '#hooks/use-sidebar-status.js';
 import { useProject } from '#hooks/use-project.js';
 import { formatKeyCombination } from '@taucad/ui/utils/keys';
+import { usePlatform } from '@taucad/ui/hooks/use-platform';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { useProjectWorkspace, useWorkspaceLanes } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
@@ -107,6 +108,7 @@ export function ChatLaneToggle({ place }: { readonly place: Place }): React.JSX.
     };
   }, [isOpen, place]);
 
+  const platform = usePlatform();
   return (
     <PaneButton
       ref={ref}
@@ -120,7 +122,7 @@ export function ChatLaneToggle({ place }: { readonly place: Place }): React.JSX.
       tooltip={
         <span className='flex items-center gap-2'>
           Toggle Chat
-          <KeyShortcut variant='tooltip'>{formatKeyCombination(toggleChatKeyCombination)}</KeyShortcut>
+          <KeyShortcut variant='tooltip'>{formatKeyCombination(toggleChatKeyCombination, platform)}</KeyShortcut>
           {facts.sentence === undefined ? undefined : <span className='opacity-70'>· {facts.sentence}</span>}
         </span>
       }

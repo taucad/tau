@@ -17,6 +17,16 @@
 export type DetectedPlatform = 'mac' | 'other';
 
 /**
+ * The platform server rendering and hydration both assume, since neither can read a
+ * `navigator`. Anything rendered from the platform reads it through
+ * `@taucad/ui/hooks/use-platform`, so the server markup and the hydrating client render
+ * agree and React swaps in the real platform once hydration is done.
+ *
+ * @public
+ */
+export const serverPlatform: DetectedPlatform = 'mac';
+
+/**
  * Extended Navigator type that includes the experimental `userAgentData` property.
  * This property is available in Chromium-based browsers (Chrome 90+, Edge 90+)
  * but not in Firefox or Safari as of early 2026.
@@ -31,11 +41,11 @@ type NavigatorWithUaData = Navigator & {
  * Detect the current platform. Returns `'mac'` for macOS/iOS, `'other'` for
  * Windows, Linux, and everything else.
  *
- * During SSR (when `navigator` is unavailable), returns `'mac'` as a default
- * since the codebase is macOS-centric and this avoids incorrect modifier
- * display on first render (hydration mismatch prevention).
- *
- * The result is cached after the first call for performance.
+ * During SSR (when `navigator` is unavailable), returns {@link serverPlatform}.
+ * Calling this during a render is a hydration hazard: a subtree that hydrates after
+ * the client has detected a non-Mac platform would render text the server never sent.
+ * Rendered platform labels read `usePlatform` from `@taucad/ui/hooks/use-platform`
+ * instead; this function serves event matching and other non-rendering callers.
  *
  * @public
  *
@@ -48,7 +58,7 @@ type NavigatorWithUaData = Navigator & {
  */
 export function detectPlatform(): DetectedPlatform {
   if (typeof navigator === 'undefined') {
-    return 'mac'; // SSR fallback
+    return serverPlatform;
   }
 
   // Prefer the modern User-Agent Client Hints API (Chromium 93+).

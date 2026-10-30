@@ -1,3 +1,5 @@
+import { serverPlatform } from '#utils/platform.js';
+
 /**
  * A key and the modifiers pressed with it; `modKey` is Command on macOS and Control elsewhere.
  *
@@ -18,10 +20,14 @@ export type KeyCombination = Pick<KeyboardEvent, 'key'> &
   };
 
 /**
- * Detected platform for key formatting.
- * Set by KeyboardProvider on init; defaults to 'mac' for SSR.
+ * Detected platform for matching real key events.
+ * Set by KeyboardProvider on mount; defaults to `serverPlatform` until then.
+ *
+ * Formatting a label from this value during a render is a hydration hazard, because it
+ * flips once the provider has mounted while the server markup still reads `⌘`. Rendered
+ * labels pass the platform from `usePlatform` (`@taucad/ui/hooks/use-platform`) instead.
  */
-let detectedPlatform: 'mac' | 'other' = 'mac';
+let detectedPlatform: 'mac' | 'other' = serverPlatform;
 
 /**
  * Sets the detected platform. Called by KeyboardProvider on mount.
@@ -72,10 +78,15 @@ const formatKey = (key: KeyCombination['key']): string => {
 
 /**
  * Formats a key combination into platform-specific notation.
+ *
+ * @param combo - The combination to label.
+ * @param platform - The platform to label it for. A render passes `usePlatform()`
+ *   (`@taucad/ui/hooks/use-platform`), which keeps the label stable through hydration;
+ *   the default suits callers outside a render.
  * @public
  */
-export function formatKeyCombination(combo: KeyCombination): string {
-  const isMac = detectedPlatform === 'mac';
+export function formatKeyCombination(combo: KeyCombination, platform: 'mac' | 'other' = detectedPlatform): string {
+  const isMac = platform === 'mac';
   const parts: string[] = [];
 
   // Resolve modKey to the platform-specific modifier
@@ -111,10 +122,13 @@ export function formatKeyCombination(combo: KeyCombination): string {
 /**
  * Formats a key combination as an `aria-keyshortcuts` value (modifiers first,
  * `+`-joined, the platform's modifier for `modKey`).
+ *
+ * @param combo - The combination to describe.
+ * @param platform - The platform to describe it for, as {@link formatKeyCombination}.
  * @public
  */
-export function ariaKeyShortcuts(combo: KeyCombination): string {
-  const isMac = detectedPlatform === 'mac';
+export function ariaKeyShortcuts(combo: KeyCombination, platform: 'mac' | 'other' = detectedPlatform): string {
+  const isMac = platform === 'mac';
   return [
     (combo.modKey ? !isMac : combo.ctrlKey) && 'Control',
     combo.altKey && 'Alt',

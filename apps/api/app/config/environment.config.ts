@@ -299,6 +299,12 @@ export const environmentSchemaBase = z.object({
     .string()
     .default('')
     .describe('Terraform-provisioned Stripe product id for one-time credit packs'),
+  STRIPE_PORTAL_CONFIGURATION_ID: z
+    .string()
+    .default('')
+    .describe(
+      'Terraform-provisioned Customer Portal configuration (bpc_...) every portal session uses, so cancellation ends at the period end; unset uses the account default',
+    ),
 
   REDIS_URL: z.string().describe('Redis connection URL (e.g., redis://localhost:6379 or rediss://... for TLS)'),
 
@@ -571,6 +577,7 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
       ['STRIPE_WEBHOOK_SECRET', data.STRIPE_WEBHOOK_SECRET, 'whsec_'],
       ['STRIPE_PRICE_ID_PRO_MONTHLY', data.STRIPE_PRICE_ID_PRO_MONTHLY, 'price_'],
       ['STRIPE_PRODUCT_ID_CREDIT_PACK', data.STRIPE_PRODUCT_ID_CREDIT_PACK, 'prod_'],
+      ['STRIPE_PORTAL_CONFIGURATION_ID', data.STRIPE_PORTAL_CONFIGURATION_ID, 'bpc_'],
     ] as const;
     for (const [key, value, accepted] of stripeIdentifiers) {
       const prefixes = typeof accepted === 'string' ? [accepted] : accepted;

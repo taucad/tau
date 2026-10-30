@@ -89,6 +89,7 @@ import {
 type Database = DatabaseService['database'];
 type Transaction = Parameters<Parameters<Database['transaction']>[0]>[0];
 type ActionRequest = { readonly requestId: string; readonly returnPath: string };
+type PortalRequest = ActionRequest & { readonly flow?: 'subscription_cancel' };
 type TopupRequest = ActionRequest & { readonly amountMinor: string; readonly method: 'saved_card' | 'checkout' };
 type ReloadConsentRequest = ActionRequest & { readonly taxLocationRevision?: string };
 export type SubscriptionOfferView = {
@@ -148,6 +149,8 @@ export type BillingPaymentsConfig = {
   readonly stripeAccountId: string;
   readonly livemode: boolean;
   readonly uiOrigin: string;
+  /** The Customer Portal configuration every session uses; absent or empty uses the account's default configuration. */
+  readonly portalConfigurationId?: string;
   readonly webhookSecret: string;
   // oxlint-disable-next-line typescript/no-restricted-types -- null structurally disables collection
   readonly collection: BillingCollection | null;
@@ -1344,7 +1347,7 @@ export class BillingPaymentsService {
     return this.subscriptionToWire(owner, stored);
   }
 
-  public async createPortal(userId: string, input: ActionRequest): Promise<WirePaymentAction> {
+  public async createPortal(userId: string, input: PortalRequest): Promise<WirePaymentAction> {
     this.assertCollectionEnabled();
     const owner = await this.resolveOwner(userId);
     const requestHash = digest(input);
@@ -1379,7 +1382,24 @@ export class BillingPaymentsService {
       throw new ConflictException({ code: 'billing_portal_not_available' });
     const actionId = randomUUID();
     const returnUrl = this.returnUrl(input.returnPath, actionId);
-    const request = { customer: binding[0].stripeCustomerId, return_url: returnUrl };
+    // The portal's cancellation flow follows its configuration, which Terraform pins to cancel at the period end.
+    const cancelSubscriptionId = input.flow === 'subscription_cancel' ? active[0].stripeSubscriptionId : undefined;
+    if (cancelSubscriptionId === null) throw new ConflictException({ code: 'billing_portal_not_available' });
+    const { portalConfigurationId } = this.config;
+    const request = {
+      customer: binding[0].stripeCustomerId,
+      ...(portalConfigurationId ? { configuration: portalConfigurationId } : {}),
+      return_url: returnUrl,
+      ...(cancelSubscriptionId === undefined
+        ? {}
+        : {
+            flow_data: {
+              type: 'subscription_cancel',
+              subscription_cancel: { subscription: cancelSubscriptionId },
+              after_completion: { type: 'redirect', redirect: { return_url: returnUrl } },
+            },
+          }),
+    };
     const inserted = await this.databaseService.database
       .insert(billingProviderLeg)
       .values({

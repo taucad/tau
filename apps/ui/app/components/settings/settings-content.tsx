@@ -5,6 +5,7 @@ import { SecuritySettings } from '#components/auth/settings/security/security-se
 import { CloudBillingSettings } from '#cloud/settings-billing.js';
 import { FileSystemSettings } from '#components/settings/filesystem-settings.js';
 import { GeneralSettings } from '#components/settings/general-settings.js';
+import { DataControlsSettings } from '#components/settings/data-controls-settings.js';
 import { ExperimentalSettings } from '#components/settings/experimental-settings.js';
 import { ModelSettings } from '#components/settings/model-settings.js';
 import { AgentSettings } from '#components/settings/agent-settings.js';
@@ -57,6 +58,9 @@ export function SettingsContent({ section }: { readonly section: SettingsSection
           <CloudBillingSettings />
         </SettingsAuthGate>
       );
+    }
+    case 'data-controls': {
+      return <DataControlsSettings />;
     }
     case 'compute': {
       return (

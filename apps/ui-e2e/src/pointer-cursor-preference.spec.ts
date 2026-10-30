@@ -4,7 +4,7 @@ import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 
 const html = selectors.getByCss('html');
-const pointerSwitch = selectors.getByRole('switch', { name: 'Use pointer cursors' });
+const pointerSwitch = selectors.getByRole('switch', { name: 'Pointer cursors' });
 const themeButton = selectors.getByRole('button', { name: /^(?:light|dark|black|high contrast|system)$/i });
 const linkProbe = selectors.getByCss('[data-cursor-link-probe]');
 const settingsSearch = selectors.getByRole('searchbox', { name: 'Search settings' });

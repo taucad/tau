@@ -1,22 +1,13 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactElement, ReactNode } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { entitlementsFromTier } from '@taucad/billing';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GeneralSettings } from '#components/settings/general-settings.js';
 import type { ThemeOption } from '#hooks/use-theme.js';
-import type * as TelemetrySwitchModule from '#hooks/use-telemetry-switch.js';
-
-const clientEnvironment = globalThis.window.ENV;
-const useEntitlementsMock = vi.hoisted(() => vi.fn());
-vi.mock('@taucad/billing/hooks/use-entitlements', () => ({
-  useEntitlements: useEntitlementsMock,
-}));
 
 const mockSetTheme = vi.fn();
 const mockSetHue = vi.fn();
 const mockResetHue = vi.fn();
-const mockUpdatePreferences = vi.fn();
 const mockSetCodeInlayHints = vi.fn();
 const mockSetPointerCursors = vi.fn();
 
@@ -32,34 +23,6 @@ vi.mock('react-router', () => ({
   /* `useCommercialFeatures` reaches the settings dialog, which is URL state. */
   useSearchParams: (): [URLSearchParams, () => void] => [new URLSearchParams(), vi.fn()],
 }));
-
-let mockAllowsUsageMetrics: boolean;
-
-vi.mock('#hooks/use-privacy-preferences.js', () => ({
-  usePrivacyPreferences: () => ({
-    preferences: { allowsAiTraining: false, allowsUsageMetrics: mockAllowsUsageMetrics },
-    isLoading: false,
-    error: undefined,
-    updatePreferences: mockUpdatePreferences,
-    isUpdating: false,
-  }),
-}));
-
-const mockTelemetryChange = vi.fn();
-let mockTelemetrySwitch: { checked: boolean; pending: boolean; forcedOff: boolean };
-
-vi.mock('#hooks/use-telemetry-switch.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof TelemetrySwitchModule>();
-  return {
-    telemetryCopy: actual.telemetryCopy,
-    useTelemetrySwitch: () => ({
-      ...mockTelemetrySwitch,
-      consent: mockTelemetrySwitch.checked ? 'granted' : 'denied',
-      onCheckedChange: mockTelemetryChange,
-      description: actual.telemetryCopy.untilActivation.description,
-    }),
-  };
-});
 
 vi.mock('#hooks/use-theme.js', () => {
   /* eslint-disable @typescript-eslint/naming-convention -- Mirrors the production Theme values. */
@@ -169,146 +132,27 @@ vi.mock('#components/ui/color-picker.js', () => ({
   ColorPicker: ({ children }: { children: ReactNode }): ReactElement => <div>{children}</div>,
 }));
 
-// Server-resolved recording purposes have their own query-backed section and hook tests.
-vi.mock('#components/settings/agent-observability-settings.js', () => ({
-  AgentObservabilitySettings: (): ReactElement => <div data-testid='agent-observability-settings' />,
-}));
-
 describe('GeneralSettings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useEntitlementsMock.mockReturnValue(entitlementsFromTier('free'));
     mockCodeInlayHintsValue = false;
     mockPointerCursorsValue = false;
-    mockAllowsUsageMetrics = true;
-    mockTelemetrySwitch = { checked: true, pending: false, forcedOff: false };
-  });
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
-    globalThis.window.ENV = clientEnvironment;
-  });
-
-  it('replaces the consent toggle with the no-train guarantee on paid tiers (T15/AD15)', () => {
-    useEntitlementsMock.mockReturnValue(entitlementsFromTier('pro'));
-
-    render(<GeneralSettings />);
-
-    expect(screen.getByText(/no-train guarantee/i)).toBeDefined();
-    expect(screen.getByText(/never trains on your data/i)).toBeDefined();
-    expect(screen.queryByText(/privacy mode enabled/i)).toBeNull();
-    expect(screen.queryByText(/data sharing enabled/i)).toBeNull();
-  });
-
-  it('keeps the consent selector for free-tier users', () => {
-    render(<GeneralSettings />);
-
-    expect(screen.getByText(/privacy mode enabled/i)).toBeDefined();
-    expect(screen.queryByText(/no-train guarantee/i)).toBeNull();
-  });
-
-  it.each(['free', 'pro'] as const)(
-    'should link privacy details to the public website from a build that runs none (%s)',
-    (tier) => {
-      useEntitlementsMock.mockReturnValue(entitlementsFromTier(tier));
-
-      render(<GeneralSettings />);
-
-      const links = screen.getAllByRole('link', { name: 'Learn more' });
-      expect(links.length).toBeGreaterThan(0);
-      for (const link of links) {
-        expect(link).toHaveAttribute('href', 'https://tau.new/legal/privacy#9.2.1-ai-service-improvement');
-        expect(link).toHaveAttribute('target', '_blank');
-      }
-    },
-  );
-
-  it.each(['free', 'pro'] as const)(
-    'should link privacy details to the website of the deployment the app is bound to (%s)',
-    (tier) => {
-      useEntitlementsMock.mockReturnValue(entitlementsFromTier(tier));
-      vi.stubEnv('TAU_TARGET', 'desktop');
-      globalThis.window.ENV = {
-        ...clientEnvironment,
-        // eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names.
-        TAU_FRONTEND_URL: 'https://taucad.dev',
-      };
-
-      render(<GeneralSettings />);
-
-      const links = screen.getAllByRole('link', { name: 'Learn more' });
-      expect(links.length).toBeGreaterThan(0);
-      for (const link of links) {
-        expect(link).toHaveAttribute('href', 'https://taucad.dev/legal/privacy#9.2.1-ai-service-improvement');
-      }
-    },
-  );
-
-  it.each(['free', 'pro'] as const)(
-    'should offer the usage and diagnostics switch beside the training choice on every tier (%s)',
-    (tier) => {
-      useEntitlementsMock.mockReturnValue(entitlementsFromTier(tier));
-
-      render(<GeneralSettings />);
-
-      const toggle = screen.getByRole('switch', { name: 'Share usage and diagnostics data' });
-      expect(toggle).toHaveAttribute('data-state', 'checked');
-      expect(toggle).toHaveAccessibleDescription(/never prompts, code, parameter values, file names or geometry/i);
-      expect(toggle).toHaveAccessibleDescription(/three things are still sent whatever this switch says/i);
-    },
-  );
-
-  it('should route switching usage and diagnostics off through the one switch', async () => {
-    render(<GeneralSettings />);
-    const user = userEvent.setup();
-
-    await user.click(screen.getByRole('switch', { name: 'Share usage and diagnostics data' }));
-
-    expect(mockTelemetryChange).toHaveBeenCalledWith(false);
-  });
-
-  it('should render the switch as off when the resolved consent is off', () => {
-    mockTelemetrySwitch = { checked: false, pending: false, forcedOff: false };
-
-    render(<GeneralSettings />);
-
-    expect(screen.getByRole('switch', { name: 'Share usage and diagnostics data' })).toHaveAttribute(
-      'data-state',
-      'unchecked',
-    );
-  });
-
-  it('should disable the switch and say why when GPC or declined analytics force it off', () => {
-    mockTelemetrySwitch = { checked: false, pending: false, forcedOff: true };
-
-    render(<GeneralSettings />);
-
-    const toggle = screen.getByRole('switch', { name: 'Share usage and diagnostics data' });
-    expect(toggle).toBeDisabled();
-    expect(toggle).toHaveAccessibleDescription(/global privacy control/i);
-  });
-
-  it('should disable the switch while a signed-in preference loads', () => {
-    mockTelemetrySwitch = { checked: false, pending: true, forcedOff: false };
-
-    render(<GeneralSettings />);
-
-    expect(screen.getByRole('switch', { name: 'Share usage and diagnostics data' })).toBeDisabled();
   });
 
   it('should render code inlay hints disabled by default', () => {
     render(<GeneralSettings />);
 
-    expect(screen.getByText('Code Inlay Hints')).toBeInTheDocument();
-    expect(screen.getByText('Show inline parameter names in code editors')).toBeInTheDocument();
-    expect(screen.getByRole('switch', { name: 'Code Inlay Hints' })).toHaveAttribute('data-state', 'unchecked');
+    expect(screen.getByRole('group', { name: 'Code inlay hints' })).toHaveAccessibleDescription(
+      'Show parameter names inline in code',
+    );
+    expect(screen.getByRole('switch', { name: 'Code inlay hints' })).toHaveAttribute('data-state', 'unchecked');
   });
 
   it('should persist code inlay hints when toggled', async () => {
     render(<GeneralSettings />);
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole('switch', { name: 'Code Inlay Hints' }));
+    await user.click(screen.getByRole('switch', { name: 'Code inlay hints' }));
 
     expect(mockSetCodeInlayHints).toHaveBeenCalledWith(true);
   });
@@ -318,24 +162,23 @@ describe('GeneralSettings', () => {
 
     render(<GeneralSettings />);
 
-    expect(screen.getByRole('switch', { name: 'Code Inlay Hints' })).toHaveAttribute('data-state', 'checked');
+    expect(screen.getByRole('switch', { name: 'Code inlay hints' })).toHaveAttribute('data-state', 'checked');
   });
 
   it('should render pointer cursors disabled by default', () => {
     render(<GeneralSettings />);
 
-    expect(screen.getByText('Use pointer cursors')).toBeInTheDocument();
-    expect(
-      screen.getByText('Change the cursor to a pointer when hovering over interactive elements'),
-    ).toBeInTheDocument();
-    expect(screen.getByRole('switch', { name: 'Use pointer cursors' })).toHaveAttribute('data-state', 'unchecked');
+    expect(screen.getByRole('group', { name: 'Pointer cursors' })).toHaveAccessibleDescription(
+      'Show a hand cursor over buttons and links',
+    );
+    expect(screen.getByRole('switch', { name: 'Pointer cursors' })).toHaveAttribute('data-state', 'unchecked');
   });
 
   it('should persist the pointer cursor preference when toggled', async () => {
     render(<GeneralSettings />);
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole('switch', { name: 'Use pointer cursors' }));
+    await user.click(screen.getByRole('switch', { name: 'Pointer cursors' }));
 
     expect(mockSetPointerCursors).toHaveBeenCalledWith(true);
   });

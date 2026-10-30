@@ -60,18 +60,17 @@ export function DefaultPermissionsSetting(): React.JSX.Element | undefined {
   };
 
   return (
-    <div className='flex flex-col gap-3'>
+    <div className='flex flex-col gap-3 py-3.5'>
       <div className='flex flex-col gap-0.5'>
         <span className='text-sm font-medium' id={titleId}>
           Default permissions
         </span>
-        <span className='text-xs text-muted-foreground' id={disclosureId}>
-          {promptInjectionDisclosure}
-        </span>
+        <span className='text-xs text-muted-foreground'>For new chats. Existing chats keep their own.</span>
       </div>
       <RadioGroup
         aria-labelledby={titleId}
         aria-describedby={disclosureId}
+        className='gap-2.5'
         value={mode}
         disabled={isSaving}
         onValueChange={(value) => {
@@ -89,7 +88,7 @@ export function DefaultPermissionsSetting(): React.JSX.Element | undefined {
         {permissionModeOptions.map((option) => {
           const id = `default-permissions-${option.value}`;
           return (
-            <label key={option.value} htmlFor={id} className='flex items-start gap-3'>
+            <label key={option.value} htmlFor={id} className='flex cursor-action items-start gap-3'>
               <RadioGroupItem
                 id={id}
                 value={option.value}
@@ -110,6 +109,9 @@ export function DefaultPermissionsSetting(): React.JSX.Element | undefined {
           );
         })}
       </RadioGroup>
+      <p className='text-xs text-muted-foreground' id={disclosureId}>
+        {promptInjectionDisclosure}
+      </p>
       {isConfirming ? (
         <div
           role='group'

@@ -5,9 +5,8 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GithubPermissions } from '#components/auth/settings/security/github-permissions.js';
 
-const fixture = vi.hoisted(() => ({ capability: vi.fn(), use: vi.fn(), connections: vi.fn() }));
+const fixture = vi.hoisted(() => ({ capability: vi.fn(), use: vi.fn() }));
 vi.mock('@better-auth-ui/react', () => ({
-  providerIcons: { github: (properties: React.ComponentProps<'svg'>) => <svg {...properties} /> },
   useAuth: () => ({ authClient: {} }),
   useListAccounts: () => ({ data: [{ id: 'account', providerId: 'github', scopes: ['gist'] }], isPending: false }),
 }));
@@ -17,10 +16,6 @@ vi.mock('#components/auth/settings/security/linked-account.js', () => ({
 vi.mock('#lib/share-providers.js', () => ({
   getGithubGistCapability: fixture.capability,
   setGithubGistEnabled: fixture.use,
-}));
-vi.mock('#lib/github-connections.js', () => ({
-  githubConnections: { list: fixture.connections },
-  githubErrorMessage: () => 'Access could not be checked.',
 }));
 const renderSettings = () =>
   render(
@@ -41,24 +36,22 @@ beforeEach(() => {
     grantedScopes: ['read:user'],
     authorizationUrl: 'https://github.com/settings/connections/applications/client-id',
   });
-  fixture.connections.mockResolvedValue([{ id: 'connection', login: 'designer' }]);
   fixture.use.mockResolvedValue(undefined);
 });
-describe('independent GitHub Security connections', () => {
-  it('should show two connections and the exact OAuth authorization without repository write controls', async () => {
+describe('GitHub sign-in and Gist sharing in Security', () => {
+  it('should show the sign-in row and the exact OAuth authorization without repository controls', async () => {
     renderSettings();
-    expect(await screen.findByRole('link', { name: 'Review authorization on GitHub' })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: 'Review on GitHub' })).toHaveAttribute(
       'href',
       'https://github.com/settings/connections/applications/client-id',
     );
-    expect(screen.getByRole('region', { name: 'GitHub sign-in and Gists' })).toBeVisible();
-    expect(screen.getByRole('region', { name: 'GitHub repositories' })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Manage repositories' })).toBeVisible();
+    expect(screen.getByText('Connected sign-in account')).toBeVisible();
+    expect(screen.getByText(/Not granted yet/u)).toBeVisible();
+    expect(screen.queryByRole('switch', { name: 'Gist sharing' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'GitHub repositories' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Enable writes' })).not.toBeInTheDocument();
-    expect(screen.getByText(/Gist access not granted/u)).toBeVisible();
-    expect(screen.queryByText('Granted by GitHub')).not.toBeInTheDocument();
   });
-  it('should turn off Gist use without disconnecting repository access', async () => {
+  it('should turn off Gist sharing from its switch', async () => {
     fixture.capability.mockResolvedValue({
       status: 'connected',
       enabled: true,
@@ -66,14 +59,16 @@ describe('independent GitHub Security connections', () => {
       authorizationUrl: 'https://github.com/settings/connections/applications/client-id',
     });
     renderSettings();
-    await userEvent.click(await screen.findByRole('button', { name: 'Turn off Gist sharing' }));
+    const toggle = await screen.findByRole('switch', { name: 'Gist sharing' });
+    expect(toggle).toBeChecked();
+    await userEvent.click(toggle);
     expect(fixture.use).toHaveBeenCalledWith(false, expect.anything());
-    expect(screen.getByRole('button', { name: 'Manage repositories' })).toBeVisible();
   });
   it('should show verification failures without claiming a grant from the stored account', async () => {
     fixture.capability.mockRejectedValue(new Error('unavailable'));
     renderSettings();
     expect(await screen.findByRole('alert')).toHaveTextContent('could not be checked');
-    expect(screen.queryByText(/Gist access granted/u)).not.toBeInTheDocument();
+    expect(screen.queryByRole('switch', { name: 'Gist sharing' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeVisible();
   });
 });

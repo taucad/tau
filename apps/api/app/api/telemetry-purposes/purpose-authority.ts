@@ -109,16 +109,12 @@ const refuse = (
   if (input.project?.mixedSource === true && contentPurposes.has(purpose)) {
     return { refusal: 'project-mixed-source', ...state };
   }
-  if (reusePurposes.has(purpose)) {
-    /* The Pro no-training ruling, and the same exclusion for reusable corpora
-     * while the production purpose notice is open. Downgrade does not relabel
-     * material captured on a paid tier; that is the source-side check in T06. */
-    if (input.tier !== 'free') {
-      return { refusal: 'tier-excluded', ...state };
-    }
-    if (!input.tierAssured) {
-      return { refusal: 'tier-unverified', ...state };
-    }
+  /* Every plan may opt in to reuse and training; the account's own current
+   * grant above is that opt-in, and a paid plan has no default one. Material
+   * captured while no grant was in force stays excluded whatever the tier later
+   * becomes; that is the source-side check in T06. */
+  if (reusePurposes.has(purpose) && !input.tierAssured) {
+    return { refusal: 'tier-unverified', ...state };
   }
   return { refusal: undefined, ...state };
 };

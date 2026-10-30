@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -49,10 +49,12 @@ const renderClosure = (activeBinding = binding, onReviewPayment: () => void = vi
 const refuseFor = (action: PendingAction): void => {
   prepare.mockRejectedValue(Object.assign(new PaymentPending(), { action }));
 };
-/** Confirms the checkbox and asks to prepare closure. */
+/** Opens the confirmation, confirms the checkbox and asks to prepare closure. */
 const prepareClosure = async (): Promise<void> => {
-  await userEvent.click(screen.getByRole('checkbox'));
   await userEvent.click(screen.getByRole('button', { name: 'Close account' }));
+  const dialog = await screen.findByRole('alertdialog');
+  await userEvent.click(within(dialog).getByRole('checkbox'));
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Close account' }));
 };
 
 describe('AccountClosureSettings', () => {
@@ -64,10 +66,12 @@ describe('AccountClosureSettings', () => {
     prepare.mockResolvedValue({ state: 'cancellation_pending', closureId: 'closure-a' });
     getClosure.mockResolvedValue({ state: 'cancellation_pending', closureId: 'closure-a' });
     renderClosure();
-    const button = screen.getByRole('button', { name: 'Close account' });
+    await userEvent.click(screen.getByRole('button', { name: 'Close account' }));
+    const dialog = await screen.findByRole('alertdialog');
+    const button = within(dialog).getByRole('button', { name: 'Close account' });
     expect(button).toBeDisabled();
-    const checkbox = screen.getByRole('checkbox', { name: 'I want to close my account.' });
-    await userEvent.click(screen.getByText('I want to close my account.'));
+    const checkbox = within(dialog).getByRole('checkbox', { name: 'I want to close my account.' });
+    await userEvent.click(within(dialog).getByText('I want to close my account.'));
     expect(checkbox).toBeChecked();
     expect(button).toBeEnabled();
     await userEvent.keyboard('[Space]');
@@ -187,7 +191,7 @@ describe('AccountClosureSettings', () => {
     const rendered = renderClosure();
     rendered.rerenderBinding({ ...binding, ownerId: 'user-b' });
     resolveBody({ state: 'ready_for_auth_deletion', closureId: 'closure-a' });
-    expect(await screen.findByText(/stops paid usage immediately/i)).toBeInTheDocument();
+    expect(await screen.findByText(/lets you delete your account/i)).toBeInTheDocument();
     expect(screen.queryByText(/closure status/i)).toBeNull();
   });
 });

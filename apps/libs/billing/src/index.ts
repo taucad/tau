@@ -84,6 +84,7 @@ export type { WirePaymentAction } from '#payment-action-wire.js';
 export {
   wirePaymentActionSchema,
   paymentActionRequestSchema,
+  portalActionRequestSchema,
   topupActionRequestSchema,
   paymentActionListQuerySchema,
   topupPrincipalBoundsMinor,

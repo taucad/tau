@@ -221,6 +221,7 @@ const providerUpstreamFetch =
             stripeAccountId: accountId,
             livemode: livemode ?? false,
             uiOrigin: config.get('TAU_FRONTEND_URL', { infer: true }),
+            portalConfigurationId: config.get('STRIPE_PORTAL_CONFIGURATION_ID', { infer: true }),
             webhookSecret:
               environment.success && accountId && livemode !== undefined
                 ? config.get('STRIPE_WEBHOOK_SECRET', { infer: true })

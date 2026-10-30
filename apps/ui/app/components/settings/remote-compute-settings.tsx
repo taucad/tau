@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Cpu, RefreshCw, Trash2 } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
-import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
-import { SettingsSectionCard } from '#components/settings/settings-item.js';
+import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
 import { stringParameter } from '#utils/search-parameter.codecs.js';
 import { approveRemoteHostPairing, listRemoteHosts, revokeRemoteHost } from '#lib/remote-host-client.js';
@@ -16,12 +15,12 @@ import { isDesktopTarget } from '#lib/build-target.js';
 
 const placementCopy = {
   local: isDesktopTarget() ? 'Rendering on this computer' : 'Rendering in this browser',
-  connecting: 'Connecting to remote compute…',
-  remote: 'Rendering on the selected remote device',
-  'device-offline': 'The selected remote device is offline or revoked',
-  busy: 'The selected remote device is at capacity',
-  'version-mismatch': 'This Tau and the remote runtime versions do not match',
-  disconnected: 'The remote runtime disconnected',
+  connecting: 'Connecting to remote device…',
+  remote: 'Rendering on a remote device',
+  'device-offline': 'Remote device is offline',
+  busy: 'Remote device is busy',
+  'version-mismatch': 'Remote device needs a Tau update',
+  disconnected: 'Remote device disconnected',
 } as const;
 
 const pairParameter = stringParameter();
@@ -78,93 +77,93 @@ export function RemoteComputeSettings(): React.JSX.Element {
   };
 
   return (
-    <SettingsSectionCard aria-labelledby='remote-compute-title'>
-      <CardHeader>
-        <CardTitle id='remote-compute-title'>Tau Host</CardTitle>
-      </CardHeader>
-      <CardContent className='flex flex-col gap-4'>
-        {pairingCode ? (
-          <div className='rounded-md border border-primary/40 p-3'>
-            <p className='text-sm font-medium'>Pair Tau Host {pairingCode}</p>
-            <p className='mb-3 text-xs text-muted-foreground'>Approve only if this code is visible in your Tau CLI.</p>
-            <Button
-              size='sm'
-              disabled={busy}
-              onClick={async () => {
-                await approve();
-              }}
-            >
-              Approve device
-            </Button>
-          </div>
-        ) : null}
-
-        <div className='flex items-center justify-between gap-4 rounded-md border p-3'>
-          <div>
-            <p className='text-sm font-medium'>{placementCopy[placement.state]}</p>
-            {placement.state !== 'local' && placement.message ? (
-              <p className='text-xs text-feature'>{placement.message}</p>
-            ) : null}
-          </div>
-          <Button size='sm' variant='outline' disabled={placement.state === 'local'} onClick={selectLocalCompute}>
-            Use local
-          </Button>
-        </div>
-
-        {devices.map((device) => (
-          <div key={device.id} className='flex items-center justify-between gap-4 rounded-md border p-3'>
-            <div>
-              <p className='text-sm font-medium'>{device.label}</p>
-              <p className='text-xs text-muted-foreground'>
-                {device.online ? `Online · ${device.runtimeVersion ?? 'runtime unknown'}` : 'Offline'}
-              </p>
-            </div>
-            <div className='flex gap-2'>
-              <Button
-                size='sm'
-                disabled={busy || !device.online}
-                onClick={() => {
-                  selectRemoteComputeDevice(device.id);
-                }}
-              >
-                <Cpu className='size-4' aria-hidden='true' /> Use remote
-              </Button>
-              <Button
-                variant='outline'
-                size='icon'
-                aria-label={`Revoke ${device.label}`}
-                disabled={busy}
-                onClick={async () => {
-                  await revoke(device.id);
-                }}
-              >
-                <Trash2 className='size-4' aria-hidden='true' />
-              </Button>
-            </div>
-          </div>
-        ))}
-
-        {error ? (
-          <p role='alert' className='text-sm text-feature'>
-            {error}
-          </p>
-        ) : null}
-        <div className='flex flex-wrap items-center justify-between gap-3 border-t pt-4'>
-          <p className='text-xs text-muted-foreground'>
-            Paired project code executes on the remote computer. Use only with projects you trust.
-          </p>
+    <div className='flex flex-col gap-3'>
+      <SettingsGroup
+        title='Tau Host'
+        action={
           <Button
-            size='sm'
+            size='icon'
             variant='ghost'
+            aria-label='Refresh devices'
             disabled={busy}
             onClick={async () => {
               await refresh();
             }}
           >
-            <RefreshCw className='size-4' aria-hidden='true' /> Refresh devices
+            <RefreshCw className='size-4' aria-hidden='true' />
           </Button>
-        </div>
-      </CardContent>
-    </SettingsSectionCard>
+        }
+      >
+        {pairingCode ? (
+          <SettingsRow
+            title={`Pair device ${pairingCode}`}
+            description='Approve only if your Tau CLI shows this code. The device will run your project code.'
+            control={
+              <Button
+                size='sm'
+                disabled={busy}
+                onClick={async () => {
+                  await approve();
+                }}
+              >
+                Approve
+              </Button>
+            }
+          />
+        ) : null}
+
+        <SettingsRow
+          title={placementCopy[placement.state]}
+          description={
+            placement.state !== 'local' && placement.message ? (
+              <span className='text-feature'>{placement.message}</span>
+            ) : undefined
+          }
+          control={
+            <Button size='sm' variant='outline' disabled={placement.state === 'local'} onClick={selectLocalCompute}>
+              Use local
+            </Button>
+          }
+        />
+
+        {devices.map((device) => (
+          <SettingsRow
+            key={device.id}
+            title={device.label}
+            description={device.online ? `Online · ${device.runtimeVersion ?? 'version unknown'}` : 'Offline'}
+            control={
+              <>
+                <Button
+                  size='sm'
+                  variant='outline'
+                  disabled={busy || !device.online}
+                  onClick={() => {
+                    selectRemoteComputeDevice(device.id);
+                  }}
+                >
+                  <Cpu className='size-4' aria-hidden='true' /> Use
+                </Button>
+                <Button
+                  variant='ghost'
+                  size='icon'
+                  aria-label={`Revoke ${device.label}`}
+                  disabled={busy}
+                  onClick={async () => {
+                    await revoke(device.id);
+                  }}
+                >
+                  <Trash2 className='size-4' aria-hidden='true' />
+                </Button>
+              </>
+            }
+          />
+        ))}
+      </SettingsGroup>
+      {error ? (
+        <p role='alert' className='text-sm text-feature'>
+          {error}
+        </p>
+      ) : null}
+    </div>
   );
 }

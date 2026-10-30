@@ -37,8 +37,8 @@ vi.mock('#components/billing/topup-modal.js', () => ({
 vi.mock('#components/billing/auto-reload-settings.js', () => ({
   AutoReloadSettings: () => <div>Automatic reload controls</div>,
 }));
-vi.mock('#components/billing/account-closure-settings.js', () => ({
-  AccountClosureSettings: () => <div>Account closure controls</div>,
+vi.mock('#components/billing/cancel-plan-settings.js', () => ({
+  CancelPlanSettings: () => <div>Cancel plan controls</div>,
 }));
 
 const balance = {
@@ -161,6 +161,12 @@ describe('BillingSettings', () => {
     expect(screen.queryByText('Automatic reload controls')).not.toBeInTheDocument();
     expect(screen.queryByText('API CAD Gateway')).not.toBeInTheDocument();
     expect(screen.getByText('$20 per month USD')).toBeInTheDocument();
-    expect(screen.getByText('Account closure controls')).toBeInTheDocument();
+    expect(screen.getByText('Cancel plan controls')).toBeInTheDocument();
+  });
+
+  it('offers no Cancel plan once the plan already ends at the period end', () => {
+    useEntitlements.mockReturnValue({ ...entitlement('pro'), cancelAtPeriodEnd: true });
+    renderSettings();
+    expect(screen.queryByText('Cancel plan controls')).not.toBeInTheDocument();
   });
 });

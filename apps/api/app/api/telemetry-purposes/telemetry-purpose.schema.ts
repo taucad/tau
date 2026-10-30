@@ -35,8 +35,6 @@ export const purposeRefusals = [
   'project-not-owned',
   /* The project carries another account's material, so protection is unknown. */
   'project-mixed-source',
-  /* The tier is permanently excluded from this purpose (the Pro no-training ruling). */
-  'tier-excluded',
   /* The entitlement could not be established affirmatively, so it cannot authorise reuse. */
   'tier-unverified',
 ] as const;

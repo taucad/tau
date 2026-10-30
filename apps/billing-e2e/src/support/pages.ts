@@ -113,7 +113,7 @@ const actionSubmission = async (
   };
 };
 
-/** Settings → Billing: plan, credit balance, automatic reload and account closure. */
+/** Settings → Billing (plan, credit balance, automatic reload) and account closure in Settings → Data controls. */
 export type BillingSettings = {
   /** Opens Settings → Billing; the note names a first navigation the server never answered, retried once. */
   readonly open: () => Promise<string | undefined>;
@@ -162,8 +162,13 @@ export const billingSettings = (page: Page): BillingSettings => ({
   subscribe: () => page.getByRole('button', { name: /Subscribe Now/u }),
   cancellationBanner: () => page.getByText(/^Pro until .+ reactivate any time from Manage Subscription\.$/u),
   closure: {
-    confirm: async () => page.getByLabel('I understand and want to close this account.').check(),
-    prepare: () => page.getByRole('button', { name: 'Prepare account closure' }),
+    // Closure lives in Settings → Data controls, behind a confirmation dialog.
+    async confirm(): Promise<void> {
+      await page.goto(`${baseUrl}/?settings=data-controls`);
+      await page.getByRole('button', { name: 'Close account' }).click();
+      await page.getByRole('alertdialog').getByLabel('I want to close my account.').check();
+    },
+    prepare: () => page.getByRole('alertdialog').getByRole('button', { name: 'Close account' }),
     status: () => page.getByText(/^Closure status: /u),
     deleteAccount: () => page.getByRole('button', { name: 'Delete my account' }),
   },

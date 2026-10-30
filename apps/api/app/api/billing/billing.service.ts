@@ -13,6 +13,7 @@ import {
   user,
 } from '#database/schema.js';
 import type { Environment } from '#config/environment.config.js';
+import { effectiveTrainingConsent } from '#api/privacy/training-consent.js';
 import { Span } from '#telemetry/tracer.service.js';
 import { stripeReadClientKey } from '#api/billing/billing.constants.js';
 import { resolveDefaultCard } from '#api/billing/resolve-default-card.js';
@@ -121,7 +122,7 @@ export class BillingService {
   private async projectEntitlements(userId: string): Promise<Entitlements> {
     const userRow = await this.databaseService.database.query.user.findFirst({
       where: eq(user.id, userId),
-      columns: { allowsAiTraining: true },
+      columns: { allowsAiTraining: true, aiTrainingDecidedAt: true },
     });
     const environment = financialEnvironmentSchema.safeParse(
       this.configService.get('BILLING_ENVIRONMENT', { infer: true }),
@@ -145,7 +146,9 @@ export class BillingService {
             ),
             orderBy: desc(subscription.paidThrough),
           });
-    const { relevant, tier } = subscriptionTierOf(subscriptionRows, Date.now());
+    const now = Date.now();
+    const { relevant, tier } = subscriptionTierOf(subscriptionRows, now);
+    const { assured } = subscriptionTierAssuranceOf(subscriptionRows, now);
     const status = this.resolveStatus(relevant);
     /* D23: the free tier's sync is a deployment gate, closed unless configured. */
     const base = entitlementsFromTier(tier, { freeTierSync: this.#freeTierSync });
@@ -173,9 +176,13 @@ export class BillingService {
       ...overrides,
       tier,
       status,
-      // AD15: paid tiers carry the no-train guarantee; Free reflects the user's
-      // privacy-settings opt-in (the existing `allowsAiTraining` surface).
-      trainingConsent: tier === 'free' ? (userRow?.allowsAiTraining ?? false) : false,
+      // Free follows the user's preference; a paid plan is off until the user opts in themselves.
+      trainingConsent: effectiveTrainingConsent({
+        tier,
+        assured,
+        allowsAiTraining: userRow?.allowsAiTraining ?? false,
+        decidedAt: userRow?.aiTrainingDecidedAt ?? undefined,
+      }),
       hasPaymentMethod: defaultCard !== undefined,
       paymentMethod: defaultCard ? { brand: defaultCard.brand, last4: defaultCard.last4 } : undefined,
       paidThrough: relevant?.paidThrough ?? undefined,

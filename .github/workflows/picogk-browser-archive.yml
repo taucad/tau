@@ -26,19 +26,19 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   # The reviewed PicoVoxel builder. `uses:` cannot read a variable, so the archive call repeats it.
-  # It is PicoVoxel#40 on `main`, which judges only threaded paths against the 2x ceiling. Its
-  # builder tree is #39's reviewed commit plus that gate change. `dotnet/inputs.json` still pins the
+  # It is PicoVoxel#41, which divides each browser path by native timed on the same runner, on top
+  # of #40, which judges only threaded paths against the 2x ceiling. `dotnet/inputs.json` still pins the
   # browser source role to a commit on #39's branch; PicoVoxel's `archive/picogk-dual-runtime-builder-w0`
   # keeps that commit reachable, and every checkout that reads the pinned tree fetches full history.
-  PICOVOXEL_REF: 41a0eabf84b85423f9b55bbeee74beeb4ec52be7
+  PICOVOXEL_REF: bed3df26294da932b6f871e81d8352939ca925ea
   PACKAGE_VERSION: 0.2.1
   # Gyroid proves every run; the scheduled run, or a dispatch that asks for it, proves HeatX.
   SUBJECT: ${{ github.event_name == 'schedule' && 'heatx' || inputs.subject || 'gyroid' }}
 jobs:
   archive:
-    uses: taucad/picovoxel/.github/workflows/dotnet-archive.yml@41a0eabf84b85423f9b55bbeee74beeb4ec52be7
+    uses: taucad/picovoxel/.github/workflows/dotnet-archive.yml@bed3df26294da932b6f871e81d8352939ca925ea
     with:
-      picovoxel-ref: 41a0eabf84b85423f9b55bbeee74beeb4ec52be7
+      picovoxel-ref: bed3df26294da932b6f871e81d8352939ca925ea
       adapter-path: packages/plugins/picogk/dotnet/native
 
   # Everything a parity run measures or compares against, built once: the two browser apps and the
@@ -189,6 +189,11 @@ jobs:
           cp -R out/native/captures out/inputs/native-captures
           cp out/native/author-sources.json out/inputs/evidence/
           cp out/native-performance/performance-native.json out/inputs/
+          # The timed comparator as built, so each performance job can time native on its own
+          # runner beside the browser path it measures.
+          mkdir -p out/inputs/native-timed/comparator
+          cp -R out/native-performance/bin out/inputs/native-timed/bin
+          cp -R out/comparator/native out/inputs/native-timed/comparator/native
           # The engine's own pin check, per execution, is I3's evidence.
           cp out/archive-serial/picogk.26.2.a.metadata.json out/inputs/evidence/archive-serial.json
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -203,8 +208,9 @@ jobs:
           path: out/inputs/
           if-no-files-found: error
 
-  # One job per engine, both modes: the charter's browser floor is three engines, and an engine that
-  # did not run is reported as not having run rather than dropped from the gate.
+  # One job per engine and mode: the charter's browser floor is three engines, and an engine that
+  # did not run is reported as not having run rather than dropped from the gate. A mode is a job of
+  # its own because one long-subject capture can take most of an hour in the slowest engine.
   parity:
     needs: parity-prepare
     runs-on: ubuntu-24.04
@@ -213,6 +219,7 @@ jobs:
       fail-fast: false
       matrix:
         engine: [chromium, firefox, webkit]
+        mode: [aot, dynamic, aot-threaded, dynamic-threaded]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -228,41 +235,78 @@ jobs:
           path: out/inputs
       - run: corepack enable && pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps ${{ matrix.engine }}
-      - name: Run both modes
+      - name: Capture this mode
         run: |
-          for mode in aot dynamic aot-threaded dynamic-threaded; do
-            node dotnet/run-parity-browser.mjs "out/inputs/$mode" "${{ matrix.engine }}" \
-              "$SUBJECT" "out/runs/${{ matrix.engine }}-$mode"
-          done
-      - name: Measure every path this engine offers
-        # R31 asks for each path separately. The ahead-of-time app has one: the generator is an
-        # ordinary analyzer there, so the engine always takes the per-voxel callback. The app that
-        # compiles in the browser has two, because the lifted tape and the callback it replaces are
-        # different engine paths, and only that app can be edited and recompiled.
-        run: |
-          node dotnet/run-performance-browser.mjs out/inputs/aot "${{ matrix.engine }}" \
-            "$SUBJECT" aot "out/performance/${{ matrix.engine }}-aot"
-          node dotnet/run-performance-browser.mjs out/inputs/dynamic "${{ matrix.engine }}" \
-            "$SUBJECT" dynamic-tape "out/performance/${{ matrix.engine }}-dynamic-tape" --options edit=on
-          node dotnet/run-performance-browser.mjs out/inputs/dynamic "${{ matrix.engine }}" \
-            "$SUBJECT" dynamic-callback "out/performance/${{ matrix.engine }}-dynamic-callback" --options tape=off
-          node dotnet/run-performance-browser.mjs out/inputs/aot-threaded "${{ matrix.engine }}" \
-            "$SUBJECT" aot-threaded "out/performance/${{ matrix.engine }}-aot-threaded"
-          node dotnet/run-performance-browser.mjs out/inputs/dynamic-threaded "${{ matrix.engine }}" \
-            "$SUBJECT" dynamic-threaded-tape "out/performance/${{ matrix.engine }}-dynamic-threaded-tape" \
-            --options edit=on
-          node dotnet/run-performance-browser.mjs out/inputs/dynamic-threaded "${{ matrix.engine }}" \
-            "$SUBJECT" dynamic-threaded-callback "out/performance/${{ matrix.engine }}-dynamic-threaded-callback" \
-            --options tape=off
+          node dotnet/run-parity-browser.mjs "out/inputs/${{ matrix.mode }}" "${{ matrix.engine }}" \
+            "$SUBJECT" "out/runs/${{ matrix.engine }}-${{ matrix.mode }}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: picogk-performance-${{ matrix.engine }}
-          path: out/performance/
-          if-no-files-found: error
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: picogk-parity-captures-${{ matrix.engine }}
+          name: picogk-parity-captures-${{ matrix.engine }}-${{ matrix.mode }}
           path: out/runs/
+          if-no-files-found: error
+
+  # R31 asks for each path separately, and a ratio is only matched when both sides ran on one
+  # machine, so each path is a job that times the browser and then native on the same runner. The
+  # ahead-of-time app has one path: the generator is an ordinary analyzer there, so the engine always
+  # takes the per-voxel callback. The app that compiles in the browser has two, because the lifted
+  # tape and the callback it replaces are different engine paths, and only that app can be edited
+  # and recompiled.
+  performance:
+    needs: parity-prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [chromium, firefox, webkit]
+        path: [aot, dynamic-tape, dynamic-callback, aot-threaded, dynamic-threaded-tape, dynamic-threaded-callback]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: taucad/picovoxel
+          ref: ${{ env.PICOVOXEL_REF }}
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '24.20.0'
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: '11.0.100-rc.3.26522.148'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: picogk-parity-inputs
+          path: out/inputs
+      - run: corepack enable && pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps ${{ matrix.engine }}
+      - name: Measure this path
+        env:
+          ENGINE: ${{ matrix.engine }}
+          PERFORMANCE_PATH: ${{ matrix.path }}
+        run: |
+          case "$PERFORMANCE_PATH" in
+            aot) app=aot; options=() ;;
+            dynamic-tape) app=dynamic; options=(--options edit=on) ;;
+            dynamic-callback) app=dynamic; options=(--options tape=off) ;;
+            aot-threaded) app=aot-threaded; options=() ;;
+            dynamic-threaded-tape) app=dynamic-threaded; options=(--options edit=on) ;;
+            dynamic-threaded-callback) app=dynamic-threaded; options=(--options tape=off) ;;
+            *) echo "Unknown path $PERFORMANCE_PATH" >&2; exit 1 ;;
+          esac
+          node dotnet/run-performance-browser.mjs "out/inputs/$app" "$ENGINE" \
+            "$SUBJECT" "$PERFORMANCE_PATH" "out/performance/$ENGINE-$PERFORMANCE_PATH" "${options[@]}"
+      - name: Time the matched native comparator on this runner
+        # The comparator the prepare job built and timed, run here as three fresh processes.
+        run: |
+          node dotnet/run-performance-native.mjs "$(command -v dotnet)" out/inputs/native-timed \
+            out/inputs/native-timed/comparator "$SUBJECT" \
+            "out/native/${{ matrix.engine }}-${{ matrix.path }}" --rounds 3 \
+            --prebuilt out/inputs/native-timed/bin
+          cp "out/native/${{ matrix.engine }}-${{ matrix.path }}/performance-native.json" \
+            "out/performance/${{ matrix.engine }}-${{ matrix.path }}/performance-native.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: picogk-performance-${{ matrix.engine }}-${{ matrix.path }}
+          path: out/performance/
           if-no-files-found: error
 
   # Desktop neutrality is I5, and it is measured rather than assumed: the native suites Tau already
@@ -308,7 +352,7 @@ jobs:
   # The gate and the invariant report. Nothing is re-derived here: each job above wrote its own
   # evidence, and a check that did not run is reported as unproven rather than passed.
   parity-gate:
-    needs: [parity, desktop-neutrality]
+    needs: [parity, performance, desktop-neutrality]
     # Not `always()`: a failed or skipped parity must still reach the gate, so that an engine that
     # did not run cannot pass by absence, but a cancelled run has no evidence to judge and a gate
     # that runs anyway reports a failure that means nothing.
@@ -355,11 +399,39 @@ jobs:
           node dotnet/tests/invariants.mjs out/evidence out/evidence/invariants.json
       - name: Judge every measured path against the matched native run
         # Separate from the byte gate above, and after it: a path that is fast and wrong is not a
-        # pass, so identity is judged first and this never substitutes for it.
+        # pass, so identity is judged first and this never substitutes for it. It still runs when
+        # the byte gate failed, so the figures are kept; the job fails either way. Each path is
+        # divided by native timed on its own runner, and a path whose job left no report fails.
+        if: ${{ !cancelled() }}
         run: |
+          mkdir -p out/evidence
           cp out/inputs/performance-native.json out/evidence/
-          node dotnet/gate-performance.mjs "$SUBJECT" out/inputs/performance-native.json out/evidence \
-            out/performance/*/performance.json
+          baselines=()
+          reports=()
+          missing=()
+          for engine in chromium firefox webkit; do
+            for path in aot dynamic-tape dynamic-callback aot-threaded dynamic-threaded-tape dynamic-threaded-callback; do
+              dir="out/performance/$engine-$path"
+              if [ -f "$dir/performance.json" ] && [ -f "$dir/performance-native.json" ]; then
+                reports+=("$dir/performance.json")
+                baselines+=("$engine:$path=$dir/performance-native.json")
+              else
+                missing+=("$engine $path")
+              fi
+            done
+          done
+          status=0
+          if [ "${#reports[@]}" -gt 0 ]; then
+            node dotnet/gate-performance.mjs "$SUBJECT" "$(IFS=,; echo "${baselines[*]}")" out/evidence \
+              "${reports[@]}" || status=$?
+          else
+            status=1
+          fi
+          if [ "${#missing[@]}" -gt 0 ]; then
+            printf 'Unmeasured: %s\n' "${missing[@]}" >&2
+            status=1
+          fi
+          exit "$status"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         # Whatever the verdict, as long as the gate reached the point of writing one.
         if: ${{ !cancelled() && hashFiles('out/evidence/**') != '' }}

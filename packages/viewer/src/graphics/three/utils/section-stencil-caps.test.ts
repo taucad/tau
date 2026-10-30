@@ -172,7 +172,7 @@ describe('createSectionStencilCaps', () => {
           ]),
         );
         caps.dispose();
-        return { ...stats, submitMilliseconds: 0 };
+        return { ...stats, buildMilliseconds: 0, submitMilliseconds: 0 };
       });
       expect(statsBySegments[0]).toEqual(statsBySegments[1]);
       expect(statsBySegments[0]).toMatchObject({

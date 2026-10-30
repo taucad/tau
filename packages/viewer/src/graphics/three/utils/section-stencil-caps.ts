@@ -85,6 +85,9 @@ export type SectionStencilCapStats = {
   meshDrawCount: number;
   /** Draws of cap polygons: caps, marks and clears. */
   polygonDrawCount: number;
+  /** Building the draw list: bounds, crossing, grouping, overlap, polygon clipping, clips and outline faces. */
+  buildMilliseconds: number;
+  /** Building the draw list and submitting it, so `buildMilliseconds` is the part no draw pays for. */
   submitMilliseconds: number;
 };
 
@@ -606,6 +609,7 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
       openChainDrawCount: 0,
       meshDrawCount: 0,
       polygonDrawCount: 0,
+      buildMilliseconds: 0,
       submitMilliseconds: 0,
     };
     meshesUsed = 0;
@@ -808,6 +812,7 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
     stats.meshDrawCount = meshesUsed;
     stats.polygonDrawCount = polygonsUsed;
     outlineGeometry?.retireUnused();
+    stats.buildMilliseconds = performance.now() - startedAt;
     if (meshesUsed + polygonsUsed > 0) {
       const previousAutoClear = renderer.autoClear;
       renderer.autoClear = false;

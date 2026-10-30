@@ -1,0 +1,300 @@
+name: Staging deploy
+
+# Each push to `main` publishes the apps it changed to staging, once the `ci.yml`
+# checks that gate each app have passed for that commit.
+#
+# These jobs lived in `ci.yml` until 2026-10-30. They run only on a push to `main`,
+# so no pull request could ever exercise them, and their failures (Netlify credits
+# and refusals, Fly registry 5xx, a missing environment secret) turned `main` red for
+# 111 of its 214 red hours in October 2026 with no code at fault. They blocked every
+# release gated on `main-ci-success` too
+# (incidents/2026-10-29-tau-main-red-revisions-tests). A failed deploy now shows here
+# and leaves `main`'s colour to the checks a pull request also runs.
+#
+# A `push` trigger rather than `workflow_run`: `github.sha` stays the pushed commit,
+# which the reusable deploy workflows build, tag images with and record, and each
+# push keeps a run of its own for `staging-deploy-superseded` to compare.
+on:
+  push:
+    branches: [main]
+
+env:
+  pnpm_config_verify_deps_before_run: warn
+  NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
+
+# Like `ci.yml`'s push runs: one group per commit, never cancelled. Each deploy keeps
+# its own queue (`deploy-<app>-staging`) and skips a commit that a newer run has
+# deployed or is about to.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  # Each staging app is diffed against the commit staging serves, not against the
+  # last green CI run: while `main` is red that base stays put and every push would
+  # redeploy everything changed since. An app with no usable record deploys. Netlify
+  # production deploys spend credits from a monthly plan (the 2026-10-11 outage
+  # paused every deploy), so an unchanged app never deploys.
+  # The job name is the one `staging-deploy-superseded` looks for.
+  plan:
+    name: Plan affected lanes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      deploy-apps: ${{ steps.plan.outputs.deploy-apps }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: Select the apps with a staging deploy
+        id: deployables
+        run: |
+          set -o pipefail
+          echo "apps=$(pnpm nx show projects --projects tag:deploy:staging --json | tail -1)" >> "$GITHUB_OUTPUT"
+
+      - name: Find each app's last staging deploy
+        id: deployed
+        uses: ./.github/actions/staging-deploy-history
+        with:
+          mode: base
+          apps: ${{ steps.deployables.outputs.apps }}
+          github-token: ${{ github.token }}
+
+      - name: Select the apps changed since staging last deployed them
+        id: plan
+        env:
+          DEPLOYABLES: ${{ steps.deployables.outputs.apps || '[]' }}
+          DEPLOYED: ${{ steps.deployed.outputs.bases || '{}' }}
+        run: |
+          set -o pipefail
+          deploy_apps='[]'
+          for app in $(jq -r '.[]' <<< "$DEPLOYABLES"); do
+            base=$(jq -r --arg app "$app" '.[$app] // empty' <<< "$DEPLOYED")
+            if [ -n "$base" ]; then
+              affected=$(pnpm nx show projects --affected --base="$base" --head=HEAD --projects "$app" --json | tail -1)
+              [ "$affected" != '[]' ] || continue
+            fi
+            deploy_apps=$(jq -c --arg app "$app" '. + [$app]' <<< "$deploy_apps")
+          done
+          echo "Staging deploys: $deploy_apps"
+          echo "deploy-apps=$deploy_apps" >> "$GITHUB_OUTPUT"
+
+  # Waits for the `ci.yml` push run on this commit and reports the conclusion of each
+  # check a deploy is gated on. `Run affected tasks` covers every affected lane, and
+  # the browser lane when this commit needed it. The API's own suites left the
+  # `affected` lane when the git storage substrate landed, so the API and the apps
+  # built from its code also need `API tests` and `Billing contracts`, which run on
+  # every push to `main`. A check that never ran reports `missing`, which no deploy
+  # accepts. This job passes whatever it reports: a red check belongs to `ci.yml`.
+  ci:
+    name: Wait for CI checks
+    needs: plan
+    if: needs.plan.result == 'success' && needs.plan.outputs.deploy-apps != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      actions: read
+    outputs:
+      workspace: ${{ steps.wait.outputs.workspace }}
+      affected: ${{ steps.wait.outputs.affected }}
+      api: ${{ steps.wait.outputs.api }}
+      billing-e2e: ${{ steps.wait.outputs.billing-e2e }}
+    steps:
+      - name: Wait for the gating checks of this commit's CI run
+        id: wait
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHECKS: >-
+            {"workspace": "Validate workspace",
+             "affected": "Run affected tasks",
+             "api": "API tests (Postgres + MinIO)",
+             "billing-e2e": "Billing contracts (no Stripe credentials)"}
+        run: |
+          set -euo pipefail
+          deadline=$(( $(date +%s) + 170 * 60 ))
+          jobs='[]'
+          while :; do
+            run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&event=push&branch=main&per_page=1" \
+              --jq '.workflow_runs[0] | select(.) | "\(.id) \(.status)"')
+            if [ -n "$run" ]; then
+              read -r run_id status <<< "$run"
+              jobs=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?per_page=100" \
+                --jq '.jobs[] | {name, status, conclusion}' | jq -s .)
+              waiting=$(jq -r --argjson checks "$CHECKS" '
+                [$checks[] as $name | first(.[] | select(.name == $name)) // null
+                  | select(. == null or .status != "completed")] | length' <<< "$jobs")
+              if [ "$waiting" = 0 ] || [ "$status" = completed ]; then
+                echo "CI run $run_id is $status; every gating check has settled or will not run."
+                break
+              fi
+              echo "Waiting for $waiting gating checks of CI run $run_id"
+            else
+              echo "Waiting for the ci.yml push run on $GITHUB_SHA to start"
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::warning::Gave up waiting for the ci.yml push run on $GITHUB_SHA; unsettled checks report missing."
+              break
+            fi
+            sleep 60
+          done
+          for key in $(jq -r 'keys[]' <<< "$CHECKS"); do
+            name=$(jq -r --arg key "$key" '.[$key]' <<< "$CHECKS")
+            conclusion=$(jq -r --arg name "$name" \
+              'first(.[] | select(.name == $name and .status == "completed") | .conclusion) // "missing"' <<< "$jobs")
+            echo "$name: $conclusion"
+            echo "$key=$conclusion" >> "$GITHUB_OUTPUT"
+          done
+
+  # The API ships to Fly (`tau-api-staging`); the UI, docs and the marketing review
+  # site publish to Netlify (`taucad` site, `taucad.dev`), which no longer builds
+  # from Git and has no PR deploy previews. Every deploy job skips a commit a newer
+  # run has deployed or is about to (`staging-deploy-superseded`). Each `if` needs
+  # `!cancelled()` and explicit results: without a status function GitHub applies an
+  # implicit `success()`, which is false when any job up the `needs` chain was
+  # skipped. Keep `needs.plan.result` before `fromJSON`: a `plan` that failed before
+  # its output step leaves `deploy-apps` empty and `fromJSON('')` errors.
+  # The API waits for the storage deploy when that runs (DC1, FR12): tau-storage
+  # verifies the grants the API signs, and a key or contract change deploys the
+  # verifier first. A skipped storage deploy (nothing of it changed) does not hold
+  # the API back; a failed one does.
+  deploy-api-staging:
+    name: Deploy API (Staging)
+    needs: [plan, ci, deploy-storage-staging]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'api') &&
+      needs.ci.outputs.workspace == 'success' && needs.ci.outputs.affected == 'success' &&
+      needs.ci.outputs.api == 'success' && needs.ci.outputs.billing-e2e == 'success' &&
+      (needs.deploy-storage-staging.result == 'success' || needs.deploy-storage-staging.result == 'skipped')
+    # `actions: read` lets the deploy see whether a newer run already deployed.
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: staging
+      app: api
+    secrets: inherit
+
+  # The private B2 copier (`tau-mirror-staging`, W13 DM1): the `mirror` project,
+  # whose code is `api`'s mirror command (implicit dependency), so the plan lists it
+  # whenever `api` or its Fly configs change. It waits for the API deploy when that
+  # runs: the API's release command owns migrations and the `tau_mirror` role, and
+  # the copier refuses to start against a schema it was not built for.
+  # `needs.plan.result` stays before `fromJSON`; see `deploy-api-staging`.
+  deploy-mirror-staging:
+    name: Deploy mirror (Staging)
+    needs: [plan, ci, deploy-api-staging]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'mirror') &&
+      needs.ci.outputs.workspace == 'success' && needs.ci.outputs.affected == 'success' &&
+      needs.ci.outputs.api == 'success' &&
+      (needs.deploy-api-staging.result == 'success' || needs.deploy-api-staging.result == 'skipped')
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: staging
+      app: mirror
+    secrets: inherit
+
+  # The private git storage app (`tau-storage-staging`, north star DC1): the
+  # `storage` project, whose code is `api`'s storage worker (implicit dependency),
+  # so the plan lists it whenever `api` or its Fly config changes. It runs before
+  # the API deploy: it is the grant verifier, and the verifier deploys first
+  # (FR12). It holds no database, so it does not wait for the API's migrations.
+  # `needs.plan.result` stays before `fromJSON`; see `deploy-api-staging`.
+  deploy-storage-staging:
+    name: Deploy storage (Staging)
+    needs: [plan, ci]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'storage') &&
+      needs.ci.outputs.workspace == 'success' && needs.ci.outputs.affected == 'success' &&
+      needs.ci.outputs.api == 'success'
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: staging
+      app: storage
+    secrets: inherit
+
+  # The private maintenance app (`tau-maintenance-staging`, north star DC4): the
+  # `maintenance` project, whose code is `api`'s maintenance command (implicit
+  # dependency), so the plan lists it whenever `api` or its Fly configs change. It
+  # waits for the API deploy when that runs: the API's release command owns
+  # migrations and the `tau_maintenance` role, and the maintenance image must not
+  # run ahead of the schema. Until the DC4 cutover it holds in standby
+  # (`TAU_MAINTENANCE_STANDBY`), so the API's own `revisions-maintenance` group
+  # stays the one worker.
+  # `needs.plan.result` stays before `fromJSON`; see `deploy-api-staging`.
+  deploy-maintenance-staging:
+    name: Deploy maintenance (Staging)
+    needs: [plan, ci, deploy-api-staging]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'maintenance') &&
+      needs.ci.outputs.workspace == 'success' && needs.ci.outputs.affected == 'success' &&
+      needs.ci.outputs.api == 'success' &&
+      (needs.deploy-api-staging.result == 'success' || needs.deploy-api-staging.result == 'skipped')
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: staging
+      app: maintenance
+    secrets: inherit
+
+  # The staging UI: built in Actions and published by the Netlify CLI. It needs the
+  # workspace and affected checks only; see `ci`.
+  # `needs.plan.result` stays before `fromJSON`; see `deploy-api-staging`.
+  deploy-ui-staging:
+    name: Deploy UI (Staging)
+    needs: [plan, ci]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'ui') &&
+      needs.ci.outputs.workspace == 'success' && needs.ci.outputs.affected == 'success'
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy-ui.yml
+    with:
+      environment: staging
+    secrets: inherit
+
+  # Docs (`docs.taucad.dev`) and the marketing review site wait for the same checks
+  # as the staging UI.
+  # `needs.plan.result` stays before `fromJSON`; see `deploy-api-staging`.
+  deploy-docs-staging:
+    name: Deploy docs (Staging)
+    needs: [plan, ci]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'docs') &&
+      needs.ci.outputs.workspace == 'success' && needs.ci.outputs.affected == 'success'
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy-docs.yml
+    with:
+      environment: staging
+    secrets: inherit
+
+  deploy-www-staging:
+    name: Deploy www (Staging)
+    needs: [plan, ci]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'www') &&
+      needs.ci.outputs.workspace == 'success' && needs.ci.outputs.affected == 'success'
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy-www-review.yml
+    secrets: inherit

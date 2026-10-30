@@ -113,7 +113,7 @@ const removeOperation = async (
       const serverPath = join(directory, 'mirror-server.crt');
       const ca = new X509Certificate(await readFile(caPath));
       const server = new X509Certificate(await readFile(serverPath));
-      if (!server.checkIssued(ca) || !server.verify(ca.publicKey)) {
+      if (server.issuer !== ca.subject || !server.verify(ca.publicKey)) {
         throw new Error('Refusing a server certificate the run CA did not issue');
       }
       assertMacTrust(command, serverPath, false);

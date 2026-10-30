@@ -5092,7 +5092,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       };
     }
 
-    if (directDeclaration !== undefined || (zodSchemas !== undefined && Object.hasOwn(zodSchemas, format))) {
+    // A named export whose extension is not the requested format was resolved through a route, so
+    // the request is a transcode even though some other export of this kernel declares the format.
+    // A kernel that offers the author's own `.stl` files alongside a meshed `glb` declares `stl`
+    // natively, and a build that wrote no authored file must still reach `glb` → `stl`.
+    const routedSelection = selectedDeclaration !== undefined && selectedDeclaration.extension !== format;
+    if (
+      directDeclaration !== undefined ||
+      (!routedSelection && zodSchemas !== undefined && Object.hasOwn(zodSchemas, format))
+    ) {
       const admitted = admitKernelOptions(
         formatZodSchema,
         rawOptions,

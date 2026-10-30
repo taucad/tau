@@ -1,12 +1,5 @@
-import { useEffect, useState } from 'react';
-import type { ComponentType } from 'react';
 import { ChatEarlyInput } from '#components/chat/chat-early-input.js';
-import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
-
-type ComposerProperties = {
-  readonly adoptedEarlyInput: EarlyChatInput;
-  readonly enableAutoFocus?: boolean;
-};
+import { useNewProjectComposer } from '#components/chat/use-new-project-composer.js';
 
 /**
  * Home's composer, with the native input in the route's own bundle and the rich composer in none.
@@ -20,54 +13,16 @@ type ComposerProperties = {
  *
  * The handover is unchanged and still belongs to `ChatEarlyInput`: this component only withholds
  * `isHostReady` until the module is here, so the native input keeps accepting and holding text until
- * there is something to hand it to, rather than being replaced by a pending boundary.
- *
- * A rejected import leaves the native input standing with whatever the user has typed, which is why
- * it is caught: an unreachable chunk must not take the text with it. It is tried once more, because
- * a single failed fetch during a deploy is the common case and a second one is not.
+ * there is something to hand it to, rather than being replaced by a pending boundary. An import
+ * `useNewProjectComposer` cannot complete therefore leaves the native input standing with whatever
+ * the user has typed, rather than taking the draft down with the chunk.
  */
-function reportComposerLoadFailure(error: unknown): void {
-  console.error('Home composer module could not be loaded; the native input keeps the draft.', error);
-}
-
 export function HomeChatComposer({
   enableAutoFocus = true,
 }: {
   readonly enableAutoFocus?: boolean;
 }): React.JSX.Element {
-  const [Composer, setComposer] = useState<ComponentType<ComposerProperties>>();
-
-  useEffect(() => {
-    let live = true;
-    const fetchComposer = async (): Promise<void> => {
-      const composerModule = await import('#components/chat/new-project-chat-composer.js');
-      if (live) {
-        setComposer(() => composerModule.NewProjectChatComposer);
-      }
-    };
-    const load = async (): Promise<void> => {
-      /* Tried twice: one failed fetch during a deploy is the common case and a second is not. A
-       * rejection that survives both leaves the native input standing with the user's text, which
-       * is the whole reason it is caught rather than allowed to replace the hero with an error. */
-      try {
-        await fetchComposer();
-      } catch {
-        if (!live) {
-          return;
-        }
-        try {
-          await fetchComposer();
-        } catch (error) {
-          reportComposerLoadFailure(error);
-        }
-      }
-    };
-    // async-iife: bootstrap — React effects cannot await the import; the live flag owns its lifecycle.
-    void load();
-    return () => {
-      live = false;
-    };
-  }, []);
+  const Composer = useNewProjectComposer();
 
   return (
     <ChatEarlyInput isHostReady={Composer !== undefined}>

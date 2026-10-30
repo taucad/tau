@@ -132,8 +132,16 @@ const outputPieces = (text: string): string[] => {
  * How long a Terminal start waits for main's root allowlist to admit its project, in milliseconds. Main admits a
  * just-created project to its own registry and connects the pane before the services host's `allowRoots` frame for
  * that project arrives; a start in that gap waits for the frame instead of being refused.
+ *
+ * The pane starts itself when it mounts, so this gap is the ordinary first moment of every project, not an edge case,
+ * and the bound is how patient Tau is on the slowest machine rather than the fastest. Five seconds lost that race by
+ * about a second on the stock Debian guest's first cold launch, where the frame arrived at +6.1 s: the person saw
+ * "This project is not open in Tau" for a project they had just opened, with nothing to do but press Try again. The
+ * pane says "Starting Terminal…" for the whole wait, and a project that genuinely is not open is a programming
+ * mistake rather than a state anyone reaches, so patience costs the person nothing and impatience costs them the
+ * Terminal.
  */
-export const terminalAdmissionMilliseconds = 5000;
+export const terminalAdmissionMilliseconds = 15_000;
 
 /**
  * Create the services host's terminal concern.

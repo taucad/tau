@@ -5,7 +5,9 @@ import { createMemoryKillSignal } from '#lib/memory-kill-signal.js';
 import { readLastMemorySample, resetMemorySampler, takeMemorySample } from '#lib/memory-sampler.js';
 import { reportDetectedKill } from '#lib/tab-kill-reporting.js';
 
-vi.mock('#lib/tab-kill-reporting.js', () => ({ reportDetectedKill: vi.fn(async () => true) }));
+vi.mock('#lib/tab-kill-reporting.js', () => ({
+  reportDetectedKill: vi.fn(async () => ({ delivered: true, eventId: 'event-1' })),
+}));
 
 afterEach(() => {
   resetMemorySampler();
@@ -44,7 +46,7 @@ describe('MemoryKillReporter (B-01, SB3)', () => {
   });
 
   it('keeps a kill whose report never landed, so the load after a kill loop still reports it', async () => {
-    vi.mocked(reportDetectedKill).mockResolvedValueOnce(false);
+    vi.mocked(reportDetectedKill).mockResolvedValueOnce({ delivered: false, eventId: undefined });
     const storage = globalThis.sessionStorage;
     const previous = createMemoryKillSignal({ storage, navigationType: 'navigate', deviceClass: 'standard' });
     previous.takeDetectedKills();

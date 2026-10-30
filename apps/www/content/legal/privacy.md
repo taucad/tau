@@ -44,6 +44,8 @@ When you are signed in, the web and desktop apps also report two kinds of metric
 
 **Error and crash reports**: When the web app, desktop app or API hits an error or crash, it sends a report to Sentry so we can find and fix the fault. A report contains the error message and stack trace, the app version, the page route without query strings or fragments, browser, operating system and device information, and recent technical events leading up to the error. Desktop crash reports may also contain a memory snapshot of the crashed app process. When you are signed in, a report may carry your internal Tau account identifier so we can tell how many people an error affects; it never carries your name or email address. Reports are scrubbed of cookies, authorization headers and tokens before they are sent. They do not depend on analytics consent or a Global Privacy Control signal, because they are needed to keep the Service working and secure and are not used for tracking or advertising.
 
+**Crash feedback you choose to write** (Optional): after the browser ends a tab because it ran out of memory, Tau may ask once what you were doing. Anything you type there is yours to write and is sent to Sentry as feedback on that crash's report; if you leave an email address so we can reply, it is sent with it. Both fields are empty until you fill them, nothing is collected automatically, no screenshot is taken, and closing the prompt sends nothing. This feedback is not sent to our analytics provider.
+
 ### 3.4 Location Data
 
 We collect general location information based on your IP address (city or regional level only). We do not collect precise geolocation data.

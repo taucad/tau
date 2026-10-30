@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useLiveProjectIds } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
+import { offerCrashFeedback } from '#lib/crash-feedback.js';
 import { isMemoryConstrainedDevice } from '#lib/device-memory-class.js';
 import { getDocumentMemoryKillSignal, killHeartbeatMilliseconds } from '#lib/memory-kill-signal.js';
 import { setLiveCountsReader } from '#lib/memory-sampler.js';
@@ -39,8 +40,11 @@ export function MemoryKillReporter({
       for (const kill of signal.takeDetectedKills()) {
         // Each kill in turn; one whose report does not land stays pending for the next load (G17).
         // eslint-disable-next-line no-await-in-loop -- the reports share one delivery path.
-        if (await reportDetectedKill(kill)) {
+        const { delivered, eventId } = await reportDetectedKill(kill);
+        if (delivered) {
           signal.settleKill(kill.id);
+          // Ask what the person was doing, where it is theirs to answer (SB12).
+          offerCrashFeedback(kill, eventId);
         }
       }
     };

@@ -12,7 +12,7 @@
  * the error page and toasts.
  */
 
-import { useId, useState, useSyncExternalStore } from 'react';
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import { Button } from '@taucad/ui/components/button';
 import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';
@@ -40,6 +40,16 @@ export function CrashReportPrompt(): React.JSX.Element | undefined {
   const headingId = useId();
   const messageId = useId();
   const emailId = useId();
+  const promptReference = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const prompt = promptReference.current;
+    // The browser's top layer sits above every z-index, including the editor's mobile tab bar.
+    // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- DOM types claim showPopover is always there; jsdom and older browsers omit it
+    if (prompt?.showPopover !== undefined && !prompt.matches(':popover-open')) {
+      prompt.showPopover();
+    }
+  }, [offer]);
 
   if (offer === undefined) {
     return undefined;
@@ -52,8 +62,10 @@ export function CrashReportPrompt(): React.JSX.Element | undefined {
 
   return (
     <section
+      ref={promptReference}
+      popover='manual'
       aria-labelledby={headingId}
-      className='fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-md flex-col gap-3 rounded-md border bg-background p-4 shadow-lg'
+      className='fixed inset-x-4 top-auto bottom-4 z-50 mx-auto my-0 flex h-auto w-auto max-w-md flex-col gap-3 overflow-visible rounded-md border bg-background p-4 text-foreground shadow-lg'
     >
       <h2 id={headingId} className='text-sm font-medium'>
         Tau reloaded because the page ran out of memory

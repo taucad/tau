@@ -6,13 +6,14 @@ import { createElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { usePlatform } from '#hooks/use-platform.js';
 
-const probe = (seen: string[]): (() => React.JSX.Element) => {
-  return function Probe(): React.JSX.Element {
+/** A component that records the platform it rendered with and shows it. */
+const probe =
+  (seen: string[]): (() => React.JSX.Element) =>
+  () => {
     const platform = usePlatform();
     seen.push(platform);
     return createElement('span', undefined, platform);
   };
-};
 
 describe('usePlatform', () => {
   afterEach(() => {
@@ -34,14 +35,14 @@ describe('usePlatform', () => {
   it('hydrates a Windows client with the server platform, then re-renders without a mismatch', async () => {
     vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32');
     const seen: string[] = [];
-    const Probe = probe(seen);
+    const probed = probe(seen);
     const container = document.createElement('div');
-    container.innerHTML = renderToString(createElement(Probe));
+    container.innerHTML = renderToString(createElement(probed));
     seen.length = 0;
     const recoverableErrors: unknown[] = [];
 
     const root = await act(async () =>
-      hydrateRoot(container, createElement(Probe), {
+      hydrateRoot(container, createElement(probed), {
         onRecoverableError(error) {
           recoverableErrors.push(error);
         },

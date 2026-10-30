@@ -1,0 +1,47 @@
+@settings(kclVersion = 3.0)
+
+basicAngle = 30deg
+thickness = 3.5mm
+flangeLength = 24mm
+bendStartX = 5mm
+legLength = 30mm
+legRun = legLength * cos(basicAngle)
+legRise = legLength * sin(basicAngle)
+normalRun = thickness * sin(basicAngle)
+normalRise = thickness * cos(basicAngle)
+annotationFont = 2mm
+
+stampedProfile = sketch(on = XY) {
+  datumFace = line(start = [var 0mm, var 0mm], end = [var 24mm, var 0mm])
+  flangeEnd = line(start = [var 24mm, var 0mm], end = [var 24mm, var 3.5mm])
+  innerFlange = line(start = [var 24mm, var 3.5mm], end = [var 5mm, var 3.5mm])
+  controlledSurface = line(start = [var 5mm, var 3.5mm], end = [var 30.98mm, var 18.5mm])
+  tabEnd = line(start = [var 30.98mm, var 18.5mm], end = [var 29.23mm, var 21.53mm])
+  outerSurface = line(start = [var 29.23mm, var 21.53mm], end = [var 3.25mm, var 6.53mm])
+  outsideBend = line(start = [var 3.25mm, var 6.53mm], end = [var 0mm, var 0mm])
+  coincident([datumFace.end, flangeEnd.start])
+  coincident([flangeEnd.end, innerFlange.start])
+  coincident([innerFlange.end, controlledSurface.start])
+  coincident([controlledSurface.end, tabEnd.start])
+  coincident([tabEnd.end, outerSurface.start])
+  coincident([outerSurface.end, outsideBend.start])
+  coincident([outsideBend.end, datumFace.start])
+  coincident([datumFace.start, ORIGIN])
+  horizontal(datumFace)
+  horizontal(innerFlange)
+  vertical(flangeEnd)
+  distance([datumFace.start, datumFace.end]) == flangeLength
+  distance([flangeEnd.start, flangeEnd.end]) == thickness
+  distance([innerFlange.start, innerFlange.end]) == flangeLength - bendStartX
+  distance([controlledSurface.start, controlledSurface.end]) == legLength
+  distance([tabEnd.start, tabEnd.end]) == thickness
+  distance([outerSurface.start, outerSurface.end]) == legLength
+  parallel([controlledSurface, outerSurface])
+  perpendicular([controlledSurface, tabEnd])
+  angle([datumFace, controlledSurface]) == basicAngle
+}
+
+stampedPart = extrude(region(segments = [stampedProfile.datumFace, stampedProfile.flangeEnd]), length = 0.8mm)
+
+gdt::datum(face = stampedPart.sketch.tags.datumFace, name = "A", framePosition = [6mm, -4mm], framePlane = XY, fontSize = annotationFont)
+gdt::angularity(faces = [stampedPart.sketch.tags.controlledSurface], tolerance = 0.1mm, datums = ["A"], framePosition = [-12mm, 11mm], framePlane = XZ, fontSize = annotationFont)

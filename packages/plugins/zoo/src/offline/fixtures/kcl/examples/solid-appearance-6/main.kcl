@@ -1,0 +1,20 @@
+// Setting the appearance of a 3D pattern can be done _before_ or _after_ the pattern.
+// This example shows _after_ the pattern.
+exampleSketch = startSketchOn(XZ)
+  |> startProfile(at = [0, 0])
+  |> line(end = [0, 2])
+  |> line(end = [3, 1])
+  |> line(end = [0, -4])
+  |> close()
+
+example = extrude(exampleSketch, length = 1)
+  |> patternLinear3d(
+      axis = [1, 0, 1],
+      instances = 7,
+      distance = 6
+     )
+  |> appearance(
+      color = '#ff0000',
+      metalness = 90,
+      roughness = 90
+     )

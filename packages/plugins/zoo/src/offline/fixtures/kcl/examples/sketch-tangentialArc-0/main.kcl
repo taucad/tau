@@ -1,0 +1,11 @@
+exampleSketch = startSketchOn(XZ)
+  |> startProfile(at = [0, 0])
+  |> angledLine(
+    angle = 45deg,
+    length = 10,
+  )
+  |> tangentialArc(end = [0, -10])
+  |> line(end = [-10, 0])
+  |> close()
+
+example = extrude(exampleSketch, length = 10)

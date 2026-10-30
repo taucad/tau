@@ -1,0 +1,25 @@
+// Move a sketch.
+
+fn square(@length){
+    l = length / 2
+    p0 = [-l, -l]
+    p1 = [-l, l]
+    p2 = [l, l]
+    p3 = [l, -l]
+
+    return startSketchOn(XY)
+        |> startProfile(at = p0)
+        |> line(endAbsolute = p1)
+        |> line(endAbsolute = p2)
+        |> line(endAbsolute = p3)
+        |> close()
+}
+
+square(10)
+    |> translate(
+        x = 5,
+        y = 5,
+    )
+    |> extrude(
+        length = 10,
+    )

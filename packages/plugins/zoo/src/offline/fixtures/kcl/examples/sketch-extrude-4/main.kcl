@@ -1,0 +1,3 @@
+example = startSketchOn(XZ)
+  |> polygon(radius = 10, numSides = 3, center = [0, 0])
+  |> extrude(length = 10, twistAngle = 120deg)

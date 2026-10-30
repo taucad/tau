@@ -1,0 +1,2 @@
+arr1 = [10, 20, 30]
+assert(count(arr1), isEqualTo = 3)

@@ -1,0 +1,30 @@
+@settings(kclVersion = 1.0)
+fn test() {
+  return startSketchOn(XY)
+    |> startProfile(at = [0, 0])
+    |> line(end = [0, 1])
+    |> line(end = [1, 0])
+    |> line(end = [0, -1])
+    |> close(%)
+}
+
+fn test2() {
+  return {
+    thing1 = {
+      thing2 = startSketchOn(XY)
+        |> startProfile(at = [0, 0])
+        |> line(end = [0, 1])
+        |> line(end = [1, 0])
+        |> line(end = [0, -1])
+        |> close(%)
+    }
+  }
+}
+
+x = test()
+x
+  |> extrude(length = -10)
+
+x2 = test2()
+x2.thing1.thing2
+  |> extrude(length = 10)

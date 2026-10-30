@@ -1,0 +1,11 @@
+shellProfile = sketch(on = XY) {
+  outerWall = line(start = [var 10mm, var 0mm], end = [var 10mm, var 5mm])
+  connector = line(start = [var 10mm, var 5mm], end = [var 12mm, var 7mm])
+  innerWall = line(start = [var 12mm, var 7mm], end = [var 15mm, var 6mm])
+  coincident([outerWall.end, connector.start])
+  coincident([connector.end, innerWall.start])
+}
+
+halfShell = revolve([shellProfile.outerWall, shellProfile.innerWall], axis = Y, bodyType = SURFACE, angle = 180deg)
+closedShell = revolve([shellProfile.outerWall, shellProfile.innerWall], axis = Y, bodyType = SURFACE)
+    |> translate(z = 30)

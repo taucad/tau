@@ -1,0 +1,9 @@
+// Create a square circumscribed around a circle of radius 5
+square = startSketchOn(XY)
+  |> polygon(
+    radius = 5.0,
+    numSides = 4,
+    center = [10, 10],
+    inscribed = false,
+  )
+example = extrude(square, length = 5)

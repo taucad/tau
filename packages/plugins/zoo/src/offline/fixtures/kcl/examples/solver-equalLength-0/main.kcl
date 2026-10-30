@@ -1,0 +1,12 @@
+profile = sketch(on = XY) {
+  base = line(start = [var -3mm, var 0mm], end = [var 3mm, var 0mm])
+  side1 = line(start = [var 3mm, var 0mm], end = [var 0mm, var 4mm])
+  side2 = line(start = [var 0mm, var 4mm], end = [var -3mm, var 0mm])
+  coincident([base.end, side1.start])
+  coincident([side1.end, side2.start])
+  coincident([side2.end, base.start])
+  horizontal(base)
+  equalLength([side1, side2])
+}
+
+solid = extrude(region(segments = [profile.base, profile.side1]), length = 2)

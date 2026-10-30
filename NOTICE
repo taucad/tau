@@ -103,6 +103,9 @@ KCL standard library (Zoo Modeling App)
   Copyright (c) 2023 The Zoo Authors
   Licensed under the MIT License.
   https://github.com/KittyCAD/modeling-app
+  `packages/plugins/zoo/src/offline/fixtures/kcl` vendors the KCL samples,
+  kcl-lib simulation tests and standard library doc examples from it as test
+  fixtures; its license text is beside them as `LICENSE.modeling-app`.
 
 libcascade / Open CASCADE Technology
   Copyright (c) 1991-1999 Matra Datavision

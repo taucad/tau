@@ -8,7 +8,7 @@ if [ ! -d "$dest/modeling-app/.git" ]; then
   git clone --filter=blob:none --no-checkout https://github.com/KittyCAD/modeling-app.git "$dest/modeling-app"
 fi
 cd "$dest/modeling-app"
-git sparse-checkout set public/kcl-samples rust/kcl-lib/tests/kcl_samples
+git sparse-checkout set public/kcl-samples rust/kcl-lib/tests rust/kcl-lib/std rust/kcl-lib/e2e/executor/inputs
 git checkout --quiet "$commit"
 echo "samples:   $dest/modeling-app/public/kcl-samples"
 echo "snapshots: $dest/modeling-app/rust/kcl-lib/tests/kcl_samples"

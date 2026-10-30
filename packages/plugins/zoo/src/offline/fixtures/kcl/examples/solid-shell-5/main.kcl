@@ -1,0 +1,20 @@
+// Shell a sketch on face object on the end face.
+size = 100
+case = startSketchOn(XY)
+    |> startProfile(at = [-size, -size])
+    |> line(end = [2 * size, 0])
+    |> line(end = [0, 2 * size])
+    |> tangentialArc(endAbsolute = [-size, size])
+    |> close()
+    |> extrude(length = 65)
+
+thing1 = startSketchOn(case, face = END)
+    |> circle( center = [-size / 2, -size / 2], radius = 25 )
+    |> extrude(length = 50)
+
+thing2 = startSketchOn(case, face = END)
+    |> circle( center = [size / 2, -size / 2], radius = 25 )
+    |> extrude(length = 50)
+
+// We put "thing1" in the shell function to shell the end face of the object.
+shell(thing1, faces = [END], thickness = 5)

@@ -1,0 +1,18 @@
+// Create a helix around an edge.
+helper001 = startSketchOn(XZ)
+ |> startProfile(at = [0, 0])
+ |> line(end = [0, 10], tag = $edge001)
+
+helixPath = helix(
+    angleStart = 0,
+    ccw = true,
+    revolutions = 5,
+    length = 10,
+    radius = 5,
+    axis = edge001,
+ )
+
+// Create a spring by sweeping around the helix path.
+springSketch = startSketchOn(XZ)
+    |> circle( center = [5, 0], radius = 0.5 )
+    |> sweep(path = helixPath)

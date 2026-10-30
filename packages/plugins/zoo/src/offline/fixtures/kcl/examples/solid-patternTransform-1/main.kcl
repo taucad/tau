@@ -1,0 +1,11 @@
+// Each instance will be shifted along the X axis,
+// with a gap between the original (at x = 0) and the first replica
+// (at x = 8). This is because `id` starts at 1.
+fn transform(@id) {
+  return { translate = [4 * (1+id), 0, 0] }
+}
+
+sketch001 = startSketchOn(XZ)
+  |> circle(center = [0, 0], radius = 2)
+  |> extrude(length = 5)
+  |> patternTransform(instances = 4, transform = transform)

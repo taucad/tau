@@ -634,22 +634,10 @@ export const maximumProjectedPixelDelta = ({
 };
 
 /**
- * Raised when no positive perspective FOV meets the pixel budget within the bisection tolerance, as when a view
- * zooms deep into bounds far larger than its vertical span. The view is valid; only the handoff is unattainable.
- */
-export class PerspectiveHandoffPrecisionError extends RangeError {
-  public constructor() {
-    super('The requested pixel budget is below numeric projection precision.');
-    this.name = 'PerspectiveHandoffPrecisionError';
-  }
-}
-
-/**
  * Finds the largest positive perspective FOV within a physical-pixel endpoint budget.
  *
  * @param options - Canonical view, search bound, error budget, and bounded search controls.
  * @returns A positive perspective field of view in degrees.
- * @throws {PerspectiveHandoffPrecisionError} When no positive FOV within the search tolerance meets the budget.
  * @public
  */
 export const findPerspectiveHandoffVerticalFieldOfView = ({
@@ -687,7 +675,7 @@ export const findPerspectiveHandoffVerticalFieldOfView = ({
     }
   }
   if (lower <= 0) {
-    throw new PerspectiveHandoffPrecisionError();
+    throw new RangeError('The requested pixel budget is below numeric projection precision.');
   }
   return lower;
 };

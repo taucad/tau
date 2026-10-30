@@ -180,13 +180,7 @@ const settingsCatalog = [
         id: 'improve-service',
         label: 'Improve the service for everyone',
         description: 'Control whether your chats are used for improving the service',
-        keywords: ['training', 'sharing', 'no train', 'ai', 'privacy'],
-      },
-      {
-        id: 'agent-observability',
-        label: 'Agent recording',
-        description: 'Choose what Tau may record from your agent tasks, and why',
-        keywords: ['agent', 'recording', 'capture', 'summaries', 'diagnosis', 'evaluation', 'training', 'privacy'],
+        keywords: ['training', 'sharing', 'no train', 'ai', 'privacy', 'agent', 'recording', 'summaries', 'evaluation'],
       },
       {
         id: 'cookie-preferences',

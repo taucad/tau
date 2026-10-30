@@ -6,7 +6,7 @@ import { authClient } from '#lib/auth-client.js';
 import { ENV } from '#environment.config.js';
 import { recordApiRequestId } from '#lib/api-request-id.js';
 
-/** The agent-observability processing purposes, in the order the settings show them. */
+/** The agent-observability processing purposes, in the server's order. */
 export const telemetryPurposes = ['summary', 'feedback', 'content', 'diagnosis', 'reuse', 'training'] as const;
 
 /** One processing purpose. */
@@ -29,6 +29,9 @@ export type EffectiveTelemetryPurposes = {
   projectId?: string;
   purposes: TelemetryPurposeState[];
 };
+
+/** One explicit decision; a request names every purpose it decides. */
+export type PurposeDecision = Readonly<{ purpose: TelemetryPurpose; granted: boolean }>;
 
 /** The query key root, so a sign-out can drop every subject's answer at once. */
 export const telemetryPurposesQueryKey = ['telemetry-purposes'] as const;
@@ -64,11 +67,8 @@ type UseTelemetryPurposesReturn = {
   canDecide: boolean;
   isLoading: boolean;
   error: unknown;
-  decide: UseMutationResult<
-    EffectiveTelemetryPurposes,
-    unknown,
-    Readonly<{ purpose: TelemetryPurpose; granted: boolean }>
-  >['mutate'];
+  /** Record one explicit decision per named purpose in one request; resolves once the server has answered. */
+  decide: UseMutationResult<EffectiveTelemetryPurposes, unknown, readonly PurposeDecision[]>['mutateAsync'];
   isDeciding: boolean;
 };
 
@@ -123,14 +123,14 @@ export function useTelemetryPurposes(options: Readonly<{ projectId?: string }> =
 
   const mutation = useMutation({
     mutationKey: [...queryKey, 'decide'],
-    mutationFn: async (decision: Readonly<{ purpose: TelemetryPurpose; granted: boolean }>) => {
+    mutationFn: async (decisions: readonly PurposeDecision[]) => {
       const noticeVersion = effective?.noticeVersion;
       if (noticeVersion === undefined) {
         throw new Error('No agent-observability notice is in force, so no purpose can be decided.');
       }
       return request('', {
         method: 'PUT',
-        body: JSON.stringify({ noticeVersion, decisions: [decision] }),
+        body: JSON.stringify({ noticeVersion, decisions }),
       });
     },
     async onSettled() {
@@ -150,7 +150,7 @@ export function useTelemetryPurposes(options: Readonly<{ projectId?: string }> =
     canDecide: typeof effective?.noticeVersion === 'string',
     isLoading,
     error,
-    decide: mutation.mutate,
+    decide: mutation.mutateAsync,
     isDeciding: mutation.isPending,
   };
 }

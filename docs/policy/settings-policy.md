@@ -3,7 +3,7 @@ title: 'Settings Policy'
 description: 'How Tau designs, words, organizes and co-locates settings: one registry entry and one row per setting, short user-facing copy, detail in tooltips, and a fixed section taxonomy.'
 status: active
 created: '2026-10-29'
-updated: '2026-10-29'
+updated: '2026-10-30'
 related:
   - docs/policy/ux-policy.md
   - docs/policy/ui-policy.md
@@ -65,19 +65,19 @@ Group related rows in one `SettingsGroup`: an optional sentence-case heading abo
 
 Put each setting in the section a user would open to answer their question. Each topic lives in exactly one section; link to it from elsewhere rather than repeating it.
 
-| Section       | Answers                               | Holds                                                                                            |
-| ------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| General       | How does Tau look and feel here?      | Theme, accent color, cursors, editor display                                                     |
-| Account       | Who am I?                             | Name, avatar, email                                                                              |
-| Security      | How do I sign in, and who has access? | Password, sign-in methods (incl. GitHub sign-in and its Gist grant), active sessions             |
-| Repositories  | Which code can Tau read and write?    | GitHub repository connection, repository access, per-repository write permission                 |
-| Billing       | What do I pay and what do I get?      | Plan, plan limits, credits, automatic reload, cancel plan                                        |
-| Data controls | What does Tau collect, keep and use?  | Usage and diagnostics, improving the service, agent recording, cookie preferences, close account |
-| Compute       | Where does work run?                  | Compute reuse, remote hosts                                                                      |
-| Models        | Which models can I use?               | Model availability                                                                               |
-| Agents        | How does the agent behave?            | Context the agent receives, tools, permissions, chat display                                     |
-| Filesystem    | Where are my projects stored?         | Workspaces, cloud project location, browser storage                                              |
-| Experimental  | What can I try early?                 | Feature flags only                                                                               |
+| Section       | Answers                               | Holds                                                                                |
+| ------------- | ------------------------------------- | ------------------------------------------------------------------------------------ |
+| General       | How does Tau look and feel here?      | Theme, accent color, cursors, editor display                                         |
+| Account       | Who am I?                             | Name, avatar, email                                                                  |
+| Security      | How do I sign in, and who has access? | Password, sign-in methods (incl. GitHub sign-in and its Gist grant), active sessions |
+| Repositories  | Which code can Tau read and write?    | GitHub repository connection, repository access, per-repository write permission     |
+| Billing       | What do I pay and what do I get?      | Plan, plan limits, credits, automatic reload, cancel plan                            |
+| Data controls | What does Tau collect, keep and use?  | Usage and diagnostics, improving the service, cookie preferences, close account      |
+| Compute       | Where does work run?                  | Compute reuse, remote hosts                                                          |
+| Models        | Which models can I use?               | Model availability                                                                   |
+| Agents        | How does the agent behave?            | Context the agent receives, tools, permissions, chat display                         |
+| Filesystem    | Where are my projects stored?         | Workspaces, cloud project location, browser storage                                  |
+| Experimental  | What can I try early?                 | Feature flags only                                                                   |
 
 **Why**: Users look for "my data" in one place. Splitting telemetry into General, training into a privacy card and account closure into Billing made each one hard to find.
 
@@ -122,7 +122,13 @@ A button either navigates, opens a dialog, changes a value, or shows a result. R
 
 Filter unavailable settings out of the registry by build or platform (`tauCloudEnabled`, `isDesktopTarget()`, feature flags) so they disappear from both navigation and search. Use a disabled control with a reason only when the setting exists for this user but cannot change now (for example, a permission whose notice is not yet approved).
 
-### 10. Accessible By Construction
+### 10. Ask for Consent Once, Where It Applies
+
+Data controls hold one switch per question a user would ask ("may Tau use my chats to improve the service?"), not one per internal processing purpose. When one switch covers several server purposes, it records an explicit decision for each of them in one request. A consent that only makes sense in context is asked in that context instead: rating a reply grants feedback for ratings, and a support report asks for its own diagnosis access.
+
+**Why**: Users cannot weigh six overlapping recording purposes, and overlapping switches ("Improve the service" next to "Model training") read as the same choice asked twice.
+
+### 11. Accessible By Construction
 
 Give every control an accessible name equal to the row title. Status text that changes after an action uses `role='status'`; errors use `role='alert'`. Tests query by role and name, so renaming a title is a test change, not a selector hunt.
 

@@ -66,8 +66,8 @@ describe('useTelemetryPurposes', () => {
           { purpose: 'summary', allowed: true, decided: true, granted: true },
           { purpose: 'content', allowed: false, decided: true, granted: true, refusal: 'project-mixed-source' },
           { purpose: 'diagnosis', allowed: false, decided: false, granted: false, refusal: 'no-decision' },
-          { purpose: 'reuse', allowed: false, decided: true, granted: true, refusal: 'tier-excluded' },
-          { purpose: 'training', allowed: false, decided: true, granted: true, refusal: 'tier-excluded' },
+          { purpose: 'reuse', allowed: false, decided: true, granted: true, refusal: 'tier-unverified' },
+          { purpose: 'training', allowed: false, decided: true, granted: true, refusal: 'tier-unverified' },
         ],
       }),
     );
@@ -126,7 +126,7 @@ describe('useTelemetryPurposes', () => {
       expect(result.current.canDecide).toBe(true);
     });
 
-    result.current.decide({ purpose: 'summary', granted: true });
+    await result.current.decide([{ purpose: 'summary', granted: true }]);
 
     await waitFor(() => {
       expect(result.current.isAllowed('summary')).toBe(true);
@@ -148,7 +148,7 @@ describe('useTelemetryPurposes', () => {
       expect(result.current.canDecide).toBe(true);
     });
 
-    result.current.decide({ purpose: 'summary', granted: true });
+    await result.current.decide([{ purpose: 'summary', granted: true }]);
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(3);
@@ -171,7 +171,7 @@ describe('useTelemetryPurposes', () => {
       expect(result.current.canDecide).toBe(true);
     });
 
-    result.current.decide({ purpose: 'summary', granted: true });
+    await expect(result.current.decide([{ purpose: 'summary', granted: true }])).rejects.toThrow('409');
 
     await waitFor(() => {
       expect(result.current.effective?.noticeVersion).toBe('notice-2');

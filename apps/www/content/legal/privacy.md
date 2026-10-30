@@ -157,6 +157,9 @@ We may use your prompts and generated designs to improve our AI features. This i
 **What we use:** Your text prompts and generated CAD designs.
 **What we do NOT do:** Share your designs with third parties for training, use your data to train external AI models, or associate training data with your identity.
 
+**Defaults:** On the free plan this is on unless you turn it off. On a paid plan it is off unless you turn it on.
+**Ratings:** When you rate an agent reply, we use that rating and the reply it rates to improve the Service.
+
 **Your Right to Opt Out:** Navigate to **Settings → Data controls** and turn off "Improve the service for everyone." Opting out will not affect your access to AI features.
 
 ### 9.3 Analytics and Observability

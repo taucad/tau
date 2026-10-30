@@ -24,7 +24,7 @@ describe('searchSettings', () => {
 
     expect(result).toHaveLength(1);
     expect(result[0]?.section.id).toBe('data-controls');
-    expect(result[0]?.entries.map(({ id }) => id)).toEqual(['improve-service', 'agent-observability']);
+    expect(result[0]?.entries.map(({ id }) => id)).toEqual(['improve-service']);
   });
 
   it('should reject results when any query token is unmatched', () => {

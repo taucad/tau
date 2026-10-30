@@ -70,9 +70,10 @@ vi.mock('#cloud/settings-billing.js', () => ({
   CloudAccountClosure: (): ReactElement => <div data-testid='account-closure' />,
 }));
 
-// Server-resolved recording purposes have their own query-backed section and hook tests.
-vi.mock('#components/settings/agent-observability-settings.js', () => ({
-  AgentObservabilitySettings: (): ReactElement => <div data-testid='agent-observability-settings' />,
+const mockDecide = vi.fn(async () => ({}));
+let mockCanDecide: boolean;
+vi.mock('#hooks/use-telemetry-purposes.js', () => ({
+  useTelemetryPurposes: () => ({ canDecide: mockCanDecide, decide: mockDecide, isDeciding: false }),
 }));
 
 const improve = 'Improve the service for everyone';
@@ -85,6 +86,7 @@ describe('DataControlsSettings', () => {
     mockAllowsUsageMetrics = true;
     mockAllowsAiTraining = false;
     mockSession = { user: { id: 'user-a' } };
+    mockCanDecide = false;
     mockTelemetrySwitch = { checked: true, pending: false, forcedOff: false };
   });
 
@@ -228,10 +230,49 @@ describe('DataControlsSettings', () => {
     expect(await screen.findByRole('dialog', { name: 'Cookie preferences' })).toBeInTheDocument();
   });
 
-  it('shows agent recording and account closure on the same page', () => {
+  it('records each improvement purpose with the one switch once a recording notice is in force', async () => {
+    mockCanDecide = true;
     render(<DataControlsSettings />);
 
-    expect(screen.getByTestId('agent-observability-settings')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('switch', { name: improve }));
+
+    expect(mockUpdatePreferences).toHaveBeenCalledWith({ allowsAiTraining: true });
+    expect(mockDecide).toHaveBeenCalledWith([
+      { purpose: 'summary', granted: true },
+      { purpose: 'content', granted: true },
+      { purpose: 'reuse', granted: true },
+      { purpose: 'training', granted: true },
+    ]);
+  });
+
+  it('withdraws every improvement purpose and the rating grant when switched off', async () => {
+    mockCanDecide = true;
+    mockAllowsAiTraining = true;
+    render(<DataControlsSettings />);
+
+    await userEvent.click(screen.getByRole('switch', { name: improve }));
+
+    expect(mockDecide).toHaveBeenCalledWith(
+      ['summary', 'content', 'reuse', 'training', 'feedback'].map((purpose) => ({ purpose, granted: false })),
+    );
+  });
+
+  it('records no recording decision while no notice is in force', async () => {
+    render(<DataControlsSettings />);
+
+    await userEvent.click(screen.getByRole('switch', { name: improve }));
+
+    expect(mockUpdatePreferences).toHaveBeenCalledWith({ allowsAiTraining: true });
+    expect(mockDecide).not.toHaveBeenCalled();
+  });
+
+  it('keeps data controls to four rows, with account closure last', () => {
+    render(<DataControlsSettings />);
+
+    for (const name of [usage, improve, 'Cookie preferences']) {
+      expect(screen.getByRole('group', { name })).toBeInTheDocument();
+    }
+    expect(screen.queryByText('Agent recording')).not.toBeInTheDocument();
     expect(screen.getByTestId('account-closure')).toBeInTheDocument();
   });
 });

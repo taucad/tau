@@ -81,6 +81,10 @@ internal sealed record TextEdit(Range Range, string NewText);
 
 internal sealed record CompletionItemData(int ResultId, int Index);
 
+/// <summary>
+/// An LSP completion item. <c>DefinitionTargets</c> is a Tau extension, as on <see cref="Hover"/>: the locations that
+/// the resolved documentation's <c>#tau-definition-N</c> links open.
+/// </summary>
 internal sealed record CompletionItem(
     string Label,
     int Kind,
@@ -92,7 +96,8 @@ internal sealed record CompletionItem(
     IReadOnlyList<TextEdit>? AdditionalTextEdits = null,
     MarkupContent? Documentation = null,
     IReadOnlyList<string>? CommitCharacters = null,
-    CompletionItemData? Data = null);
+    CompletionItemData? Data = null,
+    IReadOnlyList<Location>? DefinitionTargets = null);
 
 internal sealed record CompletionList(bool IsIncomplete, IReadOnlyList<CompletionItem> Items);
 
@@ -104,7 +109,15 @@ internal sealed record SignatureInformation(
     IReadOnlyList<ParameterInformation> Parameters,
     int? ActiveParameter);
 
-internal sealed record SignatureHelp(IReadOnlyList<SignatureInformation> Signatures, int ActiveSignature, int ActiveParameter);
+/// <summary>
+/// An LSP signature help. <c>DefinitionTargets</c> is a Tau extension, as on <see cref="Hover"/>: the locations that
+/// the <c>#tau-definition-N</c> links of every signature and parameter documentation open, indexed by N.
+/// </summary>
+internal sealed record SignatureHelp(
+    IReadOnlyList<SignatureInformation> Signatures,
+    int ActiveSignature,
+    int ActiveParameter,
+    IReadOnlyList<Location>? DefinitionTargets = null);
 
 internal sealed record DocumentHighlight(Range Range, int Kind);
 

@@ -50,7 +50,7 @@ export const automatedRunEnvironment = (environment: string | undefined): string
 /** Whether a browser automation driver (Playwright, WebDriver) controls this page. */
 const isAutomatedBrowser = (): boolean =>
   // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- navigator is absent during SSR.
-  globalThis.navigator?.webdriver === true;
+  globalThis.navigator?.webdriver ?? false;
 
 /**
  * Scrub an error event before it leaves the browser: no query strings, no invitation tokens, no

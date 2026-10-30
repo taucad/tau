@@ -18,6 +18,7 @@ type SectionCapStencilDiagnostics = Readonly<{
         outlineSourceCount: number;
         meshDrawCount: number;
         polygonDrawCount: number;
+        rebuilt: boolean;
         buildMilliseconds: number;
         submitMilliseconds: number;
       }>

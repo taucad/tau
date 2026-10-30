@@ -11,6 +11,7 @@
  */
 
 import { recordActivityBreadcrumb } from '#lib/activity-breadcrumbs.js';
+import { takeMemorySample } from '#lib/memory-sampler.js';
 import { readSessionStorage } from '#lib/session-storage.js';
 
 /** The analytics event a suspected memory kill is reported as. @public */
@@ -186,12 +187,17 @@ export const getDocumentMemoryKillSignal = (deviceClass: () => string): MemoryKi
  * Name the heavy work about to start, so a kill during it says what it was, and add it to the error
  * tracker's `tau.activity` trail (`#lib/activity-breadcrumbs`, structure only).
  *
+ * A memory sample is taken first (SB2): a kill happens during heavy work, so the sample taken as
+ * that work begins is the one the kill report needs. The sampler only reads values their owners
+ * have already observed, so this costs microseconds.
+ *
  * The marker is a no-op until the reporter has created the document's signal, and during SSR.
  *
  * @param name - A short stable name: `open`, `render`, `export`, `capture`.
  * @public
  */
 export const recordMemoryBreadcrumb = (name: string): void => {
+  takeMemorySample();
   documentSignal?.breadcrumb(name);
   recordActivityBreadcrumb(name);
 };

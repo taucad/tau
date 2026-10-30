@@ -113,7 +113,7 @@ const result = await client.export('webp', {
 });
 ```
 
-See [Capture camera views](https://tau.new/docs/runtime/guides/headless-camera-capture) for mixed preset batches, projection semantics, and RPC use.
+See [Capture camera views](https://docs.tau.new/runtime/guides/headless-camera-capture) for mixed preset batches, projection semantics, and RPC use.
 
 If the selected graphics driver cannot encode the requested image, the runtime returns a structured
 render issue with code `driver-unsupported`.
@@ -146,7 +146,7 @@ Apache-2.0 — see [LICENSE](./LICENSE). Bundled third-party payloads keep their
 
 ## Links
 
-- [Documentation](https://tau.new/docs/runtime)
+- [Documentation](https://docs.tau.new/runtime)
 - [Source](https://github.com/taucad/tau/tree/main/packages/plugins/image)
 - [Changelog](https://github.com/taucad/tau/blob/main/packages/plugins/image/CHANGELOG.md)
 - [Issues](https://github.com/taucad/tau/issues)

@@ -91,7 +91,7 @@ Apache-2.0 — see [LICENSE](./LICENSE). Runtime codec payloads retain their ups
 
 ## Links
 
-- [Documentation](https://tau.new/docs/runtime)
+- [Documentation](https://docs.tau.new/runtime)
 - [Source](https://github.com/taucad/tau/tree/main/packages/plugins/gltf)
 - [Changelog](https://github.com/taucad/tau/blob/main/packages/plugins/gltf/CHANGELOG.md)
 - [Issues](https://github.com/taucad/tau/issues)

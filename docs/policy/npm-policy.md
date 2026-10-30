@@ -310,7 +310,7 @@ Every publishable package must declare these fields. Missing fields fail `publin
 | `license`               | `Apache-2.0` per the repository-wide rule in Rule 12                                                    |
 | `author`                | Same canonical author across all packages                                                               |
 | `repository`            | `{ "type": "git", "url": "git+https://github.com/taucad/tau.git", "directory": "<package directory>" }` |
-| `homepage`              | `https://tau.new/docs/<pkg>` (or repo URL until docs land)                                              |
+| `homepage`              | `https://docs.tau.new/runtime` (published docs; `tau.new/docs` is an older site)                        |
 | `bugs`                  | `{ "url": "https://github.com/taucad/tau/issues" }`                                                     |
 | `type`                  | `"module"`                                                                                              |
 | `engines`               | `{ "node": ">=24.0.0" }` (matches the workspace's minimum supported Node release)                       |

@@ -30,12 +30,12 @@ import { isFunction } from '#utils/function.utils.js';
 import type { Handle } from '#types/matches.types.js';
 
 export const handle: Handle = {
-  title: 'Community',
+  title: 'Examples',
   enableOverflowY: true,
 };
 
 export const meta: MetaFunction = () => [
-  { title: 'Community · Tau' },
+  { title: 'Examples · Tau' },
   {
     name: 'description',
     content: 'Open, preview and remix curated CAD examples built with Tau, filtered by kernel.',
@@ -177,7 +177,7 @@ export default function CadCommunity(): React.JSX.Element {
   return (
     <PageContent className='space-y-3'>
       <PageHeader
-        title='Community'
+        title='Examples'
         count={galleryProjects.length}
         className='gap-x-4 gap-y-3'
         action={

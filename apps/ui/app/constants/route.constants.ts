@@ -47,7 +47,7 @@ export const navRoutes: {
       icon: Printer,
     },
     {
-      title: 'Community',
+      title: 'Examples',
       url: '/community',
       icon: UsersRound,
     },

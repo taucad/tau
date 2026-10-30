@@ -247,7 +247,7 @@ describe.each(phoneViewports)('phone pages at $width×$height', (viewport) => {
 
     const audit = await auditPhonePage(`community-no-match-${size(viewport)}`);
     expectPageRules(audit, 'community no match');
-    await expectShellBar('Community', viewport.width);
+    await expectShellBar('Examples', viewport.width);
     const clearBox = await box(clear);
     expect(clearBox.height).toBeGreaterThanOrEqual(24);
 
@@ -427,7 +427,7 @@ describe.each(phoneViewports)('phone pages at $width×$height', (viewport) => {
 
   test('PG-404: an unknown route says so and offers two ways forward', async () => {
     await openTouchPhone(viewport, '/community');
-    await target.expectVisible(selectors.getByRole('heading', { level: 1, name: 'Community' }), 60_000);
+    await target.expectVisible(selectors.getByRole('heading', { level: 1, name: 'Examples' }), 60_000);
     await target.navigate('/no-such-page');
     await target.expectVisible(selectors.getByRole('heading', { level: 1, name: 'Page not found' }), 60_000);
     await expectPageNamed('Page not found', 'Page not found · Tau');

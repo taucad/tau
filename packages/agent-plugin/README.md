@@ -68,14 +68,25 @@ There are no peer dependencies.
 
 ## Quick start
 
+Node.js 24 (npm 11) is required. npm 10 cannot install the CLI. Start a new session or thread after installing; only that session has the tools.
+
 ```bash
 npm install -g @taucad/cli@beta
+tau --version
+
+# Claude Code 2.1.292 or later
 claude plugin install tau --marketplace taucad/marketplace
-mkdir bracket && cd bracket
-claude "Model a 40 mm wall bracket with two M4 screw holes in replicad. Write GeoSpec tests for its size and holes, make them pass, and show me a screenshot."
+
+# Codex
+codex plugin marketplace add taucad/marketplace
+codex plugin add tau@taucad
 ```
 
-The same prompt works in `codex` after the Codex install. The agent writes `main.ts` and `main.geospec.ts` with its own file tools, then calls `evaluate_model`, `test_model` and `screenshot` until the model builds and its tests pass. Ask for a STEP file and it calls `export_model`.
+```text
+Model a 40 mm wall bracket with two M4 screw holes in replicad. Write GeoSpec tests for its size and holes, make them pass, and show me a screenshot.
+```
+
+The agent writes `main.ts` and `main.geospec.ts` with its own file tools, then calls `evaluate_model`, `test_model` and `screenshot` until the model builds and its tests pass. Ask for a STEP file and it calls `export_model`.
 
 ## Tools
 

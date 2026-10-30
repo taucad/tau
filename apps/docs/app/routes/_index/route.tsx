@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from 'react';
-import { ArrowRight, Box, Braces, Component, ExternalLink, PanelTop } from 'lucide-react';
+import { ArrowRight, Box, Braces, Component, PanelTop } from 'lucide-react';
 import { Link } from 'react-router';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
@@ -18,34 +18,40 @@ import { baseOptions } from '#lib/fumadocs/layout.shared.js';
 
 const quickStartCommand = 'pnpm add @taucad/runtime @taucad/replicad @taucad/esbuild zod';
 
+const browserExample = 'https://tau.new/s/builtin~replicad.planetary-gear-system';
+
 const buildTasks = [
   {
-    title: 'Render your first model',
-    description: 'Install the runtime, define a kernel, and export geometry from TypeScript.',
-    href: '/runtime/getting-started/quick-start',
-    path: '/runtime/getting-started',
+    title: 'Open a model',
+    description: 'The Replicad planetary-gear example runs in the browser.',
+    href: browserExample,
+    path: 'tau.new',
+    external: true,
     icon: Box,
   },
   {
-    title: 'Choose a CAD kernel',
-    description: 'Match modeling language, geometry type, and deployment target to a kernel.',
-    href: '/runtime/guides/choosing-a-kernel',
-    path: '/runtime/guides',
-    icon: Component,
+    title: 'Install the agent plugin',
+    description: 'Claude Code and Codex, from the taucad/marketplace catalog.',
+    href: '/editor/agent-plugin',
+    path: '/editor/agent-plugin',
+    external: false,
+    icon: PanelTop,
   },
   {
     title: 'Embed the runtime',
-    description: 'Connect browser, Node.js, or Electron hosts through one typed contract.',
-    href: '/runtime/guides/embedding-in-a-host',
-    path: '/runtime/guides',
+    description: 'Install the packages and export a glTF from your own Node program.',
+    href: '/runtime/getting-started/quick-start',
+    path: '/runtime/getting-started',
+    external: false,
     icon: Braces,
   },
   {
-    title: 'Work in the editor',
-    description: 'Learn the browser workspace for AI-assisted parametric modeling.',
-    href: '/editor',
-    path: '/editor',
-    icon: PanelTop,
+    title: 'Choose a kernel',
+    description: 'Browser kernels, desktop Build123d, and PicoGK on macOS arm64 only. Zoo is Pro.',
+    href: '/runtime/guides/choosing-a-kernel',
+    path: '/runtime/guides',
+    external: false,
+    icon: Component,
   },
 ] as const;
 
@@ -83,8 +89,7 @@ const LandingPage = (): React.JSX.Element => {
             </h1>
             <div className='mt-8 grid gap-8 lg:grid-cols-12 lg:items-end'>
               <p className='max-w-2xl text-lg leading-8 text-muted-foreground lg:col-span-7'>
-                Tau is an open-source, next-generation platform for parametric CAD. Describe a part, inspect real
-                geometry, and export anywhere without leaving the browser.
+                Tau is code CAD in the browser. Open an example, check geometry with GeoSpec, and export.
               </p>
               <div className='flex flex-wrap items-center gap-3 lg:col-span-5 lg:justify-end'>
                 <Button
@@ -92,10 +97,10 @@ const LandingPage = (): React.JSX.Element => {
                   size='lg'
                   className='h-11 bg-foreground text-background transition-transform duration-150 hover:bg-foreground/90 motion-reduce:transform-none'
                 >
-                  <Link to='/runtime'>
-                    Read the runtime docs
+                  <a href={browserExample}>
+                    Open the example
                     <ArrowRight aria-hidden />
-                  </Link>
+                  </a>
                 </Button>
                 <Button
                   asChild
@@ -103,10 +108,10 @@ const LandingPage = (): React.JSX.Element => {
                   variant='ghost'
                   className='h-11 transition-transform duration-150 motion-reduce:transform-none'
                 >
-                  <a href='https://github.com/taucad/tau' target='_blank' rel='noreferrer'>
-                    GitHub
-                    <ExternalLink aria-hidden />
-                  </a>
+                  <Link to='/editor/agent-plugin'>
+                    Install the plugin
+                    <ArrowRight aria-hidden />
+                  </Link>
                 </Button>
               </div>
             </div>
@@ -132,12 +137,12 @@ const LandingPage = (): React.JSX.Element => {
         <section className='border-b border-border bg-muted/40'>
           <div className='mx-auto grid w-full max-w-7xl gap-10 px-6 py-20 lg:grid-cols-12 lg:px-10 lg:py-24'>
             <div className='lg:col-span-4'>
-              <p className='font-mono text-xs tracking-widest text-muted-foreground'>START HERE</p>
+              <p className='font-mono text-xs tracking-widest text-muted-foreground'>EMBED</p>
               <h2 className='mt-4 text-3xl leading-tight font-semibold tracking-tight sm:text-4xl'>
-                Install the runtime. Make a part.
+                Add the runtime to your application.
               </h2>
               <p className='mt-5 max-w-md leading-7 text-muted-foreground'>
-                Compose only the runtime, kernel, and bundler packages your application needs.
+                This install is for embedding. The example and the agent plugin are the way into the Tau app.
               </p>
               <Link
                 to='/runtime/getting-started/quick-start'
@@ -200,11 +205,19 @@ const LandingPage = (): React.JSX.Element => {
                   <CardFooter className='border-t border-border px-6 py-4 font-mono text-xs text-muted-foreground'>
                     {task.path}
                   </CardFooter>
-                  <Link
-                    to={task.href}
-                    aria-label={task.title}
-                    className='absolute inset-0 rounded-xl focus-visible:focus-outline'
-                  />
+                  {task.external ? (
+                    <a
+                      href={task.href}
+                      aria-label={task.title}
+                      className='absolute inset-0 rounded-xl focus-visible:focus-outline'
+                    />
+                  ) : (
+                    <Link
+                      to={task.href}
+                      aria-label={task.title}
+                      className='absolute inset-0 rounded-xl focus-visible:focus-outline'
+                    />
+                  )}
                 </Card>
               ))}
             </div>

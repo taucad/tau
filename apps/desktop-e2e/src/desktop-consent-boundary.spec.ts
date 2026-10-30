@@ -67,7 +67,7 @@ test('keeps fresh and returning desktop profiles free of web consent and analyti
     .toMatch(/^https:\/\/docs\.tau\.new\/?$/u);
 
   await page.goto('app://tau/community', { waitUntil: 'domcontentloaded' });
-  await expectVisible(page.getByText('Community', { exact: true }).first(), 60_000);
+  await expectVisible(page.getByText('Examples', { exact: true }).first(), 60_000);
   await expectDesktopSurfaceBoundary(session);
 
   await page.goto('app://tau/projects/new', { waitUntil: 'domcontentloaded' });

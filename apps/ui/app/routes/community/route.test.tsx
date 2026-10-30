@@ -119,14 +119,14 @@ describe('Community route', () => {
   it('should name the document and describe the gallery', () => {
     const tags = meta({} as Parameters<typeof meta>[0]);
 
-    expect(tags).toContainEqual({ title: 'Community · Tau' });
+    expect(tags).toContainEqual({ title: 'Examples · Tau' });
     expect(tags).toContainEqual(expect.objectContaining({ name: 'description' }));
   });
 
   it('should lead the unfiltered first page with the featured card, a status and the kernel shelf', () => {
     renderCommunity();
 
-    expect(screen.getByRole('heading', { level: 1, name: 'Community' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'Examples' })).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('25 examples');
     expect(screen.getAllByRole('listitem')).toHaveLength(20);
     expect(screen.getAllByRole('listitem')[0]).toHaveClass('col-span-2', 'lg:row-span-2');

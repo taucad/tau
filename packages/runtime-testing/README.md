@@ -180,7 +180,7 @@ Apache-2.0 — see [LICENSE](./LICENSE).
 
 ## Links
 
-- [Documentation](https://tau.new/docs/runtime/api/testing)
+- [Documentation](https://docs.tau.new/runtime/api/testing)
 - [Source](https://github.com/taucad/tau/tree/main/packages/runtime-testing)
 - [Changelog](https://github.com/taucad/tau/blob/main/packages/runtime-testing/CHANGELOG.md)
 - [Issues](https://github.com/taucad/tau/issues)

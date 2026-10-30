@@ -136,7 +136,7 @@ documentation prose is excluded.
 
 ## Links
 
-- Documentation: <https://tau.new/docs>
+- Documentation: <https://docs.tau.new>
 - Source: <https://github.com/taucad/tau/tree/main/packages/skills>
 - Changelog: [`CHANGELOG.md`](./CHANGELOG.md)
 - Issues: <https://github.com/taucad/tau/issues>

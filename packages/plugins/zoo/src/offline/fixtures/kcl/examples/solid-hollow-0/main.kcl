@@ -1,0 +1,26 @@
+// Make two cubes, utterly identical,
+// except that one (left) is hollowed out,
+// and the other one (right) isn't.
+width = 2
+solidCube = startSketchOn(-XZ)
+  |> startProfile(at = [-width, width])
+  |> line(end = [width, 0])
+  |> line(end = [0, -width])
+  |> line(end = [-width, 0])
+  |> close()
+  |> extrude(length = width, symmetric = true)
+
+hollowCube = clone(solidCube)
+  |> hollow(thickness = 0.25)
+  |> translate(x = width * 1.1)
+
+// Make a tool that spans the top half of both cubes,
+// so we can cut open the cubes and look at their insides.
+tool = startSketchOn(offsetPlane(XY, offset = width))
+  |> startProfile(at = [0, width])
+  |> line(end = [width * 3, 0])
+  |> line(end = [0, -width * 2])
+  |> line(end = [-width * 3, 0])
+  |> close()
+  |> extrude(length = width, symmetric = true)
+subtract([solidCube, hollowCube], tools = tool)

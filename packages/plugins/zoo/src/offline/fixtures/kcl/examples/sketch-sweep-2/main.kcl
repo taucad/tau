@@ -1,0 +1,25 @@
+// Sweep two sketches along the same path.
+
+sketch001 = startSketchOn(XY)
+rectangleSketch = startProfile(sketch001, at = [-200, 23.86])
+    |> angledLine(angle = 0, length = 73.47, tag = $rectangleSegmentA001)
+    |> angledLine(
+        angle = segAng(rectangleSegmentA001) - 90deg,
+        length = 50.61,
+    )
+    |> angledLine(
+        angle = segAng(rectangleSegmentA001),
+        length = -segLen(rectangleSegmentA001),
+    )
+    |> line(endAbsolute = [profileStartX(%), profileStartY(%)])
+    |> close()
+
+circleSketch = circle(sketch001, center = [200, -30.29], radius = 32.63)
+
+sketch002 = startSketchOn(YZ)
+sweepPath = startProfile(sketch002, at = [0, 0])
+    |> yLine(length = 231.81)
+    |> tangentialArc(radius = 80, angle = -90deg)
+    |> xLine(length = 384.93)
+
+sweep([rectangleSketch, circleSketch], path = sweepPath)

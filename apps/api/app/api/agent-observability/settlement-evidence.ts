@@ -5,9 +5,10 @@ import type { TerminalReceipt } from '#api/billing/credit-ledger.types.js';
 import type { SourceProtection } from '#api/agent-observability/evidence-admission.js';
 import { evidenceRetentionMilliseconds } from '#api/agent-observability/evidence-admission.js';
 import type { AttemptAuthority } from '#api/agent-observability/model-invocation-evidence.js';
+import { executionOfAttempt } from '#api/agent-observability/model-invocation-evidence.js';
 
 /** Bumped whenever the facts written for the same settlement change. */
-export const apiSettlementMapper = 'api-settlement-v1';
+export const apiSettlementMapper = 'api-settlement-v2';
 
 type FinancialFact = Extract<Evidence['payload'], { plane: 'summary' }>['fact'] & { kind: 'financial' };
 
@@ -25,6 +26,14 @@ export type ObservedSettlement = Readonly<{
 /** One credit atom is one micro-USD; supplier cost is in pico-USD. */
 const atomsPerUsd = 1_000_000;
 const picoPerUsd = 1_000_000_000_000;
+
+/**
+ * The credits a settlement fact reports for what the ledger charged.
+ *
+ * @param atoms - Charged credit atoms.
+ * @returns Credits, in USD.
+ */
+export const creditsOfAtoms = (atoms: bigint): number => Number(atoms) / atomsPerUsd;
 
 /**
  * The API-reported financial fact of one settled funded operation (blueprint
@@ -45,8 +54,9 @@ export const settlementEvidence = async (
   authority: AttemptAuthority & Readonly<{ project: string }>,
 ): Promise<Evidence> => {
   const { operation, receipt } = settlement;
-  const [invocation, chat, ledger, attempt, tariff, normalization] = await Promise.all([
+  const [invocation, execution, chat, ledger, attempt, tariff, normalization] = await Promise.all([
     contractId('inv', operation.attemptKey),
+    executionOfAttempt(operation.attemptKey),
     operation.chatHint === null ? undefined : contractId('chat', operation.chatHint),
     contractId('ledger', `${operation.id}:${receipt.terminalRevision}`),
     contractId('op', operation.id),
@@ -58,7 +68,7 @@ export const settlementEvidence = async (
     kind: 'financial',
     ledger,
     attempt,
-    credits: Number(receipt.chargedAtoms) / atomsPerUsd,
+    credits: creditsOfAtoms(receipt.chargedAtoms),
     tariff,
     supplierCost: receipt.supplierCostPicoUsd === null ? null : Number(receipt.supplierCostPicoUsd) / picoPerUsd,
     currency: 'USD',
@@ -77,7 +87,7 @@ export const settlementEvidence = async (
     delivery: { uploader: 'api', attempt: 'api-1', cursor: { view: 'own', origin: 'api', position: ledger } },
     scope: { principal, project: authority.project, policyEpoch: authority.policyEpoch, destination: 'langfuse' },
     run,
-    execution: { attempt: invocation, resumedFrom: null, branchedFrom: null },
+    execution: { attempt: execution, resumedFrom: null, branchedFrom: null },
     versions: {
       hostBuild: null,
       apiBuild: null,

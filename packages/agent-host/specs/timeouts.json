@@ -1062,6 +1062,14 @@
       "owner": "desktop-bash-terminal W3"
     },
     {
+      "id": "SHELL-DRAIN-TIMEOUT",
+      "bound": "2-second bound on waiting for output readers after an unconfirmed cleanup",
+      "site": "packages/host/src/shell/shell-service.ts",
+      "token": "setTimeout(resolve, milliseconds)",
+      "class": "External edge",
+      "owner": "desktop-bash-terminal W3"
+    },
+    {
       "id": "TERMINAL-ADMISSION-WAIT",
       "bound": "5-second bound (terminalAdmissionMilliseconds) on main admitting a Terminal start's project root to the trusted-root allowlist; each wait ends on the next allowlist change, the connection ending, or the bound, after which the start is refused project-not-admitted",
       "site": "apps/desktop/src/tau/services-host.terminal.ts",

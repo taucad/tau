@@ -4,7 +4,10 @@ import { editorSurfaceTheme } from '#components/code/editor-surface-theme.js';
 import '@vscode/codicons/dist/codicon.css';
 import '#components/code/code-editor.css';
 import { renderCompletionIcon } from '#components/code/editor-completion-icon.js';
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { definitionNavigation, goToDefinition, hasDefinitionProvider } from '#components/code/editor-definition.js';
+import { availableLanguageActions, languageFeatureNavigation } from '#components/code/editor-language-features.js';
+import type { AvailableLanguageAction } from '#components/code/editor-language-features.js';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { EditorState, Compartment, Prec } from '@codemirror/state';
 import type { ViewUpdate } from '@codemirror/view';
 import {
@@ -18,7 +21,6 @@ import {
   keymap,
   lineNumbers,
   rectangularSelection,
-  runScopeHandlers,
   tooltips,
 } from '@codemirror/view';
 import {
@@ -49,10 +51,19 @@ import { jsonDepthHighlighting } from '#components/code/json-depth-highlighting.
 import type { CodeEditorProps } from '#components/code/code-editor.client.js';
 import type { DocumentChange, EditorDocument, TextChange } from '#lib/editor-document.js';
 
+/** Navigation commands sit with Go to Definition; the rest (rename, format, fixes) get their own group. */
+const navigationActions = new Set([
+  'typeDefinition',
+  'implementation',
+  'references',
+  'callHierarchy',
+  'documentSymbols',
+  'workspaceSymbols',
+]);
+
 type ViewPosition = Readonly<{ anchor: number; head: number; scrollTop: number; scrollLeft: number }>;
 const rememberedPositions = new WeakMap<EditorDocument, Map<string, ViewPosition>>();
 const maxRememberedViewsPerDocument = 32;
-const typeScriptLanguages = new Set(['typescript', 'typescriptreact', 'javascript', 'javascriptreact']);
 
 function rememberViewPosition(document: EditorDocument, viewId: string, view: EditorView): void {
   const positions = rememberedPositions.get(document) ?? new Map<string, ViewPosition>();
@@ -114,12 +125,12 @@ const editorTheme = EditorView.theme({
     fontFamily: 'var(--font-sans)',
   },
   '.cm-tooltip': { zIndex: '50', pointerEvents: 'auto' },
-  '.cm-typescript-hover, .cm-typescript-signature, .cm-typescript-references': {
+  '.cm-typescript-hover, .cm-signature-help': {
     maxWidth: 'min(36rem, 80vw)',
     padding: '0.5rem 0.75rem',
     color: 'var(--popover-foreground)',
   },
-  '.cm-typescript-inlay-hint': {
+  '.cm-typescript-inlay-hint, .cm-kcl-inlay-hint': {
     marginInline: '0.25rem',
     color: 'var(--muted-foreground)',
     fontSize: '0.9em',
@@ -191,6 +202,8 @@ export function CodeEditorView({
   const historyRef = useRef<{ kind: 'typing' | 'composition'; groupId: string; at: number } | undefined>(undefined);
   const historySequence = useRef(0);
   const markedFirstEdit = useRef(false);
+  const [canGoToDefinition, setCanGoToDefinition] = useState(false);
+  const [languageActions, setLanguageActions] = useState<readonly AvailableLanguageAction[]>([]);
   useEffect(() => {
     callbacksRef.current = { onApply, onHistory, onMount, readOnly };
   }, [onApply, onHistory, onMount, readOnly]);
@@ -240,6 +253,8 @@ export function CodeEditorView({
           diagnostics ? linter(() => diagnostics.get(document.uri).get('kernel') ?? [], { delay: 100 }) : [],
           syntaxHighlighting(editorHighlightStyle, { fallback: true }),
           tooltips({ parent: overlay, position: 'fixed' }),
+          definitionNavigation(),
+          languageFeatureNavigation(),
           Prec.highest(
             keymap.of([
               { key: 'Mod-z', run: () => applyHistory('undo') },
@@ -460,16 +475,16 @@ export function CodeEditorView({
       viewRef.current?.focus();
     }
   };
-  const runTypeDefinition = (): void => {
-    const view = viewRef.current;
-    if (view) {
-      view.focus();
-      runScopeHandlers(view, new KeyboardEvent('keydown', { key: 'F12', code: 'F12', altKey: true }), 'editor');
-    }
-  };
 
   return (
-    <ContextMenu>
+    <ContextMenu
+      onOpenChange={(open) => {
+        if (open) {
+          setCanGoToDefinition(viewRef.current ? hasDefinitionProvider(viewRef.current.state) : false);
+          setLanguageActions(viewRef.current ? availableLanguageActions(viewRef.current.state) : []);
+        }
+      }}
+    >
       <ContextMenuTrigger className='contents'>
         <div ref={hostRef} className={cn('editor-container ph-no-capture size-full overflow-hidden', className)} />
       </ContextMenuTrigger>
@@ -512,9 +527,42 @@ export function CodeEditorView({
         >
           Go to Line
         </ContextMenuItem>
-        {typeScriptLanguages.has(languageId) && extensions !== undefined && (
-          <ContextMenuItem onSelect={runTypeDefinition}>Go to Type Definition</ContextMenuItem>
+        {canGoToDefinition && (
+          <ContextMenuItem
+            onSelect={() => {
+              runCommand(goToDefinition);
+            }}
+          >
+            Go to Definition
+          </ContextMenuItem>
         )}
+        {languageActions
+          .filter((action) => navigationActions.has(action.id))
+          .map((action) => (
+            <ContextMenuItem
+              key={action.id}
+              disabled={action.disabled}
+              onSelect={() => {
+                runCommand(action.run);
+              }}
+            >
+              {action.label}
+            </ContextMenuItem>
+          ))}
+        {languageActions.some((action) => !navigationActions.has(action.id)) && <ContextMenuSeparator />}
+        {languageActions
+          .filter((action) => !navigationActions.has(action.id))
+          .map((action) => (
+            <ContextMenuItem
+              key={action.id}
+              disabled={action.disabled}
+              onSelect={() => {
+                runCommand(action.run);
+              }}
+            >
+              {action.label}
+            </ContextMenuItem>
+          ))}
         <ContextMenuSeparator />
         <ContextMenuItem
           disabled={readOnly}

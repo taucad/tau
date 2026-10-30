@@ -1,0 +1,2 @@
+offsetPlane(XZ, offset = 4mm)
+|> appearance(color = "#ff0000", opacity = 50)

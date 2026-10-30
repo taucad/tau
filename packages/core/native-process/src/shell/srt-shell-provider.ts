@@ -14,6 +14,7 @@ import { closeSync, existsSync, mkdtempSync, realpathSync, rmSync } from 'node:f
 import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative } from 'node:path';
 import { createInterface } from 'node:readline';
+import type { Readable, Writable } from 'node:stream';
 import { ReadStream } from 'node:tty';
 import { fileURLToPath } from 'node:url';
 
@@ -26,8 +27,10 @@ import {
   sandboxRuntimeSeccomp,
 } from '#native-sandbox.js';
 import { terminateOwnedProcesses, trackDescendants } from '#shell/process-tree.js';
+import type { ProcessRow } from '#shell/process-tree.js';
 import { bindMaskedDirectories, maskProblem } from '#shell/shell-project-mask.js';
 import { shellBaselineDenied } from '#shell/shell-baseline.js';
+import { createShellCustody } from '#shell/shell-custody.js';
 import { refusedShellEnvironment } from '#shell/shell-environment.js';
 import { holdProtectedStandIns, useStandInJournal } from '#shell/shell-stand-ins.js';
 import type { StandInProfile } from '#shell/shell-stand-ins.js';
@@ -39,6 +42,13 @@ import type {
   ShellProvider,
   ShellTerminalSize,
 } from '#shell/shell-provider.js';
+import {
+  abandonStartBarrier,
+  createTerminalStartGate,
+  openStartBarrier,
+  stagedStartArguments,
+  stagedTerminalStartArguments,
+} from '#shell/shell-start-barrier.js';
 import type { SupervisorControl, SupervisorJob, SupervisorReply } from '#shell/srt-supervisor.js';
 
 /**
@@ -115,6 +125,14 @@ export type SandboxShellProviderOptions = Readonly<{
   loadPty?: () => Promise<PtyBinding>;
   /** How long a supervisor may take to answer. */
   startupMilliseconds?: number;
+  /** The process table cleanup confirms against; injectable only to exercise unconfirmed cleanup. */
+  processTable?: () => Promise<readonly ProcessRow[]>;
+  /**
+   * Where this provider keeps its durable execution receipts and locks (I7), and the one parent its launches' private
+   * roots may live in. Defaults to a per-user directory under the system temporary directory and that directory's
+   * parent; a host with application data passes a directory there, so receipts survive until recovery.
+   */
+  custody?: Readonly<{ directory: string; sessionDirectory: string }>;
   /**
    * On Linux, a file under host-owned state (never inside a checkout) journalling the stand-ins this process holds, so
    * the next start sweeps the ones a crash left behind.
@@ -335,10 +353,15 @@ export const bindOwnPty = (argv: readonly string[]): readonly string[] | undefin
 };
 
 type Supervisor = Readonly<{
+  /** The supervisor's own process, registered with the launch's custody. */
+  pid: number;
   reply: SupervisorReply;
   /** Hand the supervisor the launch's process group, which it kills if this process dies before releasing it. */
   own: (group: number) => void;
+  /** An orderly release after confirmed stop. */
   close: () => Promise<void>;
+  /** Close the channel without asserting release: the supervisor kills its retained group before it exits. */
+  abandon: () => Promise<void>;
 }>;
 
 /**
@@ -349,11 +372,44 @@ type Supervisor = Readonly<{
 const createRuntimeDirectory = (): string | undefined =>
   process.platform === 'linux' ? mkdtempSync(join(tmpdir(), 'tau-shell-runtime-')) : undefined;
 
+/**
+ * The output streams of a child spawned with an extra descriptor, whose typings no longer promise them.
+ *
+ * @param child - A child whose standard output and error are pipes.
+ * @returns Its two output streams.
+ */
+const outputsOf = (child: ChildProcess): Readonly<{ stdout: Readable; stderr: Readable }> => {
+  const { stdout, stderr } = child;
+  if (stdout === null || stderr === null) {
+    throw new Error('A launch process is missing an output stream.');
+  }
+  return { stdout, stderr };
+};
+
+/**
+ * The standard streams of a supervisor, spawned with its custody lock as an extra descriptor.
+ *
+ * @param child - A child whose first three descriptors are pipes.
+ * @returns Its three standard streams.
+ */
+const pipesOf = (child: ChildProcess): Readonly<{ stdin: Writable; stdout: Readable; stderr: Readable }> => {
+  const { stdin } = child;
+  if (stdin === null) {
+    throw new Error('A launch process is missing its input stream.');
+  }
+  return { stdin, ...outputsOf(child) };
+};
+
 const startSupervisor = async (
   job: SupervisorJob,
   options: SandboxShellProviderOptions,
-  runtimeDirectory: string | undefined,
+  launch: Readonly<{
+    runtimeDirectory: string | undefined;
+    /** The execution's custody lock: the supervisor inherits it as descriptor 3 and keeps it until it exits. */
+    lock: number;
+  }>,
 ): Promise<Supervisor> => {
+  const { runtimeDirectory, lock } = launch;
   const { executablePath, arguments: supervisorArguments } = options.supervisor ?? defaultSupervisor();
   const temporaryDirectory = runtimeDirectory ?? process.env['TMPDIR'];
   const child = spawn(executablePath, supervisorArguments, {
@@ -370,10 +426,11 @@ const startSupervisor = async (
     /* eslint-enable @typescript-eslint/naming-convention -- camelCase names resume. */
     shell: false,
     windowsHide: true,
-    stdio: ['pipe', 'pipe', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe', lock],
   });
+  const { stdin, stdout, stderr } = pipesOf(child);
   let diagnostics = '';
-  child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
+  stderr.setEncoding('utf8').on('data', (chunk: string) => {
     diagnostics = (diagnostics + chunk).slice(-4096);
   });
   const exited = new Promise<void>((resolve) => {
@@ -381,18 +438,18 @@ const startSupervisor = async (
       resolve();
     });
   });
-  child.stdin.on('error', () => undefined);
+  stdin.on('error', () => undefined);
   const own = (group: number): void => {
-    if (group > 0 && child.stdin.writable) {
-      child.stdin.write(`${JSON.stringify({ own: group } satisfies SupervisorControl)}\n`);
+    if (group > 0 && stdin.writable) {
+      stdin.write(`${JSON.stringify({ own: group } satisfies SupervisorControl)}\n`);
     }
   };
-  const close = async (): Promise<void> => {
+  const finish = async (released: boolean): Promise<void> => {
     /* An orderly release: the launch's tree is already gone, so the supervisor has nothing to kill. */
-    if (child.stdin.writable) {
-      child.stdin.write(`${JSON.stringify({ released: true } satisfies SupervisorControl)}\n`);
+    if (released && stdin.writable) {
+      stdin.write(`${JSON.stringify({ released: true } satisfies SupervisorControl)}\n`);
     }
-    child.stdin.end();
+    stdin.end();
     const timer = setTimeout(() => child.kill('SIGKILL'), terminationMilliseconds);
     await exited;
     clearTimeout(timer);
@@ -400,8 +457,8 @@ const startSupervisor = async (
       rmSync(runtimeDirectory, { recursive: true, force: true });
     }
   };
-  child.stdin.write(`${JSON.stringify(job)}\n`);
-  const lines = createInterface({ input: child.stdout });
+  stdin.write(`${JSON.stringify(job)}\n`);
+  const lines = createInterface({ input: stdout });
   const reply = await new Promise<SupervisorReply>((resolve) => {
     const timer = setTimeout(() => {
       resolve({ status: 'unavailable', message: 'the sandbox supervisor did not answer in time.' });
@@ -426,7 +483,13 @@ const startSupervisor = async (
       });
     });
   });
-  return { reply, own, close };
+  return {
+    pid: child.pid ?? -1,
+    reply,
+    own,
+    close: async () => finish(true),
+    abandon: async () => finish(false),
+  };
 };
 
 /** How long an emptied stream may stay quiet after termination before it is closed. */
@@ -556,6 +619,21 @@ const queueStream = (stream: NodeJS.ReadableStream & { destroy: () => void }, id
   return queue;
 };
 
+/** Who owns one started launch's cleanup: its supervisor, and the process table cleanup confirms against. */
+type LaunchOwner = Readonly<{
+  supervisor: Supervisor;
+  table: (() => Promise<readonly ProcessRow[]>) | undefined;
+}>;
+
+/** Await a promise whose failure another path reports. */
+const quietly = async (promise: Promise<unknown>): Promise<void> => {
+  try {
+    await promise;
+  } catch {
+    /* Reported where `exited` settles. */
+  }
+};
+
 type Started = Readonly<{
   pid: number;
   exited: Promise<ShellExit>;
@@ -564,47 +642,65 @@ type Started = Readonly<{
 
 /**
  * Wrap one started launch: termination on exit, abort or disposal, then supervisor release, then settlement.
+ *
+ * `exited` resolves only once every owned process is confirmed gone. An unreadable process table or a survivor
+ * rejects it instead (I7): readers still end, but the supervisor is not told the launch ended in order, so it kills
+ * its retained group as it exits, and the caller keeps the launch's roots and custody.
  */
 const settle = (
   started: Started,
-  supervisor: Supervisor,
+  { supervisor, table }: LaunchOwner,
   signal: AbortSignal,
 ): Pick<ShellProcess, 'exited' | 'terminate' | typeof Symbol.asyncDispose> => {
-  const tracker = process.platform === 'darwin' ? trackDescendants(started.pid) : undefined;
+  const tracker = process.platform === 'darwin' ? trackDescendants(started.pid, table) : undefined;
   supervisor.own(started.pid);
   let terminating: Promise<void> | undefined;
   const stopTree = async (): Promise<void> => {
     terminating ??= (async () => {
-      await terminateOwnedProcesses({
-        root: started.pid,
-        group: started.pid,
-        deadlineMilliseconds: terminationMilliseconds,
-        ...(tracker === undefined ? {} : { table: tracker.table }),
-      });
-      await tracker?.stop();
+      let survivors: readonly number[];
+      try {
+        survivors = await terminateOwnedProcesses({
+          root: started.pid,
+          group: started.pid,
+          deadlineMilliseconds: terminationMilliseconds,
+          ...(tracker === undefined ? (table === undefined ? {} : { table }) : { table: tracker.table }),
+        });
+      } catch (error) {
+        throw new Error(
+          `Cleanup could not confirm that every owned process stopped: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
+        );
+      } finally {
+        await tracker?.stop();
+      }
+      if (survivors.length > 0) {
+        throw new Error(`Owned processes survived termination: ${survivors.join(', ')}.`);
+      }
     })();
     await terminating;
   };
   const exited = (async (): Promise<ShellExit> => {
     const onAbort = (): void => {
-      void stopTree();
+      void quietly(stopTree());
     };
     signal.addEventListener('abort', onAbort, { once: true });
+    let confirmed = false;
     try {
       const exit = await started.exited;
       await stopTree();
+      confirmed = true;
       return exit;
     } finally {
       signal.removeEventListener('abort', onAbort);
       started.release();
-      await supervisor.close();
+      await (confirmed ? supervisor.close() : supervisor.abandon());
     }
   })();
   if (signal.aborted) {
-    void stopTree();
+    void quietly(stopTree());
   }
   const terminate = async (): Promise<ShellExit> => {
-    await stopTree();
+    await quietly(stopTree());
     return exited;
   };
   return {
@@ -647,34 +743,54 @@ const hostBound = (argv: readonly string[], bwrapPath: string): readonly string[
     ? [argv[0]!, '-c', `exec ${argv[2]!}`]
     : argv;
 
-const startPipes = (argv: readonly string[], launch: ShellLaunch, supervisor: Supervisor): ShellProcess => {
-  const child = spawn(argv[0]!, argv.slice(1), {
+/**
+ * A launch spawned behind its start barrier (I7): the staged root runs nothing until `open`, and `abandon` makes it
+ * exit without executing the workload.
+ */
+type Staged = Readonly<{
+  process: ShellProcess;
+  root: number;
+  open: () => Promise<void>;
+  abandon: () => void;
+}>;
+
+const startPipes = (argv: readonly string[], launch: ShellLaunch, owner: LaunchOwner): Staged => {
+  const [executable, ...rest] = stagedStartArguments(argv);
+  const child = spawn(executable!, rest, {
     cwd: launch.workingDirectory,
     env: wrapperEnvironment(launch),
     detached: true,
     shell: false,
     windowsHide: true,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
   });
-  const stdout = queueStream(child.stdout, { commandId: launch.commandId, stream: 'stdout' });
-  const stderr = queueStream(child.stderr, { commandId: launch.commandId, stream: 'stderr' });
+  const pipes = outputsOf(child);
+  const stdout = queueStream(pipes.stdout, { commandId: launch.commandId, stream: 'stdout' });
+  const stderr = queueStream(pipes.stderr, { commandId: launch.commandId, stream: 'stderr' });
   const settled = settle(
     {
       pid: child.pid ?? -1,
       exited: exitOf(child),
       release: () => {
         stdout.finish(() => {
-          child.stdout.destroy();
+          pipes.stdout.destroy();
         });
         stderr.finish(() => {
-          child.stderr.destroy();
+          pipes.stderr.destroy();
         });
       },
     },
-    supervisor,
+    owner,
     launch.signal,
   );
-  return { kind: 'pipes', stdout: stdout.iterable, stderr: stderr.iterable, ...settled };
+  return {
+    process: { kind: 'pipes', stdout: stdout.iterable, stderr: stderr.iterable, ...settled },
+    root: child.pid ?? -1,
+    open: async () => openStartBarrier(child),
+    abandon: () => {
+      abandonStartBarrier(child);
+    },
+  };
 };
 
 /** One terminal start: the wrapped vector, the launch, its first size and the supervisor holding its profile. */
@@ -682,21 +798,22 @@ type TerminalStart = Readonly<{
   argv: readonly string[];
   launch: ShellLaunch;
   size: ShellTerminalSize;
-  supervisor: Supervisor;
+  owner: LaunchOwner;
 }>;
 
 const startLinuxTerminal = (
-  { argv, launch, size, supervisor }: TerminalStart,
+  { argv, launch, size, owner }: TerminalStart,
   native: NonNullable<PtyBinding['native']>,
-): ShellProcess => {
+): Staged => {
   /* Opened here, so no process outside the sandbox takes it as its controlling terminal; `setsid --ctty` inside does. */
   const pty = native.open(size.columns, size.rows);
-  const child = spawn(argv[0]!, argv.slice(1), {
+  const [executable, ...rest] = stagedStartArguments(argv);
+  const child = spawn(executable!, rest, {
     cwd: launch.workingDirectory,
     env: wrapperEnvironment(launch),
     detached: true,
     shell: false,
-    stdio: [pty.slave, pty.slave, pty.slave],
+    stdio: [pty.slave, pty.slave, pty.slave, 'pipe'],
   });
   closeSync(pty.slave);
   const master = new ReadStream(pty.master);
@@ -711,29 +828,43 @@ const startLinuxTerminal = (
         });
       },
     },
-    supervisor,
+    owner,
     launch.signal,
   );
   return {
-    kind: 'terminal',
-    output: queue.iterable,
-    write: (bytes) => {
-      master.write(bytes);
+    process: {
+      kind: 'terminal',
+      output: queue.iterable,
+      write: (bytes) => {
+        master.write(bytes);
+      },
+      resize: ({ columns, rows }) => {
+        native.resize(pty.master, columns, rows);
+      },
+      ...settled,
     },
-    resize: ({ columns, rows }) => {
-      native.resize(pty.master, columns, rows);
+    root: child.pid ?? -1,
+    open: async () => openStartBarrier(child),
+    abandon: () => {
+      abandonStartBarrier(child);
     },
-    ...settled,
   };
 };
 
-const startMacTerminal = ({ argv, launch, size, supervisor }: TerminalStart, binding: PtyBinding): ShellProcess => {
-  const terminal = binding.spawn(argv[0]!, argv.slice(1), {
+/*
+ * Because node-pty cannot pass a descriptor 3, the macOS barrier travels over the session's own PTY: the staged wrapper reads
+ * one gate line with echo off. Nothing the PTY printed before the wrapper's start marker reaches the person, and the
+ * host writes nothing but the gate before the barrier opens (the process is returned only after it opened).
+ */
+const startMacTerminal = ({ argv, launch, size, owner }: TerminalStart, binding: PtyBinding): Staged => {
+  const gate = createTerminalStartGate();
+  const [executable, ...rest] = stagedTerminalStartArguments(argv);
+  const terminal = binding.spawn(executable!, rest, {
     name: launch.environment['TERM'] ?? 'xterm-256color',
     cols: size.columns,
     rows: size.rows,
     cwd: launch.workingDirectory,
-    env: wrapperEnvironment(launch),
+    env: { ...wrapperEnvironment(launch), ...gate.environment },
     encoding: null,
   });
   const queue = byteQueue(
@@ -746,7 +877,10 @@ const startMacTerminal = ({ argv, launch, size, supervisor }: TerminalStart, bin
     { commandId: launch.commandId, stream: 'pty' },
   );
   terminal.onData((data) => {
-    queue.push(typeof data === 'string' ? Buffer.from(data, 'utf8') : data);
+    const passed = gate.pass(typeof data === 'string' ? new Uint8Array(Buffer.from(data, 'utf8')) : data);
+    if (passed !== undefined) {
+      queue.push(passed);
+    }
   });
   const exited = new Promise<ShellExit>((resolve) => {
     terminal.onExit(({ exitCode, signal }) => {
@@ -763,19 +897,30 @@ const startMacTerminal = ({ argv, launch, size, supervisor }: TerminalStart, bin
         });
       },
     },
-    supervisor,
+    owner,
     launch.signal,
   );
   return {
-    kind: 'terminal',
-    output: queue.iterable,
-    write: (bytes) => {
-      terminal.write(Buffer.from(bytes));
+    process: {
+      kind: 'terminal',
+      output: queue.iterable,
+      write: (bytes) => {
+        terminal.write(Buffer.from(bytes));
+      },
+      resize: ({ columns, rows }) => {
+        terminal.resize(columns, rows);
+      },
+      ...settled,
     },
-    resize: ({ columns, rows }) => {
-      terminal.resize(columns, rows);
+    root: terminal.pid,
+    open: async () => {
+      gate.open((line) => {
+        terminal.write(Buffer.from(line, 'utf8'));
+      });
     },
-    ...settled,
+    abandon: () => {
+      terminal.kill('SIGKILL');
+    },
   };
 };
 
@@ -819,20 +964,6 @@ const admit = (launch: ShellLaunch, options: SandboxShellProviderOptions): Shell
   return undefined;
 };
 
-/**
- * Create the macOS and Linux shell provider.
- *
- * @public
- * @param options - Supervisor, prerequisite paths and the macOS Terminal flag.
- * @returns A provider; each launch is fully contained or refused.
- */
-export const createSandboxShellProvider = (options: SandboxShellProviderOptions = {}): ShellProvider => {
-  if (process.platform === 'linux' && options.standInJournal !== undefined) {
-    useStandInJournal(options.standInJournal);
-  }
-  return createProvider(options);
-};
-
 /** The runtime lists a hold is computed from: exactly those of the profile, plus the grant's directory rows and masks. */
 const standInProfile = (profile: Record<string, unknown>, launch: ShellLaunch): StandInProfile => {
   const { denyWrite, allowWrite } = profile['filesystem'] as Readonly<{
@@ -848,27 +979,35 @@ const standInProfile = (profile: Record<string, unknown>, launch: ShellLaunch): 
   };
 };
 
-const createProvider = (options: SandboxShellProviderOptions): ShellProvider => ({
-  name: 'srt-0.0.75',
-  launch: async (launch) => {
-    launch.signal.throwIfAborted();
-    const refusal = admit(launch, options);
-    if (refusal !== undefined) {
-      return refusal;
-    }
-    let binding: PtyBinding | undefined;
-    if (launch.stdio.kind === 'terminal') {
-      try {
-        binding = await (options.loadPty ?? defaultLoadPty)();
-      } catch (error) {
-        return {
-          status: 'sandbox-unavailable',
-          message: `node-pty could not load: ${error instanceof Error ? error.message : String(error)}`,
-        };
-      }
-      if (process.platform === 'linux' && binding.native === null) {
-        return { status: 'sandbox-unavailable', message: 'node-pty has no POSIX binding on this host.' };
-      }
+/** The default custody namespace: per user, beside the default private-root parent. */
+const defaultCustody = (): Readonly<{ directory: string; sessionDirectory: string }> => ({
+  directory: join(tmpdir(), `tau-shell-custody-${String(process.getuid?.() ?? 0)}`),
+  sessionDirectory: tmpdir(),
+});
+
+/**
+ * Create the macOS and Linux shell provider.
+ *
+ * Every launch is prepared first (I7): its durable receipt and exclusive lock exist before any process. The launch's
+ * supervisor inherits the lock, the shell starts behind a start barrier, and the barrier opens only after the
+ * supervisor and the staged root are durably registered and this process has handed its copy of the lock away. Once
+ * `exited` settles the supervisor has exited, so {@link ShellProvider.recover} can claim the stopped receipt.
+ *
+ * @public
+ * @param options - Supervisor, prerequisite paths, custody namespace and the macOS Terminal flag.
+ * @returns A provider; each launch is fully contained or refused.
+ */
+export const createSandboxShellProvider = (options: SandboxShellProviderOptions = {}): ShellProvider => {
+  if (process.platform === 'linux' && options.standInJournal !== undefined) {
+    useStandInJournal(options.standInJournal);
+  }
+  const custody = createShellCustody(options.custody ?? defaultCustody());
+  const stage = async (launch: ShellLaunch, binding: PtyBinding | undefined): Promise<ShellLaunchOutcome> => {
+    let lock: number;
+    try {
+      lock = custody.descriptor(launch.executionId);
+    } catch {
+      return { status: 'sandbox-unavailable', message: 'This launch was not prepared, so nothing started.' };
     }
     // The runtime also masks its own mandatory names relative to the supervisor's working directory. The supervisor
     // runs in its private runtime directory; a host that itself runs inside a writable root is refused as well.
@@ -923,7 +1062,7 @@ const createProvider = (options: SandboxShellProviderOptions): ShellProvider => 
           guard: launch.network.domains.length > 0,
         },
         options,
-        runtimeDirectory,
+        { runtimeDirectory, lock },
       );
     } catch (error) {
       releaseStandIns();
@@ -959,23 +1098,69 @@ const createProvider = (options: SandboxShellProviderOptions): ShellProvider => 
       };
     }
     const argv = hostBound(maskedArgv, options.bwrapPath ?? '/usr/bin/bwrap');
+    const owner: LaunchOwner = { supervisor, table: options.processTable };
+    let staged: Staged;
     if (launch.stdio.kind === 'pipes') {
-      return { status: 'started', process: startPipes(argv, launch, supervisor) };
+      staged = startPipes(argv, launch, owner);
+    } else if (process.platform === 'linux') {
+      staged = startLinuxTerminal({ argv, launch, size: launch.stdio.size, owner }, binding!.native!);
+    } else {
+      const bound = bindOwnPty(argv);
+      if (bound === undefined) {
+        await supervisor.close();
+        return {
+          status: 'sandbox-unavailable',
+          message: 'the Seatbelt profile could not be bound to the session PTY.',
+        };
+      }
+      staged = startMacTerminal({ argv: bound, launch, size: launch.stdio.size, owner }, binding!);
     }
-    if (process.platform === 'linux') {
+    /*
+     * The staged root is owned by the supervisor (`settle` hands it over) before registration: if this process dies
+     * now, the root never ran anything and the supervisor still stops it. A failure here abandons the barrier; an
+     * unconfirmed stop of the staged root rejects the launch, and the caller keeps its roots.
+     */
+    try {
+      await custody.register({ executionId: launch.executionId, supervisor: supervisor.pid, root: staged.root });
+      await custody.handoff(launch.executionId);
+      await staged.open();
+    } catch (error) {
+      staged.abandon();
+      await staged.process.terminate();
       return {
-        status: 'started',
-        process: startLinuxTerminal({ argv, launch, size: launch.stdio.size, supervisor }, binding!.native!),
+        status: 'sandbox-unavailable',
+        message: `Tau could not take custody of this launch, so it did not run: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
-    const bound = bindOwnPty(argv);
-    if (bound === undefined) {
-      await supervisor.close();
-      return { status: 'sandbox-unavailable', message: 'the Seatbelt profile could not be bound to the session PTY.' };
-    }
-    return {
-      status: 'started',
-      process: startMacTerminal({ argv: bound, launch, size: launch.stdio.size, supervisor }, binding!),
-    };
-  },
-});
+    return { status: 'started', process: staged.process };
+  };
+  return {
+    name: 'srt-0.0.75',
+    prepare: async (input) => custody.prepare(input),
+    inventory: async () => custody.inventory(),
+    recover: async (input) => custody.recover(input),
+    release: async (input) => custody.release(input),
+    launch: async (launch) => {
+      launch.signal.throwIfAborted();
+      const refusal = admit(launch, options);
+      if (refusal !== undefined) {
+        return refusal;
+      }
+      let binding: PtyBinding | undefined;
+      if (launch.stdio.kind === 'terminal') {
+        try {
+          binding = await (options.loadPty ?? defaultLoadPty)();
+        } catch (error) {
+          return {
+            status: 'sandbox-unavailable',
+            message: `node-pty could not load: ${error instanceof Error ? error.message : String(error)}`,
+          };
+        }
+        if (process.platform === 'linux' && binding.native === null) {
+          return { status: 'sandbox-unavailable', message: 'node-pty has no POSIX binding on this host.' };
+        }
+      }
+      return stage(launch, binding);
+    },
+  };
+};

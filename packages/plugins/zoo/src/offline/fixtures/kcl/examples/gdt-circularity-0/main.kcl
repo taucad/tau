@@ -1,0 +1,10 @@
+@settings(kclVersion = 3.0)
+
+cylinderSketch = sketch(on = XY) {
+  perimeter = circle(start = [var 5mm, var 0mm], center = [var 0mm, var 0mm])
+}
+
+cylinderRegion = region(segments = [cylinderSketch.perimeter])
+hide(cylinderSketch)
+cylinder = extrude(cylinderRegion, length = 10mm)
+gdt::circularity(edges = [cylinderRegion.tags.perimeter], tolerance = 0.05mm, framePosition = [-12mm, 8mm])

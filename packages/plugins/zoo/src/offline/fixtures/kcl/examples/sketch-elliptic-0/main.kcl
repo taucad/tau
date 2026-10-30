@@ -1,0 +1,11 @@
+@settings(experimentalFeatures = allow)
+
+majorRadius = 2
+minorRadius = 1
+ellip = ellipticPoint(majorRadius, minorRadius, x = 2)
+
+exampleSketch = startSketchOn(XY)
+   |> startProfile(at = ellip, tag = $start)
+   |> elliptic(center = [0, 0], angleStart = segAng(start), angleEnd = 160deg, majorRadius, minorRadius)
+   |> close()
+example = extrude(exampleSketch, length = 10)

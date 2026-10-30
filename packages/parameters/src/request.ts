@@ -115,7 +115,12 @@ const validOperation = (value: unknown): value is ParameterSetOperation => {
     case 'select-group': {
       return (
         hasOperationText(value, 'group') &&
-        (value['kind'] !== 'replace-group-values' || (isRecord(value['values']) && isJsonValue(value['values'])))
+        (value['kind'] !== 'replace-group-values' ||
+          (isRecord(value['values']) &&
+            isJsonValue(value['values']) &&
+            (value['base'] === undefined || (isRecord(value['base']) && isJsonValue(value['base']))) &&
+            (value['editor'] === undefined ||
+              hasText(typeof value['editor'] === 'string' ? value['editor'] : undefined))))
       );
     }
     case 'create-group': {
@@ -152,6 +157,9 @@ const validBase = (value: unknown, operation: unknown): boolean => {
     return false;
   }
   if (!isJsonValue(value['value'])) {
+    return false;
+  }
+  if (value['editor'] !== undefined && !hasText(typeof value['editor'] === 'string' ? value['editor'] : undefined)) {
     return false;
   }
   const { binding } = value;

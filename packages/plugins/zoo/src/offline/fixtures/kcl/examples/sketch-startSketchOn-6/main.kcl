@@ -1,0 +1,23 @@
+// Sketch on the end of a revolved face by tagging the end face.
+
+exampleSketch = startSketchOn(XY)
+  |> startProfile(at = [4, 12])
+  |> line(end = [2, 0])
+  |> line(end = [0, -6])
+  |> line(end = [4, -6])
+  |> line(end = [0, -6])
+  |> line(end = [-3.75, -4.5])
+  |> line(end = [0, -5.5])
+  |> line(end = [-2, 0])
+  |> close()
+
+example = revolve(exampleSketch, axis = Y, angle = 180deg, tagEnd = $end01)
+
+exampleSketch002 = startSketchOn(example, face = end01)
+  |> startProfile(at = [4.5, -5])
+  |> line(end = [0, 5])
+  |> line(end = [5, 0])
+  |> line(end = [0, -5])
+  |> close()
+
+example002 = extrude(exampleSketch002, length = 5)

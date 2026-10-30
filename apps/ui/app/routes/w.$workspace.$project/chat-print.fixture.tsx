@@ -296,7 +296,7 @@ export function ParametersFake({
   readonly parameters: Record<string, unknown>;
   readonly defaultParameters: Record<string, unknown>;
   readonly jsonSchema: RJSFSchema;
-  readonly onParametersChange: (value: Record<string, unknown>) => void;
+  readonly onParametersChange: (value: Record<string, unknown>, base: Record<string, unknown>) => void;
 }): React.JSX.Element {
   const shown = mergeFormDefaults(jsonSchema, defaultParameters, parameters);
   const toggles = Object.entries(jsonSchema.properties ?? {}).filter(
@@ -319,7 +319,7 @@ export function ParametersFake({
       <button
         type='button'
         onClick={() => {
-          onParametersChange({ ...parameters, layerHeight: 0.16 });
+          onParametersChange({ ...parameters, layerHeight: 0.16 }, parameters);
         }}
       >
         Set layer height
@@ -327,7 +327,7 @@ export function ParametersFake({
       <button
         type='button'
         onClick={() => {
-          onParametersChange({ ...parameters, nozzleDiameter: 0.6 });
+          onParametersChange({ ...parameters, nozzleDiameter: 0.6 }, parameters);
         }}
       >
         Set nozzle diameter
@@ -336,7 +336,7 @@ export function ParametersFake({
         type='button'
         onClick={() => {
           const { layerHeight: _layerHeight, ...rest } = parameters;
-          onParametersChange(rest);
+          onParametersChange(rest, parameters);
         }}
       >
         Reset layer height

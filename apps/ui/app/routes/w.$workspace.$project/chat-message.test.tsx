@@ -104,6 +104,12 @@ vi.mock('#routes/w.$workspace.$project/chat-message-reasoning.js', () => ({
   },
 }));
 
+vi.mock('#routes/w.$workspace.$project/chat-message-rating.js', () => ({
+  ChatMessageRating() {
+    return <div data-testid='chat-message-rating' />;
+  },
+}));
+
 vi.mock('#routes/w.$workspace.$project/chat-message-data-usage.js', () => ({
   ChatMessageDataUsage() {
     return <div data-testid='chat-message-data-usage' />;

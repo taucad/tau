@@ -1,0 +1,19 @@
+@settings(kclVersion = 3.0)
+
+// Set `direction = CW` when the segments trace the boundary clockwise.
+trapezoid = sketch(on = XY) {
+  line1 = line(start = [var 0mm, var 0mm], end = [var 0mm, var 3mm])
+  line2 = line(start = [var 0mm, var 3mm], end = [var 4mm, var 3mm])
+  line3 = line(start = [var 4mm, var 3mm], end = [var 4mm, var 0mm])
+  line4 = line(start = [var 4mm, var 0mm], end = [var 0mm, var 0mm])
+  coincident([line1.end, line2.start])
+  coincident([line2.end, line3.start])
+  coincident([line3.end, line4.start])
+  coincident([line4.end, line1.start])
+  vertical(line1)
+  horizontal(line2)
+  parallel([line2, line4])
+}
+
+r = region(segments = [trapezoid.line1, trapezoid.line2], direction = CW)
+extrude(r, length = 3)

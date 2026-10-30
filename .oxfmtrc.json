@@ -37,6 +37,8 @@
     "/packages/**/agent/skills.json",
     "/libs/converter/src/assets/**",
     "/packages/plugins/brep/licenses/**",
+    // The offline engine's own libcascade build output (Emscripten glue and generated types) is checked in verbatim.
+    "/packages/plugins/zoo/src/offline/wasm/**",
     // Written by packages/plugins/tscircuit/tsdown.engine.ts on every build with each vendored
     // package's LICENSE text verbatim; the committed bytes must equal the generator's output.
     "/packages/plugins/tscircuit/THIRD_PARTY_LICENSES.md",

@@ -1,8 +1,7 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useSession } from '@better-auth-ui/react';
-import { posthog } from 'posthog-js';
-import type { PostHogConfig } from 'posthog-js';
+import type { PostHog, PostHogConfig } from 'posthog-js';
 import { authClient } from '#lib/auth-client.js';
 import { clearPostHogStorage, posthogConfig } from '#lib/posthog.lib.js';
 import { AnalyticsContextProvider } from '#hooks/use-analytics.js';
@@ -10,7 +9,25 @@ import type { Analytics } from '#hooks/use-analytics.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- PostHog configuration keys are SDK wire names. */
 
-const isCapturing = (): boolean => posthog.__loaded && !posthog.has_opted_out_capturing();
+/*
+ * The SDK is a quarter of a megabyte and this file is the only place that touches it, so importing
+ * it here put it in the eager graph of every route: a measured Home navigation parsed and evaluated
+ * it before its composer could take a draft, including for the visitors who decline. It is fetched
+ * once a decision admits it instead, and `sdk` is undefined until then, which is the same state the
+ * singleton reported before `init` and so answers the same way everywhere it is read.
+ */
+let sdk: PostHog | undefined;
+
+/** Resolves the singleton, fetching it on first admission. */
+const loadSdk = async (): Promise<PostHog> => {
+  if (sdk === undefined) {
+    const module_ = await import('posthog-js');
+    sdk = module_.posthog;
+  }
+  return sdk;
+};
+
+const isCapturing = (): boolean => sdk?.__loaded === true && !sdk.has_opted_out_capturing();
 
 /**
  * Starts replay outside the critical rendering path.
@@ -46,16 +63,29 @@ function PostHogLifecycle({
 }): undefined {
   const { data: sessionData, isPending } = useSession(authClient);
   const user = sessionData?.user;
+  /* Identification must not run before the admission it belongs to has configured the SDK, and the
+     fetch resolves after the effect that starts it has returned. A boolean cannot say that: one that
+     only turns true would let a re-acceptance identify through a singleton still opted out, and
+     clearing it would mean setting state synchronously inside the effect. So each decision takes a
+     generation, held in a ref the decision effect advances, and the admission that finishes records
+     its own generation in state. Identification runs only while the two agree, and the state write
+     is what re-renders to let it run. */
+  const decision = useRef(0);
+  const [admittedGeneration, setAdmittedGeneration] = useState(0);
 
   useEffect(() => {
     const { apiKey } = posthogConfig;
+    decision.current += 1;
+    const generation = decision.current;
     if (!isActive) {
-      if (posthog.__loaded) {
-        posthog.stopSessionRecording();
-        posthog.opt_out_capturing();
-        posthog.set_config({ disable_persistence: true, advanced_disable_flags: true });
-        posthog.reset();
-        posthog.opt_out_capturing();
+      /* Nothing to stop where the singleton was never fetched: it captures nothing until `init`,
+         which only an admission reaches. The storage a previous admission left is still cleared. */
+      if (sdk?.__loaded === true) {
+        sdk.stopSessionRecording();
+        sdk.opt_out_capturing();
+        sdk.set_config({ disable_persistence: true, advanced_disable_flags: true });
+        sdk.reset();
+        sdk.opt_out_capturing();
       }
       if (apiKey) {
         clearPostHogStorage(apiKey);
@@ -63,29 +93,45 @@ function PostHogLifecycle({
       return undefined;
     }
 
-    if (posthog.__loaded) {
-      posthog.set_config({ disable_persistence: false, advanced_disable_flags: false });
-    } else {
-      posthog.init(apiKey, options);
-    }
-    // Re-acceptance, or a persisted opt-out marker from an earlier withdrawal. The SDK's
-    // initial-pageview guard keeps this from emitting a second `$pageview`.
-    if (posthog.has_opted_out_capturing()) {
-      posthog.opt_in_capturing({ captureEventName: false });
-    }
-    if (!isReplayEnabled) {
-      return undefined;
-    }
-    return whenIdle(() => {
-      posthog.startSessionRecording();
-    });
+    let withdrawn = false;
+    let cancelReplay: (() => void) | undefined;
+    const admit = async (): Promise<void> => {
+      const posthog = await loadSdk();
+      if (withdrawn) {
+        return;
+      }
+      if (posthog.__loaded) {
+        posthog.set_config({ disable_persistence: false, advanced_disable_flags: false });
+      } else {
+        posthog.init(apiKey, options);
+      }
+      // Re-acceptance, or a persisted opt-out marker from an earlier withdrawal. The SDK's
+      // initial-pageview guard keeps this from emitting a second `$pageview`.
+      if (posthog.has_opted_out_capturing()) {
+        posthog.opt_in_capturing({ captureEventName: false });
+      }
+      setAdmittedGeneration(generation);
+      if (!isReplayEnabled) {
+        return;
+      }
+      cancelReplay = whenIdle(() => {
+        posthog.startSessionRecording();
+      });
+    };
+    // async-iife: bootstrap — React effects cannot await the fetch; `withdrawn` owns its lifecycle.
+    void admit();
+    return () => {
+      withdrawn = true;
+      cancelReplay?.();
+    };
     // `options` and `isReplayEnabled` are fixed per host, so only `isActive` re-runs this.
   }, [isActive, options, isReplayEnabled]);
 
   useEffect(() => {
-    if (!isActive || isPending || !posthog.__loaded) {
+    if (!isActive || isPending || admittedGeneration !== decision.current || sdk?.__loaded !== true) {
       return;
     }
+    const posthog = sdk;
     if (user) {
       // Covers cold authenticated loads, login and account switches without merging accounts.
       if (posthog.get_distinct_id() !== user.id) {
@@ -94,7 +140,7 @@ function PostHogLifecycle({
     } else if (posthog._isIdentified()) {
       posthog.reset();
     }
-  }, [isActive, isPending, user]);
+  }, [isActive, isPending, admittedGeneration, user]);
 
   return undefined;
 }
@@ -121,7 +167,7 @@ export function PostHogAnalyticsProvider({
     () => ({
       capture(event, properties) {
         if (isCapturing()) {
-          posthog.capture(event, properties);
+          sdk?.capture(event, properties);
         }
       },
     }),

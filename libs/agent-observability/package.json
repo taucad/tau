@@ -43,6 +43,7 @@
     "./projection": "./src/projection.ts",
     "./reporter": "./src/reporter.ts",
     "./scorecard": "./src/scorecard.ts",
+    "./evaluation": "./src/evaluation.ts",
     "./pi-telemetry": "./src/pi-telemetry.ts",
     "./telemetry-policy": "./src/telemetry-policy.ts",
     "./package.json": "./package.json"

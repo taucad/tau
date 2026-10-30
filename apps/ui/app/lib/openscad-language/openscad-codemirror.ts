@@ -1,3 +1,4 @@
+import { definitionProvider } from '#components/code/editor-definition.js';
 import { editorCompletionInfo, renderEditorDocumentation } from '#components/code/editor-documentation.js';
 import type { Extension } from '@codemirror/state';
 import { autocompletion, snippetCompletion } from '@codemirror/autocomplete';
@@ -381,26 +382,19 @@ export async function acquireOpenScadLanguage({
           return true;
         },
       },
-      {
-        key: 'F12',
-        run(view) {
-          const word = wordAt(document.text, view.state.selection.main.head);
-          if (!word || disposed) {
-            return false;
-          }
-          const { version } = document;
-          // async-iife: bootstrap -- CodeMirror command returns synchronously while filesystem lookup completes.
-          void (async (): Promise<void> => {
-            const target = await definitionFor(document, environment, word.text);
-            // oxlint-disable-next-line typescript/no-unnecessary-condition -- lease may be aborted during definition lookup.
-            if (target && !disposed && document.version === version) {
-              await environment.navigate(target);
-            }
-          })();
-          return true;
-        },
-      },
     ]),
+    definitionProvider.of(async (_view, position) => {
+      const word = wordAt(document.text, position);
+      if (!word || disposed) {
+        return;
+      }
+      const { version } = document;
+      const target = await definitionFor(document, environment, word.text);
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- lease may be aborted during definition lookup.
+      if (target && !disposed && document.version === version) {
+        await environment.navigate(target);
+      }
+    }),
   ];
   return { extensions, dispose };
 }

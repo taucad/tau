@@ -1,0 +1,12 @@
+// Mirror an un-closed sketch across a line from a sketch block.
+helper001 = sketch(on = XZ) {
+  line1 = line(start = [var 0mm, var 0mm], end = [var 0mm, var 10mm])
+}
+
+sketch001 = startSketchOn(XZ)
+    |> startProfile(at = [0, 8.5])
+    |> line(end = [20, -8.5])
+    |> line(end = [-20, -8.5])
+    |> mirror2d(axis = helper001.line1)
+
+// example = extrude(sketch001, length = 10)

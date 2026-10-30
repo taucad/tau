@@ -1,4 +1,5 @@
 import type { ObservationIdentity, OtlpSpan } from '#api/agent-observability/langfuse-observation.js';
+import type { LangfuseObservationRow } from '#api/agent-observability/langfuse-scorecard.js';
 import { otlpBody } from '#api/agent-observability/langfuse-observation.js';
 
 /** Where and as whom the API writes to one Langfuse project. Server-side only. */
@@ -24,6 +25,13 @@ export type FindOutcome = 'present' | 'absent' | 'unavailable';
  * deletion, so `requested` is not removal: only a later read can say.
  */
 export type DeleteOutcome = Readonly<{ kind: 'requested' }> | Readonly<{ kind: 'retry'; reason: string }>;
+
+/**
+ * One environment's observations in a time window. `partial` is a read cut
+ * short by the page bound or a failed page: its rows are a lower bound, never
+ * the whole window.
+ */
+export type ObservationsRead = Readonly<{ kind: 'complete' | 'partial'; rows: readonly LangfuseObservationRow[] }>;
 
 /** Connection failures that precede any request byte reaching the vendor. */
 const unsentCodes = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ERR_INVALID_URL', 'CERT_HAS_EXPIRED']);
@@ -96,6 +104,22 @@ const authorization = (target: LangfuseTarget): string =>
  * Langfuse v4 ingestion and read-back for agent evidence. It never logs or
  * returns request or response bodies: the span carries customer content.
  */
+/* Only Tau's own observations, by the names the mapper gives them; anything else in the project is not read. */
+const observationRow = (item: unknown): LangfuseObservationRow[] => {
+  const id = field(item, 'id');
+  const name = field(item, 'name');
+  const startTime = field(item, 'startTime');
+  const metadata = field(item, 'metadata');
+  return typeof id === 'string' &&
+    typeof name === 'string' &&
+    name.startsWith('tau.') &&
+    typeof startTime === 'string' &&
+    typeof metadata === 'object' &&
+    metadata !== null
+    ? [{ id, startTime, metadata: metadata as Record<string, unknown> }]
+    : [];
+};
+
 export class LangfuseClient {
   public constructor(
     private readonly target: LangfuseTarget,
@@ -176,6 +200,64 @@ export class LangfuseClient {
       return 'unavailable';
     } catch {
       return 'unavailable';
+    }
+  }
+
+  /**
+   * Read Tau's observations in one environment and window, for the Langfuse
+   * scorecard. Only the `core`, `basic` and `metadata` fields are requested, so no
+   * input or output is ever read back.
+   *
+   * @param window - The environment, and the start-time bounds.
+   * @param window.environment - The deployment the observations were written in.
+   * @param window.from - Inclusive lower bound on start time.
+   * @param window.to - Exclusive upper bound on start time.
+   * @param pages - At most this many pages of 100.
+   * @param signal - Aborts the read.
+   * @returns The rows read, and whether that was the whole window.
+   */
+  public async observations(
+    window: Readonly<{ environment: string; from: Date; to: Date }>,
+    pages: number,
+    signal?: AbortSignal,
+  ): Promise<ObservationsRead> {
+    const url = new URL('/api/public/v2/observations', this.target.baseUrl);
+    url.searchParams.set('environment', window.environment);
+    url.searchParams.set('fromStartTime', window.from.toISOString());
+    url.searchParams.set('toStartTime', window.to.toISOString());
+    url.searchParams.set('fields', 'core,basic,metadata');
+    url.searchParams.set('limit', '100');
+    const rows: LangfuseObservationRow[] = [];
+    try {
+      for (let page = 0; page < pages; page++) {
+        // oxlint-disable-next-line no-await-in-loop -- pages are cursor-ordered
+        const response = await this.fetcher(url, {
+          headers: { authorization: authorization(this.target) },
+          signal:
+            signal === undefined
+              ? AbortSignal.timeout(this.timeoutMilliseconds)
+              : AbortSignal.any([AbortSignal.timeout(this.timeoutMilliseconds), signal]),
+          redirect: 'error',
+        });
+        if (!response.ok) {
+          return { kind: 'partial', rows };
+        }
+        // oxlint-disable-next-line no-await-in-loop -- the body belongs to this page
+        const body = await readJson(response);
+        const data = field(body, 'data');
+        if (!Array.isArray(data)) {
+          return { kind: 'partial', rows };
+        }
+        rows.push(...data.flatMap((item: unknown) => observationRow(item)));
+        const cursor = field(field(body, 'meta'), 'cursor');
+        if (typeof cursor !== 'string' || cursor.length === 0) {
+          return { kind: 'complete', rows };
+        }
+        url.searchParams.set('cursor', cursor);
+      }
+      return { kind: 'partial', rows };
+    } catch {
+      return { kind: 'partial', rows };
     }
   }
 

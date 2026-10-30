@@ -190,6 +190,7 @@ describe('@taucad/filesystem node backend containment', () => {
     const { externals } = reachableSpecifiers(join(sourceDirectory, 'backend/node/index.ts'));
 
     expect([...externals].filter((specifier) => specifier.startsWith('node:')).sort()).toEqual([
+      // The node host scopes ancestor claims with `AsyncLocalStorage` (`backend/node/host.ts`).
       'node:async_hooks',
       'node:child_process',
       'node:crypto',

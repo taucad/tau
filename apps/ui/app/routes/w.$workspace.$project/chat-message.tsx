@@ -38,6 +38,7 @@ import { agentApprovalToolName, parseAgentHostApproval } from '#services/agent-h
 import { ChatMessageReasoning } from '#routes/w.$workspace.$project/chat-message-reasoning.js';
 import { ChatMessageDataUsage } from '#routes/w.$workspace.$project/chat-message-data-usage.js';
 import { ChatMessageContextCompaction } from '#routes/w.$workspace.$project/chat-message-context-compaction.js';
+import { ChatMessageRating } from '#routes/w.$workspace.$project/chat-message-rating.js';
 import { ChatMessageToolUseSkill } from '#routes/w.$workspace.$project/chat-message-tool-use-skill.js';
 import { ChatMessageText } from '#routes/w.$workspace.$project/chat-message-text.js';
 import { ChatMessageMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
@@ -1060,6 +1061,7 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
               getText={() => serializeMessage(displayMessage)}
               tooltip='Copy message'
             />
+            {isUser ? null : <ChatMessageRating messageId={messageId} />}
             {usageParts.length > 0 ? <ChatMessageDataUsage usageParts={usageParts} /> : null}
             <ChatMessageTimestamp createdAt={message.metadata?.createdAt} />
           </div>

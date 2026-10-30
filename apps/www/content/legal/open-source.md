@@ -611,8 +611,8 @@ Their copyright notices and full license texts ship inside each package and are 
 | [ktx-parse](https://github.com/donmccurdy/ktx-parse) | 1.1.0 | MIT |
 | [kysely](https://github.com/kysely-org/kysely) | 0.29.6 | MIT |
 | [lazy-val](https://github.com/develar/lazy-val) | 1.0.5 | MIT |
-| [libassimp](https://github.com/taucad/libassimp) | 0.4.0 | Apache-2.0 |
-| [libassimp-{platform}](https://github.com/taucad/libassimp) | 0.4.0 | Apache-2.0 |
+| [libassimp](https://github.com/taucad/libassimp) | 0.4.1 | Apache-2.0 |
+| [libassimp-{platform}](https://github.com/taucad/libassimp) | 0.4.1 | Apache-2.0 |
 | [libcascade](https://github.com/taucad/opencascade.js) | 3.1.0 | LGPL-2.1-only WITH Open-CASCADE-Exception-1.0 |
 | [libphonenumber-js](https://gitlab.com/catamphetamine/libphonenumber-js) | 1.13.15 | MIT |
 | [lie](https://github.com/calvinmetcalf/lie) | 3.3.0 | MIT |
@@ -671,8 +671,8 @@ Their copyright notices and full license texts ship inside each package and are 
 | [ms](https://github.com/vercel/ms) | 2.1.3 | MIT |
 | [n8ao](https://github.com/N8python/n8ao) | 1.10.2 | ISC |
 | [nanoid](https://github.com/ai/nanoid) | 5.1.16 | MIT |
-| [nanoraster](https://github.com/taucad/nanoraster) | 0.7.1 | Apache-2.0 |
-| [nanoraster-{platform}](https://github.com/taucad/nanoraster) | 0.7.1 | Apache-2.0 |
+| [nanoraster](https://github.com/taucad/nanoraster) | 0.8.0 | Apache-2.0 |
+| [nanoraster-{platform}](https://github.com/taucad/nanoraster) | 0.8.0 | Apache-2.0 |
 | [nanostores](https://github.com/nanostores/nanostores) | 1.5.5 | MIT |
 | [ndarray](https://github.com/mikolalysenko/ndarray) | 1.1.1 | MIT |
 | [ndarray-lanczos](https://github.com/donmccurdy/ndarray-lanczos) | 0.3.0 | MIT |

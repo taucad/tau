@@ -1,0 +1,11 @@
+profile = sketch(on = XY) {
+  guideArc = arc(start = [var 0mm, var 2mm], end = [var 2mm, var 0mm], center = [var 2mm, var 2mm])
+  tangentLine = line(start = [var 0mm, var 2mm], end = [var 0mm, var 4mm])
+  tangent([tangentLine, guideArc])
+  coincident([tangentLine.start, guideArc.start])
+  line1 = line(start = [var 0mm, var 4mm], end = [var 2mm, var 0mm])
+  coincident([guideArc.end, line1.end])
+  coincident([tangentLine.end, line1.start])
+}
+
+solid = extrude(region(segments = [profile.guideArc, profile.tangentLine]), length = 2)

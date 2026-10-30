@@ -3,32 +3,92 @@ import { recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
 import { reportRuntimeFailures } from '#lib/runtime-failure-reporting.js';
 import { reportWorkerFailures } from '#lib/worker-error-reporting.js';
 
-/** Allocate and touch WASM pages gradually. Stop releases references and prevents further allocations. */
+/** One canvas step: 2048 x 2048 RGBA is 16 MiB, the same step as one WebAssembly allocation. */
+const canvasPressureEdge = 2048;
+
+/**
+ * Allocate and touch memory gradually until the operating system ends the tab.
+ *
+ * Two allocators, used in that order. WebAssembly memory is the cheap one and
+ * the one a desktop browser dies on. iOS Safari caps WebAssembly memory per tab
+ * and throws `RangeError: Out of memory` well before the process is large
+ * enough to be killed, so a refusal there is not the end of the run: it
+ * escalates to canvas backing stores, which are charged to the process rather
+ * than to that cap and are what actually ends a tab on iOS. The WebAssembly
+ * pages stay held across the escalation, because releasing them would give back
+ * the pressure already built. Stop releases every reference and prevents
+ * further allocations.
+ */
 export const startObservabilityMemoryPressure = (status: (message: string) => void): (() => void) => {
   const allocations: WebAssembly.Memory[] = [];
+  const canvases: HTMLCanvasElement[] = [];
   let allocatedBytes = 0;
+  let allocator: 'canvas' | 'wasm' = 'wasm';
+
+  const allocateWasmPages = (): number => {
+    const memory = new WebAssembly.Memory({ initial: 256, maximum: 256 });
+    const bytes = new Uint8Array(memory.buffer);
+    // Touch every OS page so the allocation becomes resident, rather than only reserving virtual memory.
+    for (let offset = 0; offset < bytes.length; offset += 4096) {
+      bytes[offset] = 1;
+    }
+    allocations.push(memory);
+    return bytes.length;
+  };
+
+  const allocateCanvasBackingStore = (): number => {
+    const canvas = globalThis.document.createElement('canvas');
+    canvas.width = canvasPressureEdge;
+    canvas.height = canvasPressureEdge;
+    const context = canvas.getContext('2d');
+    if (context === null) {
+      throw new Error('Canvas backing store refused');
+    }
+    // Paint a colour that differs per canvas, so no two backing stores can be shared or the paint elided.
+    context.fillStyle = `rgb(${String(canvases.length % 256)} ${String((canvases.length * 7) % 256)} 1)`;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    // Read one pixel back so the paint cannot be deferred past this tick.
+    context.getImageData(0, 0, 1, 1);
+    canvases.push(canvas);
+    return canvas.width * canvas.height * 4;
+  };
+
+  const release = (): void => {
+    allocations.length = 0;
+    for (const canvas of canvases) {
+      // Zero the dimensions first: that is what frees the backing store, not dropping the reference.
+      canvas.width = 0;
+      canvas.height = 0;
+    }
+    canvases.length = 0;
+  };
+
   const timer = globalThis.setInterval(() => {
     try {
-      const memory = new WebAssembly.Memory({ initial: 256, maximum: 256 });
-      const bytes = new Uint8Array(memory.buffer);
-      // Touch every OS page so the allocation becomes resident, rather than only reserving virtual memory.
-      for (let offset = 0; offset < bytes.length; offset += 4096) {
-        bytes[offset] = 1;
-      }
-      allocations.push(memory);
-      allocatedBytes += bytes.length;
+      allocatedBytes += allocator === 'wasm' ? allocateWasmPages() : allocateCanvasBackingStore();
       recordMemoryBreadcrumb('render');
-      status(`Memory pressure running: ${String(allocatedBytes / 1024 / 1024)} MiB allocated. Stop to release it.`);
+      const held = String(Math.round(allocatedBytes / 1024 / 1024));
+      const source = allocator === 'wasm' ? 'WebAssembly memory' : 'canvas backing stores';
+      status(`Memory pressure running: ${held} MiB allocated with ${source}. Stop to release it.`);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (allocator === 'wasm') {
+        // Safari on iOS lands here: its WebAssembly cap is reached long before the tab is big enough to kill.
+        allocator = 'canvas';
+        status(
+          `WebAssembly memory refused at ${String(Math.round(allocatedBytes / 1024 / 1024))} MiB (${message}); escalating to canvas backing stores.`,
+        );
+        return;
+      }
       globalThis.clearInterval(timer);
-      allocations.length = 0;
-      status(`Allocation refused without a tab kill: ${error instanceof Error ? error.message : String(error)}`);
+      release();
+      status(`Allocation refused without a tab kill: ${message}`);
     }
   }, 250);
   recordMemoryBreadcrumb('render');
   return () => {
     globalThis.clearInterval(timer);
-    allocations.length = 0;
+    release();
   };
 };
 

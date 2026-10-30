@@ -1,0 +1,8 @@
+lengthText = 12mm
+  |> string::toString()
+
+assertIs(lengthText == "12mm")
+
+countText = string::toString(3_)
+
+assertIs(countText == "3_")

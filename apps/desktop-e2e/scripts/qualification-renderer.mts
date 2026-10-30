@@ -43,18 +43,23 @@ const exportGeometry = async (
     ),
   );
   await page.getByRole('button', { name: 'Export', exact: true }).click();
-  const formats = page.getByRole('region', { name: 'Formats' });
-  await formats.waitFor({ state: 'visible' });
-  for (const selected of await formats.locator('button[aria-pressed="true"]').all()) {
-    const selectedText = await selected.textContent();
-    if (selectedText?.trim().toLowerCase() !== 'glb') {
-      await selected.click();
-    }
-  }
-  const glb = formats.getByRole('button', { name: 'glb', exact: true });
-  if ((await glb.getAttribute('aria-pressed')) !== 'true') {
-    await glb.click();
-  }
+  // The pane names this section 'Format', singular, and offers one format through a combo box
+  // rather than the multi-select toggles it carried before #1150. Selection mirrors the
+  // maintained pattern in apps/ui-e2e/src/export-pane.spec.ts so the two cannot drift apart again.
+  const format = page.getByRole('region', { name: 'Format', exact: true });
+  await format.waitFor({ state: 'visible' });
+  const picker = format.getByRole('button', { name: 'Export format' });
+  await picker.waitFor({ state: 'visible' });
+  await picker.click();
+  // Name what was observed when GLB never becomes selectable: the bare click would otherwise
+  // time out anonymously, which is the failure class this selector fix exists to remove. The
+  // original error travels as `cause`, so a detached handle or a crashed browser stays readable
+  // rather than being reported as a missing format.
+  const glb = page.locator('[cmdk-item][data-value="glb"]');
+  await glb.waitFor({ state: 'visible' }).catch((error: unknown) => {
+    throw new Error('GLB did not become selectable in the export picker', { cause: error });
+  });
+  await glb.click();
   const download = page.getByLabel('Download to disk');
   if (await download.isChecked()) {
     await download.click();
@@ -223,7 +228,9 @@ const main = async (): Promise<void> => {
       await page.getByLabel('Project Name *', { exact: true }).fill('Qualification retained project');
       await page.locator('label[for="kernel-build123d"]').click();
       await page.getByRole('button', { name: /^Create Project/u }).click();
-      await page.getByRole('tab', { name: 'main.py', exact: true }).last().click();
+      // The viewer and source panes share a filename; explicitly open the source editor.
+      await page.getByRole('tab', { name: 'main.py', exact: true }).first().click({ button: 'right' });
+      await page.getByRole('menuitem', { name: 'Open in Editor', exact: true }).click();
       // Focus the visible CodeMirror content, not its surrounding scroll container.
       const editor = page.locator('.editor-container:visible .cm-editor:visible').last();
       await editor.waitFor({ state: 'visible' });

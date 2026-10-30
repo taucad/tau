@@ -3,7 +3,7 @@
 # `deploy_mode = "ci"` in tau-cloud, so Netlify's Git integration no longer
 # builds them and a branch change there never leaves a site without a deploy.
 #
-#   - staging (docs.taucad.dev): `ci.yml` → `deploy-docs-staging` on a push to
+#   - staging (docs.taucad.dev): `staging.yml` → `deploy-docs-staging` on a push to
 #     `main` that affects docs since its last staging deploy, once the same
 #     checks as the staging UI pass.
 #     It publishes to the site's `staging` alias, which costs no Netlify

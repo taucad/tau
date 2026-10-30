@@ -1,0 +1,13 @@
+ringProfile = sketch(on = XZ) {
+  edge1 = line(start = [var 4mm, var 0mm], end = [var 7mm, var 0mm])
+  edge2 = line(start = [var 7mm, var 0mm], end = [var 7mm, var 4mm])
+  edge3 = line(start = [var 7mm, var 4mm], end = [var 4mm, var 4mm])
+  edge4 = line(start = [var 4mm, var 4mm], end = [var 4mm, var 0mm])
+  coincident([edge1.end, edge2.start])
+  coincident([edge2.end, edge3.start])
+  coincident([edge3.end, edge4.start])
+  coincident([edge4.end, edge1.start])
+}
+
+ringRegion = region(segments = [ringProfile.edge1, ringProfile.edge2])
+ring = revolve(ringRegion, axis = Y)

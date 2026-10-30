@@ -55,12 +55,21 @@ export const posthogProxy = async (request: Request): Promise<Response> => {
     }
   }
 
+  const hasBody = request.method !== 'GET' && request.method !== 'HEAD';
+  // PostHog's browser SDK gzips capture payloads and labels them `text/plain`. Something on the hosted path
+  // decodes a textual body as text and re-encodes it, which destroys those bytes: PostHog then
+  // answers `invalid GZIP data`, so every capture is dropped. A body declared as binary survives,
+  // so forward a gzip payload under its true type. Buffering also removes the streamed `duplex`
+  // body, which the same path handles less predictably than a known-length one.
+  const body = hasBody ? new Uint8Array(await request.arrayBuffer()) : null;
+  if (body !== null && body.length > 1 && body[0] === 0x1f && body[1] === 0x8b) {
+    headers.set('content-type', 'application/octet-stream');
+  }
+
   const response = await fetch(newUrl, {
     method: request.method,
     headers,
-    body: request.method === 'GET' || request.method === 'HEAD' ? null : request.body,
-    // @ts-expect-error - duplex is required for streaming request bodies
-    duplex: 'half',
+    body,
   });
 
   const responseHeaders = new Headers(response.headers);

@@ -1,0 +1,33 @@
+// Demonstrates a sweep from a face
+sketch001 = sketch(on = XY) {
+  line1 = line(start = [var -5mm, var 3mm], end = [var 5mm, var 3mm])
+  line2 = line(start = [var 5mm, var 3mm], end = [var 5mm, var 0mm])
+  line3 = line(start = [var 5mm, var 0mm], end = [var -5mm, var 0mm])
+  line4 = line(start = [var -5mm, var 0mm], end = [var -5mm, var 3mm])
+  coincident([line1.end, line2.start])
+  coincident([line2.end, line3.start])
+  coincident([line3.end, line4.start])
+  coincident([line4.end, line1.start])
+  parallel([line2, line4])
+  parallel([line3, line1])
+  perpendicular([line1, line2])
+  horizontal(line3)
+}
+hidden001 = hide(sketch001)
+region001 = region(segments = [sketch001.line1, sketch001.line2])
+extrude001 = extrude(region001, length = 5, tagEnd = $capFace)
+sketch002 = sketch(on = XZ) {
+  line1 = line(start = [var 0mm, var 4mm], end = [var 0mm, var 12mm])
+  vertical([line1.start, ORIGIN])
+  vertical([line1.end, ORIGIN])
+  arc1 = arc(start = [var 10mm, var 20mm], end = [var 0mm, var 12mm], center = [var 7mm, var 12mm])
+  coincident([line1.end, arc1.end])
+  tangent([line1, arc1])
+  arc2 = arc(start = [var 10mm, var 20mm], end = [var 10mm, var 34mm], center = [var 13mm, var 27mm])
+  coincident([arc1.start, arc2.start])
+  tangent([arc1, arc2])
+}
+
+// sweep the tagged face
+sweep(capFace, path = sketch002)
+|> appearance(color = "#ff00aa")

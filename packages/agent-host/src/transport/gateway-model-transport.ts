@@ -1,3 +1,4 @@
+import { normalizeContext } from '@earendil-works/pi-ai';
 import { anthropicMessagesApi } from '@earendil-works/pi-ai/api/anthropic-messages.lazy';
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 import { openAIResponsesApi } from '@earendil-works/pi-ai/api/openai-responses.lazy';
@@ -16,6 +17,9 @@ import { util as zodUtility } from 'zod';
 import { MessageIdentities, providerMessageToPi } from '#harness/session-record.js';
 import { fitAttachmentBudget, rewriteDocuments } from '#transport/document-payload.js';
 import { createVertexResponseShim, echoThoughtSignatures } from '#transport/vertex-completions-shim.js';
+import { modelTelemetryParent, modelTelemetrySubject } from '#transport/model-telemetry.js';
+import { modelRequestObserver, observeModelStream } from '#transport/model-observation.js';
+import type { ModelTelemetrySeam } from '#transport/model-telemetry.js';
 import type { JsonObject, ModelProviderKind, ModelSystemPromptBlock, ProviderMessage } from '#log/event-types.js';
 import type { ModelInvocationBinding, ModelStreamEvent, ModelStreamRequest, ModelTransport } from '#waist/ports.js';
 import { gatewayProviderKinds } from '#wire/admission.schema.js';
@@ -182,6 +186,13 @@ export type GatewayModelTransportOptions = {
   readonly fetch?: typeof globalThis.fetch | undefined;
   /** Optional funded-operation protocol supplied only by a managed Cloud composition. */
   readonly fundedOperations?: GatewayFundedOperationProtocol | undefined;
+  /**
+   * Host composition's native-telemetry seam. Supplied only by a composition
+   * that has an enabled, permitted adapter; absent in every other build, which
+   * is the default. A seam never changes what is requested, retried or
+   * returned, and a seam that fails loses its telemetry rather than the call.
+   */
+  readonly telemetry?: ModelTelemetrySeam | undefined;
 };
 
 /**
@@ -486,8 +497,40 @@ const guardedResponse = (options: {
           // and the healthy frames that shared its chunks are the SDK's after
           // all. Closing on them instead loses the turn's terminal frame and
           // reports `Stream ended without finish_reason` in its place.
-          for (const held of withheld) {
-            controller.enqueue(held);
+          if (withheld.length > 0) {
+            const heldBytes = new Uint8Array(withheld.reduce((size, held) => size + held.length, 0));
+            let offset = 0;
+            for (const held of withheld) {
+              heldBytes.set(held, offset);
+              offset += held.length;
+            }
+            // Keep original bytes: a chunk may start or end inside a multibyte character.
+            let completeEnd = 0;
+            for (let index = 1; index < heldBytes.length; index += 1) {
+              const byte = heldBytes[index];
+              if ((byte === 10 || byte === 13) && heldBytes[index - 1] === byte) {
+                completeEnd = index + 1;
+              } else if (
+                index >= 3 &&
+                byte === 10 &&
+                heldBytes[index - 1] === 13 &&
+                heldBytes[index - 2] === 10 &&
+                heldBytes[index - 3] === 13
+              ) {
+                completeEnd = index + 1;
+              }
+            }
+            if (completeEnd > 0) {
+              controller.enqueue(heldBytes.subarray(0, completeEnd));
+            }
+          } else if (relayed.trim()) {
+            controller.error(
+              new GatewayModelTransportError({
+                code: 'MALFORMED_RESPONSE',
+                message: 'Tau model gateway stream ended inside an SSE frame.',
+              }),
+            );
+            return;
           }
           withheld = [];
           controller.close();
@@ -770,8 +813,26 @@ const replayInterruptedCalls = (messages: readonly ProviderMessage[]): readonly 
 
 const piContextFor = (request: ModelStreamRequest, model: PiGatewayModel): Context => {
   const identities = new MessageIdentities(() => 'transport-message');
-  const messages = replayInterruptedCalls(request.messages).flatMap((message) => {
+  const messages = replayInterruptedCalls(request.messages).flatMap((message): Context['messages'] => {
     const hydrated = providerMessageToPi(message, model as Model<Api>, identities);
+    if (
+      hydrated?.role === 'assistant' &&
+      (hydrated.provider !== model.provider || hydrated.api !== model.api || hydrated.model !== model.id)
+    ) {
+      // Tau preserves readable cross-provider history, but never replays another model's signatures.
+      return [
+        {
+          ...hydrated,
+          content: hydrated.content.flatMap((block): AssistantMessage['content'] =>
+            block.type === 'thinking'
+              ? block.redacted === true || block.thinking.length === 0
+                ? []
+                : [{ type: 'text', text: block.thinking } as const]
+              : [block],
+          ),
+        },
+      ];
+    }
     return hydrated ? [hydrated as Context['messages'][number]] : [];
   });
   const tools: PiTool[] = request.tools.map((tool) => ({
@@ -1030,6 +1091,9 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
         : {}),
       systemPromptBlocks: request.systemPromptBlocks,
     });
+    // Asked once per invocation, before anything is built or fetched. A seam
+    // that fails answers nothing and the request proceeds untelemetered.
+    const telemetryParent = modelTelemetryParent(options.telemetry, modelTelemetrySubject(request));
     const commonOptions = {
       headers: piCookieAuthValidationHeaders,
       cacheRetention: 'short',
@@ -1051,12 +1115,16 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
       maxRetries: 0,
       onPayload,
       ...(request.maxTokens === undefined ? {} : { maxTokens: request.maxTokens }),
+      // Native Pi spans hang from the composition's span when it supplies one.
+      // Absent key rather than `undefined` so a build with no seam sends pi-ai
+      // exactly the options it sent before this field existed.
+      ...(telemetryParent === undefined ? {} : { telemetry: telemetryParent }),
       signal: request.signal,
     } as const;
     const { reasoning } = request;
     const events =
       request.providerKind === 'anthropic'
-        ? anthropicMessagesApi().stream(model as Model<'anthropic-messages'>, context, {
+        ? anthropicMessagesApi().stream(model as Model<'anthropic-messages'>, normalizeContext(context), {
             ...commonOptions,
             ...(reasoning === undefined
               ? {}
@@ -1068,12 +1136,12 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
                 }),
           } satisfies AnthropicOptions)
         : isOpenAiResponsesProviderKind(request.providerKind)
-          ? openAIResponsesApi().stream(model as Model<'openai-responses'>, context, {
+          ? openAIResponsesApi().stream(model as Model<'openai-responses'>, normalizeContext(context), {
               ...commonOptions,
               ...(reasoning?.effort === undefined ? {} : { reasoningEffort: reasoning.effort }),
               ...(reasoning?.summary === undefined ? {} : { reasoningSummary: reasoning.summary }),
             } satisfies OpenAIResponsesOptions)
-          : openAICompletionsApi().stream(model as Model<'openai-completions'>, context, {
+          : openAICompletionsApi().stream(model as Model<'openai-completions'>, normalizeContext(context), {
               ...commonOptions,
               ...(request.providerKind === 'vertexai' && reasoning?.effort !== undefined
                 ? {
@@ -1110,6 +1178,17 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
                   }
                 : {}),
             } satisfies OpenAICompletionsOptions);
-    yield* streamPiEvents({ events, state, signal: request.signal, thoughtSignatures });
+    // Observation reads the codec stream Tau already consumes and never sits
+    // between it and the caller; with no parent the codec stream is used as is.
+    const observer = modelRequestObserver(telemetryParent, {
+      model,
+      ...(reasoning?.effort === undefined ? {} : { reasoning: reasoning.effort }),
+    });
+    yield* streamPiEvents({
+      events: observer === undefined ? events : observeModelStream(events, observer),
+      state,
+      signal: request.signal,
+      thoughtSignatures,
+    });
   },
 });

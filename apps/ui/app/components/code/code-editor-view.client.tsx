@@ -1,5 +1,13 @@
+import { editorHighlightStyle } from '#components/code/editor-highlight-style.js';
+import { createEditorSearchPanel } from '#components/code/editor-search-panel.js';
+import { editorSurfaceTheme } from '#components/code/editor-surface-theme.js';
+import '@vscode/codicons/dist/codicon.css';
 import '#components/code/code-editor.css';
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { renderCompletionIcon } from '#components/code/editor-completion-icon.js';
+import { definitionNavigation, goToDefinition, hasDefinitionProvider } from '#components/code/editor-definition.js';
+import { availableLanguageActions, languageFeatureNavigation } from '#components/code/editor-language-features.js';
+import type { AvailableLanguageAction } from '#components/code/editor-language-features.js';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { EditorState, Compartment, Prec } from '@codemirror/state';
 import type { ViewUpdate } from '@codemirror/view';
 import {
@@ -13,12 +21,10 @@ import {
   keymap,
   lineNumbers,
   rectangularSelection,
-  runScopeHandlers,
   tooltips,
 } from '@codemirror/view';
 import {
   bracketMatching,
-  HighlightStyle,
   foldGutter,
   foldCode,
   foldKeymap,
@@ -28,9 +34,8 @@ import {
   unfoldCode,
 } from '@codemirror/language';
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
-import { tags } from '@lezer/highlight';
 import { defaultKeymap, indentWithTab, selectAll, toggleComment } from '@codemirror/commands';
-import { gotoLine, openSearchPanel, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
+import { gotoLine, openSearchPanel, searchKeymap, highlightSelectionMatches, search } from '@codemirror/search';
 import { forceLinting, linter, lintGutter, lintKeymap } from '@codemirror/lint';
 import { cn } from '@taucad/ui/utils/cn';
 import {
@@ -46,10 +51,19 @@ import { jsonDepthHighlighting } from '#components/code/json-depth-highlighting.
 import type { CodeEditorProps } from '#components/code/code-editor.client.js';
 import type { DocumentChange, EditorDocument, TextChange } from '#lib/editor-document.js';
 
+/** Navigation commands sit with Go to Definition; the rest (rename, format, fixes) get their own group. */
+const navigationActions = new Set([
+  'typeDefinition',
+  'implementation',
+  'references',
+  'callHierarchy',
+  'documentSymbols',
+  'workspaceSymbols',
+]);
+
 type ViewPosition = Readonly<{ anchor: number; head: number; scrollTop: number; scrollLeft: number }>;
 const rememberedPositions = new WeakMap<EditorDocument, Map<string, ViewPosition>>();
 const maxRememberedViewsPerDocument = 32;
-const typeScriptLanguages = new Set(['typescript', 'typescriptreact', 'javascript', 'javascriptreact']);
 
 function rememberViewPosition(document: EditorDocument, viewId: string, view: EditorView): void {
   const positions = rememberedPositions.get(document) ?? new Map<string, ViewPosition>();
@@ -111,12 +125,12 @@ const editorTheme = EditorView.theme({
     fontFamily: 'var(--font-sans)',
   },
   '.cm-tooltip': { zIndex: '50', pointerEvents: 'auto' },
-  '.cm-typescript-hover, .cm-typescript-signature, .cm-typescript-references': {
+  '.cm-typescript-hover, .cm-signature-help': {
     maxWidth: 'min(36rem, 80vw)',
     padding: '0.5rem 0.75rem',
     color: 'var(--popover-foreground)',
   },
-  '.cm-typescript-inlay-hint': {
+  '.cm-typescript-inlay-hint, .cm-kcl-inlay-hint': {
     marginInline: '0.25rem',
     color: 'var(--muted-foreground)',
     fontSize: '0.9em',
@@ -127,48 +141,13 @@ const editorTheme = EditorView.theme({
     border: '1px solid var(--border)',
     borderRadius: 'var(--radius-sm)',
   },
-  '.cm-search .cm-textfield': {
-    color: 'var(--popover-foreground)',
-    backgroundColor: 'var(--background)',
-    border: '1px solid var(--muted-foreground)',
-    borderRadius: 'var(--radius-sm)',
-    fontSize: '1rem',
-    minHeight: '1.5rem',
-  },
-  '.cm-search .cm-textfield::placeholder': { color: 'var(--muted-foreground)' },
-  '.cm-search .cm-button': {
-    color: 'var(--secondary-foreground)',
-    backgroundColor: 'var(--secondary)',
-    backgroundImage: 'none',
-    border: '1px solid var(--muted-foreground)',
-    borderRadius: 'var(--radius-sm)',
-    fontSize: '0.875rem',
-    minHeight: '1.5rem',
-  },
-  '.cm-search label': { fontSize: '0.875rem' },
-  '.cm-search input[type=checkbox]': { accentColor: 'var(--primary-action)' },
-  '.cm-search button[name=close]': {
-    color: 'var(--popover-foreground)',
-    fontSize: '1.125rem',
-    minWidth: '1.5rem',
-    minHeight: '1.5rem',
-  },
   '.cm-conflict-mine': { backgroundColor: 'color-mix(in oklch, var(--success) 20%, transparent)' },
   '.cm-conflict-theirs': { backgroundColor: 'color-mix(in oklch, var(--feature) 20%, transparent)' },
-  '.cm-lineNumbers .cm-gutterElement': { minWidth: '3.5em', paddingRight: '0.75em' },
+  '.cm-lineNumbers .cm-gutterElement': { minWidth: '4ch', padding: '0 var(--spacing)' },
+  '.cm-gutter-lint': { width: '0' },
+  '.cm-gutter-lint:has(.cm-lint-marker)': { width: '1em' },
+  '.cm-gutter-lint .cm-gutterElement': { padding: '0' },
 });
-
-const tokenColors = HighlightStyle.define([
-  { tag: [tags.keyword, tags.controlKeyword, tags.moduleKeyword, tags.operatorKeyword], color: 'var(--cm-keyword)' },
-  { tag: [tags.definition(tags.variableName), tags.variableName], color: 'var(--cm-variable)' },
-  { tag: [tags.propertyName], color: 'var(--cm-number)' },
-  { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], color: 'var(--cm-function)' },
-  { tag: [tags.number, tags.bool, tags.null], color: 'var(--cm-number)' },
-  { tag: [tags.string, tags.special(tags.string)], color: 'var(--cm-string)' },
-  { tag: [tags.comment, tags.lineComment, tags.blockComment], color: 'var(--cm-comment)' },
-  { tag: [tags.typeName, tags.className], color: 'var(--cm-type)' },
-  { tag: [tags.bracket, tags.paren, tags.brace], color: 'var(--cm-punctuation)' },
-]);
 
 function changesFromView(update: ViewUpdate): TextChange[] {
   const changes: TextChange[] = [];
@@ -223,6 +202,8 @@ export function CodeEditorView({
   const historyRef = useRef<{ kind: 'typing' | 'composition'; groupId: string; at: number } | undefined>(undefined);
   const historySequence = useRef(0);
   const markedFirstEdit = useRef(false);
+  const [canGoToDefinition, setCanGoToDefinition] = useState(false);
+  const [languageActions, setLanguageActions] = useState<readonly AvailableLanguageAction[]>([]);
   useEffect(() => {
     callbacksRef.current = { onApply, onHistory, onMount, readOnly };
   }, [onApply, onHistory, onMount, readOnly]);
@@ -249,6 +230,7 @@ export function CodeEditorView({
         doc: document.text,
         extensions: [
           editorTheme,
+          editorSurfaceTheme,
           EditorView.contentAttributes.of({ 'aria-label': 'Code editor' }),
           EditorView.theme({ '&': { fontSize: isMobile ? '16px' : '14px' }, '.cm-content': { lineHeight: '1.5' } }),
           showLineNumbers ? lineNumbers() : [],
@@ -264,12 +246,15 @@ export function CodeEditorView({
           bracketMatching(),
           foldGutter(),
           closeBrackets(),
-          autocompletion(),
+          autocompletion({ icons: false, addToOptions: [{ render: renderCompletionIcon, position: 20 }] }),
+          search({ createPanel: createEditorSearchPanel }),
           highlightSelectionMatches(),
           lintGutter(),
           diagnostics ? linter(() => diagnostics.get(document.uri).get('kernel') ?? [], { delay: 100 }) : [],
-          syntaxHighlighting(tokenColors, { fallback: true }),
+          syntaxHighlighting(editorHighlightStyle, { fallback: true }),
           tooltips({ parent: overlay, position: 'fixed' }),
+          definitionNavigation(),
+          languageFeatureNavigation(),
           Prec.highest(
             keymap.of([
               { key: 'Mod-z', run: () => applyHistory('undo') },
@@ -350,7 +335,7 @@ export function CodeEditorView({
     view.dom.dataset['viewId'] = viewId;
     restoreViewPosition(document, viewId, view);
     markCodeEditorMilestone('editor-mounted', viewId);
-    overlay.className = `${view.dom.className} ph-no-capture`;
+    overlay.className = `${view.dom.className} cm-overlays ph-no-capture`;
     const unsubscribe = document.subscribe((event: DocumentChange) => {
       if (event.origin === 'view' && event.viewId === viewId) {
         return;
@@ -490,16 +475,16 @@ export function CodeEditorView({
       viewRef.current?.focus();
     }
   };
-  const runTypeDefinition = (): void => {
-    const view = viewRef.current;
-    if (view) {
-      view.focus();
-      runScopeHandlers(view, new KeyboardEvent('keydown', { key: 'F12', code: 'F12', altKey: true }), 'editor');
-    }
-  };
 
   return (
-    <ContextMenu>
+    <ContextMenu
+      onOpenChange={(open) => {
+        if (open) {
+          setCanGoToDefinition(viewRef.current ? hasDefinitionProvider(viewRef.current.state) : false);
+          setLanguageActions(viewRef.current ? availableLanguageActions(viewRef.current.state) : []);
+        }
+      }}
+    >
       <ContextMenuTrigger className='contents'>
         <div ref={hostRef} className={cn('editor-container ph-no-capture size-full overflow-hidden', className)} />
       </ContextMenuTrigger>
@@ -542,9 +527,42 @@ export function CodeEditorView({
         >
           Go to Line
         </ContextMenuItem>
-        {typeScriptLanguages.has(languageId) && extensions !== undefined && (
-          <ContextMenuItem onSelect={runTypeDefinition}>Go to Type Definition</ContextMenuItem>
+        {canGoToDefinition && (
+          <ContextMenuItem
+            onSelect={() => {
+              runCommand(goToDefinition);
+            }}
+          >
+            Go to Definition
+          </ContextMenuItem>
         )}
+        {languageActions
+          .filter((action) => navigationActions.has(action.id))
+          .map((action) => (
+            <ContextMenuItem
+              key={action.id}
+              disabled={action.disabled}
+              onSelect={() => {
+                runCommand(action.run);
+              }}
+            >
+              {action.label}
+            </ContextMenuItem>
+          ))}
+        {languageActions.some((action) => !navigationActions.has(action.id)) && <ContextMenuSeparator />}
+        {languageActions
+          .filter((action) => !navigationActions.has(action.id))
+          .map((action) => (
+            <ContextMenuItem
+              key={action.id}
+              disabled={action.disabled}
+              onSelect={() => {
+                runCommand(action.run);
+              }}
+            >
+              {action.label}
+            </ContextMenuItem>
+          ))}
         <ContextMenuSeparator />
         <ContextMenuItem
           disabled={readOnly}

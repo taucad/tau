@@ -1,0 +1,6 @@
+// Make an extruded square.
+startSketchOn(XY)
+|> polygon(radius = 10, numSides = 4, center = [0, 0])
+|> extrude(length = 2)
+// Delete some faces. Because there's no tags, we can delete by face _index_.
+|> deleteFace(faceIndices = [0, 5])

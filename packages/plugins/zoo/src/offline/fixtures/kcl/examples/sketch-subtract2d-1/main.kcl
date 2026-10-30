@@ -1,0 +1,16 @@
+@settings(kclVersion = 1.0)
+
+fn squareHoleSketch() {
+  squareSketch = startSketchOn(-XZ)
+    |> startProfile(at = [-1, -1])
+    |> line(end = [2, 0])
+    |> line(end = [0, 2])
+    |> line(end = [-2, 0])
+    |> close()
+  return squareSketch
+}
+
+exampleSketch = startSketchOn(-XZ)
+    |> circle( center = [0, 0], radius = 3 )
+    |> subtract2d(tool = squareHoleSketch())
+example = extrude(exampleSketch, length = 1)

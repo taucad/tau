@@ -1,0 +1,8 @@
+circSketch = startSketchOn(XY)
+  |> circle(center = [0, 0], radius= 3, tag = $circ)
+
+triangleSketch = startSketchOn(XY)
+  |> startProfile(at = [-5, 0])
+  |> angledLine(angle = tangentToEnd(circ), length = 10)
+  |> line(end = [-15, 0])
+  |> close()

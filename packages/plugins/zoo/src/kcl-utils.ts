@@ -12,6 +12,7 @@ import type { Context } from '@taucad/kcl-wasm-lib';
 import type { Models } from '@kittycad/lib';
 import type { RuntimeSpanTracer } from '@taucad/runtime/types';
 import { EngineConnection, MockEngineConnection } from '#engine-connection.js';
+import type { OcctLoader, OfflineEngineConnection } from '#offline/offline-engine-connection.js';
 import type { WasmModule } from '#zoo-wasm-module.types.js';
 import type { FileSystemManager } from '#filesystem-manager.js';
 import {
@@ -133,6 +134,13 @@ type KclUtilitiesOptions = {
   baseUrl: string;
   closeErrors?: Record<string, string>;
   token?: string;
+  /**
+   * Where modeling commands run: `offline` (default) runs them in-process against libcascade, `online` sends them to
+   * the Zoo engine WebSocket.
+   */
+  mode?: 'online' | 'offline';
+  /** Loads libcascade for offline mode; defaults to the package's single-threaded build. */
+  loadOcct?: OcctLoader;
   /** Stream dimensions for engine */
   streamDimensions?: {
     width: number;
@@ -278,11 +286,13 @@ export class KclUtilities {
   private wasmMemory: WebAssembly.Memory | undefined;
   private isWasmInitialized = false;
   private isEngineInitialized = false;
-  private engineManager: EngineConnection | undefined;
+  private engineManager: EngineConnection | OfflineEngineConnection | undefined;
   private mockContext: Context | undefined;
   private readonly baseUrl: string;
   private readonly closeErrors: Record<string, string> | undefined;
   private readonly token: string | undefined;
+  private readonly mode: 'online' | 'offline';
+  private readonly loadOcct: OcctLoader | undefined;
   private readonly fileSystemManager: FileSystemManager;
   // Add execution state tracking
   private hasExecutedProgram = false;
@@ -297,7 +307,18 @@ export class KclUtilities {
     this.baseUrl = options.baseUrl;
     this.closeErrors = options.closeErrors;
     this.token = options.token;
+    this.mode = options.mode ?? 'offline';
+    this.loadOcct = options.loadOcct;
     this.fileSystemManager = options.fileSystemManager;
+  }
+
+  /**
+   * The offline engine of the open session, when running in offline mode.
+   *
+   * @returns the engine connection, or undefined online or before initialization
+   */
+  public get offlineConnection(): OfflineEngineConnection | undefined {
+    return this.mode === 'offline' ? (this.engineManager as OfflineEngineConnection | undefined) : undefined;
   }
 
   /**
@@ -793,11 +814,21 @@ export class KclUtilities {
    *
    * @returns a configured but not yet initialized EngineConnection
    */
-  private async createEngineManager(): Promise<EngineConnection> {
+  private async createEngineManager(): Promise<EngineConnection | OfflineEngineConnection> {
     if (!this.wasmModule) {
       throw KclError.simple({
         kind: 'engine',
         message: 'WASM module not loaded',
+      });
+    }
+
+    if (this.mode === 'offline') {
+      // Loaded on demand so online sessions never fetch the libcascade engine.
+      const offline = await import('#offline/offline-engine-connection.js');
+      return new offline.OfflineEngineConnection({
+        wasmModule: this.wasmModule,
+        fileSystemManager: this.fileSystemManager,
+        loadOcct: this.loadOcct,
       });
     }
 

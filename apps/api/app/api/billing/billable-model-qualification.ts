@@ -174,6 +174,15 @@ const routes = [
     },
   ),
   route(
+    'openai-gpt-6.1-terra',
+    'GPT-6.1 Terra',
+    'openai-responses',
+    1_050_000,
+    128_000,
+    rates('2', '.1', '2.5', '7.5', '30m'),
+    { pricingRevision: '2026-10-29' },
+  ),
+  route(
     'openai-gpt-6-astra',
     'GPT-6 Astra',
     'openai-responses',
@@ -279,6 +288,7 @@ const routes = [
 ] as const;
 
 const tieredValuations = new Map<string, { minimum: bigint; baseRates: readonly Rate[] }>([
+  ['openai-gpt-6.1-terra', { minimum: 272_001n, baseRates: rates('1', '.05', '1.25', '5', '30m') }],
   ['openai-gpt-6-astra', { minimum: 272_001n, baseRates: rates('10', '1', '12.5', '50', '30m') }],
   ['openai-gpt-6-sol', { minimum: 272_001n, baseRates: rates('2', '.2', '2.5', '10', '30m') }],
   ['openai-gpt-6-luna', { minimum: 272_001n, baseRates: rates('.1', '.01', '.125', '.5', '30m') }],

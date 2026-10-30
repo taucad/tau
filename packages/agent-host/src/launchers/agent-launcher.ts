@@ -100,6 +100,13 @@ export type AgentLauncherOptions = Readonly<{
    * other verb is served.
    */
   admitting?: ((run: Readonly<{ chatId: string; runId: string }>) => boolean) | undefined;
+  /**
+   * Told each time a chat this process leads becomes quiescent (`true`) or stops being so (`false`), after the
+   * leadership has heard it (`CreateTauAgentHostOptions.onChatQuiescent`). A run's rows are settled here when it is
+   * `true`: what an observer reads them at. It runs synchronously in the host; what it throws is logged, never the
+   * host's.
+   */
+  onChatQuiescent?: ((chatId: string, quiescent: boolean) => void) | undefined;
 }>;
 
 /** A running launcher: one per project, in any process. @public */
@@ -623,6 +630,11 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
     },
     onChatQuiescent: (chatId, quiescent) => {
       leading.port?.quiescent(chatId, quiescent);
+      try {
+        options.onChatQuiescent?.(chatId, quiescent);
+      } catch (error) {
+        console.error('[agent-launcher] a quiescence observer threw', chatId, error);
+      }
     },
   });
 
@@ -941,6 +953,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
       passes.set(chatId, pass);
       pass.count += 1;
       const woken = pass.wakes;
+      const sourceWoken = pass.sourceWakes;
       let answer: Awaited<ReturnType<ChatView['log']['readBatch']>>;
       let sourceGeneration: string;
       let sourceHealth: ProjectionSourceHealth;
@@ -981,17 +994,20 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
         endCursor: answer.endCursor,
         events: [...answer.events],
       };
-      /* A wake while this pass read the bytes (a writer opened, or the holder changed) has no waiter to reach: answer
-       * now, and the reader's next read is routed anew. */
+      /* Routing changes answer now so the next read can find the new holder. A source-only wake must instead
+       * reacquire an empty captured prefix: the appended rows may have arrived after its bytes were read. */
       if (
         answer.events.length > 0 ||
         input.sourceGeneration !== sourceGeneration ||
         !sameSourceHealth(input.sourceHealth, sourceHealth) ||
         closed ||
         signal?.aborted === true ||
-        pass.wakes !== woken
+        pass.wakes - woken !== pass.sourceWakes - sourceWoken
       ) {
         return batch;
+      }
+      if (pass.sourceWakes !== sourceWoken) {
+        continue;
       }
       // oxlint-disable-next-line no-await-in-loop -- the park is the long poll.
       if ((await park(chatId, signal)) === 'reroute') {

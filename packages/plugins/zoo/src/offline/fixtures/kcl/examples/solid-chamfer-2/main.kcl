@@ -1,0 +1,48 @@
+// An example of tangent chaining chamfers
+@settings(kclVersion = 3.0)
+
+depth = 4
+width = 5
+chamferLength = 1
+
+sketch001 = sketch(on = XY) {
+  line1 = line(start = [var 0mm, var 0mm], end = [var 5mm, var 0mm])
+  coincident([line1.start, ORIGIN])
+  horizontal([line1.end, ORIGIN])
+  arc1 = arc(start = [var 5mm, var 0mm], end = [var 5mm, var 4mm], center = [var 5mm, var 2mm])
+  coincident([line1.end, arc1.start])
+  tangent([line1, arc1])
+  line2 = line(start = [var 5mm, var 4mm], end = [var 0mm, var 4mm])
+  coincident([line2.start, arc1.end])
+  vertical([line2.end, ORIGIN])
+  line3 = line(start = [var 0mm, var 4mm], end = [var 0mm, var 0mm])
+  coincident([line2.end, line3.start])
+  coincident([line3.end, line1.start])
+  horizontal(line2)
+  tangent([line2, arc1])
+  distance([line3.start, line3.end]) == depth
+  distance([line2.start, line2.end]) == width
+  equalLength([line1, line2])
+}
+hidden001 = hide(sketch001)
+region001 = region(segments = [sketch001.line1, sketch001.arc1])
+extrude001 = extrude(region001, length = depth, tagEnd = $capEnd001)
+
+chamfer001 = chamfer(
+  extrude001,
+  edges = [
+    {
+      sideFaces = [
+        region001.tags.line1,
+        extrude001.faces.capEnd001
+      ]
+    },
+    {
+      sideFaces = [
+        region001.tags.line3,
+        extrude001.faces.capEnd001
+      ]
+    }
+  ],
+  length = chamferLength,
+)

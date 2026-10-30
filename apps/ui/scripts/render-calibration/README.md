@@ -91,7 +91,10 @@ server after editing that transform. Query parameters are fixed at page load:
 - `samples=0|4`: override the single-sample renderer default; `sceneSamples=0|4`: independently set the scene target.
 - `nodegl=1`: force the node WebGL2 backend, preserving standard depth and reporting actual execution.
 - `frameStorage=half`: retain the RGBA16F composed-color reference. Default Neutral tone mapping uses hardware-sRGB RGBA8 storage with linear blending; other tone mappings keep RGBA16F. This changes no depth, AO or scene HDR allocation.
-- `edges=off`: omit BRep lines. `overlay=grid|axes|both`: enable only those overlays.
+- `edges=off`: omit BRep lines. `capOutline=off`: omit the section-cap outline pass only, keeping cap fill,
+  stencil counting and per-loop slices. Both drop required CAD edges and are diagnostic-only: confirm the draw
+  count actually fell before admitting the comparison, because a `hmr:false` page keeps its load-time choices.
+  `overlay=grid|axes|both`: enable only those overlays.
 - `depthRestore=off`: intentionally incorrect occlusion control; omit the later depth restore.
 - The lean candidate uses ordinary linear overlay blending without viewport copies. Historical `overlayBlend` comparisons belong to commit `1cec9efe67`.
 - `view=close`: initial span request 0.09 m; full is 0.22 m.

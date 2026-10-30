@@ -14,15 +14,15 @@ export const kernelLibraries: Partial<Record<KernelProvider, Readonly<Record<str
   jscad: { '@jscad/modeling': '2.13.0' },
   manifold: { 'manifold-3d': '3.4.1' },
   picovoxel: { picovoxel: '0.2.1' },
-  smlib: { '@classcad/smlibwasm': '0.3.4' },
+  smlib: { '@classcad/smlibwasm': '0.6.2' },
   tscircuit: {
     // The connectivity-map floating Biome range can select releases before their platform binaries exist.
     '@biomejs/biome': '2.5.15',
     tscircuit: 'npm:@tscircuit/core@0.0.1844',
     '@tscircuit/core': '0.0.1844',
     '@tscircuit/props': '0.0.646',
-    react: '19.2.7',
-    'react-dom': '19.2.7',
+    react: '19.3.1',
+    'react-dom': '19.3.1',
     '@tscircuit/capacity-autorouter': '0.0.879',
     '@tscircuit/checks': '0.0.183',
     '@tscircuit/circuit-json-util': '0.0.111',

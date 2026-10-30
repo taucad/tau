@@ -1,0 +1,10 @@
+@settings(experimentalFeatures = allow)
+
+profile = sketch(on = XY) {
+  spline1 = controlPointSpline(points = [
+    [var 0mm, var 0mm],
+    [var 20mm, var 30mm],
+    [var 40mm, var 0mm],
+    [var 60mm, var 20mm],
+  ])
+}

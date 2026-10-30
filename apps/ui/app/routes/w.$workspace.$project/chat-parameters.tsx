@@ -1,4 +1,4 @@
-import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { useModelAvailability } from '#hooks/use-project-availability.js';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { XIcon } from 'lucide-react';
 import { useCallback, memo, useState, useMemo, useRef, useEffect } from 'react';
@@ -441,6 +441,6 @@ export const ChatParameters = memo(function (props: {
 });
 
 export function ParametersPanelBody(): React.JSX.Element {
-  const availability = useProjectAvailability();
+  const availability = useModelAvailability();
   return availability === 'ready' ? <ProjectParametersPane /> : <ProjectSyncPlaceholder state={availability} />;
 }

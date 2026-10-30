@@ -156,9 +156,9 @@ describe('imageEdgeSchemas', () => {
   });
 
   describe('validation', () => {
-    it('should reject a dimension outside 16–4096', () => {
+    it('should reject a dimension outside 16–8192', () => {
       expect(() => imageEdgeSchemas.png.parse({ width: 8 })).toThrow();
-      expect(() => imageEdgeSchemas.png.parse({ height: 5000 })).toThrow();
+      expect(() => imageEdgeSchemas.png.parse({ height: 8193 })).toThrow();
     });
 
     it('should reject a margin outside 0–0.5', () => {

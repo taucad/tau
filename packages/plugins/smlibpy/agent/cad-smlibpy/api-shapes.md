@@ -1,10 +1,10 @@
 # smlibpy — shapes
 
-10 top-level symbols. Signatures are verbatim python.
+3 top-level symbols. Signatures are verbatim python.
 
 # Category: shapes
 # A bounded curve
-# Remarks: Edges come from bodies (``part.edges()``) or from curve constructors such as :func:`~smlibpy.Line`, :func:`~smlibpy.Arc` and :func:`~smlibpy.Spline`. Parameters along an edge (``point_at(t)``) run from 0 at the start to 1 at the end, proportional to arc length.
+# Remarks: Edges come from bodies (``part.edges()``) or from curve constructors such as :func:`~smlibpy.Line`, :func:`~smlibpy.CenterArc` and :func:`~smlibpy.Spline`. Parameters along an edge (``point_at(t)``) run from 0 at the start to 1 at the end, proportional to arc length.
 # smlibpy.shapes.Edge (class)
 class Edge(Shape)
 
@@ -14,20 +14,32 @@ class Edge(Shape)
   # ``"line"``, ``"circle"`` (also arcs), ``"ellipse"``, ``"bspline"`` or ``"other"``
   geom_type: str
 
+  # How far this edge's curve, its ends and the faces it bounds may lie apart
+  # Remarks: kernel's tolerance of the edge (1e-5 on most parts; larger where the surfaces of an imported, stitched or healed body meet less exactly). ``ValueError`` for an edge of no body (a curve made with ``Line``, ``Spline``, ...).
+  tolerance: float
+
+  # The edge's length
   length: float
 
+  # The point where the edge starts (in its direction)
   start: Vector
 
+  # The point where the edge ends (in its direction)
   end: Vector
 
+  # True if the edge ends where it starts (a circle, a closed spline)
   is_closed: bool
 
   # True for the seam of a closed surface (an edge used twice by one face)
   is_seam: bool
 
   # ``"convex"`` for an outside corner (material angle below 180 degrees), ``"concave"``
-  # Remarks: for an inside corner, ``"smooth"`` where the faces meet tangentially. Edges with a single face count as convex.
+  # Remarks: for an inside corner, ``"smooth"`` where the faces meet tangentially (within half a degree) all along the edge. Taken at the middle of the edge; an edge that is tangent there but not at points along it takes the kind where its faces turn most. Edges with a single face count as convex.
   convexity: str
+
+  # The angle between the two faces of the edge through the material, in degrees, at the
+  # Remarks: middle of the edge: 90 at the edges of a box, 270 at the inside corner of an L, 180 where the faces meet tangentially. ``ValueError`` for an edge that does not lie between two faces.
+  dihedral_angle: float
 
   # True on an outside corner (see :attr:`convexity`)
   # smlibpy.shapes.Edge.is_convex (method)
@@ -57,28 +69,119 @@ class Edge(Shape)
   # smlibpy.shapes.Edge.center (method)
   center() -> Vector
 
-  # Tight axis-aligned bounding box
+  # The box along the axes around the edge
   # smlibpy.shapes.Edge.bbox (method)
   bbox() -> BoundBox
 
+  # Distance to a point, or to a body (see :meth:`Part.distance_to`)
   # smlibpy.shapes.Edge.distance_to (method)
-  distance_to(point: VectorLike) -> float
+  distance_to(point: VectorLike | _Body) -> float
 
-  # Points where this edge crosses another edge
+  # The point of the edge nearest to ``point``
+  # smlibpy.shapes.Edge.closest_point (method)
+  closest_point(point: VectorLike | Vertex) -> Vector
+
+  # Where on the edge the point nearest to ``point`` lies, as a fraction of the edge's
+  # Remarks: length from its start (0) to its end (1), as :meth:`point_at` takes it: ``edge.point_at(edge.param_at_point(p))`` is ``edge.closest_point(p)`` (build123d's name).
+  # smlibpy.shapes.Edge.param_at_point (method)
+  param_at_point(point: VectorLike | Vertex) -> float
+
+  # The part of the edge from ``start`` to ``end``, each a fraction of the length (as in
+  # Remarks: :meth:`point_at`) or a point on the edge. The part keeps the curve: a trimmed arc is an arc, a trimmed spline the same spline. ``start`` must come before ``end`` along the edge. :: arc = CenterArc((0, 0), 10, 0, 180).trim(0.25, 0.75) # the arc from 45 to 135 degrees tail = Spline((0, 0), (10, 10), (20, 0)).trim((10, 10, 0), 1.0)
+  # smlibpy.shapes.Edge.trim (method)
+  trim(start: float | VectorLike | Vertex, end: float | VectorLike | Vertex) -> Edge
+
+  # The edge cut in two at ``at``, a fraction of the length or a point on the edge
+  # Remarks: before and the part after, each keeping the curve. :: a, b = Line((0, 0), (10, 0)).split(0.3) # 3 and 7 long left, right = edge.split(edge.intersections(other)[0])
+  # smlibpy.shapes.Edge.split (method)
+  split(at: float | VectorLike | Vertex) -> tuple[Edge, Edge]
+
+  # The edge made longer by ``distance`` at its ``end`` (``"end"``, ``"start"`` or
+  # Remarks: ``"both"``), for cut tools and paths that must run past a body. Lines and arcs (circles and ellipses) go on as themselves. Other curves are continued as ``continuity`` says: ``"G1"`` straight along the end tangent, ``"G2"`` with the curvature at the end, ``"natural"`` as the curve's own polynomial goes on. The added length is ``distance`` in every case. :: groove_path = Spline((0, 0), (20, 8), (40, 0)).extend(5, end="both")
+  # smlibpy.shapes.Edge.extend (method)
+  extend(distance: float, *, end: Literal['start', 'end', 'both'] = 'end', continuity: Literal['G1', 'G2', 'natural'] = 'G1') -> Edge
+
+  # Points where this edge meets ``other``
+  # Remarks: a list of them, in order along this edge. Where the two run along each other, the points where that overlap starts and ends. Points closer than ``tolerance`` to the other shape count as on it (default: 1e-6, or 1e-9 of the size of the two where that is larger); points closer than that to each other count once. No point is an empty list.
   # smlibpy.shapes.Edge.intersections (method)
-  intersections(other: Edge) -> list[Vector]
+  intersections(other: Shape | Iterable[Shape], *, tolerance: float | None = None) -> list[Vector]
 
-  # All vertices of this shape
+  # Where this edge meets ``other`` (see :meth:`intersections`), as fractions of its length
+  # Remarks: (as :meth:`point_at` and :meth:`split` take them), in order.
+  # smlibpy.shapes.Edge.intersection_params (method)
+  intersection_params(other: Shape | Iterable[Shape], *, tolerance: float | None = None) -> list[float]
+
+  # Points where the edge crosses itself (a figure eight, a looping spline), in order along
+  # Remarks: it; the closing point of a closed edge does not count.
+  # smlibpy.shapes.Edge.self_intersections (method)
+  self_intersections(*, tolerance: float | None = None) -> list[Vector]
+
+  # The curvature at fraction ``t`` of the length (as :meth:`point_at`)
+  # Remarks: of the circle that fits the edge best there; 0 where it runs straight.
+  # smlibpy.shapes.Edge.curvature_at (method)
+  curvature_at(t: float = 0.5) -> float
+
+  # The radius of curvature at fraction ``t`` of the length (``math.inf`` where the edge runs
+  # Remarks: straight): the radius of the circle that fits the edge best there.
+  # smlibpy.shapes.Edge.radius_at (method)
+  radius_at(t: float = 0.5) -> float
+
+  # The smallest radius of curvature of the edge (as :meth:`Face.min_radius` is the face's)
+  # Remarks: ``inf`` for a line, an arc's radius. A sweep profile that reaches farther from the path than this folds over itself. Where it is: :meth:`min_radius_at`. :: r = path.min_radius() print(f"tightest bend: radius {r:.3g} at {path.point_at(path.min_radius_at())}")
+  # smlibpy.shapes.Edge.min_radius (method)
+  min_radius() -> float
+
+  # Where the edge bends most tightly (:meth:`min_radius`)
+  # Remarks: :meth:`point_at` takes it (0 for a line or an arc).
+  # smlibpy.shapes.Edge.min_radius_at (method)
+  min_radius_at() -> float
+
+  # Where the edge changes the side it bends to (an S-curve has one), as fractions of its
+  # Remarks: length (as :meth:`point_at`), in order: points where its curvature passes through zero. Lines, arcs and curves that bend one way only have none; a straight stretch between two bends counts once, at its middle, where the bends go opposite ways.
+  # smlibpy.shapes.Edge.inflections (method)
+  inflections() -> list[float]
+
+  # The edge moved ``distance`` sideways in its plane
+  # Remarks: positive distance (seen from the side the plane's normal points to), to its right for a negative one; a closed edge (a circle, a closed spline) outward for a positive distance. Lines stay lines and arcs stay arcs, exactly. Splines and ellipses are offset by the kernel within 1e-6 of their size. Where the edge bends toward that side more tightly than the distance (a radius of curvature below it, see :meth:`min_radius`), the offset would fold over itself and :class:`ModelingError` says where. A closed edge with a corner where it starts and ends (``Spline(*pts, pts[0])``) comes back as one closed edge: rounded at the corner where the offset pulls it apart, cut where its sides cross where it pushes them together (:meth:`Wire.offset` gives sharp and chamfered corners). ``plane``: the plane the edge lies in, whose normal tells left from right. Default: the XY plane for an edge at one height, else the plane the edge lies in, its normal toward +Z (+Y, then +X, for vertical planes). :: rail = Spline((0, 0), (20, 8), (40, 0)).offset(3) # 3 to the left (+Y side)
+  # smlibpy.shapes.Edge.offset (method)
+  offset(distance: float, *, plane: Plane | None = None) -> Edge
+
+  # The edge as lines and circular arcs within ``tolerance`` of it, end to end along it
+  # Remarks: for CNC, laser and plasma cutters and DXF readers that take only LINE and ARC (``export_dxf(..., curves="arcs")``). Lines and arcs come back as they are; splines and ellipses become chains of arcs that join tangentially (lines where they run straight). Both ways, every point of one lies within ``tolerance`` of the other. :: cut = Spline((0, 0), (10, 5), (20, -3), (30, 4)).to_arcs(0.01) # 26 arcs
+  # smlibpy.shapes.Edge.to_arcs (method)
+  to_arcs(tolerance: float = 0.01) -> Wire
+
+  # This edge bent to pass through ``point`` (and there in the direction ``tangent``, if
+  # Remarks: given): the smallest move of its control points that does it, with the ends of the edge and its directions at the ends kept. For "make this curve pass here" edits of splines, sweep paths and outlines; lines and arcs become cubic B-splines.
+  # smlibpy.shapes.Edge.through (method)
+  through(point: VectorLike | Vertex, *, tangent: VectorLike | None = None, at: float | None = None) -> Edge
+
+  # This edge with its ends moved to ``start`` and ``end`` and its directions there set to
+  # Remarks: ``start_tangent`` and ``end_tangent`` (each optional: what is not given stays), bent smoothly in between: the parts near the ends move as a whole, the middle blends. For closing gaps, snapping a curve onto a point or another curve, and making it leave or arrive tangentially. Lines and arcs become B-splines (cubic at least). The kernel's own end deformation (``SmCurve::DeformToEndPointTargets``); the ends land on their targets exactly. :: snapped = spline.match(end=other.start, end_tangent=other.tangent_at(0)) # G1 joint
+  # smlibpy.shapes.Edge.match (method)
+  match(*, start: VectorLike | Vertex | None = None, end: VectorLike | Vertex | None = None, start_tangent: VectorLike | None = None, end_tangent: VectorLike | None = None) -> Edge
+
+  # How the two faces of the edge meet, checked at ``samples`` points along it
+  # Remarks: (:class:`Continuity`): ``"G2"`` where their curvatures across the edge agree as well, ``"G1"`` where they meet tangentially (a circular fillet's border), ``"G0"`` at a crease, ``None`` where they leave a gap wider than the edge's tolerance. ``angle_tolerance`` is the largest angle (degrees) between the faces' normals for G1; ``curvature_tolerance`` the largest difference of their curvatures across the edge for G2, relative to the larger of them (and at least ``1e-3 / length``, so that nearly flat faces count as G2). ``ValueError`` for an edge that does not lie between two faces.
+  # smlibpy.shapes.Edge.continuity (method)
+  continuity(samples: int = 16, *, angle_tolerance: float = 0.5, curvature_tolerance: float = 0.01) -> Continuity
+
+  # The vertices at the edge's ends, start first (one for a closed edge)
   # smlibpy.shapes.Edge.vertices (method)
   vertices() -> ShapeList[Vertex]
 
-  # All edges of this shape
+  # This edge, in a list
   # smlibpy.shapes.Edge.edges (method)
   edges() -> ShapeList[Edge]
 
-  # All faces of this shape
+  # The faces of the body that meet at this edge (none for an edge of no body)
   # smlibpy.shapes.Edge.faces (method)
   faces() -> ShapeList[Face]
+
+  # This edge and the edges that continue it tangentially, through vertices where the next
+  # Remarks: edge runs on in the same direction (within 10 degrees) between faces that meet this edge's faces smoothly, and so on along the run: all top edges of a plate with rounded corners, the outline of a slot. This edge comes first. ``fillet`` and ``chamfer`` round the whole run of each selected edge (their ``propagate``). An edge of no part is its own chain.
+  # smlibpy.shapes.Edge.tangent_chain (method)
+  tangent_chain() -> ShapeList[Edge]
 
   # The same edge traversed the other way
   # smlibpy.shapes.Edge.reversed (method)
@@ -88,6 +191,11 @@ class Edge(Shape)
   # Remarks: weights. Exact for lines, arcs (rational) and B-splines; other curves are approximated within 1e-7.
   # smlibpy.shapes.Edge.nurbs (method)
   nurbs() -> Nurbs
+
+  # The edge of a NURBS curve given by its data
+  # Remarks: points read from a file or another program, curves edited by moving control points and B-splines of many spans (a :func:`~smlibpy.Bezier` is one span).
+  # smlibpy.shapes.Edge.from_nurbs (method)
+  from_nurbs(nurbs: Nurbs | tuple[int, Sequence[float], Sequence[VectorLike], Sequence[float] | None]) -> Edge
 
   # The same curve with the knots it does not need taken out
   # Remarks: points (the kernel's knot removal, which keeps the curve within about 1e-6 of where it was). Lines, arcs and other analytic curves come back as they are.
@@ -108,10 +216,23 @@ class Face(Shape)
   # The body this face belongs to
   owner: _Body
 
+  # The face's own color as ``(r, g, b)`` from 0 to 1, or None
+  # Remarks: Faces get one with ``body.colored(color, faces=...)`` and from STEP files that color single faces. It stays with the face through later operations (kernel plan T5): with both pieces of a face a Boolean splits, with the walls of a hole cut by a tool whose faces have one, with a face moved, mirrored or scaled, with the offsets of a face in a shell; faces an operation makes anew (a fillet's round, the rim around a shell's opening) have none.
+  color: tuple[float, float, float] | None
+
+  # The face's name (``body.named(name, faces=...)``, or from the ``ADVANCED_FACE`` of a STEP
+  # Remarks: file), or None. It stays with the face as :attr:`color` does.
+  name: str | None
+
+  # The cells of its part that this face bounds, as indices into :meth:`Part.cells`
+  # Remarks: face on the outside or on the wall of a cavity, two for a face between two cells of a merged part (see :meth:`ShapeList.shared`), ``()`` for a face of a sheet or a sketch.
+  cells: tuple[int, ...]
+
   # ``"plane"``, ``"cylinder"``, ``"cone"``, ``"sphere"``, ``"torus"``, ``"revolution"``,
   # Remarks: ``"extrusion"``, ``"bspline"``, ``"offset"`` or ``"other"``.
   geom_type: str
 
+  # The face's area
   area: float
 
   # Area centroid
@@ -135,39 +256,93 @@ class Face(Shape)
   # Radius of a cylinder, sphere or cone (at its base), minor radius of a torus
   radius: float
 
+  # Major radius of a torus
+  # Remarks: tube's).
+  major_radius: float
+
+  # Half the opening angle of a cone, in degrees
+  cone_angle: float
+
   # Axis of a cylinder, cone, sphere, torus or surface of revolution
   axis: Axis
 
-  # Tight axis-aligned bounding box
+  # The box along the axes around the face
   # smlibpy.shapes.Face.bbox (method)
   bbox() -> BoundBox
 
+  # Distance to a point, or to a body (see :meth:`Part.distance_to`)
   # smlibpy.shapes.Face.distance_to (method)
-  distance_to(point: VectorLike) -> float
+  distance_to(point: VectorLike | _Body) -> float
+
+  # The point of the face nearest to ``point`` (within its boundary)
+  # smlibpy.shapes.Face.closest_point (method)
+  closest_point(point: VectorLike) -> Vector
+
+  # The parameters ``(u, v)`` of the face's point nearest to ``point``, as fractions (0 to
+  # Remarks: 1) of the face's parameter box: ``face.position_at(*face.uv_at(p))`` is ``face.closest_point(p)``.
+  # smlibpy.shapes.Face.uv_at (method)
+  uv_at(point: VectorLike) -> tuple[float, float]
+
+  # The point of the face's surface at ``(u, v)``, fractions (0 to 1) of the face's
+  # Remarks: parameter box. A trimmed face (a plate with a hole, a face cut by another) does not cover its whole box: points there lie on the surface beyond the face's boundary.
+  # smlibpy.shapes.Face.position_at (method)
+  position_at(u: float, v: float) -> Vector
+
+  # The curvature of the face at its point nearest to ``point`` (default
+  # Remarks: the face): both principal curvatures, their directions and the outward normal (:class:`Curvature`). Curvatures are positive where the face bends away from its outward normal (a ball, a boss), negative where it bends towards it (a bore): a cylinder of radius 5 has ``k1 = 0.2, k2 = 0``, its bore ``k1 = 0, k2 = -0.2``.
+  # smlibpy.shapes.Face.curvature_at (method)
+  curvature_at(point: VectorLike | None = None) -> Curvature
+
+  # The smallest radius of curvature on the face, ``1 / max(|k1|, |k2|)``
+  # Remarks: plane, the radius of a cylinder or sphere, the smaller of a torus' tube radius and its inner radius, at the narrow end of a cone. Free-form faces are sampled on a 24 x 24 grid of their parameters and refined from the sharpest points (singular points such as a pole are left out). Compare it with a wall thickness or a cutter radius.
+  # smlibpy.shapes.Face.min_radius (method)
+  min_radius() -> float
+
+  # The face's surface as a NURBS (:class:`NurbsSurface`)
+  # Remarks: and weights. Exact for every kind (planes, cylinders, cones, spheres, tori as rational surfaces). It is the whole surface, untrimmed: the face may cover only part of it.
+  # smlibpy.shapes.Face.nurbs (method)
+  nurbs() -> NurbsSurface
 
   # Where a ray meets this face, nearest first (see :meth:`Part.raycast`)
   # smlibpy.shapes.Face.raycast (method)
   raycast(origin: VectorLike | Axis, direction: VectorLike | Axis | None = None) -> list[Hit]
 
+  # The curve projected onto this face along its normals
+  # Remarks: of the face's surface, the result trimmed to the face (pieces where it leaves the face and comes back). Within 1e-7 of the size of the face and the curve. For curves drawn near a freeform face; along one direction, see :meth:`Part.project`. :: on_face = part.faces().sort_by(Z)[-1].project(Spline((0, 0, 30), (10, 5, 30), (20, 0, 30)))
+  # smlibpy.shapes.Face.project (method)
+  project(curve: Edge | Wire) -> ShapeList[Edge]
+
+  # The curve of the face along which one of its surface parameters is constant
+  # Remarks: ``v`` as a fraction (0 to 1) of the face's range of that parameter. Trimmed to the face: several pieces where the face has holes or notches. For styling lines, inspection curves and rails on freeform faces. Which parameter runs which way depends on the surface: on a cylinder's side ``v`` is constant around it (``iso(v=0.5)``: the circle half way up) and ``u`` along it. :: ring = Cylinder(10, 40).faces().cylinders()[0].iso(v=0.5) Exact: lines, arcs or B-splines of the surface itself, ending exactly where the face's edges cross them. Give one of ``u`` and ``v``, by name.
+  # smlibpy.shapes.Face.iso (method)
+  iso(*, u: float | None = None, v: float | None = None) -> ShapeList[Edge]
+
+  # A drawing on XY wrapped onto this face, as a label onto a can
+  # Remarks: ``at`` (a point of the face; default its middle), its X axis along the face in ``direction`` (default: the face's first parameter direction there; it follows the parameter line nearest to it), its Y axis across, so that it reads from outside. Lengths stay along the two parameter lines through ``at``: on planes and cylinders the whole drawing keeps its size (text around a cylinder); on cones and doubly curved faces it stretches away from those lines. Around a closed face (a cylinder) the drawing continues across the seam; what leaves the face is cut off (also in its holes). Returns the curves on the face, fitted within 1e-7 of its size; a curve across the seam comes back as one edge.
+  # smlibpy.shapes.Face.wrap (method)
+  wrap(shape: Edge | Wire | Sketch | Iterable[Edge], at: VectorLike | Vertex | None = None, *, direction: VectorLike | None = None) -> ShapeList[Edge]
+
+  # The face's outer boundary
   # smlibpy.shapes.Face.outer_wire (method)
   outer_wire() -> Wire
 
+  # The boundaries of the face's holes
   # smlibpy.shapes.Face.inner_wires (method)
   inner_wires() -> ShapeList[Wire]
 
-  # All wires (closed edge loops of faces, or the shape itself if it is a wire)
+  # The face's boundaries
   # smlibpy.shapes.Face.wires (method)
   wires() -> ShapeList[Wire]
 
   # The face's edges (seam edges only with ``seams=True``)
   # smlibpy.shapes.Face.edges (method)
-  edges(seams: bool = False) -> ShapeList[Edge]
+  edges(*, seams: bool = False) -> ShapeList[Edge]
 
-  # All vertices of this shape
+  # The face's vertices
   # smlibpy.shapes.Face.vertices (method)
   vertices() -> ShapeList[Vertex]
 
-  # All faces of this shape
+  # This face, in a list
   # smlibpy.shapes.Face.faces (method)
   faces() -> ShapeList[Face]
 
@@ -183,9 +358,33 @@ class Face(Shape)
   # smlibpy.shapes.Face.to_shell (method)
   to_shell() -> Shell
 
+  # A sheet of this face moved by ``distance`` along its normal (:meth:`normal_at`
+  # Remarks: it bounds; a negative distance moves it in): the offset surface, trimmed as the face is (see :meth:`Shell.offset`).
+  # smlibpy.shapes.Face.offset (method)
+  offset(distance: float) -> Shell
+
+  # The pieces of this face cut along curves that lie on it, as the faces of a new sheet
+  # smlibpy.shapes.Face.split (method)
+  split(curves: Edge | Wire | Iterable[Edge | Wire]) -> ShapeList[Face]
+
+  # A copy of this face, turned over
+  # Remarks: (see :meth:`Shell.flipped`).
+  # smlibpy.shapes.Face.flipped (method)
+  flipped() -> Shell
+
+  # The whole surface this face lies on, as a sheet of one face
+  # Remarks: are gone. A cylindrical face cut out of a box comes back as the whole cylinder the cut left it on (its full height and all around), a B-spline face as its whole surface. A plane has no border of its own: it comes back as the smallest rectangle around the face, along the plane's own directions. The sheet's normal follows this face's (:meth:`normal_at`).
+  # smlibpy.shapes.Face.untrimmed (method)
+  untrimmed() -> Shell
+
+  # The face's surface grown past its sides, as a sheet of one face
+  # Remarks: across a part before cutting or splitting it with it, or to give a blend room. Returns: A sheet of one face, its normal following this face's (:meth:`normal_at`).
+  # smlibpy.shapes.Face.extend (method)
+  extend(distance: float, *, sides: Edge | Iterable[Edge] | None = None, continuity: Literal['natural', 'G1', 'G2'] = 'natural') -> Shell
+
   # Extrude a planar face along its normal (see :meth:`Sketch.extrude`)
   # smlibpy.shapes.Face.extrude (method)
-  extrude(amount: float, **kwargs: Any) -> Part
+  extrude(amount: float, *, both: bool = False, taper: float = 0.0, direction: Axis | VectorLike | None = None, corners: Literal['sharp', 'round'] = 'sharp') -> Part
 
 # Category: shapes
 # Mass properties of a part
@@ -196,646 +395,22 @@ class MassProperties
   # smlibpy.shapes.MassProperties.__init__ (constructor)
   MassProperties(mass: float, volume: float, area: float, center: Vector, inertia: np.ndarray, density: float)
 
+  # The principal moments of inertia, smallest first
   principal_moments: tuple[float, float, float]
 
+  # The principal axes of inertia (directions), in the order of :attr:`principal_moments`
   principal_axes: tuple[Vector, Vector, Vector]
 
-# Category: shapes
-# A solid
-# Remarks: Combine parts with ``+`` (union), ``-`` (difference) and ``&`` (intersection). The right-hand side may be a single part or any iterable of parts.
-# smlibpy.shapes.Part (class)
-class Part(_Body)
-
-  volume: float
-
-  # Total surface area
-  area: float
-
-  # Center of mass (uniform density)
-  # smlibpy.shapes.Part.center (method)
-  center() -> Vector
-
-  # Mass, center of mass and inertia tensor for a uniform ``density``
-  # Remarks: ``accuracy`` is the relative accuracy of the results (default ``ACCURACY``, 1e-7; from 1e-10 to 1e-2): volume, mass and area to ``accuracy`` of their value, the center to ``accuracy`` times the size of the part (its bounding box diagonal), the inertia to ``accuracy`` times its largest principal moment.
-  # smlibpy.shapes.Part.mass_properties (method)
-  mass_properties(density: float = 1.0, accuracy: float | None = None) -> MassProperties
-
-  # True if the part is a closed, manifold solid that encloses a positive volume
-  # Remarks: (A body whose faces point inward, or that encloses no volume, such as a profile revolved about an axis through it, is not valid.)
-  # smlibpy.shapes.Part.is_valid (method)
-  is_valid() -> bool
-
-  # The separate bodies of this part
-  # smlibpy.shapes.Part.solids (method)
-  solids() -> ShapeList[Part]
-
-  # This part and others as one part made of cells
-  # Remarks: a cell of its own; cells that touch share the faces between them (each such face bounds two cells: the body is non-manifold). For simulation meshes that must match across materials, and for models of several materials. ``cells()`` gives the cells as parts of their own; ``volume`` is the volume of the union. A merged part is not a manifold solid: ``is_valid()`` is False, and Booleans, fillets and shells take its cells rather than the part itself.
-  # smlibpy.shapes.Part.merge (method)
-  merge(*others: Part | Sequence[Part]) -> Part
-
-  # The cells of a part made by :meth:`merge`, each as a part of its own (every closed region
-  # Remarks: of the body; a cavity is not a cell). A part that is one solid: ``[itself]``.
-  # smlibpy.shapes.Part.cells (method)
-  cells() -> ShapeList[Part]
-
-  # Union with other parts
-  # smlibpy.shapes.Part.fuse (method)
-  fuse(*others: Part | Iterable[Part]) -> Part
-
-  # Subtract other parts
-  # smlibpy.shapes.Part.cut (method)
-  cut(*others: Part | Iterable[Part]) -> Part
-
-  # Keep only the volume shared with the other parts
-  # smlibpy.shapes.Part.intersect (method)
-  intersect(*others: Part | Iterable[Part]) -> Part
-
-  # smlibpy.shapes.Part.__add__ (method)
-  __add__(other: Any) -> Part  # Part + other
-
-  # smlibpy.shapes.Part.__radd__ (method)
-  __radd__(other: Any) -> Part  # other + Part
-
-  # smlibpy.shapes.Part.__sub__ (method)
-  __sub__(other: Any) -> Part  # Part - other
-
-  # smlibpy.shapes.Part.__and__ (method)
-  __and__(other: Any) -> Part  # Part & other
-
-  # Round edges
-  # smlibpy.shapes.Part.fillet (method)
-  fillet(edges: Any, radius: float | tuple[float, float] | Sequence[float], *, continuity: int | str | None = None, fullness: float = 1.0) -> Part
-  #   edges: Edges of this part (a selection, a single edge, or faces whose edges to round)
-  #   radius: Fillet radius
-  #   continuity: ``None`` for a circular fillet
-  #   fullness: Shape of a blend cross-section
-
-  # Bevel edges
-  # smlibpy.shapes.Part.chamfer (method)
-  chamfer(edges: Any, length: float) -> Part
-
-  # Hollow the part out to walls of ``thickness``, removing the ``openings`` faces
-  # Remarks: The walls grow inward (the outside keeps its size) unless ``outward`` is true.
-  # smlibpy.shapes.Part.shell (method)
-  shell(thickness: float, openings: Any = None, *, outward: bool = False) -> Part
-
-  # Grow (positive) or shrink (negative) the part by ``distance`` everywhere
-  # smlibpy.shapes.Part.offset (method)
-  offset(distance: float) -> Part
-
-  # Cut the part with a plane
-  # Remarks: ``keep="above"`` keeps the side the plane normal points to, ``"below"`` the other side, ``"both"`` returns ``(above, below)``.
-  # smlibpy.shapes.Part.split (method)
-  split(plane: Plane | Face, keep: str = 'above') -> Any
-
-  # The cross-section of the part in a plane, as a sketch
-  # smlibpy.shapes.Part.section (method)
-  section(plane: Plane | Face = Plane.XY) -> Sketch
-
-  # Twist about an axis (default Z) by ``angle`` degrees over the part
-  # smlibpy.shapes.Part.twist (method)
-  twist(angle: float, **kwargs: Any) -> Part
-
-  # Scale cross-sections toward an axis (default Z) from 1 to ``scale``
-  # smlibpy.shapes.Part.taper (method)
-  taper(scale: float, **kwargs: Any) -> Part
-
-  # Bend around an axis by ``angle`` degrees (default
-  # smlibpy.shapes.Part.bend (method)
-  bend(angle: float, **kwargs: Any) -> Part
-
-  # Deform with a :class:`smlibpy.Lattice` (same as ``lattice.apply(part)``)
-  # smlibpy.shapes.Part.deform (method)
-  deform(lattice: Any, **kwargs: Any) -> Part
-
-  # The part with fillets taken out and their edges sharp again
-  # Remarks: of this part), or all fillets up to ``max_radius``. With ``partial`` the fillets the kernel cannot take out stay. See :mod:`smlibpy.defeature`.
-  # smlibpy.shapes.Part.remove_fillets (method)
-  remove_fillets(faces: Any = None, *, max_radius: float | None = None, partial: bool = False) -> Part
-
-  # The part with ``faces`` (a hole, a boss, a pocket) cut out and the gap closed by the
-  # Remarks: faces around it. With ``partial`` the features the kernel cannot close stay. See :mod:`smlibpy.defeature`.
-  # smlibpy.shapes.Part.remove_faces (method)
-  remove_faces(faces: Any, *, partial: bool = False) -> Part
-
-  # Draft angle of every face for the pull direction, with the faces grouped by whether
-  # Remarks: they release (see :class:`smlibpy.draft.DraftAnalysis`).
-  # smlibpy.shapes.Part.draft_analysis (method)
-  draft_analysis(direction: Axis | VectorLike, *, min_angle: float = 1.0) -> Any
-
-  # The closed lines where the part's surface turns from facing ``direction`` to facing
-  # Remarks: away from it (see :func:`smlibpy.draft.parting_line`).
-  # smlibpy.shapes.Part.parting_line (method)
-  parting_line(direction: Axis | VectorLike) -> ShapeList[Wire]
-
-  # Tilt faces by a draft angle, so that a molded or cast part comes out of its mold
-  # Remarks: Each face turns about the line where it meets the neutral plane and keeps its size there. The normal of the neutral plane is the pull direction, the way the mold moves off the part: a positive angle turns each face to look more along it, so the part narrows and pockets and holes widen along the normal, on either side of the plane. Afterwards ``draft_analysis`` of that direction finds ``angle`` more draft on each of the faces. Planes can be drafted, and cylinders and cones whose axis runs along the normal (a cylinder becomes a cone). A face that meets a drafted face tangentially, such as a fillet between two walls, must be drafted with it; the faces around the drafted ones are extended or trimmed to meet them.
-  # smlibpy.shapes.Part.draft (method)
-  draft(faces: Any, angle: float, neutral_plane: Plane | Face) -> Part
-  #   faces: Faces of this part (a selection or a single face)
-  #   angle: Draft angle in degrees, between -90 and 90 and not 0
-  #   neutral_plane: Where the faces keep their size, a :class:`Plane` or a planar face
-
-  # Fold this sheet along a line on its top or bottom face (see :func:`smlibpy.fold`)
-  # smlibpy.shapes.Part.fold (method)
-  fold(line: Any, angle: float, *, radius: float, k_factor: float = 0.44, fixed: Any = None, partial: bool = False) -> Part
-
-  # Add a flange along a straight outer edge of this sheet (see :func:`smlibpy.flange`)
-  # smlibpy.shapes.Part.flange (method)
-  flange(edge: Any, length: float, *, angle: float = 90.0, radius: float, k_factor: float = 0.44) -> Part
-
-  # The bends of this sheet metal part (see :func:`smlibpy.sheetmetal.bends`)
-  # smlibpy.shapes.Part.bends (method)
-  bends(*, k_factor: float = 0.44) -> list[Any]
-
-  # This sheet metal part unfolded flat (see :func:`smlibpy.unfold`)
-  # smlibpy.shapes.Part.unfold (method)
-  unfold(*, k_factor: float = 0.44, fixed: Face | None = None) -> Part
-
-  # The flat pattern of this sheet metal part on XY (see :func:`smlibpy.flat_pattern`)
-  # smlibpy.shapes.Part.flat_pattern (method)
-  flat_pattern(*, k_factor: float = 0.44, fixed: Face | None = None) -> Any
-
-# Category: shapes
-# Base class of all shapes
-# smlibpy.shapes.Shape (class)
-class Shape
-
-  # All vertices of this shape
-  # smlibpy.shapes.Shape.vertices (method)
-  vertices() -> ShapeList[Vertex]
-
-  # All edges of this shape
-  # smlibpy.shapes.Shape.edges (method)
-  edges() -> ShapeList[Edge]
-
-  # All wires (closed edge loops of faces, or the shape itself if it is a wire)
-  # smlibpy.shapes.Shape.wires (method)
-  wires() -> ShapeList[Wire]
-
-  # All faces of this shape
-  # smlibpy.shapes.Shape.faces (method)
-  faces() -> ShapeList[Face]
-
-  # A copy of this shape moved by a location (``location * shape``)
-  # smlibpy.shapes.Shape.moved (method)
-  moved(location: Location) -> S
-
-  # A copy moved by ``(x, y, z)``
-  # smlibpy.shapes.Shape.translate (method)
-  translate(x: float | VectorLike = 0.0, y: float = 0.0, z: float = 0.0) -> S
-
-  # A copy rotated by ``angle`` degrees about ``axis``
-  # smlibpy.shapes.Shape.rotate (method)
-  rotate(axis: Axis = Z, angle: float = 0.0) -> S
-
-  # A mirrored copy (reflection in ``plane``, a plane or a planar face
-  # Remarks: XZ plane, which flips Y).
-  # smlibpy.shapes.Shape.mirror (method)
-  mirror(plane: Plane | Face = Plane.XZ) -> S
-
-  # A scaled copy
-  # Remarks: them zero (``ValueError``: that would flatten the shape).
-  # smlibpy.shapes.Shape.scale (method)
-  scale(factor: float | VectorLike, center: VectorLike = (0, 0, 0)) -> S
-
-  # Place this shape, designed around the world XY plane, onto a plane or face
-  # Remarks: The shape's origin goes to the plane origin (a face's center), its X axis to the plane's X direction and its Z axis to the plane normal. ``sketch.on(face)`` is the usual way to draw on a face.
-  # smlibpy.shapes.Shape.on (method)
-  on(target: Plane | Face | Location | ShapeList | Sequence[Any]) -> S
-
-  # smlibpy.shapes.Shape.__rmul__ (method)
-  __rmul__(other: Any) -> Any  # other * Shape
-
-  # Tight axis-aligned bounding box
-  # smlibpy.shapes.Shape.bbox (method)
-  bbox() -> BoundBox
-
-  # Center of mass (centroid) of the shape
-  # smlibpy.shapes.Shape.center (method)
-  center() -> Vector
-
-  # Triangulate the shape (see :func:`smlibpy.mesh.tessellate`)
-  # smlibpy.shapes.Shape.mesh (method)
-  mesh(tolerance: float | None = None, angle: float = 15.0) -> 'Mesh'
-
-  # Show the shape in the browser viewer (see :func:`smlibpy.show`)
-  # smlibpy.shapes.Shape.show (method)
-  show(**kwargs: Any) -> Any
-
-  # Write the shape to a file
-  # smlibpy.shapes.Shape.export (method)
-  export(path: str, **kwargs: Any) -> None
-
-# Category: shapes
-# A list of shapes with selection helpers
-# Remarks: Every selector returns a new :class:`ShapeList`, so selectors chain:: part.edges().parallel_to(Z).max_by(X) part.faces().planar().facing(-Z) A one-element list can be used wherever a single shape is expected (``sketch.on(part.faces().top())``). Use :meth:`one` to require exactly one.
-# smlibpy.shapes.ShapeList (class)
-class ShapeList(list)
-
-  # The only element
-  # smlibpy.shapes.ShapeList.one (method)
-  one() -> T
-
-  first: T
-
-  last: T
-
-  # Sort by position along an axis, by ``"length"``/``"area"``/``"volume"``/``"radius"``,
-  # Remarks: or by any function of a shape.
-  # smlibpy.shapes.ShapeList.sort_by (method)
-  sort_by(key: SortKey = Z, reverse: bool = False) -> ShapeList[T]
-
-  # ``parallel_to(axis)``, ``of_type(name)`` or ``filter(predicate)``, depending on the
-  # Remarks: argument.
-  # smlibpy.shapes.ShapeList.filter_by (method)
-  filter_by(criterion: Axis | str | Callable[[T], bool]) -> ShapeList[T]
-
-  # Return self>value
-  # smlibpy.shapes.ShapeList.__gt__ (method)
-  __gt__(key: SortKey) -> ShapeList[T]  # ShapeList > key
-
-  # Return self<value
-  # smlibpy.shapes.ShapeList.__lt__ (method)
-  __lt__(key: SortKey) -> ShapeList[T]  # ShapeList < key
-
-  # smlibpy.shapes.ShapeList.__rshift__ (method)
-  __rshift__(key: SortKey) -> ShapeList[T]  # ShapeList >> key
-
-  # smlibpy.shapes.ShapeList.__lshift__ (method)
-  __lshift__(key: SortKey) -> ShapeList[T]  # ShapeList << key
-
-  # smlibpy.shapes.ShapeList.sort_by_distance (method)
-  sort_by_distance(point: VectorLike, reverse: bool = False) -> ShapeList[T]
-
-  # Group shapes with equal key (within ``tol``), groups in ascending key order
-  # smlibpy.shapes.ShapeList.group_by (method)
-  group_by(key: SortKey = Z, tol: float = 0.0001) -> list[ShapeList[T]]
-
-  # The shapes with the largest key (all of them, if several tie)
-  # smlibpy.shapes.ShapeList.max_by (method)
-  max_by(key: SortKey = Z, tol: float = 0.0001) -> ShapeList[T]
-
-  # The shapes with the smallest key (all of them, if several tie)
-  # smlibpy.shapes.ShapeList.min_by (method)
-  min_by(key: SortKey = Z, tol: float = 0.0001) -> ShapeList[T]
-
-  # Highest shapes (largest Z)
-  # smlibpy.shapes.ShapeList.top (method)
-  top() -> ShapeList[T]
-
-  # Lowest shapes (smallest Z)
-  # smlibpy.shapes.ShapeList.bottom (method)
-  bottom() -> ShapeList[T]
-
-  # Shapes furthest along +X
-  # smlibpy.shapes.ShapeList.right (method)
-  right() -> ShapeList[T]
-
-  # Shapes furthest along -X
-  # smlibpy.shapes.ShapeList.left (method)
-  left() -> ShapeList[T]
-
-  # Shapes furthest along +Y
-  # smlibpy.shapes.ShapeList.back (method)
-  back() -> ShapeList[T]
-
-  # Shapes furthest along -Y
-  # smlibpy.shapes.ShapeList.front (method)
-  front() -> ShapeList[T]
-
-  # The biggest shape by volume, area or length
-  # smlibpy.shapes.ShapeList.largest (method)
-  largest() -> T
-
-  # The smallest shape by volume, area or length
-  # smlibpy.shapes.ShapeList.smallest (method)
-  smallest() -> T
-
-  # The shape whose center is closest to ``point``
-  # smlibpy.shapes.ShapeList.nearest (method)
-  nearest(point: VectorLike) -> T
-
-  # Keep the shapes for which ``predicate(shape)`` is true
-  # smlibpy.shapes.ShapeList.filter (method)
-  filter(predicate: Callable[[T], bool]) -> ShapeList[T]
-
-  # Keep shapes of the given geometry types, e.g
-  # Remarks: ``"plane"``, ``"cylinder"``, ``"bspline"``.
-  # smlibpy.shapes.ShapeList.of_type (method)
-  of_type(*geom_types: str) -> ShapeList[T]
-
-  # Straight edges (also straight B-spline edges, such as the edges of a chamfer)
-  # smlibpy.shapes.ShapeList.lines (method)
-  lines() -> ShapeList[T]
-
-  # Circular edges (full circles and arcs)
-  # smlibpy.shapes.ShapeList.circles (method)
-  circles() -> ShapeList[T]
-
-  # Planar faces (also flat B-spline faces)
-  # smlibpy.shapes.ShapeList.planar (method)
-  planar() -> ShapeList[T]
-
-  # Cylindrical faces
-  # smlibpy.shapes.ShapeList.cylinders (method)
-  cylinders() -> ShapeList[T]
-
-  # Straight edges along ``axis``, or planar faces whose normal is along ``axis``
-  # smlibpy.shapes.ShapeList.parallel_to (method)
-  parallel_to(axis: Axis | VectorLike) -> ShapeList[T]
-
-  # Straight edges perpendicular to ``axis``, or planar faces containing it
-  # smlibpy.shapes.ShapeList.perpendicular_to (method)
-  perpendicular_to(axis: Axis | VectorLike) -> ShapeList[T]
-
-  # Faces whose outward normal points along ``direction`` (within ``max_angle`` degrees)
-  # Remarks: A curved face counts only when its normal does so everywhere on the face: the wall of a hole or a boss faces no direction, and a fillet only with a ``max_angle`` that takes in all its normals.
-  # smlibpy.shapes.ShapeList.facing (method)
-  facing(direction: Axis | VectorLike, max_angle: float = 0.001) -> ShapeList[T]
-
-  # Edges on outside corners (material angle below 180 degrees), and the outside
-  # Remarks: corners of a sketch (vertices where the region's angle is below 180 degrees).
-  # smlibpy.shapes.ShapeList.convex (method)
-  convex() -> ShapeList[T]
-
-  # Edges on inside corners (material angle above 180 degrees), and the inside
-  # Remarks: corners of a sketch.
-  # smlibpy.shapes.ShapeList.concave (method)
-  concave() -> ShapeList[T]
-
-  # Edges where two faces meet tangentially, such as the borders of a fillet, and the
-  # Remarks: vertices of a sketch where two edges meet tangentially.
-  # smlibpy.shapes.ShapeList.smooth (method)
-  smooth() -> ShapeList[T]
-
-  # Fillet faces
-  # Remarks: (with the corner patches where fillets meet), up to ``max_radius``. See :mod:`smlibpy.defeature`.
-  # smlibpy.shapes.ShapeList.fillets (method)
-  fillets(max_radius: float | None = None) -> ShapeList[T]
-
-  # The faces (or bodies) of the list that a ray meets, nearest first
-  # Remarks: order the ray meets them (see :meth:`Part.raycast`). Only the shapes in the list count, so ``part.faces().planar().hit_by(...)`` looks past the faces that are not planar. The ray starts at ``origin`` and runs along ``direction`` (an axis or a vector); an axis alone is a ray from its origin along its direction. A ray through an edge meets the faces on both sides of it.
-  # smlibpy.shapes.ShapeList.hit_by (method)
-  hit_by(origin: VectorLike | Axis, direction: VectorLike | Axis | None = None) -> ShapeList[T]
-
-  # Shapes whose bounding box lies inside ``box``
-  # smlibpy.shapes.ShapeList.within (method)
-  within(box: BoundBox) -> ShapeList[T]
-
-  # Shapes passing through ``point`` (vertices at, edges/faces touching it)
-  # smlibpy.shapes.ShapeList.at (method)
-  at(point: VectorLike, tol: float = 0.0001) -> ShapeList[T]
-
-  # Return self+value
-  # smlibpy.shapes.ShapeList.__add__ (method)
-  __add__(other: Iterable[T]) -> ShapeList[T]  # ShapeList + other
-
-  # Return self|value
-  # smlibpy.shapes.ShapeList.__or__ (method)
-  __or__(other: Iterable[T]) -> ShapeList[T]  # ShapeList | other
-
-  # smlibpy.shapes.ShapeList.__sub__ (method)
-  __sub__(other: Iterable[T]) -> ShapeList[T]  # ShapeList - other
-
-  # smlibpy.shapes.ShapeList.__and__ (method)
-  __and__(other: Iterable[T]) -> ShapeList[T]  # ShapeList & other
-
-  # Return self[index]
-  # smlibpy.shapes.ShapeList.__getitem__ (method)
-  __getitem__(i)  # ShapeList[i]
-
-  # smlibpy.shapes.ShapeList.vertices (method)
-  vertices() -> ShapeList[Vertex]
-
-  # smlibpy.shapes.ShapeList.edges (method)
-  edges() -> ShapeList[Edge]
-
-  # smlibpy.shapes.ShapeList.faces (method)
-  faces() -> ShapeList[Face]
-
-  # smlibpy.shapes.ShapeList.wires (method)
-  wires() -> ShapeList[Wire]
-
-  # Average of the members' centers
-  # smlibpy.shapes.ShapeList.center (method)
-  center() -> Vector
-
-  # smlibpy.shapes.ShapeList.bbox (method)
-  bbox() -> BoundBox
-
-  # smlibpy.shapes.ShapeList.moved (method)
-  moved(location: Location) -> ShapeList[T]
-
-  # Every shape placed onto a plane or face (see :meth:`Shape.on`)
-  # smlibpy.shapes.ShapeList.on (method)
-  on(target: Any) -> ShapeList[T]
-
-  # smlibpy.shapes.ShapeList.translate (method)
-  translate(x: float | VectorLike = 0.0, y: float = 0.0, z: float = 0.0) -> ShapeList[T]
-
-  # smlibpy.shapes.ShapeList.rotate (method)
-  rotate(axis: Axis = Z, angle: float = 0.0) -> ShapeList[T]
-
-  # Return value*self
-  # smlibpy.shapes.ShapeList.__rmul__ (method)
-  __rmul__(other: Any) -> Any  # other * ShapeList
-
-# Category: shapes
-# A sheet body
-# smlibpy.shapes.Shell (class)
-class Shell(_Body)
-
-  area: float
-
-  # Center of mass (centroid) of the shape
-  # smlibpy.shapes.Shell.center (method)
-  center() -> Vector
-
-  # Turn the sheet into a solid of ``thickness`` (along the face normals
-  # Remarks: thickness grows against them). With ``both`` the solid is ``thickness`` thick in total, half of it to each side of the sheet.
-  # smlibpy.shapes.Shell.thicken (method)
-  thicken(thickness: float, *, both: bool = False) -> Part
-
-  # smlibpy.shapes.Shell.__add__ (method)
-  __add__(other: Any) -> Shell  # Shell + other
-
-# Category: shapes
-# A planar region (with holes, possibly several pieces) on a plane
-# Remarks: Sketch constructors build in the world XY plane around the origin; place a sketch with ``.on(plane_or_face)``, ``Plane * sketch`` or ``Pos(...) * sketch``. Combine sketches with ``+``, ``-``, ``&`` and ``^``, change them with :meth:`offset`, :meth:`fillet`, :meth:`chamfer` and :meth:`mirror`, then turn them into parts with :meth:`extrude`, :meth:`revolve`, :meth:`sweep` or :func:`~smlibpy.loft`. Outlines that are awkward as combinations of shapes are drawn with :class:`~smlibpy.Profile`.
-# smlibpy.shapes.Sketch (class)
-class Sketch(Shell)
-
-  # The sketch plane
-  plane: Plane
-
-  # smlibpy.shapes.Sketch.__add__ (method)
-  __add__(other: Any) -> Sketch  # Sketch + other
-
-  # smlibpy.shapes.Sketch.__radd__ (method)
-  __radd__(other: Any) -> Sketch  # other + Sketch
-
-  # smlibpy.shapes.Sketch.__sub__ (method)
-  __sub__(other: Any) -> Sketch  # Sketch - other
-
-  # smlibpy.shapes.Sketch.__and__ (method)
-  __and__(other: Any) -> Sketch  # Sketch & other
-
-  # smlibpy.shapes.Sketch.__xor__ (method)
-  __xor__(other: Any) -> Sketch  # Sketch ^ other
-
-  # Area centroid of the region
-  # smlibpy.shapes.Sketch.center (method)
-  center() -> Vector
-
-  # Total length of the boundary
-  perimeter: float
-
-  # Grow (positive ``distance``) or shrink (negative) the region
-  # Remarks: ``corners`` shapes the corners that the offset pulls apart (convex ones when growing, concave ones when shrinking): ``"round"`` (arcs of radius ``|distance|``), ``"sharp"`` (the sides extended until they meet) or ``"chamfer"`` (a straight cut across). Lines stay lines and arcs stay arcs. Parts that grow into each other merge, parts that get too thin vanish; shrinking away the whole region raises :class:`ModelingError`. ``round=False`` is the older spelling of ``corners="sharp"``.
-  # smlibpy.shapes.Sketch.offset (method)
-  offset(distance: float, *, corners: str = 'round', round: bool | None = None) -> Sketch
-
-  # Round corners of the region with tangent arcs of ``radius``
-  # Remarks: ``vertices``: the corners to round, as vertices of this sketch (a selection such as ``s.vertices().concave()``) or points; ``None`` rounds every sharp corner. Corners between lines and arcs are rounded exactly; a corner that does not fit, a point that is not a corner, or a smooth corner raises :class:`ModelingError`.
-  # smlibpy.shapes.Sketch.fillet (method)
-  fillet(radius: float, vertices: Iterable[VectorLike | Vertex] | None = None) -> Sketch
-
-  # Bevel corners of the region
-  # Remarks: (measured along the edge) and join the two points with a line. ``vertices`` as for :meth:`fillet`; ``None`` bevels every sharp corner.
-  # smlibpy.shapes.Sketch.chamfer (method)
-  chamfer(length: float, vertices: Iterable[VectorLike | Vertex] | None = None) -> Sketch
-
-  # A mirrored copy
-  # Remarks: plane or planar face (by default the XZ plane, which flips Y). Lines stay lines and arcs stay arcs. The sketch keeps facing the same way when the mirror is an axis in its own plane, so the mirrored profile extrudes to the same side.
-  # smlibpy.shapes.Sketch.mirror (method)
-  mirror(plane: Plane | Face | Axis = Plane.XZ) -> Sketch
-
-  # Extrude the region into a solid
-  # smlibpy.shapes.Sketch.extrude (method)
-  extrude(amount: float, *, both: bool = False, taper: float = 0.0, direction: Axis | VectorLike | None = None) -> Part
-  #   amount: Distance along the sketch normal (negative goes the other way)
-  #   both: Extrude ``amount`` to both sides of the sketch
-  #   taper: Draft angle in degrees
-  #   direction: Extrude along this direction (an axis or a vector) instead of the normal
-
-  # Revolve the region about an axis in its plane
-  # Remarks: The default axis is the sketch's local Y axis through its plane origin. For the centered constructors (``Rectangle``, ``Circle``, ...) and for ``make_face`` that origin is the middle of the region, so pass ``axis`` unless the sketch was drawn beside its origin (``Polygon((10, 0), (20, 0), ...)``). A negative ``angle`` turns the other way. The axis must not cross the region (``ModelingError``).
-  # smlibpy.shapes.Sketch.revolve (method)
-  revolve(axis: Axis | None = None, angle: float = 360.0) -> Part
-
-  # Sweep the region along a path
-  # smlibpy.shapes.Sketch.sweep (method)
-  sweep(path: Edge | Wire, *, sharp_corners: bool | None = None) -> Part
-
-# Category: shapes
-# A point
-# smlibpy.shapes.Vertex (class)
-class Vertex(Shape)
-
-  # smlibpy.shapes.Vertex.__init__ (constructor)
-  Vertex(x: float | VectorLike = 0.0, y: float = 0.0, z: float = 0.0)
-
-  point: Vector
-
-  x: float
-
-  y: float
-
-  z: float
-
-  # Center of mass (centroid) of the shape
-  # smlibpy.shapes.Vertex.center (method)
-  center() -> Vector
-
-  # Tight axis-aligned bounding box
-  # smlibpy.shapes.Vertex.bbox (method)
-  bbox() -> BoundBox
-
-  # All vertices of this shape
-  # smlibpy.shapes.Vertex.vertices (method)
-  vertices() -> ShapeList[Vertex]
-
-  # All edges of this shape
-  # smlibpy.shapes.Vertex.edges (method)
-  edges() -> ShapeList[Edge]
-
-  # All faces of this shape
-  # smlibpy.shapes.Vertex.faces (method)
-  faces() -> ShapeList[Face]
-
-  # smlibpy.shapes.Vertex.distance_to (method)
-  distance_to(other: VectorLike | Shape) -> float
-
-  # For a corner of a sketch
-  # Remarks: degrees (an outside corner), ``"concave"`` above (an inside corner, also every corner of a square hole), ``"smooth"`` where the two edges meet tangentially.
-  convexity: str
-
-# Category: shapes
-# A chain of edges, open or closed
-# smlibpy.shapes.Wire (class)
-class Wire(Shape)
-
-  # smlibpy.shapes.Wire.__init__ (constructor)
-  Wire(edges: Iterable[Edge | Wire] | Edge | Wire, *, sort: bool = True)
-
-  # All edges of this shape
-  # smlibpy.shapes.Wire.edges (method)
-  edges() -> ShapeList[Edge]
-
-  # All vertices of this shape
-  # smlibpy.shapes.Wire.vertices (method)
-  vertices() -> ShapeList[Vertex]
-
-  # All wires (closed edge loops of faces, or the shape itself if it is a wire)
-  # smlibpy.shapes.Wire.wires (method)
-  wires() -> ShapeList[Wire]
-
-  is_closed: bool
-
-  start: Vector
-
-  end: Vector
-
-  length: float
-
-  # Length-weighted average of the edge midpoints
-  # smlibpy.shapes.Wire.center (method)
-  center() -> Vector
-
-  # Tight axis-aligned bounding box
-  # smlibpy.shapes.Wire.bbox (method)
-  bbox() -> BoundBox
-
-  # Point at fraction ``t`` of the total length
-  # smlibpy.shapes.Wire.point_at (method)
-  point_at(t: float = 0.5) -> Vector
-
-  # smlibpy.shapes.Wire.tangent_at (method)
-  tangent_at(t: float = 0.5) -> Vector
-
-  # smlibpy.shapes.Wire.distance_to (method)
-  distance_to(point: VectorLike) -> float
-
-  # This wire closed with a straight line from its end to its start
-  # smlibpy.shapes.Wire.close (method)
-  close() -> Wire
-
-  # smlibpy.shapes.Wire.reversed (method)
-  reversed() -> Wire
-
-  # smlibpy.shapes.Wire.__add__ (method)
-  __add__(other: Edge | Wire) -> Wire  # Wire + other
-
-  # The plane of a planar wire (normal by the right-hand rule along the wire)
-  # smlibpy.shapes.Wire.plane (method)
-  plane() -> Plane
-
-  # Round the corners between straight edges with tangent arcs (planar wires)
-  # smlibpy.shapes.Wire.fillet (method)
-  fillet(radius: float, vertices: Iterable[VectorLike | Vertex] | None = None) -> Wire
-
-  # The planar region bounded by this closed wire
-  # smlibpy.shapes.Wire.to_sketch (method)
-  to_sketch() -> Sketch
+  # The radius of gyration about each principal axis, ``sqrt(moment / mass)``, in the order
+  # Remarks: of :attr:`principal_moments`: the distance from the axis at which the whole mass would have the same moment of inertia.
+  radii_of_gyration: tuple[float, float, float]
+
+  # The inertia tensor about ``point`` (axes parallel to the world axes)
+  # Remarks: moved by the parallel-axis theorem, ``inertia + mass * (d.d * I - d d^T)`` with ``d`` from the center of mass to the point.
+  # smlibpy.shapes.MassProperties.inertia_about (method)
+  inertia_about(point: VectorLike) -> np.ndarray
+
+  # The moment of inertia about an axis (for example a shaft's axis or a pivot)
+  # Remarks: with the inertia tensor about a point of the axis and its unit direction ``n``.
+  # smlibpy.shapes.MassProperties.moment_about (method)
+  moment_about(axis: Axis) -> float

@@ -182,11 +182,11 @@ describe('the API Fly configs and the deploy order (DC1)', () => {
   });
 
   it('should deploy the storage app, the grant verifier, before the API on staging (FR12)', () => {
-    const ci = readRepository('.github/workflows/ci.yml');
-    const apiJob = /\n {2}deploy-api-staging:\n([\s\S]*?)\n {2}[\w-]+:\n/u.exec(ci)?.[1] ?? '';
+    const staging = readRepository('.github/workflows/staging.yml');
+    const apiJob = /\n {2}deploy-api-staging:\n([\s\S]*?)\n {2}[\w-]+:\n/u.exec(staging)?.[1] ?? '';
     expect(apiJob).toMatch(/needs: \[[^\]]*\bdeploy-storage-staging\b[^\]]*\]/u);
     expect(apiJob).toContain("needs.deploy-storage-staging.result == 'skipped'");
-    const storageJob = /\n {2}deploy-storage-staging:\n([\s\S]*?)\n {2}[\w-]+:\n/u.exec(ci)?.[1] ?? '';
+    const storageJob = /\n {2}deploy-storage-staging:\n([\s\S]*?)\n {2}[\w-]+:\n/u.exec(staging)?.[1] ?? '';
     expect(storageJob).toContain('app: storage');
     expect(/needs: \[([^\]]*)\]/u.exec(storageJob)?.[1]).not.toContain('deploy-api-staging');
   });

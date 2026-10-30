@@ -1,0 +1,14 @@
+// Translate and rotate a cloned sketch to create a loft.
+
+sketch001 = startSketchOn(XY)
+        |> startProfile(at = [-10, 10])
+        |> xLine(length = 20)
+        |> yLine(length = -20)
+        |> xLine(length = -20)
+        |> close()
+
+sketch002 = clone(sketch001)
+    |> translate(x = 0, y = 0, z = 20)
+    |> rotate(axis = [0, 0, 1.0], angle = 45)
+
+loft([sketch001, sketch002])

@@ -6,8 +6,11 @@ import { chromium, devices, webkit } from 'playwright';
 import type { BrowserContext, BrowserType, Page, Request } from 'playwright';
 import { describe, expect, it } from 'vitest';
 // oxlint-disable no-restricted-imports -- The Node-only target runs without browser aliases.
+import { maskAutomationFromAnalytics } from './support/analytics-bot-mask.ts';
 import {
   createObservabilityRunId,
+  harnessNavigationTimeout,
+  observeHarnessPage,
   observabilityUrl,
   pollSentryEventIds,
   stagingOrigin,
@@ -54,6 +57,7 @@ const readEvent = async (id: string): Promise<SentryEventDetail> => {
   if (!response.ok) {
     throw new Error(`Sentry detail query refused (HTTP ${String(response.status)})`);
   }
+  console.info('Reading Sentry event', { eventId: id });
   return (await response.json()) as SentryEventDetail;
 };
 
@@ -94,16 +98,42 @@ const decodePosthogBody = (request: Request): string => {
   }
 };
 
-/** What the page sent to PostHog: event captures seen, and how many of them carried `$exception`. */
-type PosthogTraffic = { captures: number; exceptions: number; undecodable: number };
+/**
+ * What the page sent to PostHog and what PostHog made of it: captures seen, how many of them carried
+ * `$exception`, and how each was answered. A capture that is sent but refused is worse than one never sent,
+ * because the page looks instrumented while the event is gone, so the two are counted apart.
+ */
+type PosthogTraffic = {
+  requests: number;
+  captures: number;
+  exceptions: number;
+  undecodable: number;
+  missingBody: number;
+  accepted: number;
+  /** Status codes PostHog answered captures with, other than 200. */
+  refused: number[];
+};
 
-/** Watch every PostHog request the context sends through the same-origin `/api/ph` proxy. */
+/** Watch every PostHog request the context sends through the same-origin `/api/ph` proxy, and its answer. */
 const observePosthog = (context: BrowserContext): PosthogTraffic => {
-  const traffic: PosthogTraffic = { captures: 0, exceptions: 0, undecodable: 0 };
+  const traffic: PosthogTraffic = {
+    requests: 0,
+    captures: 0,
+    exceptions: 0,
+    undecodable: 0,
+    missingBody: 0,
+    accepted: 0,
+    refused: [],
+  };
+  const captureRequests = new WeakSet<Request>();
   context.on('request', (request) => {
     const url = new URL(request.url());
     if (url.origin !== stagingOrigin || !url.pathname.startsWith('/api/ph/') || request.method() !== 'POST') {
       return;
+    }
+    traffic.requests += 1;
+    if (request.postDataBuffer() === null) {
+      traffic.missingBody += 1;
     }
     const body = decodePosthogBody(request);
     if (body === '') {
@@ -112,10 +142,21 @@ const observePosthog = (context: BrowserContext): PosthogTraffic => {
     }
     if (body.includes('"event"')) {
       traffic.captures += 1;
+      captureRequests.add(request);
     }
     if (body.includes('"$exception"')) {
       traffic.exceptions += 1;
     }
+  });
+  context.on('response', (response) => {
+    if (!captureRequests.has(response.request())) {
+      return;
+    }
+    if (response.status() === 200) {
+      traffic.accepted += 1;
+      return;
+    }
+    traffic.refused.push(response.status());
   });
   return traffic;
 };
@@ -153,13 +194,7 @@ const triggerAndAwaitDelivery = async ({
     const context = await browser.newContext({ ...device });
     // As in the analytics consent fixture, let PostHog capture this automated browser's events.
     // Its bot filter otherwise suppresses every event, making the no-$exception check inconclusive.
-    await context.addInitScript(() => {
-      Object.defineProperty(navigator, 'webdriver', { configurable: true, value: false });
-      Object.defineProperty(navigator, 'userAgent', {
-        configurable: true,
-        value: navigator.userAgent.replace('HeadlessChrome', 'Chrome'),
-      });
-    });
+    await context.addInitScript(maskAutomationFromAnalytics);
     await context.addCookies([
       { name: 'tau-entry', value: 'app', url: stagingOrigin },
       {
@@ -169,11 +204,15 @@ const triggerAndAwaitDelivery = async ({
       },
     ]);
     const traffic = observePosthog(context);
+    context.once('close', () => {
+      console.info('PostHog observation', { runId, ...traffic });
+    });
     const page = await context.newPage();
+    observeHarnessPage(page, runId);
     const delivered = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/monitoring', {
       timeout: 120_000,
     });
-    await page.goto(observabilityUrl(runId, trigger), { waitUntil: 'load' });
+    await page.goto(observabilityUrl(runId, trigger), { timeout: harnessNavigationTimeout, waitUntil: 'load' });
     await ready?.(page);
     await delivered;
     if (requirePosthog) {
@@ -193,6 +232,16 @@ const triggerAndAwaitDelivery = async ({
 const expectNoPosthogException = (traffic: PosthogTraffic): void => {
   expect(traffic.undecodable, 'every PostHog request body was readable').toBe(0);
   expect(traffic.exceptions, 'PostHog received no $exception').toBe(0);
+};
+
+/**
+ * PostHog took every capture the page sent. Without this the suite proves only that a capture was attempted:
+ * a staging path that corrupts capture bodies, or a key or host that PostHog refuses, leaves the page looking
+ * instrumented while every event is dropped, and `expectNoPosthogException` then passes for the wrong reason.
+ */
+const expectPosthogAccepted = (traffic: PosthogTraffic): void => {
+  expect(traffic.refused, 'PostHog answered every capture with 200').toEqual([]);
+  expect(traffic.accepted, 'PostHog answered at least one capture').toBeGreaterThan(0);
 };
 
 describe('P2/P3 staging runtime-reporting acceptance (A2, A6)', () => {
@@ -221,6 +270,7 @@ describe('P2/P3 staging runtime-reporting acceptance (A2, A6)', () => {
         );
         expect(typeof event.contexts['react']?.['componentStack'], 'React component stack').toBe('string');
         expectNoPosthogException(traffic);
+        expectPosthogAccepted(traffic);
         console.info('A2 boundary observed', { engine, runId, ...traffic });
       },
       caseTimeout,
@@ -245,6 +295,7 @@ describe('P2/P3 staging runtime-reporting acceptance (A2, A6)', () => {
           /hydrat|react\.dev\/errors\/(?:418|423|425)\b/iu,
         );
         expectNoPosthogException(traffic);
+        expectPosthogAccepted(traffic);
         console.info('A2 hydration observed', { engine, runId, ...traffic });
       },
       caseTimeout,

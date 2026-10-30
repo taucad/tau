@@ -1,0 +1,34 @@
+fn square(@plane, origin, side, body_type) {
+  return startSketchOn(plane)
+    |> startProfile(at = origin)
+    |> yLine(length = side)
+    |> xLine(length = side)
+    |> yLine(length = -side)
+    |> xLine(length = -side)
+    |> extrude(length = side, bodyType = body_type)
+}
+
+originX0Y0 = [0, 0]
+originX10Y0 = [10, 0]
+
+cube = square(
+  XY,
+  origin = originX0Y0,
+  side = 5,
+  body_type = "solid",
+)
+openBoxSurface = square(
+  XY,
+  origin = originX10Y0,
+  side = 6,
+  body_type = "surface",
+)
+
+assertIs(isSolid(cube))
+assertIs(isSurface(openBoxSurface))
+
+// surface is not a solid
+assertIs(!isSolid(openBoxSurface))
+
+// solid is not a surface
+assertIs(!isSurface(cube))

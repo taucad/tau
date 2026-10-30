@@ -13,7 +13,7 @@ import { fffProcessOf } from '@taucad/runtime/machine';
 import type { MachineClient, MachineDirectoryEntry, MachineJob } from '@taucad/runtime/machine';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
-import { useProjectAvailability } from '#hooks/use-project-availability.js';
+import { useModelAvailability } from '#hooks/use-project-availability.js';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { useMachineDirectory, useMachinesFacet } from '#hooks/use-machines.js';
 import { useMachineApprovalBridge } from '#hooks/use-machines-approvals.js';
@@ -367,7 +367,7 @@ function AvailablePrintPanel({ isShown }: { readonly isShown: boolean }): React.
 }
 
 export const PrintPanelBody = ({ isShown = true }: { readonly isShown?: boolean }): React.JSX.Element => {
-  const availability = useProjectAvailability();
+  const availability = useModelAvailability();
   const enabled = useFeature('machines');
   if (!enabled) {
     return <MachinesDisabled />;

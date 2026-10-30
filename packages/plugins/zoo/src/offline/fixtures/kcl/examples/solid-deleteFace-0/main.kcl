@@ -1,0 +1,9 @@
+// Make an extruded triangle.
+startSketchOn(XY)
+|> startProfile(at = [0, 15])
+|> xLine(length = 10, tag = $a)
+|> yLine(length = 8)
+|> close()
+|> extrude(length = 2)
+// Delete some faces.
+|> deleteFace(faces = [a, END])

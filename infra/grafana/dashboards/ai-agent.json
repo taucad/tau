@@ -185,6 +185,114 @@
       "id": 8
     },
     {
+      "title": "Agent evidence: admission, delivery, backlog and erasure (counts and bounded codes only)",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 32 },
+      "panels": [],
+      "id": 11
+    },
+    {
+      "title": "Evidence Admissions by Outcome",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 33 },
+      "targets": [
+        {
+          "expr": "sum by (tau_agent_evidence_authority, outcome) (rate(tau_agent_evidence_admissions_total{app=~\"$app\",service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{tau_agent_evidence_authority}} {{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps" }
+      },
+      "id": 12,
+      "description": "Parsed submissions. policy_stale is a superseded epoch, refused a withheld purpose, fenced a deleted or erased subject, capacity the backlog budget."
+    },
+    {
+      "title": "Evidence Deliveries by Outcome",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 33 },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(tau_agent_evidence_deliveries_total{app=~\"$app\",service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ops" }
+      },
+      "id": 13,
+      "description": "acknowledged and uncertain are sends not yet proven visible; confirmed was read back; gap never became visible and is not resent; key_unavailable is held for a missing payload key."
+    },
+    {
+      "title": "Evidence Backlog Rows by State",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 41 },
+      "targets": [
+        {
+          "expr": "max by (tau_agent_evidence_state) (tau_agent_evidence_backlog_rows{app=~\"$app\",service_name=~\"$service\"})",
+          "legendFormat": "{{tau_agent_evidence_state}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      },
+      "id": 14,
+      "description": "Shared figure: every replica reports the same rows, so read with max."
+    },
+    {
+      "title": "Evidence Payload Bytes Held",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 41 },
+      "targets": [
+        {
+          "expr": "max(tau_agent_evidence_backlog_held_bytes{app=~\"$app\",service_name=~\"$service\"})",
+          "legendFormat": "held"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "bytes" }
+      },
+      "id": 15,
+      "description": "Sealed payload bytes awaiting delivery, against TAU_OBSERVABILITY_BACKLOG_BYTES."
+    },
+    {
+      "title": "Langfuse Erasure Steps by Outcome",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 49 },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (increase(tau_agent_evidence_erasure_traces_total{app=~\"$app\",service_name=~\"$service\"}[1h]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      },
+      "id": 16,
+      "description": "Only absent settles a trace; present and retry are requested again with backoff."
+    },
+    {
+      "title": "Evidence Lifecycle and Worker Passes",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 49 },
+      "targets": [
+        {
+          "expr": "sum by (action) (increase(tau_agent_evidence_lifecycle_records_total{app=~\"$app\",service_name=~\"$service\"}[1h]))",
+          "legendFormat": "{{action}}"
+        },
+        {
+          "expr": "sum by (tau_worker, outcome) (increase(tau_agent_evidence_passes_total{app=~\"$app\",service_name=~\"$service\"}[1h]))",
+          "legendFormat": "pass {{tau_worker}} {{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      },
+      "id": 17,
+      "description": "purged payloads past retention, reaped receipts a day past it, erased subjects completed; and each worker's passes, the liveness signal."
+    },
+    {
       "title": "Error Logs",
       "type": "logs",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 100 },

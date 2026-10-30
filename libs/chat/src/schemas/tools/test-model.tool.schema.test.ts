@@ -191,6 +191,25 @@ describe('testModelOutputSchema per-assertion rows', () => {
       expect(testModelOutputSchema.safeParse(changed).success).toBe(false);
     },
   );
+
+  const withRow = (change: Record<string, unknown>) => {
+    const [test] = output.tests;
+    return { ...output, tests: [{ ...test, assertions: [{ ...test?.assertions[0], ...change }] }] };
+  };
+
+  it('should admit a measured duration with the capability and subject it belongs to', () => {
+    const measured = withRow({ capability: 'toHaveVolume', subject: 'load-1', durationMs: 141.119 });
+    expect(testModelOutputSchema.parse(measured)).toStrictEqual(measured);
+    const free = withRow({ durationMs: 0 });
+    expect(testModelOutputSchema.parse(free)).toStrictEqual(free);
+  });
+
+  it('should keep an unmeasured claim durationless rather than admitting an empty measurement', () => {
+    expect(testModelOutputSchema.parse(output)).toStrictEqual(output);
+    for (const durationMs of [null, -1, '12', Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(testModelOutputSchema.safeParse(withRow({ durationMs })).success).toBe(false);
+    }
+  });
 });
 
 describe('geoSpecRunFilterInputSchema testTimeout', () => {

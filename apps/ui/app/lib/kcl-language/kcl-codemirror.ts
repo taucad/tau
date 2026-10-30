@@ -1,9 +1,14 @@
+import { completionTypeFromLsp } from '#components/code/editor-completion-icon.js';
+import { definitionProvider } from '#components/code/editor-definition.js';
+import { languageFeatures } from '#components/code/editor-language-features.js';
+import type { EditorLocationItem, EditorSignature, EditorSymbol } from '#components/code/editor-language-features.js';
+import { editorCompletionInfo, renderEditorDocumentation } from '#components/code/editor-documentation.js';
 import { StateEffect, StateField } from '@codemirror/state';
-import type { Extension, StateEffectType } from '@codemirror/state';
+import type { Extension } from '@codemirror/state';
 import { autocompletion, snippet } from '@codemirror/autocomplete';
 import type { Completion } from '@codemirror/autocomplete';
-import { Decoration, EditorView, hoverTooltip, keymap, showDialog, showTooltip, ViewPlugin } from '@codemirror/view';
-import type { Tooltip } from '@codemirror/view';
+import { Decoration, EditorView, hoverTooltip, showDialog, ViewPlugin, WidgetType } from '@codemirror/view';
+import type { DecorationSet, ViewUpdate } from '@codemirror/view';
 import { setDiagnostics } from '@codemirror/lint';
 import { foldService } from '@codemirror/language';
 import type * as LSP from 'vscode-languageserver-protocol';
@@ -22,38 +27,39 @@ import { KclLspClient } from '#lib/kcl-language/lsp/kcl-lsp-client.js';
 import { semanticTokenTypes } from '#lib/kcl-language/lsp/kcl-lsp-types.js';
 import { KclSymbolService, formatModuleHover, formatSymbolHover } from '#lib/kcl-language/lsp/kcl-symbol-service.js';
 import type { KclSymbol } from '#lib/kcl-language/lsp/kcl-symbol-service.js';
-import { decodeTextFile } from '#utils/filesystem.utils.js';
-import { lspSnippetToCodeMirror } from '#lib/lsp-completion-snippet.js';
+import { applyLspCompletion } from '#lib/lsp-completion-apply.js';
+import {
+  kclDefinition,
+  kclDocumentationMarkdown,
+  kclDocumentSymbols,
+  kclOccurrences,
+  kclParameterHints,
+  kclReferences,
+  kclSignatureAt,
+  kclTypeDefinition,
+  kclWorkspaceSymbols,
+  kclWorkspaceFileLimit,
+  kclWorkspaceSources,
+  openKclTarget,
+} from '#lib/kcl-language/kcl-navigation.js';
+import type { KclLocation, KclNavigationContext } from '#lib/kcl-language/kcl-navigation.js';
+import type { KclBindingKind, KclOutlineSymbol } from '#lib/kcl-language/kcl-bindings.js';
+import { loadKclStdlib } from '#lib/kcl-language/kcl-stdlib.js';
+import type { KclStdlib } from '#lib/kcl-language/kcl-stdlib.js';
 
 type OpenDocument = { count: number; text: string; unsubscribe: () => void };
 type EditBasis = ReadonlyMap<string, Readonly<{ version: number; text: string }>>;
-// oxlint-disable-next-line typescript/no-restricted-types -- CodeMirror's tooltip facet uses null as its empty value.
-type NullableTooltip = Tooltip | null;
 
 async function captureKclBasis(document: EditorDocument, environment: EditorLanguageEnvironment): Promise<EditBasis> {
   const basis = new Map<string, { version: number; text: string }>([
     [document.uri, { version: document.version, text: document.text }],
   ]);
-  const paths = new WorkspacePathResolver(environment.fileManagerRef.getSnapshot().context.rootDirectory);
-  const files = await environment.treeService.searchFiles('.kcl', { maxResults: 513 });
-  if (files.length > 512) {
+  const { sources, truncated } = await kclWorkspaceSources(environment, kclWorkspaceFileLimit);
+  if (truncated) {
     throw new Error('KCL workspace edit exceeds the bounded source snapshot');
   }
-  for (const file of files) {
-    const path = file.path.startsWith('/') ? paths.toRelativePath(file.path) : file.path;
-    if (!path?.endsWith('.kcl') || file.type !== 'file' || (file.provenance && file.provenance.source !== 'project')) {
-      continue;
-    }
-    const loaded = environment.session.get(path);
-    if (loaded) {
-      basis.set(loaded.uri, { version: loaded.version, text: loaded.text });
-      continue;
-    }
-    // oxlint-disable-next-line eslint/no-await-in-loop -- bounded snapshot is ordered before the server request.
-    const result = await environment.contentService.resolve(path);
-    if (result.kind === 'text') {
-      basis.set(URI.file(`/${path}`).toString(), { version: 1, text: decodeTextFile(result.content) });
-    }
+  for (const source of sources) {
+    basis.set(source.uri, { version: source.version, text: source.text });
   }
   if (document.version !== basis.get(document.uri)?.version) {
     throw new Error('KCL source changed during snapshot');
@@ -473,8 +479,15 @@ async function initializeBackend(backend: KclBackend): Promise<KclBackend> {
   return backend;
 }
 
+/** Render completion documentation; KCL passes one whose docs links open definitions. */
+export type KclCompletionInfo = (markdown: string | undefined) => Completion['info'];
+
 /** Keep the prior symbol completion text, signature and snippet behavior. */
-export function symbolCompletion(symbol: KclSymbol, boost: number): Completion {
+export function symbolCompletion(
+  symbol: KclSymbol,
+  boost: number,
+  info: KclCompletionInfo = editorCompletionInfo,
+): Completion {
   if (symbol.kind === 'function') {
     const parameters = symbol.parameters ?? [];
     const signature = parameters
@@ -486,8 +499,8 @@ export function symbolCompletion(symbol: KclSymbol, boost: number): Completion {
       label: symbol.name,
       type: 'function',
       detail: `fn ${symbol.name}(${signature})${suffix}`,
-      info: formatSymbolHover(symbol, { isAlias: Boolean(symbol.importPath), importPath: symbol.importPath }).join(
-        '\n',
+      info: info(
+        formatSymbolHover(symbol, { isAlias: Boolean(symbol.importPath), importPath: symbol.importPath }).join('\n'),
       ),
       boost,
       apply: snippet(`${symbol.name}(${fields})`),
@@ -498,7 +511,7 @@ export function symbolCompletion(symbol: KclSymbol, boost: number): Completion {
       label: symbol.name,
       type: 'property',
       detail: `(param) ${symbol.name}: ${symbol.value ? 'value' : 'unknown'}`,
-      info: symbol.containingFunction ? `Parameter of ${symbol.containingFunction}` : undefined,
+      info: info(symbol.containingFunction ? `Parameter of ${symbol.containingFunction}` : undefined),
       boost,
       apply: `${symbol.name} = `,
     };
@@ -507,7 +520,9 @@ export function symbolCompletion(symbol: KclSymbol, boost: number): Completion {
     label: symbol.name,
     type: 'variable',
     detail: symbol.kind,
-    info: formatSymbolHover(symbol, { isAlias: Boolean(symbol.importPath), importPath: symbol.importPath }).join('\n'),
+    info: info(
+      formatSymbolHover(symbol, { isAlias: Boolean(symbol.importPath), importPath: symbol.importPath }).join('\n'),
+    ),
     boost,
   };
 }
@@ -515,32 +530,55 @@ export function symbolCompletion(symbol: KclSymbol, boost: number): Completion {
 /** Map one KCL LSP completion to CodeMirror with its request-time version guard. */
 export function kclLspCompletion(
   item: LSP.CompletionItem,
-  { document, version, isDisposed }: Readonly<{ document: EditorDocument; version: number; isDisposed: () => boolean }>,
+  {
+    document,
+    version,
+    isDisposed,
+    info = editorCompletionInfo,
+  }: Readonly<{ document: EditorDocument; version: number; isDisposed: () => boolean; info?: KclCompletionInfo }>,
 ): Completion {
   return {
     label: item.filterText ?? item.label,
     displayLabel: item.filterText && item.filterText !== item.label ? item.label : undefined,
     sortText: item.sortText,
     detail: item.detail,
-    info: typeof item.documentation === 'string' ? item.documentation : item.documentation?.value,
+    info: info(typeof item.documentation === 'string' ? item.documentation : item.documentation?.value),
+    type: completionTypeFromLsp(item.kind),
     boost: item.preselect ? 99 : 4,
     // oxlint-disable-next-line max-params -- CodeMirror completion apply callback contract.
     apply(view, completion, from, to) {
-      if (isDisposed() || document.version !== version) {
-        return;
-      }
-      const edit = item.textEdit;
-      const range = edit && 'range' in edit ? edit.range : undefined;
-      const start = range ? offsetAt(document.text, range.start) : from;
-      const end = range ? offsetAt(document.text, range.end) : to;
-      const insertText = edit ? edit.newText : (item.insertText ?? item.label);
-      if (item.insertTextFormat === 2) {
-        snippet(lspSnippetToCodeMirror(insertText))(view, completion, start, end);
-      } else {
-        view.dispatch({ changes: { from: start, to: end, insert: insertText } });
+      if (!isDisposed()) {
+        applyLspCompletion(view, completion, { item, from, to, current: document.version === version });
       }
     },
   };
+}
+
+class KclHintWidget extends WidgetType {
+  readonly #label: string;
+  public constructor(label: string) {
+    super();
+    this.#label = label;
+  }
+  public override eq(other: KclHintWidget): boolean {
+    return other.#label === this.#label;
+  }
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- CodeMirror WidgetType requires toDOM.
+  public toDOM(view: EditorView): HTMLElement {
+    const span = view.dom.ownerDocument.createElement('span');
+    span.className = 'cm-kcl-inlay-hint';
+    span.textContent = this.#label;
+    return span;
+  }
+}
+
+/** The standard library declarations, or none when their chunk cannot load; links then open externally. */
+async function optionalStdlib(): Promise<KclStdlib | undefined> {
+  try {
+    return await loadKclStdlib();
+  } catch {
+    return undefined;
+  }
 }
 
 export function kclExtensions({
@@ -556,6 +594,38 @@ export function kclExtensions({
 }>): Extension[] {
   const { client } = backend;
   const { symbols } = backend;
+  const navigation: KclNavigationContext = { document, environment, symbols };
+  /** KCL docs links to standard library pages open the declaration, like `{@link}` in TypeScript. */
+  const renderDocumentation = (
+    markdown: string,
+    stdlib: KclStdlib | undefined,
+    ownerDocument?: Document,
+  ): HTMLElement => {
+    const rewritten = kclDocumentationMarkdown(markdown, stdlib);
+    return renderEditorDocumentation(rewritten.markdown, ownerDocument, (index) => {
+      const target = rewritten.targets[index];
+      if (target && !isDisposed()) {
+        void observeKclOperation(openKclTarget(environment, target), document, isDisposed);
+      }
+    });
+  };
+  const locationItem = (location: KclLocation): EditorLocationItem => {
+    const path = decodeURIComponent(location.uri.replace(/^file:\/\//u, ''));
+    const slash = path.lastIndexOf('/');
+    return {
+      label: `${path.slice(slash + 1)}:${String(location.line)}`,
+      detail: path.slice(0, Math.max(slash, 0)),
+      preview: location.lineText.trim(),
+      open: async () =>
+        observeKclOperation(
+          openKclTarget(environment, { kind: 'file', uri: location.uri, line: location.line, column: location.column }),
+          document,
+          isDisposed,
+        ),
+    };
+  };
+  const completionInfo: KclCompletionInfo = (markdown) =>
+    markdown ? async () => renderDocumentation(markdown, await optionalStdlib()) : undefined;
   const tokenEffect = StateEffect.define<ReturnType<typeof Decoration.set>>();
   const tokenField = StateField.define<ReturnType<typeof Decoration.set>>({
     create: () => Decoration.none,
@@ -571,24 +641,9 @@ export function kclExtensions({
     },
     provide: (field) => EditorView.decorations.from(field),
   });
-  const signatureEffect = StateEffect.define<NullableTooltip>();
-  const signatureField = StateField.define<NullableTooltip>({
-    create: () => null,
-    update(value, transaction) {
-      let next = transaction.docChanged ? null : value;
-      for (const effect of transaction.effects) {
-        if (effect.is(signatureEffect)) {
-          next = effect.value;
-        }
-      }
-      return next;
-    },
-    provide: (field) => showTooltip.from(field),
-  });
   let folds: readonly LSP.FoldingRange[] = [];
   return [
     tokenField,
-    signatureField,
     EditorView.baseTheme({
       '.cm-kcl-semantic-number': { color: 'var(--syntax-number, #b55b3c)' },
       '.cm-kcl-semantic-string': { color: 'var(--syntax-string, #4f8b49)' },
@@ -666,13 +721,15 @@ export function kclExtensions({
             return null;
           }
           const items = result ? (Array.isArray(result) ? result : result.items) : [];
-          const options: Completion[] = items.map((item) => kclLspCompletion(item, { document, version, isDisposed }));
+          const options: Completion[] = items.map((item) =>
+            kclLspCompletion(item, { document, version, isDisposed, info: completionInfo }),
+          );
           const seen = new Set(items.map((item) => item.label));
           const addSymbols = (candidates: readonly KclSymbol[], boost: number): void => {
             for (const symbol of candidates) {
               if (!seen.has(symbol.name)) {
                 seen.add(symbol.name);
-                options.push(symbolCompletion(symbol, boost));
+                options.push(symbolCompletion(symbol, boost, completionInfo));
               }
             }
           };
@@ -689,7 +746,7 @@ export function kclExtensions({
         },
       ],
     }),
-    hoverTooltip(async (_view, pos) => {
+    hoverTooltip(async (view, pos) => {
       if (isDisposed()) {
         return null;
       }
@@ -718,12 +775,15 @@ export function kclExtensions({
       if (!text) {
         return null;
       }
+      const stdlib = await optionalStdlib();
+      if (isDisposed() || document.version !== version) {
+        return null;
+      }
       return {
         pos: result?.range ? offsetAt(document.text, result.range.start) : pos,
         end: result?.range ? offsetAt(document.text, result.range.end) : undefined,
         create() {
-          const dom = globalThis.document.createElement('div');
-          dom.textContent = text;
+          const dom = renderDocumentation(text, stdlib, view.dom.ownerDocument);
           return { dom };
         },
       };
@@ -750,51 +810,87 @@ export function kclExtensions({
         }
       },
     ),
-    keymap.of([
-      {
-        key: 'F12',
-        run(view) {
-          void observeKclOperation(
-            jumpToDefinition(view, client, { document, environment, symbols }),
-            document,
-            isDisposed,
-          );
-          return true;
-        },
+    definitionProvider.of(async (view) =>
+      observeKclOperation(jumpToDefinition(view, client, { document, environment, symbols }), document, isDisposed),
+    ),
+    ViewPlugin.fromClass(
+      class {
+        public decorations: DecorationSet = Decoration.none;
+        readonly #view: EditorView;
+        #generation = 0;
+        public constructor(view: EditorView) {
+          this.#view = view;
+          void this.refresh();
+        }
+        public update(update: ViewUpdate): void {
+          if (update.docChanged || update.viewportChanged) {
+            void this.refresh();
+          }
+        }
+        private async refresh(): Promise<void> {
+          const generation = ++this.#generation;
+          const { version } = document;
+          const ranges = this.#view.visibleRanges;
+          try {
+            const groups = await Promise.all(ranges.map(async (range) => kclParameterHints(navigation, range)));
+            if (generation !== this.#generation || isDisposed() || document.version !== version) {
+              return;
+            }
+            this.decorations = Decoration.set(
+              groups
+                .flat()
+                .map((hint) =>
+                  Decoration.widget({ widget: new KclHintWidget(hint.label), side: -1 }).range(hint.position),
+                ),
+              true,
+            );
+            this.#view.dispatch({});
+          } catch (error) {
+            if (!isDisposed() && document.version === version) {
+              // oxlint-disable-next-line no-console -- Hints are optional; editing continues without them.
+              console.warn('[kcl] inlay hints failed', error);
+            }
+          }
+        }
       },
-      {
-        key: 'Shift-Alt-f',
-        run(view) {
-          void observeKclOperation(formatDocument(view, client, document), document, isDisposed);
-          return true;
-        },
+      { decorations: (value) => value.decorations },
+    ),
+    languageFeatures.of({
+      references: async (_view, position) => {
+        const references = await kclReferences(navigation, position);
+        return references.map((reference) => locationItem(reference));
       },
-      {
-        key: 'F2',
-        run(view) {
-          void observeKclOperation(renameSymbol(view, client, { document, environment }), document, isDisposed);
-          return true;
-        },
+      occurrences: async (_view, position) => kclOccurrences(navigation, position),
+      documentSymbols: async () => editorSymbols(await kclDocumentSymbols(navigation)),
+      workspaceSymbols: async (_view, query) => {
+        const found = await kclWorkspaceSymbols(navigation, query);
+        return found.map((symbol) => {
+          const item = locationItem(symbol.location);
+          return { ...item, label: symbol.name, kind: symbolKind(symbol.kind), detail: item.label };
+        });
       },
-      {
-        key: 'Ctrl-Shift-Space',
-        run(view) {
-          void observeKclOperation(
-            showSignature(view, client, { document, effect: signatureEffect }),
-            document,
-            isDisposed,
-          );
-          return true;
-        },
+      signatureHelp: {
+        triggerCharacters: ['(', ','],
+        retriggerCharacters: [')'],
+        provide: async (_view, position) => signatureAt(client, navigation, position),
       },
-      {
-        key: 'Mod-.',
-        run(view) {
-          void observeKclOperation(showCodeActions(view, client, { document, environment }), document, isDisposed);
-          return true;
-        },
-      },
-    ]),
+      typeDefinition: async (view) =>
+        observeKclOperation(
+          (async (): Promise<void> => {
+            const target = await kclTypeDefinition(navigation, view.state.selection.main.head);
+            if (target) {
+              await openKclTarget(environment, target);
+            }
+          })(),
+          document,
+          isDisposed,
+        ),
+      rename: async (view) =>
+        observeKclOperation(renameSymbol(view, client, { document, environment }), document, isDisposed),
+      format: async (view) => observeKclOperation(formatDocument(view, client, document), document, isDisposed),
+      quickFix: async (view) =>
+        observeKclOperation(showCodeActions(view, client, { document, environment }), document, isDisposed),
+    }),
   ];
 }
 
@@ -817,7 +913,7 @@ function semanticDecorations(text: string, data: readonly number[]): ReturnType<
 
 export async function jumpToDefinition(
   view: Pick<EditorView, 'state'>,
-  client: Pick<KclLspClient, 'textDocumentDefinition' | 'getFileManager'>,
+  client: Pick<KclLspClient, 'textDocumentDefinition' | 'getFileManager' | 'getServerCapabilities'>,
   {
     document,
     environment,
@@ -825,19 +921,25 @@ export async function jumpToDefinition(
   }: Readonly<{
     document: EditorDocument;
     environment: EditorLanguageEnvironment;
-    symbols: Pick<KclSymbolService, 'getDefinitionForUsage' | 'resolveImportedSymbol'>;
+    symbols: Pick<
+      KclSymbolService,
+      'getDefinitionForUsage' | 'resolveImportedSymbol' | 'getIndex' | 'getVariableValue'
+    >;
   }>,
 ): Promise<void> {
   const { version } = document;
   const { head } = view.state.selection.main;
   let result: LSP.Definition | LSP.DefinitionLink[] | undefined;
-  try {
-    result = await client.textDocumentDefinition({
-      textDocument: { uri: document.uri },
-      position: positionAt(document.text, head),
-    });
-  } catch {
-    /* Symbol fallback remains available. */
+  // The bundled server does not implement definitions yet; ask only once it says it does.
+  if (client.getServerCapabilities().definitionProvider) {
+    try {
+      result = await client.textDocumentDefinition({
+        textDocument: { uri: document.uri },
+        position: positionAt(document.text, head),
+      });
+    } catch {
+      /* The AST resolution below remains available. */
+    }
   }
   if (document.version !== version) {
     return;
@@ -856,6 +958,15 @@ export async function jumpToDefinition(
     await environment.navigate({ uri, line: 1, column: 1 });
     return;
   }
+  const target = await kclDefinition({ document, environment, symbols }, head);
+  if (document.version !== version) {
+    return;
+  }
+  if (target) {
+    await openKclTarget(environment, target);
+    return;
+  }
+  // Text that no longer parses keeps the last parsed symbols, so navigation survives a broken edit.
   const word = wordAt(document.text, head);
   if (!word) {
     return;
@@ -919,39 +1030,66 @@ async function renameSymbol(
   }
 }
 
-async function showSignature(
-  view: EditorView,
-  client: KclLspClient,
-  { document, effect }: Readonly<{ document: EditorDocument; effect: StateEffectType<NullableTooltip> }>,
-): Promise<void> {
+function symbolKind(kind: KclBindingKind): string {
+  return kind === 'variable' || kind === 'parameter' || kind === 'tag' ? 'variable' : kind === 'type' ? 'class' : kind;
+}
+
+function editorSymbols(symbols: readonly KclOutlineSymbol[]): EditorSymbol[] {
+  return symbols.map(({ binding, children }) => ({
+    name: binding.name,
+    kind: symbolKind(binding.kind),
+    from: binding.extent.from,
+    to: binding.extent.to,
+    selectionFrom: binding.from,
+    children: editorSymbols(children),
+  }));
+}
+
+/** Server signature help where it answers, otherwise the signature resolved from the AST. */
+async function signatureAt(
+  client: Pick<KclLspClient, 'textDocumentSignatureHelp'>,
+  navigation: KclNavigationContext,
+  position: number,
+): Promise<EditorSignature | undefined> {
+  const { document } = navigation;
   const { version } = document;
-  const result = await client.textDocumentSignatureHelp({
-    textDocument: { uri: document.uri },
-    position: positionAt(document.text, view.state.selection.main.head),
-  });
-  if (result?.signatures.length && document.version === version) {
-    const signature = result.signatures[result.activeSignature ?? 0];
-    if (signature) {
-      const active = signature.parameters?.[result.activeParameter ?? 0];
-      const { label } = signature;
-      const parameter = active
-        ? typeof active.label === 'string'
-          ? active.label
-          : label.slice(active.label[0], active.label[1])
-        : undefined;
-      view.dispatch({
-        effects: effect.of({
-          pos: view.state.selection.main.head,
-          above: true,
-          create() {
-            const dom = globalThis.document.createElement('div');
-            dom.textContent = parameter ? `${label} — ${parameter}` : label;
-            return { dom };
-          },
-        }),
-      });
-    }
+  let result: LSP.SignatureHelp | undefined;
+  try {
+    result = await client.textDocumentSignatureHelp({
+      textDocument: { uri: document.uri },
+      position: positionAt(document.text, position),
+    });
+  } catch {
+    /* The AST signature below remains available. */
   }
+  if (document.version !== version) {
+    return undefined;
+  }
+  const signature = result?.signatures[result.activeSignature ?? 0];
+  if (!signature) {
+    return kclSignatureAt(navigation, position);
+  }
+  const { label } = signature;
+  const parameters = (signature.parameters ?? []).map((parameter): readonly [number, number] => {
+    if (typeof parameter.label !== 'string') {
+      return parameter.label;
+    }
+    const from = label.indexOf(parameter.label);
+    return [from, from + parameter.label.length];
+  });
+  const activeParameter = signature.activeParameter ?? result?.activeParameter ?? 0;
+  const markdown = (value: string | LSP.MarkupContent | undefined): string | undefined =>
+    // Docs links cannot navigate the app from the shared tooltip, so they open the published page.
+    value === undefined
+      ? undefined
+      : kclDocumentationMarkdown(typeof value === 'string' ? value : value.value, undefined).markdown;
+  return {
+    label,
+    parameters,
+    activeParameter,
+    documentation: markdown(signature.documentation),
+    parameterDocumentation: markdown(signature.parameters?.[activeParameter]?.documentation),
+  };
 }
 
 function isStandaloneCommand(action: LSP.CodeAction | LSP.Command): action is LSP.Command {

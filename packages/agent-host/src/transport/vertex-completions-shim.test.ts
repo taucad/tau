@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Vertex's OpenAI-compatible wire uses snake_case keys. */
+import { normalizeContext } from '@earendil-works/pi-ai';
 import { describe, expect, it, vi } from 'vitest';
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 import type { AssistantMessageEvent, Context, Model } from '@earendil-works/pi-ai';
@@ -288,7 +289,7 @@ const streamThroughPi = async (options: {
     });
   }) as typeof globalThis.fetch;
   const events: AssistantMessageEvent[] = [];
-  for await (const event of openAICompletionsApi().stream(model, options.context, {
+  for await (const event of openAICompletionsApi().stream(model, normalizeContext(options.context), {
     apiKey: 'fixture',
     fetch: fetchImpl,
     maxRetries: 0,

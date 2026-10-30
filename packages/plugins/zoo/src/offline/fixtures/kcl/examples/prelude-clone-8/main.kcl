@@ -1,0 +1,28 @@
+// Sketch on the end of a revolved face by tagging the end face.
+// This shows the cloned geometry will have the same tags as the original geometry.
+
+exampleSketch = startSketchOn(XY)
+  |> startProfile(at = [4, 12])
+  |> line(end = [2, 0])
+  |> line(end = [0, -6])
+  |> line(end = [4, -6])
+  |> line(end = [0, -6])
+  |> line(end = [-3.75, -4.5])
+  |> line(end = [0, -5.5])
+  |> line(end = [-2, 0])
+  |> close()
+
+example001 = revolve(exampleSketch, axis = Y, angle = 180, tagEnd = $end01)
+
+// example002 = clone(example001)
+// |> translate(x = 0, y = 20, z = 0)
+
+// Sketch on the cloned face.
+// exampleSketch002 = startSketchOn(example002, face = example002.sketch.tags.end01)
+//  |> startProfile(at = [4.5, -5])
+//  |> line(end = [0, 5])
+//  |> line(end = [5, 0])
+//  |> line(end = [0, -5])
+//  |> close()
+
+// example003 = extrude(exampleSketch002, length = 5)

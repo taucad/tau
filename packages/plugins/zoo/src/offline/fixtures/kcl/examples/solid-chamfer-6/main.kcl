@@ -1,0 +1,29 @@
+// Sketch on the face of a chamfer with KCL 1.0 syntax.
+fn cube(pos, scale) {
+sg = startSketchOn(XY)
+    |> startProfile(at = pos)
+    |> line(end = [0, scale])
+    |> line(end = [scale, 0])
+    |> line(end = [0, -scale])
+
+    return sg
+}
+
+part001 = cube(pos = [0,0], scale = 20)
+    |> close(tag = $line1)
+    |> extrude(length = 20)
+    // We tag the chamfer to reference it later.
+    |> chamfer(
+        length = 10,
+        tags = [getOppositeEdge(line1)],
+        tag = $chamfer1,
+    )
+
+sketch001 = startSketchOn(part001, face = chamfer1)
+    |> startProfile(at = [10, 10])
+    |> line(end = [2, 0])
+    |> line(end = [0, 2])
+    |> line(end = [-2, 0])
+    |> line(endAbsolute = [profileStartX(%), profileStartY(%)])
+    |> close()
+    |> extrude(length = 10)

@@ -1,9 +1,22 @@
+import { editorSyntaxFixtures } from '#lib/editor-syntax.fixtures.js';
+import { StateEffect } from '@codemirror/state';
+import { showTooltip } from '@codemirror/view';
+import { openLintPanel, setDiagnostics } from '@codemirror/lint';
+import { gotoLine, openSearchPanel } from '@codemirror/search';
+import { definitionProvider } from '#components/code/editor-definition.js';
+import { renderTypeScriptDocumentation } from '#components/code/editor-documentation.js';
 import '#styles/global.css';
 import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import { mock } from 'vitest-mock-extended';
-import { startCompletion } from '@codemirror/autocomplete';
+import {
+  autocompletion,
+  closeCompletion,
+  completionStatus,
+  selectedCompletion,
+  startCompletion,
+} from '@codemirror/autocomplete';
 import { CodeEditor } from '#components/code/code-editor.client.js';
 import { VirtualDeclarationDialog } from '#components/code/virtual-declaration-dialog.js';
 import { jsonDepthHighlighting } from '#components/code/json-depth-highlighting.js';
@@ -171,7 +184,7 @@ it('opens editor context actions and its search panel', async () => {
   fireEvent.contextMenu(container.querySelector('.cm-content')!);
   await expect.element(page.getByRole('menuitem', { name: 'Go to Type Definition' })).not.toBeInTheDocument();
   await page.getByRole('menuitem', { name: 'Find and Replace' }).click();
-  await expect.poll(() => container.querySelector('.cm-search')).toBeTruthy();
+  await expect.element(page.getByRole('search', { name: 'Find and replace' })).toBeVisible();
 });
 
 it.each([Theme.LIGHT, Theme.DARK, Theme.BLACK, Theme.HIGH_CONTRAST])(
@@ -191,25 +204,30 @@ it.each([Theme.LIGHT, Theme.DARK, Theme.BLACK, Theme.HIGH_CONTRAST])(
     await expect.poll(() => container.querySelector('.cm-content')).toBeTruthy();
     fireEvent.contextMenu(container.querySelector('.cm-content')!);
     await page.getByRole('menuitem', { name: 'Find and Replace' }).click();
-    await expect.poll(() => container.querySelector('.cm-search .cm-textfield')).toBeTruthy();
-
-    const panel = container.querySelector<HTMLElement>('.cm-search')!;
-    const input = panel.querySelector<HTMLInputElement>('.cm-textfield')!;
-    const button = panel.querySelector<HTMLButtonElement>('.cm-button')!;
-    const label = panel.querySelector<HTMLLabelElement>('label')!;
+    await expect.element(page.getByRole('textbox', { name: 'Find', exact: true })).toBeVisible();
+    const input = page.getByRole('textbox', { name: 'Find', exact: true }).element();
+    const button = page.getByRole('button', { name: 'Match case', exact: true }).element();
+    const panel = page.getByRole('search', { name: 'Find and replace' }).element();
     const panelBackground = getComputedStyle(container.querySelector('.cm-panels')!).backgroundColor;
-    for (const control of [input, button]) {
-      const style = getComputedStyle(control);
-      expect(contrastRatio(style.color, style.backgroundColor)).toBeGreaterThanOrEqual(4.5);
-      expect(contrastRatio(style.borderTopColor, style.backgroundColor)).toBeGreaterThanOrEqual(3);
-      expect(Number.parseFloat(style.minHeight)).toBeGreaterThanOrEqual(24);
-    }
     const inputStyle = getComputedStyle(input);
-    expect(
-      contrastRatio(getComputedStyle(input, '::placeholder').color, inputStyle.backgroundColor),
-    ).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(inputStyle.color, inputStyle.backgroundColor)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(inputStyle.borderTopColor, inputStyle.backgroundColor)).toBeGreaterThanOrEqual(3);
+    expect(contrastRatio(getComputedStyle(button).color, panelBackground)).toBeGreaterThanOrEqual(4.5);
+    expect(button.getBoundingClientRect().height).toBeGreaterThanOrEqual(24);
+    expect(panel.getBoundingClientRect().right).toBeLessThanOrEqual(390);
     expect(Number.parseFloat(inputStyle.fontSize)).toBeGreaterThanOrEqual(16);
-    expect(contrastRatio(getComputedStyle(label).color, panelBackground)).toBeGreaterThanOrEqual(4.5);
+    await page.getByRole('textbox', { name: 'Find', exact: true }).fill('value');
+    await expect.element(page.getByRole('status')).toHaveTextContent('of 1');
+    await page.getByRole('button', { name: 'Show replace' }).click();
+    await page.getByRole('textbox', { name: 'Replace', exact: true }).fill('length');
+    await page.getByRole('button', { name: 'Replace all', exact: true }).click();
+    await expect.poll(() => sourceDocument.text).toBe('const length = 1;');
+    await expect.element(page.getByRole('status')).toHaveTextContent('No matches');
+    await page.getByRole('button', { name: 'Regular expression', exact: true }).click();
+    await page.getByRole('textbox', { name: 'Find', exact: true }).fill('[');
+    await expect.element(page.getByRole('status')).toHaveTextContent('Invalid expression');
+    await expect.element(page.getByRole('button', { name: 'Next match', exact: true })).toBeDisabled();
+
     await page.screenshot();
   },
 );
@@ -310,6 +328,342 @@ it('opens a real TypeScript standard-library definition as read-only source', as
     await userEvent.keyboard('corruption');
     expect(declarationDocument.text).toBe(originalText);
     expect(container.querySelector('.cm-content')).toBeNull();
+  } finally {
+    service.dispose();
+  }
+}, 60_000);
+
+function modifierAt(view: EditorView, position: number, modifier = true): MouseEventInit {
+  const coords = view.coordsAtPos(position)!;
+  return {
+    clientX: (coords.left + coords.right) / 2 + 1,
+    clientY: (coords.top + coords.bottom) / 2,
+    button: 0,
+    metaKey: modifier && isMac,
+    ctrlKey: modifier && !isMac,
+  };
+}
+
+it('underlines a symbol under the definition modifier and opens it on Mod-click for any language provider', async () => {
+  const sourceDocument = new EditorDocument('main.scad', 'module ring() {}\nring();\n');
+  const opened: number[] = [];
+  const extensions = [
+    definitionProvider.of((_view, position) => {
+      opened.push(position);
+    }),
+  ];
+  let view: EditorView | undefined;
+  render(
+    <div className='h-72'>
+      <CodeEditor
+        document={sourceDocument}
+        viewId='definition-click'
+        languageId='openscad'
+        extensions={extensions}
+        onMount={(mounted) => {
+          view = mounted;
+        }}
+      />
+    </div>,
+  );
+  await expect.poll(() => view).toBeDefined();
+  const usage = sourceDocument.text.lastIndexOf('ring') + 1;
+  fireEvent.mouseMove(view!.contentDOM, modifierAt(view!, usage));
+  await expect.poll(() => view!.dom.querySelector('.cm-definition-link')?.textContent).toBe('ring');
+  expect(getComputedStyle(view!.dom.querySelector('.cm-definition-link')!).textDecorationLine).toBe('underline');
+  fireEvent.mouseMove(view!.contentDOM, modifierAt(view!, usage, false));
+  await expect.poll(() => view!.dom.querySelector('.cm-definition-link')).toBeNull();
+
+  fireEvent.mouseDown(view!.contentDOM, modifierAt(view!, usage));
+  expect(opened).toEqual([usage]);
+  expect(view!.state.selection.main.head).toBe(usage);
+  fireEvent.mouseDown(view!.contentDOM, modifierAt(view!, usage, false));
+  expect(opened).toHaveLength(1);
+
+  view!.dispatch({ selection: { anchor: 2 } });
+  view!.focus();
+  await userEvent.keyboard('{F12}');
+  expect(opened).toEqual([usage, 2]);
+  fireEvent.contextMenu(view!.contentDOM);
+  await page.getByRole('menuitem', { name: 'Go to Definition' }).click();
+  expect(opened).toEqual([usage, 2, 2]);
+});
+
+it('opens TypeScript definitions on Mod-click and from {@link} references in hover documentation', async () => {
+  const [{ createTypeScriptService }, { createTypeScriptExtensions }] = await Promise.all([
+    import('#lib/typescript-language/typescript-service.js'),
+    import('#lib/typescript-language/create-typescript-extensions.js'),
+  ]);
+  const sourceDocument = new EditorDocument(
+    'main.ts',
+    [
+      'interface Mechanism {',
+      '  teeth: number;',
+      '}',
+      '/**',
+      ' * Identical to {@link Mechanism} but {@link https://x.dev docs}.',
+      ' * @see {@link Mechanism}',
+      ' */',
+      'const gear: Mechanism = { teeth: 12 };',
+      'gear.teeth;',
+      '',
+    ].join('\n'),
+  );
+  const service = await createTypeScriptService({ dynamicTypes: false });
+  let view: EditorView | undefined;
+  let target: EditorNavigationTarget | undefined;
+  try {
+    await service.attach(sourceDocument);
+    const extensions = createTypeScriptExtensions({
+      document: sourceDocument,
+      service,
+      navigate: async (next) => {
+        target = next;
+      },
+    });
+    render(
+      <div className='h-72'>
+        <CodeEditor
+          document={sourceDocument}
+          viewId='definition-links'
+          languageId='typescript'
+          extensions={extensions}
+          onMount={(mounted) => {
+            view = mounted;
+          }}
+        />
+      </div>,
+    );
+    await expect.poll(() => view).toBeDefined();
+    const usage = sourceDocument.text.lastIndexOf('gear') + 1;
+    fireEvent.mouseDown(view!.contentDOM, modifierAt(view!, usage));
+    await expect.poll(() => target).toMatchObject({ uri: sourceDocument.uri, line: 8, column: 7 });
+
+    target = undefined;
+    fireEvent.mouseMove(view!.contentDOM, modifierAt(view!, usage, false));
+    await expect.poll(() => document.querySelector('.cm-typescript-hover')?.textContent).toContain('@see');
+    const links = [...document.querySelectorAll('.cm-typescript-hover a')];
+    expect(links.map((link) => link.textContent)).toEqual(['Mechanism', 'docs', 'Mechanism']);
+    expect(links[1]).toHaveAttribute('href', 'https://x.dev');
+    expect(links[1]).toHaveAttribute('target', '_blank');
+    await page.screenshot();
+    (links[2] as HTMLAnchorElement).click();
+    await expect.poll(() => target).toMatchObject({ uri: sourceDocument.uri, line: 1, column: 1 });
+  } finally {
+    service.dispose();
+  }
+}, 60_000);
+
+it('offers VS Code symbol navigation, references, call hierarchy, occurrences and parameter hints for TypeScript', async () => {
+  const [{ createTypeScriptService }, { createTypeScriptExtensions }] = await Promise.all([
+    import('#lib/typescript-language/typescript-service.js'),
+    import('#lib/typescript-language/create-typescript-extensions.js'),
+  ]);
+  const source = [
+    'export function area(width: number): number {',
+    '  let total = width;',
+    '  total = total * 2;',
+    '  return total;',
+    '}',
+    'export function report(): number {',
+    '  return area(3);',
+    '}',
+    '',
+  ].join('\n');
+  const sourceDocument = new EditorDocument('shapes.ts', source);
+  const service = await createTypeScriptService({ dynamicTypes: false });
+  let view: EditorView | undefined;
+  let target: EditorNavigationTarget | undefined;
+  const modifier = { metaKey: isMac, ctrlKey: !isMac };
+  const pickerItems = (): string[] =>
+    [...document.querySelectorAll('.cm-picker-item .cm-picker-label')].map((label) => label.textContent);
+  try {
+    await service.attach(sourceDocument);
+    const extensions = createTypeScriptExtensions({
+      document: sourceDocument,
+      service,
+      navigate: async (next) => {
+        target = next;
+      },
+      applyWorkspaceEdits: async (edits) => {
+        for (const edit of edits) {
+          sourceDocument.apply({
+            expectedVersion: sourceDocument.version,
+            origin: 'workspace-edit',
+            changes: edit.changes,
+          });
+        }
+        return true;
+      },
+    });
+    const { container } = render(
+      <div className='h-96'>
+        <CodeEditor
+          document={sourceDocument}
+          viewId='language-features'
+          languageId='typescript'
+          extensions={extensions}
+          onMount={(mounted) => {
+            view = mounted;
+          }}
+        />
+      </div>,
+    );
+    await expect.poll(() => view).toBeDefined();
+    const editor = view!;
+    editor.focus();
+
+    // Semantic occurrences: two writes and two reads of `total`, and the cursor's symbol path above the editor.
+    editor.dispatch({ selection: { anchor: source.indexOf('total') + 1 } });
+    await expect.poll(() => container.querySelectorAll('.cm-occurrence').length).toBe(4);
+    expect(container.querySelectorAll('.cm-occurrence-write')).toHaveLength(2);
+    await expect.poll(() => container.querySelector('.cm-breadcrumbs')?.textContent).toContain('area');
+    await page.screenshot();
+
+    // Go to Symbol in Editor filters the outline and moves the cursor.
+    fireEvent.keyDown(editor.contentDOM, { key: 'o', code: 'KeyO', shiftKey: true, ...modifier });
+    await expect.poll(pickerItems).toEqual(expect.arrayContaining(['area', 'report']));
+    await page.screenshot();
+    await userEvent.keyboard('rep');
+    await expect.poll(pickerItems).toEqual(['report']);
+    await userEvent.keyboard('{Enter}');
+    await expect.poll(() => editor.state.selection.main.head).toBe(source.indexOf('report'));
+
+    // Find All References lists each site with its source line, like VS Code's peek.
+    editor.dispatch({ selection: { anchor: source.indexOf('area(3)') } });
+    fireEvent.keyDown(editor.contentDOM, { key: 'F12', code: 'F12', shiftKey: true });
+    await expect.poll(() => document.querySelector('.cm-picker-title')?.textContent).toBe('2 references');
+    expect([...document.querySelectorAll('.cm-picker-preview')].map((preview) => preview.textContent)).toEqual([
+      'export function area(width: number): number {',
+      'return area(3);',
+    ]);
+    await page.screenshot();
+    await userEvent.keyboard('{ArrowDown}{Enter}');
+    await expect.poll(() => target).toMatchObject({ uri: sourceDocument.uri, line: 7 });
+
+    // Call hierarchy shows the caller, and Outgoing switches direction.
+    editor.dispatch({ selection: { anchor: source.indexOf('area') } });
+    editor.focus();
+    fireEvent.keyDown(editor.contentDOM, { key: 'h', code: 'KeyH', shiftKey: true, altKey: true });
+    await expect.poll(pickerItems).toEqual(['report']);
+    await page.getByRole('button', { name: 'Outgoing' }).click();
+    await expect.poll(() => document.querySelector('.cm-picker-empty')?.textContent).toBe('No calls found');
+    await userEvent.keyboard('{Escape}');
+    await expect.poll(() => document.querySelector('.cm-picker')).toBeNull();
+
+    // Typing `(` and `,` opens and advances parameter hints without a shortcut.
+    editor.dispatch({ selection: { anchor: editor.state.doc.length } });
+    editor.focus();
+    await userEvent.keyboard('area(');
+    await expect
+      .poll(() => document.querySelector('.cm-signature-help .cm-signature-active-parameter')?.textContent)
+      .toBe('width: number');
+    await page.screenshot();
+    await userEvent.keyboard('2)');
+    await expect.poll(() => document.querySelector('.cm-signature-help')).toBeNull();
+
+    // The context menu offers every language command the server supports.
+    fireEvent.contextMenu(editor.contentDOM);
+    for (const name of [
+      'Go to Definition',
+      'Go to Type Definition',
+      'Go to Implementations',
+      'Find All References',
+      'Show Call Hierarchy',
+      'Go to Symbol in Editor…',
+      'Go to Symbol in Workspace…',
+      'Rename Symbol',
+      'Format Document',
+      'Quick Fix…',
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- each menu item is checked in order.
+      await expect.element(page.getByRole('menuitem', { name, exact: true })).toBeVisible();
+    }
+    await page.screenshot();
+  } finally {
+    service.dispose();
+  }
+}, 90_000);
+
+it('adds the import when a TypeScript auto-import completion is accepted with Enter after more typing', async () => {
+  const [{ createTypeScriptService }, { createTypeScriptExtensions }] = await Promise.all([
+    import('#lib/typescript-language/typescript-service.js'),
+    import('#lib/typescript-language/create-typescript-extensions.js'),
+  ]);
+  const sourceDocument = new EditorDocument(
+    'layout.ts',
+    "import type { MechanismSource } from '@taucad/kinematics';\n\nexport type Test = M",
+  );
+  const service = await createTypeScriptService({ dynamicTypes: false });
+  let view: EditorView | undefined;
+  try {
+    await service.client.setExtraLib(
+      'file:///node_modules/@taucad/kinematics/index.d.ts',
+      'export interface Mechanism { name: string }\nexport interface MechanismSource { id: string }\nexport type MechanismUnits = "mm";\n',
+    );
+    await service.attach(sourceDocument);
+    const extensions = createTypeScriptExtensions({
+      document: sourceDocument,
+      service,
+      navigate: () => undefined,
+      applyWorkspaceEdits: async (edits) => {
+        for (const edit of edits) {
+          if (edit.uri !== sourceDocument.uri || edit.baseText !== sourceDocument.text) {
+            return false;
+          }
+          sourceDocument.apply({
+            expectedVersion: sourceDocument.version,
+            origin: 'workspace-edit',
+            changes: edit.changes,
+          });
+        }
+        return true;
+      },
+    });
+    render(
+      <div className='h-72'>
+        <CodeEditor
+          document={sourceDocument}
+          viewId='auto-import'
+          languageId='typescript'
+          extensions={extensions}
+          onMount={(mounted) => {
+            view = mounted;
+          }}
+        />
+      </div>,
+    );
+    await expect.poll(() => view).toBeDefined();
+    view!.dispatch({ selection: { anchor: sourceDocument.text.length } });
+    view!.focus();
+    startCompletion(view!);
+    await expect.poll(() => document.querySelector('.cm-tooltip-autocomplete')?.textContent).toContain('Mechanism');
+    await userEvent.keyboard('ec');
+    const editor = view!;
+    // CodeMirror ignores list keys while a query is pending and for a short delay after the list opens.
+    const listReady = async (): Promise<void> => {
+      await expect.poll(() => completionStatus(editor.state)).toBe('active');
+      await new Promise((resolve) => {
+        setTimeout(resolve, 150);
+      });
+    };
+    await expect
+      .poll(() => document.querySelector('.cm-tooltip-autocomplete')?.textContent)
+      .toContain('MechanismUnits');
+    await listReady();
+    for (let index = 0; index < 5 && selectedCompletion(editor.state)?.label !== 'Mechanism'; index += 1) {
+      const selected = selectedCompletion(editor.state);
+      // oxlint-disable-next-line no-await-in-loop -- arrow through the open list one row at a time.
+      await userEvent.keyboard('{ArrowDown}');
+      // oxlint-disable-next-line no-await-in-loop -- wait for each move before reading the next row.
+      await expect.poll(() => selectedCompletion(editor.state)).not.toBe(selected);
+    }
+    expect(selectedCompletion(editor.state)?.label).toBe('Mechanism');
+    await listReady();
+    await userEvent.keyboard('{Enter}');
+    await expect
+      .poll(() => sourceDocument.text)
+      .toBe("import type { Mechanism, MechanismSource } from '@taucad/kinematics';\n\nexport type Test = Mechanism");
   } finally {
     service.dispose();
   }
@@ -557,7 +911,7 @@ it.each([Theme.LIGHT, Theme.DARK, Theme.BLACK, Theme.HIGH_CONTRAST])(
       view!.dispatch({ selection: { anchor: source.lastIndexOf('greet(') + 'greet('.length } });
       view!.focus();
       fireEvent.keyDown(view!.contentDOM, { key: ' ', code: 'Space', metaKey: isMac, ctrlKey: !isMac, shiftKey: true });
-      await expect.poll(() => document.querySelector('.cm-typescript-signature')?.textContent).toContain('name');
+      await expect.poll(() => document.querySelector('.cm-signature-help')?.textContent).toContain('name');
       await page.screenshot();
 
       view!.dispatch({ selection: { anchor: source.indexOf('value:') + 2 } });
@@ -571,3 +925,205 @@ it.each([Theme.LIGHT, Theme.DARK, Theme.BLACK, Theme.HIGH_CONTRAST])(
   },
   120_000,
 );
+
+it.each(
+  [Theme.LIGHT, Theme.DARK, Theme.BLACK, Theme.HIGH_CONTRAST].flatMap((theme) => [
+    { theme, width: 1000 },
+    { theme, width: 390 },
+  ]),
+)('styles detached editor surfaces in $theme at $width', async ({ theme, width }) => {
+  await page.viewport(width, 700);
+  document.documentElement.className = theme === Theme.BLACK || theme === Theme.HIGH_CONTRAST ? `dark ${theme}` : theme;
+  let editor: EditorView | undefined;
+  const sourceDocument = new EditorDocument('surface.ts', 'rotate');
+  const documentation = () =>
+    renderTypeScriptDocumentation(
+      [
+        { text: 'function ', kind: 'keyword' },
+        { text: 'rotate', kind: 'functionName' },
+        { text: '(angle: number): Shape', kind: 'text' },
+      ],
+      '**Rotate** a shape with an `angle`.\n\n- Preserves the source\n- Returns a new shape\n\n[Reference](https://example.com)\n\n<script>alert(1)</script>[unsafe](javascript:alert(1))',
+    );
+  const { container } = render(
+    <div style={{ height: 500 }}>
+      <CodeEditor
+        document={sourceDocument}
+        viewId='surfaces'
+        languageId='typescript'
+        onMount={(view) => {
+          editor = view;
+        }}
+        extensions={[
+          autocompletion({
+            override: [
+              () => ({
+                from: 0,
+                options: [
+                  { label: 'rotate', type: 'function', detail: '(angle: number)', info: documentation },
+                  { label: 'rotation', type: 'property' },
+                  { label: 'Rotation', type: 'class' },
+                ],
+              }),
+            ],
+          }),
+        ]}
+      />
+    </div>,
+  );
+  await expect.poll(() => editor).toBeDefined();
+  const view = editor!;
+  const gutter = container.querySelector('.cm-gutters')!;
+  expect(gutter.getBoundingClientRect().width).toBeLessThan(width < 600 ? 72 : 65);
+  view.focus();
+  view.dispatch({ selection: { anchor: 6 } });
+  startCompletion(view);
+  await expect.poll(() => document.querySelector('.cm-tooltip-autocomplete')).not.toBeNull();
+  await expect.poll(() => document.querySelector('.cm-completionInfo strong')?.textContent).toBe('Rotate');
+  const popup = document.querySelector('.cm-tooltip-autocomplete')!;
+  expect(container.contains(popup)).toBe(false);
+  const selected = popup.querySelector('[aria-selected]')!;
+  const style = getComputedStyle(selected);
+  expect(contrastRatio(style.color, style.backgroundColor)).toBeGreaterThanOrEqual(4.5);
+  const icon = popup.querySelector('.codicon-symbol-method')!;
+  await document.fonts.load('16px codicon');
+  expect(document.fonts.check('16px codicon')).toBe(true);
+  expect(getComputedStyle(icon, ':before').content).not.toBe('none');
+  expect(getComputedStyle(icon).getPropertyValue('--cm-function').trim()).not.toBe('');
+  expect(document.querySelector('.cm-documentation script')).toBeNull();
+  expect(document.querySelector('.cm-documentation a[href^="javascript:"]')).toBeNull();
+  await page.screenshot();
+  expect(popup.getBoundingClientRect().right).toBeLessThanOrEqual(width);
+  closeCompletion(view);
+  view.dispatch({
+    effects: StateEffect.appendConfig.of(
+      showTooltip.of({ pos: 0, above: false, create: () => ({ dom: documentation() }) }),
+    ),
+  });
+  await expect.poll(() => document.querySelector('.cm-tooltip .cm-signature-keyword')).not.toBeNull();
+  await page.screenshot();
+  view.dispatch(
+    setDiagnostics(view.state, [
+      {
+        from: 0,
+        to: 6,
+        severity: 'warning',
+        message: 'Check the angle',
+        actions: [{ name: 'Fix angle', apply: () => undefined }],
+      },
+    ]),
+  );
+  openLintPanel(view);
+  openSearchPanel(view);
+  gotoLine(view);
+  await expect.poll(() => container.querySelector('.cm-panel-lint')).not.toBeNull();
+  await page.screenshot();
+});
+
+it.each(editorSyntaxFixtures)('renders visible syntax styles for %s', async (language, source) => {
+  await page.viewport(1000, 600);
+  document.documentElement.className = 'dark';
+  const sourceDocument = new EditorDocument(`fixture-${language}`, source);
+  const { container } = render(
+    <div className='h-72'>
+      <CodeEditor document={sourceDocument} viewId={`syntax-${language}`} languageId={language} />
+    </div>,
+  );
+  const editor = page.getByRole('textbox', { name: 'Code editor' });
+  await expect.element(editor).toBeVisible();
+  // Inspect rendered token styles rather than parser tags alone: a parsed token can still lack a theme rule.
+  await expect
+    .poll(() => {
+      const root = editor.element();
+      const base = getComputedStyle(root).color;
+      return [...root.querySelectorAll('span')].filter((node) => getComputedStyle(node).color !== base).length;
+    })
+    .toBeGreaterThan(0);
+  if (language === 'markdown') {
+    await expect.element(page.getByText('# Title', { exact: true })).toBeVisible();
+    const strong = [...container.querySelectorAll('span')].find((node) => node.textContent === 'strong');
+    expect(strong).toBeDefined();
+    expect(Number(getComputedStyle(strong!).fontWeight)).toBeGreaterThanOrEqual(600);
+    await expect
+      .poll(() => {
+        const keyword = [...editor.element().querySelectorAll('span')].find((node) => node.textContent === 'const');
+        return keyword ? getComputedStyle(keyword).color !== getComputedStyle(editor.element()).color : false;
+      })
+      .toBe(true);
+  }
+  await page.screenshot();
+});
+
+it.each([false, true])('refreshes delayed acquisition without editing (stale response: %s)', async (delayResponse) => {
+  const [{ createTypeScriptService }, { createTypeScriptExtensions }] = await Promise.all([
+    import('#lib/typescript-language/typescript-service.js'),
+    import('#lib/typescript-language/create-typescript-extensions.js'),
+  ]);
+  let release: () => void = () => undefined;
+  const ready = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const sourceDocument = new EditorDocument(
+    'main.ts',
+    "import type { Shape } from 'delayed'; export const shape: Shape = {size: 'wrong'};",
+  );
+  const dependencyReader = {
+    readFile: vi.fn(async (path: string) =>
+      new TextEncoder().encode(
+        path.endsWith('package.json') ? '{"types":"index.d.ts"}' : 'export type Shape = {size: number};',
+      ),
+    ),
+    readdir: vi.fn(async (path: string) => {
+      await ready;
+      return path === '/node_modules/delayed' ? ['index.d.ts'] : [];
+    }),
+  };
+  const service = await createTypeScriptService({ dynamicTypes: false, staticPackageNames: [], dependencyReader });
+  let releaseResponse: () => void = () => undefined;
+  const responseReady = new Promise<void>((resolve) => {
+    releaseResponse = resolve;
+  });
+  let captured = false;
+  const request = service.client.request.bind(service.client);
+  if (delayResponse) {
+    vi.spyOn(service.client, 'request').mockImplementation(async (command) => {
+      const result = await request(command);
+      if (command.kind === 'diagnostics' && !captured) {
+        captured = true;
+        await responseReady;
+      }
+      return result;
+    });
+  }
+  let messages: string[] = [];
+  try {
+    await service.attach(sourceDocument);
+    const extensions = createTypeScriptExtensions({
+      document: sourceDocument,
+      service,
+      navigate: async () => undefined,
+      publishDiagnostics: (_uri, _version, diagnostics) => {
+        messages = diagnostics.map((row) => row.message);
+      },
+    });
+    render(
+      <div className='h-72'>
+        <CodeEditor document={sourceDocument} viewId='delayed-types' languageId='typescript' extensions={extensions} />
+      </div>,
+    );
+    await expect
+      .poll(() => (delayResponse ? captured : messages.some((message) => message.includes('Cannot find module'))))
+      .toBe(true);
+    const { version } = sourceDocument;
+    release();
+    await expect.poll(() => service.environmentRevision).toBeGreaterThan(0);
+    releaseResponse();
+    await expect.poll(() => messages.some((message) => message.includes("not assignable to type 'number'"))).toBe(true);
+    expect(messages.some((message) => message.includes('Cannot find module'))).toBe(false);
+    expect(sourceDocument.version).toBe(version);
+  } finally {
+    release();
+    releaseResponse();
+    service.dispose();
+  }
+});

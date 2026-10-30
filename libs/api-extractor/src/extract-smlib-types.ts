@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, posix } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -160,7 +160,9 @@ const main = (): void => {
   mkdirSync(outputDirectory, { recursive: true });
   const bundle = buildSmlibTypes();
   writeFileSync(join(outputDirectory, 'smlib.bundled.json'), JSON.stringify(bundle));
-  // Per-package declaration trees for the type-level tests (`tsconfig.typetest.json` paths).
+  // Per-package declaration trees for the type-level tests (`tsconfig.typetest.json` paths), rebuilt
+  // whole so files a release renamed or dropped do not linger.
+  rmSync(join(outputDirectory, 'modules'), { recursive: true, force: true });
   for (const [packageName, { content, files = {} }] of Object.entries(bundle)) {
     for (const [path, declaration] of Object.entries({ 'index.d.ts': content, ...files })) {
       const target = join(outputDirectory, 'modules', packageName, path);

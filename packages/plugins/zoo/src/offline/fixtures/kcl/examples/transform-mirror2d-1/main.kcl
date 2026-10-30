@@ -1,0 +1,8 @@
+// Mirror a un-closed sketch across the Y axis.
+sketch001 = startSketchOn(XZ)
+    |> startProfile(at = [0, 8.5])
+    |> line(end = [20, -8.5])
+    |> line(end = [-20, -8.5])
+    |> mirror2d(axis = Y)
+
+example = extrude(sketch001, length = 10)

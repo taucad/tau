@@ -89,11 +89,11 @@ const startServerSentry = async (dsn: string): Promise<typeof SentryNode> => {
     // Errors only: no tracing, no OpenTelemetry, no http patching and no process-level handlers in the function.
     skipOpenTelemetrySetup: true,
     defaultIntegrations: false,
+    // Do not content-deduplicate across requests: identical failures still need their own correlation ids.
     integrations: [
       sentry.eventFiltersIntegration(),
       sentry.functionToStringIntegration(),
       sentry.linkedErrorsIntegration(),
-      sentry.dedupeIntegration(),
       sentry.nodeContextIntegration(),
     ],
     beforeSend: scrubServerSentryEvent,

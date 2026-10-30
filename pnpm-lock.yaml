@@ -1854,6 +1854,9 @@ importers:
       '@taucad/events':
         specifier: workspace:*
         version: link:../../libs/events
+      '@taucad/file-links':
+        specifier: workspace:*
+        version: link:../../libs/file-links
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../../packages/filesystem

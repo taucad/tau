@@ -5252,7 +5252,9 @@
         "area": 7.953293033706888
       },
       "offline": {
-        "gap": "engine: command ExtrudeToReference resulted in errors: Cannot extrude by zero length"
+        "solids": 2,
+        "volume": 1.196349541,
+        "area": 7.963495408
       }
     },
     {
@@ -5787,7 +5789,9 @@
         "area": 940.1672868989408
       },
       "offline": {
-        "gap": "engine: command EntityMakeHelixFromEdge resulted in errors: Unknown edge undefined"
+        "solids": 1,
+        "volume": 1486.668,
+        "area": 940.1672
       }
     },
     {
@@ -7572,7 +7576,9 @@
         "area": 3704.7582509730505
       },
       "offline": {
-        "gap": "engine: command RevolveAboutEdge resulted in errors: Unknown edge undefined"
+        "solids": 2,
+        "volume": 12587.0055,
+        "area": 3705.719631
       }
     },
     {
@@ -11545,7 +11551,9 @@
         "yLine"
       ],
       "offline": {
-        "gap": "engine: command ExtrudeToReference resulted in errors: Cannot extrude by zero length"
+        "solids": 6,
+        "volume": 3.25801972,
+        "area": 26.02765317
       }
     },
     {
@@ -11719,7 +11727,9 @@
       "upstream": "rust/kcl-lib/std/sketch.kcl#revolve",
       "functions": ["circle", "close", "extrude", "line", "revolve", "startProfile", "startSketchOn"],
       "offline": {
-        "gap": "engine: command RevolveAboutEdge resulted in errors: Unknown edge undefined"
+        "solids": 2,
+        "volume": 8789.568352,
+        "area": 2895.315141
       }
     },
     {
@@ -11727,7 +11737,9 @@
       "upstream": "rust/kcl-lib/std/sketch.kcl#revolve",
       "functions": ["circle", "close", "extrude", "line", "revolve", "startProfile", "startSketchOn"],
       "offline": {
-        "gap": "engine: command RevolveAboutEdge resulted in errors: Unknown edge undefined"
+        "solids": 2,
+        "volume": 8789.568352,
+        "area": 2895.315141
       }
     },
     {
@@ -13553,7 +13565,9 @@
       "upstream": "rust/kcl-lib/std/solid.kcl#isSolid",
       "functions": ["assertIs", "extrude", "isSolid", "isSurface", "startProfile", "startSketchOn", "xLine", "yLine"],
       "offline": {
-        "gap": "engine: Failed to deserialize msgpack response from engine: Syntax(\"data did not match any variant o"
+        "solids": 2,
+        "volume": 125.0,
+        "area": 294.0
       }
     },
     {
@@ -13561,7 +13575,9 @@
       "upstream": "rust/kcl-lib/std/solid.kcl#isSurface",
       "functions": ["assertIs", "extrude", "isSolid", "isSurface", "startProfile", "startSketchOn", "xLine", "yLine"],
       "offline": {
-        "gap": "engine: Failed to deserialize msgpack response from engine: Syntax(\"data did not match any variant o"
+        "solids": 2,
+        "volume": 125.0,
+        "area": 294.0
       }
     },
     {

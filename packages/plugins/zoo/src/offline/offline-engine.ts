@@ -76,8 +76,21 @@ import {
   mirror3d,
   setObjectTransform,
 } from '#offline/offline-engine-patterns.js';
-import { helixFromParams, helixOnCylinder, helixFromEdge, surfaceBlend } from '#offline/offline-engine-curves.js';
-import { faceIsPlanar, adjacent, measureBoundingBox, sumMass, entityType } from '#offline/offline-engine-queries.js';
+import {
+  commandEdge,
+  helixFromParams,
+  helixOnCylinder,
+  helixFromEdge,
+  surfaceBlend,
+} from '#offline/offline-engine-curves.js';
+import {
+  faceIsPlanar,
+  adjacent,
+  bodyType,
+  measureBoundingBox,
+  sumMass,
+  entityType,
+} from '#offline/offline-engine-queries.js';
 
 type Handler = (id: string, cmd: ModelingCommand) => Record<string, unknown> | undefined;
 
@@ -525,6 +538,7 @@ export class OfflineEngine {
       loft: (id, cmd) => this.loft(id, cmd),
       solid3d_get_extrusion_face_info: (_id, cmd) => this.extrusionFaceInfo(cmd),
       solid3d_get_adjacency_info: () => ({ edges: [] }),
+      solid3d_get_body_type: (_id, cmd) => bodyType(this, cmd),
       entity_get_all_child_uuids: (_id, cmd) => ({ entity_ids: childIds(this.scene.get(cmd['entity_id'] as string)) }),
       entity_get_num_children: (_id, cmd) => ({ num: childIds(this.scene.get(cmd['entity_id'] as string)).length }),
       entity_get_child_uuid: (_id, cmd) => ({
@@ -873,7 +887,7 @@ export class OfflineEngine {
   private extrudeToReference(id: string, cmd: ModelingCommand): Record<string, unknown> {
     const profile = this.profileOf(cmd['target'] as string);
     const reference = cmd['reference'] as
-      | { entity_reference: { entity_id?: string } }
+      | { entity_reference: { entity_id?: string; entity_reference?: { type: string } & EdgeSpecifier } }
       | { axis: { axis: WirePoint3d; point: WirePoint3d } }
       | { point: { point: WirePoint3d } };
     let target: Vec3;
@@ -881,6 +895,9 @@ export class OfflineEngine {
       target = point3(reference.point.point);
     } else if ('axis' in reference) {
       target = point3(reference.axis.point);
+    } else if (reference.entity_reference.entity_reference?.type === 'edge') {
+      // An `{ sideFaces, endFaces }` target: extrude until the profile reaches the edge's midpoint.
+      target = edgePoint(this.oc, this.edgeFromSpecifier(reference.entity_reference.entity_reference), 0.5).point;
     } else {
       const entity = reference.entity_reference.entity_id
         ? this.scene.find(reference.entity_reference.entity_id)
@@ -939,8 +956,7 @@ export class OfflineEngine {
 
   private revolveAboutEdge(_id: string, cmd: ModelingCommand): Record<string, unknown> {
     const profile = this.profileOf(cmd['target'] as string);
-    const edgeId = cmd['edge_id'] as string;
-    const edge = this.anyEdge(edgeId);
+    const edge = commandEdge(this, cmd);
     const start = edgePoint(this.oc, edge, 0);
     const end = edgePoint(this.oc, edge, 1);
     this.revolveWith(

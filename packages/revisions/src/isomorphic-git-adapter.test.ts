@@ -590,6 +590,8 @@ describe('reading a tree with large objects', () => {
         networkBytes: encoder.encode(parts[0]![1]).byteLength + encoder.encode(parts[2]![1]).byteLength,
         localObjects: 1,
         localBytes: encoder.encode(parts[1]![1]).byteLength,
+        /* `objects.test` is neither the files service nor R2 nor the relay (tau.lfs.transport). */
+        transport: 'other',
       }),
     ]);
 

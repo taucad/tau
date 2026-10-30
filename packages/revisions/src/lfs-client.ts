@@ -84,7 +84,7 @@ export type LfsClientOptions = Readonly<{
   maximumUploadBytes?: number;
   /** How many objects upload at once. Defaults to {@link lfsUploadConcurrency}; `1` is serial. */
   uploadConcurrency?: number;
-  /** How many objects download at once. Defaults to {@link lfsDownloadConcurrency}; `1` is serial. */
+  /** How many objects download at once. Defaults to {@link lfsDownloadConcurrency}, at most {@link lfsDownloadConcurrencyMaximum}; `1` is serial. */
   downloadConcurrency?: number;
 }>;
 
@@ -113,14 +113,59 @@ export const lfsUploadResidentBytes = 64 * 1024 * 1024;
 /**
  * How many large objects one {@link LfsClient.downloadMany} transfers at once.
  *
- * Opening a project is latency-bound, not bandwidth-bound: each presigned `GET`
- * spends most of its time waiting for its first byte. Eight fill the six
- * connections a browser opens to an HTTP/1.1 object store, and use more once
- * it speaks HTTP/2.
+ * Opening a project is latency-bound, not bandwidth-bound: each `GET` spends
+ * most of its time waiting for its first byte (the median object is about
+ * 136 KB). The files service (`files.<zone>`) multiplexes every transfer on one
+ * HTTP/2 or HTTP/3 connection, so 24 in flight cut a 300-object open to about
+ * a dozen round trips (files service blueprint §4). Against an HTTP/1.1 object
+ * store the browser queues the surplus behind its six connections, which costs
+ * nothing. {@link lfsDownloadResidentBytes} bounds memory whatever the count,
+ * and no transfer carries its own timer, so the count changes no deadline.
  *
  * @public
  */
-export const lfsDownloadConcurrency = 8;
+export const lfsDownloadConcurrency = 24;
+
+/** The most transfers a caller may ask {@link LfsClientOptions.downloadConcurrency} for. @public */
+export const lfsDownloadConcurrencyMaximum = 32;
+
+/**
+ * Which kind of host served a download, read from its action's `href`
+ * (`tau.lfs.transport`, files service blueprint §4, §8).
+ *
+ * `files` is the files service (`files.<zone>`), `r2_presigned` a presigned R2
+ * URL, `relay` the API's third-party LFS relay handle, and `other` anything
+ * else (a local MinIO, a third-party store).
+ *
+ * @public
+ */
+export type LfsTransport = 'files' | 'r2_presigned' | 'relay' | 'other';
+
+/**
+ * Classify a download action's `href` by its host. No part of the URL is kept.
+ *
+ * @param href - The action's URL.
+ * @returns The transport.
+ * @public
+ */
+export const lfsTransportOf = (href: string): LfsTransport => {
+  let url: URL;
+  try {
+    url = new URL(href);
+  } catch {
+    return 'other';
+  }
+  if (url.hostname.startsWith('files.')) {
+    return 'files';
+  }
+  if (url.hostname.endsWith('.r2.cloudflarestorage.com')) {
+    return 'r2_presigned';
+  }
+  return /\/v1\/git\/lfs\/[^/]+$/u.test(url.pathname) ? 'relay' : 'other';
+};
+
+/** What one download's transfer was, beside its bytes. @public */
+export type LfsDownloadTransfer = Readonly<{ transport: LfsTransport }>;
 
 /**
  * How many objects one download batch call names.
@@ -165,7 +210,7 @@ export type LfsDownloadManyInput = Readonly<{
    * the resident budget until this settles, so a caller that stores them here
    * keeps the whole download bounded. A rejection stops the rest.
    */
-  received: (pointer: LfsPointer, content: Uint8Array<ArrayBuffer>) => Promise<void>;
+  received: (pointer: LfsPointer, content: Uint8Array<ArrayBuffer>, transfer: LfsDownloadTransfer) => Promise<void>;
 }>;
 
 /** One project's LFS transport. @public */
@@ -209,8 +254,10 @@ const transferAttempts = 3;
 const retryable = (status: number): boolean => status === 429 || status >= 500;
 const expired = (action: BatchAction): boolean => (action.expiresAt ?? Infinity) <= Date.now() + 5000;
 /* A malformed setting (NaN, a fraction, below one) falls back to something that still transfers. */
-const concurrencyOf = (requested: number | undefined, fallback: number): number =>
-  requested !== undefined && Number.isFinite(requested) ? Math.max(1, Math.floor(requested)) : fallback;
+const concurrencyOf = (requested: number | undefined, fallback: number, maximum = Infinity): number =>
+  requested !== undefined && Number.isFinite(requested)
+    ? Math.min(maximum, Math.max(1, Math.floor(requested)))
+    : fallback;
 
 const backoff = async (attempt: number, signal?: AbortSignal): Promise<void> => {
   signal?.throwIfAborted();
@@ -605,7 +652,7 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
     pointer: LfsPointer,
     initial: BatchObject,
     signal?: AbortSignal,
-  ): Promise<Uint8Array<ArrayBuffer>> => {
+  ): Promise<Readonly<{ content: Uint8Array<ArrayBuffer>; transfer: LfsDownloadTransfer }>> => {
     if (initial.error !== undefined) {
       throw new Error(`The remote refused large object ${pointer.oid}.`);
     }
@@ -665,7 +712,7 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
           if (received !== pointer.size || lfsPointerFor(content).pointer.oid !== pointer.oid) {
             throw new Error(`Large object ${pointer.oid} did not hash to its own id.`);
           }
-          return content;
+          return { content, transfer: { transport: lfsTransportOf(action.href) } };
         }
       } else {
         await response?.body?.cancel();
@@ -727,8 +774,14 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
       return Object.freeze(wanted.map((answer) => answer.oid));
     },
 
-    download: async (pointer: LfsDownloadInput): Promise<Uint8Array<ArrayBuffer>> =>
-      downloadObject(pointer, await refresh('download', pointer, pointer.signal), pointer.signal),
+    download: async (pointer: LfsDownloadInput): Promise<Uint8Array<ArrayBuffer>> => {
+      const { content } = await downloadObject(
+        pointer,
+        await refresh('download', pointer, pointer.signal),
+        pointer.signal,
+      );
+      return content;
+    },
 
     /*
      * The open path's download (load-path audit, fix 1): one batch call per
@@ -748,14 +801,19 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
       await pool(
         {
           source: answered,
-          concurrency: concurrencyOf(options.downloadConcurrency, lfsDownloadConcurrency),
+          concurrency: concurrencyOf(
+            options.downloadConcurrency,
+            lfsDownloadConcurrency,
+            lfsDownloadConcurrencyMaximum,
+          ),
           residentBytes: lfsDownloadResidentBytes,
           sizeOf: (answer) => answer.size,
           signal,
         },
         async (answer, transferSignal) => {
           const pointer = { oid: answer.oid, size: answer.size };
-          await received(pointer, await downloadObject(pointer, answer, transferSignal));
+          const { content, transfer } = await downloadObject(pointer, answer, transferSignal);
+          await received(pointer, content, transfer);
         },
       );
     },

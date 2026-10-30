@@ -89,6 +89,7 @@ export type { LfsPointer } from '#lfs.js';
  * machine is here either. Keeping them would put `xstate` in the graph of every
  * page that imports a remote *type* from this barrel. */
 export { createLfsClient, LfsQuotaError, withQuotaPaths } from '#lfs-client.js';
+export type { LfsTransport } from '#lfs-client.js';
 export { createRevisionHttpClient, keepaliveLimitBytes } from '#http-client.js';
 export type { RevisionHttpClient, RevisionHttpRequest, RevisionHttpResponse } from '#http-client.js';
 /*

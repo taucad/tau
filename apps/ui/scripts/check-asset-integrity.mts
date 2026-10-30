@@ -5,7 +5,8 @@
  *    at least one chunk. The exception is a .NET runtime's `_framework` (the C# language server). Its own loader fetches
  *    each file with the `sha256-` integrity in the boot configuration that `dotnet.js` embeds. So every WASM file
  *    there must be listed in that configuration with a hash of its bytes, and the configuration must not turn the
- *    check off.
+ *    check off. In each browser the runtime must then start, and refuse to start with one changed byte in its native
+ *    WebAssembly.
  * 2. The client directory is served same-origin with the isolation headers. In a module worker, as kernels run, the
  *    app's own registration lines fill the registry and `@taucad/runtime`'s WASM loader compiles every WASM module the
  *    build ships. Per module it records:
@@ -269,11 +270,37 @@ const generated = new Map<string, { readonly type: string; readonly body: string
   [`${harness}/worker.js`, { type: 'text/javascript', body: workerSource }],
 ]);
 const tampered = new Map<string, Uint8Array<ArrayBuffer>>();
+/* A .NET runtime under this prefix is served whole, with one changed byte in its native WebAssembly. */
+const tamperedDotnet = `${harness}/tampered-dotnet/`;
+const dotnetNative = /\/dotnet\.native\.[^/]*\.wasm$/u;
+const dotnetContentTypes: Readonly<Record<string, string>> = {
+  '.js': 'text/javascript',
+  '.json': 'application/json',
+  '.wasm': 'application/wasm',
+  '.dat': 'application/octet-stream',
+};
+let tamperedDotnetServed = 0;
 const server = createServer((request, response) => {
   const url = new URL(request.url ?? '/', 'http://localhost');
   const fixed = generated.get(url.pathname);
   if (fixed !== undefined) {
     response.writeHead(200, { ...isolation, 'Content-Type': fixed.type }).end(fixed.body);
+    return;
+  }
+  const dotnetTampered = url.pathname.startsWith(tamperedDotnet);
+  const dotnetFile = dotnetTampered ? url.pathname.slice(tamperedDotnet.length) : url.pathname.slice(1);
+  if (receipt.assets.some((asset) => asset.path === dotnetFile && inDotnetFramework(asset.path))) {
+    let body = read(dotnetFile);
+    if (dotnetTampered && dotnetNative.test(dotnetFile)) {
+      body = tamper(body);
+      tamperedDotnetServed += 1;
+    }
+    response.writeHead(200, {
+      ...isolation,
+      'Content-Type': dotnetContentTypes[path.posix.extname(dotnetFile)] ?? 'application/octet-stream',
+      'Content-Length': String(body.byteLength),
+    });
+    response.end(body);
     return;
   }
   const file = url.pathname.slice(1);
@@ -391,6 +418,43 @@ for (const [label, type] of engines) {
       results.push({ browser: label, version: browser.version(), ...measured });
       record(measured.crossOriginIsolated, `${label} ${browser.version()} crossOriginIsolated in the kernel worker`);
       reportRows(label, measured.rows);
+      // The .NET runtime enforces its own boot configuration: it starts untampered and refuses a changed native byte.
+      for (const framework of dotnetFrameworks) {
+        const boot = async (prefix: string): Promise<Outcome> => {
+          const runtimePage = await browser.newPage();
+          try {
+            await runtimePage.goto(`${origin}${harness}/`);
+            return await runtimePage.evaluate(async (url) => {
+              try {
+                const { dotnet } = (await import(url)) as { dotnet: { create(): Promise<unknown> } };
+                await Promise.race([
+                  dotnet.create(),
+                  new Promise((_resolve, reject) => {
+                    setTimeout(() => {
+                      reject(new Error('runtime start timed out after 120 s'));
+                    }, 120_000);
+                  }),
+                ]);
+                return { ok: true };
+              } catch (error) {
+                return { ok: false, error: String(error instanceof Error ? error.message : error).slice(0, 200) };
+              }
+            }, `${origin}${prefix}${framework}/dotnet.js`);
+          } finally {
+            await runtimePage.close();
+          }
+        };
+        const untampered = await boot('/');
+        const served = tamperedDotnetServed;
+        const changed = await boot(tamperedDotnet);
+        const reached = tamperedDotnetServed > served;
+        record(
+          untampered.ok && reached && !changed.ok,
+          `${label} ${framework} .NET runtime: untampered ${untampered.ok ? 'starts' : `fails ${untampered.error ?? ''}`}; changed native byte ${
+            reached ? (changed.ok ? 'STARTED' : `refused (${changed.error ?? ''})`) : 'never fetched'
+          }`,
+        );
+      }
       // Written after each browser, so a later browser that hangs still leaves this one's evidence.
       writeFileSync(path.join(evidence, 'summary.txt'), `${lines.join('\n')}\n`);
     } finally {

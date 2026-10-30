@@ -46,8 +46,11 @@ const exportGeometry = async (
   // The pane names this section 'Format', singular, and offers one format through a combo box
   // rather than the multi-select toggles it carried before #1150. Selection mirrors the
   // maintained pattern in apps/ui-e2e/src/export-pane.spec.ts so the two cannot drift apart again.
+  // The pane shows 'No geometry to export' until the model has rendered, and on a fresh profile
+  // that waits for the first Build123d runtime download (277 MB, run 40998016336 debian-apt-x11).
+  // The visible canvas does not imply geometry, so this wait carries the same budget as the canvas.
   const format = page.getByRole('region', { name: 'Format', exact: true });
-  await format.waitFor({ state: 'visible' });
+  await format.waitFor({ state: 'visible', timeout: 900_000 });
   const picker = format.getByRole('button', { name: 'Export format' });
   await picker.waitFor({ state: 'visible' });
   await picker.click();

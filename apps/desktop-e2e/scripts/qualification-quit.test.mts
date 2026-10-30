@@ -1,6 +1,9 @@
+/* eslint-disable @typescript-eslint/naming-convention -- Environment variables retain their wire names. */
 /** Purpose: Refuse foreign and stale process records before any native close request can run. */
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { randomUUID, createHash } from 'node:crypto';
+import { once } from 'node:events';
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -33,6 +36,34 @@ try {
     }),
   );
   await assert.rejects(requestQualificationQuit(profile, process.pid, process.pid), /unchanged completed/u);
+  if (process.platform === 'linux') {
+    // A managed AppImage install admits its /usr/bin launcher; the process runs the versioned generation.
+    const appImageQuit = async (outerPath: string): Promise<unknown> => {
+      const child = spawn('sleep', ['60'], { env: { ...process.env, APPIMAGE: outerPath }, stdio: 'ignore' });
+      try {
+        // 'spawn' fires after exec, so /proc/<pid>/environ is the child's own environment.
+        await once(child, 'spawn');
+        const managed = { nonce: randomUUID(), profile, installedPath: '/usr/bin/tau-staging-appimage' };
+        await writeFile(join(profile, 'route-qualification.request.json'), JSON.stringify(managed));
+        await writeFile(
+          join(profile, 'route-qualification.ready.json'),
+          JSON.stringify({ ...managed, pid: child.pid, route: 'linux-appimage', version: '1.5.71' }),
+        );
+        return await requestQualificationQuit(profile, child.pid ?? 0).then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+      } finally {
+        child.kill();
+      }
+    };
+    const foreign = await appImageQuit('/opt/tau-staging-appimage/releases/1.5.70/Tau.AppImage');
+    assert.match(String(foreign), /admitted AppImage outer path/u);
+    // The admitted generation passes the binding and fails later, at the absent window, without closing anything.
+    const admitted = await appImageQuit('/opt/tau-staging-appimage/releases/1.5.71/Tau.AppImage');
+    assert.ok(admitted instanceof Error);
+    assert.doesNotMatch(admitted.message, /admitted AppImage outer path/u);
+  }
   console.log('Native quit guard tests passed without sending a close request.');
 } finally {
   if (previousGuard === undefined) {

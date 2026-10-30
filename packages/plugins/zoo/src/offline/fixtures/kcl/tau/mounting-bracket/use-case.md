@@ -28,10 +28,6 @@ is rounded in plan; the holes go through and do not touch the fillets.
 
 ## Offline result
 
-Fails offline: `engine: command Solid3dCutEdges resulted in errors: Unknown edge <id>`.
-
-The second `fillet` call on the same body fails; the KCL is right: with the bend fillet removed, the corner fillets and holes build 18 734.03 mm³, exactly 19 200 − 85.84 − 380.13. Pinned gap, category G2 (later fillet or chamfer edges).
-
-Expected once the gap closes: 19 120.31 mm³.
+1 solid, 19 120.31 mm³, matching the hand calculation. It first failed on the second `fillet` call (G2: edge ids dropped after the first fillet), closed with the chained fillet and chamfer fixes.
 
 No Zoo oracle: `ZOO_API_TOKEN` was not set when the fixture was recorded.

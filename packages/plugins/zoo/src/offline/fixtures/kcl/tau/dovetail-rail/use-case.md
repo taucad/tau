@@ -21,10 +21,6 @@ mirrored about the Y (sketch) axis; extruded 100 along −Y; holes Ø5.5 along Z
 
 ## Offline result
 
-Fails offline: `internal: Expected a sweep ID on the path when processing Solid3dGetExtrusionFaceInfo command, but w`.
-
-`mirror2d` then `extrude` fails offline. Pinned gap, category G1 (mirror2d).
-
-Expected once the gap closes: 39 334.77 mm³.
+1 solid, 39 334.77 mm³, matching the hand calculation. It first failed with the mirror2d gap (G1), closed by #1294.
 
 No Zoo oracle: `ZOO_API_TOKEN` was not set when the fixture was recorded.

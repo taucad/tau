@@ -14667,7 +14667,9 @@
         "yLine"
       ],
       "offline": {
-        "gap": "internal: Expected a sweep ID on the path when processing Solid3dGetExtrusionFaceInfo command, but w"
+        "solids": 1,
+        "volume": 39334.76776,
+        "area": 12977.62647
       }
     },
     {
@@ -14828,7 +14830,9 @@
         "yLine"
       ],
       "offline": {
-        "gap": "engine: command Solid3dCutEdges resulted in errors: Unknown edge <id>"
+        "solids": 1,
+        "volume": 59133.63103,
+        "area": 9368.24801
       }
     },
     {
@@ -14847,7 +14851,9 @@
         "yLine"
       ],
       "offline": {
-        "gap": "engine: command Solid3dCutEdges resulted in errors: Unknown edge <id>"
+        "solids": 1,
+        "volume": 19120.30986,
+        "area": 10663.82737
       }
     },
     {

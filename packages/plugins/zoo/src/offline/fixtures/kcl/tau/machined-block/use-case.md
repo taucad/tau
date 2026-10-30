@@ -23,10 +23,6 @@ is asked for on the straight top edges and runs on round the tangent arcs.
 
 ## Offline result
 
-Fails offline: `engine: command Solid3dCutEdges resulted in errors: Unknown edge <id>`.
-
-A `chamfer` call whose edges include two non-adjacent edges fails, with or without the fillet before it: on a plain block, chamfering the front and right top edges builds, but front and back, all four top edges, or two vertical edges fail with this message (a `fillet` of all four top edges builds). Pinned gap, new: multi-edge chamfer, close to G2.
-
-Expected once the gap closes: 59 133.63 mm³.
+1 solid, 59 133.63 mm³, matching the hand calculation. It first failed when one `chamfer` call named non-adjacent edges (the chamfer carried round a tangent chain consumed the later edges), closed with the chained fillet and chamfer fixes.
 
 No Zoo oracle: `ZOO_API_TOKEN` was not set when the fixture was recorded.

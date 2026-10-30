@@ -5529,7 +5529,9 @@
         "area": 9301.034241962823
       },
       "offline": {
-        "gap": "engine: [object WebAssembly.Exception]"
+        "solids": 5,
+        "volume": 4528.75219,
+        "area": 9301.349511
       }
     },
     {

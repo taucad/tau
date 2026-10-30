@@ -445,24 +445,32 @@ export function shell(engine: OfflineEngine, cmd: ModelingCommand): Record<strin
   const thickness = cmd['shell_thickness'] as number;
   const removed = (cmd['face_ids'] as string[]).map((faceId) => requireFace(engine.oc, solid, faceId));
   const op = new engine.oc.BRepOffsetAPI_MakeThickSolid();
-  op.MakeThickSolidByJoin(
-    solid.shape,
-    arrayToList(engine.oc, removed),
-    -thickness,
-    1e-3,
-    engine.oc.BRepOffset_Mode.BRepOffset_Skin,
-    true,
-    false,
-    engine.oc.GeomAbs_JoinType.GeomAbs_Arc,
-    false,
-  );
+  let thrown = false;
+  try {
+    op.MakeThickSolidByJoin(
+      solid.shape,
+      arrayToList(engine.oc, removed),
+      -thickness,
+      1e-3,
+      engine.oc.BRepOffset_Mode.BRepOffset_Skin,
+      true,
+      false,
+      engine.oc.GeomAbs_JoinType.GeomAbs_Arc,
+      false,
+    );
+  } catch {
+    // A wall offset that collapses a face (a fillet whose radius equals the wall) throws Standard_ConstructionError.
+    thrown = true;
+  }
+
   // MakeThickSolid can report success yet hand back the body unchanged when a wall offset collapses part of
-  // the profile; fall back to cutting an offset cavity through the removed caps.
+  // the profile, or throw; fall back to cutting an offset cavity through the removed caps.
   const unchanged =
+    !thrown &&
     op.IsDone() &&
     Math.abs(volumeOf(engine.oc, op.Shape()) - volumeOf(engine.oc, solid.shape)) <
       1e-9 * Math.max(1, volumeOf(engine.oc, solid.shape));
-  if (!op.IsDone() || unchanged) {
+  if (thrown || !op.IsDone() || unchanged) {
     const shelled = shellPrism(
       engine.oc,
       solid.shape,

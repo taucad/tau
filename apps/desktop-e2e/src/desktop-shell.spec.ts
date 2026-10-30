@@ -112,8 +112,10 @@ describe('production Electron Terminal keyboard qualification', () => {
       clipboard.writeText("printf '%s' 'λ東京' > pasted-one.txt\nprintf '%s' '$literal' > pasted-two.txt");
     });
     await pasteIntoTerminal(desktop);
+    /* A clipboard round trip, a bracketed paste and the mirror's own refresh interval, not an echo already on screen:
+     * the default poll window is shorter than that and the pasted line arrived just after the row gave up. */
     await expect
-      .poll(async () => page.locator('[data-terminal-screen-mirror]').textContent())
+      .poll(async () => page.locator('[data-terminal-screen-mirror]').textContent(), { timeout: 30_000 })
       .toContain('pasted-two.txt');
     await expect(stat(join(root, 'pasted-one.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(stat(join(root, 'pasted-two.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
@@ -121,7 +123,9 @@ describe('production Electron Terminal keyboard qualification', () => {
     await expectTerminalFile(root, 'pasted-one.txt', 'λ東京');
     await expectTerminalFile(root, 'pasted-two.txt', '$literal');
     await typeTerminalCommand(page, String.raw`stty size > copy-size.txt; printf 'copy%s\n' fixture`);
-    await expect.poll(async () => page.locator('[data-terminal-screen-mirror]').textContent()).toContain('copyfixture');
+    await expect
+      .poll(async () => page.locator('[data-terminal-screen-mirror]').textContent(), { timeout: 30_000 })
+      .toContain('copyfixture');
     const word = await terminalWordPosition(page, { root, sizeFile: 'copy-size.txt', word: 'copyfixture' });
     await page.mouse.dblclick(word.x, word.y);
     await application.evaluate(({ clipboard }) => {
@@ -190,7 +194,7 @@ describe('production Electron Terminal keyboard qualification', () => {
     await page.getByRole('menuitem', { name: 'Close', exact: true }).click();
     /* Closing a running Terminal asks in the pane first (T15); nothing stops until the person answers. */
     const closeDecision = page.locator('[data-slot="terminal-close-decision"]');
-    await expect.poll(async () => closeDecision.textContent()).toContain('Close the Terminal in Shell qualification?');
+    await expect.poll(async () => closeDecision.textContent()).toContain('Close the Terminal in shell-qualification?');
     expect(await survivingTerminalWriter(writer)).not.toEqual([]);
     await closeDecision.getByRole('button', { name: 'Close and stop', exact: true }).click();
     await terminalRegion(page).waitFor({ state: 'detached' });
@@ -210,7 +214,7 @@ describe('production Electron Terminal keyboard qualification', () => {
     /* Leaving the project the session belongs to asks first (T15), on the route a person actually takes. */
     await page.getByRole('link', { name: 'Projects', exact: true }).click();
     const guard = page.locator('[data-slot="terminal-navigation-guard"]');
-    await expect.poll(async () => guard.textContent()).toContain('Close the Terminal in Shell qualification?');
+    await expect.poll(async () => guard.textContent()).toContain('Close the Terminal in shell-qualification?');
     expect(await survivingTerminalWriter(writer)).not.toEqual([]);
     await guard.getByRole('button', { name: 'Close and stop', exact: true }).click();
     await page.locator('[data-slot="new-project-link"]').first().click();

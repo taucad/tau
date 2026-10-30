@@ -433,6 +433,12 @@ const startSupervisor = async (
   stderr.setEncoding('utf8').on('data', (chunk: string) => {
     diagnostics = (diagnostics + chunk).slice(-4096);
   });
+  /* A supervisor that is killed — which `finish` does whenever it has not exited in time — resets its own pipes, and a
+   * stream with no error listener turns that into an uncaught exception in whatever process launched the shell. There
+   * is nothing to recover: the reply already settles on `close`, and a supervisor that is gone has nothing left to
+   * say. Same reason `stdin` has had one all along. */
+  stdout.on('error', () => undefined);
+  stderr.on('error', () => undefined);
   const exited = new Promise<void>((resolve) => {
     child.once('close', () => {
       resolve();

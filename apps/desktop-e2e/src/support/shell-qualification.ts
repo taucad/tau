@@ -1,8 +1,8 @@
 import { readFile, readdir, writeFile, stat } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import process from 'node:process';
 import { expect } from 'vitest';
-import type { BrowserWindow } from 'electron';
 import type { Locator, Page } from 'playwright';
 import type { DesktopSession } from '#support/desktop-app.js';
 
@@ -109,21 +109,26 @@ export const nativeQuestionsAsked = async (session: DesktopSession): Promise<rea
   );
 
 /**
- * Paste the clipboard into the Terminal through the window's own paste command.
+ * Paste the clipboard into the Terminal the way a person does: a real click into the terminal, then the platform's
+ * paste chord.
  *
- * This is the production path the platform's paste chord reaches: Chromium's paste fires the `paste` event on the
- * focused terminal textbox, which the renderer turns into a bracketed `terminal.paste`. The chord itself — Ctrl+Shift+V
- * left to the browser, Ctrl+V still sent as `^V` — is certified against real key events in the renderer's own browser
- * test, which this row does not repeat.
+ * The chord is deliberately left to the browser — AurigaX never encodes it, and the renderer turns the `paste` event
+ * Chromium delivers into a bracketed `terminal.paste` — so this is the only path there is, and the click comes first
+ * because Chromium's paste needs a selection inside the editing host, which a person's click is what establishes.
  *
  * @param session - The running desktop session.
  */
 export const pasteIntoTerminal = async (session: DesktopSession): Promise<void> => {
-  await session.page.getByRole('textbox', { name: 'Terminal', exact: true }).focus();
-  const window = await session.application.browserWindow(session.page);
-  await window.evaluate((nativeWindow: BrowserWindow) => {
-    nativeWindow.webContents.paste();
-  });
+  const { page } = session;
+  const canvas = await page
+    .getByRole('textbox', { name: 'Terminal', exact: true })
+    .locator('canvas')
+    .first()
+    .boundingBox();
+  expect(canvas).not.toBeNull();
+  await page.mouse.click(canvas!.x + canvas!.width / 2, canvas!.y + canvas!.height / 2);
+  // Plain Ctrl+V is ^V for the shell; macOS needs no help, since Cmd+V reaches the paste event through AurigaX.
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+v' : 'Control+Shift+V');
 };
 
 /** Open the production workbench surface through its ordinary menu. */

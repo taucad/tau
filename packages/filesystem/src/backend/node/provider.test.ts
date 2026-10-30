@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -484,6 +485,86 @@ describe('NodeFsProvider atomic writes', () => {
     await expect(provider.writeFile('target.txt', 'new')).rejects.toMatchObject({ code: 'WRITE_VERIFICATION_FAILED' });
 
     expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('new');
+    expect(temporaryFiles(root)).toEqual([]);
+  });
+
+  // Windows keeps the writer's handle open through verification, so a later writer cannot
+  // replace the path mid-read there: its rename fails EPERM instead.
+  it.skipIf(process.platform === 'win32')(
+    'should settle a write that a later writer replaced during its verification read',
+    async () => {
+      const root = createRoot();
+      const provider = new NodeFsProvider(root);
+      const open = fs.open.bind(fs);
+      let replaced = false;
+      vi.spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
+        const handle = await open(path, flags, mode);
+        // The provider opens the admitted real path, which differs from `root` on macOS and Windows temp dirs.
+        if (typeof flags === 'number' && String(path).endsWith('target.txt')) {
+          const read = handle.read.bind(handle);
+          vi.spyOn(handle, 'read').mockImplementation(async (...arguments_: Parameters<typeof handle.read>) => {
+            if (!replaced) {
+              // A second writer of the same bytes publishes over the path, unlinking the inode this read holds.
+              replaced = true;
+              writeFileSync(join(root, 'later.tmp'), 'new');
+              renameSync(join(root, 'later.tmp'), join(root, 'target.txt'));
+            }
+            return read(...arguments_);
+          });
+        }
+        return handle;
+      });
+
+      await expect(provider.writeFile('target.txt', 'new')).resolves.toBeUndefined();
+
+      expect(replaced).toBe(true);
+      expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('new');
+      expect(temporaryFiles(root)).toEqual([]);
+    },
+  );
+
+  it('should settle a write whose path a later writer replaced before its verification read', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const open = fs.open.bind(fs);
+    let replacement: 'applied' | 'refused' | undefined;
+    vi.spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
+      // Numeric flags single out the post-rename verification read; the provider opens the
+      // admitted real path, which differs from `root` on macOS and Windows temp directories.
+      if (replacement === undefined && typeof flags === 'number' && String(path).endsWith('target.txt')) {
+        /*
+         * A second writer publishes different bytes over the path *before* this
+         * descriptor exists, so the verification read opens that writer's entry
+         * instead of the one our rename published. This is the interleaving the
+         * published-descriptor read cannot see: the inode it is handed is intact
+         * and its bytes verify against themselves, they are simply not ours.
+         */
+        writeFileSync(join(root, 'superseding.tmp'), 'kept');
+        try {
+          renameSync(join(root, 'superseding.tmp'), join(root, 'target.txt'));
+          replacement = 'applied';
+        } catch {
+          // Windows refuses a rename over a name whose entry a writer still holds, and
+          // `_atomicWrite` holds the published file open there for its metadata flush,
+          // so the path keeps this write's own entry and verification proceeds on it.
+          rmSync(join(root, 'superseding.tmp'));
+          replacement = 'refused';
+        }
+      }
+      return open(path, flags, mode);
+    });
+
+    const outcome = await provider.writeFile('target.txt', 'mine').then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    const code = (outcome as NodeJS.ErrnoException | undefined)?.code;
+
+    expect(code).not.toBe('WRITE_VERIFICATION_FAILED');
+    expect(code).not.toBe('CHECKED_WRITE_POTENTIALLY_APPLIED');
+    expect(outcome).toBeUndefined();
+    expect(replacement).toBe(process.platform === 'win32' ? 'refused' : 'applied');
+    expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe(replacement === 'applied' ? 'kept' : 'mine');
     expect(temporaryFiles(root)).toEqual([]);
   });
 });

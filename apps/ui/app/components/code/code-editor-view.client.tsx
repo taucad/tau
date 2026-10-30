@@ -130,7 +130,7 @@ const editorTheme = EditorView.theme({
     padding: '0.5rem 0.75rem',
     color: 'var(--popover-foreground)',
   },
-  '.cm-typescript-inlay-hint': {
+  '.cm-typescript-inlay-hint, .cm-kcl-inlay-hint': {
     marginInline: '0.25rem',
     color: 'var(--muted-foreground)',
     fontSize: '0.9em',

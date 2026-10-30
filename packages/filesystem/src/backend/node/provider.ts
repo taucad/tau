@@ -16,7 +16,11 @@
  */
 
 import fs from 'node:fs/promises';
-import { createEntryObserver, readBoundedDescriptor } from '#backend/node/entry-observation.js';
+import {
+  createEntryObserver,
+  readBoundedDescriptor,
+  readPublishedDescriptor,
+} from '#backend/node/entry-observation.js';
 import type { EntryObserver } from '#backend/node/entry-observation.js';
 import type { FileHandle } from 'node:fs/promises';
 import type { BigIntStats, Dirent, Stats } from 'node:fs';
@@ -1202,21 +1206,23 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
 
       const verification = await fs.open(admittedTarget, verificationReadFlags);
       try {
-        const committed = await readBoundedDescriptor(verification, bytes.byteLength, () => undefined);
+        const committed = await readPublishedDescriptor(verification, bytes.byteLength);
         if (!bytesEqual(committed, bytes)) {
           throw this._errno('WRITE_VERIFICATION_FAILED', 'committed bytes could not be verified', rootedPath);
         }
       } catch (error) {
         /*
          * `writeFile` has never held the path exclusively: two writes of the same
-         * path settle last-writer-wins. So a concurrent writer may replace the
-         * entry this rename published, either before this descriptor is opened —
-         * whose bytes are then the other writer's, not ours — or part way through
-         * reading it, which the bounded observation reports as `ESTALE` because
-         * the incarnation it started on lost its last link. Our rename did apply;
-         * a later write superseded it, and neither its bytes nor its absence says
-         * anything about ours. Only a path that still holds our own entry can
-         * fail this verification.
+         * path settle last-writer-wins, so a concurrent writer may replace the
+         * entry this rename published. `readPublishedDescriptor` already covers a
+         * replacement part way through the read, by holding the descriptor to its
+         * inode's identity but not to the status-change time an unlink moves. It
+         * cannot cover a replacement that lands before this descriptor is opened:
+         * the open then resolves to the other writer's entry, whose bytes are
+         * reported as unverifiable — or, when they outgrow this write's own
+         * allowance, as `EFBIG`. Our rename did apply; a later write superseded
+         * it, and that entry says nothing about ours. Only a path that still holds
+         * this write's own entry can fail its verification.
          */
         if (await isEntryStillAt(admittedTarget, written)) {
           throw error;

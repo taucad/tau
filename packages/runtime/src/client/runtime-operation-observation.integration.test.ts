@@ -8,9 +8,11 @@ import { createKernelSuccess } from '#kernels/kernel-helpers.js';
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import * as operationFacts from '#framework/operation-facts.js';
 import { WorkerTelemetryCollector } from '#framework/worker-telemetry.js';
+import { defineMiddlewareV2 } from '#middleware/runtime-middleware-v2.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
 import { defineKernelV2, nonemptyExportFiles } from '#types/runtime-kernel-v2.types.js';
 import type { RuntimeOperationObservation } from '#types/runtime-observation.types.js';
+import type { TelemetryEntry } from '#types/runtime-wire.types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 
 vi.mock('#framework/operation-facts.js', async (importOriginal) => {
@@ -47,7 +49,19 @@ type Faults = Readonly<{
   describeGate?: () => Promise<void>;
   /** Sees the resolved parameter values the kernel evaluates with. */
   onEvaluate?: (parameters: Readonly<Record<string, unknown>>) => void;
+  /** Compose a middleware that wraps all four operations and passes each through. */
+  passThrough?: true;
 }>;
+
+/** A middleware that wraps every operation and changes nothing, so each route starts a `middleware.wrap` span. */
+const passThrough = defineMiddlewareV2({
+  id: 'PassThrough',
+  name: 'PassThrough',
+  wrapDescribe: async (input, handler) => handler(input),
+  wrapEvaluate: async (input, handler) => handler(input),
+  wrapRender: async (input, handler) => handler(input),
+  wrapExport: async (input, handler) => handler(input),
+});
 
 /** A thrown error that carries kernel issues, as kernels report typed failures. */
 class IssueError extends Error {
@@ -100,7 +114,7 @@ const createClient = (faults: Faults = {}) => {
       };
     },
   })();
-  const runtime = defineRuntime({ kernels: [kernel] });
+  const runtime = defineRuntime({ kernels: [kernel], middleware: faults.passThrough ? [passThrough()] : [] });
   return createRuntimeClient({ transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs({}) }) });
 };
 
@@ -161,6 +175,62 @@ describe('operation observation over the in-process transport', () => {
       await client.shutdown();
     }
   });
+
+  it.each(['off', 'facts'] as const)(
+    'should give every route one root carrying its observation id and no accidental root, with observation %s',
+    async (mode) => {
+      const client = createClient({ passThrough: true });
+      const seen: RuntimeOperationObservation[] = [];
+      const entries: TelemetryEntry[] = [];
+      client.on('operation', (observation) => seen.push(observation));
+      client.on('telemetry', (batch) => entries.push(...batch.entries));
+      client.observe(mode);
+      try {
+        await runOperations(client);
+        const operations = ['initialize', 'evaluate', 'render', 'export', 'describe'];
+        // Each route's spans leave after its own terminal reply, the last one's included.
+        await vi.waitFor(() => {
+          expect(seen.map(({ operation }) => operation).sort()).toEqual([...operations].sort());
+          const roots = entries.filter((entry) => entry.detail?.['parentSpanId'] === undefined);
+          expect(roots).toHaveLength(seen.length);
+        });
+        expect(new Set(seen.map(({ operationId }) => operationId)).size).toBe(seen.length);
+        const roots = entries.filter((entry) => entry.detail?.['parentSpanId'] === undefined);
+        for (const observation of seen) {
+          const name = observation.operation === 'initialize' ? 'kernel.bootstrap' : `kernel.${observation.operation}`;
+          expect(
+            roots.filter((root) => root.detail?.['operation.id'] === observation.operationId).map((root) => root.name),
+            observation.operation,
+          ).toEqual([name]);
+        }
+        // Every other span reaches its operation's root through spans that were sent.
+        const byId = new Map(entries.map((entry) => [entry.detail?.['spanId'], entry]));
+        const rootOf = (entry: TelemetryEntry): TelemetryEntry | undefined => {
+          let current: TelemetryEntry | undefined = entry;
+          while (current?.detail?.['parentSpanId'] !== undefined) {
+            current = byId.get(current.detail['parentSpanId']);
+          }
+          return current;
+        };
+        expect(entries.filter((entry) => rootOf(entry) === undefined)).toEqual([]);
+        // Each wrap names the phase it runs in, under its own route's root; an evaluate describes its parameters first.
+        const wraps = entries.filter(({ name }) => name === 'middleware.wrap(PassThrough)');
+        expect(
+          wraps
+            .map((wrap) => [String(wrap.detail?.['phase']), String(rootOf(wrap)?.name)])
+            .sort((left, right) => left.join(' ').localeCompare(right.join(' '))),
+        ).toEqual([
+          ['describe', 'kernel.describe'],
+          ['describe', 'kernel.evaluate'],
+          ['evaluate', 'kernel.evaluate'],
+          ['export', 'kernel.export'],
+          ['render', 'kernel.render'],
+        ]);
+      } finally {
+        await client.shutdown();
+      }
+    },
+  );
 
   it('should join the trailing facts to every attempt once the client observes from initialize', async () => {
     const client = createClient();

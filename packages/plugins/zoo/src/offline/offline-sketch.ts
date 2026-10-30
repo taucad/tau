@@ -312,7 +312,15 @@ export function buildSegment(oc: Oc, path: PathEntity, id: string, segment: Wire
 
 const vecTuple = (v: Vec3): [number, number, number] => [v.x, v.y, v.z];
 
-const tangentAtEnd = (oc: Oc, frame: Frame, edge: TopoDS_Edge): Vec2 => {
+/**
+ * The plane-local unit tangent at the end of an oriented edge.
+ *
+ * @param oc - libcascade instance
+ * @param frame - sketch frame
+ * @param edge - edge, its orientation respected
+ * @returns unit tangent at the edge's end, in the frame's (u, v) coordinates
+ */
+export const tangentAtEnd = (oc: Oc, frame: Frame, edge: TopoDS_Edge): Vec2 => {
   const curve = new oc.BRepAdaptor_Curve(edge);
   const reversed = edge.Orientation() === oc.TopAbs_Orientation.TopAbs_REVERSED;
   const u = reversed ? curve.FirstParameter() : curve.LastParameter();

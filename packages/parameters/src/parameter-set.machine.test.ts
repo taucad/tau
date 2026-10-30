@@ -1081,3 +1081,45 @@ it('should refuse an editor whose own write was overwritten by another writer', 
   expect(fixture.actor.getSnapshot().context.current?.entry.groups['default']?.values).toEqual({ width: 30 });
   fixture.actor.stop();
 });
+
+const widthGroupEdit = (
+  requestId: string,
+  edit: Readonly<{ value: number; base: number; editor: string }>,
+  expected: ParameterSetRequest['expected'],
+): ParameterSetRequest => ({
+  requestId,
+  expected,
+  pressure: 'final',
+  operation: {
+    kind: 'replace-group-values',
+    group: 'default',
+    values: { width: edit.value },
+    base: { width: edit.base },
+    editor: edit.editor,
+  },
+});
+
+/* A form's group edit takes its base from the values it rendered, which trail its own writes just as
+ * a row's field base does; the editor rule applies to every edit, whatever its operation. */
+it('should commit a group edit whose base for a field is its own earlier value, superseded by its own later write', async () => {
+  const fixture = await parameterSetHarness();
+  const { identity } = fixture.snapshot;
+  await expect(
+    fixture.submit(widthGroupEdit('form-1', { value: 26, base: 25.4, editor: 'tab' }, identity)),
+  ).resolves.toMatchObject({ status: 'committed' });
+  await expect(
+    fixture.submit(widthGroupEdit('form-2', { value: 27, base: 25.4, editor: 'tab' }, identity)),
+  ).resolves.toMatchObject({ status: 'committed' });
+  expect(fixture.actor.getSnapshot().context.current?.entry.groups['default']?.values).toEqual({ width: 27 });
+  fixture.actor.stop();
+});
+
+it('should refuse a stale group edit from another editor', async () => {
+  const fixture = await parameterSetHarness();
+  const { identity } = fixture.snapshot;
+  await fixture.submit(widthGroupEdit('mine', { value: 26, base: 25.4, editor: 'tab' }, identity));
+  await expect(
+    fixture.submit(widthGroupEdit('theirs', { value: 30, base: 25.4, editor: 'agent' }, identity)),
+  ).resolves.toMatchObject({ status: 'rejected', code: 'STALE_MANIFEST' });
+  fixture.actor.stop();
+});

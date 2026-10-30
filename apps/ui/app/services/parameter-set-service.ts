@@ -80,6 +80,16 @@ export type ParameterSetService = Readonly<{
   resolve(filePath: string, manifest: ParameterManifest): Promise<ParameterSetAuthoritySnapshot>;
   resolveTarget(target: ParameterSetTarget, manifest: ParameterManifest): Promise<ParameterSetAuthoritySnapshot>;
   readSettled(filePath: string): Promise<Uint8Array<ArrayBuffer> | undefined>;
+  /**
+   * Write a form edit of the active group: only the fields `values` changes from `base`, the values the
+   * form rendered, so a stale rendered value of another field is never written back.
+   */
+  editValues(
+    filePath: string,
+    manifest: ParameterManifest,
+    edit: Readonly<{ values: Readonly<Record<string, unknown>>; base: Readonly<Record<string, unknown>> }>,
+  ): Promise<void>;
+  /** Replace the active group's values whatever it holds. */
   replaceValues(
     filePath: string,
     manifest: ParameterManifest,
@@ -652,6 +662,20 @@ export const createParameterSetService = (
       }
       const bytes = await options.client.readFile(path);
       return bytes;
+    },
+    editValues: async (filePath, manifest, { values, base }) => {
+      await submitOperation({
+        filePath,
+        manifest,
+        operation: {
+          kind: 'replace-group-values',
+          group: currentFor(filePath)?.entry.activeGroup ?? 'default',
+          values: valuesFor(values),
+          base: valuesFor(base),
+          editor,
+        },
+        target: targetFor(filePath),
+      });
     },
     replaceValues: async (filePath, manifest, values) => {
       await submitOperation({

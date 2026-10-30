@@ -319,6 +319,33 @@ describe('parameter set service behaviours', () => {
     await Promise.all([fixture.service.close(), peer.close()]);
   });
 
+  it('keeps a field committed after the form rendered when the form replaces its group', async () => {
+    const fixture = serviceFixture();
+    const manifest = await fixture.manifestFor();
+    await fixture.service.resolve('main.ts', manifest);
+    expect(await fixture.commit(manifest, { pointer: '/width', value: 110, base: 100 })).toMatchObject({
+      status: 'committed',
+    });
+    // The form still rendered the record from before the width commit when `height` changed.
+    await fixture.service.editValues('main.ts', manifest, { values: { height: 12 }, base: {} });
+
+    expect(fixture.stored('width')).toBe(110);
+    expect(fixture.stored('height')).toBe(12);
+    await fixture.service.close();
+  });
+
+  it('commits a second form edit of a field whose base still shows the form before its first', async () => {
+    const fixture = serviceFixture();
+    const manifest = await fixture.manifestFor();
+    await fixture.service.resolve('main.ts', manifest);
+    await fixture.service.editValues('main.ts', manifest, { values: { width: 110 }, base: {} });
+    // The form had not rendered the first edit when it made the second.
+    await fixture.service.editValues('main.ts', manifest, { values: { width: 120 }, base: {} });
+
+    expect(fixture.stored('width')).toBe(120);
+    await fixture.service.close();
+  });
+
   it('settles two independent service edits against an absent sidecar with exactly one same-base winner', async () => {
     const fixture = serviceFixture();
     const peer = fixture.createPeerService();

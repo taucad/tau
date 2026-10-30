@@ -84,7 +84,10 @@ export type ParameterControllerOptions = Readonly<{
  * @public
  */
 export type ParameterController = Required<
-  Pick<ParametersSource, 'useEntry' | 'commitValue' | 'replaceValues' | 'retry' | 'drafts' | 'useScrub' | 'groups'>
+  Pick<
+    ParametersSource,
+    'useEntry' | 'commitValue' | 'editValues' | 'replaceValues' | 'retry' | 'drafts' | 'useScrub' | 'groups'
+  >
 > &
   Pick<ParametersSource, 'resetRecord' | 'reportError'> &
   Readonly<{
@@ -570,6 +573,14 @@ export const createParameterController = (options: ParameterControllerOptions): 
       }
       return outcome;
     },
+    editValues: async (entryPath, _manifest, { values, base }) =>
+      write(entryPath, {
+        kind: 'replace-group-values',
+        group: recordOf(entryPath).state.entry?.activeGroup ?? 'default',
+        values: values as Readonly<Record<string, JSONValue>>,
+        base: base as Readonly<Record<string, JSONValue>>,
+        editor,
+      }),
     replaceValues: async (entryPath, _manifest, values) =>
       write(entryPath, {
         kind: 'replace-group-values',

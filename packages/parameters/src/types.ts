@@ -63,6 +63,14 @@ export type ParameterSetOperation =
       kind: 'replace-group-values';
       group: string;
       values: Readonly<Record<string, JSONValue>>;
+      /**
+       * The group values the editor was working from. When present, only the fields `values` changed
+       * from them are written, and a field another writer also moved since refuses the replacement;
+       * without it the group becomes `values` whatever it now holds.
+       */
+      base?: Readonly<Record<string, JSONValue>>;
+      /** The editing surface the edit comes from; see {@link ParameterSetRequestBase.editor}. */
+      editor?: string;
     }>
   | Readonly<{
       kind: 'create-group';

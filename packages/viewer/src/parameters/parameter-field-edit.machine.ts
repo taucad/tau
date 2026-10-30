@@ -2,8 +2,11 @@ import { setup, types } from 'xstate';
 import type { SnapshotFrom } from 'xstate';
 import { eventSchemas } from '#machines/machine-schemas.js';
 
+/** A value one parameter row edits: a number, a string or a boolean. */
+export type ParameterFieldScalar = number | string | boolean;
+
 /**
- * One number row's own edits, against the authority value it renders.
+ * One parameter row's own edits, against the authority value it renders.
  *
  * The row renders the authority through the form's deferred projection, which can trail the row's
  * own settled commits by more than one step. While the row leads, every value it rendered on the way
@@ -17,21 +20,21 @@ import { eventSchemas } from '#machines/machine-schemas.js';
  */
 export type ParameterFieldEditContext = Readonly<{
   /** The authority value the row last rendered. */
-  authority: number;
+  authority: ParameterFieldScalar;
   /** While leading: the value the first edit started from, then every value sent since, oldest first. */
-  trail: readonly number[];
+  trail: readonly ParameterFieldScalar[];
   /** While leading: the sent edits that have not settled. */
   unsettled: number;
 }>;
 
 /** What the row observed, sent and heard back. */
 export type ParameterFieldEditEvent =
-  | Readonly<{ type: 'observed'; value: number }>
-  | Readonly<{ type: 'submitted'; from: number; value: number }>
+  | Readonly<{ type: 'observed'; value: ParameterFieldScalar }>
+  | Readonly<{ type: 'submitted'; from: ParameterFieldScalar; value: ParameterFieldScalar }>
   | Readonly<{ type: 'settled'; isKept: boolean }>;
 
 /** The authority value the row renders when it mounts. */
-export type ParameterFieldEditInput = Readonly<{ authority: number }>;
+export type ParameterFieldEditInput = Readonly<{ authority: ParameterFieldScalar }>;
 
 const following = { trail: [], unsettled: 0 } as const satisfies Partial<ParameterFieldEditContext>;
 
@@ -100,7 +103,7 @@ export const parameterFieldEditIgnoredEvents: ReadonlyArray<readonly [state: str
   ['following', 'settled'],
 ];
 
-/** One number row's own-edit lineage; see {@link ParameterFieldEditContext}. */
+/** One parameter row's own-edit lineage; see {@link ParameterFieldEditContext}. */
 export const parameterFieldEditMachine: ParameterFieldEditMachine = parameterFieldEditMachineDefinition;
 
 /**
@@ -114,13 +117,15 @@ export const parameterFieldEditMachine: ParameterFieldEditMachine = parameterFie
  * @param authority - The authority value being rendered.
  * @returns The value the row stands on when it is its own.
  */
-export const selectOwnValue = (
+export const selectOwnValue = <Value extends ParameterFieldScalar>(
   snapshot: SnapshotFrom<ParameterFieldEditMachine>,
-  authority: number,
-): number | undefined => {
+  authority: Value,
+): Value | undefined => {
   if (!snapshot.matches('leading')) {
     return undefined;
   }
   const { trail, unsettled } = snapshot.context;
-  return unsettled > 0 || trail.includes(authority) ? trail.at(-1) : undefined;
+  // A row only ever sends values of the type it renders, so its trail holds that type.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see above
+  return unsettled > 0 || trail.includes(authority) ? (trail.at(-1) as Value) : undefined;
 };

@@ -1,14 +1,14 @@
 import * as React from 'react';
-import { useActorRef, useSelector } from '@xstate/react';
 import type { ParameterFieldProjection } from '@taucad/parameters';
 import { convert, createQuantity } from '@taucad/units/quantity';
 import { formatQuantity, parseInput } from '@taucad/units/input';
 import { createRafCoalescer } from '#graphics/three/utils/raf-coalescer.js';
-import { parameterFieldEditMachine, selectOwnValue } from '#parameters/parameter-field-edit.machine.js';
+import { useFieldEdits } from '#parameters/use-field-edits.js';
 import { ParametersNumberField } from '#parameters/parameters-number-field.jsx';
 import { validateParameterInputValue } from '#parameters/parameter-field.js';
 import type { ParameterFieldBinding } from '#parameters/parameter-field.js';
 import type { ParameterCommit } from '#parameters/rjsf-context.js';
+import type { FieldBase } from '#parameters/parameter-edit.js';
 
 const defaultRangeForZero = 100;
 
@@ -131,7 +131,16 @@ export const toDisplayValue = (fieldProjection: ParameterFieldProjection, value:
 };
 
 /** The value an edit starts from, which a commit proves the field still holds. */
-type EditBase = Readonly<{ value: number; binding: ParameterFieldBinding }>;
+type EditBase = FieldBase<number>;
+
+/** The effective binding a base carries, so a commit also proves the field's unit did not change. */
+const requestBinding = (binding: ParameterFieldBinding): NonNullable<EditBase['binding']> => ({
+  representation: binding.representation,
+  ...(binding.nativeUnit === undefined ? {} : { unit: binding.nativeUnit }),
+  ...(binding.quantityKind === undefined ? {} : { quantityKind: binding.quantityKind }),
+  ...(binding.space === undefined ? {} : { space: binding.space }),
+  ...(binding.reference === undefined ? {} : { reference: binding.reference }),
+});
 
 /* Memoised: the section panel re-renders on every step of the field being dragged, and its other
  * rows pass stable props, so only the dragged row re-renders. */
@@ -176,15 +185,16 @@ export const ParametersNumber = React.memo(function ParametersNumber({
   );
   const [localValue, setLocalValue] = React.useState<Readonly<{ value: number; authorityValue: number }>>();
   const [inputDiagnostic, setInputDiagnostic] = React.useState<string>();
-  const [base, setBase] = React.useState<EditBase>(() => ({ value: authorityValue, binding }));
   /* The rendered authority trails this row's own commits, so whether it shows the row's own echo or
    * another writer's value is the edit machine's call, never a guess from the value alone. */
-  const edits = useActorRef(parameterFieldEditMachine, { input: { authority: authorityValue } });
-  const ownValue = useSelector(edits, (snapshot) => selectOwnValue(snapshot, authorityValue));
+  const baseBinding = React.useMemo(() => requestBinding(binding), [binding]);
+  const {
+    edits,
+    ownValue,
+    base: currentBase,
+  } = useFieldEdits({ pointer: instancePointer, authority: authorityValue, binding: baseBinding });
   const isLeading = ownValue !== undefined;
-  React.useEffect(() => {
-    edits.send({ type: 'observed', value: authorityValue });
-  }, [edits, authorityValue]);
+  const [base, setBase] = React.useState<EditBase>(currentBase);
   /* A local value answers the authority it was entered against; once the authority moves, a later
    * return to that same value (a reset after a transient edit) must not bring the old entry back. */
   const [enteredAgainst, setEnteredAgainst] = React.useState(authorityValue);
@@ -194,8 +204,6 @@ export const ParametersNumber = React.memo(function ParametersNumber({
   }
 
   const isDirty = draftText !== '';
-  /* What the row stands on: its own last sent value while it leads, else the authority value. */
-  const currentBase: EditBase = { value: ownValue ?? authorityValue, binding };
   const editBase = isDirty ? base : currentBase;
   const draftValue =
     localValue !== undefined && (isLeading || Object.is(localValue.authorityValue, authorityValue))
@@ -206,8 +214,8 @@ export const ParametersNumber = React.memo(function ParametersNumber({
   const hasConflict = isDirty && !isLeading && !Object.is(authorityValue, base.value);
   const authorityRef = React.useRef(currentBase);
   React.useEffect(() => {
-    authorityRef.current = { value: authorityValue, binding };
-  }, [authorityValue, binding]);
+    authorityRef.current = currentBase;
+  }, [currentBase]);
 
   /* The blur handler runs inside the same event as Enter, whose state update has not landed yet, so
    * every writer of `draftText` mirrors it here; the ref is what keeps a committed draft from being
@@ -307,19 +315,7 @@ export const ParametersNumber = React.memo(function ParametersNumber({
                 },
               }
             : { pressure: 'transient' }),
-          base: {
-            pointer: instancePointer,
-            value: submittedBase.value,
-            binding: {
-              representation: submittedBase.binding.representation,
-              ...(submittedBase.binding.nativeUnit === undefined ? {} : { unit: submittedBase.binding.nativeUnit }),
-              ...(submittedBase.binding.quantityKind === undefined
-                ? {}
-                : { quantityKind: submittedBase.binding.quantityKind }),
-              ...(submittedBase.binding.space === undefined ? {} : { space: submittedBase.binding.space }),
-              ...(submittedBase.binding.reference === undefined ? {} : { reference: submittedBase.binding.reference }),
-            },
-          },
+          base: submittedBase,
         });
         // A displaced edit was never written, but the edit that displaced it carries its base.
         const isWritten = outcome?.status === 'committed' || outcome?.status === 'cancelled-before-apply';

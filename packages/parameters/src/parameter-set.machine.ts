@@ -7,6 +7,7 @@ import type { ParameterAuthority } from '#authority.js';
 import { eventSchemas } from '#machine-schemas.js';
 import type { ParameterManifest, ParameterResolutionOptions } from '#manifest.js';
 import { fieldValue, planParameterChange } from '#planning.js';
+import { changedFieldPointers, sameValue, setPointer } from '#values.js';
 import type { ParameterChange } from '#planning.js';
 import { sameRecordBytes } from '#record.js';
 import type { ParameterSnapshot } from '#snapshot.js';
@@ -126,12 +127,13 @@ const errorDiagnostic = (
 // commands for the same field displace older queued ones, so a burst never needs a deep queue.
 const pendingLimit = 8;
 // Commands for the same field (or the same group operation) displace each other while queued.
+const fieldKey = (group: string, pointer: string): string => JSON.stringify(['value', group, pointer]);
 const pressureKey = (request: ParameterSetRequest): string => {
   const { operation } = request;
   switch (operation.kind) {
     case 'native-value':
     case 'unit-value': {
-      return JSON.stringify(['value', operation.group, operation.pointer]);
+      return fieldKey(operation.group, operation.pointer);
     }
     default: {
       return JSON.stringify([operation.kind, operation.group]);
@@ -283,6 +285,38 @@ const isValueEdit = (
 const activeRequestBase = (context: ParameterSetMachineContext): ParameterSetRequestBase | undefined =>
   context.activeBase ?? context.active?.base;
 
+type GroupEdit = Extract<ParameterSetRequest['operation'], { kind: 'replace-group-values' }>;
+
+/** Whether the field still holds what `editor` last committed to it, and that value. */
+const ownValue = (
+  context: ParameterSetMachineContext,
+  field: Readonly<{ group: string; pointer: string; editor: string }>,
+): Readonly<{ value: ParameterFieldLineage['value'] }> | undefined => {
+  const own = context.lineage[fieldKey(field.group, field.pointer)];
+  return own?.editor === field.editor && sameValue(fieldValue(context.current!, field.group, field.pointer), own.value)
+    ? { value: own.value }
+    : undefined;
+};
+
+/**
+ * A group edit carries one base for every field. For each field it changes that still holds the
+ * editor's own last write, that write is the field's base, exactly as for a single-field edit.
+ */
+const plannedGroupEdit = (context: ParameterSetMachineContext, operation: GroupEdit): GroupEdit => {
+  const { base, editor, group, values } = operation;
+  if (base === undefined || editor === undefined) {
+    return operation;
+  }
+  let rebased = base;
+  for (const pointer of changedFieldPointers(base, values)) {
+    const own = ownValue(context, { group, pointer, editor });
+    if (own !== undefined) {
+      rebased = setPointer(rebased, pointer, own.value);
+    }
+  }
+  return { ...operation, base: rebased };
+};
+
 /**
  * The request the planner checks. When the field still holds what the same editor last committed to
  * it, that value is the base: the editor built on its own write, whatever its view showed. The view
@@ -290,37 +324,55 @@ const activeRequestBase = (context: ParameterSetMachineContext): ParameterSetReq
  */
 const plannedRequest = (context: ParameterSetMachineContext): ParameterSetRequest => {
   const request = context.active!;
+  const { operation } = request;
+  if (operation.kind === 'replace-group-values') {
+    return { ...request, operation: plannedGroupEdit(context, operation) };
+  }
   const base = activeRequestBase(context);
   if (base?.editor === undefined || !isValueEdit(request)) {
     return base === undefined ? request : { ...request, base };
   }
-  const own = context.lineage[pressureKey(request)];
-  const holdsOwn =
-    own !== undefined &&
-    own.editor === base.editor &&
-    Object.is(fieldValue(context.current!, request.operation.group, request.operation.pointer), own.value);
-  return { ...request, base: holdsOwn ? { ...base, value: own.value } : base };
+  const own = ownValue(context, {
+    group: request.operation.group,
+    pointer: request.operation.pointer,
+    editor: base.editor,
+  });
+  return { ...request, base: own === undefined ? base : { ...base, value: own.value } };
 };
 
-/** Record who last wrote a committed value edit; an edit without an editor leaves no lineage. */
+/** Record who last wrote each field a committed edit changed; an edit without an editor leaves no lineage. */
 const recordLineage = (context: ParameterSetMachineContext): ParameterSetPatch => {
   const request = context.active;
-  if (
-    request === undefined ||
-    context.outcome?.status !== 'committed' ||
-    context.current === undefined ||
-    !isValueEdit(request)
-  ) {
+  const { current } = context;
+  if (request === undefined || context.outcome?.status !== 'committed' || current === undefined) {
     return {};
   }
-  const key = pressureKey(request);
+  const { operation } = request;
+  const written = isValueEdit(request)
+    ? {
+        group: request.operation.group,
+        pointers: [request.operation.pointer],
+        editor: activeRequestBase(context)?.editor,
+      }
+    : operation.kind === 'replace-group-values' && operation.base !== undefined
+      ? {
+          group: operation.group,
+          pointers: changedFieldPointers(operation.base, operation.values),
+          editor: operation.editor,
+        }
+      : undefined;
+  if (written === undefined) {
+    return {};
+  }
   const lineage = { ...context.lineage };
-  const editor = activeRequestBase(context)?.editor;
-  const value = fieldValue(context.current, request.operation.group, request.operation.pointer);
-  if (editor === undefined || value === undefined) {
-    Reflect.deleteProperty(lineage, key);
-  } else {
-    lineage[key] = { editor, value };
+  for (const pointer of written.pointers) {
+    const key = fieldKey(written.group, pointer);
+    const value = fieldValue(current, written.group, pointer);
+    if (written.editor === undefined || value === undefined) {
+      Reflect.deleteProperty(lineage, key);
+    } else {
+      lineage[key] = { editor: written.editor, value };
+    }
   }
   return { lineage };
 };

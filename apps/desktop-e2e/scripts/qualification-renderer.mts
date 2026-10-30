@@ -51,11 +51,13 @@ const exportGeometry = async (
   const picker = format.getByRole('button', { name: 'Export format' });
   await picker.waitFor({ state: 'visible' });
   await picker.click();
-  // Name the cause when the kernel offers no GLB: the bare click would otherwise time out
-  // anonymously, which is the failure class this selector fix exists to remove.
+  // Name what was observed when GLB never becomes selectable: the bare click would otherwise
+  // time out anonymously, which is the failure class this selector fix exists to remove. The
+  // original error travels as `cause`, so a detached handle or a crashed browser stays readable
+  // rather than being reported as a missing format.
   const glb = page.locator('[cmdk-item][data-value="glb"]');
-  await glb.waitFor({ state: 'visible' }).catch(() => {
-    throw new Error('Export picker offers no GLB format for this project kernel');
+  await glb.waitFor({ state: 'visible' }).catch((error: unknown) => {
+    throw new Error('GLB did not become selectable in the export picker', { cause: error });
   });
   await glb.click();
   const download = page.getByLabel('Download to disk');

@@ -219,8 +219,10 @@ function ChatSwitcherSheet({
             <X aria-hidden className='size-4' />
           </Button>
         </div>
+        {/* Dividers in a drawer never span its full width: this one lines up with the title and close button. */}
+        <div aria-hidden className='mx-4 h-px shrink-0 bg-border' />
         <div className='min-h-0 overflow-y-auto pb-3'>
-          <DrawerList role='list' aria-label='Chats' className='border-t py-1'>
+          <DrawerList role='list' aria-label='Chats' className='py-1'>
             <SwitcherRow
               icon={SquarePen}
               label='New chat'
@@ -248,7 +250,9 @@ function ChatSwitcherSheet({
               />
             ))}
           </DrawerList>
-          <DrawerList role='list' aria-label='This chat' className='border-t py-1'>
+          {/* Inset like the row dividers: from the rows' text to the rows' right inset. */}
+          <div aria-hidden className='mr-2 ml-9 h-px bg-border' />
+          <DrawerList role='list' aria-label='This chat' className='py-1'>
             <SwitcherRow
               icon={Pencil}
               label='Rename this chat'

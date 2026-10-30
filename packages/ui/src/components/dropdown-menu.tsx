@@ -346,11 +346,13 @@ function DropdownMenuDrawerContent({
       </div>
       {/* A dialog's group of buttons: checkbox, radio and switch rows use the plain `checkbox`, `radio` and `switch`
        * roles, since the `menuitem*` roles need a `menu` parent that a drawer does not have. */}
+      {/* Dividers in a drawer never span its full width: this one lines up with the header's title and close button. */}
+      <div aria-hidden className='mx-4 h-px shrink-0 bg-border' />
       <DrawerList
         role='group'
         aria-label={title}
         data-slot='dropdown-menu-drawer-items'
-        className='flex min-h-0 flex-col overflow-y-auto border-t py-1 pb-3'
+        className='flex min-h-0 flex-col overflow-y-auto py-1 pb-3'
       >
         {children}
       </DrawerList>
@@ -946,7 +948,8 @@ function DropdownMenuSeparator({
       <div
         role='separator'
         data-slot='dropdown-menu-separator'
-        className={cn(menuSeparatorVariants(), 'mx-0 my-1', className)}
+        // Inset like the row dividers: from the rows' text to the rows' right inset.
+        className={cn(menuSeparatorVariants(), 'my-1 mr-4 ml-11', className)}
         {...separator}
       />
     );

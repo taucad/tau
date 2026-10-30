@@ -19,6 +19,9 @@ import {
   terminalRegion,
   terminalAction,
   expectTerminalRunning,
+  answerUnloadQuestion,
+  nativeQuestionsAsked,
+  pasteIntoTerminal,
   reportShellDiagnostics,
 } from '#support/shell-qualification.js';
 
@@ -108,8 +111,7 @@ describe('production Electron Terminal keyboard qualification', () => {
     await application.evaluate(({ clipboard }) => {
       clipboard.writeText("printf '%s' 'λ東京' > pasted-one.txt\nprintf '%s' '$literal' > pasted-two.txt");
     });
-    // The platform's terminal paste chord; plain Ctrl+V is ^V for the shell.
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+v' : 'Control+Shift+V');
+    await pasteIntoTerminal(desktop);
     await expect
       .poll(async () => page.locator('[data-terminal-screen-mirror]').textContent())
       .toContain('pasted-two.txt');
@@ -165,7 +167,12 @@ describe('production Electron Terminal keyboard qualification', () => {
     await page.keyboard.type('printf replayed >> reload-count.txt');
     // Wait for the ordinary layout write before the renderer goes away.
     await expect.poll(async () => readFile(join(root, '.tau/workbench/layout.json'), 'utf8')).toContain('terminal');
+    /* A running session holds the window's unload (T15), so the reload asks before it stops the session. */
+    await answerUnloadQuestion(desktop, 'Close and stop');
     await page.reload();
+    expect(await nativeQuestionsAsked(desktop)).toEqual([
+      { message: 'A Terminal session is running in this window.', buttons: ['Keep open', 'Close and stop'] },
+    ]);
     /* The restored pane starts a session of its own; the typed-but-unsent line is not carried into it. */
     await expectTerminalRunning(page);
     expect(await readFile(join(root, 'reload-count.txt'), 'utf8')).toBe('once');
@@ -181,6 +188,11 @@ describe('production Electron Terminal keyboard qualification', () => {
     await page.keyboard.type('printf replayed > close-replay.txt');
     await page.locator('.dv-tab[data-tab-panel-id="workbench:terminal"]').click({ button: 'right' });
     await page.getByRole('menuitem', { name: 'Close', exact: true }).click();
+    /* Closing a running Terminal asks in the pane first (T15); nothing stops until the person answers. */
+    const closeDecision = page.locator('[data-slot="terminal-close-decision"]');
+    await expect.poll(async () => closeDecision.textContent()).toContain('Close the Terminal in Shell qualification?');
+    expect(await survivingTerminalWriter(writer)).not.toEqual([]);
+    await closeDecision.getByRole('button', { name: 'Close and stop', exact: true }).click();
     await terminalRegion(page).waitFor({ state: 'detached' });
     await expectTerminalWriterStopped(writer);
     await openTerminalPane(page);
@@ -195,7 +207,13 @@ describe('production Electron Terminal keyboard qualification', () => {
     const { page } = desktop;
     const writer = await startTerminalWriter(page, root);
     await page.keyboard.type('printf stale > project-replay.txt');
-    await page.goto('app://tau/projects/new');
+    /* Leaving the project the session belongs to asks first (T15), on the route a person actually takes. */
+    await page.getByRole('link', { name: 'Projects', exact: true }).click();
+    const guard = page.locator('[data-slot="terminal-navigation-guard"]');
+    await expect.poll(async () => guard.textContent()).toContain('Close the Terminal in Shell qualification?');
+    expect(await survivingTerminalWriter(writer)).not.toEqual([]);
+    await guard.getByRole('button', { name: 'Close and stop', exact: true }).click();
+    await page.locator('[data-slot="new-project-link"]').first().click();
     await page.getByLabel('Project Name *').fill('Other shell project');
     await page.getByRole('button', { name: /^Create Project/u }).click();
     await page.waitForURL(/\/w\//u);
@@ -216,10 +234,12 @@ describe('production Electron Terminal keyboard qualification', () => {
     const writer = await startTerminalWriter(page, root);
     await page.keyboard.type('printf stale > quit-replay.txt');
     await expect.poll(async () => readFile(join(root, '.tau/workbench/layout.json'), 'utf8')).toContain('terminal');
+    /* Hold the process before the quit: once Electron exits, the application handle no longer has one to ask. */
+    const electron = application.process();
     await application.evaluate(({ app }) => {
       app.quit();
     });
-    await expect.poll(() => application.process().exitCode, { timeout: 30_000 }).toBe(0);
+    await expect.poll(() => electron.exitCode, { timeout: 30_000 }).toBe(0);
     await expectTerminalWriterStopped(writer);
     await desktop.close();
     session = await launchDesktopApp({ token: 'offline-shell-qualification', profileRoot: dirname(desktop.homeRoot) });
@@ -312,11 +332,9 @@ describe('production Electron Terminal keyboard qualification', () => {
     expect(await page.locator('[data-terminal-announcer] > div').count()).toBeLessThanOrEqual(100);
     await page.keyboard.press('Shift+Escape');
     await expect
-      .poll(async () =>
-        page.locator('[data-slot="terminal-chrome"]').evaluate((element) => element === document.activeElement),
-      )
+      .poll(async () => terminalRegion(page).evaluate((element) => element === document.activeElement))
       .toBe(true);
-    await page.getByRole('button', { name: 'Find', exact: true }).click();
+    await terminalAction(page, 'Find');
     await page.getByRole('textbox', { name: 'Find in Terminal', exact: true }).fill('after-focus-visible');
     await page.keyboard.press('Enter');
     expect(await page.getByRole('status').allTextContents()).not.toContain('No match for “after-focus-visible”.');
@@ -345,19 +363,12 @@ describe('production Electron Terminal keyboard qualification', () => {
       .toContain('zoom-visible');
     await page.keyboard.press('Shift+Escape');
     await expect
-      .poll(async () =>
-        page.locator('[data-slot="terminal-chrome"]').evaluate((element) => element === document.activeElement),
-      )
+      .poll(async () => terminalRegion(page).evaluate((element) => element === document.activeElement))
       .toBe(true);
-    await page.keyboard.press('Tab');
-    await expect
-      .poll(async () =>
-        page
-          .getByRole('button', { name: 'Find', exact: true })
-          .evaluate((element) => element === document.activeElement),
-      )
-      .toBe(true);
-    await page.keyboard.press('Enter');
+    /* The way out leads somewhere: from the pane's own focus, the advertised Shift+F10 opens the Terminal actions,
+     * and Find takes the focus it offers. The actions are menu items, never controls in an inner header. */
+    await page.keyboard.press('Shift+F10');
+    await page.getByRole('menuitem', { name: 'Find', exact: true }).click();
     await expect
       .poll(async () =>
         page

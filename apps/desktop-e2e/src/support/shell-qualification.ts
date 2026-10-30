@@ -2,6 +2,7 @@ import { readFile, readdir, writeFile, stat } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { expect } from 'vitest';
+import type { BrowserWindow } from 'electron';
 import type { Locator, Page } from 'playwright';
 import type { DesktopSession } from '#support/desktop-app.js';
 
@@ -56,6 +57,73 @@ export const expectTerminalRunning = async (page: Page): Promise<void> => {
 export const terminalAction = async (page: Page, name: 'Find' | 'Request access' | 'Restart'): Promise<void> => {
   await terminalRegion(page).click({ button: 'right' });
   await page.getByRole('menuitem', { name, exact: true }).click();
+};
+
+/**
+ * A native question Tau's main process asked, as the harness recorded it.
+ */
+export type NativeQuestion = Readonly<{ message: string; buttons: readonly string[] }>;
+
+const unloadAnswers = '__TAU_E2E_UNLOAD_QUESTIONS__';
+
+/**
+ * Answer the window's running-Terminal question the way a person would, and record it.
+ *
+ * A running session holds the page's unload (T15), so reloading the window or closing it asks first through
+ * `dialog.showMessageBoxSync` — a native modal no browser automation can reach, which is why the answer is installed
+ * before the navigation rather than clicked afterwards. Only the operating system's message box stands in; the hold
+ * itself, the main process's handler and the session's end are the production ones, and
+ * {@link nativeQuestionsAsked} proves the question was really put.
+ *
+ * @param session - The running desktop session.
+ * @param choice - The button a person would press.
+ */
+export const answerUnloadQuestion = async (
+  session: DesktopSession,
+  choice: 'Keep open' | 'Close and stop',
+): Promise<void> => {
+  await session.application.evaluate(
+    ({ dialog }, [key, answer]) => {
+      const asked: NativeQuestion[] = (Reflect.get(globalThis, key!) as NativeQuestion[] | undefined) ?? [];
+      Reflect.set(globalThis, key!, asked);
+      dialog.showMessageBoxSync = (...args: readonly unknown[]): number => {
+        const options = (args.length > 1 ? args[1] : args[0]) as { message: string; buttons: string[] };
+        asked.push({ message: options.message, buttons: [...options.buttons] });
+        return options.buttons.indexOf(answer!);
+      };
+    },
+    [unloadAnswers, choice],
+  );
+};
+
+/**
+ * The native questions this session has asked since {@link answerUnloadQuestion} was installed.
+ *
+ * @param session - The desktop session.
+ * @returns Each question's message and buttons, oldest first.
+ */
+export const nativeQuestionsAsked = async (session: DesktopSession): Promise<readonly NativeQuestion[]> =>
+  session.application.evaluate(
+    (_electron, key) => (Reflect.get(globalThis, key) as NativeQuestion[] | undefined) ?? [],
+    unloadAnswers,
+  );
+
+/**
+ * Paste the clipboard into the Terminal through the window's own paste command.
+ *
+ * This is the production path the platform's paste chord reaches: Chromium's paste fires the `paste` event on the
+ * focused terminal textbox, which the renderer turns into a bracketed `terminal.paste`. The chord itself — Ctrl+Shift+V
+ * left to the browser, Ctrl+V still sent as `^V` — is certified against real key events in the renderer's own browser
+ * test, which this row does not repeat.
+ *
+ * @param session - The running desktop session.
+ */
+export const pasteIntoTerminal = async (session: DesktopSession): Promise<void> => {
+  await session.page.getByRole('textbox', { name: 'Terminal', exact: true }).focus();
+  const window = await session.application.browserWindow(session.page);
+  await window.evaluate((nativeWindow: BrowserWindow) => {
+    nativeWindow.webContents.paste();
+  });
 };
 
 /** Open the production workbench surface through its ordinary menu. */

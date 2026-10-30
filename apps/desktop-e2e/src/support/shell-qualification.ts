@@ -43,6 +43,15 @@ export const reportShellDiagnostics = async (session: DesktopSession): Promise<v
  */
 export const expectTerminalRunning = async (page: Page): Promise<void> => {
   await page.getByRole('textbox', { name: 'Terminal', exact: true }).waitFor({ timeout: 60_000 });
+  /*
+   * A prompt alone is not the new session. An access replacement keeps the renderer and clears the old screen
+   * asynchronously, so the mirror can still be showing the replaced shell's `$` while the pane is starting — and a
+   * command typed into that gap is discarded. The pane says so itself: it renders this status for the whole of idle,
+   * starting and checking, and nothing else does, so its absence is the only running signal there is from outside.
+   */
+  await page
+    .getByRole('status', { name: 'Starting Terminal', exact: true })
+    .waitFor({ state: 'detached', timeout: 60_000 });
   await expect
     .poll(async () => page.locator('[data-terminal-screen-mirror] > div').allTextContents(), { timeout: 60_000 })
     .toEqual(expect.arrayContaining([expect.stringMatching(/\$\s*$/u)]));

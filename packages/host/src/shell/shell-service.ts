@@ -1237,8 +1237,9 @@ export const probeHostShell = async (options: ProbeHostShellOptions): Promise<Sh
         if (keep && version.length < 256) {
           version += decoder.decode(chunk, { stream: true });
         }
-        if (!keep && failure.length < 1024) {
-          failure += failureDecoder.decode(chunk, { stream: true });
+        if (!keep) {
+          /* The last words are the useful ones: a refusal's own message comes after whatever noise preceded it. */
+          failure = (failure + failureDecoder.decode(chunk, { stream: true })).slice(-1024);
         }
       }
     };

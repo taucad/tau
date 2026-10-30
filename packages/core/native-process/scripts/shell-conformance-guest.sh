@@ -135,8 +135,14 @@ cat "$evidence/application.log"
 # The model tier's own observers: the API, storage worker and provider-stub logs its global setup writes, and the
 # per-tier JSON reports. The Nx stream above shows only what vitest printed, which does not say what the API answered.
 mkdir -p "$evidence/application"
-cp -f out/test-results/desktop-e2e/*.log "$evidence/application/" 2>/dev/null || true
-cp -f out/test-results/desktop-shell/*.json "$evidence/application/" 2>/dev/null || true
+# A tier that wrote no log is not a failure; a copy that cannot be made is, because the receipt would be short
+# without saying so.
+shopt -s nullglob
+application_logs=(out/test-results/desktop-e2e/*.log)
+application_reports=(out/test-results/desktop-shell/*.json)
+shopt -u nullglob
+((${#application_logs[@]} == 0)) || cp -f -- "${application_logs[@]}" "$evidence/application/"
+((${#application_reports[@]} == 0)) || cp -f -- "${application_reports[@]}" "$evidence/application/"
 if [[ "$application_status" != 0 ]]; then status="$application_status"; fi
 # The run never relaxed the stock policy.
 [[ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || printf 'absent')" == "$before" ]]

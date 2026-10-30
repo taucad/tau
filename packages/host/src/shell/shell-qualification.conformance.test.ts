@@ -2021,6 +2021,11 @@ describe.runIf(enabled)('shell qualification', () => {
             signal: controller.signal,
             input: {
               command: `printf ready > ${readyPath(index)}; while [ ! -f ${releasePath(index)} ]; do sleep 0.02; done; printf ${String(index)} > ${join(own, `s04-${String(attempt)}-${String(index)}.txt`)}; cat ${join(other, 'marker.txt')} 2>/dev/null || cat ${join(other, 'src', 'main.scad')} 2>/dev/null || echo isolated`,
+              /* Every one of these is held at the barrier until the last one reaches it, so each must outlive the
+               * readiness window below; on the default 120 s the first to start could time out while the eighth is
+               * still starting, and the row would fail for the machine's speed rather than the limiter's behaviour. */
+              // oxlint-disable-next-line tau-lint/no-time-unit-suffix -- the shell tool's wire field.
+              timeoutMs: 300_000,
             },
           });
         };

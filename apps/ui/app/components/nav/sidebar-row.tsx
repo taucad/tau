@@ -33,6 +33,7 @@ import { Skeleton } from '@taucad/ui/components/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
 import { cn } from '@taucad/ui/utils/cn';
+import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { warmProjectWorkspace } from '#lib/project-workspace-warmup.js';
 
 /*
@@ -42,7 +43,7 @@ import { warmProjectWorkspace } from '#lib/project-workspace-warmup.js';
  * menu through the row's own `data-state`.
  */
 const rowClass =
-  'group/row fade-row flex h-7 w-full min-w-0 items-center gap-1 rounded-md pr-0.5 pl-0.5 text-sm text-sidebar-foreground [--fade-scrim-into:var(--sidebar-background)] focus-within:bg-sidebar-accent focus-within:[--fade-scrim-into:var(--sidebar-accent)] hover:bg-sidebar-accent hover:[--fade-scrim-into:var(--sidebar-accent)] data-[active=true]:bg-sidebar-accent data-[active=true]:[--fade-scrim-into:var(--sidebar-accent)] has-[[aria-haspopup=menu][data-state=open]]:bg-sidebar-accent has-[[aria-haspopup=menu][data-state=open]]:[--fade-scrim-into:var(--sidebar-accent)] data-[state=open]:bg-sidebar-accent data-[state=open]:[--fade-scrim-into:var(--sidebar-accent)] pointer-coarse:[--fade-label-size:var(--fade-label-size-actions)]';
+  'group/row fade-row flex h-7 w-full min-w-0 items-center gap-1 rounded-md pr-0.5 pl-0.5 text-sm text-sidebar-foreground [--fade-scrim-into:var(--sidebar-background)] focus-within:bg-sidebar-accent focus-within:[--fade-scrim-into:var(--sidebar-accent)] hover:bg-sidebar-accent hover:[--fade-scrim-into:var(--sidebar-accent)] data-[active=true]:bg-sidebar-accent data-[active=true]:[--fade-scrim-into:var(--sidebar-accent)] has-[:is([aria-haspopup=menu],[aria-haspopup=dialog])[data-state=open]]:bg-sidebar-accent has-[:is([aria-haspopup=menu],[aria-haspopup=dialog])[data-state=open]]:[--fade-scrim-into:var(--sidebar-accent)] data-[state=open]:bg-sidebar-accent data-[state=open]:[--fade-scrim-into:var(--sidebar-accent)] pointer-coarse:[--fade-label-size:var(--fade-label-size-actions)]';
 
 /**
  * The row's class. Renaming moves the focus outline onto the row (D17): the
@@ -80,7 +81,7 @@ export function SidebarRowActions({ children }: { readonly children: ReactNode }
      * slot stays shown so the menu keeps an anchor instead of jumping to (0,0). */
     <span
       data-slot='row-actions'
-      className='fade-action absolute inset-y-0 right-0.5 hidden items-center rounded-r-md bg-(--fade-scrim-into) group-focus-within/row:flex group-hover/row:flex has-[[aria-haspopup=menu][data-state=open]]:flex pointer-coarse:flex'
+      className='fade-action absolute inset-y-0 right-0.5 hidden items-center rounded-r-md bg-(--fade-scrim-into) group-focus-within/row:flex group-hover/row:flex has-[:is([aria-haspopup=menu],[aria-haspopup=dialog])[data-state=open]]:flex pointer-coarse:flex'
       onClick={stop}
       onDoubleClick={stop}
     >
@@ -126,12 +127,14 @@ export function SidebarRowContextMenu({
   readonly className: string;
   readonly children: ReactNode;
 }): React.JSX.Element {
+  const isMobile = useIsMobile();
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild disabled={isDisabled}>
         {children}
       </ContextMenuTrigger>
-      <ContextMenuContent className={className}>{items(contextParts)}</ContextMenuContent>
+      {/* A long press on a phone opens it from the sidebar sheet (z-100), which it must clear. */}
+      <ContextMenuContent className={cn(className, isMobile && 'z-110')}>{items(contextParts)}</ContextMenuContent>
     </ContextMenu>
   );
 }
@@ -139,7 +142,7 @@ export function SidebarRowContextMenu({
 /**
  * The row's actions button and its menu.
  *
- * @param props - The row's name, its items, and where the menu opens.
+ * @param props - The row's name, its items, where the menu opens, and whether a phone opens it in a drawer.
  * @returns The button and its menu.
  * @public
  */
@@ -149,15 +152,21 @@ export function SidebarRowMenuButton({
   className,
   side = 'right',
   align = 'start',
+  isResponsive = false,
 }: {
   readonly name: string;
   readonly items: SidebarRowMenuItems;
   readonly className: string;
   readonly side?: ComponentProps<typeof DropdownMenuContent>['side'];
   readonly align?: ComponentProps<typeof DropdownMenuContent>['align'];
+  /**
+   * Open the items in a bottom drawer on a phone. The sidebar's rows need it: the phone sidebar is a sheet (z-100)
+   * that a dropdown (z-50) would open behind.
+   */
+  readonly isResponsive?: boolean;
 }): React.JSX.Element {
   return (
-    <DropdownMenu>
+    <DropdownMenu isResponsive={isResponsive}>
       <DropdownMenuTrigger asChild>
         <Button
           type='button'
@@ -169,7 +178,7 @@ export function SidebarRowMenuButton({
           <EllipsisVertical aria-hidden className='size-3.5' />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent side={side} align={align} className={className}>
+      <DropdownMenuContent drawerTitle={name} side={side} align={align} className={className}>
         {items(dropdownParts)}
       </DropdownMenuContent>
     </DropdownMenu>

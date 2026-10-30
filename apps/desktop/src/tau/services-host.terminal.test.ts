@@ -244,9 +244,45 @@ describe('terminal concern', () => {
   });
 
   it('should refuse a project main no longer admits before starting anything', async () => {
-    const { connect, sessions } = setup({ trusted: new Set() });
+    const { connect, sessions } = setup({ trusted: new Set(), admissionMilliseconds: 0 });
     const port = connect();
     port.send({ type: 'open', size });
+    await flush();
+    expect(port.of('refused')[0]?.code).toBe('project-not-admitted');
+    expect(sessions).toHaveLength(0);
+  });
+
+  it('should wait for main to admit a just-created project, then open its shell', async () => {
+    const { concern: terminals, connect, sessions, trusted } = setup({ trusted: new Set() });
+    const port = connect();
+    port.send({ type: 'open', size });
+    await flush();
+    expect(port.of('refused')).toEqual([]);
+    expect(port.closed()).toBe(false);
+    expect(sessions).toHaveLength(0);
+    /* An unrelated allowlist update while the start waits ends nothing. */
+    terminals.revokeUntrusted();
+    await flush();
+    expect(port.closed()).toBe(false);
+    /* The services host applies main's `allowRoots` frame: the waiting start goes on. */
+    trusted.add(projectRoot);
+    terminals.revokeUntrusted();
+    await flush();
+    expect(port.of('refused')).toEqual([]);
+    expect(port.of('opened')).toHaveLength(1);
+    expect(sessions).toHaveLength(1);
+  });
+
+  it('should refuse project-not-admitted once the admission bound passes without main admitting it', async () => {
+    const { connect, sessions, advance } = setup({ trusted: new Set(), admissionMilliseconds: 20 });
+    const port = connect();
+    port.send({ type: 'open', size });
+    await flush();
+    expect(port.of('refused')).toEqual([]);
+    advance(20);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 40);
+    });
     await flush();
     expect(port.of('refused')[0]?.code).toBe('project-not-admitted');
     expect(sessions).toHaveLength(0);

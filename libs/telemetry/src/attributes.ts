@@ -24,6 +24,8 @@ export const AttributeKey = {
   /* Hosted Remote Storage: where git ran (`in_process` | `forwarded`) and how tau-storage was chosen (`off` | `rendezvous`). */
   GIT_EXECUTION: 'tau.git.execution',
   GIT_AFFINITY: 'tau.git.affinity',
+  /* Files service blueprint §4, §8: which kind of host served an open's LFS downloads, from the action host. */
+  LFS_TRANSPORT: 'tau.lfs.transport',
   KERNEL_ID: 'kernel.id',
   KERNEL_STATUS: 'kernel.status',
   EXPORT_FORMAT: 'export.format',

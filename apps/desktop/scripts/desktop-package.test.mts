@@ -26,6 +26,7 @@ import {
 import {
   desktopManifestFields,
   desktopPackageChannel,
+  keepsNodePtyPath,
   packagePathPayloads,
   runtimeAsarOptions,
   runtimePlatformPackages,
@@ -92,6 +93,20 @@ assert.equal(desktopPackagePlans['win32-x64'].icon, 'icon.ico');
 assert.ok(desktopPackagePlans['win32-x64'].branding.includes('icon.ico'), 'main loads branding/icon.ico on Windows');
 console.log('✓ each plan names its archive and icon');
 
+/* The ASAR unpack-directory glob is a union, and every group is load-bearing: `@agentclientprotocol` adapters are
+ * spawned from disk, `@img` carries libvips, `node-pty` carries the Terminal addon and the `spawn-helper` its fork
+ * path runs from `app.asar.unpacked`, and the sandbox runtime's vendored `seccomp` and `java-proxy-agent` payloads
+ * are containment-relevant. Pin each entry so a later edit cannot silently drop one. */
+const unpackedPackageDirectories = [
+  '@agentclientprotocol',
+  '@img',
+  'node-pty',
+  '@anthropic-ai/sandbox-runtime/vendor/{seccomp,java-proxy-agent}',
+];
+assert.equal(runtimeAsarOptions.unpackDir, `**/node_modules/{${unpackedPackageDirectories.join(',')}}`);
+assert.equal(runtimeAsarOptions.unpack, '{*.node,*.dll,esbuild,esbuild.exe}');
+console.log('✓ the ASAR unpack globs keep every spawned adapter, libvips, node-pty and sandbox-runtime vendor payload');
+
 /* ASAR matches absolute filenames: hidden checkout ancestors must not hide spawned payloads. */
 const fixtureParent = fileURLToPath(new URL('../../../out/test-results/desktop-package/', import.meta.url));
 await mkdir(fixtureParent, { recursive: true });
@@ -109,6 +124,8 @@ try {
     'node_modules/@agentclientprotocol/codex-acp/dist/index.js',
     'node_modules/@agentclientprotocol/codex-acp/node_modules/dependency/index.js',
     'node_modules/@img/sharp-libvips-darwin-arm64/lib/libvips.dylib',
+    /* The node-pty fork path runs `spawn-helper` from `app.asar.unpacked`. */
+    'node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper',
     'node_modules/@gltf-transform/functions/node_modules/ndarray-pixels/node_modules/sharp/node_modules/@img/sharp-libvips-darwin-arm64/lib/libvips.dylib',
   ];
   await Promise.all(
@@ -191,6 +208,7 @@ assert.deepEqual(runtimePlatformPackages['darwin-arm64'], {
     '@parcel/watcher-darwin-arm64',
   ],
   unusedSandboxHelpers: ['vendor/seccomp', 'vendor/srt-win'],
+  nodePtyNative: 'prebuilds/darwin-arm64',
 });
 for (const [target, packages] of Object.entries(runtimePlatformPackages)) {
   const [platform, arch] = target.split('-') as [string, string];
@@ -236,6 +254,47 @@ assert.deepEqual(keptSandboxHelpers('darwin-arm64'), []);
 assert.deepEqual(keptSandboxHelpers('linux-x64'), ['vendor/seccomp/x64']);
 assert.deepEqual(keptSandboxHelpers('win32-x64'), ['vendor/srt-win/x64']);
 console.log('✓ macOS stages no sandbox helper; Linux keeps x64 apply-seccomp and Windows x64 srt-win');
+
+/* Node-pty: its runtime JavaScript everywhere, and only the target's own addon directory. */
+const nodePtyPaths = [
+  'package.json',
+  'LICENSE',
+  'lib/index.js',
+  'lib/unixTerminal.js',
+  'lib/unixTerminal.test.js',
+  'lib/index.js.map',
+  'src/unix/pty.cc',
+  'deps/winpty/src/agent/Agent.cc',
+  'third_party/conpty/1.23/win10-x64/conpty.dll',
+  'build/Makefile',
+  'build/Release/pty.node',
+  'prebuilds/darwin-arm64/pty.node',
+  'prebuilds/darwin-arm64/spawn-helper',
+  'prebuilds/darwin-x64/pty.node',
+  'prebuilds/win32-x64/pty.node',
+  'prebuilds/win32-x64/pty.pdb',
+];
+const keptNodePty = (target: keyof typeof runtimePlatformPackages): string[] =>
+  nodePtyPaths.filter((path) => keepsNodePtyPath(path, runtimePlatformPackages[target].nodePtyNative));
+const nodePtyRuntime = ['package.json', 'LICENSE', 'lib/index.js', 'lib/unixTerminal.js'];
+assert.deepEqual(keptNodePty('linux-x64'), [...nodePtyRuntime, 'build/Release/pty.node']);
+assert.deepEqual(keptNodePty('darwin-arm64'), [
+  ...nodePtyRuntime,
+  'prebuilds/darwin-arm64/pty.node',
+  'prebuilds/darwin-arm64/spawn-helper',
+]);
+assert.deepEqual(keptNodePty('darwin-x64'), [...nodePtyRuntime, 'prebuilds/darwin-x64/pty.node']);
+assert.deepEqual(keptNodePty('win32-x64'), nodePtyRuntime);
+/* The copy walks directories through the same predicate, so the addon's ancestors must be kept. */
+assert.deepEqual(
+  ['', 'lib', 'build', 'prebuilds'].map((directory) => keepsNodePtyPath(directory, 'build/Release')),
+  [true, true, true, false],
+);
+assert.deepEqual(
+  ['build', 'prebuilds'].map((directory) => keepsNodePtyPath(directory, 'prebuilds/darwin-arm64')),
+  [false, true],
+);
+console.log('✓ node-pty ships its runtime and only the target addon, without sources, build tree or symbols');
 
 /* The licence gate precedes every archive the script writes. */
 const packageSource = readFileSync(new URL('package-desktop.mts', import.meta.url), 'utf8');

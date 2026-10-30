@@ -102,12 +102,13 @@ const logSdkThrow = (error: unknown): void => {
   }
 };
 
-/** Capture one error with the SDK; a capture that throws costs only that error. */
-const capture = (sentry: typeof SentryLibrary, reportedError: unknown): void => {
+/** Capture one error with the SDK, and say which event took it; a capture that throws costs only that error. */
+const capture = (sentry: typeof SentryLibrary, reportedError: unknown): string | undefined => {
   try {
-    sentry.captureUiError(reportedError);
+    return sentry.captureUiError(reportedError);
   } catch (error) {
     logSdkThrow(error);
+    return undefined;
   }
 };
 
@@ -394,16 +395,19 @@ export const isSdkLoadFailure = (value: unknown): boolean | Promise<boolean> => 
  *
  * @param error - The caught value.
  * @param details - Tags, contexts and grouping the caller knows; a primitive cannot carry them.
+ * @returns The id of the event that took it, when the SDK captured it on this call: the crash prompt
+ * attaches its feedback to that event (SB12). Absent on every other path, including a report that
+ * waited for the load or went without the SDK, which mints its id where it is sent.
  */
-export const reportUiError = async (error: unknown, details?: ErrorDetails): Promise<void> => {
+export const reportUiError = async (error: unknown, details?: ErrorDetails): Promise<string | undefined> => {
   if (!ENV.SENTRY_DSN) {
-    return;
+    return undefined;
   }
   if (details !== undefined) {
     recordErrorDetails(error, details);
   }
   if (isWeakKey(error) && reported.has(error)) {
-    return;
+    return undefined;
   }
   const markReported = (): void => {
     if (isWeakKey(error)) {
@@ -416,27 +420,58 @@ export const reportUiError = async (error: unknown, details?: ErrorDetails): Pro
     if (!isPageHidden()) {
       await Promise.resolve();
     }
-    capture(liveSentry, error);
-    return;
+    return capture(liveSentry, error);
   }
   if (isSdkUnavailable) {
     if (!admitDirect()) {
       warnDirectDropped(1);
-      return;
+      return undefined;
     }
     markReported();
     const sent = sendDirectlyWhenTagged({ error });
     sendNowIfHidden();
     await sent;
-    return;
+    return undefined;
   }
   if (waitingForLoad.length >= unreportedErrorLimit) {
     droppedWhileLoading += 1;
-    return;
+    return undefined;
   }
   markReported();
   waitingForLoad = [...waitingForLoad, { error }];
   sendNowIfHidden();
   // Starts this page's only load when nothing has; the error goes with what it does.
   await start();
+  return undefined;
+};
+
+/**
+ * Send what someone wrote in the crash prompt (SB12, D9). Voluntary text and an optional email,
+ * never anything the page collected on its own, and never to PostHog.
+ *
+ * The SDK is where feedback goes, so this waits for the page's one load when it is still under way;
+ * a page whose SDK is unavailable cannot send feedback and says so, rather than dropping it
+ * silently. The prompt only appears after a kill was reported, which has already started that load.
+ *
+ * @param feedback - The message, the optional email, and the event the feedback belongs to.
+ * @returns Whether the SDK took it.
+ */
+export const reportUiFeedback = async (
+  feedback: Readonly<{ message: string; email?: string; associatedEventId?: string }>,
+): Promise<boolean> => {
+  if (!ENV.SENTRY_DSN || isSdkUnavailable) {
+    return false;
+  }
+  if (liveSentry === undefined) {
+    await start();
+  }
+  if (liveSentry === undefined) {
+    return false;
+  }
+  try {
+    return liveSentry.captureUserFeedback(feedback);
+  } catch (error) {
+    logSdkThrow(error);
+    return false;
+  }
 };

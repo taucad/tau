@@ -276,6 +276,15 @@ describe('ChatTitleBar', () => {
 
     const title = (): HTMLElement => screen.getByRole('button', { name: /^Bracket design, Chats in Rotor housing$/ });
 
+    // A short name showed its tail faded out, as if clipped: the name ellipsizes only when it overflows.
+    it('should show the chat name whole, ellipsized only on overflow, never faded', () => {
+      render(<ChatTitleBar />);
+
+      const name = within(title()).getByText('Bracket design');
+      expect(name).toHaveClass('truncate', 'min-w-0');
+      expect(name).not.toHaveClass('fade-label');
+    });
+
     it('should close only the switcher on Escape and give focus back to the title', async () => {
       const user = userEvent.setup();
       render(<ChatTitleBar closeButton={<button type='button'>Close chat</button>} />);
@@ -360,9 +369,10 @@ describe('ChatTitleBar', () => {
       expect(within(sheet).getByRole('button', { name: 'Gear ratio study' })).not.toHaveAttribute('aria-current');
       // A chat in Trash is not offered.
       expect(within(sheet).queryByText('Trashed sketch')).not.toBeInTheDocument();
-      // Each row is a 44px target (I3).
+      // Each row is a touch-row target (I3), inset 1rem like a responsive menu's drawer row, with no full-width hover band.
       for (const row of rows) {
-        expect(row).toHaveClass('h-11');
+        expect(row).toHaveClass('h-touch-row', 'px-4', 'text-sm', 'hover:bg-transparent!');
+        expect(row.parentElement).toHaveClass('[--drawer-row-inset:1rem]');
       }
     });
 

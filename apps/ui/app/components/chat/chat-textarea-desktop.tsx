@@ -1,5 +1,6 @@
 import { chatComposerPaddingClassName } from '#components/chat/chat-input-styles.js';
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef } from 'react';
+import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import type { Editor } from '@tiptap/core';
 import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
 import { AtSign, Paperclip, Plus } from 'lucide-react';
@@ -55,6 +56,7 @@ const dragOverlayCopy: Record<ChatTextareaDragKind, string> = {
 };
 
 type ChatTextareaDesktopProperties = {
+  readonly earlyInput?: EarlyChatInput;
   readonly className?: string;
   readonly enableAutoFocus?: boolean;
   readonly enableContextActions?: boolean;
@@ -200,6 +202,7 @@ const sendRefusalOf = (input: {
  * the tooltip tree entirely.
  */
 export const ChatTextareaDesktop = memo(function ({
+  earlyInput,
   className,
   enableAutoFocus = true,
   enableContextActions = true,
@@ -337,6 +340,7 @@ export const ChatTextareaDesktop = memo(function ({
   }, [dictation.cancel, dictation.phase, onEscapePressed]);
 
   const chatEditor = useChatEditor({
+    initialText: earlyInput?.edited ? earlyInput.text : undefined,
     onSubmit: submitWithDictation,
     onEscape: escapeWithDictation,
     onUpdate: handleEditorUpdate,
@@ -460,20 +464,37 @@ export const ChatTextareaDesktop = memo(function ({
   }, [addContextChipsRef, addContextReferencesRef, insertContextReferences]);
 
   useEffect(() => {
-    if (!enableAutoFocus || !editor) {
+    if (
+      !editor ||
+      (earlyInput
+        ? !(earlyInput.focused || (enableAutoFocus && !earlyInput.edited && earlyInput.focusUnclaimed))
+        : !enableAutoFocus)
+    ) {
       return undefined;
     }
     // Rehydration installs the draft in a microtask. Focus after it so opening
     // a history message keeps its first line visible instead of scrolling to the end.
     const frame = requestAnimationFrame(() => {
       if (!editor.isDestroyed) {
-        editor.commands.focus(mode === 'edit' ? 'start' : 'end');
+        if (earlyInput && document.activeElement !== document.body && document.activeElement !== editor.view.dom) {
+          return;
+        }
+        if (earlyInput?.edited) {
+          const position = (offset: number): number =>
+            offset + 1 + earlyInput.text.slice(0, offset).split('\n').length - 1;
+          const from = position(earlyInput.start);
+          const to = position(earlyInput.end);
+          editor.commands.setTextSelection(earlyInput.direction === 'backward' ? { from: to, to: from } : { from, to });
+          editor.commands.focus();
+        } else {
+          editor.commands.focus(mode === 'edit' ? 'start' : 'end');
+        }
       }
     });
     return () => {
       cancelAnimationFrame(frame);
     };
-  }, [enableAutoFocus, editor, mode]);
+  }, [enableAutoFocus, editor, mode, earlyInput]);
 
   // Lock Tiptap while `await onSubmit(...)` is in-flight inside the textarea
   // hook (homepage create-project + `await navigate`, vs fire-and-forget

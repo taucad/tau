@@ -17,8 +17,11 @@ export const phoneViewports = [
 
 export type PhoneViewport = (typeof phoneViewports)[number];
 
-/** The sheet's detents as the grabber reports them (`aria-valuenow`): peek, half and full (D4). */
-export const detents = { peek: '1', half: '2', full: '3' } as const;
+/**
+ * The sheet's detents as the grabber reports them (`aria-valuenow`): half and full. Collapsed is the sheet closed
+ * (the Model destination), so the sheet rests at 0, 50% or 100% of the screen.
+ */
+export const detents = { half: '1', full: '2' } as const;
 
 export const navigation = (): Locator => selectors.getByRole('navigation', { name: 'Workbench' });
 export const navButton = (name: string): Locator => navigation().getByRole('button', { name, exact: true });
@@ -107,7 +110,7 @@ export const sheetSettled = async (): Promise<void> => settleMotion('sheet');
 export const motionSettled = async (): Promise<void> => settleMotion('document');
 
 /**
- * Move the sheet with the grabber's own keys (D4) and wait for the detent: `Home` peek, `End` full; the arrows step
+ * Move the sheet with the grabber's own keys (D4) and wait for the detent: `Home` half, `End` full; the arrows step
  * down and up; `Enter` cycles.
  *
  * @param key - The grabber key.
@@ -298,7 +301,11 @@ export const chooseTheme = async (theme: ThemeName): Promise<void> => {
   const sidebar = selectors.getByRole('dialog', { name: 'Sidebar' });
   await target.expectVisible(sidebar);
   await target.click(sidebar.getByRole('button', { name: 'Account', exact: true }), { touch: true });
-  await target.click(selectors.getByRole('menuitem', { name: 'Settings', exact: true }), { touch: true });
+  // On a phone the account menu opens in a drawer above the sidebar sheet.
+  await target.click(
+    selectors.getByRole('dialog', { name: 'Account' }).getByRole('button', { name: 'Settings', exact: true }),
+    { touch: true },
+  );
   const settings = selectors.getByRole('dialog', { name: /^settings$/iu });
   await target.expectVisible(settings, 60_000);
   const themeButton = selectors.getByRole('button', { name: /^(?:light|dark|black|high contrast|system)$/iu });

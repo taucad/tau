@@ -11,7 +11,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  await rm(directory, { recursive: true, force: true });
+  // The observer can still be writing evidence as the test ends: retry the teardown rather than fail on ENOTEMPTY.
+  await rm(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
 });
 
 const noRows = vi.fn(async ({ cursor }: { cursor: number }) => ({
@@ -36,6 +37,8 @@ describe('desktopChatObserver', () => {
     await vi.waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
+    /* A refused grant purges the queue file; settle that write before the directory is removed. */
+    await observer.reporter.refresh();
     observer.close();
 
     const [url, init] = fetchMock.mock.calls[0]!;

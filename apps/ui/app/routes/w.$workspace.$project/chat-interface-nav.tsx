@@ -19,11 +19,22 @@ import {
   SlidersHorizontal,
   SquareTerminal,
   Terminal,
+  X,
 } from 'lucide-react';
 import { useRef, useState } from 'react';
 import type { DockviewApi } from 'dockview-react';
 import { useDockviewPanels } from '#components/panes/dockview-tab-overflow-picker.js';
-import { Drawer, DrawerContent, DrawerTitle, DrawerDescription } from '@taucad/ui/components/drawer';
+import {
+  Drawer,
+  DrawerAction,
+  DrawerBar,
+  DrawerClose,
+  DrawerContent,
+  DrawerTitle,
+  DrawerDescription,
+  DrawerDivider,
+  drawerBarTitleClass,
+} from '@taucad/ui/components/drawer';
 import { Button } from '@taucad/ui/components/button';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent } from '@taucad/ui/components/dropdown-menu';
 import { FileSelector } from '#components/files/file-selector.js';
@@ -175,7 +186,15 @@ export function ChatInterfaceNav({
             }
           }}
         >
-          <DrawerTitle className='px-3'>All surfaces</DrawerTitle>
+          <DrawerBar>
+            <DrawerTitle className={drawerBarTitleClass}>All surfaces</DrawerTitle>
+            <DrawerClose asChild>
+              <DrawerAction aria-label='Close'>
+                <X aria-hidden className='size-4' />
+              </DrawerAction>
+            </DrawerClose>
+          </DrawerBar>
+          <DrawerDivider />
           <DrawerDescription className='sr-only'>Choose a workbench surface</DrawerDescription>
           <div
             className='min-h-0 overflow-y-auto pb-3'
@@ -196,10 +215,10 @@ export function ChatInterfaceNav({
           >
             {viewerApi ? (
               <section aria-labelledby='all-views-title'>
-                <h3 id='all-views-title' className='px-3 pt-3 pb-1 text-xs font-medium text-muted-foreground'>
+                <h3 id='all-views-title' className='px-4 pt-3 pb-1 text-xs font-medium text-muted-foreground'>
                   Views
                 </h3>
-                <div className='grid grid-cols-1 gap-2 px-3'>
+                <div className='grid grid-cols-1 gap-2 px-4'>
                   <FileSelector
                     dataSource={fileActions?.dataSource}
                     selectedFile={undefined}
@@ -284,12 +303,12 @@ export function ChatInterfaceNav({
               <section key={group.label} aria-labelledby={`all-surfaces-${group.label}`}>
                 <h3
                   id={`all-surfaces-${group.label}`}
-                  className='px-3 pt-3 pb-1 text-xs font-medium text-muted-foreground'
+                  className='px-4 pt-3 pb-1 text-xs font-medium text-muted-foreground'
                 >
                   {group.label}
                 </h3>
                 {/* Two columns at 320px, so the longest title keeps its whole word beside its icon. */}
-                <div className='grid grid-cols-[repeat(auto-fill,minmax(8rem,1fr))] gap-2 px-3'>
+                <div className='grid grid-cols-[repeat(auto-fill,minmax(8rem,1fr))] gap-2 px-4'>
                   {group.surfaces.map((id) => {
                     const tab = surfaceById.get(id)!;
                     return (

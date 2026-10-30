@@ -149,6 +149,8 @@ describe('electron-vite main externalization', () => {
   it('bundles workspace sources and keeps host/runtime imports external', async () => {
     const { isExternal, include } = await resolveProcessExternals();
     expect(include).toContain('geospec-engine');
+    /* Inlined into a main chunk, node-pty looks for `pty.node` beside the chunk and every Terminal is unavailable. */
+    expect(include).toContain('node-pty');
     for (const id of [
       '@taucad/events',
       '@taucad/types/browser',
@@ -180,12 +182,18 @@ describe('electron-vite main externalization', () => {
     const { include } = await resolveProcessExternals();
     const manifest = JSON.parse(readFileSync(join(appRoot, 'package.json'), 'utf8')) as {
       readonly dependencies?: Readonly<Record<string, string>>;
+      readonly optionalDependencies?: Readonly<Record<string, string>>;
     };
 
     /* Every externalized package must be a declared dependency: the unpackaged
      * build resolves them from `apps/desktop/node_modules`, and an undeclared
      * one kills the kernel host at boot (`nanoraster/options`, 2026-09-07). */
-    expect(Object.keys(manifest.dependencies ?? {})).toEqual(expect.arrayContaining([...include]));
+    expect(Object.keys({ ...manifest.dependencies, ...manifest.optionalDependencies })).toEqual(
+      expect.arrayContaining([...include]),
+    );
+    /* Node-pty builds from source on Linux; a host without a toolchain still installs, and its Terminal answers
+     * sandbox-unavailable, while every package script refuses to stage a target without its addon. */
+    expect(manifest.optionalDependencies?.['node-pty']).toBe('catalog:');
   });
 
   it.runIf(process.platform === 'darwin' && process.arch === 'arm64')(

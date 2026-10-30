@@ -22,6 +22,8 @@ apps/desktop/resources/python/*
 apps/desktop/resources/picogk/*
 packages/plugins/picogk/dotnet/**/bin
 packages/plugins/picogk/dotnet/**/obj
+apps/libs/csharp-language/dotnet/**/bin
+apps/libs/csharp-language/dotnet/**/obj
 apps/desktop/macos/generated/runtime
 out-tsc
 *.tsbuildinfo

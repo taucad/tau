@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createTerminalRenderer } from '#components/terminal/terminal-renderer.js';
+import { createTerminalRenderer, isTerminalPasteChord } from '#components/terminal/terminal-renderer.js';
 import type { TerminalRendererOptions, TerminalRendererView } from '#components/terminal/terminal-renderer.js';
 
 const theme = {
@@ -90,6 +90,16 @@ afterEach(() => {
 });
 
 describe('createTerminalRenderer (AurigaX 0.3.6)', () => {
+  it('should hide the browser caret while retaining the terminal cursor and screen mirror', async () => {
+    const renderer = await create();
+    await write('prompt> ');
+    renderer.focus();
+    expect(getComputedStyle(textbox()).caretColor).toBe('rgba(0, 0, 0, 0)');
+    expect(await mirrorText()).toContain('prompt>');
+    renderer.setScreenReaderMode(false);
+    expect(getComputedStyle(textbox()).caretColor).toBe('rgba(0, 0, 0, 0)');
+  });
+
   it('draws output to a hidden canvas and mirrors it as text for screen readers', async () => {
     await create();
     await write('hello from tau\r\n$ ');
@@ -100,6 +110,24 @@ describe('createTerminalRenderer (AurigaX 0.3.6)', () => {
     expect(textbox().getAttribute('aria-label')).toBe('Terminal');
     expect(host.querySelector('textarea')?.getAttribute('tabindex')).toBe('-1');
     expect(host.querySelector('[role="log"]')).not.toBeNull();
+  });
+
+  it('should preserve IME input and pause the screen mirror during composition', async () => {
+    const renderer = await create();
+    const sent: string[] = [];
+    renderer.onData((data) => {
+      sent.push(data);
+    });
+    await write('prompt> ');
+    renderer.focus();
+    const before = await mirrorText();
+    textbox().dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    await write('output during composition');
+    expect(await mirrorText()).toBe(before);
+    textbox().dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '界' }));
+    expect(sent).toEqual(['界']);
+    expect(await mirrorText()).toContain('output during composition');
+    expect(getComputedStyle(textbox()).caretColor).toBe('rgba(0, 0, 0, 0)');
   });
 
   it('renders HTML in output as characters, never as elements', async () => {
@@ -186,6 +214,57 @@ describe('createTerminalRenderer (AurigaX 0.3.6)', () => {
     clipboardData.setData('text/plain', 'echo one\necho two');
     textbox().dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }));
     expect(sent.join('')).toBe('echo one\recho two');
+  });
+
+  it.each(['Linux x86_64', 'Win32'])(
+    'leaves Ctrl+Shift+V to browser paste and sends Ctrl+V as ^V on %s',
+    async (platform) => {
+      vi.spyOn(navigator, 'platform', 'get').mockReturnValue(platform);
+      const created = await create();
+      const sent: string[] = [];
+      created.onData((data) => {
+        sent.push(data);
+      });
+      created.focus();
+      const chord = new KeyboardEvent('keydown', {
+        key: 'V',
+        code: 'KeyV',
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      textbox().dispatchEvent(chord);
+      expect(chord.defaultPrevented).toBe(false);
+      textbox().dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'v', code: 'KeyV', ctrlKey: true, bubbles: true, cancelable: true }),
+      );
+      await vi.waitFor(() => {
+        expect(sent.join('')).toBe('\u0016');
+      });
+    },
+  );
+
+  it('names Ctrl+Shift+V the paste chord on Linux and Windows, and none on macOS, where Cmd+V pastes', () => {
+    const chord = { code: 'KeyV', ctrlKey: true, shiftKey: true, altKey: false, metaKey: false };
+    expect(isTerminalPasteChord(chord, 'Linux x86_64')).toBe(true);
+    expect(isTerminalPasteChord(chord, 'Win32')).toBe(true);
+    expect(isTerminalPasteChord(chord, 'MacIntel')).toBe(false);
+    expect(isTerminalPasteChord({ ...chord, shiftKey: false }, 'Linux x86_64')).toBe(false);
+    expect(isTerminalPasteChord({ ...chord, altKey: true }, 'Win32')).toBe(false);
+  });
+
+  it('keeps up with a shell that prints line by line: small writes share a parse task', async () => {
+    await create();
+    const lines = 2000;
+    const started = performance.now();
+    for (let index = 0; index < lines - 1; index++) {
+      view!.write(`output ${String(index)}\r\n`, () => undefined);
+    }
+    await write(`output ${String(lines - 1)}\r\nafter-flood-visible\r\n`);
+    /* One task per frame is at least 4 ms each once timers nest: eight seconds for this backlog. */
+    expect(performance.now() - started).toBeLessThan(2000);
+    expect(await mirrorText()).toContain('after-flood-visible');
   });
 
   it('parses a large backlog in bounded slices and yields to the event loop between them', async () => {

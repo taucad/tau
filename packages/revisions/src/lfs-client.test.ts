@@ -6,6 +6,8 @@ import {
   createLfsClient,
   lfsDownloadBatchSize,
   lfsDownloadConcurrency,
+  lfsDownloadConcurrencyMaximum,
+  lfsTransportOf,
   lfsUploadConcurrency,
   lfsUploadResidentBytes,
 } from '#lfs-client.js';
@@ -666,6 +668,58 @@ describe('downloadMany', () => {
     expect(received).toEqual(contentOf);
   });
 
+  it('should hand each object over with the transport its action named', async () => {
+    const { request } = batchEndpoint();
+    const transports: string[] = [];
+    await createLfsClient({
+      url: 'https://api.tau.test/git',
+      http: { request },
+      fetch: async (url) => new Response(contentOf.get(oidOf(url))),
+    }).downloadMany({
+      pointers: pointers.slice(0, 2),
+      received: async (_pointer, _content, transfer) => {
+        transports.push(transfer.transport);
+      },
+    });
+    expect(transports).toEqual(['other', 'other']);
+  });
+
+  it('should cap a caller-requested concurrency at the maximum', async () => {
+    const releases: Array<() => void> = [];
+    let inFlight = 0;
+    let peak = 0;
+    const transfer = vi.fn<typeof fetch>(
+      async (url) =>
+        new Promise<Response>((resolve) => {
+          inFlight += 1;
+          peak = Math.max(peak, inFlight);
+          releases.push(() => {
+            inFlight -= 1;
+            resolve(new Response(contentOf.get(oidOf(url))));
+          });
+        }),
+    );
+    const subset = pointers.slice(0, lfsDownloadConcurrencyMaximum + 8);
+    const downloading = createLfsClient({
+      url: 'https://api.tau.test/git',
+      http: { request: batchEndpoint().request },
+      fetch: transfer,
+      downloadConcurrency: 1000,
+    }).downloadMany({ pointers: subset, received: async () => undefined });
+    await vi.waitFor(() => {
+      expect(transfer).toHaveBeenCalledTimes(lfsDownloadConcurrencyMaximum);
+    });
+    while (transfer.mock.calls.length < subset.length || releases.length > 0) {
+      releases.shift()?.();
+      // oxlint-disable-next-line no-await-in-loop -- let the pool admit the next object.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
+    }
+    await downloading;
+    expect(peak).toBe(lfsDownloadConcurrencyMaximum);
+  });
+
   it('transfers at most the bounded number of objects at once', async () => {
     const releases: Array<() => void> = [];
     let inFlight = 0;
@@ -681,7 +735,7 @@ describe('downloadMany', () => {
           });
         }),
     );
-    const subset = pointers.slice(0, 20);
+    const subset = pointers.slice(0, lfsDownloadConcurrency + 12);
     const downloading = createLfsClient({
       url: 'https://api.tau.test/git',
       http: { request: batchEndpoint().request },
@@ -858,5 +912,22 @@ describe('downloadMany', () => {
       received: async () => undefined,
     });
     expect(request).not.toHaveBeenCalled();
+  });
+});
+
+describe('lfsTransportOf', () => {
+  it.each([
+    ['https://files.taucad.dev/v1/lfs/u/p/' + 'a'.repeat(64) + '?n=1&x=2&k=files-1-0123456789abcdef&s=x', 'files'],
+    ['https://files.tau.new/v1/lfs-legacy/p/' + 'a'.repeat(64), 'files'],
+    [
+      'https://tau-prod-content-private.271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com/tenants/x?X-Amz-Signature=y',
+      'r2_presigned',
+    ],
+    ['https://api.tau.new/v1/git/lfs/0b5e9a9e-6f5c-4a43-9f55-bd1d4cb0c6a1', 'relay'],
+    ['http://localhost:9000/tau-content-private/tenants/x', 'other'],
+    ['https://github-cloud.githubusercontent.com/alambic/media/1', 'other'],
+    ['not a url', 'other'],
+  ] as const)('should classify %s as %s', (href, transport) => {
+    expect(lfsTransportOf(href)).toBe(transport);
   });
 });

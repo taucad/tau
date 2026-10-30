@@ -7,7 +7,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { Button } from '@taucad/ui/components/button';
 import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { DrawerClose, useIsInsideDrawer } from '@taucad/ui/components/drawer';
+import { DrawerClose, drawerActionClass, drawerGrabStrip, useIsInsideDrawer } from '@taucad/ui/components/drawer';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { CollapsibleCodeBlock } from '#components/ui/collapsible-code-block.js';
 import { reportUiError } from '#lib/error-reporting.js';
@@ -226,13 +226,16 @@ function FloatingPanelClose({
     return <IconComponent />;
   };
 
+  const isDrawerAction = isMobile && isInsideDrawer;
+
   const button = (
     <FloatingPanelMenuButton
       tooltip={tooltipContent(isOpen)}
       tooltipSide='top'
+      // Inside a drawer the close is a solid DrawerAction; a translucent blur there reads as noise.
       className={cn(
         'text-muted-foreground',
-        'max-md:border max-md:bg-background/70 max-md:backdrop-blur-lg',
+        !isDrawerAction && 'max-md:bg-background/70 max-md:backdrop-blur-lg',
         className,
       )}
       aria-label={label}
@@ -243,7 +246,7 @@ function FloatingPanelClose({
     </FloatingPanelMenuButton>
   );
 
-  if (isMobile && isInsideDrawer) {
+  if (isDrawerAction) {
     return <DrawerClose asChild>{button}</DrawerClose>;
   }
 
@@ -361,26 +364,49 @@ class FloatingPanelErrorBoundary extends React.Component<
   };
 }
 
+/** How many floating panel contents hold this one: a nested panel's header is never the one under a grabber. */
+const FloatingPanelContentDepthContext = React.createContext(0);
+
 function FloatingPanelContent({ children, className, errorFallback }: FloatingPanelContentProps): React.JSX.Element {
   const fallback = errorFallback ?? ((props) => <FloatingPanelErrorContent {...props} />);
+  const depth = React.useContext(FloatingPanelContentDepthContext) + 1;
   return (
     <div className={cn('flex size-full flex-col bg-sidebar/50', className)} data-slot='floating-panel-content'>
-      <FloatingPanelErrorBoundary fallback={fallback}>{children}</FloatingPanelErrorBoundary>
+      <FloatingPanelContentDepthContext.Provider value={depth}>
+        <FloatingPanelErrorBoundary fallback={fallback}>{children}</FloatingPanelErrorBoundary>
+      </FloatingPanelContentDepthContext.Provider>
     </div>
   );
 }
 
-/** The drawer's dedicated grabber owns dragging; titles and actions remain ordinary controls. */
+/**
+ * The panel's title row. In a phone sheet the outermost panel's header is the sheet's grab strip: the grabber's target
+ * reaches over it, so dragging the row moves the sheet, while its title menu and actions stay ordinary controls on top
+ * (I3, W1).
+ */
 function FloatingPanelContentHeader({ children, className }: FloatingPanelContentHeaderProps): React.JSX.Element {
   const side = React.useContext(FloatingPanelContext)?.side ?? 'right';
   const isMobile = useIsMobile();
   const isInsideDrawer = useIsInsideDrawer();
+  // A header sits in its own content (depth 1); one in a panel nested in another's content is deeper.
+  const depth = React.useContext(FloatingPanelContentDepthContext);
+  const isGrabStrip = isMobile && isInsideDrawer && depth <= 1;
   const headerRef = React.useRef<HTMLDivElement>(null);
   return (
     <div
       ref={headerRef}
-      className={cn('relative', floatingPanelContentHeaderVariants({ side }), isMobile && 'h-10 pr-2', className)}
+      className={cn(
+        'relative',
+        floatingPanelContentHeaderVariants({ side }),
+        isMobile && 'h-10 pr-2',
+        // In a phone drawer the header is a drawer bar: 60px, its actions inset 16px, as every drawer's header is.
+        // `!`: the header's own `max-md:` height and inset come later in the sheet.
+        isMobile && isInsideDrawer && 'h-(--drawer-bar-height)! pr-4!',
+        className,
+        isGrabStrip && drawerGrabStrip.className,
+      )}
       data-slot='floating-panel-content-header'
+      data-drawer-grab-strip={isGrabStrip ? drawerGrabStrip['data-drawer-grab-strip'] : undefined}
       onClickCapture={(event) => {
         // A nested drawer's portaled overlay must not activate any ancestor surface. Its content (a sheet a header
         // control opened, such as the chat switcher) and a popper's content keep their own clicks.
@@ -433,9 +459,9 @@ type FloatingPanelMenuButtonProps = React.ComponentProps<typeof PaneButton>;
 /**
  * Styled icon button for floating panel headers.
  *
- * Thin wrapper around the shared `PaneButton` that adds mobile-responsive
- * sizing (`max-md:size-8 max-md:rounded-md`) and the
- * `floating-panel-menu-button` data-slot for styling hooks.
+ * Thin wrapper around the shared `PaneButton` that adds the phone shape (a
+ * 32px circle with a single border, or in a phone drawer a 44px drawer action) and the `floating-panel-menu-button`
+ * data-slot for styling hooks.
  *
  * When rendered inside a mobile drawer, stops click and pointerDown
  * propagation at the button level so parent surfaces do not initiate
@@ -457,8 +483,11 @@ function FloatingPanelMenuButton({
     <PaneButton
       data-slot='floating-panel-menu-button'
       className={cn(
-        'max-md:size-8 max-md:rounded-md',
-        isMobile && 'size-8 rounded-md border bg-background shadow-xs',
+        'max-md:size-8 max-md:rounded-full max-md:border max-md:bg-background max-md:shadow-xs',
+        // An embedded phone surface is not a narrow viewport; `!` outranks the button's own radius there.
+        isMobile && 'size-8 rounded-full! border bg-background shadow-xs',
+        // In a phone drawer it is a drawer action, the same 44px circle as every drawer header's.
+        isDrawerHandle && drawerActionClass,
         className,
       )}
       onClick={isDrawerHandle ? chainStopPropagation(onClick) : onClick}
@@ -474,20 +503,15 @@ type FloatingPanelButtonGroupProps = {
 };
 
 /**
- * Groups action buttons into a pill-shaped bar with iOS glass styling on mobile.
- * On desktop the group is visually transparent (ghost buttons remain individually styled).
- * On mobile it renders as a frosted-glass pill.
+ * Groups action buttons. The group draws nothing itself: on desktop the ghost buttons stand alone, and on a phone each
+ * button is its own bordered circle, so a group never adds a second border around one.
  */
 function FloatingPanelButtonGroup({ children, className }: FloatingPanelButtonGroupProps): React.JSX.Element {
   return (
     <div
       role='group'
       data-slot='floating-panel-button-group'
-      className={cn(
-        'flex items-center',
-        'max-md:overflow-hidden max-md:rounded-full max-md:border max-md:bg-background/70 max-md:backdrop-blur-lg',
-        className,
-      )}
+      className={cn('flex items-center max-md:gap-1', className)}
     >
       {children}
     </div>

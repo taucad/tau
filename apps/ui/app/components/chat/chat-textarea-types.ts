@@ -21,6 +21,7 @@ import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { toast } from '#components/ui/sonner.js';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useComposerExit } from '#components/chat/use-composer-exit.js';
+import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import {
   getClipboardImageFiles,
   handleClipboardImagePaste,
@@ -147,6 +148,14 @@ export type ChatTextareaProperties = {
   readonly onEscapePressed?: () => void;
   readonly onBlur?: () => void;
   readonly enableAutoFocus?: boolean;
+  /** Let Home accept native text before the rich editor is hydrated. */
+  readonly enableEarlyInput?: boolean;
+  /**
+   * An early edit a host above this component already adopted, when the host owns the native input
+   * instead of this component. Mutually exclusive with `enableEarlyInput`, which is the arrangement
+   * where this component owns it and so has to be loaded before anything can be typed.
+   */
+  readonly adoptedEarlyInput?: EarlyChatInput;
   readonly className?: string;
   readonly enableContextActions?: boolean;
   readonly enableKernelSelector?: boolean;

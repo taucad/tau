@@ -78,6 +78,19 @@ describe('applyErrorDetails', () => {
     expect(applied.contexts).toEqual(reactContext);
     expect(applied.fingerprint).toEqual(['event']);
   });
+
+  it('should let a recorded level and trail correct the capture’s defaults (SB3)', () => {
+    const trail = [{ category: 'tau.activity', message: 'render', level: 'info', timestamp: 1_793_324_760 }] as const;
+    const error = recordErrorDetails(new Error('tab killed'), { level: 'warning', breadcrumbs: trail });
+
+    const applied = applyErrorDetails(
+      { ...exceptionEvent(), level: 'error', breadcrumbs: [{ message: 'this page' }] },
+      error,
+    );
+
+    expect(applied.level).toBe('warning');
+    expect(applied.breadcrumbs).toEqual(trail);
+  });
 });
 
 describe('details on both delivery paths (SB4, principle 7)', () => {
@@ -96,6 +109,18 @@ describe('details on both delivery paths (SB4, principle 7)', () => {
     expect(sent?.fingerprint).toEqual(['worker-failure', 'agent-host']);
   });
 
+  it('should carry a kill report’s level and replayed trail on the SDK event too (SB3)', () => {
+    const error = recordErrorDetails(new Error('tab killed'), {
+      level: 'error',
+      breadcrumbs: [{ category: 'tau.activity', message: 'open', timestamp: 1_793_324_757 }],
+    });
+
+    const sent = beforeSendSentryEvent({ ...exceptionEvent(), level: 'error' }, { originalException: error });
+
+    expect(sent?.level).toBe('error');
+    expect(sent?.breadcrumbs).toEqual([{ category: 'tau.activity', message: 'open', timestamp: 1_793_324_757 }]);
+  });
+
   it('should apply them to the event sent without the SDK', async () => {
     const posted: string[] = [];
     vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
@@ -109,5 +134,23 @@ describe('details on both delivery paths (SB4, principle 7)', () => {
     expect(event.tags).toMatchObject({ worker: 'agent-host', delivery: 'without-sdk' });
     expect(event.contexts).toMatchObject(reactContext);
     expect(event.fingerprint).toEqual(['worker-failure', 'agent-host']);
+  });
+
+  it('should send a kill report at its own level without the SDK, not the builder’s error (SB3)', async () => {
+    const posted: string[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      posted.push(typeof init.body === 'string' ? init.body : '');
+      return new Response('{}');
+    });
+    const error = recordErrorDetails(new Error('tab killed'), {
+      level: 'warning',
+      breadcrumbs: [{ category: 'tau.activity', message: 'render', timestamp: 1_793_324_760 }],
+    });
+
+    await sendSentryEventDirectly(error, {});
+
+    const event = JSON.parse(posted[0]?.split('\n')[2] ?? '{}') as ErrorEvent;
+    expect(event.level).toBe('warning');
+    expect(event.breadcrumbs).toEqual([{ category: 'tau.activity', message: 'render', timestamp: 1_793_324_760 }]);
   });
 });

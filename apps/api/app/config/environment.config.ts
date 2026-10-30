@@ -1,6 +1,7 @@
 import process from 'node:process';
 import { ensureWorktreeDatabase } from '@taucad/utils/worktree-database';
 import { parseRuntimeTelemetryMode, policyMaxAgeBounds, releasePattern } from '@taucad/telemetry';
+import { fileLinkOrigin, parseFileLinkSigningSecret } from '@taucad/file-links';
 import { z } from 'zod';
 import { jsonCodec } from '#lib/zod.lib.js';
 
@@ -340,6 +341,18 @@ export const environmentSchemaBase = z.object({
   ),
 
   /*
+   * Files service (docs/research/files-service-blueprint.md §3, §6.2). With both set, LFS batch downloads
+   * are `files.<zone>` links signed for the Worker instead of presigned R2 GETs; uploads stay presigned.
+   * Unset the base URL and redeploy to roll back to presigned downloads.
+   */
+  TAU_FILES_BASE_URL: unsetWhenEmpty(z.string().optional()).describe(
+    "Files service origin, e.g. https://files.taucad.dev; its host is the links' audience. Unset keeps presigned LFS downloads",
+  ),
+  TAU_FILES_LINK_SIGNING_KEY: unsetWhenEmpty(z.string().optional()).describe(
+    'JSON {kid: "files-<generation>-<16 hex>", alg: "HS256", keyBase64}: the files link signing key (tau-cloud modules/files-link-keys)',
+  ),
+
+  /*
    * Tau Hosted Remote (charter D1). Retired: a repository's durable state is
    * its manifest and packs in object storage, and every request builds a
    * disposable lease on the worker's own ephemeral disk. There is no root
@@ -399,7 +412,51 @@ export const environmentSchemaBase = z.object({
   /* eslint-enable @typescript-eslint/naming-convention -- renabling */
 });
 
+/**
+ * The files service settings: a base URL needs its key, and both must parse. No message repeats a value.
+ *
+ * @param data - The parsed environment.
+ * @param context - Where issues go.
+ */
+const refineFilesService = (data: z.infer<typeof environmentSchemaBase>, context: z.RefinementCtx): void => {
+  /* The files service: a base URL needs its key, and both must parse. Neither message repeats a value. */
+  if (data.TAU_FILES_BASE_URL !== undefined) {
+    try {
+      fileLinkOrigin(data.TAU_FILES_BASE_URL);
+      if (data.NODE_ENV === 'production' && !data.TAU_FILES_BASE_URL.startsWith('https://')) {
+        throw new TypeError('https');
+      }
+    } catch {
+      context.addIssue({
+        code: 'custom',
+        message: 'TAU_FILES_BASE_URL must be a bare https origin, such as https://files.taucad.dev',
+        path: ['TAU_FILES_BASE_URL'],
+      });
+    }
+    if (data.TAU_FILES_LINK_SIGNING_KEY === undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'TAU_FILES_LINK_SIGNING_KEY is required when TAU_FILES_BASE_URL is set',
+        path: ['TAU_FILES_LINK_SIGNING_KEY'],
+      });
+    }
+  }
+  if (data.TAU_FILES_LINK_SIGNING_KEY !== undefined) {
+    try {
+      parseFileLinkSigningSecret(data.TAU_FILES_LINK_SIGNING_KEY);
+    } catch (error) {
+      context.addIssue({
+        code: 'custom',
+        message: `TAU_FILES_LINK_SIGNING_KEY is invalid: ${error instanceof Error ? error.message : 'unreadable'}`,
+        path: ['TAU_FILES_LINK_SIGNING_KEY'],
+      });
+    }
+  }
+};
+
 export const environmentSchema = environmentSchemaBase.superRefine((data, context) => {
+  refineFilesService(data, context);
+
   // Checked before the production gate below: redirecting funded provider traffic must be
   // refused in staging and production too, not only when NODE_ENV happens to be production.
   if (data.TAU_LLM_PROVIDER_UPSTREAM_URL !== undefined && data.BILLING_ENVIRONMENT !== 'development') {

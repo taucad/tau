@@ -7,6 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/p
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { cn } from '@taucad/ui/utils/cn';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
+import { usePlatform } from '@taucad/ui/hooks/use-platform';
 import { ghostPillClass } from '#components/chat/chat-agent-sheet.js';
 import { ChatPermissionModeControl } from '#components/chat/chat-permission-mode-control.js';
 import { configOptionOf, configValues } from '#components/chat/use-agent-config.js';
@@ -60,6 +61,7 @@ export function ChatAgentModeControl({
 }): React.JSX.Element | undefined {
   const [isOpen, setIsOpen] = useState(false);
   const closedOutside = useRef(false);
+  const platform = usePlatform();
   const option = configOptionOf(agentConfig, 'mode');
   const values = option ? configValues(option) : [];
   const currentId = option ? String(agentConfig.valueOf(option)) : undefined;
@@ -90,7 +92,7 @@ export function ChatAgentModeControl({
               size='sm'
               data-chat-textarea-focustrap
               aria-label={`Mode: ${current.name}`}
-              aria-keyshortcuts={ariaKeyShortcuts(toggleModeKeyCombination)}
+              aria-keyshortcuts={ariaKeyShortcuts(toggleModeKeyCombination, platform)}
               className={cn(
                 ghostPillClass,
                 'min-w-0 gap-1.5 group-data-[hide-mode]/bar:w-7 group-data-[hide-mode]/bar:px-0',
@@ -120,7 +122,7 @@ export function ChatAgentModeControl({
           <Command className='bg-transparent' defaultValue={current.value} loop>
             <div className='flex items-center justify-between px-3 pt-2 pb-1'>
               <span className='text-xs font-medium text-muted-foreground'>{option.name}</span>
-              <KeyShortcut variant='ghost'>{formatKeyCombination(toggleModeKeyCombination)}</KeyShortcut>
+              <KeyShortcut variant='ghost'>{formatKeyCombination(toggleModeKeyCombination, platform)}</KeyShortcut>
             </div>
             <CommandList>
               <CommandGroup className='pt-0'>
@@ -161,7 +163,7 @@ export function ChatAgentModeControl({
         <span className='flex items-center gap-1.5'>
           {/* The trigger's own name (I6). */}
           Mode: {current.name}
-          <KeyShortcut variant='tooltip'>{formatKeyCombination(toggleModeKeyCombination)}</KeyShortcut>
+          <KeyShortcut variant='tooltip'>{formatKeyCombination(toggleModeKeyCombination, platform)}</KeyShortcut>
         </span>
       </TooltipContent>
     </Tooltip>

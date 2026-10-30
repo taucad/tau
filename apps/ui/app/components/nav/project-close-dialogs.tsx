@@ -28,6 +28,8 @@ import { useProjects } from '#hooks/use-projects.js';
 import { useLiveProjectIds, useSessions } from '#hooks/use-sessions.js';
 import { pluralize, useProjectSidebarRow, useSidebarCommands } from '#hooks/use-sidebar-status.js';
 import type { ProjectSidebarRow } from '#hooks/use-sidebar-status.js';
+import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
+import { cn } from '@taucad/ui/utils/cn';
 
 /** The close action's known effects; an aggregate sidebar row cannot classify runs. */
 type ClosePlan = Readonly<{
@@ -62,9 +64,11 @@ export function CloseProjectDialog({
 }): React.JSX.Element {
   const { closeProject } = useSidebarCommands();
   const stopsRuns = closePlan !== undefined && closePlan.stoppableRunCount > 0;
+  const isMobile = useIsMobile();
   return (
     <AlertDialog open={isOpen} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
+      {/* On a phone a project row's drawer in the sidebar sheet (z-100) opens it: it must clear the sheet. */}
+      <AlertDialogContent className={cn(isMobile && 'z-110')} overlayClassName={cn(isMobile && 'z-110')}>
         <AlertDialogHeader>
           <AlertDialogTitle>
             {stopsRuns
@@ -169,8 +173,10 @@ function BudgetRefusedBody({
   const { closeProject } = useSidebarCommands();
   const nameOf = (projectId: string): string =>
     projects.find((entry) => entry.id === projectId)?.name ?? 'that project';
+  // A project opened from the phone sidebar sheet (z-100) can be refused while the sheet is still open.
+  const isMobile = useIsMobile();
   return (
-    <AlertDialogContent>
+    <AlertDialogContent className={cn(isMobile && 'z-110')} overlayClassName={cn(isMobile && 'z-110')}>
       <AlertDialogHeader>
         <AlertDialogTitle>{`Close a project to open ${nameOf(refusedProjectId)}`}</AlertDialogTitle>
         <AlertDialogDescription>

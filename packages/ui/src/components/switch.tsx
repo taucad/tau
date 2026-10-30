@@ -138,4 +138,37 @@ function SwitchRow({
   );
 }
 
-export { Switch, SwitchRow };
+/**
+ * A switch's look without a control of its own, for a row that is itself the control (a phone menu drawer's switch
+ * row, `role=menuitemcheckbox`), where a nested switch button would be a control inside a control.
+ *
+ * @public
+ * @example <caption>Draw an on switch inside a row that toggles.</caption>
+ * ```typescript
+ * import { createElement } from 'react';
+ * import { SwitchIndicator } from '@taucad/ui/components/switch';
+ *
+ * createElement(SwitchIndicator, { isChecked: true });
+ * ```
+ */
+function SwitchIndicator({
+  isChecked,
+  className,
+}: {
+  readonly isChecked: boolean;
+  readonly className?: string;
+}): React.JSX.Element {
+  const state = isChecked ? 'checked' : 'unchecked';
+  return (
+    <span
+      aria-hidden
+      data-slot='switch-indicator'
+      data-state={state}
+      className={cn(switchVariants(), 'pointer-events-none', className)}
+    >
+      <span data-state={state} className={thumbVariants()} />
+    </span>
+  );
+}
+
+export { Switch, SwitchIndicator, SwitchRow };

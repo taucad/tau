@@ -6,14 +6,19 @@ using PicoGK;
 
 namespace Tau.PicoGK.Worker;
 
-internal static class Program
+internal static partial class Program
 {
+#if PICOGK_BROWSER
+    private const int ProtocolVersion = 9;
+#else
     private const int ProtocolVersion = 8;
+#endif
     private const int MaximumRequestCharacters = 1_048_576;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly object ProtocolGate = new();
     private static TextWriter protocol = Console.Out;
 
+#if !PICOGK_BROWSER
     private static int Main(string[] args) => args switch
     {
         // Build-time only: emit the author-callable C# surface as JSON. Read-only,
@@ -21,6 +26,8 @@ internal static class Program
         ["--emit-api", var outputPath, var sourceRoot] => ApiExtraction.Emit(outputPath, sourceRoot),
         _ => Run(args, Console.In, Console.Out, Console.Error, watchParent: true),
     };
+
+#endif
 
     internal static long ManagedHeapBytesAfterCollection()
     {
@@ -30,6 +37,7 @@ internal static class Program
         return collection.HeapSizeBytes - collection.FragmentedBytes;
     }
 
+#if !PICOGK_BROWSER
     internal static int Run(string[] args, TextReader input, TextWriter output, TextWriter error, bool watchParent = false)
     {
         var arguments = ParseArguments(args);
@@ -103,9 +111,12 @@ internal static class Program
         }
     }
 
+#endif
+
     /// <summary>One protocol line, parsed once by the reader (CH16): a request, or why it is not one.</summary>
     internal sealed record Frame(Request? Request, string? Error, bool Oversized);
 
+#if !PICOGK_BROWSER
     private static void ReadFrames(TextReader input, BlockingCollection<(Frame, CancellationTokenSource)> frames)
     {
         CancellationTokenSource? active = null;
@@ -124,6 +135,8 @@ internal static class Program
         frames.CompleteAdding();
     }
 
+#endif
+
     // An oversized or malformed frame is not a cancel; the request loop owns its rejection.
     internal static Frame ParseFrame(string line)
     {
@@ -140,7 +153,11 @@ internal static class Program
         }
     }
 
+#if PICOGK_BROWSER
+    private static async Task<bool> Dispatch(Request request, Arguments arguments, CancellationToken cancellation)
+#else
     private static bool Dispatch(Request request, Arguments arguments, CancellationToken cancellation)
+#endif
     {
         switch (request.Method)
         {
@@ -187,7 +204,23 @@ internal static class Program
                     catch(Exception error) when(ComputeWorkerSession.IsDisposableFailure(error)){ComputeWorkerSession.ReportBypass("preload",error);}
                 }
                 var meshing = ParseMeshing(request.Params);
-                var execution = ModelRunner.Execute(compiled, arguments.Artifacts, parameters, cancellation, compute, meshing);
+                // Both runtimes collect the author's own geometry files, so a desktop build offers the
+                // same STL and VDB exports a browser build does. It also gives the model its own output
+                // directory on both, rather than the directory holding this build's private artifacts.
+                using var authored = new AuthoredFileCapture(arguments.Workspace, arguments.Artifacts);
+#if PICOGK_BROWSER
+#if PICOGK_BROWSER_THREADS
+                // Native geometry can synchronously wait for TBB helpers. Keep Mono's runtime
+                // owner free to start those workers and service their proxy requests.
+                var execution = await Task.Run(
+                    () => ModelRunner.ExecuteAsync(compiled, authored.OutputRoot, parameters, cancellation, compute, meshing),
+                    cancellation);
+#else
+                var execution = await ModelRunner.ExecuteAsync(compiled, authored.OutputRoot, parameters, cancellation, compute, meshing);
+#endif
+#else
+                var execution = ModelRunner.Execute(compiled, authored.OutputRoot, parameters, cancellation, compute, meshing);
+#endif
                 var result = MeshArtifactWriter.Write(
                     arguments.Artifacts,
                     execution,
@@ -208,14 +241,49 @@ internal static class Program
                         new WorkerMetrics(
                             ManagedHeapBytesAfterCollection(),
                             execution.PicoGkNativeBytes,
+#if PICOGK_BROWSER
+                            null)));
+#else
                             Environment.WorkingSet)));
+#endif
+#if PICOGK_BROWSER
+                try
+                {
+                    await ValidateImages(result.ArtifactPath, JsonSerializer.Serialize(result.Images, JsonOptions));
+                    result = result with { AuthoredOutputs = authored.Complete() };
+                }
+                catch (System.Runtime.InteropServices.JavaScript.JSException error)
+                {
+                    File.Delete(result.ArtifactPath);
+                    throw MaterialCapture.Invalid("Image.Data", error.Message);
+                }
+                catch
+                {
+                    File.Delete(result.ArtifactPath);
+                    throw;
+                }
+#else
+                try
+                {
+                    result = result with { AuthoredOutputs = authored.Complete() };
+                }
+                catch
+                {
+                    // A build whose authored files cannot be received publishes nothing, as the
+                    // browser path does, rather than a result that names a receipt it never wrote.
+                    File.Delete(result.ArtifactPath);
+                    throw;
+                }
+#endif
                 if(compute is not null&&execution.ComputeRecords is {} computeRecords) {
                     try{result=result with{ComputeReuseManifest=compute.WriteSuccessful(computeRecords)};}
                     catch(Exception error) when(ComputeWorkerSession.IsDisposableFailure(error)){ComputeWorkerSession.ReportBypass("publication",error);}
                 }
                 cancellation.ThrowIfCancellationRequested();
                 Write(new { protocolVersion = ProtocolVersion, requestId = request.RequestId, result });
+#if !PICOGK_BROWSER
                 ModelRunner.CollectReleased();
+#endif
                 return false;
             }
             case "shutdown":
@@ -260,6 +328,7 @@ internal static class Program
         return Path.GetRelativePath(root, path).Replace('\\', '/');
     }
 
+#if !PICOGK_BROWSER
     internal static Arguments ParseArguments(string[] args)
     {
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -327,12 +396,18 @@ internal static class Program
         }
     }
 
+#endif
+
     private static void Write(object value)
     {
         lock (ProtocolGate)
         {
+#if PICOGK_BROWSER
+            Respond(JsonSerializer.Serialize(value, JsonOptions));
+#else
             protocol.WriteLine(JsonSerializer.Serialize(value, JsonOptions));
             protocol.Flush();
+#endif
         }
     }
 

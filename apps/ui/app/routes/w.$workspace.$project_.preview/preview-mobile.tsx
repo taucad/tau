@@ -99,7 +99,7 @@ export const PreviewMobile = memo(function (): React.JSX.Element {
           aria-labelledby='drawer-title'
           aria-describedby='drawer-description'
           className={cn(
-            'flex-1 rounded-t-lg border-t bg-sidebar',
+            'flex-1 bg-sidebar',
             'z-40',
             'data-[vaul-drawer-direction=bottom]:max-h-[100dvh]',
             'data-[vaul-drawer-direction=bottom]:mt-0',

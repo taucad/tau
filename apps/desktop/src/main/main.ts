@@ -650,9 +650,13 @@ const bootstrapElectronApp = async (): Promise<void> => {
 
   if (!isDevelopment) {
     const storageOrigin = originOf(environment['TAU_S3_ENDPOINT']);
+    /* The files service's signed LFS downloads; the bucket origin stays for uploads and rollback. */
+    const filesOrigin = originOf(environment['TAU_FILES_ORIGIN']);
     /* Product analytics post straight to PostHog; never an authenticated origin, so no bearer reaches it. */
     const analyticsOrigin = environment['POSTHOG_CLIENT_KEY'] ? originOf(environment['POSTHOG_API_HOST']) : undefined;
-    const connectOrigins = [storageOrigin, analyticsOrigin].filter((origin): origin is string => origin !== undefined);
+    const connectOrigins = [storageOrigin, filesOrigin, analyticsOrigin].filter(
+      (origin): origin is string => origin !== undefined,
+    );
     registerAppProtocol({
       clientRoot,
       protocol,
@@ -889,10 +893,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
       ...esbuildEnvironment,
       ...compileCacheEnvironment(app.getPath('userData')),
       TAU_DESKTOP_LOG_DIR: logDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
-      /* The shell's never-grantable app data, and on Linux the Tau-owned bubblewrap it runs (desktop shell W4). */
-      TAU_DESKTOP_USER_DATA_DIR: app.getPath('userData'), // eslint-disable-line @typescript-eslint/naming-convention -- environment name
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
-      TAU_DESKTOP_SHELL_BWRAP: linuxInstallation(desktopChannel, process.env['APPIMAGE'] !== undefined).bwrap,
     }),
     fork: (entry, args, forkOptions) => utilityProcess.fork(entry, args, forkOptions),
     createChannel: () => new MessageChannelMain(),
@@ -937,6 +937,23 @@ const bootstrapElectronApp = async (): Promise<void> => {
     );
   });
 
+  /*
+   * The Tau-owned bubblewrap the shell sandbox runs, when this installation has one. Stock Ubuntu 24.04 and Debian 13
+   * keep `kernel.apparmor_restrict_unprivileged_userns=1`, which strips capabilities from an unprofiled binary's user
+   * namespace, so the distro `/usr/bin/bwrap` can create the namespace and then fail to bring loopback up
+   * (`bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`) and no shell starts. The selector package installs
+   * a copy at this stable path and attaches the one AppArmor profile that grants `userns` to it. An unpackaged build has
+   * no such file, so the variable is left unset and the provider keeps its own default.
+   */
+  const desktopShellBwrapEnvironment = (): Readonly<Record<string, string>> => {
+    if (process.platform !== 'linux') {
+      return {};
+    }
+    const { bwrap } = linuxInstallation(desktopChannel, process.env['APPIMAGE'] !== undefined);
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
+    return existsSync(bwrap) ? { TAU_DESKTOP_SHELL_BWRAP: bwrap } : {};
+  };
+
   const services = createServicesBroker({
     utilityEntry: servicesUtilityEntry,
     env: utilityEnvironment(environment, {
@@ -953,6 +970,12 @@ const bootstrapElectronApp = async (): Promise<void> => {
       TAU_DESKTOP_PERMISSIONS_DIR: join(app.getPath('userData'), 'permissions'),
       // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
       TAU_DESKTOP_EVIDENCE_DIR: join(app.getPath('userData'), 'agent-evidence'),
+      /*
+       * The shell's never-grantable app data, and on Linux the Tau-owned bubblewrap it runs (desktop shell W4).
+       * `services-host.ts` is the only reader of either, so they belong on this utility and nowhere else.
+       */
+      TAU_DESKTOP_USER_DATA_DIR: app.getPath('userData'), // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+      ...desktopShellBwrapEnvironment(),
     }),
     fork: (entry, args, forkOptions) => utilityProcess.fork(entry, args, forkOptions),
     createChannel: () => new MessageChannelMain(),

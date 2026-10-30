@@ -2,7 +2,7 @@ import { defineConfig } from 'tsdown';
 import type { UserConfig } from 'tsdown';
 
 const baseConfig: UserConfig = {
-  entry: ['src/index.ts', 'src/native.ts'],
+  entry: ['src/index.ts', 'src/browser.ts', 'src/native.ts', 'src/picogk-browser.worker.mjs'],
   sourcemap: false,
   clean: true,
   dts: true,

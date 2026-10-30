@@ -1,0 +1,370 @@
+# Qualify private PicoGK browser archives without publishing or changing desktop payloads, then
+# gate the geometry the browser produces against the matched native comparator.
+name: PicoGK browser archives
+on:
+  pull_request:
+    branches-ignore: [production]
+    paths:
+      - packages/plugins/picogk/dotnet/**
+      - .github/workflows/picogk-browser-archive.yml
+  # The large subject on a schedule, as the charter requires: HeatX is minutes of voxel work per
+  # engine and mode, which no pull request should wait on. A dispatch can ask for it directly, so
+  # the subject the ceiling is read off does not have to wait for the week's run.
+  schedule:
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+    inputs:
+      subject:
+        description: Which parity subject to qualify. The ceiling is read off the long subject.
+        type: choice
+        options: [gyroid, heatx]
+        default: gyroid
+permissions:
+  contents: read
+concurrency:
+  group: picogk-browser-archive-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+env:
+  # The reviewed PicoVoxel builder. `uses:` cannot read a variable, so the archive call repeats it.
+  # It is the commit PicoVoxel#39 was reviewed and merged from, not the squash commit on `main`:
+  # `dotnet/inputs.json` pins each source role to a commit of its own, and the browser role's is an
+  # ancestor of this one, so only this history can read that tree. PicoVoxel's
+  # `archive/picogk-dual-runtime-builder-w0` holds it, which is what keeps it reachable now that the
+  # merged branch is gone. Moving this forward means moving those pins first.
+  PICOVOXEL_REF: 83d3ba1be5fbcca6936542bf129fb6700c6e1fae
+  PACKAGE_VERSION: 0.2.1
+  # Gyroid proves every run; the scheduled run, or a dispatch that asks for it, proves HeatX.
+  SUBJECT: ${{ github.event_name == 'schedule' && 'heatx' || inputs.subject || 'gyroid' }}
+jobs:
+  archive:
+    uses: taucad/picovoxel/.github/workflows/dotnet-archive.yml@83d3ba1be5fbcca6936542bf129fb6700c6e1fae
+    with:
+      picovoxel-ref: 83d3ba1be5fbcca6936542bf129fb6700c6e1fae
+      adapter-path: packages/plugins/picogk/dotnet/native
+
+  # Everything a parity run measures or compares against, built once: the two browser apps and the
+  # matched native comparator's own captures. Both need the same restored payload, so neither can be
+  # built from a different engine than the other.
+  parity-prepare:
+    needs: archive
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: taucad/picovoxel
+          ref: ${{ env.PICOVOXEL_REF }}
+          path: out/picovoxel
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '24.20.0'
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: '11.0.100-rc.3.26522.148'
+      # The package artifact carries two directories of its own, the feed and its qualification
+      # report, so it unpacks beside the other downloads rather than into one of them: the feed
+      # lands at `out/package/feed`, which is the path the staging config names.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: picogk-browser-package
+          path: out
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: picogk-browser-serial
+          path: out/archive-serial
+      - name: Install the matched workload and native build tools
+        run: |
+          mkdir -p out/workload-install
+          # The archive's own toolchain pin, not the plugin's: `packages/plugins/picogk/dotnet`
+          # builds the shipped native kernel against the product's SDK, while the workload this
+          # job installs has to match the SDK the archives were built by, which is the pin each
+          # receipt is compared against.
+          cp out/picovoxel/dotnet/global.json out/workload-install/global.json
+          cd out/workload-install
+          dotnet workload install wasm-tools --version 11.0.100-rc.3.26524.4
+          sudo apt-get update
+          sudo apt-get install -y ninja-build cmake
+      - run: corepack enable && pnpm install --frozen-lockfile
+      - name: Acquire the managed dependency the package declares
+        # Staging copies the one managed dependency out of this machine's NuGet cache, at the
+        # version the package's own props name. The restore it does next writes into the staged
+        # tree rather than the cache, and nothing earlier in this job populates it, so acquire
+        # exactly that version first. The version is read from the packed props, so it cannot
+        # drift from what the receipt was built against.
+        run: |
+          mkdir -p out/dependency-stage
+          unzip -p out/package/feed/PicoVoxel.PicoGK.*.nupkg build/PicoVoxel.PicoGK.props \
+            > out/dependency-stage/package.props
+          version=$(sed -n 's:.*<PicoVoxelPicoGKSkiaSharp>\(.*\)</PicoVoxelPicoGKSkiaSharp>.*:\1:p' \
+            out/dependency-stage/package.props)
+          test -n "$version"
+          cat > out/dependency-stage/Dependency.csproj <<XML
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <TargetFramework>net11.0</TargetFramework>
+            </PropertyGroup>
+            <ItemGroup>
+              <PackageReference Include="SkiaSharp" Version="$version" />
+            </ItemGroup>
+          </Project>
+          XML
+          dotnet restore out/dependency-stage/Dependency.csproj
+          test -f "$HOME/.nuget/packages/skiasharp/$version/lib/net8.0/SkiaSharp.dll"
+      - name: Stage the qualified package
+        run: |
+          cat > out/stage-config.json <<JSON
+          {
+            "dotnet": "$(command -v dotnet)",
+            "nuget": "$HOME/.nuget/packages",
+            "hostRid": "linux-x64",
+            "feed": "$PWD/out/package/feed",
+            "version": "$PACKAGE_VERSION",
+            "outputRoot": "$PWD/out/staged"
+          }
+          JSON
+          node --import @oxc-node/core/register \
+            packages/plugins/picogk/scripts/stage-picogk-package.mts out/stage-config.json
+      - name: Prepare both parity apps
+        run: |
+          cat > out/parity-apps-config.json <<JSON
+          {
+            "dotnet": "$(command -v dotnet)",
+            "packageRoot": "$PWD/out/staged/packages/picovoxel.picogk/$PACKAGE_VERSION",
+            "picoGkProject": "$PWD/out/staged/base/PicoGK.csproj",
+            "picovoxelRoot": "$PWD/out/picovoxel",
+            "referencesRoot": "$PWD/out/staged/references",
+            "outputRoot": "$PWD/out/parity-apps",
+            "modes": ["aot", "dynamic"]
+          }
+          JSON
+          pnpm nx run picogk:prepare-parity-apps out/parity-apps-config.json
+          rm -rf out/parity-apps/artifacts-aot out/parity-apps/artifacts-dynamic
+      - name: Prepare both parity apps on the threaded runtime
+        # The execution the product ships: the browser kernel's default `auto` takes the threaded
+        # bundle wherever the page is cross-origin isolated, so this is the pair a figure and a
+        # byte comparison have to describe. The serial pair above stays measured as the fallback.
+        run: |
+          cat > out/parity-apps-threaded-config.json <<JSON
+          {
+            "dotnet": "$(command -v dotnet)",
+            "packageRoot": "$PWD/out/staged/packages/picovoxel.picogk/$PACKAGE_VERSION",
+            "picoGkProject": "$PWD/out/staged/base/PicoGK.csproj",
+            "picovoxelRoot": "$PWD/out/picovoxel",
+            "referencesRoot": "$PWD/out/staged/references",
+            "outputRoot": "$PWD/out/parity-apps-threaded",
+            "modes": ["aot", "dynamic"],
+            "execution": "threaded"
+          }
+          JSON
+          pnpm nx run picogk:prepare-parity-apps out/parity-apps-threaded-config.json
+          rm -rf out/parity-apps-threaded/artifacts-aot out/parity-apps-threaded/artifacts-dynamic
+      - name: Build the matched native comparator and run the reference subject
+        working-directory: out/picovoxel
+        # The same engine sources and the same shared float trigonometry, built for this host: the
+        # bytes every browser run is compared against.
+        run: |
+          node dotnet/build-native-comparator.mjs \
+            "$GITHUB_WORKSPACE/packages/plugins/picogk/dotnet/native" ../comparator --jobs 4
+          node dotnet/run-parity-native.mjs "$(command -v dotnet)" \
+            "$GITHUB_WORKSPACE/out/staged/base/PicoGK.csproj" ../comparator "$SUBJECT" ../native
+      - name: Measure the matched native comparator
+        working-directory: out/picovoxel
+        # R31's ratio needs a denominator from the same build, timed around the same call the
+        # browser times. Three fresh processes, because a browser page is one too.
+        run: |
+          node dotnet/run-performance-native.mjs "$(command -v dotnet)" \
+            ../native/fixture ../comparator "$SUBJECT" ../native-performance --rounds 3
+      - name: Collect what a parity run needs
+        run: |
+          mkdir -p out/inputs/evidence
+          cp -R out/parity-apps/aot out/parity-apps/dynamic out/inputs/
+          cp -R out/parity-apps-threaded/aot out/inputs/aot-threaded
+          cp -R out/parity-apps-threaded/dynamic out/inputs/dynamic-threaded
+          cp out/parity-apps/parity-apps.json out/inputs/
+          cp out/parity-apps-threaded/parity-apps.json out/inputs/parity-apps-threaded.json
+          cp -R out/native/captures out/inputs/native-captures
+          cp out/native/author-sources.json out/inputs/evidence/
+          cp out/native-performance/performance-native.json out/inputs/
+          # The engine's own pin check, per execution, is I3's evidence.
+          cp out/archive-serial/picogk.26.2.a.metadata.json out/inputs/evidence/archive-serial.json
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: picogk-browser-threaded
+          path: out/archive-threaded
+      - name: Add the threaded execution's receipt
+        run: cp out/archive-threaded/picogk.26.2.a.metadata.json out/inputs/evidence/archive-threaded.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: picogk-parity-inputs
+          path: out/inputs/
+          if-no-files-found: error
+
+  # One job per engine, both modes: the charter's browser floor is three engines, and an engine that
+  # did not run is reported as not having run rather than dropped from the gate.
+  parity:
+    needs: parity-prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: taucad/picovoxel
+          ref: ${{ env.PICOVOXEL_REF }}
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '24.20.0'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: picogk-parity-inputs
+          path: out/inputs
+      - run: corepack enable && pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps ${{ matrix.engine }}
+      - name: Run both modes
+        run: |
+          for mode in aot dynamic aot-threaded dynamic-threaded; do
+            node dotnet/run-parity-browser.mjs "out/inputs/$mode" "${{ matrix.engine }}" \
+              "$SUBJECT" "out/runs/${{ matrix.engine }}-$mode"
+          done
+      - name: Measure every path this engine offers
+        # R31 asks for each path separately. The ahead-of-time app has one: the generator is an
+        # ordinary analyzer there, so the engine always takes the per-voxel callback. The app that
+        # compiles in the browser has two, because the lifted tape and the callback it replaces are
+        # different engine paths, and only that app can be edited and recompiled.
+        run: |
+          node dotnet/run-performance-browser.mjs out/inputs/aot "${{ matrix.engine }}" \
+            "$SUBJECT" aot "out/performance/${{ matrix.engine }}-aot"
+          node dotnet/run-performance-browser.mjs out/inputs/dynamic "${{ matrix.engine }}" \
+            "$SUBJECT" dynamic-tape "out/performance/${{ matrix.engine }}-dynamic-tape" --options edit=on
+          node dotnet/run-performance-browser.mjs out/inputs/dynamic "${{ matrix.engine }}" \
+            "$SUBJECT" dynamic-callback "out/performance/${{ matrix.engine }}-dynamic-callback" --options tape=off
+          node dotnet/run-performance-browser.mjs out/inputs/aot-threaded "${{ matrix.engine }}" \
+            "$SUBJECT" aot-threaded "out/performance/${{ matrix.engine }}-aot-threaded"
+          node dotnet/run-performance-browser.mjs out/inputs/dynamic-threaded "${{ matrix.engine }}" \
+            "$SUBJECT" dynamic-threaded-tape "out/performance/${{ matrix.engine }}-dynamic-threaded-tape" \
+            --options edit=on
+          node dotnet/run-performance-browser.mjs out/inputs/dynamic-threaded "${{ matrix.engine }}" \
+            "$SUBJECT" dynamic-threaded-callback "out/performance/${{ matrix.engine }}-dynamic-threaded-callback" \
+            --options tape=off
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: picogk-performance-${{ matrix.engine }}
+          path: out/performance/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: picogk-parity-captures-${{ matrix.engine }}
+          path: out/runs/
+          if-no-files-found: error
+
+  # Desktop neutrality is I5, and it is measured rather than assumed: the native suites Tau already
+  # runs for PicoGK, on the host its engine ships for, from a checkout carrying this program's
+  # changes. `native-darwin.yml` is the canonical row; this job records its verdict as evidence the
+  # invariant report can read beside the browser's.
+  desktop-neutrality:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '24.20.0'
+      - run: corepack enable && pnpm install --frozen-lockfile
+      - name: Run the native desktop suites
+        id: suites
+        run: pnpm nx run picogk:test:native-darwin
+      - name: Record the verdict
+        if: always() && steps.suites.conclusion != 'skipped'
+        # The invariant report reads `passed` or anything else as a failure, which is the vocabulary
+        # every other evidence file in that directory uses. A step's own outcome says `success`, so
+        # recording it verbatim made I5 unpassable: this translates the one word rather than
+        # teaching the reader a second spelling of it.
+        run: |
+          mkdir -p out/evidence
+          cat > out/evidence/desktop-neutrality.json <<JSON
+          {
+            "status": "${{ steps.suites.outcome == 'success' && 'passed' || 'failed' }}",
+            "host": "darwin-arm64",
+            "suite": "picogk:test:native-darwin"
+          }
+          JSON
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: picogk-desktop-neutrality
+          path: out/evidence/
+          if-no-files-found: error
+
+  # The gate and the invariant report. Nothing is re-derived here: each job above wrote its own
+  # evidence, and a check that did not run is reported as unproven rather than passed.
+  parity-gate:
+    needs: [parity, desktop-neutrality]
+    # Not `always()`: a failed or skipped parity must still reach the gate, so that an engine that
+    # did not run cannot pass by absence, but a cancelled run has no evidence to judge and a gate
+    # that runs anyway reports a failure that means nothing.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: taucad/picovoxel
+          ref: ${{ env.PICOVOXEL_REF }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '24.20.0'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: picogk-parity-inputs
+          path: out/inputs
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: picogk-parity-captures-*
+          merge-multiple: true
+          path: out/runs
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: picogk-desktop-neutrality
+          path: out/desktop
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: picogk-performance-*
+          merge-multiple: true
+          path: out/performance
+      - name: Gate every engine and judge the invariants
+        run: |
+          mkdir -p out/evidence
+          cp out/inputs/evidence/*.json out/desktop/desktop-neutrality.json out/evidence/
+          node dotnet/tests/npm-contract.mjs . origin/main out/evidence/npm-contract.json
+          node dotnet/gate-parity.mjs "$SUBJECT" out/inputs/native-captures out/evidence \
+            chromium=aot:out/runs/chromium-aot/captures,dynamic:out/runs/chromium-dynamic/captures,aot-threaded:out/runs/chromium-aot-threaded/captures,dynamic-threaded:out/runs/chromium-dynamic-threaded/captures \
+            firefox=aot:out/runs/firefox-aot/captures,dynamic:out/runs/firefox-dynamic/captures,aot-threaded:out/runs/firefox-aot-threaded/captures,dynamic-threaded:out/runs/firefox-dynamic-threaded/captures \
+            webkit=aot:out/runs/webkit-aot/captures,dynamic:out/runs/webkit-dynamic/captures,aot-threaded:out/runs/webkit-aot-threaded/captures,dynamic-threaded:out/runs/webkit-dynamic-threaded/captures
+          node dotnet/tests/invariants.mjs out/evidence out/evidence/invariants.json
+      - name: Judge every measured path against the matched native run
+        # Separate from the byte gate above, and after it: a path that is fast and wrong is not a
+        # pass, so identity is judged first and this never substitutes for it.
+        run: |
+          cp out/inputs/performance-native.json out/evidence/
+          node dotnet/gate-performance.mjs "$SUBJECT" out/inputs/performance-native.json out/evidence \
+            out/performance/*/performance.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        # Whatever the verdict, as long as the gate reached the point of writing one.
+        if: ${{ !cancelled() && hashFiles('out/evidence/**') != '' }}
+        with:
+          name: picogk-parity-evidence
+          path: out/evidence/
+          if-no-files-found: error

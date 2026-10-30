@@ -1,4 +1,4 @@
-import type { Event } from '@sentry/react';
+import type { Breadcrumb, Event, SeverityLevel } from '@sentry/react';
 import { apiRequestIdTags } from '#lib/api-request-id.js';
 import { isWeakKey } from '#lib/weak-key.js';
 
@@ -15,6 +15,16 @@ export type ErrorDetails = Readonly<{
   contexts?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
   /** Groups the event apart from what its stack alone would group it with. */
   fingerprint?: readonly string[];
+  /**
+   * How severe the event is, where the reporter knows better than the capture's default: a detected
+   * tab kill is a `warning`, a background discard `info`, a kill loop an `error` (SB3).
+   */
+  level?: SeverityLevel;
+  /**
+   * The trail to report with the event, in place of this page's own: a kill report replays the
+   * breadcrumbs of the page that died, with their original timestamps (SB3).
+   */
+  breadcrumbs?: readonly Breadcrumb[];
 }>;
 
 const recorded = new WeakMap<WeakKey, ErrorDetails>();
@@ -37,6 +47,10 @@ export const recordErrorDetails = <Failure>(error: Failure, details: ErrorDetail
     ...((details.fingerprint ?? previous?.fingerprint) === undefined
       ? {}
       : { fingerprint: details.fingerprint ?? previous?.fingerprint }),
+    ...((details.level ?? previous?.level) === undefined ? {} : { level: details.level ?? previous?.level }),
+    ...((details.breadcrumbs ?? previous?.breadcrumbs) === undefined
+      ? {}
+      : { breadcrumbs: details.breadcrumbs ?? previous?.breadcrumbs }),
   });
   return error;
 };
@@ -45,7 +59,7 @@ export const recordErrorDetails = <Failure>(error: Failure, details: ErrorDetail
  * The details of a reported value: what reporters recorded on it, and the `api_request_id` along its `cause` chain.
  *
  * @param error - The reported value.
- * @returns Its tags, contexts and fingerprint (each possibly empty).
+ * @returns Its tags, contexts, fingerprint, level and trail (each possibly absent or empty).
  */
 export const readErrorDetails = (error: unknown): ErrorDetails => {
   const own = isWeakKey(error) ? recorded.get(error) : undefined;
@@ -53,20 +67,30 @@ export const readErrorDetails = (error: unknown): ErrorDetails => {
     tags: { ...own?.tags, ...apiRequestIdTags(error) },
     contexts: { ...own?.contexts },
     ...(own?.fingerprint === undefined ? {} : { fingerprint: own.fingerprint }),
+    ...(own?.level === undefined ? {} : { level: own.level }),
+    ...(own?.breadcrumbs === undefined ? {} : { breadcrumbs: own.breadcrumbs }),
   };
 };
 
 /**
  * Apply a reported value's details to its event. The event's own tags, contexts and fingerprint win: the SDK and
- * the stale-build decoration set them on purpose.
+ * the stale-build decoration set them on purpose. A recorded `level` and trail do win over the event's, because
+ * both carry a default the reporter is correcting: every capture is `error` until someone says otherwise, and a
+ * kill report's trail belongs to the page that died rather than to the one reporting it (SB3).
  *
  * @param event - The event about to be sent.
  * @param error - The value it reports.
  * @returns The event with the details applied (the same event when there are none).
  */
 export const applyErrorDetails = <Reported extends Event>(event: Reported, error: unknown): Reported => {
-  const { tags = {}, contexts = {}, fingerprint } = readErrorDetails(error);
-  if (Object.keys(tags).length === 0 && Object.keys(contexts).length === 0 && fingerprint === undefined) {
+  const { tags = {}, contexts = {}, fingerprint, level, breadcrumbs } = readErrorDetails(error);
+  if (
+    Object.keys(tags).length === 0 &&
+    Object.keys(contexts).length === 0 &&
+    fingerprint === undefined &&
+    level === undefined &&
+    breadcrumbs === undefined
+  ) {
     return event;
   }
   const mergedContexts = { ...contexts, ...event.contexts };
@@ -79,5 +103,7 @@ export const applyErrorDetails = <Reported extends Event>(event: Reported, error
     tags: { ...tags, ...event.tags },
     contexts: mergedContexts,
     ...(event.fingerprint === undefined && fingerprint !== undefined ? { fingerprint: [...fingerprint] } : {}),
+    ...(level === undefined ? {} : { level }),
+    ...(breadcrumbs === undefined ? {} : { breadcrumbs: [...breadcrumbs] }),
   };
 };

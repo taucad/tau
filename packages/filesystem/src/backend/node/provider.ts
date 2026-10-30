@@ -23,7 +23,7 @@ import {
 } from '#backend/node/entry-observation.js';
 import type { EntryObserver } from '#backend/node/entry-observation.js';
 import type { FileHandle } from 'node:fs/promises';
-import type { Dirent, Stats } from 'node:fs';
+import type { BigIntStats, Dirent, Stats } from 'node:fs';
 import { constants, realpathSync, statSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
@@ -92,6 +92,26 @@ const verificationReadFlags = boundedReadFlags + optionalOpenFlag(constants.O_NO
 const isContained = (base: string, target: string): boolean => {
   const relative = path.relative(base, target);
   return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));
+};
+
+/**
+ * Does `target` still hold the very entry a rename put there?
+ *
+ * A different entry — or none — means another writer replaced the path after our
+ * rename landed, so there is nothing of ours left at it to verify.
+ *
+ * A volume that supplies no physical file identity reports `ino` as `0n` — the
+ * same absence `acquireWindowsAuthorityWriter` refuses an authority root for.
+ * Two entries cannot be told apart there, so this answers that the path is still
+ * ours and the write stays answerable for it: a verification refusal is kept
+ * rather than suppressed on a platform that cannot prove it was superseded.
+ */
+const isEntryStillAt = async (target: string, written: BigIntStats): Promise<boolean> => {
+  if (written.ino <= 0n) {
+    return true;
+  }
+  const current = await fs.lstat(target, { bigint: true }).catch(() => undefined);
+  return current !== undefined && current.dev === written.dev && current.ino === written.ino;
 };
 
 const bytesEqual = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
@@ -1164,6 +1184,9 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       }
 
       await beforeReplace?.();
+      /* Rename keeps the inode, so this identifies the entry the rename is about
+       * to publish — and tells a later writer's entry apart from ours below. */
+      const written = await fs.lstat(temporaryPath, { bigint: true });
       await fs.rename(temporaryPath, admittedTarget);
       replaced = true;
       if (retainedHandle === undefined) {
@@ -1182,14 +1205,30 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       }
 
       const verification = await fs.open(admittedTarget, verificationReadFlags);
-      let committed: Uint8Array<ArrayBuffer>;
       try {
-        committed = await readPublishedDescriptor(verification, bytes.byteLength);
+        const committed = await readPublishedDescriptor(verification, bytes.byteLength);
+        if (!bytesEqual(committed, bytes)) {
+          throw this._errno('WRITE_VERIFICATION_FAILED', 'committed bytes could not be verified', rootedPath);
+        }
+      } catch (error) {
+        /*
+         * `writeFile` has never held the path exclusively: two writes of the same
+         * path settle last-writer-wins, so a concurrent writer may replace the
+         * entry this rename published. `readPublishedDescriptor` already covers a
+         * replacement part way through the read, by holding the descriptor to its
+         * inode's identity but not to the status-change time an unlink moves. It
+         * cannot cover a replacement that lands before this descriptor is opened:
+         * the open then resolves to the other writer's entry, whose bytes are
+         * reported as unverifiable — or, when they outgrow this write's own
+         * allowance, as `EFBIG`. Our rename did apply; a later write superseded
+         * it, and that entry says nothing about ours. Only a path that still holds
+         * this write's own entry can fail its verification.
+         */
+        if (await isEntryStillAt(admittedTarget, written)) {
+          throw error;
+        }
       } finally {
         await verification.close();
-      }
-      if (!bytesEqual(committed, bytes)) {
-        throw this._errno('WRITE_VERIFICATION_FAILED', 'committed bytes could not be verified', rootedPath);
       }
     } catch (error) {
       failure = error;

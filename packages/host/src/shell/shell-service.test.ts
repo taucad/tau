@@ -191,29 +191,30 @@ describe('admission (A03, F5)', () => {
 });
 
 describe('the launch Tau compiles (D4, D20, D26, A05)', () => {
-  it('should mask future reserved children while reopening existing authored roots', async () => {
+  it('should open the whole checkout and keep records read-only and control rows denied', async () => {
     await writeFile(join(project, '.tau', 'AGENTS.md'), 'instructions');
     const { service, provider } = harness();
     await service.run(call({ command: 'true' }));
-    expect(provider.launches[0]!.filesystem.masked).toEqual([join(project, '.tau')]);
-    expect(provider.launches[0]!.filesystem.writable).toEqual(
-      expect.arrayContaining([project, join(project, '.tau', 'parameters'), join(project, '.tau', 'AGENTS.md')]),
+    const { filesystem } = provider.launches[0]!;
+    expect(filesystem).not.toHaveProperty('masked');
+    expect(filesystem.writable).toContain(project);
+    expect(filesystem.writable).not.toContain(join(project, '.tau'));
+    expect(filesystem.readOnly).toContain(join(project, '.tau', 'chats'));
+    expect(filesystem.denied).toEqual(
+      expect.arrayContaining([join(project, '.tau', 'binding.json'), join(project, '.tau', 'project.json')]),
     );
-    expect(provider.launches[0]!.filesystem.readOnly).toContain(join(project, '.tau', 'chats'));
-    expect(provider.launches[0]!.filesystem.writable).not.toContain(join(project, '.tau', 'machines'));
+    expect([...(filesystem.readOnly ?? []), ...filesystem.denied]).not.toContain(join(project, '.tau', 'AGENTS.md'));
   });
 
-  it('should compile existing reserved case aliases and refuse authored symlink grants', async () => {
+  it('should protect the records of an existing reserved case alias', async () => {
     const alias = join(project, '.TAU');
-    await mkdir(join(alias, 'Parameters'), { recursive: true });
-    await symlink(outside, join(project, '.tau', 'machines'));
+    await mkdir(join(alias, 'chats'), { recursive: true });
+    await mkdir(join(alias, 'future'), { recursive: true });
     const { service, provider } = harness();
     await service.run(call({ command: 'true' }));
     const { filesystem } = provider.launches[0]!;
-    expect(filesystem.masked).toContain(await realpath(alias));
-    expect(filesystem.writable).toContain(await realpath(join(alias, 'Parameters')));
-    expect(filesystem.writable).not.toContain(join(project, '.tau', 'machines'));
-    expect(filesystem.denied).toContain(join(project, '.tau', 'machines'));
+    expect(filesystem.readOnly).toContain(join(await realpath(alias), 'chats'));
+    expect([...(filesystem.readOnly ?? []), ...filesystem.denied]).not.toContain(join(await realpath(alias), 'future'));
   });
 
   it('runs one fresh contained process in the checkout with closed stdin and an allowlisted environment', async () => {

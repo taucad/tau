@@ -78,8 +78,11 @@ export const unlistedPathClassification: PathClassification = Object.freeze({
  * `.tau` is Tau's own directory, so a member of it that no row names is either
  * a residue of a retired layout — the `.tau/workspaces` trees no migration
  * deletes (I15) — or a family this build does not know. Either way it is not
- * the user's design: never versioned, never the agent's. Watched on the UI
- * plane like the records rows, so the file tree still sees it move.
+ * the user's design, so it is never versioned. It is the agent's to read and
+ * write like the rest of the project: nothing Tau trusts lives under a name no
+ * row declares, and hiding names that do not exist yet is what made the shell
+ * mask every spelling of `.tau` (retired 2026-10-31). Watched on the UI plane
+ * like the records rows, so the file tree still sees it move.
  *
  * It is the fallback rather than a row because a row would name `.tau` itself:
  * the directory holds the authored controls too, and hiding the container hides
@@ -93,7 +96,7 @@ export const unlistedPathClassification: PathClassification = Object.freeze({
 export const reservedTauPathClassification: PathClassification = Object.freeze({
   class: 'records',
   versioned: false,
-  agentAccess: 'hidden',
+  agentAccess: 'read-write',
   watch: 'ui',
 });
 
@@ -397,20 +400,15 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
  * A `root` row matches at the project root only; a `segment` row matches
  * wherever its prefix sits on segment boundaries, so `lib/node_modules/x` is
  * cache and `vendor/dep/.git/config` is the control plane however deep the
- * repository is. A directory row covers itself and everything beneath it; a file
- * row covers that path alone — which still catches a `.git` that is a worktree
- * or submodule pointer file rather than a directory, because the directory row
- * matches the segment either way.
+ * repository is. Every row covers itself and everything beneath it: a file
+ * row's answer then never depends on whether someone built a directory of that
+ * name, and a `.git` that is a worktree or submodule pointer file rather than a
+ * directory matches the same way.
  */
 const covers = (row: PathRegistryRow, relative: string): boolean => {
-  if (row.directory) {
-    const bounded = `/${relative}/`;
-    const pattern = `/${row.prefix}/`;
-    return row.match === 'segment' ? bounded.includes(pattern) : bounded.startsWith(pattern);
-  }
-  const bounded = `/${relative}`;
-  const pattern = `/${row.prefix}`;
-  return row.match === 'segment' ? bounded.endsWith(pattern) : bounded === pattern;
+  const bounded = `/${relative}/`;
+  const pattern = `/${row.prefix}/`;
+  return row.match === 'segment' ? bounded.includes(pattern) : bounded.startsWith(pattern);
 };
 
 /**

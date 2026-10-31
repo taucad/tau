@@ -364,8 +364,8 @@ describe('path registry', () => {
 
   it('does not let a path that merely starts like a reserved one inherit it', () => {
     /* Inside `.tau` the near miss lands on the reserved default, never on the
-     * row it resembles: the chats row is agent-readable, the default is not. */
-    expect(classify('.tau/chats-notes.md').agentAccess).toBe('hidden');
+     * row it resembles: the chats row is read-only, the default is the agent's. */
+    expect(classify('.tau/chats-notes.md')).toStrictEqual(reservedTauPathClassification);
     expect(classify('.gitignore-old')).toStrictEqual(unlistedPathClassification);
     expect(classify('thumbnail.webp.bak')).toStrictEqual(unlistedPathClassification);
   });

@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Unattended-install answer file for the Spike W2 consumer Win11 standard-user lane.
+
+  Security stance (do NOT change without the blueprint's sign-off):
+    * UAC stays ENABLED (EnableLUA is NOT touched). The one elevated action (`srt-win install`) is
+      performed by the BUILT-IN Administrator (RID-500), which by Windows default is NOT in Admin
+      Approval Mode (FilterAdministratorToken=0), so it elevates without an interactive prompt — this
+      models "the one-time install is an elevated action" without disabling UAC or using an admin
+      shell for the sandboxed workload.
+    * Windows Defender / SmartScreen are NOT disabled. The boundary under test is srt-win's, not
+      Defender's.
+    * TPM 2.0 and Secure Boot are satisfied by the host (swtpm vTPM + OVMF secure-boot firmware), so
+      NO registry bypass (LabConfig BypassTPMCheck/BypassSecureBootCheck) is used — the guest is a
+      stock Win11 install, not a check-bypassed one.
+    * The harness-under-test runs as the GENUINE STANDARD user `spikeuser` (created, non-admin), never
+      as Administrator. The consumer profile-isolation story is the whole point.
+
+  Credentials here are SYNTHETIC, VM-local, and disposable (no secret). The VM is destroyed at job end.
+-->
+<unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+  <settings pass="windowsPE">
+    <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <SetupUILanguage><UILanguage>en-US</UILanguage></SetupUILanguage>
+      <InputLocale>en-US</InputLocale>
+      <SystemLocale>en-US</SystemLocale>
+      <UILanguage>en-US</UILanguage>
+      <UserLocale>en-US</UserLocale>
+    </component>
+    <component name="Microsoft-Windows-Setup" processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <UserData>
+        <AcceptEula>true</AcceptEula>
+        <!-- Enterprise Evaluation installs without a product key. -->
+      </UserData>
+      <DiskConfiguration>
+        <Disk wcm:action="add" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+          <DiskID>0</DiskID>
+          <WillWipeDisk>true</WillWipeDisk>
+          <CreatePartitions>
+            <CreatePartition wcm:action="add"><Order>1</Order><Type>EFI</Type><Size>260</Size></CreatePartition>
+            <CreatePartition wcm:action="add"><Order>2</Order><Type>MSR</Type><Size>16</Size></CreatePartition>
+            <CreatePartition wcm:action="add"><Order>3</Order><Type>Primary</Type><Extend>true</Extend></CreatePartition>
+          </CreatePartitions>
+          <ModifyPartitions>
+            <ModifyPartition wcm:action="add"><Order>1</Order><PartitionID>1</PartitionID><Format>FAT32</Format><Label>System</Label></ModifyPartition>
+            <ModifyPartition wcm:action="add"><Order>2</Order><PartitionID>2</PartitionID></ModifyPartition>
+            <ModifyPartition wcm:action="add"><Order>3</Order><PartitionID>3</PartitionID><Format>NTFS</Format><Label>Windows</Label><Letter>C</Letter></ModifyPartition>
+          </ModifyPartitions>
+        </Disk>
+      </DiskConfiguration>
+      <ImageInstall>
+        <OSImage>
+          <InstallTo><DiskID>0</DiskID><PartitionID>3</PartitionID></InstallTo>
+          <!-- Must match the edition in the operator-supplied ISO. Enterprise eval ships this name;
+               a different ISO edition must be set here (provisioning fails cleanly otherwise). -->
+          <InstallFrom><MetaData wcm:action="add"><Key>/IMAGE/NAME</Key><Value>Windows 11 Enterprise Evaluation</Value></MetaData></InstallFrom>
+        </OSImage>
+      </ImageInstall>
+    </component>
+  </settings>
+
+  <settings pass="oobeSystem">
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <OOBE>
+        <HideEULAPage>true</HideEULAPage>
+        <HideLocalAccountScreen>true</HideLocalAccountScreen>
+        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+        <ProtectYourPC>3</ProtectYourPC>
+        <SkipMachineOOBE>true</SkipMachineOOBE>
+        <SkipUserOOBE>true</SkipUserOOBE>
+      </OOBE>
+      <UserAccounts>
+        <!-- Enable the built-in Administrator (RID-500) for provisioning only. Synthetic password. -->
+        <AdministratorPassword><Value>Spike!Pw0rd#W2</Value><PlainText>true</PlainText></AdministratorPassword>
+      </UserAccounts>
+      <AutoLogon>
+        <Enabled>true</Enabled>
+        <Username>Administrator</Username>
+        <Password><Value>Spike!Pw0rd#W2</Value><PlainText>true</PlainText></Password>
+        <LogonCount>1</LogonCount>
+      </AutoLogon>
+      <FirstLogonCommands>
+        <!-- Provisioning runs from the slirp SMB share (\\10.0.2.4\qemu) presented by the host. It
+             installs Node + pinned Git Bash + `srt-win install` (elevated, RID-500), creates the
+             standard user `spikeuser`, and arms a logon task that runs the harness AS spikeuser. -->
+        <SynchronousCommand wcm:action="add" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+          <Order>1</Order>
+          <Description>Enable SMB client access to the host drop share</Description>
+          <CommandLine>cmd /c "reg add HKLM\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters /v AllowInsecureGuestAuth /t REG_DWORD /d 1 /f"</CommandLine>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+          <Order>2</Order>
+          <Description>Run provisioning</Description>
+          <CommandLine>powershell.exe -NoProfile -ExecutionPolicy Bypass -File \\10.0.2.4\qemu\provision.ps1</CommandLine>
+        </SynchronousCommand>
+      </FirstLogonCommands>
+    </component>
+  </settings>
+</unattend>

@@ -1,0 +1,57 @@
+#cloud-config
+# NoCloud seed for the Linux stock-VM lane (Spike W2). Boots a stock Ubuntu 24.04 cloud image and runs
+# the UNMODIFIED fs-net-probe harness against Tau's bundled bwrap, with and without the Tau-scoped
+# AppArmor profile, under the shipped kernel.apparmor_restrict_unprivileged_userns (NEVER changed here).
+#
+# NO SECRETS: the only credential is a synthetic VM-local password for the console (locked SSH anyway;
+# the lane talks to the host over the 9p drop share, not the network). The guest reaches the harness,
+# the AppArmor profile and the orchestrator over a read-only 9p share of the repo; it writes receipts
+# and a sentinel to a read-write 9p drop share. The host watches the drop for the sentinel.
+
+hostname: tau-linux-vm
+# Synthetic console login only (no network login path is opened); not a secret of any real system.
+password: tau-spike-local
+chpasswd: { expire: false }
+ssh_pwauth: false
+
+# Stock security: we do NOT write kernel.apparmor_restrict_unprivileged_userns. The image ships it at 1
+# and the lane asserts that value rather than setting it.
+
+write_files:
+  - path: /etc/systemd/system/tau-9p-repo.mount
+    content: |
+      [Unit]
+      Description=Tau repo (read-only 9p share)
+      [Mount]
+      What=taurepo
+      Where=/mnt/taurepo
+      Type=9p
+      Options=trans=virtio,version=9p2000.L,ro,access=any
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/systemd/system/tau-9p-drop.mount
+    content: |
+      [Unit]
+      Description=Tau receipt drop (read-write 9p share)
+      [Mount]
+      What=taudrop
+      Where=/mnt/taudrop
+      Type=9p
+      Options=trans=virtio,version=9p2000.L,rw,access=any
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - set -x
+  - mkdir -p /mnt/taurepo /mnt/taudrop
+  - systemctl daemon-reload
+  - systemctl start tau-9p-repo.mount || mount -t 9p -o trans=virtio,version=9p2000.L,ro,access=any taurepo /mnt/taurepo
+  - systemctl start tau-9p-drop.mount || mount -t 9p -o trans=virtio,version=9p2000.L,rw,access=any taudrop /mnt/taudrop
+  # Hand off to the orchestrator on the repo share. It records its own blocker receipt + sentinel on any
+  # failure, so the host always gets a verdict (never a silent hang beyond its deadline).
+  - 'TAU_DROP=/mnt/taudrop TAU_REPO=/mnt/taurepo bash /mnt/taurepo/packages/core/native-process/spikes/shell/linux-vm/run-in-guest.sh > /mnt/taudrop/guest-console.log 2>&1 || echo "FAIL orchestrator exited $?" > /mnt/taudrop/DONE'
+  # Signal completion to the host even if the orchestrator forgot to.
+  - '[ -f /mnt/taudrop/DONE ] || echo "DONE (orchestrator returned without sentinel)" > /mnt/taudrop/DONE'
+  - sync
+  # Power off so the host boot wait returns promptly on a KVM run.
+  - poweroff

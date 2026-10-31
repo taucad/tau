@@ -388,6 +388,9 @@ const config = [
       'experiments/**',
       '**/wasm/**',
       'repos/**',
+      // Dev-only desktop-Bash feasibility spike (W1 evidence harness); not shipped and not part of
+      // the package build. Deleted when W2 lands. See packages/core/native-process/spikes/shell.
+      'packages/core/native-process/spikes/**',
       // Symlink twin of libs/tau-examples/.agents/skills — linting it would
       // double-lint the same files.
       '**/.claude/skills/**',

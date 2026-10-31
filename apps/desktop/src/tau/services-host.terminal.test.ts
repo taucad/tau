@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { HostShell, ShellProbe, TerminalSession, TerminalSessionRequest } from '@taucad/host';
+import type {
+  HostShell,
+  ShellProbe,
+  TerminalSession,
+  TerminalSessionOutcome,
+  TerminalSessionRequest,
+} from '@taucad/host';
 import { shellLimits } from '@taucad/host';
 import { terminalHostFrameSchema, terminalLimits } from '@taucad/types/desktop-terminal';
 import type { TerminalClientFrame, TerminalHostFrame } from '@taucad/types/desktop-terminal';
@@ -386,6 +392,42 @@ describe('terminal concern', () => {
     });
     expect(attempts).toBe(1);
     expect(sessions).toHaveLength(0);
+  });
+
+  it('should make quit wait for a shell still opening, cancel it, and stop it if it opens anyway', async () => {
+    const pending = Promise.withResolvers<TerminalSessionOutcome>();
+    let request: TerminalSessionRequest | undefined;
+    const { connect } = setup({
+      shell: async (): Promise<ShellProbe> => ({
+        status: 'available',
+        shell: {
+          ...createShell().shell,
+          openTerminal: async (asked) => {
+            request = asked;
+            return pending.promise;
+          },
+        },
+      }),
+    });
+    const port = connect();
+    port.send({ type: 'open', size });
+    await vi.waitFor(() => {
+      expect(request).toBeDefined();
+    });
+    let quit = false;
+    const closing = (async (): Promise<void> => {
+      await concern!.closeAll();
+      quit = true;
+    })();
+    await flush();
+    expect(request?.signal.aborted).toBe(true);
+    expect(quit).toBe(false);
+    /* A shell service that opens the shell regardless: quit still waits until it is stopped. */
+    const late = createSession(request!);
+    pending.resolve({ status: 'opened', session: late.session });
+    await closing;
+    expect(late.disposed()).toBe(true);
+    expect(port.of('opened')).toEqual([]);
   });
 
   it('should spend one admission bound across main’s allowlist and the shell service’s registration', async () => {

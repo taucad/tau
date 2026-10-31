@@ -218,6 +218,11 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
     const isEnded = (): boolean => ended !== undefined;
     let session: TerminalSession | undefined;
     let abort: AbortController | undefined;
+    /**
+     * A shell being opened, not yet this connection's: ending the connection cancels it and waits until it has
+     * either refused or been stopped, so quit's `closeAll` never resolves before a shell it could not yet see.
+     */
+    let pendingOpen: { readonly controller: AbortController; readonly settled: Promise<void> } | undefined;
     /** Bumped whenever a session ends, so a pump of an earlier session can never send again. */
     let generation = 0;
     let sent = 0;
@@ -278,6 +283,11 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
           clearTimeout(openTimer);
           pendingAccess = undefined;
           const exit = await stopSession();
+          const opening = pendingOpen;
+          if (opening !== undefined) {
+            opening.controller.abort();
+            await opening.settled;
+          }
           if (claimed && live.get(key) === connection) {
             live.delete(key);
           }
@@ -380,9 +390,38 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
         await refuse(refusal(probe.code, probe.message, probe.recovery));
         return;
       }
+      /* Until the shell is this connection's or refused, ending the connection cancels the open and waits for it. */
       const controller = new AbortController();
+      const settled = Promise.withResolvers<void>();
+      pendingOpen = { controller, settled: settled.promise };
+      let refused: TerminalRefusal | undefined;
+      try {
+        refused = await openAndAdopt(probe.shell, controller, { settleBy, size, access });
+      } finally {
+        pendingOpen = undefined;
+        settled.resolve();
+      }
+      if (refused !== undefined && !isEnded()) {
+        await refuse(refused);
+      }
+    };
+
+    /**
+     * Open the shell, retrying while the shell service has not yet registered the project, then make it this
+     * connection's. A shell that opens after the pane left is stopped here.
+     * @returns The refusal to send, or `undefined` once the shell is this connection's or the pane has left.
+     */
+    const openAndAdopt = async (
+      shell: Extract<ShellProbe, { status: 'available' }>['shell'],
+      controller: AbortController,
+      {
+        settleBy,
+        size,
+        access,
+      }: Readonly<{ settleBy: number; size: TerminalSize; access: TerminalAccess | undefined }>,
+    ): Promise<TerminalRefusal | undefined> => {
       const openTerminal = async (): Promise<TerminalSessionOutcome> =>
-        probe.shell.openTerminal({
+        shell.openTerminal({
           projectRoot,
           size,
           signal: controller.signal,
@@ -412,18 +451,14 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
         // oxlint-disable-next-line no-await-in-loop -- one open attempt at a time.
         outcome = await openTerminal();
       }
-      if (isEnded() && outcome.status === 'refused') {
-        return;
-      }
       if (outcome.status === 'refused') {
-        await refuse(refusal(outcome.code, outcome.message, outcome.recovery));
-        return;
+        return refusal(outcome.code, outcome.message, outcome.recovery);
       }
       if (isEnded()) {
         /* The pane left while the shell started: stop it before anything can reach it. */
         controller.abort();
         await outcome.session[Symbol.asyncDispose]();
-        return;
+        return undefined;
       }
       session = outcome.session;
       abort = controller;
@@ -445,6 +480,7 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
       log('terminal.opened', { granted: access !== undefined });
       // async-iife: bootstrap -- the pump ends the connection itself; nobody awaits a port's output.
       void pump(outcome.session, generation);
+      return undefined;
     };
 
     /** Open a shell once quit holds no starts; a connection that ends while held opens nothing. */

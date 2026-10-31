@@ -40,7 +40,7 @@ On the web, we collect product analytics such as browser type, pages visited, in
 When you are signed in, the web and desktop apps also report two kinds of metrics to Tau's own API. Neither includes prompts, messages, code, file contents, file or project names, or error message text, and neither is labelled by account, workspace, project or chat:
 
 - **Operational telemetry**: performance and outcome metrics such as kernel execution timing, sync outcomes, agent turn counts and durations, tool-call counts by kind, token counts, and error codes. We use these to keep the Service healthy, and they are sent regardless of the setting below.
-- **Anonymous usage metrics** (Optional): counts describing how the AI agent works during a turn, such as the CAD kernel, which built-in skills were used, how many calls and reference lookups happened before the first model change, lookup outcomes, evaluation outcome classes, and GeoSpec test pass and fail counts. We use these to improve Tau. They are on by default; switch them off under **Settings → General → Privacy** by disabling "Share anonymous usage metrics." On the web, an active Global Privacy Control signal also switches them off.
+- **Anonymous usage metrics** (Optional): counts describing how the AI agent works during a turn, such as the CAD kernel, which built-in skills were used, how many calls and reference lookups happened before the first model change, lookup outcomes, evaluation outcome classes, and GeoSpec test pass and fail counts. We use these to improve Tau. They are on by default; switch them off under **Settings → Data controls** by disabling "Share usage and diagnostics." On the web, an active Global Privacy Control signal also switches them off.
 
 **Error and crash reports**: When the web app, desktop app or API hits an error or crash, it sends a report to Sentry so we can find and fix the fault. A report contains the error message and stack trace, the app version, the page route without query strings or fragments, browser, operating system and device information, and recent technical events leading up to the error. Desktop crash reports may also contain a memory snapshot of the crashed app process. When you are signed in, a report may carry your internal Tau account identifier so we can tell how many people an error affects; it never carries your name or email address. Reports are scrubbed of cookies, authorization headers and tokens before they are sent. They do not depend on analytics consent or a Global Privacy Control signal, because they are needed to keep the Service working and secure and are not used for tracking or advertising.
 
@@ -64,7 +64,7 @@ On the web, you can manage analytics through the consent form, the **Cookie pref
 
 ### 3.6 Prompts, Designs, and CAD Files
 
-When you use our Service, we collect the content you create and submit, including text prompts, CAD designs, models, code, and project files. This content is processed to provide the Service and, if you have not opted out, to improve our AI features (see Section 9.2.1).
+When you use our Service, we collect the content you create and submit, including text prompts, CAD designs, models, code, and project files. This content is processed to provide the Service and, only with your explicit opt-in for the relevant purposes, to improve our AI features (see Section 9.2.1).
 
 ### 3.7 Sensitive Data
 
@@ -99,8 +99,8 @@ Opting out of marketing will not affect transactional or service-related communi
 Under data protection laws, we rely on the following legal bases:
 
 - **Contractual Necessity**: To perform our contract with you (providing the Service, account registration, subscription management).
-- **Legitimate Interests**: For improving our Service, security, communication, and AI improvement (you may opt out).
-- **Consent**: For analytics cookies and marketing communications (where required). You may withdraw consent at any time.
+- **Legitimate Interests**: For service security, operational reliability, and communication. This does not authorize the optional recording and AI improvement described in Section 9.2.1.
+- **Consent**: For the optional recording and AI improvement purposes described in Section 9.2.1, analytics cookies, and marketing communications (where required). You may withdraw consent at any time.
 - **Legal Obligations**: To comply with applicable laws.
 - **Vital Interests**: In rare circumstances, to protect vital interests.
 
@@ -110,7 +110,7 @@ Under data protection laws, we rely on the following legal bases:
 |---------------|------------------|
 | **Account Data** | While account is active, plus 90 days after deletion request |
 | **Usage & Analytics Data** | According to the current service-side retention configuration; contact privacy@tau.new for the current schedule |
-| **AI Prompts & Designs** | 12 months for service improvement; deleted upon opt-out |
+| **Optional Agent Evidence for AI Improvement** | 180 days from the original eligible evidence, with expiry processing within 24 hours after that window; deleted upon withdrawal, with expiry and erasure applied to pending delivery, media, derivatives, datasets and restored copies |
 | **Support Communications** | 3 years from communication |
 | **Financial Records** | 7 years (as required by law) |
 | **Security Logs** | 12 months |
@@ -152,15 +152,17 @@ When you use AI features, your prompts may be processed by: **OpenAI**, **Anthro
 
 #### 9.2.1 AI Service Improvement
 
-We may use your prompts and generated designs to improve our AI features. This is based on our legitimate interest in improving the Service.
+Tau does not use your designs for training unless you explicitly opt in. Optional account-linked recording and reuse are off by default on every plan and require your consent under the current notice before collection or reuse.
 
-**What we use:** Your text prompts and generated CAD designs.
-**What we do NOT do:** Share your designs with third parties for training, use your data to train external AI models, or associate training data with your identity.
+**What you can allow:** Turning on "Improve Tau for everyone" allows Tau to record account-linked task summaries, chats and generated designs, and to reuse eligible content for evaluation, prompt optimization and training Tau models. We record a separate decision for each named purpose even when you grant them with one control. Anonymous usage metrics do not grant any of these permissions.
 
-**Defaults:** On the free plan this is on unless you turn it off. On a paid plan it is off unless you turn it on.
-**Ratings:** When you rate an agent reply, we use that rating and the reply it rates to improve the Service.
+**Defaults and source rights:** Paid plans start off. The Free plan's existing supplier-training preference can start on, but that default grants no permission to record or reuse account-linked content. An explicit current opt-in and verified source rights are required on every plan. Unknown ownership, plan or source rights, including unresolved shared-project rights, prevent the affected capture or reuse. Content captured without the required opt-in remains excluded after upgrades, downgrades, copying, compaction and derivation. Enterprise contractual no-train guarantees remain binding.
 
-**Your Right to Opt Out:** Navigate to **Settings → Data controls** and turn off "Improve Tau for everyone." Opting out will not affect your access to AI features.
+**AI providers:** Your opt-in for Tau's improvement purposes does not permit AI providers to train their own models on your data. We do not share your designs with third parties for training or use them to train external AI models. The provider restrictions in Section 9.2 still apply. Optional agent evidence may be linked to your Tau account; it is distinct from anonymous usage metrics.
+
+**Ratings and support:** Rating an agent reply grants permission to use that rating only. It does not grant access to the reply content or authorize training or reusable evaluation. Access for operational diagnosis is requested for each support report, remains scoped to that report, and does not grant reuse permission.
+
+**Your choice:** Use **Settings → Data controls → Improve Tau for everyone** to opt in or withdraw. Turning it off withdraws the improvement-purpose grants and the rating grant; a later rating is a new feedback decision for that rating only. Your choice does not affect access to AI features. Optional recording and reuse remain unavailable until the applicable notice and service activation requirements are met.
 
 ### 9.3 Analytics and Observability
 

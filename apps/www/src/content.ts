@@ -279,7 +279,7 @@ export const plans: Array<{
       ['Tau Cloud backup & sync, 10 GB'],
       ['Zoo KCL cloud kernel, metered'],
       ['Private and unlisted share links'],
-      ['No training on your designs'],
+      ['No training on your designs unless you explicitly opt in'],
     ],
     cta: ['Choose Pro in Tau', '/?settings=billing'] as const,
   },

@@ -43,7 +43,7 @@ export const user = pgTable('user', {
   email: text('email').notNull().unique(),
   emailVerified: boolean('email_verified').default(false).notNull(),
   image: text('image'),
-  /** Whether the user allows their AI prompts and designs to be used for AI service improvement */
+  /** Legacy supplier-training preference; never authorizes account-linked recording or Tau reuse. */
   allowsAiTraining: boolean('allows_ai_training').default(true).notNull(),
   /**
    * When the user last chose `allowsAiTraining` themselves. Paid plans count only a decided `true` as consent, so the

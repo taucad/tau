@@ -41,7 +41,7 @@ export type PlanCatalogEntry = {
  * The three-tier marketing catalogue (T6/U1/E1/E2, copy per ui-patterns doc
  * Finding 5): credits are the sole model spend-gate (every model is available
  * on every tier — see docs/research/drop-model-tier-gating.md), and the
- * AD13/AD15 verification + no-train boundary is customer-facing copy. Launch
+ * verification and default-off training consent are customer-facing copy. Launch
  * carries no complimentary credit grant or refill countdown (charter D1/D2);
  * only paid plan and purchased credits are advertised.
  * @public
@@ -84,7 +84,7 @@ export const tauPlanCatalog: PlanCatalogEntry[] = [
       'Pro kernels (Zoo / KCL, metered)',
       'Hosted design verification (Coming Soon)',
       'Private & unlisted share links',
-      'No training on your designs',
+      'No training on your designs unless you explicitly opt in',
       backupFeature('pro'),
       'Early access to new features',
       'API CAD Gateway — 30k exports/mo (Coming Soon)',

@@ -78,13 +78,17 @@ describe('pinned Mono worker startup staging', () => {
 
   it('should deliver a pthread start that reaches a pool worker before its glue listens', async () => {
     let finishLoading = (): void => undefined;
+    // The release is scheduled on a timer the test advances itself, so nothing races the assertions.
+    let release: (() => void) | undefined;
     const delivered: unknown[] = [];
     const self = new EventTarget();
     const context = {
       self,
       MessageEvent,
       MessageChannel,
-      setTimeout,
+      setTimeout: (callback: () => void) => {
+        release = callback;
+      },
       Fe: { handlers: [], wasmMemory: 0, wasmModule: 0 },
       Me: true,
       loaded: async () =>
@@ -111,9 +115,8 @@ describe('pinned Mono worker startup staging', () => {
     // A notification that arrives after the load but before the release still keeps its place.
     post(4);
     expect(delivered).toEqual([1]);
-    await new Promise((resolve) => {
-      setTimeout(resolve, 10);
-    });
+    expect(release).toBeDefined();
+    release?.();
     expect(delivered).toEqual([1, 2, 4]);
     post(4);
     expect(delivered).toEqual([1, 2, 4, 4]);

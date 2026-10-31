@@ -173,6 +173,7 @@ describe('bridge proxy surfaces — rooted / workspace split', () => {
     expectTypeOf<FileSystemBridgeWorkspaceProxy>().toHaveProperty('mount');
     expectTypeOf<FileSystemBridgeWorkspaceProxy>().toHaveProperty('configureProjectRoots');
     expectTypeOf<FileSystemBridgeWorkspaceProxy>().toHaveProperty('listProjectManifests');
+    expectTypeOf<FileSystemBridgeWorkspaceProxy>().toHaveProperty('verifyProjectRoute');
     expectTypeOf<FileSystemBridgeWorkspaceProxy>().toHaveProperty('pollExternalChanges');
     expectTypeOf<FileSystemBridgeWorkspaceProxy>().toHaveProperty('dispose');
     expectTypeOf<FileSystemBridgeWorkspaceProxy>().toHaveProperty('listen');

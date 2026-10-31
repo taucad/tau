@@ -85,6 +85,9 @@ const bridgeEventListeners = new Map<unknown, Set<(data: unknown) => void>>();
 let readFileForBridge: ((bridge: { worker?: unknown }, path: string) => Promise<Uint8Array<ArrayBuffer>>) | undefined;
 let readyForBridge: (() => Promise<void>) | undefined;
 const mockWaitForWorkerReady = vi.fn<() => Promise<void>>();
+const mockVerifyProjectRoute = vi.fn(
+  async (_input: { projectId: string }) => ({ status: 'discovery-required' }) as const,
+);
 const mockListProjectManifests = vi.fn<() => Promise<{ roots: readonly unknown[]; entries: readonly unknown[] }>>();
 const mockCreateFileSystemBridge = vi.fn(() => ({
   port: {
@@ -173,6 +176,7 @@ vi.mock('@taucad/fs-bridge', () => ({
           : { source: 'project', versioned: true, agentAccess: 'read-write' },
       ),
       listProjectManifests: mockListProjectManifests,
+      verifyProjectRoute: mockVerifyProjectRoute,
       mkdir: mockProxyMkdir,
       rmdir: mockProxyRmdir,
       writeFile: mockProxyWriteFile,
@@ -1089,6 +1093,17 @@ describe('FileManagerProvider — client + workspace facades', () => {
     expect(mockProxyExists.mock.calls).toEqual([['.tau/workbench']]);
     expect(mockProxyReadFile).not.toHaveBeenCalled();
     expect(mockProxyDispose).toHaveBeenCalledOnce();
+  });
+
+  it('forwards exact project verification through the ready workspace authority', async () => {
+    const { result } = renderProvider();
+    await act(async () => {
+      await expect(result.current.client.verifyProjectRoute({ projectId: 'selected' })).resolves.toEqual({
+        status: 'discovery-required',
+      });
+    });
+    expect(mockVerifyProjectRoute).toHaveBeenCalledExactlyOnceWith({ projectId: 'selected' });
+    expect(mockListProjectManifests).not.toHaveBeenCalled();
   });
 
   it('exposes a scope-required storage facade whose reads route through the worker proxy', async () => {

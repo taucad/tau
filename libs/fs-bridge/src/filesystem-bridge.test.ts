@@ -631,6 +631,31 @@ describe('createFileSystemBridgeProxy', () => {
     proxy.dispose();
   });
 
+  it('rejects unknown project-verification result modes before client resolution', async () => {
+    const channel = new MessageChannel();
+    createBridgeServer(
+      { verifyProjectRoute: async () => ({ status: 'surprise' }) },
+      fsBridgePort(channel.port1, 'fs-bridge-invalid-verification-result-server'),
+      {
+        hello: createFileSystemBridgeHello({ state: 'workspace', watchable: false }),
+        protocolSchemas: fileSystemBridgeSchemas,
+      },
+    );
+    const proxy = createFileSystemBridgeProxy({
+      port: fsBridgePort(channel.port2, 'fs-bridge-invalid-verification-result-client'),
+      dispose: () => {
+        channel.port2.close();
+      },
+    });
+
+    await expect(proxy.verifyProjectRoute({ projectId: 'proj_aaaaaaaaaaaaaaaaaaaaa' })).rejects.toMatchObject({
+      name: 'WireValidationError',
+      site: 'client-call-result',
+      entry: 'verifyProjectRoute',
+    });
+    proxy.dispose();
+  });
+
   it('rejects unknown workspace mutation error codes before client resolution', async () => {
     const channel = new MessageChannel();
     createBridgeServer(

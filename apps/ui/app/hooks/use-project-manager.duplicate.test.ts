@@ -59,6 +59,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
       rmdir: vi.fn(async () => undefined),
     },
     client: {
+      verifyProjectRoute: vi.fn(async () => ({ status: 'discovery-required' })),
       listProjectManifests: vi.fn(async () => ({ roots: [], entries: [] })),
       commitPendingProjectDirectory: mockCommitPendingProjectDirectory,
     },

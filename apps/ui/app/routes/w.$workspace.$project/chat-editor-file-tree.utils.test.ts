@@ -22,6 +22,9 @@ function createFileItem(path: string, options?: { isDirectory?: boolean }): File
   };
 }
 
+const indexFiles = (files: FileItem[]): ReadonlyMap<string, FileItem> =>
+  new Map(files.map((file) => [file.path, file]));
+
 const rootId = '';
 
 describe('isEditorSystemArtifactPath', () => {
@@ -78,7 +81,7 @@ describe('isEditorSystemArtifactPath', () => {
 
 describe('getItemData', () => {
   it('should return isFolder true for the root item', () => {
-    const result = getItemData([], rootId, rootId);
+    const result = getItemData(new Map(), rootId, rootId);
 
     expect(result).toEqual(
       expect.objectContaining({
@@ -92,7 +95,7 @@ describe('getItemData', () => {
   it('should return isFolder true for explicit directory entries in fileTree', () => {
     const fileTree = [createFileItem('src', { isDirectory: true }), createFileItem('main.ts')];
 
-    const result = getItemData(fileTree, rootId, 'src');
+    const result = getItemData(indexFiles(fileTree), rootId, 'src');
 
     expect(result.isFolder).toBe(true);
     expect(result.name).toBe('src');
@@ -101,7 +104,7 @@ describe('getItemData', () => {
   it('should return isFolder false for explicit file entries in fileTree', () => {
     const fileTree = [createFileItem('src', { isDirectory: true }), createFileItem('main.ts')];
 
-    const result = getItemData(fileTree, rootId, 'main.ts');
+    const result = getItemData(indexFiles(fileTree), rootId, 'main.ts');
 
     expect(result.isFolder).toBe(false);
     expect(result.name).toBe('main.ts');
@@ -110,7 +113,7 @@ describe('getItemData', () => {
   it('should return isFolder true for virtual folder paths not in fileTree', () => {
     const fileTree = [createFileItem('src/utils/math.ts')];
 
-    const result = getItemData(fileTree, rootId, 'src');
+    const result = getItemData(indexFiles(fileTree), rootId, 'src');
 
     expect(result.isFolder).toBe(true);
     expect(result.name).toBe('src');
@@ -126,28 +129,28 @@ describe('isPathFolder', () => {
     const fileTree = [createFileItem('lib', { isDirectory: true })];
     const allPaths = new Set(['lib']);
 
-    expect(isPathFolder('lib', fileTree, allPaths)).toBe(true);
+    expect(isPathFolder('lib', indexFiles(fileTree), allPaths)).toBe(true);
   });
 
   it('should return false for explicit file entries', () => {
     const fileTree = [createFileItem('readme.md')];
     const allPaths = new Set(['readme.md']);
 
-    expect(isPathFolder('readme.md', fileTree, allPaths)).toBe(false);
+    expect(isPathFolder('readme.md', indexFiles(fileTree), allPaths)).toBe(false);
   });
 
   it('should return true for virtual folders inferred from nested paths', () => {
     const fileTree: FileItem[] = [];
     const allPaths = new Set(['src', 'src/index.ts']);
 
-    expect(isPathFolder('src', fileTree, allPaths)).toBe(true);
+    expect(isPathFolder('src', indexFiles(fileTree), allPaths)).toBe(true);
   });
 
   it('should return false for unknown paths not in fileTree or allPaths', () => {
     const fileTree: FileItem[] = [];
     const allPaths = new Set<string>();
 
-    expect(isPathFolder('nonexistent', fileTree, allPaths)).toBe(false);
+    expect(isPathFolder('nonexistent', indexFiles(fileTree), allPaths)).toBe(false);
   });
 });
 
@@ -164,7 +167,7 @@ describe('sortChildrenFoldersFirst', () => {
     ];
     const allPaths = new Set(['readme.md', 'src', 'package.json']);
 
-    const sorted = sortChildrenFoldersFirst(['readme.md', 'src', 'package.json'], fileTree, allPaths);
+    const sorted = sortChildrenFoldersFirst(['readme.md', 'src', 'package.json'], indexFiles(fileTree), allPaths);
 
     expect(sorted[0]).toBe('src');
     expect(sorted.indexOf('src')).toBeLessThan(sorted.indexOf('readme.md'));
@@ -181,10 +184,14 @@ describe('sortChildrenFoldersFirst', () => {
     ];
     const allPaths = new Set(['.tau', 'public', 'src', 'main.ts', 'README.md']);
 
-    const sorted = sortChildrenFoldersFirst(['main.ts', '.tau', 'README.md', 'public', 'src'], fileTree, allPaths);
+    const sorted = sortChildrenFoldersFirst(
+      ['main.ts', '.tau', 'README.md', 'public', 'src'],
+      indexFiles(fileTree),
+      allPaths,
+    );
 
-    const firstFile = sorted.findIndex((p) => !isPathFolder(p, fileTree, allPaths));
-    const lastFolder = sorted.findLastIndex((p) => isPathFolder(p, fileTree, allPaths));
+    const firstFile = sorted.findIndex((p) => !isPathFolder(p, indexFiles(fileTree), allPaths));
+    const lastFolder = sorted.findLastIndex((p) => isPathFolder(p, indexFiles(fileTree), allPaths));
     expect(lastFolder).toBeLessThan(firstFile);
   });
 
@@ -197,7 +204,7 @@ describe('sortChildrenFoldersFirst', () => {
     ];
     const allPaths = new Set(['alpha', 'beta', 'apple.ts', 'zebra.ts']);
 
-    const sorted = sortChildrenFoldersFirst(['zebra.ts', 'beta', 'apple.ts', 'alpha'], fileTree, allPaths);
+    const sorted = sortChildrenFoldersFirst(['zebra.ts', 'beta', 'apple.ts', 'alpha'], indexFiles(fileTree), allPaths);
 
     expect(sorted).toEqual(['alpha', 'beta', 'apple.ts', 'zebra.ts']);
   });
@@ -210,10 +217,50 @@ describe('sortChildrenFoldersFirst', () => {
     ];
     const allPaths = new Set(['src', 'lib', 'lib/utils', 'lib/utils/helper.ts', 'index.ts']);
 
-    const sorted = sortChildrenFoldersFirst(['index.ts', 'lib', 'src'], fileTree, allPaths);
+    const sorted = sortChildrenFoldersFirst(['index.ts', 'lib', 'src'], indexFiles(fileTree), allPaths);
 
     expect(sorted[0]).toBe('lib');
     expect(sorted[1]).toBe('src');
     expect(sorted[2]).toBe('index.ts');
+  });
+});
+
+describe('file-tree lookup work', () => {
+  it('should resolve a large sibling list without repeatedly scanning unrelated entries', () => {
+    let pathReads = 0;
+    const paths = Array.from({ length: 1000 }, (_, index) => `file-${String(index).padStart(4, '0')}.ts`);
+    const files = paths.map(
+      (path): FileItem => ({
+        ...createFileItem(path),
+        get path() {
+          pathReads++;
+          return path;
+        },
+      }),
+    );
+    const indexedFiles = indexFiles(files);
+    for (const path of paths) {
+      expect(getItemData(indexedFiles, rootId, path).name).toBe(path);
+    }
+    const children = [...paths].reverse();
+    expect(sortChildrenFoldersFirst(children, indexedFiles, new Set(paths))).toEqual(paths);
+    expect(children).toEqual([...paths].reverse());
+    expect(pathReads).toBeLessThanOrEqual(paths.length * 3);
+  });
+});
+
+describe('file-tree snapshot replacement', () => {
+  it('should reflect replacement entries without retaining removed file data', () => {
+    const original = createFileItem('src');
+    const before = indexFiles([original]);
+    const after = indexFiles([createFileItem('src/main.ts')]);
+    expect(getItemData(before, rootId, 'src')).toEqual({
+      path: 'src',
+      name: 'src',
+      isFolder: false,
+      content: original.content,
+    });
+    expect(getItemData(after, rootId, 'src')).toEqual({ path: 'src', name: 'src', isFolder: true });
+    expect(getItemData(after, rootId, 'src/main.ts').isFolder).toBe(false);
   });
 });

@@ -93,6 +93,7 @@ import { getFileExtension, encodeTextFile } from '#utils/filesystem.utils.js';
 import { downloadBlob, asBuffer } from '@taucad/utils/file';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFileTreeSelector } from '#hooks/use-file-tree.js';
+import { useDirectoryListing } from '@taucad/fs-client/react/use-directory-listing';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
@@ -525,6 +526,8 @@ export const ChatEditorFileTree = memo(function ({
   );
 
   const { treeService } = fileManager;
+  const [rootListingRetry, setRootListingRetry] = useState(0);
+  const rootListing = useDirectoryListing(treeService, '', { reloadToken: rootListingRetry });
 
   /* Every row re-renders with this component, so it holds the snapshot it last drew until a row
    * would change: sizes and mtimes in it may be stale, and nothing below reads them. */
@@ -551,12 +554,12 @@ export const ChatEditorFileTree = memo(function ({
   /** The user's access is `source !== 'project'` (ruling P10), never `agentAccess`. */
   const isReadOnlyPath = useCallback((path: string): boolean => presentationFor(path).readOnly, [presentationFor]);
 
-  const fileTree = useMemo((): FileItem[] => {
+  const fileTree = useMemo((): ReadonlyMap<string, FileItem> => {
     if (fileTreeMap.size === 0) {
-      return [];
+      return new Map();
     }
 
-    return [...fileTreeMap.values()]
+    const entries: FileItem[] = [...fileTreeMap.values()]
       .filter((entry) => !isEditorSystemArtifactPath(entry.path))
       .map((entry) => ({
         id: entry.path,
@@ -566,6 +569,7 @@ export const ChatEditorFileTree = memo(function ({
         language: getIconIdForFilename(entry.path),
         isDirectory: entry.type === 'dir',
       }));
+    return new Map(entries.map((entry) => [entry.path, entry]));
   }, [fileTreeMap]);
 
   // Tree state management
@@ -800,7 +804,7 @@ export const ChatEditorFileTree = memo(function ({
     const paths = new Set<string>();
     paths.add(rootId);
 
-    for (const file of fileTree) {
+    for (const file of fileTree.values()) {
       const parts = file.path.split('/');
       let currentPath = '';
 
@@ -1816,7 +1820,7 @@ export const ChatEditorFileTree = memo(function ({
 
   const fileActions = (
     <FloatingPanelButtonGroup className='shrink-0'>
-      {readOnly ? null : (
+      {readOnly || rootListing.kind !== 'ready' ? null : (
         <DropdownMenu modal={false}>
           <FloatingPanelMenuButton asChild tooltip='Create new file' aria-label='Create new file'>
             <DropdownMenuTrigger>
@@ -1861,7 +1865,7 @@ export const ChatEditorFileTree = memo(function ({
           </DropdownMenuContent>
         </DropdownMenu>
       )}
-      {readOnly ? null : (
+      {readOnly || rootListing.kind !== 'ready' ? null : (
         <FloatingPanelMenuButton
           aria-label='Create new folder'
           tooltip='Create new folder'
@@ -1967,7 +1971,29 @@ export const ChatEditorFileTree = memo(function ({
           </div>
 
           <AssistiveTreeDescription tree={tree} getLabel={getFileTreeAssistiveDndLabel} />
-          {tree.getItems().length > 0 || pendingFolder !== undefined || pendingFile !== undefined ? (
+          {rootListing.kind === 'error' ? (
+            <div role='alert' aria-label='Files unavailable' className='p-3 text-sm'>
+              <p>{rootListing.cause.message}</p>
+              <Button
+                variant='outline'
+                size='sm'
+                onClick={() => {
+                  setRootListingRetry((value) => value + 1);
+                }}
+              >
+                Try again
+              </Button>
+            </div>
+          ) : rootListing.kind === 'loading' || rootListing.kind === 'unready' ? (
+            <div
+              role='status'
+              aria-label='Loading files'
+              aria-busy='true'
+              className='p-3 text-sm text-muted-foreground'
+            >
+              Loading files…
+            </div>
+          ) : tree.getItems().length > 0 || pendingFolder !== undefined || pendingFile !== undefined ? (
             <div
               data-tree-container
               {...tree.getContainerProps()}

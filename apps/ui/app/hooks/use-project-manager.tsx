@@ -102,6 +102,8 @@ import { selectWorkspaceConnectionState, workspaceConnectionMachine } from '#hoo
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { tauCloudIntent, withNamedLock } from '#hooks/use-cloud-projects.js';
 import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
+import { readLocalProjectOpenPerformance } from '#lib/project-open-performance.js';
+import type { ProjectOpenOutcome } from '#lib/project-open-performance.js';
 import type {
   PreparedWorkspaceCatalog,
   RegisteredWorkspace,
@@ -766,6 +768,9 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   const workspaceTelemetry = useWorkspaceTelemetry();
   const projectNameClient = useProjectNameClient();
   const discoveryReadinessRef = useRef<Promise<void> | undefined>(undefined);
+  const journalReadinessRef = useRef<Promise<PendingProjectOperation[]> | undefined>(undefined);
+  /** Only callers already waiting for bootstrap may reuse its completed discovery generation. */
+  const discoveryBootstrapCompleteRef = useRef(false);
   const recoveryLoopRef = useRef<Promise<void> | undefined>(undefined);
   const recoveriesRef = useRef(new Map<string, PendingProjectRecovery>());
   /** Settle attempts per pending operation this session (DF11 retry cap). */
@@ -1703,10 +1708,18 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       const quarantinedLocators = new Map(
         options?.quarantinedLocators ?? quarantinedLocatorsOf(recoveriesRef.current.values()),
       );
-      const [discovered, persistedConfigs] = await Promise.all([
-        fileManager.client.listProjectManifests(),
-        getAllProjectFileSystemConfigs(),
-      ]);
+      const discoverySpan = readLocalProjectOpenPerformance()?.begin('discovery');
+      const scan = async (): Promise<ProjectDiscoveryResult> => {
+        try {
+          const discovered = await fileManager.client.listProjectManifests();
+          discoverySpan?.finish('ok', { scanGenerations: 1, manifestResults: discovered.entries.length });
+          return discovered;
+        } catch (error) {
+          discoverySpan?.finish('error');
+          throw error;
+        }
+      };
+      const [discovered, persistedConfigs] = await Promise.all([scan(), getAllProjectFileSystemConfigs()]);
       for (const [locator, projectId] of quarantinedLocatorsOf(recoveriesRef.current.values())) {
         quarantinedLocators.set(locator, projectId);
       }
@@ -2028,17 +2041,36 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     [getReadiedWorker, invalidateProjectsList],
   );
 
-  const ensureDiscoveryReady = useCallback(async (): Promise<void> => {
-    if (discoveryReadinessRef.current) {
-      return discoveryReadinessRef.current;
+  const ensureJournalReady = useCallback(async (): Promise<PendingProjectOperation[]> => {
+    if (journalReadinessRef.current) {
+      return journalReadinessRef.current;
     }
-    const promise = (async () => {
+    const pending = (async () => {
       const worker = await getReadiedWorker();
       const operations = await worker.getPendingProjectOperations();
       recoveriesRef.current = new Map(
         operations.map((operation) => [operation.operationId, pendingOperationRecovery(operation)]),
       );
       setRecoveries([...recoveriesRef.current.values()]);
+      return operations;
+    })();
+    journalReadinessRef.current = pending;
+    try {
+      return await pending;
+    } catch (error) {
+      journalReadinessRef.current = undefined;
+      throw error;
+    }
+  }, [getReadiedWorker]);
+
+  const ensureDiscoveryReady = useCallback(async (): Promise<void> => {
+    if (discoveryReadinessRef.current) {
+      return discoveryReadinessRef.current;
+    }
+    discoveryBootstrapCompleteRef.current = false;
+    const promise = (async () => {
+      const worker = await getReadiedWorker();
+      const operations = await ensureJournalReady();
       await discoverProjects({ quarantinedLocators: quarantinedLocatorsOf(recoveriesRef.current.values()) });
 
       const loop = (async (): Promise<void> => {
@@ -2049,15 +2081,17 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         /* oxlint-enable no-await-in-loop */
       })();
       recoveryLoopRef.current = loop;
+      discoveryBootstrapCompleteRef.current = true;
     })();
     discoveryReadinessRef.current = promise;
     try {
       await promise;
     } catch (error) {
       discoveryReadinessRef.current = undefined;
+      discoveryBootstrapCompleteRef.current = false;
       throw error;
     }
-  }, [discoverProjects, getReadiedWorker, settleRecovery]);
+  }, [discoverProjects, ensureJournalReady, getReadiedWorker, settleRecovery]);
 
   /**
    * Release the rows a cleared browser left behind for a project id (R14).
@@ -2227,81 +2261,132 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
 
   const getProjectRouteAccess = useCallback(
     async (projectId: string): Promise<ProjectRouteAccess> => {
-      await ensureDiscoveryReady();
-      const worker = await getReadiedWorker();
-      // A manifest/root event can supersede a shared pass while it is in flight.
-      /* oxlint-disable no-await-in-loop -- A route must retry sequentially until its discovery epoch is current. */
-      for (;;) {
-        const recovery = [...recoveriesRef.current.values()].find((entry) => entry.projectId === projectId);
-        if (recovery?.status === 'recovering') {
-          return { status: 'recovering', recovery };
+      const accessSpan = readLocalProjectOpenPerformance()?.begin('access.check');
+      let accessOutcome: ProjectOpenOutcome = 'error';
+      let cacheHits = 0;
+      try {
+        const operations = await ensureJournalReady();
+        // Pending operations retain the existing discovery-before-replay contract.
+        if (operations.length > 0) {
+          await ensureDiscoveryReady();
         }
-        if (recovery?.status === 'failed') {
-          return { status: 'recovery-failed', recovery };
-        }
-        const snapshot = discoverySnapshotRef.current;
-        let epoch = discoveryEpochRef.current;
-        let discovery: ProjectDiscoveryResult;
-        if (snapshot?.epoch === epoch) {
-          discovery = snapshot.result;
-        } else {
-          const pending = discoverProjects();
-          epoch = discoveryPassEpochRef.current ?? epoch;
-          discovery = await pending;
+        const worker = await getReadiedWorker();
+        // A manifest/root event can supersede a shared pass while it is in flight.
+        /* oxlint-disable no-await-in-loop -- A route must retry sequentially until its discovery epoch is current. */
+        for (;;) {
+          const recovery = [...recoveriesRef.current.values()].find((entry) => entry.projectId === projectId);
+          if (recovery?.status === 'recovering') {
+            accessOutcome = 'unavailable';
+            return { status: 'recovering', recovery };
+          }
+          if (recovery?.status === 'failed') {
+            accessOutcome = 'unavailable';
+            return { status: 'recovery-failed', recovery };
+          }
+          const verificationEpoch = discoveryEpochRef.current;
+          const verification =
+            operations.length === 0 &&
+            recoveriesRef.current.size === 0 &&
+            discoverySnapshotRef.current?.epoch !== verificationEpoch
+              ? await fileManager.client.verifyProjectRoute({ projectId })
+              : ({ status: 'discovery-required' } as const);
+          if (verification.status === 'superseded' || verificationEpoch !== discoveryEpochRef.current) {
+            continue;
+          }
+          if (verification.status === 'unavailable') {
+            accessOutcome = 'unavailable';
+            return { status: 'unavailable' };
+          }
+          if (verification.status === 'verified') {
+            const library = await ensureProjectLibraryState(worker, projectId);
+            if (verificationEpoch !== discoveryEpochRef.current) {
+              continue;
+            }
+            accessOutcome = 'ok';
+            const project = { ...verification.project.manifest, id: verification.project.projectId };
+            return library.deletedAt === undefined ? { status: 'ready', project } : { status: 'trashed', project };
+          }
+          await ensureDiscoveryReady();
+          const snapshot = discoverySnapshotRef.current;
+          let epoch = discoveryEpochRef.current;
+          let discovery: ProjectDiscoveryResult;
+          if (snapshot?.epoch === epoch) {
+            cacheHits += 1;
+            discovery = snapshot.result;
+          } else {
+            const pending = discoverProjects();
+            epoch = discoveryPassEpochRef.current ?? epoch;
+            discovery = await pending;
+            if (epoch !== discoveryEpochRef.current) {
+              continue;
+            }
+          }
+          const valid = discovery.entries.find(
+            (entry): entry is Extract<ProjectDiscoveryEntry, { status: 'valid' }> =>
+              entry.status === 'valid' && entry.projectId === projectId,
+          );
+          if (valid) {
+            const library = await ensureProjectLibraryState(worker, projectId);
+            if (epoch !== discoveryEpochRef.current) {
+              continue;
+            }
+            accessOutcome = 'ok';
+            return library.deletedAt === undefined
+              ? { status: 'ready', project: { ...valid.manifest, id: valid.projectId } }
+              : { status: 'trashed', project: { ...valid.manifest, id: valid.projectId } };
+          }
+          if (discovery.entries.some((entry) => entry.status === 'route-blocked' && entry.projectId === projectId)) {
+            accessOutcome = 'unavailable';
+            return { status: 'unavailable' };
+          }
+          if (discovery.entries.some((entry) => entry.status === 'duplicate-id' && entry.projectId === projectId)) {
+            accessOutcome = 'unavailable';
+            return { status: 'conflict' };
+          }
+          const config = await getProjectFileSystemConfig(projectId);
           if (epoch !== discoveryEpochRef.current) {
             continue;
           }
-        }
-        const valid = discovery.entries.find(
-          (entry): entry is Extract<ProjectDiscoveryEntry, { status: 'valid' }> =>
-            entry.status === 'valid' && entry.projectId === projectId,
-        );
-        if (valid) {
-          const library = await ensureProjectLibraryState(worker, projectId);
-          if (epoch !== discoveryEpochRef.current) {
-            continue;
+          if (
+            config &&
+            config.backend !== 'memory' &&
+            discovery.roots.some(
+              (root) =>
+                root.status === 'inaccessible' &&
+                persistentStorageRootKey(root.root) === persistentStorageRootKey(config),
+            )
+          ) {
+            accessOutcome = 'unavailable';
+            return { status: 'unavailable' };
           }
-          return library.deletedAt === undefined
-            ? { status: 'ready', project: { ...valid.manifest, id: valid.projectId } }
-            : { status: 'trashed', project: { ...valid.manifest, id: valid.projectId } };
+          const identityFailure = discovery.entries.find(
+            (entry) =>
+              entry.status === 'invalid' &&
+              routeBindsLocator(config, entry.locator) &&
+              (entry.issue.code === 'identity-invalid' ||
+                entry.issue.code === 'identity-conflict' ||
+                entry.issue.code === 'identity-unavailable'),
+          );
+          if (identityFailure?.status === 'invalid') {
+            accessOutcome = 'unavailable';
+            return { status: identityFailure.issue.code === 'identity-unavailable' ? 'unavailable' : 'conflict' };
+          }
+          accessOutcome = 'missing';
+          return { status: 'missing' };
         }
-        if (discovery.entries.some((entry) => entry.status === 'route-blocked' && entry.projectId === projectId)) {
-          return { status: 'unavailable' };
-        }
-        if (discovery.entries.some((entry) => entry.status === 'duplicate-id' && entry.projectId === projectId)) {
-          return { status: 'conflict' };
-        }
-        const config = await getProjectFileSystemConfig(projectId);
-        if (epoch !== discoveryEpochRef.current) {
-          continue;
-        }
-        if (
-          config &&
-          config.backend !== 'memory' &&
-          discovery.roots.some(
-            (root) =>
-              root.status === 'inaccessible' &&
-              persistentStorageRootKey(root.root) === persistentStorageRootKey(config),
-          )
-        ) {
-          return { status: 'unavailable' };
-        }
-        const identityFailure = discovery.entries.find(
-          (entry) =>
-            entry.status === 'invalid' &&
-            routeBindsLocator(config, entry.locator) &&
-            (entry.issue.code === 'identity-invalid' ||
-              entry.issue.code === 'identity-conflict' ||
-              entry.issue.code === 'identity-unavailable'),
-        );
-        if (identityFailure?.status === 'invalid') {
-          return { status: identityFailure.issue.code === 'identity-unavailable' ? 'unavailable' : 'conflict' };
-        }
-        return { status: 'missing' };
+        /* oxlint-enable no-await-in-loop */
+      } finally {
+        accessSpan?.finish(accessOutcome, { cacheHits });
       }
-      /* oxlint-enable no-await-in-loop */
     },
-    [discoverProjects, ensureDiscoveryReady, ensureProjectLibraryState, getReadiedWorker],
+    [
+      discoverProjects,
+      ensureDiscoveryReady,
+      ensureJournalReady,
+      ensureProjectLibraryState,
+      fileManager.client,
+      getReadiedWorker,
+    ],
   );
 
   const updateProject = useCallback(
@@ -2555,14 +2640,38 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
 
   const getProjectListing = useCallback(
     async (options?: { includeDeleted?: boolean }): Promise<ProjectListing> => {
+      // Capture before awaiting: a later explicit refresh must still run discovery,
+      // even when the settled bootstrap left a current route-access snapshot.
+      let mayReuseBootstrap = !discoveryBootstrapCompleteRef.current;
       await ensureDiscoveryReady();
-      const listing = await buildProjectListing(await discoverProjects());
-      return options?.includeDeleted
-        ? listing
-        : {
-            ...listing,
-            projects: listing.projects.filter((project) => project.library.deletedAt === undefined),
-          };
+      /* oxlint-disable no-await-in-loop -- A filesystem event may invalidate the generation during listing enrichment. */
+      for (;;) {
+        const snapshot = mayReuseBootstrap ? discoverySnapshotRef.current : undefined;
+        mayReuseBootstrap = false;
+        let epoch = discoveryEpochRef.current;
+        let discovery: ProjectDiscoveryResult;
+        if (snapshot?.epoch === epoch) {
+          discovery = snapshot.result;
+        } else {
+          const pending = discoverProjects();
+          epoch = discoveryPassEpochRef.current ?? epoch;
+          discovery = await pending;
+          if (epoch !== discoveryEpochRef.current) {
+            continue;
+          }
+        }
+        const listing = await buildProjectListing(discovery);
+        if (epoch !== discoveryEpochRef.current) {
+          continue;
+        }
+        return options?.includeDeleted
+          ? listing
+          : {
+              ...listing,
+              projects: listing.projects.filter((project) => project.library.deletedAt === undefined),
+            };
+      }
+      /* oxlint-enable no-await-in-loop */
     },
     [buildProjectListing, discoverProjects, ensureDiscoveryReady],
   );

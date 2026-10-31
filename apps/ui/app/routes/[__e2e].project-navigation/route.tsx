@@ -8,6 +8,15 @@ import { useFileManager } from '#hooks/use-file-manager.js';
 import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
 import { projectUrl } from '#utils/project-url.utils.js';
 import { homeProjectCreationLocation } from '#types/project-creation-location.types.js';
+import {
+  parseProjectOpenFixtureOptions,
+  projectOpenOtherFiles,
+  projectOpenOtherManifest,
+  projectOpenSeedReceiptKey,
+  projectOpenTargetFiles,
+  projectOpenTargetManifest,
+  projectOpenTargetSourceSha256,
+} from '#routes/[__e2e].project-navigation/project-open-fixture.js';
 
 const encode = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text);
 const alphaEntryPath = 'alpha.ts';
@@ -42,12 +51,20 @@ export const loader = async (): Promise<Response> => {
 };
 
 const ProjectNavigationDebugRoute = (): React.JSX.Element => {
-  const { createProject, createChat, getChatsForResource, getProjectLibraryState, patchChat, isLoading } =
-    useProjectManager();
+  const {
+    createProject,
+    createChat,
+    getChatsForResource,
+    getProjectLibraryState,
+    getProjectListing,
+    patchChat,
+    isLoading,
+  } = useProjectManager();
   const { recordFiles } = useFileManager();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const seedActivityChats = searchParams.get('activity') === '1';
+  const seedProjectOpen = searchParams.get('projectOpen') === '1';
   const [error, setError] = React.useState<string>();
   const seedStarted = React.useRef(false);
 
@@ -59,6 +76,60 @@ const ProjectNavigationDebugRoute = (): React.JSX.Element => {
 
     const seed = async (): Promise<void> => {
       try {
+        if (seedProjectOpen) {
+          const options = parseProjectOpenFixtureOptions(searchParams);
+          sessionStorage.removeItem(projectOpenSeedReceiptKey);
+          const before = await getProjectListing({ includeDeleted: true });
+          if (before.projects.length > 0 || before.conflicts.length > 0 || before.recoveries.length > 0) {
+            throw new Error('Project-open fixture requires an empty project catalog.');
+          }
+          const target = await createProject({
+            activeKernel: 'replicad',
+            location: homeProjectCreationLocation,
+            editorState: {
+              panelState: {
+                desktopLayout: { chatOpen: true, workbenchOpen: true },
+              },
+            },
+            project: projectOpenTargetManifest(),
+            files: projectOpenTargetFiles(options),
+          });
+          /* oxlint-disable no-await-in-loop -- Each production create commits before the next catalog entry is seeded. */
+          for (let index = 1; index < options.totalProjects; index += 1) {
+            await createProject({
+              activeKernel: 'replicad',
+              location: homeProjectCreationLocation,
+              chat: false,
+              deferInitialView: true,
+              project: projectOpenOtherManifest(index),
+              files: projectOpenOtherFiles(),
+            });
+          }
+          /* oxlint-enable no-await-in-loop */
+          const listing = await getProjectListing({ includeDeleted: true });
+          if (
+            listing.projects.length !== options.totalProjects ||
+            !listing.projects.some((project) => project.projectId === target.id) ||
+            listing.conflicts.length > 0
+          ) {
+            throw new Error('Project-open fixture did not publish the requested valid catalog.');
+          }
+          const targetUrl = projectUrl(target.slugs);
+          sessionStorage.setItem(
+            projectOpenSeedReceiptKey,
+            JSON.stringify({
+              schemaVersion: 1,
+              totalProjects: options.totalProjects,
+              targetFileCount: options.targetFileCount,
+              layout: options.layout,
+              targetProjectId: target.id,
+              targetUrl,
+              targetSourceSha256: await projectOpenTargetSourceSha256(),
+            }),
+          );
+          void navigate(targetUrl);
+          return;
+        }
         const projectA = await createProject({
           activeKernel: 'replicad',
           location: homeProjectCreationLocation,
@@ -131,10 +202,13 @@ const ProjectNavigationDebugRoute = (): React.JSX.Element => {
     getChatsForResource,
     recordFiles,
     getProjectLibraryState,
+    getProjectListing,
     isLoading,
     navigate,
     patchChat,
     seedActivityChats,
+    seedProjectOpen,
+    searchParams,
   ]);
 
   return error ? <div role='alert'>{error}</div> : <Loader />;

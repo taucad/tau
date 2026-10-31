@@ -126,6 +126,11 @@ export type KclExportResult = {
   error?: string;
 };
 
+type KclVector = { x: number; y: number; z: number };
+
+/** An engine solid's axis-aligned box in millimetres, Z up. */
+export type KclSolidBounds = { id: string; min: number[]; max: number[] };
+
 type KclOperationOptions = {
   settings?: PartialDeep<Configuration>;
   signal?: AbortSignal;
@@ -755,34 +760,52 @@ export class KclUtilities {
   }
 
   /**
-   * Ids of the solids in the engine scene, in the engine's scene order. Zoo's glTF export lists the same solids in
-   * the reverse of this order (verified live against booleans, patterns and unnamed bodies); the order is not a
-   * documented contract, so callers check the count against the export before relying on it.
+   * Engine bounding boxes of the scene's solids whose ids are in `solidIds`, in millimetres with Z up. Zoo's glTF
+   * export carries no solid ids and its solid order differs from the scene's, so a body is joined to its solid by
+   * box. The engine pads its boxes, but each one contains its solid.
    *
-   * @returns the solid ids, or an empty array when the engine cannot answer
+   * @param solidIds - the solids to measure; solids not in the scene are skipped
+   * @returns the boxes the engine answered, or an empty array when it cannot answer
    */
-  public async getSceneSolidIds({ signal }: KclOperationOptions = {}): Promise<string[]> {
+  public async getSceneSolidBounds(
+    solidIds: ReadonlySet<string>,
+    { signal }: KclOperationOptions = {},
+  ): Promise<KclSolidBounds[]> {
     return this.withAbort(signal, async () => {
-      const bridge = this.engineManager?.bridge;
-      if (!bridge) {
-        return [];
-      }
-      const id = randomUuid();
-      const cmd = { type: 'scene_get_entity_ids', filter: ['solid3d'], skip: 0, take: 1000 };
       try {
-        const response = decode(
-          await bridge.sendModelingCommandFromWasm(
-            id,
-            '{}',
-            // eslint-disable-next-line @typescript-eslint/naming-convention -- Kittycad wire JSON field name
-            JSON.stringify({ type: 'modeling_cmd_req', cmd_id: id, cmd }),
-            '{}',
-          ),
-        ) as { resp?: { data?: { modeling_response?: { data?: { entity_ids?: unknown } } } } };
-        const entityIds = response.resp?.data?.modeling_response?.data?.entity_ids;
-        return Array.isArray(entityIds) ? entityIds.flat().filter((entry) => typeof entry === 'string') : [];
+        const scene = await this.sendModelingQuery<{ entity_ids?: unknown }>({
+          type: 'scene_get_entity_ids',
+          filter: ['solid3d'],
+          skip: 0,
+          take: 1000,
+        });
+        const ids = Array.isArray(scene?.entity_ids)
+          ? scene.entity_ids.flat().filter((id): id is string => typeof id === 'string' && solidIds.has(id))
+          : [];
+        const boxes = await Promise.all(
+          ids.map(async (id) => {
+            const box = await this.sendModelingQuery<{ center?: KclVector; dimensions?: KclVector }>({
+              type: 'bounding_box',
+              // eslint-disable-next-line @typescript-eslint/naming-convention -- Kittycad wire JSON field names
+              entity_ids: [id],
+              // eslint-disable-next-line @typescript-eslint/naming-convention -- Kittycad wire JSON field names
+              output_unit: 'mm',
+            });
+            if (!box?.center || !box.dimensions) {
+              return undefined;
+            }
+            const { center, dimensions } = box;
+            const axes = ['x', 'y', 'z'] as const;
+            return {
+              id,
+              min: axes.map((axis) => center[axis] - dimensions[axis] / 2),
+              max: axes.map((axis) => center[axis] + dimensions[axis] / 2),
+            };
+          }),
+        );
+        return boxes.filter((box) => box !== undefined);
       } catch (error) {
-        log.warn('Scene solid id query failed:', error);
+        log.warn('Scene solid bounds query failed:', error);
         return [];
       }
     });
@@ -831,6 +854,23 @@ export class KclUtilities {
    * Drops cached engine state when the Zoo modeling WebSocket closes (idle timeout, network drop, etc.) so the next
    * {@link executeProgram} / {@link exportFromMemory} path runs {@link initializeEngine} again with a fresh session.
    */
+  private async sendModelingQuery<T>(cmd: Record<string, unknown>): Promise<T | undefined> {
+    const bridge = this.engineManager?.bridge;
+    if (!bridge) {
+      return undefined;
+    }
+    const id = randomUuid();
+    const response = decode(
+      await bridge.sendModelingCommandFromWasm(
+        id,
+        '{}',
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Kittycad wire JSON field name
+        JSON.stringify({ type: 'modeling_cmd_req', cmd_id: id, cmd }),
+        '{}',
+      ),
+    ) as { resp?: { data?: { modeling_response?: { data?: T } } } };
+    return response.resp?.data?.modeling_response?.data;
+  }
   private invalidateEngineDueToSocketClose(): void {
     this.engineSocketCloseUnsubscribe?.();
     this.engineSocketCloseUnsubscribe = undefined;

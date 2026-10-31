@@ -11,10 +11,94 @@ import type {
 import { kittyCadBoundaryRepresentationExtension, tauCadTopologyExtension } from '@taucad/runtime/types';
 import type { JSONObject } from '@taucad/runtime/types';
 
+/** A named solid's engine box in millimetres, Z up; the engine pads it, so it contains the solid. */
+export type NamedSolidBounds = { name: string; min: readonly number[]; max: readonly number[] };
+
+type SolidBox = { min: readonly number[]; max: readonly number[] };
+
 type EnrichZooGltfTopologyOptions = {
   format: 'glb' | 'gltf';
-  /** Body names by B-rep solid index; ignored unless it names every solid, since the engine join is by order. */
-  solidNames?: ReadonlyArray<string | undefined>;
+  /** Engine boxes of named solids; each names the body whose mesh box it contains most tightly. */
+  namedSolidBounds?: readonly NamedSolidBounds[];
+};
+
+// 0.05 mm: export tessellation and engine rounding.
+const boundsTolerance = 0.05;
+
+/**
+ * Name glTF solids from engine boxes, since the export carries no solid ids and lists solids in no fixed order. A box
+ * is a candidate for a solid when it contains the solid's mesh box; the tightest pairs are taken first, and a solid
+ * no box contains keeps its default name.
+ *
+ * @param solidBoxes - each B-rep solid's mesh box in millimetres, Z up, by solid index
+ * @param namedBounds - the engine boxes of named solids
+ * @returns the body name by solid index
+ */
+export const matchSolidNamesByBounds = (
+  solidBoxes: ReadonlyArray<SolidBox | undefined>,
+  namedBounds: readonly NamedSolidBounds[],
+): Array<string | undefined> => {
+  // ponytail: greedy over all pairs, O(n·m log); a true assignment solver if greedy ever mislabels.
+  const pairs: Array<{ cost: number; solidIndex: number; boundsIndex: number }> = [];
+  for (const [solidIndex, box] of solidBoxes.entries()) {
+    if (!box) {
+      continue;
+    }
+    for (const [boundsIndex, bounds] of namedBounds.entries()) {
+      let cost = 0;
+      let contains = true;
+      for (let axis = 0; axis < 3; axis += 1) {
+        const solidMin = box.min[axis]!;
+        const solidMax = box.max[axis]!;
+        const boundsMin = bounds.min[axis]!;
+        const boundsMax = bounds.max[axis]!;
+        contains &&= boundsMin <= solidMin + boundsTolerance && boundsMax >= solidMax - boundsTolerance;
+        cost += Math.log((boundsMax - boundsMin + boundsTolerance) / (solidMax - solidMin + boundsTolerance));
+      }
+      if (contains) {
+        pairs.push({ cost, solidIndex, boundsIndex });
+      }
+    }
+  }
+  pairs.sort((first, second) => first.cost - second.cost);
+  const names: Array<string | undefined> = solidBoxes.map(() => undefined);
+  const usedBounds = new Set<number>();
+  for (const { solidIndex, boundsIndex } of pairs) {
+    if (names[solidIndex] === undefined && !usedBounds.has(boundsIndex)) {
+      names[solidIndex] = namedBounds[boundsIndex]!.name;
+      usedBounds.add(boundsIndex);
+    }
+  }
+  return names;
+};
+
+/**
+ * A mesh's box in millimetres, Z up, from its glTF (metres, Y up) position bounds; Zoo exports solids in world space.
+ *
+ * @param mesh - the solid's mesh
+ * @returns the box, or `undefined` when the mesh has no positions
+ */
+const getMeshBox = (mesh: GltfTransformMesh | undefined): SolidBox | undefined => {
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  for (const primitive of mesh?.listPrimitives() ?? []) {
+    const position = primitive.getAttribute('POSITION');
+    if (!position) {
+      continue;
+    }
+    const low = position.getMin([]);
+    const high = position.getMax([]);
+    for (let axis = 0; axis < 3; axis += 1) {
+      min[axis] = Math.min(min[axis]!, low[axis]!);
+      max[axis] = Math.max(max[axis]!, high[axis]!);
+    }
+  }
+  if (min[0] === Infinity) {
+    return undefined;
+  }
+  const [minX, minY, minZ] = min.map((value) => value * 1000) as [number, number, number];
+  const [maxX, maxY, maxZ] = max.map((value) => value * 1000) as [number, number, number];
+  return { min: [minX, -maxZ, minY], max: [maxX, -minZ, maxY] };
 };
 
 type KittyCadSolid = {
@@ -455,7 +539,17 @@ export async function enrichZooGltfTopology(
       (mesh: GltfTransformMesh) =>
         mesh.listPrimitives().filter((primitive) => primitive.getMode() === Primitive.Mode['TRIANGLES']).length,
     );
-  const solidNames = options.solidNames?.length === brepPayload.solids.length ? options.solidNames : undefined;
+  const meshes = root.listMeshes();
+  const solidNames = options.namedSolidBounds?.length
+    ? matchSolidNamesByBounds(
+        brepPayload.solids.map((solid, solidIndex) => {
+          const meshIndex =
+            typeof solid?.mesh === 'number' ? solid.mesh : solidNodesBySolidIndex.get(solidIndex)?.[0]?.meshIndex;
+          return meshIndex === undefined ? undefined : getMeshBox(meshes[meshIndex]);
+        }),
+        options.namedSolidBounds,
+      )
+    : undefined;
   const topology = buildTopologyPayload({
     payload: brepPayload,
     meshPrimitiveCounts,

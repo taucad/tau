@@ -3,13 +3,12 @@ title: 'Filesystem Context Policy'
 description: 'Rules for the filesystem-backed context management pipeline: transcripts, tool offloading, skills, memory, compaction, and middleware ordering.'
 status: active
 created: '2026-03-24'
-updated: '2026-09-23'
+updated: '2026-10-30'
 related:
   - docs/policy/context-engineering-policy.md
   - docs/policy/filesystem-authority-policy.md
   - docs/research/client-host-topology-and-filesystem-authority.md
   - docs/research/transcript-search-architecture.md
-  - docs/research/harness-cache-hygiene-audit.md
   - docs/research/chat-compaction-safety-blueprint.md
 ---
 
@@ -50,13 +49,15 @@ Never increase the offloading threshold without measuring the impact on context 
 
 ### 4. Skills and Memory via Filesystem
 
-| Feature       | Source                                                       | Middleware                      | Loading                                                              |
-| ------------- | ------------------------------------------------------------ | ------------------------------- | -------------------------------------------------------------------- |
-| Skills        | `.agents/skills/` (client-assembled catalog)                 | `createClientContextMiddleware` | Metadata block on the system channel; body on `use_skill` activation |
-| Memory        | Client-assembled AGENTS.md payload (`contextPayload.memory`) | `createClientContextMiddleware` | HumanMessage on the message channel, per request                     |
-| Recent skills | LangGraph store, per-chat namespace                          | `createRecentSkillsMiddleware`  | Fingerprint-reconciled; content restored after compaction            |
+| Feature       | Source                                         | Loading                                                                   |
+| ------------- | ---------------------------------------------- | ------------------------------------------------------------------------- |
+| Skills        | `.agents/skills/` (client-assembled catalog)   | Metadata in the turn context; body on `use_skill` activation              |
+| Memory        | Client-assembled AGENTS.md payload (`memory`)  | User-role `<system-reminder>` message in the turn context                 |
+| Recent skills | `RecentSkillsPort`, per-chat                   | Fingerprint-reconciled; content restored after a compaction summary       |
 
-Do not add static skill or memory content to the system prompt. Let the middleware load it from the client payload / filesystem so users can edit, version, and customize it.
+`createTurnContextSnapshot` (`packages/agent-host/src/harness/cad-middleware.ts`) resolves all three once per turn, and the session commits the result with `turn.history-projection-committed` before the first model call, so a replay sees the exact context the model saw.
+
+Do not add static skill or memory content to the system prompt. Let the turn context load it from the client payload / filesystem so users can edit, version, and customize it.
 
 ### 5. Context Compaction Pipeline
 
@@ -77,24 +78,18 @@ Invariants:
 
 Tests for this pipeline drive `createAgentSession` through the real middleware chain; they do not hand-populate `MessageIdentities` (`compaction.safety.test.ts`). Evidence: `docs/research/chat-compaction-safety-blueprint.md`.
 
-### 6. Middleware Ordering
+### 6. Model-Call Middleware Ordering
 
-The middleware chain order in `chat.service.ts` is load-bearing (earlier entries wrap outer and mutate the effective request first):
+`packages/agent-host/src/harness/session.ts` composes pi's single `streamFn` slot with `composeModelCallMiddleware`; the first entry is outermost:
 
 ```
-1. Tool metrics + error handling + input compat   (observe tool calls)
-2. Tool offloading → result budget → trimmer      (reduce results before budgeting)
-3. Token-usage context + agent safeguards         (reminders counted by compaction)
-4. Interrupt recovery + message sanitization      (clean content)
-5. Client context (skills + memory) + recent skills
-6. Prompt caching (modelSettings cache_control)
-7. Compaction                                      (sees the final effective request)
-8. Cross-provider content normalizer               (after compaction rebuilds AIMessages)
-9. Logging + observability
-10. Transcript                                     (captures final events)
+1. Compaction            (outermost: an overflow retry re-enters every request-shaping middleware)
+2. Tool-result trimmer   (shapes structured results for the model)
+3. Safeguards            (loop and repetition guards; also owns `transformContext`)
+4. LaTeX delimiters      (normalises the final assistant text)
 ```
 
-**Why**: every middleware that mutates the effective ModelRequest (result trimming, reminders, skills/memory injection, cache settings) runs **before** compaction so the budget decision evaluates exactly the payload the provider would receive; the normalizer runs **after** compaction because LangChain rebuilds AIMessages when rewriting history; transcript runs last to capture the final state of each turn. See `docs/research/harness-cache-hygiene-audit.md` for the durability semantics of each mutation channel (`wrapToolCall` = durable, `wrapModelCall` = ephemeral, `Command` update = durable rewrite) — pick the channel to match the intended durability.
+**Why**: model-call middleware rewrites only the request copy, or the returned assistant message, and never history already in the log (Rule 5). Durable changes take their own channel: tool results through `afterToolCall`, compaction through clearing rows or one `history.compacted`, turn context through `turn.history-projection-committed`. Pick the channel by the durability the change needs; never rely on a request rewrite to persist.
 
 ### 7. Most Context Writes Are Non-Blocking
 
@@ -135,7 +130,7 @@ Required compaction commits are the exception. When compaction is the gate that 
 ### 6. Static Injection of Dynamic Context
 
 - INCORRECT: Hardcoding skill content or memory in the system prompt string
-- CORRECT: Let `createSkillsMiddleware` / `createMemoryMiddleware` load from filesystem
+- CORRECT: Let `createTurnContextSnapshot` load them from the client payload
 
 ## Summary Checklist
 
@@ -147,7 +142,7 @@ When adding or modifying filesystem-based context:
 - [ ] Optional diagnostics are non-blocking; authoritative events, referenced output publication and required compaction have truthful awaited commit boundaries
 - [ ] `timestamp` is included on every JSONL line
 - [ ] Tests added in the corresponding middleware test file
-- [ ] Middleware ordering in `chat.service.ts` is preserved
+- [ ] Model-call middleware ordering in `packages/agent-host/src/harness/session.ts` is preserved
 
 ## References
 

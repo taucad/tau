@@ -7,7 +7,7 @@ import { autocompletion } from '@codemirror/autocomplete';
 import type { Completion, CompletionContext, CompletionResult } from '@codemirror/autocomplete';
 import { Decoration, EditorView, hoverTooltip, keymap, showDialog, showTooltip, ViewPlugin } from '@codemirror/view';
 import type { Tooltip, ViewUpdate } from '@codemirror/view';
-import { setDiagnostics } from '@codemirror/lint';
+import { storeDiagnostics } from '#components/code/editor-lint.js';
 import { foldService } from '@codemirror/language';
 import type * as LSP from 'vscode-languageserver-protocol';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
@@ -843,35 +843,7 @@ export function openscadExtensions(context: ExtensionContext): Extension[] {
         create: () => ({ dom: documentationDom(context, markdown, view.dom.ownerDocument) }),
       };
     }),
-    ViewPlugin.fromClass(
-      class {
-        readonly #unsubscribe: () => void;
-        public constructor(view: EditorView) {
-          const show = (): void => {
-            const diagnostics = environment.diagnostics.get(document.uri).get(owner) ?? [];
-            view.dispatch(
-              setDiagnostics(
-                view.state,
-                diagnostics.map(({ from, to, message, severity }) => ({ from, to, message, severity })),
-              ),
-            );
-          };
-          this.#unsubscribe = environment.diagnostics.subscribe((event) => {
-            if (event.uri === document.uri && event.owner === owner && !isDisposed()) {
-              show();
-            }
-          });
-          queueMicrotask(() => {
-            if (!isDisposed()) {
-              show();
-            }
-          });
-        }
-        public destroy(): void {
-          this.#unsubscribe();
-        }
-      },
-    ),
+    storeDiagnostics(environment.diagnostics, document, owner),
     definitionProvider.of(async (view, position) =>
       observe(jumpToDefinition(view, position, context), document, isDisposed),
     ),

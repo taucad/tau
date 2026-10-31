@@ -9,7 +9,7 @@ import type { Completion, CompletionSource } from '@codemirror/autocomplete';
 import { StateEffect, StateField } from '@codemirror/state';
 import type { Extension, Range } from '@codemirror/state';
 import { foldService, indentUnit } from '@codemirror/language';
-import { setDiagnostics } from '@codemirror/lint';
+import { storeDiagnostics } from '#components/code/editor-lint.js';
 import { Decoration, EditorView, hoverTooltip, showDialog, ViewPlugin } from '@codemirror/view';
 import type { DecorationSet, HoverTooltipSource, ViewUpdate } from '@codemirror/view';
 import type * as LSP from 'vscode-languageserver-protocol';
@@ -890,28 +890,6 @@ export function csharpExtensions(options: ExtensionOptions): Extension[] {
         reportFailure(error, options, version);
       }
     }),
-    ViewPlugin.define((view: EditorView) => {
-      const show = (): void => {
-        const diagnostics = environment.diagnostics.get(document.uri).get(diagnosticsOwner) ?? [];
-        view.dispatch(setDiagnostics(view.state, [...diagnostics]));
-      };
-      const unsubscribe = environment.diagnostics.subscribe((event) => {
-        if (event.uri === document.uri && event.owner === diagnosticsOwner) {
-          show();
-        }
-      });
-      let destroyed = false;
-      queueMicrotask(() => {
-        if (!destroyed && !isDisposed()) {
-          show();
-        }
-      });
-      return {
-        destroy() {
-          destroyed = true;
-          unsubscribe();
-        },
-      };
-    }),
+    storeDiagnostics(environment.diagnostics, document, diagnosticsOwner),
   ];
 }

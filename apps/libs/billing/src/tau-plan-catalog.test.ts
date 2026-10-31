@@ -32,9 +32,9 @@ describe('tauPlanCatalog', () => {
     expect(tauPlanCatalog.at(-1)?.priceMonthly).toBeUndefined();
   });
 
-  it('should keep the AD15 no-train boundary customer-facing on both paid tiers', () => {
+  it('should distinguish Pro opt-in from the Enterprise contractual no-train guarantee', () => {
     const [, pro, enterprise] = tauPlanCatalog;
-    expect(pro?.features).toContain('No training on your designs');
+    expect(pro?.features).toContain('No training on your designs unless you explicitly opt in');
     expect(enterprise?.features).toContain('Contractual no-train guarantee (DPA)');
   });
 

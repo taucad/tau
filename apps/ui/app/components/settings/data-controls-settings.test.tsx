@@ -230,11 +230,22 @@ describe('DataControlsSettings', () => {
     expect(await screen.findByRole('dialog', { name: 'Cookie preferences' })).toBeInTheDocument();
   });
 
-  it('records each improvement purpose with the one switch once a recording notice is in force', async () => {
+  it('should disclose each improvement purpose before recording its explicit grant', async () => {
     mockCanDecide = true;
     render(<DataControlsSettings />);
+    const user = userEvent.setup();
 
-    await userEvent.click(screen.getByRole('switch', { name: improve }));
+    await user.hover(screen.getByRole('button', { name: 'About improve tau for everyone' }));
+    expect(await screen.findAllByText(/account-linked task summaries, chats and generated designs/i)).not.toHaveLength(
+      0,
+    );
+    expect(screen.getAllByText(/evaluation, prompt optimization and training tau models/i)).not.toHaveLength(0);
+    expect(screen.getAllByText(/recording and reuse require your explicit opt-in on every plan/i)).not.toHaveLength(0);
+    expect(screen.getAllByText(/does not permit ai providers to train their models/i)).not.toHaveLength(0);
+    expect(screen.getAllByText(/rating a reply shares your rating only/i)).not.toHaveLength(0);
+    expect(mockDecide).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('switch', { name: improve }));
 
     expect(mockUpdatePreferences).toHaveBeenCalledWith({ allowsAiTraining: true });
     expect(mockDecide).toHaveBeenCalledWith([

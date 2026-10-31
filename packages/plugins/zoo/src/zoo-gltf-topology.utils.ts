@@ -1,5 +1,10 @@
 import { Primitive, WebIO } from '@gltf-transform/core';
-import type { Document, JSONDocument, Mesh as GltfTransformMesh } from '@gltf-transform/core';
+import type {
+  Document,
+  JSONDocument,
+  Mesh as GltfTransformMesh,
+  Node as GltfTransformNode,
+} from '@gltf-transform/core';
 
 import { embedGltfResources, registerTauGltfExtensions, TauCadTopology } from '@taucad/geometry-core';
 import type {
@@ -11,10 +16,118 @@ import type {
 import { kittyCadBoundaryRepresentationExtension, tauCadTopologyExtension } from '@taucad/runtime/types';
 import type { JSONObject } from '@taucad/runtime/types';
 
+/** A named solid's engine box in millimetres, Z up; the engine pads it, so it contains the solid. */
+export type NamedSolidBounds = { name: string; min: readonly number[]; max: readonly number[] };
+
+type SolidBox = { min: readonly number[]; max: readonly number[] };
+
 type EnrichZooGltfTopologyOptions = {
   format: 'glb' | 'gltf';
-  /** Body names by B-rep solid index; ignored unless it names every solid, since the engine join is by order. */
-  solidNames?: ReadonlyArray<string | undefined>;
+  /** Engine boxes of named solids; each names the body whose mesh box it contains most tightly. */
+  namedSolidBounds?: readonly NamedSolidBounds[];
+};
+
+// 0.05 mm: engine rounding. Plus 0.5% of the box's diagonal: a mesh can overshoot an exact box by its tessellation.
+const boundsTolerance = 0.05;
+const relativeBoundsTolerance = 0.005;
+
+/**
+ * Name glTF solids from engine boxes, since the export carries no solid ids and lists solids in no fixed order. A box
+ * is a candidate for a solid when it contains the solid's mesh box; the tightest pairs are taken first, and a solid
+ * no box contains keeps its default name.
+ *
+ * @param solidBoxes - each B-rep solid's mesh box in millimetres, Z up, by solid index
+ * @param namedBounds - the engine boxes of named solids
+ * @returns the body name by solid index
+ */
+export const matchSolidNamesByBounds = (
+  solidBoxes: ReadonlyArray<SolidBox | undefined>,
+  namedBounds: readonly NamedSolidBounds[],
+): Array<string | undefined> => {
+  // ponytail: greedy over all pairs, O(n·m log); a true assignment solver if greedy ever mislabels.
+  const pairs: Array<{ cost: number; solidIndex: number; boundsIndex: number }> = [];
+  for (const [solidIndex, box] of solidBoxes.entries()) {
+    if (!box) {
+      continue;
+    }
+    for (const [boundsIndex, bounds] of namedBounds.entries()) {
+      let cost = 0;
+      let contains = true;
+      const slack =
+        boundsTolerance +
+        relativeBoundsTolerance * Math.hypot(...bounds.max.map((value, axis) => value - bounds.min[axis]!));
+      for (let axis = 0; axis < 3; axis += 1) {
+        const solidMin = box.min[axis]!;
+        const solidMax = box.max[axis]!;
+        const boundsMin = bounds.min[axis]!;
+        const boundsMax = bounds.max[axis]!;
+        contains &&= boundsMin <= solidMin + slack && boundsMax >= solidMax - slack;
+        // Squared face offsets: a shifted box costs more than a padded one, which only comparing sizes misses.
+        const scale = boundsMax - boundsMin + boundsTolerance;
+        cost += ((solidMin - boundsMin) / scale) ** 2 + ((boundsMax - solidMax) / scale) ** 2;
+      }
+      if (contains) {
+        pairs.push({ cost, solidIndex, boundsIndex });
+      }
+    }
+  }
+  pairs.sort((first, second) => first.cost - second.cost);
+  const names: Array<string | undefined> = solidBoxes.map(() => undefined);
+  const usedBounds = new Set<number>();
+  for (const { solidIndex, boundsIndex } of pairs) {
+    if (names[solidIndex] === undefined && !usedBounds.has(boundsIndex)) {
+      names[solidIndex] = namedBounds[boundsIndex]!.name;
+      usedBounds.add(boundsIndex);
+    }
+  }
+  return names;
+};
+
+/**
+ * A solid's box in millimetres, Z up, from its mesh's glTF (metres, Y up) position bounds placed by its node. Zoo bakes
+ * positions into world space; the offline engine places pattern copies with node transforms.
+ *
+ * @param mesh - the solid's mesh
+ * @param node - the node that places it, when it has one
+ * @returns the box, or `undefined` when the mesh has no positions
+ */
+const getMeshBox = (mesh: GltfTransformMesh | undefined, node: GltfTransformNode | undefined): SolidBox | undefined => {
+  const matrix = node?.getWorldMatrix();
+  // A rotated node's box comes from its vertices: the rotated box of its local box is looser than the solid.
+  const isTranslation =
+    !matrix || [0, 1, 2, 4, 5, 6, 8, 9, 10].every((index) => matrix[index] === (index % 5 === 0 ? 1 : 0));
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  const include = (point: readonly number[]): void => {
+    for (let axis = 0; axis < 3; axis += 1) {
+      const value = matrix
+        ? matrix[axis]! * point[0]! + matrix[axis + 4]! * point[1]! + matrix[axis + 8]! * point[2]! + matrix[axis + 12]!
+        : point[axis]!;
+      min[axis] = Math.min(min[axis]!, value);
+      max[axis] = Math.max(max[axis]!, value);
+    }
+  };
+  for (const primitive of mesh?.listPrimitives() ?? []) {
+    const position = primitive.getAttribute('POSITION');
+    if (!position) {
+      continue;
+    }
+    if (isTranslation) {
+      include(position.getMin([]));
+      include(position.getMax([]));
+      continue;
+    }
+    const point: number[] = [];
+    for (let index = 0; index < position.getCount(); index += 1) {
+      include(position.getElement(index, point));
+    }
+  }
+  if (min[0] === Infinity) {
+    return undefined;
+  }
+  const [minX, minY, minZ] = min.map((value) => value * 1000) as [number, number, number];
+  const [maxX, maxY, maxZ] = max.map((value) => value * 1000) as [number, number, number];
+  return { min: [minX, -maxZ, minY], max: [maxX, -minZ, maxY] };
 };
 
 type KittyCadSolid = {
@@ -455,7 +568,19 @@ export async function enrichZooGltfTopology(
       (mesh: GltfTransformMesh) =>
         mesh.listPrimitives().filter((primitive) => primitive.getMode() === Primitive.Mode['TRIANGLES']).length,
     );
-  const solidNames = options.solidNames?.length === brepPayload.solids.length ? options.solidNames : undefined;
+  const meshes = root.listMeshes();
+  const solidNames = options.namedSolidBounds?.length
+    ? matchSolidNamesByBounds(
+        brepPayload.solids.map((solid, solidIndex) => {
+          const binding = solidNodesBySolidIndex.get(solidIndex)?.[0];
+          const meshIndex = typeof solid?.mesh === 'number' ? solid.mesh : binding?.meshIndex;
+          return meshIndex === undefined
+            ? undefined
+            : getMeshBox(meshes[meshIndex], binding && root.listNodes()[binding.nodeIndex]);
+        }),
+        options.namedSolidBounds,
+      )
+    : undefined;
   const topology = buildTopologyPayload({
     payload: brepPayload,
     meshPrimitiveCounts,

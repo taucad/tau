@@ -1,9 +1,11 @@
 import { Document, NodeIO } from '@gltf-transform/core';
+import type { Node } from '@gltf-transform/core';
 import { describe, expect, it } from 'vitest';
 import { KittyCadBoundaryRepresentation, registerTauGltfExtensions } from '@taucad/geometry-core';
 import type { TauCadTopologyRoot } from '@taucad/geometry-core';
 import { kittyCadBoundaryRepresentationExtension, tauCadTopologyExtension } from '@taucad/runtime/types';
-import { enrichZooGltfTopology } from '#zoo-gltf-topology.utils.js';
+import { enrichZooGltfTopology, matchSolidNamesByBounds } from '#zoo-gltf-topology.utils.js';
+import type { NamedSolidBounds } from '#zoo-gltf-topology.utils.js';
 
 const createPositionAccessor = (document: Document, buffer: ReturnType<Document['createBuffer']>, offset: number) =>
   document
@@ -103,19 +105,64 @@ describe('enrichZooGltfTopology', () => {
     });
   });
 
-  it('should name bodies only when a name list covers every solid', async () => {
+  it('should name a body from the engine box that contains its mesh', async () => {
     const io = registerTauGltfExtensions(new NodeIO());
     const input = await io.writeBinary(createZooBrepDocument());
-    const bodyName = async (solidNames: Array<string | undefined>): Promise<unknown> => {
-      const document = await io.readBinary(await enrichZooGltfTopology(input, { format: 'glb', solidNames }));
+    const bodyName = async (namedSolidBounds: NamedSolidBounds[]): Promise<unknown> => {
+      const document = await io.readBinary(await enrichZooGltfTopology(input, { format: 'glb', namedSolidBounds }));
       const payload = document.getRoot().getExtension<TauCadTopologyRoot>(tauCadTopologyExtension)?.getPayload();
       return (payload?.['components'] as Array<{ name: string }> | undefined)?.[0]?.name;
     };
 
-    expect(await bodyName(['ring'])).toBe('ring');
-    expect(await bodyName([undefined])).toBe('Solid 1');
-    expect(await bodyName(['ring', 'sun'])).toBe('Solid 1');
+    // The mesh spans x 0..2000 mm, y 0 mm and z 0..1000 mm once converted from metres, Y up.
+    expect(await bodyName([{ name: 'ring', min: [-200, -100, -100], max: [2200, 100, 1100] }])).toBe('ring');
+    expect(await bodyName([{ name: 'elsewhere', min: [5000, 0, 0], max: [6000, 1, 1] }])).toBe('Solid 1');
     expect(await bodyName([])).toBe('Solid 1');
+  });
+
+  it('should name a body from the box its node places it in', async () => {
+    const io = registerTauGltfExtensions(new NodeIO());
+    const bodyName = async (place: (node: Node) => void, namedSolidBounds: NamedSolidBounds[]): Promise<unknown> => {
+      const source = createZooBrepDocument();
+      place(source.getRoot().listNodes()[0]!);
+      const output = await enrichZooGltfTopology(await io.writeBinary(source), { format: 'glb', namedSolidBounds });
+      const document = await io.readBinary(output);
+      const payload = document.getRoot().getExtension<TauCadTopologyRoot>(tauCadTopologyExtension)?.getPayload();
+      return (payload?.['components'] as Array<{ name: string }> | undefined)?.[0]?.name;
+    };
+    const moved = (node: Node) => node.setTranslation([1, 0, 0]);
+    // A quarter turn about glTF Y turns the mesh's x 0..2000 mm into y 0..2000 mm, Z up.
+    const turned = (node: Node) => node.setRotation([0, Math.SQRT1_2, 0, Math.SQRT1_2]);
+
+    expect(await bodyName(moved, [{ name: 'copy', min: [800, -100, -100], max: [3200, 100, 1100] }])).toBe('copy');
+    expect(await bodyName(moved, [{ name: 'original', min: [-200, -100, -100], max: [2200, 100, 1100] }])).toBe(
+      'Solid 1',
+    );
+    expect(await bodyName(turned, [{ name: 'turned', min: [-10, -10, -10], max: [10, 2010, 1010] }])).toBe('turned');
+  });
+
+  it('should pair same-size copies with the boxes they sit in, not a shifted neighbour', () => {
+    const box = (low: number, high: number) => ({ min: [low, 0, 0], max: [high, 10, 10] });
+    // Each copy also fits its neighbour's box within the tolerance, and all boxes are the same size.
+    const named = [
+      { name: 'second', ...box(0.05, 10.15) },
+      { name: 'first', ...box(-0.05, 10.05) },
+    ];
+
+    expect(matchSolidNamesByBounds([box(0, 10), box(0.1, 10.1)], named)).toEqual(['first', 'second']);
+  });
+
+  it('should pair concentric and coincident solids with their tightest boxes', () => {
+    const box = (low: number, high: number) => ({ min: [low, low, 0], max: [high, high, 8] });
+    const solids = [box(-14, 14), box(-8.4, 8.4), box(-4, 4)];
+    const named = [
+      { name: 'inner', ...box(-10.08, 10.08) },
+      { name: 'outer', ...box(-16.8, 16.8) },
+      { name: 'housing', ...box(-60, 60) },
+    ];
+
+    expect(matchSolidNamesByBounds(solids, named)).toEqual(['outer', 'inner', 'housing']);
+    expect(matchSolidNamesByBounds([undefined, box(-14, 14)], named)).toEqual([undefined, 'outer']);
   });
 
   it('should bind every node that references the same instanced solid', async () => {

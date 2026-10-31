@@ -652,6 +652,8 @@ export class OfflineEngine {
 
         return undefined;
       },
+      // ponytail: answers the `solid3d` filter only, the one Tau sends.
+      scene_get_entity_ids: () => ({ entity_ids: [this.scene.visibleSolids().map((solid) => solid.id)] }),
       bounding_box: (_id, cmd) => measureBoundingBox(this, cmd),
       volume: (_id, cmd) => ({
         volume: sumMass(this, cmd, 'volume') * unitScale(cmd['output_unit'] as string, 3),

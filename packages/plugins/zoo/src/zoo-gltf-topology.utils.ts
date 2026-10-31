@@ -1,5 +1,10 @@
 import { Primitive, WebIO } from '@gltf-transform/core';
-import type { Document, JSONDocument, Mesh as GltfTransformMesh } from '@gltf-transform/core';
+import type {
+  Document,
+  JSONDocument,
+  Mesh as GltfTransformMesh,
+  Node as GltfTransformNode,
+} from '@gltf-transform/core';
 
 import { embedGltfResources, registerTauGltfExtensions, TauCadTopology } from '@taucad/geometry-core';
 import type {
@@ -22,8 +27,9 @@ type EnrichZooGltfTopologyOptions = {
   namedSolidBounds?: readonly NamedSolidBounds[];
 };
 
-// 0.05 mm: export tessellation and engine rounding.
+// 0.05 mm: engine rounding. Plus 0.5% of the box's diagonal: a mesh can overshoot an exact box by its tessellation.
 const boundsTolerance = 0.05;
+const relativeBoundsTolerance = 0.005;
 
 /**
  * Name glTF solids from engine boxes, since the export carries no solid ids and lists solids in no fixed order. A box
@@ -47,13 +53,18 @@ export const matchSolidNamesByBounds = (
     for (const [boundsIndex, bounds] of namedBounds.entries()) {
       let cost = 0;
       let contains = true;
+      const slack =
+        boundsTolerance +
+        relativeBoundsTolerance * Math.hypot(...bounds.max.map((value, axis) => value - bounds.min[axis]!));
       for (let axis = 0; axis < 3; axis += 1) {
         const solidMin = box.min[axis]!;
         const solidMax = box.max[axis]!;
         const boundsMin = bounds.min[axis]!;
         const boundsMax = bounds.max[axis]!;
-        contains &&= boundsMin <= solidMin + boundsTolerance && boundsMax >= solidMax - boundsTolerance;
-        cost += Math.log((boundsMax - boundsMin + boundsTolerance) / (solidMax - solidMin + boundsTolerance));
+        contains &&= boundsMin <= solidMin + slack && boundsMax >= solidMax - slack;
+        // Squared face offsets: a shifted box costs more than a padded one, which only comparing sizes misses.
+        const scale = boundsMax - boundsMin + boundsTolerance;
+        cost += ((solidMin - boundsMin) / scale) ** 2 + ((boundsMax - solidMax) / scale) ** 2;
       }
       if (contains) {
         pairs.push({ cost, solidIndex, boundsIndex });
@@ -73,24 +84,42 @@ export const matchSolidNamesByBounds = (
 };
 
 /**
- * A mesh's box in millimetres, Z up, from its glTF (metres, Y up) position bounds; Zoo exports solids in world space.
+ * A solid's box in millimetres, Z up, from its mesh's glTF (metres, Y up) position bounds placed by its node. Zoo bakes
+ * positions into world space; the offline engine places pattern copies with node transforms.
  *
  * @param mesh - the solid's mesh
+ * @param node - the node that places it, when it has one
  * @returns the box, or `undefined` when the mesh has no positions
  */
-const getMeshBox = (mesh: GltfTransformMesh | undefined): SolidBox | undefined => {
+const getMeshBox = (mesh: GltfTransformMesh | undefined, node: GltfTransformNode | undefined): SolidBox | undefined => {
+  const matrix = node?.getWorldMatrix();
+  // A rotated node's box comes from its vertices: the rotated box of its local box is looser than the solid.
+  const isTranslation =
+    !matrix || [0, 1, 2, 4, 5, 6, 8, 9, 10].every((index) => matrix[index] === (index % 5 === 0 ? 1 : 0));
   const min = [Infinity, Infinity, Infinity];
   const max = [-Infinity, -Infinity, -Infinity];
+  const include = (point: readonly number[]): void => {
+    for (let axis = 0; axis < 3; axis += 1) {
+      const value = matrix
+        ? matrix[axis]! * point[0]! + matrix[axis + 4]! * point[1]! + matrix[axis + 8]! * point[2]! + matrix[axis + 12]!
+        : point[axis]!;
+      min[axis] = Math.min(min[axis]!, value);
+      max[axis] = Math.max(max[axis]!, value);
+    }
+  };
   for (const primitive of mesh?.listPrimitives() ?? []) {
     const position = primitive.getAttribute('POSITION');
     if (!position) {
       continue;
     }
-    const low = position.getMin([]);
-    const high = position.getMax([]);
-    for (let axis = 0; axis < 3; axis += 1) {
-      min[axis] = Math.min(min[axis]!, low[axis]!);
-      max[axis] = Math.max(max[axis]!, high[axis]!);
+    if (isTranslation) {
+      include(position.getMin([]));
+      include(position.getMax([]));
+      continue;
+    }
+    const point: number[] = [];
+    for (let index = 0; index < position.getCount(); index += 1) {
+      include(position.getElement(index, point));
     }
   }
   if (min[0] === Infinity) {
@@ -543,9 +572,11 @@ export async function enrichZooGltfTopology(
   const solidNames = options.namedSolidBounds?.length
     ? matchSolidNamesByBounds(
         brepPayload.solids.map((solid, solidIndex) => {
-          const meshIndex =
-            typeof solid?.mesh === 'number' ? solid.mesh : solidNodesBySolidIndex.get(solidIndex)?.[0]?.meshIndex;
-          return meshIndex === undefined ? undefined : getMeshBox(meshes[meshIndex]);
+          const binding = solidNodesBySolidIndex.get(solidIndex)?.[0];
+          const meshIndex = typeof solid?.mesh === 'number' ? solid.mesh : binding?.meshIndex;
+          return meshIndex === undefined
+            ? undefined
+            : getMeshBox(meshes[meshIndex], binding && root.listNodes()[binding.nodeIndex]);
         }),
         options.namedSolidBounds,
       )

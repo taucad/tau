@@ -1,0 +1,27 @@
+base = startSketchOn(XY)
+  |> rectangle(center = [0, 0], width = 100, height = 60)
+  |> extrude(length = 8)
+
+hole = startSketchOn(XY)
+  |> circle(center = [0, 0], radius = 10)
+  |> extrude(length = 20)
+
+plate = subtract(base, tools = [hole])
+
+startSketchOn(XY)
+  |> circle(center = [-80, 0], radius = 6)
+  |> extrude(length = 12)
+
+bolts = startSketchOn(XY)
+  |> circle(center = [30, 20], radius = 3)
+  |> extrude(length = 25)
+  |> patternLinear3d(instances = 3, distance = 15, axis = [0, -1, 0])
+
+boss = startSketchOn(XY)
+  |> circle(center = [-30, 0], radius = 8)
+  |> extrude(length = 15)
+cap = startSketchOn(XY)
+  |> circle(center = [-30, 0], radius = 12)
+  |> extrude(length = 3)
+  |> translate(z = 15)
+knob = union([boss, cap])

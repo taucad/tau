@@ -812,6 +812,30 @@ export class KclUtilities {
   }
 
   /**
+   * Sends one modeling command and returns its response data, for queries the WASM bindings have no call for.
+   *
+   * @param cmd - the modeling command
+   * @returns the response's data, or `undefined` before the engine starts
+   */
+  public async sendModelingQuery<T>(cmd: Record<string, unknown>): Promise<T | undefined> {
+    const bridge = this.engineManager?.bridge;
+    if (!bridge) {
+      return undefined;
+    }
+    const id = randomUuid();
+    const response = decode(
+      await bridge.sendModelingCommandFromWasm(
+        id,
+        '{}',
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Kittycad wire JSON field name
+        JSON.stringify({ type: 'modeling_cmd_req', cmd_id: id, cmd }),
+        '{}',
+      ),
+    ) as { resp?: { data?: { modeling_response?: { data?: T } } } };
+    return response.resp?.data?.modeling_response?.data;
+  }
+
+  /**
    * Releases all resources including the WebSocket connection and WASM contexts.
    */
   public async cleanup(): Promise<void> {
@@ -854,23 +878,6 @@ export class KclUtilities {
    * Drops cached engine state when the Zoo modeling WebSocket closes (idle timeout, network drop, etc.) so the next
    * {@link executeProgram} / {@link exportFromMemory} path runs {@link initializeEngine} again with a fresh session.
    */
-  private async sendModelingQuery<T>(cmd: Record<string, unknown>): Promise<T | undefined> {
-    const bridge = this.engineManager?.bridge;
-    if (!bridge) {
-      return undefined;
-    }
-    const id = randomUuid();
-    const response = decode(
-      await bridge.sendModelingCommandFromWasm(
-        id,
-        '{}',
-        // eslint-disable-next-line @typescript-eslint/naming-convention -- Kittycad wire JSON field name
-        JSON.stringify({ type: 'modeling_cmd_req', cmd_id: id, cmd }),
-        '{}',
-      ),
-    ) as { resp?: { data?: { modeling_response?: { data?: T } } } };
-    return response.resp?.data?.modeling_response?.data;
-  }
   private invalidateEngineDueToSocketClose(): void {
     this.engineSocketCloseUnsubscribe?.();
     this.engineSocketCloseUnsubscribe = undefined;

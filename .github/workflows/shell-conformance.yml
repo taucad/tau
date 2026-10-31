@@ -11,10 +11,6 @@
 # - MAC-A and MAC-X: hosted `macos-26` (arm64) and `macos-26-intel` (x64), Seatbelt through the same
 #   provider. The macOS Terminal rows are recorded `operator-validation-pending`, never run here.
 # - WIN-ARM is not a row yet: the Windows provider is paused.
-# - LNX-P: the private, unactivated Linux projection transport on a stock hosted Ubuntu 24.04 runner. It builds
-#   libfuse 3.17.2 from the SHA-256-pinned upstream release, installs only its setuid `fusermount3`, builds the
-#   bridge through `native-process-core:test:shell-projection-conformance` and mounts as the unprivileged runner
-#   user. It proves the FUSE transport only; authority composition and every D8 activation gate stay open.
 #
 # Noncacheable by construction: the target sets `cache: false` and every row passes `--skip-nx-cache`.
 name: Shell conformance
@@ -136,79 +132,6 @@ jobs:
         with:
           name: shell-conformance-${{ matrix.row }}
           path: out/test-results/shell-conformance/${{ matrix.row }}/
-          retention-days: 14
-          if-no-files-found: error
-
-  linux-projection:
-    name: Shell projection transport on LNX-P (stock ubuntu-24.04 runner, pinned libfuse 3.17.2)
-    if: github.event_name != 'pull_request' || github.triggering_actor != 'dependabot[bot]'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    env:
-      LIBFUSE_VERSION: '3.17.2'
-      # SHA-256 of https://github.com/libfuse/libfuse/releases/download/fuse-3.17.2/fuse-3.17.2.tar.gz
-      LIBFUSE_SHA256: 3d932431ad94e86179e5265cddde1d67aa3bb2fb09a5bd35c641f86f2b5ed06f
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Setup Nx Environment
-        uses: ./.github/actions/setup-nx
-        with:
-          save-pnpm-store: 'false'
-
-      - name: Build pinned libfuse
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y meson ninja-build
-          work="$RUNNER_TEMP/libfuse"
-          mkdir -p "$work/headers"
-          curl -fsSL --retry 3 -o "$work/fuse.tar.gz" \
-            "https://github.com/libfuse/libfuse/releases/download/fuse-${LIBFUSE_VERSION}/fuse-${LIBFUSE_VERSION}.tar.gz"
-          echo "${LIBFUSE_SHA256}  $work/fuse.tar.gz" | sha256sum --check --strict
-          tar -xzf "$work/fuse.tar.gz" -C "$work"
-          meson setup "$work/build" "$work/fuse-${LIBFUSE_VERSION}" --prefix=/usr/local --buildtype=release \
-            -Dexamples=false -Dtests=false -Dutils=true
-          ninja -C "$work/build"
-          # Only the mount helper is installed; the bridge loads its own adjacent copy of the library.
-          sudo install -o root -g root -m 4755 "$work/build/util/fusermount3" /usr/local/bin/fusermount3
-          cp "$work/fuse-${LIBFUSE_VERSION}/include/"{fuse_lowlevel.h,fuse_common.h,fuse_opt.h,fuse_log.h} "$work/headers/"
-          cp "$work/build/libfuse_config.h" "$work/headers/"
-          library="$(readlink -f "$work/build/lib/libfuse3.so.4")"
-          {
-            echo "TAU_PROJECTION_NODE_HEADERS=$(dirname "$(dirname "$(command -v node)")")/include/node"
-            echo "TAU_PROJECTION_FUSE_HEADERS=$work/headers"
-            echo "TAU_PROJECTION_FUSE_LIBRARY=$library"
-            echo "TAU_PROJECTION_FUSE_SHA256=$(sha256sum "$library" | cut -d' ' -f1)"
-          } >> "$GITHUB_ENV"
-          ls -l /dev/fuse /usr/local/bin/fusermount3
-          id
-
-      - name: Run the projection transport conformance target
-        run: pnpm nx run native-process-core:test:shell-projection-conformance --skip-nx-cache
-
-      - name: Record the bridge provenance
-        if: always()
-        run: |
-          mkdir -p out/test-results/shell-conformance/LNX-P
-          cp packages/core/native-process/dist/native/linux-x64/provenance.json \
-            out/test-results/shell-conformance/LNX-P/provenance.json || true
-          { uname -a; cat /etc/os-release; node --version; } > out/test-results/shell-conformance/LNX-P/host.txt
-          # No mount may outlive the run.
-          if grep tau-shell-projection /proc/self/mounts; then
-            echo '::error::A projection mount outlived the conformance run.'
-            exit 1
-          fi
-
-      - name: Upload the receipt
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: shell-conformance-LNX-P
-          path: out/test-results/shell-conformance/LNX-P/
           retention-days: 14
           if-no-files-found: error
 

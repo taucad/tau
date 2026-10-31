@@ -80,13 +80,64 @@ const darwinTable = async (): Promise<readonly ProcessRow[]> =>
   });
 
 /**
+ * Share one read among concurrent callers without handing anyone a stale answer.
+ *
+ * A caller that arrives while a read is running waits for the next read, which starts only after the running one
+ * ends, so every answer was taken after its caller asked; everyone waiting meanwhile shares that next read. At most
+ * one read runs at a time.
+ *
+ * @public
+ * @param read - The read to share.
+ * @returns The shared read.
+ */
+export const coalesceReads = <T>(read: () => Promise<T>): (() => Promise<T>) => {
+  let running: Promise<T> | undefined;
+  let next: Promise<T> | undefined;
+  const start = async (): Promise<T> => {
+    const current = read();
+    running = current;
+    try {
+      return await current;
+    } finally {
+      /* A queued read keeps this one marked as running until it starts, so no caller slips in a second read. */
+      if (running === current && next === undefined) {
+        running = undefined;
+      }
+    }
+  };
+  const after = async (previous: Promise<T>): Promise<T> => {
+    try {
+      await previous;
+    } catch {
+      /* The next read stands on its own; a failed one is never handed to anyone else. */
+    }
+    next = undefined;
+    return start();
+  };
+  return async () => {
+    if (running === undefined) {
+      return start();
+    }
+    next ??= after(running);
+    return next;
+  };
+};
+
+/*
+ * Every launch on macOS tracks its tree every 250 ms, and eight launches at once spawned dozens of `ps` per second:
+ * on a loaded runner single reads then outran their bound and cleanup went unconfirmed (MAC-X T02, S04). One `ps`
+ * per process at a time serves them all.
+ */
+const sharedDarwinTable = coalesceReads(darwinTable);
+
+/**
  * The host process table: `/proc` on Linux, `ps` on macOS.
  *
  * @public
  * @returns Every visible process.
  */
 export const processTable = async (): Promise<readonly ProcessRow[]> =>
-  process.platform === 'linux' ? linuxTable() : darwinTable();
+  process.platform === 'linux' ? linuxTable() : sharedDarwinTable();
 
 /**
  * Every live process descended from `root` by parent links, plus every live member of process group `group`.

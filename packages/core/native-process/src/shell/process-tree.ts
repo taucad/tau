@@ -99,7 +99,8 @@ export const coalesceReads = <T>(read: () => Promise<T>): (() => Promise<T>) => 
     try {
       return await current;
     } finally {
-      if (running === current) {
+      /* A queued read keeps this one marked as running until it starts, so no caller slips in a second read. */
+      if (running === current && next === undefined) {
         running = undefined;
       }
     }

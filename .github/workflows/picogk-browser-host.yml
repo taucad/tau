@@ -142,6 +142,18 @@ jobs:
           JSON
           node --import @oxc-node/core/register \
             packages/plugins/picogk/scripts/stage-picogk-package.mts out/stage-config.json
+      - name: Restore the pinned compiler and runtime packs the toolchain check reads
+        # The host's toolchain check digests the pinned Roslyn assemblies and resolves each runtime
+        # pack from this machine's NuGet cache, as the archive build did on its own runner.
+        if: steps.cache.outputs.cache-hit != 'true'
+        working-directory: out/picovoxel/dotnet
+        run: |
+          dotnet restore compiler-inputs.csproj --packages "$HOME/.nuget/packages" \
+            "-p:BaseIntermediateOutputPath=$RUNNER_TEMP/compiler-restore/"
+          for threads in false true; do
+            dotnet restore toolchain.csproj --packages "$HOME/.nuget/packages" "-p:WasmEnableThreads=$threads" \
+              "-p:BaseIntermediateOutputPath=$RUNNER_TEMP/runtime-restore-$threads/"
+          done
       - name: Prepare the serial and threaded browser host
         if: steps.cache.outputs.cache-hit != 'true'
         run: |

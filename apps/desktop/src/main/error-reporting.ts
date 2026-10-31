@@ -25,13 +25,17 @@ export const scrubDesktopEvent = (event: ErrorEvent): ErrorEvent => {
 /**
  * Start crash reporting after profile selection and pristine qualification admission, before any windows or utilities.
  *
+ * An automated run (a route qualification, or a package assembled to honour test overrides) reports under
+ * `<channel>-e2e`, so the crashes a suite causes on purpose never land among real users' (TAU-DESKTOP-5).
+ *
  * @param channel - The channel from the packaged application manifest.
+ * @param automated - Whether a test harness launched this process.
  */
-export const initializeDesktopErrorReporting = (channel: 'staging' | 'production'): void => {
+export const initializeDesktopErrorReporting = (channel: 'staging' | 'production', automated = false): void => {
   if (tauSentryDsn) {
     Sentry.init({
       dsn: tauSentryDsn,
-      environment: channel,
+      environment: automated ? `${channel}-e2e` : channel,
       sendDefaultPii: false,
       beforeSend: scrubDesktopEvent,
     });

@@ -8,12 +8,14 @@
  * each curve generated, which `solid3d_get_extrusion_face_info` later reports to kcl-lib.
  */
 import type { Frame, Vec3 } from '#offline/offline-math.js';
-import { directionToGlobal, normalize, scale, toGlobal } from '#offline/offline-math.js';
+import { add, cross, directionToGlobal, normalize, scale, toGlobal, vec3 } from '#offline/offline-math.js';
 import type { Oc, TopoDS_Edge, TopoDS_Face, TopoDS_Shape, gp_Trsf } from '#offline/offline-occt.js';
 import {
   ax1,
   compound,
   dir,
+  edgePoint,
+  faces,
   pnt,
   edges,
   gvec,
@@ -38,6 +40,8 @@ export type Profile = {
   /** Curve a loft starts this section's wire at, so sections built the same way line up vertex for vertex. */
   firstCurveId?: string;
   onFace?: { solidId: string; faceId: string };
+  /** A surface body: the swept faces without their caps. */
+  surface?: boolean;
 };
 
 /** Face ids kcl-lib may pre-assign on extrude. */
@@ -160,18 +164,40 @@ export function orientOutward(oc: Oc, shape: TopoDS_Shape): TopoDS_Shape {
 // oxlint-disable-next-line max-params -- generator factory and id policy
 function sweepFaces<
   T extends Generator & { Shape(): TopoDS_Shape; FirstShape?(): TopoDS_Shape; LastShape?(): TopoDS_Shape },
->(oc: Oc, profile: Profile, make: (face: TopoDS_Face) => T, preset: PresetFaces, mint: () => string): SweepResult {
-  if (profile.faces.length === 0) {
-    throw new OfflineEngineError('The profile does not enclose an area', 'bad_request');
-  }
-
-  const generators = profile.faces.map((face) => make(face));
+>(oc: Oc, profile: Profile, make: (face: TopoDS_Shape) => T, preset: PresetFaces, mint: () => string): SweepResult {
+  const generators = sweepInputs(profile).map((input) => make(input));
   const shapes = generators.map((generator) => orientOutward(oc, generator.Shape()));
+  const caps = generators
+    .flatMap((generator) => [generator.FirstShape?.(), generator.LastShape?.()])
+    .filter((cap): cap is TopoDS_Shape => Boolean(cap && !cap.IsNull()));
   const sideFace = (edge: TopoDS_Edge): TopoDS_Shape | undefined => {
     for (const generator of generators) {
       const face = firstGenerated(oc, generator, edge);
       if (face) {
         return face;
+      }
+    }
+
+    // A revolve reports no history for a segment perpendicular to its axis, whose face is a planar disc or annulus
+    // through the segment itself: take the swept face, other than a cap, that the segment's midpoint lies on.
+    const probe = new oc.BRepBuilderAPI_MakeVertex(pnt(oc, edgePoint(oc, edge, 0.5).point)).Vertex();
+    for (const shape of shapes) {
+      for (const face of faces(oc, shape)) {
+        if (caps.some((cap) => cap.IsSame(face))) {
+          continue;
+        }
+
+        const distance = new oc.BRepExtrema_DistShapeShape(
+          probe,
+          face,
+          oc.Extrema_ExtFlag.Extrema_ExtFlag_MIN,
+          oc.Extrema_ExtAlgo.Extrema_ExtAlgo_Grad,
+        );
+        const touches = distance.IsDone() && distance.Value() < 1e-7;
+        distance.delete();
+        if (touches) {
+          return face;
+        }
       }
     }
 
@@ -186,8 +212,93 @@ function sweepFaces<
     preset,
     mint,
   });
-  const shape = shapes.length === 1 ? shapes[0]! : fuseAll(oc, shapes);
+  let shape = shapes.length === 1 ? shapes[0]! : fuseAll(oc, shapes);
+  // A pipe starts from a relocated copy of the profile, so a curve's own edge is not part of the solid: track the
+  // start-cap edge its side face grew from instead, which scales, mirrors and edge lookups can then find.
+  const solidEdges = edges(oc, shape);
+  const inSolid = (edge: TopoDS_Shape): boolean => solidEdges.some((candidate) => candidate.IsSame(edge));
+  for (const curve of profile.curves) {
+    if (inSolid(curve.edge)) {
+      continue;
+    }
+
+    for (const generator of generators) {
+      const side = firstGenerated(oc, generator, curve.edge);
+      const first = generator.FirstShape?.();
+      const capEdges = first && !first.IsNull() ? edges(oc, first) : [];
+      const capEdge = side && edges(oc, side).find((edge) => capEdges.some((cap) => cap.IsSame(edge)));
+      if (capEdge && inSolid(capEdge)) {
+        recorded.edges.set(curve.id, capEdge);
+        break;
+      }
+    }
+  }
+
+  if (profile.surface && profile.faces.length > 0) {
+    // A surface body is the solid's boundary without its caps, so its faces keep the solid's outward normals.
+    const capFaces = generators.flatMap((generator) => [generator.FirstShape?.(), generator.LastShape?.()]);
+    shape = compound(
+      oc,
+      faces(oc, shape).filter((face) => !capFaces.some((cap) => cap?.IsSame(face))),
+    );
+    for (const capId of [recorded.sweep.startCapId, recorded.sweep.endCapId]) {
+      recorded.faces.delete(capId!);
+    }
+
+    recorded.sweep.startCapId = undefined;
+    recorded.sweep.endCapId = undefined;
+  }
+
   return { shape, ...recorded };
+}
+
+/**
+ * What a sweep moves: the profile's faces, or for a surface body of a profile that encloses no area, its open curves,
+ * which sweep into faces without caps.
+ *
+ * @param profile - the swept profile
+ * @returns sweep inputs
+ */
+function sweepInputs(profile: Profile): TopoDS_Shape[] {
+  if (profile.faces.length === 0) {
+    if (profile.curves.length === 0) {
+      throw new OfflineEngineError('The profile does not enclose an area', 'bad_request');
+    }
+
+    return profile.curves.map((curve) => curve.edge);
+  }
+
+  return profile.faces;
+}
+
+/**
+ * The direction an edge is extruded in when none is given: halfway between the faces on either side of it, or
+ * along the normal of the one face of a surface's boundary edge.
+ *
+ * @param oc - libcascade instance
+ * @param shape - the body the edge belongs to
+ * @param edge - edge
+ * @returns unit direction
+ */
+export function edgeExtrudeDirection(oc: Oc, shape: TopoDS_Shape, edge: TopoDS_Edge): Vec3 {
+  let sum = vec3(0, 0, 0);
+  for (const face of faces(oc, shape).filter((candidate) => edges(oc, candidate).some((other) => other.IsSame(edge)))) {
+    const first = new oc.gp_Pnt2d();
+    const last = new oc.gp_Pnt2d();
+    oc.BRep_Tool.UVPoints(edge, face, first, last);
+    const surface = new oc.BRepAdaptor_Surface(face, true);
+    const p = new oc.gp_Pnt();
+    const du = new oc.gp_Vec();
+    const dv = new oc.gp_Vec();
+    surface.D1((first.X() + last.X()) / 2, (first.Y() + last.Y()) / 2, p, du, dv);
+    const normal = normalize(cross(vec3(du.X(), du.Y(), du.Z()), vec3(dv.X(), dv.Y(), dv.Z())));
+    sum = add(sum, scale(normal, face.Orientation() === oc.TopAbs_Orientation.TopAbs_REVERSED ? -1 : 1));
+    for (const item of [first, last, surface, p, du, dv]) {
+      item.delete();
+    }
+  }
+
+  return normalize(sum);
 }
 
 /**
@@ -202,10 +313,8 @@ export function fuseAll(oc: Oc, shapes: readonly TopoDS_Shape[]): TopoDS_Shape {
     return shapes[0]!;
   }
 
-  return compound(
-    oc,
-    shapes.flatMap((shape) => solidsOf(oc, shape)),
-  );
+  const solids = shapes.flatMap((shape) => solidsOf(oc, shape));
+  return compound(oc, solids.length > 0 ? solids : shapes);
 }
 
 /** Extrusion extent along the sketch normal, as an offset and a total length. */
@@ -240,28 +349,6 @@ export function extrudeProfile(
       ? moveProfile(oc, profile, translationTrsf(oc, scale(direction, extent.offset)))
       : profile;
   const vector = gvec(oc, scale(direction, extent.length));
-  if (moved.faces.length === 0 && moved.curves.length > 0) {
-    // Surface body: sweep each open curve into a face.
-    const prisms = moved.curves.map((curve) => new oc.BRepPrimAPI_MakePrism(curve.edge, vector, false, true));
-    const recorded = recordSweep(oc, {
-      profile: moved,
-      sideFace: (edge) => {
-        const index = moved.curves.findIndex((curve) => curve.edge.IsSame(edge));
-        return index === -1 ? undefined : prisms[index]!.Shape();
-      },
-      preset,
-      mint,
-    });
-    recorded.sweep.direction = extent.length < 0 ? scale(direction, -1) : direction;
-    return {
-      shape: compound(
-        oc,
-        prisms.map((prism) => prism.Shape()),
-      ),
-      ...recorded,
-    };
-  }
-
   const result = sweepFaces(oc, moved, (face) => new oc.BRepPrimAPI_MakePrism(face, vector, false, true), preset, mint);
   result.sweep.direction = extent.length < 0 ? scale(direction, -1) : direction;
   const { startCapId, endCapId } = result.sweep;
@@ -333,9 +420,10 @@ export function sweepProfile(
   return sweepFaces(
     oc,
     profile,
-    (face) => {
-      const outer = oc.BRepTools.OuterWire(face);
-      if (binormal && edges(oc, face).length === edges(oc, outer).length) {
+    (section) => {
+      const isFace = section.ShapeType() === oc.TopAbs_ShapeEnum.TopAbs_FACE;
+      const outer = binormal && isFace ? oc.BRepTools.OuterWire(oc.TopoDS.Face(section)) : undefined;
+      if (binormal && outer && edges(oc, section).length === edges(oc, outer).length) {
         // Along a helix, hold the section's binormal on the helix axis, as thread and spring sweeps expect;
         // a Frenet frame drifts on the approximated helix.
         const shell = new oc.BRepOffsetAPI_MakePipeShell(wire);
@@ -347,7 +435,7 @@ export function sweepProfile(
         }
       }
 
-      return new oc.BRepOffsetAPI_MakePipe(wire, face, oc.GeomFill_Trihedron.GeomFill_IsCorrectedFrenet, false);
+      return new oc.BRepOffsetAPI_MakePipe(wire, section, oc.GeomFill_Trihedron.GeomFill_IsCorrectedFrenet, false);
     },
     null,
     mint,
@@ -374,11 +462,19 @@ export function loftProfiles(
   const loft = new oc.BRepOffsetAPI_ThruSections(solid, ruled, 1e-6);
   const wires = profiles.map((profile) => {
     const face = profile.faces.length > 1 ? mergedFace(oc, profile.faces) : profile.faces[0];
-    if (!face) {
+    if (face) {
+      return alignedOuterWire(oc, profile, face);
+    }
+
+    // An open section lofts into a surface through the section's curves.
+    if (solid || profile.curves.length === 0) {
       throw new OfflineEngineError('A loft section does not enclose an area', 'bad_request');
     }
 
-    return alignedOuterWire(oc, profile, face);
+    return wireFromEdges(
+      oc,
+      profile.curves.map((curve) => curve.edge),
+    );
   });
   // Sections with different edge counts crash libcascade's loft unless it first re-splits them to match.
   const edgeCounts = new Set(wires.map((wire) => edges(oc, wire).length));

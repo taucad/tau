@@ -1,10 +1,11 @@
-import { AlertCircle, ArrowLeft, LoaderCircle, RefreshCcw } from 'lucide-react';
-import { lazy, Suspense, useEffect, useSyncExternalStore } from 'react';
-import { isRouteErrorResponse, useNavigate, useRouteError } from 'react-router';
+import { AlertCircle, ArrowLeft, LoaderCircle, RefreshCcw, WifiOff } from 'lucide-react';
+import { lazy, Suspense, useCallback, useEffect, useSyncExternalStore } from 'react';
+import { isRouteErrorResponse, useLocation, useNavigate, useRouteError } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
 import { chatObservationConflict, quarantineChatObservation } from '#lib/chat-observation-guard.js';
 import { PageNotFound } from '#components/page-not-found.js';
 import { reportUiError } from '#lib/error-reporting.js';
+import { isTransientNetworkFailure } from '#lib/network-failure.js';
 import { isWeakKey } from '#lib/weak-key.js';
 import { describeSupersession, readServerVerdict, subscribeServerVerdict } from '#filesystem/build-skew.js';
 import type { ServerVerdict } from '#filesystem/build-skew.js';
@@ -55,6 +56,8 @@ const serverOutcome = (): StaleBuildOutcome | undefined => undefined;
 export function ErrorPage(): React.JSX.Element {
   const error = useRouteError();
   const navigate = useNavigate();
+  const location = useLocation();
+  const isNetworkFailure = isTransientNetworkFailure(error);
   const observationConflict = chatObservationConflict(error);
   const isModuleLoadFailure = isStaleModuleError(error);
   /* TAU-UI-6: the recovery owns a module load failure, its outcome and its report; this page only
@@ -96,6 +99,21 @@ export function ErrorPage(): React.JSX.Element {
       void reportUiError(captured);
     }
   }, [error, isModuleLoadFailure]);
+
+  /* Navigating to the location that failed runs its loaders again; a device coming back online retries by itself. */
+  const failedLocation = `${location.pathname}${location.search}${location.hash}`;
+  const retryNavigation = useCallback((): void => {
+    void navigate(failedLocation, { replace: true });
+  }, [navigate, failedLocation]);
+  useEffect(() => {
+    if (!isNetworkFailure) {
+      return undefined;
+    }
+    globalThis.addEventListener('online', retryNavigation);
+    return () => {
+      globalThis.removeEventListener('online', retryNavigation);
+    };
+  }, [isNetworkFailure, retryNavigation]);
 
   const goBack = (): void => {
     if (observationConflict !== undefined) {
@@ -182,6 +200,33 @@ export function ErrorPage(): React.JSX.Element {
           <RefreshCcw className='size-4' />
           Reload
         </Button>
+      </div>
+    );
+  }
+
+  // TAU-UI-E: a request that never reached the server is a connection problem to retry, not a crash to investigate.
+  if (isNetworkFailure) {
+    return (
+      <div className='flex min-h-full flex-1 flex-col items-center justify-center gap-6 px-4 py-8'>
+        <div className='flex flex-col items-center gap-3 text-center'>
+          <div className='flex size-12 items-center justify-center rounded-full bg-feature/10'>
+            <WifiOff className='size-6 text-feature' />
+          </div>
+          <h1 className='text-lg font-semibold text-foreground'>Couldn’t reach Tau</h1>
+          <p className='max-w-xs text-sm text-pretty text-muted-foreground'>
+            Check your connection, then try again. Tau retries when your device is back online.
+          </p>
+        </div>
+        <div className='flex flex-wrap items-center justify-center gap-2'>
+          <Button variant='default' size='sm' className='gap-2' onClick={retryNavigation}>
+            <RefreshCcw className='size-4' />
+            Try Again
+          </Button>
+          <Button variant='outline' size='sm' className='gap-2' onClick={goBack}>
+            <ArrowLeft className='size-4' />
+            Go Back
+          </Button>
+        </div>
       </div>
     );
   }

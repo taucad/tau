@@ -1,0 +1,594 @@
+@settings(defaultLengthUnit = mm, kclVersion = 3.0, experimentalFeatures = allow)
+
+// =====================================================================
+// Planetary Gearbox, single stage, 4:1
+// Sun = input, carrier = output, ring = fixed (housing).
+// i = 1 + Zr / Zs. Every tooth count and position derives from the ratio.
+// Axis of rotation = global Z. Sketches in XZ use (radius, z).
+// =====================================================================
+
+// ---------- Gear train ----------
+reductionRatio = 4
+sunTeeth = 18
+ringTeeth = (reductionRatio - 1) * sunTeeth // 54
+planetTeeth = (ringTeeth - sunTeeth) / 2 // 18 (coaxial condition)
+planetCount = 3
+gearModule = 1.5mm
+pressureAngle = 20deg
+faceWidth = 12mm
+
+assert(planetTeeth, isEqualTo = floor(planetTeeth), error = "Planet tooth count must be an integer (coaxial condition)")
+assert((sunTeeth + ringTeeth) / planetCount, isEqualTo = floor((sunTeeth + ringTeeth) / planetCount), error = "Planets cannot be equally spaced (assembly condition)")
+assert(1 + ringTeeth / sunTeeth, isEqualTo = reductionRatio, tolerance = 0.0001, error = "Tooth counts do not give the requested ratio")
+
+centerDistance = gearModule * (sunTeeth + planetTeeth) / 2 // 27 mm
+sunPitchR = gearModule * sunTeeth / 2
+planetPitchR = gearModule * planetTeeth / 2
+ringPitchR = gearModule * ringTeeth / 2
+ringRootR = gearModule * (ringTeeth + 2) / 2 // internal root = tip of generating cutter
+planetTipR = ringRootR - centerDistance - 0.25 * gearModule // topped planet, 0.25 m clearance
+
+// Mesh phasing (gear::spur places a tooth on +X)
+ringPhase = ((planetTeeth + 1) * 180 / ringTeeth): number(deg)
+
+// ---------- Axial stack ----------
+washerT = 1mm
+plateT = 6mm
+gearZ0 = 17mm
+gearZ1 = gearZ0 + faceWidth // 29
+ringZ0 = gearZ0 - washerT // 16
+ringWidth = faceWidth + 2 * washerT // 14
+ringZ1 = ringZ0 + ringWidth // 30
+rearPlateZ0 = ringZ0 - plateT // 10
+frontPlateZ0 = ringZ1 // 30
+frontPlateZ1 = frontPlateZ0 + plateT // 36
+
+// ---------- Housing ----------
+housingOD = 110mm
+housingChamfer = 1mm
+cupBoreD = 80mm
+cupDepth = 10mm
+rearFloorTopZ = ringZ0 - cupDepth // 6
+frontCupCeilingZ = ringZ1 + cupDepth // 40
+frontHousingTopZ = frontCupCeilingZ + 6mm // 46
+ringBlankBoreD = 76mm
+
+// Input bearing 6001-2Z (12 x 28 x 8), outer race on floor underside (z = 0)
+rearBearingD = 12mm
+rearBearingOD = 28mm
+rearBearingW = 8mm
+rearBossOD = 40mm
+rearBossDepth = 10.5mm
+rearClearD = 20mm
+
+// Output bearing 3203-2RS double-row angular contact (17 x 40 x 17.5)
+outputBearingD = 17mm
+outputBearingOD = 40mm
+outputBearingW = 17.5mm
+outputBearingZ0 = frontCupCeilingZ + 4mm // 44
+frontBossOD = 52mm
+frontBossTopZ = 64mm
+frontLipD = 25mm
+
+// ---------- Shafts ----------
+inputShaftD = 12mm
+inputCollarD = 16mm
+inputShaftEndZ = -36mm
+outputShaftD = 17mm
+outputCollarD = 22mm
+outputShaftEndZ = 90mm
+shaftChamfer = 0.5mm
+
+// ---------- Carrier & planets ----------
+carrierPlateD = 74mm
+carrierCenterHoleD = 20mm
+postD = 13mm
+pinD = 6mm
+pinChamfer = 0.5mm
+needleOD = 10mm // HK0612 drawn-cup needle bearing
+washerOD = 13mm
+washerID = 6.4mm
+
+// ---------- Fasteners ----------
+boltCount = 6
+boltCircleR = 48mm
+boltD = 5mm // M5 x 35 ISO 4762
+boltLength = 35mm
+boltHeadD = 8.5mm
+boltHeadH = 5mm
+boltSocketAF = 4mm
+boltSocketDepth = 2.5mm
+boltClearD = 5.5mm
+boltCounterboreD = 9.5mm
+tapDrillD = 4.2mm
+boltSeatZ = frontHousingTopZ - boltHeadH // 41
+dowelD = 4mm
+
+// ---------- Reusable primitives ----------
+fn annulus(outerD, innerD, z0, height) {
+  s = sketch(on = offsetPlane(XY, offset = z0)) {
+    outer = circle(start = [var 20mm, var 0mm], center = [var 0mm, var 0mm])
+    inner = circle(start = [var 10mm, var 0mm], center = [var 0mm, var 0mm])
+    coincident([outer.center, ORIGIN])
+    coincident([inner.center, ORIGIN])
+    diameter(outer) == outerD
+    diameter(inner) == innerD
+  }
+  return extrude(region(segments = [s.outer]), length = height)
+}
+
+fn cylinder(dia, z0, height, radialPos, angle) {
+  s = sketch(on = offsetPlane(XY, offset = z0)) {
+    c = circle(start = [var 5mm, var 0mm], center = [var 0mm, var 0mm])
+    coincident([c.center, ORIGIN])
+    diameter(c) == dia
+  }
+  return extrude(region(segments = [s.c]), length = height)
+    |> translate(x = radialPos)
+    |> rotate(axis = Z, angle = angle, global = true)
+}
+
+fn ringOfTools(@tool, instances) {
+  return patternCircular3d(
+    tool,
+    instances = instances,
+    axis = Z,
+    center = [0mm, 0mm, 0mm],
+    arcDegrees = 360deg,
+    rotateDuplicates = true,
+  )
+}
+
+// Shielded rolling bearing: inner ring, outer ring and two recessed shields
+fn shieldedBearing(boreD, outerD, width, z0) {
+  ringT = (outerD - boreD) / 2 * 0.3
+  innerLandD = boreD + 2 * ringT
+  outerLandD = outerD - 2 * ringT
+  innerRing = annulus(outerD = innerLandD, innerD = boreD, z0 = z0, height = width)
+  outerRing = annulus(outerD = outerD, innerD = outerLandD, z0 = z0, height = width)
+  shieldLow = annulus(outerD = outerLandD, innerD = innerLandD + 0.6mm, z0 = z0 + 0.3mm, height = 0.6mm)
+  shieldHigh = annulus(outerD = outerLandD, innerD = innerLandD + 0.6mm, z0 = z0 + width - 0.9mm, height = 0.6mm)
+  return [innerRing, outerRing, shieldLow, shieldHigh]
+}
+
+// Milled keyway: stadium in the YZ plane, cut radially from +X
+fn keywayTool(shaftD, keyW, keyDepth, zLow, zHigh) {
+  s = sketch(on = offsetPlane(YZ, offset = shaftD / 2 - keyDepth)) {
+    right = line(start = [var 2mm, var 2mm], end = [var 2mm, var 12mm])
+    topArc = arc(start = [var 2mm, var 12mm], end = [var -2mm, var 12mm], center = [var 0mm, var 12mm])
+    left = line(start = [var -2mm, var 12mm], end = [var -2mm, var 2mm])
+    bottomArc = arc(start = [var -2mm, var 2mm], end = [var 2mm, var 2mm], center = [var 0mm, var 2mm])
+    coincident([right.end, topArc.start])
+    coincident([topArc.end, left.start])
+    coincident([left.end, bottomArc.start])
+    coincident([bottomArc.end, right.start])
+    vertical(right)
+    vertical(left)
+    tangent([right, topArc])
+    tangent([left, bottomArc])
+    coincident([topArc.center, [0mm, zHigh - keyW / 2]])
+    coincident([bottomArc.center, [0mm, zLow + keyW / 2]])
+    radius(topArc) == keyW / 2
+    radius(bottomArc) == keyW / 2
+  }
+  return extrude(region(segments = [s.right, s.topArc]), length = keyDepth + 1mm)
+}
+
+// =====================================================================
+// Rear Housing (input side)
+// =====================================================================
+rearHousingProfile = sketch(on = XZ) {
+  bossFace = line(start = [var 14mm, var -10.5mm], end = [var 20mm, var -10.5mm])
+  bossOD = line(start = [var 20mm, var -10.5mm], end = [var 20mm, var 0mm])
+  floorBottom = line(start = [var 20mm, var 0mm], end = [var 54mm, var 0mm])
+  outerChamfer = line(start = [var 54mm, var 0mm], end = [var 55mm, var 1mm])
+  outerWall = line(start = [var 55mm, var 1mm], end = [var 55mm, var 16mm])
+  rimFace = line(start = [var 55mm, var 16mm], end = [var 40mm, var 16mm])
+  cupWall = line(start = [var 40mm, var 16mm], end = [var 40mm, var 6mm])
+  cupFloor = line(start = [var 40mm, var 6mm], end = [var 10mm, var 6mm])
+  shaftClearBore = line(start = [var 10mm, var 6mm], end = [var 10mm, var 0mm])
+  bearingShoulder = line(start = [var 10mm, var 0mm], end = [var 14mm, var 0mm])
+  bearingBore = line(start = [var 14mm, var 0mm], end = [var 14mm, var -10.5mm])
+  coincident([bossFace.end, bossOD.start])
+  coincident([bossOD.end, floorBottom.start])
+  coincident([floorBottom.end, outerChamfer.start])
+  coincident([outerChamfer.end, outerWall.start])
+  coincident([outerWall.end, rimFace.start])
+  coincident([rimFace.end, cupWall.start])
+  coincident([cupWall.end, cupFloor.start])
+  coincident([cupFloor.end, shaftClearBore.start])
+  coincident([shaftClearBore.end, bearingShoulder.start])
+  coincident([bearingShoulder.end, bearingBore.start])
+  coincident([bearingBore.end, bossFace.start])
+  horizontal(bossFace)
+  vertical(bossOD)
+  horizontal(floorBottom)
+  vertical(outerWall)
+  horizontal(rimFace)
+  vertical(cupWall)
+  horizontal(cupFloor)
+  vertical(shaftClearBore)
+  horizontal(bearingShoulder)
+  vertical(bearingBore)
+  // radial dimensions
+  horizontalDistance([ORIGIN, bearingBore.start]) == rearBearingOD / 2
+  horizontalDistance([ORIGIN, bossOD.start]) == rearBossOD / 2
+  horizontalDistance([ORIGIN, outerChamfer.start]) == housingOD / 2 - housingChamfer
+  horizontalDistance([ORIGIN, outerWall.start]) == housingOD / 2
+  horizontalDistance([ORIGIN, cupWall.start]) == cupBoreD / 2
+  horizontalDistance([ORIGIN, shaftClearBore.start]) == rearClearD / 2
+  // axial dimensions
+  verticalDistance([bossFace.start, ORIGIN]) == rearBossDepth
+  horizontal([ORIGIN, floorBottom.start])
+  verticalDistance([ORIGIN, outerWall.start]) == housingChamfer
+  verticalDistance([ORIGIN, rimFace.start]) == ringZ0
+  verticalDistance([ORIGIN, cupFloor.start]) == rearFloorTopZ
+  horizontal([ORIGIN, bearingShoulder.start])
+}
+rearHousingBlank = revolve(region(segments = [rearHousingProfile.bossFace, rearHousingProfile.bossOD]), axis = Y)
+hide(rearHousingProfile)
+
+rearHousing = subtract(
+  rearHousingBlank,
+  tools = flatten([
+    ringOfTools(cylinder(dia = tapDrillD, z0 = 3mm, height = ringZ0 - 3mm + 1mm, radialPos = boltCircleR, angle = 0deg), instances = boltCount),
+    ringOfTools(cylinder(dia = dowelD, z0 = rearPlateZ0, height = ringZ0 - rearPlateZ0 + 1mm, radialPos = boltCircleR, angle = 30deg), instances = 2),
+    cylinder(dia = 29.4mm, z0 = -rearBearingW - 1.3mm, height = 1.3mm, radialPos = 0mm, angle = 0deg) // DIN 472-28 circlip groove
+  ]),
+)
+  |> appearance(color = "#a7b0ba", metalness = 0.7, roughness = 0.4)
+
+// =====================================================================
+// Ring Gear, 54T internal (fixed)
+// Internal tooth spaces are generated by a conjugate 54T external cutter.
+// =====================================================================
+ringBlankSketch = sketch(on = offsetPlane(XY, offset = ringZ0)) {
+  outer = circle(start = [var 55mm, var 0mm], center = [var 0mm, var 0mm])
+  bore = circle(start = [var 38mm, var 0mm], center = [var 0mm, var 0mm])
+  coincident([outer.center, ORIGIN])
+  coincident([bore.center, ORIGIN])
+  diameter(outer) == housingOD
+  diameter(bore) == ringBlankBoreD
+}
+ringBlank = extrude(region(segments = [ringBlankSketch.outer]), length = ringWidth)
+hide(ringBlankSketch)
+
+fn ringCutter(@phase) {
+  return gear::spur(
+    nTeeth = ringTeeth,
+    module = gearModule,
+    pressureAngle = pressureAngle,
+    gearHeight = ringWidth + 2mm,
+  )
+    |> rotate(axis = Z, angle = phase, global = true)
+    |> translate(z = ringZ0 - 1mm)
+}
+
+ringGear = subtract(
+  ringBlank,
+  tools = flatten([
+
+    ringOfTools(cylinder(dia = boltClearD, z0 = ringZ0 - 1mm, height = ringWidth + 2mm, radialPos = boltCircleR, angle = 0deg), instances = boltCount),
+    ringOfTools(cylinder(dia = dowelD, z0 = ringZ0 - 1mm, height = ringWidth + 2mm, radialPos = boltCircleR, angle = 30deg), instances = 2)
+  ]),
+)
+  |> appearance(color = "#5f6b76", metalness = 0.85, roughness = 0.35)
+
+// =====================================================================
+// Front Housing (output side)
+// =====================================================================
+frontHousingProfile = sketch(on = XZ) {
+  rimFace = line(start = [var 40mm, var 30mm], end = [var 55mm, var 30mm])
+  outerWall = line(start = [var 55mm, var 30mm], end = [var 55mm, var 45mm])
+  outerChamfer = line(start = [var 55mm, var 45mm], end = [var 54mm, var 46mm])
+  topFace = line(start = [var 54mm, var 46mm], end = [var 26mm, var 46mm])
+  bossOD = line(start = [var 26mm, var 46mm], end = [var 26mm, var 64mm])
+  bossFace = line(start = [var 26mm, var 64mm], end = [var 20mm, var 64mm])
+  bearingBore = line(start = [var 20mm, var 64mm], end = [var 20mm, var 44mm])
+  bearingShoulder = line(start = [var 20mm, var 44mm], end = [var 12.5mm, var 44mm])
+  lipBore = line(start = [var 12.5mm, var 44mm], end = [var 12.5mm, var 40mm])
+  cupCeiling = line(start = [var 12.5mm, var 40mm], end = [var 40mm, var 40mm])
+  cupWall = line(start = [var 40mm, var 40mm], end = [var 40mm, var 30mm])
+  coincident([rimFace.end, outerWall.start])
+  coincident([outerWall.end, outerChamfer.start])
+  coincident([outerChamfer.end, topFace.start])
+  coincident([topFace.end, bossOD.start])
+  coincident([bossOD.end, bossFace.start])
+  coincident([bossFace.end, bearingBore.start])
+  coincident([bearingBore.end, bearingShoulder.start])
+  coincident([bearingShoulder.end, lipBore.start])
+  coincident([lipBore.end, cupCeiling.start])
+  coincident([cupCeiling.end, cupWall.start])
+  coincident([cupWall.end, rimFace.start])
+  horizontal(rimFace)
+  vertical(outerWall)
+  horizontal(topFace)
+  vertical(bossOD)
+  horizontal(bossFace)
+  vertical(bearingBore)
+  horizontal(bearingShoulder)
+  vertical(lipBore)
+  horizontal(cupCeiling)
+  vertical(cupWall)
+  // radial dimensions
+  horizontalDistance([ORIGIN, rimFace.start]) == cupBoreD / 2
+  horizontalDistance([ORIGIN, outerWall.start]) == housingOD / 2
+  horizontalDistance([ORIGIN, outerChamfer.end]) == housingOD / 2 - housingChamfer
+  horizontalDistance([ORIGIN, bossOD.start]) == frontBossOD / 2
+  horizontalDistance([ORIGIN, bearingBore.start]) == outputBearingOD / 2
+  horizontalDistance([ORIGIN, lipBore.start]) == frontLipD / 2
+  // axial dimensions
+  verticalDistance([ORIGIN, rimFace.start]) == ringZ1
+  verticalDistance([ORIGIN, outerChamfer.start]) == frontHousingTopZ - housingChamfer
+  verticalDistance([ORIGIN, topFace.start]) == frontHousingTopZ
+  verticalDistance([ORIGIN, bossFace.start]) == frontBossTopZ
+  verticalDistance([ORIGIN, bearingShoulder.start]) == outputBearingZ0
+  verticalDistance([ORIGIN, cupCeiling.start]) == frontCupCeilingZ
+}
+frontHousingBlank = revolve(region(segments = [frontHousingProfile.rimFace, frontHousingProfile.outerWall]), axis = Y)
+hide(frontHousingProfile)
+
+frontHousing = subtract(
+  frontHousingBlank,
+  tools = flatten([
+    ringOfTools(cylinder(dia = boltClearD, z0 = ringZ1 - 1mm, height = frontHousingTopZ - ringZ1 + 2mm, radialPos = boltCircleR, angle = 0deg), instances = boltCount),
+    ringOfTools(cylinder(dia = boltCounterboreD, z0 = boltSeatZ, height = boltHeadH + 1mm, radialPos = boltCircleR, angle = 0deg), instances = boltCount),
+    ringOfTools(cylinder(dia = dowelD, z0 = ringZ1 - 1mm, height = 5mm, radialPos = boltCircleR, angle = 30deg), instances = 2),
+    cylinder(dia = 42.5mm, z0 = outputBearingZ0 + outputBearingW, height = 1.85mm, radialPos = 0mm, angle = 0deg) // DIN 472-40 circlip groove
+  ]),
+)
+  |> appearance(color = "#a7b0ba", metalness = 0.7, roughness = 0.4, opacity = 0.45)
+
+// =====================================================================
+// Sun Gear + Input Shaft (one piece)
+// =====================================================================
+sunTeethBody = gear::spur(nTeeth = sunTeeth, module = gearModule, pressureAngle = pressureAngle, gearHeight = faceWidth)
+  |> translate(z = gearZ0)
+
+inputShaftProfile = sketch(on = XZ) {
+  endFace = line(start = [var 0mm, var -36mm], end = [var 5.5mm, var -36mm])
+  endChamfer = line(start = [var 5.5mm, var -36mm], end = [var 6mm, var -35.5mm])
+  shaftOD = line(start = [var 6mm, var -35.5mm], end = [var 6mm, var 0mm])
+  shoulder = line(start = [var 6mm, var 0mm], end = [var 8mm, var 0mm])
+  collarOD = line(start = [var 8mm, var 0mm], end = [var 8mm, var 18mm])
+  top = line(start = [var 8mm, var 18mm], end = [var 0mm, var 18mm])
+  axisLine = line(start = [var 0mm, var 18mm], end = [var 0mm, var -36mm])
+  coincident([endFace.end, endChamfer.start])
+  coincident([endChamfer.end, shaftOD.start])
+  coincident([shaftOD.end, shoulder.start])
+  coincident([shoulder.end, collarOD.start])
+  coincident([collarOD.end, top.start])
+  coincident([top.end, axisLine.start])
+  coincident([axisLine.end, endFace.start])
+  horizontal(endFace)
+  vertical(shaftOD)
+  horizontal(shoulder)
+  vertical(collarOD)
+  horizontal(top)
+  vertical(axisLine)
+  coincident([endFace.start, [0mm, inputShaftEndZ]])
+  horizontalDistance([ORIGIN, endFace.end]) == inputShaftD / 2 - shaftChamfer
+  horizontalDistance([ORIGIN, shaftOD.start]) == inputShaftD / 2
+  verticalDistance([endChamfer.start, endChamfer.end]) == shaftChamfer
+  horizontal([ORIGIN, shoulder.start])
+  horizontalDistance([ORIGIN, collarOD.start]) == inputCollarD / 2
+  verticalDistance([ORIGIN, top.start]) == gearZ0 + 1mm
+}
+inputShaft = revolve(region(segments = [inputShaftProfile.endFace, inputShaftProfile.endChamfer]), axis = Y)
+hide(inputShaftProfile)
+
+sunGear = subtract(
+  union(flatten([sunTeethBody, inputShaft])),
+  tools = flatten([
+    keywayTool(shaftD = inputShaftD, keyW = 4mm, keyDepth = 2.5mm, zLow = -32mm, zHigh = -16mm),
+    annulus(outerD = 14mm, innerD = 11.5mm, z0 = -rearBearingW - 1.1mm, height = 1.1mm) // DIN 471-12 groove
+  ]),
+)
+  |> appearance(color = "#d9a326", metalness = 0.9, roughness = 0.3)
+
+// =====================================================================
+// Planet Gears, 18T, topped tips, Ø10 bore for HK0612 needle sleeve
+// =====================================================================
+fn planetGear(@i) {
+  theta = (i * 360 / planetCount): number(deg)
+  phase = (i * 360 / planetCount * (1 + sunTeeth / planetTeeth) + 180 + 180 / planetTeeth): number(deg)
+  body = intersect([
+    gear::spur(nTeeth = planetTeeth, module = gearModule, pressureAngle = pressureAngle, gearHeight = faceWidth),
+    annulus(outerD = 2 * planetTipR, innerD = needleOD, z0 = 0mm, height = faceWidth)
+  ])
+  return body
+    |> rotate(axis = Z, angle = phase, global = true)
+    |> translate(x = centerDistance * cos(theta), y = centerDistance * sin(theta), z = gearZ0)
+    |> appearance(color = "#3d7cc9", metalness = 0.9, roughness = 0.3)
+}
+planets = map([0..planetCount - 1], f = planetGear)
+
+// =====================================================================
+// Planet Pins, Needle Sleeves, Thrust Washers
+// =====================================================================
+pinProfile = sketch(on = XZ) {
+  bottom = line(start = [var 0mm, var 10mm], end = [var 2.5mm, var 10mm])
+  chamferLow = line(start = [var 2.5mm, var 10mm], end = [var 3mm, var 10.5mm])
+  od = line(start = [var 3mm, var 10.5mm], end = [var 3mm, var 35.5mm])
+  chamferHigh = line(start = [var 3mm, var 35.5mm], end = [var 2.5mm, var 36mm])
+  top = line(start = [var 2.5mm, var 36mm], end = [var 0mm, var 36mm])
+  axisLine = line(start = [var 0mm, var 36mm], end = [var 0mm, var 10mm])
+  coincident([bottom.end, chamferLow.start])
+  coincident([chamferLow.end, od.start])
+  coincident([od.end, chamferHigh.start])
+  coincident([chamferHigh.end, top.start])
+  coincident([top.end, axisLine.start])
+  coincident([axisLine.end, bottom.start])
+  horizontal(bottom)
+  vertical(od)
+  horizontal(top)
+  vertical(axisLine)
+  coincident([bottom.start, [0mm, rearPlateZ0]])
+  horizontalDistance([ORIGIN, bottom.end]) == pinD / 2 - pinChamfer
+  horizontalDistance([ORIGIN, od.start]) == pinD / 2
+  verticalDistance([ORIGIN, od.start]) == rearPlateZ0 + pinChamfer
+  verticalDistance([ORIGIN, od.end]) == frontPlateZ1 - pinChamfer
+  horizontalDistance([ORIGIN, top.start]) == pinD / 2 - pinChamfer
+  verticalDistance([ORIGIN, top.start]) == frontPlateZ1
+}
+planetPins = revolve(region(segments = [pinProfile.bottom, pinProfile.chamferLow]), axis = Y)
+  |> translate(x = centerDistance)
+  |> ringOfTools(instances = planetCount)
+  |> appearance(color = "#c8ccd0", metalness = 0.95, roughness = 0.2)
+hide(pinProfile)
+
+needleSleeves = annulus(outerD = needleOD, innerD = pinD, z0 = gearZ0, height = faceWidth)
+  |> translate(x = centerDistance)
+  |> ringOfTools(instances = planetCount)
+  |> appearance(color = "#8a8f94", metalness = 0.9, roughness = 0.3)
+
+thrustWashersLow = annulus(outerD = washerOD, innerD = washerID, z0 = ringZ0, height = washerT)
+  |> translate(x = centerDistance)
+  |> ringOfTools(instances = planetCount)
+  |> appearance(color = "#b08d57", metalness = 0.8, roughness = 0.35)
+thrustWashersHigh = annulus(outerD = washerOD, innerD = washerID, z0 = gearZ1, height = washerT)
+  |> translate(x = centerDistance)
+  |> ringOfTools(instances = planetCount)
+  |> appearance(color = "#b08d57", metalness = 0.8, roughness = 0.35)
+
+// =====================================================================
+// Planet Carrier + Output Shaft (one piece)
+// =====================================================================
+outputShaftProfile = sketch(on = XZ) {
+  base = line(start = [var 0mm, var 35.5mm], end = [var 11mm, var 35.5mm])
+  collarOD = line(start = [var 11mm, var 35.5mm], end = [var 11mm, var 44mm])
+  shoulder = line(start = [var 11mm, var 44mm], end = [var 8.5mm, var 44mm])
+  shaftOD = line(start = [var 8.5mm, var 44mm], end = [var 8.5mm, var 89.5mm])
+  endChamfer = line(start = [var 8.5mm, var 89.5mm], end = [var 8mm, var 90mm])
+  endFace = line(start = [var 8mm, var 90mm], end = [var 0mm, var 90mm])
+  axisLine = line(start = [var 0mm, var 90mm], end = [var 0mm, var 35.5mm])
+  coincident([base.end, collarOD.start])
+  coincident([collarOD.end, shoulder.start])
+  coincident([shoulder.end, shaftOD.start])
+  coincident([shaftOD.end, endChamfer.start])
+  coincident([endChamfer.end, endFace.start])
+  coincident([endFace.end, axisLine.start])
+  coincident([axisLine.end, base.start])
+  horizontal(base)
+  vertical(collarOD)
+  horizontal(shoulder)
+  vertical(shaftOD)
+  horizontal(endFace)
+  vertical(axisLine)
+  coincident([base.start, [0mm, frontPlateZ1 - 0.5mm]])
+  horizontalDistance([ORIGIN, collarOD.start]) == outputCollarD / 2
+  verticalDistance([ORIGIN, shoulder.start]) == outputBearingZ0
+  horizontalDistance([ORIGIN, shaftOD.start]) == outputShaftD / 2
+  verticalDistance([ORIGIN, endChamfer.start]) == outputShaftEndZ - shaftChamfer
+  horizontalDistance([ORIGIN, endChamfer.end]) == outputShaftD / 2 - shaftChamfer
+  verticalDistance([ORIGIN, endFace.start]) == outputShaftEndZ
+}
+outputShaft = revolve(region(segments = [outputShaftProfile.base, outputShaftProfile.collarOD]), axis = Y)
+hide(outputShaftProfile)
+
+carrierBody = union(flatten([
+  annulus(outerD = carrierPlateD, innerD = carrierCenterHoleD, z0 = rearPlateZ0, height = plateT),
+  cylinder(dia = carrierPlateD, z0 = frontPlateZ0, height = plateT, radialPos = 0mm, angle = 0deg),
+  ringOfTools(cylinder(dia = postD, z0 = ringZ0 - 0.5mm, height = ringWidth + 1mm, radialPos = centerDistance, angle = (180 / planetCount): number(deg)), instances = planetCount),
+  outputShaft
+]))
+
+carrier = subtract(
+  carrierBody,
+  tools = flatten([
+    ringOfTools(cylinder(dia = pinD, z0 = rearPlateZ0 - 1mm, height = frontPlateZ1 - rearPlateZ0 + 2mm, radialPos = centerDistance, angle = 0deg), instances = planetCount),
+    keywayTool(shaftD = outputShaftD, keyW = 5mm, keyDepth = 3mm, zLow = 68mm, zHigh = 86mm),
+    annulus(outerD = 19mm, innerD = 16.2mm, z0 = outputBearingZ0 + outputBearingW, height = 1.1mm) // DIN 471-17 groove
+  ]),
+)
+  |> appearance(color = "#2f8f5b", metalness = 0.8, roughness = 0.35)
+
+// =====================================================================
+// Bearings and Retaining Rings
+// =====================================================================
+inputBearing = shieldedBearing(boreD = rearBearingD, outerD = rearBearingOD, width = rearBearingW, z0 = -rearBearingW)
+  |> appearance(color = "#d0d4d8", metalness = 0.95, roughness = 0.2)
+outputBearing = shieldedBearing(boreD = outputBearingD, outerD = outputBearingOD, width = outputBearingW, z0 = outputBearingZ0)
+  |> appearance(color = "#d0d4d8", metalness = 0.95, roughness = 0.2)
+
+inputHousingCirclip = annulus(outerD = 29.4mm, innerD = 24mm, z0 = -rearBearingW - 1.2mm, height = 1.2mm)
+  |> appearance(color = "#1f1f1f", metalness = 0.6, roughness = 0.5)
+inputShaftCirclip = annulus(outerD = 15mm, innerD = 11.5mm, z0 = -rearBearingW - 1mm, height = 1mm)
+  |> appearance(color = "#1f1f1f", metalness = 0.6, roughness = 0.5)
+outputHousingCirclip = annulus(outerD = 42.5mm, innerD = 35mm, z0 = outputBearingZ0 + outputBearingW, height = 1.75mm)
+  |> appearance(color = "#1f1f1f", metalness = 0.6, roughness = 0.5)
+outputShaftCirclip = annulus(outerD = 21mm, innerD = 16.2mm, z0 = outputBearingZ0 + outputBearingW, height = 1mm)
+  |> appearance(color = "#1f1f1f", metalness = 0.6, roughness = 0.5)
+
+// =====================================================================
+// Fasteners: 6 x M5 x 35 socket head cap screws, 2 x Ø4 x 24 dowels
+// =====================================================================
+boltProfile = sketch(on = XZ) {
+  tip = line(start = [var 0mm, var -35mm], end = [var 2mm, var -35mm])
+  tipChamfer = line(start = [var 2mm, var -35mm], end = [var 2.5mm, var -34.5mm])
+  shank = line(start = [var 2.5mm, var -34.5mm], end = [var 2.5mm, var 0mm])
+  headUnder = line(start = [var 2.5mm, var 0mm], end = [var 4.25mm, var 0mm])
+  headOD = line(start = [var 4.25mm, var 0mm], end = [var 4.25mm, var 4.5mm])
+  headChamfer = line(start = [var 4.25mm, var 4.5mm], end = [var 3.75mm, var 5mm])
+  headTop = line(start = [var 3.75mm, var 5mm], end = [var 0mm, var 5mm])
+  axisLine = line(start = [var 0mm, var 5mm], end = [var 0mm, var -35mm])
+  coincident([tip.end, tipChamfer.start])
+  coincident([tipChamfer.end, shank.start])
+  coincident([shank.end, headUnder.start])
+  coincident([headUnder.end, headOD.start])
+  coincident([headOD.end, headChamfer.start])
+  coincident([headChamfer.end, headTop.start])
+  coincident([headTop.end, axisLine.start])
+  coincident([axisLine.end, tip.start])
+  horizontal(tip)
+  vertical(shank)
+  horizontal(headUnder)
+  vertical(headOD)
+  horizontal(headTop)
+  vertical(axisLine)
+  coincident([tip.start, [0mm, -boltLength]])
+  horizontalDistance([ORIGIN, tip.end]) == boltD / 2 - 0.5mm
+  horizontalDistance([ORIGIN, shank.start]) == boltD / 2
+  verticalDistance([shank.start, ORIGIN]) == boltLength - 0.5mm
+  horizontal([ORIGIN, headUnder.start])
+  horizontalDistance([ORIGIN, headOD.start]) == boltHeadD / 2
+  verticalDistance([ORIGIN, headOD.end]) == boltHeadH - 0.5mm
+  horizontalDistance([ORIGIN, headTop.start]) == boltHeadD / 2 - 0.5mm
+  verticalDistance([ORIGIN, headTop.start]) == boltHeadH
+}
+boltBlank = revolve(region(segments = [boltProfile.tip, boltProfile.tipChamfer]), axis = Y)
+hide(boltProfile)
+
+hexSocket = sketch(on = offsetPlane(XY, offset = boltHeadH - boltSocketDepth)) {
+  e1 = line(start = [var -1.155mm, var -2mm], end = [var 1.155mm, var -2mm])
+  e2 = line(start = [var 1.155mm, var -2mm], end = [var 2.309mm, var 0mm])
+  e3 = line(start = [var 2.309mm, var 0mm], end = [var 1.155mm, var 2mm])
+  e4 = line(start = [var 1.155mm, var 2mm], end = [var -1.155mm, var 2mm])
+  e5 = line(start = [var -1.155mm, var 2mm], end = [var -2.309mm, var 0mm])
+  e6 = line(start = [var -2.309mm, var 0mm], end = [var -1.155mm, var -2mm])
+  coincident([e1.end, e2.start])
+  coincident([e2.end, e3.start])
+  coincident([e3.end, e4.start])
+  coincident([e4.end, e5.start])
+  coincident([e5.end, e6.start])
+  coincident([e6.end, e1.start])
+  horizontal(e1)
+  equalLength([e1, e2, e3, e4, e5, e6])
+  distance([ORIGIN, e1.start]) == boltSocketAF / sqrt(3)
+  distance([ORIGIN, e2.start]) == boltSocketAF / sqrt(3)
+  distance([ORIGIN, e3.start]) == boltSocketAF / sqrt(3)
+  distance([ORIGIN, e4.start]) == boltSocketAF / sqrt(3)
+  distance([ORIGIN, e5.start]) == boltSocketAF / sqrt(3)
+  distance([ORIGIN, e6.start]) == boltSocketAF / sqrt(3)
+}
+socketTool = extrude(region(segments = [hexSocket.e1, hexSocket.e2]), length = boltSocketDepth + 1mm)
+hide(hexSocket)
+
+capScrews = subtract(boltBlank, tools = socketTool)
+  |> translate(x = boltCircleR, z = boltSeatZ)
+  |> ringOfTools(instances = boltCount)
+  |> appearance(color = "#26282b", metalness = 70, roughness = 45)
+
+dowelPins = cylinder(dia = dowelD, z0 = rearPlateZ0, height = 24mm, radialPos = boltCircleR, angle = 30deg)
+  |> ringOfTools(instances = 2)
+  |> appearance(color = "#c8ccd0", metalness = 95, roughness = 2)

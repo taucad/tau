@@ -1,0 +1,22 @@
+// 90 degree long-radius elbow for 1-inch schedule 40 pipe, swept along its centreline.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+// Parameters
+outerDiameter = 33.4
+innerDiameter = 26.6
+bendRadius = 50
+tangentLength = 30
+
+// Centreline on XZ: up the Z axis, bend towards +X, then along X.
+centreline = startSketchOn(XZ)
+  |> startProfile(at = [0, 0])
+  |> yLine(length = tangentLength)
+  |> tangentialArc(radius = bendRadius, angle = -90deg)
+  |> xLine(length = tangentLength)
+
+// Pipe section at the start of the path, square to it.
+section = startSketchOn(XY)
+  |> circle(center = [0, 0], diameter = outerDiameter)
+  |> subtract2d(tool = circle(startSketchOn(XY), center = [0, 0], diameter = innerDiameter))
+
+elbow = sweep(section, path = centreline)

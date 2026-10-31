@@ -305,7 +305,7 @@ describe('exposeFileSystem workspace-root masking', () => {
       await provider.writeFile('home.txt', new TextEncoder().encode('home'));
       await provider.writeFile('projects/alpha/main.ts', new TextEncoder().encode('main'));
       // eslint-disable-next-line no-restricted-syntax -- Exact retired spelling reproduces the reviewed bridge bypass.
-      const reserved = ['.tau', 'revisions', 'secret'].join('/');
+      const reserved = ['.jj', 'secret'].join('/');
       await provider.writeFile(`projects/alpha/${reserved}`, new TextEncoder().encode('secret'));
       const mounts = new MountTable();
       mounts.mount('/', provider, {

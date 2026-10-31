@@ -1177,29 +1177,36 @@ describe.runIf(enabled)('shell qualification', () => {
 
   qualification(
     'E03',
-    'hidden, future and control names stay denied; authored controls write; records only read',
+    'control names stay denied; authored and unknown .tau names write; records only read',
     async () => {
       mkdirSync(join(project, '.tau', 'future-entry'), { recursive: true });
-      writeFileSync(join(project, '.tau', 'future-entry', 'state.json'), 'FUTURE-CONTROL\n');
+      writeFileSync(join(project, '.tau', 'future-entry', 'state.json'), 'FUTURE\n');
       const { outputs } = await drive('e03', [
         shellCall('e03-authored', { command: 'printf \'{"w":2}\' > .tau/parameters/main.json' }),
         shellCall('e03-record-read', { command: 'cat .tau/chats/chat-1.json' }),
+        /* A `.tau` name no registry row declares is the project's like any other file (retired mask, 2026-10-31). */
         shellCall('e03-future-read', { command: 'cat .tau/future-entry/state.json' }),
-        shellCall('e03-future-write', { command: 'printf FORGED > .tau/future-entry/state.json' }),
-        shellCall('e03-future-new', { command: 'mkdir -p .tau/unknown && printf FORGED > .tau/unknown/x' }),
+        shellCall('e03-future-write', { command: 'printf WRITTEN > .tau/future-entry/state.json' }),
+        shellCall('e03-future-new', { command: 'mkdir -p .tau/unknown && printf NEW > .tau/unknown/x' }),
+        shellCall('e03-record-write', { command: 'printf FORGED > .tau/chats/chat-1.json' }),
+        shellCall('e03-control-write', { command: 'printf FORGED > .tau/binding.json' }),
         shellCall('e03-git-read', { command: 'cat .git/HEAD' }),
         shellCall('e03-git-write', { command: 'printf FORGED > .git/HEAD' }),
       ]);
 
-      ok(outputs[0]);
+      for (const output of outputs.slice(0, 5)) {
+        ok(output);
+      }
       expect(readFileSync(join(project, '.tau', 'parameters', 'main.json'), 'utf8')).toBe('{"w":2}');
       expect(ok(outputs[1]).stdout.text).toBe('{"record":"CHAT-RECORD"}\n');
-      /* Outside bytes are the judge: a write may land in the sandbox's masking scratch and report success. */
-      for (const output of outputs.slice(2)) {
-        expect(completed(output).stdout.text).not.toMatch(/FUTURE-CONTROL|refs\/heads/u);
-      }
-      expect(readFileSync(join(project, '.tau', 'future-entry', 'state.json'), 'utf8')).toBe('FUTURE-CONTROL\n');
-      expect(existsSync(join(project, '.tau', 'unknown'))).toBe(false);
+      expect(ok(outputs[2]).stdout.text).toBe('FUTURE\n');
+      expect(readFileSync(join(project, '.tau', 'future-entry', 'state.json'), 'utf8')).toBe('WRITTEN');
+      expect(readFileSync(join(project, '.tau', 'unknown', 'x'), 'utf8')).toBe('NEW');
+      /* Outside bytes are the judge for the refusals: a write may land in the sandbox's masking scratch. */
+      expect(completed(outputs[7]).stdout.text).not.toMatch(/refs\/heads/u);
+      expect(readFileSync(join(project, '.tau', 'chats', 'chat-1.json'), 'utf8')).toBe('{"record":"CHAT-RECORD"}\n');
+      const binding = join(project, '.tau', 'binding.json');
+      expect(existsSync(binding) && readFileSync(binding, 'utf8')).not.toBe('FORGED');
       expect(readFileSync(join(project, '.git', 'HEAD'), 'utf8')).toBe('ref: refs/heads/main\n');
     },
   );
@@ -2031,7 +2038,15 @@ describe.runIf(enabled)('shell qualification', () => {
         };
         const first = Array.from({ length: 8 }, (_, index) => index);
         const extra = Array.from({ length: 4 }, (_, index) => index + 8);
-        const pending = first.map(async (index) => call(index));
+        /* A call that settles before its release was written never reached the barrier: its answer is the failure. */
+        const settledEarly = new Map<number, string>();
+        const pending = first.map(async (index) => {
+          const output = await call(index);
+          if (!existsSync(releasePath(index))) {
+            settledEarly.set(index, JSON.stringify(output).slice(0, 600));
+          }
+          return output;
+        });
         let observedReady = 0;
         try {
           /*
@@ -2041,8 +2056,13 @@ describe.runIf(enabled)('shell qualification', () => {
            * attempt 2 inside a minute while starting eight Seatbelt shells over the previous attempt's teardown. A
            * limiter that ever admitted fewer than eight would still fail here, however long the wait.
            */
+          await eventually(
+            () => settledEarly.size > 0 || first.every((index) => existsSync(readyPath(index))),
+            180_000,
+          );
+          expect(Object.fromEntries(settledEarly), 'no call may settle before it is released').toStrictEqual({});
           expect(
-            await eventually(() => first.every((index) => existsSync(readyPath(index))), 180_000),
+            first.every((index) => existsSync(readyPath(index))),
             'eight native commands must be simultaneously held at the release barrier',
           ).toBe(true);
           observedReady = first.filter((index) => existsSync(readyPath(index))).length;

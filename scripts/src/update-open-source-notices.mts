@@ -9,8 +9,7 @@
  * license record, lists the MIT components of the desktop app's C# runtime,
  * and carries the Open CASCADE Technology notice with the unmodified LGPL-2.1
  * and Open CASCADE exception texts, read from the installed `geospec-engine`
- * package together with the OCCT revision its SOURCE-RELINK receipt pins, and the libfuse notice for the Linux
- * shell projection bridge at the version its build script pins. The
+ * package together with the OCCT revision its SOURCE-RELINK receipt pins. The
  * website (`apps/www`) renders the file at `/legal/open-source/`; the macOS package ships the same
  * file inside the app bundle.
  *
@@ -36,7 +35,6 @@ const engineName = 'geospec-engine';
 const tscircuitLicenseFile = join(rootDirectory, 'packages/plugins/tscircuit/THIRD_PARTY_LICENSES.md');
 export const outputFile = join(rootDirectory, 'apps/www/content/legal/open-source.md');
 const desktopRuntimeFile = join(rootDirectory, 'apps/www/content/legal/desktop-runtime-notices.json');
-const projectionBuildScript = join(rootDirectory, 'packages/core/native-process/scripts/build-shell-projection.mts');
 const picoGkWorkerLockFile = join(rootDirectory, 'packages/plugins/picogk/dotnet/Tau.PicoGK.Worker/packages.lock.json');
 
 /** Workspace devDependencies that only serve tests or the build, never the shipped bundle. */
@@ -212,24 +210,6 @@ const fence = (text: string): string[] => ['```text', text.replace(/\s+$/, ''), 
 const repositoryLink = (packageInfo: PackageInfo): string =>
   packageInfo.repository?.startsWith('https://') ? ` ([source](${packageInfo.repository}))` : '';
 
-/** The libfuse release the Linux shell projection bridge is built against. */
-export type ProjectionLibrary = { version: string };
-
-/**
- * Read the libfuse version the projection bridge's build script records, so the notice cannot name a libfuse
- * the bridge no longer builds against.
- *
- * @returns The `libfuse` version the build script writes into the bridge's provenance.
- */
-export function parseProjectionLibfuse(buildScript: string): ProjectionLibrary {
-  const match = /^\s*libfuse: '(\d+\.\d+\.\d+)',$/mu.exec(buildScript);
-  if (!match) {
-    throw new Error('The shell projection build script records no libfuse version.');
-  }
-
-  return { version: match[1]! };
-}
-
 /** The installed GeoSpec engine release and the OCCT revision it compiles in. */
 export type EngineRelease = { version: string; occtRevision: string };
 
@@ -256,9 +236,8 @@ export function generateNotices(input: {
   lgpl: string;
   occtException: string;
   engine: EngineRelease;
-  libfuse: ProjectionLibrary;
 }): string {
-  const { packages, vendored, desktopRuntime, lgpl, occtException, engine, libfuse } = input;
+  const { packages, vendored, desktopRuntime, lgpl, occtException, engine } = input;
   const sorted = packages.toSorted((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version));
   const occtPackages = sorted.filter(({ name }) =>
     ['libcascade', 'occt-import-js', 'replicad-opencascadejs'].includes(name),
@@ -294,15 +273,6 @@ export function generateNotices(input: {
     'corresponding OCCT source and relink kit, these license texts and the GeoSpec engine notices. The macOS app also',
     'carries the kit inside the app bundle, under `Tau.app/Contents/Resources/SOURCES`. The source of the GeoSpec engine,',
     'including how it builds and links OCCT, is at [github.com/taucad/geospec](https://github.com/taucad/geospec).',
-    '',
-    '## libfuse',
-    '',
-    "On Linux, the desktop app's private shell projection bridge links dynamically against **libfuse** 3",
-    '(`libfuse3.so.4`), Copyright © Miklos Szeredi and the libfuse contributors. The libfuse library is licensed under',
-    'the [GNU Lesser General Public License version 2.1](#gnu-lesser-general-public-license-version-2.1), reproduced',
-    `in full below. The bridge is built against unmodified libfuse ${libfuse.version}`,
-    `([source](https://github.com/libfuse/libfuse/releases/tag/fuse-${libfuse.version})) and calls only its public`,
-    'interface from a separate shared object.',
     '',
     '## Third-Party Packages',
     '',
@@ -386,7 +356,7 @@ async function main(): Promise<void> {
     ).values(),
   ];
   const occtLicenseDirectory = join(engineDirectory, 'licenses');
-  const [tscircuitRecord, desktopRuntimeRecord, picoGkWorkerLock, lgpl, occtException, sourceRelink, projectionBuild] =
+  const [tscircuitRecord, desktopRuntimeRecord, picoGkWorkerLock, lgpl, occtException, sourceRelink] =
     await Promise.all([
       readFile(tscircuitLicenseFile, 'utf8'),
       readFile(desktopRuntimeFile, 'utf8'),
@@ -394,7 +364,6 @@ async function main(): Promise<void> {
       readFile(join(occtLicenseDirectory, 'OCCT-LGPL-2.1.txt'), 'utf8'),
       readFile(join(occtLicenseDirectory, 'OCCT-LGPL-exception.txt'), 'utf8'),
       readFile(join(occtLicenseDirectory, 'SOURCE-RELINK.json'), 'utf8'),
-      readFile(projectionBuildScript, 'utf8'),
     ]);
   const desktopRuntime = JSON.parse(desktopRuntimeRecord) as DesktopRuntimeNotices;
   const drift = desktopRuntimeDrift(
@@ -414,7 +383,6 @@ async function main(): Promise<void> {
     lgpl,
     occtException,
     engine: { version: engineManifest.version, occtRevision: parseOcctRevision(sourceRelink) },
-    libfuse: parseProjectionLibfuse(projectionBuild),
   });
   console.log(`App closure: ${String(closure.length)} packages, ${String(packages.length)} third-party listed`);
 

@@ -5,12 +5,19 @@
  * Booleans, imprints, edge cuts and shells for {@link OfflineEngine}: command handlers that take the engine as their first argument.
  */
 import type { Oc, TopoDS_Edge, TopoDS_Shape } from '#offline/offline-occt.js';
-import { ShapeIndex, arrayToList, compound, listToArray, volumeOf } from '#offline/offline-occt.js';
+import { ShapeIndex, arrayToList, compound, listToArray, subShapes, volumeOf } from '#offline/offline-occt.js';
 import type { SolidEntity } from '#offline/offline-scene.js';
 import { helpersFor } from '#offline/offline-helpers.js';
 import { shellPrism } from '#offline/offline-shell.js';
 import type { ShapeHistory } from '#offline/offline-topology.js';
-import { algoHistory, facesOfEdge, rebaseSolid, remapIds, requireFace } from '#offline/offline-topology.js';
+import {
+  algoHistory,
+  facesOfEdge,
+  noEdgeMatches,
+  rebaseSolid,
+  remapIds,
+  requireFace,
+} from '#offline/offline-topology.js';
 import type { ModelingCommand, WireAngle } from '#offline/offline-engine.types.js';
 import { OfflineEngineError, toRadians } from '#offline/offline-engine.types.js';
 import type { OfflineEngine } from '#offline/offline-engine.js';
@@ -33,6 +40,45 @@ export function boolean(
   kind: 'union' | 'intersection' | 'subtract',
   targets: string[],
   tools: string[],
+): Record<string, unknown> {
+  if (kind !== 'subtract' || targets.length <= 1) {
+    return combine(engine, id, kind, targets, tools, false);
+  }
+
+  // Zoo cuts each target on its own and answers every resulting body in `extra_solid_ids`, which kcl-lib takes as the
+  // whole output of a multi-target subtract.
+  // Resolve every operand first so an unknown id fails before any target is replaced.
+  for (const solidId of [...targets, ...tools]) {
+    engine.scene.getSolid(solidId);
+  }
+
+  const ids = targets.map((_, index) => (index === 0 ? id : engine.mint()));
+  for (const [index, targetId] of targets.entries()) {
+    combine(engine, ids[index]!, kind, [targetId], tools, index < targets.length - 1);
+  }
+
+  return { extra_solid_ids: ids };
+}
+
+/**
+ * Runs one boolean into a single result body with id `id`.
+ *
+ * @param engine - offline engine
+ * @param id - id of the result body
+ * @param kind - boolean kind
+ * @param targets - target solid ids
+ * @param tools - tool solid ids
+ * @param keepTools - leave the tools in the scene for the next target of a multi-target subtract
+ * @returns the response
+ */
+// oxlint-disable-next-line max-params -- `boolean`'s operands plus whether the tools stay for the next target
+function combine(
+  engine: OfflineEngine,
+  id: string,
+  kind: 'union' | 'intersection' | 'subtract',
+  targets: string[],
+  tools: string[],
+  keepTools: boolean,
 ): Record<string, unknown> {
   const targetSolids = targets.map((targetId) => engine.scene.getSolid(targetId));
   const toolSolids = tools.map((toolId) => engine.scene.getSolid(toolId));
@@ -180,9 +226,10 @@ export function boolean(
     metalness: first.metalness,
     roughness: first.roughness,
   };
-  for (const solid of [...targetSolids, ...toolSolids]) {
+  for (const solid of keepTools ? targetSolids : [...targetSolids, ...toolSolids]) {
     engine.scene.remove(solid.id);
     engine.scene.aliases.set(solid.id, id);
+    engine.consumedByBoolean.add(solid.id);
   }
 
   engine.scene.add(result);
@@ -263,10 +310,24 @@ export function imprint(engine: OfflineEngine, id: string, cmd: ModelingCommand)
 // oxlint-disable-next-line complexity -- fillet and chamfer variants share edge resolution
 export function cutEdges(engine: OfflineEngine, id: string, cmd: ModelingCommand): Record<string, unknown> {
   const solid = engine.scene.getSolid(cmd['object_id'] as string);
+  const cutKey = JSON.stringify([cmd['cut_type'] ?? 'fillet', cmd['radius']]);
   const resolveTargets = (body: SolidEntity): TopoDS_Edge[] => {
     const found: TopoDS_Edge[] = [];
-    for (const spec of (cmd['edges_references'] as EdgeSpecifier[] | undefined) ?? []) {
-      found.push(engine.resolveEdgeSpecifier(body, spec));
+    // A tag on a sketch curve that a region split into several arcs becomes one reference per arc, all with the
+    // same end faces; the end faces pick the arcs they touch, and the other references match nothing. Only a cut
+    // where no reference matches fails.
+    const specs = (cmd['edges_references'] as EdgeSpecifier[] | undefined) ?? [];
+    let unmatched: unknown;
+    for (const spec of specs) {
+      try {
+        found.push(engine.resolveEdgeSpecifier(body, spec));
+      } catch (error) {
+        if (!(error instanceof OfflineEngineError) || error.message !== noEdgeMatches) {
+          throw error;
+        }
+
+        unmatched = error;
+      }
     }
 
     const edgeIds = [
@@ -274,7 +335,17 @@ export function cutEdges(engine: OfflineEngine, id: string, cmd: ModelingCommand
       ...(cmd['edge_id'] ? [cmd['edge_id'] as string] : []),
     ];
     for (const edgeId of edgeIds) {
+      // An edge that an earlier cut of the same kind and size already blended, because libcascade carries a cut
+      // along the tangent chain of its edges (a chamfer round filleted corners), is already cut.
+      if (!body.edges.has(edgeId) && engine.scene.cutEdges.get(edgeId) === cutKey) {
+        continue;
+      }
+
       found.push(engine.edgeById(body, edgeId));
+    }
+
+    if (specs.length > 0 && found.length === 0) {
+      throw unmatched;
     }
 
     return found;
@@ -348,11 +419,20 @@ export function cutEdges(engine: OfflineEngine, id: string, cmd: ModelingCommand
   ): ShapeHistory => {
     const history = algoHistory(engine.oc, op);
     const generated = cutEdges.map((edge) => listToArray(engine.oc, op.Generated(edge))[0]);
+    for (const [edgeId, edge] of body.edges) {
+      if (!op.Generated(edge).IsEmpty()) {
+        engine.scene.cutEdges.set(edgeId, cutKey);
+      }
+    }
+
     rebaseSolid(engine.oc, body, op.Shape(), history);
     for (const [index, face] of generated.entries()) {
       const faceId = faceIds[index];
       if (face && faceId) {
         body.faces.set(faceId, face);
+        if (isChamfer && cmd['version'] === 'v2') {
+          engine.scene.halfTurnFaces.add(faceId);
+        }
       }
     }
 
@@ -445,24 +525,32 @@ export function shell(engine: OfflineEngine, cmd: ModelingCommand): Record<strin
   const thickness = cmd['shell_thickness'] as number;
   const removed = (cmd['face_ids'] as string[]).map((faceId) => requireFace(engine.oc, solid, faceId));
   const op = new engine.oc.BRepOffsetAPI_MakeThickSolid();
-  op.MakeThickSolidByJoin(
-    solid.shape,
-    arrayToList(engine.oc, removed),
-    -thickness,
-    1e-3,
-    engine.oc.BRepOffset_Mode.BRepOffset_Skin,
-    true,
-    false,
-    engine.oc.GeomAbs_JoinType.GeomAbs_Arc,
-    false,
-  );
+  let thrown = false;
+  try {
+    op.MakeThickSolidByJoin(
+      solid.shape,
+      arrayToList(engine.oc, removed),
+      -thickness,
+      1e-3,
+      engine.oc.BRepOffset_Mode.BRepOffset_Skin,
+      true,
+      false,
+      engine.oc.GeomAbs_JoinType.GeomAbs_Arc,
+      false,
+    );
+  } catch {
+    // A wall offset that collapses a face (a fillet whose radius equals the wall) throws Standard_ConstructionError.
+    thrown = true;
+  }
+
   // MakeThickSolid can report success yet hand back the body unchanged when a wall offset collapses part of
-  // the profile; fall back to cutting an offset cavity through the removed caps.
+  // the profile, or throw; fall back to cutting an offset cavity through the removed caps.
   const unchanged =
+    !thrown &&
     op.IsDone() &&
     Math.abs(volumeOf(engine.oc, op.Shape()) - volumeOf(engine.oc, solid.shape)) <
       1e-9 * Math.max(1, volumeOf(engine.oc, solid.shape));
-  if (!op.IsDone() || unchanged) {
+  if (thrown || !op.IsDone() || unchanged) {
     const shelled = shellPrism(
       engine.oc,
       solid.shape,
@@ -483,6 +571,54 @@ export function shell(engine: OfflineEngine, cmd: ModelingCommand): Record<strin
   }
 
   rebaseSolid(engine.oc, solid, op.Shape(), algoHistory(engine.oc, op as unknown as Parameters<typeof algoHistory>[1]));
+  engine.scene.claim(solid);
+  return {};
+}
+
+/**
+ * Deletes faces from a body (`entity_delete_children`, KCL `deleteFace`). Each solid that loses a face is left as
+ * its open shells, a surface body; solids of the body that keep all their faces stay solid.
+ *
+ * @param engine - offline engine
+ * @param cmd - command payload
+ * @returns the response
+ */
+export function deleteFaces(engine: OfflineEngine, cmd: ModelingCommand): Record<string, unknown> {
+  const { oc } = engine;
+  const solid = engine.scene.find(cmd['entity_id'] as string);
+  if (solid?.kind !== 'solid') {
+    return {};
+  }
+
+  const faceIds = (cmd['child_entity_ids'] as string[]).filter((childId) => solid.faces.has(childId));
+  const removed = faceIds.map((faceId) => requireFace(oc, solid, faceId));
+  if (removed.length === 0) {
+    return {};
+  }
+
+  const reshape = new oc.BRepTools_ReShape();
+  for (const face of removed) {
+    reshape.Remove(face);
+  }
+
+  const top =
+    solid.shape.ShapeType() === oc.TopAbs_ShapeEnum.TopAbs_COMPOUND ? topLevelPieces(oc, solid.shape) : [solid.shape];
+  const pieces = top.flatMap((piece) => {
+    const solids = subShapes(oc, piece, 'TopAbs_SOLID');
+    const touched = (shape: TopoDS_Shape): boolean =>
+      subShapes(oc, shape, 'TopAbs_FACE').some((face) => removed.some((gone) => gone.IsSame(face)));
+    if (solids.length === 0) {
+      return touched(piece) ? [reshape.Apply(piece)] : [piece];
+    }
+
+    return solids.flatMap((part) => (touched(part) ? subShapes(oc, reshape.Apply(part), 'TopAbs_SHELL') : [part]));
+  });
+  reshape.delete();
+  solid.shape = pieces.length === 1 ? pieces[0]! : compound(oc, pieces);
+  for (const faceId of faceIds) {
+    solid.faces.delete(faceId);
+  }
+
   engine.scene.claim(solid);
   return {};
 }

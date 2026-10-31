@@ -1,5 +1,6 @@
 import { definitionProvider } from '#components/code/editor-definition.js';
 import { languageFeatures } from '#components/code/editor-language-features.js';
+import { startAfterLineBreaks } from '#components/code/editor-lint.js';
 import type {
   CallHierarchyDirection,
   EditorLocationItem,
@@ -819,10 +820,11 @@ export function createTypeScriptExtensions(options: TypeScriptExtensionOptions):
           if (!attachedViews.has(view) || !unchanged(options, version)) {
             return [];
           }
-          const { length } = view.state.doc;
           const diagnostics: Diagnostic[] = result.map((entry) => ({
-            from: Math.min(entry.start, length),
-            to: Math.min(entry.start + Math.max(entry.length, 1), length),
+            ...startAfterLineBreaks(view.state.doc, {
+              from: entry.start,
+              to: entry.start + Math.max(entry.length, 1),
+            }),
             severity: entry.category === 1 ? 'error' : entry.category === 0 ? 'warning' : 'info',
             message: entry.message,
             source: 'typescript',

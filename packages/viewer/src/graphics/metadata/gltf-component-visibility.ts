@@ -25,6 +25,25 @@ export const getComponentAncestorIds = (manifest: GeometryComponentManifest, com
 };
 
 /**
+ * Resolve a picked component to the component the viewer's verbs act on: the component itself, or its nearest ancestor
+ * that is not a face. Faces stay addressable sub-entities (measurement, sections) while hover, selection and the part
+ * menu work on the body that owns them, as in CAD tools.
+ *
+ * @param manifest - The component manifest to walk.
+ * @param componentId - The picked component.
+ * @returns The pickable component ID; the picked component when it has no non-face ancestor.
+ * @public
+ */
+export const resolvePickableComponentId = (manifest: GeometryComponentManifest, componentId: string): string => {
+  if (manifest.nodesById[componentId]?.kind !== 'face') {
+    return componentId;
+  }
+  return (
+    getComponentAncestorIds(manifest, componentId).find((id) => manifest.nodesById[id]?.kind !== 'face') ?? componentId
+  );
+};
+
+/**
  * Check whether a component, or any of its ancestors, is in a set of component IDs.
  *
  * @param manifest - The component manifest to walk.

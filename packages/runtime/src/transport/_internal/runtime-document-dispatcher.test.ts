@@ -171,6 +171,69 @@ describe('document worker dispatcher', () => {
     }
   });
 
+  it('should run the after-reply step once per operation when its terminal notify is duplicated', async () => {
+    const ports = new MessageChannel();
+    const flushed: Array<string | undefined> = [];
+    const worker = {
+      setTelemetrySend: vi.fn(),
+      setObservation: vi.fn(),
+      setDevtoolsTelemetryEnabled: vi.fn(),
+      setCompiledWasmModules: vi.fn(),
+      afterTerminalReply: vi.fn((operationId?: string) => flushed.push(operationId)),
+      capabilitiesManifest: { registrations: [], routes: [], renderCapabilities: {} },
+      initialize: vi.fn(async () => undefined),
+      permitComputePublication: vi.fn(),
+    } as unknown as KernelWorker;
+    const server = createDocumentWorkerDispatcher(worker, wrapMessagePort(ports.port1));
+    const client = createChannelClient<RuntimeDocumentProtocol>({
+      port: wrapMessagePort(ports.port2),
+      sessionKey: 'tau.runtime/v1',
+      protocolSchemas: runtimeDocumentProtocolSchemas,
+    });
+    try {
+      await client.ready;
+      const evaluated = (id: string): void =>
+        worker.onEvaluated?.({
+          documentId: 'd1',
+          intent: 0,
+          id,
+          success: true,
+          transient: false,
+          views: [],
+          exports: [],
+          issues: [],
+        });
+      const failedRender = (requestId: string): void =>
+        worker.onRendered?.({
+          subscriptionId: 'v1',
+          intent: 0,
+          evaluationId: 'e3',
+          requestId,
+          success: false,
+          transient: false,
+          issues: [],
+        } as unknown as Parameters<NonNullable<KernelWorker['onRendered']>>[0]);
+
+      // Duplicated after the settlement: the first notify runs the step, the copy finds nothing waiting.
+      worker.onOperationSettled?.({ operation: 'evaluate', operationId: 'evaluate:d1:e1', outcome: 'succeeded' });
+      evaluated('e1');
+      evaluated('e1');
+      // Duplicated before the settlement: both copies wait for the one settlement.
+      evaluated('e2');
+      evaluated('e2');
+      worker.onOperationSettled?.({ operation: 'evaluate', operationId: 'evaluate:d1:e2', outcome: 'succeeded' });
+      // A failed render's notify, duplicated around its settlement.
+      failedRender('r1');
+      worker.onOperationSettled?.({ operation: 'render', operationId: 'render:v1:e3:r1', outcome: 'issue' });
+      failedRender('r1');
+
+      expect(flushed).toEqual(['evaluate:d1:e1', 'evaluate:d1:e2', 'render:v1:e3:r1']);
+    } finally {
+      client.close();
+      server.dispose();
+    }
+  });
+
   it('rejects duplicate initialization and acknowledges pooled bytes through the host owner', async () => {
     const ports = new MessageChannel();
     const initialize = vi.fn(async () => undefined);

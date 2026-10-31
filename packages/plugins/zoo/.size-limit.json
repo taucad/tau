@@ -1,12 +1,12 @@
 [
   {
-    "name": "total (ESM JS) without the lazy offline engine — measured 17.12 kB brotlied on 2026-10-29, including the proxy subpath",
+    "name": "total (ESM JS) without the lazy offline engine — measured 17.12 kB brotlied on 2026-10-29, including the proxy subpath; 18.68 kB in CI on 2026-10-31 with KCL body names joined to glTF solids by bounding box (17.73 kB before it)",
     "path": ["dist/**/*.mjs", "!dist/offline/**"],
-    "limit": "18 kB"
+    "limit": "19.5 kB"
   },
   {
-    "name": "Offline libcascade engine, loaded only in offline mode — measured 30.96 kB brotlied on 2026-10-29, after moving the native helpers and the custom libcascade build in",
+    "name": "Offline libcascade engine, loaded only in offline mode — measured 32.63 kB brotlied on 2026-10-30, after the offline gap closure added surface bodies, edge and face extrudes, edge references and chained-blend id tracking",
     "path": "dist/offline/*.mjs",
-    "limit": "32 kB"
+    "limit": "35 kB"
   }
 ]

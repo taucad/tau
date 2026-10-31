@@ -1,0 +1,21 @@
+// Compression spring: 1.5 mm wire, 12 mm mean diameter, 8 coils, 30 mm free length.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+// Parameters
+wireDiameter = 1.5
+meanDiameter = 12
+coils = 8
+freeLength = 30
+
+coilPath = helix(
+  revolutions = coils,
+  angleStart = 0deg,
+  ccw = true,
+  radius = meanDiameter / 2,
+  length = freeLength,
+  axis = Z,
+)
+
+spring = startSketchOn(XZ)
+  |> circle(center = [meanDiameter / 2, 0], diameter = wireDiameter)
+  |> sweep(path = coilPath)

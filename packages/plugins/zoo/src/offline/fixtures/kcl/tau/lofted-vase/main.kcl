@@ -1,0 +1,24 @@
+// Flower vase lofted through four circular sections, then shelled open at the top.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+// Parameters: section heights and diameters, base to lip.
+baseDiameter = 60
+bellyDiameter = 100
+bellyHeight = 70
+neckDiameter = 50
+neckHeight = 160
+lipDiameter = 60
+lipHeight = 180
+wallThickness = 2.5
+
+base = startSketchOn(XY)
+  |> circle(center = [0, 0], diameter = baseDiameter)
+belly = startSketchOn(offsetPlane(XY, offset = bellyHeight))
+  |> circle(center = [0, 0], diameter = bellyDiameter)
+neck = startSketchOn(offsetPlane(XY, offset = neckHeight))
+  |> circle(center = [0, 0], diameter = neckDiameter)
+lip = startSketchOn(offsetPlane(XY, offset = lipHeight))
+  |> circle(center = [0, 0], diameter = lipDiameter)
+
+body = loft([base, belly, neck, lip], tagEnd = $mouth)
+vase = shell(body, faces = [mouth], thickness = wallThickness)

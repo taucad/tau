@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import { Inject, Injectable, Logger, ServiceUnavailableException, UnprocessableEntityException } from '@nestjs/common';
 import type { DictationEvent, DictationStatus } from '@taucad/chat/schemas';
 import { TranscriptionProviderError, transcriptionProvidersKey } from '#api/voice/voice.types.js';
 import type { TranscriptionEvent, TranscriptionProvider } from '#api/voice/voice.types.js';
@@ -63,11 +63,14 @@ export class VoiceService {
         throw error;
       }
       this.logger.warn(`Dictation provider ${provider.id} refused: ${error.message}`);
-      throw new ServiceUnavailableException(
-        error.status === 400
-          ? 'The recording could not be transcribed. Try recording again.'
-          : 'The dictation service is unavailable. Try again shortly.',
-      );
+      // An unusable recording is the caller's to fix, not a server fault to report (TAU-API-7).
+      if (error.status === 400) {
+        throw new UnprocessableEntityException('The recording could not be transcribed. Try recording again.');
+      }
+      // The provider's refusal rides along as the cause, so the reported 503 says what upstream answered.
+      throw new ServiceUnavailableException('The dictation service is unavailable. Try again shortly.', {
+        cause: error,
+      });
     }
   }
 }

@@ -490,3 +490,61 @@ describe('FileSelector search recovery', () => {
     expect(searchFiles).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('FileSelector (directories only)', () => {
+  const folderSource = createStaticDataSource(
+    [{ path: 'README.md' }, { path: 'public/fonts/a.woff' }, { path: 'public/index.html' }, { path: 'src/main.ts' }],
+    { shouldIncludeDirectories: true },
+  );
+
+  const renderFolderSelector = (selectedFile = '', onSelect = vi.fn()): ReturnType<typeof vi.fn> => {
+    render(
+      <FileSelector
+        shouldShowDirectoriesOnly
+        dataSource={folderSource}
+        rootLabel='Whole repository'
+        selectedFile={selectedFile}
+        searchPlaceholder='Search folders…'
+        onSelect={onSelect}
+      />,
+    );
+    return onSelect;
+  };
+
+  it('should name the root selection on its trigger and a folder by its path', () => {
+    renderFolderSelector('public/fonts');
+    expect(screen.getByRole('button', { name: 'public/fonts' })).toBeVisible();
+  });
+
+  it('should list folders only and choose the folder shown', async () => {
+    const onSelect = renderFolderSelector();
+    await userEvent.click(screen.getByRole('button', { name: 'Whole repository' }));
+
+    expect(await screen.findByText('public')).toBeVisible();
+    expect(screen.getByText('src')).toBeVisible();
+    expect(screen.queryByText('README.md')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByText('public'));
+    expect(await screen.findByText('fonts')).toBeVisible();
+    expect(screen.queryByText('index.html')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('option', { name: 'Select public' }));
+    expect(onSelect).toHaveBeenCalledWith('public');
+  });
+
+  it('should choose the root from its own row', async () => {
+    const onSelect = renderFolderSelector('src');
+    await userEvent.click(screen.getByRole('button', { name: 'src' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Whole repository' }));
+    await userEvent.click(await screen.findByRole('option', { name: 'Select Whole repository' }));
+    expect(onSelect).toHaveBeenCalledWith('');
+  });
+
+  it('should find folders by name', async () => {
+    renderFolderSelector();
+    await userEvent.click(screen.getByRole('button', { name: 'Whole repository' }));
+    fireEvent.change(screen.getByPlaceholderText('Search folders…'), { target: { value: 'font' } });
+    expect(await screen.findByText('fonts')).toBeVisible();
+    expect(screen.queryByText('a.woff')).not.toBeInTheDocument();
+  });
+});

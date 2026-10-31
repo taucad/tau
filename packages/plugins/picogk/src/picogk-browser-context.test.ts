@@ -51,6 +51,17 @@ describe('PicoGK browser kernel context', () => {
     await expect(context.mirror.sync(services)).rejects.toMatchObject({ name: 'AbortError' });
   });
 
+  it('should observe the heap of the session it holds now, not the one it recycled', async () => {
+    const { context } = setup();
+    const observed = vi.spyOn(PicogkBrowserSession.prototype, 'observedHeapBytes').mockReturnValueOnce(64 * 2 ** 20);
+    expect(context.session.observedHeapBytes?.()).toBe(64 * 2 ** 20);
+    await context.session.recycle();
+    expect(context.session.observedHeapBytes?.()).toBeUndefined();
+    expect(observed).toHaveBeenCalledTimes(2);
+    expect(observed.mock.contexts[1]).not.toBe(observed.mock.contexts[0]);
+    await context.session.cleanup();
+  });
+
   it('should reject unsynchronized, cancelled and superseded requests before dispatch', async () => {
     const { context, services, request } = setup();
     const dispatch = vi.spyOn(PicogkBrowserSession.prototype, 'request');

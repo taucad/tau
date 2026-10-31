@@ -2031,7 +2031,15 @@ describe.runIf(enabled)('shell qualification', () => {
         };
         const first = Array.from({ length: 8 }, (_, index) => index);
         const extra = Array.from({ length: 4 }, (_, index) => index + 8);
-        const pending = first.map(async (index) => call(index));
+        /* A call that settles before its release was written never reached the barrier: its answer is the failure. */
+        const settledEarly = new Map<number, string>();
+        const pending = first.map(async (index) => {
+          const output = await call(index);
+          if (!existsSync(releasePath(index))) {
+            settledEarly.set(index, JSON.stringify(output).slice(0, 600));
+          }
+          return output;
+        });
         let observedReady = 0;
         try {
           /*
@@ -2041,8 +2049,13 @@ describe.runIf(enabled)('shell qualification', () => {
            * attempt 2 inside a minute while starting eight Seatbelt shells over the previous attempt's teardown. A
            * limiter that ever admitted fewer than eight would still fail here, however long the wait.
            */
+          await eventually(
+            () => settledEarly.size > 0 || first.every((index) => existsSync(readyPath(index))),
+            180_000,
+          );
+          expect(Object.fromEntries(settledEarly), 'no call may settle before it is released').toStrictEqual({});
           expect(
-            await eventually(() => first.every((index) => existsSync(readyPath(index))), 180_000),
+            first.every((index) => existsSync(readyPath(index))),
             'eight native commands must be simultaneously held at the release barrier',
           ).toBe(true);
           observedReady = first.filter((index) => existsSync(readyPath(index))).length;

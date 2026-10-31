@@ -4,7 +4,13 @@ import { spawn } from 'node:child_process';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ProcessRow } from '#shell/process-tree.js';
-import { ownedProcesses, processTable, terminateOwnedProcesses, trackDescendants } from '#shell/process-tree.js';
+import {
+  coalesceReads,
+  ownedProcesses,
+  processTable,
+  terminateOwnedProcesses,
+  trackDescendants,
+} from '#shell/process-tree.js';
 
 describe('ownedProcesses', () => {
   it('should own the tree under the root and the root group, without zombies', () => {
@@ -18,6 +24,67 @@ describe('ownedProcesses', () => {
     ];
 
     expect([...ownedProcesses(table, 10, 10)].sort((left, right) => left - right)).toStrictEqual([10, 11, 12, 13]);
+  });
+});
+
+describe('coalesceReads', () => {
+  it('should run one read at a time and give every caller a read that started after it asked', async () => {
+    const started: number[] = [];
+    const finish: Array<(value: number) => void> = [];
+    let running = 0;
+    let highWater = 0;
+    const shared = coalesceReads(
+      async () =>
+        new Promise<number>((resolve) => {
+          running += 1;
+          highWater = Math.max(highWater, running);
+          started.push(started.length);
+          finish.push((value) => {
+            running -= 1;
+            resolve(value);
+          });
+        }),
+    );
+
+    const first = shared();
+    const second = shared();
+    const third = shared();
+    expect(started).toStrictEqual([0]);
+    finish[0]!(1);
+    await expect(first).resolves.toBe(1);
+    await vi.waitFor(() => {
+      expect(started).toStrictEqual([0, 1]);
+    });
+    const fourth = shared();
+    finish[1]!(2);
+    await expect(Promise.all([second, third])).resolves.toStrictEqual([2, 2]);
+    await vi.waitFor(() => {
+      expect(started).toStrictEqual([0, 1, 2]);
+    });
+    finish[2]!(3);
+    await expect(fourth).resolves.toBe(3);
+    expect(highWater).toBe(1);
+  });
+
+  it('should start the next read after a failed one and never reuse the failure', async () => {
+    let calls = 0;
+    let fail: (error: Error) => void = () => undefined;
+    const shared = coalesceReads(async () => {
+      calls += 1;
+      if (calls === 1) {
+        return new Promise<number>((_resolve, reject) => {
+          fail = reject;
+        });
+      }
+      return calls;
+    });
+
+    const failing = shared();
+    const waiting = shared();
+    fail(new Error('ps failed'));
+    await expect(failing).rejects.toThrow('ps failed');
+    await expect(waiting).resolves.toBe(2);
+    await expect(shared()).resolves.toBe(3);
   });
 });
 

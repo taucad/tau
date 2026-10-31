@@ -360,7 +360,7 @@
         "area": 144409.80323955856
       },
       "offline": {
-        "solids": 49,
+        "solids": 50,
         "volume": 121950.778,
         "area": 144435.1193
       }
@@ -4298,7 +4298,9 @@
         "area": 199.82450477051827
       },
       "offline": {
-        "gap": "engine: command Solid3dCutEdges resulted in errors: Unknown edge <id>"
+        "solids": 1,
+        "volume": 29.83243511,
+        "area": 199.8306256
       }
     },
     {
@@ -4350,7 +4352,9 @@
         "area": 104.018373162873
       },
       "offline": {
-        "gap": "engine: command Solid3dCutEdges resulted in errors: Unknown edge <id>"
+        "solids": 1,
+        "volume": 6.125,
+        "area": 104.0183712
       }
     },
     {
@@ -4373,7 +4377,9 @@
         "area": 104.018373162873
       },
       "offline": {
-        "gap": "engine: command Solid3dCutEdges resulted in errors: Unknown edge <id>"
+        "solids": 1,
+        "volume": 6.125,
+        "area": 104.0183712
       }
     },
     {
@@ -4775,7 +4781,9 @@
         "area": 200.0000074531272
       },
       "offline": {
-        "gap": "argument: The input argument of `appearance` requires one or more `Solid`s or a value with type `Imp"
+        "solids": 2,
+        "volume": 112.0,
+        "area": 200.0
       }
     },
     {
@@ -5244,7 +5252,9 @@
         "area": 7.953293033706888
       },
       "offline": {
-        "gap": "engine: command ExtrudeToReference resulted in errors: Cannot extrude by zero length"
+        "solids": 2,
+        "volume": 1.196349541,
+        "area": 7.963495408
       }
     },
     {
@@ -5529,7 +5539,9 @@
         "area": 9301.034241962823
       },
       "offline": {
-        "gap": "engine: [object WebAssembly.Exception]"
+        "solids": 5,
+        "volume": 4528.75219,
+        "area": 9301.349511
       }
     },
     {
@@ -5542,7 +5554,9 @@
         "area": 287.393831916824
       },
       "offline": {
-        "gap": "engine: command Solid3dCutEdgeReferences resulted in errors: No edge matches the edge reference"
+        "solids": 1,
+        "volume": 303.0871644,
+        "area": 285.6842516
       }
     },
     {
@@ -5617,7 +5631,9 @@
         "area": 105.44365082587603
       },
       "offline": {
-        "gap": "engine: command Solid3dCutEdges resulted in errors: Unknown edge <id>"
+        "solids": 1,
+        "volume": 6.339048623,
+        "area": 105.500414
       }
     },
     {
@@ -5640,7 +5656,9 @@
         "area": 105.44365082587603
       },
       "offline": {
-        "gap": "engine: command Solid3dCutEdges resulted in errors: Unknown edge <id>"
+        "solids": 1,
+        "volume": 6.339048623,
+        "area": 105.500414
       }
     },
     {
@@ -5771,7 +5789,9 @@
         "area": 940.1672868989408
       },
       "offline": {
-        "gap": "engine: command EntityMakeHelixFromEdge resulted in errors: Unknown edge undefined"
+        "solids": 1,
+        "volume": 1486.668,
+        "area": 940.1672
       }
     },
     {
@@ -6570,7 +6590,7 @@
         "area": 74083.34756934209
       },
       "offline": {
-        "solids": 2,
+        "solids": 4,
         "volume": 365805.1423,
         "area": 73441.37961
       }
@@ -6599,7 +6619,7 @@
         "area": 425.0045553709329
       },
       "offline": {
-        "solids": 2,
+        "solids": 3,
         "volume": 234.605479,
         "area": 425.0070237
       }
@@ -7556,7 +7576,9 @@
         "area": 3704.7582509730505
       },
       "offline": {
-        "gap": "engine: command RevolveAboutEdge resulted in errors: Unknown edge undefined"
+        "solids": 2,
+        "volume": 12587.0055,
+        "area": 3705.719631
       }
     },
     {
@@ -8018,7 +8040,9 @@
         "area": 211317.99854558153
       },
       "offline": {
-        "gap": "engine: command Solid3dCutEdges resulted in errors: Unknown edge <id>"
+        "solids": 1,
+        "volume": 5540073.492,
+        "area": 211321.7502
       }
     },
     {
@@ -8045,7 +8069,9 @@
         "area": 211317.99854558153
       },
       "offline": {
-        "gap": "engine: command Solid3dCutEdges resulted in errors: Unknown edge <id>"
+        "solids": 1,
+        "volume": 5540073.492,
+        "area": 211321.7502
       }
     },
     {
@@ -8372,7 +8398,9 @@
         "area": 211317.9984249882
       },
       "offline": {
-        "gap": "engine: Unknown edge <id>"
+        "solids": 1,
+        "volume": 5540073.492,
+        "area": 211321.7502
       }
     },
     {
@@ -8398,7 +8426,9 @@
         "area": 211317.9984249882
       },
       "offline": {
-        "gap": "engine: Unknown edge <id>"
+        "solids": 1,
+        "volume": 5540073.492,
+        "area": 211321.7502
       }
     },
     {
@@ -8437,7 +8467,9 @@
         "area": 252.75696079951615
       },
       "offline": {
-        "gap": "engine: command Solid3dCutEdges resulted in errors: Unknown edge <id>"
+        "solids": 1,
+        "volume": 63.93987322,
+        "area": 252.7720169
       }
     },
     {
@@ -9345,7 +9377,9 @@
         "area": 12.513541133074568
       },
       "offline": {
-        "gap": "engine: command EntityMirrorAcross resulted in errors: [object WebAssembly.Exception]"
+        "solids": 2,
+        "volume": 0.7608582859,
+        "area": 12.51513047
       }
     },
     {
@@ -11242,7 +11276,9 @@
       "upstream": "rust/kcl-lib/std/prelude.kcl#edgeId",
       "functions": ["edgeId", "extrude", "fillet", "rectangle", "startSketchOn"],
       "offline": {
-        "gap": "semantic: Engine didn't find any edges near this point"
+        "solids": 1,
+        "volume": 199.4634954,
+        "area": 277.7466807
       }
     },
     {
@@ -11515,7 +11551,9 @@
         "yLine"
       ],
       "offline": {
-        "gap": "engine: command ExtrudeToReference resulted in errors: Cannot extrude by zero length"
+        "solids": 6,
+        "volume": 3.25801972,
+        "area": 26.02765317
       }
     },
     {
@@ -11689,7 +11727,9 @@
       "upstream": "rust/kcl-lib/std/sketch.kcl#revolve",
       "functions": ["circle", "close", "extrude", "line", "revolve", "startProfile", "startSketchOn"],
       "offline": {
-        "gap": "engine: command RevolveAboutEdge resulted in errors: Unknown edge undefined"
+        "solids": 2,
+        "volume": 8789.568352,
+        "area": 2895.315141
       }
     },
     {
@@ -11697,7 +11737,9 @@
       "upstream": "rust/kcl-lib/std/sketch.kcl#revolve",
       "functions": ["circle", "close", "extrude", "line", "revolve", "startProfile", "startSketchOn"],
       "offline": {
-        "gap": "engine: command RevolveAboutEdge resulted in errors: Unknown edge undefined"
+        "solids": 2,
+        "volume": 8789.568352,
+        "area": 2895.315141
       }
     },
     {
@@ -12653,7 +12695,9 @@
       "upstream": "rust/kcl-lib/std/sketch.kcl#hyperbolic",
       "functions": ["close", "hyperbolic", "startProfile", "startSketchOn"],
       "offline": {
-        "gap": "engine: command ExtendPath resulted in errors: [object WebAssembly.Exception]"
+        "solids": 0,
+        "volume": 0.0,
+        "area": 0.0
       }
     },
     {
@@ -12816,7 +12860,9 @@
         "verticalDistance"
       ],
       "offline": {
-        "gap": "type: Tag `seg01` refers to a sketch edge, but this operation requires a face tag"
+        "solids": 1,
+        "volume": 4406881.426,
+        "area": 339635.5137
       }
     },
     {
@@ -12837,7 +12883,9 @@
         "verticalDistance"
       ],
       "offline": {
-        "gap": "type: Tag `seg01` refers to a sketch edge, but this operation requires a face tag"
+        "solids": 1,
+        "volume": 4411598.567,
+        "area": 340474.222
       }
     },
     {
@@ -12965,7 +13013,9 @@
       "upstream": "rust/kcl-lib/std/solid.kcl#chamfer",
       "functions": ["chamfer", "close", "extrude", "getNextAdjacentEdge", "line", "startProfile", "startSketchOn"],
       "offline": {
-        "gap": "engine: command Solid3dCutEdges resulted in errors: Unknown edge <id>"
+        "solids": 1,
+        "volume": 192.0,
+        "area": 439.3137085
       }
     },
     {
@@ -12985,7 +13035,7 @@
       "offline": {
         "solids": 1,
         "volume": 7040.0,
-        "area": 2270.842712
+        "area": 2262.842712
       }
     },
     {
@@ -13084,7 +13134,7 @@
         "translate"
       ],
       "offline": {
-        "solids": 1,
+        "solids": 2,
         "volume": 5.6875,
         "area": 25.0
       }
@@ -13515,7 +13565,9 @@
       "upstream": "rust/kcl-lib/std/solid.kcl#isSolid",
       "functions": ["assertIs", "extrude", "isSolid", "isSurface", "startProfile", "startSketchOn", "xLine", "yLine"],
       "offline": {
-        "gap": "engine: Failed to deserialize msgpack response from engine: Syntax(\"data did not match any variant o"
+        "solids": 2,
+        "volume": 125.0,
+        "area": 294.0
       }
     },
     {
@@ -13523,7 +13575,9 @@
       "upstream": "rust/kcl-lib/std/solid.kcl#isSurface",
       "functions": ["assertIs", "extrude", "isSolid", "isSurface", "startProfile", "startSketchOn", "xLine", "yLine"],
       "offline": {
-        "gap": "engine: Failed to deserialize msgpack response from engine: Syntax(\"data did not match any variant o"
+        "solids": 2,
+        "volume": 125.0,
+        "area": 294.0
       }
     },
     {
@@ -14229,7 +14283,9 @@
       "upstream": "rust/kcl-lib/std/transform.kcl#scale",
       "functions": ["arc", "circle", "coincident", "line", "region", "scale", "sweep"],
       "offline": {
-        "gap": "engine: command SetObjectTransform resulted in errors: [object WebAssembly.Exception]"
+        "solids": 1,
+        "volume": 455.0199823,
+        "area": 1663.943597
       }
     },
     {
@@ -14253,7 +14309,9 @@
         "yLine"
       ],
       "offline": {
-        "gap": "engine: command SetObjectTransform resulted in errors: [object WebAssembly.Exception]"
+        "solids": 2,
+        "volume": 2715825.701,
+        "area": 244203.5778
       }
     },
     {

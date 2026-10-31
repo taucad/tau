@@ -11,9 +11,12 @@
 import type { Frame, Vec3 } from '#offline/offline-math.js';
 import { cross, dot, frameFromAxes, length, normalize, sub, vec3 } from '#offline/offline-math.js';
 import type { Oc, TopoDS_Edge, TopoDS_Face, TopoDS_Shape } from '#offline/offline-occt.js';
-import { ShapeIndex, edges, faces, listToArray, planarFaceFrame, vertices } from '#offline/offline-occt.js';
+import { ShapeIndex, edges, faces, listToArray, planarFaceFrame, pnt, vertices } from '#offline/offline-occt.js';
 import type { SolidEntity } from '#offline/offline-scene.js';
 import { OfflineEngineError } from '#offline/offline-engine.types.js';
+
+/** The error an edge reference that names no edge fails with. */
+export const noEdgeMatches = 'No edge matches the edge reference';
 
 /** History of one operation: images of a sub-shape, or undefined when it was deleted. */
 export type ShapeHistory = (shape: TopoDS_Shape) => TopoDS_Shape[] | undefined;
@@ -57,12 +60,9 @@ export function remapIds(
 ): Map<string, TopoDS_Shape> {
   const out = new Map<string, TopoDS_Shape>();
   for (const [id, shape] of ids) {
-    const images = history(shape);
-    if (!images) {
-      continue;
-    }
-
-    const image = images.find((candidate) => index.has(candidate));
+    // A sub-shape that is still in the result survived, whatever the history says: libcascade's fillet and chamfer
+    // report every edge they did not rebuild as deleted.
+    const image = history(shape)?.find((candidate) => index.has(candidate)) ?? (index.has(shape) ? shape : undefined);
     if (image) {
       out.set(id, image);
     }
@@ -190,6 +190,34 @@ export function edgesBetween(
   }
 
   return candidates;
+}
+
+/**
+ * The edge of a shape nearest a point; the first in exploration order wins a tie.
+ *
+ * @param oc - libcascade instance
+ * @param shape - solid shape
+ * @param point - query point
+ * @returns the nearest edge, or undefined when the shape has no edges
+ */
+export function closestEdge(oc: Oc, shape: TopoDS_Shape, point: Vec3): TopoDS_Edge | undefined {
+  const probe = new oc.BRepBuilderAPI_MakeVertex(pnt(oc, point)).Vertex();
+  let best: { edge: TopoDS_Edge; distance: number } | undefined;
+  for (const edge of edges(oc, shape)) {
+    const extrema = new oc.BRepExtrema_DistShapeShape(
+      probe,
+      edge,
+      oc.Extrema_ExtFlag.Extrema_ExtFlag_MIN,
+      oc.Extrema_ExtAlgo.Extrema_ExtAlgo_Grad,
+    );
+    if (extrema.IsDone() && (!best || extrema.Value() < best.distance - 1e-9)) {
+      best = { edge, distance: extrema.Value() };
+    }
+
+    extrema.delete();
+  }
+
+  return best?.edge;
 }
 
 const shareVertex = (oc: Oc, a: TopoDS_Shape, b: TopoDS_Shape): boolean => {

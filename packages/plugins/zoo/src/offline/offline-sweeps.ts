@@ -14,6 +14,8 @@ import {
   ax1,
   compound,
   dir,
+  edgePoint,
+  faces,
   pnt,
   edges,
   gvec,
@@ -167,11 +169,37 @@ function sweepFaces<
 
   const generators = profile.faces.map((face) => make(face));
   const shapes = generators.map((generator) => orientOutward(oc, generator.Shape()));
+  const caps = generators
+    .flatMap((generator) => [generator.FirstShape?.(), generator.LastShape?.()])
+    .filter((cap): cap is TopoDS_Shape => Boolean(cap && !cap.IsNull()));
   const sideFace = (edge: TopoDS_Edge): TopoDS_Shape | undefined => {
     for (const generator of generators) {
       const face = firstGenerated(oc, generator, edge);
       if (face) {
         return face;
+      }
+    }
+
+    // A revolve reports no history for a segment perpendicular to its axis, whose face is a planar disc or annulus
+    // through the segment itself: take the swept face, other than a cap, that the segment's midpoint lies on.
+    const probe = new oc.BRepBuilderAPI_MakeVertex(pnt(oc, edgePoint(oc, edge, 0.5).point)).Vertex();
+    for (const shape of shapes) {
+      for (const face of faces(oc, shape)) {
+        if (caps.some((cap) => cap.IsSame(face))) {
+          continue;
+        }
+
+        const distance = new oc.BRepExtrema_DistShapeShape(
+          probe,
+          face,
+          oc.Extrema_ExtFlag.Extrema_ExtFlag_MIN,
+          oc.Extrema_ExtAlgo.Extrema_ExtAlgo_Grad,
+        );
+        const touches = distance.IsDone() && distance.Value() < 1e-7;
+        distance.delete();
+        if (touches) {
+          return face;
+        }
       }
     }
 
@@ -187,6 +215,27 @@ function sweepFaces<
     mint,
   });
   const shape = shapes.length === 1 ? shapes[0]! : fuseAll(oc, shapes);
+  // A pipe starts from a relocated copy of the profile, so a curve's own edge is not part of the solid: track the
+  // start-cap edge its side face grew from instead, which scales, mirrors and edge lookups can then find.
+  const solidEdges = edges(oc, shape);
+  const inSolid = (edge: TopoDS_Shape): boolean => solidEdges.some((candidate) => candidate.IsSame(edge));
+  for (const curve of profile.curves) {
+    if (inSolid(curve.edge)) {
+      continue;
+    }
+
+    for (const generator of generators) {
+      const side = firstGenerated(oc, generator, curve.edge);
+      const first = generator.FirstShape?.();
+      const capEdges = first && !first.IsNull() ? edges(oc, first) : [];
+      const capEdge = side && edges(oc, side).find((edge) => capEdges.some((cap) => cap.IsSame(edge)));
+      if (capEdge && inSolid(capEdge)) {
+        recorded.edges.set(curve.id, capEdge);
+        break;
+      }
+    }
+  }
+
   return { shape, ...recorded };
 }
 

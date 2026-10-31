@@ -20,7 +20,7 @@
 import { randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
 
-import type { ShellProbe, TerminalSession } from '@taucad/host';
+import type { ShellProbe, TerminalSession, TerminalSessionOutcome } from '@taucad/host';
 import { terminalClientFrameSchema, terminalLimits } from '@taucad/types/desktop-terminal';
 import type {
   TerminalAccess,
@@ -142,6 +142,9 @@ const outputPieces = (text: string): string[] => {
  * Terminal.
  */
 export const terminalAdmissionMilliseconds = 15_000;
+
+/** How often a start retries the shell service while that service has not yet registered an admitted project. */
+const terminalRegistrationRetryMilliseconds = 250;
 
 /**
  * Create the services host's terminal concern.
@@ -377,12 +380,37 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
         return;
       }
       const controller = new AbortController();
-      const outcome = await probe.shell.openTerminal({
-        projectRoot,
-        size,
-        signal: controller.signal,
-        ...(access === undefined ? {} : { access }),
-      });
+      const openTerminal = async (): Promise<TerminalSessionOutcome> =>
+        probe.shell.openTerminal({
+          projectRoot,
+          size,
+          signal: controller.signal,
+          ...(access === undefined ? {} : { access }),
+        });
+      /*
+       * Main's allowlist is not the shell service's: the service learns a project only when that project's agent host
+       * starts, which the pane does not wait for. On the stock Debian guest the pane asked 1.8 s before it did (shell
+       * conformance run 41176389935), and the person saw "This project is not open in Tau" for the project in front of
+       * them. The same admission bound covers that second registry; a refusal for any other reason is final.
+       */
+      const settleBy = now() + admissionMilliseconds;
+      let outcome = await openTerminal();
+      while (
+        outcome.status === 'refused' &&
+        outcome.code === 'project-not-admitted' &&
+        now() < settleBy &&
+        !isEnded()
+      ) {
+        // oxlint-disable-next-line no-await-in-loop -- each retry waits for the agent host to register the project.
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, terminalRegistrationRetryMilliseconds);
+        });
+        // oxlint-disable-next-line no-await-in-loop -- one open attempt at a time.
+        outcome = await openTerminal();
+      }
+      if (isEnded() && outcome.status === 'refused') {
+        return;
+      }
       if (outcome.status === 'refused') {
         await refuse(refusal(outcome.code, outcome.message, outcome.recovery));
         return;

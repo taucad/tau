@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { HostShell, ShellProbe, TerminalSession, TerminalSessionRequest } from '@taucad/host';
 import { shellLimits } from '@taucad/host';
 import { terminalHostFrameSchema, terminalLimits } from '@taucad/types/desktop-terminal';
@@ -286,6 +286,70 @@ describe('terminal concern', () => {
     await flush();
     expect(port.of('refused')[0]?.code).toBe('project-not-admitted');
     expect(sessions).toHaveLength(0);
+  });
+
+  it('should wait for the shell service to register an admitted project, then open its shell', async () => {
+    const { shell, sessions } = createShell();
+    let unregistered = 2;
+    const { connect } = setup({
+      shell: async (): Promise<ShellProbe> => ({
+        status: 'available',
+        shell: {
+          ...shell,
+          openTerminal: async (request) => {
+            if (unregistered > 0) {
+              unregistered -= 1;
+              return {
+                status: 'refused',
+                code: 'project-not-admitted',
+                message: 'This project is not open in Tau.',
+                recovery: 'Open the project, then start the Terminal.',
+              };
+            }
+            return shell.openTerminal(request);
+          },
+        },
+      }),
+    });
+    const port = connect();
+    port.send({ type: 'open', size });
+    await vi.waitFor(() => {
+      expect(port.of('opened')).toHaveLength(1);
+    });
+    expect(port.of('refused')).toEqual([]);
+    expect(sessions).toHaveLength(1);
+  });
+
+  it('should refuse project-not-admitted once the shell service never registers the project within the bound', async () => {
+    let attempts = 0;
+    const { connect, advance } = setup({
+      admissionMilliseconds: 20,
+      shell: async (): Promise<ShellProbe> => ({
+        status: 'available',
+        shell: {
+          ...createShell().shell,
+          openTerminal: async () => {
+            attempts += 1;
+            return {
+              status: 'refused',
+              code: 'project-not-admitted',
+              message: 'This project is not open in Tau.',
+              recovery: 'Open the project, then start the Terminal.',
+            };
+          },
+        },
+      }),
+    });
+    const port = connect();
+    port.send({ type: 'open', size });
+    await vi.waitFor(() => {
+      expect(attempts).toBeGreaterThan(0);
+    });
+    expect(port.of('refused')).toEqual([]);
+    advance(20);
+    await vi.waitFor(() => {
+      expect(port.of('refused')[0]?.code).toBe('project-not-admitted');
+    });
   });
 
   it('should refuse with the probe reason when the shell is unavailable', async () => {

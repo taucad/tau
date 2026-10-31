@@ -231,14 +231,11 @@ const main = async (): Promise<void> => {
       // The viewer and source panes share a filename; explicitly open the source editor.
       await page.getByRole('tab', { name: 'main.py', exact: true }).first().click({ button: 'right' });
       await page.getByRole('menuitem', { name: 'Open in Editor', exact: true }).click();
-      // Candidate A ships Monaco and later candidates ship CodeMirror. Focus the editor's own input surface,
-      // not its surrounding scroll container.
-      const editor = page.locator('.editor-container:visible :is(.cm-editor, .monaco-editor):visible').last();
+      // Candidates span code-editor generations, so find the editable surface by its textbox role rather than by
+      // one editor's class names, and focus it rather than its surrounding scroll container.
+      const editor = page.locator('.editor-container:visible').last().getByRole('textbox').last();
       await editor.waitFor({ state: 'visible' });
-      // Monaco routes a click on its rendered lines to its hidden input.
-      await ((await editor.evaluate((element) => element.classList.contains('monaco-editor')))
-        ? editor.locator('.view-lines').click()
-        : editor.locator('.cm-content[contenteditable="true"]').last().focus());
+      await editor.focus();
       await page.keyboard.press(process.platform === 'darwin' ? 'Meta+a' : 'Control+a');
       // This disposable host may have no clipboard owner. Keep the paste payload until save is verified.
       await page.evaluate(async (text) => navigator.clipboard.writeText(text), source);
@@ -356,7 +353,7 @@ const main = async (): Promise<void> => {
             return {
               url: location.href,
               focused: document.activeElement ? describe(document.activeElement) : undefined,
-              editors: [...document.querySelectorAll('.editor-container, .cm-editor, .monaco-editor')]
+              editors: [...document.querySelectorAll('.editor-container, .editor-container [role="textbox"]')]
                 .slice(0, 20)
                 .map((element) => describe(element)),
               tabs: [...document.querySelectorAll('[role="tab"]')].slice(0, 30).map((element) => ({

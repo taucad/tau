@@ -352,6 +352,85 @@ describe('terminal concern', () => {
     });
   });
 
+  it('should open no shell once the pane leaves while it waits for the shell service', async () => {
+    let attempts = 0;
+    const { shell, sessions } = createShell();
+    const { connect } = setup({
+      shell: async (): Promise<ShellProbe> => ({
+        status: 'available',
+        shell: {
+          ...shell,
+          openTerminal: async (request) => {
+            attempts += 1;
+            if (attempts === 1) {
+              return {
+                status: 'refused',
+                code: 'project-not-admitted',
+                message: 'This project is not open in Tau.',
+                recovery: 'Open the project, then start the Terminal.',
+              };
+            }
+            return shell.openTerminal(request);
+          },
+        },
+      }),
+    });
+    const port = connect();
+    port.send({ type: 'open', size });
+    await vi.waitFor(() => {
+      expect(attempts).toBe(1);
+    });
+    port.disconnect();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 400);
+    });
+    expect(attempts).toBe(1);
+    expect(sessions).toHaveLength(0);
+  });
+
+  it('should spend one admission bound across main’s allowlist and the shell service’s registration', async () => {
+    let attempts = 0;
+    const {
+      connect,
+      advance,
+      trusted,
+      concern: terminals,
+    } = setup({
+      trusted: new Set(),
+      admissionMilliseconds: 20,
+      shell: async (): Promise<ShellProbe> => ({
+        status: 'available',
+        shell: {
+          ...createShell().shell,
+          openTerminal: async () => {
+            attempts += 1;
+            return {
+              status: 'refused',
+              code: 'project-not-admitted',
+              message: 'This project is not open in Tau.',
+              recovery: 'Open the project, then start the Terminal.',
+            };
+          },
+        },
+      }),
+    });
+    const port = connect();
+    port.send({ type: 'open', size });
+    await flush();
+    /* Main admits the project at the end of the bound: nothing of it is left for the shell service. */
+    advance(19);
+    trusted.add(projectRoot);
+    terminals.revokeUntrusted();
+    await vi.waitFor(() => {
+      expect(attempts).toBe(1);
+    });
+    advance(1);
+    await vi.waitFor(() => {
+      expect(port.of('refused')[0]?.code).toBe('project-not-admitted');
+    });
+    expect(attempts).toBe(1);
+  });
+
   it('should refuse with the probe reason when the shell is unavailable', async () => {
     const { connect } = setup({
       shell: async () => ({

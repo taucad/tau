@@ -177,13 +177,18 @@ export const openTerminalPane = async (page: Page): Promise<void> => {
     if ((await terminalRegion(page).count()) > 0) {
       return;
     }
-    if (!(await item.isVisible())) {
-      await page.getByRole('button', { name: 'Open workbench tab', exact: true }).first().click();
-    }
+    /* Each attempt is bounded by what is left of the minute, so a retry never outlives it. */
+    const attempt = (): number => Math.max(1, Math.min(5000, deadline - Date.now()));
     try {
-      await item.click({ timeout: 5000 });
+      if (!(await item.isVisible())) {
+        await page
+          .getByRole('button', { name: 'Open workbench tab', exact: true })
+          .first()
+          .click({ timeout: attempt() });
+      }
+      await item.click({ timeout: attempt() });
     } catch (error) {
-      if (Date.now() > deadline) {
+      if (Date.now() >= deadline) {
         throw error;
       }
       await page.keyboard.press('Escape');

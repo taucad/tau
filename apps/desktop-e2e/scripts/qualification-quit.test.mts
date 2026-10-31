@@ -63,6 +63,8 @@ try {
     const admitted = await appImageQuit('/opt/tau-staging-appimage/releases/1.5.71/Tau.AppImage');
     assert.ok(admitted instanceof Error);
     assert.doesNotMatch(admitted.message, /admitted AppImage outer path/u);
+    // Only the window lookup may refuse it: an environment that could not be read is not a pass.
+    assert.match(admitted.message, /xdotool/u);
   }
   console.log('Native quit guard tests passed without sending a close request.');
 } finally {

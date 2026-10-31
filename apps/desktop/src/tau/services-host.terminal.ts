@@ -160,11 +160,10 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
   /** Resolved and replaced each time main's root allowlist changes; a start awaiting admission wakes on it. */
   let rootsChanged = Promise.withResolvers<void>();
   /**
-   * Wait until main's allowlist admits `root`, its connection ends, or the admission bound passes.
+   * Wait until main's allowlist admits `root`, its connection ends, or `deadline` (the start's admission bound) passes.
    * @returns Whether the root is admitted.
    */
-  const awaitAdmission = async (root: string, isEnded: () => boolean): Promise<boolean> => {
-    const deadline = now() + admissionMilliseconds;
+  const awaitAdmission = async (root: string, isEnded: () => boolean, deadline: number): Promise<boolean> => {
     while (!options.isTrustedRoot(root)) {
       const remaining = deadline - now();
       if (remaining <= 0 || isEnded()) {
@@ -344,8 +343,10 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
 
     /** Start one shell for this connection; refuses end the connection with the shell service's own words. */
     const openShell = async (size: TerminalSize, access: TerminalAccess | undefined): Promise<void> => {
+      /* One admission bound for the whole start: main's allowlist, then the shell service's registration below. */
+      const settleBy = now() + admissionMilliseconds;
       awaitingAdmission = true;
-      const admitted = await awaitAdmission(projectRoot, isEnded).finally(() => {
+      const admitted = await awaitAdmission(projectRoot, isEnded, settleBy).finally(() => {
         awaitingAdmission = false;
       });
       if (isEnded()) {
@@ -393,7 +394,6 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
        * conformance run 41176389935), and the person saw "This project is not open in Tau" for the project in front of
        * them. The same admission bound covers that second registry; a refusal for any other reason is final.
        */
-      const settleBy = now() + admissionMilliseconds;
       let outcome = await openTerminal();
       while (
         outcome.status === 'refused' &&
@@ -405,6 +405,10 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
         await new Promise<void>((resolve) => {
           setTimeout(resolve, terminalRegistrationRetryMilliseconds);
         });
+        /* A pane that left, or a bound that passed, during the wait starts nothing more. */
+        if (isEnded() || now() >= settleBy) {
+          break;
+        }
         // oxlint-disable-next-line no-await-in-loop -- one open attempt at a time.
         outcome = await openTerminal();
       }

@@ -1509,6 +1509,9 @@ export function ChatAgentSheet({
   const { agents, current } = useSheetAgents(placements);
   const sheetModel = useSheetModel(current, agentConfig);
   const name = triggerName(current, sheetModel);
+  const {
+    execution: { isPending = false },
+  } = useChatComposer();
   const closedOutside = useRef(false);
   const backRef = useRef<(() => void) | undefined>(undefined);
 
@@ -1523,15 +1526,23 @@ export function ChatAgentSheet({
       size='sm'
       data-slot='agent-trigger'
       data-chat-textarea-focustrap
-      aria-label={`Agent and model: ${name}`}
+      aria-label={isPending ? 'Agent and model' : `Agent and model: ${name}`}
+      aria-busy={isPending}
       aria-keyshortcuts={ariaKeyShortcuts(openModelSelectorKeyCombination, platform)}
       className={cn(ghostPillClass, 'max-w-64 min-w-0 shrink gap-1 pr-2 text-foreground')}
     >
-      {sheetModel.glyph}
-      <span data-slot='trigger-model' className='min-w-0 truncate text-xs'>
-        {sheetModel.name}
-      </span>
-      {sheetModel.isLevelShown && sheetModel.level ? (
+      {/* Until the chat's own choice is known, the control shows itself loading, not a model it may replace. */}
+      {isPending ? (
+        <span data-slot='trigger-pending' className='h-3 w-24 animate-pulse rounded-full bg-muted' />
+      ) : (
+        <>
+          {sheetModel.glyph}
+          <span data-slot='trigger-model' className='min-w-0 truncate text-xs'>
+            {sheetModel.name}
+          </span>
+        </>
+      )}
+      {!isPending && sheetModel.isLevelShown && sheetModel.level ? (
         <span
           data-slot='trigger-level'
           className='shrink-0 text-xs text-muted-foreground group-data-[hide-level]/bar:hidden'
@@ -1539,7 +1550,9 @@ export function ChatAgentSheet({
           {sheetModel.level.name}
         </span>
       ) : null}
-      {sheetModel.isFast ? <Zap aria-hidden='true' className='size-3 shrink-0 text-muted-foreground' /> : null}
+      {!isPending && sheetModel.isFast ? (
+        <Zap aria-hidden='true' className='size-3 shrink-0 text-muted-foreground' />
+      ) : null}
       <ChevronDown aria-hidden='true' className='size-3 shrink-0 text-muted-foreground' />
     </Button>
   );

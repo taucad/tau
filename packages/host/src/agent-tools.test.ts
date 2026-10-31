@@ -347,10 +347,10 @@ describe('createHostToolRegistry', () => {
     expect(read.isError).toBe(false);
     expect(JSON.stringify(read.content)).toContain('seq');
 
-    /* Inside `.tau` an unlisted path is Tau's, not the agent's (P13): a near
-     * miss is refused rather than treated as authored content. */
+    /* An unlisted `.tau` name is an ordinary project file since the mask was
+     * retired (2026-10-31); a near miss beside a record row is not a record. */
     const nearMiss = await invoke(registry, 'create_file', { targetFile: '.tau/chats-notes.md', content: 'ok\n' });
-    expect(nearMiss.isError).toBe(true);
+    expect(nearMiss.isError).toBe(false);
 
     const recordWrites = await Promise.all(
       ['.tau/artifacts/forged.stl', '.tau/tool-results/forged.json', '.tau/offloaded-tool-results/forged.json'].map(

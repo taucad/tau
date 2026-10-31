@@ -1,0 +1,44 @@
+// ISO 10303-21 exchange structure (STEP physical file).
+
+@top StepFile { item* }
+
+item {
+  Entity |
+  Keyword |
+  UserKeyword |
+  TypeName |
+  EntityReference |
+  String |
+  Binary |
+  Number |
+  Enumeration |
+  Omitted |
+  Group |
+  "," | ";"
+}
+
+Entity { EntityReference "=" (TypeName Group | Group) }
+
+Group { "(" item* ")" }
+
+Keyword { @specialize<TypeName, "ISO-10303-21" | "END-ISO-10303-21" | "HEADER" | "DATA" | "ENDSEC"> }
+
+@skip { whitespace | BlockComment }
+
+@tokens {
+  whitespace { @whitespace+ }
+  BlockComment[isolate] { "/*" commentRest }
+  commentRest { @eof | ![*] commentRest | "*" commentStar }
+  commentStar { @eof | "/" | ![/] commentRest | "*" commentStar }
+  TypeName { $[A-Za-z_] $[A-Za-z0-9_\-]* }
+  UserKeyword { "!" $[A-Za-z_] $[A-Za-z0-9_]* }
+  EntityReference { "#" @digit+ }
+  String[isolate] { "'" (![']| "''")* "'"? }
+  Binary { '"' $[0-9A-Fa-f]* '"' }
+  Number { $[+\-]? @digit+ ("." @digit*)? ($[eE] $[+\-]? @digit+)? }
+  Enumeration { "." $[A-Za-z_] $[A-Za-z0-9_]* "." }
+  Omitted { "$" | "*" }
+  "(" ")" "=" "," ";"
+}
+
+@detectDelim

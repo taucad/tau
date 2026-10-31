@@ -253,7 +253,7 @@ export function ConflictDecision({
                   <DiffViewer
                     originalContent={materialized.ours}
                     modifiedContent={materialized.theirs}
-                    language={resolveHighlightLanguageForPath(path).shikiLanguage}
+                    language={resolveHighlightLanguageForPath(path).language}
                     className='rounded-md border'
                   />
                 ) : null}

@@ -2,7 +2,6 @@
 import { defineConfig, defineDocs, frontmatterSchema } from 'fumadocs-mdx/config';
 import { remarkAutoTypeTable, createGenerator } from 'fumadocs-typescript';
 import { remarkMdxMermaid } from 'fumadocs-core/mdx-plugins';
-import { tauCustomShikiLanguages } from '@taucad/grammars';
 import { z } from 'zod';
 import { remarkLlmStringifyMdx } from './llm-stringify-mdx.js';
 import { remarkResolveRelativeLinks } from './remark-resolve-relative-links.js';
@@ -49,7 +48,6 @@ export default defineConfig({
       },
       defaultColor: false,
       inline: 'tailing-curly-colon',
-      langs: tauCustomShikiLanguages,
     },
   },
 });

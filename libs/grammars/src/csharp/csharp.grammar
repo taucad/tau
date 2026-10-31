@@ -1,0 +1,106 @@
+// C#: keywords, declarations, calls, literals, attributes and preprocessor lines.
+// Highlighting needs the role of each name, not full C# syntax.
+
+@top CSharp { item* }
+
+item {
+  TypeDeclaration |
+  NamespaceDeclaration |
+  ObjectCreation |
+  CallExpression |
+  Keyword |
+  TypeKeyword |
+  Atom |
+  VariableName |
+  String |
+  Character |
+  Number |
+  Block |
+  Group |
+  List |
+  Operator |
+  "=" | "," | ";" | ":" | "." | "?" | "<" | ">"
+}
+
+TypeDeclaration { typeKeyword (!declaration TypeName)? }
+
+typeKeyword { kw<"class"> | kw<"struct"> | kw<"interface"> | kw<"enum"> | kw<"record"> | kw<"delegate"> }
+
+NamespaceDeclaration { (kw<"namespace"> | kw<"using">) (!declaration Namespace)? }
+
+Namespace { Identifier (!declaration "." Identifier)* }
+
+ObjectCreation { kw<"new"> (!declaration TypeName)? }
+
+TypeName { Identifier }
+
+CallExpression { Identifier !call Group }
+
+VariableName { Identifier }
+
+Keyword {
+  kw<"abstract"> | kw<"as"> | kw<"async"> | kw<"await"> | kw<"base"> | kw<"break"> | kw<"case"> | kw<"catch"> |
+  kw<"checked"> | kw<"const"> | kw<"continue"> | kw<"default"> | kw<"do"> | kw<"else"> | kw<"event"> |
+  kw<"explicit"> | kw<"extern"> | kw<"finally"> | kw<"fixed"> | kw<"for"> | kw<"foreach"> | kw<"get"> |
+  kw<"goto"> | kw<"if"> | kw<"implicit"> | kw<"in"> | kw<"init"> | kw<"internal"> | kw<"is"> | kw<"lock"> |
+  kw<"nameof"> | kw<"operator"> | kw<"out"> | kw<"override"> | kw<"params"> | kw<"partial"> |
+  kw<"private"> | kw<"protected"> | kw<"public"> | kw<"readonly"> | kw<"ref"> | kw<"required"> |
+  kw<"return"> | kw<"sealed"> | kw<"set"> | kw<"sizeof"> | kw<"stackalloc"> | kw<"static"> | kw<"switch"> |
+  kw<"this"> | kw<"throw"> | kw<"try"> | kw<"typeof"> | kw<"unchecked"> | kw<"unsafe"> | kw<"value"> |
+  kw<"virtual"> | kw<"volatile"> | kw<"when"> | kw<"where"> | kw<"while"> | kw<"with"> | kw<"yield"> |
+  kw<"and"> | kw<"or"> | kw<"not"> | kw<"global"> | kw<"file"> | kw<"scoped">
+}
+
+TypeKeyword {
+  kw<"bool"> | kw<"byte"> | kw<"char"> | kw<"decimal"> | kw<"double"> | kw<"dynamic"> | kw<"float"> |
+  kw<"int"> | kw<"long"> | kw<"nint"> | kw<"nuint"> | kw<"object"> | kw<"sbyte"> | kw<"short"> |
+  kw<"string"> | kw<"uint"> | kw<"ulong"> | kw<"ushort"> | kw<"var"> | kw<"void">
+}
+
+Atom { kw<"true"> | kw<"false"> | kw<"null"> }
+
+Block { "{" item* "}" }
+Group { "(" item* ")" }
+List { "[" item* "]" }
+
+kw<term> { @specialize[@name={term}]<Identifier, term> }
+
+@skip { whitespace | LineComment | DocComment | BlockComment | Preprocessor }
+
+@precedence { declaration @right, call @right }
+
+@tokens {
+  whitespace { @whitespace+ }
+  DocComment[isolate] { "///" ![\n]* }
+  LineComment[isolate] { "//" ![\n]* }
+  BlockComment[isolate] { "/*" commentRest }
+  commentRest { @eof | ![*] commentRest | "*" commentStar }
+  commentStar { @eof | "/" | ![/] commentRest | "*" commentStar }
+  Preprocessor[isolate] { "#" $[a-z]+ ![\n]* }
+  Identifier { "@"? $[A-Za-z_\u{a1}-\u{167f}\u{1681}-\u{1fff}\u{200e}-\u{2027}\u{202a}-\u{202e}\u{2030}-\u{205e}\u{2061}-\u{2fff}\u{3001}-\u{fefe}\u{ff00}-\u{10ffff}] $[A-Za-z0-9_\u{a1}-\u{167f}\u{1681}-\u{1fff}\u{200e}-\u{2027}\u{202a}-\u{202e}\u{2030}-\u{205e}\u{2061}-\u{2fff}\u{3001}-\u{fefe}\u{ff00}-\u{10ffff}]* }
+  String[isolate] {
+    '"""' rawRest |
+    "$"? "@" '"' (!["] | '""')* '"'? |
+    "@"? "$" '"' ("\\" _ | !["\\\n])* '"'? |
+    '"' ("\\" _ | !["\\\n])* '"'?
+  }
+  rawRest { @eof | !["] rawRest | '"' raw1 }
+  raw1 { @eof | !["] rawRest | '"' raw2 }
+  raw2 { @eof | '"' | !["] rawRest }
+  Character { "'" ("\\" ![\n] $[0-9A-Fa-f]* | !['\\\n]) "'"? }
+  Number {
+    ("0x" | "0X") $[0-9A-Fa-f_]+ $[uUlL]* |
+    ("0b" | "0B") $[01_]+ $[uUlL]* |
+    (@digit $[0-9_]* ("." @digit+)? | "." @digit+) ($[eE] $[+\-]? @digit+)? $[uUlLfFdDmM]*
+  }
+  Operator {
+    "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^" | "!" | "~" | "++" | "--" | "&&" | "||" | "==" | "!=" |
+    "<=" | ">=" | "<<" | ">>" | ">>>" | "=>" | "??" | "??=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" |
+    "^=" | "<<=" | ">>=" | "?." | "::" | ".."
+  }
+  @precedence { DocComment, LineComment, BlockComment, Operator }
+  @precedence { Number, Operator, "." }
+  "=" "," ";" ":" "." "?" "<" ">" "{" "}" "(" ")" "[" "]"
+}
+
+@detectDelim

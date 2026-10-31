@@ -1,6 +1,7 @@
 import { renderSymbolIcon } from '#components/code/editor-completion-icon.js';
-import { renderEditorDocumentation } from '#components/code/editor-documentation.js';
+import { paintHighlightedCode, renderEditorDocumentation } from '#components/code/editor-documentation.js';
 import type { DocumentationLinkHandler } from '#components/code/editor-documentation.js';
+import { language as languageFacet } from '@codemirror/language';
 import { Facet, StateEffect, StateField } from '@codemirror/state';
 import type { EditorState, Extension, Transaction } from '@codemirror/state';
 import { Decoration, EditorView, ViewPlugin, keymap, showDialog, showPanel, showTooltip } from '@codemirror/view';
@@ -502,19 +503,25 @@ function renderSignature(view: EditorView, signature: EditorSignature): HTMLElem
     overload.textContent = `${String(signature.overload.index + 1)}/${String(signature.overload.count)}`;
     line.append(overload);
   }
+  // The signature is code in the document's own language, so it highlights like the editor.
+  const languageId = view.state.facet(languageFacet)?.name;
   const range = signature.parameters[signature.activeParameter];
-  if (range) {
-    const active = ownerDocument.createElement('span');
-    active.className = 'cm-signature-active-parameter';
-    active.textContent = signature.label.slice(range[0], range[1]);
-    line.append(signature.label.slice(0, range[0]), active, signature.label.slice(range[1]));
-  } else {
-    line.append(signature.label);
-  }
+  const label = ownerDocument.createElement('span');
+  paintHighlightedCode(label, {
+    text: signature.label,
+    languageId,
+    emphasis: range ? { from: range[0], to: range[1], className: 'cm-signature-active-parameter' } : undefined,
+  });
+  line.append(label);
   dom.append(line);
   for (const markdown of [signature.parameterDocumentation, signature.documentation]) {
     if (markdown) {
-      dom.append(renderEditorDocumentation(markdown, ownerDocument, signature.onDefinitionLink));
+      dom.append(
+        renderEditorDocumentation(markdown, ownerDocument, {
+          onDefinitionLink: signature.onDefinitionLink,
+          languageId,
+        }),
+      );
     }
   }
   return dom;

@@ -79,8 +79,8 @@ sketches stay source excerpts; Python's child skill requires separate runnable e
 KCL sketches (`design/**/*.kcl`) parse and run with the workspace's `@taucad/kcl-wasm-lib` against a
 mock engine, with no Zoo connection: each directory's `main.kcl` runs with its siblings importable, or
 every file runs when there is none. Parse issues, warnings and a failed run are diagnostics at the
-file and line KCL reports. A guide with KCL sketches passes `languages: tauCustomShikiLanguages` (from
-`@taucad/grammars`) so the renderer can highlight them.
+file and line KCL reports. The renderer highlights every sketch language, KCL included, with the
+Lezer grammars from `@taucad/grammars`; a guide passes nothing for it.
 
 ## Serve and build
 

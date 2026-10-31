@@ -1,0 +1,93 @@
+// SysML v2 textual notation: keywords, definitions, typing and feature relationships.
+// Highlighting needs names and their roles, not the full KerML grammar.
+
+@top SysML { item* }
+
+item {
+  Definition |
+  PackageDeclaration |
+  Typing |
+  Keyword |
+  Atom |
+  Name |
+  String |
+  Number |
+  Block |
+  Group |
+  List |
+  Operator |
+  ";" | "," | "." | "::"
+}
+
+Definition { kw<"def"> (!def DefinitionName)? }
+
+PackageDeclaration { (kw<"package"> | kw<"library">) (!def PackageName)? }
+
+Typing { typingOperator (!typing TypeReference)? }
+
+typingOperator {
+  ":" | ":>" | ":>>" | "::>" | "~" |
+  kw<"specializes"> | kw<"subsets"> | kw<"redefines"> | kw<"references"> | kw<"conjugates"> | kw<"defined"> | kw<"by">
+}
+
+DefinitionName { name }
+PackageName { name }
+TypeReference { name (!typing "::" name)* }
+
+Name { name }
+
+name { Identifier | UnrestrictedName }
+
+Atom { kw<"true"> | kw<"false"> | kw<"null"> }
+
+Keyword {
+  kw<"about"> | kw<"abstract"> | kw<"accept"> | kw<"action"> | kw<"actor"> | kw<"after"> | kw<"alias"> |
+  kw<"all"> | kw<"allocate"> | kw<"allocation"> | kw<"analysis"> | kw<"and"> | kw<"as"> | kw<"assert"> |
+  kw<"assign"> | kw<"assume"> | kw<"at"> | kw<"attribute"> | kw<"bind"> | kw<"binding"> | kw<"calc"> |
+  kw<"case"> | kw<"comment"> | kw<"concern"> | kw<"connect"> | kw<"connection"> | kw<"constant"> |
+  kw<"constraint"> | kw<"crosses"> | kw<"decide"> | kw<"dependency"> | kw<"derived"> | kw<"do"> |
+  kw<"doc"> | kw<"else"> | kw<"end"> | kw<"entry"> | kw<"enum"> | kw<"event"> | kw<"exhibit"> | kw<"exit"> |
+  kw<"expose"> | kw<"filter"> | kw<"first"> | kw<"flow"> | kw<"for"> | kw<"fork"> | kw<"frame"> |
+  kw<"from"> | kw<"hastype"> | kw<"if"> | kw<"implies"> | kw<"import"> | kw<"in"> | kw<"include"> |
+  kw<"individual"> | kw<"inout"> | kw<"interface"> | kw<"istype"> | kw<"item"> | kw<"join"> |
+  kw<"language"> | kw<"loop"> | kw<"merge"> | kw<"message"> | kw<"meta"> | kw<"metadata"> |
+  kw<"nonunique"> | kw<"not"> | kw<"objective"> | kw<"occurrence"> | kw<"of"> | kw<"or"> | kw<"ordered"> |
+  kw<"out"> | kw<"parallel"> | kw<"part"> | kw<"perform"> | kw<"port"> | kw<"private"> | kw<"protected"> |
+  kw<"public"> | kw<"readonly"> | kw<"ref"> | kw<"render"> | kw<"rendering"> | kw<"rep"> | kw<"require"> |
+  kw<"requirement"> | kw<"return"> | kw<"satisfy"> | kw<"send"> | kw<"snapshot"> | kw<"stakeholder"> |
+  kw<"standard"> | kw<"state"> | kw<"subject"> | kw<"succession"> | kw<"terminate"> | kw<"then"> |
+  kw<"timeslice"> | kw<"to"> | kw<"transition"> | kw<"until"> | kw<"use"> | kw<"variant"> |
+  kw<"variation"> | kw<"verification"> | kw<"verify"> | kw<"via"> | kw<"view"> | kw<"viewpoint"> |
+  kw<"when"> | kw<"while"> | kw<"xor">
+}
+
+Block { "{" item* "}" }
+Group { "(" item* ")" }
+List { "[" item* "]" }
+
+kw<term> { @specialize[@name={term}]<Identifier, term> }
+
+@skip { whitespace | LineComment | BlockComment }
+
+@precedence { def @right, typing @right }
+
+@tokens {
+  whitespace { @whitespace+ }
+  LineComment[isolate] { "//" ![\n]* }
+  BlockComment[isolate] { "/*" commentRest }
+  commentRest { @eof | ![*] commentRest | "*" commentStar }
+  commentStar { @eof | "/" | ![/] commentRest | "*" commentStar }
+  @precedence { BlockComment, LineComment, Operator }
+  Identifier { $[A-Za-z_] $[A-Za-z0-9_]* }
+  UnrestrictedName[isolate] { "'" ("\\" _ | !['\\\n])* "'"? }
+  String[isolate] { '"' ("\\" _ | !["\\\n])* '"'? }
+  Number { (@digit+ ("." @digit*)? | "." @digit+) ($[eE] $[+\-]? @digit+)? }
+  Operator {
+    "=" | ":=" | "==" | "!=" | "===" | "!==" | "<" | ">" | "<=" | ">=" | "+" | "-" | "*" | "/" | "%" | "**" |
+    "^" | ".." | "->" | ".?" | "@" | "@@" | "#" | "&" | "|" | "??" | "!" | "$" | "?"
+  }
+  @precedence { Number, ".", Operator }
+  ":" ":>" ":>>" "::>" "::" "~" ";" "," "." "{" "}" "(" ")" "[" "]"
+}
+
+@detectDelim

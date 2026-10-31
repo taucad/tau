@@ -17,8 +17,8 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { createRoot } from 'react-dom/client';
 import remarkGfm from 'remark-gfm';
 import remarkParse from 'remark-parse';
-import { codeToHtml, createHighlighter } from 'shiki';
-import type { LanguageInput } from 'shiki';
+import { highlightLines, loadLanguage, resolveHighlightLanguageId } from '@taucad/grammars';
+import type { HighlightSegment } from '@taucad/grammars';
 import { unified } from 'unified';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
@@ -148,8 +148,6 @@ export type ApiGuide = Readonly<{
     }>
   >;
   evidence: Evidence;
-  /** Grammars for sketch languages Shiki does not bundle, such as KCL (`tauCustomShikiLanguages`). */
-  languages?: readonly LanguageInput[];
 }>;
 
 type Question = ApiGuide['questions'][number];
@@ -288,17 +286,25 @@ const horizonTone: Record<Horizon, string> = {
   placeholder: 'bg-muted text-muted-foreground',
 };
 
-const themes = { light: 'github-light', dark: 'github-dark' } as const;
-// Set once by `mountApiGuide`; a language Shiki does not bundle is highlighted with the guide's grammars.
-let guideLanguages: readonly LanguageInput[] = [];
-let guideHighlighter: ReturnType<typeof createHighlighter> | undefined;
-const highlightCode = async (code: string, language: NonNullable<Sketch['language']>): Promise<string> => {
-  if (language !== 'kcl') {
-    return codeToHtml(code, { lang: language, themes, defaultColor: false });
-  }
-  guideHighlighter ??= createHighlighter({ themes: Object.values(themes), langs: [...guideLanguages] });
-  const highlighter = await guideHighlighter;
-  return highlighter.codeToHtml(code, { lang: language, themes, defaultColor: false });
+/** `tauHighlighter` token colours: the app's GitHub palette (`apps/ui/app/styles/syntax-highlight.css`). */
+const apiGuideCodeStyles = [
+  '.api-guide-code{margin:0;background:transparent}',
+  '.api-guide-code .tok-keyword{color:#cf222e}.dark .api-guide-code .tok-keyword{color:#ff7b72}',
+  '.api-guide-code .tok-function,.api-guide-code .tok-heading{color:#8250df}.dark .api-guide-code :is(.tok-function,.tok-heading){color:#d2a8ff}',
+  '.api-guide-code .tok-variable{color:#953800}.dark .api-guide-code .tok-variable{color:#ffa657}',
+  '.api-guide-code :is(.tok-number,.tok-atom,.tok-property){color:#0550ae}.dark .api-guide-code :is(.tok-number,.tok-atom,.tok-property){color:#79c0ff}',
+  '.api-guide-code .tok-string{color:#0a3069}.dark .api-guide-code .tok-string{color:#a5d6ff}',
+  '.api-guide-code :is(.tok-comment,.tok-meta){color:#6e7781}.dark .api-guide-code :is(.tok-comment,.tok-meta){color:#8b949e}',
+  '.api-guide-code .tok-type{color:#116329}.dark .api-guide-code .tok-type{color:#7ee787}',
+].join('');
+
+/** Highlight a sketch with Tau's Lezer grammars, the same parsers the app's editor uses for every sketch language. */
+const highlightCode = async (
+  code: string,
+  language: NonNullable<Sketch['language']>,
+): Promise<HighlightSegment[][]> => {
+  const resolved = resolveHighlightLanguageId(language);
+  return highlightLines(code, resolved === undefined ? undefined : await loadLanguage(resolved));
 };
 
 const markdown = unified().use(remarkParse).use(remarkGfm);
@@ -455,7 +461,7 @@ function Markdown({ text, inline = false }: Readonly<{ text: string; inline?: bo
 }
 
 function Code({ sketch, evidence }: { sketch: Sketch; evidence?: Evidence }): React.JSX.Element {
-  const [html, setHtml] = useState<string>();
+  const [highlighted, setHighlighted] = useState<HighlightSegment[][]>();
   const language = sketch.language ?? 'typescript';
   // TypeScript and C# sketches are compiled and KCL sketches run; anything else is a source excerpt.
   const compiled = language === 'typescript' || language === 'csharp' || language === 'kcl';
@@ -474,7 +480,7 @@ function Code({ sketch, evidence }: { sketch: Sketch; evidence?: Evidence }): Re
     const highlight = async (): Promise<void> => {
       const result = await highlightCode(source, language);
       if (live) {
-        setHtml(result);
+        setHighlighted(result);
       }
     };
     // async-iife: bootstrap -- an effect cannot return the highlight promise; `live` guards a stale result.
@@ -497,12 +503,24 @@ function Code({ sketch, evidence }: { sketch: Sketch; evidence?: Evidence }): Re
           <span className='text-destructive'>{checked.diagnostics.length} compile errors</span>
         )}
       </figcaption>
-      {html === undefined ? (
-        <pre className='overflow-x-auto p-3 text-xs'>{source}</pre>
-      ) : (
-        // oxlint-disable-next-line react/no-danger -- Shiki output for a local sketch file.
-        <div className='api-guide-code overflow-x-auto p-3 text-xs' dangerouslySetInnerHTML={{ __html: html }} />
-      )}
+      <pre className='api-guide-code overflow-x-auto p-3 text-xs'>
+        <code>
+          {highlighted === undefined
+            ? source
+            : highlighted.map((line, lineIndex) => (
+                // oxlint-disable-next-line react/no-array-index-key -- lines are positional
+                <Fragment key={lineIndex}>
+                  {line.map((segment, segmentIndex) => (
+                    // oxlint-disable-next-line react/no-array-index-key -- segments of a line are positional
+                    <span key={segmentIndex} className={segment.className === '' ? undefined : segment.className}>
+                      {segment.text}
+                    </span>
+                  ))}
+                  {lineIndex < highlighted.length - 1 ? '\n' : null}
+                </Fragment>
+              ))}
+        </code>
+      </pre>
     </figure>
   );
 }
@@ -1501,7 +1519,7 @@ function Guide({ guide }: { guide: ApiGuide }): React.JSX.Element {
         </div>
       </details>
       <div className='mx-auto flex max-w-6xl gap-8 px-4 py-8 md:px-6'>
-        <style>{`.api-guide-code pre{background:transparent!important;margin:0}.api-guide-code span{color:var(--shiki-light)}.dark .api-guide-code span{color:var(--shiki-dark)}`}</style>
+        <style>{apiGuideCodeStyles}</style>
         <aside className='sticky top-8 hidden max-h-[calc(100dvh-4rem)] w-56 shrink-0 flex-col gap-3 self-start md:flex'>
           <Contents
             guide={guide}
@@ -1717,6 +1735,5 @@ function Guide({ guide }: { guide: ApiGuide }): React.JSX.Element {
 
 /** Mount a guide into `#root`. */
 export const mountApiGuide = (guide: ApiGuide): void => {
-  guideLanguages = guide.languages ?? [];
   createRoot(document.querySelector('#root')!).render(<Guide guide={guide} />);
 };

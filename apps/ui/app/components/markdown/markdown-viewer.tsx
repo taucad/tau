@@ -8,7 +8,6 @@ import { cn } from '@taucad/ui/utils/cn';
 import { MarkdownHyperlink } from '#components/markdown/markdown-hyperlink.js';
 import { MarkdownCode } from '#components/markdown/markdown-code.js';
 import { publicationRehypeSanitize } from '#components/markdown/markdown-sanitize.js';
-import { useTheme } from '#hooks/use-theme.js';
 
 type MarkdownViewerProps = {
   readonly children: string;
@@ -49,14 +48,10 @@ const tauRemarkPlugins: StreamdownProps['remarkPlugins'] = Object.values({
 
 const { sanitize: _sanitize, harden: hardenPlugin, ...beforeHardenPlugins } = defaultRehypePlugins;
 const tauRehypePlugins = Object.values(beforeHardenPlugins);
-const shikiThemes = {
-  default: ['github-light', 'github-dark'],
-  highContrast: ['github-light-high-contrast', 'github-dark-high-contrast'],
-} satisfies Record<string, NonNullable<StreamdownProps['shikiTheme']>>;
 
 /* D-UI-18: no `code` or `mermaid` plugin. `MarkdownCode` renders every fenced
- * block (mermaid included) and `shikiTheme` is always passed, so Streamdown
- * never reaches either plugin; they only added bundle weight and module-level
+ * block (mermaid included) with the editor's Lezer grammars, so Streamdown never
+ * reaches either plugin; they only added bundle weight and module-level
  * highlighter caches that are never evicted. */
 const streamdownPlugins = {
   cjk,
@@ -75,7 +70,6 @@ export const MarkdownViewer = memo(function ({
   plugins = streamdownPlugins,
   ...streamdownProperties
 }: MarkdownViewerProps): React.JSX.Element {
-  const { isHighContrast } = useTheme();
   const memoizedComponents = useMemo<Components>(
     () =>
       // oxlint-disable-next-line typescript/consistent-type-assertions -- Streamdown v2's string index signature conflicts with React Three Fiber's global JSX elements.
@@ -113,7 +107,6 @@ export const MarkdownViewer = memo(function ({
         controls={controls}
         remarkPlugins={tauRemarkPlugins}
         rehypePlugins={mergedRehypePlugins}
-        shikiTheme={isHighContrast ? shikiThemes.highContrast : shikiThemes.default}
         plugins={plugins}
         className={streamdownClassName}
       >

@@ -1,4 +1,4 @@
-import { editorHighlightStyle } from '#components/code/editor-highlight-style.js';
+import { tauHighlighter } from '@taucad/grammars';
 import { createEditorSearchPanel } from '#components/code/editor-search-panel.js';
 import { editorSurfaceTheme } from '#components/code/editor-surface-theme.js';
 import '@vscode/codicons/dist/codicon.css';
@@ -251,7 +251,7 @@ export function CodeEditorView({
           highlightSelectionMatches(),
           lintGutter(),
           diagnostics ? linter(() => diagnostics.get(document.uri).get('kernel') ?? [], { delay: 100 }) : [],
-          syntaxHighlighting(editorHighlightStyle, { fallback: true }),
+          syntaxHighlighting(tauHighlighter),
           tooltips({ parent: overlay, position: 'fixed' }),
           definitionNavigation(),
           languageFeatureNavigation(),

@@ -1,0 +1,69 @@
+// OpenSCAD: modules, functions, calls, special variables and modifiers.
+
+@top OpenScad { item* }
+
+item {
+  ModuleDefinition |
+  FunctionDefinition |
+  IncludeStatement |
+  CallExpression |
+  Keyword |
+  Atom |
+  VariableName |
+  SpecialVariable |
+  String |
+  Number |
+  Block |
+  Group |
+  List |
+  Operator |
+  Modifier |
+  "=" | "," | ";" | ":" | "." | "?"
+}
+
+ModuleDefinition { kw<"module"> (!definition DefinitionName)? }
+FunctionDefinition { kw<"function"> (!definition DefinitionName)? }
+DefinitionName { Identifier }
+
+IncludeStatement { (kw<"include"> | kw<"use">) IncludePath? }
+
+CallExpression { (Identifier | SpecialVariable) !call Group }
+
+VariableName { Identifier }
+
+Keyword {
+  kw<"if"> | kw<"else"> | kw<"for"> | kw<"let"> | kw<"each"> | kw<"intersection_for"> | kw<"assert"> |
+  kw<"echo">
+}
+
+Atom { kw<"true"> | kw<"false"> | kw<"undef"> | kw<"PI"> }
+
+Block { "{" item* "}" }
+Group { "(" item* ")" }
+List { "[" item* "]" }
+
+kw<term> { @specialize[@name={term}]<Identifier, term> }
+
+@skip { whitespace | LineComment | BlockComment }
+
+@precedence { definition @right, call @right }
+
+@tokens {
+  whitespace { @whitespace+ }
+  LineComment[isolate] { "//" ![\n]* }
+  BlockComment[isolate] { "/*" commentRest }
+  commentRest { @eof | ![*] commentRest | "*" commentStar }
+  commentStar { @eof | "/" | ![/] commentRest | "*" commentStar }
+  Identifier { $[A-Za-z_] $[A-Za-z0-9_]* }
+  SpecialVariable { "$" $[A-Za-z_] $[A-Za-z0-9_]* }
+  IncludePath { "<" ![>\n]* ">" }
+  String[isolate] { '"' ("\\" _ | !["\\\n])* '"'? }
+  Number { (@digit+ ("." @digit*)? | "." @digit+) ($[eE] $[+\-]? @digit+)? }
+  Operator { "+" | "-" | "*" | "/" | "%" | "^" | "<" | ">" | "<=" | ">=" | "==" | "!=" | "&&" | "||" | "!" }
+  Modifier { "#" }
+  @precedence { BlockComment, LineComment, Operator }
+  @precedence { Number, "." }
+  "=" "," ";" ":" "." "?" "{" "}" "(" ")" "[" "]"
+}
+
+@detectDelim

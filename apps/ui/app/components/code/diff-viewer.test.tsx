@@ -1,50 +1,24 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi, afterEach, beforeAll, beforeEach } from 'vitest';
+import { describe, expect, it, vi, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import * as grammars from '@taucad/grammars';
 import { DiffViewer, getDiffLineCount, getFirstChangedLine } from '#components/code/diff-viewer.js';
-import { getHighlighter } from '#lib/shiki.lib.js';
-import { supportedHighlightLanguages } from '#lib/code-language-resolution.js';
 
-const useThemeMock = vi.hoisted(() => vi.fn(() => ({ theme: 'light', isHighContrast: false })));
-
-vi.mock('#hooks/use-theme.js', () => ({ useTheme: useThemeMock }));
-
-beforeAll(async () => {
-  await getHighlighter();
-});
-
-beforeEach(() => {
-  useThemeMock.mockReturnValue({ theme: 'light', isHighContrast: false });
-});
+vi.mock('@taucad/grammars', { spy: true });
 
 afterEach(() => {
-  vi.restoreAllMocks();
+  vi.mocked(grammars.highlightLines).mockClear();
 });
 
-function expectDiffViewerShikiReady(container: HTMLElement): void {
+function expectDiffViewerHighlighted(container: HTMLElement): void {
   const root = container.firstElementChild;
   expect(root).toBeInstanceOf(HTMLElement);
-  expect((root as HTMLElement).dataset['shikiState']).toBe('ready');
+  expect((root as HTMLElement).dataset['highlightState']).toBe('ready');
 }
 
 describe('DiffViewer', () => {
-  it('should use the high-contrast Shiki palette when contrast is enhanced', async () => {
-    useThemeMock.mockReturnValue({ theme: 'dark', isHighContrast: true });
-    const highlighter = await getHighlighter();
-    const codeToHtml = vi.spyOn(highlighter, 'codeToHtml');
-
-    render(<DiffViewer originalContent='before' modifiedContent='after' language='typescript' />);
-
-    await waitFor(() => {
-      expect(codeToHtml).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({ theme: 'github-dark-high-contrast' }),
-      );
-    });
-  });
-
   describe('per-language diff highlighting (no [!code] leak)', () => {
-    it.each(supportedHighlightLanguages)('language %s: diff classes, no notation leak', async (language) => {
+    it.each(grammars.highlightLanguages)('language %s: diff classes, no notation leak', async (language) => {
       const originalContent = 'alpha\nbeta\ngamma';
       const modifiedContent = 'alpha\nX\ngamma';
 
@@ -53,7 +27,7 @@ describe('DiffViewer', () => {
       );
 
       await waitFor(() => {
-        expectDiffViewerShikiReady(container);
+        expectDiffViewerHighlighted(container);
       });
 
       await waitFor(
@@ -68,18 +42,13 @@ describe('DiffViewer', () => {
       );
     });
 
-    it('falls back to plaintext for unsupported languages without throwing', async () => {
+    it('falls back to plain lines for unsupported languages without throwing', () => {
       const { container } = render(
-        <DiffViewer originalContent='alpha\nbeta' modifiedContent='alpha\npython' language='python' />,
+        <DiffViewer originalContent={'alpha\nbeta'} modifiedContent={'alpha\ncobol'} language='cobol' />,
       );
 
-      await waitFor(() => {
-        expectDiffViewerShikiReady(container);
-      });
-
-      await waitFor(() => {
-        expect(container.innerHTML).toMatch(/class="[^"]*\bdiff\b[^"]*\badd\b/);
-      });
+      expect((container.firstElementChild as HTMLElement).dataset['highlightState']).toBe('plain');
+      expect(container.innerHTML).toMatch(/class="[^"]*\bdiff\b[^"]*\badd\b/);
     });
   });
 
@@ -87,7 +56,7 @@ describe('DiffViewer', () => {
     const { container } = render(<DiffViewer originalContent='a' modifiedContent={'a\n\nb'} language='typescript' />);
 
     await waitFor(() => {
-      expectDiffViewerShikiReady(container);
+      expectDiffViewerHighlighted(container);
     });
 
     await waitFor(
@@ -100,14 +69,9 @@ describe('DiffViewer', () => {
     );
   });
 
-  /* The rule is asserted where it is declared, because jsdom has no layout. In
-   * plaintext Shiki renders a blank line as a `.line` holding one empty span, so
-   * a rule on `.line:empty` alone would leave it 0 px tall. */
+  /* The rule is asserted where it is declared, because jsdom has no layout. */
   it('should keep a blank line one line tall', async () => {
     const { container } = render(<DiffViewer originalContent='' modifiedContent={'a\n\nb'} language='plaintext' />);
-    await waitFor(() => {
-      expectDiffViewerShikiReady(container);
-    });
 
     const blankLine = await waitFor(
       () => {
@@ -131,12 +95,26 @@ describe('DiffViewer', () => {
     expect(label.parentElement).toHaveClass('text-xs');
   });
 
-  it('should render every line before the highlighter loads, so an opening disclosure measures its full height', () => {
+  it('should render every line before the grammar loads, so an opening disclosure measures its full height', () => {
+    const { container } = render(
+      <DiffViewer originalContent={'alpha\nbeta'} modifiedContent={'alpha\ngamma'} language='sysml' />,
+    );
+
+    expect([...container.querySelectorAll('.line')].map((line) => [line.textContent, line.className])).toEqual([
+      ['alpha', 'line'],
+      ['beta', 'line diff remove'],
+      ['gamma', 'line diff add'],
+    ]);
+  });
+
+  it('should keep diff classes on every line once highlighted', async () => {
     const { container } = render(
       <DiffViewer originalContent={'alpha\nbeta'} modifiedContent={'alpha\ngamma'} language='typescript' />,
     );
 
-    expect((container.firstElementChild as HTMLElement).dataset['shikiState']).toBe('loading');
+    await waitFor(() => {
+      expectDiffViewerHighlighted(container);
+    });
     expect([...container.querySelectorAll('.line')].map((line) => [line.textContent, line.className])).toEqual([
       ['alpha', 'line'],
       ['beta', 'line diff remove'],
@@ -150,7 +128,7 @@ describe('DiffViewer', () => {
     );
 
     await waitFor(() => {
-      expectDiffViewerShikiReady(container);
+      expectDiffViewerHighlighted(container);
     });
 
     expect(container.innerHTML).not.toContain('diff add');
@@ -167,7 +145,7 @@ describe('DiffViewer', () => {
     );
 
     await waitFor(() => {
-      expectDiffViewerShikiReady(container);
+      expectDiffViewerHighlighted(container);
     });
 
     await waitFor(
@@ -207,39 +185,38 @@ describe('getFirstChangedLine', () => {
  * every segment synchronously in render. */
 describe('DiffViewer highlighting cost', () => {
   it('should highlight the latest revision of a streaming file, not every revision', async () => {
-    const highlighter = await getHighlighter();
     const { rerender, container } = render(
-      <DiffViewer originalContent='alpha' modifiedContent='alpha\nstep-0' language='typescript' />,
+      <DiffViewer originalContent='alpha' modifiedContent={'alpha\nstep-0'} language='typescript' />,
     );
     await waitFor(() => {
-      expect(container.innerHTML).toContain('shiki');
+      expectDiffViewerHighlighted(container);
     });
-    const codeToHtml = vi.spyOn(highlighter, 'codeToHtml');
+    const highlightLines = vi.mocked(grammars.highlightLines);
+    highlightLines.mockClear();
 
     for (let step = 1; step <= 10; step++) {
       rerender(<DiffViewer originalContent='alpha' modifiedContent={`alpha\nstep-${step}`} language='typescript' />);
     }
 
     await waitFor(() => {
-      expect(codeToHtml).toHaveBeenCalledWith(expect.stringContaining('step-10'), expect.anything());
+      expect(highlightLines).toHaveBeenCalledWith(expect.stringContaining('step-10'), expect.anything());
     });
-    expect(codeToHtml).not.toHaveBeenCalledWith(expect.stringContaining('step-5'), expect.anything());
+    expect(highlightLines).not.toHaveBeenCalledWith(expect.stringContaining('step-5'), expect.anything());
     await waitFor(() => {
       expect(container.textContent).toContain('step-10');
     });
   });
 
   it('should leave a diff past the highlight cap as plain diff lines', async () => {
-    const highlighter = await getHighlighter();
-    const codeToHtml = vi.spyOn(highlighter, 'codeToHtml');
     const large = Array.from({ length: 4000 }, (_, index) => `line ${index} ${'x'.repeat(32)}`).join('\n');
+    await grammars.loadLanguage('typescript');
+    const highlightLines = vi.mocked(grammars.highlightLines);
+    highlightLines.mockClear();
 
     const { container } = render(<DiffViewer originalContent='' modifiedContent={large} language='typescript' />);
 
-    await waitFor(() => {
-      expectDiffViewerShikiReady(container);
-    });
-    expect(codeToHtml).not.toHaveBeenCalled();
+    expect((container.firstElementChild as HTMLElement).dataset['highlightState']).toBe('plain');
+    expect(highlightLines).not.toHaveBeenCalled();
     expect(container.querySelectorAll('.line.diff.add')).toHaveLength(4000);
   });
 });

@@ -1,0 +1,32 @@
+// JSON with comments and trailing commas (JSONC), and newline-delimited JSON (JSONL) as a second top.
+
+@top JsonText { value? }
+@top JsonLines { value* }
+
+value[@isGroup=Value] { True | False | Null | Number | String | Object | Array }
+
+Object { "{" list<Property>? "}" }
+Property { PropertyName ":" value }
+PropertyName { String }
+
+Array { "[" list<value>? "]" }
+
+list<item> { item ("," item)* ","? }
+
+@skip { whitespace | LineComment | BlockComment }
+
+@tokens {
+  whitespace { @whitespace+ }
+  LineComment[isolate] { "//" ![\n]* }
+  BlockComment[isolate] { "/*" commentRest }
+  commentRest { @eof | ![*] commentRest | "*" commentStar }
+  commentStar { @eof | "/" | ![/] commentRest | "*" commentStar }
+  True { "true" }
+  False { "false" }
+  Null { "null" }
+  Number { "-"? (@digit+ ("." @digit*)? | "." @digit+) ($[eE] $[+\-]? @digit+)? }
+  String[isolate] { '"' ("\\" _ | !["\\\n])* '"'? }
+  "{" "}" "[" "]" "," ":"
+}
+
+@detectDelim

@@ -77,6 +77,9 @@ import { ChatEditorTooLargeWarning } from '#routes/w.$workspace.$project/chat-ed
 import { ChatEditorErrorPlaceholder } from '#routes/w.$workspace.$project/chat-editor-error-placeholder.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFileContent } from '#hooks/use-file-content.js';
+import type { FileContentSelection } from '#hooks/use-file-content.js';
+import { useVirtualDeclarationContent } from '#hooks/use-virtual-declaration-content.js';
+import { isVirtualDeclarationPath } from '#lib/virtual-declarations.js';
 import { useFileTreeEntry } from '#hooks/use-file-tree.js';
 import type { FileProvenance } from '@taucad/types';
 import { useEditorDocumentSession } from '#hooks/use-editor-document-session.js';
@@ -1306,7 +1309,9 @@ export const FileEditor = memo(function ({
     (previous, next) => previous?.path === next?.path && previous?.readOnly === next?.readOnly,
   );
   const filePath = liveEntry?.path ?? filePathFromParams;
-  const readOnly = isPaneReadOnly(readOnlyFromParams ?? liveEntry?.readOnly, useFileTreeEntry(filePath)?.provenance);
+  const readOnly =
+    isVirtualDeclarationPath(filePath) ||
+    isPaneReadOnly(readOnlyFromParams ?? liveEntry?.readOnly, useFileTreeEntry(filePath)?.provenance);
   const paneParameters = parameters ?? { filePath: filePathFromParams, readOnly: readOnlyFromParams };
 
   // Kernel diagnostics
@@ -1316,7 +1321,12 @@ export const FileEditor = memo(function ({
   // The discriminated outcome is the single source of truth for the render
   // gate — there is no local "force open" state because the override is
   // expressed by re-resolving with `forceText` / `sizeLimit` options.
-  const result = useFileContent(filePath);
+  const virtualDeclaration = useVirtualDeclarationContent(documentSession, filePath);
+  const fileContent = useFileContent(virtualDeclaration === undefined ? filePath : undefined);
+  const result: FileContentSelection =
+    virtualDeclaration === undefined
+      ? fileContent
+      : { ...virtualDeclaration, observation: fileContent.observation, retry: fileContent.retry };
   /* A file whose large object has not arrived holds its pointer: shown loading, never as text, so nothing edits or saves it. */
   const isAwaitingLargeObject = useLargeObjectPending(filePath);
 

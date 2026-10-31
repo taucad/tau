@@ -40,7 +40,7 @@ interface from a separate shared object.
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 877 packages, with the license each declares.
+The web and desktop apps include the following 863 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -108,7 +108,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@codemirror/lang-python](https://github.com/codemirror/lang-python) | 6.2.1 | MIT |
 | [@codemirror/lang-yaml](https://github.com/codemirror/lang-yaml) | 6.1.3 | MIT |
 | [@codemirror/language](https://code.haverbeke.berlin/codemirror/language) | 6.13.1 | MIT |
-| [@codemirror/legacy-modes](https://code.haverbeke.berlin/codemirror/legacy-modes) | 6.5.5 | MIT |
 | [@codemirror/lint](https://code.haverbeke.berlin/codemirror/lint) | 6.9.7 | MIT |
 | [@codemirror/search](https://code.haverbeke.berlin/codemirror/search) | 6.7.2 | MIT |
 | [@codemirror/state](https://code.haverbeke.berlin/codemirror/state) | 6.7.6 | MIT |
@@ -267,13 +266,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@sentry/replay](https://github.com/getsentry/sentry-javascript) | 10.75.0 | MIT |
 | [@sentry/replay-canvas](https://github.com/getsentry/sentry-javascript) | 10.75.0 | MIT |
 | [@sentry/server-utils](https://github.com/getsentry/sentry-javascript) | 10.75.0 | MIT |
-| [@shikijs/core](https://github.com/shikijs/shiki) | 3.23.0 | MIT |
-| [@shikijs/engine-javascript](https://github.com/shikijs/shiki) | 3.23.0 | MIT |
-| [@shikijs/engine-oniguruma](https://github.com/shikijs/shiki) | 3.23.0 | MIT |
-| [@shikijs/langs](https://github.com/shikijs/shiki) | 3.23.0 | MIT |
-| [@shikijs/themes](https://github.com/shikijs/shiki) | 3.23.0 | MIT |
-| [@shikijs/types](https://github.com/shikijs/shiki) | 3.23.0 | MIT |
-| [@shikijs/vscode-textmate](https://github.com/shikijs/vscode-textmate) | 10.0.2 | MIT |
 | [@smithy/core](https://github.com/smithy-lang/smithy-typescript) | 3.35.2 | Apache-2.0 |
 | [@smithy/credential-provider-imds](https://github.com/smithy-lang/smithy-typescript) | 4.5.2 | Apache-2.0 |
 | [@smithy/fetch-http-handler](https://github.com/smithy-lang/smithy-typescript) | 5.8.0 | Apache-2.0 |
@@ -700,8 +692,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [on-headers](https://github.com/jshttp/on-headers) | 1.1.0 | MIT |
 | [once](https://github.com/isaacs/once) | 1.4.0 | ISC |
 | [onetime](https://github.com/sindresorhus/onetime) | 5.1.2 | MIT |
-| [oniguruma-parser](https://github.com/slevithan/oniguruma-parser) | 0.12.2 | MIT |
-| [oniguruma-to-es](https://github.com/slevithan/oniguruma-to-es) | 4.3.6 | MIT |
 | [open](https://github.com/sindresorhus/open) | 11.0.4 | MIT |
 | [openai](https://github.com/openai/openai-node) | 7.19.0 | Apache-2.0 |
 | [openapi-types](https://github.com/kogosoftwarellc/open-api/tree/master/packages/openapi-types) | 12.1.3 | MIT |
@@ -757,9 +747,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [recharts](https://github.com/recharts/recharts) | 3.10.1 | MIT |
 | [redux](https://github.com/reduxjs/redux) | 5.0.1 | MIT |
 | [redux-thunk](https://github.com/reduxjs/redux-thunk) | 3.1.0 | MIT |
-| [regex](https://github.com/slevithan/regex) | 6.1.0 | MIT |
-| [regex-recursion](https://github.com/slevithan/regex-recursion) | 6.0.2 | MIT |
-| [regex-utilities](https://github.com/slevithan/regex-utilities) | 2.3.0 | MIT |
 | [regexp-tree](https://github.com/DmitrySoshnikov/regexp-tree) | 0.1.27 | MIT |
 | [rehype-sanitize](https://github.com/rehypejs/rehype-sanitize) | 6.0.0 | MIT |
 | [rehype-stringify](https://github.com/rehypejs/rehype/tree/main/packages/rehype-stringify) | 10.0.1 | MIT |
@@ -798,7 +785,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [sharp](https://github.com/lovell/sharp) | 0.35.5 | Apache-2.0 |
 | [shebang-command](https://github.com/kevva/shebang-command) | 2.0.0 | MIT |
 | [shebang-regex](https://github.com/sindresorhus/shebang-regex) | 3.0.0 | MIT |
-| [shiki](https://github.com/shikijs/shiki) | 3.23.0 | MIT |
 | [side-channel](https://github.com/ljharb/side-channel) | 1.1.1 | MIT |
 | [side-channel-list](https://github.com/ljharb/side-channel-list) | 1.0.1 | MIT |
 | [side-channel-map](https://github.com/ljharb/side-channel-map) | 1.0.1 | MIT |

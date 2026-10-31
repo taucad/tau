@@ -12,7 +12,6 @@ vi.mock('#hooks/use-revision-status.js', async () => {
   return harness.revisionStatusMock();
 });
 vi.mock('#hooks/use-theme.js', () => ({ useTheme: () => ({ theme: 'light', isHighContrast: false }) }));
-vi.mock('#lib/shiki.lib.js', () => ({ getHighlighter: async () => undefined }));
 beforeEach(() => {
   revisionStatusHarness.reset();
   revisionStatusHarness.diff = [{ path: 'empty.ts', kind: 'added' }];
@@ -121,8 +120,12 @@ describe('Revision file comparison with the actual line renderer', () => {
     );
     await userEvent.click(await screen.findByRole('button', { name: 'Compare empty.ts' }));
     const comparison = await screen.findByRole('region', { name: 'Comparison for empty.ts' });
-    expect(within(comparison).getByText('const before = 1;')).toHaveClass('diff', 'remove');
-    expect(within(comparison).getByText('const after = 2;')).toHaveClass('diff', 'add');
+    const line = (text: string): HTMLElement =>
+      within(comparison).getByText(
+        (_, element) => element?.classList.contains('line') === true && element.textContent === text,
+      );
+    expect(line('const before = 1;')).toHaveClass('diff', 'remove');
+    expect(line('const after = 2;')).toHaveClass('diff', 'add');
     expect(comparison).not.toHaveTextContent(/Original bytes|Current bytes|sha256/u);
   });
 });

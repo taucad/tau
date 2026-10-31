@@ -8,6 +8,7 @@ const baseStyles = readFileSync(join(process.cwd(), '../../packages/ui/src/style
 const appStyles = readFileSync(join(process.cwd(), 'app/styles/global.css'), 'utf8');
 const codeEditorStyles = readFileSync(join(process.cwd(), 'app/components/code/code-editor.css'), 'utf8');
 const appStyleLinks = readFileSync(join(process.cwd(), 'app/styles/global.styles.ts'), 'utf8');
+const syntaxStyles = readFileSync(join(process.cwd(), 'app/styles/syntax-highlight.css'), 'utf8');
 const scrollShadowStyles = readFileSync(join(process.cwd(), 'app/styles/scroll-shadows.css'), 'utf8');
 const globalStyles = `${tokenStyles}\n${appStyles}\n${scrollShadowStyles}`;
 
@@ -330,7 +331,9 @@ describe('action cursor contract', () => {
     expect(appStyles).not.toContain('.editor-container .cm-tooltip-autocomplete li');
     expect(codeEditorStyles).toContain('.cm-editor .cm-tooltip-autocomplete li');
     expect(codeEditorStyles).toContain('.cm-editor .cm-tooltip button');
-    expect(codeEditorStyles).toContain('--cm-keyword: oklch(77.882% 0.1293 21.59);');
+    expect(appStyles).toContain("@import './syntax-highlight.css';");
+    expect(syntaxStyles).toContain('--cm-keyword: oklch(77.882% 0.1293 21.59);');
+    expect(codeEditorStyles).not.toMatch(/--cm-keyword:/u);
     expect(appStyles).toContain('[data-sonner-toast] [data-button]');
     expect(appStyles).toContain('#profiler-toggle');
   });

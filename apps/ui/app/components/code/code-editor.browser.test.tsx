@@ -18,7 +18,6 @@ import {
   startCompletion,
 } from '@codemirror/autocomplete';
 import { CodeEditor } from '#components/code/code-editor.client.js';
-import { VirtualDeclarationDialog } from '#components/code/virtual-declaration-dialog.js';
 import { jsonDepthHighlighting } from '#components/code/json-depth-highlighting.js';
 import { EditorDocument } from '#lib/editor-document.js';
 import { EditorDocumentSession, maxBackgroundDocuments } from '#lib/editor-document-session.js';
@@ -278,7 +277,7 @@ it('opens a real TypeScript standard-library definition as read-only source', as
         target = next;
       },
     });
-    const { container, rerender } = render(
+    render(
       <div className='h-72'>
         <CodeEditor
           document={sourceDocument}
@@ -311,23 +310,7 @@ it('opens a real TypeScript standard-library definition as read-only source', as
     view!.dispatch({ selection: { anchor: sourceDocument.text.indexOf('toFixed') } });
     await userEvent.keyboard('{F12}');
     await expect.poll(() => target?.declaration?.text).toContain('toFixed');
-    const declarationDocument = new EditorDocument(target!.uri.replace('file:///', ''), target!.declaration!.text);
-    rerender(
-      <VirtualDeclarationDialog
-        declaration={{ uri: target!.uri, document: declarationDocument, line: target!.line, column: target!.column }}
-        onClose={() => undefined}
-        restoreFocus={() => undefined}
-      />,
-    );
-    await expect.poll(() => document.querySelector('[role="dialog"] .cm-content')).toBeTruthy();
-    const declarationView = document.querySelector('[role="dialog"] .cm-content');
-    expect(declarationView).toHaveAttribute('contenteditable', 'false');
-    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Read-only TypeScript declaration');
-    const originalText = declarationDocument.text;
-    await page.getByRole('textbox', { name: 'Code editor' }).click();
-    await userEvent.keyboard('corruption');
-    expect(declarationDocument.text).toBe(originalText);
-    expect(container.querySelector('.cm-content')).toBeNull();
+    // The editor session opens this text as a read-only tab (see use-editor-document-session.test.tsx).
   } finally {
     service.dispose();
   }

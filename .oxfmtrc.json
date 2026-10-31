@@ -39,6 +39,8 @@
     "/packages/plugins/brep/licenses/**",
     // The offline engine's own libcascade build output (Emscripten glue and generated types) is checked in verbatim.
     "/packages/plugins/zoo/src/offline/wasm/**",
+    // Foreign files the offline KCL fixtures import (glTF is JSON), vendored verbatim from modeling-app.
+    "/packages/plugins/zoo/src/offline/fixtures/kcl/*/*/inputs/*.gltf",
     // Written by packages/plugins/tscircuit/tsdown.engine.ts on every build with each vendored
     // package's LICENSE text verbatim; the committed bytes must equal the generator's output.
     "/packages/plugins/tscircuit/THIRD_PARTY_LICENSES.md",

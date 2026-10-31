@@ -5,7 +5,7 @@
  * Booleans, imprints, edge cuts and shells for {@link OfflineEngine}: command handlers that take the engine as their first argument.
  */
 import type { Oc, TopoDS_Edge, TopoDS_Shape } from '#offline/offline-occt.js';
-import { ShapeIndex, arrayToList, compound, listToArray, volumeOf } from '#offline/offline-occt.js';
+import { ShapeIndex, arrayToList, compound, listToArray, subShapes, volumeOf } from '#offline/offline-occt.js';
 import type { SolidEntity } from '#offline/offline-scene.js';
 import { helpersFor } from '#offline/offline-helpers.js';
 import { shellPrism } from '#offline/offline-shell.js';
@@ -229,6 +229,7 @@ function combine(
   for (const solid of keepTools ? targetSolids : [...targetSolids, ...toolSolids]) {
     engine.scene.remove(solid.id);
     engine.scene.aliases.set(solid.id, id);
+    engine.consumedByBoolean.add(solid.id);
   }
 
   engine.scene.add(result);
@@ -570,6 +571,54 @@ export function shell(engine: OfflineEngine, cmd: ModelingCommand): Record<strin
   }
 
   rebaseSolid(engine.oc, solid, op.Shape(), algoHistory(engine.oc, op as unknown as Parameters<typeof algoHistory>[1]));
+  engine.scene.claim(solid);
+  return {};
+}
+
+/**
+ * Deletes faces from a body (`entity_delete_children`, KCL `deleteFace`). Each solid that loses a face is left as
+ * its open shells, a surface body; solids of the body that keep all their faces stay solid.
+ *
+ * @param engine - offline engine
+ * @param cmd - command payload
+ * @returns the response
+ */
+export function deleteFaces(engine: OfflineEngine, cmd: ModelingCommand): Record<string, unknown> {
+  const { oc } = engine;
+  const solid = engine.scene.find(cmd['entity_id'] as string);
+  if (solid?.kind !== 'solid') {
+    return {};
+  }
+
+  const faceIds = (cmd['child_entity_ids'] as string[]).filter((childId) => solid.faces.has(childId));
+  const removed = faceIds.map((faceId) => requireFace(oc, solid, faceId));
+  if (removed.length === 0) {
+    return {};
+  }
+
+  const reshape = new oc.BRepTools_ReShape();
+  for (const face of removed) {
+    reshape.Remove(face);
+  }
+
+  const top =
+    solid.shape.ShapeType() === oc.TopAbs_ShapeEnum.TopAbs_COMPOUND ? topLevelPieces(oc, solid.shape) : [solid.shape];
+  const pieces = top.flatMap((piece) => {
+    const solids = subShapes(oc, piece, 'TopAbs_SOLID');
+    const touched = (shape: TopoDS_Shape): boolean =>
+      subShapes(oc, shape, 'TopAbs_FACE').some((face) => removed.some((gone) => gone.IsSame(face)));
+    if (solids.length === 0) {
+      return touched(piece) ? [reshape.Apply(piece)] : [piece];
+    }
+
+    return solids.flatMap((part) => (touched(part) ? subShapes(oc, reshape.Apply(part), 'TopAbs_SHELL') : [part]));
+  });
+  reshape.delete();
+  solid.shape = pieces.length === 1 ? pieces[0]! : compound(oc, pieces);
+  for (const faceId of faceIds) {
+    solid.faces.delete(faceId);
+  }
+
   engine.scene.claim(solid);
   return {};
 }

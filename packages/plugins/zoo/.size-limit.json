@@ -5,8 +5,8 @@
     "limit": "18 kB"
   },
   {
-    "name": "Offline libcascade engine, loaded only in offline mode — measured 30.96 kB brotlied on 2026-10-29, after moving the native helpers and the custom libcascade build in",
+    "name": "Offline libcascade engine, loaded only in offline mode — measured 32.63 kB brotlied on 2026-10-30, after the offline gap closure added surface bodies, edge and face extrudes, edge references and chained-blend id tracking",
     "path": "dist/offline/*.mjs",
-    "limit": "32 kB"
+    "limit": "35 kB"
   }
 ]

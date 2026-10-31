@@ -1,0 +1,35 @@
+// Male dovetail rail: half the profile sketched and mirrored about the centreline, with two mounting holes.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+// Parameters
+baseWidth = 40
+baseHeight = 6
+dovetailHeight = 8
+dovetailNeckWidth = 16
+dovetailTopWidth = 24
+railLength = 100
+holeDiameter = 5.5
+holeInset = 25
+
+totalHeight = baseHeight + dovetailHeight
+
+// Right half of the cross-section on XZ, from the centreline at the bottom to the centreline at the top.
+halfProfile = startSketchOn(XZ)
+  |> startProfile(at = [0, 0])
+  |> xLine(length = baseWidth / 2)
+  |> yLine(length = baseHeight)
+  |> xLine(endAbsolute = dovetailNeckWidth / 2)
+  |> line(endAbsolute = [dovetailTopWidth / 2, totalHeight])
+  |> xLine(endAbsolute = 0)
+
+profile = mirror2d(halfProfile, axis = Y)
+rail = extrude(profile, length = railLength)
+
+// Mounting holes down the centreline (XZ extrudes towards -Y, so the rail spans y in [-100, 0]).
+fn mountingHole(@y) {
+  return startSketchOn(offsetPlane(XY, offset = -1))
+    |> circle(center = [0, y], diameter = holeDiameter)
+    |> extrude(length = totalHeight + 2)
+}
+
+dovetailRail = subtract([rail], tools = [mountingHole(-holeInset), mountingHole(-(railLength - holeInset))])

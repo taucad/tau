@@ -1,0 +1,30 @@
+// Slip-on pipe flange with a raised hub and a four-bolt circle.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+// Parameters
+flangeDiameter = 165
+flangeThickness = 18
+boreDiameter = 61
+hubDiameter = 90
+hubHeight = 12
+boltCount = 4
+boltCircleDiameter = 125
+boltHoleDiameter = 18
+
+// Bolt holes: one on +X, patterned around the centre.
+boltHoles = startSketchOn(XY)
+  |> circle(center = [boltCircleDiameter / 2, 0], diameter = boltHoleDiameter)
+  |> patternCircular2d(instances = boltCount, center = [0, 0], arcDegrees = 360deg, rotateDuplicates = true)
+
+// Flange disc with the bore and the bolt holes cut from the profile.
+disc = startSketchOn(XY)
+  |> circle(center = [0, 0], diameter = flangeDiameter)
+  |> subtract2d(tool = circle(startSketchOn(XY), center = [0, 0], diameter = boreDiameter))
+  |> subtract2d(tool = boltHoles)
+  |> extrude(length = flangeThickness, tagEnd = $flangeFace)
+
+// Raised hub, sketched on the top face of the disc.
+hub = startSketchOn(disc, face = flangeFace)
+  |> circle(center = [0, 0], diameter = hubDiameter)
+  |> subtract2d(tool = circle(startSketchOn(disc, face = flangeFace), center = [0, 0], diameter = boreDiameter))
+  |> extrude(length = hubHeight)

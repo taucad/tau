@@ -93,7 +93,15 @@ describe('KCL shared editor features', () => {
       ],
     });
     const document = new EditorDocument('main.kcl', 'extrude(');
-    const environment = mock<EditorLanguageEnvironment>({ diagnostics: new EditorDiagnostics() });
+    const environment: EditorLanguageEnvironment = {
+      session: mock<EditorLanguageEnvironment['session']>(),
+      diagnostics: new EditorDiagnostics(),
+      fileManagerRef: mock<EditorLanguageEnvironment['fileManagerRef']>(),
+      contentService: mock<EditorLanguageEnvironment['contentService']>(),
+      treeService: mock<EditorLanguageEnvironment['treeService']>(),
+      fileManager: mock<EditorLanguageEnvironment['fileManager']>(),
+      navigate: vi.fn(),
+    };
     const view = new EditorView({
       state: EditorState.create({
         doc: document.text,

@@ -10,6 +10,8 @@
 #     that affects the UI since its last staging deploy. It publishes to the
 #     site's `staging` alias, which costs no Netlify credits, and
 #     `netlify-staging-router` serves taucad.dev from that alias.
+#   - Both builds embed the PicoGK browser host `picogk-browser-host.yml` prepares, which is
+#     what makes the browser PicoGK kernel available.
 #   - production (tau.new): `release-build.yml` calls this workflow in a `ui@x.y.z`
 #     release's own run, and `deploy-production.yml` dispatches it at the tag
 #     for a rollback or redeploy. Either way the `ci.yml` push run on `main` for
@@ -61,8 +63,14 @@ permissions:
   actions: read
 
 jobs:
+  # The browser PicoGK kernel ships only inside a build that embedded its prepared bundle, so the
+  # bundle is prepared first (cached by its inputs, so an unchanged one costs a lookup).
+  picogk:
+    uses: ./.github/workflows/picogk-browser-host.yml
+
   deploy:
     name: Deploy UI to ${{ inputs.environment }}
+    needs: picogk
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     environment: ${{ inputs.environment }}
@@ -115,6 +123,14 @@ jobs:
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+
+      # The UI embeds this bundle at the content-addressed path its manifest names, and advertises
+      # the browser PicoGK kernel only because it did (`PICOGK_BROWSER_ASSETS_ROOT` below).
+      - name: Download the prepared PicoGK browser host
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.picogk.outputs.artifact }}
+          path: out/picogk-browser-host
 
       # Production ships only a commit whose main CI run passed.
       - name: Require this commit's main CI run to have passed
@@ -204,6 +220,8 @@ jobs:
           # Emergency only: a live origin that cannot be read fails the deploy, so a fix
           # must say on purpose that it ships without retention (logged as a warning).
           TAU_RETAIN_ASSETS_SKIP: ${{ inputs.skip_asset_retention && '1' || '' }}
+          # The prepared PicoGK browser host; `ui:build` declares it as an input.
+          PICOGK_BROWSER_ASSETS_ROOT: ${{ github.workspace }}/out/picogk-browser-host
         run: |
           # The CLI reports every refused deploy as a bare `Forbidden`: the token
           # was revoked or cannot deploy this site, or the Netlify team is out of

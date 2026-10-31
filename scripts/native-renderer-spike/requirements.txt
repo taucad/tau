@@ -1,0 +1,8 @@
+# Native wgpu library distributed by wgpu-py; isolated spike only.
+wgpu==0.31.1
+rendercanvas==2.7.2
+numpy==2.4.3
+glfw==2.10.0
+pillow==12.2.0
+cffi==2.1.1
+pycparser==3.0

@@ -4,7 +4,7 @@
 # row, positive controls before negatives, network negatives judged by canaries outside the sandbox, and one
 # JSON receipt per row binding source, host, runtime, Bash and node-pty identities (I12).
 #
-# - LNX-U and LNX-D: a disposable stock Ubuntu 24.04 or Debian 13 cloud guest under KVM. The guest keeps its
+# - LNX-U, LNX-U26 and LNX-D: a disposable stock Ubuntu 24.04, Ubuntu 26.04 or Debian 13 cloud guest under KVM. The guest keeps its
 #   shipped AppArmor policy and `kernel.apparmor_restrict_unprivileged_userns`; the sandbox reaches user
 #   namespaces only through the Tau-scoped profile the real APT selector installs with its bwrap copy. This
 #   row never uses `setup-linux-sandbox`, which relaxes that sysctl for the CAD workers.
@@ -104,6 +104,8 @@ jobs:
             row: LNX-U
           - distro: debian
             row: LNX-D
+          - distro: ubuntu2604
+            row: LNX-U26
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

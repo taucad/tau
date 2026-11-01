@@ -20,6 +20,8 @@ const rows = [
   ['windows-nsis-x64', 'windows-nsis', 'win32-x64'],
   ['ubuntu-apt-x11', 'linux-apt', 'linux-x64'],
   ['ubuntu-appimage-x11', 'linux-appimage', 'linux-x64'],
+  ['ubuntu2604-apt-x11', 'linux-apt', 'linux-x64'],
+  ['ubuntu2604-appimage-x11', 'linux-appimage', 'linux-x64'],
   ['debian-apt-x11', 'linux-apt', 'linux-x64'],
   ['debian-appimage-x11', 'linux-appimage', 'linux-x64'],
 ] as const;
@@ -53,6 +55,7 @@ const assertOperatingSystem = (id: string, target: string, receipt: DesktopAccep
     (target.startsWith('darwin-') && !/^Darwin \d+\.\d+\.\d+$/u.test(os)) ||
     (target === 'win32-x64' && !/^Microsoft Windows\b/u.test(os)) ||
     (id.startsWith('ubuntu') && (distribution.length !== 1 || !/^ID=(?:ubuntu|"ubuntu")$/u.test(distribution[0]!))) ||
+    (id.startsWith('ubuntu2604') && !os.split(/\r?\n/u).includes('VERSION_ID="26.04"')) ||
     (id.startsWith('debian') && (distribution.length !== 1 || !/^ID=(?:debian|"debian")$/u.test(distribution[0]!)))
   ) {
     throw new Error('Native row does not observe its declared operating system');

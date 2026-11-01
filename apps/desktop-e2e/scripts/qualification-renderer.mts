@@ -275,11 +275,12 @@ const main = async (): Promise<void> => {
     // The frozen candidates stop waiting for the driver's command fifteen minutes after they write
     // readiness, then close the window. A wait that outlasts that window ends in a closed page with no
     // failure evidence (run 41342192947 macos-dmg-x64), so both viewer waits share what remains of it,
-    // less a minute kept for the failure observations below.
+    // less a minute kept for the failure observations below. The reinstalled launch runs without the
+    // probe, writes no new readiness and has no such window, so it keeps the full limits.
     const readiness = await stat(join(profile, 'route-qualification.ready.json'));
     const readyAt = readiness.mtimeMs;
     const remaining = (limit: number): number =>
-      Math.max(1000, Math.min(limit, readyAt + 15 * 60_000 - 60_000 - Date.now()));
+      action === 'reinstall-ui' ? limit : Math.max(1000, Math.min(limit, readyAt + 15 * 60_000 - 60_000 - Date.now()));
     await page
       .getByTestId('cad-viewer-canvas-region')
       .locator('canvas')

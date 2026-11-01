@@ -26,7 +26,7 @@
 [build]
 # Vendored engine licences must clear before any deploy artifact is built.
 # Paths relative to site base directory (`apps/ui`, set in Terraform).
-command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && ([ \"$TAU_SOURCEMAPS_ENABLED\" = true ] && SENTRY_AUTH_TOKEN=\"$TAU_SENTRY_AUTH_TOKEN\" POSTHOG_CLI_TOKEN=\"$TAU_POSTHOG_CLI_TOKEN\" POSTHOG_CLI_ENV_ID=\"$TAU_POSTHOG_CLI_ENV_ID\" pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: source map upload disabled or failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; }) && node scripts/retain-previous-assets.mts"
+command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && ([ \"$TAU_SOURCEMAPS_ENABLED\" = true ] && SENTRY_AUTH_TOKEN=\"$TAU_SENTRY_AUTH_TOKEN\" POSTHOG_CLI_TOKEN=\"$TAU_POSTHOG_CLI_TOKEN\" POSTHOG_CLI_ENV_ID=\"$TAU_POSTHOG_CLI_ENV_ID\" pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: source map upload disabled or failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; }) && node scripts/verify-content-addressed-assets.mts build/client && node scripts/retain-previous-assets.mts"
 publish = "build/client"
 
 # The last step keeps the previous two deploys' `/assets/*` in this one, so a page
@@ -48,7 +48,7 @@ NX_NO_CLOUD = "true"
 directory = ".netlify/v1/functions"
 
 [context.production]
-command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && ([ \"$TAU_SOURCEMAPS_ENABLED\" = true ] && SENTRY_AUTH_TOKEN=\"$TAU_SENTRY_AUTH_TOKEN\" POSTHOG_CLI_TOKEN=\"$TAU_POSTHOG_CLI_TOKEN\" POSTHOG_CLI_ENV_ID=\"$TAU_POSTHOG_CLI_ENV_ID\" pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: source map upload disabled or failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; }) && node scripts/retain-previous-assets.mts"
+command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && ([ \"$TAU_SOURCEMAPS_ENABLED\" = true ] && SENTRY_AUTH_TOKEN=\"$TAU_SENTRY_AUTH_TOKEN\" POSTHOG_CLI_TOKEN=\"$TAU_POSTHOG_CLI_TOKEN\" POSTHOG_CLI_ENV_ID=\"$TAU_POSTHOG_CLI_ENV_ID\" pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: source map upload disabled or failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; }) && node scripts/verify-content-addressed-assets.mts build/client && node scripts/retain-previous-assets.mts"
 
 [context.deploy-preview]
 command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui"

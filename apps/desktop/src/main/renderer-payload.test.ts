@@ -100,7 +100,11 @@ const stageLanguageServers = async (root: string, renderer: string) => {
         return file.fileName;
       },
     };
-    (plugin.generateBundle as unknown as (this: typeof context) => void).call(context);
+    const { generateBundle } = plugin;
+    if (typeof generateBundle !== 'function') {
+      throw new TypeError('Language asset plugin has no generateBundle hook.');
+    }
+    Reflect.apply(generateBundle, context, []);
     for (const { fileName, source } of files) {
       emitted.push(fileName);
       // oxlint-disable-next-line no-await-in-loop -- a handful of fixture files.
@@ -622,17 +626,34 @@ describe('Desktop renderer ownership', () => {
     );
     await rm(join(paths.renderer, 'dotnet.native-copy.wasm'));
 
-    // Changed renderer bytes at a staged path, and a stage that no longer matches its manifest, both fail.
+    // Changed renderer bytes at a staged path, including either emitted manifest, and a stage that no longer matches
+    // its manifest all fail.
+    const csharpManifest = emitted.find((path) => path.endsWith('/assets-manifest.json'))!;
+    const openscadManifest = emitted.find((path) => /^assets\/openscad-language-[a-f0-9]{16}\.json$/u.test(path))!;
+    await writeFile(join(paths.renderer, csharpManifest), '{}');
+    await writeFile(join(paths.renderer, openscadManifest), '{}');
     await writeFile(join(paths.renderer, openscadModule), wasmModule('swapped module'));
     await writeFile(join(stages.csharp, '_framework/dotnet.native.wasm'), wasmModule('rebuilt runtime'));
     const tampered = await inspectDesktopPayload({ ...paths, stagedLanguageServers: stages });
     expect(tampered.violations).toEqual(
       expect.arrayContaining([
         `Renderer file differs from its language server stage: ${openscadModule}`,
+        `Renderer file differs from its language server stage: ${csharpManifest}`,
+        `Renderer file differs from its language server stage: ${openscadManifest}`,
         `Staged language server file does not match its manifest: ${stages.csharp}/_framework/dotnet.native.wasm`,
         `Renderer WASM is not editor/viewer-owned: ${runtime}`,
       ]),
     );
+  });
+
+  it('should refuse a C# stage whose manifest does not list its bootstrap', async () => {
+    const paths = await fixture();
+    const { stages } = await stageLanguageServers(paths.root, paths.renderer);
+    const manifestPath = join(stages.csharp, 'assets-manifest.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as { bootstrap: string };
+    await writeFile(manifestPath, JSON.stringify({ ...manifest, bootstrap: '_framework/missing.js' }));
+    const report = await inspectDesktopPayload({ ...paths, stagedLanguageServers: stages });
+    expect(report.violations).toContain(`Staged C# language server manifest is invalid: ${stages.csharp}`);
   });
 
   it('should detect disguised retained WASM and FAT64 binaries', async () => {

@@ -107,36 +107,54 @@ const readStagedLanguageServers = async (
     }
   };
   // Admit one staged file at its emitted path, only when the staged bytes still match the manifest.
-  const admit = async (stage: string, entry: StagedEntry, emittedPath: (path: string, sha256: string) => string) => {
+  const admit = async (
+    stage: string,
+    entry: StagedEntry,
+    emittedPath: (path: string, sha256: string) => string,
+  ): Promise<boolean> => {
     if (!isStagedPath(entry.path) || typeof entry.sha256 !== 'string' || typeof entry.byteLength !== 'number') {
       violations.push(`Staged language server manifest lists an invalid file: ${stage}`);
-      return;
+      return false;
     }
     let bytes: Uint8Array<ArrayBuffer>;
     try {
       bytes = Uint8Array.from(await readFile(resolve(stage, entry.path)));
     } catch {
       violations.push(`Staged language server file is missing: ${stage}/${entry.path}`);
-      return;
+      return false;
     }
     if (bytes.byteLength !== entry.byteLength || digest(bytes) !== entry.sha256) {
       violations.push(`Staged language server file does not match its manifest: ${stage}/${entry.path}`);
-      return;
+      return false;
     }
     files.set(emittedPath(entry.path, entry.sha256), entry.sha256);
     if (entry.path.endsWith('.wasm')) {
       wasmBytes += bytes.byteLength;
     }
+    return true;
   };
   if (stages.csharp) {
     const manifest = await readManifest(stages.csharp);
     if (manifest) {
-      const value = manifest.value as { format?: unknown; files?: unknown } | undefined;
-      if (value?.format !== 'tau-csharp-language-v1' || !Array.isArray(value.files) || value.files.length === 0) {
+      const value = manifest.value as
+        | { format?: unknown; bootstrap?: unknown; references?: unknown; files?: unknown }
+        | undefined;
+      const listed = Array.isArray(value?.files) ? (value.files as StagedEntry[]).map((entry) => entry.path) : [];
+      // The shape the UI asset plugin accepts: a bootstrap and a reference bundle, both among the listed files.
+      if (
+        value?.format !== 'tau-csharp-language-v1' ||
+        listed.length === 0 ||
+        !isStagedPath(value.bootstrap) ||
+        !isStagedPath(value.references) ||
+        !listed.includes(value.bootstrap) ||
+        !listed.includes(value.references)
+      ) {
         violations.push(`Staged C# language server manifest is invalid: ${stages.csharp}`);
       } else {
         const identity = digest(manifest.bytes);
         const prefix = `csharp-language/${identity}/`;
+        // The plugin emits the staged manifest unchanged; its digest names the directory.
+        files.set(`${prefix}${stagedManifestName}`, identity);
         for (const entry of value.files as StagedEntry[]) {
           // oxlint-disable-next-line no-await-in-loop -- one staged file's bytes at a time.
           await admit(stages.csharp, entry, (path) => `${prefix}${path}`);
@@ -151,11 +169,19 @@ const readStagedLanguageServers = async (
       if (value?.format !== 'tau-openscad-language-v1' || value.module === undefined) {
         violations.push(`Staged OpenSCAD language server manifest is invalid: ${stages.openscad}`);
       } else {
-        await admit(
-          stages.openscad,
-          value.module,
-          (path, sha256) => `assets/${basename(path, '.wasm')}-${sha256.slice(0, 16)}.wasm`,
-        );
+        const { module } = value;
+        let moduleName = '';
+        const admitted = await admit(stages.openscad, module, (path, sha256) => {
+          moduleName = `${basename(path, '.wasm')}-${sha256.slice(0, 16)}.wasm`;
+          return `assets/${moduleName}`;
+        });
+        if (admitted) {
+          // The plugin serves the manifest rewritten to name the emitted module, under that manifest's digest.
+          const served = digest(
+            new TextEncoder().encode(JSON.stringify({ ...value, module: { ...module, path: moduleName } })),
+          );
+          files.set(`assets/openscad-language-${served.slice(0, 16)}.json`, served);
+        }
       }
     }
   }

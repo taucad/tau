@@ -47,7 +47,7 @@ const sdks: Readonly<Partial<Record<string, { readonly archive: string; readonly
     sha512:
       '3ec1cc5539afe17341145c1ce61a4342546a05de75053cccbef4169c76113146bb77f30857b5bb47f784690c081c543ea160728a3fa0d06af11aefdafebb0c7f',
   },
-  // Windows ships the SDK as a zip; the inbox bsdtar (System32 first on PATH, as release-build.yml sets) extracts it.
+  // Windows ships the SDK as a zip, which the inbox System32 bsdtar extracts.
   'win32-x64': {
     archive: `dotnet-sdk-${dotnetVersion}-win-x64.zip`,
     sha512:
@@ -153,8 +153,13 @@ const ensureDotnet = async (): Promise<string> => {
     const temporary = `${root}.${String(process.pid)}.tmp`;
     await rm(temporary, { recursive: true, force: true });
     await mkdir(temporary, { recursive: true });
-    // `-xf` lets tar detect the format: GNU tar and bsdtar read gzip, and bsdtar reads the Windows zip.
-    execFileSync('tar', ['-xf', archive, '-C', temporary]);
+    // `-xf` lets tar detect the format. GNU tar and bsdtar read gzip; only the inbox bsdtar reads the Windows zip, so
+    // Windows names it rather than whichever tar (Git Bash's GNU tar) comes first on PATH.
+    const tar =
+      process.platform === 'win32'
+        ? resolve(process.env['SystemRoot'] ?? String.raw`C:\Windows`, 'System32/tar.exe')
+        : 'tar';
+    execFileSync(tar, ['-xf', archive, '-C', temporary]);
     await writeFile(resolve(temporary, '.tau-dotnet-archive-sha512'), `${sdk.sha512}\n`);
     await rm(root, { recursive: true, force: true });
     await rename(temporary, root);

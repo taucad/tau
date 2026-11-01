@@ -75,8 +75,14 @@ const dotnetRoot = resolve(projectRoot, 'dotnet');
 const outputRoot = resolve(workspaceRoot, 'out/csharp-language');
 // Shared with prepare-picogk-dotnet.mts so one machine downloads the pinned SDK once.
 const sdkCacheRoot = resolve(workspaceRoot, 'out/cache/picogk');
-const { NUGET_PACKAGES: nugetPackages, HOME: home, TAU_DOTNET: dotnetOverride, CI: ci } = process.env;
-const nugetRoot = nugetPackages ?? resolve(home ?? '', '.nuget/packages');
+const {
+  NUGET_PACKAGES: nugetPackages,
+  HOME: home,
+  USERPROFILE: userProfile,
+  TAU_DOTNET: dotnetOverride,
+  CI: ci,
+} = process.env;
+const nugetRoot = nugetPackages ?? resolve(home ?? userProfile ?? '', '.nuget/packages');
 /* eslint-disable @typescript-eslint/naming-convention -- environment variables are not camelCase */
 const dotnetEnvironment = {
   DOTNET_CLI_TELEMETRY_OPTOUT: '1',

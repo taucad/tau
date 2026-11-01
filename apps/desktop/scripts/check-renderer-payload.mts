@@ -12,7 +12,7 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { mkdir, readFile, readdir, lstat, writeFile } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
-import { dirname, relative, resolve } from 'node:path';
+import { basename, dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
@@ -61,6 +61,106 @@ const approvedWasmProducers = [
 const embeddedWasmProducers = [
   { anchor: '@aurigax-ai/ghostty-web/ghostty-vt.wasm', manifest: 'apps/ui/package.json' },
 ] as const;
+/*
+ * Editor language servers built in this repository from pinned toolchains rather than installed from a package:
+ * `csharp-language:prepare` (Roslyn on the .NET browser-wasm runtime) and `openscad-language:prepare` (Rust and
+ * tree-sitter). Each writes a stage with a content manifest, and the UI's asset plugin emits exactly those bytes at a
+ * path derived from the manifest. A renderer file at one of those paths is admitted only when its bytes match the
+ * manifest entry, and the manifest entry matches the staged file, so the stage is the producer provenance. The emitted
+ * JavaScript of the .NET runtime (`dotnet.js` and its native loader) is covered the same way: it is the runtime's own
+ * loader, so it is not in the module graph. Paths mirror `apps/ui/{csharp,openscad}-language-assets.vite-plugin.ts`.
+ */
+export type StagedLanguageServers = { csharp?: string; openscad?: string };
+const defaultStagedLanguageServers = (workspaceRoot: string): StagedLanguageServers => ({
+  csharp: resolve(workspaceRoot, 'out/csharp-language/stage'),
+  openscad: resolve(workspaceRoot, 'out/openscad-language/stage'),
+});
+const stagedManifestName = 'assets-manifest.json';
+const isStagedPath = (value: unknown): value is string =>
+  typeof value === 'string' &&
+  /^[\w./-]+$/u.test(value) &&
+  value.split('/').every((part) => part !== '' && part !== '.' && part !== '..');
+type StagedEntry = { path?: unknown; sha256?: unknown; byteLength?: unknown };
+
+/** Map each emitted renderer path of a staged language server to the sha256 its stage manifest records. */
+const readStagedLanguageServers = async (
+  stages: StagedLanguageServers,
+): Promise<{ files: Map<string, string>; wasmBytes: number; violations: string[] }> => {
+  const files = new Map<string, string>();
+  const violations: string[] = [];
+  let wasmBytes = 0;
+  const digest = (bytes: Uint8Array<ArrayBuffer>): string => createHash('sha256').update(bytes).digest('hex');
+  const readManifest = async (
+    stage: string,
+  ): Promise<{ bytes: Uint8Array<ArrayBuffer>; value: unknown } | undefined> => {
+    let bytes: Uint8Array<ArrayBuffer>;
+    try {
+      bytes = Uint8Array.from(await readFile(resolve(stage, stagedManifestName)));
+    } catch {
+      return undefined;
+    }
+    try {
+      return { bytes, value: JSON.parse(Buffer.from(bytes).toString()) as unknown };
+    } catch {
+      violations.push(`Staged language server manifest is not JSON: ${stage}`);
+      return undefined;
+    }
+  };
+  // Admit one staged file at its emitted path, only when the staged bytes still match the manifest.
+  const admit = async (stage: string, entry: StagedEntry, emittedPath: (path: string, sha256: string) => string) => {
+    if (!isStagedPath(entry.path) || typeof entry.sha256 !== 'string' || typeof entry.byteLength !== 'number') {
+      violations.push(`Staged language server manifest lists an invalid file: ${stage}`);
+      return;
+    }
+    let bytes: Uint8Array<ArrayBuffer>;
+    try {
+      bytes = Uint8Array.from(await readFile(resolve(stage, entry.path)));
+    } catch {
+      violations.push(`Staged language server file is missing: ${stage}/${entry.path}`);
+      return;
+    }
+    if (bytes.byteLength !== entry.byteLength || digest(bytes) !== entry.sha256) {
+      violations.push(`Staged language server file does not match its manifest: ${stage}/${entry.path}`);
+      return;
+    }
+    files.set(emittedPath(entry.path, entry.sha256), entry.sha256);
+    if (entry.path.endsWith('.wasm')) {
+      wasmBytes += bytes.byteLength;
+    }
+  };
+  if (stages.csharp) {
+    const manifest = await readManifest(stages.csharp);
+    if (manifest) {
+      const value = manifest.value as { format?: unknown; files?: unknown } | undefined;
+      if (value?.format !== 'tau-csharp-language-v1' || !Array.isArray(value.files) || value.files.length === 0) {
+        violations.push(`Staged C# language server manifest is invalid: ${stages.csharp}`);
+      } else {
+        const identity = digest(manifest.bytes);
+        const prefix = `csharp-language/${identity}/`;
+        for (const entry of value.files as StagedEntry[]) {
+          // oxlint-disable-next-line no-await-in-loop -- one staged file's bytes at a time.
+          await admit(stages.csharp, entry, (path) => `${prefix}${path}`);
+        }
+      }
+    }
+  }
+  if (stages.openscad) {
+    const manifest = await readManifest(stages.openscad);
+    if (manifest) {
+      const value = manifest.value as { format?: unknown; module?: StagedEntry } | undefined;
+      if (value?.format !== 'tau-openscad-language-v1' || value.module === undefined) {
+        violations.push(`Staged OpenSCAD language server manifest is invalid: ${stages.openscad}`);
+      } else {
+        await admit(
+          stages.openscad,
+          value.module,
+          (path, sha256) => `assets/${basename(path, '.wasm')}-${sha256.slice(0, 16)}.wasm`,
+        );
+      }
+    }
+  }
+  return { files, wasmBytes, violations };
+};
 const embeddedWasmMarker = /(?:AGFzbQ|data:application\/wasm|\\x00asm|0,97,115,109)/u;
 const encodedWasmMarker = /(?:AGFzbQ|data:application\/wasm|\\x00asm)/u;
 const browserExecutionEntry =
@@ -370,6 +470,8 @@ export const inspectDesktopPayload = async (options: {
   host: string;
   app?: string;
   archive?: string;
+  /** Language server stages; defaults to this checkout's `out/` stages. */
+  stagedLanguageServers?: StagedLanguageServers;
 }): Promise<PayloadInventory> => {
   const workspaceRoot = resolve(import.meta.dirname, '../../..');
   const inventory: PayloadInventory = {
@@ -401,7 +503,13 @@ export const inspectDesktopPayload = async (options: {
   );
   // The budget is one copy of each approved producer at its installed version:
   // a KCL upgrade moves it, while a second copy still exceeds it.
-  const approvedWasmBytes = approvedWasmSizes.reduce((total, bytes) => total + bytes, 0);
+  const staged = await readStagedLanguageServers(
+    options.stagedLanguageServers ?? defaultStagedLanguageServers(workspaceRoot),
+  );
+  inventory.violations.push(...staged.violations);
+  // Renderer paths whose bytes matched a language server's stage manifest.
+  const stagedAdmitted = new Set<string>();
+  const approvedWasmBytes = approvedWasmSizes.reduce((total, bytes) => total + bytes, 0) + staged.wasmBytes;
   // oxlint-disable-next-line complexity, max-params -- hot file-walk callback avoids allocating a second descriptor for every payload entry.
   const recordContent = (
     scope: PayloadScope,
@@ -411,12 +519,13 @@ export const inspectDesktopPayload = async (options: {
     allocatedBytes: number,
   ): void => {
     const kind = fileKind(path, content);
+    const sha256 = createHash('sha256').update(content).digest('hex');
     inventory.files.push({
       scope,
       path,
       bytes,
       allocatedBytes,
-      sha256: createHash('sha256').update(content).digest('hex'),
+      sha256,
       kind,
       group: payloadGroup(scope, path),
     });
@@ -435,7 +544,16 @@ export const inspectDesktopPayload = async (options: {
         }
       }
     }
-    if (kind === 'wasm' && !allowedWasm.test(rendererPath.split('/').at(-1) ?? '')) {
+    const stagedSha256 = staged.files.get(rendererPath);
+    if (stagedSha256 !== undefined) {
+      if (stagedSha256 === sha256) {
+        stagedAdmitted.add(rendererPath);
+      } else {
+        inventory.violations.push(`Renderer file differs from its language server stage: ${rendererPath}`);
+      }
+    }
+    const admittedFromStage = stagedSha256 === sha256;
+    if (kind === 'wasm' && !admittedFromStage && !allowedWasm.test(rendererPath.split('/').at(-1) ?? '')) {
       inventory.violations.push(`Renderer WASM is not editor/viewer-owned: ${rendererPath}`);
     }
     if (kind === 'wasm' && Buffer.from(content.subarray(0, 4)).toString('hex') !== '0061736d') {
@@ -455,7 +573,7 @@ export const inspectDesktopPayload = async (options: {
     if (browserExecutionEntry.test(rendererPath)) {
       inventory.violations.push(`Browser execution worker in renderer: ${rendererPath}`);
     }
-    if (kind === 'javascript') {
+    if (kind === 'javascript' && !admittedFromStage) {
       const source = Buffer.from(content).toString();
       if (embeddedWasmMarker.test(source)) {
         embeddedWasm.push({ path: rendererPath, encoded: encodedWasmMarker.test(source) });
@@ -616,7 +734,9 @@ export const inspectDesktopPayload = async (options: {
     inventory.violations.push('Desktop emitted module graph is missing');
   }
   const rendererJs = new Set(
-    inventory.files.filter((file) => file.scope === 'renderer' && file.kind === 'javascript').map((file) => file.path),
+    inventory.files
+      .filter((file) => file.scope === 'renderer' && file.kind === 'javascript' && !stagedAdmitted.has(file.path))
+      .map((file) => file.path),
   );
   const chunkNames = inventory.chunks.map((chunk) => chunk.fileName);
   const chunkNameSet = new Set(chunkNames);
@@ -672,7 +792,9 @@ export const inspectDesktopPayload = async (options: {
       inventory.violations.push(`Renderer JavaScript is absent from module graph: ${path}`);
     }
   }
-  for (const file of inventory.files.filter((entry) => entry.scope === 'renderer' && entry.kind === 'wasm')) {
+  for (const file of inventory.files.filter(
+    (entry) => entry.scope === 'renderer' && entry.kind === 'wasm' && !stagedAdmitted.has(entry.path),
+  )) {
     const provenance = inventory.assets.filter((asset) => asset.fileName === file.path);
     let approvedHash: string | undefined;
     try {

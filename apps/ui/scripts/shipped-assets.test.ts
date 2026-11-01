@@ -47,7 +47,7 @@ const createClient = async (): Promise<string> => {
   };
   await Promise.all([
     ...Object.entries({ ...compiled, ...verbatim }).map(async ([path, contents]) => write(path, contents)),
-    ...[...Object.keys(compiled), 'csharp-language/4567/_framework/dotnet.runtime'].map(async (path) =>
+    ...[...Object.keys(compiled), 'csharp-language/4567/_framework/dotnet.runtime.js'].map(async (path) =>
       write(`${path}.map`, JSON.stringify({ version: 3, sources: ['a.ts'], names: [], mappings: 'AAAA' })),
     ),
   ]);

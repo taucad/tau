@@ -1,4 +1,3 @@
-/* oxlint-disable no-await-in-loop -- Move files one at a time so a failure leaves a clear, recoverable state. */
 /**
  * Run a command that may rewrite JavaScript under a built client directory, with every file the build copied
  * verbatim moved out of its reach.
@@ -53,18 +52,22 @@ export const withVerbatimAssetsAside = async (client: string, command: string): 
     .filter((file) => existsSync(path.join(client, file)));
   const moved: string[] = [];
   try {
+    /* oxlint-disable no-await-in-loop -- Move one file at a time so a failure leaves a clear, recoverable state. */
     for (const file of verbatim) {
       await mkdir(path.dirname(path.join(aside, file)), { recursive: true });
       await rename(path.join(client, file), path.join(aside, file));
       moved.push(file);
     }
+    /* oxlint-enable no-await-in-loop */
     console.log(`Moved ${String(moved.length)} file(s) the build copied verbatim aside while running: ${command}`);
     return await run(command);
   } finally {
+    /* oxlint-disable no-await-in-loop -- Move one file at a time so a failure leaves a clear, recoverable state. */
     for (const file of moved) {
       await mkdir(path.dirname(path.join(client, file)), { recursive: true });
       await rename(path.join(aside, file), path.join(client, file));
     }
+    /* oxlint-enable no-await-in-loop */
     await rm(aside, { recursive: true, force: true });
   }
 };

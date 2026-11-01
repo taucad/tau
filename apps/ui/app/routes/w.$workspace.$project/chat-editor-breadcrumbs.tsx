@@ -7,12 +7,14 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 import { useProject } from '#hooks/use-project.js';
 import { useFileTreeEntry } from '#hooks/use-file-tree.js';
 import { fileProvenanceLabel } from '#lib/file-provenance-labels.js';
+import type { FileProvenanceLabel } from '#lib/file-provenance-labels.js';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { FileSelector } from '#components/files/file-selector.js';
 import { OmniScroller } from '#components/ui/omni-scroller.js';
 import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { useFileReturn } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { paneTitle } from '#workbench-records/pane-titles.js';
+import { virtualDeclarationRoot } from '#lib/virtual-declarations.js';
 
 type ChatEditorBreadcrumbsProperties = {
   readonly filePath: string;
@@ -26,7 +28,15 @@ export function ChatEditorBreadcrumbs({ filePath, children }: ChatEditorBreadcru
   const returnTo = fileReturn?.returnTo?.path === filePath ? fileReturn.returnTo : undefined;
   const entry = useFileTreeEntry(filePath);
   const provenance = entry?.provenance;
-  const label = fileProvenanceLabel(provenance, filePath);
+  const declarationRoot = virtualDeclarationRoot(filePath);
+  const label: FileProvenanceLabel = declarationRoot
+    ? {
+        glyph: 'lock',
+        description: `Read-only ${declarationRoot.label} declaration`,
+        dimmed: false,
+        readOnly: true,
+      }
+    : fileProvenanceLabel(provenance, filePath);
   const descriptionId = useId();
   const attachScroller = useCallback<RefCallback<HTMLDivElement>>((scroller) => {
     if (!scroller) {
@@ -97,7 +107,29 @@ export function ChatEditorBreadcrumbs({ filePath, children }: ChatEditorBreadcru
             ref={attachScroller}
             className='flex min-w-0 flex-1 scroll-shadows-x [scrollbar-width:none] flex-row items-center gap-0 overscroll-x-none [&::-webkit-scrollbar]:hidden'
           >
-            {breadcrumbs.length > 0 ? (
+            {declarationRoot ? (
+              /* A library declaration has no project folder to browse: name its library, then the file. */
+              [declarationRoot.label, ...filePath.slice(declarationRoot.prefix.length).split('/')].map(
+                (name, index, names) => (
+                  // oxlint-disable-next-line react/no-array-index-key -- crumbs are positional
+                  <Fragment key={index}>
+                    <span
+                      className='flex max-w-48 items-center gap-1 px-1.5 text-sm font-medium'
+                      aria-current={index === names.length - 1 ? 'page' : undefined}
+                      title={name}
+                    >
+                      {index === names.length - 1 ? (
+                        <FileExtensionIcon filename={name} className='size-3 shrink-0' />
+                      ) : undefined}
+                      <span className='truncate'>{name}</span>
+                    </span>
+                    {index === names.length - 1 ? undefined : (
+                      <ChevronRight aria-hidden className='-mx-1 size-4 shrink-0' />
+                    )}
+                  </Fragment>
+                ),
+              )
+            ) : breadcrumbs.length > 0 ? (
               breadcrumbs.map((crumb) => (
                 <Fragment key={crumb.path}>
                   <FileSelector

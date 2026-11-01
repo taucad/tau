@@ -13,4 +13,4 @@ Follow [create-api](../create-api/SKILL.md) and its [authoring contract](../crea
   location and correction an author or agent would see.
 - Place `design/**/*.kcl` in the guide. The common checker parses and runs each directory's
   `main.kcl` with the workspace `@taucad/kcl-wasm-lib` mock engine; record its version and
-  diagnostics. Highlight with `tauCustomShikiLanguages` from `@taucad/grammars`.
+  diagnostics. The guide renderer highlights KCL with the Lezer grammar from `@taucad/grammars`.

@@ -3,6 +3,7 @@ import { EditorDocument } from '#lib/editor-document.js';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
 import { CodeEditor } from '#components/code/code-editor.client.js';
+import { getEditorLanguage } from '#lib/editor-languages.js';
 import type { CodeEditorProps } from '#components/code/code-editor.client.js';
 
 /** One `<<<<<<< / ======= / >>>>>>>` block, by zero-based line index. */
@@ -173,7 +174,8 @@ export function RevisionConflictEditor({
         className='h-64 rounded-md border'
         document={document}
         viewId={`conflict/${path}`}
-        languageId='plaintext'
+        /* The file's own grammar: Lezer recovers around the conflict markers, so the sides stay highlighted. */
+        languageId={getEditorLanguage(path) ?? 'plaintext'}
         showLineNumbers={false}
         lineHighlights={lineHighlights}
         onApply={(transaction) => {

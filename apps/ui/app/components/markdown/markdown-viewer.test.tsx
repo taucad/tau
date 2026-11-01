@@ -1,42 +1,27 @@
-import { render, screen } from '@testing-library/react';
+import { render } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
 
-const useThemeMock = vi.hoisted(() => vi.fn());
 const streamdownPropsMock = vi.hoisted(() => vi.fn());
 
-vi.mock('#hooks/use-theme.js', () => ({ useTheme: useThemeMock }));
 vi.mock('streamdown', () => ({
   defaultRehypePlugins: { sanitize: vi.fn() },
   defaultRemarkPlugins: {},
-  Streamdown: ({ children, shikiTheme, ...properties }: { children: ReactNode; shikiTheme: readonly string[] }) => {
+  Streamdown: ({ children, ...properties }: { children: ReactNode }) => {
     streamdownPropsMock(properties);
-    return (
-      <div data-testid='streamdown' data-shiki-theme={shikiTheme.join(',')}>
-        {children}
-      </div>
-    );
+    return <div data-testid='streamdown'>{children}</div>;
   },
 }));
 
 describe('MarkdownViewer', () => {
   beforeEach(() => {
-    useThemeMock.mockReturnValue({ isHighContrast: false });
     streamdownPropsMock.mockClear();
   });
 
-  it('should switch Streamdown to its high-contrast light and dark pair', () => {
-    const view = render(<MarkdownViewer>content</MarkdownViewer>);
-    expect(screen.getByTestId('streamdown')).toHaveAttribute('data-shiki-theme', 'github-light,github-dark');
-
-    useThemeMock.mockReturnValue({ isHighContrast: true });
-    view.rerender(<MarkdownViewer>updated content</MarkdownViewer>);
-
-    expect(screen.getByTestId('streamdown')).toHaveAttribute(
-      'data-shiki-theme',
-      'github-light-high-contrast,github-dark-high-contrast',
-    );
+  it('should leave code highlighting to Tau and pass Streamdown no Shiki theme', () => {
+    render(<MarkdownViewer>content</MarkdownViewer>);
+    expect(streamdownPropsMock.mock.lastCall?.[0]).not.toHaveProperty('shikiTheme');
   });
 
   it('should forward the latest Streamdown options and install only the plugins it renders through (D-UI-18)', () => {

@@ -65,7 +65,7 @@ describe('editor documentation', () => {
     );
 
     const opened = vi.fn();
-    const dom = renderEditorDocumentation(documentation.markdown, document, opened);
+    const dom = renderEditorDocumentation(documentation.markdown, document, { onDefinitionLink: opened });
     const anchors = [...dom.querySelectorAll('a')];
     expect(anchors.map((anchor) => anchor.textContent)).toEqual(['Mechanism', 'the gear', 'docs', 'Mechanism']);
     const event = new MouseEvent('click', { bubbles: true, cancelable: true });

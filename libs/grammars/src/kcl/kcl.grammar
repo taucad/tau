@@ -1,0 +1,176 @@
+// KCL grammar for syntax highlighting.
+// Adapted from Zoo's MIT-licensed CodeMirror grammar:
+// https://github.com/KittyCAD/modeling-app/blob/main/packages/codemirror-lang-kcl/src/kcl.grammar
+// Tau additions: unlabeled `@` parameters, return types, body-less declarations
+// (the standard library's read-only declaration files) and typed constants.
+
+@precedence {
+  body
+  typeArgs
+  annotation
+  member
+  call
+  exp @left
+  mult @left
+  add @left
+  comp @left
+  logic @left
+  pipe @left
+  range
+  enumBody
+}
+
+@top Program {
+  Shebang?
+  statement*
+}
+
+statement[@isGroup=Statement] {
+  ImportStatement { kw<"import"> ImportItems ckw<"from"> String } |
+  ImportStatement { kw<"import"> String (ckw<"as"> VariableDefinition)? } |
+  FunctionDeclaration { kw<"export">? kw<"fn"> FunctionName ParamList ReturnType? (!body Body)? } |
+  VariableDeclaration { kw<"export">? VariableDefinition (TypeAnnotation (Equals expression)? | Equals expression) } |
+  TypeDeclaration { kw<"export">? kw<"type"> TypeDefinition (Equals type | !enumBody EnumBody)? } |
+  ReturnStatement { kw<"return"> expression } |
+  ExpressionStatement { expression } |
+  Annotation { AnnotationName AnnotationList? }
+}
+
+AnnotationList { !annotation "(" commaSep<AnnotationProperty> ")" }
+
+ParameterAnnotation { AnnotationName AnnotationList }
+
+ParamList { "(" commaSep<Parameter> ")" }
+
+Parameter { ParameterAnnotation? (VariableDefinition | UnlabeledParameter { AnnotationName }) "?"? TypeAnnotation? (Equals expression)? }
+
+TypeAnnotation { ":" type }
+
+ReturnType { ":" type }
+
+Body { "{" statement* "}" }
+
+EnumBody { "{" "|" (EnumVariant ("|" EnumVariant)*)? "}" }
+
+EnumVariant { identifier }
+
+ImportItems { commaSep1NoTrailingComma<ImportItem> }
+ImportItem { identifier (ckw<"as"> identifier)? }
+
+expression[@isGroup=Expression] {
+  String |
+  Number |
+  SketchVar { kw<"var"> AddOp? Number } |
+  VariableName |
+  TagDeclarator |
+  kw<"true"> | kw<"false"> | kw<"nil"> |
+  PipeSubstitution |
+  BinaryExpression {
+    expression !add AddOp expression |
+    expression !mult MultOp expression |
+    expression !exp ExpOp expression |
+    expression !comp CompOp expression |
+    expression !logic LogicOp expression
+  } |
+  UnaryExpression { UnaryOp expression } |
+  ParenthesizedExpression { "(" expression ")" } |
+  IfExpression { kw<"if"> expression Body (kw<"else"> kw<"if"> expression Body)* kw<"else"> Body } |
+  SketchBlockExpression { ckw<"sketch"> ArgumentList Body } |
+  FunctionExpression { kw<"fn"> ParamList ReturnType? Body } |
+  CallExpression { expression !call ArgumentList } |
+  ArrayExpression { "[" commaSep<expression | IntegerRange { expression !range ".." "<"? expression }> "]" } |
+  ObjectExpression { "{" commaSep<ObjectProperty> "}" } |
+  MemberExpression { expression !member "." PropertyName } |
+  SubscriptExpression { expression !member "[" expression "]" } |
+  PipeExpression { expression (!pipe PipeOperator expression)+ }
+}
+
+UnaryOp { AddOp | BangOp }
+
+ObjectProperty { PropertyName (":" | Equals) expression }
+
+AnnotationProperty {
+  PropertyName
+  ( AddOp | MultOp | ExpOp | LogicOp | BangOp | CompOp | Equals | PipeOperator | PipeSubstitution )
+  expression
+}
+
+LabeledArgument { ArgumentLabel Equals expression }
+
+ArgumentList { "(" commaSep<LabeledArgument | expression> ")" }
+
+type[@isGroup=Type] {
+  TypeName { "::"? identifier ("::" identifier)* (!typeArgs TypeArguments)? } |
+  ArrayType { "[" type !member (";" Number "+"?)? "]" } |
+  ObjectType { "{" commaSep<ObjectProperty { PropertyName ":" type }> "}" } |
+  UnionType { type !logic LogicOp type } |
+  FunctionType { kw<"fn"> "(" commaSep<(ArgumentLabel ":")? type> ")" (!typeArgs ":" type)? }
+}
+
+TypeArguments { "(" commaSep<type "?"?> ")" }
+
+VariableDefinition { identifier ("::" identifier)* }
+
+FunctionName { identifier ("::" identifier)* }
+
+TypeDefinition { identifier ("::" identifier)* }
+
+VariableName { identifier ("::" identifier)* }
+
+ArgumentLabel { identifier }
+
+@skip { whitespace | LineComment | DocComment | BlockComment }
+
+kw<term> { @specialize[@name={term}]<identifier, term> }
+
+// Contextual keywords: also valid as names, such as a `sketch` or `from` parameter.
+ckw<term> { @extend[@name={term}]<identifier, term> }
+
+commaSep<term> { (term ("," term)*)? ","? }
+
+commaSep1NoTrailingComma<term> { term ("," term)* }
+
+@tokens {
+  String[isolate] { "'" ("\\" _ | !['\\])* "'"? | '"' ("\\" _ | !["\\])* '"'? }
+
+  Number {
+    ("." @digit+ | @digit+ ("." @digit+)?) ($[eE] $[+\-]? @digit+)?
+    ("inch" | "mm" | "cm" | "m" | "in" | "ft" | "yd" | "deg" | "rad" | "_" "?"? | "?")?
+  }
+  @precedence { Number, "." }
+
+  AddOp { "+" | "-" }
+  MultOp { "/" | "*" | "\\" }
+  ExpOp { "^" }
+  LogicOp { "|" | "&" }
+  BangOp { "!" }
+  CompOp { "==" | "!=" | "<=" | ">=" | "<" | ">" }
+  Equals { "=" }
+  PipeOperator { "|>" }
+
+  PipeSubstitution { "%" }
+
+  identifier { $[a-zA-Z_\u{a1}-\u{167f}\u{1681}-\u{1fff}\u{200e}-\u{2027}\u{202a}-\u{202e}\u{2030}-\u{205e}\u{2061}-\u{2fff}\u{3001}-\u{fefe}\u{ff00}-\u{10ffff}] $[a-zA-Z0-9_\u{a1}-\u{167f}\u{1681}-\u{1fff}\u{200e}-\u{2027}\u{202a}-\u{202e}\u{2030}-\u{205e}\u{2061}-\u{2fff}\u{3001}-\u{fefe}\u{ff00}-\u{10ffff}]* }
+  AnnotationName { "@" identifier? }
+  PropertyName { identifier }
+  TagDeclarator { "$" identifier }
+
+  whitespace { @whitespace+ }
+
+  DocComment[isolate] { "///" ![\n]* | "//!" ![\n]* }
+  LineComment[isolate] { "//" ![\n]* }
+  BlockComment[isolate] { "/*" blockCommentRest }
+  blockCommentRest { @eof | ![*] blockCommentRest | "*" blockCommentStar }
+  blockCommentStar { @eof | "/" | ![/] blockCommentRest | "*" blockCommentStar }
+
+  @precedence { DocComment, LineComment, BlockComment, MultOp }
+
+  Shebang { "#!" ![\n]* }
+
+  "(" ")"
+  "{" "}"
+  "[" "]"
+  "," "?" ":" "." ".." ";" "::"
+}
+
+@detectDelim

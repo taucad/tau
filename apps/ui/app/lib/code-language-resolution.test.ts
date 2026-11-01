@@ -3,38 +3,38 @@ import {
   extractLanguageFromClassName,
   resolveHighlightLanguage,
   resolveHighlightLanguageForPath,
-  supportedHighlightLanguages,
 } from '#lib/code-language-resolution.js';
+import { highlightLanguages } from '@taucad/grammars';
 
 describe('code language resolution', () => {
   it('resolves every supported highlight language directly', () => {
-    for (const language of supportedHighlightLanguages) {
+    for (const language of highlightLanguages) {
       expect(resolveHighlightLanguage(language)).toEqual({
         input: language,
         displayLanguage: language,
-        shikiLanguage: language,
+        language,
         isSupported: true,
       });
     }
   });
 
-  it('normalizes common aliases to supported Shiki languages', () => {
-    expect(resolveHighlightLanguage('md').shikiLanguage).toBe('markdown');
-    expect(resolveHighlightLanguage('sh').shikiLanguage).toBe('bash');
-    expect(resolveHighlightLanguage('shellscript').shikiLanguage).toBe('bash');
-    expect(resolveHighlightLanguage('ts').shikiLanguage).toBe('typescript');
-    expect(resolveHighlightLanguage('js').shikiLanguage).toBe('javascript');
-    expect(resolveHighlightLanguage('scad').shikiLanguage).toBe('openscad');
-    expect(resolveHighlightLanguage('stp').shikiLanguage).toBe('stepfile');
-    expect(resolveHighlightLanguage('kerml').shikiLanguage).toBe('sysml');
-    expect(resolveHighlightLanguage('cs').shikiLanguage).toBe('csharp');
+  it('normalizes common aliases to supported highlight languages', () => {
+    expect(resolveHighlightLanguage('md').language).toBe('markdown');
+    expect(resolveHighlightLanguage('sh').language).toBe('bash');
+    expect(resolveHighlightLanguage('shellscript').language).toBe('bash');
+    expect(resolveHighlightLanguage('ts').language).toBe('typescript');
+    expect(resolveHighlightLanguage('js').language).toBe('javascript');
+    expect(resolveHighlightLanguage('scad').language).toBe('openscad');
+    expect(resolveHighlightLanguage('stp').language).toBe('stepfile');
+    expect(resolveHighlightLanguage('kerml').language).toBe('sysml');
+    expect(resolveHighlightLanguage('cs').language).toBe('csharp');
   });
 
   it('keeps unsupported display labels while falling back to plaintext', () => {
     expect(resolveHighlightLanguage('brainfuck')).toEqual({
       input: 'brainfuck',
       displayLanguage: 'brainfuck',
-      shikiLanguage: 'plaintext',
+      language: 'plaintext',
       isSupported: false,
     });
   });
@@ -43,18 +43,18 @@ describe('code language resolution', () => {
     expect(resolveHighlightLanguage(undefined)).toEqual({
       input: undefined,
       displayLanguage: 'plaintext',
-      shikiLanguage: 'plaintext',
+      language: 'plaintext',
       isSupported: false,
     });
   });
 
   it('resolves file paths by extension', () => {
-    expect(resolveHighlightLanguageForPath('README.md').shikiLanguage).toBe('markdown');
-    expect(resolveHighlightLanguageForPath('docs/guide.markdown').shikiLanguage).toBe('markdown');
-    expect(resolveHighlightLanguageForPath('main.scad').shikiLanguage).toBe('openscad');
-    expect(resolveHighlightLanguageForPath('data.jsonl').shikiLanguage).toBe('jsonl');
-    expect(resolveHighlightLanguageForPath('main.cs').shikiLanguage).toBe('csharp');
-    expect(resolveHighlightLanguageForPath('unknown.xyz').shikiLanguage).toBe('plaintext');
+    expect(resolveHighlightLanguageForPath('README.md').language).toBe('markdown');
+    expect(resolveHighlightLanguageForPath('docs/guide.markdown').language).toBe('markdown');
+    expect(resolveHighlightLanguageForPath('main.scad').language).toBe('openscad');
+    expect(resolveHighlightLanguageForPath('data.jsonl').language).toBe('jsonl');
+    expect(resolveHighlightLanguageForPath('main.cs').language).toBe('csharp');
+    expect(resolveHighlightLanguageForPath('unknown.xyz').language).toBe('plaintext');
   });
 
   it('extracts non-word markdown code fence language classes', () => {

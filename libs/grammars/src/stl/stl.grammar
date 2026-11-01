@@ -1,0 +1,17 @@
+// ASCII STL: solids of facets, each a normal and a loop of vertices.
+
+@top Stl { item* }
+
+item { keyword | Number | Name }
+
+keyword {
+  @specialize[@name=Keyword]<Name, "solid" | "facet" | "normal" | "outer" | "loop" | "vertex" | "endloop" | "endfacet" | "endsolid">
+}
+
+@skip { whitespace }
+
+@tokens {
+  whitespace { $[ \t\r\n]+ }
+  Number { $[+\-]? (@digit+ ("." @digit*)? | "." @digit+) ($[eE] $[+\-]? @digit+)? }
+  Name { ![ \t\r\n0-9.+\-] ![ \t\r\n]* }
+}

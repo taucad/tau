@@ -1,4 +1,4 @@
-/* Loaded only with the admitted CodeMirror source view. GitHub theme hues are mapped to OKLCH. */
+/* Loaded only with the admitted CodeMirror source view. The syntax palette lives in app/styles/syntax-highlight.css. */
 @layer base {
   :where(
     .editor-container .cm-foldGutter .cm-gutterElement,
@@ -8,40 +8,6 @@
     .cm-editor .cm-tooltip button
   ):not(:any-link) {
     cursor: var(--cursor-action) !important;
-  }
-
-  /* GitHub light/dark/high-contrast Shiki syntax hues, expressed in OKLCH for app color policy. */
-  :is(.editor-container .cm-editor, .cm-overlays) {
-    --cm-keyword: oklch(55.175% 0.2051 24.53);
-    --cm-function: oklch(56.307% 0.2069 294.97);
-    --cm-variable: oklch(46.567% 0.1371 43.35);
-    --cm-number: oklch(45.095% 0.1641 258.18);
-    --cm-string: oklch(32.103% 0.1084 259.11);
-    --cm-comment: oklch(56.511% 0.0189 250.97);
-    --cm-type: oklch(43.906% 0.1179 148.07);
-    --cm-punctuation: oklch(55.419% 0.1169 75.01);
-  }
-
-  .dark :is(.editor-container .cm-editor, .cm-overlays) {
-    --cm-keyword: oklch(73.45% 0.1626 25.78);
-    --cm-function: oklch(80.051% 0.1275 305.86);
-    --cm-variable: oklch(79.915% 0.1412 60.1);
-    --cm-number: oklch(78.565% 0.1153 246.66);
-    --cm-string: oklch(85.599% 0.0768 244.09);
-    --cm-comment: oklch(66.247% 0.0181 250.92);
-    --cm-type: oklch(84.16% 0.1641 145.75);
-    --cm-punctuation: oklch(79.045% 0.1386 85.24);
-  }
-
-  .dark.high-contrast :is(.editor-container .cm-editor, .cm-overlays) {
-    --cm-keyword: oklch(77.882% 0.1293 21.59);
-    --cm-function: oklch(84.54% 0.0908 307.26);
-    --cm-variable: oklch(83.443% 0.1125 59.73);
-    --cm-number: oklch(85.599% 0.0768 244.09);
-    --cm-string: oklch(90.974% 0.0481 241.64);
-    --cm-comment: oklch(74.638% 0.0194 250.65);
-    --cm-type: oklch(89.243% 0.1391 148.25);
-    --cm-punctuation: oklch(85.741% 0.1331 89.95);
   }
 
   .editor-container .cm-json-key-depth0 {

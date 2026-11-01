@@ -1,14 +1,13 @@
 import type { ReactNode } from 'react';
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProject } from '#hooks/use-project.js';
 import { getRevisionClient } from '#hooks/use-revision-status.js';
 import { EditorDocumentSession } from '#lib/editor-document-session.js';
-import { EditorDocument } from '#lib/editor-document.js';
+import type { EditorDocument } from '#lib/editor-document.js';
 import { clearEditorNavigation } from '#lib/editor-navigation-service.js';
 import type { EditorLanguageEnvironment, EditorNavigationTarget } from '#lib/editor-language-environment.js';
-import { VirtualDeclarationDialog } from '#components/code/virtual-declaration-dialog.js';
-import type { VirtualDeclaration } from '#components/code/virtual-declaration-dialog.js';
+import { isVirtualDeclarationPath } from '#lib/virtual-declarations.js';
 import { URI } from 'vscode-uri';
 import { assertRootedPath } from '@taucad/utils/path';
 
@@ -23,16 +22,11 @@ export function EditorDocumentSessionProvider({ children }: { readonly children:
   const { projectId, editorRef } = useProject();
   const { contentService, treeService, fileManagerRef, readFile, exists, readdir, getDirectoryStat } = useFileManager();
   const [session, setSession] = useState<EditorDocumentSession>();
-  const [declaration, setDeclaration] = useState<VirtualDeclaration>();
-  const opener = useRef<HTMLElement | undefined>(undefined);
 
   useEffect(() => {
     if (!contentService) {
       return;
     }
-    // oxlint-disable-next-line react/set-state-in-effect -- a declaration from the previous project must not remain visible.
-    setDeclaration(undefined);
-    opener.current = undefined;
     const next = new EditorDocumentSession({
       contentService,
       projectId,
@@ -71,23 +65,25 @@ export function EditorDocumentSessionProvider({ children }: { readonly children:
         return;
       }
       const path = assertRootedPath(uri.path.slice(1));
-      if (target.declaration) {
-        const typescriptDeclaration =
-          (path.startsWith('__typescript_lib__/') || path.startsWith('cdn-types/')) && path.endsWith('.d.ts');
-        const csharpDeclaration = path.startsWith('__csharp_metadata__/') && path.endsWith('.cs');
-        const kclStandardLibrary = path.startsWith('__kcl_std__/') && path.endsWith('.kcl');
-        const openscadBuiltins = path.startsWith('__openscad_builtins__/') && path.endsWith('.scad');
-        if (!typescriptDeclaration && !csharpDeclaration && !kclStandardLibrary && !openscadBuiltins) {
+      if (isVirtualDeclarationPath(path)) {
+        // A library declaration opens as a read-only tab like any file; its text comes from the language service.
+        if (target.declaration) {
+          session?.openDeclaration(path, target.declaration.text);
+        }
+        if (!session?.hasDeclaration(path)) {
           return;
         }
-        opener.current =
-          globalThis.document.activeElement instanceof HTMLElement ? globalThis.document.activeElement : undefined;
-        setDeclaration({
-          uri: target.uri,
-          document: new EditorDocument(path, target.declaration.text),
-          line: target.line,
+        editorRef.send({
+          type: 'openFile',
+          path,
+          source: 'user',
+          readOnly: true,
+          lineNumber: target.line,
           column: target.column,
         });
+        return;
+      }
+      if (target.declaration) {
         return;
       }
       const entry = await treeService?.getEntry(path);
@@ -103,7 +99,7 @@ export function EditorDocumentSessionProvider({ children }: { readonly children:
         column: target.column,
       });
     },
-    [editorRef, treeService],
+    [editorRef, session, treeService],
   );
   const environment = useMemo(
     (): EditorLanguageEnvironment | undefined =>
@@ -121,20 +117,7 @@ export function EditorDocumentSessionProvider({ children }: { readonly children:
     [session, contentService, treeService, fileManagerRef, fileManager, navigate],
   );
   const value = useMemo(() => ({ session, environment }), [session, environment]);
-  return (
-    <EditorSessionContext.Provider value={value}>
-      {children}
-      <VirtualDeclarationDialog
-        declaration={declaration}
-        onClose={() => {
-          setDeclaration(undefined);
-        }}
-        restoreFocus={() => {
-          opener.current?.focus();
-        }}
-      />
-    </EditorSessionContext.Provider>
-  );
+  return <EditorSessionContext.Provider value={value}>{children}</EditorSessionContext.Provider>;
 }
 
 /** The neutral session is present for project panes, including non-code views. */

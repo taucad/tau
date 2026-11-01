@@ -15,10 +15,13 @@ import { decodeTextFile } from '#utils/filesystem.utils.js';
 import { EditorDocument } from '#lib/editor-document.js';
 import type { DocumentChange, DocumentTransaction } from '#lib/editor-document.js';
 import { EditorDiagnostics } from '#lib/editor-diagnostics.js';
+import { isVirtualDeclarationPath } from '#lib/virtual-declarations.js';
 
 const encoder = new TextEncoder();
 const parameterCodec = { read: requireParameterRecord, serialize: serializeParameterRecord };
 export const maxBackgroundDocuments = 10;
+/** Library declarations kept for reopening; held ones are never dropped. */
+export const maxDeclarations = 16;
 
 type SaveState = { path: string; completion: Promise<void>; settled: Promise<void> };
 type PendingRebase = {
@@ -99,6 +102,8 @@ export class EditorDocumentSession {
   readonly #bases = new Map<string, Uint8Array<ArrayBuffer>>();
   readonly #saves = new Map<string, SaveState>();
   readonly #rebases = new Map<string, PendingRebase>();
+  /** Read-only library declaration text by path, most recently opened last. */
+  readonly #declarations = new Map<string, string>();
   readonly #subscriptions: Array<() => void>;
   #projectId: string;
   #epoch = 0;
@@ -120,6 +125,37 @@ export class EditorDocumentSession {
 
   public get(path: string): EditorDocument | undefined {
     return this.#documents.get(assertRootedPath(path));
+  }
+
+  /**
+   * Serve a library declaration a language service returned, such as a `.d.ts` file or a KCL standard
+   * library module, at its own path. It never touches the filesystem and cannot be saved.
+   */
+  public openDeclaration(path: string, text: string): EditorDocument | undefined {
+    const key = assertRootedPath(path);
+    if (this.#disposed || !isVirtualDeclarationPath(key)) {
+      return undefined;
+    }
+    this.#declarations.delete(key);
+    this.#declarations.set(key, text);
+    let document = this.#documents.get(key);
+    if (document?.text !== text) {
+      document = new EditorDocument(key, text);
+      this.#documents.set(key, document);
+    }
+    if (!this.#holds.has(key)) {
+      this.#background.set(key, Date.now());
+    }
+    this.#evictDeclarations();
+    return document;
+  }
+
+  public hasDeclaration(path: string): boolean {
+    return this.#declarations.has(assertRootedPath(path));
+  }
+
+  public declarationText(path: string): string | undefined {
+    return this.#declarations.get(assertRootedPath(path));
   }
 
   public async acquire(path: string): Promise<EditorDocument | undefined> {
@@ -144,6 +180,18 @@ export class EditorDocumentSession {
         this.#background.set(key, Date.now());
       }
       return existing;
+    }
+    const declaration = this.#declarations.get(key);
+    if (declaration !== undefined) {
+      const document = new EditorDocument(key, declaration);
+      this.#documents.set(key, document);
+      if (!this.#holds.has(key)) {
+        this.#background.set(key, Date.now());
+      }
+      return document;
+    }
+    if (isVirtualDeclarationPath(key)) {
+      return undefined;
     }
     const epoch = this.#epoch;
     const result = await this.#contentService.resolve(key);
@@ -180,7 +228,7 @@ export class EditorDocumentSession {
   }
 
   public apply(path: string, transaction: DocumentTransaction): DocumentChange | undefined {
-    if (this.#disposed) {
+    if (this.#disposed || this.#declarations.has(assertRootedPath(path))) {
       return undefined;
     }
     return this.get(path)?.apply(transaction);
@@ -193,6 +241,9 @@ export class EditorDocumentSession {
     const document = this.#documents.get(key);
     if (!document || this.#disposed) {
       return Promise.reject(new Error(`No active document for ${key}`));
+    }
+    if (this.#declarations.has(key)) {
+      return Promise.reject(new Error(`${key} is a read-only library declaration`));
     }
     const completion = this.#contentService.saveEditor(key, encoder.encode(document.text), this.#bases.get(key));
     const existing = this.#saves.get(key);
@@ -211,6 +262,7 @@ export class EditorDocumentSession {
     this.#epoch += 1;
     this.#projectId = projectId;
     this.#documents.clear();
+    this.#declarations.clear();
     this.#holds.clear();
     this.#background.clear();
     this.#bases.clear();
@@ -515,6 +567,22 @@ export class EditorDocumentSession {
       this.#settleRebase(path, pending, Promise.resolve());
     }
     this.diagnostics.remove(URI.file(`/${path}`).toString());
+  }
+
+  #evictDeclarations(): void {
+    let excess = this.#declarations.size - maxDeclarations;
+    for (const path of this.#declarations.keys()) {
+      if (excess <= 0) {
+        break;
+      }
+      if (this.#holds.has(path)) {
+        continue;
+      }
+      this.#declarations.delete(path);
+      this.#documents.delete(path);
+      this.#background.delete(path);
+      excess -= 1;
+    }
   }
 
   #evict(): void {

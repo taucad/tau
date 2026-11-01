@@ -27,7 +27,6 @@
     "@codemirror/lang-python": "catalog:",
     "@codemirror/lang-yaml": "catalog:",
     "@codemirror/language": "catalog:",
-    "@codemirror/legacy-modes": "catalog:",
     "@codemirror/lint": "catalog:",
     "@codemirror/search": "catalog:",
     "@codemirror/state": "catalog:",

@@ -408,12 +408,14 @@ function FloatingPanelContent({ children, className, errorFallback }: FloatingPa
   const depth = React.useContext(FloatingPanelContentDepthContext) + 1;
   const isMobile = useIsMobile();
   const isInsideDrawer = useIsInsideDrawer();
-  const body = <FloatingPanelErrorBoundary fallback={fallback}>{children}</FloatingPanelErrorBoundary>;
   return (
     <div className={cn('flex size-full flex-col bg-sidebar/50', className)} data-slot='floating-panel-content'>
       <FloatingPanelContentDepthContext.Provider value={depth}>
-        {/* A phone sheet is short: the outermost pane folds its filter row behind a header toggle (desktop keeps it). */}
-        {isMobile && isInsideDrawer && depth === 1 ? <PaneSearchProvider>{body}</PaneSearchProvider> : body}
+        {/* A phone sheet is short: the outermost pane folds its filter row behind a header toggle. Desktop keeps the
+            row, and a nested panel scopes the fold out so its row never answers the outer pane's toggle. */}
+        <PaneSearchProvider isEnabled={isMobile && isInsideDrawer && depth === 1}>
+          <FloatingPanelErrorBoundary fallback={fallback}>{children}</FloatingPanelErrorBoundary>
+        </PaneSearchProvider>
       </FloatingPanelContentDepthContext.Provider>
     </div>
   );

@@ -41,11 +41,19 @@ export function usePaneSearch(): PaneSearchState | undefined {
  *
  * @param props - The provider properties.
  * @param props.children - The pane whose header toggle and filter row share this state.
+ * @param props.isEnabled - Whether the row folds here; `false` scopes it out, so a pane nested in a folding one keeps
+ * its own row shown instead of registering it with the outer pane's toggle.
  * @returns The pane, holding the shared search state.
  *
  * @public
  */
-export function PaneSearchProvider({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
+export function PaneSearchProvider({
+  children,
+  isEnabled = true,
+}: {
+  readonly children: React.ReactNode;
+  readonly isEnabled?: boolean;
+}): React.JSX.Element {
   const [isOpen, setIsOpen] = React.useState(false);
   const [hasHiddenQuery, setHasHiddenQuery] = React.useState(false);
   const [region, setRegion] = React.useState<HTMLElement | undefined>(undefined);
@@ -82,7 +90,7 @@ export function PaneSearchProvider({ children }: { readonly children: React.Reac
     [hasHiddenQuery, isOpen, region, regionId, toggle],
   );
 
-  return <PaneSearchContext.Provider value={value}>{children}</PaneSearchContext.Provider>;
+  return <PaneSearchContext.Provider value={isEnabled ? value : undefined}>{children}</PaneSearchContext.Provider>;
 }
 
 /**

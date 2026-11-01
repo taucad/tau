@@ -93,3 +93,21 @@ describe('PaneSearchRegion', () => {
     expect(toggle).toHaveAttribute('data-hidden-query', 'false');
   });
 });
+
+describe('PaneSearchProvider', () => {
+  it('should keep a nested pane filter row shown and off the outer toggle when scoped out', () => {
+    render(
+      <PaneSearchProvider>
+        <Toggle />
+        <PaneSearchProvider isEnabled={false}>
+          <PaneSearchRegion data-testid='nested'>
+            <input type='search' aria-label='Nested filter' />
+          </PaneSearchRegion>
+        </PaneSearchProvider>
+      </PaneSearchProvider>,
+    );
+
+    expect(screen.getByTestId('nested')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Filter' })).toBeNull();
+  });
+});

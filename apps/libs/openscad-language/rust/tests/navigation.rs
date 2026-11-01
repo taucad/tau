@@ -220,3 +220,55 @@ fn merge(mut base: Value, extra: Value) -> Value {
     }
     base
 }
+
+#[test]
+fn shows_incoming_and_outgoing_calls() {
+    let mut harness = project();
+    let gears = fixture::GEARS;
+    let offset = gears.find("pitch_radius(teeth").unwrap() + 1;
+    let items = harness.request(
+        "textDocument/prepareCallHierarchy",
+        json!({ "textDocument": { "uri": uri("lib/gears.scad") }, "position": harness::position(gears, offset) }),
+    );
+    let item = items[0].clone();
+    assert_eq!(item["name"], "pitch_radius");
+    assert_eq!(item["kind"], 12);
+    let incoming = harness.request("callHierarchy/incomingCalls", json!({ "item": item }));
+    let callers: Vec<&str> =
+        incoming.as_array().unwrap().iter().map(|call| call["from"]["name"].as_str().unwrap()).collect();
+    assert_eq!(callers, vec!["spur_gear"]);
+
+    let main = fixture::MAIN;
+    let plate = main.find("module plate").unwrap() + 8;
+    let items = harness.request(
+        "textDocument/prepareCallHierarchy",
+        json!({ "textDocument": { "uri": uri("main.scad") }, "position": harness::position(main, plate) }),
+    );
+    let outgoing = harness.request("callHierarchy/outgoingCalls", json!({ "item": items[0] }));
+    let callees: Vec<(&str, &str)> = outgoing
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|call| (call["to"]["name"].as_str().unwrap(), call["to"]["uri"].as_str().unwrap()))
+        .collect();
+    assert_eq!(
+        callees,
+        vec![("difference", BUILTINS), ("cube", BUILTINS), ("translate", BUILTINS), ("cylinder", BUILTINS)]
+    );
+
+    // Calls at the top level come from the file; variables have no call hierarchy.
+    let spur = gears.find("spur_gear").unwrap();
+    let items = harness.request(
+        "textDocument/prepareCallHierarchy",
+        json!({ "textDocument": { "uri": uri("lib/gears.scad") }, "position": harness::position(gears, spur) }),
+    );
+    let incoming = harness.request("callHierarchy/incomingCalls", json!({ "item": items[0] }));
+    assert_eq!(incoming[0]["from"]["name"], "main.scad");
+    assert_eq!(incoming[0]["from"]["kind"], 1);
+    let thickness = main.find("thickness =").unwrap();
+    let none = harness.request(
+        "textDocument/prepareCallHierarchy",
+        json!({ "textDocument": { "uri": uri("main.scad") }, "position": harness::position(main, thickness) }),
+    );
+    assert!(none.is_null());
+}

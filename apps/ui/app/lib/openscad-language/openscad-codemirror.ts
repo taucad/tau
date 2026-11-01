@@ -1,15 +1,24 @@
 import { completionTypeFromLsp } from '#components/code/editor-completion-icon.js';
 import { definitionProvider } from '#components/code/editor-definition.js';
 import { definitionLinkMarkdown, renderEditorDocumentation } from '#components/code/editor-documentation.js';
+import { languageFeatures, triggerParameterHints } from '#components/code/editor-language-features.js';
+import type {
+  CallHierarchyDirection,
+  EditorLocationItem,
+  EditorOccurrence,
+  EditorSignature,
+  EditorSymbol,
+} from '#components/code/editor-language-features.js';
 import { StateEffect, StateField } from '@codemirror/state';
-import type { Extension, StateEffectType } from '@codemirror/state';
+import type { Extension } from '@codemirror/state';
 import { autocompletion } from '@codemirror/autocomplete';
 import type { Completion, CompletionContext, CompletionResult } from '@codemirror/autocomplete';
-import { Decoration, EditorView, hoverTooltip, keymap, showDialog, showTooltip, ViewPlugin } from '@codemirror/view';
-import type { Tooltip, ViewUpdate } from '@codemirror/view';
+import { Decoration, EditorView, hoverTooltip, showDialog, ViewPlugin } from '@codemirror/view';
+import type { ViewUpdate } from '@codemirror/view';
 import { storeDiagnostics } from '#components/code/editor-lint.js';
-import { foldService } from '@codemirror/language';
+import { foldService, indentUnit } from '@codemirror/language';
 import type * as LSP from 'vscode-languageserver-protocol';
+import { URI } from 'vscode-uri';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
 import { Topic } from '@taucad/events';
 import { OpenscadLanguageClient } from '@taucad/openscad-language/client';
@@ -20,6 +29,7 @@ import type { EditorLanguageEnvironment, EditorNavigationTarget } from '#lib/edi
 import { applyLspCompletion } from '#lib/lsp-completion-apply.js';
 import { applyLspWorkspaceEdit, captureLspEditBasis } from '#lib/lsp-workspace-edit.js';
 import type { LspEditBasis } from '#lib/lsp-workspace-edit.js';
+import { decodeTextFile } from '#utils/filesystem.utils.js';
 
 /** The language server's diagnostics owner. */
 const owner = 'openscad-lsp';
@@ -28,8 +38,6 @@ const tokenTypes = ['module', 'function', 'variable', 'parameter', 'property'] a
 const defaultLibraryModifier = 0b10;
 
 type OpenDocument = { text: string; unsubscribe: () => void; timer?: ReturnType<typeof setTimeout> };
-// oxlint-disable-next-line typescript/no-restricted-types -- CodeMirror's tooltip facet uses null as its empty value.
-type NullableTooltip = Tooltip | null;
 // oxlint-disable-next-line typescript/no-restricted-types -- CodeMirror's completion sources answer null for no result.
 type NullableCompletionResult = CompletionResult | null;
 
@@ -71,11 +79,13 @@ function stagedAssets(): OpenscadLanguageAssets | undefined {
  * Server documentation with each `[label](file:///path#Lline,column)` link the server resolved from `{@link}` turned
  * into a definition link, and the targets those links open.
  */
-export function openscadDocumentation(markdown: string): {
+export function openscadDocumentation(
+  markdown: string,
+  targets: EditorNavigationTarget[] = [],
+): {
   markdown: string;
   targets: EditorNavigationTarget[];
 } {
-  const targets: EditorNavigationTarget[] = [];
   const rewritten = markdown.replaceAll(
     /\[(`?)([^\]`]*)\1\]\((file:\/\/\/[^\s#)]*)#L(\d+),(\d+)\)/gu,
     // oxlint-disable-next-line max-params -- String.replaceAll callback supplies capture groups.
@@ -537,56 +547,6 @@ function semanticDecorations(text: string, data: readonly number[]): ReturnType<
   return Decoration.set(ranges, true);
 }
 
-async function showSignature(
-  view: EditorView,
-  {
-    client,
-    document,
-    effect,
-  }: Pick<ExtensionContext, 'client' | 'document'> & Readonly<{ effect: StateEffectType<NullableTooltip> }>,
-): Promise<void> {
-  const { version } = document;
-  const { head } = view.state.selection.main;
-  const help = await client.request<LSP.SignatureHelp | undefined>('textDocument/signatureHelp', {
-    textDocument: { uri: document.uri },
-    position: positionAt(document.text, head),
-  } satisfies LSP.SignatureHelpParams);
-  if (document.version !== version) {
-    return;
-  }
-  const signature = help?.signatures[help.activeSignature ?? 0];
-  if (!signature) {
-    view.dispatch({ effects: effect.of(null) });
-    return;
-  }
-  const active = signature.parameters?.[help.activeParameter ?? signature.activeParameter ?? 0];
-  const parameterDocumentation = markupText(active?.documentation);
-  view.dispatch({
-    effects: effect.of({
-      pos: head,
-      above: true,
-      create() {
-        const dom = view.dom.ownerDocument.createElement('div');
-        dom.className = 'cm-openscad-signature';
-        const label = view.dom.ownerDocument.createElement('code');
-        if (active && Array.isArray(active.label)) {
-          const [start, end] = active.label;
-          const strong = view.dom.ownerDocument.createElement('strong');
-          strong.textContent = signature.label.slice(start, end);
-          label.append(signature.label.slice(0, start), strong, signature.label.slice(end));
-        } else {
-          label.textContent = signature.label;
-        }
-        dom.append(label);
-        if (parameterDocumentation) {
-          dom.append(renderEditorDocumentation(parameterDocumentation, view.dom.ownerDocument));
-        }
-        return { dom };
-      },
-    }),
-  });
-}
-
 /** The OpenSCAD sources a workspace edit may touch, snapshotted before each request. */
 const openscadSources = {
   language: 'OpenSCAD',
@@ -607,7 +567,10 @@ export async function applyOpenscadWorkspaceEdit(
   await applyLspWorkspaceEdit(edit, { environment, basis, language: openscadSources.language });
 }
 
-async function renameSymbol(view: EditorView, { client, document, environment }: ExtensionContext): Promise<void> {
+async function renameSymbol(
+  view: EditorView,
+  { client, document, environment, isDisposed }: ExtensionContext,
+): Promise<void> {
   const basis = await captureBasis(document, environment);
   const { version } = document;
   const position = positionAt(document.text, view.state.selection.main.head);
@@ -615,7 +578,7 @@ async function renameSymbol(view: EditorView, { client, document, environment }:
     'textDocument/prepareRename',
     { textDocument: { uri: document.uri }, position } satisfies LSP.PrepareRenameParams,
   );
-  if (!prepared || document.version !== version) {
+  if (!prepared || isDisposed() || document.version !== version) {
     return;
   }
   const dialog = showDialog(view, {
@@ -633,12 +596,15 @@ async function renameSymbol(view: EditorView, { client, document, environment }:
     position,
     newName: name,
   } satisfies LSP.RenameParams);
-  if (edit && document.version === version) {
+  if (edit && !isDisposed() && document.version === version) {
     await applyOpenscadWorkspaceEdit(edit, environment, basis);
   }
 }
 
-async function showCodeActions(view: EditorView, { client, document, environment }: ExtensionContext): Promise<void> {
+async function showCodeActions(
+  view: EditorView,
+  { client, document, environment, isDisposed }: ExtensionContext,
+): Promise<void> {
   const selection = view.state.selection.main;
   const basis = await captureBasis(document, environment);
   const { version, text } = document;
@@ -655,7 +621,7 @@ async function showCodeActions(view: EditorView, { client, document, environment
     context: { diagnostics },
   } satisfies LSP.CodeActionParams);
   const offered = actions?.filter((action) => action.edit) ?? [];
-  if (offered.length === 0 || document.version !== version) {
+  if (offered.length === 0 || isDisposed() || document.version !== version) {
     return;
   }
   const dialog = showDialog(view, {
@@ -663,6 +629,7 @@ async function showCodeActions(view: EditorView, { client, document, environment
       const form = view.dom.ownerDocument.createElement('form');
       const select = view.dom.ownerDocument.createElement('select');
       select.name = 'action';
+      select.setAttribute('aria-label', 'Quick fix');
       for (const [index, action] of offered.entries()) {
         const option = view.dom.ownerDocument.createElement('option');
         option.value = String(index);
@@ -679,7 +646,7 @@ async function showCodeActions(view: EditorView, { client, document, environment
   const submitted = await dialog.result;
   const choice = Number(submitted?.querySelector('select')?.value ?? -1);
   const chosen = offered[choice];
-  if (chosen?.edit && document.version === version) {
+  if (chosen?.edit && !isDisposed() && document.version === version) {
     await applyOpenscadWorkspaceEdit(chosen.edit, environment, basis);
   }
 }
@@ -696,6 +663,251 @@ async function jumpToDefinition(view: EditorView, position: number, context: Ext
     const { start } = link.targetSelectionRange;
     await navigateTo(context, { uri: link.targetUri, line: start.line + 1, column: start.character + 1 });
   }
+}
+
+/** The signature of the call around `position`, with the active parameter and both documentations' links. */
+async function signatureAt(context: ExtensionContext, position: number): Promise<EditorSignature | undefined> {
+  const { client, document, isDisposed } = context;
+  const { version, text } = document;
+  const help = await client.request<LSP.SignatureHelp | undefined>('textDocument/signatureHelp', {
+    textDocument: { uri: document.uri },
+    position: positionAt(text, position),
+  } satisfies LSP.SignatureHelpParams);
+  const index = help?.activeSignature ?? 0;
+  const signature = help?.signatures[index];
+  if (!help || !signature || isDisposed() || document.version !== version) {
+    return undefined;
+  }
+  const { label } = signature;
+  const parameters = (signature.parameters ?? []).map((parameter): readonly [number, number] => {
+    if (typeof parameter.label !== 'string') {
+      return parameter.label;
+    }
+    const from = label.indexOf(parameter.label);
+    return [from, from + parameter.label.length];
+  });
+  const activeParameter = help.activeParameter ?? signature.activeParameter ?? 0;
+  const targets: EditorNavigationTarget[] = [];
+  const linked = (value: string | LSP.MarkupContent | undefined): string | undefined => {
+    const markdown = markupText(value);
+    return markdown === undefined ? undefined : openscadDocumentation(markdown, targets).markdown;
+  };
+  return {
+    label,
+    parameters,
+    activeParameter,
+    documentation: linked(signature.documentation),
+    parameterDocumentation: linked(signature.parameters?.[activeParameter]?.documentation),
+    onDefinitionLink(linkIndex) {
+      const target = targets[linkIndex];
+      if (target) {
+        void openLink(context, target);
+      }
+    },
+    overload: { index, count: help.signatures.length },
+  };
+}
+
+/** Format the document with the editor's indentation, checked against the text the server formatted. */
+async function formatDocument(view: EditorView, { client, document, environment, isDisposed }: ExtensionContext) {
+  const { uri, version, text } = document;
+  const edits = await client.request<LSP.TextEdit[] | undefined>('textDocument/formatting', {
+    textDocument: { uri },
+    options: { tabSize: view.state.tabSize, insertSpaces: !view.state.facet(indentUnit).includes('\t') },
+  } satisfies LSP.DocumentFormattingParams);
+  if (!edits || edits.length === 0 || isDisposed() || document.version !== version) {
+    return;
+  }
+  await applyOpenscadWorkspaceEdit(
+    { documentChanges: [{ textDocument: { uri, version }, edits }] },
+    environment,
+    new Map([[uri, { version, text }]]),
+  );
+}
+
+/** LSP `SymbolKind`s the server reports, as editor symbol icons. */
+const symbolKinds: Readonly<Partial<Record<LSP.SymbolKind, string>>> = {
+  1: 'file',
+  2: 'module',
+  12: 'function',
+  13: 'variable',
+  14: 'constant',
+};
+
+/** Reads each source a result list points into once, for the line previews. */
+type SourceReader = (uri: string) => Promise<string | undefined>;
+
+async function readSource(
+  { client, document, environment }: ExtensionContext,
+  uri: string,
+): Promise<string | undefined> {
+  if (uri === document.uri) {
+    return document.text;
+  }
+  if (uri === openscadBuiltinsUri) {
+    const declaration = await client.request<{ text: string }>('tau/declarationSource', { uri });
+    return declaration.text;
+  }
+  const path = URI.parse(uri).path.replace(/^\//u, '');
+  const loaded = environment.session.get(path);
+  if (loaded) {
+    return loaded.text;
+  }
+  const result = await environment.contentService.resolve(path);
+  return result.kind === 'text' ? decodeTextFile(result.content) : undefined;
+}
+
+async function readPreviewSource(context: ExtensionContext, uri: string): Promise<string | undefined> {
+  try {
+    return await readSource(context, uri);
+  } catch {
+    // A result whose file cannot be read still opens; it only loses its line preview.
+    return undefined;
+  }
+}
+
+/** The editor context and a per-request reader for the sources a result list points into. */
+type ResultSources = Readonly<{ context: ExtensionContext; read: SourceReader }>;
+
+function resultSources(context: ExtensionContext): ResultSources {
+  const sources = new Map<string, Promise<string | undefined>>();
+  return {
+    context,
+    async read(uri) {
+      let source = sources.get(uri);
+      if (!source) {
+        source = readPreviewSource(context, uri);
+        sources.set(uri, source);
+      }
+      return source;
+    },
+  };
+}
+
+function fileLabel(uri: string): Readonly<{ name: string; directory: string }> {
+  if (uri === openscadBuiltinsUri) {
+    return { name: 'builtins.scad', directory: 'OpenSCAD built-ins' };
+  }
+  const path = URI.parse(uri).path.replace(/^\//u, '');
+  const slash = path.lastIndexOf('/');
+  return { name: path.slice(slash + 1), directory: path.slice(0, Math.max(slash, 0)) };
+}
+
+/**
+ * A result at `range` in `uri`, labelled `file:line` like VS Code's reference list, or by `symbol` with the
+ * location as its detail.
+ */
+async function locationItem(
+  { context, read }: ResultSources,
+  { uri, range }: LSP.Location,
+  symbol?: Readonly<{ name: string; kind: LSP.SymbolKind; container?: string }>,
+): Promise<EditorLocationItem> {
+  const file = fileLabel(uri);
+  const line = range.start.line + 1;
+  const place = `${file.name}:${String(line)}`;
+  const source = await read(uri);
+  return {
+    label: symbol ? symbol.name : place,
+    kind: symbol ? symbolKinds[symbol.kind] : undefined,
+    detail: symbol ? [symbol.container, place].filter(Boolean).join(' · ') : file.directory,
+    preview: source?.split('\n')[range.start.line]?.trim(),
+    open: async () => openLink(context, { uri, line, column: range.start.character + 1 }),
+  };
+}
+
+async function references(context: ExtensionContext, position: number): Promise<EditorLocationItem[]> {
+  const { client, document } = context;
+  const locations = await client.request<LSP.Location[] | undefined>('textDocument/references', {
+    textDocument: { uri: document.uri },
+    position: positionAt(document.text, position),
+    context: { includeDeclaration: true },
+  } satisfies LSP.ReferenceParams);
+  const sources = resultSources(context);
+  return Promise.all((locations ?? []).map(async (location) => locationItem(sources, location)));
+}
+
+async function occurrences({ client, document }: ExtensionContext, position: number): Promise<EditorOccurrence[]> {
+  const { version, text } = document;
+  const highlights = await client.request<LSP.DocumentHighlight[] | undefined>('textDocument/documentHighlight', {
+    textDocument: { uri: document.uri },
+    position: positionAt(text, position),
+  } satisfies LSP.DocumentHighlightParams);
+  if (document.version !== version) {
+    return [];
+  }
+  return (highlights ?? []).map((highlight) => ({
+    from: offsetAt(text, highlight.range.start),
+    to: offsetAt(text, highlight.range.end),
+    kind: highlight.kind === 3 ? 'write' : highlight.kind === 2 ? 'read' : 'text',
+  }));
+}
+
+function editorSymbols(text: string, symbols: readonly LSP.DocumentSymbol[]): EditorSymbol[] {
+  return symbols.map((symbol) => ({
+    name: symbol.name,
+    kind: symbolKinds[symbol.kind] ?? 'variable',
+    detail: symbol.detail,
+    from: offsetAt(text, symbol.range.start),
+    to: offsetAt(text, symbol.range.end),
+    selectionFrom: offsetAt(text, symbol.selectionRange.start),
+    children: editorSymbols(text, symbol.children ?? []),
+  }));
+}
+
+async function documentSymbols({ client, document }: ExtensionContext): Promise<EditorSymbol[]> {
+  const { version, text } = document;
+  const symbols = await client.request<LSP.DocumentSymbol[] | undefined>('textDocument/documentSymbol', {
+    textDocument: { uri: document.uri },
+  } satisfies LSP.DocumentSymbolParams);
+  return document.version === version ? editorSymbols(text, symbols ?? []) : [];
+}
+
+async function workspaceSymbols(context: ExtensionContext, query: string): Promise<EditorLocationItem[]> {
+  const symbols = await context.client.request<LSP.SymbolInformation[] | undefined>('workspace/symbol', {
+    query,
+  } satisfies LSP.WorkspaceSymbolParams);
+  const sources = resultSources(context);
+  return Promise.all(
+    (symbols ?? []).map(async (symbol) =>
+      locationItem(sources, symbol.location, {
+        name: symbol.name,
+        kind: symbol.kind,
+        container: symbol.containerName,
+      }),
+    ),
+  );
+}
+
+/** Callers of the module or function at `position`, opening at the call; or its callees, opening at their declaration. */
+async function callHierarchy(
+  context: ExtensionContext,
+  position: number,
+  direction: CallHierarchyDirection,
+): Promise<EditorLocationItem[]> {
+  const { client, document } = context;
+  const [item] =
+    (await client.request<LSP.CallHierarchyItem[] | undefined>('textDocument/prepareCallHierarchy', {
+      textDocument: { uri: document.uri },
+      position: positionAt(document.text, position),
+    } satisfies LSP.CallHierarchyPrepareParams)) ?? [];
+  if (!item) {
+    return [];
+  }
+  const sources = resultSources(context);
+  if (direction === 'incoming') {
+    const calls = await client.request<LSP.CallHierarchyIncomingCall[]>('callHierarchy/incomingCalls', {
+      item,
+    } satisfies LSP.CallHierarchyIncomingCallsParams);
+    return Promise.all(
+      calls.map(async ({ from, fromRanges }) =>
+        locationItem(sources, { uri: from.uri, range: fromRanges[0] ?? from.selectionRange }, from),
+      ),
+    );
+  }
+  const calls = await client.request<LSP.CallHierarchyOutgoingCall[]>('callHierarchy/outgoingCalls', {
+    item,
+  } satisfies LSP.CallHierarchyOutgoingCallsParams);
+  return Promise.all(calls.map(async ({ to }) => locationItem(sources, { uri: to.uri, range: to.selectionRange }, to)));
 }
 
 export function openscadExtensions(context: ExtensionContext): Extension[] {
@@ -715,37 +927,23 @@ export function openscadExtensions(context: ExtensionContext): Extension[] {
     },
     provide: (field) => EditorView.decorations.from(field),
   });
-  const signatureEffect = StateEffect.define<NullableTooltip>();
-  const signatureField = StateField.define<NullableTooltip>({
-    create: () => null,
-    update(value, transaction) {
-      let next = value;
-      if (transaction.docChanged && value) {
-        next = { ...value, pos: transaction.changes.mapPos(value.pos) };
-      }
-      for (const effect of transaction.effects) {
-        if (effect.is(signatureEffect)) {
-          next = effect.value;
-        }
-      }
-      return next;
-    },
-    provide: (field) => showTooltip.from(field),
-  });
-  const signature = (view: EditorView): void => {
-    void observe(showSignature(view, { client, document, effect: signatureEffect }), document, isDisposed);
+  const showSignature = (view: EditorView): void => {
+    triggerParameterHints(view);
   };
+  /** Run a language command, reporting a failure unless the editor moved on. */
+  const command =
+    (task: (view: EditorView) => Promise<void>) =>
+    async (view: EditorView): Promise<void> =>
+      observe(task(view), document, isDisposed);
   let folds: readonly LSP.FoldingRange[] = [];
   return [
     tokenField,
-    signatureField,
     EditorView.baseTheme({
       '.cm-openscad-semantic-module': { color: 'var(--syntax-function, #265a97)' },
       '.cm-openscad-semantic-function': { color: 'var(--syntax-function, #265a97)' },
       '.cm-openscad-semantic-parameter': { color: 'var(--syntax-parameter, #92593a)' },
       '.cm-openscad-semantic-property': { color: 'var(--syntax-property, #92593a)' },
       '.cm-openscad-semantic-builtin': { fontStyle: 'normal' },
-      '.cm-openscad-signature': { padding: '2px 6px', fontFamily: 'var(--font-mono, monospace)' },
     }),
     foldService.of((state, from) => {
       const line = state.doc.lineAt(from).number - 1;
@@ -763,18 +961,8 @@ export function openscadExtensions(context: ExtensionContext): Extension[] {
           this.refresh();
         }
         public update(update: ViewUpdate): void {
-          if (!update.docChanged) {
-            return;
-          }
-          this.refresh();
-          // Typing `(` or `,` in a call shows the parameters, as VS Code's signature help trigger characters do.
-          const typing = update.transactions.some((transaction) => transaction.isUserEvent('input.type'));
-          const { head } = update.state.selection.main;
-          const typed = typing ? update.state.sliceDoc(head - 1, head) : '';
-          if (typed === '(' || typed === ',') {
-            signature(update.view);
-          } else if (typed === ')' || typed === ';') {
-            update.view.dispatch({ effects: signatureEffect.of(null) });
+          if (update.docChanged) {
+            this.refresh();
           }
         }
         public destroy(): void {
@@ -808,7 +996,7 @@ export function openscadExtensions(context: ExtensionContext): Extension[] {
           if (isDisposed()) {
             return null;
           }
-          const result = completions(completionContext, { ...context, showSignature: signature });
+          const result = completions(completionContext, { ...context, showSignature });
           void observe(result, document, isDisposed);
           try {
             return await result;
@@ -847,38 +1035,29 @@ export function openscadExtensions(context: ExtensionContext): Extension[] {
     definitionProvider.of(async (view, position) =>
       observe(jumpToDefinition(view, position, context), document, isDisposed),
     ),
-    keymap.of([
-      {
-        key: 'F2',
-        run(view) {
-          void observe(renameSymbol(view, context), document, isDisposed);
-          return true;
-        },
-      },
-      {
-        key: 'Ctrl-Shift-Space',
-        run(view) {
-          signature(view);
-          return true;
-        },
-      },
-      {
-        key: 'Mod-.',
-        run(view) {
-          void observe(showCodeActions(view, context), document, isDisposed);
-          return true;
-        },
-      },
-      {
-        key: 'Escape',
-        run(view) {
-          if (!view.state.field(signatureField)) {
-            return false;
+    // The server's capabilities, offered through the editor's shared keys, context menu and views.
+    languageFeatures.of({
+      signatureHelp: {
+        // The server's `signatureHelpProvider` triggers; `)` closes the hint.
+        triggerCharacters: ['(', ','],
+        retriggerCharacters: [')'],
+        provide: async (view, position) => {
+          // A typed trigger reaches the session document, and so the server, after view plugins update.
+          await Promise.resolve();
+          if (isDisposed() || view.state.doc.toString() !== document.text) {
+            return undefined;
           }
-          view.dispatch({ effects: signatureEffect.of(null) });
-          return true;
+          return signatureAt(context, position);
         },
       },
-    ]),
+      references: async (_view, position) => references(context, position),
+      occurrences: async (_view, position) => occurrences(context, position),
+      documentSymbols: async () => documentSymbols(context),
+      workspaceSymbols: async (_view, query) => workspaceSymbols(context, query),
+      callHierarchy: async (_view, position, direction) => callHierarchy(context, position, direction),
+      rename: command(async (view) => renameSymbol(view, context)),
+      format: command(async (view) => formatDocument(view, context)),
+      quickFix: command(async (view) => showCodeActions(view, context)),
+    }),
   ];
 }

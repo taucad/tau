@@ -9,6 +9,7 @@ pub mod context;
 pub mod docs;
 pub mod document;
 mod features;
+pub mod format;
 pub mod index;
 pub mod resolve;
 pub mod server;

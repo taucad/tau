@@ -84,6 +84,10 @@ impl Server {
             "workspace/symbol" => features::workspace_symbol(workspace, params),
             "textDocument/foldingRange" => features::folding_range(workspace, params),
             "textDocument/codeAction" => features::code_action(workspace, params),
+            "textDocument/formatting" => features::formatting(workspace, params),
+            "textDocument/prepareCallHierarchy" => features::prepare_call_hierarchy(workspace, params),
+            "callHierarchy/incomingCalls" => features::incoming_calls(workspace, params),
+            "callHierarchy/outgoingCalls" => features::outgoing_calls(workspace, params),
             "textDocument/semanticTokens/full" => features::semantic_tokens(workspace, params),
             "tau/declarationSource" => {
                 let uri = params.get("uri").and_then(Value::as_str).ok_or_else(|| invalid_params("uri"))?;
@@ -187,6 +191,8 @@ pub fn capabilities() -> Value {
         "workspaceSymbolProvider": true,
         "foldingRangeProvider": true,
         "codeActionProvider": { "codeActionKinds": ["quickfix"] },
+        "documentFormattingProvider": true,
+        "callHierarchyProvider": true,
         "diagnosticProvider": { "interFileDependencies": true, "workspaceDiagnostics": false },
         "semanticTokensProvider": {
             "legend": { "tokenTypes": features::TOKEN_TYPES, "tokenModifiers": features::TOKEN_MODIFIERS },

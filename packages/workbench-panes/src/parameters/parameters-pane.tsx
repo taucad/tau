@@ -39,6 +39,7 @@ import {
 import { ModifiedIndicator } from '@taucad/ui/components/modified-indicator';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { SearchInput } from '@taucad/ui/components/search-input';
+import { PaneSearchRegion } from '@taucad/ui/components/pane-search';
 import { cn } from '@taucad/ui/utils/cn';
 import { hasJsonSchemaObjectProperties } from '@taucad/utils/schema';
 import { Parameters } from '@taucad/viewer/parameters/parameters';
@@ -724,7 +725,7 @@ export function ParametersPane(): React.JSX.Element | undefined {
   return (
     <ParametersPaneContext.Provider value={context}>
       <div data-slot='parameters-panel-body' className='flex size-full min-h-0 flex-col overflow-hidden bg-sidebar'>
-        <div data-slot='parameters-filter' className='shrink-0 bg-sidebar px-2 pt-2'>
+        <PaneSearchRegion data-slot='parameters-filter' className='shrink-0 bg-sidebar px-2 pt-2'>
           <SearchInput
             aria-label='Filter parameters'
             placeholder='Filter parameters…'
@@ -737,7 +738,7 @@ export function ParametersPane(): React.JSX.Element | undefined {
               setFilterTerm('');
             }}
           />
-        </div>
+        </PaneSearchRegion>
         {operationError === undefined ? null : (
           <p role='alert' className='shrink-0 px-3 pt-2 text-xs text-destructive'>
             {operationError}

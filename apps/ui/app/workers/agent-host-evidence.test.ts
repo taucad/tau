@@ -127,18 +127,23 @@ describe('createWorkerEvidence', () => {
     expect(urls.every((url) => url.includes('/v1/telemetry-purposes'))).toBe(true);
   });
 
-  it('should read nothing when the chat is not quiescent', async () => {
-    const { evidence, fetchMock } = setup(['summary']);
+  it('should only re-read the grants, and send nothing, when a chat starts a run', async () => {
+    const { evidence, fetchMock, sent, urls } = setup(['summary']);
     await vi.waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
     evidence.onChatQuiescent('chat-1', false);
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+    });
     await new Promise((resolve) => {
       setTimeout(resolve, 10);
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(urls.every((url) => url.includes('/v1/telemetry-purposes'))).toBe(true);
+    expect(sent).toEqual([]);
   });
 
   it('should report a rating from its own queue only while ratings are allowed', async () => {

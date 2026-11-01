@@ -19,6 +19,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { cn } from '@taucad/ui/utils/cn';
 import { SearchInput } from '@taucad/ui/components/search-input';
+import { PaneSearchRegion } from '@taucad/ui/components/pane-search';
 import { HighlightText } from '@taucad/ui/components/highlight-text';
 import { Loader } from '@taucad/ui/components/loader';
 import { ModifiedIndicator } from '@taucad/ui/components/modified-indicator';
@@ -1337,7 +1338,7 @@ export function KinematicsPane(): React.JSX.Element {
       /* Each joint's typed value takes the 40px touch row under a coarse pointer, as a parameter does (PN-KIN-1, I3). */
       className='flex size-full min-h-0 flex-col overflow-hidden bg-sidebar pointer-coarse:[--param-field-h:2.5rem] pointer-coarse:[&_input]:text-base'
     >
-      <div data-slot='kinematics-filter' className='shrink-0 bg-sidebar px-2 pt-2'>
+      <PaneSearchRegion data-slot='kinematics-filter' className='shrink-0 bg-sidebar px-2 pt-2'>
         <SearchInput
           aria-label='Filter joints and parts'
           placeholder='Filter joints and parts…'
@@ -1350,7 +1351,7 @@ export function KinematicsPane(): React.JSX.Element {
             setFilterTerm('');
           }}
         />
-      </div>
+      </PaneSearchRegion>
       <div className='min-h-0 flex-1 overflow-hidden'>
         <KinematicsContent filterTerm={filterTerm} isShown={isShown} reveal={reveal} useUnitStatus={useUnitStatus} />
       </div>

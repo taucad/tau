@@ -235,10 +235,15 @@ const main = async (): Promise<void> => {
       await page.getByRole('tab', { name: 'main.py', exact: true }).first().click({ button: 'right' });
       await page.getByRole('menuitem', { name: 'Open in Editor', exact: true }).click();
       // Candidates span code-editor generations, so find the editable surface by its textbox role rather than by
-      // one editor's class names, and focus it rather than its surrounding scroll container.
+      // one editor's class names, and focus it rather than its surrounding scroll container. Some generations
+      // render that surface with zero width, so wait for it to attach rather than to become visible, then
+      // prove it holds focus before typing into it.
       const editor = page.locator('.editor-container:visible').last().getByRole('textbox').last();
-      await editor.waitFor({ state: 'visible' });
+      await editor.waitFor({ state: 'attached' });
       await editor.focus();
+      await page.waitForFunction(() => document.activeElement?.getAttribute('role') === 'textbox', undefined, {
+        timeout: 10_000,
+      });
       await page.keyboard.press(process.platform === 'darwin' ? 'Meta+a' : 'Control+a');
       // This disposable host may have no clipboard owner. Keep the paste payload until save is verified.
       await page.evaluate(async (text) => navigator.clipboard.writeText(text), source);

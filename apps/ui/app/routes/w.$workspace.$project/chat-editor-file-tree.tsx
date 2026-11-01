@@ -46,6 +46,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { Button, buttonVariants } from '@taucad/ui/components/button';
 import { Badge } from '@taucad/ui/components/badge';
 import { SearchInput } from '@taucad/ui/components/search-input';
+import { PaneSearchRegion } from '@taucad/ui/components/pane-search';
 import { toast } from '#components/ui/sonner.js';
 import {
   FloatingPanelContent,
@@ -1949,7 +1950,7 @@ export const ChatEditorFileTree = memo(function ({
           </FloatingPanelContentHeader>
         ) : null}
         <FloatingPanelContentBody className='group/filetree flex min-h-0 flex-col'>
-          <div
+          <PaneSearchRegion
             className={cn(
               'flex w-full shrink-0 items-center gap-1 border-b bg-sidebar p-2',
               borderless && 'border-0 bg-transparent',
@@ -1964,7 +1965,7 @@ export const ChatEditorFileTree = memo(function ({
                 tree.setSearch('');
               }}
             />
-          </div>
+          </PaneSearchRegion>
 
           <AssistiveTreeDescription tree={tree} getLabel={getFileTreeAssistiveDndLabel} />
           {tree.getItems().length > 0 || pendingFolder !== undefined || pendingFile !== undefined ? (

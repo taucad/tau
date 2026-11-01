@@ -81,6 +81,7 @@
     "./components/nested-action.variants": "./src/components/nested-action.variants.ts",
     "./components/pane-spacing.variants": "./src/components/pane-spacing.variants.ts",
     "./components/pane-virtual-list": "./src/components/pane-virtual-list.tsx",
+    "./components/pane-search": "./src/components/pane-search.tsx",
     "./components/panel-empty-state": "./src/components/panel-empty-state.tsx",
     "./components/password-input": "./src/components/password-input.tsx",
     "./components/popover": "./src/components/popover.tsx",
@@ -337,6 +338,11 @@
         "types": "./dist/components/pane-virtual-list.d.mts",
         "import": "./dist/components/pane-virtual-list.mjs",
         "default": "./dist/components/pane-virtual-list.mjs"
+      },
+      "./components/pane-search": {
+        "types": "./dist/components/pane-search.d.mts",
+        "import": "./dist/components/pane-search.mjs",
+        "default": "./dist/components/pane-search.mjs"
       },
       "./components/panel-empty-state": {
         "types": "./dist/components/panel-empty-state.d.mts",

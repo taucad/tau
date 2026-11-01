@@ -43,10 +43,11 @@ const linuxTable = async (): Promise<readonly ProcessRow[]> => {
 };
 
 /**
- * Maximum duration of a process-table snapshot. A macOS `ps -A` on a loaded runner with eight sandboxed launches took
- * over a second (MAC-X S04, run 41339625314: `ps` killed at 1000 ms refused a launch). Milliseconds.
+ * Maximum duration of a process-table snapshot. A macOS `ps -A` on a loaded Intel runner with eight sandboxed launches
+ * outran both 1000 ms and 2500 ms (MAC-X S04, runs 41339625314 and 41342268275: a killed `ps` refused a launch).
+ * Milliseconds.
  */
-const tableTimeout = 2500;
+const tableTimeout = 5000;
 
 /**
  * Bound on one observation through the shared table. Reads are coalesced, so a caller that arrives just after a read
@@ -72,7 +73,11 @@ const darwinTable = async (): Promise<readonly ProcessRow[]> =>
       },
       (error, stdout) => {
         if (error !== null) {
-          reject(new Error(`ps failed: ${error.message}`, { cause: error }));
+          /* Say whether `ps` was killed at its bound or exited on its own, so a refusal names its cause. */
+          const outcome = error.killed
+            ? `killed by ${error.signal ?? 'signal'} after ${tableTimeout} ms`
+            : `exit ${String(error.code)}`;
+          reject(new Error(`ps failed (${outcome}): ${error.message}`, { cause: error }));
           return;
         }
         resolve(

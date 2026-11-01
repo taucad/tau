@@ -432,6 +432,8 @@ describe('terminal concern', () => {
 
   it('should spend one admission bound across main’s allowlist and the shell service’s registration', async () => {
     let attempts = 0;
+    /* The first refusal answers only once the bound is spent, so the real retry timer cannot race the logical clock. */
+    const firstRefusal = Promise.withResolvers<void>();
     const {
       connect,
       advance,
@@ -446,6 +448,9 @@ describe('terminal concern', () => {
           ...createShell().shell,
           openTerminal: async () => {
             attempts += 1;
+            if (attempts === 1) {
+              await firstRefusal.promise;
+            }
             return {
               status: 'refused',
               code: 'project-not-admitted',
@@ -467,6 +472,7 @@ describe('terminal concern', () => {
       expect(attempts).toBe(1);
     });
     advance(1);
+    firstRefusal.resolve();
     await vi.waitFor(() => {
       expect(port.of('refused')[0]?.code).toBe('project-not-admitted');
     });

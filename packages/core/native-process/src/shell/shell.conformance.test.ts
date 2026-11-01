@@ -7,7 +7,7 @@
  * network negative is judged by a canary listener outside the sandbox, not by the sandboxed command's own report.
  *
  * Off unless `TAU_SHELL_CONFORMANCE=1`, which only the noncacheable Nx target sets. `TAU_SHELL_CONFORMANCE_ROW` names
- * the row (LNX-U, LNX-D, MAC-A, MAC-X), `TAU_SHELL_CONFORMANCE_RECEIPT` where the JSON receipt goes, and on Linux
+ * the row (LNX-U, LNX-U26, LNX-D, MAC-A, MAC-X), `TAU_SHELL_CONFORMANCE_RECEIPT` where the JSON receipt goes, and on Linux
  * `TAU_SHELL_CONFORMANCE_BWRAP` the installed, profiled bubblewrap. macOS terminal rows are recorded
  * `operator-validation-pending` and never run here (ruling 2026-10-24T05:39Z).
  */

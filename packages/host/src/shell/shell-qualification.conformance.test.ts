@@ -1438,7 +1438,8 @@ describe.runIf(enabled)('shell qualification', () => {
       const binaries = ok(outputs[0]);
       expect(binaries.stdout.text).toContain('curl');
       expect(binaries.stdout.text).toContain('systemd');
-      expect(binaries.stdout.text).toContain('GNU coreutils');
+      // Ubuntu 26.04 ships the uutils coreutils as /usr/bin/env ("env (uutils coreutils) 0.10.0"); 24.04 and Debian ship GNU.
+      expect(binaries.stdout.text).toMatch(/^env \((?:GNU|uutils) coreutils\)/mu);
       measurements['sandboxBinaryControls'] = 4;
       for (const [index, output] of outputs.slice(1).entries()) {
         const denied = completed(output);

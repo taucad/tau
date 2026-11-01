@@ -13,6 +13,7 @@ describe('virtual declarations', () => {
   it.each([
     ['__typescript_lib__/lib.es5.d.ts', 'TypeScript library', 'typescript'],
     ['cdn-types/three/index.d.ts', 'Package types', 'typescript'],
+    ['node_modules/replicad/index.d.ts', 'Package types', 'typescript'],
     ['__csharp_metadata__/System.Math.cs', 'C# metadata', 'csharp'],
     ['__kcl_std__/sketch.kcl', 'KCL standard library', 'kcl'],
     ['__openscad_builtins__/builtins.scad', 'OpenSCAD built-ins', 'openscad'],
@@ -22,12 +23,15 @@ describe('virtual declarations', () => {
     expect(getEditorLanguage(path)).toBe(language);
   });
 
-  it.each(['main.kcl', 'src/__kcl_std__/sketch.kcl', '__kcl_std__/notes.md', 'cdn-types/three/index.js'])(
-    'should treat %s as a project file',
-    (path) => {
-      expect(isVirtualDeclarationPath(path)).toBe(false);
-    },
-  );
+  it.each([
+    'main.kcl',
+    'src/__kcl_std__/sketch.kcl',
+    '__kcl_std__/notes.md',
+    'cdn-types/three/index.js',
+    'node_modules/replicad/index.js',
+  ])('should treat %s as a project file', (path) => {
+    expect(isVirtualDeclarationPath(path)).toBe(false);
+  });
 
   it('should name every root once', () => {
     expect(new Set(virtualDeclarationRoots.map((root) => root.prefix)).size).toBe(virtualDeclarationRoots.length);

@@ -14,6 +14,7 @@ export type VirtualDeclarationRoot = Readonly<{
 export const virtualDeclarationRoots: readonly VirtualDeclarationRoot[] = [
   { prefix: '__typescript_lib__/', extension: '.d.ts', label: 'TypeScript library' },
   { prefix: 'cdn-types/', extension: '.d.ts', label: 'Package types' },
+  { prefix: 'node_modules/', extension: '.d.ts', label: 'Package types' },
   { prefix: '__csharp_metadata__/', extension: '.cs', label: 'C# metadata' },
   { prefix: '__kcl_std__/', extension: '.kcl', label: 'KCL standard library' },
   { prefix: '__openscad_builtins__/', extension: '.scad', label: 'OpenSCAD built-ins' },

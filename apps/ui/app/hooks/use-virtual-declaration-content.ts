@@ -7,8 +7,8 @@ const encoder = new TextEncoder();
 
 /**
  * A library declaration's text for its read-only tab, served by the editor session instead of the filesystem.
- * `undefined` for a project file. A declaration the session no longer holds, such as one restored after a
- * reload, reads as not found.
+ * `undefined` for a project file, and for a declaration path the session does not hold, which then reads from the
+ * filesystem: installed package types under `node_modules/` live there too.
  */
 export function useVirtualDeclarationContent(
   session: EditorDocumentSession | undefined,
@@ -22,6 +22,6 @@ export function useVirtualDeclarationContent(
       return { kind: 'loading' };
     }
     const text = session.declarationText(path);
-    return text === undefined ? { kind: 'orphaned' } : { kind: 'text', content: encoder.encode(text) };
+    return text === undefined ? undefined : { kind: 'text', content: encoder.encode(text) };
   }, [session, path]);
 }

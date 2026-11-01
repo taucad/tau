@@ -12,12 +12,23 @@ export function requestEditorNavigation(navigation: Navigation): void {
   const key = keyOf(navigation.projectId, navigation.path);
   const views = mounted.get(key);
   const target = [...(views ?? [])].find((view) => view.paneId === navigation.paneId) ?? [...(views ?? [])][0];
+  pending.set(key, navigation);
   if (target) {
-    target.reveal(navigation.line, navigation.column);
-    pending.delete(key);
-  } else {
-    pending.set(key, navigation);
+    deliver(key, navigation, target);
   }
+}
+
+/**
+ * Reveal in a view, keeping the jump queued until that view survives a frame. A view torn down sooner, such as
+ * by an effect replay, never laid out the scroll, so its replacement for the same pane reveals it again.
+ */
+function deliver(key: string, navigation: Navigation, view: ViewPort): void {
+  view.reveal(navigation.line, navigation.column);
+  requestAnimationFrame(() => {
+    if (pending.get(key) === navigation && mounted.get(key)?.has(view)) {
+      pending.delete(key);
+    }
+  });
 }
 
 /** Register a visible source view; its teardown removes the navigation handle. */
@@ -34,8 +45,7 @@ export function registerEditorView(input: {
   mounted.set(key, views);
   const queued = pending.get(key);
   if (queued && (!queued.paneId || queued.paneId === input.paneId)) {
-    input.reveal(queued.line, queued.column);
-    pending.delete(key);
+    deliver(key, queued, view);
   }
   return () => {
     views.delete(view);

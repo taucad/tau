@@ -13,6 +13,7 @@ import {
   useContext,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -1323,10 +1324,18 @@ export const FileEditor = memo(function ({
   // expressed by re-resolving with `forceText` / `sizeLimit` options.
   const virtualDeclaration = useVirtualDeclarationContent(documentSession, filePath);
   const fileContent = useFileContent(virtualDeclaration === undefined ? filePath : undefined);
-  const result: FileContentSelection =
-    virtualDeclaration === undefined
-      ? fileContent
-      : { ...virtualDeclaration, observation: fileContent.observation, retry: fileContent.retry };
+  // A declaration held in memory has nothing to observe on disk, so it is always current.
+  const result = useMemo(
+    (): FileContentSelection =>
+      virtualDeclaration === undefined
+        ? fileContent
+        : {
+            ...virtualDeclaration,
+            observation: { status: 'ready', value: virtualDeclaration },
+            retry: fileContent.retry,
+          },
+    [fileContent, virtualDeclaration],
+  );
   /* A file whose large object has not arrived holds its pointer: shown loading, never as text, so nothing edits or saves it. */
   const isAwaitingLargeObject = useLargeObjectPending(filePath);
 

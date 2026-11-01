@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Extension } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
 import { CodeEditor, markCodeEditorMilestone } from '#components/code/code-editor.client.js';
 import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.js';
 import { useEditorDocument, useEditorLanguageEnvironment } from '#hooks/use-editor-document-session.js';
@@ -143,7 +144,10 @@ function MountedCodeEditor({
                   reveal: (line, column) => {
                     const textLine = view.state.doc.line(Math.max(1, Math.min(line, view.state.doc.lines)));
                     const offset = textLine.from + Math.max(0, Math.min(column - 1, textLine.length));
-                    view.dispatch({ selection: { anchor: offset }, scrollIntoView: true });
+                    view.dispatch({
+                      selection: { anchor: offset },
+                      effects: EditorView.scrollIntoView(offset, { y: 'center' }),
+                    });
                     view.focus();
                   },
                 })

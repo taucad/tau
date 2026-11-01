@@ -51,6 +51,7 @@ describe('EditorDocumentSessionProvider navigation', () => {
   it.each([
     'file:///__typescript_lib__/lib.es5.d.ts',
     'file:///cdn-types/three/index.d.ts',
+    'file:///node_modules/replicad/index.d.ts',
     'file:///__csharp_metadata__/System.Math.cs',
     'file:///__kcl_std__/sketch.kcl',
     'file:///__openscad_builtins__/builtins.scad',

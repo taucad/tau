@@ -25,6 +25,8 @@ describe('destructive-test bucket guard', () => {
     it.each([
       'tau-staging-content',
       'tau-staging-content-private',
+      'tau-staging-au-content',
+      'tau-staging-au-content-private',
       'TAU-Staging-Content-Private',
       'Tau-Staging-Content',
       'tau-prod-content',

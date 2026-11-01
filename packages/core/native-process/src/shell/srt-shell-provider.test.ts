@@ -114,6 +114,22 @@ describe('createSandboxShellProvider admission', () => {
     });
   });
 
+  it('should refuse Zsh startup files on a pipe launch or any shell but the macOS Terminal Zsh', async () => {
+    const provider = createSandboxShellProvider({ supervisor });
+    const pipes = await provider.launch(
+      launchOf({ executablePath: '/bin/zsh', arguments: ['-c', 'true'], startupFiles: 'zsh' }),
+    );
+    const bash = await provider.launch(launchOf({ arguments: ['-c', 'true'], startupFiles: 'zsh' }));
+
+    for (const outcome of [pipes, bash]) {
+      expect(outcome).toStrictEqual({
+        status: 'unsupported',
+        requirement: 'filesystem-mask',
+        message: 'only the macOS Terminal running /bin/zsh may read Zsh startup files.',
+      });
+    }
+  });
+
   it('should refuse a relative path', async () => {
     const outcome = await createSandboxShellProvider({ supervisor }).launch(
       launchOf({ arguments: ['-c', 'true'], workingDirectory: 'project' }),
@@ -526,6 +542,25 @@ describe.runIf(process.platform === 'linux')('createSandboxShellProvider termina
 });
 
 describe('shellSandboxProfile', () => {
+  it('should reopen only the Zsh startup files, read-only, for the human Terminal Zsh', () => {
+    const home = '/Users/person';
+    const startup = ['.zshenv', '.zprofile', '.zshrc', '.zlogin'].map((name) => join(home, name));
+    const launch = { filesystem: { readable: [], writable: [], denied: [] }, network: { domains: [] } };
+    const clean = shellSandboxProfile(launch, { home }) as { filesystem: Record<string, string[]> };
+    const zsh = shellSandboxProfile({ ...launch, startupFiles: 'zsh' }, { home }) as {
+      filesystem: Record<string, string[]>;
+    };
+
+    expect(clean.filesystem['denyRead']).toStrictEqual(expect.arrayContaining(startup));
+    expect(startup.filter((path) => zsh.filesystem['denyRead']!.includes(path))).toStrictEqual([]);
+    expect(zsh.filesystem['allowRead']).toStrictEqual(expect.arrayContaining(startup));
+    expect(zsh.filesystem['denyWrite']).toStrictEqual(expect.arrayContaining(startup));
+    expect(zsh.filesystem['allowWrite']).toStrictEqual(clean.filesystem['allowWrite']);
+    expect(zsh.filesystem['denyRead']).toStrictEqual(
+      expect.arrayContaining([join(home, '.ssh'), join(home, '.bashrc'), join(home, '.config/git')]),
+    );
+  });
+
   it('should allow exactly the granted names and deny every other destination', () => {
     const profile = shellSandboxProfile({
       filesystem: { readable: [], writable: [], denied: [] },

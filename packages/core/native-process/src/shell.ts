@@ -23,20 +23,23 @@ export type {
   ShellTerminalProcess,
   ShellTerminalSize,
 } from '#shell/shell-provider.js';
-export { shellBaselineDenied } from '#shell/shell-baseline.js';
+export { shellBaselineDenied, zshStartupFiles } from '#shell/shell-baseline.js';
 export type { ShellBaselineOptions } from '#shell/shell-baseline.js';
 export { refusedShellEnvironment } from '#shell/shell-environment.js';
 export {
   resolveShellExecutable,
+  resolveTerminalZsh,
   shellCommandArguments,
   shellInteractiveArguments,
   shellVersionCommand,
+  terminalZshArguments,
 } from '#shell/shell-identity.js';
 export type {
   ResolveShellExecutableOptions,
   ShellExecutable,
   ShellExecutableRefusal,
   ShellKind,
+  TerminalZsh,
 } from '#shell/shell-identity.js';
 export { createSandboxShellProvider } from '#shell/srt-shell-provider.js';
 export type { SandboxShellProviderOptions } from '#shell/srt-shell-provider.js';

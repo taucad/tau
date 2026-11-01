@@ -782,6 +782,17 @@ describe('HomeNewProjectComposerProvider', () => {
     expect(harness.toastError).toHaveBeenCalledWith('Could not restore your draft', expect.any(Object));
   });
 
+  it('should run a new Home chat locally when the record names a loopback daemon this tab was never handed', async () => {
+    writeRecord({
+      version: 1,
+      execution: { kind: 'tau', model: 'record-model', hostId: 'loopback:http://127.0.0.1:4100' },
+    });
+    const { result } = renderHook(() => useChatComposer(), { wrapper: createHomeWrapper() });
+    await waitFor(() => {
+      expect(result.current.execution.execution).toEqual({ kind: 'tau', model: 'record-model' });
+    });
+  });
+
   it('persists edits and awaits a draft-only clear while retaining execution', async () => {
     writeRecord({ version: 1, execution: { kind: 'tau', model: 'cookie-model', hostId: 'desktop' } });
     vi.useFakeTimers({ shouldAdvanceTime: true });

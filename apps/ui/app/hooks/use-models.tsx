@@ -9,6 +9,7 @@ import type { Model as ApiModel } from '../../../api/app/api/models/model.schema
 /* oxlint-enable import/extensions -- Re-enable project import checks. */
 import { ENV } from '#environment.config.js';
 import { useCookie } from '#hooks/use-cookie.js';
+import { usePlaceableExecution } from '#hooks/use-placeable-execution.js';
 import { useFeature } from '#flags/use-feature.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { defaultChatModel } from '#constants/chat.constants.js';
@@ -134,10 +135,16 @@ export const useModels = () => {
   });
   const catalog = useMemo(() => catalogOf(data, isError), [data, isError]);
 
-  /** The execution a chat with none of its own starts on: the last one used, of any agent. */
-  const defaultExecution = useMemo<CadAgentExecution>(
-    () => resolveNewChatExecution({ last: parseStoredExecution(storedExecution), lastTau: lastTauExecution, catalog }),
-    [storedExecution, lastTauExecution, catalog],
+  /**
+   * The execution a chat with none of its own starts on: the last one used, of any agent, on a host this tab reaches.
+   * The cookie is shared by every tab on this device, so a loopback daemon another tab was handed is dropped here.
+   */
+  const defaultExecution = usePlaceableExecution(
+    useMemo<CadAgentExecution>(
+      () =>
+        resolveNewChatExecution({ last: parseStoredExecution(storedExecution), lastTau: lastTauExecution, catalog }),
+      [storedExecution, lastTauExecution, catalog],
+    ),
   );
 
   /**

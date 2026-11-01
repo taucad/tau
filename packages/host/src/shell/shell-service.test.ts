@@ -614,6 +614,34 @@ describe('human Terminal sessions (D6, D21)', () => {
     await expect(opened.session.exited).resolves.toEqual({ signal: 'SIGKILL' });
   });
 
+  it('runs the verified macOS Zsh with the startup files for the Terminal only, never for an agent', async () => {
+    const terminalZsh = { path: '/bin/zsh', realPath: '/bin/zsh', digest: `sha256:${'b'.repeat(64)}` } as const;
+    const { service, provider } = harness(
+      (launch) =>
+        launch.stdio.kind === 'terminal'
+          ? { status: 'started', stdout: '$ ' }
+          : { status: 'started', stdout: 'hi\n', exit: { exitCode: 0 } },
+      { terminalZsh },
+    );
+    const opened = await service.openTerminal({ projectRoot: project, size, signal: new AbortController().signal });
+    if (opened.status !== 'opened') {
+      throw new Error(`expected opened, got ${opened.code}`);
+    }
+    await service.run(call({ command: 'echo hi' }));
+
+    expect(provider.launches[0]).toMatchObject({
+      executablePath: '/bin/zsh',
+      arguments: ['-l', '-i'],
+      startupFiles: 'zsh',
+      environment: { SHELL: '/bin/zsh' },
+    });
+    expect(provider.launches[0]!.environment).not.toHaveProperty('ZDOTDIR');
+    expect(provider.launches[1]).toMatchObject({ executablePath: executable.path });
+    expect(provider.launches[1]).not.toHaveProperty('startupFiles');
+    expect(provider.launches[1]!.arguments.slice(0, 2)).toStrictEqual(['--noprofile', '--norc']);
+    await opened.session[Symbol.asyncDispose]();
+  });
+
   it('maps a provider that cannot give a terminal to pty-unavailable', async () => {
     const { service } = harness(() => ({ status: 'unsupported', requirement: 'terminal', message: 'own-pty pending' }));
     await expect(

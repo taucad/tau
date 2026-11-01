@@ -54,13 +54,16 @@ const missing = (message: string): ShellExecutableRefusal => ({ status: 'shell-m
 // oxlint-disable-next-line no-bitwise -- file mode bits.
 const posixUntrusted = (mode: number, uid: number): boolean => uid !== 0 || (mode & 0o022) !== 0;
 
-const resolvePosix = async (): Promise<ShellExecutable | ShellExecutableRefusal> => {
-  const path = '/bin/bash';
+/** A root-owned system shell at one fixed path, bound to its bytes; `name` is only for messages. */
+const resolveRootOwned = async (
+  path: string,
+  name: string,
+): Promise<Readonly<{ path: string; realPath: string; digest: string }> | ShellExecutableRefusal> => {
   let real: string;
   try {
     real = await realpath(path);
   } catch {
-    return missing('Bash is not installed at /bin/bash.');
+    return missing(`${name} is not installed at ${path}.`);
   }
   const file = await stat(real);
   // oxlint-disable-next-line no-bitwise -- file mode bits.
@@ -71,13 +74,18 @@ const resolvePosix = async (): Promise<ShellExecutable | ShellExecutableRefusal>
     // oxlint-disable-next-line no-await-in-loop -- each ancestor is checked in order up to the root.
     const status = entry === real ? file : await stat(entry);
     if (posixUntrusted(status.mode, status.uid)) {
-      return missing(`${entry} can be changed by a user other than root, so Tau does not run the Bash below it.`);
+      return missing(`${entry} can be changed by a user other than root, so Tau does not run the ${name} below it.`);
     }
     if (entry === posix.dirname(entry)) {
       break;
     }
   }
-  return { kind: 'bash', path, realPath: real, digest: await digestOf(real) };
+  return { path, realPath: real, digest: await digestOf(real) };
+};
+
+const resolvePosix = async (): Promise<ShellExecutable | ShellExecutableRefusal> => {
+  const resolved = await resolveRootOwned('/bin/bash', 'Bash');
+  return 'status' in resolved ? resolved : { kind: 'bash', ...resolved };
 };
 
 /** Directories a Windows shell copy may never come from: the Store alias folder and every per-user profile root. */
@@ -197,3 +205,35 @@ export const shellInteractiveArguments = (kind: ShellKind): readonly string[] =>
  */
 export const shellVersionCommand = (kind: ShellKind): string =>
   kind === 'bash' ? 'printf %s "$BASH_VERSION"' : '$PSVersionTable.PSVersion.ToString()';
+
+/**
+ * The macOS system Zsh the human Terminal runs so it can load the person's own Zsh startup files (operator ruling
+ * 2026-11-01T18:57Z). Agent shells never run it.
+ *
+ * @public
+ */
+export type TerminalZsh = Readonly<{ path: '/bin/zsh'; realPath: string; digest: string }>;
+
+/**
+ * Resolve the human Terminal's Zsh: `/bin/zsh` only, on macOS only, refused like Bash when it or any ancestor can be
+ * changed by anyone but root. Never `PATH`, never a Homebrew or user copy.
+ *
+ * @public
+ * @param platform - The host platform.
+ * @returns The verified Zsh, or a `shell-missing` refusal; the Terminal then keeps the clean Bash.
+ */
+export const resolveTerminalZsh = async (platform: NodeJS.Platform): Promise<TerminalZsh | ShellExecutableRefusal> => {
+  if (platform !== 'darwin') {
+    return missing('The Terminal runs the system Zsh only on macOS.');
+  }
+  const resolved = await resolveRootOwned('/bin/zsh', 'Zsh');
+  return 'status' in resolved ? resolved : { ...resolved, path: '/bin/zsh' };
+};
+
+/**
+ * Arguments that start the human Terminal's Zsh as an interactive login shell, so it reads `.zshenv`, `.zprofile`,
+ * `.zshrc` and `.zlogin` from `ZDOTDIR`, which the provider sets to the person's home.
+ *
+ * @public
+ */
+export const terminalZshArguments: readonly string[] = ['-l', '-i'];

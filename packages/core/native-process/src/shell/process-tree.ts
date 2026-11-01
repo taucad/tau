@@ -45,6 +45,16 @@ const linuxTable = async (): Promise<readonly ProcessRow[]> => {
 /** Maximum duration of a process-table snapshot. Milliseconds. */
 const tableTimeout = 1000;
 
+/**
+ * Bound on one observation through the shared table. Reads are coalesced, so a caller that arrives just after a read
+ * began waits that read out (itself killed at `tableTimeout`) before its own read starts: its observation needs two
+ * read budgets. Bounding it at one refused launches and left cleanup unconfirmed whenever a loaded macOS runner took
+ * more than half the budget per `ps` (MAC-X S03, S04, E11). Milliseconds.
+ *
+ * @public
+ */
+export const tableObservationTimeout = 2 * tableTimeout;
+
 const darwinTable = async (): Promise<readonly ProcessRow[]> =>
   new Promise((resolve, reject) => {
     execFile(
@@ -245,7 +255,7 @@ export const terminateOwnedProcesses = async (options: TerminateTreeOptions): Pr
   }
   const deadline = Date.now() + options.deadlineMilliseconds;
   const read = async (): Promise<readonly ProcessRow[]> =>
-    boundedTable(options.table ?? processTable, Math.min(tableTimeout, Math.max(1, deadline - Date.now())));
+    boundedTable(options.table ?? processTable, Math.min(tableObservationTimeout, Math.max(1, deadline - Date.now())));
   const frozen = new Set<number>();
   try {
     for (let round = 0; round < freezeRounds; round += 1) {
@@ -306,7 +316,7 @@ export const trackDescendants = (
 ): { stop: () => Promise<void>; table: () => Promise<readonly ProcessRow[]> } => {
   const seen = new Map<number, Readonly<{ pgid: number; started: string }>>();
   const remember = async (): Promise<readonly ProcessRow[]> => {
-    const rows = await boundedTable(read, tableTimeout);
+    const rows = await boundedTable(read, tableObservationTimeout);
     for (const [pid, identity] of seen) {
       if (!rows.some((row) => row.pid === pid && row.pgid === identity.pgid && row.started === identity.started)) {
         seen.delete(pid);

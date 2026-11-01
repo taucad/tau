@@ -16,7 +16,7 @@ import type { Completion, CompletionContext, CompletionResult } from '@codemirro
 import { Decoration, EditorView, hoverTooltip, showDialog, ViewPlugin } from '@codemirror/view';
 import type { ViewUpdate } from '@codemirror/view';
 import { storeDiagnostics } from '#components/code/editor-lint.js';
-import { foldService, indentUnit } from '@codemirror/language';
+import { foldService, getIndentUnit, indentUnit } from '@codemirror/language';
 import type * as LSP from 'vscode-languageserver-protocol';
 import { URI } from 'vscode-uri';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
@@ -713,7 +713,8 @@ async function formatDocument(view: EditorView, { client, document, environment,
   const { uri, version, text } = document;
   const edits = await client.request<LSP.TextEdit[] | undefined>('textDocument/formatting', {
     textDocument: { uri },
-    options: { tabSize: view.state.tabSize, insertSpaces: !view.state.facet(indentUnit).includes('\t') },
+    // The server indents by `tabSize` columns per level, so it gets the indent unit's width, not the tab width.
+    options: { tabSize: getIndentUnit(view.state), insertSpaces: !view.state.facet(indentUnit).includes('\t') },
   } satisfies LSP.DocumentFormattingParams);
   if (!edits || edits.length === 0 || isDisposed() || document.version !== version) {
     return;

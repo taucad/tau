@@ -312,7 +312,7 @@ describe('OpenSCAD editor commands', () => {
     await view.state.facet(languageFeatures).format?.(view);
     expect(requests.at(-1)).toEqual({
       method: 'textDocument/formatting',
-      params: { textDocument: { uri: document.uri }, options: { tabSize: 4, insertSpaces: true } },
+      params: { textDocument: { uri: document.uri }, options: { tabSize: 2, insertSpaces: true } },
     });
     expect(document.text).toBe('module m() {\n  cube();\n}\n');
   });

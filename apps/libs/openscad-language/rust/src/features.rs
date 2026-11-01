@@ -1124,9 +1124,13 @@ fn item_declaration(workspace: &Workspace, params: &Value) -> Result<Option<Reso
         .and_then(crate::text::Position::from_json)
         .ok_or_else(|| invalid_params("item.selectionRange"))?;
     let Some(document) = workspace.get(uri) else { return Ok(None) };
-    Ok(declaration_at(workspace, document, document.offset(start))
-        .map(|(_, declaration)| declaration)
-        .filter(|declaration| matches!(declaration.decl.kind, DeclKind::Module | DeclKind::Function)))
+    let offset = document.offset(start);
+    // Only the declaration's own name: a file item's range or a stale item may sit on a call instead.
+    Ok(declaration_at(workspace, document, offset).map(|(_, declaration)| declaration).filter(|declaration| {
+        declaration.uri == uri
+            && declaration.decl.name_range.0 == offset
+            && matches!(declaration.decl.kind, DeclKind::Module | DeclKind::Function)
+    }))
 }
 
 /// Every call of the item, grouped by the module or function (or file top level) that makes it.

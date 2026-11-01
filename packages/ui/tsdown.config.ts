@@ -44,6 +44,7 @@ const baseConfig: UserConfig = {
     'src/components/navigation-menu.tsx',
     'src/components/nested-action.variants.ts',
     'src/components/pane-spacing.variants.ts',
+    'src/components/pane-search.tsx',
     'src/components/pane-virtual-list.tsx',
     'src/components/panel-empty-state.tsx',
     'src/components/password-input.tsx',

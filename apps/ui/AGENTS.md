@@ -11,7 +11,7 @@ This app owns the browser shell, editor, file manager, chat presentation, and br
 - Finalize only interrupted tail tool parts: consult the RPC ledger for live tails and the host log for rebuilt tails. Follow [Interrupted Tool-Call Contract Policy](../../docs/policy/interrupted-tool-call-contract.md).
 - Keep the streaming skeleton in the run's single `TurnGroup`. Use `Chat.startupRequest` for durable first turns; `ChatSessionStore` restores refused or stopped sends with attachments.
 - Per-device composer records: `#db/composer-record-store`, `#machines/composer-record.machine`, bound by `#hooks/composer-record`. Attachments: `#db/attachment-store`, `#utils/attachment.utils`, `#hooks/use-attachment-source`. Build user messages only with `buildUserMessage` (`#utils/chat.utils`).
-- Load editor code only for mounted source panes; code highlighting loads Lezer grammars lazily through `@taucad/grammars`. Follow [Language Contribution Policy](../../docs/policy/language-contribution-policy.md) and [Filesystem Policy](../../docs/policy/filesystem-policy.md).
+- Load editor code only for mounted source panes; keep grammars lazy. Follow [Language Contribution Policy](../../docs/policy/language-contribution-policy.md) and [Filesystem Policy](../../docs/policy/filesystem-policy.md).
 - Follow [Chat Request Config Policy](../../docs/policy/chat-request-config-policy.md) and [SSR Bundle Policy](../../docs/policy/ssr-bundle-policy.md).
 
 ## Checks

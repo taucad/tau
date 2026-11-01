@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { unmappedScripts } from '#scripts/inject-debug-ids.mts';
+import { withVerbatimAssetsAside } from '#scripts/with-verbatim-assets-aside.mts';
 import { verifyShippedAssets } from '#scripts/verify-shipped-assets.mts';
 
 const workspace = resolve(import.meta.dirname, '../../..');
@@ -28,6 +28,9 @@ const compiled = {
 const verbatim = {
   'picogk-browser/0123/_framework/dotnet.js': 'export const dotnet = 1;\n',
   'csharp-language/4567/_framework/dotnet.native.abc.js': 'export const native = 2;\n',
+  // The .NET runtime names a source map it also ships, so injectors that follow the comment pair it.
+  'csharp-language/4567/_framework/dotnet.runtime.def.js':
+    'export const runtime = 5;\n//# sourceMappingURL=dotnet.runtime.js.map\n',
   'some-future-kernel/glue.mjs': 'export const glue = 4;\n',
   'assets/kernel-c1d2e3f4.wasm': '\0asm\u0001\0\0\0',
   '.vite/manifest.json': '{}\n',
@@ -44,7 +47,7 @@ const createClient = async (): Promise<string> => {
   };
   await Promise.all([
     ...Object.entries({ ...compiled, ...verbatim }).map(async ([path, contents]) => write(path, contents)),
-    ...Object.keys(compiled).map(async (path) =>
+    ...[...Object.keys(compiled), 'csharp-language/4567/_framework/dotnet.runtime.js'].map(async (path) =>
       write(`${path}.map`, JSON.stringify({ version: 3, sources: ['a.ts'], names: [], mappings: 'AAAA' })),
     ),
   ]);
@@ -66,7 +69,7 @@ const createClient = async (): Promise<string> => {
 describe('files the UI build ships', () => {
   it('should accept a build whose verbatim files still match its receipt', async () => {
     const client = await createClient();
-    await expect(verifyShippedAssets(client)).resolves.toEqual({ checked: 5, problems: [] });
+    await expect(verifyShippedAssets(client)).resolves.toEqual({ checked: 6, problems: [] });
   });
 
   it('should allow compiled chunks to change and name every verbatim file that did', async () => {
@@ -83,10 +86,10 @@ describe('files the UI build ships', () => {
   it('should refuse a missing verbatim file or receipt, but not a removed Vite manifest', async () => {
     const client = await createClient();
     await rm(join(client, '.vite'), { recursive: true });
-    await expect(verifyShippedAssets(client)).resolves.toEqual({ checked: 5, problems: [] });
+    await expect(verifyShippedAssets(client)).resolves.toEqual({ checked: 6, problems: [] });
     await rm(join(client, 'assets/kernel-c1d2e3f4.wasm'));
     await expect(verifyShippedAssets(client)).resolves.toEqual({
-      checked: 5,
+      checked: 6,
       problems: ['assets/kernel-c1d2e3f4.wasm: missing'],
     });
     await rm(join(client, 'tau-asset-receipt.json'));
@@ -96,31 +99,65 @@ describe('files the UI build ships', () => {
     });
   });
 
-  it('should list the scripts without a source map, wherever they are', async () => {
+  it('should hide every verbatim file from a command that rewrites JavaScript, then put it back', async () => {
     const client = await createClient();
-    await expect(unmappedScripts(client)).resolves.toEqual([
-      'csharp-language/4567/_framework/dotnet.native.abc.js',
-      'picogk-browser/0123/_framework/dotnet.js',
-      'some-future-kernel/glue.mjs',
-    ]);
+    // Stands in for any injector: append to every JavaScript file it can see, as PostHog and Sentry do.
+    const injector = join(dirname(client), 'inject-everything.mjs');
+    await writeFile(
+      injector,
+      [
+        "import { appendFileSync, readdirSync } from 'node:fs';",
+        "import { join } from 'node:path';",
+        'const [client] = process.argv.slice(2);',
+        'for (const file of readdirSync(client, { recursive: true })) {',
+        String.raw`  if (/\.[cm]?js$/u.test(file)) appendFileSync(join(client, file), '//injected');`,
+        '}',
+      ].join('\n'),
+    );
+    const rewriteAll = `node ${injector} ${client}`;
+    await expect(withVerbatimAssetsAside(client, rewriteAll)).resolves.toBe(0);
+    await expect(verifyShippedAssets(client)).resolves.toEqual({ checked: 6, problems: [] });
+    await expect(readFile(join(client, 'assets/app-a1b2c3d4.js'), 'utf8')).resolves.toContain('//injected');
   });
 
-  it('should add debug ids to compiled chunks only, through the deploy source-map command', async () => {
-    // Run the client-side injection command exactly as `ui:sourcemaps` declares it. Before this, it
-    // appended a debug-ID snippet to every JavaScript file, and the PicoGK host refused its own runtime
-    // ("PicoGK runtime resource integrity mismatch").
+  it('should put verbatim files back and pass on the status when the command fails', async () => {
+    const client = await createClient();
+    await expect(withVerbatimAssetsAside(client, 'exit 3')).resolves.toBe(3);
+    await expect(verifyShippedAssets(client)).resolves.toEqual({ checked: 6, problems: [] });
+  });
+
+  it('should run every client-side injector in the deploy source-map target with verbatim files aside', async () => {
+    // Before this, PostHog and Sentry each appended a snippet to runtime files the build copied verbatim, and the
+    // PicoGK and C# hosts refused them ("PicoGK runtime resource integrity mismatch").
     const project = JSON.parse(await readFile(join(workspace, 'apps/ui/project.json'), 'utf8')) as {
       targets: { sourcemaps: { options: { commands: string[] } } };
     };
-    const inject = project.targets.sourcemaps.options.commands.filter(
-      (command) =>
-        command.includes('{projectRoot}/build/client') && /\binject\b/u.test(command) && !command.includes('posthog'),
+    const commands = project.targets.sourcemaps.options.commands.filter(
+      (command) => command.includes('{projectRoot}/build/client') && /\binject\b/u.test(command),
     );
-    expect(inject).toHaveLength(1);
+    expect(commands.some((command) => command.includes('posthog'))).toBe(true);
+    expect(commands.some((command) => command.includes('sentry-cli'))).toBe(true);
+    for (const command of commands) {
+      expect(command).toMatch(
+        /^node apps\/ui\/scripts\/with-verbatim-assets-aside\.mts \{projectRoot\}\/build\/client '/u,
+      );
+    }
+  });
+
+  it('should add Sentry debug ids to compiled chunks only, through the deploy command', async () => {
+    const project = JSON.parse(await readFile(join(workspace, 'apps/ui/project.json'), 'utf8')) as {
+      targets: { sourcemaps: { options: { commands: string[] } } };
+    };
+    const inject = project.targets.sourcemaps.options.commands.find(
+      (command) => command.includes('{projectRoot}/build/client') && /\binject\b/u.test(command),
+    );
+    // Run the declared command without PostHog, which needs its API; the Sentry injection runs offline.
+    const sentryOnly = inject!.replace(/npx -y @posthog\/cli sourcemap inject [^&']*&& /u, '');
+    expect(sentryOnly).not.toContain('posthog');
     const client = await createClient();
     const projectRoot = dirname(dirname(client));
-    execFileSync('sh', ['-c', inject[0]!.replaceAll('{projectRoot}', projectRoot)], { cwd: workspace, stdio: 'pipe' });
-    await expect(verifyShippedAssets(client)).resolves.toEqual({ checked: 5, problems: [] });
+    execFileSync('sh', ['-c', sentryOnly.replaceAll('{projectRoot}', projectRoot)], { cwd: workspace, stdio: 'pipe' });
+    await expect(verifyShippedAssets(client)).resolves.toEqual({ checked: 6, problems: [] });
     const chunks = await Promise.all(Object.keys(compiled).map(async (path) => readFile(join(client, path), 'utf8')));
     for (const chunk of chunks) {
       expect(chunk).toContain('debugId=');

@@ -1057,3 +1057,151 @@ fn push_lines(ranges: &mut Vec<Value>, push: &mut FoldPush, document: &Document,
         push(ranges, document.lines.line_start(start), document.lines.line_start(last), Some("comment"));
     }
 }
+
+// Formatting -----------------------------------------------------------------------------------------------------
+
+pub fn formatting(workspace: &Workspace, params: &Value) -> RpcResult {
+    let document = document(workspace, params)?;
+    let indent = crate::format::Indent::from_options(params.get("options"));
+    Ok(Value::Array(crate::format::format_edits(document, &indent)))
+}
+
+// Call hierarchy -------------------------------------------------------------------------------------------------
+
+fn is_callable(node: Node) -> bool {
+    matches!(node.kind(), "module_item" | "function_item")
+}
+
+fn call_item(document: &Document, decl: &Decl) -> Value {
+    json!({
+        "name": decl.name,
+        "kind": symbol_kind(decl),
+        "detail": format!("({})", decl.parameter_list()),
+        "uri": document.uri,
+        "range": range_json(document, decl.node_range),
+        "selectionRange": range_json(document, decl.name_range),
+    })
+}
+
+/// Calls at the top level of a file come from the file itself.
+fn file_item(document: &Document) -> Value {
+    json!({
+        "name": display_path(&document.path),
+        "kind": 1,
+        "uri": document.uri,
+        "range": range_json(document, (0, document.text.len())),
+        "selectionRange": range_json(document, (0, 0)),
+    })
+}
+
+/// The module or function declaration around `offset`.
+fn enclosing_callable(document: &Document, offset: usize) -> Option<Node<'_>> {
+    let mut node = document.tree.root_node().descendant_for_byte_range(offset, offset)?;
+    loop {
+        if is_callable(node) {
+            return Some(node);
+        }
+        node = node.parent()?;
+    }
+}
+
+pub fn prepare_call_hierarchy(workspace: &Workspace, params: &Value) -> RpcResult {
+    let (document, offset) = located(workspace, params)?;
+    let Some((_, declaration)) = declaration_at(workspace, document, offset) else { return Ok(Value::Null) };
+    let Some(file) = workspace.get(&declaration.uri) else { return Ok(Value::Null) };
+    if !matches!(declaration.decl.kind, DeclKind::Module | DeclKind::Function) {
+        return Ok(Value::Null);
+    }
+    Ok(json!([call_item(file, &declaration.decl)]))
+}
+
+/// The module or function a call hierarchy item names, found again from its `selectionRange`.
+fn item_declaration(workspace: &Workspace, params: &Value) -> Result<Option<Resolved>, RpcError> {
+    let item = params.get("item").ok_or_else(|| invalid_params("item"))?;
+    let uri = item.get("uri").and_then(Value::as_str).ok_or_else(|| invalid_params("item.uri"))?;
+    let start = item
+        .pointer("/selectionRange/start")
+        .and_then(crate::text::Position::from_json)
+        .ok_or_else(|| invalid_params("item.selectionRange"))?;
+    let Some(document) = workspace.get(uri) else { return Ok(None) };
+    let offset = document.offset(start);
+    // Only the declaration's own name: a file item's range or a stale item may sit on a call instead.
+    Ok(declaration_at(workspace, document, offset).map(|(_, declaration)| declaration).filter(|declaration| {
+        declaration.uri == uri
+            && declaration.decl.name_range.0 == offset
+            && matches!(declaration.decl.kind, DeclKind::Module | DeclKind::Function)
+    }))
+}
+
+/// Every call of the item, grouped by the module or function (or file top level) that makes it.
+pub fn incoming_calls(workspace: &Workspace, params: &Value) -> RpcResult {
+    let Some(declaration) = item_declaration(workspace, params)? else { return Ok(json!([])) };
+    let mut callers: BTreeMap<(String, usize), (Value, Vec<Value>)> = BTreeMap::new();
+    for (uri, range) in find_references(workspace, &declaration) {
+        if uri == declaration.uri && range == declaration.decl.name_range {
+            continue;
+        }
+        let Some(file) = workspace.get(&uri) else { continue };
+        let caller = enclosing_callable(file, range.0).and_then(|node| crate::index::callable_of(&file.text, node));
+        let key = (uri.clone(), caller.as_ref().map_or(usize::MAX, |decl| decl.name_range.0));
+        let entry = callers.entry(key).or_insert_with(|| {
+            (caller.as_ref().map_or_else(|| file_item(file), |decl| call_item(file, decl)), Vec::new())
+        });
+        entry.1.push(range_json(file, range));
+    }
+    Ok(Value::Array(
+        callers.into_values().map(|(from, ranges)| json!({ "from": from, "fromRanges": ranges })).collect(),
+    ))
+}
+
+/// Every module and function the item's body calls, grouped by callee, in first-call order.
+pub fn outgoing_calls(workspace: &Workspace, params: &Value) -> RpcResult {
+    let Some(declaration) = item_declaration(workspace, params)? else { return Ok(json!([])) };
+    let Some(document) = workspace.get(&declaration.uri) else { return Ok(json!([])) };
+    let Some(callable) = enclosing_callable(document, declaration.decl.name_range.0) else { return Ok(json!([])) };
+    let resolver = Resolver::new(workspace, document);
+    let mut order: Vec<(String, usize)> = Vec::new();
+    let mut callees: HashMap<(String, usize), (Value, Vec<Value>)> = HashMap::new();
+    let mut pending = vec![callable];
+    while let Some(node) = pending.pop() {
+        let mut cursor = node.walk();
+        for child in node.named_children(&mut cursor) {
+            // A nested declaration's calls belong to it.
+            if !is_callable(child) {
+                pending.push(child);
+            }
+        }
+        if !matches!(node.kind(), "module_call" | "function_call") {
+            continue;
+        }
+        let Some(name) = node.child_by_field_name("name").filter(|name| name.kind() == "identifier") else { continue };
+        let Some(target) = target_at(document, name.start_byte()) else { continue };
+        let Some(callee) = resolver.resolve(&target) else { continue };
+        let Some(file) = workspace.get(&callee.uri) else { continue };
+        if !matches!(callee.decl.kind, DeclKind::Module | DeclKind::Function) {
+            continue;
+        }
+        let key = (callee.uri.clone(), callee.decl.name_range.0);
+        if !callees.contains_key(&key) {
+            order.push(key.clone());
+        }
+        callees
+            .entry(key)
+            .or_insert_with(|| (call_item(file, &callee.decl), Vec::new()))
+            .1
+            .push(range_json(document, target.range));
+    }
+    let mut calls = Vec::with_capacity(order.len());
+    for key in order {
+        if let Some((to, mut ranges)) = callees.remove(&key) {
+            ranges.sort_by_key(|range| (range["start"]["line"].as_u64(), range["start"]["character"].as_u64()));
+            calls.push(json!({ "to": to, "fromRanges": ranges }));
+        }
+    }
+    let first = |call: &Value| {
+        let start = &call["fromRanges"][0]["start"];
+        (start["line"].as_u64(), start["character"].as_u64())
+    };
+    calls.sort_by_key(first);
+    Ok(Value::Array(calls))
+}

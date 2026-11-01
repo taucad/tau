@@ -10,7 +10,14 @@ fn answers_the_initialize_handshake() {
     let result = harness.request("initialize", json!({ "capabilities": {} }));
     let capabilities = &result["capabilities"];
     assert_eq!(capabilities["textDocumentSync"]["change"], 2);
-    for provider in ["hoverProvider", "definitionProvider", "referencesProvider", "documentSymbolProvider"] {
+    for provider in [
+        "hoverProvider",
+        "definitionProvider",
+        "referencesProvider",
+        "documentSymbolProvider",
+        "documentFormattingProvider",
+        "callHierarchyProvider",
+    ] {
         assert_eq!(capabilities[provider], true, "{provider}");
     }
     assert_eq!(capabilities["semanticTokensProvider"]["legend"]["tokenTypes"][0], "module");

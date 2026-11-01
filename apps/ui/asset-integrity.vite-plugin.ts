@@ -14,6 +14,12 @@ export type AssetReceiptEntry = {
   readonly bytes: number;
   /** Subresource Integrity value of the served bytes. */
   readonly integrity: string;
+  /**
+   * Present when the build compiled this file and wrote its source map. Deploy steps may rewrite such files (Sentry
+   * and PostHog add debug ids). A file without one was copied verbatim, may be checked against a manifest at
+   * runtime (the PicoGK and C# hosts), and must ship byte-identical to this entry.
+   */
+  readonly sourceMap?: true;
 };
 
 /** The UI asset receipt: every file the client build emitted, with its integrity. */
@@ -57,7 +63,8 @@ const registration = (chunkFileName: string, assets: ReadonlyArray<readonly [str
  * In each bundle, every ES chunk that names a WASM file gains a first line registering that file's SHA-384 integrity,
  * so the runtime fetches it with `fetch(url, { integrity })` and the browser refuses a tampered byte before
  * compilation. Once the client output is written, the main client build also writes `tau-asset-receipt.json` at its
- * root, listing every emitted file (source maps aside) with the integrity of its bytes on disk. Add the plugin to the client plugins (`receipt: true`) and to the worker plugins
+ * root, listing every emitted file (source maps aside) with the integrity of its bytes on disk, and marking the files
+ * that have a source map. Add the plugin to the client plugins (`receipt: true`) and to the worker plugins
  * (`receipt: false`), because each worker bundle references its own WASM.
  *
  * @param options - Whether this build writes the receipt.
@@ -118,7 +125,8 @@ export const createAssetIntegrity = (options: AssetIntegrityOptions): Plugin => 
         files.map(async (fileName): Promise<AssetReceiptEntry | undefined> => {
           try {
             const bytes = await readFile(path.join(root, fileName));
-            return { path: fileName, bytes: bytes.byteLength, integrity: integrityOf(bytes) };
+            const entry = { path: fileName, bytes: bytes.byteLength, integrity: integrityOf(bytes) };
+            return Object.hasOwn(bundle, `${fileName}.map`) ? { ...entry, sourceMap: true } : entry;
           } catch {
             // A plugin removed the file after emitting it; the receipt lists what is served.
             return undefined;

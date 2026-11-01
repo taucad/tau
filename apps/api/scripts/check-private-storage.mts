@@ -26,7 +26,8 @@ const batchSchema = z.object({
   ),
 });
 const apiOrigin = 'https://api.taucad.dev';
-const storageOrigin = 'https://tau-staging-content-private.271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com';
+const storageOrigin =
+  'https://tau-staging-au-content-private.271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com';
 const required = (name: string): string => {
   const value = process.env[name];
   if (!value) {

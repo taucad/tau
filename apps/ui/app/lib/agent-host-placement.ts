@@ -477,6 +477,21 @@ export const isDeviceRelativeHostReachable = (hostId: TauAgentHostId): boolean =
 };
 
 /**
+ * Whether an execution names a `loopback:` daemon this tab was never handed. The daemon is admitted per tab
+ * (`sessionStorage`), but the execution that names it is remembered per device (the `chat-execution` cookie, the Home
+ * composer record), so another tab's hand-off reaches every tab that reads it. A new chat started on such an execution
+ * would hold a placement it cannot reach, so it starts on this tab's own Tau instead (XD2).
+ *
+ * @param execution - The execution a new chat would start on.
+ * @returns Whether its host is a loopback daemon this tab holds no session for.
+ * @public
+ */
+export const namesUnhandedLoopbackHost = (execution: CadAgentExecution): boolean =>
+  execution.kind === 'tau' &&
+  execution.hostId?.startsWith(loopbackHostIdPrefix) === true &&
+  !isDeviceRelativeHostReachable(execution.hostId);
+
+/**
  * Whether this page's origin is a daemon, as last asked. A daemon is a daemon for the page's life; "no daemon" may be
  * a request that failed (the page cannot tell them apart), so it is asked again after {@link originAnswerReuse}.
  */

@@ -1,7 +1,7 @@
 import * as React from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { AlertCircle, RefreshCcw, RotateCcw } from 'lucide-react';
+import { AlertCircle, RefreshCcw, RotateCcw, SearchIcon } from 'lucide-react';
 import { cva } from 'class-variance-authority';
 import { cn } from '@taucad/ui/utils/cn';
 import { Button } from '@taucad/ui/components/button';
@@ -9,6 +9,7 @@ import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { DrawerClose, drawerActionClass, drawerGrabStrip, useIsInsideDrawer } from '@taucad/ui/components/drawer';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
+import { PaneSearchProvider, usePaneSearch } from '@taucad/ui/components/pane-search';
 import { CollapsibleCodeBlock } from '#components/ui/collapsible-code-block.js';
 import { reportUiError } from '#lib/error-reporting.js';
 import { reactErrorDetails } from '#lib/react-root-errors.js';
@@ -247,10 +248,45 @@ function FloatingPanelClose({
   );
 
   if (isDrawerAction) {
-    return <DrawerClose asChild>{button}</DrawerClose>;
+    return (
+      <>
+        <FloatingPanelSearchToggle />
+        <DrawerClose asChild>{button}</DrawerClose>
+      </>
+    );
   }
 
   return button;
+}
+
+/**
+ * The phone pane's search toggle, left of its Close: it shows the pane's filter row and focuses its field, or hides it.
+ * Renders nothing where the pane has no filter row or the row is always shown (desktop).
+ */
+function FloatingPanelSearchToggle(): React.ReactNode {
+  const search = usePaneSearch();
+  if (!search?.hasRegion) {
+    return null;
+  }
+
+  const label = search.isOpen ? 'Hide filter' : 'Show filter';
+  return (
+    <FloatingPanelMenuButton
+      tooltip={label}
+      tooltipSide='top'
+      aria-label={label}
+      aria-expanded={search.isOpen}
+      aria-controls={search.regionId}
+      data-slot='floating-panel-search-toggle'
+      className={cn('relative text-muted-foreground', (search.isOpen || search.hasHiddenQuery) && 'text-primary')}
+      onClick={search.toggle}
+    >
+      <SearchIcon />
+      {search.hasHiddenQuery ? (
+        <span aria-hidden className='absolute top-2 right-2 size-2 rounded-full bg-primary' />
+      ) : null}
+    </FloatingPanelMenuButton>
+  );
 }
 
 type FloatingPanelTriggerProps = {
@@ -370,10 +406,14 @@ const FloatingPanelContentDepthContext = React.createContext(0);
 function FloatingPanelContent({ children, className, errorFallback }: FloatingPanelContentProps): React.JSX.Element {
   const fallback = errorFallback ?? ((props) => <FloatingPanelErrorContent {...props} />);
   const depth = React.useContext(FloatingPanelContentDepthContext) + 1;
+  const isMobile = useIsMobile();
+  const isInsideDrawer = useIsInsideDrawer();
+  const body = <FloatingPanelErrorBoundary fallback={fallback}>{children}</FloatingPanelErrorBoundary>;
   return (
     <div className={cn('flex size-full flex-col bg-sidebar/50', className)} data-slot='floating-panel-content'>
       <FloatingPanelContentDepthContext.Provider value={depth}>
-        <FloatingPanelErrorBoundary fallback={fallback}>{children}</FloatingPanelErrorBoundary>
+        {/* A phone sheet is short: the outermost pane folds its filter row behind a header toggle (desktop keeps it). */}
+        {isMobile && isInsideDrawer && depth === 1 ? <PaneSearchProvider>{body}</PaneSearchProvider> : body}
       </FloatingPanelContentDepthContext.Provider>
     </div>
   );

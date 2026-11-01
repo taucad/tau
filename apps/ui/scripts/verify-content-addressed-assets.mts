@@ -118,7 +118,7 @@ export const verifyContentAddressedAssets = async (
   return { trees, problems: problems.toSorted() };
 };
 
-if (import.meta.main) {
+if (process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) {
   const [client, ...extra] = process.argv.slice(2);
   if (!client || extra.length > 0) {
     console.error('Usage: node apps/ui/scripts/verify-content-addressed-assets.mts <client-dir>');

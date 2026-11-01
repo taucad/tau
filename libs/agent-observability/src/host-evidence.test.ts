@@ -158,6 +158,61 @@ describe('createHostEvidence', () => {
     );
   });
 
+  it('should bind a grant given after the host opened when a run starts, and report that run', async () => {
+    /* A new project: the host opens before the API knows it, so its first read is refused; the run then starts, ends
+     * and goes quiescent. Bound only at quiescence, every fact of that run would predate the grant and be dropped. */
+    let clock = 1000;
+    let known = false;
+    const submitted: string[] = [];
+    const answer = (allowed: boolean): Response =>
+      new Response(
+        JSON.stringify({
+          epoch: 'policy-1',
+          projectId: 'project-1',
+          purposes: [{ purpose: 'summary', allowed, ...(allowed ? {} : { refusal: 'project-not-owned' }) }],
+        }),
+        { status: 200 },
+      );
+    const evidence = createHostEvidence({
+      apiBaseUrl: 'https://api.test',
+      principal: () => 'user-1',
+      project: 'project-1',
+      uploader: 'node-1',
+      hostBuild: undefined,
+      fetch: async (input) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        if (url.includes('/v1/telemetry-purposes')) {
+          return answer(known);
+        }
+        submitted.push(url);
+        return new Response(JSON.stringify({ receipt: 'r-1', disposition: 'accepted', duplicate: false }), {
+          status: 200,
+        });
+      },
+      store: memoryPendingStore(),
+      now: () => clock,
+      observe: async () => ({
+        runs: [{ ...run, ending: { source: { chatId: 'chat-1', leaderEpoch: 'term-1', sequence: 3 }, at: 3000 } }],
+        ownsEpoch: () => true,
+      }),
+    });
+    await evidence.reporter.refresh();
+    known = true;
+
+    clock = 2000;
+    evidence.onChatQuiescent('chat-1', false);
+    await vi.waitFor(() => {
+      expect(evidence.reporter.coverage().stop).toBeDefined();
+    });
+    clock = 4000;
+    evidence.onChatQuiescent('chat-1', true);
+    await vi.waitFor(() => {
+      expect(submitted).toHaveLength(1);
+    });
+
+    expect(evidence.reporter.coverage().beforeGrant).toBe(0);
+  });
+
   it('should report no rating from a host composed without the feedback queue', async () => {
     const { evidence, facts } = setup(allowing(['summary', 'feedback']));
     await evidence.reporter.refresh();

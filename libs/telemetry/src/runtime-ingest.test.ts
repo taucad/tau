@@ -333,18 +333,6 @@ describe('runtime metrics (T13 registry part)', () => {
       expect(Object.keys(metric.attributes.shape), metric.name).toContain('tau.runtime.population');
     }
   });
-
-  it('should mark the four producer-less instruments deprecated (D-T18)', () => {
-    const deprecated = Object.values(TauMetrics)
-      .filter((metric) => 'deprecated' in metric && metric.deprecated !== undefined)
-      .map((metric) => metric.name);
-    expect(deprecated).toEqual([
-      'ws.reconnection.duration',
-      'editor.load.duration',
-      'wasm.module.load.duration',
-      'indexeddb.operation.duration',
-    ]);
-  });
 });
 
 /**

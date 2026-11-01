@@ -13,6 +13,7 @@ import type { AssetReceipt } from './asset-integrity.vite-plugin.js';
 /* Two distinct, valid empty modules: one custom section each. */
 const mainWasm = Uint8Array.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0, 0, 3, 1, 0x6d, 0x61]);
 const workerWasm = Uint8Array.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0, 0, 3, 1, 0x77, 0x6b]);
+const verbatimRuntime = 'export const dotnet = 1;\n';
 const integrityOf = (bytes: Uint8Array<ArrayBuffer>): string =>
   `sha384-${createHash('sha384').update(bytes).digest('base64')}`;
 
@@ -38,7 +39,16 @@ describe('UI asset integrity', () => {
       root,
       configFile: false,
       logLevel: 'silent',
-      plugins: [createAssetIntegrity({ receipt: true })],
+      plugins: [
+        createAssetIntegrity({ receipt: true }),
+        {
+          // A runtime copied verbatim into the client, as the PicoGK and C# hosts are: no source map.
+          name: 'verbatim-runtime',
+          generateBundle() {
+            this.emitFile({ type: 'asset', fileName: 'runtime/0123abcd/dotnet.js', source: verbatimRuntime });
+          },
+        },
+      ],
       worker: { format: 'es', plugins: () => [createAssetIntegrity({ receipt: false })] },
       build: {
         outDir: output,
@@ -114,7 +124,26 @@ describe('UI asset integrity', () => {
     expect(listed).toEqual(emitted);
     for (const asset of receipt.assets) {
       const bytes = Uint8Array.from(readFileSync(path.join(output, asset.path)));
-      expect(asset).toEqual({ path: asset.path, bytes: bytes.byteLength, integrity: integrityOf(bytes) });
+      expect(asset).toEqual({
+        path: asset.path,
+        bytes: bytes.byteLength,
+        integrity: integrityOf(bytes),
+        ...(files().includes(`${asset.path}.map`) ? { sourceMap: true } : {}),
+      });
     }
+  });
+
+  it('marks the files the build compiled with a source map, and not the files it copied verbatim', () => {
+    // Deploy steps may rewrite compiled code (debug ids); every file without a source map must ship unchanged.
+    const receipt = JSON.parse(read(assetReceiptFileName)) as AssetReceipt;
+    const entry = (file: string): AssetReceipt['assets'][number] | undefined =>
+      receipt.assets.find((asset) => asset.path === file);
+    expect(entry(chunkNaming('wasmUrl'))?.sourceMap).toBe(true);
+    expect(entry(chunkNaming('self.postMessage'))?.sourceMap).toBe(true);
+    expect(entry('runtime/0123abcd/dotnet.js')).toEqual({
+      path: 'runtime/0123abcd/dotnet.js',
+      bytes: verbatimRuntime.length,
+      integrity: integrityOf(new TextEncoder().encode(verbatimRuntime)),
+    });
   });
 });

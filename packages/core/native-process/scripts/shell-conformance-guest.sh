@@ -38,10 +38,8 @@ trap 'exit 1' INT TERM
 
 sudo env DEBIAN_FRONTEND=noninteractive apt-get update -qq
 # Runtime prerequisites (bubblewrap, socat, ripgrep) and the toolchain node-pty builds from source with.
-# `fuse3` carries the setuid `fusermount3` the Linux projection transport mounts through. The projection is
-# unactivated, so no row here mounts one; the dependency is declared so activation needs no guest change.
 sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-  apparmor bubblewrap socat ripgrep fuse3 curl git git-lfs ca-certificates build-essential python3 util-linux \
+  apparmor bubblewrap socat ripgrep curl git git-lfs ca-certificates build-essential python3 util-linux \
   xvfb xauth dbus-x11 dbus-user-session xdg-utils libsecret-1-0 libgtk-3-0t64 libnss3 libasound2t64 libatk-bridge2.0-0t64 libcups2t64 \
   libdrm2 libgbm1 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libx11-xcb1 libxss1 \
   libvulkan1 mesa-vulkan-drivers vulkan-tools docker.io

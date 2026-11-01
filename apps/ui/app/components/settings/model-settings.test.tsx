@@ -23,6 +23,7 @@ const mockState = vi.hoisted(() => {
       isAvailable: () => true,
       setAvailable: vi.fn(),
       resetAvailability: vi.fn(),
+      isPinningEnabled: true,
       isPinned: () => false,
       setPinned: vi.fn(),
     },
@@ -48,6 +49,7 @@ describe('ModelSettings', () => {
       overrides: {},
       setAvailable: vi.fn(),
       resetAvailability: vi.fn(),
+      isPinningEnabled: true,
       setPinned: vi.fn(),
     };
   });
@@ -87,6 +89,14 @@ describe('ModelSettings', () => {
     fireEvent.click(pin);
     expect(mockState.models.setPinned).toHaveBeenCalledWith(model, true);
     expect(mockState.models.setAvailable).not.toHaveBeenCalled();
+  });
+
+  it('should offer no pin while the pinning flag is off', () => {
+    mockState.models = { ...mockState.models, data: [model], recommendedModels: [model], isPinningEnabled: false };
+    render(<ModelSettings />);
+
+    expect(screen.getByText('GPT')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Pin GPT' })).toBeNull();
   });
 
   it('should offer a reset only once a model has been toggled', () => {

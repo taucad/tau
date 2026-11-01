@@ -20,25 +20,13 @@ export type MetricDefinition<T extends InstrumentType = InstrumentType, A extend
   readonly description: string;
   readonly buckets: T extends 'histogram' ? readonly number[] : undefined;
   readonly attributes: z.ZodObject<A>;
-  /**
-   * Set on an instrument that nothing produces any more: the release that removes it and why. A deprecated
-   * instrument stays declared (dashboards keep resolving) until that release deletes it and its panels.
-   */
-  readonly deprecated?: MetricDeprecation;
 };
-
-/**
- * Why a registry instrument is deprecated and the release that removes it.
- * @public
- */
-export type MetricDeprecation = Readonly<{ removal: string; reason: string }>;
 
 type BaseMetricOptions<A extends z.ZodRawShape> = {
   readonly name: string;
   readonly unit: string;
   readonly description: string;
   readonly attributes: z.ZodObject<A>;
-  readonly deprecated?: MetricDeprecation;
 };
 
 type HistogramMetricOptions<A extends z.ZodRawShape> = BaseMetricOptions<A> & {

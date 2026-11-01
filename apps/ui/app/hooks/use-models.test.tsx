@@ -11,6 +11,9 @@ import { cookieName } from '#constants/cookie.constants.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { redeemLoopbackHandOff, resetLoopbackAgentHosts } from '#lib/agent-host-placement.js';
 
+const flags = vi.hoisted(() => ({ modelPinning: true }));
+vi.mock('#flags/use-feature.js', () => ({ useFeature: (name: 'modelPinning') => flags[name] }));
+
 const codex: AcpAgentExecution = {
   kind: 'acp',
   hostId: 'desktop',
@@ -51,6 +54,7 @@ beforeEach(() => {
 
 afterEach(() => {
   resetLoopbackAgentHosts();
+  flags.modelPinning = true;
   for (const key of storageKeys) {
     store.remove(key);
   }
@@ -257,6 +261,15 @@ describe('useModels', () => {
         store.update(pinnedKey, { opus: true });
       });
       expect(result.current.pinnedIds).toEqual([]);
+    });
+
+    it('should ignore stored pins while the pinning flag is off', async () => {
+      flags.modelPinning = false;
+      store.update(pinnedKey, ['hidden']);
+      const { result } = await loaded();
+      expect(result.current.isPinningEnabled).toBe(false);
+      expect(result.current.pinnedIds).toEqual([]);
+      expect(result.current.isAvailable(row('hidden'))).toBe(false);
     });
 
     it('should keep pins the catalog cannot confirm while it is unavailable', () => {

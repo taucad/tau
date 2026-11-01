@@ -270,3 +270,65 @@ it.each(['webgl', 'webgpu'] as const)(
   // Two native WebGPU devices compile their pipelines under the software qualification profile.
   120_000,
 );
+
+it.each(['webgl', 'webgpu'] as const)(
+  'should draw the only %s demand frame after a shrink like a steady frame',
+  async (backend) => {
+    await page.viewport(1280, 800);
+    const actor = createActor(
+      graphicsMachine.provide({
+        actors: { probeWebGpu: createAsyncLogic({ run: async () => backend === 'webgpu' }) },
+      }),
+      { input: {} },
+    ).start();
+    actors.push(actor);
+    let state: RootState | undefined;
+    let capture: { width: number; result: ReturnType<typeof Promise.withResolvers<Uint8ClampedArray>> } | undefined;
+    function Probe(): undefined {
+      useFrame((next) => {
+        state = next;
+        if (capture?.width === next.size.width) {
+          const { result } = capture;
+          capture = undefined;
+          result.resolve(captureRendererOutput(next.gl));
+        }
+      }, 4);
+      return undefined;
+    }
+    const view = render(
+      <div data-testid='shrinking-viewer' style={{ width: 900, height: 550 }}>
+        <GraphicsProvider graphicsRef={actor}>
+          <ThreeCanvasInstance enableGrid graphicsBackend={backend} onRetry={() => undefined}>
+            <mesh>
+              <boxGeometry args={[100, 100, 100]} />
+              <meshStandardMaterial />
+            </mesh>
+            <Probe />
+          </ThreeCanvasInstance>
+        </GraphicsProvider>
+      </div>,
+    );
+    await vi.waitFor(
+      () => {
+        expect(state?.size.width).toBe(900);
+      },
+      { timeout: 45_000 },
+    );
+    const nextFrame = async (width: number): Promise<Uint8ClampedArray> => {
+      const result = Promise.withResolvers<Uint8ClampedArray>();
+      capture = { width, result };
+      return result.promise;
+    };
+    // Demand rendering draws one frame after a shrink and keeps it until the next input.
+    const shrunk = nextFrame(640);
+    view.getByTestId('shrinking-viewer').style.width = '640px';
+    const first = await shrunk;
+    const steady = nextFrame(640);
+    state!.invalidate();
+    const second = await steady;
+    expect(first.length).toBe(second.length);
+    // A cleared shared depth lets the grid draw through the box in only the first frame.
+    expect(first.filter((value, index) => Math.abs(value - second[index]!) > 2).length).toBe(0);
+  },
+  120_000,
+);

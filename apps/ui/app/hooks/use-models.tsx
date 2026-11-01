@@ -10,6 +10,7 @@ import type { Model as ApiModel } from '../../../api/app/api/models/model.schema
 import { ENV } from '#environment.config.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { usePlaceableExecution } from '#hooks/use-placeable-execution.js';
+import { useFeature } from '#flags/use-feature.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { defaultChatModel } from '#constants/chat.constants.js';
 import { unknownIconId } from '#components/icons/svg-icon.js';
@@ -112,6 +113,8 @@ export const useModels = () => {
     noOverrides,
   );
   const [storedPinned, setStoredPinned] = useCookie<unknown>(cookieName.chatModelPinned, noPinned);
+  /* Pinning is behind a hidden flag: while it is off, stored pins neither group nor keep a model in the picker. */
+  const isPinningEnabled = useFeature('modelPinning');
   const [storedEffort, setStoredEffort] = useCookie<string | undefined>(cookieName.chatEffort, undefined);
   // Stored preferences are untrusted: a level outside the vocabulary would fail the turn wire.
   const selectedEffort = reasoningLevels.find((level) => level === storedEffort);
@@ -197,7 +200,10 @@ export const useModels = () => {
   const isOffered = useCallback((id: string): boolean => data?.some((model) => model.id === id) ?? true, [data]);
 
   /** Pinned model ids in pin order, without ids the loaded catalog no longer offers. */
-  const pinnedIds = useMemo(() => parsePinned(storedPinned).filter((id) => isOffered(id)), [storedPinned, isOffered]);
+  const pinnedIds = useMemo(
+    () => (isPinningEnabled ? parsePinned(storedPinned).filter((id) => isOffered(id)) : noPinned),
+    [isPinningEnabled, storedPinned, isOffered],
+  );
 
   const isPinned = useCallback((model: Model): boolean => pinnedIds.includes(model.id), [pinnedIds]);
 
@@ -281,6 +287,7 @@ export const useModels = () => {
     isAvailable,
     setAvailable,
     resetAvailability,
+    isPinningEnabled,
     pinnedIds,
     isPinned,
     setPinned,

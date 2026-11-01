@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import * as Sentry from '@sentry/node';
 import type { ErrorEvent } from '@sentry/node';
 import {
+  AutomatedRunFailure,
   getSentryRelease,
   isRetryableGitRefusal,
   reportReadinessFailure,
@@ -59,6 +60,17 @@ describe('scrubSentryEvent', () => {
     expect(scrubbed.request).toStrictEqual({ method: 'GET', url: 'https://api.taucad.dev/v1/auth/callback/github' });
     expect(scrubbed.user).toBeUndefined();
     expect(JSON.stringify(scrubbed)).not.toContain('secret');
+  });
+
+  it('files a failure a test harness raises on purpose under the automated-run environment', () => {
+    const event: ErrorEvent = { type: undefined, environment: 'staging' };
+
+    expect(scrubSentryEvent(event, { originalException: new AutomatedRunFailure('harness') }).environment).toBe(
+      'staging-e2e',
+    );
+    expect(
+      scrubSentryEvent({ type: undefined, environment: 'staging' }, { originalException: new Error('real') }),
+    ).toStrictEqual({ type: undefined, environment: 'staging' });
   });
 
   it('leaves an event without a request alone', () => {

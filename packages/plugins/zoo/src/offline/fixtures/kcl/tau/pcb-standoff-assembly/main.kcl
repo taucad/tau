@@ -1,0 +1,32 @@
+// PCB mounting plate with four M3 standoffs from the project's standoff module.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+import standoff from "standoff.kcl"
+
+// Parameters
+plateLength = 100
+plateWidth = 70
+plateThickness = 3
+holeInset = 8
+holeDiameter = 3.2
+standoffHeight = 10
+standoffAcrossFlats = 5.5
+standoffTapDiameter = 2.5
+
+holeX = plateLength / 2 - holeInset
+holeY = plateWidth / 2 - holeInset
+mountPoints = [[holeX, holeY], [-holeX, holeY], [-holeX, -holeY], [holeX, -holeY]]
+
+holeCircles = map(mountPoints, f = fn(@point) {
+  return circle(startSketchOn(XY), center = point, diameter = holeDiameter)
+})
+plate = startSketchOn(XY)
+  |> rectangle(center = [0, 0], width = plateLength, height = plateWidth)
+  |> subtract2d(tool = holeCircles)
+  |> extrude(length = plateThickness)
+
+// One standoff per hole, sitting on the plate.
+standoffs = map(mountPoints, f = fn(@point) {
+  return standoff(height = standoffHeight, acrossFlats = standoffAcrossFlats, holeDiameter = standoffTapDiameter)
+    |> translate(x = point[0], y = point[1], z = plateThickness)
+})

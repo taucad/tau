@@ -1,8 +1,12 @@
 /* oxlint-disable new-cap -- NestJS decorators use PascalCase. */
 import { Controller, Get } from '@nestjs/common';
+import { AutomatedRunFailure } from '#telemetry/sentry.js';
 
-/** The error the failure route throws: an unhandled server error the exception filter reports to Sentry. */
-export class ObservabilityHarnessFailure extends Error {
+/**
+ * The error the failure route throws: an unhandled server error the exception filter reports to Sentry, under the
+ * automated-run environment.
+ */
+export class ObservabilityHarnessFailure extends AutomatedRunFailure {
   public override readonly name = 'ObservabilityHarnessFailure';
 }
 

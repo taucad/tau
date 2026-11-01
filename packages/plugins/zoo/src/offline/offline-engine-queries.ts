@@ -6,7 +6,7 @@
  */
 import type { Frame } from '#offline/offline-math.js';
 import { add, scale, sub, vec3 } from '#offline/offline-math.js';
-import { boundingBox, compound, areaOf, volumeOf, planarFaceFrame } from '#offline/offline-occt.js';
+import { boundingBox, compound, areaOf, volumeOf, planarFaceFrame, subShapes } from '#offline/offline-occt.js';
 import { adjacentEdge, requireFace } from '#offline/offline-topology.js';
 import type { ModelingCommand } from '#offline/offline-engine.types.js';
 import type { OfflineEngine } from '#offline/offline-engine.js';
@@ -114,4 +114,17 @@ export function entityType(engine: OfflineEngine, id: string): string {
   }
 
   return owner ? 'edge' : 'entity';
+}
+
+/**
+ * Whether a body is a solid or a surface, as `Solid3dGetBodyType` answers it: a body with a closed volume is a solid,
+ * one made only of faces (a `bodyType = SURFACE` sweep, an open shell) is a surface.
+ *
+ * @param engine - offline engine
+ * @param cmd - command payload
+ * @returns the response
+ */
+export function bodyType(engine: OfflineEngine, cmd: ModelingCommand): Record<string, unknown> {
+  const solid = engine.scene.getSolid(cmd['object_id'] as string);
+  return { body_type: subShapes(engine.oc, solid.shape, 'TopAbs_SOLID').length > 0 ? 'solid' : 'surface' };
 }

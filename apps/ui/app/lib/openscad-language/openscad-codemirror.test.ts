@@ -300,10 +300,7 @@ describe('OpenSCAD editor commands', () => {
     const session = mock<EditorLanguageEnvironment['session']>();
     session.acquire.mockResolvedValue(document);
     session.get.mockReturnValue(document);
-    session.apply.mockImplementation((_path, change) => {
-      document.apply(change);
-      return true;
-    });
+    session.apply.mockImplementation((_path, change) => document.apply(change));
     const environment = environmentWith({
       session,
       treeService: mock<EditorLanguageEnvironment['treeService']>({

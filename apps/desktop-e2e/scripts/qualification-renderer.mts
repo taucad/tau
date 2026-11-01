@@ -31,6 +31,7 @@ const findSource = async (root: string): Promise<string[]> => {
 const exportGeometry = async (
   page: Page,
   projectRoot: string,
+  formatTimeout: number,
 ): Promise<{ path: string; sha256: string; vertices: number }> => {
   const directory = join(projectRoot, 'exports');
   const previousNames = await readdir(directory).catch(() => []);
@@ -50,7 +51,7 @@ const exportGeometry = async (
   // that waits for the first Build123d runtime download (277 MB, run 40998016336 debian-apt-x11).
   // The visible canvas does not imply geometry, so this wait carries the same budget as the canvas.
   const format = page.getByRole('region', { name: 'Format', exact: true });
-  await format.waitFor({ state: 'visible', timeout: 900_000 });
+  await format.waitFor({ state: 'visible', timeout: formatTimeout });
   const picker = format.getByRole('button', { name: 'Export format' });
   await picker.waitFor({ state: 'visible' });
   await picker.click();
@@ -271,14 +272,23 @@ const main = async (): Promise<void> => {
     if (!savedPath) {
       throw new Error('Shipping renderer did not retain the expected project bytes');
     }
+    // The frozen candidates stop waiting for the driver's command fifteen minutes after they write
+    // readiness, then close the window. A wait that outlasts that window ends in a closed page with no
+    // failure evidence (run 41342192947 macos-dmg-x64), so both viewer waits share what remains of it,
+    // less a minute kept for the failure observations below. The reinstalled launch runs without the
+    // probe, writes no new readiness and has no such window, so it keeps the full limits.
+    const readiness = await stat(join(profile, 'route-qualification.ready.json'));
+    const readyAt = readiness.mtimeMs;
+    const remaining = (limit: number): number =>
+      action === 'reinstall-ui' ? limit : Math.max(1000, Math.min(limit, readyAt + 15 * 60_000 - 60_000 - Date.now()));
     await page
       .getByTestId('cad-viewer-canvas-region')
       .locator('canvas')
-      .waitFor({ state: 'visible', timeout: 900_000 });
+      .waitFor({ state: 'visible', timeout: remaining(600_000) });
     if (await page.getByRole('alert', { name: 'CAD runtime error' }).isVisible()) {
       throw new Error('Native CAD runtime failed');
     }
-    const exported = await exportGeometry(page, dirname(savedPath));
+    const exported = await exportGeometry(page, dirname(savedPath), remaining(900_000));
     const logBytes = await readFile(join(profile, 'logs', 'desktop.log'));
     const log = logBytes.subarray(logOffset).toString();
     const native = log.split('\n').filter((line) => {
@@ -372,6 +382,16 @@ const main = async (): Promise<void> => {
               alerts: [...document.querySelectorAll('[role="alert"]')]
                 .slice(0, 10)
                 .map((element) => element.textContent.slice(0, 1000)),
+              statuses: [...document.querySelectorAll('[role="status"]')]
+                .slice(0, 10)
+                .map((element) => element.textContent.slice(0, 1000)),
+              issues: document.querySelector('[role="region"][aria-label="Issues"]')?.textContent.slice(0, 2000),
+              viewer: [...document.querySelectorAll('[data-testid="cad-viewer-canvas-region"]')]
+                .slice(0, 5)
+                .map((element) => ({
+                  ...describe(element),
+                  canvases: [...element.querySelectorAll('canvas')].slice(0, 5).map((canvas) => describe(canvas)),
+                })),
             };
           },
           undefined,
@@ -389,6 +409,18 @@ const main = async (): Promise<void> => {
               return { path: relative(profile, path), bytes: Buffer.byteLength(bytes), sha256: sha256(bytes) };
             }),
           );
+        })(),
+        (async () => {
+          // Only this launch's native engine records, the same lines acceptance reads, never the whole log.
+          const offset = Number(process.env['TAU_QUALIFICATION_LOG_OFFSET'] ?? 0);
+          const log = await readFile(join(profile, 'logs', 'desktop.log'));
+          return log
+            .subarray(Number.isSafeInteger(offset) && offset > 0 ? offset : 0)
+            .toString()
+            .split('\n')
+            .filter((line) => /^\S+ \w+ native\./u.test(line))
+            .slice(-40)
+            .map((line) => line.slice(0, 500));
         })(),
       ]);
       await writeFile(

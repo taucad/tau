@@ -466,13 +466,31 @@ int main(int argc,char **argv) { if(argc!=2) return 2; pid_t pid=(pid_t)strtol(a
 `,
         );
         command('/usr/bin/xcrun', ['clang', '-Wall', '-Werror', source, '-lsandbox', '-o', helper]);
+        // `ps -o comm=` reports what the process calls itself, which can be a bare name ("Tau", run
+        // 41342192947 macos-dmg-arm64) that codesign cannot open. The kernel's proc_pidpath names the
+        // image the process actually executes, so signatures are measured on that file.
+        const pathSource = join(temporary, 'pid-path.c');
+        const pathHelper = join(temporary, 'pid-path');
+        await writeFile(
+          pathSource,
+          `#include <libproc.h>
+#include <stdlib.h>
+#include <stdio.h>
+int main(int argc,char **argv) { if(argc!=2) return 2; pid_t pid=(pid_t)strtol(argv[1],0,10); if(pid<=0) return 3; char path[PROC_PIDPATHINFO_MAXSIZE]; if(proc_pidpath(pid,path,sizeof path)<=0) return 4; printf("%s\\n",path); return 0; }
+`,
+        );
+        command('/usr/bin/xcrun', ['clang', '-Wall', '-Werror', pathSource, '-o', pathHelper]);
         observations = [processes.mainPid, ...processes.rendererPids, ...processes.nativeChildPids].map((pid) => {
           if (!Number.isSafeInteger(pid) || pid <= 0) {
             throw new Error('Invalid measured process PID');
           }
-          const executable = command('/bin/ps', ['-ww', '-p', String(pid), '-o', 'comm=']);
+          const executable = command(pathHelper, [String(pid)]);
+          if (!executable.startsWith('/') || executable.includes('\n')) {
+            throw new Error('Measured process executable must be one absolute path');
+          }
           const commandLine = command('/bin/ps', ['-ww', '-p', String(pid), '-o', 'args=']);
           const measurements = {
+            processName: command('/bin/ps', ['-ww', '-p', String(pid), '-o', 'comm=']),
             processFlags: command('/bin/ps', ['-ww', '-p', String(pid), '-o', 'flags=']),
             sandboxCheck: command(helper, [String(pid)]),
             sandboxApi: 'Apple private SPI sandbox_check(pid,NULL,0); raw result and errno',

@@ -271,10 +271,14 @@ const main = async (): Promise<void> => {
     if (!savedPath) {
       throw new Error('Shipping renderer did not retain the expected project bytes');
     }
+    // The viewer mounts its canvas before the first Build123d runtime download, which the export
+    // wait below covers. The frozen candidates stop waiting for the driver's command fifteen minutes
+    // after readiness and close the window, so a longer wait here could only end in a closed page
+    // with no failure evidence (run 41342192947 macos-dmg-x64).
     await page
       .getByTestId('cad-viewer-canvas-region')
       .locator('canvas')
-      .waitFor({ state: 'visible', timeout: 900_000 });
+      .waitFor({ state: 'visible', timeout: 600_000 });
     if (await page.getByRole('alert', { name: 'CAD runtime error' }).isVisible()) {
       throw new Error('Native CAD runtime failed');
     }
@@ -372,6 +376,16 @@ const main = async (): Promise<void> => {
               alerts: [...document.querySelectorAll('[role="alert"]')]
                 .slice(0, 10)
                 .map((element) => element.textContent.slice(0, 1000)),
+              statuses: [...document.querySelectorAll('[role="status"]')]
+                .slice(0, 10)
+                .map((element) => element.textContent.slice(0, 1000)),
+              issues: document.querySelector('[role="region"][aria-label="Issues"]')?.textContent.slice(0, 2000),
+              viewer: [...document.querySelectorAll('[data-testid="cad-viewer-canvas-region"]')]
+                .slice(0, 5)
+                .map((element) => ({
+                  ...describe(element),
+                  canvases: [...element.querySelectorAll('canvas')].slice(0, 5).map((canvas) => describe(canvas)),
+                })),
             };
           },
           undefined,
@@ -389,6 +403,18 @@ const main = async (): Promise<void> => {
               return { path: relative(profile, path), bytes: Buffer.byteLength(bytes), sha256: sha256(bytes) };
             }),
           );
+        })(),
+        (async () => {
+          // Only this launch's native engine records, the same lines acceptance reads, never the whole log.
+          const offset = Number(process.env['TAU_QUALIFICATION_LOG_OFFSET'] ?? 0);
+          const log = await readFile(join(profile, 'logs', 'desktop.log'));
+          return log
+            .subarray(Number.isSafeInteger(offset) && offset > 0 ? offset : 0)
+            .toString()
+            .split('\n')
+            .filter((line) => /^\S+ \w+ native\./u.test(line))
+            .slice(-40)
+            .map((line) => line.slice(0, 500));
         })(),
       ]);
       await writeFile(

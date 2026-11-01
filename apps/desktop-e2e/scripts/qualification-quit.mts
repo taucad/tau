@@ -77,8 +77,15 @@ export const requestQualificationQuit = async (
           throw new Error('APT running generation differs from the admitted probe');
         }
       } else if (ready.route === 'linux-appimage') {
+        // A managed install reports its /usr/bin launcher while the process runs the exact
+        // generation under /opt; a portable AppImage reports its own outer path.
+        const managed = {
+          '/usr/bin/tau-appimage': '/opt/tau-appimage',
+          '/usr/bin/tau-staging-appimage': '/opt/tau-staging-appimage',
+        }[ready.installedPath];
+        const outerPath = managed ? `${managed}/releases/${ready.version}/Tau.AppImage` : ready.installedPath;
         const environmentText = await readFile(`/proc/${browserPid}/environ`, 'utf8');
-        if (!environmentText.split('\0').includes(`APPIMAGE=${ready.installedPath}`)) {
+        if (!environmentText.split('\0').includes(`APPIMAGE=${outerPath}`)) {
           throw new Error('Native quit requires the admitted AppImage outer path');
         }
       } else {

@@ -192,13 +192,23 @@ const bootIdentity = async (): Promise<string> => {
     );
   });
 };
+/*
+ * This process's creation identity cannot change while it runs, so one good read serves every record. Reading the
+ * whole table again for each record put a `ps` on every macOS launch path, and under eight concurrent launches on a
+ * loaded runner one of those reads failed and refused a command (MAC-X S04). A failed read is not kept.
+ */
+let ownIdentity: z.infer<typeof processIdentity> | undefined;
 const selfIdentity = async (): Promise<z.infer<typeof processIdentity>> => {
+  if (ownIdentity !== undefined) {
+    return ownIdentity;
+  }
   const rows = await processTable();
   const row = rows.find((candidate) => candidate.pid === process.pid);
   if (row?.started === undefined) {
     throw new Error('Shell custody owner creation identity is unavailable.');
   }
-  return { pid: process.pid, started: row.started };
+  ownIdentity = { pid: process.pid, started: row.started };
+  return ownIdentity;
 };
 
 /**

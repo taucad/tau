@@ -49,10 +49,22 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 1' INT TERM
-sudo timeout --kill-after=30s 300s apt-get \
-  -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 \
-  -o APT::Update::Error-Mode=any update
-sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils cloud-image-utils acl
+# The runner image's package lists usually already name these packages, so install from them first; a mirror that
+# stalls `apt-get update` then cannot fail the row. Only a failed install refreshes the lists, with two bounded tries.
+packages=(qemu-system-x86 qemu-utils cloud-image-utils acl)
+install_packages() {
+  sudo timeout --kill-after=30s 600s apt-get install -y --no-install-recommends \
+    -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 "${packages[@]}"
+}
+refresh_lists() {
+  sudo timeout --kill-after=30s 300s apt-get \
+    -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 \
+    -o APT::Update::Error-Mode=any update
+}
+if ! install_packages; then
+  refresh_lists || refresh_lists
+  install_packages
+fi
 sudo setfacl -m "u:$(id -un):rw" /dev/kvm
 curl --fail --location --proto '=https' --proto-redir '=https' --retry 3 "$url" -o "$work/base.qcow2"
 printf '%s  %s\n' "$digest" "$work/base.qcow2" | "$algorithm" --check

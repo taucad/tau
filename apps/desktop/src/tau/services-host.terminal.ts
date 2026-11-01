@@ -20,7 +20,7 @@
 import { randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
 
-import type { ShellProbe, TerminalSession } from '@taucad/host';
+import type { ShellProbe, TerminalSession, TerminalSessionOutcome } from '@taucad/host';
 import { terminalClientFrameSchema, terminalLimits } from '@taucad/types/desktop-terminal';
 import type {
   TerminalAccess,
@@ -143,6 +143,9 @@ const outputPieces = (text: string): string[] => {
  */
 export const terminalAdmissionMilliseconds = 15_000;
 
+/** How often a start retries the shell service while that service has not yet registered an admitted project. */
+const terminalRegistrationRetryMilliseconds = 250;
+
 /**
  * Create the services host's terminal concern.
  *
@@ -157,11 +160,10 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
   /** Resolved and replaced each time main's root allowlist changes; a start awaiting admission wakes on it. */
   let rootsChanged = Promise.withResolvers<void>();
   /**
-   * Wait until main's allowlist admits `root`, its connection ends, or the admission bound passes.
+   * Wait until main's allowlist admits `root`, its connection ends, or `deadline` (the start's admission bound) passes.
    * @returns Whether the root is admitted.
    */
-  const awaitAdmission = async (root: string, isEnded: () => boolean): Promise<boolean> => {
-    const deadline = now() + admissionMilliseconds;
+  const awaitAdmission = async (root: string, isEnded: () => boolean, deadline: number): Promise<boolean> => {
     while (!options.isTrustedRoot(root)) {
       const remaining = deadline - now();
       if (remaining <= 0 || isEnded()) {
@@ -216,6 +218,11 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
     const isEnded = (): boolean => ended !== undefined;
     let session: TerminalSession | undefined;
     let abort: AbortController | undefined;
+    /**
+     * A shell being opened, not yet this connection's: ending the connection cancels it and waits until it has
+     * either refused or been stopped, so quit's `closeAll` never resolves before a shell it could not yet see.
+     */
+    let pendingOpen: { readonly controller: AbortController; readonly settled: Promise<void> } | undefined;
     /** Bumped whenever a session ends, so a pump of an earlier session can never send again. */
     let generation = 0;
     let sent = 0;
@@ -276,6 +283,11 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
           clearTimeout(openTimer);
           pendingAccess = undefined;
           const exit = await stopSession();
+          const opening = pendingOpen;
+          if (opening !== undefined) {
+            opening.controller.abort();
+            await opening.settled;
+          }
           if (claimed && live.get(key) === connection) {
             live.delete(key);
           }
@@ -341,8 +353,10 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
 
     /** Start one shell for this connection; refuses end the connection with the shell service's own words. */
     const openShell = async (size: TerminalSize, access: TerminalAccess | undefined): Promise<void> => {
+      /* One admission bound for the whole start: main's allowlist, then the shell service's registration below. */
+      const settleBy = now() + admissionMilliseconds;
       awaitingAdmission = true;
-      const admitted = await awaitAdmission(projectRoot, isEnded).finally(() => {
+      const admitted = await awaitAdmission(projectRoot, isEnded, settleBy).finally(() => {
         awaitingAdmission = false;
       });
       if (isEnded()) {
@@ -376,22 +390,75 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
         await refuse(refusal(probe.code, probe.message, probe.recovery));
         return;
       }
+      /* Until the shell is this connection's or refused, ending the connection cancels the open and waits for it. */
       const controller = new AbortController();
-      const outcome = await probe.shell.openTerminal({
-        projectRoot,
+      const settled = Promise.withResolvers<void>();
+      pendingOpen = { controller, settled: settled.promise };
+      let refused: TerminalRefusal | undefined;
+      try {
+        refused = await openAndAdopt(probe.shell, controller, { settleBy, size, access });
+      } finally {
+        pendingOpen = undefined;
+        settled.resolve();
+      }
+      if (refused !== undefined && !isEnded()) {
+        await refuse(refused);
+      }
+    };
+
+    /**
+     * Open the shell, retrying while the shell service has not yet registered the project, then make it this
+     * connection's. A shell that opens after the pane left is stopped here.
+     * @returns The refusal to send, or `undefined` once the shell is this connection's or the pane has left.
+     */
+    const openAndAdopt = async (
+      shell: Extract<ShellProbe, { status: 'available' }>['shell'],
+      controller: AbortController,
+      {
+        settleBy,
         size,
-        signal: controller.signal,
-        ...(access === undefined ? {} : { access }),
-      });
+        access,
+      }: Readonly<{ settleBy: number; size: TerminalSize; access: TerminalAccess | undefined }>,
+    ): Promise<TerminalRefusal | undefined> => {
+      const openTerminal = async (): Promise<TerminalSessionOutcome> =>
+        shell.openTerminal({
+          projectRoot,
+          size,
+          signal: controller.signal,
+          ...(access === undefined ? {} : { access }),
+        });
+      /*
+       * Main's allowlist is not the shell service's: the service learns a project only when that project's agent host
+       * starts, which the pane does not wait for. On the stock Debian guest the pane asked 1.8 s before it did (shell
+       * conformance run 41176389935), and the person saw "This project is not open in Tau" for the project in front of
+       * them. The same admission bound covers that second registry; a refusal for any other reason is final.
+       */
+      let outcome = await openTerminal();
+      while (
+        outcome.status === 'refused' &&
+        outcome.code === 'project-not-admitted' &&
+        now() < settleBy &&
+        !isEnded()
+      ) {
+        // oxlint-disable-next-line no-await-in-loop -- each retry waits for the agent host to register the project.
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, terminalRegistrationRetryMilliseconds);
+        });
+        /* A pane that left, or a bound that passed, during the wait starts nothing more. */
+        if (isEnded() || now() >= settleBy) {
+          break;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- one open attempt at a time.
+        outcome = await openTerminal();
+      }
       if (outcome.status === 'refused') {
-        await refuse(refusal(outcome.code, outcome.message, outcome.recovery));
-        return;
+        return refusal(outcome.code, outcome.message, outcome.recovery);
       }
       if (isEnded()) {
         /* The pane left while the shell started: stop it before anything can reach it. */
         controller.abort();
         await outcome.session[Symbol.asyncDispose]();
-        return;
+        return undefined;
       }
       session = outcome.session;
       abort = controller;
@@ -413,6 +480,7 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
       log('terminal.opened', { granted: access !== undefined });
       // async-iife: bootstrap -- the pump ends the connection itself; nobody awaits a port's output.
       void pump(outcome.session, generation);
+      return undefined;
     };
 
     /** Open a shell once quit holds no starts; a connection that ends while held opens nothing. */

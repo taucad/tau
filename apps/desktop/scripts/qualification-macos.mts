@@ -466,11 +466,27 @@ int main(int argc,char **argv) { if(argc!=2) return 2; pid_t pid=(pid_t)strtol(a
 `,
         );
         command('/usr/bin/xcrun', ['clang', '-Wall', '-Werror', source, '-lsandbox', '-o', helper]);
+        // `ps -o comm=` reports argv[0], which is a bare name ("Tau") for a launch-services start;
+        // codesign needs the kernel's executable path, which only proc_pidpath reports.
+        const pathSource = join(temporary, 'pid-path.c');
+        const pathHelper = join(temporary, 'pid-path');
+        await writeFile(
+          pathSource,
+          `#include <libproc.h>
+#include <stdio.h>
+#include <stdlib.h>
+int main(int argc,char **argv) { if(argc!=2) return 2; int pid=(int)strtol(argv[1],0,10); if(pid<=0) return 3; char path[PROC_PIDPATHINFO_MAXSIZE]; if(proc_pidpath(pid,path,sizeof path)<=0) return 4; printf("%s\\n",path); return 0; }
+`,
+        );
+        command('/usr/bin/xcrun', ['clang', '-Wall', '-Werror', pathSource, '-o', pathHelper]);
         observations = [processes.mainPid, ...processes.rendererPids, ...processes.nativeChildPids].map((pid) => {
           if (!Number.isSafeInteger(pid) || pid <= 0) {
             throw new Error('Invalid measured process PID');
           }
-          const executable = command('/bin/ps', ['-ww', '-p', String(pid), '-o', 'comm=']);
+          const executable = command(pathHelper, [String(pid)]);
+          if (!executable.startsWith('/')) {
+            throw new Error('Measured process executable path is not absolute');
+          }
           const commandLine = command('/bin/ps', ['-ww', '-p', String(pid), '-o', 'args=']);
           const measurements = {
             processFlags: command('/bin/ps', ['-ww', '-p', String(pid), '-o', 'flags=']),

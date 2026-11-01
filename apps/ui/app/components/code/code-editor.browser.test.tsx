@@ -20,6 +20,9 @@ import {
 import { CodeEditor } from '#components/code/code-editor.client.js';
 import { jsonDepthHighlighting } from '#components/code/json-depth-highlighting.js';
 import { EditorDocument } from '#lib/editor-document.js';
+import { EditorDiagnostics } from '#lib/editor-diagnostics.js';
+import type { EditorDiagnostic } from '#lib/editor-diagnostics.js';
+import { storeDiagnostics } from '#components/code/editor-lint.js';
 import { EditorDocumentSession, maxBackgroundDocuments } from '#lib/editor-document-session.js';
 import { clearEditorNavigation, registerEditorView, requestEditorNavigation } from '#lib/editor-navigation-service.js';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
@@ -70,7 +73,15 @@ it.each([
   const sourceDocument = new EditorDocument('main.ts', source);
   const { container } = render(
     <ThemeProvider specifiedTheme={theme} themeAction='/'>
-      <div style={{ position: 'fixed', top: 0, left: 0, width: Math.min(width, 800), height: 300 }}>
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: Math.min(width, 800),
+          height: 300,
+        }}
+      >
         <CodeEditor document={sourceDocument} viewId='pane-one' languageId='typescript' />
       </div>
     </ThemeProvider>,
@@ -124,7 +135,9 @@ it('moves navigation to a renamed path without remounting the editor view', asyn
             paneId: 'rename-pane',
             reveal: (line, column) => {
               const row = mounted.state.doc.line(line);
-              mounted.dispatch({ selection: { anchor: row.from + column - 1 } });
+              mounted.dispatch({
+                selection: { anchor: row.from + column - 1 },
+              });
             },
           });
         }}
@@ -291,7 +304,9 @@ it('opens a real TypeScript standard-library definition as read-only source', as
       </div>,
     );
     await expect.poll(() => view).toBeDefined();
-    view!.dispatch({ selection: { anchor: sourceDocument.text.indexOf('toFixed') } });
+    view!.dispatch({
+      selection: { anchor: sourceDocument.text.indexOf('toFixed') },
+    });
     view!.focus();
     await userEvent.keyboard('{F12}');
     await expect.poll(() => target?.declaration?.text).toContain('toFixed');
@@ -299,7 +314,11 @@ it('opens a real TypeScript standard-library definition as read-only source', as
     const valuePosition = sourceDocument.text.indexOf('typed.count') + 1;
     target = undefined;
     view!.dispatch({ selection: { anchor: valuePosition } });
-    fireEvent.keyDown(view!.contentDOM, { key: 'F12', code: 'F12', altKey: true });
+    fireEvent.keyDown(view!.contentDOM, {
+      key: 'F12',
+      code: 'F12',
+      altKey: true,
+    });
     await expect.poll(() => target?.uri).toBe(sourceDocument.uri);
     target = undefined;
     fireEvent.contextMenu(view!.contentDOM);
@@ -307,7 +326,9 @@ it('opens a real TypeScript standard-library definition as read-only source', as
     await page.getByRole('menuitem', { name: 'Go to Type Definition' }).click();
     await expect.poll(() => target?.uri).toBe(sourceDocument.uri);
     target = undefined;
-    view!.dispatch({ selection: { anchor: sourceDocument.text.indexOf('toFixed') } });
+    view!.dispatch({
+      selection: { anchor: sourceDocument.text.indexOf('toFixed') },
+    });
     await userEvent.keyboard('{F12}');
     await expect.poll(() => target?.declaration?.text).toContain('toFixed');
     // The editor session opens this text as a read-only tab (see use-editor-document-session.test.tsx).
@@ -504,7 +525,12 @@ it('offers VS Code symbol navigation, references, call hierarchy, occurrences an
     await page.screenshot();
 
     // Go to Symbol in Editor filters the outline and moves the cursor.
-    fireEvent.keyDown(editor.contentDOM, { key: 'o', code: 'KeyO', shiftKey: true, ...modifier });
+    fireEvent.keyDown(editor.contentDOM, {
+      key: 'o',
+      code: 'KeyO',
+      shiftKey: true,
+      ...modifier,
+    });
     await expect.poll(pickerItems).toEqual(expect.arrayContaining(['area', 'report']));
     await page.screenshot();
     await userEvent.keyboard('rep');
@@ -514,7 +540,11 @@ it('offers VS Code symbol navigation, references, call hierarchy, occurrences an
 
     // Find All References lists each site with its source line, like VS Code's peek.
     editor.dispatch({ selection: { anchor: source.indexOf('area(3)') } });
-    fireEvent.keyDown(editor.contentDOM, { key: 'F12', code: 'F12', shiftKey: true });
+    fireEvent.keyDown(editor.contentDOM, {
+      key: 'F12',
+      code: 'F12',
+      shiftKey: true,
+    });
     await expect.poll(() => document.querySelector('.cm-picker-title')?.textContent).toBe('2 references');
     expect([...document.querySelectorAll('.cm-picker-preview')].map((preview) => preview.textContent)).toEqual([
       'export function area(width: number): number {',
@@ -527,7 +557,12 @@ it('offers VS Code symbol navigation, references, call hierarchy, occurrences an
     // Call hierarchy shows the caller, and Outgoing switches direction.
     editor.dispatch({ selection: { anchor: source.indexOf('area') } });
     editor.focus();
-    fireEvent.keyDown(editor.contentDOM, { key: 'h', code: 'KeyH', shiftKey: true, altKey: true });
+    fireEvent.keyDown(editor.contentDOM, {
+      key: 'h',
+      code: 'KeyH',
+      shiftKey: true,
+      altKey: true,
+    });
     await expect.poll(pickerItems).toEqual(['report']);
     await page.getByRole('button', { name: 'Outgoing' }).click();
     await expect.poll(() => document.querySelector('.cm-picker-empty')?.textContent).toBe('No calls found');
@@ -720,10 +755,16 @@ it('releases views and TypeScript mirrors across twenty open/switch/close cycles
     { length: 80 },
     (_, index) => `const value${String(index)}: number = ${String(index)};`,
   ).join('\n');
-  content.resolve.mockResolvedValue({ kind: 'text', content: new TextEncoder().encode(source) });
+  content.resolve.mockResolvedValue({
+    kind: 'text',
+    content: new TextEncoder().encode(source),
+  });
   content.onDidContentChange.mockReturnValue(() => undefined);
   content.onDidChangeOutcome.mockReturnValue(() => undefined);
-  const session = new EditorDocumentSession({ contentService: content, projectId: 'browser-lifecycle' });
+  const session = new EditorDocumentSession({
+    contentService: content,
+    projectId: 'browser-lifecycle',
+  });
   const service = await createTypeScriptService({ dynamicTypes: false });
   const opened = vi.spyOn(service.client, 'open');
   const closed = vi.spyOn(service.client, 'close');
@@ -759,7 +800,11 @@ it('releases views and TypeScript mirrors across twenty open/switch/close cycles
       if (split) {
         await service.attach(shared);
       }
-      const extensions = createTypeScriptExtensions({ document: shared, service, navigate: async () => undefined });
+      const extensions = createTypeScriptExtensions({
+        document: shared,
+        service,
+        navigate: async () => undefined,
+      });
       const views: EditorView[] = [];
       // eslint-disable-next-line no-loop-func -- The rendered views close before the next cycle starts.
       const editor = (viewId: string): React.JSX.Element => (
@@ -852,7 +897,15 @@ it.each([Theme.LIGHT, Theme.DARK, Theme.BLACK, Theme.HIGH_CONTRAST])(
       });
       const { container } = render(
         <ThemeProvider specifiedTheme={theme} themeAction='/'>
-          <div style={{ position: 'fixed', top: 0, left: 0, width: 800, height: 480 }}>
+          <div
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              width: 800,
+              height: 480,
+            }}
+          >
             <CodeEditor
               document={sourceDocument}
               viewId={`widgets-${theme}`}
@@ -891,9 +944,17 @@ it.each([Theme.LIGHT, Theme.DARK, Theme.BLACK, Theme.HIGH_CONTRAST])(
       await expect.poll(() => document.querySelector('.cm-typescript-hover')?.textContent).toBeTruthy();
       await page.screenshot();
 
-      view!.dispatch({ selection: { anchor: source.lastIndexOf('greet(') + 'greet('.length } });
+      view!.dispatch({
+        selection: { anchor: source.lastIndexOf('greet(') + 'greet('.length },
+      });
       view!.focus();
-      fireEvent.keyDown(view!.contentDOM, { key: ' ', code: 'Space', metaKey: isMac, ctrlKey: !isMac, shiftKey: true });
+      fireEvent.keyDown(view!.contentDOM, {
+        key: ' ',
+        code: 'Space',
+        metaKey: isMac,
+        ctrlKey: !isMac,
+        shiftKey: true,
+      });
       await expect.poll(() => document.querySelector('.cm-signature-help')?.textContent).toContain('name');
       await page.screenshot();
 
@@ -943,7 +1004,12 @@ it.each(
               () => ({
                 from: 0,
                 options: [
-                  { label: 'rotate', type: 'function', detail: '(angle: number)', info: documentation },
+                  {
+                    label: 'rotate',
+                    type: 'function',
+                    detail: '(angle: number)',
+                    info: documentation,
+                  },
                   { label: 'rotation', type: 'property' },
                   { label: 'Rotation', type: 'class' },
                 ],
@@ -980,7 +1046,11 @@ it.each(
   closeCompletion(view);
   view.dispatch({
     effects: StateEffect.appendConfig.of(
-      showTooltip.of({ pos: 0, above: false, create: () => ({ dom: documentation() }) }),
+      showTooltip.of({
+        pos: 0,
+        above: false,
+        create: () => ({ dom: documentation() }),
+      }),
     ),
   });
   await expect.poll(() => document.querySelector('.cm-tooltip .cm-signature-keyword')).not.toBeNull();
@@ -1061,7 +1131,11 @@ it.each([false, true])('refreshes delayed acquisition without editing (stale res
       return path === '/node_modules/delayed' ? ['index.d.ts'] : [];
     }),
   };
-  const service = await createTypeScriptService({ dynamicTypes: false, staticPackageNames: [], dependencyReader });
+  const service = await createTypeScriptService({
+    dynamicTypes: false,
+    staticPackageNames: [],
+    dependencyReader,
+  });
   let releaseResponse: () => void = () => undefined;
   const responseReady = new Promise<void>((resolve) => {
     releaseResponse = resolve;
@@ -1110,3 +1184,151 @@ it.each([false, true])('refreshes delayed acquisition without editing (stale res
     service.dispose();
   }
 });
+
+/** One-based rows of the lint gutter markers and of the underlined text, as drawn. */
+function diagnosticRows(view: EditorView): {
+  gutter: number[];
+  underline: number[];
+} {
+  const rowAt = (element: Element): number => {
+    const box = element.getBoundingClientRect();
+    const block = view.lineBlockAtHeight(box.top + box.height / 2 - view.documentTop);
+    return view.state.doc.lineAt(block.from).number;
+  };
+  const gutter = [...view.dom.querySelectorAll('.cm-gutter-lint .cm-lint-marker')].map((element) => rowAt(element));
+  const underline = [...view.dom.querySelectorAll('.cm-lintRange')]
+    .map((element) => view.state.doc.lineAt(view.posAtDOM(element)).number)
+    .filter((row, index, rows) => rows.indexOf(row) === index);
+  return {
+    gutter: gutter.toSorted((a, b) => a - b),
+    underline: underline.toSorted((a, b) => a - b),
+  };
+}
+
+const lintSource = [
+  'postD = 13mm',
+  'pinD = 6mm',
+  'pinChamfer = 0.5mm',
+  'needleOD = 10mm',
+  'washerOD = 13mm',
+  'washerID = 6.4mm',
+].join('\n');
+
+/** Store offsets for `name` as the language reports it; `fromLineBreak` starts on the previous line's break like the KCL server. */
+function lintAt(name: string, fromLineBreak = false): EditorDiagnostic {
+  const from = lintSource.indexOf(name);
+  return {
+    from: fromLineBreak ? from - 1 : from,
+    to: from + name.length,
+    message: `${name} should be lowerCamelCase`,
+    severity: 'info',
+  };
+}
+
+it.each([
+  { name: 'KCL', path: 'main.kcl', languageId: 'kcl', owner: 'kcl-lsp' },
+  { name: 'OpenSCAD', path: 'main.scad', languageId: 'openscad', owner: 'openscad-lsp' },
+  { name: 'C#', path: 'Main.cs', languageId: 'csharp', owner: 'csharp-lsp' },
+  { name: 'kernel', path: 'main.kcl', languageId: 'kcl', owner: 'kernel' },
+] as const)(
+  'draws $name diagnostics with gutter markers on their underlined rows',
+  async ({ path, languageId, owner }) => {
+    await page.viewport(1000, 600);
+    const sourceDocument = new EditorDocument(path, lintSource);
+    const diagnostics = new EditorDiagnostics();
+    diagnostics.set(sourceDocument.uri, owner, [lintAt('pinD'), lintAt('needleOD', true), lintAt('washerID', true)]);
+    let view: EditorView | undefined;
+    render(
+      <div className='h-72'>
+        <CodeEditor
+          document={sourceDocument}
+          viewId={`lint-${owner}`}
+          languageId={languageId}
+          diagnostics={diagnostics}
+          extensions={owner === 'kernel' ? [] : storeDiagnostics(diagnostics, sourceDocument, owner)}
+          onMount={(mounted) => {
+            view = mounted;
+          }}
+        />
+      </div>,
+    );
+    await expect.poll(() => view && diagnosticRows(view)).toEqual({ gutter: [2, 4, 6], underline: [2, 4, 6] });
+
+    // Edits move diagnostics with their text, and a re-lint keeps them there until the owner publishes again.
+    view!.dispatch({ changes: { from: 0, insert: '// header\n' } });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 300);
+    });
+    expect(diagnosticRows(view!)).toEqual({
+      gutter: [3, 5, 7],
+      underline: [3, 5, 7],
+    });
+  },
+);
+
+it('shows kernel and language diagnostics together on their own rows', async () => {
+  await page.viewport(1000, 600);
+  const sourceDocument = new EditorDocument('main.kcl', lintSource);
+  const diagnostics = new EditorDiagnostics();
+  let view: EditorView | undefined;
+  render(
+    <div className='h-72'>
+      <CodeEditor
+        document={sourceDocument}
+        viewId='lint-combined'
+        languageId='kcl'
+        diagnostics={diagnostics}
+        extensions={storeDiagnostics(diagnostics, sourceDocument, 'kcl-lsp')}
+        onMount={(mounted) => {
+          view = mounted;
+        }}
+      />
+    </div>,
+  );
+  await expect.poll(() => view).toBeDefined();
+  diagnostics.set(sourceDocument.uri, 'kcl-lsp', [lintAt('needleOD', true)]);
+  diagnostics.set(sourceDocument.uri, 'kernel', [{ ...lintAt('washerOD'), severity: 'error', message: 'kernel' }]);
+  await expect.poll(() => diagnosticRows(view!)).toEqual({ gutter: [4, 5], underline: [4, 5] });
+  view!.dispatch({ changes: { from: lintSource.length, insert: '\nx = 1' } });
+  diagnostics.set(sourceDocument.uri, 'kcl-lsp', [lintAt('pinChamfer', true)]);
+  await expect.poll(() => diagnosticRows(view!)).toEqual({ gutter: [3, 5], underline: [3, 5] });
+});
+
+it('draws real TypeScript diagnostics with gutter markers on their underlined rows', async () => {
+  await page.viewport(1000, 600);
+  const [{ createTypeScriptService }, { createTypeScriptExtensions }] = await Promise.all([
+    import('#lib/typescript-language/typescript-service.js'),
+    import('#lib/typescript-language/create-typescript-extensions.js'),
+  ]);
+  const sourceDocument = new EditorDocument(
+    'main.ts',
+    'const width = 1;\n\nmissing;\nconst height: number = "tall";\n',
+  );
+  const service = await createTypeScriptService({ dynamicTypes: false });
+  let view: EditorView | undefined;
+  try {
+    await service.attach(sourceDocument);
+    render(
+      <div className='h-72'>
+        <CodeEditor
+          document={sourceDocument}
+          viewId='lint-typescript'
+          languageId='typescript'
+          extensions={createTypeScriptExtensions({
+            document: sourceDocument,
+            service,
+            navigate: async () => undefined,
+          })}
+          onMount={(mounted) => {
+            view = mounted;
+          }}
+        />
+      </div>,
+    );
+    await expect
+      .poll(() => view && diagnosticRows(view), { timeout: 30_000 })
+      .toEqual({ gutter: [3, 4], underline: [3, 4] });
+  } finally {
+    service.dispose();
+  }
+}, 60_000);

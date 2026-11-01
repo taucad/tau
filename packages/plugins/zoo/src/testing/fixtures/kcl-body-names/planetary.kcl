@@ -1,0 +1,21 @@
+sun = startSketchOn(XY)
+  |> circle(center = [0, 0], radius = 9)
+  |> extrude(length = 8)
+
+planets = startSketchOn(XY)
+  |> circle(center = [18, 0], radius = 8)
+  |> extrude(length = 8)
+  |> patternCircular3d(instances = 3, axis = [0, 0, 1], center = [0, 0, 0], arcDegrees = 360, rotateDuplicates = true)
+
+ringBlank = startSketchOn(XY)
+  |> circle(center = [0, 0], radius = 35)
+  |> extrude(length = 8)
+ringBore = startSketchOn(XY)
+  |> circle(center = [0, 0], radius = 27)
+  |> extrude(length = 8)
+ring = subtract(ringBlank, tools = [ringBore])
+
+carrier = startSketchOn(XY)
+  |> circle(center = [0, 0], radius = 24)
+  |> extrude(length = 3)
+  |> translate(z = 10)

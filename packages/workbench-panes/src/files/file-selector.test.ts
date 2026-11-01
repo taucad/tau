@@ -33,6 +33,21 @@ describe('createStaticDataSource', () => {
       { name: 'Main.ts', path: 'src/Main.ts', isFolder: false, size: 100 },
     ]);
   });
+
+  it('should also find folders by name when asked to', async () => {
+    const source = createStaticDataSource(
+      [
+        { path: 'src/Main.ts', size: 100 },
+        { path: 'main/README.md', size: 200 },
+      ],
+      { shouldIncludeDirectories: true },
+    );
+
+    expect(await source.searchFiles('main')).toEqual([
+      { name: 'main', path: 'main', isFolder: true, size: undefined },
+      { name: 'Main.ts', path: 'src/Main.ts', isFolder: false, size: 100 },
+    ]);
+  });
 });
 
 describe('useFileBrowser search outcomes', () => {

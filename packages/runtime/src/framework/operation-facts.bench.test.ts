@@ -3,7 +3,8 @@
  *
  * Everything measured here runs only while a client observes, and only after the operation's terminal reply. The
  * bounds of the design (p95 ≤ 1,500 ns per span for the walk; `parameterFacts` p95 ≤ 15 µs at 50 leaves and ≤ 100 µs
- * on the truncated 5,000-leaf sweep; ≤ 2 µs per observation including the join) are reported on stderr and stay
+ * on the truncated 5,000-leaf sweep; ≤ 2 µs per observation including the join; ≤ 100 ns for a kernel's heap hook,
+ * T26) are reported on stderr and stay
  * advisory until calibrated on the runner that enforces them, which then sets `TAU_FACTS_BENCH_GATE=enforce`. A ceiling
  * ten times each bound always blocks, so a pathological regression cannot land.
  */
@@ -21,6 +22,7 @@ const walkBound = 1500;
 const parameterBound = 15_000;
 const sweepBound = 100_000;
 const observationBound = 2000;
+const heapHookBound = 100;
 const hardFactor = 10;
 
 type Tracer = Pick<RuntimeTracer, 'startSpan'>;
@@ -242,5 +244,23 @@ describe('operation facts cost (advisory)', () => {
     observer.workerGone();
     observer.dispose();
     gate('observation incl. join', p95, observationBound);
+  });
+
+  // T26 (FR-03): a kernel's `observedHeapBytes` is one property read of its linear memory, as brep's `HEAPU8` and
+  // the PicoGK browser session's last reply are.
+  it('should read a WebAssembly heap hook within the hook bound', () => {
+    const memory = new WebAssembly.Memory({ initial: 16 });
+    const view = new Uint8Array(memory.buffer);
+    const observedHeapBytes = (): number | undefined => view.byteLength;
+    let sink = 0;
+    const { p95 } = sample(
+      () => {
+        sink += observedHeapBytes() ?? 0;
+      },
+      500,
+      1000,
+    );
+    expect(sink).toBeGreaterThan(0);
+    gate('observedHeapBytes hook', p95, heapHookBound);
   });
 });

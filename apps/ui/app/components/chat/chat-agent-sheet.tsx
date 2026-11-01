@@ -982,7 +982,7 @@ function ModelList({
   };
   const tauGroups = useTauModelGroups(modelId);
   /* F1: pinned models, read and written where the model overrides live (F2). */
-  const { pinnedIds, setPinned } = useModels();
+  const { isPinningEnabled, pinnedIds, setPinned } = useModels();
   const pinOf = (entry: Model): { readonly isOn: boolean; readonly toggle: () => void } => ({
     isOn: pinnedIds.includes(entry.id),
     toggle: () => {
@@ -991,7 +991,7 @@ function ModelList({
   });
   /* F1: Shift+Enter toggles the highlighted model's pin; Enter alone still chooses it (cmdk defers to a prevented key). */
   const onKeyDown = (event: React.KeyboardEvent): void => {
-    if (event.key === 'Enter' && event.shiftKey && agent.kind === 'tau') {
+    if (isPinningEnabled && event.key === 'Enter' && event.shiftKey && agent.kind === 'tau') {
       const highlighted = event.currentTarget.querySelector<HTMLElement>('[cmdk-item][data-selected=true]');
       const entry = tauGroups
         .flatMap((group) => group.items)
@@ -1057,7 +1057,7 @@ function ModelList({
                       name={entry.name}
                       isInUse={isInUse}
                       level={isInUse ? sheetModel.level?.name : undefined}
-                      pinned={pinOf(entry)}
+                      pinned={isPinningEnabled ? pinOf(entry) : undefined}
                     />
                   </CommandItem>
                 );

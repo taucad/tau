@@ -193,20 +193,11 @@ export function planarFaceFrame(oc: Oc, face: TopoDS_Face): Frame | undefined {
     const position = surface.Plane().Position();
     const origin = fromPnt(position.Location());
     const x = fromPnt(position.XDirection());
-    let y = fromPnt(position.YDirection());
-    let z = fromPnt(position.Direction());
+    const y = fromPnt(position.YDirection());
+    // The surface normal is X × Y, which is -Direction() on an indirect (left-handed) placement such as a chamfer's
+    // plane; a reversed face points the other way. Keep the frame right-handed with z outward.
     const reversed = face.Orientation() === oc.TopAbs_Orientation.TopAbs_REVERSED;
-    if (reversed) {
-      z = vec3(-z.x, -z.y, -z.z);
-    }
-
-    // Keep the frame right-handed with z outward.
-    const cz = { x: x.y * y.z - x.z * y.y, y: x.z * y.x - x.x * y.z, z: x.x * y.y - x.y * y.x };
-    if (cz.x * z.x + cz.y * z.y + cz.z * z.z < 0) {
-      y = vec3(-y.x, -y.y, -y.z);
-    }
-
-    return frameFromAxes(origin, x, y);
+    return frameFromAxes(origin, x, reversed ? vec3(-y.x, -y.y, -y.z) : y);
   } finally {
     surface.delete();
   }

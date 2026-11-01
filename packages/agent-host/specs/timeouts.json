@@ -1079,6 +1079,15 @@
       "fixedBy": "outside this charter: main sending the trusted-root allowlist within the terminal port handshake would delete this wait (desktop main/services-broker owner)"
     },
     {
+      "id": "TERMINAL-REGISTRATION-RETRY",
+      "bound": "250 ms retry (terminalRegistrationRetryMilliseconds) of a Terminal start the shell service refuses project-not-admitted, within the same admission bound; the service learns a project only when its agent host is served, which the pane does not wait for. Any other refusal is final, and a connection that ends stops the retry",
+      "site": "apps/desktop/src/tau/services-host.terminal.ts",
+      "token": "setTimeout(resolve, terminalRegistrationRetryMilliseconds)",
+      "class": "Peer",
+      "owner": "desktop-bash-terminal W7",
+      "fixedBy": "outside this charter: registering a project with the shell service when main admits it, rather than when its agent host is served, would delete this wait (desktop services-host owner)"
+    },
+    {
       "id": "TERMINAL-OPEN-TIMEOUT",
       "bound": "30-second bound on a fresh desktop terminal port's open frame; a port that never opens is closed before any shell starts",
       "site": "apps/desktop/src/tau/services-host.terminal.ts",

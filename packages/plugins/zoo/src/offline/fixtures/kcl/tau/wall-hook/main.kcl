@@ -1,0 +1,40 @@
+// Wall-mounted coat hook: back plate with two screw holes and an arm that curls up into a tip.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+// Parameters
+plateHeight = 60
+plateThickness = 5
+hookWidth = 20
+armThickness = 6
+armReach = 40
+bendRadius = 10
+tipHeight = 18
+screwDiameter = 4.5
+screwHeights = [25, 50]
+
+innerBendRadius = bendRadius - armThickness
+
+// Side profile on YZ: sketch x is the distance from the wall, sketch y is height. YZ extrudes along X.
+profile = startSketchOn(YZ)
+  |> startProfile(at = [0, 0])
+  |> xLine(length = armReach - bendRadius, tag = $armUnderside)
+  |> tangentialArc(radius = bendRadius, angle = 90deg)
+  |> yLine(endAbsolute = tipHeight)
+  |> xLine(length = -armThickness, tag = $tipTop)
+  |> yLine(endAbsolute = bendRadius)
+  |> tangentialArc(radius = innerBendRadius, angle = -90deg)
+  |> xLine(endAbsolute = plateThickness, tag = $armTop)
+  |> yLine(endAbsolute = plateHeight)
+  |> xLine(endAbsolute = 0, tag = $plateTop)
+  |> close(tag = $wallFace)
+
+hook = extrude(profile, length = hookWidth, symmetric = true)
+
+// Screw holes through the back plate, along Y (XZ extrudes towards -Y, so go symmetric).
+fn screwHole(@z) {
+  return startSketchOn(XZ)
+    |> circle(center = [0, z], diameter = screwDiameter)
+    |> extrude(length = 4 * plateThickness, symmetric = true)
+}
+
+wallHook = subtract([hook], tools = map(screwHeights, f = screwHole))

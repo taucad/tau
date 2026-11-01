@@ -1,0 +1,31 @@
+// 24-tooth module 2 spur gear with a D-shaped bore for a motor shaft.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0, experimentalFeatures = allow)
+
+// Parameters
+teeth = 24
+gearModule = 2
+pressureAngle = 20deg
+faceWidth = 10
+boreDiameter = 8
+flatDepth = 0.5
+
+// The gear blank from the standard library's involute generator.
+blank = gear::spur(
+  nTeeth = teeth,
+  module = gearModule,
+  pressureAngle = pressureAngle,
+  gearHeight = faceWidth,
+)
+
+// D-shaped bore: a circle with one side cut flat, 1 mm proud of both faces.
+boreRadius = boreDiameter / 2
+flatOffset = boreRadius - flatDepth
+flatHalfChord = sqrt(boreRadius * boreRadius - flatOffset * flatOffset)
+bore = startSketchOn(offsetPlane(XY, offset = -1))
+  |> startProfile(at = [-flatHalfChord, flatOffset])
+  |> xLine(length = 2 * flatHalfChord, tag = $flat)
+  |> arc(interiorAbsolute = [0, -boreRadius], endAbsolute = [-flatHalfChord, flatOffset])
+  |> close()
+  |> extrude(length = faceWidth + 2)
+
+gearWithBore = subtract([blank], tools = [bore])

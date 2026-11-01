@@ -1,0 +1,35 @@
+// Bar pull for 128 mm hole spacing: a 10 mm round bar swept along a U path, with M4 pilot holes in the feet.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+// Parameters
+holeSpacing = 128
+standoff = 30
+barDiameter = 10
+bendRadius = 10
+pilotDiameter = 3.3
+pilotDepth = 10
+
+legLength = standoff - bendRadius
+gripLength = holeSpacing - 2 * bendRadius
+
+// Path on XZ: up the first foot, across the grip, down the second foot.
+path = startSketchOn(XZ)
+  |> startProfile(at = [0, 0])
+  |> yLine(length = legLength)
+  |> tangentialArc(radius = bendRadius, angle = -90deg)
+  |> xLine(length = gripLength)
+  |> tangentialArc(radius = bendRadius, angle = -90deg)
+  |> yLine(length = -legLength)
+
+bar = startSketchOn(XY)
+  |> circle(center = [0, 0], diameter = barDiameter)
+  |> sweep(path = path)
+
+// Pilot holes up into each foot, starting just below the drawer face.
+fn pilot(@x) {
+  return startSketchOn(offsetPlane(XY, offset = -1))
+    |> circle(center = [x, 0], diameter = pilotDiameter)
+    |> extrude(length = pilotDepth + 1)
+}
+
+handle = subtract([bar], tools = [pilot(0), pilot(holeSpacing)])

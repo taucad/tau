@@ -677,7 +677,7 @@ const occurrenceHighlighter = ViewPlugin.fromClass(
   { decorations: (value) => value.decorations },
 );
 
-/** The symbol path at the cursor above the editor; each crumb jumps to its symbol, the last opens the outline. */
+/** The symbol path at the cursor above the editor; each crumb jumps to its symbol. */
 function breadcrumbsPanel(view: EditorView): Panel {
   const { ownerDocument } = view.dom;
   const dom = ownerDocument.createElement('nav');
@@ -695,16 +695,7 @@ function breadcrumbsPanel(view: EditorView): Panel {
     }
     rendered = key;
     dom.replaceChildren();
-    dom.hidden = symbols.length === 0;
-    if (path.length === 0) {
-      const outline = ownerDocument.createElement('button');
-      outline.type = 'button';
-      outline.className = 'cm-breadcrumb';
-      outline.textContent = 'Go to symbol…';
-      outline.addEventListener('click', () => goToSymbolInEditor(view));
-      dom.append(outline);
-      return;
-    }
+    dom.hidden = path.length === 0;
     for (const [index, symbol] of path.entries()) {
       if (index > 0) {
         const separator = ownerDocument.createElement('span');
@@ -717,11 +708,7 @@ function breadcrumbsPanel(view: EditorView): Panel {
       crumb.className = 'cm-breadcrumb';
       crumb.append(renderSymbolIcon(symbol.kind, ownerDocument), symbol.name);
       crumb.addEventListener('click', () => {
-        if (index === path.length - 1) {
-          goToSymbolInEditor(view);
-        } else {
-          moveTo(view, symbol.selectionFrom);
-        }
+        moveTo(view, symbol.selectionFrom);
       });
       dom.append(crumb);
     }

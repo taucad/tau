@@ -1,0 +1,27 @@
+// Equal tee for 20 mm tubing: a run along X and a branch up Z, hollowed so the bores meet.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+// Parameters
+outerDiameter = 26
+boreDiameter = 20
+runLength = 80
+branchHeight = 40
+
+// Outside: the run (YZ extrudes along +X, so extrude it symmetrically) and the branch from the run's axis.
+run = startSketchOn(YZ)
+  |> circle(center = [0, 0], diameter = outerDiameter)
+  |> extrude(length = runLength, symmetric = true)
+branch = startSketchOn(XY)
+  |> circle(center = [0, 0], diameter = outerDiameter)
+  |> extrude(length = branchHeight)
+body = union([run, branch])
+
+// Bores, a little longer than the body so they open cleanly at the ends.
+runBore = startSketchOn(YZ)
+  |> circle(center = [0, 0], diameter = boreDiameter)
+  |> extrude(length = runLength + 2, symmetric = true)
+branchBore = startSketchOn(XY)
+  |> circle(center = [0, 0], diameter = boreDiameter)
+  |> extrude(length = branchHeight + 1)
+
+tee = subtract([body], tools = [runBore, branchBore])

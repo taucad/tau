@@ -1,0 +1,7 @@
+@settings(defaultLengthUnit = in)
+big = startSketchOn(XY)
+  |> circle(center = [0, 0], radius = 3)
+  |> extrude(length = 1)
+small = startSketchOn(XY)
+  |> circle(center = [5, 0], radius = 0.5)
+  |> extrude(length = 2)

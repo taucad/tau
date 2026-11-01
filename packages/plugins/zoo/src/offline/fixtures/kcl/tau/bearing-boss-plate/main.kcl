@@ -1,0 +1,35 @@
+// Base plate with a shaft boss: each feature is sketched on a face of the part.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+// Parameters
+plateLength = 80
+plateWidth = 50
+plateThickness = 10
+bossDiameter = 30
+bossHeight = 15
+boreDiameter = 12
+boreDepth = 20
+holeDiameter = 5.5
+holeSpacing = 60
+
+plate = startSketchOn(XY)
+  |> rectangle(center = [0, 0], width = plateLength, height = plateWidth)
+  |> extrude(length = plateThickness, tagEnd = $plateTop)
+
+// Boss on the plate's top face.
+boss = startSketchOn(plate, face = plateTop)
+  |> circle(center = [0, 0], diameter = bossDiameter)
+  |> extrude(length = bossHeight, tagEnd = $bossTop)
+
+// Bore cut down from the top of the boss.
+bore = startSketchOn(boss, face = bossTop)
+  |> circle(center = [0, 0], diameter = boreDiameter)
+  |> extrude(length = -boreDepth)
+
+// Mounting holes cut down through the plate from its top face.
+mountingHoles = startSketchOn(plate, face = plateTop)
+  |> circle(center = [-holeSpacing / 2, 0], diameter = holeDiameter)
+  |> extrude(length = -plateThickness)
+mountingHoles2 = startSketchOn(plate, face = plateTop)
+  |> circle(center = [holeSpacing / 2, 0], diameter = holeDiameter)
+  |> extrude(length = -plateThickness)

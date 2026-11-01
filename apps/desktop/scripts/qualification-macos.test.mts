@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { parseDesktopArtifactManifest } from '#shared/desktop-release.js';
 /* oxlint-disable no-restricted-imports -- Native driver tests use the actual byte-admission API. */
 import {
+  isMacZipEntryInsideApp,
   macosQualificationPackageSchema,
   createMacosQualificationDriver,
   verifyMacosQualificationArtifact,
@@ -16,6 +17,30 @@ import { QualificationUnavailable } from './qualification-platform-types.mjs';
 import type { MacosCleanHost } from './qualification-evidence.mjs';
 /* oxlint-enable no-restricted-imports */
 const main = async (): Promise<void> => {
+  // Packaging's `ditto --sequesterRsrc` AppleDouble members are admitted only when they mirror Tau.app.
+  for (const entry of [
+    'Tau.app/',
+    'Tau.app/Contents/MacOS/Tau',
+    '__MACOSX/',
+    '__MACOSX/Tau.app/',
+    '__MACOSX/Tau.app/Contents/Resources/ui/client/textures/',
+    '__MACOSX/Tau.app/Contents/Resources/ui/client/textures/._matcap-soft.png',
+  ]) {
+    assert.equal(isMacZipEntryInsideApp(entry), true, entry);
+  }
+  for (const entry of [
+    '',
+    'Other.app/Contents/MacOS/Other',
+    'Tau.app/../escape',
+    'Tau.app/./Contents',
+    '__MACOSX/Other.app/._x',
+    '__MACOSX/Tau.app/Contents/MacOS/Tau',
+    '__MACOSX/Tau.app/../._x',
+    '__MACOSX/._Tau.app',
+    '__MACOSXevil/Tau.app/._x',
+  ]) {
+    assert.equal(isMacZipEntryInsideApp(entry), false, entry);
+  }
   // Exact desktopManifestFields production contract omits channel and false environmentOverrides.
   const packageMetadata = {
     version: '1.0.1',

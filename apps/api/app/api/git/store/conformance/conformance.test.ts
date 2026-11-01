@@ -44,12 +44,15 @@ describe('repository store conformance', () => {
       TAU_S3_CONFORMANCE_SECRET_ACCESS_KEY: 'never-used',
     });
 
-    it.each(['tau-staging-content', 'tau-staging-content-private', 'TAU-Staging-Content-Private'])(
-      'should refuse the %j bucket while parsing the environment, before any credential is used (D32)',
-      (bucket) => {
-        expect(() => conformanceAccountFromEnvironment(environmentFor(bucket))).toThrow(/scratch bucket/u);
-      },
-    );
+    it.each([
+      'tau-staging-content',
+      'tau-staging-content-private',
+      'tau-staging-au-content',
+      'tau-staging-au-content-private',
+      'TAU-Staging-Content-Private',
+    ])('should refuse the %j bucket while parsing the environment, before any credential is used (D32)', (bucket) => {
+      expect(() => conformanceAccountFromEnvironment(environmentFor(bucket))).toThrow(/scratch bucket/u);
+    });
 
     it('should accept a dedicated scratch bucket', () => {
       expect(conformanceAccountFromEnvironment(environmentFor('tau-staging-conformance'))).toMatchObject({

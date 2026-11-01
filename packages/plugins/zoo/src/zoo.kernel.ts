@@ -39,6 +39,7 @@ import {
   createEmptyGltf,
 } from '@taucad/geometry-core';
 import { enrichZooGltfTopology } from '#zoo-gltf-topology.utils.js';
+import type { NamedSolidBounds } from '#zoo-gltf-topology.utils.js';
 
 // =============================================================================
 // Types
@@ -59,15 +60,38 @@ type ZooNativeHandle = {
   kind: 'zoo-live-engine-session';
   hasGeometry: boolean;
   generation: number;
+  /** KCL variable path by engine solid id, naming the bodies in the topology manifest. */
+  solidNamesById?: ReadonlyMap<string, string>;
 };
 
 type ZooExportFormat = keyof typeof zooExportSchemas;
 
-const createZooNativeHandle = (hasGeometry: boolean, generation: number): ZooNativeHandle => ({
+const createZooNativeHandle = (
+  hasGeometry: boolean,
+  generation: number,
+  solidNamesById?: ReadonlyMap<string, string>,
+): ZooNativeHandle => ({
   kind: 'zoo-live-engine-session',
   hasGeometry,
   generation,
+  ...(solidNamesById && { solidNamesById }),
 });
+
+/**
+ * Engine boxes of the scene's named solids, which name the bodies in the topology manifest.
+ */
+const resolveZooNamedSolidBounds = async (
+  utilities: KclUtilities,
+  handle: ZooNativeHandle,
+  signal: AbortSignal | undefined,
+): Promise<NamedSolidBounds[]> => {
+  const names = handle.solidNamesById;
+  if (!names?.size) {
+    return [];
+  }
+  const bounds = await utilities.getSceneSolidBounds(new Set(names.keys()), { signal });
+  return bounds.map(({ id, min, max }) => ({ name: names.get(id)!, min, max }));
+};
 
 const isCurrentZooHandle = (handle: ZooNativeHandle, context: ZooContext): boolean =>
   handle.generation === (context.generation ?? 0) &&
@@ -349,7 +373,9 @@ export const zooKernel = defineKernel({
       // Display GLTF fetch is deferred to render so a BRep-only export
       // skips the engine round-trip. An executed-but-empty scene is discovered
       // at fetch/export time; export's per-format empty guards cover it.
-      return { handle: createZooNativeHandle(true, generation) };
+      return {
+        handle: createZooNativeHandle(true, generation, KclUtilities.collectSolidNames(executionResult.variables)),
+      };
     } catch (error) {
       if (error instanceof KclBuildError) {
         throw error;
@@ -369,13 +395,11 @@ export const zooKernel = defineKernel({
 
     try {
       const utilities = await getKclUtilitiesWithEngine(context);
-      const exportResult = await utilities.exportFromMemory(
-        {
-          type: 'gltf',
-          storage: 'binary',
-        },
-        { signal },
-      );
+      // The box queries share the engine round trip with the export instead of following it.
+      const [exportResult, namedSolidBounds] = await Promise.all([
+        utilities.exportFromMemory({ type: 'gltf', storage: 'binary' }, { signal }),
+        content?.includeTopology ? resolveZooNamedSolidBounds(utilities, handle, signal) : [],
+      ]);
       const gltf = exportResult[0];
       if (!gltf) {
         return { content: asBuffer(createEmptyGlb()) };
@@ -390,7 +414,7 @@ export const zooKernel = defineKernel({
         sceneNameSource: 'external-generated',
       });
       const outputGltf = content?.includeTopology
-        ? await enrichZooGltfTopology(normalizedGltf, { format: 'glb' })
+        ? await enrichZooGltfTopology(normalizedGltf, { format: 'glb', namedSolidBounds })
         : normalizedGltf;
       return { content: asBuffer(outputGltf) };
     } catch (error) {
@@ -485,7 +509,12 @@ export const zooKernel = defineKernel({
             sceneNamePolicy: 'clear-generated',
             sceneNameSource: 'external-generated',
           });
-          const output = content?.includeTopology ? await enrichZooGltfTopology(glb, { format: 'glb' }) : glb;
+          const output = content?.includeTopology
+            ? await enrichZooGltfTopology(glb, {
+                format: 'glb',
+                namedSolidBounds: await resolveZooNamedSolidBounds(utilities, handle, signal),
+              })
+            : glb;
           return { files: [createExportFile('glb', 'model.glb', asBuffer(output))] };
         }
 
@@ -522,7 +551,12 @@ export const zooKernel = defineKernel({
             sceneNamePolicy: 'clear-generated',
             sceneNameSource: 'external-generated',
           });
-          const output = content?.includeTopology ? await enrichZooGltfTopology(gltf, { format: 'gltf' }) : gltf;
+          const output = content?.includeTopology
+            ? await enrichZooGltfTopology(gltf, {
+                format: 'gltf',
+                namedSolidBounds: await resolveZooNamedSolidBounds(utilities, handle, signal),
+              })
+            : gltf;
           return { files: [createExportFile('gltf', 'model.gltf', asBuffer(output))] };
         }
 

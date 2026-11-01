@@ -1,0 +1,57 @@
+// L-shaped mounting bracket for M5 screws, 4 mm stock, with a filleted bend and rounded corners.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+// Parameters
+thickness = 4
+width = 50
+baseDepth = 40
+uprightHeight = 60
+holeDiameter = 5.5
+holeInset = 12.5
+baseHoleX = 22
+uprightHoleZ = 35
+bendFillet = 6
+cornerRadius = 5
+
+// Side profile of the L on XZ: x runs along the base, z up the upright. XZ extrudes towards -Y.
+profile = startSketchOn(XZ)
+  |> startProfile(at = [0, 0])
+  |> xLine(length = baseDepth, tag = $baseUnderside)
+  |> yLine(length = thickness, tag = $baseEnd)
+  |> xLine(endAbsolute = thickness, tag = $baseTop)
+  |> yLine(endAbsolute = uprightHeight, tag = $uprightInside)
+  |> xLine(length = -thickness, tag = $uprightEnd)
+  |> close(tag = $uprightBack)
+
+bracket = extrude(profile, length = width, tagStart = $sideA, tagEnd = $sideB)
+
+// Inside bend: the edge where the top of the base meets the inside of the upright.
+bendRounded = fillet(bracket, radius = bendFillet, tags = [getCommonEdge(faces = [baseTop, uprightInside])])
+
+// Free corners: where each leg's end face meets the two sides.
+cornersRounded = fillet(
+  bendRounded,
+  radius = cornerRadius,
+  tags = [
+    getCommonEdge(faces = [baseEnd, sideA]),
+    getCommonEdge(faces = [baseEnd, sideB]),
+    getCommonEdge(faces = [uprightEnd, sideA]),
+    getCommonEdge(faces = [uprightEnd, sideB])
+  ],
+)
+
+// Screw holes: a cylinder through a leg, started 1 mm outside the part so the cut is clean.
+fn holeTool(@plane, center) {
+  return startSketchOn(offsetPlane(plane, offset = -1))
+    |> circle(center = center, diameter = holeDiameter)
+    |> extrude(length = thickness + 2)
+}
+
+holeTools = [
+  holeTool(XY, center = [baseHoleX, -holeInset]),
+  holeTool(XY, center = [baseHoleX, -(width - holeInset)]),
+  holeTool(YZ, center = [-holeInset, uprightHoleZ]),
+  holeTool(YZ, center = [-(width - holeInset), uprightHoleZ])
+]
+
+finished = subtract([cornersRounded], tools = holeTools)

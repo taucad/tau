@@ -12,10 +12,12 @@
 import type { Frame, Vec3 } from '#offline/offline-math.js';
 import {
   add,
+  cross,
   directionToGlobal,
   dot,
   frameFromAxes,
   globalFrame,
+  length,
   normalize,
   scale,
   sub,
@@ -31,8 +33,10 @@ import type { WirePathSegment } from '#offline/offline-sketch.js';
 import { buildSegment, orientedFaceEdges, pathFaces, regionAtPoint, selectRegion } from '#offline/offline-sketch.js';
 import type { PresetFaces, Profile, SweepResult } from '#offline/offline-sweeps.js';
 import {
+  edgeExtrudeDirection,
   extrudeProfile,
   loftProfiles,
+  moveProfile,
   revolveProfile,
   sweepProfile,
   twistExtrudeProfile,
@@ -40,17 +44,26 @@ import {
 } from '#offline/offline-sweeps.js';
 import {
   algoHistory,
+  closestEdge,
   edgesBetween,
   faceSketchFrame,
   facesOfEdge,
   idForSubShape,
+  noEdgeMatches,
   oppositeEdge,
   rebaseSolid,
   remapIds,
   requireEdge,
   requireFace,
 } from '#offline/offline-topology.js';
-import { childIds, entityCenter, entityShape, sketchFrameOf } from '#offline/offline-transform.js';
+import {
+  childIds,
+  entityCenter,
+  entityShape,
+  rotationTrsf,
+  sketchFrameOf,
+  translationTrsf,
+} from '#offline/offline-transform.js';
 import type {
   ModelingCommand,
   ModelingResponse,
@@ -60,10 +73,11 @@ import type {
 } from '#offline/offline-engine.types.js';
 import { OfflineEngineError, toRadians } from '#offline/offline-engine.types.js';
 import { exportScene } from '#offline/offline-export.js';
+import { randomUuid } from '#binary.utils.js';
 import type { WireOutputFormat } from '#offline/offline-export.js';
 import type { EdgeSpecifier } from '#offline/offline-engine-support.js';
 import { point3, point2, frameFromNormal, unitScale } from '#offline/offline-engine-support.js';
-import { boolean, imprint, cutEdges, shell } from '#offline/offline-engine-booleans.js';
+import { boolean, imprint, cutEdges, deleteFaces, shell } from '#offline/offline-engine-booleans.js';
 import {
   clone,
   patternTransform,
@@ -74,8 +88,22 @@ import {
   mirror3d,
   setObjectTransform,
 } from '#offline/offline-engine-patterns.js';
-import { helixFromParams, helixOnCylinder, helixFromEdge, surfaceBlend } from '#offline/offline-engine-curves.js';
-import { faceIsPlanar, adjacent, measureBoundingBox, sumMass, entityType } from '#offline/offline-engine-queries.js';
+import {
+  commandEdge,
+  helixFromParams,
+  helixOnCylinder,
+  helixFromEdge,
+  surfaceBlend,
+} from '#offline/offline-engine-curves.js';
+import {
+  faceIsPlanar,
+  adjacent,
+  bodyType,
+  measureBoundingBox,
+  sumMass,
+  entityType,
+} from '#offline/offline-engine-queries.js';
+import { importFiles } from '#offline/offline-import.js';
 
 type Handler = (id: string, cmd: ModelingCommand) => Record<string, unknown> | undefined;
 
@@ -166,6 +194,11 @@ export class OfflineEngine {
   public readonly scene = new OfflineScene();
   /** Commands that reached the default handler, for coverage reports. */
   public readonly unhandled = new Map<string, number>();
+  /**
+   * Bodies a boolean consumed. Their ids still resolve to the result for edge and face lookups, but hiding one does
+   * not hide the result, as on Zoo's engine.
+   */
+  public readonly consumedByBoolean = new Set<string>();
   /** Invalid solids found in debug mode (`validate`), in command order. */
   public readonly validationIssues: ValidationIssue[] = [];
   // oxlint-disable-next-line @typescript-eslint/parameter-properties -- erasableSyntaxOnly forbids parameter properties
@@ -294,7 +327,8 @@ export class OfflineEngine {
   /** The sketch frame of a solid's face, using the extrusion direction when the face is a side face. */
   public faceFrame(owner: SolidEntity, faceId: string, face: TopoDS_Face): Frame {
     const sweep = owner.sweeps.find((candidate) => [...candidate.sideFaceByCurve.values()].includes(faceId));
-    return faceSketchFrame(this.oc, face, sweep?.direction);
+    const frame = faceSketchFrame(this.oc, face, sweep?.direction);
+    return this.scene.halfTurnFaces.has(faceId) ? { ...frame, x: scale(frame.x, -1), y: scale(frame.y, -1) } : frame;
   }
 
   public resolveEdgeSpecifier(solid: SolidEntity, spec: EdgeSpecifier): TopoDS_Edge {
@@ -303,7 +337,7 @@ export class OfflineEngine {
     const candidates = edgesBetween(this.oc, sideFaces, endFaces);
     const edge = candidates[spec.index ?? 0] ?? candidates[0];
     if (!edge) {
-      throw new OfflineEngineError('No edge matches the edge reference', 'bad_request');
+      throw new OfflineEngineError(noEdgeMatches, 'bad_request');
     }
 
     return edge;
@@ -423,6 +457,7 @@ export class OfflineEngine {
     return {
       scene_clear_all: () => {
         this.scene.clear();
+        this.consumedByBoolean.clear();
         this.sketchFrame = undefined;
         return undefined;
       },
@@ -436,7 +471,8 @@ export class OfflineEngine {
         return undefined;
       },
       object_visible: (_id, cmd) => {
-        const entity = this.scene.find(cmd['object_id'] as string);
+        const objectId = cmd['object_id'] as string;
+        const entity = this.consumedByBoolean.has(objectId) ? undefined : this.scene.find(objectId);
         if (entity) {
           entity.hidden = Boolean(cmd['hidden']);
         }
@@ -522,6 +558,7 @@ export class OfflineEngine {
       loft: (id, cmd) => this.loft(id, cmd),
       solid3d_get_extrusion_face_info: (_id, cmd) => this.extrusionFaceInfo(cmd),
       solid3d_get_adjacency_info: () => ({ edges: [] }),
+      solid3d_get_body_type: (_id, cmd) => bodyType(this, cmd),
       entity_get_all_child_uuids: (_id, cmd) => ({ entity_ids: childIds(this.scene.get(cmd['entity_id'] as string)) }),
       entity_get_num_children: (_id, cmd) => ({ num: childIds(this.scene.get(cmd['entity_id'] as string)).length }),
       entity_get_child_uuid: (_id, cmd) => ({
@@ -590,6 +627,11 @@ export class OfflineEngine {
         );
         return { edge: found[0] ? this.edgeId(solid, found[0]) : null };
       },
+      closest_edge: (_id, cmd) => {
+        const solid = this.scene.getSolid(cmd['object_id'] as string);
+        const edge = closestEdge(this.oc, solid.shape, point3(cmd['closest_to'] as WirePoint3d));
+        return { edge_id: edge ? this.edgeId(solid, edge) : null };
+      },
       solid3d_get_edge_uuid: (_id, cmd) => {
         const solid = this.scene.getSolid(cmd['object_id'] as string);
         const list = edges(this.oc, solid.shape);
@@ -600,6 +642,7 @@ export class OfflineEngine {
 
         return { edge_id: this.edgeId(solid, edge) };
       },
+      entity_delete_children: (_id, cmd) => deleteFaces(this, cmd),
       solid3d_get_face_uuid: (_id, cmd) => {
         const solid = this.scene.getSolid(cmd['object_id'] as string);
         const face = faces(this.oc, solid.shape)[cmd['face_index'] as number];
@@ -618,6 +661,7 @@ export class OfflineEngine {
       entity_make_helix: (id, cmd) => helixOnCylinder(this, id, cmd),
       entity_make_helix_from_edge: (id, cmd) => helixFromEdge(this, id, cmd),
       surface_blend: (id, cmd) => surfaceBlend(this, id, cmd),
+      solid3d_multi_join: (id, cmd) => this.join(id, cmd['object_ids'] as string[]),
       object_set_material_params_pbr: (_id, cmd) => {
         const solid = this.scene.find(cmd['object_id'] as string);
         if (solid?.kind === 'solid') {
@@ -629,6 +673,8 @@ export class OfflineEngine {
 
         return undefined;
       },
+      // ponytail: answers the `solid3d` filter only, the one Tau sends.
+      scene_get_entity_ids: () => ({ entity_ids: [this.scene.visibleSolids().map((solid) => solid.id)] }),
       bounding_box: (_id, cmd) => measureBoundingBox(this, cmd),
       volume: (_id, cmd) => ({
         volume: sumMass(this, cmd, 'volume') * unitScale(cmd['output_unit'] as string, 3),
@@ -656,6 +702,7 @@ export class OfflineEngine {
         return result;
       },
       export: (_id, cmd) => ({ files: this.export(cmd['format'] as WireOutputFormat) }),
+      import_files: (id, cmd) => importFiles(this, id, cmd),
     };
   }
 
@@ -769,9 +816,18 @@ export class OfflineEngine {
     return { region_mapping: mapping };
   }
 
-  private profileOf(targetId: string, surface = false): Profile {
-    const entity = this.scene.get(targetId);
-    if (surface && entity.kind === 'path') {
+  /**
+   * The profile a sweep moves: a path or region, a body's face, or (for a surface extrude) a body's edge. A face or
+   * edge profile takes the command id, which kcl-lib gives the new body.
+   *
+   * @param targetId - path, region, face or edge id
+   * @param surface - whether the sweep makes a surface body
+   * @param commandId - the sweep command's id
+   * @returns profile
+   */
+  private profileOf(targetId: string, surface = false, commandId = targetId): Profile {
+    const entity = this.scene.find(targetId);
+    if (surface && entity?.kind === 'path') {
       // A surface sweep takes the open curves themselves, not the area they enclose.
       return {
         sourceId: entity.id,
@@ -782,7 +838,7 @@ export class OfflineEngine {
       };
     }
 
-    if (entity.kind === 'region') {
+    if (entity?.kind === 'region') {
       return {
         sourceId: entity.id,
         frame: entity.frame,
@@ -790,10 +846,11 @@ export class OfflineEngine {
         curves: [...entity.curves].map(([id, edge]) => ({ id, edge })),
         firstCurveId: entity.firstCurveId,
         onFace: entity.onFace,
+        surface,
       };
     }
 
-    if (entity.kind === 'path') {
+    if (entity?.kind === 'path') {
       const holes = this.holesOf(entity);
       const arrangement = pathFaces(this.oc, entity, holes);
       const curves: Array<{ id: string; edge: TopoDS_Edge }> = [];
@@ -817,55 +874,124 @@ export class OfflineEngine {
       };
     }
 
-    const owner = this.scene.ownerOf(targetId);
+    const owner = entity ? undefined : this.scene.ownerOf(targetId);
     if (owner?.faces.has(targetId)) {
       const face = requireFace(this.oc, owner, targetId);
       return {
-        sourceId: targetId,
+        sourceId: commandId,
         frame: this.faceFrame(owner, targetId, face),
         faces: [face],
         curves: [],
         onFace: { solidId: owner.id, faceId: targetId },
+        surface,
       };
     }
 
-    throw new OfflineEngineError(`Cannot sweep a ${entity.kind}`, 'bad_request');
+    if (owner) {
+      return this.edgeProfile(owner, requireEdge(this.oc, owner, targetId), commandId);
+    }
+
+    throw new OfflineEngineError(
+      entity ? `Cannot sweep a ${entity.kind}` : `Unknown entity ${targetId}`,
+      'bad_request',
+    );
   }
 
-  private extrude(_id: string, cmd: ModelingCommand): Record<string, unknown> {
-    const profile = this.profileOf(cmd['target'] as string, cmd['body_type'] === 'surface');
+  /**
+   * A body's edge as an open profile, facing the way Zoo extrudes an edge when no direction is given.
+   *
+   * @param owner - the body the edge belongs to
+   * @param edge - edge
+   * @param sourceId - the new body's id
+   * @returns profile
+   */
+  private edgeProfile(owner: SolidEntity, edge: TopoDS_Edge, sourceId: string): Profile {
+    return {
+      sourceId,
+      frame: frameFromNormal(edgeExtrudeDirection(this.oc, owner.shape, edge)),
+      faces: [],
+      curves: [{ id: this.mint(), edge }],
+    };
+  }
+
+  /**
+   * The profile of an extrude-like command: its `target`, or the edge its `target_reference` names.
+   *
+   * @param id - command id
+   * @param cmd - command payload
+   * @returns profile
+   */
+  private commandProfile(id: string, cmd: ModelingCommand): Profile {
+    const reference = cmd['target_reference'] as EdgeSpecifier | undefined;
+    const owner = reference && this.scene.ownerOf(reference.side_faces[0]!);
+    return owner
+      ? this.edgeProfile(owner, this.resolveEdgeSpecifier(owner, reference), id)
+      : this.profileOf(cmd['target'] as string, cmd['body_type'] === 'surface', id);
+  }
+
+  private extrude(id: string, cmd: ModelingCommand): Record<string, unknown> {
+    const profile = this.commandProfile(id, cmd);
     const distance = cmd['distance'] as number;
     const opposite = cmd['opposite'] as 'None' | 'Symmetric' | { Other: number } | undefined;
     let extent = { offset: 0, length: distance };
-    if (opposite === 'Symmetric') {
+    const other = opposite && typeof opposite === 'object' && 'Other' in opposite ? opposite.Other : undefined;
+    if (this.isEdgeProfile(id, profile)) {
+      // Zoo extrudes an edge one way only: `symmetric` changes nothing and a second length adds to the first
+      // (its recorded bounding boxes for surface_extrude_edge_symmetric and _bidirectional).
+      extent.length += other ?? 0;
+    } else if (opposite === 'Symmetric') {
       extent = { offset: -distance / 2, length: distance };
-    } else if (opposite && typeof opposite === 'object' && 'Other' in opposite) {
+    } else if (other !== undefined) {
       // The second length runs the other way from the sketch plane, whichever way the first one goes.
       const sign = distance < 0 ? -1 : 1;
-      extent = { offset: -sign * opposite.Other, length: distance + sign * opposite.Other };
+      extent = { offset: -sign * other, length: distance + sign * other };
     }
 
-    const direction = this.extrudeDirection(
-      profile,
-      cmd['direction'] as { axis?: { direction: WirePoint3d } } | undefined,
-    );
+    const direction = this.extrudeDirection(profile, cmd);
     const result = extrudeProfile(this.oc, profile, direction, extent, cmd['faces'] as PresetFaces, this.mint);
     this.commitSweep(profile, result, { merge: cmd['extrude_method'] !== 'new', cut: distance < 0 });
     return {};
   }
 
-  private extrudeDirection(profile: Profile, direction: { axis?: { direction: WirePoint3d } } | undefined): Vec3 {
+  private extrudeDirection(profile: Profile, cmd: ModelingCommand): Vec3 {
+    const direction = cmd['direction'] as { axis?: { direction: WirePoint3d }; edge?: { id: string } } | undefined;
     if (direction?.axis) {
       return normalize(point3(direction.axis.direction));
     }
 
-    return profile.frame.z;
+    const reference = cmd['direction_reference'] as EdgeSpecifier | undefined;
+    const edge = direction?.edge ? this.anyEdge(direction.edge.id) : reference && this.edgeFromSpecifier(reference);
+    if (!edge) {
+      return profile.frame.z;
+    }
+
+    // An edge named by its faces points the way the last face's boundary runs along it, as Zoo's
+    // surface_extrude_edge_specifier_direction bounding box shows.
+    const face = reference && this.faceById(reference.side_faces.at(-1)!).face;
+    const reversed =
+      face &&
+      edges(this.oc, face)
+        .find((candidate) => candidate.IsSame(edge))
+        ?.Orientation();
+    const along = sub(edgePoint(this.oc, edge, 1).point, edgePoint(this.oc, edge, 0).point);
+    return normalize(scale(along, reversed === this.oc.TopAbs_Orientation.TopAbs_REVERSED ? -1 : 1));
+  }
+
+  /**
+   * Whether a profile is a body's edge, which an extrude turns into a surface.
+   *
+   * @param id - command id
+   * @param profile - the extruded profile
+   * @returns whether it is an edge profile
+   */
+  private isEdgeProfile(id: string, profile: Profile): boolean {
+    return profile.sourceId === id && profile.faces.length === 0;
   }
 
   private extrudeToReference(id: string, cmd: ModelingCommand): Record<string, unknown> {
-    const profile = this.profileOf(cmd['target'] as string);
+    const profile = this.commandProfile(id, cmd);
     const reference = cmd['reference'] as
-      | { entity_reference: { entity_id?: string } }
+      | { entity_reference: { entity_id?: string; entity_reference?: { type: string } & EdgeSpecifier } }
       | { axis: { axis: WirePoint3d; point: WirePoint3d } }
       | { point: { point: WirePoint3d } };
     let target: Vec3;
@@ -873,6 +999,9 @@ export class OfflineEngine {
       target = point3(reference.point.point);
     } else if ('axis' in reference) {
       target = point3(reference.axis.point);
+    } else if (reference.entity_reference.entity_reference?.type === 'edge') {
+      // An `{ sideFaces, endFaces }` target: extrude until the profile reaches the edge's midpoint.
+      target = edgePoint(this.oc, this.edgeFromSpecifier(reference.entity_reference.entity_reference), 0.5).point;
     } else {
       const entity = reference.entity_reference.entity_id
         ? this.scene.find(reference.entity_reference.entity_id)
@@ -883,8 +1012,21 @@ export class OfflineEngine {
       }
     }
 
-    const origin = faceCentroid(this.oc, profile.faces[0]!).center;
-    const distance = dot(sub(target, origin), profile.frame.z);
+    const origin = profile.faces[0]
+      ? faceCentroid(this.oc, profile.faces[0]).center
+      : edgePoint(this.oc, profile.curves[0]!.edge, 0.5).point;
+    let distance = dot(sub(target, origin), profile.frame.z);
+    const planeId = 'entity_reference' in reference ? reference.entity_reference.entity_id : undefined;
+    const plane = planeId === undefined ? undefined : this.scene.find(planeId);
+    if (plane?.kind === 'plane' && this.isEdgeProfile(id, profile)) {
+      // An edge extrudes along its own direction until it meets the plane.
+      const along = dot(profile.frame.z, plane.frame.z);
+      if (Math.abs(along) < 1e-9) {
+        throw new OfflineEngineError('The edge extrudes parallel to the reference plane', 'bad_request');
+      }
+
+      distance = dot(sub(target, origin), plane.frame.z) / along;
+    }
     const result = extrudeProfile(
       this.oc,
       profile,
@@ -893,7 +1035,6 @@ export class OfflineEngine {
       cmd['faces'] as PresetFaces,
       this.mint,
     );
-    void id;
     this.commitSweep(profile, result, { merge: cmd['extrude_method'] !== 'new', cut: distance < 0 });
     return {};
   }
@@ -915,8 +1056,8 @@ export class OfflineEngine {
     return {};
   }
 
-  private revolve(_id: string, cmd: ModelingCommand): Record<string, unknown> {
-    const profile = this.profileOf(cmd['target'] as string);
+  private revolve(id: string, cmd: ModelingCommand): Record<string, unknown> {
+    const profile = this.commandProfile(id, cmd);
     const axisWire = point3(cmd['axis'] as WirePoint3d);
     const originWire = point3(cmd['origin'] as WirePoint3d);
     const axis = cmd['axis_is_2d']
@@ -929,10 +1070,9 @@ export class OfflineEngine {
     return {};
   }
 
-  private revolveAboutEdge(_id: string, cmd: ModelingCommand): Record<string, unknown> {
-    const profile = this.profileOf(cmd['target'] as string);
-    const edgeId = cmd['edge_id'] as string;
-    const edge = this.anyEdge(edgeId);
+  private revolveAboutEdge(id: string, cmd: ModelingCommand): Record<string, unknown> {
+    const profile = this.commandProfile(id, cmd);
+    const edge = commandEdge(this, cmd);
     const start = edgePoint(this.oc, edge, 0);
     const end = edgePoint(this.oc, edge, 1);
     this.revolveWith(
@@ -959,8 +1099,8 @@ export class OfflineEngine {
     this.commitSweep(profile, result, { merge: false, cut: false });
   }
 
-  private sweep(_id: string, cmd: ModelingCommand): Record<string, unknown> {
-    const profile = this.profileOf(cmd['target'] as string);
+  private sweep(id: string, cmd: ModelingCommand): Record<string, unknown> {
+    const profile = this.commandProfile(id, cmd);
     const trajectory = this.scene.get(cmd['trajectory'] as string);
     let spine: TopoDS_Shape;
     if (trajectory.kind === 'curve') {
@@ -980,7 +1120,7 @@ export class OfflineEngine {
 
     const result = sweepProfile(
       this.oc,
-      profile,
+      this.placeOnPath(profile, spine, cmd),
       spine,
       this.mint,
       trajectory.kind === 'curve' ? trajectory.axis : undefined,
@@ -990,16 +1130,51 @@ export class OfflineEngine {
     return {};
   }
 
+  /**
+   * Places a sweep's profile as a version 2 sweep asks: `orient_profile_perpendicular` turns the sketch plane, about
+   * its origin, until its normal runs along the path's start tangent; `translate_profile_to_path` then moves the
+   * sketch plane's origin onto the path's start. Without either flag the profile stays where it was sketched.
+   */
+  private placeOnPath(profile: Profile, spine: TopoDS_Shape, cmd: ModelingCommand): Profile {
+    const translate = cmd['translate_profile_to_path'] === true;
+    const orient = cmd['orient_profile_perpendicular'] === true;
+    if (!translate && !orient) {
+      return profile;
+    }
+
+    const explorer = new this.oc.BRepTools_WireExplorer(this.oc.TopoDS.Wire(spine));
+    const first = explorer.Current();
+    explorer.delete();
+    const reversed = first.Orientation() === this.oc.TopAbs_Orientation.TopAbs_REVERSED;
+    const start = edgePoint(this.oc, first, reversed ? 1 : 0);
+    const tangent = normalize(reversed ? scale(start.tangent, -1) : start.tangent);
+    const { origin, z: normal } = profile.frame;
+    const trsf = new this.oc.gp_Trsf();
+    if (orient) {
+      const axis = cross(normal, tangent);
+      const angle = Math.atan2(length(axis), dot(normal, tangent));
+      if (length(axis) > 1e-12) {
+        trsf.PreMultiply(rotationTrsf(this.oc, origin, axis, angle));
+      } else if (angle > Math.PI / 2) {
+        trsf.PreMultiply(rotationTrsf(this.oc, origin, profile.frame.x, Math.PI));
+      }
+    }
+
+    if (translate) {
+      trsf.PreMultiply(translationTrsf(this.oc, sub(start.point, origin)));
+    }
+
+    return moveProfile(this.oc, profile, trsf);
+  }
+
   private loft(id: string, cmd: ModelingCommand): Record<string, unknown> {
     const sectionIds = cmd['section_ids'] as string[];
-    const profiles = sectionIds.map((sectionId) => this.profileOf(sectionId));
-    const result = loftProfiles(
-      this.oc,
-      profiles,
-      (cmd['v_degree'] as number) <= 1,
-      this.mint,
-      cmd['body_type'] !== 'surface',
-    );
+    const surface = cmd['body_type'] === 'surface';
+    const profiles = sectionIds.map((sectionId) => {
+      const profile = this.profileOf(sectionId);
+      return profile.faces.length > 0 || !surface ? profile : this.profileOf(sectionId, true);
+    });
+    const result = loftProfiles(this.oc, profiles, (cmd['v_degree'] as number) <= 1, this.mint, !surface);
     const solid: SolidEntity = {
       kind: 'solid',
       id,
@@ -1019,6 +1194,35 @@ export class OfflineEngine {
 
     this.scene.add(solid);
     return { solid_id: id };
+  }
+
+  /**
+   * Stitches bodies (surfaces, typically) into one new body with the command id, consuming the inputs.
+   *
+   * @param id - command id; the joined body's id
+   * @param ids - bodies to join
+   * @returns empty response
+   */
+  private join(id: string, ids: string[]): Record<string, unknown> {
+    const [first, ...rest] = ids.map((objectId) => this.scene.getSolid(objectId));
+    const body: SolidEntity = {
+      ...first!,
+      id,
+      faces: new Map(first!.faces),
+      edges: new Map(first!.edges),
+      hidden: false,
+    };
+    for (const other of rest) {
+      this.mergeInto(body, other, false);
+    }
+
+    for (const objectId of ids) {
+      this.scene.remove(objectId);
+      this.scene.aliases.set(objectId, id);
+    }
+
+    this.scene.add(body);
+    return {};
   }
 
   private commitSweep(profile: Profile, result: SweepResult, mode: { merge: boolean; cut: boolean }): void {
@@ -1077,17 +1281,4 @@ export class OfflineEngine {
     this.scene.subShapeOwner.set(id, solid.id);
     return id;
   }
-}
-
-/**
- * A v4 UUID from `crypto.getRandomValues`, which (unlike `crypto.randomUUID`) also exists outside secure contexts.
- *
- * @returns a random UUID string
- */
-function randomUuid(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  bytes[6] = 0x40 + (bytes[6]! % 16);
-  bytes[8] = 0x80 + (bytes[8]! % 64);
-  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }

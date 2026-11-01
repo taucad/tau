@@ -1,0 +1,66 @@
+// Printable enclosure for a 60 x 40 mm PCB: an open box with corner screw bosses, and a lid with a locating lip.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+// Parameters
+innerLength = 70
+innerWidth = 50
+innerDepth = 25
+wall = 2
+bossOuterDiameter = 6
+bossPilotDiameter = 2.5
+bossHeight = 20
+bossInset = 5
+lidThickness = 2
+lipHeight = 3
+lipClearance = 0.2
+lidHoleDiameter = 3.4
+lidOffsetX = 90
+
+outerLength = innerLength + 2 * wall
+outerWidth = innerWidth + 2 * wall
+outerHeight = innerDepth + wall
+bossX = innerLength / 2 - bossInset
+bossY = innerWidth / 2 - bossInset
+bossPositions = [[bossX, bossY], [-bossX, bossY], [-bossX, -bossY], [bossX, -bossY]]
+
+// Box: a solid block shelled from the top face.
+block = startSketchOn(XY)
+  |> rectangle(center = [0, 0], width = outerLength, height = outerWidth)
+  |> extrude(length = outerHeight, tagEnd = $boxTop)
+box = shell(block, faces = [boxTop], thickness = wall)
+
+// A screw boss standing on the floor: a tube with a blind pilot hole.
+fn boss(@position) {
+  return startSketchOn(offsetPlane(XY, offset = wall))
+    |> circle(center = position, diameter = bossOuterDiameter)
+    |> subtract2d(tool = circle(startSketchOn(offsetPlane(XY, offset = wall)), center = position, diameter = bossPilotDiameter))
+    |> extrude(length = bossHeight)
+}
+
+bosses = map(bossPositions, f = boss)
+enclosure = union([box, bosses[0], bosses[1], bosses[2], bosses[3]])
+
+// Lid: a plate with clearance holes over the bosses, and a lip ring on top (it prints upside down).
+lipOuterLength = innerLength - 2 * lipClearance
+lipOuterWidth = innerWidth - 2 * lipClearance
+
+lidHoles = map(bossPositions, f = fn(@position) {
+  return circle(startSketchOn(XY), center = position, diameter = lidHoleDiameter)
+})
+lidPlate = startSketchOn(XY)
+  |> rectangle(center = [0, 0], width = outerLength, height = outerWidth)
+  |> subtract2d(tool = lidHoles)
+  |> extrude(length = lidThickness)
+
+lip = startSketchOn(offsetPlane(XY, offset = lidThickness))
+  |> rectangle(center = [0, 0], width = lipOuterLength, height = lipOuterWidth)
+  |> subtract2d(tool = rectangle(
+       startSketchOn(offsetPlane(XY, offset = lidThickness)),
+       center = [0, 0],
+       width = lipOuterLength - 2 * wall,
+       height = lipOuterWidth - 2 * wall,
+     ))
+  |> extrude(length = lipHeight)
+
+lid = union([lidPlate, lip])
+  |> translate(x = lidOffsetX)

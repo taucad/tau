@@ -6,6 +6,7 @@ import '#components/code/code-editor.css';
 import { renderCompletionIcon } from '#components/code/editor-completion-icon.js';
 import { definitionNavigation, goToDefinition, hasDefinitionProvider } from '#components/code/editor-definition.js';
 import { availableLanguageActions, languageFeatureNavigation } from '#components/code/editor-language-features.js';
+import { storeDiagnostics } from '#components/code/editor-lint.js';
 import type { AvailableLanguageAction } from '#components/code/editor-language-features.js';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { EditorState, Compartment, Prec } from '@codemirror/state';
@@ -36,7 +37,7 @@ import {
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
 import { defaultKeymap, indentWithTab, selectAll, toggleComment } from '@codemirror/commands';
 import { gotoLine, openSearchPanel, searchKeymap, highlightSelectionMatches, search } from '@codemirror/search';
-import { forceLinting, linter, lintGutter, lintKeymap } from '@codemirror/lint';
+import { lintGutter, lintKeymap } from '@codemirror/lint';
 import { cn } from '@taucad/ui/utils/cn';
 import {
   ContextMenu,
@@ -250,7 +251,7 @@ export function CodeEditorView({
           search({ createPanel: createEditorSearchPanel }),
           highlightSelectionMatches(),
           lintGutter(),
-          diagnostics ? linter(() => diagnostics.get(document.uri).get('kernel') ?? [], { delay: 100 }) : [],
+          diagnostics ? storeDiagnostics(diagnostics, document, 'kernel') : [],
           syntaxHighlighting(tauHighlighter),
           tooltips({ parent: overlay, position: 'fixed' }),
           definitionNavigation(),
@@ -350,11 +351,6 @@ export function CodeEditorView({
         applyingExternalRef.current = false;
       }
     });
-    const unsubscribeDiagnostics = diagnostics?.subscribe((event) => {
-      if (event.uri === document.uri && event.owner === 'kernel') {
-        forceLinting(view);
-      }
-    });
     const callback = callbacksRef.current.onMount;
     const dispose = callback?.(view, document.path);
     mountRegistration.current = {
@@ -370,7 +366,6 @@ export function CodeEditorView({
         mountRegistration.current = undefined;
       }
       unsubscribe();
-      unsubscribeDiagnostics?.();
       viewRef.current = undefined;
       view.destroy();
       overlay.remove();

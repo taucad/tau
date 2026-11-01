@@ -1,0 +1,24 @@
+// M3 hex standoff and a round spacer, side by side.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+// Parameters
+hexAcrossFlats = 5.5
+standoffLength = 10
+tapDiameter = 2.5
+spacerOuterDiameter = 6
+spacerInnerDiameter = 3.2
+spacerLength = 5
+spacerX = 15
+
+// Hex standoff: polygon's radius is to the corners when inscribed, so convert from across-flats.
+hexCornerRadius = hexAcrossFlats / sqrt(3)
+standoff = startSketchOn(XY)
+  |> polygon(radius = hexCornerRadius, numSides = 6, center = [0, 0], inscribed = true)
+  |> subtract2d(tool = circle(startSketchOn(XY), center = [0, 0], diameter = tapDiameter))
+  |> extrude(length = standoffLength)
+
+// Round spacer.
+spacer = startSketchOn(XY)
+  |> circle(center = [spacerX, 0], diameter = spacerOuterDiameter)
+  |> subtract2d(tool = circle(startSketchOn(XY), center = [spacerX, 0], diameter = spacerInnerDiameter))
+  |> extrude(length = spacerLength)

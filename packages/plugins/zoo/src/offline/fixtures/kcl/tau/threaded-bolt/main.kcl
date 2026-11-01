@@ -1,0 +1,42 @@
+// M10 hex bolt with a cosmetic helical thread.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+// Parameters
+acrossFlats = 16
+headHeight = 6.4
+shankLength = 30
+coreDiameter = 8.4
+pitch = 1.5
+threadTurns = 18
+threadBase = 1.3
+threadDepth = 0.75
+
+coreRadius = coreDiameter / 2
+
+// Hex head below the XY plane.
+head = startSketchOn(offsetPlane(XY, offset = -headHeight))
+  |> polygon(radius = acrossFlats / sqrt(3), numSides = 6, center = [0, 0], inscribed = true)
+  |> extrude(length = headHeight)
+
+// Core of the shank.
+core = startSketchOn(XY)
+  |> circle(center = [0, 0], radius = coreRadius)
+  |> extrude(length = shankLength)
+
+// Thread: a triangle on the core surface, swept along a helix that starts at its base.
+threadPath = helix(
+  revolutions = threadTurns,
+  angleStart = 0deg,
+  ccw = true,
+  radius = coreRadius,
+  length = threadTurns * pitch,
+  axis = Z,
+)
+threadProfile = startSketchOn(XZ)
+  |> startProfile(at = [coreRadius - 0.05, -threadBase / 2])
+  |> line(endAbsolute = [coreRadius + threadDepth, 0])
+  |> line(endAbsolute = [coreRadius - 0.05, threadBase / 2])
+  |> close()
+thread = sweep(threadProfile, path = threadPath)
+
+bolt = union([head, core, thread])

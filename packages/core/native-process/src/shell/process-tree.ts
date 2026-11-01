@@ -42,8 +42,11 @@ const linuxTable = async (): Promise<readonly ProcessRow[]> => {
   return rows.filter((row) => row !== undefined);
 };
 
-/** Maximum duration of a process-table snapshot. Milliseconds. */
-const tableTimeout = 1000;
+/**
+ * Maximum duration of a process-table snapshot. A macOS `ps -A` on a loaded runner with eight sandboxed launches took
+ * over a second (MAC-X S04, run 41339625314: `ps` killed at 1000 ms refused a launch). Milliseconds.
+ */
+const tableTimeout = 2500;
 
 /**
  * Bound on one observation through the shared table. Reads are coalesced, so a caller that arrives just after a read

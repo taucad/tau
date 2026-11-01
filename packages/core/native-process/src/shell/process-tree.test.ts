@@ -147,13 +147,13 @@ describe('terminateOwnedProcesses', () => {
     vi.useFakeTimers();
     const kill = vi.spyOn(process, 'kill').mockReturnValue(true);
     try {
-      /* Each read takes 700 ms, inside the 1000 ms per-read bound; a queued caller waits 1400 ms in all. */
+      /* Each read takes 2000 ms, inside the 2500 ms per-read bound; a queued caller waits 4000 ms in all. */
       const shared = coalesceReads(
         async () =>
           new Promise<readonly ProcessRow[]>((resolve) => {
             setTimeout(() => {
               resolve([]);
-            }, 700);
+            }, 2000);
           }),
       );
       const running = shared();
@@ -164,7 +164,7 @@ describe('terminateOwnedProcesses', () => {
         table: shared,
       });
       const settled = expect(termination).resolves.toStrictEqual([]);
-      await vi.advanceTimersByTimeAsync(3000);
+      await vi.advanceTimersByTimeAsync(8000);
       await settled;
       await expect(running).resolves.toStrictEqual([]);
     } finally {
@@ -238,8 +238,8 @@ describe('trackDescendants', () => {
       await vi.advanceTimersByTimeAsync(750);
       expect(reads).toBe(1);
       const stopped = tracker.stop();
-      /* The hung read is bounded at two read budgets (2000 ms), since a shared read may queue behind another. */
-      await vi.advanceTimersByTimeAsync(1500);
+      /* The hung read is bounded at two read budgets (5000 ms), since a shared read may queue behind another. */
+      await vi.advanceTimersByTimeAsync(4500);
       await stopped;
       expect(vi.getTimerCount()).toBe(0);
     } finally {

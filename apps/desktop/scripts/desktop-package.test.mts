@@ -318,13 +318,16 @@ assert.equal(nodePtySpawnHelper(runtimePlatformPackages['win32-x64'].nodePtyNati
     await mkdir(dirname(helper), { recursive: true });
     await writeFile(helper, 'fixture', { mode: 0o644 });
     await markNodePtySpawnHelperExecutable(stagedPty, native);
-    assert.equal(statSync(helper).mode.toString(8).slice(-3), '755');
+    /* Windows has no POSIX execute bit (it reports 0666), and macOS packages are staged on a macOS host only. */
+    if (process.platform !== 'win32') {
+      assert.equal(statSync(helper).mode.toString(8).slice(-3), '755');
+    }
     await markNodePtySpawnHelperExecutable(stagedPty, runtimePlatformPackages['linux-x64'].nodePtyNative);
   } finally {
     await rm(stagedPty, { recursive: true, force: true });
   }
 }
-console.log('✓ the staged macOS node-pty spawn-helper is made executable');
+console.log('✓ the staged macOS node-pty spawn-helper is made executable on a POSIX host');
 
 /* The licence gate precedes every archive the script writes. */
 const packageSource = readFileSync(new URL('package-desktop.mts', import.meta.url), 'utf8');

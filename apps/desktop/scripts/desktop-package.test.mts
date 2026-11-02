@@ -318,7 +318,7 @@ assert.equal(nodePtySpawnHelper(runtimePlatformPackages['win32-x64'].nodePtyNati
     await mkdir(dirname(helper), { recursive: true });
     await writeFile(helper, 'fixture', { mode: 0o644 });
     await markNodePtySpawnHelperExecutable(stagedPty, native);
-    assert.equal(statSync(helper).mode & 0o777, 0o755);
+    assert.equal(statSync(helper).mode.toString(8).slice(-3), '755');
     await markNodePtySpawnHelperExecutable(stagedPty, runtimePlatformPackages['linux-x64'].nodePtyNative);
   } finally {
     await rm(stagedPty, { recursive: true, force: true });

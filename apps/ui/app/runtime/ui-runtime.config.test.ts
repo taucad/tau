@@ -167,9 +167,6 @@ describe('createUiRuntimeConfig', () => {
 
     expect(kernelOptions('replicad')).toMatchObject({ previewTriangleBudget: 400_000 });
     expect(kernelOptions('opencascade')).toMatchObject({ previewTriangleBudget: 400_000 });
-    expect(resolvedRuntime.middleware.find(({ id }) => id === 'displaySimplification')).toMatchObject({
-      options: { maxTriangles: 400_000 },
-    });
     expect(kernelOptions('picovoxel')).toMatchObject({ recycleHeapBytes: 512 * 2 ** 20 });
   });
 

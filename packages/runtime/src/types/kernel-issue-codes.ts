@@ -26,6 +26,8 @@ export const kernelIssueCodeValues = [
   'INVALID_REFERENCE',
   'RESOURCE_LIMIT',
   'TESSELLATION_DOWNGRADED',
+  // Retired: nothing produces it since the display simplification middleware was removed. It stays so stored
+  // chat transcripts and results that carry it still validate against this closed list.
   'DISPLAY_SIMPLIFIED',
   'METADATA_CONFLICT',
   'SEMANTICS_UNRESOLVED',

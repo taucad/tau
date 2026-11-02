@@ -124,9 +124,7 @@ const shapes: ReadonlyArray<Readonly<{ name: string; root: string; run: (tracer:
       wrap(tracer, 'kernel.mesh', () => {
         wrap(tracer, 'middleware.wrap(GeometryCache)', () => {
           wrap(tracer, 'middleware.wrap(GltfEdgeDetection)', () => {
-            wrap(tracer, 'middleware.wrap(DisplaySimplification)', () => {
-              tracer.startSpan('kernel.mesh-compute').end();
-            });
+            tracer.startSpan('kernel.mesh-compute').end();
           });
         });
       });

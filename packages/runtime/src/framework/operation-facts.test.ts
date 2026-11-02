@@ -92,11 +92,7 @@ const chains = {
     {
       name: 'kernel.mesh',
       self: 1,
-      children: [
-        wrap('GeometryCache', 2, [
-          wrap('GltfEdgeDetection', 3, [wrap('DisplaySimplification', 4, [{ name: 'kernel.mesh-compute', self: 5 }])]),
-        ]),
-      ],
+      children: [wrap('GeometryCache', 2, [wrap('GltfEdgeDetection', 3, [{ name: 'kernel.mesh-compute', self: 5 }])])],
     },
   ],
   export: [
@@ -149,10 +145,10 @@ describe('workerFactsFromEntries on the real chains', () => {
     const facts = workerFactsFromEntries(entries, rootSpanId);
     expect(facts.phases).toEqual({ mesh: 6 });
     expect(facts.middleware).toEqual({
-      total: 9,
-      slowestId: 'DisplaySimplification',
-      slowest: 4,
-      ran: ['DisplaySimplification', 'GltfEdgeDetection', 'GeometryCache'],
+      total: 5,
+      slowestId: 'GltfEdgeDetection',
+      slowest: 3,
+      ran: ['GltfEdgeDetection', 'GeometryCache'],
     });
   });
 

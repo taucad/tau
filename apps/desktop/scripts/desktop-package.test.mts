@@ -297,7 +297,7 @@ assert.deepEqual(
 );
 console.log('✓ node-pty ships its runtime and only the target addon, without sources, build tree or symbols');
 
-/* node-pty 1.1.0 publishes `spawn-helper` mode 0644; the macOS fork path execs it, so staging must set the bit. */
+/* The node-pty 1.1.0 package publishes `spawn-helper` mode 0644; the macOS fork path execs it, so staging must set the bit. */
 assert.equal(
   nodePtySpawnHelper(runtimePlatformPackages['darwin-arm64'].nodePtyNative),
   'prebuilds/darwin-arm64/spawn-helper',

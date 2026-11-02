@@ -27,6 +27,7 @@ import {
   desktopManifestFields,
   desktopPackageChannel,
   keepsNodePtyPath,
+  markNodePtySpawnHelperExecutable,
   nodePtySpawnHelper,
   packagePathPayloads,
   runtimeAsarOptions,
@@ -308,6 +309,21 @@ assert.equal(
 );
 assert.equal(nodePtySpawnHelper(runtimePlatformPackages['linux-x64'].nodePtyNative), undefined);
 assert.equal(nodePtySpawnHelper(runtimePlatformPackages['win32-x64'].nodePtyNative), undefined);
+{
+  /* Stage a 0644 helper as node-pty publishes it, then check the bit staging sets. */
+  const stagedPty = await mkdtemp(join(fixtureParent, 'node-pty-'));
+  try {
+    const native = runtimePlatformPackages['darwin-arm64'].nodePtyNative;
+    const helper = join(stagedPty, 'prebuilds/darwin-arm64/spawn-helper');
+    await mkdir(dirname(helper), { recursive: true });
+    await writeFile(helper, 'fixture', { mode: 0o644 });
+    await markNodePtySpawnHelperExecutable(stagedPty, native);
+    assert.equal(statSync(helper).mode & 0o777, 0o755);
+    await markNodePtySpawnHelperExecutable(stagedPty, runtimePlatformPackages['linux-x64'].nodePtyNative);
+  } finally {
+    await rm(stagedPty, { recursive: true, force: true });
+  }
+}
 console.log('✓ the staged macOS node-pty spawn-helper is made executable');
 
 /* The licence gate precedes every archive the script writes. */

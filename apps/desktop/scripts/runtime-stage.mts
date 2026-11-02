@@ -323,6 +323,21 @@ export const nodePtySpawnHelper = (native: string | undefined): string | undefin
   native?.startsWith('prebuilds/darwin-') === true ? `${native}/spawn-helper` : undefined;
 
 /**
+ * Make a staged node-pty's macOS `spawn-helper` executable; a no-op on targets without one.
+ * @param nodePtyRoot - The staged node-pty directory.
+ * @param native - The target's addon directory (`RuntimePlatformPackages.nodePtyNative`).
+ */
+export const markNodePtySpawnHelperExecutable = async (
+  nodePtyRoot: string,
+  native: string | undefined,
+): Promise<void> => {
+  const helper = nodePtySpawnHelper(native);
+  if (helper !== undefined) {
+    await chmod(resolve(nodePtyRoot, helper), 0o755);
+  }
+};
+
+/**
  * Stage the built main/preload bundles, every runtime package and the app manifest into `stageRoot`.
  * @param options - The desktop root, the staging directory, the resolved packages, any dependencies
  *   the caller already staged (listed first in the staged manifest) and any extra manifest fields.
@@ -383,12 +398,9 @@ export const stageRuntimePackages = async (
     copyRuntimePackage('nanoraster', packages.nanoraster.source),
     copyTree(packages.nodePty.source, resolve(stageRoot, 'node_modules/node-pty'), (path) =>
       keepsNodePtyPath(relative(packages.nodePty.source, path), platform.nodePtyNative),
-    ).then(async () => {
-      const helper = nodePtySpawnHelper(platform.nodePtyNative);
-      if (helper !== undefined) {
-        await chmod(resolve(stageRoot, 'node_modules/node-pty', helper), 0o755);
-      }
-    }),
+    ).then(async () =>
+      markNodePtySpawnHelperExecutable(resolve(stageRoot, 'node_modules/node-pty'), platform.nodePtyNative),
+    ),
     copyRuntimePackage(platform.nanoraster, packages.nanorasterPlatform),
     writeFile(
       resolve(stageRoot, 'package.json'),

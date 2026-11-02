@@ -6,6 +6,7 @@ import type { Completion } from '@codemirror/autocomplete';
 import type * as LSP from 'vscode-languageserver-protocol';
 import { openscadBuiltinsUri } from '@taucad/openscad-language/protocol';
 import { goToDefinitionAt } from '#components/code/editor-definition.js';
+import { availableLanguageActions, languageFeatures } from '#components/code/editor-language-features.js';
 import { EditorDocument } from '#lib/editor-document.js';
 import { EditorDiagnostics } from '#lib/editor-diagnostics.js';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
@@ -18,6 +19,7 @@ import {
 } from '#lib/openscad-language/openscad-codemirror.js';
 import type { OpenscadClient } from '#lib/openscad-language/openscad-codemirror.js';
 
+type FileEntry = NonNullable<Awaited<ReturnType<EditorLanguageEnvironment['treeService']['getEntry']>>>;
 type Call = { method: string; params: unknown };
 type Apply = Exclude<Completion['apply'], string | undefined>;
 type Info = Exclude<Completion['info'], string | undefined>;
@@ -259,5 +261,132 @@ describe('OpenSCAD workspace edits', () => {
         new Map([['file:///main.scad', { version: 4, text: 'cube' }]]),
       ),
     ).rejects.toThrow('stale document version');
+  });
+});
+
+describe('OpenSCAD editor commands', () => {
+  const range = (line: number, from: number, to: number): LSP.Range => ({
+    start: { line, character: from },
+    end: { line, character: to },
+  });
+
+  it('offers every command the server supports in the context menu, like the other languages', () => {
+    const document = new EditorDocument('main.scad', 'cube(1);');
+    const { client } = scriptedClient();
+    const view = viewOf(
+      document.text,
+      openscadExtensions({ client, document, environment: environmentWith(), isDisposed: () => false }),
+    );
+    expect(availableLanguageActions(view.state).map((action) => action.label)).toEqual([
+      'Find All References',
+      'Show Call Hierarchy',
+      'Go to Symbol in Editor…',
+      'Go to Symbol in Workspace…',
+      'Rename Symbol',
+      'Format Document',
+      'Quick Fix…',
+      'Trigger Parameter Hints',
+    ]);
+  });
+
+  it('formats the document through the server with the editor indentation', async () => {
+    const text = 'module m() {\n      cube();\n}\n';
+    const document = new EditorDocument('main.scad', text);
+    const { client, requests } = scriptedClient(
+      new Map<string, (params: unknown) => unknown>([
+        ['textDocument/formatting', () => [{ range: range(1, 0, 6), newText: '  ' }]],
+      ]),
+    );
+    const session = mock<EditorLanguageEnvironment['session']>();
+    session.acquire.mockResolvedValue(document);
+    session.get.mockReturnValue(document);
+    session.apply.mockImplementation((_path, change) => document.apply(change));
+    const environment = environmentWith({
+      session,
+      treeService: mock<EditorLanguageEnvironment['treeService']>({
+        subscribeTree: () => () => undefined,
+        getEntry: vi.fn(async () => mock<FileEntry>({ type: 'file', provenance: undefined })),
+      }),
+    });
+    const view = viewOf(text, openscadExtensions({ client, document, environment, isDisposed: () => false }));
+    await view.state.facet(languageFeatures).format?.(view);
+    expect(requests.at(-1)).toEqual({
+      method: 'textDocument/formatting',
+      params: { textDocument: { uri: document.uri }, options: { tabSize: 2, insertSpaces: true } },
+    });
+    expect(document.text).toBe('module m() {\n  cube();\n}\n');
+  });
+
+  it('lists references, symbols and calls with their file, line and source preview', async () => {
+    const text = 'module plate() {\n  cube(1);\n}\nplate();\n';
+    const document = new EditorDocument('main.scad', text);
+    const navigate = vi.fn();
+    const { client } = scriptedClient(
+      new Map<string, (params: unknown) => unknown>([
+        [
+          'textDocument/references',
+          () => [
+            { uri: document.uri, range: range(0, 7, 12) },
+            { uri: document.uri, range: range(3, 0, 5) },
+          ],
+        ],
+        [
+          'textDocument/documentSymbol',
+          () => [{ name: 'plate', kind: 2, range: range(0, 0, 16), selectionRange: range(0, 7, 12), children: [] }],
+        ],
+        [
+          'textDocument/documentHighlight',
+          () => [
+            { range: range(0, 7, 12), kind: 3 },
+            { range: range(3, 0, 5), kind: 2 },
+          ],
+        ],
+        [
+          'textDocument/prepareCallHierarchy',
+          () => [
+            { name: 'plate', kind: 2, uri: document.uri, range: range(0, 0, 16), selectionRange: range(0, 7, 12) },
+          ],
+        ],
+        [
+          'callHierarchy/outgoingCalls',
+          () => [
+            {
+              to: {
+                name: 'cube',
+                kind: 2,
+                uri: openscadBuiltinsUri,
+                range: range(1, 0, 9),
+                selectionRange: range(1, 7, 11),
+              },
+              fromRanges: [range(1, 2, 6)],
+            },
+          ],
+        ],
+        ['tau/declarationSource', () => ({ text: 'module sphere() {}\nmodule cube(size) {}\n' })],
+      ]),
+    );
+    const view = viewOf(
+      text,
+      openscadExtensions({ client, document, environment: environmentWith({ navigate }), isDisposed: () => false }),
+    );
+    const features = view.state.facet(languageFeatures);
+    const found = (await features.references?.(view, 8)) ?? [];
+    expect(found.map(({ label, detail, preview }) => ({ label, detail, preview }))).toEqual([
+      { label: 'main.scad:1', detail: '', preview: 'module plate() {' },
+      { label: 'main.scad:4', detail: '', preview: 'plate();' },
+    ]);
+    await found[1]?.open();
+    expect(navigate).toHaveBeenCalledWith({ uri: document.uri, line: 4, column: 1 });
+    expect(await features.documentSymbols?.(view)).toEqual([
+      { name: 'plate', kind: 'module', detail: undefined, from: 0, to: 16, selectionFrom: 7, children: [] },
+    ]);
+    expect(await features.occurrences?.(view, 8)).toEqual([
+      { from: 7, to: 12, kind: 'write' },
+      { from: 30, to: 35, kind: 'read' },
+    ]);
+    const calls = (await features.callHierarchy?.(view, 8, 'outgoing')) ?? [];
+    expect(calls.map(({ label, kind, detail, preview }) => ({ label, kind, detail, preview }))).toEqual([
+      { label: 'cube', kind: 'module', detail: 'builtins.scad:2', preview: 'module cube(size) {}' },
+    ]);
   });
 });

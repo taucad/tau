@@ -8,7 +8,7 @@
  * Exit codes: n/a (library module).
  */
 
-import { cp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -313,6 +313,16 @@ export const keepsNodePtyPath = (relativePath: string, native: string | undefine
 };
 
 /**
+ * The `spawn-helper` node-pty's macOS fork path executes, relative to node-pty's root, or nothing on other targets.
+ * node-pty 1.1.0 publishes it mode 0644 and only a source build sets the bit, so staging must make it executable
+ * before signing: without the bit every Terminal launch fails `posix_spawnp` with EACCES.
+ * @param native - The target's addon directory (`RuntimePlatformPackages.nodePtyNative`).
+ * @returns The helper's path, or undefined when the target has no fork helper.
+ */
+export const nodePtySpawnHelper = (native: string | undefined): string | undefined =>
+  native?.startsWith('prebuilds/darwin-') === true ? `${native}/spawn-helper` : undefined;
+
+/**
  * Stage the built main/preload bundles, every runtime package and the app manifest into `stageRoot`.
  * @param options - The desktop root, the staging directory, the resolved packages, any dependencies
  *   the caller already staged (listed first in the staged manifest) and any extra manifest fields.
@@ -373,7 +383,12 @@ export const stageRuntimePackages = async (
     copyRuntimePackage('nanoraster', packages.nanoraster.source),
     copyTree(packages.nodePty.source, resolve(stageRoot, 'node_modules/node-pty'), (path) =>
       keepsNodePtyPath(relative(packages.nodePty.source, path), platform.nodePtyNative),
-    ),
+    ).then(async () => {
+      const helper = nodePtySpawnHelper(platform.nodePtyNative);
+      if (helper !== undefined) {
+        await chmod(resolve(stageRoot, 'node_modules/node-pty', helper), 0o755);
+      }
+    }),
     copyRuntimePackage(platform.nanoraster, packages.nanorasterPlatform),
     writeFile(
       resolve(stageRoot, 'package.json'),

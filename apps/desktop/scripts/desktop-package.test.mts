@@ -27,6 +27,7 @@ import {
   desktopManifestFields,
   desktopPackageChannel,
   keepsNodePtyPath,
+  nodePtySpawnHelper,
   packagePathPayloads,
   runtimeAsarOptions,
   runtimePlatformPackages,
@@ -295,6 +296,19 @@ assert.deepEqual(
   [false, true],
 );
 console.log('✓ node-pty ships its runtime and only the target addon, without sources, build tree or symbols');
+
+/* node-pty 1.1.0 publishes `spawn-helper` mode 0644; the macOS fork path execs it, so staging must set the bit. */
+assert.equal(
+  nodePtySpawnHelper(runtimePlatformPackages['darwin-arm64'].nodePtyNative),
+  'prebuilds/darwin-arm64/spawn-helper',
+);
+assert.equal(
+  nodePtySpawnHelper(runtimePlatformPackages['darwin-x64'].nodePtyNative),
+  'prebuilds/darwin-x64/spawn-helper',
+);
+assert.equal(nodePtySpawnHelper(runtimePlatformPackages['linux-x64'].nodePtyNative), undefined);
+assert.equal(nodePtySpawnHelper(runtimePlatformPackages['win32-x64'].nodePtyNative), undefined);
+console.log('✓ the staged macOS node-pty spawn-helper is made executable');
 
 /* The licence gate precedes every archive the script writes. */
 const packageSource = readFileSync(new URL('package-desktop.mts', import.meta.url), 'utf8');

@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { KernelIssue } from '@taucad/runtime/types';
 
 import { summarizeRenderedModel } from '#runtime/model-summary.js';
 import type { ModelAdmissionLimits } from '#runtime/model-summary.js';
@@ -60,7 +59,6 @@ describe('summarizeRenderedModel', () => {
           { componentType: 5125, type: 'SCALAR', count: 6 },
         ],
       }),
-      issues: [],
     });
 
     // The Y-up metres of glTF become the model's Z-up millimetres: x = 1000 X, y = -1000 Z, z = 1000 Y.
@@ -91,7 +89,6 @@ describe('summarizeRenderedModel', () => {
         meshes: [{ primitives: [{ attributes: { POSITION: 0 }, mode: 5 }] }],
         accessors: [{ componentType: 5126, type: 'VEC3', count: 5, min: [0, 0, 0], max: [0.02, 0.01, 0.005] }],
       }),
-      issues: [],
     });
 
     // The scaled, quarter-turned box spans X -0.02..0, Y 0..0.04, Z 0..0.01; the shifted copy Z -0.1..-0.095.
@@ -119,7 +116,6 @@ describe('summarizeRenderedModel', () => {
           { componentType: 5125, type: 'SCALAR', count: 6 },
         ],
       }),
-      issues: [],
     });
 
     // Each occurrence decodes the four shared vertices once and draws both primitives: 1 + 2 triangles.
@@ -135,7 +131,6 @@ describe('summarizeRenderedModel', () => {
           { componentType: 5121, normalized: true, type: 'VEC3', count: 3, min: [0, 0, 0], max: [255, 51, 255] },
         ],
       }),
-      issues: [],
     });
 
     expect(summary?.bounds).toEqual({
@@ -154,7 +149,6 @@ describe('summarizeRenderedModel', () => {
         meshes: [triangleMesh(0)],
         accessors: [{ componentType: 5126, type: 'VEC3', count: 3_000_192, min: [0, 0, 0], max: [0.1, 0.1, 0.1] }],
       }),
-      issues: [],
       admissionLimits,
     });
 
@@ -178,7 +172,6 @@ describe('summarizeRenderedModel', () => {
           { componentType: 5125, type: 'SCALAR', count: 213_138 },
         ],
       }),
-      issues: [],
       admissionLimits: async () => engineLimits,
     });
 
@@ -199,7 +192,6 @@ describe('summarizeRenderedModel', () => {
           meshes: [triangleMesh(0)],
           accessors: [{ componentType: 5126, type: 'VEC3', count, min: [0, 0, 0], max: [0.1, 0.1, 0.1] }],
         }),
-        issues: [],
         tessellation: adaptivity === undefined ? {} : { adaptivity },
         admissionLimits: async () => engineLimits,
       });
@@ -220,36 +212,6 @@ describe('summarizeRenderedModel', () => {
     );
   });
 
-  it('should estimate admission from the mesh a display simplification started from', async () => {
-    const simplified: KernelIssue = {
-      message: 'The display mesh had 2000000 triangles, over the preview budget.',
-      code: 'DISPLAY_SIMPLIFIED',
-      type: 'kernel',
-      severity: 'warning',
-      details: { producer: 'displaySimplification', from: 2_000_000, to: 500_000, maxErrorMm: 0.25 },
-    };
-    const summary = await summarizeRenderedModel({
-      artifact: glbArtifact({
-        nodes: [{ mesh: 0 }],
-        meshes: [triangleMesh(0, 1)],
-        accessors: [
-          { componentType: 5126, type: 'VEC3', count: 250_000, min: [0, 0, 0], max: [0.1, 0.1, 0.1] },
-          { componentType: 5125, type: 'SCALAR', count: 1_500_000 },
-        ],
-      }),
-      issues: [simplified],
-      admissionLimits: async () => engineLimits,
-    });
-
-    expect(summary).toMatchObject({ triangles: 500_000, vertices: 250_000 });
-    expect(summary?.admission).toEqual({
-      triangles: { estimated: 2_000_000, limit: 4_000_000 },
-      vertices: { estimated: 1_000_000, limit: 2_000_000 },
-      subjectBytes: { estimated: 144_000_000, limit: 67_108_864 },
-      warning: `A whole-model GeoSpec loadModel of this model is estimated to exceed the engine's admission limits (subject bytes about 144000000, limit 67108864). The engine refuses such a load, so its claims would be not decided at this capacity, not failed. ${estimateCaveat}`,
-    });
-  });
-
   it('should leave the box out when the default scene draws no triangles', async () => {
     const summary = await summarizeRenderedModel({
       artifact: glbArtifact({
@@ -258,7 +220,6 @@ describe('summarizeRenderedModel', () => {
         meshes: [{ primitives: [{ attributes: { POSITION: 0 }, mode: 1 }] }],
         accessors: [{ componentType: 5126, type: 'VEC3', count: 2, min: [0, 0, 0], max: [1, 1, 1] }],
       }),
-      issues: [],
     });
 
     expect(summary).toEqual({ componentCount: 0, triangles: 0, vertices: 0 });
@@ -273,21 +234,18 @@ describe('summarizeRenderedModel', () => {
     await expect(
       summarizeRenderedModel({
         artifact: { mimeType: 'image/svg+xml', content: '<svg/>' },
-        issues: [],
         admissionLimits,
       }),
     ).resolves.toBeUndefined();
     await expect(
       summarizeRenderedModel({
         artifact: { mimeType: 'model/gltf-binary', content: header },
-        issues: [],
         admissionLimits,
       }),
     ).resolves.toBeUndefined();
     await expect(
       summarizeRenderedModel({
         artifact: { mimeType: 'model/gltf-binary', content: unreadable },
-        issues: [],
         admissionLimits,
       }),
     ).resolves.toBeUndefined();

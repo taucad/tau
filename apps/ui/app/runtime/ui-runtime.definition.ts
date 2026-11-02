@@ -7,13 +7,7 @@ import { gltf } from '@taucad/gltf';
 import { image } from '@taucad/image';
 import { jscad } from '@taucad/jscad';
 import { manifold } from '@taucad/manifold';
-import {
-  displaySimplification,
-  geometryCache,
-  gltfEdgeDetection,
-  parameterFileResolver,
-  parameterUnits,
-} from '@taucad/middleware';
+import { geometryCache, gltfEdgeDetection, parameterFileResolver, parameterUnits } from '@taucad/middleware';
 import { opencascade } from '@taucad/opencascade';
 import { picogk } from '@taucad/picogk/browser';
 import { picovoxel } from '@taucad/picovoxel';
@@ -122,7 +116,6 @@ const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptio
     parameterUnits(),
     geometryCache(),
     gltfEdgeDetection(),
-    displaySimplification(config.memoryConstrained ? { maxTriangles: constrainedPreviewTriangleBudget } : undefined),
   ],
 });
 

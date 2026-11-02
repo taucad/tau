@@ -64,7 +64,6 @@ const knownMiddleware: ReadonlySet<string> = new Set([
   'ParameterFileResolver',
   'GeometryCache',
   'GltfEdgeDetection',
-  'DisplaySimplification',
 ]);
 
 const wrapPrefix = 'middleware.wrap(';

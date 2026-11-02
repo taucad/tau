@@ -130,7 +130,12 @@ describe('reportModelMechanism', () => {
 
   it('should report a declared mechanism the writer dropped, with each diagnostic path once', () => {
     const issues = [
-      { code: 'DISPLAY_SIMPLIFIED', severity: 'info', type: 'kernel', message: 'Unrelated.' } satisfies KernelIssue,
+      {
+        code: 'TESSELLATION_DOWNGRADED',
+        severity: 'info',
+        type: 'kernel',
+        message: 'Unrelated.',
+      } satisfies KernelIssue,
       mechanismIssue('UNKNOWN_JOINT', '/couplings/0/joint', 'Coupling names unknown joint "ring".'),
       mechanismIssue('UNKNOWN_JOINT', '/couplings/0/joint', 'Coupling names unknown joint "ring".'),
     ];

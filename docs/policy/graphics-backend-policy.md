@@ -3,7 +3,7 @@ title: 'Graphics Backend Policy'
 description: 'Dual WebGL/WebGPU Three.js rendering, portable shaders, resource ownership, interaction, backend evidence, and kernel mesh resolution'
 status: active
 created: '2026-05-07'
-updated: '2026-10-26'
+updated: '2026-11-02'
 related:
   - docs/policy/compatibility-policy.md
   - docs/research/viewer-webgpu-selector-removal.md
@@ -178,17 +178,17 @@ INCORRECT (a `VALIDATION_ERROR`):
 
 Every render reports its effective resolution on the result's `tessellation`: triangles, vertices and elapsed time; tolerance-meshed kernels add the requested form, the effective `linearTolerance` and `angularTolerance` and the downgrade steps; voxel kernels add `voxelSize`, `activeVoxels` and `memoryBytes`. A kernel that changes mesh output reports it here.
 
-A memory-constrained device is a coarse-pointer or `navigator.deviceMemory` ≤ 4 GB one (`isMemoryConstrainedDevice` in `apps/ui`); the host passes the smaller budget as the kernels' `previewTriangleBudget` and the `displaySimplification` middleware's `maxTriangles`.
+A memory-constrained device is a coarse-pointer or `navigator.deviceMemory` ≤ 4 GB one (`isMemoryConstrainedDevice` in `apps/ui`); the host passes the smaller budget as the kernels' `previewTriangleBudget`.
 
 **Why**: the viewer's edge detection, BVH and GPU upload all scale with triangles, so an unbounded preview stalls the session, while a silently coarsened export is a manufacturing defect. On a phone, 2,000,000 preview triangles cost about 230 MiB in the viewer and over 1 GiB with Section armed.
 
-### 17. Keep a voxel model's grid; simplify only its picture
+### 17. Keep a voxel model's grid; lighten only its display mesh
 
 In voxel kernels (PicoVoxel, PicoGK) the voxel size is the model (ruling R2). No lane of the harness changes `voxelSize`; it is a model parameter, never a tessellation option, and iteration goes through per-call `parameters`. Choose it from the thinnest feature, about one third of the thinnest wall or strut: field evaluation time scales with 1/h³, and memory and triangles with 1/h².
 
-A voxel render over the preview budget is delivered through the `displaySimplification` middleware: meshoptimizer simplification with crease vertices locked and a maximum deviation of half a voxel (0.5 × `voxelSize`), reported as `DISPLAY_SIMPLIFIED` with the triangle counts before and after. Simplification touches preview and capture artifacts only; exports and GeoSpec subjects keep their exact bytes. A voxel report without `voxelSize` is not simplified, because the bound is unknown; PicoGK previews are in that case today.
+A voxel view lightens its display mesh in the kernel, through OpenVDB mesh adaptivity: an unset view `meshAdaptivity` resolves to 0.25 (Balanced) where the kernel can mesh adaptively (PicoVoxel's default `fast` lane, a PicoGK runtime that meshes adaptively), and the tessellation report carries `adaptivity` when the delivered mesh is adaptive. Exports and GeoSpec subjects mesh uniformly unless the caller asks otherwise. No host middleware simplifies a delivered mesh (display simplification was removed on 2026-11-02); a voxel preview still over the budget is delivered as produced, and `meshAdaptivity` or a coarser per-call `voxelSize` lightens it.
 
-**Why**: coarsening the grid changes the part (thin walls vanish, volumes move, tests flip), while a simplified display mesh changes only the picture, within half a voxel.
+**Why**: coarsening the grid changes the part (thin walls vanish, volumes move, tests flip), while adaptive meshing changes only the picture. Meshing coarser at the source is cheaper than simplifying a finished mesh, which delayed the first preview more than it saved downstream.
 
 ## Ownership
 
@@ -201,5 +201,5 @@ A voxel render over the preview budget is delivered through the `displaySimplifi
 - Graphics state: `packages/viewer/src/machines/graphics.machine.ts`
 - Tessellation vocabulary, presets and budgets: `packages/core/occt/src/occt-schemas.ts`, `packages/core/occt/src/occt-tessellation.ts`
 - Kernel-settings pane: `packages/viewer/src/cad/kernel-settings.tsx`
-- Voxel display simplification: `packages/plugins/middleware/src/display-simplification.middleware.ts`
+- Voxel view adaptivity: `packages/plugins/picovoxel/src/picovoxel-meshing.ts`, `packages/plugins/picogk/src/picogk-render.schemas.ts`
 - Tessellation report on `evaluate_model`: `libs/chat/src/schemas/tools/evaluate-model.tool.schema.ts`

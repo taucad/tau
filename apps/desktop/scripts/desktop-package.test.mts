@@ -27,6 +27,8 @@ import {
   desktopManifestFields,
   desktopPackageChannel,
   keepsNodePtyPath,
+  markNodePtySpawnHelperExecutable,
+  nodePtySpawnHelper,
   packagePathPayloads,
   runtimeAsarOptions,
   runtimePlatformPackages,
@@ -295,6 +297,37 @@ assert.deepEqual(
   [false, true],
 );
 console.log('✓ node-pty ships its runtime and only the target addon, without sources, build tree or symbols');
+
+/* The node-pty 1.1.0 package publishes `spawn-helper` mode 0644; the macOS fork path execs it, so staging must set the bit. */
+assert.equal(
+  nodePtySpawnHelper(runtimePlatformPackages['darwin-arm64'].nodePtyNative),
+  'prebuilds/darwin-arm64/spawn-helper',
+);
+assert.equal(
+  nodePtySpawnHelper(runtimePlatformPackages['darwin-x64'].nodePtyNative),
+  'prebuilds/darwin-x64/spawn-helper',
+);
+assert.equal(nodePtySpawnHelper(runtimePlatformPackages['linux-x64'].nodePtyNative), undefined);
+assert.equal(nodePtySpawnHelper(runtimePlatformPackages['win32-x64'].nodePtyNative), undefined);
+{
+  /* Stage a 0644 helper as node-pty publishes it, then check the bit staging sets. */
+  const stagedPty = await mkdtemp(join(fixtureParent, 'node-pty-'));
+  try {
+    const native = runtimePlatformPackages['darwin-arm64'].nodePtyNative;
+    const helper = join(stagedPty, 'prebuilds/darwin-arm64/spawn-helper');
+    await mkdir(dirname(helper), { recursive: true });
+    await writeFile(helper, 'fixture', { mode: 0o644 });
+    await markNodePtySpawnHelperExecutable(stagedPty, native);
+    /* Windows has no POSIX execute bit (it reports 0666), and macOS packages are staged on a macOS host only. */
+    if (process.platform !== 'win32') {
+      assert.equal(statSync(helper).mode.toString(8).slice(-3), '755');
+    }
+    await markNodePtySpawnHelperExecutable(stagedPty, runtimePlatformPackages['linux-x64'].nodePtyNative);
+  } finally {
+    await rm(stagedPty, { recursive: true, force: true });
+  }
+}
+console.log('✓ the staged macOS node-pty spawn-helper is made executable on a POSIX host');
 
 /* The licence gate precedes every archive the script writes. */
 const packageSource = readFileSync(new URL('package-desktop.mts', import.meta.url), 'utf8');

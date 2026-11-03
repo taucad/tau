@@ -99,15 +99,19 @@ describe('responsive dropdown menu', () => {
     expect(drawer).not.toHaveClass('w-48');
   });
 
-  it('should sit above the phone sidebar sheet (z-100) it opens from, overlay included', async () => {
+  it('should open on the shared overlay layer, after the surface it opens from, overlay included', async () => {
     const user = userEvent.setup();
     render(onPhone(<ProjectMenu />));
+    const trigger = screen.getByRole('button', { name: 'More actions for Bracket' });
 
-    await user.click(screen.getByRole('button', { name: 'More actions for Bracket' }));
+    await user.click(trigger);
 
+    // Overlays share z-50 and stack by open order, so the drawer paints over the sheet it opens from.
     const drawer = await screen.findByRole('dialog', { name: 'Bracket' });
-    expect(drawer).toHaveClass('z-110');
-    expect(document.querySelector('[data-slot=drawer-overlay]')).toHaveClass('z-110');
+    const overlay = document.querySelector('[data-slot=drawer-overlay]');
+    expect(drawer).toHaveClass('z-50');
+    expect(overlay).toHaveClass('z-50');
+    expect(trigger.compareDocumentPosition(drawer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('should run an item’s onSelect and close the drawer', async () => {

@@ -292,8 +292,7 @@ function DropdownMenuContent({
 }
 
 /**
- * A responsive menu's drawer: its title and a circular Close, then the items as touch rows. It sits above the phone
- * sidebar sheet (z-100), the surface most of these menus open from.
+ * A responsive menu's drawer: its title and a circular Close, then the items as touch rows.
  */
 function DropdownMenuDrawerContent({
   title,
@@ -308,8 +307,6 @@ function DropdownMenuDrawerContent({
   return (
     <DrawerContent
       aria-describedby={undefined}
-      className='z-110'
-      overlayClassName='z-110'
       onCloseAutoFocus={(event) => {
         onCloseAutoFocus?.(event);
         if (!event.defaultPrevented) {

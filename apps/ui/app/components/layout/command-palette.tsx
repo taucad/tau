@@ -422,7 +422,7 @@ type CommandPaletteMobileProperties = CommandPaletteTriggerProperties & {
 
 /**
  * The phone trigger: a Search icon at the end of the sidebar sheet header, opening the palette as a
- * full-height sheet with the field focused. The sheet sits above the sidebar sheet (z-100) it opens from.
+ * full-height sheet with the field focused.
  */
 function CommandPaletteMobile({
   isOpen,
@@ -443,8 +443,7 @@ function CommandPaletteMobile({
             </Button>
           </DrawerTrigger>
         </TooltipTrigger>
-        {/* Above the sidebar sheet (z-100) this button sits in. */}
-        <TooltipContent className='z-110'>
+        <TooltipContent>
           Search{' '}
           <KeyShortcut className='ml-1' variant='tooltip'>
             {formattedKeyCombination}
@@ -455,7 +454,7 @@ function CommandPaletteMobile({
         data-slot='command-palette-sheet'
         className={cn(
           // Below the status bar with a sliver of page above, so its rounded top reads as a drawer like the others.
-          'z-110 h-[calc(100dvh-env(safe-area-inset-top)-var(--spacing)*3)]',
+          'h-[calc(100dvh-env(safe-area-inset-top)-var(--spacing)*3)]',
           'data-[vaul-drawer-direction=bottom]:mt-0 data-[vaul-drawer-direction=bottom]:max-h-[calc(100dvh-env(safe-area-inset-top)-var(--spacing)*3)]',
         )}
       >

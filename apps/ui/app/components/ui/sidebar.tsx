@@ -161,8 +161,7 @@ const SidebarTrigger = ({
           <span className='sr-only'>{label}</span>
         </Button>
       </TooltipTrigger>
-      {/* On phones the trigger also sits in the sidebar sheet (z-100); its tooltip must clear the sheet. */}
-      <TooltipContent className={cn(isMobile && 'z-110')}>
+      <TooltipContent>
         {isMobile ? label : 'Sidebar'}{' '}
         <KeyShortcut className='ml-1' variant='tooltip'>
           {formatKeyCombination(sidebarToggleKeyCombo, platform)}

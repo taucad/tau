@@ -123,15 +123,12 @@ describe('sidebar search trigger', () => {
         close.focus();
       });
       expect(await screen.findByRole('tooltip')).toHaveTextContent(/^Close sidebar/);
-      // Tooltips in the sheet must clear its z-100 (Radix copies the content's z-index to its popper wrapper).
-      expect(document.querySelector('[data-slot=tooltip-content]')).toHaveClass('z-110');
       act(() => {
         controls[2]!.focus();
       });
       await waitFor(() => {
         expect(screen.getByRole('tooltip')).toHaveTextContent(/^Search/);
       });
-      expect(document.querySelector('[data-slot=tooltip-content]')).toHaveClass('z-110');
       expect(controls).toEqual([close, within(header).getByRole('link', { name: 'Home' }), search]);
       // The icon-lg size: a 40px header target, matching the 40px close and Home controls beside it.
       expect(search).toHaveClass('size-10');
@@ -156,7 +153,6 @@ describe('sidebar search trigger', () => {
         'h-[calc(100dvh-env(safe-area-inset-top)-var(--spacing)*3)]',
         'data-[vaul-drawer-direction=bottom]:max-h-[calc(100dvh-env(safe-area-inset-top)-var(--spacing)*3)]',
         'data-[vaul-drawer-direction=bottom]:rounded-t-(--drawer-radius)',
-        'z-110',
       );
       expect(palette).not.toHaveClass('data-[vaul-drawer-direction=bottom]:rounded-none');
       const field = within(palette).getByPlaceholderText('Search projects, chats…');

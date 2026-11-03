@@ -161,7 +161,7 @@ describe('NavUser', () => {
     expect(screen.queryByText('About Tau')).not.toBeInTheDocument();
   });
 
-  /* A phone opens the sidebar as a sheet (z-100) the dropdown would sit behind; the Help menu opens in a drawer there. */
+  /* On a phone the Help menu opens in a drawer. */
   it('should open Help in a drawer titled Help on a phone', () => {
     render(<NavUser />, { wrapper: MemoryRouter });
 

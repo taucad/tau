@@ -2,6 +2,7 @@
 
 import { Color, DoubleSide, Vector2 } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
+import { gltfSurfacePolygonOffset } from '#graphics/three/materials/gltf-surface-depth-bias.js';
 import {
   abs,
   add,
@@ -135,8 +136,11 @@ export function createInfiniteGridNodeMaterial(
     transparent: true,
     depthWrite: false,
     polygonOffset: true,
-    polygonOffsetFactor: -1,
-    polygonOffsetUnits: -1,
+    // A part face lying on the grid plane is pushed back by the edge-separation bias: half a
+    // stroke plus half a pixel of slope per device pixel ratio, and two depth steps. The grid
+    // must sit behind that face, not print over it; this margin holds up to a pixel ratio of 6.
+    polygonOffsetFactor: gltfSurfacePolygonOffset.webgpu.polygonOffsetFactor - 3,
+    polygonOffsetUnits: gltfSurfacePolygonOffset.webgpu.polygonOffsetUnits - 1,
   });
 
   material.lights = false;

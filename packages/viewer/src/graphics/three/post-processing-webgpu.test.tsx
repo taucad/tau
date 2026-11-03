@@ -368,7 +368,8 @@ vi.mock('#graphics/three/fxaa.js', () => ({ createViewportFxaa: mocks.fxaa }));
 vi.mock('three/addons/tsl/display/GTAONode.js', () => ({ ao: mocks.ao }));
 vi.mock('#graphics/three/ao-normal.js', () => ({
   encodeAoNormal: (normal: unknown) => normal,
-  sampleAoNormal: (encoded: unknown) => encoded,
+  loadAoNormal: (encoded: unknown) => encoded,
+  aoTexel: (_input: unknown, uv: unknown) => uv,
 }));
 vi.mock('#graphics/three/ao-denoise.js', () => ({ createAoDenoise: mocks.denoise }));
 vi.mock('#graphics/three/gtao-depth-camera.js', () => ({
@@ -770,7 +771,8 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     expect(mocks.pass).toHaveBeenCalledWith(mocks.scene, mocks.perspectiveCamera, { samples: 0 });
     expect(mocks.antialiasTargetOptions).toHaveBeenCalledTimes(1);
     expect(mocks.fxaa).toHaveBeenCalledOnce();
-    expect(mocks.denoise.mock.results[0]!.value.upsample).not.toHaveBeenCalled();
+    // Bilinear reconstruction smeared contact shading across silhouettes; reconstruct per surface.
+    expect(mocks.denoise.mock.results[0]!.value.upsample).toHaveBeenCalledOnce();
     expect(mocks.aoNodes[0]!.scale.value).toBeGreaterThan(0);
     mocks.getFrame()?.(mocks.state, 1 / 60);
     expect(mocks.updateAoCamera).toHaveBeenCalled();
@@ -815,7 +817,7 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     const composed = mocks.outputQuads.find((quad) => !isBeautyOnly(quad));
     expect(composed?.material.fragmentNode).toMatchObject({
       aoOnly: [
-        { condition: { intensityAbove: 0 }, ifTrue: { kind: 'filtered-ao-r' }, ifFalse: 1 },
+        { condition: { intensityAbove: 0 }, ifTrue: { kind: 'denoised-ao-r' }, ifFalse: 1 },
         { kind: 'scene-alpha' },
       ],
     });
@@ -919,7 +921,7 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     expect(composed?.material.fragmentNode).toMatchObject({
       beauty: { kind: 'display-composed-color', color: { kind: 'composed-color' } },
       aoOnly: [
-        { condition: { intensityAbove: 0 }, ifTrue: { kind: 'filtered-ao-r' }, ifFalse: 1 },
+        { condition: { intensityAbove: 0 }, ifTrue: { kind: 'denoised-ao-r' }, ifFalse: 1 },
         { kind: 'scene-alpha' },
       ],
     });

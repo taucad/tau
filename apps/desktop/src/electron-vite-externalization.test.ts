@@ -171,6 +171,23 @@ describe('electron-vite main externalization', () => {
     }
   }, 60_000);
 
+  it('bundles every workspace dependency into the ASAR', async () => {
+    const { isExternal } = await resolveProcessExternals();
+    const manifest = JSON.parse(readFileSync(join(appRoot, 'package.json'), 'utf8')) as {
+      readonly dependencies?: Readonly<Record<string, string>>;
+    };
+    /* The packaged app ships no workspace `node_modules`, so a workspace package left external is missing at run
+     * time: `@taucad/agent-observability` killed the packaged services host at boot (2026-11-03). */
+    const workspace = Object.entries(manifest.dependencies ?? {})
+      .filter(([, version]) => version.startsWith('workspace:'))
+      .map(([name]) => name);
+    expect(workspace).toContain('@taucad/agent-observability');
+    for (const id of workspace) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- one resolved config, cheap predicate
+      expect([id, await isExternal(id)]).toEqual([id, false]);
+    }
+  }, 60_000);
+
   it('should bundle the browser contract and validator into the preload', async () => {
     const { isExternal } = await resolveProcessExternals('preload');
     expect(await isExternal('@taucad/types/browser')).toBe(false);

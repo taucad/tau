@@ -26,7 +26,7 @@ permissions:
 env:
   # The reviewed PicoVoxel builder, the same commit `picogk-browser-archive.yml` qualifies. `uses:`
   # cannot read a variable, so the archive call below repeats it.
-  PICOVOXEL_REF: 8d316e12d48c45bac9850f14d2c8e877e66d1163
+  PICOVOXEL_REF: dd846c480f96cae17e3087a2a7bad9c26765e47d
   PACKAGE_VERSION: 0.2.1
 jobs:
   key:
@@ -56,9 +56,9 @@ jobs:
   archive:
     needs: key
     if: needs.key.outputs.hit != 'true' && !inputs.package-from-run
-    uses: taucad/picovoxel/.github/workflows/dotnet-archive.yml@8d316e12d48c45bac9850f14d2c8e877e66d1163
+    uses: taucad/picovoxel/.github/workflows/dotnet-archive.yml@dd846c480f96cae17e3087a2a7bad9c26765e47d
     with:
-      picovoxel-ref: 8d316e12d48c45bac9850f14d2c8e877e66d1163
+      picovoxel-ref: dd846c480f96cae17e3087a2a7bad9c26765e47d
       adapter-path: packages/plugins/picogk/dotnet/native
 
   host:

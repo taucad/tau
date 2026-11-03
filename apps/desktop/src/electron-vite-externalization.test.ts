@@ -149,6 +149,8 @@ describe('electron-vite main externalization', () => {
   it('bundles workspace sources and keeps host/runtime imports external', async () => {
     const { isExternal, include } = await resolveProcessExternals();
     expect(include).toContain('geospec-engine');
+    /* Inlined into a main chunk, node-pty looks for `pty.node` beside the chunk and every Terminal is unavailable. */
+    expect(include).toContain('node-pty');
     for (const id of [
       '@taucad/events',
       '@taucad/types/browser',
@@ -169,6 +171,23 @@ describe('electron-vite main externalization', () => {
     }
   }, 60_000);
 
+  it('bundles every workspace dependency into the ASAR', async () => {
+    const { isExternal } = await resolveProcessExternals();
+    const manifest = JSON.parse(readFileSync(join(appRoot, 'package.json'), 'utf8')) as {
+      readonly dependencies?: Readonly<Record<string, string>>;
+    };
+    /* The packaged app ships no workspace `node_modules`, so a workspace package left external is missing at run
+     * time: `@taucad/agent-observability` killed the packaged services host at boot (2026-11-03). */
+    const workspace = Object.entries(manifest.dependencies ?? {})
+      .filter(([, version]) => version.startsWith('workspace:'))
+      .map(([name]) => name);
+    expect(workspace).toContain('@taucad/agent-observability');
+    for (const id of workspace) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- one resolved config, cheap predicate
+      expect([id, await isExternal(id)]).toEqual([id, false]);
+    }
+  }, 60_000);
+
   it('should bundle the browser contract and validator into the preload', async () => {
     const { isExternal } = await resolveProcessExternals('preload');
     expect(await isExternal('@taucad/types/browser')).toBe(false);
@@ -180,12 +199,18 @@ describe('electron-vite main externalization', () => {
     const { include } = await resolveProcessExternals();
     const manifest = JSON.parse(readFileSync(join(appRoot, 'package.json'), 'utf8')) as {
       readonly dependencies?: Readonly<Record<string, string>>;
+      readonly optionalDependencies?: Readonly<Record<string, string>>;
     };
 
     /* Every externalized package must be a declared dependency: the unpackaged
      * build resolves them from `apps/desktop/node_modules`, and an undeclared
      * one kills the kernel host at boot (`nanoraster/options`, 2026-09-07). */
-    expect(Object.keys(manifest.dependencies ?? {})).toEqual(expect.arrayContaining([...include]));
+    expect(Object.keys({ ...manifest.dependencies, ...manifest.optionalDependencies })).toEqual(
+      expect.arrayContaining([...include]),
+    );
+    /* Node-pty builds from source on Linux; a host without a toolchain still installs, and its Terminal answers
+     * sandbox-unavailable, while every package script refuses to stage a target without its addon. */
+    expect(manifest.optionalDependencies?.['node-pty']).toBe('catalog:');
   });
 
   it.runIf(process.platform === 'darwin' && process.arch === 'arm64')(

@@ -31,6 +31,7 @@ const findSource = async (root: string): Promise<string[]> => {
 const exportGeometry = async (
   page: Page,
   projectRoot: string,
+  formatTimeout: number,
 ): Promise<{ path: string; sha256: string; vertices: number }> => {
   const directory = join(projectRoot, 'exports');
   const previousNames = await readdir(directory).catch(() => []);
@@ -46,8 +47,11 @@ const exportGeometry = async (
   // The pane names this section 'Format', singular, and offers one format through a combo box
   // rather than the multi-select toggles it carried before #1150. Selection mirrors the
   // maintained pattern in apps/ui-e2e/src/export-pane.spec.ts so the two cannot drift apart again.
+  // The pane shows 'No geometry to export' until the model has rendered, and on a fresh profile
+  // that waits for the first Build123d runtime download (277 MB, run 40998016336 debian-apt-x11).
+  // The visible canvas does not imply geometry, so this wait carries the same budget as the canvas.
   const format = page.getByRole('region', { name: 'Format', exact: true });
-  await format.waitFor({ state: 'visible' });
+  await format.waitFor({ state: 'visible', timeout: formatTimeout });
   const picker = format.getByRole('button', { name: 'Export format' });
   await picker.waitFor({ state: 'visible' });
   await picker.click();
@@ -103,6 +107,19 @@ const exportGeometry = async (
   }
   throw new Error('Installed renderer did not produce a fresh geometry export');
 };
+/**
+ * Navigates only after the app's own first load has finished. A launch is waited for only by its debugging port,
+ * so the harness can attach while the main process still awaits `window.loadURL('/')`; navigating then aborts
+ * that load, which rejects the app's bootstrap and exits the app (run 41568143873 macos-dmg-arm64 and
+ * macos-zip-arm64 `ERR_ABORTED; maybe frame was detached?`, then run 41576899441 macos-dmg-arm64 with no app
+ * page left). Waiting for that document lets the app settle; it accepts nothing new.
+ */
+const navigateAfterFirstLoad = async (page: Page, url: string): Promise<void> => {
+  // The page's own document state, not Playwright's lifecycle record of a page it attached to mid-load.
+  await page.waitForFunction(() => document.readyState === 'complete');
+  await page.goto(url);
+};
+
 const main = async (): Promise<void> => {
   if (process.env['TAU_QUALIFICATION_DISPOSABLE_HOST'] !== '1') {
     throw new Error('Renderer qualification requires an explicitly disposable host');
@@ -144,13 +161,10 @@ const main = async (): Promise<void> => {
         if (!filename || basename(filename) !== filename || !filename.endsWith('.glb')) {
           throw new Error('Expected an exported GLB basename');
         }
-        await page.waitForURL(
-          (url) =>
-            url.protocol === 'app:' &&
-            url.host === 'tau' &&
-            url.pathname === '/import' &&
-            url.searchParams.get('desktop-open') === '1',
-        );
+        // The import route clears `desktop-open` as soon as it consumes the opened file (run 41428110095
+        // macos-dmg-arm64 reached `/import` showing the GLB with the flag already gone), so the route alone is
+        // awaited and the opened file's name on that page is the evidence of the Open With handoff.
+        await page.waitForURL((url) => url.protocol === 'app:' && url.host === 'tau' && url.pathname === '/import');
         await page.getByText(filename, { exact: true }).first().waitFor({ state: 'visible' });
       }
       await writeFile(
@@ -221,20 +235,38 @@ const main = async (): Promise<void> => {
       if (!projectUrl?.startsWith('app://tau/w/')) {
         throw new Error('Retained project route required');
       }
-      await page.goto(projectUrl);
+      await navigateAfterFirstLoad(page, projectUrl);
     }
     if (stage === 'a' && !process.env['TAU_QUALIFICATION_PROJECT_URL']) {
-      await page.goto('app://tau/projects/new');
+      await navigateAfterFirstLoad(page, 'app://tau/projects/new');
       await page.getByLabel('Project Name *', { exact: true }).fill('Qualification retained project');
       await page.locator('label[for="kernel-build123d"]').click();
       await page.getByRole('button', { name: /^Create Project/u }).click();
       // The viewer and source panes share a filename; explicitly open the source editor.
       await page.getByRole('tab', { name: 'main.py', exact: true }).first().click({ button: 'right' });
       await page.getByRole('menuitem', { name: 'Open in Editor', exact: true }).click();
-      // Focus the visible CodeMirror content, not its surrounding scroll container.
-      const editor = page.locator('.editor-container:visible .cm-editor:visible').last();
-      await editor.waitFor({ state: 'visible' });
-      await editor.locator('.cm-content[contenteditable="true"]').last().focus();
+      // Candidates span code-editor generations, so find the editable surface by its textbox role rather than by
+      // one editor's class names, and focus it rather than its surrounding scroll container. Some generations
+      // render that surface with zero width, so wait for it to attach rather than to become visible, then
+      // prove it holds focus before typing into it.
+      const editor = page.locator('.editor-container:visible').last().getByRole('textbox').last();
+      await editor.waitFor({ state: 'attached' });
+      // The tab can take focus back after the context menu closes (run 41561293311 macos-zip-arm64 ended
+      // focused on the `main.py` tab), so refocus until the textbox holds focus across two reads.
+      const focusDeadline = Date.now() + 10_000;
+      const editorPage = page;
+      const editorFocused = async (): Promise<boolean> =>
+        editorPage.evaluate(() => document.activeElement?.getAttribute('role') === 'textbox');
+      for (;;) {
+        await editor.focus();
+        await wait(300);
+        if ((await editorFocused()) && (await wait(300).then(editorFocused))) {
+          break;
+        }
+        if (Date.now() > focusDeadline) {
+          throw new Error('The source editor did not keep focus');
+        }
+      }
       await page.keyboard.press(process.platform === 'darwin' ? 'Meta+a' : 'Control+a');
       // This disposable host may have no clipboard owner. Keep the paste payload until save is verified.
       await page.evaluate(async (text) => navigator.clipboard.writeText(text), source);
@@ -262,14 +294,23 @@ const main = async (): Promise<void> => {
     if (!savedPath) {
       throw new Error('Shipping renderer did not retain the expected project bytes');
     }
+    // The frozen candidates stop waiting for the driver's command fifteen minutes after they write
+    // readiness, then close the window. A wait that outlasts that window ends in a closed page with no
+    // failure evidence (run 41342192947 macos-dmg-x64), so both viewer waits share what remains of it,
+    // less a minute kept for the failure observations below. The reinstalled launch runs without the
+    // probe, writes no new readiness and has no such window, so it keeps the full limits.
+    const readiness = await stat(join(profile, 'route-qualification.ready.json'));
+    const readyAt = readiness.mtimeMs;
+    const remaining = (limit: number): number =>
+      action === 'reinstall-ui' ? limit : Math.max(1000, Math.min(limit, readyAt + 15 * 60_000 - 60_000 - Date.now()));
     await page
       .getByTestId('cad-viewer-canvas-region')
       .locator('canvas')
-      .waitFor({ state: 'visible', timeout: 900_000 });
+      .waitFor({ state: 'visible', timeout: remaining(600_000) });
     if (await page.getByRole('alert', { name: 'CAD runtime error' }).isVisible()) {
       throw new Error('Native CAD runtime failed');
     }
-    const exported = await exportGeometry(page, dirname(savedPath));
+    const exported = await exportGeometry(page, dirname(savedPath), remaining(900_000));
     const logBytes = await readFile(join(profile, 'logs', 'desktop.log'));
     const log = logBytes.subarray(logOffset).toString();
     const native = log.split('\n').filter((line) => {
@@ -352,7 +393,7 @@ const main = async (): Promise<void> => {
             return {
               url: location.href,
               focused: document.activeElement ? describe(document.activeElement) : undefined,
-              editors: [...document.querySelectorAll('.editor-container, .cm-editor')]
+              editors: [...document.querySelectorAll('.editor-container, .editor-container [role="textbox"]')]
                 .slice(0, 20)
                 .map((element) => describe(element)),
               tabs: [...document.querySelectorAll('[role="tab"]')].slice(0, 30).map((element) => ({
@@ -363,6 +404,16 @@ const main = async (): Promise<void> => {
               alerts: [...document.querySelectorAll('[role="alert"]')]
                 .slice(0, 10)
                 .map((element) => element.textContent.slice(0, 1000)),
+              statuses: [...document.querySelectorAll('[role="status"]')]
+                .slice(0, 10)
+                .map((element) => element.textContent.slice(0, 1000)),
+              issues: document.querySelector('[role="region"][aria-label="Issues"]')?.textContent.slice(0, 2000),
+              viewer: [...document.querySelectorAll('[data-testid="cad-viewer-canvas-region"]')]
+                .slice(0, 5)
+                .map((element) => ({
+                  ...describe(element),
+                  canvases: [...element.querySelectorAll('canvas')].slice(0, 5).map((canvas) => describe(canvas)),
+                })),
             };
           },
           undefined,
@@ -380,6 +431,18 @@ const main = async (): Promise<void> => {
               return { path: relative(profile, path), bytes: Buffer.byteLength(bytes), sha256: sha256(bytes) };
             }),
           );
+        })(),
+        (async () => {
+          // Only this launch's native engine records, the same lines acceptance reads, never the whole log.
+          const offset = Number(process.env['TAU_QUALIFICATION_LOG_OFFSET'] ?? 0);
+          const log = await readFile(join(profile, 'logs', 'desktop.log'));
+          return log
+            .subarray(Number.isSafeInteger(offset) && offset > 0 ? offset : 0)
+            .toString()
+            .split('\n')
+            .filter((line) => /^\S+ \w+ native\./u.test(line))
+            .slice(-40)
+            .map((line) => line.slice(0, 500));
         })(),
       ]);
       await writeFile(

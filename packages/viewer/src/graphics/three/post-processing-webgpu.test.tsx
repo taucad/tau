@@ -84,6 +84,7 @@ const mocks = vi.hoisted(() => {
     autoClearDepth: true,
     autoClearStencil: true,
     initRenderTarget: vi.fn(),
+    clear: vi.fn(),
     outputColorSpace: 'srgb',
     toneMapping: 0,
     getDrawingBufferSize: (target: Vector2) => target.set(3000, 2000),
@@ -367,7 +368,8 @@ vi.mock('#graphics/three/fxaa.js', () => ({ createViewportFxaa: mocks.fxaa }));
 vi.mock('three/addons/tsl/display/GTAONode.js', () => ({ ao: mocks.ao }));
 vi.mock('#graphics/three/ao-normal.js', () => ({
   encodeAoNormal: (normal: unknown) => normal,
-  sampleAoNormal: (encoded: unknown) => encoded,
+  loadAoNormal: (encoded: unknown) => encoded,
+  aoTexel: (_input: unknown, uv: unknown) => uv,
 }));
 vi.mock('#graphics/three/ao-denoise.js', () => ({ createAoDenoise: mocks.denoise }));
 vi.mock('#graphics/three/gtao-depth-camera.js', () => ({
@@ -716,7 +718,9 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
         .find((value) => value.texture.name === 'Tau composed surface')!;
       expect(composed.texture.type).toBe(UnsignedByteType);
       expect(composed.texture.colorSpace).toBe(SRGBColorSpace);
-      expect(target.depthTexture).toBe(composed.depthTexture);
+      // Composition is color-only; the reuse view alone owns the frame depth.
+      expect(composed.depthTexture).toBeNull();
+      expect(composed.depthBuffer).toBe(false);
       expect(target.depthTexture?.type).toBe(UnsignedInt248Type);
       expect(target.depthTexture?.format).toBe(DepthStencilFormat);
       expect(target.samples).toBe(0);
@@ -767,7 +771,8 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     expect(mocks.pass).toHaveBeenCalledWith(mocks.scene, mocks.perspectiveCamera, { samples: 0 });
     expect(mocks.antialiasTargetOptions).toHaveBeenCalledTimes(1);
     expect(mocks.fxaa).toHaveBeenCalledOnce();
-    expect(mocks.denoise.mock.results[0]!.value.upsample).not.toHaveBeenCalled();
+    // Bilinear reconstruction smeared contact shading across silhouettes; reconstruct per surface.
+    expect(mocks.denoise.mock.results[0]!.value.upsample).toHaveBeenCalledOnce();
     expect(mocks.aoNodes[0]!.scale.value).toBeGreaterThan(0);
     mocks.getFrame()?.(mocks.state, 1 / 60);
     expect(mocks.updateAoCamera).toHaveBeenCalled();
@@ -812,7 +817,7 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     const composed = mocks.outputQuads.find((quad) => !isBeautyOnly(quad));
     expect(composed?.material.fragmentNode).toMatchObject({
       aoOnly: [
-        { condition: { intensityAbove: 0 }, ifTrue: { kind: 'filtered-ao-r' }, ifFalse: 1 },
+        { condition: { intensityAbove: 0 }, ifTrue: { kind: 'denoised-ao-r' }, ifFalse: 1 },
         { kind: 'scene-alpha' },
       ],
     });
@@ -916,7 +921,7 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     expect(composed?.material.fragmentNode).toMatchObject({
       beauty: { kind: 'display-composed-color', color: { kind: 'composed-color' } },
       aoOnly: [
-        { condition: { intensityAbove: 0 }, ifTrue: { kind: 'filtered-ao-r' }, ifFalse: 1 },
+        { condition: { intensityAbove: 0 }, ifTrue: { kind: 'denoised-ao-r' }, ifFalse: 1 },
         { kind: 'scene-alpha' },
       ],
     });
@@ -1015,8 +1020,10 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     expect(mocks.outputQuads[0]!.material.depthWrite).toBe(false);
     const composed = mocks.gl.initRenderTarget.mock.calls[1]![0] as RenderTarget;
     expect(composed.texture.name).toBe('Tau composed surface');
-    expect(composed.depthTexture).toBe(target.depthTexture);
+    expect(composed.depthTexture).toBeNull();
     expect(mocks.gl.initRenderTarget.mock.calls).toEqual([[scenePass.renderTarget], [composed], [target]]);
+    // The shared attachment's first-draw clear is consumed at allocation, before the scene writes it.
+    expect(mocks.gl.clear).toHaveBeenCalledWith(false, true, true);
     expect(scenePass.renderTarget.setSize).toHaveBeenCalledWith(3000, 2000);
     expect(mocks.gl.autoClearDepth).toBe(true);
     expect(mocks.gl.autoClearStencil).toBe(true);
@@ -1046,8 +1053,9 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     expect([target.width, target.height, target.samples, target.stencilBuffer]).toEqual([3000, 2000, 0, true]);
     expect(target.texture.colorSpace).toBe(LinearSRGBColorSpace);
     const dispose = vi.spyOn(target, 'dispose');
-    const { material } = mocks.outputQuads[0]!;
-    expect(material).toMatchObject({ depthWrite: true, depthNode: { kind: 'sampled-depth' } });
+    // Composition is color-only; the filter into the view writes the view's own depth.
+    expect(mocks.outputQuads[0]!.material.depthWrite).toBe(false);
+    expect(mocks.outputQuads[1]!.material).toMatchObject({ depthWrite: true, depthNode: { kind: 'sampled-depth' } });
     mocks.glRender.mockClear();
     mocks.getRestoreDepth()?.();
     expect(mocks.glRender).not.toHaveBeenCalled();

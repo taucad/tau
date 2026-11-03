@@ -26,7 +26,8 @@ import type {
 import type { GetDependenciesResult } from '#types/runtime-dependency.types.js';
 import type { TranscoderDefinition, TranscoderEdge } from '#types/runtime-transcoder.types.js';
 import type { MaterializedRender, NativeBuildInput, OperationOwner } from '#framework/render-artifact.js';
-import type { EvaluateResult } from '#types/runtime-kernel-v2.types.js';
+import type { EvaluateResult, KernelOffers } from '#types/runtime-kernel-v2.types.js';
+import type { RuntimeContentKey } from '#types/runtime-content.types.js';
 // oxlint-disable-next-line no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph.
 import type { MockKernelWorkerOptions } from '../../test/support/kernel-worker.fixture.js';
 /* oxlint-disable no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph. */
@@ -4308,6 +4309,47 @@ describe('transcoder loading', () => {
         tessellation: { linearTolerance: 0.01, angularTolerance: 30 },
       }),
     );
+  });
+
+  it('should transcode to a format a different export declares natively', async () => {
+    // PicoGK declares `stl` for the author's own files and meshes `glb`; a build that wrote no
+    // authored file still reaches `glb` -> `stl`, rather than planning a native `stl` export the
+    // evaluation never offered.
+    const mockModule = createMockTranscoderModule([{ from: 'glb', to: 'stl', fidelity: 'mesh' }]);
+    class ShadowedFormatWorker extends MockKernelWorker {
+      protected override resolveDocumentExportTarget(
+        _owner: OperationOwner,
+        _offers: KernelOffers | undefined,
+        target: string,
+      ): { success: true; format: string; exportId: string } | { success: false; issues: KernelIssue[] } {
+        return target === 'stl'
+          ? { success: true, format: 'stl', exportId: 'glb' }
+          : { success: true, format: target, exportId: target };
+      }
+
+      protected override getDocumentExportDeclaration(
+        _owner: OperationOwner,
+        exportId: string,
+      ): { extension: string; mimeType: string; content: readonly RuntimeContentKey[] } | undefined {
+        return exportId === 'glb' ? { extension: 'glb', mimeType: 'model/gltf-binary', content: [] } : undefined;
+      }
+    }
+
+    const worker = new ShadowedFormatWorker({
+      middleware: [],
+      onLog: noopLog,
+      filesystem: createMockFileSystem(),
+      exportZodSchemas: { glb: z.object({}), stl: z.object({}) },
+      nativeHandle: { kind: 'mock-native-handle' },
+      transcoders: [createMockTranscoderPlugin('shadowed-transcoder', mockModule)],
+    });
+
+    await worker.initialize({ callbacks: { onLog: vi.fn() }, transferables: {}, options: {} });
+    await openDocument(worker);
+    const result = await exportDocument(worker, 'stl', {});
+
+    expect(result.success).toBe(true);
+    expect(worker.exportGeometrySpy.mock.calls[0]![0].format).toBe('glb');
   });
 });
 

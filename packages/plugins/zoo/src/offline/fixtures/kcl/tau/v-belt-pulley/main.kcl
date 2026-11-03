@@ -1,0 +1,35 @@
+// A-section V-belt pulley with a side hub, revolved from its half section.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+// Parameters
+outerDiameter = 80
+pulleyWidth = 20
+grooveTopWidth = 13
+grooveDepth = 11
+grooveAngle = 40deg
+boreDiameter = 12
+hubDiameter = 24
+hubLength = 8
+
+outerRadius = outerDiameter / 2
+boreRadius = boreDiameter / 2
+hubRadius = hubDiameter / 2
+grooveFloorRadius = outerRadius - grooveDepth
+grooveFloorHalfWidth = grooveTopWidth / 2 - grooveDepth * tan(grooveAngle / 2)
+grooveCentre = pulleyWidth / 2
+
+// Half section on XY: x is the radius, y runs along the axle.
+section = startSketchOn(XY)
+  |> startProfile(at = [boreRadius, -hubLength])
+  |> xLine(endAbsolute = hubRadius)
+  |> yLine(endAbsolute = 0)
+  |> xLine(endAbsolute = outerRadius)
+  |> yLine(endAbsolute = grooveCentre - grooveTopWidth / 2)
+  |> line(endAbsolute = [grooveFloorRadius, grooveCentre - grooveFloorHalfWidth])
+  |> yLine(endAbsolute = grooveCentre + grooveFloorHalfWidth)
+  |> line(endAbsolute = [outerRadius, grooveCentre + grooveTopWidth / 2])
+  |> yLine(endAbsolute = pulleyWidth)
+  |> xLine(endAbsolute = boreRadius)
+  |> close()
+
+pulley = revolve(section, axis = Y, angle = 360deg)

@@ -531,7 +531,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
    *
    * The repository-store conformance suite is the single sanctioned exception
    * (D32): it runs against a dedicated scratch bucket, under a tenant prefix it
-   * created itself, and never against `tau-staging-content*`.
+   * created itself, and never against `tau-staging-au-content*`.
    */
   public async deleteEntirePrefixForPurgeJob(args: {
     namespace: StorageNamespace;

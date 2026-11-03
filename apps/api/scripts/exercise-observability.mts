@@ -268,26 +268,6 @@ await run('telemetry', async () => {
             duration: random(200, 4000),
             detail: { status: 'success', exportFormat: ['stl', 'step', 'glb'][round % 3] },
           },
-          {
-            name: 'observability.websocketReconnection',
-            duration: random(300, 5000),
-            detail: { attempt: 1 + (round % 3), reason: 'close' },
-          },
-          {
-            name: 'observability.editorLoad',
-            duration: random(400, 3000),
-            detail: { kernel: ['openscad', 'replicad', 'jscad'][round % 3], fileCount: 1 + (round % 4) },
-          },
-          {
-            name: 'observability.wasmModuleLoad',
-            duration: random(150, 1800),
-            detail: { module: ['replicad', 'openscad', 'occt'][round % 3], sizeBytes: 1_048_576 },
-          },
-          {
-            name: 'observability.indexeddbOperation',
-            duration: random(1, 40),
-            detail: { operation: ['get', 'put'][round % 2], store: 'files' },
-          },
           // Synthetic fixtures in the shape the UI and daemon send: they validate ingest to metrics, not agents.
           {
             name: 'agent.session',

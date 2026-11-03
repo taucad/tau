@@ -255,6 +255,28 @@
         }
       }
     },
+    "test:e2e:picogk": {
+      "executor": "nx:run-commands",
+      "metadata": {
+        "description": "PicoGK as a clean browser consumer: the built app serving the staged package bundle, opening the shipped C# examples through the ordinary project route. PICOGK_BROWSER_ASSETS_ROOT must name a prepared bundle, which ui:build declares as an input, so this target never reuses a build made against another bundle. Its own PORT keeps it from reusing a server another e2e target started."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "parallel": false,
+        "commands": [
+          "pnpm exec nx run ui:build",
+          "vitest run --config apps/ui-e2e/vitest.config.ts --project chromium src/picogk-browser.spec.ts"
+        ],
+        "env": {
+          "PORT": "3019",
+          "TAU_E2E_UI_SNAPSHOT": "true",
+          "TAU_CLOUD_ENABLED": "false",
+          "TAU_API_URL": "http://localhost:4000",
+          "TAU_WEBSOCKET_URL": "ws://localhost:4001",
+          "TAU_FRONTEND_URL": "http://localhost:3000"
+        }
+      }
+    },
     "test:observability-helpers": {
       "executor": "nx:run-commands",
       "cache": false,

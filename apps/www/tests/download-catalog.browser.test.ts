@@ -286,6 +286,28 @@ describe('shipping installer catalog browser behavior', () => {
     await close();
   }, 60_000);
 
+  it('drops the Intel Mac entries when a staging catalog publishes only the Apple silicon DMG', async () => {
+    const appleSilicon = macOnlyStaging();
+    appleSilicon.routes = appleSilicon.routes.filter((route) => route.target === 'darwin-arm64');
+    for (const route of appleSilicon.routes) {
+      route.qualification = { ci: true, vm: 'pending', trust: 'release' };
+    }
+    const { page, close } = await open({ origin: 'https://taucad.dev', catalog: appleSilicon });
+    const after = await surface(page);
+    const visible = after.links.filter((link) => link.visible);
+    expect(visible.filter((link) => /Intel Mac|macos-x64/u.test(`${link.text} ${link.href}`))).toEqual([]);
+    const apple = visible.filter((link) => link.text === 'Download DMG for Apple silicon');
+    expect(apple.length).toBeGreaterThanOrEqual(2);
+    for (const link of apple) {
+      expect(link.href).toBe(
+        'https://downloads.taucad.dev/releases/desktop-staging%400.1.0-staging.455/Tau-macos-arm64.dmg',
+      );
+    }
+    expect(visible.some((link) => link.text === 'Tau-macos-arm64.zip')).toBe(true);
+    expect(await page.locator('[data-qualified-downloads] details').count()).toBe(1);
+    await close();
+  }, 60_000);
+
   it('offers staging Mac DMGs admitted on CI evidence while saying clean-Mac install testing is pending', async () => {
     const pending = macOnlyStaging();
     for (const route of pending.routes) {

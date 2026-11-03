@@ -57,7 +57,7 @@ it('marks the prerendered usage document noindex, nofollow', () => {
   const tags = meta(metaArguments);
 
   expect(tags).toStrictEqual(
-    expect.arrayContaining([{ name: 'robots', content: 'noindex, nofollow' }, { title: 'Tau usage' }]),
+    expect.arrayContaining([{ name: 'robots', content: 'noindex, nofollow' }, { title: 'Usage · Tau' }]),
   );
 });
 

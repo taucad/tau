@@ -113,6 +113,28 @@
         "cwd": ".",
         "command": "node --import @oxc-node/core/register packages/plugins/picogk/scripts/benchmark-reuse.mts"
       }
+    },
+    "prepare-parity-apps": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Build the browser apps the geometry parity gate runs, one per measured mode, from the restored package payload and the pinned author sources."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "node --import @oxc-node/core/register packages/plugins/picogk/scripts/prepare-parity-apps.mts"
+      }
+    },
+    "prepare-browser-host": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Build serial and optional threaded browser hosts from qualified inputs and stage their immutable manifest; no research or optional repository paths are assumed."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "node --import @oxc-node/core/register packages/plugins/picogk/scripts/prepare-browser-host.mts"
+      }
     }
   }
 }

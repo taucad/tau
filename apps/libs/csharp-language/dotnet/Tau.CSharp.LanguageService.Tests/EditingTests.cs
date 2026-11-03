@@ -141,6 +141,68 @@ public sealed class EditingTests
     }
 
     [Fact]
+    public async Task CompletionAndSignatureHelpLinkDocumentationReferencesToTheirDefinitions()
+    {
+        const string shapes = """
+            using System.Collections.Generic;
+            using PicoGK;
+
+            public static class Shapes
+            {
+                /// <summary>A <see cref="Voxels"/> ball from <see cref="ShapeFactory.Create(float)"/>.</summary>
+                /// <param name="radius">Passed to <see cref="ShapeFactory.Create(float)"/>, unlike <see cref="Missing"/>.</param>
+                /// <param name="into">The <see cref="List{T}"/> to fill.</param>
+                public static void Ball(float radius, List<Voxels> into) => into.Add(ShapeFactory.Create(radius));
+
+                public static void Plain(float radius) { }
+            }
+            """;
+        const string main = "Shapes.Ball(1f, []);\nShapes.\n";
+        using var harness = await StartAsync(new Dictionary<string, string>
+        {
+            ["ShapeFactory.cs"] = Sources.ShapeFactory,
+            ["Shapes.cs"] = shapes,
+        });
+        await harness.OpenAsync("main.cs", main);
+        static (string?, int)[] Targets(JsonElement owner) =>
+            [.. owner.GetProperty("definitionTargets").EnumerateArray()
+                .Select(target => (target.GetProperty("uri").GetString(), target.GetProperty("range").GetProperty("start").GetProperty("line").GetInt32()))];
+
+        var items = await CompletionsAsync(harness, "main.cs", At(main, "Shapes.\n", 7));
+        var ball = Assert.Single(items, item => item.GetProperty("label").GetString() == "Ball");
+        var resolved = await harness.RequestAsync("completionItem/resolve", JsonNode.Parse(ball.GetRawText())!);
+        var documentation = resolved.GetProperty("documentation").GetProperty("value").GetString()!;
+        Assert.Equal(
+            "```csharp\nvoid Shapes.Ball(float radius, List<PicoGK.Voxels> into)\n```\n\nA [`Voxels`](#tau-definition-0) ball from [`ShapeFactory.Create`](#tau-definition-1).",
+            documentation);
+        Assert.EndsWith("A [`Voxels`](#tau-definition-0) ball from [`ShapeFactory.Create`](#tau-definition-1).", documentation, StringComparison.Ordinal);
+        var completionTargets = Targets(resolved);
+        Assert.Equal(2, completionTargets.Length);
+        Assert.Equal("file:///__csharp_metadata__/PicoGK/PicoGK.Voxels.cs", completionTargets[0].Item1);
+        Assert.Equal((Uri("ShapeFactory.cs"), 8), completionTargets[1]);
+        var plain = Assert.Single(items, item => item.GetProperty("label").GetString() == "Plain");
+        var plainResolved = await harness.RequestAsync("completionItem/resolve", JsonNode.Parse(plain.GetRawText())!);
+        Assert.False(plainResolved.TryGetProperty("definitionTargets", out _));
+
+        var help = await harness.RequestAsync("textDocument/signatureHelp", DocumentPosition("main.cs", At(main, "Ball(", 5)));
+        var signature = Assert.Single(help.GetProperty("signatures").EnumerateArray());
+        Assert.Equal(
+            "A [`Voxels`](#tau-definition-0) ball from [`ShapeFactory.Create`](#tau-definition-1).",
+            signature.GetProperty("documentation").GetProperty("value").GetString());
+        var parameters = signature.GetProperty("parameters");
+        // Links share one index space across the signature and its parameters.
+        Assert.Equal(
+            "Passed to [`ShapeFactory.Create`](#tau-definition-1), unlike `Missing`.",
+            parameters[0].GetProperty("documentation").GetProperty("value").GetString());
+        Assert.Equal("The [`List`](#tau-definition-2) to fill.", parameters[1].GetProperty("documentation").GetProperty("value").GetString());
+        var targets = Targets(help);
+        Assert.Equal(3, targets.Length);
+        Assert.Equal("file:///__csharp_metadata__/PicoGK/PicoGK.Voxels.cs", targets[0].Item1);
+        Assert.Equal((Uri("ShapeFactory.cs"), 8), targets[1]);
+        Assert.Equal("file:///__csharp_metadata__/System.Collections/System.Collections.Generic.List%601.cs", targets[2].Item1);
+    }
+
+    [Fact]
     public async Task SignatureHelpTracksTheActiveParameterAndOverloads()
     {
         const string text = "using System.Numerics;\nusing PicoGK;\nvar a = Voxels.voxSphere(Vector3.Zero, 2f);\nvar b = Math.Max(1, 2);\nvar c = new Vector3(1, 2, 3);\nvar d = ShapeFactory.Create(1f);\n";

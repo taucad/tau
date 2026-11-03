@@ -10,8 +10,9 @@
 # GitHub-hosted macOS reports SIP disabled (ruling X19), so it can never run this workflow: every row fails closed in
 # its preflight unless the host shows SIP and Gatekeeper enabled, native architecture (no Rosetta) and no prior Tau
 # installation, profile or ShipIt cache. `desktop-macos-vm-receipts` is uploaded only by a Mac-scoped staging dispatch
-# on main whose every row passed that preflight and its run. No Intel clean host exists yet: without `x64_runner_label`
-# the run covers Apple silicon only (the `local-mac` runner) and uploads no receipt set, so clean-host stays unqualified.
+# on main whose every row passed that preflight and its run. The Mac-only scope is Apple silicon only (operator ruling:
+# hosted Intel Macs cannot render, so Intel is neither qualified nor published), so the two Apple silicon rows on the
+# `local-mac` runner are the complete receipt set; `x64_runner_label` must stay empty.
 name: Desktop clean-host route acceptance
 
 on:
@@ -46,7 +47,7 @@ on:
         default: local-mac
         type: string
       x64_runner_label:
-        description: 'Mac scope only: label of a SIP-enabled Intel clean host; empty (no Intel host exists) runs Apple silicon only and uploads no receipt set'
+        description: 'Must stay empty: the Mac-only scope is Apple silicon only, so an Intel clean host is refused'
         required: false
         default: ''
         type: string
@@ -117,17 +118,18 @@ jobs:
             appendFileSync(process.env.GITHUB_OUTPUT, `windows_host=${JSON.stringify({ group: process.env.WINDOWS_GROUP, labels: ['self-hosted', 'Windows', 'X64', process.env.WINDOWS_LABEL] })}\n`);
             process.exit(0);
           }
-          if (!label.test(group) || !label.test(arm64) || (x64 !== '' && !label.test(x64))) {
+          if (!label.test(group) || !label.test(arm64)) {
             throw new Error('Invalid runner group or label');
+          }
+          if (x64 !== '') {
+            throw new Error('The Mac-only scope is Apple silicon only; an Intel clean host cannot add rows');
           }
           // Self-hosted only: a GitHub-hosted image can never satisfy the clean-host contract.
           const host = (arch, name) => ({ group, labels: ['self-hosted', 'macOS', arch === 'arm64' ? 'ARM64' : 'X64', name] });
           const rows = [
             { id: 'macos-zip-arm64', route: 'macos-zip', arch: 'arm64', host: host('arm64', arm64) },
             { id: 'macos-dmg-arm64', route: 'macos-dmg', arch: 'arm64', host: host('arm64', arm64) },
-            { id: 'macos-zip-x64', route: 'macos-zip', arch: 'x64', host: host('x64', x64) },
-            { id: 'macos-dmg-x64', route: 'macos-dmg', arch: 'x64', host: host('x64', x64) },
-          ].filter((row) => row.arch === 'arm64' || x64 !== '');
+          ];
           appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify(rows)}\n`);
           NODE
 
@@ -247,8 +249,8 @@ jobs:
 
   receipts:
     needs: installed
-    # Without an Intel clean host the run is Apple silicon evidence only and never yields the receipt set publication admits.
-    if: inputs.x64_runner_label != '' && inputs.scope == 'macos'
+    # Both Apple silicon rows are the complete Mac-only receipt set; collection still refuses any missing or extra row.
+    if: inputs.scope == 'macos'
     environment: desktop-qualification-staging
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -270,7 +272,7 @@ jobs:
         with:
           pattern: desktop-route-row-*
           path: out/qualification-rows
-      - name: Require all four clean-host rows and bind every receipt to the final source
+      - name: Require both Apple silicon clean-host rows and bind every receipt to the final source
         run: pnpm nx run desktop:collect-qualification-rows
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

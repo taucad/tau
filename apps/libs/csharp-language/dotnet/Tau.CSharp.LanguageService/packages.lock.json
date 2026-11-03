@@ -190,6 +190,7 @@
       "Microsoft.CodeAnalysis.Workspaces.UnitTests": {
         "type": "Project",
         "dependencies": {
+          "Microsoft.CodeAnalysis.Features": "[5.9.0, )",
           "Microsoft.CodeAnalysis.Workspaces.Common": "[5.9.0, )"
         }
       }

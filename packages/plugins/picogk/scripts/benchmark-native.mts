@@ -257,7 +257,7 @@ const main = async (): Promise<void> => {
         signal,
       });
       const artifact = await session.readArtifact(built);
-      const glb = picogkArtifactToGlb(artifact, built);
+      const glb = await picogkArtifactToGlb(artifact, built);
       validateGlb(glb);
       return {
         digest: await digestContent({ bytes: glb }),
@@ -273,7 +273,7 @@ const main = async (): Promise<void> => {
         schema: picogkBuildSchema,
         signal,
       });
-      const glb = picogkArtifactToGlb(await session.readArtifact(built), built);
+      const glb = await picogkArtifactToGlb(await session.readArtifact(built), built);
       validateGlb(glb);
       return {
         digest: await digestContent({ bytes: glb }),

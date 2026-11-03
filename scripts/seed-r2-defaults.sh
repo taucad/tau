@@ -9,7 +9,7 @@
 #   export AWS_ACCESS_KEY_ID=<R2 access key id from HCP Terraform output>
 #   export AWS_SECRET_ACCESS_KEY=<R2 secret access key>
 #   export TAU_S3_ENDPOINT=https://271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com
-#   export TAU_S3_BUCKET=tau-staging-content   # or tau-prod-content
+#   export TAU_S3_BUCKET=tau-staging-au-content   # or tau-prod-content
 #   bash scripts/seed-r2-defaults.sh
 
 set -euo pipefail
@@ -17,7 +17,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 : "${TAU_S3_ENDPOINT:?set TAU_S3_ENDPOINT (R2 S3-compatible endpoint)}"
-: "${TAU_S3_BUCKET:?set TAU_S3_BUCKET (single content bucket name, e.g. tau-staging-content)}"
+: "${TAU_S3_BUCKET:?set TAU_S3_BUCKET (single content bucket name, e.g. tau-staging-au-content)}"
 
 aws s3 cp "${ROOT}/infra/seed/default-og.png" "s3://${TAU_S3_BUCKET}/defaults/og.png" \
   --endpoint-url "${TAU_S3_ENDPOINT}" \

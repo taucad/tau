@@ -6,12 +6,14 @@ import {
   accountClosureRequestSchema,
   enterpriseInvoiceRequestSchema,
   paymentActionRequestSchema,
+  portalActionRequestSchema,
   topupActionRequestSchema,
   paymentActionListQuerySchema,
 } from '@taucad/billing';
 
 export class TopupRequestDto extends createZodDto(topupActionRequestSchema) {}
 export class PaymentActionRequestDto extends createZodDto(paymentActionRequestSchema) {}
+export class PortalActionRequestDto extends createZodDto(portalActionRequestSchema) {}
 export class PaymentActionListQueryDto extends createZodDto(paymentActionListQuerySchema) {}
 export class PaymentActionIdDto extends createZodDto(z.object({ actionId: financialIdentitySchema }).strict()) {}
 

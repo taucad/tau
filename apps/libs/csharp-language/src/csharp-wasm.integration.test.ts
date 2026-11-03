@@ -38,7 +38,7 @@ const shapes = [
   '',
   'public static class Shapes',
   '{',
-  '    /// <summary>A ball at the origin.</summary>',
+  '    /// <summary>A ball at the origin, as <see cref="Voxels"/>.</summary><param name="radius">Passed to <see cref="Voxels"/>.</param>',
   '    public static Voxels Ball(float radius) => Voxels.voxSphere(Vector3.Zero, radius);',
   '}',
 ].join('\n');
@@ -116,13 +116,41 @@ describe('C# language server on .NET WebAssembly', () => {
     expect(resolved.documentation?.value).toContain('voxSphere');
   });
 
+  it('links documentation references in completion details and signature help', async () => {
+    const voxels = 'file:///__csharp_metadata__/PicoGK/PicoGK.Voxels.cs';
+    const list = await request<{ items: Array<Json & { label: string }> }>('textDocument/completion', {
+      textDocument: { uri: 'file:///main.cs' },
+      position: { line: 5, character: 24 },
+    });
+    const ball = list.items.find((item) => item.label === 'Ball');
+    const resolved = await request<{ documentation?: { value: string }; definitionTargets?: Array<{ uri: string }> }>(
+      'completionItem/resolve',
+      ball,
+    );
+    expect(resolved.documentation?.value).toContain('A ball at the origin, as [`Voxels`](#tau-definition-0).');
+    expect(resolved.definitionTargets).toEqual([expect.objectContaining({ uri: voxels })]);
+    const help = await request<{
+      signatures: Array<{
+        documentation?: { value: string };
+        parameters: Array<{ documentation?: { value: string } }>;
+      }>;
+      definitionTargets?: Array<{ uri: string }>;
+    }>('textDocument/signatureHelp', {
+      textDocument: { uri: 'file:///main.cs' },
+      position: { line: 5, character: 29 },
+    });
+    expect(help.signatures[0]?.documentation?.value).toBe('A ball at the origin, as [`Voxels`](#tau-definition-0).');
+    expect(help.signatures[0]?.parameters[0]?.documentation?.value).toBe('Passed to [`Voxels`](#tau-definition-0).');
+    expect(help.definitionTargets).toEqual([expect.objectContaining({ uri: voxels })]);
+  });
+
   it('hovers with signatures and XML documentation', async () => {
     const hover = await request<{ contents: { value: string } }>('textDocument/hover', {
       textDocument: { uri: 'file:///main.cs' },
       position: { line: 5, character: 25 },
     });
     expect(hover.contents.value).toContain('Voxels Shapes.Ball(float radius)');
-    expect(hover.contents.value).toContain('A ball at the origin.');
+    expect(hover.contents.value).toContain('A ball at the origin, as [`Voxels`](#tau-definition-0).');
   });
 
   it('navigates across files and into generated library declarations', async () => {

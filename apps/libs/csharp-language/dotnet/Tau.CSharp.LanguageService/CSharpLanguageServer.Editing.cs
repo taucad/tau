@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Text;
+using System.Xml.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CodeActions;
 using Microsoft.CodeAnalysis.CodeFixes;
@@ -11,6 +12,7 @@ using Microsoft.CodeAnalysis.Formatting;
 using Microsoft.CodeAnalysis.QuickInfo;
 using Microsoft.CodeAnalysis.Tags;
 using Microsoft.CodeAnalysis.Text;
+using Tau.CSharp.LanguageService.RoslynHost;
 using RoslynCodeAction = Microsoft.CodeAnalysis.CodeActions.CodeAction;
 using RoslynCompletionItem = Microsoft.CodeAnalysis.Completion.CompletionItem;
 using RoslynCompletionList = Microsoft.CodeAnalysis.Completion.CompletionList;
@@ -77,12 +79,9 @@ public sealed partial class CSharpLanguageServer
         var service = CompletionService.GetService(document)!;
         var roslynItem = list.ItemsList[data.Index];
         var description = await service.GetDescriptionAsync(document, roslynItem, cancellationToken).ConfigureAwait(false);
-        var resolved = item with
-        {
-            Documentation = description is null || description.TaggedParts.IsEmpty
-                ? null
-                : new MarkupContent("markdown", Markdown(description.TaggedParts)),
-        };
+        var resolved = description is null || description.TaggedParts.IsEmpty
+            ? item
+            : await DescribeAsync(item, roslynItem, description, document, cancellationToken).ConfigureAwait(false);
         if (!roslynItem.IsComplexTextEdit)
         {
             return resolved;
@@ -98,6 +97,29 @@ public sealed partial class CSharpLanguageServer
         {
             TextEdit = primary.NewText is null ? item.TextEdit : new TextEdit(Positions.ToRange(text, primary.Span), primary.NewText),
             AdditionalTextEdits = additional.Length == 0 ? null : additional,
+        };
+    }
+
+    /// <summary>The item with Roslyn's description as documentation, its summary references linked as hover links them.</summary>
+    private async Task<CompletionItem> DescribeAsync(
+        CompletionItem item,
+        RoslynCompletionItem roslynItem,
+        CompletionDescription description,
+        Document document,
+        CancellationToken cancellationToken)
+    {
+        var model = await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
+        var symbol = await CompletionSymbols.GetSymbolAsync(roslynItem, document, cancellationToken).ConfigureAwait(false);
+        if (model is null || symbol is null)
+        {
+            return item with { Documentation = new MarkupContent("markdown", Markdown(description.TaggedParts)) };
+        }
+        var links = new DocumentationLinks(this, model.Compilation);
+        var summary = await links.RenderAsync(DocumentationComments.Root(symbol)?.Element("summary"), cancellationToken).ConfigureAwait(false);
+        return item with
+        {
+            Documentation = new MarkupContent("markdown", CompletionMarkdown(description.TaggedParts, summary)),
+            DefinitionTargets = links.Targets,
         };
     }
 
@@ -167,10 +189,10 @@ public sealed partial class CSharpLanguageServer
         {
             return null;
         }
-        var targets = new List<Location>();
-        var summary = await SymbolAtAsync(document, offset, cancellationToken).ConfigureAwait(false) is { } symbol &&
-            await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false) is { } model
-            ? await LinkedSummaryAsync(symbol, model.Compilation, targets, cancellationToken).ConfigureAwait(false)
+        var model = await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
+        var links = model is null ? null : new DocumentationLinks(this, model.Compilation);
+        var summary = links is not null && await SymbolAtAsync(document, offset, cancellationToken).ConfigureAwait(false) is { } symbol
+            ? await links.RenderAsync(DocumentationComments.Root(symbol)?.Element("summary"), cancellationToken).ConfigureAwait(false)
             : null;
         var markdown = new StringBuilder();
         foreach (var section in info.Sections)
@@ -194,40 +216,70 @@ public sealed partial class CSharpLanguageServer
         return new Hover(
             new MarkupContent("markdown", markdown.ToString()),
             Positions.ToRange(text, info.Span),
-            targets.Count == 0 ? null : targets);
+            links?.Targets);
     }
 
     /// <summary>
-    /// The symbol's summary with each <c>see cref</c> that resolves to a definition rendered as a link, as VS Code
-    /// renders C# documentation. Each link's index addresses <paramref name="targets"/>.
+    /// Documentation rendered with each <c>see cref</c> that resolves to a definition as a link, as VS Code renders C#
+    /// documentation. Every section of one response shares the link indices, which address <see cref="Targets"/>.
     /// </summary>
-    private async Task<string?> LinkedSummaryAsync(
-        ISymbol symbol,
-        Compilation compilation,
-        List<Location> targets,
-        CancellationToken cancellationToken)
+    private sealed class DocumentationLinks(CSharpLanguageServer server, Compilation compilation)
     {
-        if (DocumentationComments.Element(symbol, "summary") is not { } summary)
+        private readonly Dictionary<string, int?> indices = new(StringComparer.Ordinal);
+        private readonly List<Location> targets = [];
+
+        /// <summary>The locations the links open, indexed by <c>#tau-definition-N</c>; null while there are none.</summary>
+        internal IReadOnlyList<Location>? Targets => targets.Count == 0 ? null : targets;
+
+        /// <summary>One documentation element, such as a <c>summary</c> or <c>param</c>, as linked Markdown.</summary>
+        internal async Task<string?> RenderAsync(XElement? element, CancellationToken cancellationToken)
         {
-            return null;
-        }
-        var links = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var cref in DocumentationComments.Crefs(summary))
-        {
-            if (links.ContainsKey(cref) ||
-                DocumentationCommentId.GetFirstSymbolForDeclarationId(cref, compilation) is not { } target ||
-                await LocationsOfAsync(target, cancellationToken).ConfigureAwait(false) is not [var location, ..])
+            if (element is null)
             {
-                continue;
+                return null;
             }
-            links[cref] = targets.Count;
-            targets.Add(location);
+            foreach (var cref in DocumentationComments.Crefs(element))
+            {
+                if (indices.ContainsKey(cref))
+                {
+                    continue;
+                }
+                indices[cref] = DocumentationCommentId.GetFirstSymbolForDeclarationId(cref, compilation) is { } target &&
+                    await server.LocationsOfAsync(target, cancellationToken).ConfigureAwait(false) is [var location, ..]
+                    ? Add(location)
+                    : null;
+            }
+            var text = DocumentationComments.Flatten(element, cref => indices.GetValueOrDefault(cref));
+            return string.IsNullOrWhiteSpace(text) ? null : text;
         }
-        var text = DocumentationComments.Flatten(summary, cref => links.TryGetValue(cref, out var index) ? index : null);
-        return string.IsNullOrWhiteSpace(text) ? null : text;
+
+        private int Add(Location location)
+        {
+            targets.Add(location);
+            return targets.Count - 1;
+        }
     }
 
-    /// <summary>Render tagged text as Markdown, fencing nothing: hover descriptions are fenced by the caller.</summary>
+    /// <summary>
+    /// A completion description: Roslyn's signature line, then the symbol's linked summary in place of Roslyn's
+    /// plain-text documentation when the symbol has one, as hover renders it.
+    /// </summary>
+    private static string CompletionMarkdown(ImmutableArray<TaggedText> parts, string? summary)
+    {
+        if (summary is null)
+        {
+            return Markdown(parts);
+        }
+        var signature = parts.TakeWhile(part => part.Tag != TextTags.LineBreak).ToImmutableArray();
+        var head = Markdown(signature);
+        return head.Length == 0 ? summary : $"{head}\n\n{summary}";
+    }
+
+    // Roslyn's internal TextTags that bracket the signature in a completion description.
+    private const string CodeBlockStartTag = "CodeBlockStart";
+    private const string CodeBlockEndTag = "CodeBlockEnd";
+
+    /// <summary>Render tagged text as Markdown, fencing the code blocks Roslyn marks, such as a completion's signature.</summary>
     private static string Markdown(ImmutableArray<TaggedText> parts)
     {
         var builder = new StringBuilder();
@@ -236,10 +288,13 @@ public sealed partial class CSharpLanguageServer
             builder.Append(part.Tag switch
             {
                 TextTags.LineBreak => "\n\n",
+                CodeBlockStartTag => "```csharp\n",
+                CodeBlockEndTag => "\n```\n",
                 _ => part.Text,
             });
         }
-        return builder.ToString().Trim();
+        // A fence's closing newline and the line break after it would otherwise leave an empty paragraph.
+        return builder.ToString().Replace("```\n\n\n", "```\n\n", StringComparison.Ordinal).Trim();
     }
 
     /// <summary>
@@ -255,6 +310,7 @@ public sealed partial class CSharpLanguageServer
         {
             return null;
         }
+        var links = new DocumentationLinks(this, model.Compilation);
         var token = root.FindToken(Math.Max(0, offset - 1));
         var list = token.Parent?.AncestorsAndSelf().OfType<BaseArgumentListSyntax>()
             .FirstOrDefault(candidate => Inside(candidate, offset));
@@ -283,15 +339,23 @@ public sealed partial class CSharpLanguageServer
                 break;
             case ElementAccessExpressionSyntax access:
                 var indexers = model.GetIndexerGroup(access.Expression, cancellationToken);
-                return Signatures(
+                return await SignaturesAsync(
                     [.. indexers.Select(indexer => (ISymbol)indexer)],
                     model.GetSymbolInfo(access, cancellationToken).Symbol,
                     list,
-                    offset);
+                    offset,
+                    links,
+                    cancellationToken).ConfigureAwait(false);
             default:
                 return null;
         }
-        return Signatures([.. candidates.Select(candidate => (ISymbol)candidate)], selected, list, offset);
+        return await SignaturesAsync(
+            [.. candidates.Select(candidate => (ISymbol)candidate)],
+            selected,
+            list,
+            offset,
+            links,
+            cancellationToken).ConfigureAwait(false);
     }
 
     private static bool Inside(BaseArgumentListSyntax list, int offset)
@@ -305,7 +369,13 @@ public sealed partial class CSharpLanguageServer
         return !open.IsMissing && offset > open.SpanStart && (close.IsMissing || offset <= close.SpanStart);
     }
 
-    private static SignatureHelp? Signatures(ImmutableArray<ISymbol> candidates, ISymbol? selected, BaseArgumentListSyntax list, int offset)
+    private static async Task<SignatureHelp?> SignaturesAsync(
+        ImmutableArray<ISymbol> candidates,
+        ISymbol? selected,
+        BaseArgumentListSyntax list,
+        int offset,
+        DocumentationLinks links,
+        CancellationToken cancellationToken)
     {
         if (candidates.IsEmpty)
         {
@@ -330,7 +400,8 @@ public sealed partial class CSharpLanguageServer
                     ? $"{ordinary.ReturnType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {ordinary.ContainingType?.Name}.{ordinary.Name}"
                     : $"{((IPropertySymbol)candidate).Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} this");
             label.Append(candidate is IPropertySymbol ? '[' : '(');
-            var documentation = DocumentationComments.Read(candidate);
+            var documentation = DocumentationComments.Root(candidate);
+            var summary = await links.RenderAsync(documentation?.Element("summary"), cancellationToken).ConfigureAwait(false);
             var information = new List<ParameterInformation>();
             foreach (var (parameter, position) in parameters.Select((parameter, position) => (parameter, position)))
             {
@@ -340,9 +411,10 @@ public sealed partial class CSharpLanguageServer
                 }
                 var start = label.Length;
                 label.Append(parameter.ToDisplayString(SignatureFormat));
-                information.Add(new ParameterInformation(
-                    [start, label.Length],
-                    documentation.Parameters.TryGetValue(parameter.Name, out var text) ? new MarkupContent("markdown", text) : null));
+                var text = documentation is null
+                    ? null
+                    : await links.RenderAsync(DocumentationComments.Parameter(documentation, parameter.Name), cancellationToken).ConfigureAwait(false);
+                information.Add(new ParameterInformation([start, label.Length], text is null ? null : new MarkupContent("markdown", text)));
             }
             label.Append(candidate is IPropertySymbol ? ']' : ')');
             var activeParameter = named is not null
@@ -350,7 +422,7 @@ public sealed partial class CSharpLanguageServer
                 : parameters.Length > 0 && parameters[^1].IsParams ? Math.Min(argumentIndex, parameters.Length - 1) : argumentIndex;
             signatures.Add(new SignatureInformation(
                 label.ToString(),
-                documentation.Summary is { } summary ? new MarkupContent("markdown", summary) : null,
+                summary is null ? null : new MarkupContent("markdown", summary),
                 information,
                 activeParameter));
             if (selected is not null && SymbolEqualityComparer.Default.Equals(candidate.OriginalDefinition, selected.OriginalDefinition))
@@ -363,7 +435,7 @@ public sealed partial class CSharpLanguageServer
                 active = index;
             }
         }
-        return new SignatureHelp(signatures, active, signatures[active].ActiveParameter ?? 0);
+        return new SignatureHelp(signatures, active, signatures[active].ActiveParameter ?? 0, links.Targets);
     }
 
     private async Task<List<TextEdit>> FormatAsync(DocumentFormattingParams request, CancellationToken cancellationToken)

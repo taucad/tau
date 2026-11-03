@@ -23,7 +23,6 @@ export const runtimeKernelIds = [
 
 /** First-party middleware names (`middleware.name`), as `middleware.wrap(<name>)` spans carry them. @public */
 export const middlewareIds = [
-  'DisplaySimplification',
   'GeometryCache',
   'GltfEdgeDetection',
   'ParameterCache',
@@ -63,6 +62,7 @@ export const exportFormats = [
   'usda',
   'usdc',
   'usdz',
+  'vdb',
   'webp',
 ] as const;
 
@@ -115,6 +115,7 @@ export const fileFormats = [
   'usda',
   'usdc',
   'usdz',
+  'vdb',
   'webp',
   'xgl',
 ] as const;

@@ -672,7 +672,7 @@ const authenticatedFetch =
           body = JSON.stringify({ ...payload, system });
         }
       }
-      const response = await options.fetch(input, {
+      const response = await options.fetch(withoutBetaMarker(input), {
         ...init,
         body,
         credentials: 'include',
@@ -889,6 +889,31 @@ const streamedToolCall = (
     });
   }
   return block;
+};
+
+/**
+ * The same request with pi's `beta` marker taken off the query.
+ *
+ * pi posts an Anthropic messages call to `/v1/messages?beta=true`, whatever betas the request actually asks for, and
+ * Tau's own gateway accepts no query parameter at all: price and funded identity are computed from the body and an
+ * allow-listed header set, so a query input that never reaches that identity is refused rather than ignored
+ * (`assertNoQuery`). A beta Tau supports is requested through the `anthropic-beta` header, which the gateway validates
+ * against its own list, so this marker carries nothing and the gateway answers 400 while it is on. Only `beta` is
+ * dropped: anything else on the query is still something neither side meant to send.
+ *
+ * @param input - The request pi is about to make.
+ * @returns The same target with no `beta` parameter, or the input unchanged when it carries none.
+ */
+const withoutBetaMarker = (input: RequestInfo | URL): RequestInfo | URL => {
+  if (typeof input !== 'string' && !(input instanceof URL)) {
+    return input;
+  }
+  const url = new URL(input.toString());
+  if (!url.searchParams.has('beta')) {
+    return input;
+  }
+  url.searchParams.delete('beta');
+  return url.toString();
 };
 
 const abortError = (signal: AbortSignal): Error =>

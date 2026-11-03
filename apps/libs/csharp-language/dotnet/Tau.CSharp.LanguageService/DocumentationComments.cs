@@ -6,38 +6,8 @@ using Microsoft.CodeAnalysis;
 
 namespace Tau.CSharp.LanguageService;
 
-/// <summary>Plain-text sections of a symbol's XML documentation, for signature help and declarations.</summary>
-internal sealed record DocumentationSections(string? Summary, IReadOnlyDictionary<string, string> Parameters, string? Returns);
-
 internal static partial class DocumentationComments
 {
-    private static readonly DocumentationSections Empty = new(null, new Dictionary<string, string>(), null);
-
-    internal static DocumentationSections Read(ISymbol symbol)
-    {
-        var xml = symbol.GetDocumentationCommentXml(expandIncludes: false);
-        if (string.IsNullOrWhiteSpace(xml))
-        {
-            return Empty;
-        }
-        try
-        {
-            var root = XElement.Parse(xml, LoadOptions.PreserveWhitespace);
-            var parameters = root.Elements("param")
-                .Where(element => element.Attribute("name") is not null)
-                .GroupBy(element => element.Attribute("name")!.Value, StringComparer.Ordinal)
-                .ToDictionary(group => group.Key, group => Flatten(group.First()), StringComparer.Ordinal);
-            return new DocumentationSections(
-                Text(root.Element("summary")),
-                parameters,
-                Text(root.Element("returns")));
-        }
-        catch (XmlException)
-        {
-            return Empty;
-        }
-    }
-
     /// <summary>The inner XML of a symbol's documentation as <c>///</c> lines, without the outer member element.</summary>
     internal static IEnumerable<string> TripleSlashLines(ISymbol symbol)
     {
@@ -69,14 +39,8 @@ internal static partial class DocumentationComments
         }
     }
 
-    private static string? Text(XElement? element)
-    {
-        var text = element is null ? null : Flatten(element);
-        return string.IsNullOrWhiteSpace(text) ? null : text;
-    }
-
-    /// <summary>One top-level element of a symbol's documentation, such as <c>summary</c>.</summary>
-    internal static XElement? Element(ISymbol symbol, string name)
+    /// <summary>A symbol's documentation, whose elements such as <c>summary</c> and <c>param</c> hold its sections.</summary>
+    internal static XElement? Root(ISymbol symbol)
     {
         var xml = symbol.GetDocumentationCommentXml(expandIncludes: false);
         if (string.IsNullOrWhiteSpace(xml))
@@ -85,13 +49,17 @@ internal static partial class DocumentationComments
         }
         try
         {
-            return XElement.Parse(xml, LoadOptions.PreserveWhitespace).Element(name);
+            return XElement.Parse(xml, LoadOptions.PreserveWhitespace);
         }
         catch (XmlException)
         {
             return null;
         }
     }
+
+    /// <summary>The first <c>param</c> element that documents <paramref name="name"/>.</summary>
+    internal static XElement? Parameter(XElement root, string name) =>
+        root.Elements("param").FirstOrDefault(element => element.Attribute("name")?.Value == name);
 
     /// <summary>The documentation IDs that <c>see</c> and <c>seealso</c> elements reference, in document order.</summary>
     internal static IEnumerable<string> Crefs(XElement element) =>

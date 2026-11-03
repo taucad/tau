@@ -209,6 +209,54 @@ describe('createSectionStencilCaps', () => {
     caps.dispose();
   });
 
+  it('should share each pass draw between owners whose bounds do not meet, and order owners whose bounds do', () => {
+    const caps = createSectionStencilCaps('webgl');
+    const renderer = createRecordingRenderer();
+    const passOrders = (sources: readonly SectionStencilCapSource[]) => {
+      const stats = caps.render(renderer, frameFor(sources));
+      const orders = new Map<string, number[]>();
+      for (const { material, renderOrder } of renderer.frames.at(-1)!.objects) {
+        const { name } = material as THREE.Material;
+        orders.set(
+          name,
+          [...(orders.get(name) ?? []), renderOrder].toSorted((left, right) => left - right),
+        );
+      }
+      return { stats, orders };
+    };
+
+    // Six owners of two sources each, every box apart from every other: one draw per pass.
+    const apart = Array.from({ length: 6 }, (_, owner) =>
+      [0, 1].map((index) =>
+        createSource(`${owner}-${index}`, `owner-${owner}`, new THREE.BoxGeometry(), (owner * 2 + index) * 3),
+      ),
+    ).flat();
+    const shared = passOrders(apart);
+    expect(shared.stats).toMatchObject({ crossingSourceCount: 12, overlapCandidateSourceCount: 0 });
+    // An owner's two sources still take turns: two rounds of a cap and a clear, after one clear of the piece.
+    expect(shared.stats.polygonDrawCount).toBe(5);
+    expect(shared.orders.get('TauSectionStencil:mark-overlap')).toBeUndefined();
+    expect(shared.orders.get('TauSectionStencil:promote-owner')).toBeUndefined();
+
+    // A later owner that meets an earlier one marks and caps after the earlier one is promoted; one apart from both
+    // shares the first owner's draws.
+    const meeting = passOrders([
+      createSource('a', 'owner-a', new THREE.BoxGeometry()),
+      createSource('b', 'owner-b', new THREE.BoxGeometry(), 0.5),
+      createSource('c', 'owner-c', new THREE.BoxGeometry(), 10),
+    ]);
+    const capOrders = meeting.orders.get('TauSectionCap')!;
+    const [promote] = meeting.orders.get('TauSectionStencil:promote-owner')!;
+    const [mark] = meeting.orders.get('TauSectionStencil:mark-overlap')!;
+    // The first and last owners' caps in one draw, the second owner's, then the overlap cap.
+    expect(capOrders).toHaveLength(3);
+    expect(capOrders[0]).toBeLessThan(promote!);
+    expect(promote).toBeLessThan(mark!);
+    expect(mark).toBeLessThan(capOrders[1]!);
+    expect(meeting.stats.overlapCandidateSourceCount).toBe(1);
+    caps.dispose();
+  });
+
   it('should omit zero-width outline draws while retaining cap fills', () => {
     const caps = createSectionStencilCaps('webgpu');
     const renderer = createRecordingRenderer();
@@ -298,14 +346,70 @@ describe('createSectionStencilCaps', () => {
       expectRebuildFor('a source that left', { ...frame, sources: [] });
       expectRebuildFor('the stripe frequency', { ...frame, stripes: { stripeFrequency: 3, stripeWidth: 0.25 } });
       expectRebuildFor('the outline width', { ...frame, outlineWidthPixels: 2 });
+      expectRebuildFor('a hatch', { ...frame, sources: [{ ...source, hatch: { angle: 0.3, spacingScale: 1 } }] });
+      expectRebuildFor('an owner', { ...frame, sources: [{ ...source, ownerKey: 'owner-b' }] });
+      const loopFill = new THREE.BufferGeometry();
+      const loopOpen = new THREE.BufferGeometry();
+      const landed = { fill: loopFill, open: loopOpen, closedLoopCount: 1, openChainCount: 0 };
+      expectRebuildFor('a per-loop slice that landed', {
+        ...frame,
+        sources: [{ ...source, loops: { matrix: new THREE.Matrix4(), bySlot: new Map([[0, landed]]) } }],
+      });
       // A posed part moves its meshes without any cut or source change.
       caps.render(renderer, frame);
       expect(caps.render(renderer, frame).rebuilt).toBe(false);
       source.meshes[0]!.position.set(0.4, 0, 0);
       source.meshes[0]!.updateMatrixWorld();
       expect(caps.render(renderer, frame).rebuilt, 'a posed part rebuilds').toBe(true);
+      // Geometry edited in place keeps its identity; its revision and draw range carry the edit.
+      expect(caps.render(renderer, frame).rebuilt).toBe(false);
+      source.meshes[0]!.geometry.getAttribute('position').needsUpdate = true;
+      expect(caps.render(renderer, frame).rebuilt, 'a geometry edited in place rebuilds').toBe(true);
+      expect(caps.render(renderer, frame).rebuilt).toBe(false);
+      source.meshes[0]!.geometry.setDrawRange(0, 12);
+      expect(caps.render(renderer, frame).rebuilt, 'a new draw range rebuilds').toBe(true);
+      loopFill.dispose();
+      loopOpen.dispose();
     } finally {
       caps.dispose();
+      source.meshes[0]!.geometry.dispose();
+    }
+  });
+
+  it('should write the outline camera on a reused frame as a build at that camera writes it', () => {
+    const outlineCamera = (renderer: ReturnType<typeof createRecordingRenderer>): unknown[] =>
+      renderer.frames
+        .at(-1)!
+        .objects.filter(({ material }) => (material as THREE.Material).name === 'TauSectionCapOutline')
+        .map(({ material }) =>
+          Object.entries((material as THREE.ShaderMaterial).uniforms).map(([name, uniform]): [string, unknown] => {
+            const value: unknown = uniform.value;
+            return [name, (value as Partial<THREE.Vector4>).toArray?.() ?? value];
+          }),
+        );
+    const reusing = createSectionStencilCaps('webgl');
+    const fresh = createSectionStencilCaps('webgl');
+    const reusingRenderer = createRecordingRenderer();
+    const freshRenderer = createRecordingRenderer();
+    const source = createSource('a', 'owner-a', new THREE.BoxGeometry());
+    const frame = frameFor([source]);
+    try {
+      reusing.render(reusingRenderer, frame);
+      // Orbit, zoom and resize: none of them is a build input, and all of them move the outline's screen-space data.
+      const camera = frame.camera as THREE.PerspectiveCamera;
+      camera.position.set(1.5, -2, 6);
+      camera.lookAt(0, 0, 0);
+      camera.zoom = 2;
+      camera.updateProjectionMatrix();
+      camera.updateMatrixWorld();
+      const moved = { ...frame, viewportHeightPixels: 900 };
+      expect(reusing.render(reusingRenderer, moved).rebuilt).toBe(false);
+      expect(fresh.render(freshRenderer, moved).rebuilt).toBe(true);
+      expect(outlineCamera(reusingRenderer)).not.toHaveLength(0);
+      expect(outlineCamera(reusingRenderer)).toEqual(outlineCamera(freshRenderer));
+    } finally {
+      reusing.dispose();
+      fresh.dispose();
       source.meshes[0]!.geometry.dispose();
     }
   });

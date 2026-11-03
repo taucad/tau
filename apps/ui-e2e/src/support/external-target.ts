@@ -223,6 +223,16 @@ declare module 'vitest' {
     /** DP18: the exact STL and GLB of `picovoxel.sphere-minus-beams` every host exports (tau-examples `exact-pins.json`). */
     picovoxelExactPins: Readonly<Record<'stl' | 'glb', { readonly sha256: string; readonly bytes: number }>>;
     /**
+     * T15: the prepared PicoGK browser bundle the UI build embedded, and a sample of its files as
+     * its own manifest records them; undefined when no bundle was staged for this run.
+     */
+    picogkBundle:
+      | Readonly<{
+          sha256: string;
+          files: ReadonlyArray<Readonly<{ path: string; sha256: string; byteLength: number }>>;
+        }>
+      | undefined;
+    /**
      * The variable names each live GitHub row still needs (C10, A4; R17), never
      * a value; an empty list means the row runs (`#support/github-identity.js`).
      */

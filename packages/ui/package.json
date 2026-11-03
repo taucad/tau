@@ -81,6 +81,7 @@
     "./components/nested-action.variants": "./src/components/nested-action.variants.ts",
     "./components/pane-spacing.variants": "./src/components/pane-spacing.variants.ts",
     "./components/pane-virtual-list": "./src/components/pane-virtual-list.tsx",
+    "./components/pane-search": "./src/components/pane-search.tsx",
     "./components/panel-empty-state": "./src/components/panel-empty-state.tsx",
     "./components/password-input": "./src/components/password-input.tsx",
     "./components/popover": "./src/components/popover.tsx",
@@ -107,6 +108,7 @@
     "./components/toggle-group": "./src/components/toggle-group.tsx",
     "./components/tooltip": "./src/components/tooltip.tsx",
     "./hooks/use-mobile": "./src/hooks/use-mobile.ts",
+    "./hooks/use-platform": "./src/hooks/use-platform.ts",
     "./hooks/use-tick-animation": "./src/hooks/use-tick-animation.ts",
     "./styles/base.css": {
       "types": "./src/styles/base.css.d.ts",
@@ -337,6 +339,11 @@
         "import": "./dist/components/pane-virtual-list.mjs",
         "default": "./dist/components/pane-virtual-list.mjs"
       },
+      "./components/pane-search": {
+        "types": "./dist/components/pane-search.d.mts",
+        "import": "./dist/components/pane-search.mjs",
+        "default": "./dist/components/pane-search.mjs"
+      },
       "./components/panel-empty-state": {
         "types": "./dist/components/panel-empty-state.d.mts",
         "import": "./dist/components/panel-empty-state.mjs",
@@ -466,6 +473,11 @@
         "types": "./dist/hooks/use-mobile.d.mts",
         "import": "./dist/hooks/use-mobile.mjs",
         "default": "./dist/hooks/use-mobile.mjs"
+      },
+      "./hooks/use-platform": {
+        "types": "./dist/hooks/use-platform.d.mts",
+        "import": "./dist/hooks/use-platform.mjs",
+        "default": "./dist/hooks/use-platform.mjs"
       },
       "./hooks/use-tick-animation": {
         "types": "./dist/hooks/use-tick-animation.d.mts",

@@ -6,6 +6,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { PanelLeft } from 'lucide-react';
 import { useLocation } from 'react-router';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
+import { usePlatform } from '@taucad/ui/hooks/use-platform';
 import { cookieName } from '#constants/cookie.constants.js';
 import { sidebarDefaultOpen } from '#constants/sidebar.constants.js';
 import { useCookie } from '#hooks/use-cookie.js';
@@ -111,6 +112,7 @@ const SidebarTrigger = ({
 }): React.JSX.Element => {
   const { isMobile, open, openMobile, toggleSidebar } = useSidebar();
   const isOpen = isMobile ? openMobile : open;
+  const platform = usePlatform();
   /* On phones the sidebar is a sheet: the control opens it from a page, and inside the sheet it closes it. */
   const label = isMobile ? (isOpen ? 'Close sidebar' : 'Open sidebar') : 'Toggle Sidebar';
 
@@ -163,7 +165,7 @@ const SidebarTrigger = ({
       <TooltipContent className={cn(isMobile && 'z-110')}>
         {isMobile ? label : 'Sidebar'}{' '}
         <KeyShortcut className='ml-1' variant='tooltip'>
-          {formatKeyCombination(sidebarToggleKeyCombo)}
+          {formatKeyCombination(sidebarToggleKeyCombo, platform)}
         </KeyShortcut>
       </TooltipContent>
     </Tooltip>

@@ -1,4 +1,6 @@
-import { act, render, screen, within } from '@testing-library/react';
+import { KeyboardProvider } from '@taucad/ui/components/keyboard';
+import { StrictMode } from 'react';
+import { act, render as renderReact, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Mock } from 'vitest';
@@ -8,6 +10,8 @@ import { closePanel, TerminalCloseContext, useDockviewTerminalCloseHost } from '
 import type { TerminalRendererLoader } from '#components/terminal/terminal-pane.js';
 import type { TerminalAvailability } from '#components/terminal/terminal-availability.js';
 import type { TerminalRendererOptions, TerminalRendererView } from '#components/terminal/terminal-renderer.js';
+
+const render = (ui: React.ReactNode) => renderReact(ui, { wrapper: KeyboardProvider });
 
 type FakeSession = DesktopTerminalSession & { readonly calls: Record<keyof DesktopTerminalSession, unknown[][]> };
 
@@ -116,33 +120,136 @@ beforeEach(() => {
 });
 
 const startTerminal = async (): Promise<void> => {
-  await userEvent.click(screen.getByRole('button', { name: 'Start Terminal' }));
+  await act(async () => undefined);
   harness.emit(opened);
 };
 
 describe('TerminalPane', () => {
-  it('shows Start Terminal and opens nothing until a person presses it (D21)', async () => {
-    const { rerender, unmount } = render(
-      <TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />,
-    );
-    expect(screen.getByRole('button', { name: 'Start Terminal' })).toBeEnabled();
-    rerender(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
-    unmount();
-    render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
-    expect(harness.open).not.toHaveBeenCalled();
+  it.each(['frames', 'bytes'])(
+    'should bound early %s and close an overflowing launch without replay',
+    async (limit) => {
+      harness.open.mockImplementation((_request, onFrame: (frame: TerminalHostFrame) => void) => {
+        for (let index = 0; index < (limit === 'frames' ? 65 : 5); index += 1) {
+          onFrame({ type: 'output', data: limit === 'frames' ? '' : 'x'.repeat(65_536), offset: (index + 1) * 65_536 });
+        }
+        return harness.session;
+      });
+      render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
+      await act(async () => undefined);
+      expect(harness.session.calls.close).toHaveLength(1);
+      expect(harness.view.dispose).toHaveBeenCalledOnce();
+      expect(harness.view.writes).toEqual([]);
+      expect(harness.session.calls.ack).toEqual([]);
+      expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+      expect(harness.open).toHaveBeenCalledOnce();
+    },
+  );
 
-    await startTerminal();
-    expect(harness.open).toHaveBeenCalledExactlyOnceWith(
-      { projectRoot: '/home/me/Tau/project-1', size: { columns: 120, rows: 30 } },
-      expect.any(Function),
+  it('should discard early frames and late callbacks from a failed open before retry', async () => {
+    let failedListener: ((frame: TerminalHostFrame) => void) | undefined;
+    harness.open.mockImplementationOnce((_request, onFrame: (frame: TerminalHostFrame) => void) => {
+      failedListener = onFrame;
+      onFrame(opened);
+      onFrame({ type: 'output', data: 'failed prompt', offset: 13 });
+      throw new Error('Bridge disconnected.');
+    });
+    render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
+    await act(async () => undefined);
+    expect(harness.view.dispose).toHaveBeenCalledOnce();
+    expect(harness.view.writes).toEqual([]);
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    act(() => {
+      failedListener?.({ type: 'output', data: 'stale', offset: 18 });
+    });
+    harness.emit(opened);
+    harness.emit({ type: 'output', data: 'new prompt', offset: 10 });
+    expect(harness.view.writes.map(({ data }) => data)).toEqual(['new prompt']);
+    harness.view.writes[0]!.painted();
+    expect(harness.session.calls.ack).toEqual([[10]]);
+    expect(harness.open).toHaveBeenCalledTimes(2);
+  });
+
+  it('should capture and acknowledge initial output delivered during open after input subscribes', async () => {
+    const subscribed = vi.spyOn(harness.view, 'onData');
+    vi.spyOn(harness.view, 'write').mockImplementation((data, painted) => {
+      harness.view.writes.push({ data, painted });
+      painted();
+    });
+    harness.open.mockImplementation((_request, onFrame: (frame: TerminalHostFrame) => void) => {
+      expect(subscribed).toHaveBeenCalledOnce();
+      onFrame(opened);
+      onFrame({ type: 'output', data: 'real initial prompt> ', offset: 21 });
+      return harness.session;
+    });
+    render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
+    await act(async () => undefined);
+    expect(harness.view.writes.map(({ data }) => data)).toEqual(['real initial prompt> ']);
+    expect(harness.session.calls.ack).toEqual([[21]]);
+  });
+
+  it('should dispose a late renderer without opening after the pane unmounts', async () => {
+    let ready: ((view: TerminalRendererView) => void) | undefined;
+    const loading = new Promise<TerminalRendererView>((resolve) => {
+      ready = resolve;
+    });
+    const loadRenderer = vi.fn(async () => loading);
+    const { unmount } = render(<TerminalPane availability={available(harness)} loadRenderer={loadRenderer} />);
+    await act(async () => undefined);
+    expect(loadRenderer).toHaveBeenCalledOnce();
+    unmount();
+    await act(async () => {
+      ready?.(harness.view);
+    });
+    expect(harness.open).not.toHaveBeenCalled();
+    expect(harness.view.dispose).toHaveBeenCalledOnce();
+  });
+
+  it('should autostart exactly once across StrictMode effects and rerenders', async () => {
+    const { rerender } = render(
+      <StrictMode>
+        <TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />
+      </StrictMode>,
     );
+    await act(async () => undefined);
+    expect(harness.open).toHaveBeenCalledOnce();
+    rerender(
+      <StrictMode>
+        <TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />
+      </StrictMode>,
+    );
+    await act(async () => undefined);
+    expect(harness.open).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('button', { name: 'Start Terminal' })).toBeNull();
+  });
+
+  it('should render no inner header controls', async () => {
+    render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
+    await act(async () => undefined);
+    harness.emit(opened);
+    for (const name of ['Screen reader mode', 'Find', 'Restart', 'Request access']) {
+      expect(screen.queryByRole('button', { name })).toBeNull();
+    }
+    expect(screen.queryByText('Terminal')).toBeNull();
+  });
+
+  it('should close on unmount and autostart a fresh session on reopen', async () => {
+    const first = render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
+    await startTerminal();
+    expect(harness.open).toHaveBeenCalledOnce();
+    first.unmount();
+    expect(harness.session.calls.close).toHaveLength(1);
+    harness = createHarness();
+    render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
+    await startTerminal();
+    expect(harness.open).toHaveBeenCalledOnce();
     expect(harness.options().fontFamily).toContain('Geist Mono');
     expect(harness.view.focus).toHaveBeenCalled();
   });
 
   it('cannot start while the folder is still being looked up', () => {
     render(<TerminalPane availability={{ status: 'checking' }} loadRenderer={harness.loadRenderer} />);
-    expect(screen.getByRole('button', { name: 'Start Terminal' })).toBeDisabled();
+    expect(screen.getByRole('status', { name: 'Starting Terminal' })).toHaveAttribute('aria-busy', 'true');
+    expect(harness.open).not.toHaveBeenCalled();
   });
 
   it('shows the reason and what to do when the Terminal is unavailable', () => {
@@ -167,6 +274,20 @@ describe('TerminalPane', () => {
     expect(harness.session.calls.ack).toEqual([[7]]);
   });
 
+  it('acknowledges nothing of a replaced shell that paints after the replacement opened', async () => {
+    render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
+    await startTerminal();
+    harness.emit({ type: 'output', data: 'old shell output\r\n', offset: 18 });
+    harness.emit({ type: 'exited', exitCode: null, signal: 'SIGTERM', reason: 'replaced' });
+    harness.emit(opened);
+    harness.emit({ type: 'output', data: '$ ', offset: 2 });
+    for (const { painted } of harness.view.writes) {
+      painted();
+    }
+    /* The new shell's offsets start at zero: 18 would be past them, and the host would end the Terminal. */
+    expect(harness.session.calls.ack).toEqual([[2]]);
+  });
+
   it('sends typed input and splits a paste larger than one input frame', async () => {
     render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
     await startTerminal();
@@ -179,13 +300,7 @@ describe('TerminalPane', () => {
     render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
     await startTerminal();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Request access' }));
-    const form = screen.getByRole('form', { name: 'Request Terminal access' });
-    await userEvent.type(within(form).getByLabelText('Hosts to reach'), 'registry.npmjs.org');
-    await userEvent.click(within(form).getByRole('button', { name: 'Request access' }));
-    expect(harness.session.calls.requestAccess).toEqual([[{ read: [], write: [], domains: ['registry.npmjs.org'] }]]);
-    expect(screen.queryByText('Allow this Terminal more access?')).toBeNull();
-
+    expect(harness.session.calls.requestAccess).toEqual([]);
     harness.emit({
       type: 'access-requested',
       requestId: 'host-minted-1',
@@ -214,6 +329,59 @@ describe('TerminalPane', () => {
     expect(open).toHaveBeenCalledExactlyOnceWith('https://tau.new/', '_blank', 'noopener,noreferrer');
   });
 
+  it('offers access through the keyboard menu and binds approval to the host request', async () => {
+    render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
+    await startTerminal();
+    screen.getByRole('region', { name: 'Terminal' }).focus();
+    await userEvent.keyboard('{Shift>}{F10}{/Shift}');
+    expect(screen.queryByText('Screen reader mode')).toBeNull();
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Request access' }));
+    const read = screen.getByLabelText('Folders to read');
+    expect(read).toHaveFocus();
+    await userEvent.type(read, '/home/me/reference');
+    await userEvent.click(screen.getByRole('button', { name: 'Request access' }));
+    expect(harness.session.calls.requestAccess).toEqual([[{ read: ['/home/me/reference'], write: [], domains: [] }]]);
+    expect(harness.session.calls.decideAccess).toEqual([]);
+    harness.emit({
+      type: 'access-requested',
+      requestId: 'trusted-request',
+      access: { read: ['/home/me/reference'], write: [], domains: [] },
+      expiresAt: '2030-01-01T00:00:00.000Z',
+    });
+    expect(screen.queryByRole('form', { name: 'Request Terminal access' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Allow and restart' }));
+    expect(harness.session.calls.decideAccess).toEqual([['trusted-request', 'allow']]);
+  });
+
+  it('finds through the menu and restores terminal focus on Escape', async () => {
+    render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
+    await startTerminal();
+    screen.getByRole('region', { name: 'Terminal' }).focus();
+    await userEvent.keyboard('{Shift>}{F10}{/Shift}');
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Find' }));
+    const find = screen.getByRole('textbox', { name: 'Find in Terminal' });
+    expect(find).toHaveFocus();
+    await userEvent.type(find, 'needle{Enter}');
+    expect(harness.view.search).toHaveBeenCalledWith('needle', false);
+    await userEvent.keyboard('{Escape}');
+    expect(harness.view.clearFind).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('textbox', { name: 'Find in Terminal' })).toBeNull();
+    expect(harness.view.focus).toHaveBeenCalledTimes(2);
+  });
+
+  it('waits for the host exit before a requested restart', async () => {
+    render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
+    await startTerminal();
+    screen.getByRole('region', { name: 'Terminal' }).focus();
+    await userEvent.keyboard('{Shift>}{F10}{/Shift}');
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Restart' }));
+    expect(harness.session.calls.close).toHaveLength(1);
+    expect(harness.open).toHaveBeenCalledOnce();
+    harness.emit({ type: 'exited', exitCode: 0, signal: null, reason: 'closed' });
+    await act(async () => undefined);
+    expect(harness.open).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps the shell running when a stale decision is refused', async () => {
     render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
     await startTerminal();
@@ -224,12 +392,13 @@ describe('TerminalPane', () => {
       recovery: 'Ask again.',
     });
     expect(screen.getByText('That access request expired. Ask again.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Request access' })).toBeInTheDocument();
+    expect(harness.session.calls.close).toEqual([]);
+    expect(harness.open).toHaveBeenCalledOnce();
   });
 
   it('shows the typed host refusal, such as Windows sandbox-unavailable, with a retry', async () => {
     render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
-    await userEvent.click(screen.getByRole('button', { name: 'Start Terminal' }));
+    await act(async () => undefined);
     harness.emit({
       type: 'refused',
       code: 'sandbox-unavailable',
@@ -274,57 +443,25 @@ describe('TerminalPane', () => {
     expect(harness.view.dispose).toHaveBeenCalledOnce();
   });
 
-  it('restarts only after the host has ended the running session', async () => {
-    render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
-    await startTerminal();
-    await userEvent.click(screen.getByRole('button', { name: 'Restart' }));
-    expect(harness.session.calls.close).toHaveLength(1);
+  it('should not retry a refused launch on rerender', async () => {
+    const { rerender } = render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
+    await act(async () => undefined);
+    harness.emit({ type: 'refused', code: 'sandbox-unavailable', message: 'Unavailable.', recovery: 'Try again.' });
+    rerender(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
+    await act(async () => undefined);
     expect(harness.open).toHaveBeenCalledOnce();
-    harness.emit({ type: 'exited', exitCode: null, signal: 'SIGHUP', reason: 'closed' });
-    await vi.waitFor(() => {
-      expect(harness.open).toHaveBeenCalledTimes(2);
-    });
-  });
-
-  it('never restarts on its own after a restart the host refused', async () => {
-    render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
-    await startTerminal();
-    await userEvent.click(screen.getByRole('button', { name: 'Restart' }));
-    harness.emit({
-      type: 'refused',
-      code: 'sandbox-unavailable',
-      message: 'This computer has no shell sandbox Tau can use yet.',
-      recovery: 'Use the typed Tau tools.',
-    });
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
-    harness.emit(opened);
-    expect(harness.open).toHaveBeenCalledTimes(2);
-    harness.emit({ type: 'exited', exitCode: 0, signal: null, reason: 'shell-exited' });
-    expect(screen.getByText('The shell exited. Exit code 0.')).toBeInTheDocument();
     expect(harness.open).toHaveBeenCalledTimes(2);
   });
 
-  it('finds in screen and scrollback from the pane chrome', async () => {
-    render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
-    await startTerminal();
-    await userEvent.click(screen.getByRole('button', { name: 'Find' }));
-    await userEvent.type(screen.getByRole('textbox', { name: 'Find in Terminal' }), 'error{Enter}');
-    expect(harness.view.search).toHaveBeenCalledWith('error', false);
-    await userEvent.keyboard('{Shift>}{Enter}{/Shift}');
-    expect(harness.view.search).toHaveBeenLastCalledWith('error', true);
-    await userEvent.keyboard('{Escape}');
-    expect(harness.view.clearFind).toHaveBeenCalledOnce();
-    expect(screen.queryByRole('textbox', { name: 'Find in Terminal' })).toBeNull();
-  });
-
-  it('moves focus to the pane chrome on the documented leave key', async () => {
+  it('moves focus out of terminal input on the documented leave key', async () => {
     render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
     await startTerminal();
     act(() => {
       harness.options().onLeave();
     });
-    expect(document.activeElement).toHaveAttribute('data-slot', 'terminal-chrome');
-    expect(screen.getByRole('button', { name: 'Screen reader mode' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('region', { name: 'Terminal' })).toHaveFocus();
+    expect(harness.options().screenReaderMode).toBe(true);
   });
 });
 
@@ -469,6 +606,7 @@ describe('TerminalPane close (T15)', () => {
     await startTerminal();
     requestClose();
     rerender(<DockedTerminal api={api} hide={hide} availability={available(harness, '/home/me/Tau/project-2')} />);
+    await act(async () => undefined);
     expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(harness.session.calls.close).toHaveLength(1);
     expect(api.close).not.toHaveBeenCalled();
@@ -540,11 +678,8 @@ describe('TerminalPane project change (T15)', () => {
     );
     expect(first.session.calls.close).toHaveLength(1);
     expect(first.view.dispose).toHaveBeenCalledOnce();
-    /* Nothing starts by itself in the new project (D21). */
-    expect(second.open).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'Start Terminal' })).toBeEnabled();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Start Terminal' }));
+    await act(async () => undefined);
     second.emit({
       type: 'opened',
       session: { id: 'session-2', projectLabel: 'project-2', access: { read: [], write: [], domains: [] } },
@@ -562,7 +697,7 @@ describe('TerminalPane project change (T15)', () => {
     expect(first.view.writes).toEqual([]);
     expect(second.session.calls.input).toEqual([]);
     expect(first.session.calls.input).toEqual([['make build\r']]);
-    expect(screen.getByText('project-2')).toBeInTheDocument();
+    expect(second.view.focus).toHaveBeenCalled();
     expect(screen.queryByText(/project changed/iu)).toBeNull();
   });
 });

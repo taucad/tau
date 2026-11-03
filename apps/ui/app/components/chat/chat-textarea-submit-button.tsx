@@ -3,6 +3,7 @@ import { ArrowUp, Play, Square } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
+import { usePlatform } from '@taucad/ui/hooks/use-platform';
 import { cancelChatStreamKeyCombination } from '#components/chat/chat-textarea-types.js';
 import { ariaKeyShortcuts, formatKeyCombination } from '@taucad/ui/utils/keys';
 import { Loader } from '@taucad/ui/components/loader';
@@ -22,6 +23,7 @@ const ChatStreamingStopButton = memo(function ({
   formattedCancelKeyCombination,
   onCancel,
 }: ChatStreamingStopButtonProperties): React.JSX.Element {
+  const platform = usePlatform();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -30,7 +32,7 @@ const ChatStreamingStopButton = memo(function ({
           variant='ghost'
           size='icon'
           aria-label='Stop'
-          aria-keyshortcuts={ariaKeyShortcuts(cancelChatStreamKeyCombination)}
+          aria-keyshortcuts={ariaKeyShortcuts(cancelChatStreamKeyCombination, platform)}
           className={cn(chatComposerActionButtonClassName, 'size-7')}
           onClick={(event) => {
             event.stopPropagation();

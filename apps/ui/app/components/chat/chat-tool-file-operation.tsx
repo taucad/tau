@@ -21,7 +21,7 @@ import { useResizeObserver } from '#hooks/use-resize-observer.js';
 import { ChangeIndicator } from '#components/chat/change-indicator.js';
 import { OpenRenderButton } from '#components/files/open-render-button.js';
 import { shouldShowOpenRenderButton } from '#components/files/open-render-button.ignore.js';
-import type { ShikiLanguage } from '#lib/code-language-resolution.js';
+import type { CodeLanguage } from '#lib/code-language-resolution.js';
 import { resolveHighlightLanguageForPath } from '#lib/code-language-resolution.js';
 
 const fileOperationActionLabelClassName = '**:data-[slot=label]:hidden @xs/code:**:data-[slot=label]:flex';
@@ -52,8 +52,8 @@ function getFilename(path: string): string {
  * Get the code language for syntax highlighting based on a filename's extension.
  * Falls back to plaintext if the extension is not recognized.
  */
-function getLanguageFromFilename(filename: string): ShikiLanguage {
-  return resolveHighlightLanguageForPath(filename).shikiLanguage;
+function getLanguageFromFilename(filename: string): CodeLanguage {
+  return resolveHighlightLanguageForPath(filename).language;
 }
 
 type FourLineViewportProps = {
@@ -144,7 +144,7 @@ function FourLineViewport({ children }: FourLineViewportProps): React.JSX.Elemen
 
 type CodePreviewProps = {
   readonly content: string;
-  readonly language?: ShikiLanguage;
+  readonly language?: CodeLanguage;
 };
 
 function CodePreview({ content, language = 'plaintext' }: CodePreviewProps): React.JSX.Element {
@@ -158,7 +158,7 @@ function CodePreview({ content, language = 'plaintext' }: CodePreviewProps): Rea
 type DiffPreviewProps = {
   readonly originalContent: string;
   readonly modifiedContent: string;
-  readonly language?: ShikiLanguage;
+  readonly language?: CodeLanguage;
 };
 
 export function DiffPreview({

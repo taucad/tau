@@ -52,7 +52,7 @@ describe('publicationRehypeSanitize', () => {
     expect(html).toContain('target="_blank"');
   });
 
-  it('preserves code-block language classes for shiki/highlight', async () => {
+  it('preserves code-block language classes for syntax highlighting', async () => {
     const html = await renderHtml('```ts\nconst x = 1;\n```');
     expect(html).toContain('language-ts');
   });

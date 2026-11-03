@@ -48,6 +48,19 @@ const homeEntries: readonly string[] = [
   '.emacs.d',
 ];
 
+/** The Zsh startup files, relative to `ZDOTDIR`, in the order Zsh reads them. */
+const zshStartupNames: readonly string[] = ['.zshenv', '.zprofile', '.zshrc', '.zlogin'];
+
+/**
+ * The person's own Zsh startup files: the only baseline entries a launch may reopen, read-only, and only for the
+ * human macOS Terminal's system Zsh (operator ruling 2026-11-01T18:57Z).
+ *
+ * @public
+ * @param home - The person's home root.
+ * @returns Absolute paths, in the order Zsh reads them.
+ */
+export const zshStartupFiles = (home: string): readonly string[] => zshStartupNames.map((name) => join(home, name));
+
 /**
  * The provider-owned floor of the D20 never-grantable set and the D26 runtime-socket directories, as absolute paths
  * for one platform. A launch's `denied` list always carries these; the host adds Tau app data and every other admitted

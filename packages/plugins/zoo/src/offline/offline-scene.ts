@@ -114,6 +114,10 @@ export class OfflineScene {
   public readonly aliases = new Map<string, string>();
   /** Face or edge id → the solid that most recently took ownership of it. */
   public readonly subShapeOwner = new Map<string, string>();
+  /** Chamfer faces cut with the `v2` edge-cut algorithm, whose sketch frame Zoo turns half a turn about its normal. */
+  public readonly halfTurnFaces = new Set<string>();
+  /** Edge id → the fillet or chamfer that blended it, as a key of its cut type and size. */
+  public readonly cutEdges = new Map<string, string>();
 
   /** Runs on every claimed solid, before its ids are registered; the engine re-reads face orientations here. */
   public onClaim?: (solid: SolidEntity) => void;
@@ -125,6 +129,8 @@ export class OfflineScene {
     this.entities.clear();
     this.aliases.clear();
     this.subShapeOwner.clear();
+    this.halfTurnFaces.clear();
+    this.cutEdges.clear();
   }
 
   /**

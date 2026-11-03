@@ -7,6 +7,20 @@
   "implicitDependencies": ["desktop", "api"],
   "targets": {
     "formal:logs": {},
+    "test:e2e:shell": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "parallelism": false,
+      "metadata": {
+        "description": "Linux production Electron Terminal keyboard and scripted shell-to-CAD qualification. Requires desktop:build, a display (xvfb in CI), stock sandbox prerequisites and the matching native PTY binary. Both tiers are attempted independently and either failure fails the target. The model row uses the existing local API/PostgreSQL/Redis/MinIO fixture, not a live model credential. Missing prerequisites fail; macOS PTY and Windows provider evidence remain open."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}/apps/desktop-e2e",
+        "parallel": false,
+        "command": "terminal_status=0; ../../node_modules/.bin/vitest run --config vitest.shell.config.ts || terminal_status=$?; model_status=0; if ./scripts/ensure-services.sh; then ../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-shell-model.spec.ts --reporter=default --reporter=json --outputFile=../../out/test-results/desktop-shell/model-results.json || model_status=$?; else model_status=$?; fi; exit $(( terminal_status || model_status ))",
+        "env": { "TAU_E2E_API_URL": "http://localhost:4014" }
+      }
+    },
     "test": {
       "executor": "nx:noop"
     },

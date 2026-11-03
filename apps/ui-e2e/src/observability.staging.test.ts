@@ -8,6 +8,7 @@ import {
   observeHarnessPage,
   harnessNavigationTimeout,
   harnessPath,
+  harnessSentryEnvironments,
   observabilityUrl,
   productionOrigin,
   stagingOrigin,
@@ -28,7 +29,9 @@ describe('P1 deployed staging observability harness', () => {
       ).map(async ([projectName, projectId]) => {
         const url = new URL('https://us.sentry.io/api/0/organizations/taucad/events/');
         url.searchParams.set('project', projectId);
-        url.searchParams.set('environment', 'staging');
+        for (const environment of harnessSentryEnvironments) {
+          url.searchParams.append('environment', environment);
+        }
         url.searchParams.set('query', `e2e_run:${createObservabilityRunId()}`);
         url.searchParams.set('field', 'id');
         url.searchParams.set('statsPeriod', '1h');

@@ -116,8 +116,9 @@ describe('generated example artifacts', () => {
     expect(manifest.find((entry) => entry.kernel === 'picogk')?.mainFile).toBe('main.cs');
     expect(manifest.find((entry) => entry.name === 'v8-engine-rev2')?.mainFile).toBeUndefined();
 
-    // PicoVoxel adds three test fixtures, the helix-heat-x heavy reference and six implicit references (D36).
-    expect(manifest.filter((entry) => entry.kind === 'test-fixture')).toHaveLength(12);
+    /* PicoVoxel adds three test fixtures, the helix-heat-x heavy reference and six implicit references (D36);
+     * PicoGK adds three more test fixtures, the small C# programs the browser consumer suite opens. */
+    expect(manifest.filter((entry) => entry.kind === 'test-fixture')).toHaveLength(15);
     expect(manifest.filter((entry) => entry.kind === 'spec-fixture')).toHaveLength(1);
     expect(manifest.filter((entry) => entry.kind === 'reference')).toHaveLength(13);
 

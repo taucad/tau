@@ -1,0 +1,57 @@
+// One leaf of a printable butt hinge: a plate with three knuckles on a 3.2 mm pin.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+// Parameters
+hingeLength = 40
+leafWidth = 25
+leafThickness = 3
+knuckleCount = 5
+knuckleGap = 0.5
+knuckleDiameter = 8
+pinDiameter = 3.2
+clearance = 0.5
+screwDiameter = 4
+
+knuckleRadius = knuckleDiameter / 2
+knuckleLength = (hingeLength - (knuckleCount - 1) * knuckleGap) / knuckleCount
+knucklePitch = 2 * (knuckleLength + knuckleGap)
+
+// Plate, kept clear of the mating leaf's knuckles. XZ extrudes towards -Y.
+plate = startSketchOn(XZ)
+  |> startProfile(at = [knuckleRadius + clearance, 0])
+  |> xLine(endAbsolute = leafWidth)
+  |> yLine(length = leafThickness)
+  |> xLine(endAbsolute = knuckleRadius + clearance)
+  |> close()
+  |> extrude(length = hingeLength)
+
+// First knuckle: a tube around the pin axis plus a tab that reaches the plate.
+knuckle = startSketchOn(XZ)
+  |> circle(center = [0, knuckleRadius], radius = knuckleRadius)
+  |> extrude(length = knuckleLength)
+tab = startSketchOn(XZ)
+  |> startProfile(at = [0, 0])
+  |> xLine(length = knuckleRadius + clearance + 0.5)
+  |> yLine(length = leafThickness)
+  |> xLine(endAbsolute = 0)
+  |> close()
+  |> extrude(length = knuckleLength)
+firstKnuckle = union([knuckle, tab])
+
+// Knuckles 1, 3 and 5 along the pin.
+knuckles = patternLinear3d(firstKnuckle, instances = 3, distance = knucklePitch, axis = [0, -1, 0])
+
+leaf = union([plate, knuckles[0], knuckles[1], knuckles[2]])
+
+// Pin hole through every knuckle, and two screw holes through the plate.
+pinHole = startSketchOn(offsetPlane(XZ, offset = -1))
+  |> circle(center = [0, knuckleRadius], diameter = pinDiameter)
+  |> extrude(length = hingeLength + 2)
+
+fn screwHole(@y) {
+  return startSketchOn(offsetPlane(XY, offset = -1))
+    |> circle(center = [15, y], diameter = screwDiameter)
+    |> extrude(length = leafThickness + 2)
+}
+
+hingeLeaf = subtract([leaf], tools = [pinHole, screwHole(-10), screwHole(-30)])

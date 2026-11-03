@@ -45,6 +45,7 @@ describe('kernel-worker constants', () => {
     expect(resolvedRuntime.kernels.map((kernel) => kernel.id)).toEqual([
       'opencascade',
       'openrscad',
+      'picogk',
       'jscad',
       'manifold',
       'picovoxel',
@@ -69,7 +70,6 @@ describe('kernel-worker constants', () => {
       'parameterUnits',
       'geometryCache',
       'gltfEdgeDetection',
-      'displaySimplification',
     ]);
   });
 

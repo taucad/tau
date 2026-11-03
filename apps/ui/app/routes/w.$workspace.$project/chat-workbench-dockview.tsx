@@ -13,6 +13,7 @@ import {
   useContext,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -77,6 +78,9 @@ import { ChatEditorTooLargeWarning } from '#routes/w.$workspace.$project/chat-ed
 import { ChatEditorErrorPlaceholder } from '#routes/w.$workspace.$project/chat-editor-error-placeholder.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFileContent } from '#hooks/use-file-content.js';
+import type { FileContentSelection } from '#hooks/use-file-content.js';
+import { useVirtualDeclarationContent } from '#hooks/use-virtual-declaration-content.js';
+import { isVirtualDeclarationPath } from '#lib/virtual-declarations.js';
 import { useFileTreeEntry } from '#hooks/use-file-tree.js';
 import type { FileProvenance } from '@taucad/types';
 import { useEditorDocumentSession } from '#hooks/use-editor-document-session.js';
@@ -132,6 +136,7 @@ import {
 } from '@taucad/ui/components/dropdown-menu';
 import { Separator } from '@taucad/ui/components/separator';
 import { formatKeyCombination } from '@taucad/ui/utils/keys';
+import { usePlatform } from '@taucad/ui/hooks/use-platform';
 import { capturePointer, releasePointer } from '@taucad/ui/utils/pointer-capture';
 import type {
   FileViewerPaneContent,
@@ -631,10 +636,11 @@ export function openWorkbenchFiles({
 }
 
 function WorkbenchSurfaceShortcut({ surface }: { readonly surface: WorkbenchSurface }): React.JSX.Element | undefined {
+  const platform = usePlatform();
   if (!surface.shortcut) {
     return undefined;
   }
-  return <KeyShortcut className='ml-auto'>{formatKeyCombination(surface.shortcut)}</KeyShortcut>;
+  return <KeyShortcut className='ml-auto'>{formatKeyCombination(surface.shortcut, platform)}</KeyShortcut>;
 }
 
 function WorkbenchSurfaceSelector({
@@ -1304,7 +1310,9 @@ export const FileEditor = memo(function ({
     (previous, next) => previous?.path === next?.path && previous?.readOnly === next?.readOnly,
   );
   const filePath = liveEntry?.path ?? filePathFromParams;
-  const readOnly = isPaneReadOnly(readOnlyFromParams ?? liveEntry?.readOnly, useFileTreeEntry(filePath)?.provenance);
+  const readOnly =
+    isVirtualDeclarationPath(filePath) ||
+    isPaneReadOnly(readOnlyFromParams ?? liveEntry?.readOnly, useFileTreeEntry(filePath)?.provenance);
   const paneParameters = parameters ?? { filePath: filePathFromParams, readOnly: readOnlyFromParams };
 
   // Kernel diagnostics
@@ -1314,7 +1322,20 @@ export const FileEditor = memo(function ({
   // The discriminated outcome is the single source of truth for the render
   // gate — there is no local "force open" state because the override is
   // expressed by re-resolving with `forceText` / `sizeLimit` options.
-  const result = useFileContent(filePath);
+  const virtualDeclaration = useVirtualDeclarationContent(documentSession, filePath);
+  const fileContent = useFileContent(virtualDeclaration === undefined ? filePath : undefined);
+  // A declaration held in memory has nothing to observe on disk, so it is always current.
+  const result = useMemo(
+    (): FileContentSelection =>
+      virtualDeclaration === undefined
+        ? fileContent
+        : {
+            ...virtualDeclaration,
+            observation: { status: 'ready', value: virtualDeclaration },
+            retry: fileContent.retry,
+          },
+    [fileContent, virtualDeclaration],
+  );
   /* A file whose large object has not arrived holds its pointer: shown loading, never as text, so nothing edits or saves it. */
   const isAwaitingLargeObject = useLargeObjectPending(filePath);
 

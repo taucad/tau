@@ -28,7 +28,7 @@ const localDevelopmentBuckets: ReadonlySet<string> = new Set([
 /**
  * The dedicated R2 scratch buckets D32 confines the conformance and burst
  * suites to. Provisioned through `repos/tau-cloud`; deliberately distinct from
- * `tau-staging-content` and `tau-staging-content-private`, which hold real
+ * `tau-staging-au-content` and `tau-staging-au-content-private`, which hold real
  * staging bytes and must never be prefix-deleted.
  */
 const scratchBucketPattern = /^tau-staging-conformance(?:-[\da-z]+(?:-[\da-z]+)*)?$/u;

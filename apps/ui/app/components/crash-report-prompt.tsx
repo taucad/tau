@@ -28,6 +28,19 @@ import {
 const noOffer = (): undefined => undefined;
 
 /**
+ * Open the prompt in the browser's top layer, which sits above every z-index, including the
+ * editor's mobile tab bar.
+ *
+ * @param prompt - The prompt element, or nothing as it unmounts.
+ */
+const openInTopLayer: React.RefCallback<HTMLElement> = (prompt) => {
+  // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- DOM types claim showPopover is always there; jsdom and older browsers omit it
+  if (prompt?.showPopover !== undefined && !prompt.matches(':popover-open')) {
+    prompt.showPopover();
+  }
+};
+
+/**
  * The prompt, shown while a kill is standing to be asked about.
  *
  * @returns The prompt, or nothing when there is nothing to ask about.
@@ -52,8 +65,10 @@ export function CrashReportPrompt(): React.JSX.Element | undefined {
 
   return (
     <section
+      ref={openInTopLayer}
+      popover='manual'
       aria-labelledby={headingId}
-      className='fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-md flex-col gap-3 rounded-md border bg-background p-4 shadow-lg'
+      className='fixed inset-x-4 top-auto bottom-4 z-50 mx-auto my-0 flex h-auto w-auto max-w-md flex-col gap-3 overflow-visible rounded-md border bg-background p-4 text-foreground shadow-lg'
     >
       <h2 id={headingId} className='text-sm font-medium'>
         Tau reloaded because the page ran out of memory

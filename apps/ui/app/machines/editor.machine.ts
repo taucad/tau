@@ -4,6 +4,7 @@ import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { assertRootedPath, resolveRootedPath } from '@taucad/utils/path';
 import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
+import { isVirtualDeclarationPath } from '#lib/virtual-declarations.js';
 import type { PartialDeep } from 'type-fest';
 import type {
   EditorState,
@@ -25,6 +26,10 @@ const repairPersistedOpenFiles = (files: readonly OpenFile[], activePaneId: stri
     try {
       const candidate = file.path.startsWith('/') && !file.path.startsWith('//') ? file.path.slice(1) : file.path;
       const repaired = { ...file, path: resolveRootedPath(candidate) };
+      if (isVirtualDeclarationPath(repaired.path)) {
+        // A library declaration lives in memory only; its tab does not survive a reload.
+        continue;
+      }
       const existing = byPath.get(repaired.path);
       if (!existing || repaired.paneId === activePaneId) {
         byPath.set(repaired.path, repaired);
@@ -744,8 +749,12 @@ export const editorMachine = setup({
                 input: ({ context }) => ({
                   editorState: {
                     projectId: context.projectId,
-                    openFiles: context.openFiles,
-                    activePaneId: context.activePaneId,
+                    openFiles: context.openFiles.filter((file) => !isVirtualDeclarationPath(file.path)),
+                    activePaneId: context.openFiles.some(
+                      (file) => file.paneId === context.activePaneId && isVirtualDeclarationPath(file.path),
+                    )
+                      ? undefined
+                      : context.activePaneId,
                     focusedChatId: context.focusedChatId,
                     panelState: context.panelState,
                     fileSidebars: context.fileSidebars,

@@ -1296,6 +1296,25 @@ describe('NativeProcessSession.sampleResident', () => {
       await expect(worker.sampleResident?.()).resolves.toBeUndefined();
     }
   });
+
+  // T35 (B19, PR-1c): no native runtime starts on Windows, so the child heap source there is `none`, never a reading
+  // of some other process: the launch refuses before the sandbox wraps anything, and the session samples nothing.
+  it('should spawn nothing on Windows and sample undefined, so the heap source there is none', async () => {
+    const value = fixture();
+    try {
+      await withPlatform('win32', async () => {
+        await expect(startNativeWorker({ ...value.options, commandId: 'win32#1' })).rejects.toBeInstanceOf(
+          NativeRuntimeUnavailableError,
+        );
+        await expect(request(value.session)).rejects.toThrow('Windows is not yet a supported native runtime platform');
+        await expect(value.session.sampleResident()).resolves.toBeUndefined();
+      });
+      expect(sandbox.wrap).not.toHaveBeenCalled();
+    } finally {
+      await value.session.cleanup();
+    }
+    await expect(value.session.sampleResident()).resolves.toBeUndefined();
+  });
 });
 
 /** Wire a mocked filesystem's batched listing from a directory-to-names description. */

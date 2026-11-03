@@ -2509,7 +2509,6 @@ describe('effective tessellation on the render span', () => {
       'tessellation.effective.triangles': 56_240,
       'tessellation.effective.elapsed': 4700,
       'tessellation.effective.downgraded': false,
-      'tessellation.effective.simplified': false,
     });
   });
 

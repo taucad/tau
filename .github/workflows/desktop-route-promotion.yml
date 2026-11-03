@@ -12,7 +12,7 @@ on:
         options: [promote-routes, renew-routes]
         required: true
       scope:
-        description: All qualified routes, or a Mac-only staging ZIP/DMG catalog (promotion only)
+        description: All qualified routes, or an Apple silicon-only staging ZIP/DMG catalog (promotion only)
         type: choice
         options: [all, macos]
         default: all

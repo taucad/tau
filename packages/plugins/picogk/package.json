@@ -47,7 +47,8 @@
     "./agent/*": "./agent/*",
     "./tau-plugin.json": "./tau-plugin.json",
     "./project/*": "./project/*",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./browser": "./src/browser.ts"
   },
   "publishConfig": {
     "access": "public",
@@ -69,7 +70,12 @@
       "./agent/*": "./agent/*",
       "./tau-plugin.json": "./tau-plugin.json",
       "./project/*": "./project/*",
-      "./package.json": "./package.json"
+      "./package.json": "./package.json",
+      "./browser": {
+        "types": "./dist/browser.d.mts",
+        "import": "./dist/browser.mjs",
+        "default": "./dist/browser.mjs"
+      }
     },
     "imports": {}
   },
@@ -82,15 +88,16 @@
     "zod": "^4.1.0"
   },
   "dependencies": {
+    "@gltf-transform/core": "catalog:",
     "@taucad/cache-core": "workspace:*",
     "@taucad/dotnet-kernel-core": "workspace:*",
     "@taucad/geometry-core": "workspace:*",
     "@taucad/kinematics": "workspace:*",
     "@taucad/native-process-core": "workspace:*",
-    "@taucad/parameters": "workspace:*"
+    "@taucad/parameters": "workspace:*",
+    "uint8array-extras": "catalog:"
   },
   "devDependencies": {
-    "@gltf-transform/core": "catalog:",
     "@taucad/assimp": "workspace:*",
     "@taucad/middleware": "workspace:*",
     "@taucad/runtime": "workspace:*",

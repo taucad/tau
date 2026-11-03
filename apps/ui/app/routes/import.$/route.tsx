@@ -23,7 +23,6 @@ import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
 import { RepositoryCard } from '#routes/import.$/repository-card.js';
 import { BranchSelector } from '#routes/import.$/branch-selector.js';
-import { FolderSelector, repositoryFolders } from '#routes/import.$/folder-selector.js';
 import { createStaticDataSource } from '@taucad/workbench-panes/files/file-selector';
 import { FileSelector } from '#components/files/file-selector.js';
 import { SuggestedClones } from '#routes/import.$/suggested-clones.js';
@@ -217,6 +216,7 @@ export default function ImportRoute(): React.JSX.Element {
   const githubConnectionAvailable = useGithubConnectionAvailable();
   const branchLabelId = useId();
   const folderLabelId = useId();
+  const folderTriggerId = useId();
   const mainFileLabelId = useId();
   const linkedMainFileLabelId = useId();
 
@@ -330,7 +330,11 @@ export default function ImportRoute(): React.JSX.Element {
   const selectedBranch = useSelector(gitHubActorRef, (snapshot) => snapshot.context.selectedBranch);
   const repoFiles = useSelector(gitHubActorRef, (snapshot) => snapshot.context.repoFiles);
   const selectedFolder = useSelector(gitHubActorRef, (snapshot) => snapshot.context.path);
-  const repoFolders = useMemo(() => repositoryFolders(repoFiles.map((file) => file.path)), [repoFiles]);
+  const hasRepoFolders = useMemo(() => repoFiles.some((file) => file.path.includes('/')), [repoFiles]);
+  const repoFoldersDataSource = useMemo(
+    () => createStaticDataSource(repoFiles, { shouldIncludeDirectories: true }),
+    [repoFiles],
+  );
   /* Files under the chosen folder, relative to it: the folder becomes the project root. */
   const folderFiles = useMemo(() => {
     if (selectedFolder === '') {
@@ -894,12 +898,20 @@ export default function ImportRoute(): React.JSX.Element {
                       Folder
                     </span>
                     <div className='max-w-sm'>
-                      {repoFolders.length > 0 ? (
-                        <FolderSelector
-                          labelId={folderLabelId}
-                          folders={repoFolders}
-                          selectedFolder={selectedFolder}
+                      {hasRepoFolders ? (
+                        <FileSelector
+                          shouldShowDirectoriesOnly
+                          id={folderTriggerId}
+                          aria-labelledby={`${folderLabelId} ${folderTriggerId}`}
+                          dataSource={repoFoldersDataSource}
+                          selectedFile={selectedFolder}
+                          rootLabel='Whole repository'
                           isDisabled={isLoadingFiles}
+                          placeholder='Whole repository'
+                          title='Select folder'
+                          description='Import the whole repository or one of its folders'
+                          searchPlaceholder='Search folders…'
+                          emptyMessage='No folders found'
                           onSelect={(folder) => {
                             gitHubActorRef.send({ type: 'selectFolder', path: folder });
                           }}

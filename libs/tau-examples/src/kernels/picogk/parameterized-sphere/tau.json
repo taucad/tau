@@ -1,0 +1,12 @@
+{
+  "$schema": "https://tau.new/schemas/tau-v1.json",
+  "name": "PicoGK Parameterized Sphere",
+  "description": "A PicoGK sphere whose voxel size, radius and colour are declared as C# parameters.",
+  "tags": ["picogk", "csharp", "test-fixture"],
+  "assets": {
+    "main": {
+      "entryPath": "main.cs",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

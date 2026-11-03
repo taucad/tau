@@ -295,29 +295,38 @@ type PolygonStyle = Readonly<{
 
 const neutralStyle: PolygonStyle = { base: [1, 1, 1], stripe: [1, 1, 1], axis: [0, 1] };
 
-const createPolygonGeometry = (): THREE.BufferGeometry => {
+const polygonAttributes = [
+  ['position', 3],
+  ['aPlaneUv', 2],
+  ['aCapBaseColor', 3],
+  ['aCapStripeColor', 3],
+  ['aCapStripeAxis', 2],
+] as const;
+
+/** Triangles of one convex polygon at most, as a fan. */
+const maxPolygonIndices = (maxPolygonVertices - 2) * 3;
+
+/** Room for `polygons` convex polygons, each a fan over its own vertices. */
+const createPolygonGeometry = (polygons: number): THREE.BufferGeometry => {
   const geometry = new THREE.BufferGeometry();
-  const attribute = (itemSize: number): THREE.BufferAttribute =>
-    new THREE.BufferAttribute(new Float32Array(maxPolygonVertices * itemSize), itemSize).setUsage(
-      THREE.DynamicDrawUsage,
+  for (const [name, itemSize] of polygonAttributes) {
+    geometry.setAttribute(
+      name,
+      new THREE.BufferAttribute(new Float32Array(polygons * maxPolygonVertices * itemSize), itemSize).setUsage(
+        THREE.DynamicDrawUsage,
+      ),
     );
-  geometry.setAttribute('position', attribute(3));
-  geometry.setAttribute('aPlaneUv', attribute(2));
-  geometry.setAttribute('aCapBaseColor', attribute(3));
-  geometry.setAttribute('aCapStripeColor', attribute(3));
-  geometry.setAttribute('aCapStripeAxis', attribute(2));
-  // A fan: the polygon is convex.
-  const indices: number[] = [];
-  for (let index = 1; index < maxPolygonVertices - 1; index++) {
-    indices.push(0, index, index + 1);
   }
-  geometry.setIndex(indices);
+  geometry.setIndex(
+    new THREE.BufferAttribute(new Uint32Array(polygons * maxPolygonIndices), 1).setUsage(THREE.DynamicDrawUsage),
+  );
+  geometry.setDrawRange(0, 0);
   return geometry;
 };
 
 /** Write the GPU payload only when its float32 representation changes. */
 const writePolygonComponent = (attribute: THREE.BufferAttribute, offset: number, value: number): boolean => {
-  const stored = Math.fround(value);
+  const stored = attribute.array instanceof Float32Array ? Math.fround(value) : value;
   if (attribute.array[offset] === stored) {
     return false;
   }
@@ -325,49 +334,124 @@ const writePolygonComponent = (attribute: THREE.BufferAttribute, offset: number,
   return true;
 };
 
+/**
+ * One draw of every polygon a pass takes at one order with one material. Polygons that share a draw must not cover
+ * the same pixel, or must not care in which order they do.
+ */
+type PolygonBatch = {
+  mesh: THREE.Mesh;
+  /** Polygons the geometry has room for. */
+  capacity: number;
+  /** Vertices and indices written by this build. */
+  vertices: number;
+  indices: number;
+  /** Per attribute (and the index last), whether this build changed it. */
+  readonly changed: Uint8Array<ArrayBuffer>;
+};
+
+const createPolygonBatch = (): PolygonBatch => ({
+  mesh: createDrawObject(createPolygonGeometry(1)),
+  capacity: 1,
+  vertices: 0,
+  indices: 0,
+  changed: new Uint8Array(polygonAttributes.length + 1),
+});
+
+/**
+ * Doubles a batch's room in a new draw that keeps what this build already wrote, and returns the draw it replaces. A
+ * new draw rather than new geometry on the old one: the WebGPU renderer keeps per-draw state that would otherwise
+ * still read the old geometry.
+ */
+const growPolygonBatch = (batch: PolygonBatch): THREE.Mesh => {
+  const previous = batch.mesh;
+  const geometry = createPolygonGeometry(batch.capacity * 2);
+  for (const [name] of polygonAttributes) {
+    (geometry.getAttribute(name) as THREE.BufferAttribute).array.set(
+      (previous.geometry.getAttribute(name) as THREE.BufferAttribute).array,
+    );
+  }
+  geometry.index!.array.set(previous.geometry.index!.array);
+  const mesh = createDrawObject(geometry);
+  mesh.material = previous.material;
+  mesh.matrix.copy(previous.matrix);
+  mesh.matrixWorld.copy(previous.matrixWorld);
+  mesh.renderOrder = previous.renderOrder;
+  mesh.visible = previous.visible;
+  batch.mesh = mesh;
+  batch.capacity *= 2;
+  batch.changed.fill(1);
+  return previous;
+};
+
 // oxlint-disable-next-line max-params -- A pooled geometry write takes its points, count, normal and style apart.
-const writePolygonGeometry = (
-  geometry: THREE.BufferGeometry,
+const writePolygonToBatch = (
+  batch: PolygonBatch,
   points: readonly THREE.Vector3[],
   count: number,
   normal: readonly [number, number, number],
   style: PolygonStyle,
 ): void => {
+  const { geometry } = batch.mesh;
   writeSectionPlaneAxes(normal, _u, _v);
-  const position = geometry.getAttribute('position') as THREE.BufferAttribute;
-  const planeUv = geometry.getAttribute('aPlaneUv') as THREE.BufferAttribute;
-  const base = geometry.getAttribute('aCapBaseColor') as THREE.BufferAttribute;
-  const stripe = geometry.getAttribute('aCapStripeColor') as THREE.BufferAttribute;
-  const axis = geometry.getAttribute('aCapStripeAxis') as THREE.BufferAttribute;
-  let positionChanged = false;
-  let uvChanged = false;
-  let baseChanged = false;
-  let stripeChanged = false;
-  let axisChanged = false;
+  const [position, planeUv, base, stripe, axis] = polygonAttributes.map(
+    ([name]) => geometry.getAttribute(name) as THREE.BufferAttribute,
+  ) as [
+    THREE.BufferAttribute,
+    THREE.BufferAttribute,
+    THREE.BufferAttribute,
+    THREE.BufferAttribute,
+    THREE.BufferAttribute,
+  ];
+  // Per attribute (and the index last), whether this polygon changed it.
+  const wrote: [boolean, boolean, boolean, boolean, boolean, boolean] = [false, false, false, false, false, false];
+  const first = batch.vertices;
   for (let index = 0; index < count; index++) {
     const point = points[index]!;
-    positionChanged = writePolygonComponent(position, index * 3, point.x) || positionChanged;
-    positionChanged = writePolygonComponent(position, index * 3 + 1, point.y) || positionChanged;
-    positionChanged = writePolygonComponent(position, index * 3 + 2, point.z) || positionChanged;
-    uvChanged = writePolygonComponent(planeUv, index * 2, point.dot(_u)) || uvChanged;
-    uvChanged = writePolygonComponent(planeUv, index * 2 + 1, point.dot(_v)) || uvChanged;
+    const vertex = first + index;
+    wrote[0] = writePolygonComponent(position, vertex * 3, point.x) || wrote[0];
+    wrote[0] = writePolygonComponent(position, vertex * 3 + 1, point.y) || wrote[0];
+    wrote[0] = writePolygonComponent(position, vertex * 3 + 2, point.z) || wrote[0];
+    wrote[1] = writePolygonComponent(planeUv, vertex * 2, point.dot(_u)) || wrote[1];
+    wrote[1] = writePolygonComponent(planeUv, vertex * 2 + 1, point.dot(_v)) || wrote[1];
     for (let component = 0; component < 3; component++) {
-      baseChanged = writePolygonComponent(base, index * 3 + component, style.base[component]!) || baseChanged;
-      stripeChanged = writePolygonComponent(stripe, index * 3 + component, style.stripe[component]!) || stripeChanged;
+      wrote[2] = writePolygonComponent(base, vertex * 3 + component, style.base[component]!) || wrote[2];
+      wrote[3] = writePolygonComponent(stripe, vertex * 3 + component, style.stripe[component]!) || wrote[3];
     }
-    axisChanged = writePolygonComponent(axis, index * 2, style.axis[0]) || axisChanged;
-    axisChanged = writePolygonComponent(axis, index * 2 + 1, style.axis[1]) || axisChanged;
+    wrote[4] = writePolygonComponent(axis, vertex * 2, style.axis[0]) || wrote[4];
+    wrote[4] = writePolygonComponent(axis, vertex * 2 + 1, style.axis[1]) || wrote[4];
   }
-  const changed = [positionChanged, uvChanged, baseChanged, stripeChanged, axisChanged];
-  const attributes = [position, planeUv, base, stripe, axis];
+  // A fan: the polygon is convex.
+  const index = geometry.index!;
+  for (let corner = 1; corner < count - 1; corner++) {
+    wrote[5] = writePolygonComponent(index, batch.indices++, first) || wrote[5];
+    wrote[5] = writePolygonComponent(index, batch.indices++, first + corner) || wrote[5];
+    wrote[5] = writePolygonComponent(index, batch.indices++, first + corner + 1) || wrote[5];
+  }
+  for (const [index, isWritten] of wrote.entries()) {
+    if (isWritten) {
+      batch.changed[index] = 1;
+    }
+  }
+  batch.vertices += count;
+};
+
+/** Hands this build's writes of `batch` to the renderer. */
+const finishPolygonBatch = (batch: PolygonBatch): void => {
+  const { geometry } = batch.mesh;
+  const attributes = [
+    ...polygonAttributes.map(([name]) => geometry.getAttribute(name) as THREE.BufferAttribute),
+    geometry.index!,
+  ];
   for (const [index, attribute] of attributes.entries()) {
-    if (changed[index]) {
+    if (batch.changed[index]) {
+      const length = index === attributes.length - 1 ? batch.indices : batch.vertices * attribute.itemSize;
       // Keep pending ranges until the renderer consumes them, including repeated writes before a draw.
-      attribute.addUpdateRange(0, count * attribute.itemSize);
+      attribute.addUpdateRange(0, length);
       attribute.needsUpdate = true;
     }
   }
-  geometry.setDrawRange(0, (count - 2) * 3);
+  batch.changed.fill(0);
+  geometry.setDrawRange(0, batch.indices);
 };
 
 const createDrawObject = (geometry: THREE.BufferGeometry): THREE.Mesh => {
@@ -446,7 +530,9 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
   scene.matrixWorldAutoUpdate = false;
   const ownedMaterials: THREE.Material[] = [];
   const meshPool: THREE.Mesh[] = [];
-  const polygonPool: THREE.Mesh[] = [];
+  const polygonPool: PolygonBatch[] = [];
+  /** This build's batch for each order and material. */
+  const polygonBatches = new Map<number, Map<THREE.Material, PolygonBatch>>();
   const emptyGeometry = new THREE.BufferGeometry();
   let meshesUsed = 0;
   let polygonsUsed = 0;
@@ -583,19 +669,37 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
     if (count < 3) {
       return false;
     }
-    let mesh = polygonPool[polygonsUsed];
-    if (!mesh) {
-      mesh = createDrawObject(createPolygonGeometry());
-      polygonPool.push(mesh);
-      scene.add(mesh);
+    let byMaterial = polygonBatches.get(order);
+    if (!byMaterial) {
+      byMaterial = new Map();
+      polygonBatches.set(order, byMaterial);
     }
-    polygonsUsed++;
-    writePolygonGeometry(mesh.geometry, polygonPoints, count, plane.normal, style);
-    mesh.material = material;
-    mesh.matrix.copy(identity);
-    mesh.matrixWorld.copy(identity);
-    mesh.renderOrder = order;
-    mesh.visible = true;
+    let batch = byMaterial.get(material);
+    if (!batch) {
+      batch = polygonPool[polygonsUsed];
+      if (!batch) {
+        batch = createPolygonBatch();
+        polygonPool.push(batch);
+        scene.add(batch.mesh);
+      }
+      polygonsUsed++;
+      batch.vertices = 0;
+      batch.indices = 0;
+      byMaterial.set(material, batch);
+      const { mesh } = batch;
+      mesh.material = material;
+      mesh.matrix.copy(identity);
+      mesh.matrixWorld.copy(identity);
+      mesh.renderOrder = order;
+      mesh.visible = true;
+    }
+    if (batch.vertices + maxPolygonVertices > batch.capacity * maxPolygonVertices) {
+      const previous = growPolygonBatch(batch);
+      scene.remove(previous);
+      previous.geometry.dispose();
+      scene.add(batch.mesh);
+    }
+    writePolygonToBatch(batch, polygonPoints, count, plane.normal, style);
     return true;
   };
 
@@ -740,6 +844,7 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
     };
     meshesUsed = 0;
     polygonsUsed = 0;
+    polygonBatches.clear();
     if (
       stripes?.stripeFrequency !== frame.stripes.stripeFrequency ||
       stripes.stripeWidth !== frame.stripes.stripeWidth
@@ -806,62 +911,95 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
         owners.set(entry.source.ownerKey, group);
       }
       const groups = [...owners.values()];
+      const meets = (entry: SourceBox, group: readonly SourceBox[]): boolean =>
+        group.some(({ box }) => box.intersectsBox(entry.box));
       const meetsAny = (entry: SourceBox, others: readonly SourceBox[][]): boolean =>
-        others.some((group) => group.some(({ box }) => box.intersectsBox(entry.box)));
+        others.some((group) => meets(entry, group));
+      const groupsMeet = (a: readonly SourceBox[], b: readonly SourceBox[]): boolean =>
+        a.some((entry) => meets(entry, b));
       let hasMarks = false;
 
+      // Owners whose bounds do not meet share each pass's draw. Outside its own solid a source's surfaces count to
+      // zero, and its polygons stay in its own bounds, so what one owner writes never reaches another's pixels. Each
+      // owner goes one layer after the last earlier owner it meets, so owners that do meet keep their order, which is
+      // all the overlap marks read.
+      const layers: number[][] = [];
+      const layerOf: number[] = [];
       for (const [groupIndex, group] of groups.entries()) {
-        const earlier = groups.slice(0, groupIndex);
-        for (const entry of group) {
-          const countOrder = order++;
-          const { loops } = entry.source;
-          if (loops) {
-            stats.loopSourceCount++;
-            for (const { slot } of faces) {
-              const geometry = loops.bySlot.get(slot);
-              if (geometry && geometry.closedLoopCount > 0) {
-                takeMesh(geometry.fill, fillSlot(slot).material, loops.matrix, countOrder);
-              }
-            }
-          } else {
-            for (const mesh of entry.source.meshes) {
-              takeMesh(mesh.geometry, counts.back, mesh.matrixWorld, countOrder);
-              takeMesh(mesh.geometry, counts.front, mesh.matrixWorld, countOrder);
-            }
-          }
-          if (meetsAny(entry, earlier)) {
-            stats.overlapCandidateSourceCount++;
-            const markOrder = order++;
-            for (const { face } of faces) {
-              hasMarks =
-                takePolygon(face.plane, entry.box, face.bounds, stencilMaterial('mark-overlap'), markOrder) || hasMarks;
-            }
-          }
-          const capOrder = order++;
-          const style = resolveSectionCapStyle({
-            tintHex: entry.source.tintHex,
-            stripeFrequency: frame.stripes.stripeFrequency,
-            stripeWidth: frame.stripes.stripeWidth,
-            stripeAngle: entry.source.hatch?.angle,
-            stripeSpacingScale: entry.source.hatch?.spacingScale,
-          });
-          for (const { face, slot } of faces) {
-            takePolygon(face.plane, entry.box, face.bounds, capSlot(slot).material, capOrder, {
-              base: style.normalBaseColor,
-              stripe: style.normalStripeColor,
-              axis: style.normalStripeAxis,
-            });
-          }
-          const clearCountOrder = order++;
-          for (const halfSpace of exit) {
-            takePolygon(halfSpace, entry.box, [], stencilMaterial('clear-count'), clearCountOrder);
+        let layer = 0;
+        for (let earlierIndex = 0; earlierIndex < groupIndex; earlierIndex++) {
+          if (layerOf[earlierIndex]! >= layer && groupsMeet(group, groups[earlierIndex]!)) {
+            layer = layerOf[earlierIndex]! + 1;
           }
         }
-        if (groups.slice(groupIndex + 1).some((later) => later.some((entry) => meetsAny(entry, [group])))) {
-          const promoteOrder = order++;
-          for (const entry of group) {
-            for (const { face } of faces) {
-              takePolygon(face.plane, entry.box, face.bounds, stencilMaterial('promote-owner'), promoteOrder);
+        layerOf.push(layer);
+        (layers[layer] ??= []).push(groupIndex);
+      }
+
+      for (const layer of layers) {
+        // An owner's sources still take their turns one after another: its nth source shares a round with the other
+        // owners' nth.
+        const rounds = Math.max(...layer.map((groupIndex) => groups[groupIndex]!.length));
+        for (let round = 0; round < rounds; round++) {
+          const countOrder = order++;
+          const markOrder = order++;
+          const capOrder = order++;
+          const clearCountOrder = order++;
+          for (const groupIndex of layer) {
+            const entry = groups[groupIndex]![round];
+            if (!entry) {
+              continue;
+            }
+            const { loops } = entry.source;
+            if (loops) {
+              stats.loopSourceCount++;
+              for (const { slot } of faces) {
+                const geometry = loops.bySlot.get(slot);
+                if (geometry && geometry.closedLoopCount > 0) {
+                  takeMesh(geometry.fill, fillSlot(slot).material, loops.matrix, countOrder);
+                }
+              }
+            } else {
+              for (const mesh of entry.source.meshes) {
+                takeMesh(mesh.geometry, counts.back, mesh.matrixWorld, countOrder);
+                takeMesh(mesh.geometry, counts.front, mesh.matrixWorld, countOrder);
+              }
+            }
+            if (meetsAny(entry, groups.slice(0, groupIndex))) {
+              stats.overlapCandidateSourceCount++;
+              for (const { face } of faces) {
+                hasMarks =
+                  takePolygon(face.plane, entry.box, face.bounds, stencilMaterial('mark-overlap'), markOrder) ||
+                  hasMarks;
+              }
+            }
+            const style = resolveSectionCapStyle({
+              tintHex: entry.source.tintHex,
+              stripeFrequency: frame.stripes.stripeFrequency,
+              stripeWidth: frame.stripes.stripeWidth,
+              stripeAngle: entry.source.hatch?.angle,
+              stripeSpacingScale: entry.source.hatch?.spacingScale,
+            });
+            for (const { face, slot } of faces) {
+              takePolygon(face.plane, entry.box, face.bounds, capSlot(slot).material, capOrder, {
+                base: style.normalBaseColor,
+                stripe: style.normalStripeColor,
+                axis: style.normalStripeAxis,
+              });
+            }
+            for (const halfSpace of exit) {
+              takePolygon(halfSpace, entry.box, [], stencilMaterial('clear-count'), clearCountOrder);
+            }
+          }
+        }
+        const promoteOrder = order++;
+        for (const groupIndex of layer) {
+          const group = groups[groupIndex]!;
+          if (groups.slice(groupIndex + 1).some((later) => groupsMeet(later, group))) {
+            for (const entry of group) {
+              for (const { face } of faces) {
+                takePolygon(face.plane, entry.box, face.bounds, stencilMaterial('promote-owner'), promoteOrder);
+              }
             }
           }
         }
@@ -933,9 +1071,14 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
       // Let go of the source's geometry, so a disposed model is not kept alive by the pool.
       mesh.geometry = emptyGeometry;
     }
-    for (let index = polygonsUsed; index < polygonPool.length; index++) {
-      polygonPool[index]!.visible = false;
+    for (const [index, batch] of polygonPool.entries()) {
+      if (index < polygonsUsed) {
+        finishPolygonBatch(batch);
+      } else {
+        batch.mesh.visible = false;
+      }
     }
+    polygonBatches.clear();
     stats.meshDrawCount = meshesUsed;
     stats.polygonDrawCount = polygonsUsed;
     outlineGeometry?.retireUnused();
@@ -957,7 +1100,7 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
       for (const material of ownedMaterials.splice(0)) {
         material.dispose();
       }
-      for (const mesh of polygonPool.splice(0)) {
+      for (const { mesh } of polygonPool.splice(0)) {
         mesh.geometry.dispose();
       }
       meshPool.length = 0;

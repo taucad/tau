@@ -10,7 +10,6 @@
   },
   "include": [
     "vitest.config.ts",
-    "scripts/build-shell-projection.mts",
     "vitest.setup.ts",
     "tsdown.config.ts",
     "src/**/*.test.ts",

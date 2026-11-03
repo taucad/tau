@@ -91,7 +91,7 @@ describe('contentSecurityPolicy', () => {
         .split('; ')
         .find((entry) => entry.startsWith('connect-src '))!
         .split(' ');
-      const bucket = channel === 'staging' ? 'tau-staging-content-private' : 'tau-prod-content-private';
+      const bucket = channel === 'staging' ? 'tau-staging-au-content-private' : 'tau-prod-content-private';
       const signedAction = new URL(
         `https://${bucket}.271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com/tenant/object?signature=fixture`,
       );

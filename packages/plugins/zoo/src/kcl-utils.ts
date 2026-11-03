@@ -1,4 +1,5 @@
 import type { PartialDeep, SetRequired } from 'type-fest';
+import { decode } from '@msgpack/msgpack';
 import type { Node } from '@taucad/kcl-wasm-lib/bindings/Node';
 import type { Program } from '@taucad/kcl-wasm-lib/bindings/Program';
 import type { KclValueView } from '@taucad/kcl-wasm-lib/bindings/KclValueView';
@@ -30,6 +31,8 @@ import type { KclSceneGraphDelta } from '#kcl-scene-graph-delta.js';
 
 import type { KclExecutionResult } from '#kcl-execution-result.types.js';
 import { buildKclSettingsJson } from '#kcl-headless-settings.js';
+import { randomUuid } from '#binary.utils.js';
+import { ensureWasmTimerGlobal } from '#kcl-wasm-timer-global.js';
 
 /**
  * URL to the KCL WASM binary exposed by the dependency package.
@@ -124,6 +127,11 @@ export type KclExportResult = {
   error?: string;
 };
 
+type KclVector = { x: number; y: number; z: number };
+
+/** An engine solid's axis-aligned box in millimetres, Z up. */
+export type KclSolidBounds = { id: string; min: number[]; max: number[] };
+
 type KclOperationOptions = {
   settings?: PartialDeep<Configuration>;
   signal?: AbortSignal;
@@ -158,6 +166,7 @@ async function loadWasmModule(
   tracer?: RuntimeSpanTracer,
 ): Promise<{ wasmModule: WasmModule; memory: WebAssembly.Memory }> {
   try {
+    ensureWasmTimerGlobal();
     const wasmModule = await import('@taucad/kcl-wasm-lib');
 
     const compiledModule = await compileWasmStreaming(kclWasmUrl, tracer);
@@ -220,6 +229,45 @@ export class KclUtilities {
     }
 
     return modifiedProgram;
+  }
+
+  /**
+   * Name each engine solid after the KCL variable that holds it: `ring`, `planets[2]`, `gear.hub`. A solid several
+   * variables hold (`moved = part |> translate(...)` keeps the id) takes the last name declared.
+   *
+   * @param variables - name-to-value map produced by the KCL executor
+   * @returns Variable path by engine solid id
+   */
+  public static collectSolidNames(variables: Partial<Record<string, KclValueView>>): Map<string, string> {
+    const names = new Map<string, string>();
+    const visit = (path: string, value: KclValueView | undefined): void => {
+      switch (value?.type) {
+        case 'Solid': {
+          names.set(value.value.id, path);
+          break;
+        }
+        case 'Tuple':
+        case 'HomArray': {
+          for (const [index, item] of value.value.entries()) {
+            visit(`${path}[${index}]`, item);
+          }
+          break;
+        }
+        case 'Object': {
+          for (const [key, item] of Object.entries(value.value)) {
+            visit(`${path}.${key}`, item);
+          }
+          break;
+        }
+        default: {
+          break;
+        }
+      }
+    };
+    for (const [name, value] of Object.entries(variables)) {
+      visit(name, value);
+    }
+    return names;
   }
 
   /**
@@ -711,6 +759,82 @@ export class KclUtilities {
         throw new KclExportError(`Export failed: ${errorMessage}`, options.type);
       }
     });
+  }
+
+  /**
+   * Engine bounding boxes of the scene's solids whose ids are in `solidIds`, in millimetres with Z up. Zoo's glTF
+   * export carries no solid ids and its solid order differs from the scene's, so a body is joined to its solid by
+   * box. The engine pads its boxes, but each one contains its solid.
+   *
+   * @param solidIds - the solids to measure; solids not in the scene are skipped
+   * @returns the boxes the engine answered, or an empty array when it cannot answer
+   */
+  public async getSceneSolidBounds(
+    solidIds: ReadonlySet<string>,
+    { signal }: KclOperationOptions = {},
+  ): Promise<KclSolidBounds[]> {
+    return this.withAbort(signal, async () => {
+      try {
+        const scene = await this.sendModelingQuery<{ entity_ids?: unknown }>({
+          type: 'scene_get_entity_ids',
+          filter: ['solid3d'],
+          skip: 0,
+          take: 1000,
+        });
+        const ids = Array.isArray(scene?.entity_ids)
+          ? scene.entity_ids.flat().filter((id): id is string => typeof id === 'string' && solidIds.has(id))
+          : [];
+        const boxes = await Promise.all(
+          ids.map(async (id) => {
+            const box = await this.sendModelingQuery<{ center?: KclVector; dimensions?: KclVector }>({
+              type: 'bounding_box',
+              // eslint-disable-next-line @typescript-eslint/naming-convention -- Kittycad wire JSON field names
+              entity_ids: [id],
+              // eslint-disable-next-line @typescript-eslint/naming-convention -- Kittycad wire JSON field names
+              output_unit: 'mm',
+            });
+            if (!box?.center || !box.dimensions) {
+              return undefined;
+            }
+            const { center, dimensions } = box;
+            const axes = ['x', 'y', 'z'] as const;
+            return {
+              id,
+              min: axes.map((axis) => center[axis] - dimensions[axis] / 2),
+              max: axes.map((axis) => center[axis] + dimensions[axis] / 2),
+            };
+          }),
+        );
+        return boxes.filter((box) => box !== undefined);
+      } catch (error) {
+        log.warn('Scene solid bounds query failed:', error);
+        return [];
+      }
+    });
+  }
+
+  /**
+   * Sends one modeling command and returns its response data, for queries the WASM bindings have no call for.
+   *
+   * @param cmd - the modeling command
+   * @returns the response's data, or `undefined` before the engine starts
+   */
+  public async sendModelingQuery<T>(cmd: Record<string, unknown>): Promise<T | undefined> {
+    const bridge = this.engineManager?.bridge;
+    if (!bridge) {
+      return undefined;
+    }
+    const id = randomUuid();
+    const response = decode(
+      await bridge.sendModelingCommandFromWasm(
+        id,
+        '{}',
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Kittycad wire JSON field name
+        JSON.stringify({ type: 'modeling_cmd_req', cmd_id: id, cmd }),
+        '{}',
+      ),
+    ) as { resp?: { data?: { modeling_response?: { data?: T } } } };
+    return response.resp?.data?.modeling_response?.data;
   }
 
   /**

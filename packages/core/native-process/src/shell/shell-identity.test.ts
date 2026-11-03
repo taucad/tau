@@ -7,8 +7,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   resolveShellExecutable,
+  resolveTerminalZsh,
   shellCommandArguments,
   shellInteractiveArguments,
+  terminalZshArguments,
   shellVersionCommand,
 } from '#shell/shell-identity.js';
 
@@ -55,5 +57,28 @@ describe('shell arguments', () => {
       powershellInteractive: ['-NoLogo', '-NoProfile'],
       version: ['printf %s "$BASH_VERSION"', '$PSVersionTable.PSVersion.ToString()'],
     });
+  });
+});
+
+describe('resolveTerminalZsh', () => {
+  it('should refuse every platform but macOS', async () => {
+    expect(await resolveTerminalZsh('linux')).toStrictEqual({
+      status: 'shell-missing',
+      message: 'The Terminal runs the system Zsh only on macOS.',
+    });
+  });
+
+  it.runIf(process.platform === 'darwin')('should bind /bin/zsh to its bytes on macOS', async () => {
+    const zsh = await resolveTerminalZsh('darwin');
+    if ('status' in zsh) {
+      throw new Error(zsh.message);
+    }
+
+    expect(zsh.path).toBe('/bin/zsh');
+    expect(zsh.digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
+  });
+
+  it('should start the Terminal Zsh as an interactive login shell', () => {
+    expect(terminalZshArguments).toStrictEqual(['-l', '-i']);
   });
 });

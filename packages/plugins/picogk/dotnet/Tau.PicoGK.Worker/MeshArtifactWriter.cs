@@ -41,7 +41,11 @@ internal sealed record BuildResult(
     // Build-level voxel edge length in millimetres; omitted when the model ran without a voxel library.
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] float? VoxelSize = null,
     // The display meshing applied to captured Voxels; omitted for the uniform mesh.
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] MeshingOptions? Meshing = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] MeshingOptions? Meshing = null)
+{
+    // Both runtimes report the author's own geometry files, so both offer the same exports.
+    public IReadOnlyList<AuthoredFile> AuthoredOutputs { get; init; } = [];
+}
 
 // Build-level operation deltas; memory metrics above remain point-in-time snapshots.
 internal sealed record WorkCounters(long CapturedSnapshots, long GeometryReadbacks, long InputVertices,
@@ -63,7 +67,7 @@ internal sealed record WorkerTimings(
 internal sealed record WorkerMetrics(
     long ManagedHeapBytes,
     long PicoGkNativeBytes,
-    long ProcessWorkingSetBytes);
+    long? ProcessWorkingSetBytes);
 internal sealed record WorkerDiagnostics(WorkerTimings Timings, WorkerMetrics Metrics);
 
 internal static class MeshArtifactWriter

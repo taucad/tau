@@ -94,10 +94,10 @@ if (tauAblation.has('surfaceFilter')) throw new Error('surfaceFilter is retired:
       if (tauAblation.get('abl') === 'mrt') scenePass.getTexture('normal').type = UnsignedByteType;`,
     );
     replace(
-      'denoiseInput!.sample(uv).r, float(1)',
+      'denoiseNode!.upsample(denoiseInput!, uv, !frame!.sharedDepth),',
       `tauAblation.get('abl') === 'raw-ao' ? aoTexture.sample(uv).r
-        : tauAblation.get('abl') === 'bilateral-ao' ? denoiseNode.upsample(denoiseInput, uv)
-        : denoiseInput!.sample(uv).r, float(1)`,
+        : tauAblation.get('abl') === 'bilinear-ao' ? denoiseInput!.sample(uv).r
+        : denoiseNode!.upsample(denoiseInput!, uv, !frame!.sharedDepth),`,
     );
     replace(
       "const withAo = aoAllowed && aoEnabled && displayMode !== 'no-ao';",

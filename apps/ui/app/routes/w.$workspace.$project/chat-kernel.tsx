@@ -14,6 +14,7 @@ import {
 } from '#components/ui/floating-panel.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { SearchInput } from '@taucad/ui/components/search-input';
+import { PaneSearchRegion } from '@taucad/ui/components/pane-search';
 import {
   PaneviewHeader,
   PaneviewHeaderControls,
@@ -161,7 +162,7 @@ export function TelemetryPanelContent(): React.JSX.Element {
 
   return (
     <div data-slot='telemetry-panel-body' className='flex size-full min-h-0 flex-col overflow-hidden bg-sidebar'>
-      <div data-slot='telemetry-filter' className='shrink-0 bg-sidebar px-2 pt-2'>
+      <PaneSearchRegion data-slot='telemetry-filter' className='shrink-0 bg-sidebar px-2 pt-2'>
         <SearchInput
           aria-label='Filter telemetry'
           placeholder='Filter telemetry…'
@@ -174,7 +175,7 @@ export function TelemetryPanelContent(): React.JSX.Element {
             setQuery('');
           }}
         />
-      </div>
+      </PaneSearchRegion>
       <div className='min-h-0 flex-1 overflow-hidden'>
         <TelemetryPaneviewContent query={query} />
       </div>

@@ -17,7 +17,11 @@ const syntaxError: KernelIssue = {
     { functionName: 'evaluate', fileName: 'worker.js', lineNumber: 1, columnNumber: 2, context: 'runtime' },
   ],
 };
-const warning: KernelIssue = { message: 'Display simplified', code: 'DISPLAY_SIMPLIFIED', severity: 'warning' };
+const warning: KernelIssue = {
+  message: 'Tessellation downgraded',
+  code: 'TESSELLATION_DOWNGRADED',
+  severity: 'warning',
+};
 const note: KernelIssue = { message: 'Cached', code: 'UNKNOWN', severity: 'info' };
 
 const renderIssues = (props: Partial<ViewerIssuesProps> = {}) =>
@@ -61,7 +65,7 @@ describe('ViewerIssues', () => {
     const items = screen.getAllByRole('listitem').map((item) => item.textContent);
 
     expect(items[0]).toContain('Unexpected token');
-    expect(items[1]).toContain('Display simplified');
+    expect(items[1]).toContain('Tessellation downgraded');
     expect(items[2]).toContain('Cached');
 
     fireEvent.keyDown(screen.getByRole('region', { name: 'Issues' }), { key: 'Escape' });
@@ -174,7 +178,9 @@ describe('formatViewerIssue', () => {
     expect(formatViewerIssue(syntaxError)).toBe(
       '- **Message:** Unexpected token\n- **Location:** Line 3, Column 7\n- **Stack Trace:**\n    1. main (/src/main.ts:3:7)\n    2. evaluate (worker.js:1:2)',
     );
-    expect(formatViewerIssue(warning)).toBe('- **Message:** Display simplified\n- **Location:** Unknown location\n');
+    expect(formatViewerIssue(warning)).toBe(
+      '- **Message:** Tessellation downgraded\n- **Location:** Unknown location\n',
+    );
   });
 });
 

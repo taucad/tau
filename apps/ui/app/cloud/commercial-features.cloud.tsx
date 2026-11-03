@@ -20,7 +20,6 @@ export const useCommercialFeatures = (): {
   readonly storageLimitBytes: number | undefined;
   /** Whether a larger plan exists to offer (D17): never on the top tier, never before the plan is known. */
   readonly canUpgradePlan: boolean;
-  readonly hasNoTrainGuarantee: boolean;
   /** False until the plan is known; upgrade prompts stay hidden so a Pro customer is never asked to buy Pro. */
   readonly isResolved: boolean;
   readonly requestUpgrade: () => void;
@@ -33,7 +32,6 @@ export const useCommercialFeatures = (): {
     storageLimitBytes:
       entitlements.isResolved && entitlements.canSyncFiles ? storageLimitBytesByTier[entitlements.tier] : undefined,
     canUpgradePlan: entitlements.isResolved && entitlements.tier !== 'enterprise',
-    hasNoTrainGuarantee: entitlements.tier !== 'free',
     isResolved: entitlements.isResolved,
     requestUpgrade: useCallback(() => {
       openSettings('billing');

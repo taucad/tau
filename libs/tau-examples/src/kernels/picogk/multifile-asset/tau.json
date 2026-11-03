@@ -1,0 +1,12 @@
+{
+  "$schema": "https://tau.new/schemas/tau-v1.json",
+  "name": "PicoGK Multi-File Asset",
+  "description": "A PicoGK program whose geometry comes from a helper file and whose scale comes from a data asset.",
+  "tags": ["picogk", "csharp", "test-fixture"],
+  "assets": {
+    "main": {
+      "entryPath": "main.cs",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

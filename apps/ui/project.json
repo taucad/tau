@@ -105,7 +105,13 @@
           "env": "GEOSPEC_MT_STAGED_PACKAGE_ROOT"
         },
         {
+          "env": "PICOGK_BROWSER_ASSETS_ROOT"
+        },
+        {
           "runtime": "node apps/ui/geospec-mt-assets-cache-key.ts"
+        },
+        {
+          "runtime": "node apps/ui/picogk-browser-assets-cache-key.ts"
         },
         {
           "runtime": "node apps/ui/csharp-language-assets-cache-key.ts"
@@ -152,7 +158,13 @@
           "env": "GEOSPEC_MT_STAGED_PACKAGE_ROOT"
         },
         {
+          "env": "PICOGK_BROWSER_ASSETS_ROOT"
+        },
+        {
           "runtime": "node apps/ui/geospec-mt-assets-cache-key.ts"
+        },
+        {
+          "runtime": "node apps/ui/picogk-browser-assets-cache-key.ts"
         },
         {
           "runtime": "node apps/ui/csharp-language-assets-cache-key.ts"
@@ -184,7 +196,13 @@
           "env": "GEOSPEC_MT_STAGED_PACKAGE_ROOT"
         },
         {
+          "env": "PICOGK_BROWSER_ASSETS_ROOT"
+        },
+        {
           "runtime": "node apps/ui/geospec-mt-assets-cache-key.ts"
+        },
+        {
+          "runtime": "node apps/ui/picogk-browser-assets-cache-key.ts"
         },
         {
           "runtime": "node apps/ui/csharp-language-assets-cache-key.ts"
@@ -361,8 +379,7 @@
       "executor": "nx:run-commands",
       "options": {
         "commands": [
-          "npx -y @posthog/cli sourcemap inject --directory {projectRoot}/build/client --project tau-ui",
-          "scripts/node_modules/.bin/sentry-cli sourcemaps inject {projectRoot}/build/client",
+          "node apps/ui/scripts/with-verbatim-assets-aside.mts {projectRoot}/build/client 'npx -y @posthog/cli sourcemap inject --directory {projectRoot}/build/client --project tau-ui && scripts/node_modules/.bin/sentry-cli sourcemaps inject {projectRoot}/build/client'",
           "scripts/node_modules/.bin/sentry-cli sourcemaps upload --validate --wait --org taucad --project tau-ui {projectRoot}/build/client",
           "cp -R {projectRoot}/build/server-sourcemaps/. {projectRoot}/build/server/ && scripts/node_modules/.bin/sentry-cli sourcemaps inject {projectRoot}/build/server && scripts/node_modules/.bin/sentry-cli sourcemaps upload --validate --wait --org taucad --project tau-ui {projectRoot}/build/server; status=$?; find {projectRoot}/build/server -name '*.map' -delete; rm -rf {projectRoot}/build/server-sourcemaps; exit $status",
           "npx -y @posthog/cli sourcemap upload --directory {projectRoot}/build/client --delete-after"

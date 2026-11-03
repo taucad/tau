@@ -10,17 +10,20 @@ import thumbnail4 from "./kernels/jscad/section-overlap-fixture/thumbnail.webp?u
 import thumbnail5 from "./kernels/jscad/section-overlap-heavy-planetary-fixture/thumbnail.webp?url";
 import thumbnail6 from "./kernels/jscad/section-overlap-heavy-v8-fixture/thumbnail.webp?url";
 import thumbnail7 from "./kernels/jscad/section-picking-fixture/thumbnail.webp?url";
-import thumbnail8 from "./kernels/picovoxel/quasicrystal/thumbnail.webp?url";
-import thumbnail9 from "./kernels/picovoxel/rover-wheel/thumbnail.webp?url";
-import thumbnail10 from "./kernels/picovoxel/simple-fluid-simulation/thumbnail.webp?url";
-import thumbnail11 from "./kernels/replicad/flower-attachment-section-outline-fixture/thumbnail.webp?url";
+import thumbnail8 from "./kernels/picogk/boolean-shell/thumbnail.webp?url";
+import thumbnail9 from "./kernels/picogk/multifile-asset/thumbnail.webp?url";
+import thumbnail10 from "./kernels/picogk/parameterized-sphere/thumbnail.webp?url";
+import thumbnail11 from "./kernels/picovoxel/quasicrystal/thumbnail.webp?url";
+import thumbnail12 from "./kernels/picovoxel/rover-wheel/thumbnail.webp?url";
+import thumbnail13 from "./kernels/picovoxel/simple-fluid-simulation/thumbnail.webp?url";
+import thumbnail14 from "./kernels/replicad/flower-attachment-section-outline-fixture/thumbnail.webp?url";
 
 const textAssetLoaders = import.meta.glob<string>(
-  ["./kernels/jscad/cube-cylinder-section-fixture/main.ts","./kernels/jscad/cube-cylinder-section-fixture/tau.json","./kernels/jscad/edge-occlusion-fixture/main.ts","./kernels/jscad/edge-occlusion-fixture/tau.json","./kernels/jscad/non-manifold-section-fixture/main.ts","./kernels/jscad/non-manifold-section-fixture/tau.json","./kernels/jscad/section-cap-fixture/main.ts","./kernels/jscad/section-cap-fixture/tau.json","./kernels/jscad/section-overlap-fixture/main.ts","./kernels/jscad/section-overlap-fixture/tau.json","./kernels/jscad/section-overlap-heavy-planetary-fixture/main.ts","./kernels/jscad/section-overlap-heavy-planetary-fixture/tau.json","./kernels/jscad/section-overlap-heavy-v8-fixture/main.ts","./kernels/jscad/section-overlap-heavy-v8-fixture/tau.json","./kernels/jscad/section-picking-fixture/main.ts","./kernels/jscad/section-picking-fixture/tau.json","./kernels/picovoxel/quasicrystal/README.md","./kernels/picovoxel/quasicrystal/icosahedralFace.ts","./kernels/picovoxel/quasicrystal/main.ts","./kernels/picovoxel/quasicrystal/quasiCrystal.ts","./kernels/picovoxel/quasicrystal/quasiTile.ts","./kernels/picovoxel/quasicrystal/quasiTileInflation.ts","./kernels/picovoxel/quasicrystal/run.ts","./kernels/picovoxel/quasicrystal/tau.json","./kernels/picovoxel/rover-wheel/README.md","./kernels/picovoxel/rover-wheel/main.ts","./kernels/picovoxel/rover-wheel/randomWheel.ts","./kernels/picovoxel/rover-wheel/run.ts","./kernels/picovoxel/rover-wheel/tau.json","./kernels/picovoxel/rover-wheel/treadPatterns.ts","./kernels/picovoxel/rover-wheel/wheelContext.ts","./kernels/picovoxel/rover-wheel/wheelElements.ts","./kernels/picovoxel/rover-wheel/wheelTread.ts","./kernels/picovoxel/rover-wheel/wheels.ts","./kernels/picovoxel/simple-fluid-simulation/README.md","./kernels/picovoxel/simple-fluid-simulation/main.ts","./kernels/picovoxel/simple-fluid-simulation/run.ts","./kernels/picovoxel/simple-fluid-simulation/simpleFlowDevice.ts","./kernels/picovoxel/simple-fluid-simulation/simpleFluidSimulationInput.ts","./kernels/picovoxel/simple-fluid-simulation/simpleFluidSimulationOutput.ts","./kernels/picovoxel/simple-fluid-simulation/tau.json","./kernels/replicad/flower-attachment-section-outline-fixture/main.ts","./kernels/replicad/flower-attachment-section-outline-fixture/tau.json"],
+  ["./kernels/jscad/cube-cylinder-section-fixture/main.ts","./kernels/jscad/cube-cylinder-section-fixture/tau.json","./kernels/jscad/edge-occlusion-fixture/main.ts","./kernels/jscad/edge-occlusion-fixture/tau.json","./kernels/jscad/non-manifold-section-fixture/main.ts","./kernels/jscad/non-manifold-section-fixture/tau.json","./kernels/jscad/section-cap-fixture/main.ts","./kernels/jscad/section-cap-fixture/tau.json","./kernels/jscad/section-overlap-fixture/main.ts","./kernels/jscad/section-overlap-fixture/tau.json","./kernels/jscad/section-overlap-heavy-planetary-fixture/main.ts","./kernels/jscad/section-overlap-heavy-planetary-fixture/tau.json","./kernels/jscad/section-overlap-heavy-v8-fixture/main.ts","./kernels/jscad/section-overlap-heavy-v8-fixture/tau.json","./kernels/jscad/section-picking-fixture/main.ts","./kernels/jscad/section-picking-fixture/tau.json","./kernels/picogk/boolean-shell/main.cs","./kernels/picogk/boolean-shell/tau.json","./kernels/picogk/multifile-asset/ShapeFactory.cs","./kernels/picogk/multifile-asset/main.cs","./kernels/picogk/multifile-asset/radius-scale.txt","./kernels/picogk/multifile-asset/tau.json","./kernels/picogk/parameterized-sphere/main.cs","./kernels/picogk/parameterized-sphere/tau.json","./kernels/picovoxel/quasicrystal/README.md","./kernels/picovoxel/quasicrystal/icosahedralFace.ts","./kernels/picovoxel/quasicrystal/main.ts","./kernels/picovoxel/quasicrystal/quasiCrystal.ts","./kernels/picovoxel/quasicrystal/quasiTile.ts","./kernels/picovoxel/quasicrystal/quasiTileInflation.ts","./kernels/picovoxel/quasicrystal/run.ts","./kernels/picovoxel/quasicrystal/tau.json","./kernels/picovoxel/rover-wheel/README.md","./kernels/picovoxel/rover-wheel/main.ts","./kernels/picovoxel/rover-wheel/randomWheel.ts","./kernels/picovoxel/rover-wheel/run.ts","./kernels/picovoxel/rover-wheel/tau.json","./kernels/picovoxel/rover-wheel/treadPatterns.ts","./kernels/picovoxel/rover-wheel/wheelContext.ts","./kernels/picovoxel/rover-wheel/wheelElements.ts","./kernels/picovoxel/rover-wheel/wheelTread.ts","./kernels/picovoxel/rover-wheel/wheels.ts","./kernels/picovoxel/simple-fluid-simulation/README.md","./kernels/picovoxel/simple-fluid-simulation/main.ts","./kernels/picovoxel/simple-fluid-simulation/run.ts","./kernels/picovoxel/simple-fluid-simulation/simpleFlowDevice.ts","./kernels/picovoxel/simple-fluid-simulation/simpleFluidSimulationInput.ts","./kernels/picovoxel/simple-fluid-simulation/simpleFluidSimulationOutput.ts","./kernels/picovoxel/simple-fluid-simulation/tau.json","./kernels/replicad/flower-attachment-section-outline-fixture/main.ts","./kernels/replicad/flower-attachment-section-outline-fixture/tau.json"],
   { query: '?raw', import: 'default' },
 );
 const binaryAssetLoaders = import.meta.glob<string>(
-  ["./kernels/jscad/cube-cylinder-section-fixture/thumbnail.webp","./kernels/jscad/edge-occlusion-fixture/thumbnail.webp","./kernels/jscad/non-manifold-section-fixture/thumbnail.webp","./kernels/jscad/section-cap-fixture/thumbnail.webp","./kernels/jscad/section-overlap-fixture/thumbnail.webp","./kernels/jscad/section-overlap-heavy-planetary-fixture/thumbnail.webp","./kernels/jscad/section-overlap-heavy-v8-fixture/thumbnail.webp","./kernels/jscad/section-picking-fixture/thumbnail.webp","./kernels/picovoxel/quasicrystal/thumbnail.webp","./kernels/picovoxel/rover-wheel/thumbnail.webp","./kernels/picovoxel/simple-fluid-simulation/thumbnail.webp","./kernels/replicad/flower-attachment-section-outline-fixture/thumbnail.webp"],
+  ["./kernels/jscad/cube-cylinder-section-fixture/thumbnail.webp","./kernels/jscad/edge-occlusion-fixture/thumbnail.webp","./kernels/jscad/non-manifold-section-fixture/thumbnail.webp","./kernels/jscad/section-cap-fixture/thumbnail.webp","./kernels/jscad/section-overlap-fixture/thumbnail.webp","./kernels/jscad/section-overlap-heavy-planetary-fixture/thumbnail.webp","./kernels/jscad/section-overlap-heavy-v8-fixture/thumbnail.webp","./kernels/jscad/section-picking-fixture/thumbnail.webp","./kernels/picogk/boolean-shell/thumbnail.webp","./kernels/picogk/multifile-asset/thumbnail.webp","./kernels/picogk/parameterized-sphere/thumbnail.webp","./kernels/picovoxel/quasicrystal/thumbnail.webp","./kernels/picovoxel/rover-wheel/thumbnail.webp","./kernels/picovoxel/simple-fluid-simulation/thumbnail.webp","./kernels/replicad/flower-attachment-section-outline-fixture/thumbnail.webp"],
   { query: '?inline&url', import: 'default' },
 );
 
@@ -158,10 +161,45 @@ export const testFixtures = [
     ],
   },
   {
+    locator: "picogk.boolean-shell",
+    kernel: "picogk",
+    manifest: {"$schema":"https://tau.new/schemas/tau-v1.json","name":"PicoGK Boolean Shell","description":"A hollow shell cut from a boolean of primitives, the smallest PicoGK example that exports a mesh.","tags":["picogk","csharp","test-fixture"],"assets":{"main":{"entryPath":"main.cs","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail8,
+    assets: [
+      { path: "main.cs", load: loadTextAsset.bind(undefined, "./kernels/picogk/boolean-shell/main.cs") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picogk/boolean-shell/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picogk/boolean-shell/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picogk.multifile-asset",
+    kernel: "picogk",
+    manifest: {"$schema":"https://tau.new/schemas/tau-v1.json","name":"PicoGK Multi-File Asset","description":"A PicoGK program whose geometry comes from a helper file and whose scale comes from a data asset.","tags":["picogk","csharp","test-fixture"],"assets":{"main":{"entryPath":"main.cs","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail9,
+    assets: [
+      { path: "ShapeFactory.cs", load: loadTextAsset.bind(undefined, "./kernels/picogk/multifile-asset/ShapeFactory.cs") },
+      { path: "main.cs", load: loadTextAsset.bind(undefined, "./kernels/picogk/multifile-asset/main.cs") },
+      { path: "radius-scale.txt", load: loadTextAsset.bind(undefined, "./kernels/picogk/multifile-asset/radius-scale.txt") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picogk/multifile-asset/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picogk/multifile-asset/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picogk.parameterized-sphere",
+    kernel: "picogk",
+    manifest: {"$schema":"https://tau.new/schemas/tau-v1.json","name":"PicoGK Parameterized Sphere","description":"A PicoGK sphere whose voxel size, radius and colour are declared as C# parameters.","tags":["picogk","csharp","test-fixture"],"assets":{"main":{"entryPath":"main.cs","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail10,
+    assets: [
+      { path: "main.cs", load: loadTextAsset.bind(undefined, "./kernels/picogk/parameterized-sphere/main.cs") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picogk/parameterized-sphere/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picogk/parameterized-sphere/thumbnail.webp") },
+    ],
+  },
+  {
     locator: "picovoxel.quasicrystal",
     kernel: "picovoxel",
     manifest: {"$schema":"https://tau.new/schemas/tau-v1.json","name":"PicoVoxel Quasicrystal","description":"PicoVoxel Quasicrystal community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail8,
+    thumbnailUrl: thumbnail11,
     assets: [
       { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/quasicrystal/README.md") },
       { path: "icosahedralFace.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/quasicrystal/icosahedralFace.ts") },
@@ -178,7 +216,7 @@ export const testFixtures = [
     locator: "picovoxel.rover-wheel",
     kernel: "picovoxel",
     manifest: {"$schema":"https://tau.new/schemas/tau-v1.json","name":"PicoVoxel Rover Wheel","description":"PicoVoxel Rover Wheel community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail9,
+    thumbnailUrl: thumbnail12,
     assets: [
       { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/rover-wheel/README.md") },
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/rover-wheel/main.ts") },
@@ -197,7 +235,7 @@ export const testFixtures = [
     locator: "picovoxel.simple-fluid-simulation",
     kernel: "picovoxel",
     manifest: {"$schema":"https://tau.new/schemas/tau-v1.json","name":"PicoVoxel Simple Fluid Simulation","description":"PicoVoxel Simple Fluid Simulation community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail10,
+    thumbnailUrl: thumbnail13,
     assets: [
       { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/simple-fluid-simulation/README.md") },
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/simple-fluid-simulation/main.ts") },
@@ -213,7 +251,7 @@ export const testFixtures = [
     locator: "replicad.flower-attachment-section-outline-fixture",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-v1.json","name":"Flower Attachment Section Outline Fixture","description":"A real exported Replicad flower attachment source fixture for section-view contour outline visual regression testing.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail11,
+    thumbnailUrl: thumbnail14,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/flower-attachment-section-outline-fixture/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/flower-attachment-section-outline-fixture/tau.json") },

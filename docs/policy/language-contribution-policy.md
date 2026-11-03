@@ -1,9 +1,9 @@
 ---
 title: 'Language Contribution Policy'
-description: 'CodeMirror and Shiki language support, code-pane admission, shared filesystem tiers, checked edits and TypeScript worker ownership'
+description: 'CodeMirror and Lezer language support, code-pane admission, shared filesystem tiers, checked edits and TypeScript worker ownership'
 status: active
 created: '2026-05-07'
-updated: '2026-10-26'
+updated: '2026-10-31'
 related:
   - docs/research/language-fs-bridge-implementation.md
   - docs/research/scalable-language-contribution-fs-architecture.md
@@ -13,7 +13,7 @@ related:
 
 # Language Contribution Policy
 
-Language contributions share one workspace filesystem contract and activate only when their language is needed. CodeMirror, Shiki, LSP workers, and the custom TypeScript worker may expose different capabilities, but they must agree on language identity, URI semantics, and declaration ownership.
+Language contributions share one workspace filesystem contract and activate only when their language is needed. CodeMirror, the Lezer grammar registry, LSP workers, and the custom TypeScript worker may expose different capabilities, but they must agree on language identity, URI semantics, and declaration ownership.
 
 ## Rationale
 
@@ -65,11 +65,11 @@ Before admission, request no editor-only JavaScript, CSS, grammar, worker or dec
 
 Share backend services per project session and mirror each document once. Abort pending acquisition on pane closure; dispose per-view extensions and release the backend when its last view closes. Cached code modules do not justify keeping workers alive.
 
-### 8. Keep editor and documentation grammars aligned
+### 8. Highlight every code surface through one grammar registry
 
-Precompile shared TextMate grammars in `libs/grammars`. CodeMirror syntax adapters and the docs Shiki highlighter must use the same canonical language ID, extensions, aliases, and upstream grammar revision.
+Every code surface in the app (the editor, hover, signature and completion documentation, chat code blocks, the code and diff viewers, and the conflict editor) highlights through the Lezer registry in `libs/grammars`: `loadLanguage` and `peekLanguage` for parsers, `tauHighlighter` for `tok-*` token classes, and `apps/ui/app/styles/syntax-highlight.css` for the one palette. A surface never resolves languages or paints tokens on its own; `apps/ui/app/components/code/code-surfaces.test.tsx` checks every surface against every language's fixture.
 
-Do not fetch grammars at runtime. Follow the `add-editor-language` skill for a new language.
+Grammars are committed with their generated parser tables; do not fetch or compile grammars at runtime. Documentation code takes the source document's language for untagged fences, and an adapter maps fence tags its server uses loosely (KCL documentation fences KCL as `js`). Highlighting a code block never starts a language service. Follow the `add-editor-language` skill for a new language.
 
 ### 9. Fail visibly without breaking basic editing
 

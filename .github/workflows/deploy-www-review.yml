@@ -35,6 +35,8 @@ jobs:
       group: deploy-www-review
       cancel-in-progress: false
     env:
+      # Job scope, so Netlify's own rebuild inside `netlify deploy` keeps the flag too.
+      WWW_INSTALLER_CATALOG: 'true'
       NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
       SITE_ID: 17066c91-5b08-4cc0-b45c-32b0ea08b4e9
       URL: https://staging--taucad-marketing-review.netlify.app

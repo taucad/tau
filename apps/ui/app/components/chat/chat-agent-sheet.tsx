@@ -52,6 +52,7 @@ import { SvgIcon } from '#components/icons/svg-icon.js';
 import type { IconId } from '#components/icons/svg-icon.js';
 import { Tau } from '#components/icons/tau.js';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
+import { usePlatform } from '@taucad/ui/hooks/use-platform';
 import { configOptionOf, configValues } from '#components/chat/use-agent-config.js';
 import type { AgentConfig, AgentConfigOption } from '#components/chat/use-agent-config.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
@@ -981,7 +982,7 @@ function ModelList({
   };
   const tauGroups = useTauModelGroups(modelId);
   /* F1: pinned models, read and written where the model overrides live (F2). */
-  const { pinnedIds, setPinned } = useModels();
+  const { isPinningEnabled, pinnedIds, setPinned } = useModels();
   const pinOf = (entry: Model): { readonly isOn: boolean; readonly toggle: () => void } => ({
     isOn: pinnedIds.includes(entry.id),
     toggle: () => {
@@ -990,7 +991,7 @@ function ModelList({
   });
   /* F1: Shift+Enter toggles the highlighted model's pin; Enter alone still chooses it (cmdk defers to a prevented key). */
   const onKeyDown = (event: React.KeyboardEvent): void => {
-    if (event.key === 'Enter' && event.shiftKey && agent.kind === 'tau') {
+    if (isPinningEnabled && event.key === 'Enter' && event.shiftKey && agent.kind === 'tau') {
       const highlighted = event.currentTarget.querySelector<HTMLElement>('[cmdk-item][data-selected=true]');
       const entry = tauGroups
         .flatMap((group) => group.items)
@@ -1056,7 +1057,7 @@ function ModelList({
                       name={entry.name}
                       isInUse={isInUse}
                       level={isInUse ? sheetModel.level?.name : undefined}
-                      pinned={pinOf(entry)}
+                      pinned={isPinningEnabled ? pinOf(entry) : undefined}
                     />
                   </CommandItem>
                 );
@@ -1504,6 +1505,7 @@ export function ChatAgentSheet({
 }): React.JSX.Element {
   const [isOpen, setIsOpen] = useState(false);
   const isMobile = useIsMobile();
+  const platform = usePlatform();
   const { agents, current } = useSheetAgents(placements);
   const sheetModel = useSheetModel(current, agentConfig);
   const name = triggerName(current, sheetModel);
@@ -1522,7 +1524,7 @@ export function ChatAgentSheet({
       data-slot='agent-trigger'
       data-chat-textarea-focustrap
       aria-label={`Agent and model: ${name}`}
-      aria-keyshortcuts={ariaKeyShortcuts(openModelSelectorKeyCombination)}
+      aria-keyshortcuts={ariaKeyShortcuts(openModelSelectorKeyCombination, platform)}
       className={cn(ghostPillClass, 'max-w-64 min-w-0 shrink gap-1 pr-2 text-foreground')}
     >
       {sheetModel.glyph}
@@ -1614,7 +1616,7 @@ export function ChatAgentSheet({
         <span className='flex items-center gap-1.5'>
           {/* The trigger's own name (I6). */}
           Agent and model: {name}
-          <KeyShortcut variant='tooltip'>{formatKeyCombination(openModelSelectorKeyCombination)}</KeyShortcut>
+          <KeyShortcut variant='tooltip'>{formatKeyCombination(openModelSelectorKeyCombination, platform)}</KeyShortcut>
         </span>
       </TooltipContent>
     </Tooltip>

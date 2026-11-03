@@ -7,10 +7,12 @@ import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { createMockFileSystem, createMockKernelRuntime, expectKernelProjectionOrder } from '@taucad/runtime-testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { picogkBrowserKernel } from '#picogk-browser.kernel.js';
 import { picogkKernel } from '#picogk.kernel.js';
-import { picogkExportSchemas, picogkOptionsSchema, picogkRenderSchema } from '#picogk.schemas.js';
-import { PicogkWorkerError } from '#picogk-session.js';
-import type { PicogkSession } from '#picogk-session.js';
+import { createPicogkKernelDefinition } from '#picogk-kernel-definition.js';
+import { picogkOptionsSchema } from '#picogk.schemas.js';
+import { picogkExportSchemas, picogkRenderSchema } from '#picogk-render.schemas.js';
+import { PicogkWorkerError } from '#picogk-worker-error.js';
 
 const runtime = createMockKernelRuntime();
 const kernelOptions = {
@@ -176,7 +178,7 @@ describe('PicoGK kernel', () => {
     );
     const mirrorRuntime = { ...createMockKernelRuntime(), filesystem };
     const value = await definition.initialize(picogkOptionsSchema.parse({ closure: kernelOptions }), mirrorRuntime);
-    vi.spyOn((value as { readonly session: PicogkSession }).session, 'request').mockResolvedValue({
+    vi.spyOn(value.session, 'request').mockResolvedValue({
       sources: ['main.cs'],
     });
     try {
@@ -277,8 +279,20 @@ describe('PicoGK kernel', () => {
     await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: uniform }, render, value);
 
     // The mirror reuses its own walk per operation id.
-    expect(value.mirror.sync.mock.calls.map((call): unknown => call[2])).toEqual([1, 1, 1]);
+    expect(value.mirror.sync.mock.calls.map((call): unknown => call[0])).toEqual([render, render, render]);
     expect(requestedMethods(value.session.request)).toEqual(['resolve', 'analyze', 'build']);
+  });
+
+  it('should omit unavailable process memory from trace attributes', async () => {
+    const value = context();
+    const result = buildResult();
+    value.session.request.mockResolvedValueOnce({
+      ...result,
+      metrics: { ...result.metrics, processWorkingSetBytes: null },
+    });
+    await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: uniform }, runtime, value);
+    expect(endedSpanAttributes('picogk.build')).toMatchObject({ managedHeapBytes: 10, picoGkNativeBytes: 0 });
+    expect(endedSpanAttributes('picogk.build')).not.toHaveProperty('processWorkingSetBytes');
   });
 
   it('preserves worker warnings and shared mechanism warnings alongside valid geometry', async () => {
@@ -709,5 +723,71 @@ describe('PicoGK kernel', () => {
     value.session.cleanup.mockRejectedValueOnce(new Error('cleanup failed'));
     await expect(definition.onDispose?.(value)).rejects.toThrow('cleanup failed');
     expect(value.mirror.cleanup).toHaveBeenCalled();
+  });
+});
+
+describe('authored exports', () => {
+  it('should retain original file bytes through handle serialization and preserve ordinary exports', async () => {
+    const value = context();
+    const original = new Uint8Array([0, 255, 1, 128]);
+    const output = {
+      artifactPath: `/artifacts/authored/${'a'.repeat(32)}/files/original.stl`,
+      name: 'original.stl',
+      byteLength: original.length,
+      sha256: 'b'.repeat(64),
+      mimeType: 'model/stl',
+    };
+    value.session.request.mockResolvedValue({ ...buildResult(), authoredOutputs: [output] });
+    value.session.readArtifact.mockResolvedValueOnce(triangle).mockResolvedValueOnce(original);
+    const factory = createPicogkKernelDefinition({
+      optionsSchema: picogkOptionsSchema,
+      version: 'test-authored-files',
+      authoredOutputs: true,
+      initialize: async () => value,
+    });
+    const definition = await resolveRuntimePluginDefinition('kernel', factory({ closure: kernelOptions }));
+    const built = await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: uniform }, runtime, value);
+    expect(built.exports).toEqual(['glb', 'gltf', 'authoredStl']);
+    expect(value.session.readArtifact).toHaveBeenLastCalledWith(output);
+    const serialized = definition.serializeHandle!({ handle: built.handle }, runtime, value);
+    const restored = definition.deserializeHandle!({ serialized: structuredClone(serialized) }, runtime, value);
+    original.fill(9);
+    const exported = await definition.export!(
+      { handle: restored, exportId: 'authoredStl', options: {} },
+      runtime,
+      value,
+    );
+    expect(exported.files).toEqual([
+      { name: 'original.stl', mimeType: 'model/stl', bytes: new Uint8Array([0, 255, 1, 128]) },
+    ]);
+    await expect(
+      definition.export!({ handle: restored, exportId: 'authoredVdb', options: {} }, runtime, value),
+    ).rejects.toThrow('at least one file');
+  });
+
+  // The desktop worker collects the author's own geometry as the browser worker does, so the two
+  // kernels must offer the same export identities rather than the browser offering two more.
+  it('should declare the same exports on the desktop kernel as the browser kernel', async () => {
+    const nativeDefinition = await loadDefinition();
+    expect(Object.keys(nativeDefinition.exports)).toEqual(['authoredStl', 'authoredVdb', 'glb', 'gltf']);
+    const browserDefinition = await resolveRuntimePluginDefinition('kernel', picogkBrowserKernel());
+    expect(Object.keys(nativeDefinition.exports)).toEqual(Object.keys(browserDefinition.exports));
+  });
+
+  // A layer published before that change reports no authored outputs, and the kernel must then
+  // offer none for that build rather than an export identity it cannot serve.
+  it('should offer no authored export for a build that reported none', async () => {
+    const value = context();
+    value.session.request.mockResolvedValue(buildResult());
+    value.session.readArtifact.mockResolvedValue(triangle);
+    const factory = createPicogkKernelDefinition({
+      optionsSchema: picogkOptionsSchema,
+      version: 'test-authored-absent',
+      authoredOutputs: true,
+      initialize: async () => value,
+    });
+    const definition = await resolveRuntimePluginDefinition('kernel', factory({ closure: kernelOptions }));
+    const built = await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: uniform }, runtime, value);
+    expect(built.exports).toEqual(['glb', 'gltf']);
   });
 });

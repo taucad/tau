@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run disposable full Linux guests for infrastructure proof or protected staging qualification.
 # See desktop-release-signing-pipeline/linux-remote-qualification-2026-10-22.md.
-# Required env: TAU_VM_DISTRO (ubuntu or debian), RUNNER_TEMP (disposable CI directory).
+# Required env: TAU_VM_DISTRO (ubuntu, ubuntu2604 or debian), RUNNER_TEMP (disposable CI directory).
 # Optional env: TAU_VM_MODE (proof default, tooling, or qualification with protected staging inputs). Usage: TAU_VM_DISTRO=ubuntu pnpm nx run desktop:hosted-linux-vm-proof
 # Exit codes: 0 proof passed; 1 failed assertion/external operation; 3 missing host prerequisite.
 set -euo pipefail
@@ -27,6 +27,10 @@ case "$TAU_VM_DISTRO" in
   ubuntu)
     url=https://cloud-images.ubuntu.com/releases/noble/release-20261017/ubuntu-24.04-server-cloudimg-amd64.img
     digest=04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94
+    algorithm=sha256sum ;;
+  ubuntu2604)
+    url=https://cloud-images.ubuntu.com/releases/resolute/release-20261016/ubuntu-26.04-server-cloudimg-amd64.img
+    digest=5645d0318ad21f643ebb1ac4567514620e9893380b07b0201fda163baa5b7eb5
     algorithm=sha256sum ;;
   debian)
     url=https://cloud.debian.org/images/cloud/trixie/20261021-2638/debian-13-generic-amd64-20261021-2638.qcow2
@@ -104,7 +108,7 @@ for _attempt in $(seq 1 90); do
 done
 [[ "$ready" == true ]]
 ssh "${ssh_options[@]}" tau@127.0.0.1 'sudo cloud-init status --wait' > "$output/cloud-init-status.txt"
-# Distro is constrained to two literals above, intentionally passed to the guest.
+# Distro is constrained to three literals above, intentionally passed to the guest.
 # shellcheck disable=SC2029
 ssh "${ssh_options[@]}" tau@127.0.0.1 "bash -s -- $TAU_VM_DISTRO" \
   < "$REPO_ROOT/apps/desktop/scripts/hosted-linux-vm-guest.sh" | tee "$output/guest-proof.txt"
@@ -161,6 +165,14 @@ with tarfile.open(fileobj=sys.stdout.buffer, mode='w|') as output:
             if os.path.isfile(path) and not os.path.islink(path):
                 output.add(path, arcname=os.path.basename(path), recursive=False)
 PYRESULT
+  if [[ "$status" != 0 ]]; then
+    # A page that closes without a renderer error leaves no app-side record, so print the guest kernel's own
+    # account of process deaths (OOM killer, segfaults) and its memory. Kernel lines name commands only, never the
+    # app profile, its logs or the qualification environment.
+    ssh "${ssh_options[@]}" tau@127.0.0.1 \
+      'free -m; sudo journalctl -k --no-pager | grep -iE "out of memory|oom-kill|oom_reaper|killed process|segfault|traps:" | tail -n 40' \
+      | tee "$output/guest-kernel-deaths.txt" || true
+  fi
   printf '%s\n' "$status" > "$output/harness-exit-code.txt"
   exit "$status"
 fi

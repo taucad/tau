@@ -1,0 +1,16 @@
+ring = startSketchOn(XY)
+  |> circle(center = [0, 0], radius = 20)
+  |> extrude(length = 10)
+
+shaft = startSketchOn(XY)
+  |> circle(center = [50, 0], radius = 5)
+  |> extrude(length = 30)
+
+fn peg(@x) {
+  return startSketchOn(XZ)
+    |> rectangle(center = [x, 40], width = 4, height = 4)
+    |> extrude(length = 6)
+}
+pegs = [peg(-20), peg(20)]
+
+shaft2 = shaft |> translate(y = 30)

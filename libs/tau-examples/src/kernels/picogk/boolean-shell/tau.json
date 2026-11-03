@@ -1,0 +1,12 @@
+{
+  "$schema": "https://tau.new/schemas/tau-v1.json",
+  "name": "PicoGK Boolean Shell",
+  "description": "A hollow shell cut from a boolean of primitives, the smallest PicoGK example that exports a mesh.",
+  "tags": ["picogk", "csharp", "test-fixture"],
+  "assets": {
+    "main": {
+      "entryPath": "main.cs",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

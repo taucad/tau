@@ -240,8 +240,12 @@ if (routeQualification) {
   app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1');
   app.commandLine.appendSwitch('remote-debugging-port', '0');
 }
-// Crashpad may create profile files, so initialize only after the pristine probe admission above.
-initializeDesktopErrorReporting(desktopChannel);
+// Crashpad may create profile files, so initialize only after the pristine probe admission above. A qualification
+// run or a package that honours test overrides is a test harness, and reports apart from real use.
+initializeDesktopErrorReporting(
+  desktopChannel,
+  routeQualification !== undefined || (app.isPackaged && !environmentLocked),
+);
 /* Sentry first registers its IPC scheme and wraps subsequent registrations.
  * Register app:// afterward so both schemes retain their privileges, still
  * before app.whenReady() starts the network service. */
@@ -893,10 +897,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
       ...esbuildEnvironment,
       ...compileCacheEnvironment(app.getPath('userData')),
       TAU_DESKTOP_LOG_DIR: logDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
-      /* The shell's never-grantable app data, and on Linux the Tau-owned bubblewrap it runs (desktop shell W4). */
-      TAU_DESKTOP_USER_DATA_DIR: app.getPath('userData'), // eslint-disable-line @typescript-eslint/naming-convention -- environment name
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
-      TAU_DESKTOP_SHELL_BWRAP: linuxInstallation(desktopChannel, process.env['APPIMAGE'] !== undefined).bwrap,
     }),
     fork: (entry, args, forkOptions) => utilityProcess.fork(entry, args, forkOptions),
     createChannel: () => new MessageChannelMain(),
@@ -941,6 +941,23 @@ const bootstrapElectronApp = async (): Promise<void> => {
     );
   });
 
+  /*
+   * The Tau-owned bubblewrap the shell sandbox runs, when this installation has one. Stock Ubuntu 24.04 and Debian 13
+   * keep `kernel.apparmor_restrict_unprivileged_userns=1`, which strips capabilities from an unprofiled binary's user
+   * namespace, so the distro `/usr/bin/bwrap` can create the namespace and then fail to bring loopback up
+   * (`bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`) and no shell starts. The selector package installs
+   * a copy at this stable path and attaches the one AppArmor profile that grants `userns` to it. An unpackaged build has
+   * no such file, so the variable is left unset and the provider keeps its own default.
+   */
+  const desktopShellBwrapEnvironment = (): Readonly<Record<string, string>> => {
+    if (process.platform !== 'linux') {
+      return {};
+    }
+    const { bwrap } = linuxInstallation(desktopChannel, process.env['APPIMAGE'] !== undefined);
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
+    return existsSync(bwrap) ? { TAU_DESKTOP_SHELL_BWRAP: bwrap } : {};
+  };
+
   const services = createServicesBroker({
     utilityEntry: servicesUtilityEntry,
     env: utilityEnvironment(environment, {
@@ -957,6 +974,12 @@ const bootstrapElectronApp = async (): Promise<void> => {
       TAU_DESKTOP_PERMISSIONS_DIR: join(app.getPath('userData'), 'permissions'),
       // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
       TAU_DESKTOP_EVIDENCE_DIR: join(app.getPath('userData'), 'agent-evidence'),
+      /*
+       * The shell's never-grantable app data, and on Linux the Tau-owned bubblewrap it runs (desktop shell W4).
+       * `services-host.ts` is the only reader of either, so they belong on this utility and nowhere else.
+       */
+      TAU_DESKTOP_USER_DATA_DIR: app.getPath('userData'), // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+      ...desktopShellBwrapEnvironment(),
     }),
     fork: (entry, args, forkOptions) => utilityProcess.fork(entry, args, forkOptions),
     createChannel: () => new MessageChannelMain(),

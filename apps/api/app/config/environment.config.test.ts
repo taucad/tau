@@ -188,6 +188,29 @@ describe('environmentSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it.each([
+    ['accepts', 'bpc_staging', true],
+    ['rejects', 'pc_wrong', false],
+  ])('%s a portal configuration id by its prefix', (_verb, id, accepted) => {
+    const result = environmentSchema.safeParse({
+      ...baseEnvironment(),
+      TAU_CLOUD_ENABLED: 'true',
+      BILLING_ENVIRONMENT: 'staging',
+      BILLING_USAGE_CURSOR_SECRET: 'test-usage-cursor-secret-min-32-chars',
+      BILLING_REQUEST_DIGEST_SECRET: 'test-request-digest-secret-min-32-chars',
+      STRIPE_SECRET_KEY: 'rk_test_create_scope',
+      STRIPE_READ_SECRET_KEY: 'rk_test_read_scope',
+      STRIPE_ACCOUNT_ID: 'acct_test',
+      STRIPE_LIVEMODE: 'false',
+      STRIPE_WEBHOOK_SECRET: 'whsec_test',
+      STRIPE_PRICE_ID_PRO_MONTHLY: 'price_test',
+      STRIPE_PRODUCT_ID_CREDIT_PACK: 'prod_test',
+      STRIPE_PORTAL_CONFIGURATION_ID: id,
+    });
+
+    expect(result.success).toBe(accepted);
+  });
+
   describe('files service', () => {
     const [key] = fileLinkVectors.keys;
     const signingKey = JSON.stringify({ kid: key?.kid, alg: 'HS256', keyBase64: key?.keyBase64 });

@@ -2,13 +2,12 @@
  * The desktop Terminal pane (blueprint W6, D21, I8, I9, A13–A15): a person's own shell in the project folder, drawn by
  * the lazily loaded AurigaX renderer over `window.tau.terminal`.
  *
- * - Nothing starts by itself. A restored, reopened or agent-opened pane shows *Start Terminal*, and a session opens
- *   only when a person presses it (D21).
+ * - Opening the pane starts one session when its project becomes available. Exits and refusals require an explicit retry.
  * - Extra access is approved here, in pane chrome Tau draws, against the request id the host minted. Output is
  *   terminal data on a canvas; it can describe a decision but never make one (I9).
  * - The session lives while the pane is mounted, hidden or not, and ends when the pane closes, the project changes
  *   or the Terminal stops being available. Closing a pane whose session runs asks first: Keep open, Hide or Close
- *   and stop (T15). A project change ends it unconditionally, and a new project's Terminal starts only on a press.
+ *   and stop. A project change ends it unconditionally and opens a fresh session for the new project.
  */
 
 import { useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
@@ -24,6 +23,13 @@ import type {
 } from '@taucad/types/desktop-terminal';
 import { Button } from '@taucad/ui/components/button';
 import { Input } from '@taucad/ui/components/input';
+import { useKeybinding } from '@taucad/ui/components/keyboard';
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+} from '@taucad/ui/components/context-menu';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { cookieName } from '#constants/cookie.constants.js';
 import { useCookie } from '#hooks/use-cookie.js';
@@ -61,6 +67,8 @@ type PaneState =
 const fontFamily = "'Geist Mono', ui-monospace, monospace";
 const fontSize = 13;
 const scrollbackLines = 10_000;
+// Bound synchronous bridge startup separately from the host's ongoing backpressure window.
+const initialFrameLimit = 64;
 
 const endedCopy: Record<TerminalExitReason, string> = {
   'shell-exited': 'The shell exited.',
@@ -76,15 +84,6 @@ const entries = (value: string): string[] =>
     .split(/[\n,]/u)
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);
-
-const accessSummary = (access: TerminalAccess): string | undefined => {
-  const parts = [
-    access.read.length > 0 ? `reads ${access.read.join(', ')}` : undefined,
-    access.write.length > 0 ? `writes ${access.write.join(', ')}` : undefined,
-    access.domains.length > 0 ? `reaches ${access.domains.join(', ')}` : undefined,
-  ].filter((part) => part !== undefined);
-  return parts.length === 0 ? undefined : `Also ${parts.join('; ')}.`;
-};
 
 /** The trusted card for one host-minted access request. */
 function TerminalAccessDecision({
@@ -146,9 +145,11 @@ function TerminalAccessDecision({
 
 /** The person's own request for extra access; the host answers with a request id the card above decides. */
 function TerminalAccessForm({
+  inputRef,
   onSubmit,
   onCancel,
 }: {
+  readonly inputRef: React.Ref<HTMLInputElement>;
   readonly onSubmit: (access: TerminalAccess) => void;
   readonly onCancel: () => void;
 }): React.JSX.Element {
@@ -182,7 +183,9 @@ function TerminalAccessForm({
     >
       <label htmlFor={`${id}-read`}>Folders to read</label>
       <Input
+        ref={inputRef}
         id={`${id}-read`}
+        autoFocus
         value={read}
         placeholder='/path/to/folder'
         onChange={(event) => {
@@ -243,22 +246,24 @@ export function TerminalPane({
   /** Told the running session's project label, and `undefined` once no session runs. */
   readonly onRunningChange?: (projectLabel: string | undefined) => void;
 }): React.JSX.Element {
+  const actionsDescriptionId = useId();
   const [state, setState] = useState<PaneState>({ phase: 'idle' });
   const [accessRequest, setAccessRequest] = useState<AccessRequest | undefined>(undefined);
   const [isRequestingAccess, setIsRequestingAccess] = useState(false);
-  const [notice, setNotice] = useState<string | undefined>(undefined);
   const [findTerm, setFindTerm] = useState<string | undefined>(undefined);
+  const menuActionRef = useRef(false);
+  const actionInputRef = useRef<HTMLInputElement>(null);
+  const restartRef = useRef(false);
+  const [notice, setNotice] = useState<string | undefined>(undefined);
   const [isConfirmingClose, setIsConfirmingClose] = useState(false);
   const closeHost = useContext(TerminalCloseContext);
-  const [screenReaderMode, setScreenReaderMode] = useCookie(cookieName.terminalScreenReader, true);
+  const [screenReaderMode] = useCookie(cookieName.terminalScreenReader, true);
   const hostRef = useRef<HTMLDivElement>(null);
   const chromeRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<TerminalRendererView | undefined>(undefined);
   const sessionRef = useRef<DesktopTerminalSession | undefined>(undefined);
   /* Bumped on every start and teardown, so a renderer that finishes loading for an abandoned start is disposed. */
   const generationRef = useRef(0);
-  /* Restart waits for the host to end the running session, which frees the one-per-window slot, then starts again. */
-  const restartRef = useRef(false);
   const startRef = useRef<(() => Promise<void>) | undefined>(undefined);
   const screenReaderModeRef = useRef(screenReaderMode);
   /* The project root and bridge the current or last session was started against. */
@@ -294,6 +299,7 @@ export function TerminalPane({
 
   const teardown = useCallback(() => {
     generationRef.current += 1;
+    restartRef.current = false;
     sessionRef.current?.close();
     sessionRef.current = undefined;
     viewRef.current?.dispose();
@@ -311,7 +317,6 @@ export function TerminalPane({
       teardown();
       setState({ phase: 'idle' });
       setAccessRequest(undefined);
-      setIsRequestingAccess(false);
       setIsConfirmingClose(false);
     },
     [projectRoot, bridge, teardown],
@@ -393,10 +398,11 @@ export function TerminalPane({
       return;
     }
     teardown();
-    restartRef.current = false;
     targetRef.current = { projectRoot, bridge };
     const generation = generationRef.current;
     setState({ phase: 'starting' });
+    setIsRequestingAccess(false);
+    setFindTerm(undefined);
     setIsConfirmingClose(false);
     setAccessRequest(undefined);
     setNotice(undefined);
@@ -437,6 +443,10 @@ export function TerminalPane({
       return;
     }
     viewRef.current = view;
+    /* Counts the shells this port has served. An access replacement keeps the port but starts the host's offsets
+     * again at zero, so output of the replaced shell that paints afterwards acknowledges nothing: its offset would be
+     * beyond the new shell's, which the host refuses as an invalid frame and ends the Terminal. */
+    let shell = 0;
     const onFrame = (frame: TerminalHostFrame): void => {
       if (generation !== generationRef.current) {
         return;
@@ -449,8 +459,9 @@ export function TerminalPane({
         }
         case 'output': {
           const { offset } = frame;
+          const painting = shell;
           view.write(frame.data, () => {
-            if (generation === generationRef.current) {
+            if (generation === generationRef.current && painting === shell) {
               sessionRef.current?.ack(offset);
             }
           });
@@ -466,6 +477,7 @@ export function TerminalPane({
           setIsConfirmingClose(false);
           setAccessRequest(undefined);
           if (frame.reason === 'replaced') {
+            shell += 1;
             /* The fresh session's `opened` follows; clear the old screen so its output is not mistaken for the new
              * shell's (RIS, which AurigaX handles in the engine). */
             view.write('\u001Bc', () => undefined);
@@ -490,29 +502,114 @@ export function TerminalPane({
           }
           sessionRef.current = undefined;
           setIsConfirmingClose(false);
-          /* A refusal ends a pending restart too, so a later exit never starts a session on its own (D21). */
-          restartRef.current = false;
           setAccessRequest(undefined);
+          restartRef.current = false;
           setState({ phase: 'refused', refusal: frame });
           break;
         }
       }
     };
     const size = view.fit();
-    const session = bridge.open({ projectRoot, size }, onFrame);
-    sessionRef.current = session;
+    let session: DesktopTerminalSession | undefined;
+    const initialFrames: TerminalHostFrame[] = [];
+    let initialOutputBytes = 0;
+    const startup = { overflow: false };
+    let hasFailed = false;
     view.onData((data) => {
       if (generation !== generationRef.current) {
         return;
       }
       for (const slice of outputSlices(data, terminalLimits.inputCharacters)) {
-        session.input(slice);
+        session?.input(slice);
       }
     });
+    try {
+      // Attach input before launching; synchronous frames wait until their session can acknowledge paint.
+      session = bridge.open({ projectRoot, size }, (frame) => {
+        if (hasFailed || startup.overflow || generation !== generationRef.current) {
+          return;
+        }
+        if (session !== undefined) {
+          onFrame(frame);
+          return;
+        }
+        const bytes = frame.type === 'output' ? frame.data.length * 2 : 0;
+        if (
+          initialFrames.length >= initialFrameLimit ||
+          bytes > terminalLimits.unacknowledgedBytes - initialOutputBytes
+        ) {
+          startup.overflow = true;
+          initialFrames.length = 0;
+          return;
+        }
+        initialOutputBytes += bytes;
+        initialFrames.push(frame);
+      });
+      if (generation !== generationRef.current) {
+        session.close();
+        return;
+      }
+      sessionRef.current = session;
+      if (startup.overflow) {
+        throw new Error('Terminal startup exceeded its frame bound.');
+      }
+      for (const frame of initialFrames) {
+        onFrame(frame);
+      }
+    } catch {
+      hasFailed = true;
+      if (generation === generationRef.current) {
+        teardown();
+        setState({
+          phase: 'refused',
+          refusal: {
+            code: startup.overflow ? 'invalid-frame' : 'pty-unavailable',
+            message: startup.overflow
+              ? 'The Terminal sent too much startup data.'
+              : 'The Terminal could not connect to its shell.',
+            recovery: 'Try again.',
+          },
+        });
+      }
+    } finally {
+      initialFrames.length = 0;
+    }
   }, [bridge, loadRenderer, projectRoot, teardown]);
   useEffect(() => {
     startRef.current = start;
   }, [start]);
+
+  useEffect(() => {
+    if (projectRoot === undefined || bridge === undefined) {
+      return;
+    }
+    let cancelled = false;
+    // Defer one microtask so StrictMode's setup/cleanup replay cannot open two sessions.
+    queueMicrotask(() => {
+      if (!cancelled && targetRef.current === undefined) {
+        void startRef.current?.();
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectRoot, bridge]);
+
+  useKeybinding(
+    { key: 'F10', shiftKey: true },
+    () => {
+      const root = chromeRef.current;
+      if (root) {
+        const bounds = root.getBoundingClientRect();
+        root.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: bounds.left, clientY: bounds.top }));
+      }
+    },
+    {
+      scope: 'global',
+      ignoreInputs: false,
+      enabled: () => isRunning && chromeRef.current?.contains(document.activeElement) === true,
+    },
+  );
 
   if (availability.status === 'omitted') {
     return <div className='size-full' />;
@@ -525,170 +622,148 @@ export function TerminalPane({
     );
   }
 
-  const isLive = state.phase === 'running' || state.phase === 'starting';
-  const summary = state.phase === 'running' ? accessSummary(state.access) : undefined;
-
   return (
-    <div role='region' aria-label='Terminal' className='flex size-full flex-col'>
-      <div
-        ref={chromeRef}
-        tabIndex={-1}
-        data-slot='terminal-chrome'
-        className='flex min-h-9 items-center gap-2 border-b px-2 text-xs outline-none focus-visible:focus-outline'
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          ref={chromeRef}
+          tabIndex={-1}
+          role='region'
+          aria-label='Terminal'
+          aria-describedby={actionsDescriptionId}
+          className='flex size-full flex-col outline-none focus-visible:focus-outline'
+        >
+          <span id={actionsDescriptionId} className='sr-only'>
+            Press Shift+F10 for Terminal actions.
+          </span>
+          {isConfirmingClose && state.phase === 'running' ? (
+            <TerminalCloseDecision projectLabel={state.projectLabel} onChoose={chooseClose} />
+          ) : null}
+          {notice ? (
+            <p role='status' className='border-b px-3 py-2 text-xs text-muted-foreground'>
+              {notice}
+            </p>
+          ) : null}
+          {accessRequest ? (
+            <TerminalAccessDecision
+              request={accessRequest}
+              onDecide={(decision) => {
+                sessionRef.current?.decideAccess(accessRequest.requestId, decision);
+                setAccessRequest(undefined);
+                if (decision === 'deny') {
+                  setNotice('Access request denied. The Terminal keeps its current access.');
+                }
+              }}
+            />
+          ) : null}
+          {isRequestingAccess && state.phase === 'running' ? (
+            <TerminalAccessForm
+              inputRef={actionInputRef}
+              onSubmit={(access) => {
+                sessionRef.current?.requestAccess(access);
+              }}
+              onCancel={() => {
+                setIsRequestingAccess(false);
+              }}
+            />
+          ) : null}
+          <div className='relative min-h-0 flex-1'>
+            <div ref={hostRef} data-slot='terminal' className='absolute inset-0 overflow-hidden bg-background p-1' />
+            {state.phase === 'running' && findTerm !== undefined ? (
+              <Input
+                ref={actionInputRef}
+                aria-label='Find in Terminal'
+                className='absolute top-2 right-2 h-7 w-40 bg-background text-xs'
+                autoFocus
+                value={findTerm}
+                onChange={(event) => {
+                  setFindTerm(event.target.value);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && findTerm.length > 0) {
+                    event.preventDefault();
+                    const found = viewRef.current?.search(findTerm, event.shiftKey) ?? false;
+                    setNotice(found ? undefined : `No match for “${findTerm}”.`);
+                  } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    viewRef.current?.clearFind();
+                    setFindTerm(undefined);
+                    viewRef.current?.focus();
+                  }
+                }}
+              />
+            ) : null}
+            {state.phase === 'idle' || state.phase === 'starting' || availability.status === 'checking' ? (
+              <span role='status' aria-label='Starting Terminal' aria-busy='true' className='sr-only'>
+                Starting Terminal…
+              </span>
+            ) : null}
+            {state.phase === 'ended' || state.phase === 'refused' ? (
+              <div
+                role='status'
+                className='absolute inset-x-0 bottom-0 flex flex-wrap items-center gap-2 border-t bg-card p-3 text-sm'
+              >
+                <span className='min-w-0 flex-1'>
+                  {state.phase === 'ended'
+                    ? `${endedCopy[state.reason]}${state.exitCode === null ? '' : ` Exit code ${String(state.exitCode)}.`}`
+                    : `${state.refusal.message} ${state.refusal.recovery}`}
+                </span>
+                <Button
+                  size='sm'
+                  onClick={() => {
+                    void start();
+                  }}
+                >
+                  {state.phase === 'ended' ? 'Start a new Terminal' : 'Try again'}
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent
+        aria-label='Terminal actions'
+        onCloseAutoFocus={(event) => {
+          if (menuActionRef.current) {
+            event.preventDefault();
+            menuActionRef.current = false;
+            actionInputRef.current?.focus();
+          }
+        }}
       >
-        <span className='truncate text-muted-foreground'>
-          {state.phase === 'running' ? state.projectLabel : 'Terminal'}
-          {summary ? ` · ${summary}` : null}
-        </span>
-        <span className='ml-auto' />
-        {state.phase === 'running' && findTerm !== undefined ? (
-          <Input
-            aria-label='Find in Terminal'
-            className='h-6 w-40 text-xs'
-            autoFocus
-            value={findTerm}
-            onChange={(event) => {
-              setFindTerm(event.target.value);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && findTerm.length > 0) {
-                event.preventDefault();
-                const found = viewRef.current?.search(findTerm, event.shiftKey) ?? false;
-                setNotice(found ? undefined : `No match for “${findTerm}”.`);
-              } else if (event.key === 'Escape') {
-                event.preventDefault();
-                viewRef.current?.clearFind();
-                setFindTerm(undefined);
-                viewRef.current?.focus();
-              }
-            }}
-          />
-        ) : null}
-        {state.phase === 'running' ? (
-          <Button
-            size='xs'
-            variant='ghost'
-            aria-pressed={findTerm !== undefined}
-            onClick={() => {
-              if (findTerm === undefined) {
-                setFindTerm('');
-              } else {
-                viewRef.current?.clearFind();
-                setFindTerm(undefined);
-              }
-            }}
-          >
-            Find
-          </Button>
-        ) : null}
-        {state.phase === 'running' ? (
-          <Button
-            size='xs'
-            variant='ghost'
-            onClick={() => {
-              restartRef.current = true;
-              setFindTerm(undefined);
-              sessionRef.current?.close();
-            }}
-          >
-            Restart
-          </Button>
-        ) : null}
-        {state.phase === 'running' ? (
-          <Button
-            size='xs'
-            variant='ghost'
-            aria-expanded={isRequestingAccess}
-            onClick={() => {
-              setIsRequestingAccess((open) => !open);
-            }}
-          >
-            Request access
-          </Button>
-        ) : null}
-        <Button
-          size='xs'
-          variant='ghost'
-          aria-pressed={screenReaderMode}
-          onClick={() => {
-            setScreenReaderMode(!screenReaderMode);
+        <ContextMenuItem
+          disabled={!isRunning}
+          onSelect={() => {
+            menuActionRef.current = true;
+            setIsRequestingAccess(true);
+            setFindTerm(undefined);
           }}
         >
-          Screen reader mode
-        </Button>
-        {isLive ? <span className='sr-only'>Press Shift+Escape in the terminal to come back here.</span> : null}
-      </div>
-      {isConfirmingClose && state.phase === 'running' ? (
-        <TerminalCloseDecision projectLabel={state.projectLabel} onChoose={chooseClose} />
-      ) : null}
-      {notice ? (
-        <p role='status' className='border-b px-3 py-2 text-xs text-muted-foreground'>
-          {notice}
-        </p>
-      ) : null}
-      {accessRequest ? (
-        <TerminalAccessDecision
-          request={accessRequest}
-          onDecide={(decision) => {
-            sessionRef.current?.decideAccess(accessRequest.requestId, decision);
-            setAccessRequest(undefined);
-            if (decision === 'deny') {
-              setNotice('Access request denied. The Terminal keeps its current access.');
-            }
-          }}
-        />
-      ) : null}
-      {isRequestingAccess && state.phase === 'running' ? (
-        <TerminalAccessForm
-          onSubmit={(access) => {
-            sessionRef.current?.requestAccess(access);
-          }}
-          onCancel={() => {
+          Request access
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={!isRunning}
+          onSelect={() => {
+            menuActionRef.current = true;
+            setFindTerm('');
             setIsRequestingAccess(false);
           }}
-        />
-      ) : null}
-      <div className='relative min-h-0 flex-1'>
-        <div ref={hostRef} data-slot='terminal' className='absolute inset-0 overflow-hidden bg-background p-1' />
-        {state.phase === 'idle' || availability.status === 'checking' ? (
-          <PanelEmptyState
-            className='absolute inset-0 bg-background'
-            icon={SquareTerminal}
-            title='Terminal'
-            description='A shell in this project folder, contained to the project. It starts when you start it.'
-          >
-            <Button
-              disabled={availability.status !== 'available'}
-              onClick={() => {
-                void start();
-              }}
-            >
-              Start Terminal
-            </Button>
-          </PanelEmptyState>
-        ) : null}
-        {state.phase === 'ended' || state.phase === 'refused' ? (
-          <div
-            role='status'
-            className='absolute inset-x-0 bottom-0 flex flex-wrap items-center gap-2 border-t bg-card p-3 text-sm'
-          >
-            <span className='min-w-0 flex-1'>
-              {state.phase === 'ended'
-                ? `${endedCopy[state.reason]}${state.exitCode === null ? '' : ` Exit code ${String(state.exitCode)}.`}`
-                : `${state.refusal.message} ${state.refusal.recovery}`}
-            </span>
-            <Button
-              size='sm'
-              onClick={() => {
-                void start();
-              }}
-            >
-              {state.phase === 'ended' ? 'Start a new Terminal' : 'Try again'}
-            </Button>
-          </div>
-        ) : null}
-      </div>
-    </div>
+        >
+          Find
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={!isRunning}
+          onSelect={() => {
+            restartRef.current = true;
+            setFindTerm(undefined);
+            setIsRequestingAccess(false);
+            sessionRef.current?.close();
+          }}
+        >
+          Restart
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 

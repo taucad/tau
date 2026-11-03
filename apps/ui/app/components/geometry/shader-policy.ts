@@ -510,7 +510,8 @@ export const shaderEvidence = {
       'packages/viewer/src/graphics/three/utils/section-stencil-caps.browser.test.ts::should cap each owner where its solids hold the cut, and nowhere else',
       'packages/viewer/src/graphics/three/node-frame-reference.browser.test.ts::should preserve display ramps, alpha and linear overlay blends in compact frame storage',
       'packages/viewer/src/graphics/three/ao-normal.browser.test.ts::should round-trip both normal hemispheres through RG8 on %s',
-      'packages/viewer/src/graphics/three/ao-normal.browser.test.ts::should interpolate decoded normals across folds and clear texels on %s',
+      'packages/viewer/src/graphics/three/ao-normal.browser.test.ts::should fetch one surface normal at texel corners, never a fold or background blend, on %s',
+      'packages/viewer/src/graphics/three/ao-denoise.browser.test.ts::should %s on a flat surface',
       'packages/viewer/src/graphics/three/post-processing-antialias.browser.test.tsx::should occlude grid and hidden outlines through actual stencil caps',
       'packages/viewer/src/graphics/three/post-processing-antialias.browser.test.tsx::should keep contact AO smooth without erasing it',
     ],
@@ -540,7 +541,7 @@ export const shaderEvidence = {
     lifecycle: [
       'packages/viewer/src/graphics/three/post-processing-antialias.browser.test.tsx::should isolate two 5K node views through sibling resize and remount on %s',
       'packages/viewer/src/graphics/three/surface-reuse.test.ts::should retire every attachment user before initialization and retry a failed preparation',
-      'packages/viewer/src/graphics/three/surface-reuse.test.ts::should restore target and depth clear state after %s fails',
+      'packages/viewer/src/graphics/three/surface-reuse.test.ts::should restore the target after %s fails',
       'packages/viewer/src/graphics/three/surface-reuse.test.ts::should isolate simultaneous owners and release only the retiring framebuffer view',
       'packages/viewer/src/graphics/three/camera-preparation.test.ts::should cancel on input, hidden document and disposal, allowing a later eligible frame',
       'packages/viewer/src/graphics/three/post-processing-webgpu.test.tsx::should prepare offscreen once and restore camera and state after failure=%s',

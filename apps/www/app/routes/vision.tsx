@@ -10,15 +10,9 @@ export const content = (): React.JSX.Element => (
   <>
     <section className='band'>
       {intro({
-        eyebrow: 'The Tau vision',
-        title: (
-          <>
-            Give ideas
-            <br />
-            <em>physical form.</em>
-          </>
-        ),
-        body: 'Design something useful. Verify the details. Make it and put it to work. We’re building open tools that connect an idea to the part, assembly or product it becomes.',
+        eyebrow: 'Vision',
+        title: 'From idea to physical part',
+        body: 'We’re building open-source tools that take a design from an idea to something you can make: editable CAD, geometry checks and exports for manufacturing.',
         aside: (
           <img
             className='vision-metal'
@@ -48,33 +42,22 @@ export const content = (): React.JSX.Element => (
     </section>
     <section className='band split-band'>
       <div className='cell'>
-        {kicker('A real starting point')}
-        <h2>
-          The distance from
-          <br />
-          thought to thing.
-        </h2>
+        {kicker('Why we’re building Tau')}
+        <h2>Tools for people who make things</h2>
       </div>
       <div className='cell'>
         <p className='lead'>
-          A design earns its place when you can make it, fit it and use it. Good tools help you carry that purpose
-          through every decision.
+          We want more people to design parts they understand and can make, from a 3D-printed prototype to a machined
+          component.
         </p>
         <p>
-          From a printed prototype to a machined component, we want more people to make things they understand, with
-          editable source and clear evidence close at hand. See it in practice in the{' '}
-          <SiteLink href='/#story'>planetary gearbox story</SiteLink>, or open the{' '}
+          Every design keeps its editable source and its check results. See an example in the{' '}
+          <SiteLink href='/#story'>planetary gearbox walkthrough</SiteLink>, or open the{' '}
           <SiteLink href={`${appOrigin}/vision`}>interactive 3D vision {out}</SiteLink> in the Tau app.
         </p>
       </div>
     </section>
-    {closing(
-      <>
-        Make something
-        <br />
-        that matters.
-      </>,
-    )}
+    {closing()}
   </>
 );
 export default function Page(): React.JSX.Element {

@@ -27,6 +27,8 @@ import {
 import { createCsharpLanguageAssets } from './csharp-language-assets.vite-plugin.js';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
 import { createGeoSpecMtAssets } from './geospec-mt-assets.vite-plugin.js';
+// oxlint-disable-next-line eslint/no-restricted-imports -- Vite configuration runs outside the app alias resolver.
+import { createPicogkBrowserAssets } from './picogk-browser-assets.vite-plugin.js';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
 import { createOpenscadLanguageAssets } from './openscad-language-assets.vite-plugin.js';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
@@ -35,9 +37,8 @@ import { createAssetIntegrity } from './asset-integrity.vite-plugin.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testScriptsAlias = '#scripts';
 const uiReactCompilerPluginName = 'vite:react-compiler';
-const streamdownShikiFacade = path.resolve(__dirname, 'app/lib/streamdown-shiki.ts');
-/** The only specifiers `tau-ui-source-alias` resolves: `#` app aliases and Streamdown's `shiki`. */
-const uiSourceAliasIdFilter = /^#|^shiki$/u;
+/** The only specifiers `tau-ui-source-alias` resolves: `#` app aliases. */
+const uiSourceAliasIdFilter = /^#/u;
 
 const toOriginOrRaw = (value: string | undefined): string | undefined => {
   if (!value) {
@@ -200,9 +201,6 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
       // its own checks for hosts that ignore hook filters.
       filter: { id: uiSourceAliasIdFilter },
       handler(source, importer) {
-        if (source === 'shiki' && importer?.includes('/streamdown/') === true && importer.includes('/code-block-')) {
-          return streamdownShikiFacade;
-        }
         if (!source.startsWith('#')) {
           return null;
         }
@@ -444,6 +442,7 @@ const createReleaseManifestPlugin = (release: string): Plugin => ({
 
 export default defineConfig(({ command, mode }) => {
   const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
+  const picogkAssets = createPicogkBrowserAssets(process.env['PICOGK_BROWSER_ASSETS_ROOT']);
   const openscadLanguage = createOpenscadLanguageAssets(path.resolve(__dirname, '../../out/openscad-language/stage'));
   const isTest = mode === 'test';
   const csharpAssets = createCsharpLanguageAssets(
@@ -496,6 +495,7 @@ export default defineConfig(({ command, mode }) => {
         !isTest && resolveTauTelemetryHostCloud(process.env['TAU_TELEMETRY_HOST']),
       ),
       tauGeoSpecMtReceipts: JSON.stringify(mtAssets.receipts),
+      tauPicogkBrowserAssets: picogkAssets.assets ? JSON.stringify(picogkAssets.assets) : 'undefined',
       tauCsharpLanguageAssets: JSON.stringify(csharpAssets.assets ?? null),
       /*
        * Compile-time host seam (charter D2). `desktop/vite.config.ts` sets
@@ -537,6 +537,7 @@ export default defineConfig(({ command, mode }) => {
     },
     plugins: [
       mtAssets.plugin,
+      picogkAssets.plugin,
       csharpAssets.plugin,
       openscadLanguage.plugin,
       createUiSourceAliasPlugin({

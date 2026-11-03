@@ -28,12 +28,13 @@ export const desktopManifestDigest = (manifest: DesktopArtifactManifest): string
     .digest('hex');
 
 /**
- * Explicitly selected publication scope. `all` keeps the original admission; `macos` is a staging-only Mac rollout
- * that must cover both architectures with ZIP and DMG and may not carry any other platform's artifact.
+ * Explicitly selected publication scope. `all` keeps the original admission; `macos` is a staging-only Apple silicon
+ * rollout that must carry exactly its ZIP and DMG and no other architecture's or platform's artifact. Intel is excluded
+ * by operator ruling until a GPU-capable Intel Mac host can qualify it.
  */
 export const desktopPublicationScopes = ['all', 'macos'] as const;
 export type DesktopPublicationScope = (typeof desktopPublicationScopes)[number];
-const macosScopeArtifacts = ['darwin-arm64', 'darwin-x64'].flatMap((target) =>
+const macosScopeArtifacts = ['darwin-arm64'].flatMap((target) =>
   ['macos-dmg', 'macos-zip'].map((kind) => `${target}:${kind}`),
 );
 
@@ -66,9 +67,9 @@ export const desktopCandidateRoutes = (
     if (
       manifest.channel !== 'staging' ||
       JSON.stringify(present) !== JSON.stringify([...macosScopeArtifacts].sort()) ||
-      result.length !== 2
+      result.length !== 1
     ) {
-      throw new Error('Mac-only publication requires exactly staging ZIP and DMG for Apple silicon and Intel');
+      throw new Error('Mac-only publication requires exactly staging ZIP and DMG for Apple silicon');
     }
   }
   return result;

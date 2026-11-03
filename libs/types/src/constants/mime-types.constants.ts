@@ -29,6 +29,9 @@ export const mimeTypes = {
   igs: 'application/iges',
   brep: 'application/octet-stream',
 
+  // Sparse volumetric geometry
+  vdb: 'application/vnd.openvdb',
+
   // Mesh
   stl: 'model/stl',
   obj: 'model/obj', // eslint-disable-line id-denylist -- OBJ file format identifier

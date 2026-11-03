@@ -119,6 +119,16 @@ describe('ViewerSettings', () => {
     expect(screen.queryByText('WebGPU')).not.toBeInTheDocument();
   });
 
+  it('should label the edge visibility switch Edges and toggle edge rendering', async () => {
+    const user = userEvent.setup();
+    await openViewerSettings(user);
+
+    expect(screen.queryByText('Lines')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('switch', { name: 'Edges' }));
+
+    expect(mocks.graphicsSend).toHaveBeenCalledWith({ type: 'setLinesVisibility', payload: false });
+  });
+
   describe('closing', () => {
     it('should return focus to the trigger when Escape closes the menu', async () => {
       const user = userEvent.setup();

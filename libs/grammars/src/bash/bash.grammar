@@ -1,0 +1,65 @@
+// POSIX shell and Bash: commands, keywords, variables, strings and redirections.
+
+@top Script { list }
+
+list { (statement? separator)* statement? }
+
+statement { Keyword* (Command | Group | Block) | Keyword+ | ForHeader argument* }
+
+ForHeader { kw<"for"> LoopVariable }
+
+LoopVariable { Word }
+
+Command { assignment+ (CommandName argument*)? | CommandName argument* }
+
+assignment { Assignment (!value value)? }
+
+value { word | String | Variable | Substitution }
+
+CommandName { word }
+
+argument { word | String | Variable | Substitution | Assignment | Redirect | Keyword }
+
+word { Word | Number }
+
+Group { "(" list ")" }
+Block { "{" list "}" }
+
+Substitution { "$(" list ")" }
+
+separator { Newline | ";" | ";;" | "&" | "&&" | "|" | "||" | "|&" }
+
+Keyword {
+  kw<"if"> | kw<"then"> | kw<"else"> | kw<"elif"> | kw<"fi"> | kw<"in"> | kw<"while"> |
+  kw<"until"> | kw<"do"> | kw<"done"> | kw<"case"> | kw<"esac"> | kw<"function"> | kw<"select"> |
+  kw<"return"> | kw<"exit"> | kw<"local"> | kw<"export"> | kw<"declare"> | kw<"readonly"> | kw<"unset"> |
+  kw<"break"> | kw<"continue"> | kw<"time"> | "!"
+}
+
+kw<term> { @specialize[@name={term}]<Word, term> }
+
+@precedence { value @right }
+
+@skip { whitespace | Comment | LineContinuation }
+
+@tokens {
+  whitespace { $[ \t]+ }
+  LineContinuation { "\\" "\r"? "\n" }
+  Newline { "\r"? "\n" }
+  Comment[isolate] { "#" ![\n]* }
+  Word { (![ \t\r\n;&|<>()'"$`#\\{}!] | "\\" ![\r\n]) (![ \t\r\n;&|<>()'"$`\\] | "\\" ![\r\n])* }
+  Number { @digit+ }
+  Assignment { $[A-Za-z_] $[A-Za-z0-9_]* ("[" ![\]\n]* "]")? "+"? "=" }
+  Variable { "$" ($[A-Za-z_] $[A-Za-z0-9_]* | $[0-9@*#?$!\-] | "{" ![}\n]* "}"?) }
+  String[isolate] {
+    "'" ![']* "'"? |
+    "$'" ("\\" _ | !['\\])* "'"? |
+    '"' ("\\" _ | !["\\])* '"'? |
+    "`" ("\\" _ | ![`\\])* "`"?
+  }
+  Redirect { @digit* (">" | ">>" | "<" | "<<" | "<<<" | ">&" | "<&" | "&>" | "&>>" | ">|") }
+  @precedence { Redirect, Number, Assignment, Word }
+  "(" ")" "{" "}" "$(" ";" ";;" "&" "&&" "|" "||" "|&" "!"
+}
+
+@detectDelim

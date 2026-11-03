@@ -12,38 +12,7 @@ import type { Vec3 } from '#offline/offline-math.js';
 import { dot, scale, sub } from '#offline/offline-math.js';
 import type { Oc, TopoDS_Face, TopoDS_Shape } from '#offline/offline-occt.js';
 import { arrayToList, compound, edges, fromPnt, gvec, planarFaceFrame, pnt, vertices } from '#offline/offline-occt.js';
-import { buildArrangement } from '#offline/offline-sketch.js';
-
-/**
- * A point strictly inside a face, found on a grid over its parameter range.
- *
- * @param oc - libcascade instance
- * @param face - planar face
- * @returns a point classified inside, or undefined
- */
-function interiorPoint(oc: Oc, face: TopoDS_Face): Vec3 | undefined {
-  const surface = new oc.BRepAdaptor_Surface(face, true);
-  const [u0, u1, v0, v1] = [
-    surface.FirstUParameter(),
-    surface.LastUParameter(),
-    surface.FirstVParameter(),
-    surface.LastVParameter(),
-  ];
-  for (const steps of [4, 12, 40]) {
-    for (let i = 1; i < steps; i++) {
-      for (let j = 1; j < steps; j++) {
-        const u = u0 + ((u1 - u0) * i) / steps;
-        const v = v0 + ((v1 - v0) * j) / steps;
-        const classifier = new oc.BRepClass_FaceClassifier(face, new oc.gp_Pnt2d(u, v), 1e-7, true);
-        if (classifier.State() === oc.TopAbs_State.TopAbs_IN) {
-          return fromPnt(surface.Value(u, v));
-        }
-      }
-    }
-  }
-
-  return undefined;
-}
+import { buildArrangement, interiorPoint } from '#offline/offline-sketch.js';
 
 /**
  * Shells a prismatic body by cutting an inward-offset cavity through its removed caps.

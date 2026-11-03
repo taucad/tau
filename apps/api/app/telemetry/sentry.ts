@@ -11,16 +11,32 @@
 /* oxlint-disable typescript-eslint/dot-notation -- process.env index access required by TS4111 (verbatimModuleSyntax) */
 import process from 'node:process';
 import * as Sentry from '@sentry/node';
-import type { ErrorEvent } from '@sentry/node';
+import type { ErrorEvent, EventHint } from '@sentry/node';
+
+/**
+ * An error a test harness raises on purpose, such as the staging observability harness's failure route. It reports
+ * under `<environment>-e2e`, so the failures a suite causes never land among real users' (TAU-API-9).
+ */
+export class AutomatedRunFailure extends Error {}
 
 /**
  * Drop what a request can carry that must not leave the process: the query string (OAuth `code` and `state`,
- * verification tokens), every header, cookie and body, and the user.
+ * verification tokens), every header, cookie and body, and the user. File an {@link AutomatedRunFailure} under the
+ * automated-run environment.
  *
  * @param event - The event Sentry is about to send.
+ * @param hint - The SDK's hint, carrying the reported value as `originalException`.
  * @returns The same event, scrubbed.
  */
-export const scrubSentryEvent = (event: ErrorEvent): ErrorEvent => {
+export const scrubSentryEvent = (event: ErrorEvent, hint?: EventHint): ErrorEvent => {
+  const { environment } = event;
+  if (
+    hint?.originalException instanceof AutomatedRunFailure &&
+    environment !== undefined &&
+    !environment.endsWith('-e2e')
+  ) {
+    event.environment = `${environment}-e2e`;
+  }
   if (event.request) {
     const { url } = event.request;
     event.request = {

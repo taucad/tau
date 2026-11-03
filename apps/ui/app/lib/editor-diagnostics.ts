@@ -1,6 +1,7 @@
 import { Topic } from '@taucad/events';
 import { URI } from 'vscode-uri';
 import { assertRootedPath } from '@taucad/utils/path';
+import { isVirtualDeclarationUri } from '#lib/virtual-declarations.js';
 
 export type EditorDiagnostic = Readonly<{
   from: number;
@@ -26,7 +27,9 @@ export class EditorDiagnostics {
     return this.#store.get(uri) ?? new Map();
   }
 
-  public set(uri: string, owner: string, diagnostics: readonly EditorDiagnostic[]): void {
+  public set(uri: string, owner: string, reported: readonly EditorDiagnostic[]): void {
+    // A library declaration is read for reference; a language service's view of it is not the reader's to fix.
+    const diagnostics = isVirtualDeclarationUri(uri) ? [] : reported;
     let byOwner = this.#store.get(uri);
     if (!byOwner) {
       byOwner = new Map();

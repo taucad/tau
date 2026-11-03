@@ -171,6 +171,26 @@ const textStreamState = (
  */
 const toolKey = (runId: string, toolCallId: string): string => JSON.stringify([runId, 'tool', toolCallId]);
 
+/**
+ * Whether this run has a text or reasoning block still open.
+ *
+ * The SDK reducer forgets its active text and reasoning parts on `finish-step`
+ * without closing them, and rejects their next delta. The host makes a step's
+ * tool results durable before the next request starts, but the page reads the
+ * durable log and the live preview on separate subscriptions, so the next
+ * step's live block can already be open when those results are folded
+ * (`specs/live-overlay/LiveOverlay.tla`, `GuardBoundary`).
+ */
+const hasOpenStreamBlock = (runId: string, streamedBlocks: AgentHostLiveBlocks | undefined): boolean => {
+  const prefix = `[${JSON.stringify(runId)},`;
+  for (const [key, block] of streamedBlocks ?? []) {
+    if (block.type !== 'tool' && !block.closed && key.startsWith(prefix)) {
+      return true;
+    }
+  }
+  return false;
+};
+
 const reasoningMetadata = (
   summary?: string,
   startedAt?: number,
@@ -577,7 +597,10 @@ const messageChunks = (
             ...facts,
           }
         : { type: 'tool-output-available', toolCallId: message.toolCallId, output: message.content, ...facts };
-      return facts.dynamic ? [output] : [output, { type: 'finish-step' }, { type: 'start-step' }];
+      /* A result read after the next step's live block opened concludes its call without ending that block's step. */
+      return facts.dynamic === true || hasOpenStreamBlock(runId, streamedBlocks)
+        ? [output]
+        : [output, { type: 'finish-step' }, { type: 'start-step' }];
     }
   }
 };

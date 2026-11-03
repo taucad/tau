@@ -18,9 +18,11 @@ import { basename, dirname, join } from 'node:path';
 import type { InterruptResolution } from '@taucad/agent-host';
 import {
   resolveShellExecutable,
+  resolveTerminalZsh,
   shellCommandArguments,
   shellInteractiveArguments,
   shellVersionCommand,
+  terminalZshArguments,
 } from '@taucad/native-process-core/shell';
 import type {
   ShellExecutable,
@@ -31,6 +33,7 @@ import type {
   ShellLaunchOutcome,
   ShellProvider,
   ShellTerminalSize,
+  TerminalZsh,
 } from '@taucad/native-process-core/shell';
 
 import { shellLimits } from '#shell/shell-contract.js';
@@ -75,6 +78,11 @@ export type ShellUnavailable = Readonly<{
   message: string;
   /** One sentence naming the next action, shown in the Terminal pane. */
   recovery: string;
+  /**
+   * What the sandbox itself reported, for the host log and a support bundle only. Never rendered: the pane shows
+   * `message` and `recovery`, which stay free of paths and command output.
+   */
+  diagnostic?: string | undefined;
 }>;
 
 /**
@@ -203,6 +211,11 @@ export type ShellServiceOptions = Readonly<{
   provider: ShellProvider;
   /** The machine's own shell ({@link resolveShellExecutable}). */
   executable: ShellExecutable;
+  /**
+   * The verified macOS system Zsh the human Terminal runs instead, loading the person's own Zsh startup files (operator
+   * ruling 2026-11-01T18:57Z; {@link resolveTerminalZsh}). Agent launches always run `executable`, clean.
+   */
+  terminalZsh?: TerminalZsh | undefined;
   identity: ShellIdentity;
   /** The admitted checkout of each live run, read at every call; an absent run is refused, never defaulted (F5). */
   checkouts: ReadonlyMap<string, ShellCheckout>;
@@ -1059,17 +1072,19 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         access,
         host,
       });
+      const { terminalZsh } = options;
       outcome = await provider.launch({
         executionId,
-        executablePath: executable.path,
-        arguments: shellInteractiveArguments(executable.kind),
+        executablePath: terminalZsh?.path ?? executable.path,
+        arguments: terminalZsh === undefined ? shellInteractiveArguments(executable.kind) : terminalZshArguments,
         workingDirectory: root,
         commandId: `terminal:${sessionId}`,
         filesystem,
         network: { domains: access.domains },
+        startupFiles: terminalZsh === undefined ? undefined : 'zsh',
         environment: shellEnvironment({
           platform,
-          executablePath: executable.path,
+          executablePath: terminalZsh?.path ?? executable.path,
           home: session.home,
           temporary: session.temporary,
           toolchainBins: options.toolchain?.bins ?? [],
@@ -1140,7 +1155,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
 export type ShellProbe = Readonly<{ status: 'available'; shell: HostShell }> | ShellUnavailable;
 
 /** @public */
-export type ProbeHostShellOptions = Omit<ShellServiceOptions, 'executable' | 'identity'>;
+export type ProbeHostShellOptions = Omit<ShellServiceOptions, 'executable' | 'identity' | 'terminalZsh'>;
 
 /**
  * Prove the provider and the machine's own shell on this host before anything is offered (D1, I2): resolve the shell
@@ -1224,10 +1239,17 @@ export const probeHostShell = async (options: ProbeHostShellOptions): Promise<Sh
     const { stdout, stderr, exited } = outcome.process;
     const decoder = new TextDecoder();
     let version = '';
+    /* Kept only to explain a refusal in the host log; a successful probe never reads it. */
+    let failure = '';
+    const failureDecoder = new TextDecoder();
     const drain = async (chunks: AsyncIterable<Uint8Array<ArrayBuffer>>, keep: boolean): Promise<void> => {
       for await (const chunk of chunks) {
         if (keep && version.length < 256) {
           version += decoder.decode(chunk, { stream: true });
+        }
+        if (!keep) {
+          /* The last words are the useful ones: a refusal's own message comes after whatever noise preceded it. */
+          failure = (failure + failureDecoder.decode(chunk, { stream: true })).slice(-1024);
         }
       }
     };
@@ -1250,6 +1272,9 @@ export const probeHostShell = async (options: ProbeHostShellOptions): Promise<Sh
           platform === 'linux'
             ? "Install your distribution's socat package, or reinstall Tau from its .deb or .rpm package to restore its sandbox."
             : 'Reinstall Tau to restore its sandbox components.',
+        /* Without this the one failure that means "the sandbox ran, the shell did not" is indistinguishable from
+         * every other refusal in a host log, and the probe is the only place the shell's own words exist. */
+        diagnostic: `exit ${JSON.stringify(exit)}; stdout ${JSON.stringify(version)}; stderr ${JSON.stringify(failure.slice(-1024))}`,
       };
     }
     const identity: ShellIdentity = {
@@ -1259,7 +1284,10 @@ export const probeHostShell = async (options: ProbeHostShellOptions): Promise<Sh
       shellDigest: executable.digest,
       provider: options.provider.name,
     };
-    return { status: 'available', shell: createShellService({ ...options, executable, identity }) };
+    /* On macOS the human Terminal runs the verified system Zsh; without one it keeps the clean Bash. */
+    const zsh = platform === 'darwin' ? await resolveTerminalZsh(platform) : undefined;
+    const terminalZsh = zsh === undefined || 'status' in zsh ? undefined : zsh;
+    return { status: 'available', shell: createShellService({ ...options, executable, terminalZsh, identity }) };
   } catch (error) {
     return {
       status: 'unavailable',

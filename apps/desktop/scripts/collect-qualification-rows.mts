@@ -20,14 +20,23 @@ const rows = [
   ['windows-nsis-x64', 'windows-nsis', 'win32-x64'],
   ['ubuntu-apt-x11', 'linux-apt', 'linux-x64'],
   ['ubuntu-appimage-x11', 'linux-appimage', 'linux-x64'],
+  ['ubuntu2604-apt-x11', 'linux-apt', 'linux-x64'],
+  ['ubuntu2604-appimage-x11', 'linux-appimage', 'linux-x64'],
   ['debian-apt-x11', 'linux-apt', 'linux-x64'],
   ['debian-appimage-x11', 'linux-appimage', 'linux-x64'],
 ] as const;
 const scopes = ['all', 'linux', 'macos', 'windows'] as const;
 type QualificationScope = (typeof scopes)[number];
-/** Rows each explicit scope must produce; a scoped run can neither omit nor add another platform's host. */
+/**
+ * Rows each explicit scope must produce; a scoped run can neither omit nor add another platform's host. The Mac-only
+ * scope is Apple silicon only (operator ruling: hosted Intel Macs cannot render, so Intel is not qualified).
+ */
 const scopeRows = (scope: QualificationScope) =>
-  scope === 'all' ? rows : rows.filter(([, route]) => route.startsWith(`${scope}-`));
+  scope === 'all'
+    ? rows
+    : rows.filter(
+        ([, route, target]) => route.startsWith(`${scope}-`) && (scope !== 'macos' || target === 'darwin-arm64'),
+      );
 const inputSchema = z.strictObject({
   scope: z.enum(scopes).default('all'),
   /** `vm` collects clean-host acceptance rows from the Mac- or Windows-scoped staging producer; never inferred from receipts. */
@@ -53,6 +62,7 @@ const assertOperatingSystem = (id: string, target: string, receipt: DesktopAccep
     (target.startsWith('darwin-') && !/^Darwin \d+\.\d+\.\d+$/u.test(os)) ||
     (target === 'win32-x64' && !/^Microsoft Windows\b/u.test(os)) ||
     (id.startsWith('ubuntu') && (distribution.length !== 1 || !/^ID=(?:ubuntu|"ubuntu")$/u.test(distribution[0]!))) ||
+    (id.startsWith('ubuntu2604') && !os.split(/\r?\n/u).includes('VERSION_ID="26.04"')) ||
     (id.startsWith('debian') && (distribution.length !== 1 || !/^ID=(?:debian|"debian")$/u.test(distribution[0]!)))
   ) {
     throw new Error('Native row does not observe its declared operating system');

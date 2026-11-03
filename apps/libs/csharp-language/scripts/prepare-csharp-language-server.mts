@@ -32,10 +32,31 @@ const sdks: Readonly<Partial<Record<string, { readonly archive: string; readonly
     sha512:
       '1033977dd837150e0814cf0c5d5b17ceb63925fda7ba2158b47258a4bd7c048cf82eac3bc1166f3146f53124a3f5fba09db1de1260d2ce96399860303b404b48',
   },
+  'linux-arm64': {
+    archive: `dotnet-sdk-${dotnetVersion}-linux-arm64.tar.gz`,
+    sha512:
+      'a1b45da58e5591fff909a6126ac6bfc1ef9c12bc72c0625f7815e83a82be1a902317ee96926cbbf81324a45c6abf2ed8102a216d0507879cc166159af78d1b77',
+  },
   'darwin-arm64': {
     archive: `dotnet-sdk-${dotnetVersion}-osx-arm64.tar.gz`,
     sha512:
       'e440e9a58d4ff7741c8342ac3e086fa9ee2dadc25e01c0449a88317a74cfbd63625b8092c3b2a131ae14b16ab3401e9cc470e578e4c65a72a0b5786bd2308cde',
+  },
+  'darwin-x64': {
+    archive: `dotnet-sdk-${dotnetVersion}-osx-x64.tar.gz`,
+    sha512:
+      '3ec1cc5539afe17341145c1ce61a4342546a05de75053cccbef4169c76113146bb77f30857b5bb47f784690c081c543ea160728a3fa0d06af11aefdafebb0c7f',
+  },
+  // Windows ships the SDK as a zip, which the inbox System32 bsdtar extracts.
+  'win32-x64': {
+    archive: `dotnet-sdk-${dotnetVersion}-win-x64.zip`,
+    sha512:
+      '9b8b88590e4da131bfd0da7aa089d0fc04d5418d5f8607ec13d55dc5a17b4399afd54d496c12657fa05c6c6546dc5eab930f26ac6c50f2d3a7712c0fb378c366',
+  },
+  'win32-arm64': {
+    archive: `dotnet-sdk-${dotnetVersion}-win-arm64.zip`,
+    sha512:
+      '9d4ecd7439f15c7797d6f46d368cb7aa6513755c5fc3d6de7621bc4878a1805f6b8ffb60ffb9d3e72a049cca87edb252f7c8c03023b643e333544c4606509d7f',
   },
 };
 /** BCL documentation shipped for hover and completion; the rest of the reference pack binds without it. */
@@ -54,8 +75,14 @@ const dotnetRoot = resolve(projectRoot, 'dotnet');
 const outputRoot = resolve(workspaceRoot, 'out/csharp-language');
 // Shared with prepare-picogk-dotnet.mts so one machine downloads the pinned SDK once.
 const sdkCacheRoot = resolve(workspaceRoot, 'out/cache/picogk');
-const { NUGET_PACKAGES: nugetPackages, HOME: home, TAU_DOTNET: dotnetOverride, CI: ci } = process.env;
-const nugetRoot = nugetPackages ?? resolve(home ?? '', '.nuget/packages');
+const {
+  NUGET_PACKAGES: nugetPackages,
+  HOME: home,
+  USERPROFILE: userProfile,
+  TAU_DOTNET: dotnetOverride,
+  CI: ci,
+} = process.env;
+const nugetRoot = nugetPackages ?? resolve(home ?? userProfile ?? '', '.nuget/packages');
 /* eslint-disable @typescript-eslint/naming-convention -- environment variables are not camelCase */
 const dotnetEnvironment = {
   DOTNET_CLI_TELEMETRY_OPTOUT: '1',
@@ -132,13 +159,21 @@ const ensureDotnet = async (): Promise<string> => {
     const temporary = `${root}.${String(process.pid)}.tmp`;
     await rm(temporary, { recursive: true, force: true });
     await mkdir(temporary, { recursive: true });
-    execFileSync('tar', ['-xzf', archive, '-C', temporary]);
+    // `-xf` lets tar detect the format. GNU tar and bsdtar read gzip; only the inbox bsdtar reads the Windows zip, so
+    // Windows names it rather than whichever tar (Git Bash's GNU tar) comes first on PATH.
+    const tar =
+      process.platform === 'win32'
+        ? resolve(process.env['SystemRoot'] ?? String.raw`C:\Windows`, 'System32/tar.exe')
+        : 'tar';
+    execFileSync(tar, ['-xf', archive, '-C', temporary]);
     await writeFile(resolve(temporary, '.tau-dotnet-archive-sha512'), `${sdk.sha512}\n`);
     await rm(root, { recursive: true, force: true });
     await rename(temporary, root);
   }
-  const dotnet = resolve(root, 'dotnet');
-  await chmod(dotnet, 0o755);
+  const dotnet = resolve(root, process.platform === 'win32' ? 'dotnet.exe' : 'dotnet');
+  if (process.platform !== 'win32') {
+    await chmod(dotnet, 0o755);
+  }
   return dotnet;
 };
 

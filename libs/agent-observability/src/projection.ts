@@ -119,7 +119,7 @@ export type RunProjection = Readonly<{
 }>;
 
 /** Bumped whenever the facts written for the same rows change. @public */
-export const hostTurnMapper = 'host-turn-v2';
+export const hostTurnMapper = 'host-turn-v3';
 
 const retentionMilliseconds = 180 * 86_400_000;
 
@@ -145,6 +145,10 @@ type Candidate =
 
 const rowPosition = (source: ProjectedSource): string => `${source.leaderEpoch}:${source.sequence}`;
 
+/** A committed row's digest, the same for every fact that cites it. */
+const rowDigest = async (source: ProjectedSource): Promise<string> =>
+  sha256Hex(canonicalEvidence(['host-row', source.chatId, source.leaderEpoch, source.sequence]));
+
 const envelope = async (
   context: ProjectionContext,
   run: ProjectedRun,
@@ -163,11 +167,16 @@ const envelope = async (
     ),
   );
   const expiresAt = item.occurredAt + retentionMilliseconds;
+  /*
+   * A lineage entry names a committed row, and the API keeps the first digest it is given for that row: several facts
+   * cite the same row (a run's ending row anchors its outcome, its presentation and its rating; a check cites its tool's
+   * rows), so the digest is the row's own, from its identity in the append-only log, and never the citing fact's.
+   */
   const lineage = await Promise.all(
     item.lineage.map(
       async (row): Promise<Evidence['lineage'][number]> => ({
         source: await contractId('row', `${row.chatId}:${rowPosition(row)}`),
-        digest: sourceDigest,
+        digest: await rowDigest(row),
         protection: context.protection,
         rights: 'unknown',
         expiresAt,
@@ -395,13 +404,18 @@ export const projectRun = async (run: ProjectedRun, context: ProjectionContext):
       },
       occurredAt: run.ending.at,
       events: 'complete',
+      /* A run that began before the grant reports only the time since it: earlier phases are clipped, not sent. */
       intervals: run.intervals
-        .filter((phaseInterval) => phaseInterval.phase !== 'tool')
+        .filter(
+          (phaseInterval) =>
+            phaseInterval.phase !== 'tool' &&
+            (phaseInterval.end === undefined || phaseInterval.end > context.grantedAt),
+        )
         .slice(0, 32)
         .map((phaseInterval) => ({
           phase: phaseInterval.phase,
           domain: 'host-recorded',
-          start: phaseInterval.start,
+          start: Math.max(phaseInterval.start, context.grantedAt),
           end: phaseInterval.end ?? null,
         })),
     };

@@ -1,4 +1,4 @@
-import type { HighlightLanguage } from '#lib/code-language-resolution.js';
+import type { HighlightLanguage } from '@taucad/grammars';
 import { resolveHighlightLanguageForPath } from '#lib/code-language-resolution.js';
 
 /** Canonical editor language identifiers; metadata never imports an editor runtime. */
@@ -6,16 +6,16 @@ export type EditorLanguage = HighlightLanguage | 'typescriptreact' | 'javascript
 
 export const getEditorLanguage = (path: string): EditorLanguage | undefined => {
   const resolved = resolveHighlightLanguageForPath(path);
-  if (!resolved.isSupported || resolved.shikiLanguage === 'plaintext') {
+  if (!resolved.isSupported || resolved.language === 'plaintext') {
     return undefined;
   }
-  if (resolved.shikiLanguage === 'tsx') {
+  if (resolved.language === 'tsx') {
     return 'typescriptreact';
   }
-  if (resolved.shikiLanguage === 'jsx') {
+  if (resolved.language === 'jsx') {
     return 'javascriptreact';
   }
-  return resolved.shikiLanguage;
+  return resolved.language;
 };
 
 export const jsLikeExtensions = ['.ts', '.tsx', '.js', '.jsx', '.mts', '.mjs', '.cts', '.cjs'] as const;

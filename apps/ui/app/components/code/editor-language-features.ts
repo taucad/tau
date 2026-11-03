@@ -1,5 +1,7 @@
 import { renderSymbolIcon } from '#components/code/editor-completion-icon.js';
-import { renderEditorDocumentation } from '#components/code/editor-documentation.js';
+import { paintHighlightedCode, renderEditorDocumentation } from '#components/code/editor-documentation.js';
+import type { DocumentationLinkHandler } from '#components/code/editor-documentation.js';
+import { language as languageFacet } from '@codemirror/language';
 import { Facet, StateEffect, StateField } from '@codemirror/state';
 import type { EditorState, Extension, Transaction } from '@codemirror/state';
 import { Decoration, EditorView, ViewPlugin, keymap, showDialog, showPanel, showTooltip } from '@codemirror/view';
@@ -39,6 +41,8 @@ export type EditorSignature = Readonly<{
   documentation?: string;
   /** Markdown for the active parameter. */
   parameterDocumentation?: string;
+  /** Opens the definition a `#tau-definition-N` link in either documentation names. */
+  onDefinitionLink?: DocumentationLinkHandler;
   overload?: Readonly<{ index: number; count: number }>;
 }>;
 
@@ -499,19 +503,25 @@ function renderSignature(view: EditorView, signature: EditorSignature): HTMLElem
     overload.textContent = `${String(signature.overload.index + 1)}/${String(signature.overload.count)}`;
     line.append(overload);
   }
+  // The signature is code in the document's own language, so it highlights like the editor.
+  const languageId = view.state.facet(languageFacet)?.name;
   const range = signature.parameters[signature.activeParameter];
-  if (range) {
-    const active = ownerDocument.createElement('span');
-    active.className = 'cm-signature-active-parameter';
-    active.textContent = signature.label.slice(range[0], range[1]);
-    line.append(signature.label.slice(0, range[0]), active, signature.label.slice(range[1]));
-  } else {
-    line.append(signature.label);
-  }
+  const label = ownerDocument.createElement('span');
+  paintHighlightedCode(label, {
+    text: signature.label,
+    languageId,
+    emphasis: range ? { from: range[0], to: range[1], className: 'cm-signature-active-parameter' } : undefined,
+  });
+  line.append(label);
   dom.append(line);
   for (const markdown of [signature.parameterDocumentation, signature.documentation]) {
     if (markdown) {
-      dom.append(renderEditorDocumentation(markdown, ownerDocument));
+      dom.append(
+        renderEditorDocumentation(markdown, ownerDocument, {
+          onDefinitionLink: signature.onDefinitionLink,
+          languageId,
+        }),
+      );
     }
   }
   return dom;
@@ -667,7 +677,7 @@ const occurrenceHighlighter = ViewPlugin.fromClass(
   { decorations: (value) => value.decorations },
 );
 
-/** The symbol path at the cursor above the editor; each crumb jumps to its symbol, the last opens the outline. */
+/** The symbol path at the cursor above the editor; each crumb jumps to its symbol. */
 function breadcrumbsPanel(view: EditorView): Panel {
   const { ownerDocument } = view.dom;
   const dom = ownerDocument.createElement('nav');
@@ -685,16 +695,7 @@ function breadcrumbsPanel(view: EditorView): Panel {
     }
     rendered = key;
     dom.replaceChildren();
-    dom.hidden = symbols.length === 0;
-    if (path.length === 0) {
-      const outline = ownerDocument.createElement('button');
-      outline.type = 'button';
-      outline.className = 'cm-breadcrumb';
-      outline.textContent = 'Go to symbol…';
-      outline.addEventListener('click', () => goToSymbolInEditor(view));
-      dom.append(outline);
-      return;
-    }
+    dom.hidden = path.length === 0;
     for (const [index, symbol] of path.entries()) {
       if (index > 0) {
         const separator = ownerDocument.createElement('span');
@@ -707,11 +708,7 @@ function breadcrumbsPanel(view: EditorView): Panel {
       crumb.className = 'cm-breadcrumb';
       crumb.append(renderSymbolIcon(symbol.kind, ownerDocument), symbol.name);
       crumb.addEventListener('click', () => {
-        if (index === path.length - 1) {
-          goToSymbolInEditor(view);
-        } else {
-          moveTo(view, symbol.selectionFrom);
-        }
+        moveTo(view, symbol.selectionFrom);
       });
       dom.append(crumb);
     }

@@ -2,10 +2,15 @@ using System.Diagnostics;
 using System.Numerics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+#if !PICOGK_BROWSER
 using System.Runtime.Loader;
+#endif
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using PicoGK;
+#if PICOGK_BROWSER
+using PicoVoxel.Sdf.Generator;
+#endif
 
 namespace Tau.PicoGK.Worker;
 
@@ -56,6 +61,70 @@ internal sealed record LayoutStability(float MinimumArea, float MaximumEdgeSum, 
 
 internal static class ModelRunner
 {
+#if PICOGK_BROWSER
+    private static byte[]? retainedAssemblyBytes;
+    private static Assembly? retainedAssembly;
+
+    /// <summary>
+    /// Registers the signed-distance methods the generator lifted, once, right after the author's assembly
+    /// is loaded.
+    /// </summary>
+    /// <remarks>
+    /// Explicitly, by name: no author static constructor runs to install anything, and a compilation the
+    /// generator found nothing in still carries the entry point, so there is no conditional path here. A
+    /// field the generator refused is simply absent and keeps the per-voxel callback.
+    /// </remarks>
+    private static void RegisterGeneratedTapes(Assembly author)
+    {
+        var registry = author.GetType(GeneratedRegistryType, throwOnError: false)
+            ?? throw RuntimeError("The compiled C# assembly carries no signed-distance registry.");
+        (registry.GetMethod(GeneratedRegistryMethod, BindingFlags.Public | BindingFlags.Static)
+            ?? throw RuntimeError("The signed-distance registry carries no registration entry point."))
+            .Invoke(null, null);
+    }
+
+    private const string GeneratedRegistryType = SdfTapeGenerator.RegistryTypeName;
+    private const string GeneratedRegistryMethod = SdfTapeGenerator.RegistryMethodName;
+
+    // Browser assemblies cannot unload. Parameter edits reuse this assembly; source edits
+    // must replace the owning worker before another assembly is admitted.
+    internal static async Task<ModelExecutionResult> ExecuteAsync(
+        CompiledModel compiled,
+        string artifactRoot,
+        JsonElement? parameters = null,
+        CancellationToken cancellation = default,
+        ComputeWorkerSession? compute = null,
+        MeshingOptions? meshing = null)
+    {
+        cancellation.ThrowIfCancellationRequested();
+        if (retainedAssemblyBytes is not null && !ReferenceEquals(retainedAssemblyBytes, compiled.Assembly))
+            throw RuntimeError("A C# source edit requires a new browser worker.");
+        var values = CompilationService.BindParameters(
+            compiled, parameters ?? JsonSerializer.SerializeToElement(new Dictionary<string, object?>()));
+        if (retainedAssembly is null)
+        {
+            retainedAssembly = Assembly.Load(compiled.Assembly, compiled.Pdb);
+            retainedAssemblyBytes = compiled.Assembly;
+            RegisterGeneratedTapes(retainedAssembly);
+        }
+        var invoke = Stopwatch.StartNew();
+        using var host = new HostedLibraryHost(artifactRoot, cancellation, compute, meshing);
+        using (Library.UseHost(host))
+        {
+            ApplyParameters(retainedAssembly, values);
+            var entry = compiled.EntryPoint;
+            var method = retainedAssembly.GetType(entry.TypeName, throwOnError: true)!.GetMethod(
+                entry.MethodName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static,
+                binder: null, types: entry.HasArguments ? [typeof(string[])] : Type.EmptyTypes, modifiers: null)
+                ?? throw RuntimeError("The compiled C# entry point could not be resolved.");
+            await InvokeEntryPointAsync(method);
+        }
+        cancellation.ThrowIfCancellationRequested();
+        invoke.Stop();
+        var execution = host.TakeResult();
+        return execution with { Timings = execution.Timings with { EntryPointInvoke = invoke.Elapsed.TotalMilliseconds } };
+    }
+#else
     /*
      * D25: the collectible load context is retained across builds and reloaded only when the
      * compilation changed. `CompilationService` caches by source hash and hands back the same
@@ -179,6 +248,8 @@ internal static class ModelRunner
         return host.TakeResult();
     }
 
+#endif
+
     private static void ApplyParameters(Assembly assembly, IReadOnlyDictionary<string, object?> values)
     {
         if (values.Count == 0) return;
@@ -193,7 +264,11 @@ internal static class ModelRunner
         }
     }
 
+#if PICOGK_BROWSER
+    internal static async Task InvokeEntryPointAsync(MethodInfo entryPoint)
+#else
     internal static void InvokeEntryPoint(MethodInfo entryPoint)
+#endif
     {
         var parameters = entryPoint.GetParameters();
         if (parameters.Length > 1 ||
@@ -209,11 +284,19 @@ internal static class ModelRunner
             var exitCode = result is int code ? code : 0;
             if (result is Task<int> exitTask)
             {
+#if PICOGK_BROWSER
+                exitCode = await exitTask;
+#else
                 exitCode = exitTask.GetAwaiter().GetResult();
+#endif
             }
             else if (result is Task task)
             {
+#if PICOGK_BROWSER
+                await task;
+#else
                 task.GetAwaiter().GetResult();
+#endif
             }
             if (exitCode != 0)
             {

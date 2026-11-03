@@ -230,6 +230,10 @@ export const formatConfigurations = {
     name: 'Plain Text (TXT)',
     description: 'Unstructured plain-text format; produced by EDA kernels for human-readable netlist exports.',
   },
+  vdb: {
+    name: 'OpenVDB (VDB)',
+    description: 'Sparse volumetric geometry, scalar fields and vector fields written by the model.',
+  },
   usda: {
     name: 'Universal Scene Description ASCII (USDA)',
     description:

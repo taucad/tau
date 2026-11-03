@@ -9,15 +9,9 @@ export const loader: typeof loadMarketingPage = loadMarketingPage;
 export const content = (hasArticles = false): React.JSX.Element => (
   <section className='band'>
     {intro({
-      eyebrow: 'The Tau blog',
-      title: (
-        <>
-          Notes from
-          <br />
-          the workbench.
-        </>
-      ),
-      body: 'Notes on designing useful parts, checking the details and taking ideas into the workshop.',
+      eyebrow: 'Blog',
+      title: 'Blog',
+      body: 'Product updates and engineering posts from the Tau team.',
     })}
     {!hasArticles && (
       <div className='cell blog-empty'>
@@ -25,10 +19,10 @@ export const content = (hasArticles = false): React.JSX.Element => (
           τ
         </span>
         <div>
-          <h2>The first notes are taking shape.</h2>
-          <p>Human-authored product and engineering stories will appear here after review.</p>
+          <h2>No posts yet</h2>
+          <p>Posts will appear here once they are published.</p>
           <SiteLink className='text-link' href={sourceUrl}>
-            Follow the code {out}
+            Follow development on GitHub {out}
           </SiteLink>
         </div>
       </div>

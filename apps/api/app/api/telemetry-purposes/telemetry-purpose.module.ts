@@ -47,7 +47,8 @@ export class TelemetryPurposeModule {
       imports: options.tauCloudEnabled ? [DatabaseModule, HostsModule, BillingModule] : [DatabaseModule, HostsModule],
       controllers: [TelemetryPurposeController],
       providers: [implementation, { provide: tierAssuranceKey, useExisting: implementation }, TelemetryPurposeService],
-      exports: [TelemetryPurposeService],
+      // The tier source is shared with privacy preferences, which default a paid plan's training consent off.
+      exports: [TelemetryPurposeService, tierAssuranceKey],
     };
   }
 }

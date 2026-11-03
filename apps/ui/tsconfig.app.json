@@ -20,7 +20,9 @@
     "vite-environment.d.ts",
     "types/**/*.d.ts",
     ".react-router/types/**/*",
-    "package.json"
+    "package.json",
+    "picogk-browser-assets.vite-plugin.ts",
+    "picogk-browser-assets-cache-key.ts"
   ],
   "compilerOptions": {
     "rewriteRelativeImportExtensions": true,

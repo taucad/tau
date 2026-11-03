@@ -16,7 +16,11 @@ export const workspaceRoot = path.resolve(import.meta.dirname, '../../..');
 
 const pluginsRoot = path.join(workspaceRoot, 'packages/plugins');
 const definitionSymbol = Symbol.for('@taucad/runtime/plugin-definition');
-const capabilityKinds = ['kernels', 'middleware', 'bundlers', 'transcoders', 'jobs', 'machines'] as const;
+/**
+ * The capability kinds the derivation reads. A kind `PluginCapabilities` adds is refused by
+ * {@link deriveRuntimeVocabulary} until it is listed here and classified by the T33 contract test.
+ */
+export const capabilityKinds = ['kernels', 'middleware', 'bundlers', 'transcoders', 'jobs', 'machines'] as const;
 type CapabilityKind = (typeof capabilityKinds)[number];
 
 /** What one registry capability contributes to the vocabularies. */
@@ -90,45 +94,51 @@ export const registryCapabilities = async (): Promise<readonly Capability[]> => 
   directories.sort((a, b) => a.name.localeCompare(b.name));
   for (const directory of directories) {
     const source = path.join(pluginsRoot, directory.name, 'src');
-    const pluginFile = readdirSync(source).find((file) => file.endsWith('.plugin.ts'));
-    if (pluginFile === undefined) {
-      continue;
-    }
-    // oxlint-disable-next-line no-await-in-loop -- plugins load one at a time so the derivation is deterministic.
-    const module: unknown = await import(path.join(source, 'index.ts'));
-    for (const { kind, identifier } of factoryNames(readFileSync(path.join(source, pluginFile), 'utf8'))) {
-      const factory = isRecord(module) ? module[identifier] : undefined;
-      if (typeof factory !== 'function') {
-        throw new TypeError(`${directory.name} does not export the ${kind} factory ${identifier}`);
+    // A package may expose different plugins through its native and browser entry points.
+    // Pair each declaration with the entry point that exports it, never filesystem ordering.
+    const entries = readdirSync(source).filter((file) => file === 'index.ts' || file === 'browser.ts');
+    for (const entry of entries) {
+      const entrySource = readFileSync(path.join(source, entry), 'utf8');
+      const pluginFile = /from '#(?<file>[^']+\.plugin)\.js'/u.exec(entrySource)?.groups?.['file'];
+      if (pluginFile === undefined) {
+        continue;
       }
-      const capability: unknown = (factory as () => unknown)();
-      if (!isRecord(capability) || typeof capability['id'] !== 'string') {
-        throw new TypeError(`${directory.name}.${identifier} did not produce an identified capability`);
+      // oxlint-disable-next-line no-await-in-loop -- plugins load one at a time so the derivation is deterministic.
+      const module: unknown = await import(path.join(source, entry));
+      for (const { kind, identifier } of factoryNames(readFileSync(path.join(source, `${pluginFile}.ts`), 'utf8'))) {
+        const factory = isRecord(module) ? module[identifier] : undefined;
+        if (typeof factory !== 'function') {
+          throw new TypeError(`${directory.name} does not export the ${kind} factory ${identifier}`);
+        }
+        const capability: unknown = (factory as () => unknown)();
+        if (!isRecord(capability) || typeof capability['id'] !== 'string') {
+          throw new TypeError(`${directory.name}.${identifier} did not produce an identified capability`);
+        }
+        const loader = capability[definitionSymbol];
+        // oxlint-disable-next-line no-await-in-loop -- each definition resolves after its own factory.
+        const definition: unknown = typeof loader === 'function' ? await (loader as () => unknown)() : undefined;
+        const own = (key: string): unknown => capability[key] ?? (isRecord(definition) ? definition[key] : undefined);
+        const exportsMap = own('exports');
+        const edges = own('edges');
+        capabilities.push({
+          kind,
+          id: capability['id'],
+          name: isRecord(definition) && typeof definition['name'] === 'string' ? definition['name'] : undefined,
+          extensions: strings(own('extensions')),
+          exports: isRecord(exportsMap)
+            ? Object.values(exportsMap).flatMap((entry) =>
+                isRecord(entry) && typeof entry['extension'] === 'string' ? [entry['extension']] : [],
+              )
+            : [],
+          edges: Array.isArray(edges)
+            ? edges.flatMap((edge: unknown) =>
+                isRecord(edge) && typeof edge['from'] === 'string' && typeof edge['to'] === 'string'
+                  ? [{ from: edge['from'], to: edge['to'] }]
+                  : [],
+              )
+            : [],
+        });
       }
-      const loader = capability[definitionSymbol];
-      // oxlint-disable-next-line no-await-in-loop -- each definition resolves after its own factory.
-      const definition: unknown = typeof loader === 'function' ? await (loader as () => unknown)() : undefined;
-      const own = (key: string): unknown => capability[key] ?? (isRecord(definition) ? definition[key] : undefined);
-      const exportsMap = own('exports');
-      const edges = own('edges');
-      capabilities.push({
-        kind,
-        id: capability['id'],
-        name: isRecord(definition) && typeof definition['name'] === 'string' ? definition['name'] : undefined,
-        extensions: strings(own('extensions')),
-        exports: isRecord(exportsMap)
-          ? Object.values(exportsMap).flatMap((entry) =>
-              isRecord(entry) && typeof entry['extension'] === 'string' ? [entry['extension']] : [],
-            )
-          : [],
-        edges: Array.isArray(edges)
-          ? edges.flatMap((edge: unknown) =>
-              isRecord(edge) && typeof edge['from'] === 'string' && typeof edge['to'] === 'string'
-                ? [{ from: edge['from'], to: edge['to'] }]
-                : [],
-            )
-          : [],
-      });
     }
   }
   return capabilities;
@@ -152,11 +162,32 @@ const unionLiterals = (file: string, name: string): string[] => {
 };
 
 /**
+ * The capability kinds `PluginCapabilities` declares, read from its source (the kinds exist as a type alone).
+ *
+ * @returns The kinds in declaration order.
+ */
+export const declaredCapabilityKinds = (): string[] => {
+  const file = 'packages/runtime/src/plugins/plugin.ts';
+  const text = read(file);
+  const start = text.indexOf('export type PluginCapabilities = {');
+  if (start === -1) {
+    throw new Error(`${file} no longer declares PluginCapabilities`);
+  }
+  const body = text.slice(start, text.indexOf('\n};', start));
+  return [...body.matchAll(/^\s+readonly (?<kind>\w+)\??:/gmu)].map(({ groups }) => groups?.['kind'] ?? '');
+};
+
+/**
  * Derive every registry-generated runtime vocabulary.
  *
  * @returns The vocabularies, sorted.
+ * @throws Error when `PluginCapabilities` declares a capability kind the derivation does not read.
  */
 export const deriveRuntimeVocabulary = async (): Promise<RuntimeRegistryVocabulary> => {
+  const unread = declaredCapabilityKinds().filter((kind) => !(capabilityKinds as readonly string[]).includes(kind));
+  if (unread.length > 0) {
+    throw new Error(`PluginCapabilities declares capability kinds no vocabulary reads: ${unread.join(', ')}`);
+  }
   const capabilities = await registryCapabilities();
   const of = (kind: CapabilityKind): readonly Capability[] => capabilities.filter((entry) => entry.kind === kind);
   const kernels = of('kernels');

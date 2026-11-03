@@ -430,6 +430,7 @@ const config = [
             'examples/electron/electron.vite.config.ts',
             'apps/api/vitest.config.ts',
             'packages/runtime/src/nextjs/package-assets-loader.mjs',
+            'packages/plugins/picogk/dotnet/Tau.PicoGK.Parity/main.mjs',
           ],
         },
         tsconfigRootDir: import.meta.dirname,

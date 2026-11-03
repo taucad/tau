@@ -49,6 +49,7 @@ export default defineConfig({
       'src/graphics/three/post-processing-antialias.browser.test.tsx',
       'src/graphics/three/ao-denoise.browser.test.ts',
       'src/graphics/three/ao-normal.browser.test.ts',
+      'src/graphics/three/materials/infinite-grid-material.browser.test.ts',
       'src/graphics/three/fxaa.browser.test.ts',
       'src/graphics/three/controls/viewport-gizmo-cube.browser.test.ts',
       'src/graphics/three/viewer-resize-continuation.browser.test.tsx',

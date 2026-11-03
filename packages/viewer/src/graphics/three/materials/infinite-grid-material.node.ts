@@ -2,7 +2,11 @@
 
 import { Color, DoubleSide, Vector2 } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
-import { gltfSurfacePolygonOffset } from '#graphics/three/materials/gltf-surface-depth-bias.js';
+import {
+  gltfSurfacePolygonOffset,
+  logarithmicDepthBehindGltfSurface,
+} from '#graphics/three/materials/gltf-surface-depth-bias.js';
+import { setLogarithmicDepthOverride } from '#graphics/three/logarithmic-depth.js';
 import {
   abs,
   add,
@@ -118,6 +122,8 @@ export function createInfiniteGridNodeMaterial(
   const axesIndexUniform = uniform(mapAxesToIndex(axes));
   const renderPlanePosition = varyingProperty('vec2', 'renderPlanePositionTauInfGrid');
   const gridProxyPosition = varying(positionLocal.xy, 'gridProxyPositionTauInfGrid');
+  // The proxy quad's own position is not where the grid draws; carry the grid plane's view depth.
+  const gridViewZ = varyingProperty('float', 'tauGridViewZ');
 
   const uSmallSize = uniform(smallSize);
   const uLargeSize = uniform(largeSize);
@@ -145,6 +151,8 @@ export function createInfiniteGridNodeMaterial(
 
   material.lights = false;
   material.forceSinglePass = true;
+  // The WebGL2 viewport writes logarithmic fragment depth, which discards the polygon offset above.
+  setLogarithmicDepthOverride(material, logarithmicDepthBehindGltfSurface(gridViewZ));
 
   material.vertexNode = Fn(() => {
     const cameraPlane = vec2().toVar('tauGridCameraPlane');
@@ -174,6 +182,7 @@ export function createInfiniteGridNodeMaterial(
       });
 
     const viewPosition = mul(cameraViewMatrix, vec4(posWorld, float(1))).toVec4();
+    gridViewZ.assign(viewPosition.z);
 
     return cameraProjectionMatrix.mul(viewPosition);
   })();

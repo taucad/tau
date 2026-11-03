@@ -188,9 +188,8 @@ export const createHostEvidence = (options: HostEvidenceOptions): HostEvidence =
         void quietly(async () => report(chatId));
         return;
       }
-      /* A run is starting: read the grant now, so one given since the last read (or a project the API registered
-       * after this host opened) binds before the run's facts occur rather than after it ends. Facts from before a
-       * reporter first sees its grant are never backfilled. */
+      /* A run is starting: read the grant now, so a withdrawal since the last read purges before the run's facts are
+       * held. Facts from before the account's allowing decision are never backfilled. */
       void quietly(async () => reporter.refresh());
       if (feedback !== undefined) {
         void quietly(async () => feedback.refresh());

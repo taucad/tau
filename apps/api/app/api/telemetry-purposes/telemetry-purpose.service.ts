@@ -214,7 +214,7 @@ export class TelemetryPurposeService {
   private async decisionsFor(userId: string): Promise<RecordedPurposeDecision[]> {
     const rows = await this.databaseService.database.query.telemetryPurposeDecision.findMany({
       where: eq(telemetryPurposeDecision.userId, userId),
-      columns: { id: true, purpose: true, granted: true, noticeVersion: true },
+      columns: { id: true, purpose: true, granted: true, noticeVersion: true, decidedAt: true },
     });
 
     return rows.map((row) => ({
@@ -222,6 +222,7 @@ export class TelemetryPurposeService {
       granted: row.granted,
       noticeVersion: row.noticeVersion,
       sequence: row.id,
+      decidedAt: row.decidedAt.getTime(),
     }));
   }
 

@@ -95,6 +95,19 @@ describe('summaryGrantOf', () => {
     expect(summaryGrantOf({ ...answer(true), projectId: undefined }, subject)).toBeUndefined();
     expect(summaryGrantOf(answer(true, 'project-b'), subject)).toBeUndefined();
   });
+
+  it('should carry when the server says the grant was given, and only a well-formed time', () => {
+    const subject = { principal: 'user-a', project: 'project-a' };
+    const since = (allowedSince: number) => ({
+      epoch: 'policy-1',
+      projectId: 'project-a',
+      purposes: [{ purpose: 'summary', allowed: true, allowedSince }],
+    });
+
+    expect(summaryGrantOf(since(at), subject)).toEqual(grant({ allowedSince: at }));
+    expect(summaryGrantOf(since(-1), subject)).toEqual(grant());
+    expect(summaryGrantOf(since(Number.NaN), subject)).toEqual(grant());
+  });
 });
 
 describe('createEvidenceReporter', () => {
@@ -108,6 +121,27 @@ describe('createEvidenceReporter', () => {
 
     expect(sent.map((evidence) => evidence.semantic.kind)).toEqual(['outcome']);
     expect(reporter.coverage()).toMatchObject({ projected: 1, beforeGrant: 1, stop: 'empty' });
+  });
+
+  it('should report from the time the account granted, however late it first read the grant', async () => {
+    /* A project the API registers after its first run began: the first read grants nothing, a later one does. */
+    const { reporter, sent, advance } = setup([undefined, grant({ allowedSince: at - 60_000 })]);
+
+    await reporter.refresh();
+    advance(30_000);
+    await reporter.report([run(0, at + 1000), run(1, at - 120_000)], () => true);
+
+    expect(sent.map((evidence) => evidence.semantic.kind)).toEqual(['outcome']);
+    expect(reporter.coverage()).toMatchObject({ projected: 1, beforeGrant: 1 });
+  });
+
+  it('should never date a grant later than now, whatever the server answers', async () => {
+    const { reporter, sent } = setup([grant({ allowedSince: at + 3_600_000 })]);
+
+    await reporter.refresh();
+    await reporter.report([run(0, at)], () => true);
+
+    expect(sent).toHaveLength(1);
   });
 
   it('should not send a settled run again', async () => {

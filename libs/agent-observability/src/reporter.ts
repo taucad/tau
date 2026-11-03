@@ -14,13 +14,18 @@ import { projectRun } from '#projection.js';
  */
 
 /** The server's current answer for one account and project: the scope to report summaries under. @public */
-export type ReportingGrant = DeliveryScope & Readonly<{ protection: ProjectionContext['protection'] }>;
+export type ReportingGrant = DeliveryScope &
+  Readonly<{
+    protection: ProjectionContext['protection'];
+    /** When the account's allowing decision was taken, as the server answers it; absent from an older server. */
+    allowedSince?: number | undefined;
+  }>;
 
 /** The parts of the server's effective-purposes answer a host reads. @public */
 export type EffectivePurposesAnswer = Readonly<{
   epoch: string;
   projectId?: string | undefined;
-  purposes: ReadonlyArray<Readonly<{ purpose: string; allowed: boolean }>>;
+  purposes: ReadonlyArray<Readonly<{ purpose: string; allowed: boolean; allowedSince?: number | undefined }>>;
 }>;
 
 /** A purpose a host reports under; each is its own plane and grant. @public */
@@ -47,7 +52,14 @@ export const purposeGrantOf = (
     return undefined;
   }
   /* The answer does not say the account's protection; `unknown` is the strictest claim, and the API only tightens it. */
-  return { principal: subject.principal, project: subject.project, policyEpoch: answer.epoch, protection: 'unknown' };
+  const since = state.allowedSince;
+  return {
+    principal: subject.principal,
+    project: subject.project,
+    policyEpoch: answer.epoch,
+    protection: 'unknown',
+    ...(typeof since === 'number' && Number.isSafeInteger(since) && since >= 0 ? { allowedSince: since } : {}),
+  };
 };
 
 /**
@@ -71,7 +83,7 @@ export type ReporterCoverage = Readonly<{
   foreign: number;
   /** Runs still unended here whose newest rows another device wrote: a gap this device cannot fill. */
   openForeignTails: number;
-  /** Facts that happened before this reporter saw the grant; never backfilled. */
+  /** Facts that happened before the account granted (or, from an older server, before this reporter saw it); never backfilled. */
   beforeGrant: number;
   /** Facts not yet settled when last seen. */
   pending: number;
@@ -155,7 +167,12 @@ export const createEvidenceReporter = (options: EvidenceReporterOptions): Eviden
     ungranted: 0,
     unknownGrant: 0,
   };
-  /* `grantedAt` is when this reporter first saw the grant: never earlier than the grant itself. */
+  /*
+   * `grantedAt` is when the account's allowing decision was taken, as the server answers it: never earlier than the
+   * grant itself, and the same however late this host first read it. A project the API registered after its first run
+   * began, or a host that restarted mid-run, would otherwise drop the facts in between. A server that does not say
+   * falls back to when this reporter first saw the grant. A time the server puts ahead of this clock is capped at now.
+   */
   let bound: (ReportingGrant & Readonly<{ grantedAt: number }>) | undefined;
   let stop: DrainStop | undefined;
   let cancelRetry: (() => void) | undefined;
@@ -183,7 +200,7 @@ export const createEvidenceReporter = (options: EvidenceReporterOptions): Eviden
       return undefined;
     }
     if (!sameScope(bound, grant)) {
-      bound = { ...grant, grantedAt: now() };
+      bound = { ...grant, grantedAt: Math.min(grant.allowedSince ?? Number.POSITIVE_INFINITY, now()) };
       settled.clear();
       await outbox.bind(grant);
     } else if (bound !== undefined && bound.protection !== grant.protection) {

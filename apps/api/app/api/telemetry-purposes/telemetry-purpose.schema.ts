@@ -56,6 +56,12 @@ export const telemetryPurposeStateSchema = z.object({
   granted: z.boolean(),
   /** Absent only when `allowed` is true. */
   refusal: purposeRefusalSchema.optional(),
+  /**
+   * When the decision that allows this purpose was taken, in milliseconds since the epoch. Present only when
+   * `allowed` is true. A host reports facts from this time on, never from before it, however late it first read
+   * the answer: a project the API registers after its first run, or a host that restarts, loses nothing granted.
+   */
+  allowedSince: z.number().int().nonnegative().optional(),
 });
 
 /** The effective state of one purpose. */

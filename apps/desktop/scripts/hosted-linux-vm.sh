@@ -165,6 +165,14 @@ with tarfile.open(fileobj=sys.stdout.buffer, mode='w|') as output:
             if os.path.isfile(path) and not os.path.islink(path):
                 output.add(path, arcname=os.path.basename(path), recursive=False)
 PYRESULT
+  if [[ "$status" != 0 ]]; then
+    # A page that closes without a renderer error leaves no app-side record, so print the guest kernel's own
+    # account of process deaths (OOM killer, segfaults) and its memory. Kernel lines name commands only, never the
+    # app profile, its logs or the qualification environment.
+    ssh "${ssh_options[@]}" tau@127.0.0.1 \
+      'free -m; sudo journalctl -k --no-pager | grep -iE "out of memory|oom-kill|oom_reaper|killed process|segfault|traps:" | tail -n 40' \
+      | tee "$output/guest-kernel-deaths.txt" || true
+  fi
   printf '%s\n' "$status" > "$output/harness-exit-code.txt"
   exit "$status"
 fi

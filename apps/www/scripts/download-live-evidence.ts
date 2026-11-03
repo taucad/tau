@@ -212,8 +212,8 @@ check(expected === 'zip' || catalog !== undefined, `${catalogUrl} returned ${cat
 const catalogArtifacts = new Map(
   (catalog?.routes ?? []).flatMap((route) => route.artifacts.map((artifact) => [artifact.name, artifact] as const)),
 );
-// A DMG cutover covers exactly the Mac architectures the catalog publishes a disk image for (Apple silicon only while
-// Intel stays unlisted); the archive baseline still covers both.
+// A DMG cutover covers exactly the Mac architectures the catalog publishes a disk image for; the archive baseline
+// offers Apple silicon only, because Intel Macs are unlisted until a catalog qualifies an Intel route.
 const macArchitectures =
   expected === 'dmg'
     ? (['arm64', 'x64'] as const).filter((architecture) =>
@@ -223,7 +223,7 @@ const macArchitectures =
             route.artifacts.some((artifact) => artifact.kind === 'macos-dmg'),
         ),
       )
-    : (['arm64', 'x64'] as const);
+    : (['arm64'] as const);
 const macPlatforms = macArchitectures.map((architecture) => (architecture === 'arm64' ? 'mac' : 'macIntel'));
 check(expected === 'zip' || macArchitectures.includes('arm64'), `${catalogUrl} publishes no Apple silicon DMG`);
 const releaseBase = catalog ? `${downloadsOrigin}/releases/${encodeURIComponent(catalog.tag)}` : undefined;

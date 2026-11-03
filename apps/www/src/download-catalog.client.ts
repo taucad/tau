@@ -27,10 +27,6 @@ export const initializeHostDownload = (hostname: string): void => {
       link.innerHTML = desktopDownloadLabel(hostPlatform);
     }
   }
-  const intelDownload = document.querySelector('[data-mac-intel]');
-  if (intelDownload instanceof HTMLElement) {
-    intelDownload.hidden = hostPlatform !== 'mac';
-  }
   const detail = document.querySelector('[data-download-detail]');
   const instructions = document.querySelector('[data-install-instructions]');
   const note = document.querySelector('[data-platform-note]');
@@ -227,14 +223,10 @@ export const initializeInstallerCatalog = async (signal: AbortSignal): Promise<v
       body.append(alternatives);
       fragment.append(section);
     }
-    // The catalog is the whole published Mac route set: once it offers an Apple silicon disk image without an Intel
-    // route, the Intel entries would point at an archive that channel never published, so they leave the page.
-    const platforms = new Set(catalog.map((choice) => (macDiskImage(choice) ? choice.platform : undefined)));
-    if (platforms.has('mac') && !platforms.has('macIntel')) {
-      for (const link of document.querySelectorAll('a[data-download-platform="macIntel"]')) {
-        if (link.parentElement) {
-          link.parentElement.hidden = true;
-        }
+    // Intel Macs stay unlisted unless the catalog qualifies an Intel disk image; the hero offers it only to a Mac.
+    if (catalog.some((choice) => choice.platform === 'macIntel' && macDiskImage(choice))) {
+      for (const entry of document.querySelectorAll<HTMLElement>('[data-mac-intel]')) {
+        entry.hidden = entry.dataset['macIntel'] === 'hero' && host !== 'mac';
       }
     }
     if (choices instanceof HTMLElement) {

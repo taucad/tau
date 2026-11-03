@@ -38,7 +38,7 @@ export const content = (): React.JSX.Element => (
               macOS · Windows · Linux
             </p>
           </div>
-          <div data-mac-intel hidden>
+          <div data-mac-intel='hero' hidden>
             <SiteLink
               className='button'
               href={desktopDownloadHref('macIntel')}
@@ -78,7 +78,8 @@ export const content = (): React.JSX.Element => (
           </p>
           <div className='actions'>
             {(['mac', 'macIntel', 'windows', 'linux'] as const).map((platform) => (
-              <div key={platform}>
+              // Intel Macs are unlisted until a qualified catalog publishes an Intel route (no channel publishes its ZIP).
+              <div key={platform} {...(platform === 'macIntel' ? { 'data-mac-intel': 'list', hidden: true } : {})}>
                 <SiteLink
                   className='text-link'
                   href={desktopDownloadHref(platform)}

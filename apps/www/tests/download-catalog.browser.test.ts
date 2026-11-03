@@ -221,7 +221,7 @@ describe('shipping installer catalog browser behavior', () => {
     expect(await host.getAttribute('href')).toBe(
       'https://downloads.tau.new/releases/desktop%400.2.0/Tau-macos-arm64.dmg',
     );
-    expect(await page.locator('[data-mac-intel]').isVisible()).toBe(true);
+    expect(await page.locator('[data-mac-intel="hero"]').isVisible()).toBe(true);
     const read = async (selector: string) =>
       page.locator(selector).evaluateAll((links) =>
         links.map((link) => ({
@@ -355,10 +355,9 @@ describe('shipping installer catalog browser behavior', () => {
       expect(await page.locator('[data-qualified-downloads]').isHidden()).toBe(true);
       expect(await page.locator('[data-install-instructions]').textContent()).toMatch(/ZIP/u);
 
-      for (const [platform, architecture] of [
-        ['mac', 'arm64'],
-        ['macIntel', 'x64'],
-      ]) {
+      // Intel Macs are unlisted without a qualified Intel route, so the fallback offers no Intel archive.
+      expect(await page.locator('#downloads a[data-download-platform="macIntel"]').isVisible()).toBe(false);
+      for (const [platform, architecture] of [['mac', 'arm64']] as const) {
         const filename = `Tau-macos-${architecture}.zip`;
         const url = `https://downloads.taucad.dev/latest/${filename}`;
         const bytes = `ZIP fixture for ${architecture}`;
@@ -426,7 +425,7 @@ describe('shipping installer catalog browser behavior', () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     const selectors = [
       'a[data-host-download="direct"]',
-      '[data-mac-intel] a[data-download-platform="macIntel"]',
+      '[data-mac-intel="hero"] a[data-download-platform="macIntel"]',
       '#downloads a[data-download-platform="mac"]',
       '#downloads a[data-download-platform="macIntel"]',
       '#downloads [data-download-alternative="mac"]',

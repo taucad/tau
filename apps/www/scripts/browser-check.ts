@@ -176,7 +176,8 @@ try {
         label: 'Mac',
         direct: 'Download ZIP for Apple silicon',
         file: 'Tau-macos-arm64.zip',
-        intel: true,
+        // Intel Macs are unlisted until a qualified catalog publishes an Intel route.
+        intel: false,
       },
       { platform: 'Win32', label: 'Windows', direct: 'Download for Windows', file: 'Tau-win32-x64.zip', intel: false },
       {
@@ -226,7 +227,7 @@ try {
       const primaryDownload = downloadPage.locator('[data-host-download="direct"]');
       await primaryDownload.filter({ hasText: direct }).waitFor();
       assert.equal(await primaryDownload.getAttribute('href'), `https://downloads.tau.new/latest/${file}`);
-      assert.equal(await downloadPage.locator('[data-mac-intel]').isVisible(), intel);
+      assert.equal(await downloadPage.locator('[data-mac-intel="hero"]').isVisible(), intel);
       await assertDownloadIcons();
       await primaryDownload.hover();
       await primaryDownload.focus();

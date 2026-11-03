@@ -209,6 +209,54 @@ describe('createSectionStencilCaps', () => {
     caps.dispose();
   });
 
+  it('should share each pass draw between owners whose bounds do not meet, and order owners whose bounds do', () => {
+    const caps = createSectionStencilCaps('webgl');
+    const renderer = createRecordingRenderer();
+    const passOrders = (sources: readonly SectionStencilCapSource[]) => {
+      const stats = caps.render(renderer, frameFor(sources));
+      const orders = new Map<string, number[]>();
+      for (const { material, renderOrder } of renderer.frames.at(-1)!.objects) {
+        const { name } = material as THREE.Material;
+        orders.set(
+          name,
+          [...(orders.get(name) ?? []), renderOrder].toSorted((left, right) => left - right),
+        );
+      }
+      return { stats, orders };
+    };
+
+    // Six owners of two sources each, every box apart from every other: one draw per pass.
+    const apart = Array.from({ length: 6 }, (_, owner) =>
+      [0, 1].map((index) =>
+        createSource(`${owner}-${index}`, `owner-${owner}`, new THREE.BoxGeometry(), (owner * 2 + index) * 3),
+      ),
+    ).flat();
+    const shared = passOrders(apart);
+    expect(shared.stats).toMatchObject({ crossingSourceCount: 12, overlapCandidateSourceCount: 0 });
+    // An owner's two sources still take turns: two rounds of a cap and a clear, after one clear of the piece.
+    expect(shared.stats.polygonDrawCount).toBe(5);
+    expect(shared.orders.get('TauSectionStencil:mark-overlap')).toBeUndefined();
+    expect(shared.orders.get('TauSectionStencil:promote-owner')).toBeUndefined();
+
+    // A later owner that meets an earlier one marks and caps after the earlier one is promoted; one apart from both
+    // shares the first owner's draws.
+    const meeting = passOrders([
+      createSource('a', 'owner-a', new THREE.BoxGeometry()),
+      createSource('b', 'owner-b', new THREE.BoxGeometry(), 0.5),
+      createSource('c', 'owner-c', new THREE.BoxGeometry(), 10),
+    ]);
+    const capOrders = meeting.orders.get('TauSectionCap')!;
+    const [promote] = meeting.orders.get('TauSectionStencil:promote-owner')!;
+    const [mark] = meeting.orders.get('TauSectionStencil:mark-overlap')!;
+    // The first and last owners' caps in one draw, the second owner's, then the overlap cap.
+    expect(capOrders).toHaveLength(3);
+    expect(capOrders[0]).toBeLessThan(promote!);
+    expect(promote).toBeLessThan(mark!);
+    expect(mark).toBeLessThan(capOrders[1]!);
+    expect(meeting.stats.overlapCandidateSourceCount).toBe(1);
+    caps.dispose();
+  });
+
   it('should omit zero-width outline draws while retaining cap fills', () => {
     const caps = createSectionStencilCaps('webgpu');
     const renderer = createRecordingRenderer();

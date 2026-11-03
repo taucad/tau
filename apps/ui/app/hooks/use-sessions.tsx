@@ -156,6 +156,8 @@ function SessionsQuitHold(): React.JSX.Element | undefined {
       className='fixed inset-0 z-[100] flex items-center justify-center bg-background/80 backdrop-blur-sm'
       role='status'
       aria-live='polite'
+      // It covers the page at z-100, so app shortcuts stay off here: the sidebar sheet (z-50) would open behind it.
+      data-shortcut-scope='session-quit-hold'
     >
       <div className='max-w-sm space-y-3 text-center'>
         <p className='text-sm'>

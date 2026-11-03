@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: All platforms, Linux-only staging evidence (not public promotion), or Mac-only staging ZIP/DMG evidence
+        description: All platforms, Linux-only staging evidence (not public promotion), or Apple silicon-only staging ZIP/DMG evidence
         required: true
         default: all
         type: choice
@@ -85,8 +85,9 @@ jobs:
             {"id": "debian-apt-x11", "route": "linux-apt", "host": "[\"self-hosted\", \"linux\", \"x64\", \"tau-disposable-debian13-x11\"]"},
             {"id": "debian-appimage-x11", "route": "linux-appimage", "host": "[\"self-hosted\", \"linux\", \"x64\", \"tau-disposable-debian13-x11\"]"},
           ];
-          // A scoped run selects exactly its own platform's rows: Mac-only is ZIP and DMG on both native architectures.
-          const selected = scope === 'all' ? rows : rows.filter(row => row.route.startsWith(scope === 'linux' ? 'linux-' : 'macos-'));
+          // A scoped run selects exactly its own platform's rows. Mac-only is ZIP and DMG on Apple silicon: hosted Intel
+          // Macs have no WebGL, so Intel is out of the Mac-only scope by operator ruling.
+          const selected = scope === 'all' ? rows : rows.filter(row => scope === 'linux' ? row.route.startsWith('linux-') : row.route.startsWith('macos-') && row.id.endsWith('-arm64'));
           appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify(selected)}\n`);
           NODE
 

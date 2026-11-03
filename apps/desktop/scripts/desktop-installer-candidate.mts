@@ -58,7 +58,8 @@ const metadataSchema = z.strictObject({
 const scopeTargets = {
   all: ['darwin-arm64', 'darwin-x64', 'win32-x64', 'linux-x64'],
   linux: ['linux-x64'],
-  macos: ['darwin-arm64', 'darwin-x64'],
+  // Apple silicon only: hosted Intel Macs have no WebGL, so Intel is not qualified or published (operator ruling).
+  macos: ['darwin-arm64'],
 } as const;
 const main = async (): Promise<void> => {
   const operation = process.argv[2];
@@ -141,12 +142,8 @@ const main = async (): Promise<void> => {
         `Verify ${tag}`,
         ...(scope === 'linux'
           ? ['Package linux-x64 (unsigned)']
-          : [
-              'Package macOS arm64 (signed)',
-              'Package macOS x64 (signed)',
-              'Verify native macOS arm64 OTA replacement',
-              'Verify native macOS x64 OTA replacement',
-            ]),
+          : // The Mac-only scope is Apple silicon only; an Intel job's result neither admits nor blocks it.
+            ['Package macOS arm64 (signed)', 'Verify native macOS arm64 OTA replacement']),
         'Attach immutable candidate assets',
       ]) {
         const matches = jobs.filter((job) => job.name === name);
@@ -174,7 +171,7 @@ const main = async (): Promise<void> => {
     .regex(/^[a-f\d]{40}$/u)
     .parse(required('TAU_DESKTOP_SOURCE_SHA'));
   if (operation === 'admit-scope') {
-    // After assembly, a Mac-only candidate must be exactly both Mac ZIP/DMG pairs and nothing from another platform.
+    // After assembly, a Mac-only candidate must be exactly the Apple silicon ZIP/DMG pair and nothing else.
     const manifest = parseDesktopArtifactManifest(
       JSON.parse(await readFile(join(resolve(required('DESKTOP_ASSETS_DIR')), 'desktop-artifacts.json'), 'utf8')),
     );
@@ -201,7 +198,7 @@ const main = async (): Promise<void> => {
       if (!requiredAsset) {
         throw new Error(
           scope === 'macos'
-            ? 'Mac-only installer candidates require both Mac archives. Rebuild the staging release with Intel Mac enabled and notarization enabled; existing staging defaults remain unchanged.'
+            ? 'Mac-only installer candidates require the Apple silicon archive. Rebuild the staging release with notarization enabled; existing staging defaults remain unchanged.'
             : 'Full installer candidates require all four archives. Rebuild the prior staging release with Intel Mac enabled and notarization enabled; existing staging defaults remain unchanged.',
         );
       }

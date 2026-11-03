@@ -122,14 +122,13 @@ const main = async (): Promise<void> => {
       }).status,
       0,
     );
-    // Mac-only staging admits a failed whole run only when its own exact Mac prerequisite jobs succeeded.
+    // Mac-only staging is Apple silicon only: it admits a failed whole run only when its own exact Apple silicon
+    // prerequisite jobs succeeded.
     const macJobs = [
       'resolve',
       `Verify ${linuxTag}`,
       'Package macOS arm64 (signed)',
-      'Package macOS x64 (signed)',
       'Verify native macOS arm64 OTA replacement',
-      'Verify native macOS x64 OTA replacement',
       'Attach immutable candidate assets',
     ].map((name) => ({ name, head_sha: source, run_id: 123, status: 'completed', conclusion: 'success' }));
     const macResolve = {
@@ -140,6 +139,18 @@ const main = async (): Promise<void> => {
     const macAdmitted = run('resolve', macResolve);
     assert.equal(macAdmitted.status, 0, macAdmitted.stderr);
     assert.equal(run('resolve', { ...macResolve, TEST_RUN: JSON.stringify(successful) }).status, 0);
+    // Intel Mac jobs are outside the Mac-only scope: their failure cannot block an Apple silicon candidate.
+    const intelJobs = ['Package macOS x64 (signed)', 'Verify native macOS x64 OTA replacement'].map((name) => ({
+      name,
+      head_sha: source,
+      run_id: 123,
+      status: 'completed',
+      conclusion: 'failure',
+    }));
+    assert.equal(
+      run('resolve', { ...macResolve, TEST_JOBS: JSON.stringify([{ jobs: [...macJobs, ...intelJobs] }]) }).status,
+      0,
+    );
     // Linux prerequisites never satisfy a Mac-only candidate, and production has no Mac-only scope.
     assert.equal(run('resolve', { ...macResolve, TEST_JOBS: JSON.stringify([{ jobs: linuxJobs }]) }).status, 1);
     assert.equal(run('resolve', { ...macResolve, DESKTOP_RELEASE_TAG: tag }).status, 1);
@@ -228,35 +239,37 @@ const main = async (): Promise<void> => {
     };
     await writeFile(join(archives, 'download.json'), JSON.stringify(full));
     assert.equal(run('preflight', preflight).status, 0);
-    // Mac-only preflight needs exactly both Mac archives, never Windows or Linux ones.
+    // Mac-only preflight needs the Apple silicon archive, never an Intel Mac, Windows or Linux one in its place.
     const macPreflight = { ...linuxPreflight, TAU_DESKTOP_QUALIFICATION_SCOPE: 'macos' };
     const macAssets = {
       'darwin-arm64': {
         ...metadata.assets['linux-x64'],
         url: 'https://downloads.taucad.dev/releases/desktop-staging%400.2.0-staging.3/Tau-macos-arm64.zip',
       },
-      'darwin-x64': {
-        ...metadata.assets['linux-x64'],
-        url: 'https://downloads.taucad.dev/releases/desktop-staging%400.2.0-staging.3/Tau-macos-x64.zip',
-      },
+    };
+    const intelAsset = {
+      ...metadata.assets['linux-x64'],
+      url: 'https://downloads.taucad.dev/releases/desktop-staging%400.2.0-staging.3/Tau-macos-x64.zip',
     };
     await writeFile(join(archives, 'download.json'), JSON.stringify({ ...linuxMetadata, assets: macAssets }));
     const macOnly = run('preflight', macPreflight);
     assert.equal(macOnly.status, 0, macOnly.stderr);
     assert.equal(run('preflight', linuxPreflight).status, 1);
     assert.equal(run('preflight', { ...macPreflight, TAU_DESKTOP_QUALIFICATION_SCOPE: 'all' }).status, 1);
+    // Apple silicon alone never satisfies the full scope, which still needs both Mac archives.
+    assert.equal(run('preflight', { ...macPreflight, TAU_DESKTOP_QUALIFICATION_SCOPE: 'all' }).status, 1);
     await writeFile(
       join(archives, 'download.json'),
-      JSON.stringify({ ...linuxMetadata, assets: { 'darwin-arm64': macAssets['darwin-arm64'] } }),
+      JSON.stringify({ ...linuxMetadata, assets: { 'darwin-x64': intelAsset } }),
     );
-    const singleArchitecture = run('preflight', macPreflight);
-    assert.equal(singleArchitecture.status, 1);
-    assert.match(singleArchitecture.stderr, /both Mac archives/u);
+    const intelOnly = run('preflight', macPreflight);
+    assert.equal(intelOnly.status, 1);
+    assert.match(intelOnly.stderr, /require the Apple silicon archive/u);
     await writeFile(join(archives, 'download.json'), JSON.stringify(linuxMetadata));
     assert.equal(run('preflight', macPreflight).status, 1);
     assert.equal(run('preflight', { ...macPreflight, DESKTOP_RELEASE_TAG: tag }).status, 1);
-    // A Mac-only candidate cannot stage another platform's archive.
-    for (const target of ['linux-x64', 'win32-x64']) {
+    // A Mac-only candidate cannot stage another platform's archive, nor an Intel Mac one.
+    for (const target of ['darwin-x64', 'linux-x64', 'win32-x64']) {
       const refused = run('stage', {
         ...macPreflight,
         DESKTOP_CANDIDATE_TARGET: target,
@@ -265,21 +278,23 @@ const main = async (): Promise<void> => {
       assert.equal(refused.status, 1);
       assert.match(refused.stderr, /cannot stage another platform/u);
     }
-    // The assembled Mac-only manifest must be exactly both ZIP/DMG pairs from this tag and source.
+    // The assembled Mac-only manifest must be exactly the Apple silicon ZIP/DMG pair from this tag and source.
     const assets = join(root, 'assets');
     await mkdir(assets);
-    const macArtifacts = (['arm64', 'x64'] as const).flatMap((arch) =>
-      (['macos-zip', 'macos-dmg'] as const).map((kind, index) => ({
-        kind,
-        target: `darwin-${arch}`,
-        format: desktopArtifactKinds[kind].format,
-        roles: [...desktopArtifactKinds[kind].roles],
-        name: desktopArtifactName({ kind, channel: 'staging', version: '1.0.3', arch }),
-        size: 10,
-        sha256: String(index + 1).repeat(64),
-        sha512: Buffer.alloc(64, index + 1).toString('base64'),
-      })),
-    );
+    const macArtifactsFor = (archs: ReadonlyArray<'arm64' | 'x64'>) =>
+      archs.flatMap((arch) =>
+        (['macos-zip', 'macos-dmg'] as const).map((kind, index) => ({
+          kind,
+          target: `darwin-${arch}`,
+          format: desktopArtifactKinds[kind].format,
+          roles: [...desktopArtifactKinds[kind].roles],
+          name: desktopArtifactName({ kind, channel: 'staging', version: '1.0.3', arch }),
+          size: 10,
+          sha256: String(index + (arch === 'arm64' ? 1 : 3)).repeat(64),
+          sha512: Buffer.alloc(64, index + (arch === 'arm64' ? 1 : 3)).toString('base64'),
+        })),
+      );
+    const macArtifacts = macArtifactsFor(['arm64']);
     const macManifest = {
       schemaVersion: 1,
       tag: linuxMetadata.tag,
@@ -289,17 +304,32 @@ const main = async (): Promise<void> => {
       artifacts: macArtifacts,
     };
     let admission = 0;
-    const admitScope = async (manifest: unknown, changes: Record<string, string> = {}): Promise<number | undefined> => {
+    const admitScopeResult = async (manifest: unknown, changes: Record<string, string> = {}) => {
       const directory = join(assets, String(++admission));
       await mkdir(directory);
       await writeFile(join(directory, 'desktop-artifacts.json'), JSON.stringify(manifest));
-      const result = run('admit-scope', { ...macPreflight, DESKTOP_ASSETS_DIR: directory, ...changes });
+      return run('admit-scope', { ...macPreflight, DESKTOP_ASSETS_DIR: directory, ...changes });
+    };
+    const admitScope = async (manifest: unknown, changes: Record<string, string> = {}): Promise<number | undefined> => {
+      const result = await admitScopeResult(manifest, changes);
       return result.status ?? undefined;
     };
     const scoped = await admitScope(macManifest);
     assert.equal(scoped, 0);
+    // Any Intel Mac artifact is refused by the Apple silicon rule: the former two-architecture candidate, Intel in place
+    // of Apple silicon, and an Intel ZIP added to the exact Apple silicon pair.
+    const intelRefusals = await Promise.all(
+      [
+        macArtifactsFor(['arm64', 'x64']),
+        macArtifactsFor(['x64']),
+        [...macArtifacts, ...macArtifactsFor(['x64']).filter((artifact) => artifact.kind === 'macos-zip')],
+      ].map(async (artifacts) => admitScopeResult({ ...macManifest, artifacts })),
+    );
+    for (const refused of intelRefusals) {
+      assert.equal(refused.status, 1);
+      assert.match(refused.stderr, /Mac-only publication requires exactly staging ZIP and DMG for Apple silicon/u);
+    }
     const refusedManifests = [
-      { ...macManifest, artifacts: macArtifacts.filter((artifact) => artifact.target === 'darwin-arm64') },
       { ...macManifest, artifacts: macArtifacts.filter((artifact) => artifact.kind === 'macos-zip') },
       { ...macManifest, sourceCommit: 'b'.repeat(40) },
       {

@@ -29,21 +29,22 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   # The reviewed PicoVoxel builder. `uses:` cannot read a variable, so the archive call repeats it.
-  # It is PicoVoxel#46 as merged, which evaluates proven-pure callback fields on every core of a threaded build
-  # (bytes unchanged). Under it are #42, which measures Firefox on Playwright 1.64.1 (1.61.1's Firefox
+  # It is PicoVoxel#47 as merged, which lifts a field's signed-distance IL to a native tape, admitted only
+  # after a bit check against the method (bytes unchanged). Under it are #46, which evaluates proven-pure
+  # callback fields on every core of a threaded build, #42, which measures Firefox on Playwright 1.64.1 (1.61.1's Firefox
   # pinned every page's wasm to the debug baseline tier), #41, which divides each browser path by
   # native timed on the same runner, and #40, which judges only threaded paths against the 2x ceiling. `dotnet/inputs.json` still pins the
   # browser source role to a commit on #39's branch; PicoVoxel's `archive/picogk-dual-runtime-builder-w0`
   # keeps that commit reachable, and every checkout that reads the pinned tree fetches full history.
-  PICOVOXEL_REF: 6a0e6e55341fe645e1f0f75c990d908e0b24989d
+  PICOVOXEL_REF: 8d316e12d48c45bac9850f14d2c8e877e66d1163
   PACKAGE_VERSION: 0.2.1
   # Gyroid proves every run; the scheduled run, or a dispatch that asks for it, proves HeatX.
   SUBJECT: ${{ github.event_name == 'schedule' && 'heatx' || inputs.subject || 'gyroid' }}
 jobs:
   archive:
-    uses: taucad/picovoxel/.github/workflows/dotnet-archive.yml@6a0e6e55341fe645e1f0f75c990d908e0b24989d
+    uses: taucad/picovoxel/.github/workflows/dotnet-archive.yml@8d316e12d48c45bac9850f14d2c8e877e66d1163
     with:
-      picovoxel-ref: 6a0e6e55341fe645e1f0f75c990d908e0b24989d
+      picovoxel-ref: 8d316e12d48c45bac9850f14d2c8e877e66d1163
       adapter-path: packages/plugins/picogk/dotnet/native
 
   # Everything a parity run measures or compares against, built once: the two browser apps and the

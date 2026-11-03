@@ -551,8 +551,8 @@ const main = async (): Promise<void> => {
       }
       projectUrl = rendered.url;
       const installed = await driver.observe(candidate(index));
-      const processes = discoverQualificationProcesses(ready.pid, ready.rendererPid);
-      const security = await driver.measureSecurity(processes);
+      let processes = discoverQualificationProcesses(ready.pid, ready.rendererPid);
+      let security = await driver.measureSecurity(processes);
       const command = async (action: 'observe' | 'install') => {
         await atomicJson(join(profile, 'route-qualification.command.json'), {
           schemaVersion: 1,
@@ -588,7 +588,10 @@ const main = async (): Promise<void> => {
         if (!active || !alive(ready.pid) || active.project.sha256 !== rendered.project.sha256) {
           throw new Error('Old APT session cannot export its retained saved project after selector upgrade');
         }
-        discoverQualificationProcesses(ready.pid, ready.rendererPid);
+        /* The selector upgrade and the active export can restart the native workers, so the stage evidence takes its
+         * process tree and security from this moment, beside the probe's own observation that follows. */
+        processes = discoverQualificationProcesses(ready.pid, ready.rendererPid);
+        security = await driver.measureSecurity(processes);
         scheduler.push({
           ...scheduled,
           activeSession: {

@@ -522,7 +522,10 @@ export function csharpCompletion(item: LSP.CompletionItem, version: number, opti
       const { documentation, definitionTargets } = await resolve();
       const markdown = typeof documentation === 'string' ? documentation : documentation?.value;
       return markdown && !isDisposed()
-        ? renderEditorDocumentation(markdown, undefined, definitionLinkOpener(definitionTargets, options))
+        ? renderEditorDocumentation(markdown, undefined, {
+            onDefinitionLink: definitionLinkOpener(definitionTargets, options),
+            languageId: 'csharp',
+          })
         : null;
     },
     // oxlint-disable-next-line max-params -- CodeMirror completion apply callback contract.
@@ -573,11 +576,10 @@ export function csharpHover(options: ExtensionOptions): HoverTooltipSource {
       pos: hover.range ? offsetAt(document.text, hover.range.start) : pos,
       end: hover.range ? offsetAt(document.text, hover.range.end) : undefined,
       create: () => ({
-        dom: renderEditorDocumentation(
-          markdown,
-          view.dom.ownerDocument,
-          definitionLinkOpener(definitionTargets, options),
-        ),
+        dom: renderEditorDocumentation(markdown, view.dom.ownerDocument, {
+          onDefinitionLink: definitionLinkOpener(definitionTargets, options),
+          languageId: 'csharp',
+        }),
       }),
     };
   };

@@ -52,6 +52,7 @@ export const editorSurfaceTheme = EditorView.theme({
     borderRadius: '0',
   },
   '.cm-documentation code': { fontFamily: 'var(--font-mono)', color: 'var(--cm-string)' },
+  '.cm-documentation pre code': { color: 'var(--popover-foreground)' },
   '.cm-documentation a': { color: 'var(--foreground)', textDecoration: 'underline' },
   '.cm-documentation ul, .cm-documentation ol': { paddingLeft: 'calc(var(--spacing) * 4)' },
   '.cm-documentation ul': { listStyleType: 'disc' },

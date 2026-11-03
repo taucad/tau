@@ -36,6 +36,9 @@
     "/packages/**/agent/resources.{js,d.ts}",
     "/packages/**/agent/skills.json",
     "/libs/converter/src/assets/**",
+    // Lezer parser tables are generated, and a test pins them to the generator's exact output.
+    "/libs/grammars/src/*/*.parser.ts",
+    "/libs/grammars/src/*/*.parser.terms.ts",
     "/packages/plugins/brep/licenses/**",
     // The offline engine's own libcascade build output (Emscripten glue and generated types) is checked in verbatim.
     "/packages/plugins/zoo/src/offline/wasm/**",

@@ -297,7 +297,7 @@ export async function acquireJsonLanguage({
               label: item.label,
               type: completionTypeFromLsp(item.kind),
               detail: item.detail,
-              info: editorCompletionInfo(item.documentation),
+              info: editorCompletionInfo(item.documentation, { languageId: 'json' }),
               // oxlint-disable-next-line max-params -- CodeMirror completion apply callback contract.
               apply(view: EditorView, completion: Completion, from: number, to: number): void {
                 const range = item.range ?? { from, to };
@@ -328,7 +328,7 @@ export async function acquireJsonLanguage({
         pos: result.range?.from ?? pos,
         end: result.range?.to,
         create() {
-          const dom = renderEditorDocumentation(result.text, documentObject());
+          const dom = renderEditorDocumentation(result.text, documentObject(), { languageId: 'json' });
           return { dom };
         },
       };

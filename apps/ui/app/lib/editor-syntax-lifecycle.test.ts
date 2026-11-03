@@ -1,26 +1,29 @@
 import { expect, it, vi } from 'vitest';
+import type { Extension } from '@codemirror/state';
 import { loadEditorSyntax } from '#lib/editor-syntax.js';
 
 const adapter = vi.hoisted(() => ({
-  ready: Promise.withResolvers<void>(),
-  started: vi.fn(),
-  loadGrammar: vi.fn(async () => []),
+  ready: Promise.withResolvers<Extension>(),
+  loadGrammar: vi.fn(async () => adapter.ready.promise),
 }));
 
-vi.mock('#lib/editor-textmate-syntax.js', async () => {
-  adapter.started();
-  await adapter.ready.promise;
-  return { loadTextMateSyntax: adapter.loadGrammar };
+vi.mock('@taucad/grammars', () => ({
+  loadLanguage: adapter.loadGrammar,
+  resolveHighlightLanguageId: (id: string) => id,
+}));
+
+it('does not schedule a grammar download for a pane that closed before admission', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  await expect(loadEditorSyntax('kcl', controller.signal)).rejects.toThrow();
+  expect(adapter.loadGrammar).not.toHaveBeenCalled();
 });
 
-it('does not schedule custom grammar downloads after an admitted pane closes during adapter loading', async () => {
+it('does not hand a grammar to a pane that closed while it loaded', async () => {
   const controller = new AbortController();
   const pending = loadEditorSyntax('kcl', controller.signal);
-  await vi.waitFor(() => {
-    expect(adapter.started).toHaveBeenCalledOnce();
-  });
+  expect(adapter.loadGrammar).toHaveBeenCalledOnce();
   controller.abort();
-  adapter.ready.resolve();
+  adapter.ready.resolve([]);
   await expect(pending).rejects.toThrow();
-  expect(adapter.loadGrammar).not.toHaveBeenCalled();
 });

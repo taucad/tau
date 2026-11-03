@@ -37,9 +37,8 @@ import { createAssetIntegrity } from './asset-integrity.vite-plugin.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testScriptsAlias = '#scripts';
 const uiReactCompilerPluginName = 'vite:react-compiler';
-const streamdownShikiFacade = path.resolve(__dirname, 'app/lib/streamdown-shiki.ts');
-/** The only specifiers `tau-ui-source-alias` resolves: `#` app aliases and Streamdown's `shiki`. */
-const uiSourceAliasIdFilter = /^#|^shiki$/u;
+/** The only specifiers `tau-ui-source-alias` resolves: `#` app aliases. */
+const uiSourceAliasIdFilter = /^#/u;
 
 const toOriginOrRaw = (value: string | undefined): string | undefined => {
   if (!value) {
@@ -202,9 +201,6 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
       // its own checks for hosts that ignore hook filters.
       filter: { id: uiSourceAliasIdFilter },
       handler(source, importer) {
-        if (source === 'shiki' && importer?.includes('/streamdown/') === true && importer.includes('/code-block-')) {
-          return streamdownShikiFacade;
-        }
         if (!source.startsWith('#')) {
           return null;
         }

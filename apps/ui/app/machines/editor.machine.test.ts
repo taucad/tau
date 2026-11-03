@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createActor, waitFor } from 'xstate';
-import type { EditorState } from '#types/editor.types.js';
+import type { EditorState, EditorStateInput } from '#types/editor.types.js';
 import { defaultPanelState } from '#constants/editor.constants.js';
 import { editorMachine } from '#machines/editor.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
@@ -200,6 +200,63 @@ describe('editorMachine', () => {
       ]);
       expect(actor.getSnapshot().context.activePaneId).toBe('pane-legacy');
       actor.stop();
+    });
+
+    it('should drop library declaration tabs a previous session persisted', async () => {
+      const actor = await startAndLoad({
+        loadResult: {
+          ...stubEditorState,
+          openFiles: [
+            { paneId: 'pane-main', path: 'main.ts', name: 'main.ts', lastAccessedAt: 1000 },
+            { paneId: 'pane-lib', path: '__kcl_std__/sketch.kcl', name: 'sketch.kcl', lastAccessedAt: 2000 },
+          ],
+          activePaneId: 'pane-lib',
+        },
+      });
+
+      expect(actor.getSnapshot().context.openFiles.map((file) => file.path)).toEqual(['main.ts']);
+      expect(actor.getSnapshot().context.activePaneId).toBeUndefined();
+      actor.stop();
+    });
+
+    it('should open a library declaration read-only without persisting its tab', async () => {
+      vi.useFakeTimers();
+      try {
+        const saved: EditorStateInput[] = [];
+        const actors = {
+          loadEditorStateActor: fromSafeAsync(
+            async (): Promise<{ type: 'editorStateRetrieved'; state: EditorState | undefined }> => ({
+              type: 'editorStateRetrieved',
+              state: undefined,
+            }),
+          ),
+          ensureFocusedChatActor: fromSafeAsync(async ({ input }) => defaultEnsureFocusedChat(input)),
+          saveEditorStateActor: fromSafeAsync(async ({ input }) => {
+            saved.push(input.editorState);
+          }),
+        } satisfies Partial<MachineActors<typeof editorMachine>>;
+        const actor = createActor(editorMachine.provide({ actors }), {
+          input: { projectId: 'test-build', requestedChatId: undefined },
+        });
+        actor.start();
+        actor.send({ type: 'load' });
+        await waitFor(actor, (state) => state.matches({ ready: {} }));
+
+        actor.send({ type: 'openFile', path: 'main.ts', source: 'user' });
+        actor.send({ type: 'openFile', path: '__kcl_std__/sketch.kcl', source: 'user', readOnly: true });
+        expect(actor.getSnapshot().context.openFiles.find((file) => file.path === '__kcl_std__/sketch.kcl')).toEqual(
+          expect.objectContaining({ readOnly: true }),
+        );
+        await vi.advanceTimersByTimeAsync(500);
+        await waitFor(actor, (state) => state.matches({ ready: { storing: 'idle' } }));
+
+        const last = saved.at(-1);
+        expect(last?.openFiles.map((file) => file.path)).toEqual(['main.ts']);
+        expect(last?.activePaneId).toBeUndefined();
+        actor.stop();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('should handle load with undefined state', async () => {

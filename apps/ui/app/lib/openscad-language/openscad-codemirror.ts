@@ -447,11 +447,14 @@ function documentationDom(
   ownerDocument?: Document,
 ): HTMLElement {
   const { markdown: rendered, targets } = openscadDocumentation(markdown);
-  return renderEditorDocumentation(rendered, ownerDocument, (index) => {
-    const target = targets[index];
-    if (target) {
-      void openLink(context, target);
-    }
+  return renderEditorDocumentation(rendered, ownerDocument, {
+    onDefinitionLink(index) {
+      const target = targets[index];
+      if (target) {
+        void openLink(context, target);
+      }
+    },
+    languageId: 'openscad',
   });
 }
 

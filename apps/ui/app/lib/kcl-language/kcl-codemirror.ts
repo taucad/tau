@@ -474,6 +474,9 @@ async function initializeBackend(backend: KclBackend): Promise<KclBackend> {
   return backend;
 }
 
+/** KCL documentation fences its examples as `js`; they are KCL. Untagged fences are KCL too. */
+const kclDocumentationCode = { languageId: 'kcl', fenceAliases: { js: 'kcl', javascript: 'kcl' } } as const;
+
 /** Render completion documentation; KCL passes one whose docs links open definitions. */
 export type KclCompletionInfo = (markdown: string | undefined) => Completion['info'];
 
@@ -481,7 +484,7 @@ export type KclCompletionInfo = (markdown: string | undefined) => Completion['in
 export function symbolCompletion(
   symbol: KclSymbol,
   boost: number,
-  info: KclCompletionInfo = editorCompletionInfo,
+  info: KclCompletionInfo = (markdown) => editorCompletionInfo(markdown, kclDocumentationCode),
 ): Completion {
   if (symbol.kind === 'function') {
     const parameters = symbol.parameters ?? [];
@@ -529,7 +532,7 @@ export function kclLspCompletion(
     document,
     version,
     isDisposed,
-    info = editorCompletionInfo,
+    info = (markdown) => editorCompletionInfo(markdown, kclDocumentationCode),
   }: Readonly<{ document: EditorDocument; version: number; isDisposed: () => boolean; info?: KclCompletionInfo }>,
 ): Completion {
   return {
@@ -597,11 +600,14 @@ export function kclExtensions({
     ownerDocument?: Document,
   ): HTMLElement => {
     const rewritten = kclDocumentationMarkdown(markdown, stdlib);
-    return renderEditorDocumentation(rewritten.markdown, ownerDocument, (index) => {
-      const target = rewritten.targets[index];
-      if (target && !isDisposed()) {
-        void observeKclOperation(openKclTarget(environment, target), document, isDisposed);
-      }
+    return renderEditorDocumentation(rewritten.markdown, ownerDocument, {
+      ...kclDocumentationCode,
+      onDefinitionLink(index) {
+        const target = rewritten.targets[index];
+        if (target && !isDisposed()) {
+          void observeKclOperation(openKclTarget(environment, target), document, isDisposed);
+        }
+      },
     });
   };
   const locationItem = (location: KclLocation): EditorLocationItem => {

@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { highlightLines, loadLanguage } from '@taucad/grammars';
 import type { JSONRPCRequest, JSONRPCResponse } from 'json-rpc-2.0';
 import type { PublishDiagnosticsParams } from 'vscode-languageserver-protocol';
 import { kclRangeOffsets } from '#lib/kcl-language/kcl-codemirror.js';
@@ -214,6 +215,21 @@ describe('KCL LSP Integration (Real WASM)', () => {
     // If the WASM LSP returns hover content, verify its structure.
     if (result) {
       expect(result.contents).toBeDefined();
+      // Hover code is untagged or fenced `js`; tooltips highlight it as KCL, so the KCL grammar must read it.
+      const markdown = [result.contents]
+        .flat()
+        .map((content) => (typeof content === 'string' ? content : content.value))
+        .join('\n');
+      const fences = [...markdown.matchAll(/```(?:js|kcl)?\n([\s\S]*?)```/gu)].map((match) => match[1] ?? '');
+      const kcl = await loadLanguage('kcl');
+      for (const fence of fences) {
+        expect(
+          highlightLines(fence, kcl)
+            .flat()
+            .some((segment) => segment.className !== ''),
+          fence,
+        ).toBe(true);
+      }
     }
   }, 10_000);
 

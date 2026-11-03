@@ -10,7 +10,7 @@ import { apiRoot, importChain, moduleGraph } from '#testing/module-graph.js';
  * service. These tests tie the deployable pieces to one another and to that
  * rule: the Dockerfile's `maintenance` target runs the maintenance command,
  * the command's module graph opens no listener, and both Fly configs deploy one
- * Machine in `syd` with no service, no metrics endpoint and no volume.
+ * Machine (staging `syd`, production `sjc`) with no service, no metrics endpoint and no volume.
  */
 
 const read = (file: string): string => readFileSync(path.join(apiRoot, file), 'utf8');
@@ -143,16 +143,16 @@ describe('tau-maintenance image (DC4)', () => {
 });
 
 describe.each([
-  ['staging', 'tau-maintenance-staging'],
-  ['prod', 'tau-maintenance'],
-])('apps/maintenance/fly.%s.toml (DC4)', (environment, app) => {
+  ['staging', 'tau-maintenance-staging', 'syd'],
+  ['prod', 'tau-maintenance', 'sjc'],
+])('apps/maintenance/fly.%s.toml (DC4)', (environment, app, region) => {
   const config = (): string => readFileSync(path.join(maintenanceProject, `fly.${environment}.toml`), 'utf8');
   /** Section headers, comments excluded. */
   const sections = (): string[] => config().match(/^\[\[?[^\]]+\]\]?$/gmu) ?? [];
 
-  it('should name the app and deploy it in syd', () => {
+  it('should name the app and deploy it in its region (staging syd, production sjc)', () => {
     expect(config()).toMatch(new RegExp(`^app = '${app}'$`, 'mu'));
-    expect(config()).toMatch(/^primary_region = 'syd'$/mu);
+    expect(config()).toMatch(new RegExp(`^primary_region = '${region}'$`, 'mu'));
   });
 
   it('should declare no service, metrics endpoint, volume or release command', () => {

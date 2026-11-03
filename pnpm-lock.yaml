@@ -328,8 +328,8 @@ catalogs:
       specifier: ^5.101.0
       version: 5.104.2
     '@taucad/kcl-wasm-lib':
-      specifier: 0.1.191
-      version: 0.1.191
+      specifier: 0.1.192
+      version: 0.1.192
     '@taulabs/openrscad-engine':
       specifier: 0.11.0-beta.4
       version: 0.11.0-beta.4
@@ -1198,7 +1198,7 @@ importers:
         version: link:libs/json-schema
       '@taucad/kcl-wasm-lib':
         specifier: 'catalog:'
-        version: 0.1.191
+        version: 0.1.192
       '@tiptap/core':
         specifier: 'catalog:'
         version: 3.31.4(@tiptap/pm@3.31.4)
@@ -3498,6 +3498,9 @@ importers:
       '@classcad/smlibwasm':
         specifier: 'catalog:'
         version: 0.6.2
+      '@taucad/kcl-wasm-lib':
+        specifier: 'catalog:'
+        version: 0.1.192
       picovoxel:
         specifier: 'catalog:'
         version: 0.2.1(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))
@@ -5421,7 +5424,7 @@ importers:
         version: link:../../core/geometry
       '@taucad/kcl-wasm-lib':
         specifier: 'catalog:'
-        version: 0.1.191
+        version: 0.1.192
       '@taucad/parameters':
         specifier: workspace:*
         version: link:../../parameters
@@ -13501,6 +13504,7 @@ packages:
   '@smithy/core@3.35.2':
     resolution: {integrity: sha512-ejTukBuP/Pg3t9N8Ux+0zKsXeHWm7p6W3HbXFOyltKasSxZwCFmvTut7kBdZSCF3m9y1bXXyVu6p2xuMFcsTyQ==}
     engines: {node: '>=18.0.0'}
+    deprecated: Deprecated due to a bug in custom logger data redaction. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
 
   '@smithy/credential-provider-imds@4.5.2':
     resolution: {integrity: sha512-A9uSdn72ozbRUSit0eib0TW7nXuNPlaeM0zcGkJ+nE6tFcSDbnmtwoxbTCFBukVQcszDAyvsd7+rTduPTXpygg==}
@@ -13885,8 +13889,8 @@ packages:
   '@tanstack/virtual-core@3.19.2':
     resolution: {integrity: sha512-Ch+e8t097FdTfuihfRwBMqz/OfRZKHOH/C213dbM1lXDZ8bv6r330Bcc9k9XCrP6NkoMYy0/ZCHcddOAPihW4w==}
 
-  '@taucad/kcl-wasm-lib@0.1.191':
-    resolution: {integrity: sha512-CO6M3oW8j/i2mUYGGUyzIuvL9BfvEUOdc9+joixzO3pRmacq/sn4S3SamfF8h69s465Wd/LtB2/eBVh7+psEcw==}
+  '@taucad/kcl-wasm-lib@0.1.192':
+    resolution: {integrity: sha512-ju18AEQT7m7wfE0b/beBCmQGAiLHJRLvWve4M4URUrCh3bdjcYv5fCcacKTjGm2RyPOqokq2XN7o+/EmYNQ4cA==}
 
   '@taulabs/langchain-google-common@2.2.0-beta.0':
     resolution: {integrity: sha512-vU/YtcBZUhEXLLzdDWeAHbUvxphKBd5DqRnFqKnM9BKAP2C/mes6m6UevMsK81cNdICQ5hRiWe/VazRyFhLdXQ==}
@@ -34999,7 +35003,7 @@ snapshots:
 
   '@tanstack/virtual-core@3.19.2': {}
 
-  '@taucad/kcl-wasm-lib@0.1.191': {}
+  '@taucad/kcl-wasm-lib@0.1.192': {}
 
   '@taulabs/langchain-google-common@2.2.0-beta.0(@langchain/core@1.2.17(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.223.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.12.0(@opentelemetry/api@1.9.1))(openai@7.32.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/signature-v4@5.7.4)(undici@8.11.2)(ws@8.22.0)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(ws@8.22.0))':
     dependencies:

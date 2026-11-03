@@ -1,6 +1,6 @@
 import { completionTypeFromLsp } from '#components/code/editor-completion-icon.js';
 import { definitionProvider } from '#components/code/editor-definition.js';
-import { startAfterLineBreaks, storeDiagnostics } from '#components/code/editor-lint.js';
+import { storeDiagnostics } from '#components/code/editor-lint.js';
 import { languageFeatures } from '#components/code/editor-language-features.js';
 import type { EditorLocationItem, EditorSignature, EditorSymbol } from '#components/code/editor-language-features.js';
 import { editorCompletionInfo, renderEditorDocumentation } from '#components/code/editor-documentation.js';
@@ -86,12 +86,9 @@ function offsetAt(text: string, position: LSP.Position): number {
   return Math.min(offset + position.character, end === -1 ? text.length : end);
 }
 
-/**
- * Offsets of a range the KCL server reported. The server writes a column-0 start as the end of the previous line, so a
- * range that starts on a line break begins on the next line.
- */
+/** Document offsets of a range the KCL server reported. */
 export function kclRangeOffsets(text: string, range: LSP.Range): Readonly<{ from: number; to: number }> {
-  return startAfterLineBreaks(text, { from: offsetAt(text, range.start), to: offsetAt(text, range.end) });
+  return { from: offsetAt(text, range.start), to: offsetAt(text, range.end) };
 }
 
 export function kclImportAt(text: string, offset: number): string | undefined {

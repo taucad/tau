@@ -331,9 +331,8 @@ describe('KCL LSP Integration (Real WASM)', () => {
     }
     const lints = published?.diagnostics.filter((diagnostic) => diagnostic.code === 'Z0001') ?? [];
     expect(lints.map((diagnostic) => diagnostic.range.start)).toEqual([
-      // The server writes each column-0 start as the end of the line before it.
-      { line: 0, character: 18 },
-      { line: 1, character: 15 },
+      { line: 1, character: 0 },
+      { line: 2, character: 0 },
     ]);
     const rows = lints.map((diagnostic) => {
       const { from, to } = kclRangeOffsets(text, diagnostic.range);

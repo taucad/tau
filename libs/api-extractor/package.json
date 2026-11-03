@@ -36,6 +36,7 @@
   },
   "devDependencies": {
     "@classcad/smlibwasm": "catalog:",
+    "@taucad/kcl-wasm-lib": "catalog:",
     "picovoxel": "catalog:"
   }
 }

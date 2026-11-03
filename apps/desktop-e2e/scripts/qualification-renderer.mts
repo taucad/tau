@@ -238,10 +238,22 @@ const main = async (): Promise<void> => {
       // prove it holds focus before typing into it.
       const editor = page.locator('.editor-container:visible').last().getByRole('textbox').last();
       await editor.waitFor({ state: 'attached' });
-      await editor.focus();
-      await page.waitForFunction(() => document.activeElement?.getAttribute('role') === 'textbox', undefined, {
-        timeout: 10_000,
-      });
+      // The tab can take focus back after the context menu closes (run 41561293311 macos-zip-arm64 ended
+      // focused on the `main.py` tab), so refocus until the textbox holds focus across two reads.
+      const focusDeadline = Date.now() + 10_000;
+      const editorPage = page;
+      const editorFocused = async (): Promise<boolean> =>
+        editorPage.evaluate(() => document.activeElement?.getAttribute('role') === 'textbox');
+      for (;;) {
+        await editor.focus();
+        await wait(300);
+        if ((await editorFocused()) && (await wait(300).then(editorFocused))) {
+          break;
+        }
+        if (Date.now() > focusDeadline) {
+          throw new Error('The source editor did not keep focus');
+        }
+      }
       await page.keyboard.press(process.platform === 'darwin' ? 'Meta+a' : 'Control+a');
       // This disposable host may have no clipboard owner. Keep the paste payload until save is verified.
       await page.evaluate(async (text) => navigator.clipboard.writeText(text), source);

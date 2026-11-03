@@ -461,6 +461,35 @@ function workspaceFor(files: Readonly<Record<string, string>>) {
   return { environment, session, stored };
 }
 
+/** The jsdom environment has no text layout; the tooltip measures its anchor through Range rectangles. */
+function stubTextLayout(): void {
+  const layout = {
+    getClientRects: () => [],
+    getBoundingClientRect: () => new DOMRect(),
+  };
+  for (const name of Object.keys(layout) as Array<keyof typeof layout>) {
+    const original = Object.getOwnPropertyDescriptor(Range.prototype, name);
+    Object.defineProperty(Range.prototype, name, { configurable: true, writable: true, value: layout[name] });
+    onTestFinished(() => {
+      if (original) {
+        Object.defineProperty(Range.prototype, name, original);
+      } else {
+        Reflect.deleteProperty(Range.prototype, name);
+      }
+    });
+  }
+}
+
+/** Type `name` into the inline rename box and press Enter. */
+async function submitRename(name: string): Promise<void> {
+  await vi.waitFor(() => {
+    expect(document.querySelector('.cm-rename-input')).not.toBeNull();
+  });
+  const input = document.querySelector<HTMLInputElement>('.cm-rename-input')!;
+  input.value = name;
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+}
+
 /** Submit the open CodeMirror dialog, after `fill` sets its control. */
 async function submitDialog(view: EditorView, fill: (form: HTMLFormElement) => void): Promise<void> {
   await vi.waitFor(() => {
@@ -505,11 +534,10 @@ describe('C# rename', () => {
     const client = renameServer((current) => current.version)(document);
     const view = boundView(document, csharpExtensions({ client, document, environment, isDisposed: () => false }));
     try {
+      stubTextLayout();
       view.dispatch({ selection: { anchor: main.indexOf('Ball') + 1 } });
       expect(renameSymbol(view)).toBe(true);
-      await submitDialog(view, (form) => {
-        form.querySelector('input')!.value = 'Sphere';
-      });
+      await submitRename('Sphere');
       await vi.waitFor(() => {
         expect(new TextDecoder().decode(stored.get('Shapes.cs'))).toContain('public static int Sphere(float r)');
       });
@@ -533,11 +561,10 @@ describe('C# rename', () => {
     const client = renameServer((current) => current.version - 1)(document);
     const view = boundView(document, csharpExtensions({ client, document, environment, isDisposed: () => false }));
     try {
+      stubTextLayout();
       view.dispatch({ selection: { anchor: main.indexOf('Ball') + 1 } });
       renameSymbol(view);
-      await submitDialog(view, (form) => {
-        form.querySelector('input')!.value = 'Sphere';
-      });
+      await submitRename('Sphere');
       await vi.waitFor(() => {
         expect(String(warn.mock.calls.at(-1)?.[1])).toContain('stale document version');
       });
@@ -657,25 +684,6 @@ describe('C# signature help', () => {
     activeSignature: 0,
     activeParameter: 0,
   };
-
-  /** The jsdom environment has no text layout; the tooltip measures its anchor through Range rectangles. */
-  function stubTextLayout(): void {
-    const layout = {
-      getClientRects: () => [],
-      getBoundingClientRect: () => new DOMRect(),
-    };
-    for (const name of Object.keys(layout) as Array<keyof typeof layout>) {
-      const original = Object.getOwnPropertyDescriptor(Range.prototype, name);
-      Object.defineProperty(Range.prototype, name, { configurable: true, writable: true, value: layout[name] });
-      onTestFinished(() => {
-        if (original) {
-          Object.defineProperty(Range.prototype, name, original);
-        } else {
-          Reflect.deleteProperty(Range.prototype, name);
-        }
-      });
-    }
-  }
 
   it('opens on the server trigger characters and on Mod-Shift-Space', async () => {
     stubTextLayout();

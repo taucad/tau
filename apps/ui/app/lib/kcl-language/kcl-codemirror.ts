@@ -1,7 +1,7 @@
 import { completionTypeFromLsp } from '#components/code/editor-completion-icon.js';
 import { definitionProvider } from '#components/code/editor-definition.js';
 import { storeDiagnostics } from '#components/code/editor-lint.js';
-import { languageFeatures } from '#components/code/editor-language-features.js';
+import { languageFeatures, promptRename } from '#components/code/editor-language-features.js';
 import type { EditorLocationItem, EditorSignature, EditorSymbol } from '#components/code/editor-language-features.js';
 import { editorCompletionInfo, renderEditorDocumentation } from '#components/code/editor-documentation.js';
 import { StateEffect, StateField } from '@codemirror/state';
@@ -992,13 +992,9 @@ async function renameSymbol(
   if (!prepared || document.version !== version) {
     return;
   }
-  const dialog = showDialog(view, {
-    label: 'Rename symbol',
-    input: { value: typeof prepared === 'object' && 'placeholder' in prepared ? prepared.placeholder : '' },
-    submitLabel: 'Rename',
+  const name = await promptRename(view, {
+    value: typeof prepared === 'object' && 'placeholder' in prepared ? prepared.placeholder : undefined,
   });
-  const submitted = await dialog.result;
-  const name = submitted?.querySelector('input')?.value.trim();
   if (!name || document.version !== version) {
     return;
   }

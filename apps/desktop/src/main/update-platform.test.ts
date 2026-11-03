@@ -47,7 +47,7 @@ afterEach(() => {
   mocks.managed.mockResolvedValue(false);
 });
 describe('platform update transport and launch', () => {
-  it('carries launch switches but not files or deep links into the updated process', () => {
+  it('carries launch switches but not files, deep links or anything after -- into the updated process', () => {
     expect(
       relaunchSwitches([
         '/usr/bin/tau-staging',
@@ -58,6 +58,7 @@ describe('platform update transport and launch', () => {
         'tau-staging://machines',
         '/home/tau/model.glb',
         '--',
+        '--after-separator.glb',
       ]),
     ).toEqual([
       '--use-gl=angle',

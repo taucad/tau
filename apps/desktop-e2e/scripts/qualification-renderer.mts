@@ -148,13 +148,10 @@ const main = async (): Promise<void> => {
         if (!filename || basename(filename) !== filename || !filename.endsWith('.glb')) {
           throw new Error('Expected an exported GLB basename');
         }
-        await page.waitForURL(
-          (url) =>
-            url.protocol === 'app:' &&
-            url.host === 'tau' &&
-            url.pathname === '/import' &&
-            url.searchParams.get('desktop-open') === '1',
-        );
+        // The import route clears `desktop-open` as soon as it consumes the opened file (run 41428110095
+        // macos-dmg-arm64 reached `/import` showing the GLB with the flag already gone), so the route alone is
+        // awaited and the opened file's name on that page is the evidence of the Open With handoff.
+        await page.waitForURL((url) => url.protocol === 'app:' && url.host === 'tau' && url.pathname === '/import');
         await page.getByText(filename, { exact: true }).first().waitFor({ state: 'visible' });
       }
       await writeFile(

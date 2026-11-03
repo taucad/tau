@@ -3510,6 +3510,9 @@ importers:
       '@classcad/smlibwasm':
         specifier: 'catalog:'
         version: 0.6.2
+      '@taucad/kcl-wasm-lib':
+        specifier: 'catalog:'
+        version: 0.1.192
       picovoxel:
         specifier: 'catalog:'
         version: 0.2.1(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))

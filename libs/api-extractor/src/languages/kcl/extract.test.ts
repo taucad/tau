@@ -1,4 +1,6 @@
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { get_kcl_version as getKclVersion, initSync } from '@taucad/kcl-wasm-lib';
 import { describe, expect, it } from 'vitest';
 import { loadKclCorpus } from '#languages/kcl/extract.js';
 import { flattenEntries } from '#model/api-corpus.js';
@@ -27,12 +29,11 @@ describe('KCL corpus', () => {
   });
 
   it('matches the kcl-lib version the runtime @taucad/kcl-wasm-lib is built from', () => {
-    // Upstream bumps kcl-wasm-lib 0.1.N and kcl-lib 0.2.N together, so the
-    // pnpm catalog's wasm-lib patch number names the kcl-lib release.
-    const workspace = readFileSync(new URL('../../../../../pnpm-workspace.yaml', import.meta.url), 'utf8');
-    const wasmLib = /'@taucad\/kcl-wasm-lib': (?<version>\S+)/u.exec(workspace)?.groups?.['version'];
-    expect(wasmLib).toMatch(/^0\.1\.\d+$/u);
-    expect(corpus.metadata.packageVersion).toBe(wasmLib?.replace(/^0\.1\./u, '0.2.'));
+    // The fork can release kcl-wasm-lib without a kcl-lib bump, so ask the
+    // runtime which kcl-lib it was built from instead of deriving it from the
+    // wasm-lib version.
+    initSync({ module: readFileSync(createRequire(import.meta.url).resolve('@taucad/kcl-wasm-lib/kcl.wasm')) });
+    expect(corpus.metadata.packageVersion).toBe(getKclVersion());
   });
 
   it('holds the sketch-block API', () => {

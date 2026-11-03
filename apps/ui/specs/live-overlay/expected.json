@@ -1,0 +1,26 @@
+{
+  "configs": {
+    "LiveOverlay.target.cfg": {
+      "tier": "pr",
+      "expect": "pass"
+    },
+    "LiveOverlay.today-StreamAccepted.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "StreamAccepted"
+      },
+      "kind": "defect",
+      "ref": "A durable tool result read after the next step's live reasoning started presents finish-step inside the open block; the SDK rejects the next reasoning-delta",
+      "fixedBy": "fix(ui): Keep a live reasoning block open across durable tool results"
+    },
+    "LiveOverlay.today-FoldedToolConcluded.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "FoldedToolConcluded"
+      },
+      "kind": "defect",
+      "ref": "After the rejected stream, later tool results are folded but never presented, so their calls spin until the step ends",
+      "fixedBy": "fix(ui): Keep a live reasoning block open across durable tool results"
+    }
+  }
+}

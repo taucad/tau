@@ -13,6 +13,8 @@ export type RecordedPurposeDecision = Readonly<{
   noticeVersion: string;
   /** Insertion order. Two decisions can share a timestamp; they cannot share this. */
   sequence: number;
+  /** When it was taken, in milliseconds; absent where a caller did not read it. */
+  decidedAt?: number | undefined;
 }>;
 
 /**
@@ -80,7 +82,7 @@ const latestDecision = (
 const refuse = (
   purpose: TelemetryPurpose,
   input: PurposeAuthorityInput,
-): Readonly<{ refusal: PurposeRefusal | undefined; decided: boolean; granted: boolean }> => {
+): Readonly<{ refusal: PurposeRefusal | undefined; decided: boolean; granted: boolean; since?: number }> => {
   if (input.noticeVersion === undefined) {
     return { refusal: 'notice-unapproved', decided: false, granted: false };
   }
@@ -116,7 +118,8 @@ const refuse = (
   if (reusePurposes.has(purpose) && !input.tierAssured) {
     return { refusal: 'tier-unverified', ...state };
   }
-  return { refusal: undefined, ...state };
+  /* The allowing decision's own time: nothing before it was permitted, everything since it is. */
+  return { refusal: undefined, ...state, ...(current.decidedAt === undefined ? {} : { since: current.decidedAt }) };
 };
 
 /**
@@ -132,13 +135,14 @@ const refuse = (
  */
 export const resolvePurposeAuthority = (input: PurposeAuthorityInput): TelemetryPurposeState[] =>
   telemetryPurposes.map((purpose) => {
-    const { refusal, decided, granted } = refuse(purpose, input);
+    const { refusal, decided, granted, since } = refuse(purpose, input);
     return {
       purpose,
       allowed: refusal === undefined,
       decided,
       granted,
       ...(refusal === undefined ? {} : { refusal }),
+      ...(refusal === undefined && since !== undefined ? { allowedSince: since } : {}),
     };
   });
 

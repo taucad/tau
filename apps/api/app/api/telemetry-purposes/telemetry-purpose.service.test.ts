@@ -12,18 +12,19 @@ const notice = 'observability-notice-2026-10-29';
 
 type DecisionRow = typeof telemetryPurposeDecision.$inferSelect;
 
-/** The four columns the service actually selects; the rest of the row is never read. */
-type SelectedDecision = Pick<DecisionRow, 'id' | 'purpose' | 'granted' | 'noticeVersion'>;
+/** The five columns the service actually selects; the rest of the row is never read. */
+type SelectedDecision = Pick<DecisionRow, 'id' | 'purpose' | 'granted' | 'noticeVersion' | 'decidedAt'>;
 
 const row = (id: number, purpose: TelemetryPurpose, granted: boolean): SelectedDecision => ({
   id,
   purpose,
   granted,
   noticeVersion: notice,
+  decidedAt: new Date(Date.UTC(2026, 9, 29) + id * 1000),
 });
 
 /* `findMany` is typed against the whole row, but the service narrows the query with
- * `columns`, so the fixtures carry only the four columns it can see. */
+ * `columns`, so the fixtures carry only the five columns it can see. */
 const resolvesTo = (decisions: readonly SelectedDecision[]): DecisionRow[] => [...decisions] as DecisionRow[];
 
 const createService = (
@@ -103,6 +104,18 @@ describe('TelemetryPurposeService', () => {
       const effective = await service.getEffectivePurposes('user-a');
 
       expect(effective.purposes.find((state) => state.purpose === 'summary')?.refusal).toBe('withdrawn');
+    });
+
+    it('answers when the allowing decision was taken', async () => {
+      const { service } = createService({ noticeVersion: notice, decisions: [row(1, 'summary', true)] });
+
+      const effective = await service.getEffectivePurposes('user-a');
+
+      expect(effective.purposes.find((state) => state.purpose === 'summary')?.allowedSince).toBe(
+        Date.UTC(2026, 9, 29) + 1000,
+      );
+      /* Its own clock beside it, so a host can read that time on the host's clock. */
+      expect(effective.answeredAt).toEqual(expect.any(Number));
     });
 
     it('binds the answer to the principal and the project', async () => {

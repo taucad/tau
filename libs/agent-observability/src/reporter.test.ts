@@ -4,7 +4,7 @@ import type { SubmitOutcome } from '#delivery.js';
 import { createEvidenceOutbox, memoryPendingStore } from '#delivery.js';
 import type { ProjectedRun } from '#projection.js';
 import type { ReportingGrant } from '#reporter.js';
-import { createEvidenceReporter, summaryGrantOf } from '#reporter.js';
+import { createEvidenceReporter, purposeGrantOf, summaryGrantOf } from '#reporter.js';
 
 const at = Date.parse('2026-10-29T00:00:00.000Z');
 
@@ -95,6 +95,30 @@ describe('summaryGrantOf', () => {
     expect(summaryGrantOf({ ...answer(true), projectId: undefined }, subject)).toBeUndefined();
     expect(summaryGrantOf(answer(true, 'project-b'), subject)).toBeUndefined();
   });
+
+  it('should date the grant on the host clock, shifted by how far it read ahead of the server', () => {
+    const subject = { principal: 'user-a', project: 'project-a' };
+    const since = (allowedSince: number, answeredAt?: number) => ({
+      epoch: 'policy-1',
+      projectId: 'project-a',
+      purposes: [{ purpose: 'summary', allowed: true, allowedSince }],
+      ...(answeredAt === undefined ? {} : { answeredAt }),
+    });
+
+    /* The host's clock reads 90 s ahead of the server's: the decision is 90 s later on it. */
+    expect(purposeGrantOf(since(at, at + 10_000), { ...subject, receivedAt: at + 100_000 }, 'summary')).toEqual(
+      grant({ allowedSince: at + 90_000 }),
+    );
+    /* Behind it, the decision is earlier on the host's clock by as much. */
+    expect(purposeGrantOf(since(at, at + 10_000), { ...subject, receivedAt: at }, 'summary')).toEqual(
+      grant({ allowedSince: at - 10_000 }),
+    );
+    /* Without the server's answer time, or the receipt time, nothing dates the grant. */
+    expect(purposeGrantOf(since(at), { ...subject, receivedAt: at }, 'summary')).toEqual(grant());
+    expect(purposeGrantOf(since(at, at), subject, 'summary')).toEqual(grant());
+    expect(purposeGrantOf(since(-1, at), { ...subject, receivedAt: at }, 'summary')).toEqual(grant());
+    expect(purposeGrantOf(since(Number.NaN, at), { ...subject, receivedAt: at }, 'summary')).toEqual(grant());
+  });
 });
 
 describe('createEvidenceReporter', () => {
@@ -108,6 +132,39 @@ describe('createEvidenceReporter', () => {
 
     expect(sent.map((evidence) => evidence.semantic.kind)).toEqual(['outcome']);
     expect(reporter.coverage()).toMatchObject({ projected: 1, beforeGrant: 1, stop: 'empty' });
+  });
+
+  it('should report from the time the account granted, however late it first read the grant', async () => {
+    /* A project the API registers after its first run began: the first read grants nothing, a later one does. */
+    const { reporter, sent, advance } = setup([undefined, grant({ allowedSince: at - 60_000 })]);
+
+    await reporter.refresh();
+    advance(30_000);
+    await reporter.report([run(0, at + 1000), run(1, at - 120_000)], () => true);
+
+    expect(sent.map((evidence) => evidence.semantic.kind)).toEqual(['outcome']);
+    expect(reporter.coverage()).toMatchObject({ projected: 1, beforeGrant: 1 });
+  });
+
+  it('should never date a grant later than now, whatever the server answers', async () => {
+    const { reporter, sent } = setup([grant({ allowedSince: at + 3_600_000 })]);
+
+    await reporter.refresh();
+    await reporter.report([run(0, at)], () => true);
+
+    expect(sent).toHaveLength(1);
+  });
+
+  it('should adopt the decision time when a later read of the same grant gives it, and project its runs again', async () => {
+    const { reporter, sent, advance } = setup([grant(), grant(), grant({ allowedSince: at - 60_000 })]);
+
+    advance(30_000);
+    await reporter.refresh();
+    await reporter.report([run(0, at + 1000)], () => true);
+    expect(sent).toEqual([]);
+    await reporter.report([run(0, at + 1000)], () => true);
+
+    expect(sent).toHaveLength(1);
   });
 
   it('should not send a settled run again', async () => {

@@ -100,6 +100,8 @@ const readGrant = async (
     `${options.apiBaseUrl}/v1/telemetry-purposes?projectId=${encodeURIComponent(options.project)}`,
     { credentials: 'include', headers: { accept: 'application/json' } },
   );
+  /* Read as the response arrives, which is after the server answered: it dates the grant on this host's clock. */
+  const receivedAt = (options.now ?? Date.now)();
   if (response.status === 401 || response.status === 403) {
     return undefined;
   }
@@ -109,7 +111,7 @@ const readGrant = async (
   const answer = (await response.json()) as EffectivePurposesAnswer;
   /* An account switched while the answer was in flight is not the account it answered for. */
   return options.principal() === principal
-    ? purposeGrantOf(answer, { principal, project: options.project }, purpose)
+    ? purposeGrantOf(answer, { principal, project: options.project, receivedAt }, purpose)
     : undefined;
 };
 
@@ -188,9 +190,8 @@ export const createHostEvidence = (options: HostEvidenceOptions): HostEvidence =
         void quietly(async () => report(chatId));
         return;
       }
-      /* A run is starting: read the grant now, so one given since the last read (or a project the API registered
-       * after this host opened) binds before the run's facts occur rather than after it ends. Facts from before a
-       * reporter first sees its grant are never backfilled. */
+      /* A run is starting: read the grant now, so a withdrawal since the last read purges before the run's facts are
+       * held. Facts from before the account's allowing decision are never backfilled. */
       void quietly(async () => reporter.refresh());
       if (feedback !== undefined) {
         void quietly(async () => feedback.refresh());

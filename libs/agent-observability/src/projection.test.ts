@@ -259,6 +259,19 @@ describe('projectRun', () => {
     const late = await projectRun(run(), context({ grantedAt: at + 5000 }));
     expect(late).toMatchObject({ beforeGrant: 1 });
     expect(late.evidence.map((evidence) => evidence.semantic.kind)).toEqual(['outcome']);
+    /* An outcome after the grant carries no phase time from before it. */
+    expect(late.evidence[0]?.clocks.intervals).toEqual([]);
+  });
+
+  it('clips an outcome’s phases at the grant, so a run that began before it reports only the time since', async () => {
+    const projection = await projectRun(
+      run({ intervals: [{ phase: 'approval', start: at, end: at + 2000 }] }),
+      context({ grantedAt: at + 500 }),
+    );
+
+    expect(projection.evidence.at(-1)?.clocks.intervals).toEqual([
+      { phase: 'approval', domain: 'host-recorded', start: at + 500, end: at + 2000 },
+    ]);
   });
 
   it('reports each foreign epoch it read, by its contract id, and flags an unended run whose tail is elsewhere', async () => {

@@ -85,8 +85,8 @@ never installs them; query choices do not enter the viewer API. The current bran
 contains the lean production candidate described below. Restart the calibration
 server after editing that transform. Query parameters are fixed at page load:
 
-- `abl=full|direct|beauty|mrt|raw-ao|filtered-ao|bilateral-ao`: full graph; direct PBR draw; tone-mapped beauty;
-  tone-mapped beauty with normal MRT; raw GTAO with bilinear sampling; filtered GTAO with bilinear sampling (the lean default); filtered GTAO with native bilateral reconstruction.
+- `abl=full|direct|beauty|mrt|raw-ao|bilinear-ao`: full graph; direct PBR draw; tone-mapped beauty;
+  tone-mapped beauty with normal MRT; raw GTAO with bilinear sampling; filtered GTAO with the retired bilinear reconstruction, which smears contact shading across silhouettes.
 - The lean candidate has no FXAA intermediate. Historical `aa=off` comparisons belong to commit `1cec9efe67`.
 - `samples=0|4`: override the single-sample renderer default; `sceneSamples=0|4`: independently set the scene target.
 - `nodegl=1`: force the node WebGL2 backend, preserving standard depth and reporting actual execution.
@@ -107,8 +107,8 @@ Benchmark combined. Save PNG + metadata only after timing finishes. Warmup is 30
 then 300 samples. Run matched repeats; never report capped cadence as exclusive GPU time.
 
 `mrt` and `raw-ao` remove graph dependencies, not merely their visible
-contribution. `filtered-ao` matches the lean full graph; `bilateral-ao` restores the expensive reconstruction for controlled comparison. Draw counts and allocated target counts verify the intended execution. Raw/filtered controls intentionally change appearance. The lean branch defaults to single-sample
-scene acquisition and frame targets, bilinear AO reconstruction, no FXAA intermediate and linear overlay blending; it is not appearance-qualified. Direct rendering still
+contribution. `full` uses filtered GTAO with depth/normal-aware reconstruction; `bilinear-ao` restores the retired bilinear reconstruction for controlled comparison. Draw counts and allocated target counts verify the intended execution. Raw/filtered controls intentionally change appearance. The lean branch defaults to single-sample
+scene acquisition and frame targets, depth/normal-aware AO reconstruction, no FXAA intermediate and linear overlay blending; it is not appearance-qualified. Direct rendering still
 uses Tau's loaded meshes, materials, lighting and update owners; it is not a standalone
 Three.js application or a measurement of all Tau CPU overhead.
 

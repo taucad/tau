@@ -93,7 +93,9 @@ $(sed 's/^/    /' "$work/host")
 CONFIG
 printf 'instance-id: tau-proof-%s\nlocal-hostname: tau-proof\n' "$TAU_VM_DISTRO" > "$work/meta-data"
 cloud-localds "$work/seed.img" "$work/user-data" "$work/meta-data"
-qemu-system-x86_64 -enable-kvm -cpu host -smp 2 -m 4096 -display none -no-reboot \
+# 8 GiB of the hosted runner's 16 GiB: at 4 GiB, stock Ubuntu's packagekitd pushed the guest into the OOM killer, which
+# killed a Tau process (2 GiB anon RSS) mid-render in staging run 41662259184 (ubuntu-apt-x11).
+qemu-system-x86_64 -enable-kvm -cpu host -smp 2 -m 8192 -display none -no-reboot \
   -drive "file=$work/guest.qcow2,format=qcow2,if=virtio" \
   -drive "file=$work/seed.img,format=raw,if=virtio,readonly=on" \
   -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22 -device virtio-net-pci,netdev=net0 \

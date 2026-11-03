@@ -193,6 +193,29 @@ const tau = (step: RowVerdict['step'], args: readonly string[]): string =>
   });
 
 /**
+ * `tau install` against the public npm registry, given one more chance after a pause when, and only when, Tau
+ * reports the registry itself unreachable. Tau's own fetch retries span about 300 ms, which a registry blip on a
+ * hosted runner outlasts: run 41675383638 failed the tscircuit row on `registry-unavailable` for
+ * `@tscircuit/math-utils` while main was green on the same row. Any other failure, including a second
+ * `registry-unavailable`, fails the row as before.
+ * @param project - The project to install.
+ */
+const installFromRegistry = (project: string): void => {
+  try {
+    tau('tau install', ['install', project]);
+  } catch (error) {
+    if (!(error instanceof StepFailure) || !error.message.includes('registry-unavailable:')) {
+      throw error;
+    }
+    console.log(
+      '::warning title=npm registry unavailable::tau install could not reach the registry; retrying once in 30 s',
+    );
+    spawnSync('sleep', ['30']);
+    tau('tau install', ['install', project]);
+  }
+};
+
+/**
  * The project template files a kernel's plugin publishes (`@taucad/<kernel>/project/*`), which the UI's
  * `getKernelProjectTemplate` imports; undefined for a kernel whose files Tau writes itself.
  * @param kernel - The kernel id.
@@ -295,7 +318,7 @@ const checkRow = (kernel: string, work: string): RowVerdict => {
     const main = createProject(kernel, project);
     const configuration = kernelConfigurations.find(({ id }) => id === kernel);
     if (configuration?.ecosystem === 'npm') {
-      tau('tau install', ['install', project]);
+      installFromRegistry(project);
     }
     cpSync(project, standalone, { recursive: true, filter: (source) => !source.includes(`${project}/node_modules`) });
 

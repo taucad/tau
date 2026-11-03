@@ -59,6 +59,11 @@ try {
     };
     const foreign = await appImageQuit('/opt/tau-staging-appimage/releases/1.5.70/Tau.AppImage');
     assert.match(String(foreign), /admitted AppImage outer path/u);
+    // The refusal names what the kernel reported, so a CI mismatch is diagnosable without the guest.
+    assert.match(
+      String(foreign),
+      /expected APPIMAGE=\/opt\/tau-staging-appimage\/releases\/1\.5\.71\/Tau\.AppImage; .* "APPIMAGE=\/opt\/tau-staging-appimage\/releases\/1\.5\.70\/Tau\.AppImage"/u,
+    );
     // The admitted generation passes the binding and fails later, at the absent window, without closing anything.
     const admitted = await appImageQuit('/opt/tau-staging-appimage/releases/1.5.71/Tau.AppImage');
     assert.ok(admitted instanceof Error);

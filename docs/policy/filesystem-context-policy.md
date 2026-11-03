@@ -49,11 +49,11 @@ Never increase the offloading threshold without measuring the impact on context 
 
 ### 4. Skills and Memory via Filesystem
 
-| Feature       | Source                                         | Loading                                                                   |
-| ------------- | ---------------------------------------------- | ------------------------------------------------------------------------- |
-| Skills        | `.agents/skills/` (client-assembled catalog)   | Metadata in the turn context; body on `use_skill` activation              |
-| Memory        | Client-assembled AGENTS.md payload (`memory`)  | User-role `<system-reminder>` message in the turn context                 |
-| Recent skills | `RecentSkillsPort`, per-chat                   | Fingerprint-reconciled; content restored after a compaction summary       |
+| Feature       | Source                                        | Loading                                                             |
+| ------------- | --------------------------------------------- | ------------------------------------------------------------------- |
+| Skills        | `.agents/skills/` (client-assembled catalog)  | Metadata in the turn context; body on `use_skill` activation        |
+| Memory        | Client-assembled AGENTS.md payload (`memory`) | User-role `<system-reminder>` message in the turn context           |
+| Recent skills | `RecentSkillsPort`, per-chat                  | Fingerprint-reconciled; content restored after a compaction summary |
 
 `createTurnContextSnapshot` (`packages/agent-host/src/harness/cad-middleware.ts`) resolves all three once per turn, and the session commits the result with `turn.history-projection-committed` before the first model call, so a replay sees the exact context the model saw.
 

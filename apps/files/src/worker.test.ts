@@ -308,6 +308,7 @@ describe('CORS', () => {
     expect(response.headers.get('access-control-expose-headers')).toBe(
       'ETag, Content-Range, Accept-Ranges, X-Tau-Files-Error',
     );
+    expect(response.headers.get('timing-allow-origin')).toBe(allowedOrigin);
     expect(response.headers.get('vary')).toBe('Origin');
     expect(response.headers.get('access-control-allow-credentials')).toBeNull();
   });
@@ -321,6 +322,7 @@ describe('CORS', () => {
     const response = await fetchAt(tenant.url, { headers: { Origin: 'https://evil.example' } });
     expect(response.status).toBe(200);
     expect(response.headers.get('access-control-allow-origin')).toBeNull();
+    expect(response.headers.get('timing-allow-origin')).toBeNull();
     expect(response.headers.get('vary')).toBe('Origin');
   });
 

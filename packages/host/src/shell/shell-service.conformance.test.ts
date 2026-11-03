@@ -200,12 +200,15 @@ describe.runIf(enabled)('shell service conformance', () => {
 
   conformance(
     'H02',
-    'authored controls are writable; records, control data, other projects and app data are not',
+    'authored and unknown .tau names are writable; records, control data, other projects and app data are not',
     async () => {
       const positive = completed(await run({ command: 'printf \'{"a":1}\' > .tau/parameters/main.json' }));
 
       expect(positive.exitCode, positive.stderr.text).toBe(0);
       expect(readFileSync(join(project, '.tau', 'parameters', 'main.json'), 'utf8')).toBe('{"a":1}');
+      const unknown = completed(await run({ command: 'mkdir -p .tau/notes && printf NOTE > .tau/notes/a.txt' }));
+      expect(unknown.exitCode, unknown.stderr.text).toBe(0);
+      expect(readFileSync(join(project, '.tau', 'notes', 'a.txt'), 'utf8')).toBe('NOTE');
 
       const probes = [
         'cat .git/HEAD',

@@ -4,7 +4,7 @@ OpenSCAD language server compiled to WebAssembly for the source editor.
 
 The server is Rust (`rust/`) on the [tree-sitter-openscad](https://github.com/openscad/tree-sitter-openscad) grammar. It runs in a module worker with no imports and no I/O: the worker sends project files over JSON-RPC (`tau/workspaceFiles`) and the editor's open documents with the usual `textDocument/did*` notifications.
 
-It serves completion (built-ins, locals, `use`/`include` imports, import paths, argument names, and project declarations that add their own `use <…>` when accepted), hover with doc comments and `{@link}` links, signature help, go to definition (built-ins open generated declaration source through `tau/declarationSource`), references, document highlights, rename, pull diagnostics, import quick fixes, document and workspace symbols, folding and semantic tokens.
+It serves completion (built-ins, locals, `use`/`include` imports, import paths, argument names, and project declarations that add their own `use <…>` when accepted), hover with doc comments and `{@link}` links, signature help, go to definition (built-ins open generated declaration source through `tau/declarationSource`), references, document highlights, rename, call hierarchy, document formatting (indentation, trailing whitespace and blank lines only, never inside strings, and nothing on a file with syntax errors), pull diagnostics, import quick fixes, document and workspace symbols, folding and semantic tokens.
 
 ## Targets
 
@@ -17,7 +17,7 @@ It serves completion (built-ins, locals, `use`/`include` imports, import paths, 
 
 ## Editor integration
 
-`apps/ui/openscad-language-assets.vite-plugin.ts` serves the stage under a content-addressed path and defines `tauOpenscadLanguageAssets`; the UI's build and dev targets depend on `prepare`. `apps/ui/app/lib/openscad-language/openscad-codemirror.ts` shares one worker per editor session and maps completion (accepting an auto-import applies the server's `additionalTextEdits`), hover and completion documentation with `{@link}` definition links, Cmd-click and F12 definitions, signature help, F2 rename, Mod-. quick fixes, pull diagnostics, folding and semantic tokens onto CodeMirror.
+`apps/ui/openscad-language-assets.vite-plugin.ts` serves the stage under a content-addressed path and defines `tauOpenscadLanguageAssets`; the UI's build and dev targets depend on `prepare`. `apps/ui/app/lib/openscad-language/openscad-codemirror.ts` shares one worker per editor session and maps completion (accepting an auto-import applies the server's `additionalTextEdits`), hover and completion documentation with `{@link}` definition links, Cmd-click and F12 definitions, signature help, F2 rename, Mod-. quick fixes, pull diagnostics, folding and semantic tokens onto CodeMirror. Rename, Format Document, quick fixes, parameter hints, references, call hierarchy, document highlights and document and workspace symbols reach the editor through the shared `languageFeatures` facet, so OpenSCAD gets the same context menu entries, keys, breadcrumbs and pickers as C#, TypeScript and KCL.
 
 ## Performance
 

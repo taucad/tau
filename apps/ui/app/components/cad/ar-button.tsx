@@ -8,9 +8,26 @@ import { useAr } from '#components/cad/use-ar.js';
 import type { ArFailure } from '#components/cad/use-ar.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 
-/** Shared AR glyph for the launch button and proposed grouped controls. */
+/** Shared AR glyph for the launch button and proposed grouped controls: the scan frame with a small "AR" inside it. */
 export function ArIcon({ className }: { readonly className?: string }): React.JSX.Element {
-  return <Scan aria-hidden className={className} />;
+  return (
+    <Scan aria-hidden className={className}>
+      {/* Baseline at the frame's centre plus half the capitals' height (~0.73 em), so "AR" itself is centred; a
+          `central` baseline centres the font's em box instead, which sits low and varies by font. */}
+      <text
+        x='12'
+        y='15.1'
+        textAnchor='middle'
+        fontSize='8.5'
+        fontWeight='700'
+        letterSpacing='-0.2'
+        fill='currentColor'
+        stroke='none'
+      >
+        AR
+      </text>
+    </Scan>
+  );
 }
 
 /**

@@ -66,6 +66,12 @@ export const flagRegistry = {
     label: 'WebGPU inspector',
     description: 'Load the Three.js pipeline inspector for WebGPU diagnostics',
   },
+  modelPinning: {
+    showInExperimental: false,
+    schema: z.boolean().default(false),
+    label: 'Model pinning',
+    description: 'Pin models to the top of the model selector',
+  },
   pluginsStore: {
     showInExperimental: false,
     schema: z.boolean().default(false),

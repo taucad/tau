@@ -6,7 +6,7 @@ import { basename, dirname, join } from 'node:path';
 
 import { z } from 'zod';
 
-import { processTable, terminateOwnedProcesses } from '#shell/process-tree.js';
+import { processTable, tableObservationTimeout, terminateOwnedProcesses } from '#shell/process-tree.js';
 import type { ProcessRow } from '#shell/process-tree.js';
 import type { PreparedShell, ShellExecution, ShellRecovery, ShellResource } from '#shell/shell-provider.js';
 
@@ -192,13 +192,23 @@ const bootIdentity = async (): Promise<string> => {
     );
   });
 };
+/*
+ * This process's creation identity cannot change while it runs, so one good read serves every record. Reading the
+ * whole table again for each record put a `ps` on every macOS launch path, and under eight concurrent launches on a
+ * loaded runner one of those reads failed and refused a command (MAC-X S04). A failed read is not kept.
+ */
+let ownIdentity: z.infer<typeof processIdentity> | undefined;
 const selfIdentity = async (): Promise<z.infer<typeof processIdentity>> => {
+  if (ownIdentity !== undefined) {
+    return ownIdentity;
+  }
   const rows = await processTable();
   const row = rows.find((candidate) => candidate.pid === process.pid);
   if (row?.started === undefined) {
     throw new Error('Shell custody owner creation identity is unavailable.');
   }
-  return { pid: process.pid, started: row.started };
+  ownIdentity = { pid: process.pid, started: row.started };
+  return ownIdentity;
 };
 
 /**
@@ -225,7 +235,7 @@ export const createShellCustody = (
         new Promise<never>((_resolve, reject) => {
           timer = setTimeout(() => {
             reject(new Error('The process table did not answer in time.'));
-          }, 1000);
+          }, tableObservationTimeout);
         }),
       ]);
     } finally {

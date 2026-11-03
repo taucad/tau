@@ -106,6 +106,7 @@ export const createPicogkBrowserContext = (options: PicogkBrowserSessionOptions)
       async sampleResident() {
         return undefined;
       },
+      observedHeapBytes: () => session.observedHeapBytes(),
       async cleanup() {
         disposed = true;
         current = undefined;

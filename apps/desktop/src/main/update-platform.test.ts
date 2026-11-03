@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   fetchUpdateDescriptor,
   launchWindowsUpdate,
+  relaunchSwitches,
   verifyDownloadedUpdate,
   startPlatformUpdater,
 } from '#main/update-platform.js';
@@ -46,6 +47,27 @@ afterEach(() => {
   mocks.managed.mockResolvedValue(false);
 });
 describe('platform update transport and launch', () => {
+  it('carries launch switches but not files, deep links or anything after -- into the updated process', () => {
+    expect(
+      relaunchSwitches([
+        '/usr/bin/tau-staging',
+        '--use-gl=angle',
+        '--use-angle=swiftshader',
+        '--enable-unsafe-swiftshader',
+        '--tau-route-qualification=nonce',
+        'tau-staging://machines',
+        '/home/tau/model.glb',
+        '--',
+        '--after-separator.glb',
+      ]),
+    ).toEqual([
+      '--use-gl=angle',
+      '--use-angle=swiftshader',
+      '--enable-unsafe-swiftshader',
+      '--tau-route-qualification=nonce',
+    ]);
+  });
+
   it.each([
     { wrongSource: false, managed: false },
     { wrongSource: true, managed: false },

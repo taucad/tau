@@ -20,6 +20,7 @@ export function ModelSettings(): React.JSX.Element {
     isAvailable,
     setAvailable,
     resetAvailability,
+    isPinningEnabled,
     isPinned,
     setPinned,
   } = useModels();
@@ -90,17 +91,19 @@ export function ModelSettings(): React.JSX.Element {
                 >
                   <span className='truncate'>{model.name}</span>
                 </SwitchRow>
-                <ModelPinButton
-                  name={model.name}
-                  isOn={isPinned(model)}
-                  className={cn(
-                    !isPinned(model) &&
-                      'opacity-0 group-hover/row:opacity-100 group-has-focus-visible/row:opacity-100 pointer-coarse:opacity-100',
-                  )}
-                  onToggle={() => {
-                    setPinned(model, !isPinned(model));
-                  }}
-                />
+                {isPinningEnabled ? (
+                  <ModelPinButton
+                    name={model.name}
+                    isOn={isPinned(model)}
+                    className={cn(
+                      !isPinned(model) &&
+                        'opacity-0 group-hover/row:opacity-100 group-has-focus-visible/row:opacity-100 pointer-coarse:opacity-100',
+                    )}
+                    onToggle={() => {
+                      setPinned(model, !isPinned(model));
+                    }}
+                  />
+                ) : null}
               </div>
             ))}
           </div>

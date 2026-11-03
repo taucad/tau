@@ -1,0 +1,31 @@
+// Flat-sided bottle: a stadium-shaped body with a neck on its shoulder, shelled open at the mouth.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+// Parameters
+bodyLength = 70
+bodyWidth = 40
+bodyHeight = 150
+neckDiameter = 26
+neckHeight = 20
+wallThickness = 2
+
+endRadius = bodyWidth / 2
+straightLength = bodyLength - bodyWidth
+
+// Stadium footprint centred on the origin.
+footprint = startSketchOn(XY)
+  |> startProfile(at = [-straightLength / 2, -endRadius])
+  |> xLine(length = straightLength)
+  |> tangentialArc(angle = 180deg, radius = endRadius)
+  |> xLine(length = -straightLength)
+  |> tangentialArc(angle = 180deg, radius = endRadius)
+  |> close()
+
+body = extrude(footprint, length = bodyHeight, tagEnd = $shoulder)
+
+// Neck on the shoulder.
+neck = startSketchOn(body, face = shoulder)
+  |> circle(center = [0, 0], diameter = neckDiameter)
+  |> extrude(length = neckHeight, tagEnd = $mouth)
+
+bottle = shell(neck, faces = [mouth], thickness = wallThickness)

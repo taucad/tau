@@ -1,20 +1,28 @@
 /**
  * T30 (AR-W15-02/03/08, AR-W22-03, AR-W23-02): the generated runtime vocabularies equal the plugin registry, and the
  * product `kernelIds` are untouched. Regenerate with `pnpm nx run telemetry:generate-runtime-vocabulary`.
+ *
+ * T33 (AR-W15-08, AR-W16-09, R19): every `PluginCapabilities` kind is classified to a producer vocabulary and a usage
+ * series, and every registry capability is named by both.
  */
 import { describe, expect, it } from 'vitest';
 import { kernelIds } from '#ingest.js';
-import { capabilityOf, codeClassOf, errorTypes, fileFormatOf, pluginUsageIds } from '#runtime-ingest.js';
+import { capabilityOf, codeClassOf, errorTypes, fileFormatOf, pluginUsageIds, usageCoverage } from '#runtime-ingest.js';
+import type { PluginCapability } from '#runtime-ingest.js';
+import { runtimeMetrics } from '#runtime-metrics.js';
 import * as generated from '#runtime-vocabulary.js';
 
 /** The parts of `scripts/runtime-registry.mts` this test reads. */
 type RegistryModule = Readonly<{
+  capabilityKinds: readonly string[];
+  declaredCapabilityKinds: () => readonly string[];
   deriveRuntimeVocabulary: () => Promise<Readonly<Record<string, readonly string[]>>>;
   registryCapabilities: () => Promise<
     ReadonlyArray<
       Readonly<{
         kind: string;
         id: string;
+        name: string | undefined;
         extensions: readonly string[];
         exports: readonly string[];
         edges: ReadonlyArray<Readonly<{ from: string; to: string }>>;
@@ -127,5 +135,120 @@ describe('runtime vocabularies (T30)', () => {
     for (const code of generated.machineFailureCodes) {
       expect(errorTypes).toContain(code);
     }
+  });
+});
+
+type GeneratedVocabulary = {
+  [Key in keyof typeof generated]: (typeof generated)[Key] extends readonly string[] ? Key : never;
+}[keyof typeof generated];
+
+/**
+ * The producer table of §7.1 (R19) with the usage series of §7.5, per `PluginCapabilities` kind. A kind added to
+ * `PluginCapabilities` fails this contract until it is classified here (or recorded as a blind spot in the design and
+ * classified here with that reason).
+ */
+const capabilityClassification: Readonly<
+  Record<
+    string,
+    Readonly<{
+      vocabulary: GeneratedVocabulary;
+      series: string;
+      by: string;
+      capability: PluginCapability | undefined;
+    }>
+  >
+> = {
+  kernels: {
+    vocabulary: 'runtimeKernelIds',
+    series: 'tau_runtime_operations_total',
+    by: 'kernel_id',
+    capability: undefined,
+  },
+  middleware: {
+    vocabulary: 'middlewareIds',
+    series: 'tau_runtime_plugin_operations_total{tau_runtime_capability="middleware"}',
+    by: 'tau_runtime_plugin',
+    capability: 'middleware',
+  },
+  bundlers: {
+    vocabulary: 'bundlerIds',
+    series: 'tau_runtime_plugin_operations_total{tau_runtime_capability="bundler"}',
+    by: 'tau_runtime_plugin',
+    capability: 'bundler',
+  },
+  transcoders: {
+    vocabulary: 'transcoderIds',
+    series: 'tau_runtime_plugin_operations_total{tau_runtime_capability="transcoder"}',
+    by: 'tau_runtime_plugin',
+    capability: 'transcoder',
+  },
+  jobs: {
+    vocabulary: 'jobProviderIds',
+    series: 'tau_runtime_plugin_operations_total{tau_runtime_capability="job"}',
+    by: 'tau_runtime_plugin',
+    capability: 'job',
+  },
+  machines: {
+    vocabulary: 'machineProviderIds',
+    series: 'tau_runtime_plugin_operations_total{tau_runtime_capability="machine"}',
+    by: 'tau_runtime_plugin',
+    capability: 'machine',
+  },
+};
+
+const kernelLabel = runtimeMetrics.runtimeOperations.attributes.shape['kernel.id'];
+const pluginLabel = runtimeMetrics.runtimePluginOperations.attributes.shape['tau.runtime.plugin'];
+const machinePluginLabel = runtimeMetrics.runtimeMachineOperations.attributes.shape['tau.runtime.plugin'];
+
+describe('capability classification (T33)', () => {
+  it('should classify every capability kind PluginCapabilities declares, and read each in the derivation', () => {
+    const declared = registry.declaredCapabilityKinds().toSorted();
+    expect(declared).toHaveLength(6);
+    expect(Object.keys(capabilityClassification).toSorted()).toEqual(declared);
+    expect(registry.capabilityKinds.toSorted()).toEqual(declared);
+  });
+
+  it('should give every classified kind a usage series row', () => {
+    for (const [kind, { series, by }] of Object.entries(capabilityClassification)) {
+      expect(
+        usageCoverage.some((row) => row.series === series && row.by === by),
+        kind,
+      ).toBe(true);
+    }
+    expect(usageCoverage.some((row) => row.series === 'tau_runtime_machine_operations_total')).toBe(true);
+  });
+
+  it('should name every registry capability in its producer vocabulary and keep it as its usage label', async () => {
+    const capabilities = await registry.registryCapabilities();
+    const problems = capabilities.flatMap(({ kind, id, name }) => {
+      const classification = capabilityClassification[kind];
+      if (classification === undefined) {
+        return [`${kind}:${id}: unclassified capability kind`];
+      }
+      // Middleware is counted under its `name`, every other capability under its id.
+      const label = kind === 'middleware' ? (name ?? id) : id;
+      const found: string[] = [];
+      if (!(generated[classification.vocabulary] as readonly string[]).includes(label)) {
+        found.push(`${kind}:${label}: not in ${classification.vocabulary}`);
+      }
+      if (classification.capability === undefined) {
+        if (kernelLabel.parse(label) !== label) {
+          found.push(`${kind}:${label}: kernel_id collapses it`);
+        }
+        return found;
+      }
+      if (pluginLabel.parse(label) !== label) {
+        found.push(`${kind}:${label}: tau_runtime_plugin collapses it`);
+      }
+      if (capabilityOf[label as keyof typeof capabilityOf] !== classification.capability) {
+        found.push(`${kind}:${label}: capabilityOf is ${String(capabilityOf[label as keyof typeof capabilityOf])}`);
+      }
+      if (kind === 'machines' && machinePluginLabel.parse(label) !== label) {
+        found.push(`${kind}:${label}: machine_operations collapses it`);
+      }
+      return found;
+    });
+    expect(capabilities.length).toBeGreaterThan(0);
+    expect(problems).toEqual([]);
   });
 });

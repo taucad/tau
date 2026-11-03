@@ -70,7 +70,6 @@ describe('kernel-worker constants', () => {
       'parameterUnits',
       'geometryCache',
       'gltfEdgeDetection',
-      'displaySimplification',
     ]);
   });
 

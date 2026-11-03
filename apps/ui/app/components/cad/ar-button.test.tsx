@@ -257,8 +257,12 @@ describe('ArButton capability detection', () => {
     renderAr();
     await settle();
     const button = arButton();
-    expect(button).toHaveTextContent('');
-    expect(button.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    // The only text is the glyph's "AR" mark, inside the hidden SVG, so the accessible name stays the label.
+    const glyph = button.querySelector('svg');
+    expect(glyph).toHaveAttribute('aria-hidden', 'true');
+    expect(glyph).toHaveTextContent('AR');
+    expect(button).toHaveTextContent('AR');
+    expect(button).toHaveAccessibleName('View in your space');
     await userEvent.hover(button);
     expect(await screen.findByRole('tooltip')).toHaveTextContent('View in your space');
   });

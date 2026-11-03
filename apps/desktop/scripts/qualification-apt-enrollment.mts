@@ -179,6 +179,18 @@ const admitSnapshot = async (options: {
   }
   return repository;
 };
+/**
+ * The `Date` of a signed APT pointer, in milliseconds. APT treats an `InRelease` dated before the one it already holds
+ * as unchanged and never reads its index (run 41342285729: snapshot B, signed before A, was never fetched).
+ */
+const aptReleaseDate = (inRelease: Uint8Array<ArrayBuffer>): number => {
+  const [message = ''] = Buffer.from(inRelease).toString('utf8').split('\n-----BEGIN PGP SIGNATURE-----');
+  const date = Date.parse(/^Date: (.+)$/mu.exec(message)?.[1] ?? '');
+  if (Number.isNaN(date)) {
+    throw new TypeError('Signed APT pointer has no Date');
+  }
+  return date;
+};
 export type QualificationAptEnrollment = {
   repositories: AptQualificationRepository[];
   snapshotDirectories: string[];
@@ -235,6 +247,10 @@ export const prepareQualificationAptEnrollment = async (options: {
     }
     return result.value;
   });
+  const dates = repositories.map((repository) => aptReleaseDate(repository.inRelease));
+  if (!(dates[0]! < dates[1]! && dates[1]! < dates[2]!)) {
+    throw new Error('APT snapshots must be signed in candidate order: InRelease Date A < B < C');
+  }
   const id = createHash('sha256').update(runDirectory).digest('hex').slice(0, 16);
   const owned = new Map<string, string>();
   const sudo = (args: string[]): string => command('sudo', ['-n', ...args]);

@@ -79,10 +79,12 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
 const models: {
   defaultExecution: ChatComposerContextValue['execution']['execution'];
   catalog: { status: 'loading' } | { status: 'unavailable' } | { status: 'loaded'; models: Model[] };
+  isPinningEnabled: boolean;
   pinnedIds: string[];
 } = {
   defaultExecution: { kind: 'tau', model: fable.id, effort: 'low' },
   catalog: { status: 'loaded', models: catalog },
+  isPinningEnabled: true,
   pinnedIds: [],
 };
 const setPinned = vi.fn();
@@ -93,6 +95,7 @@ vi.mock('#hooks/use-models.js', () => ({
     defaultExecution: models.defaultExecution,
     lastTauExecution: { kind: 'tau', model: fable.id, effort: 'low' },
     catalog: models.catalog,
+    isPinningEnabled: models.isPinningEnabled,
     pinnedIds: models.pinnedIds,
     setPinned,
   }),
@@ -195,6 +198,7 @@ describe('ChatAgentSheet', () => {
     state.canSelectExecution = true;
     models.defaultExecution = { kind: 'tau', model: fable.id, effort: 'low' };
     models.catalog = { status: 'loaded', models: catalog };
+    models.isPinningEnabled = true;
     models.pinnedIds = [];
   });
 
@@ -788,6 +792,18 @@ describe('ChatAgentSheet', () => {
 
       await userEvent.keyboard('{ArrowUp}{Enter}');
       expect(setActiveModel).toHaveBeenCalledWith(haiku.id);
+    });
+
+    it('offers no pin, and Shift+Enter pins nothing, while the pinning flag is off', async () => {
+      models.isPinningEnabled = false;
+      renderSheet();
+      await openSheet();
+      await userEvent.click(screen.getByRole('button', { name: 'Model: Fable 5.1. Change' }));
+
+      expect(screen.queryByRole('button', { name: /^Pin / })).toBeNull();
+      expect(screen.queryByRole('group', { name: 'Pinned' })).toBeNull();
+      await userEvent.keyboard('{Shift>}{Enter}{/Shift}');
+      expect(setPinned).not.toHaveBeenCalled();
     });
 
     it('offers no pin on an external agent’s models', async () => {

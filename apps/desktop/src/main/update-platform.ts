@@ -26,6 +26,19 @@ import { updateSource, isNewerVersion } from '#main/updater.js';
 import type { DesktopUpdater, AvailableUpdate } from '#main/updater.js';
 import { verifyWindowsSignature } from '#main/windows-signature.js';
 
+/**
+ * Electron replaces the whole command line whenever `app.relaunch` is given an `execPath`, so carry the
+ * launch switches (graphics, sandbox, Ozone) into the updated process. Positional files and deep links stay
+ * behind so an update never reopens what the old process was asked to open.
+ */
+export const relaunchSwitches = (argv: readonly string[]): string[] => {
+  const options = argv.slice(1);
+  const separator = options.indexOf('--');
+  return (separator === -1 ? options : options.slice(0, separator)).filter(
+    (value) => value.startsWith('--') && value.length > 2,
+  );
+};
+
 /** Bound metadata and refuse redirects rather than giving the server another origin's authority. */
 export const fetchUpdateDescriptor = async (url: string): Promise<unknown> => {
   const response = await net.fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(30_000) });
@@ -201,7 +214,7 @@ export const startPlatformUpdater = async (options: PlatformUpdateOptions): Prom
         };
       },
       finish: () => {
-        app.relaunch({ execPath: launcher });
+        app.relaunch({ execPath: launcher, args: relaunchSwitches(process.argv) });
         app.quit();
       },
     });
@@ -391,7 +404,7 @@ export const startPlatformUpdater = async (options: PlatformUpdateOptions): Prom
     },
     finish: () => {
       if (image) {
-        app.relaunch({ execPath: image.outerImagePath });
+        app.relaunch({ execPath: image.outerImagePath, args: relaunchSwitches(process.argv) });
       }
       app.quit();
     },

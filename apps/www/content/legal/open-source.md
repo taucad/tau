@@ -29,15 +29,6 @@ corresponding OCCT source and relink kit, these license texts and the GeoSpec en
 carries the kit inside the app bundle, under `Tau.app/Contents/Resources/SOURCES`. The source of the GeoSpec engine,
 including how it builds and links OCCT, is at [github.com/taucad/geospec](https://github.com/taucad/geospec).
 
-## libfuse
-
-On Linux, the desktop app's private shell projection bridge links dynamically against **libfuse** 3
-(`libfuse3.so.4`), Copyright © Miklos Szeredi and the libfuse contributors. The libfuse library is licensed under
-the [GNU Lesser General Public License version 2.1](#gnu-lesser-general-public-license-version-2.1), reproduced
-in full below. The bridge is built against unmodified libfuse 3.17.2
-([source](https://github.com/libfuse/libfuse/releases/tag/fuse-3.17.2)) and calls only its public
-interface from a separate shared object.
-
 ## Third-Party Packages
 
 The web and desktop apps include the following 877 packages, with the license each declares.

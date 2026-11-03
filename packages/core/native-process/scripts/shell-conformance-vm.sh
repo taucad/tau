@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Run native-process-core:test:shell-conformance inside a disposable stock Linux guest (LNX-U, LNX-D).
+# Run native-process-core:test:shell-conformance inside a disposable stock Linux guest (LNX-U, LNX-U26, LNX-D).
 # The guest keeps its shipped AppArmor policy and kernel.apparmor_restrict_unprivileged_userns value; the sandbox
 # reaches user namespaces only through the Tau-scoped bwrap profile the real APT selector installs.
-# Required env: TAU_VM_DISTRO (ubuntu or debian), RUNNER_TEMP (disposable CI directory).
+# Required env: TAU_VM_DISTRO (ubuntu, ubuntu2604 or debian), RUNNER_TEMP (disposable CI directory).
 # Usage: TAU_VM_DISTRO=ubuntu bash packages/core/native-process/scripts/shell-conformance-vm.sh
 # Exit codes: 0 every row passed; 1 a row failed or an operation failed; 3 missing host prerequisite.
 set -euo pipefail
@@ -17,6 +17,11 @@ case "$TAU_VM_DISTRO" in
     row=LNX-U
     url=https://cloud-images.ubuntu.com/releases/noble/release-20261017/ubuntu-24.04-server-cloudimg-amd64.img
     digest=04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94
+    algorithm=sha256sum ;;
+  ubuntu2604)
+    row=LNX-U26
+    url=https://cloud-images.ubuntu.com/releases/resolute/release-20261016/ubuntu-26.04-server-cloudimg-amd64.img
+    digest=5645d0318ad21f643ebb1ac4567514620e9893380b07b0201fda163baa5b7eb5
     algorithm=sha256sum ;;
   debian)
     row=LNX-D
@@ -49,10 +54,22 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 1' INT TERM
-sudo timeout --kill-after=30s 300s apt-get \
-  -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 \
-  -o APT::Update::Error-Mode=any update
-sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils cloud-image-utils acl
+# The runner image's package lists usually already name these packages, so install from them first; a mirror that
+# stalls `apt-get update` then cannot fail the row. Only a failed install refreshes the lists, with two bounded tries.
+packages=(qemu-system-x86 qemu-utils cloud-image-utils acl)
+install_packages() {
+  sudo timeout --kill-after=30s 600s apt-get install -y --no-install-recommends \
+    -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 "${packages[@]}"
+}
+refresh_lists() {
+  sudo timeout --kill-after=30s 300s apt-get \
+    -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 \
+    -o APT::Update::Error-Mode=any update
+}
+if ! install_packages; then
+  refresh_lists || refresh_lists
+  install_packages
+fi
 sudo setfacl -m "u:$(id -un):rw" /dev/kvm
 curl --fail --location --proto '=https' --proto-redir '=https' --retry 3 "$url" -o "$work/base.qcow2"
 printf '%s  %s\n' "$digest" "$work/base.qcow2" | "$algorithm" --check

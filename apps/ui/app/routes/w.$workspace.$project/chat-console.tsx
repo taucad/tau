@@ -20,6 +20,7 @@ import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { SearchInput } from '@taucad/ui/components/search-input';
+import { PaneSearchRegion } from '@taucad/ui/components/pane-search';
 import { HighlightText } from '@taucad/ui/components/highlight-text';
 import {
   PaneviewHeader,
@@ -369,21 +370,24 @@ export const ChatConsole = memo(function ChatConsole(): React.JSX.Element {
     <div data-slot='console-panel-body' className='flex size-full min-h-0 flex-col overflow-hidden bg-sidebar'>
       <div
         data-slot='console-filter'
-        className='flex shrink-0 items-center gap-1 bg-sidebar px-2 pt-2 text-muted-foreground'
+        // The log actions stay in reach on a phone, where the search field folds behind the header toggle.
+        className='flex shrink-0 items-center justify-end gap-1 bg-sidebar px-2 pt-2 text-muted-foreground'
       >
-        <SearchInput
-          aria-label='Filter logs'
-          autoComplete='off'
-          className='h-7 min-w-0 flex-1 bg-background pointer-coarse:h-10'
-          placeholder='Filter logs…'
-          value={query}
-          onChange={(event) => {
-            setQuery(event.target.value);
-          }}
-          onClear={() => {
-            setQuery('');
-          }}
-        />
+        <PaneSearchRegion className='min-w-0 flex-1'>
+          <SearchInput
+            aria-label='Filter logs'
+            autoComplete='off'
+            className='h-7 min-w-0 flex-1 bg-background pointer-coarse:h-10'
+            placeholder='Filter logs…'
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+            }}
+            onClear={() => {
+              setQuery('');
+            }}
+          />
+        </PaneSearchRegion>
 
         <DropdownMenu modal={false}>
           <Tooltip>

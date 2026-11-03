@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { FileSystemManager } from '#filesystem-manager.js';
 import { KclUtilities } from '#kcl-utils.js';
 import type { KernelFileSystem } from '@taucad/runtime/kernel';
+import type { KclValueView } from '@taucad/kcl-wasm-lib/bindings/KclValueView';
 
 const memoryFs = (files: Map<string, string>): KernelFileSystem =>
   ({
@@ -191,5 +192,25 @@ enabled = true
     expect(variables['bare']).toMatchObject({ value: 9, ty: { type: 'Default', value: { len: 'mm' } } });
     expect(variables['label']).toMatchObject({ type: 'String', value: 'b "quoted"' });
     expect(variables['enabled']).toMatchObject({ type: 'Bool', value: false });
+  });
+});
+
+describe('KclUtilities solid names', () => {
+  it('should name solids by variable path, letting a later alias win', () => {
+    const solid = (id: string) => ({ type: 'Solid', value: { id } }) as unknown as KclValueView;
+    const names = KclUtilities.collectSolidNames({
+      ring: solid('a'),
+      planets: { type: 'HomArray', value: [solid('b'), solid('c')] },
+      gear: { type: 'Object', value: { hub: solid('d') }, constrainable: false },
+      width: { type: 'Number', value: 12, ty: { type: 'Unknown' } } as unknown as KclValueView,
+      moved: solid('a'),
+    });
+
+    expect([...names]).toEqual([
+      ['a', 'moved'],
+      ['b', 'planets[0]'],
+      ['c', 'planets[1]'],
+      ['d', 'gear.hub'],
+    ]);
   });
 });

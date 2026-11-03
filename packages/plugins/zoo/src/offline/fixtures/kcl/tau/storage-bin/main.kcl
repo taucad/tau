@@ -1,0 +1,34 @@
+// Open-top storage bin with rounded vertical corners and uniform walls.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+// Parameters
+binLength = 120
+binWidth = 80
+binHeight = 60
+wallThickness = 2.5
+cornerRadius = 10
+
+// Footprint with each side tagged, so the vertical corner edges can be picked for the fillet.
+footprint = startSketchOn(XY)
+  |> startProfile(at = [-binLength / 2, -binWidth / 2])
+  |> xLine(length = binLength, tag = $front)
+  |> yLine(length = binWidth, tag = $right)
+  |> xLine(length = -binLength, tag = $back)
+  |> close(tag = $left)
+
+block = extrude(footprint, length = binHeight, tagEnd = $rim)
+
+// Round the four vertical corners.
+rounded = fillet(
+  block,
+  radius = cornerRadius,
+  tags = [
+    getNextAdjacentEdge(front),
+    getNextAdjacentEdge(right),
+    getNextAdjacentEdge(back),
+    getNextAdjacentEdge(left)
+  ],
+)
+
+// Hollow it out, leaving the top open.
+bin = shell(rounded, faces = [rim], thickness = wallThickness)

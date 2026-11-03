@@ -1,5 +1,6 @@
 import { completionTypeFromLsp } from '#components/code/editor-completion-icon.js';
 import { definitionProvider } from '#components/code/editor-definition.js';
+import { startAfterLineBreaks, storeDiagnostics } from '#components/code/editor-lint.js';
 import { languageFeatures } from '#components/code/editor-language-features.js';
 import type { EditorLocationItem, EditorSignature, EditorSymbol } from '#components/code/editor-language-features.js';
 import { editorCompletionInfo, renderEditorDocumentation } from '#components/code/editor-documentation.js';
@@ -9,7 +10,6 @@ import { autocompletion, snippet } from '@codemirror/autocomplete';
 import type { Completion } from '@codemirror/autocomplete';
 import { Decoration, EditorView, hoverTooltip, showDialog, ViewPlugin, WidgetType } from '@codemirror/view';
 import type { DecorationSet, ViewUpdate } from '@codemirror/view';
-import { setDiagnostics } from '@codemirror/lint';
 import { foldService } from '@codemirror/language';
 import type * as LSP from 'vscode-languageserver-protocol';
 import { URI, Utils } from 'vscode-uri';
@@ -86,6 +86,14 @@ function offsetAt(text: string, position: LSP.Position): number {
   return Math.min(offset + position.character, end === -1 ? text.length : end);
 }
 
+/**
+ * Offsets of a range the KCL server reported. The server writes a column-0 start as the end of the previous line, so a
+ * range that starts on a line break begins on the next line.
+ */
+export function kclRangeOffsets(text: string, range: LSP.Range): Readonly<{ from: number; to: number }> {
+  return startAfterLineBreaks(text, { from: offsetAt(text, range.start), to: offsetAt(text, range.end) });
+}
+
 export function kclImportAt(text: string, offset: number): string | undefined {
   const start = text.lastIndexOf('\n', offset - 1) + 1;
   const line = text.slice(start).split('\n', 1)[0] ?? '';
@@ -127,18 +135,6 @@ export function kclHoverFallback({
   const position = positionAt(text, offset);
   const symbol = symbols.getDefinitionForUsage({ uri, line: position.line + 1, column: position.character + 1, word });
   return symbol ? formatSymbolHover(symbol).join('\n') : undefined;
-}
-
-function mappedDiagnostics(
-  document: EditorDocument,
-  environment: EditorLanguageEnvironment,
-): Array<{ from: number; to: number; message: string; severity: 'error' | 'warning' | 'info' | 'hint' }> {
-  return (environment.diagnostics.get(document.uri).get('kcl-lsp') ?? []).map((diagnostic) => ({
-    from: diagnostic.from,
-    to: diagnostic.to,
-    message: diagnostic.message,
-    severity: diagnostic.severity,
-  }));
 }
 
 async function observeKclOperation(
@@ -370,8 +366,7 @@ export class KclBackend {
       params.uri,
       'kcl-lsp',
       params.diagnostics.map((diagnostic) => ({
-        from: offsetAt(document.text, diagnostic.range.start),
-        to: offsetAt(document.text, diagnostic.range.end),
+        ...kclRangeOffsets(document.text, diagnostic.range),
         message: typeof diagnostic.message === 'string' ? diagnostic.message : diagnostic.message.value,
         severity:
           diagnostic.severity === 2
@@ -779,37 +774,17 @@ export function kclExtensions({
       if (isDisposed() || document.version !== version) {
         return null;
       }
+      const range = result?.range ? kclRangeOffsets(document.text, result.range) : undefined;
       return {
-        pos: result?.range ? offsetAt(document.text, result.range.start) : pos,
-        end: result?.range ? offsetAt(document.text, result.range.end) : undefined,
+        pos: range?.from ?? pos,
+        end: range?.to,
         create() {
           const dom = renderDocumentation(text, stdlib, view.dom.ownerDocument);
           return { dom };
         },
       };
     }),
-    ViewPlugin.fromClass(
-      class {
-        readonly #unsubscribe: () => void;
-        #destroyed = false;
-        public constructor(view: EditorView) {
-          this.#unsubscribe = environment.diagnostics.subscribe((event) => {
-            if (event.uri === document.uri) {
-              view.dispatch(setDiagnostics(view.state, mappedDiagnostics(document, environment)));
-            }
-          });
-          queueMicrotask(() => {
-            if (!this.#destroyed && !isDisposed()) {
-              view.dispatch(setDiagnostics(view.state, mappedDiagnostics(document, environment)));
-            }
-          });
-        }
-        public destroy(): void {
-          this.#destroyed = true;
-          this.#unsubscribe();
-        }
-      },
-    ),
+    storeDiagnostics(environment.diagnostics, document, 'kcl-lsp'),
     definitionProvider.of(async (view) =>
       observeKclOperation(jumpToDefinition(view, client, { document, environment, symbols }), document, isDisposed),
     ),

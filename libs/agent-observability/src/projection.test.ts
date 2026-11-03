@@ -203,6 +203,29 @@ describe('projectRun', () => {
     expect(compareEvidence(presentation!, rating!)).not.toBe('conflict');
   });
 
+  it('cites each committed row with one digest, whichever fact cites it, so admission keeps every fact', async () => {
+    const tool = run().tools[0]!;
+    const shown = run({
+      presentedAt: at + 2500,
+      rating: { value: 'positive', at: at + 7000 },
+      tools: [{ ...tool, check: { result: 'passed', revision: [`ENTRY=sha256:${'a'.repeat(64)}`], requirements: [] } }],
+    });
+    const summary = await projectRun(shown, context());
+    const feedback = await projectRun(shown, context({ plane: 'feedback' }));
+    const cited = [...summary.evidence, ...feedback.evidence].flatMap((evidence) => evidence.lineage);
+    const digests = new Map<string, Set<string>>();
+    for (const item of cited) {
+      digests.set(item.source, (digests.get(item.source) ?? new Set()).add(item.digest));
+    }
+
+    /* The tool and its check share rows 3 and 4; the outcome, presentation and rating share the ending row 6. */
+    expect(cited).toHaveLength(7);
+    expect(digests.size).toBe(3);
+    expect([...digests.values()].map((held) => held.size)).toEqual([1, 1, 1]);
+    /* The fact's own source digest still differs per fact. */
+    expect(new Set(summary.evidence.map((evidence) => evidence.source.digest)).size).toBe(summary.evidence.length);
+  });
+
   it('holds a presentation back until the run ends, and never sends one shown before the grant', async () => {
     const open = await projectRun(run({ presentedAt: at + 2500, ending: undefined, tools: [] }), context());
     const early = await projectRun(run({ presentedAt: at - 1 }), context());

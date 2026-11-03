@@ -540,7 +540,7 @@ export const shaderEvidence = {
     lifecycle: [
       'packages/viewer/src/graphics/three/post-processing-antialias.browser.test.tsx::should isolate two 5K node views through sibling resize and remount on %s',
       'packages/viewer/src/graphics/three/surface-reuse.test.ts::should retire every attachment user before initialization and retry a failed preparation',
-      'packages/viewer/src/graphics/three/surface-reuse.test.ts::should restore target and depth clear state after %s fails',
+      'packages/viewer/src/graphics/three/surface-reuse.test.ts::should restore the target after %s fails',
       'packages/viewer/src/graphics/three/surface-reuse.test.ts::should isolate simultaneous owners and release only the retiring framebuffer view',
       'packages/viewer/src/graphics/three/camera-preparation.test.ts::should cancel on input, hidden document and disposal, allowing a later eligible frame',
       'packages/viewer/src/graphics/three/post-processing-webgpu.test.tsx::should prepare offscreen once and restore camera and state after failure=%s',

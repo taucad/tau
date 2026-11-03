@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ComponentProps, ComponentType } from 'react';
-import { ChevronRight, File as FileIconFallback, Folder } from 'lucide-react';
+import { ChevronRight, File as FileIconFallback, Folder, FolderCheck } from 'lucide-react';
 import { Virtuoso } from 'react-virtuoso';
 import { Button } from '@taucad/ui/components/button';
 import { Command, CommandInput, CommandItem, CommandList } from '@taucad/ui/components/command';
@@ -103,15 +103,17 @@ const childrenAt = (root: TreeNode, path: string): TreeNode[] => {
   return [...current.children.values()].toSorted(compareFileEntries);
 };
 
-const searchTree = (root: TreeNode, query: string): TreeNode[] => {
+const searchTree = (root: TreeNode, query: string, shouldIncludeDirectories: boolean): TreeNode[] => {
   const results: TreeNode[] = [];
   const lowerQuery = query.toLowerCase();
   const traverse = (node: TreeNode): void => {
     for (const child of node.children.values()) {
+      const isMatch = child.name.toLowerCase().includes(lowerQuery);
+      if (isMatch && (!child.isFolder || shouldIncludeDirectories)) {
+        results.push(child);
+      }
       if (child.isFolder) {
         traverse(child);
-      } else if (child.name.toLowerCase().includes(lowerQuery)) {
-        results.push(child);
       }
     }
   };
@@ -120,10 +122,21 @@ const searchTree = (root: TreeNode, query: string): TreeNode[] => {
 };
 
 /**
+ * Options of {@link createStaticDataSource}.
+ *
+ * @public
+ */
+export type StaticDataSourceOptions = Readonly<{
+  /** Whether a search also finds folders by name; it finds files only by default. */
+  shouldIncludeDirectories?: boolean | undefined;
+}>;
+
+/**
  * Wrap a static file list into a {@link FileSelectorDataSource}. The tree is built once, and every answer resolves
  * from memory: for files that come from a GitHub listing, an upload or a server's listing.
  *
  * @param files - Project-relative file paths, with their sizes and whether the view can show each.
+ * @param options - Whether a search also finds folders.
  * @returns A data source over those files.
  * @public
  *
@@ -135,14 +148,17 @@ const searchTree = (root: TreeNode, query: string): TreeNode[] => {
  * await source.loadDirectory(''); // the `parts` folder, then main.ts
  * ```
  */
-export function createStaticDataSource(files: readonly StaticFile[]): FileSelectorDataSource {
+export function createStaticDataSource(
+  files: readonly StaticFile[],
+  { shouldIncludeDirectories = false }: StaticDataSourceOptions = {},
+): FileSelectorDataSource {
   const tree = buildTree(files);
   return {
     async loadDirectory(path) {
       return childrenAt(tree, path).map((node) => toEntry(node));
     },
     async searchFiles(query) {
-      return searchTree(tree, query).map((node) => toEntry(node));
+      return searchTree(tree, query, shouldIncludeDirectories).map((node) => toEntry(node));
     },
   };
 }
@@ -183,9 +199,16 @@ export type FileBrowserProps = Readonly<{
   status: FileBrowserStatus;
   /** List the folder again after it failed. */
   onRetry: () => void;
-  /** The file drawn as chosen. */
+  /** The file drawn as chosen; the folder, when only folders are shown. */
   selectedFile: string | undefined;
   onSelect: (path: string) => void;
+  /**
+   * List folders only and choose one: a folder row still opens it, and a first row chooses the folder shown, so a
+   * folder is picked by browsing to it.
+   */
+  shouldShowDirectoriesOnly?: boolean | undefined;
+  /** The name of the root folder on the row that chooses it; `Files` by default. */
+  rootLabel?: string | undefined;
   /** A file being opened, drawn with a spinner. */
   pendingFile?: string | undefined;
   searchPlaceholder?: string | undefined;
@@ -239,13 +262,15 @@ const breadcrumbsOf = (path: string): Array<{ name: string; path: string }> => {
   return parts.map((name, index) => ({ name, path: parts.slice(0, index + 1).join('/') }));
 };
 
-/** The breadcrumb row: the fixed `Files` root, then each folder, scrolled so the folder shown stays in view. */
+/** The breadcrumb row: the root, named `rootLabel`, then each folder, scrolled so the folder shown stays in view. */
 function FileBreadcrumbs({
   currentPath,
+  rootLabel,
   onNavigate,
   Scroller = 'div',
 }: Readonly<{
   currentPath: string;
+  rootLabel: string;
   onNavigate: (path: string) => void;
   Scroller?: ComponentType<ComponentProps<'div'>> | 'div';
 }>): React.JSX.Element {
@@ -268,7 +293,7 @@ function FileBreadcrumbs({
             onNavigate('');
           }}
         >
-          Files
+          {rootLabel}
         </button>
         {crumbs.map((crumb, index) => {
           const isLast = index === crumbs.length - 1;
@@ -329,7 +354,8 @@ function FileRow({
       >
         <div className={cn(menuItemLayoutClass, 'min-w-0 flex-1')}>
           <Folder className='shrink-0 text-muted-foreground' />
-          <span className='truncate'>{entry.name}</span>
+          <span className={hint ? 'shrink-0' : 'truncate'}>{entry.name}</span>
+          {hint ? <span className='min-w-0 truncate text-xs text-muted-foreground'>{hint}</span> : undefined}
         </div>
         <ChevronRight className='shrink-0 text-muted-foreground' />
       </CommandItem>
@@ -353,6 +379,36 @@ function FileRow({
       {entry.size === undefined ? undefined : (
         <span className='shrink-0 text-xs text-muted-foreground'>{formatBytes(entry.size)}</span>
       )}
+    </CommandItem>
+  );
+}
+
+/** The first row of a folder picker: choose the folder shown. */
+function CurrentFolderRow({
+  currentPath,
+  rootLabel,
+  isSelected,
+  onSelect,
+}: Readonly<{
+  currentPath: string;
+  rootLabel: string;
+  isSelected: boolean;
+  onSelect: (path: string) => void;
+}>): React.JSX.Element {
+  const name = currentPath === '' ? rootLabel : (currentPath.split('/').pop() ?? currentPath);
+  return (
+    <CommandItem
+      value={`select:${currentPath}`}
+      aria-current={isSelected ? 'true' : undefined}
+      className='flex items-center justify-between gap-2'
+      onSelect={() => {
+        onSelect(currentPath);
+      }}
+    >
+      <div className={cn(menuItemLayoutClass, 'min-w-0 flex-1')}>
+        <FolderCheck className='shrink-0 text-muted-foreground' />
+        <span className={cn('truncate', isSelected && 'font-medium')}>Select {name}</span>
+      </div>
     </CommandItem>
   );
 }
@@ -387,11 +443,13 @@ export function FileBrowser({
   onNavigate,
   searchQuery,
   onSearchChange,
-  entries,
+  entries: allEntries,
   status,
   onRetry,
   selectedFile,
   onSelect,
+  shouldShowDirectoriesOnly = false,
+  rootLabel = 'Files',
   pendingFile,
   searchPlaceholder = 'Filter files…',
   emptyMessage = 'No files found.',
@@ -402,6 +460,7 @@ export function FileBrowser({
   className,
 }: FileBrowserProps): React.JSX.Element {
   const isSearching = searchQuery.length > 0;
+  const entries = shouldShowDirectoriesOnly ? allEntries.filter((entry) => entry.isFolder) : allEntries;
   /* A filling list scrolls its command list; Virtuoso measures that element once it is mounted. */
   // oxlint-disable-next-line typescript/no-restricted-types -- React passes null when a callback ref detaches.
   const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null);
@@ -423,9 +482,23 @@ export function FileBrowser({
     return entry === undefined ? undefined : row(entry);
   };
 
+  const currentFolderRow =
+    shouldShowDirectoriesOnly && !isSearching ? (
+      <div className='px-1 pt-1'>
+        <CurrentFolderRow
+          currentPath={currentPath}
+          rootLabel={rootLabel}
+          isSelected={selectedFile === currentPath}
+          onSelect={onSelect}
+        />
+      </div>
+    ) : undefined;
+
   const list = (): React.JSX.Element => {
     if (entries.length === 0) {
-      return <div className='p-1 py-6 text-center text-sm text-muted-foreground'>{emptyMessage}</div>;
+      return (
+        currentFolderRow ?? <div className='p-1 py-6 text-center text-sm text-muted-foreground'>{emptyMessage}</div>
+      );
     }
     if (entries.length > virtualizationThreshold && (!fill || scrollParent !== null)) {
       return (
@@ -449,7 +522,12 @@ export function FileBrowser({
 
   return (
     <Command shouldFilter={false} className={cn('flex flex-col', fill && 'size-full min-h-0', className)}>
-      <FileBreadcrumbs currentPath={currentPath} Scroller={BreadcrumbScroller} onNavigate={onNavigate} />
+      <FileBreadcrumbs
+        currentPath={currentPath}
+        rootLabel={rootLabel}
+        Scroller={BreadcrumbScroller}
+        onNavigate={onNavigate}
+      />
       <CommandInput placeholder={searchPlaceholder} value={searchQuery} onValueChange={onSearchChange} />
       <CommandList
         ref={setScrollParent}
@@ -467,7 +545,10 @@ export function FileBrowser({
             <Loader className='size-4' />
           </div>
         ) : (
-          list()
+          <>
+            {entries.length > 0 ? currentFolderRow : undefined}
+            {list()}
+          </>
         )}
       </CommandList>
     </Command>

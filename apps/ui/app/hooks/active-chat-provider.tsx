@@ -68,6 +68,7 @@ import {
 import { subscribeRunElsewhere } from '#hooks/run-elsewhere-clock.js';
 import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
 import { useModels } from '#hooks/use-models.js';
+import { usePlaceableExecution } from '#hooks/use-placeable-execution.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { useKernel } from '#hooks/use-kernel.js';
 import { withTauExecutionModel } from '#utils/chat-execution.js';
@@ -643,12 +644,14 @@ function useExecutionModel(activeExecution: ActiveChatExecution): ActiveChatMode
 /**
  * Home execution: the user's choice this mount, else the record's as read,
  * else the cookie model. A late read never replaces a choice already made.
+ * The record is this device's, so a loopback daemon another tab was handed
+ * is dropped and the new chat runs here.
  */
 function useHomeExecution(recordRef: ComposerRecordRef): ActiveChatExecution {
   const { defaultExecution, rememberExecution } = useModels();
   const stored = useSelector(recordRef, (snapshot) => snapshot.context.record?.execution);
   const [chosen, setChosen] = useState<CadAgentExecution>();
-  const execution = chosen ?? stored ?? defaultExecution;
+  const execution = usePlaceableExecution(chosen ?? stored ?? defaultExecution);
   const setActiveExecution = useCallback(
     (next: CadAgentExecution) => {
       setChosen(next);

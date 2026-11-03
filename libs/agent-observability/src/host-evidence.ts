@@ -52,7 +52,7 @@ export type RunRating = Readonly<{ chatId: string; runId: string; value: 'positi
 
 /** A composed host reporter, as the launcher calls it. @public */
 export type HostEvidence = Readonly<{
-  /** The launcher's quiescence hook. */
+  /** The launcher's quiescence hook: a chat going busy re-reads the grants, going quiescent reports its runs. */
   onChatQuiescent: (chatId: string, quiescent: boolean) => void;
   /**
    * The UI showed a live run's model text at `at`, on this device's clock. The first time per run is kept, for the most
@@ -186,6 +186,14 @@ export const createHostEvidence = (options: HostEvidenceOptions): HostEvidence =
     onChatQuiescent: (chatId, quiescent) => {
       if (quiescent) {
         void quietly(async () => report(chatId));
+        return;
+      }
+      /* A run is starting: read the grant now, so one given since the last read (or a project the API registered
+       * after this host opened) binds before the run's facts occur rather than after it ends. Facts from before a
+       * reporter first sees its grant are never backfilled. */
+      void quietly(async () => reporter.refresh());
+      if (feedback !== undefined) {
+        void quietly(async () => feedback.refresh());
       }
     },
     onPresented: (chatId, runId, at) => {

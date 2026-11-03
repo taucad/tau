@@ -118,7 +118,9 @@ const main = async (): Promise<void> => {
       });
     }
     /* oxlint-enable no-await-in-loop */
-    const outputDirectory = join(root, 'bundle');
+    /* Candidates A, B and C, signed an hour apart in candidate order. */
+    const bundles = ['A', 'B', 'C'].map((name) => join(root, `bundle-${name}`)) as [string, string, string];
+    const outputDirectory = bundles[2];
     const manifest = {
       schemaVersion: 1,
       tag: 'desktop-staging@0.1.0-staging.1',
@@ -127,15 +129,20 @@ const main = async (): Promise<void> => {
       sourceCommit: 'a'.repeat(40),
       artifacts,
     };
-    await prepareQualificationAptSnapshot({
-      manifest,
-      artifactDirectory: root,
-      outputDirectory,
-      gnupgHome: online,
-      primaryFingerprint: fingerprint,
-      signingFingerprint: signing,
-      issuedAt: new Date().toISOString(),
-    });
+    const firstIssued = Date.now() - 3 * 3_600_000;
+    /* oxlint-disable no-await-in-loop -- Sign the three snapshots serially in candidate order. */
+    for (const [index, directory] of bundles.entries()) {
+      await prepareQualificationAptSnapshot({
+        manifest,
+        artifactDirectory: root,
+        outputDirectory: directory,
+        gnupgHome: online,
+        primaryFingerprint: fingerprint,
+        signingFingerprint: signing,
+        issuedAt: new Date(firstIssued + index * 3_600_000).toISOString(),
+      });
+    }
+    /* oxlint-enable no-await-in-loop */
     const snapshot = await readDesktopAptSnapshot({
       channel: 'staging',
       gnupgHome: online,
@@ -166,7 +173,7 @@ const main = async (): Promise<void> => {
     } as const;
     const enrollment = await prepareQualificationAptEnrollment({
       candidates: [candidate, candidate, candidate],
-      bundleDirectories: [outputDirectory, outputDirectory, outputDirectory],
+      bundleDirectories: bundles,
       primaryFingerprint: fingerprint,
       signingFingerprint: signing,
       publicKeyPath: join(outputDirectory, 'qualification-apt-public.asc'),
@@ -175,6 +182,19 @@ const main = async (): Promise<void> => {
     });
     assert.equal(enrollment.repositories.length, 3);
     await assert.rejects(enrollment.enroll(), /Ordinary-user disposable/u);
+    /* APT keeps an index dated after the one offered next, so B signed before A could never upgrade A. */
+    await assert.rejects(
+      prepareQualificationAptEnrollment({
+        candidates: [candidate, candidate, candidate],
+        bundleDirectories: [bundles[1], bundles[0], bundles[2]],
+        primaryFingerprint: fingerprint,
+        signingFingerprint: signing,
+        publicKeyPath: join(outputDirectory, 'qualification-apt-public.asc'),
+        runDirectory: join(root, 'unordered-enrollment'),
+        origin: 'https://127.0.0.1:43111/',
+      }),
+      /signed in candidate order/u,
+    );
     const archivePath = join(outputDirectory, 'qualification-apt-snapshot.tar');
     execFileSync('python3', [
       '-c',

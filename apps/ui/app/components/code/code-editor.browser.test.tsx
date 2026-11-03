@@ -1236,7 +1236,7 @@ const lintSource = [
   'washerID = 6.4mm',
 ].join('\n');
 
-/** Store offsets for `name` as the language reports it; `fromLineBreak` starts on the previous line's break like the KCL server. */
+/** Store offsets for `name` as the language reports it; `fromLineBreak` starts on the previous line's break as a server might. */
 function lintAt(name: string, fromLineBreak = false): EditorDiagnostic {
   const from = lintSource.indexOf(name);
   return {

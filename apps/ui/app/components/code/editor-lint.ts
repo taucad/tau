@@ -10,7 +10,7 @@ type DiagnosticRange = Readonly<{ from: number; to: number }>;
 /**
  * Moves a range's start past the line breaks it begins with. The lint gutter marks the line holding `from` while the
  * underline only paints visible text, so a range starting on the previous line's break draws its marker one row above
- * its squiggle. The KCL server reports every column-0 start that way.
+ * its squiggle, so every language's diagnostics pass through this guard.
  */
 export function startAfterLineBreaks(text: string | Text, range: DiagnosticRange): DiagnosticRange {
   const read =

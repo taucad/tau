@@ -44,7 +44,7 @@ import {
   selectTurnRevision,
   remoteSegmentParsesOf,
 } from '#machines/chat-projection.logic.js';
-import type { ChatProjection, ChatProjectionReadAnswer } from '#machines/chat-projection.logic.js';
+import type { ChatProjection, ChatProjectionEvent, ChatProjectionReadAnswer } from '#machines/chat-projection.logic.js';
 import { lifecycleRow, logRow, runningRows } from '#machines/chat-projection.fixture.js';
 
 /* Three recorded runs, and two seeded logs whose runs pause on an interrupt. */
@@ -2462,3 +2462,132 @@ it.each(['text', 'thinking'] as const)(
     });
   },
 );
+
+describe('durable tool results read after the next step went live (LiveOverlay.tla)', () => {
+  const calls = ['skill', 'main', 'config'] as const;
+  const toolCall = (id: string) => ({
+    type: 'toolCall',
+    id,
+    name: 'read_file',
+    arguments: { targetFile: id },
+  });
+  /* The host's own order: the step's tool calls, its final message, then every result before the next request. */
+  const stepRows = [
+    lifecycleRow(0, 'admitted'),
+    lifecycleRow(1, 'running'),
+    logRow(2, {
+      type: 'message.appended',
+      message: {
+        id: 'step-1',
+        role: 'assistant',
+        content: calls.map((id) => toolCall(id)),
+      },
+    }),
+    ...calls.map((id, index) =>
+      logRow(3 + index, {
+        type: 'message.appended',
+        message: {
+          id: `input-${id}`,
+          role: 'tool-input',
+          toolCallId: id,
+          toolName: 'read_file',
+          content: { id },
+        },
+      }),
+    ),
+  ];
+  const outputRow = (id: string, sequence: number) =>
+    logRow(sequence, {
+      type: 'message.appended',
+      message: {
+        id: `output-${id}`,
+        role: 'tool-output',
+        toolCallId: id,
+        toolName: 'read_file',
+        content: id,
+        isError: false,
+      },
+    });
+  type ThinkingEvent =
+    | Readonly<{ type: 'thinking-start' }>
+    | Readonly<{ type: 'thinking-delta'; delta: string }>
+    | Readonly<{ type: 'thinking-end'; content: string }>;
+  const thinking = (event: ThinkingEvent): ChatProjectionEvent => ({
+    type: 'live',
+    event: { chatId: 'chat_1', runId: 'run_1', messageId: 'step-2', contentIndex: 0, ...event },
+  });
+  const present = async (state: ChatProjection) => {
+    const chunks = chunksOf(state.live?.chunks ?? state.views['run_1']?.chunks);
+    const stream = new ReadableStream<UIMessageChunk>({
+      start(controller) {
+        for (const chunk of chunks) {
+          controller.enqueue(chunk);
+        }
+        controller.close();
+      },
+    });
+    let message: UIMessage | undefined;
+    for await (const next of readUIMessageStream({
+      stream,
+      terminateOnError: true,
+    })) {
+      message = next;
+    }
+    return message;
+  };
+
+  const thinkThroughResults = () => {
+    let state = project(stepRows, stepRows.length);
+    state = reduceChatProjection(state, thinking({ type: 'thinking-start' })).state;
+    state = reduceChatProjection(state, thinking({ type: 'thinking-delta', delta: 'Reading. ' })).state;
+    for (const [index, id] of calls.entries()) {
+      const at = stepRows.length + index;
+      state = reduceChatProjection(state, {
+        type: 'batch',
+        answer: batch([outputRow(id, at)], at, at + 1),
+      }).state;
+      state = reduceChatProjection(state, thinking({ type: 'thinking-delta', delta: `${id} read. ` })).state;
+    }
+    return state;
+  };
+
+  it('should conclude every tool call and keep streaming the open reasoning block', async () => {
+    const message = await present(thinkThroughResults());
+
+    expect(message?.parts.filter((part) => part.type === 'tool-read_file')).toMatchObject(
+      calls.map((id) => ({ toolCallId: id, state: 'output-available' })),
+    );
+    expect(message?.parts.find((part) => part.type === 'reasoning')).toMatchObject({
+      text: 'Reading. skill read. main read. config read. ',
+      state: 'streaming',
+    });
+  });
+
+  it('should end the reasoning block when the step closes and keep its concluded tools', async () => {
+    let state = thinkThroughResults();
+    const text = 'Reading. skill read. main read. config read. ';
+    state = reduceChatProjection(state, thinking({ type: 'thinking-end', content: text })).state;
+    const at = stepRows.length + calls.length;
+    const closing = [
+      logRow(at, {
+        type: 'message.appended',
+        message: {
+          id: 'step-2',
+          role: 'assistant',
+          content: [{ type: 'thinking', thinking: text }],
+        },
+      }),
+    ];
+    state = reduceChatProjection(state, {
+      type: 'batch',
+      answer: batch(closing, at, at + 1),
+    }).state;
+
+    const message = await present(state);
+
+    expect(message?.parts.filter((part) => part.type === 'tool-read_file')).toMatchObject(
+      calls.map((id) => ({ toolCallId: id, state: 'output-available' })),
+    );
+    expect(message?.parts.filter((part) => part.type === 'reasoning')).toMatchObject([{ text, state: 'done' }]);
+  });
+});

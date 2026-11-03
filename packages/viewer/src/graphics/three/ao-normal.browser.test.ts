@@ -3,7 +3,7 @@ import { DataTexture, FloatType, RGBAFormat, RGFormat, UnsignedByteType, Nearest
 import { NodeMaterial, QuadMesh, RenderTarget, WebGPUBackend, WebGLBackend } from 'three/webgpu';
 import { texture, vec2, vec4 } from 'three/tsl';
 import { createRenderer } from '#graphics/three/renderer.js';
-import { encodeAoNormal, decodeAoNormal, sampleAoNormal } from '#graphics/three/ao-normal.js';
+import { encodeAoNormal, decodeAoNormal, loadAoNormal } from '#graphics/three/ao-normal.js';
 
 it.each(['webgpu', 'webgl'] as const)(
   'should round-trip both normal hemispheres through RG8 on %s',
@@ -81,7 +81,7 @@ it.each(['webgpu', 'webgl'] as const)(
 );
 
 it.each(['webgpu', 'webgl'] as const)(
-  'should interpolate decoded normals across folds and clear texels on %s',
+  'should fetch one surface normal at texel corners, never a fold or background blend, on %s',
   async (backend) => {
     const renderer = await createRenderer('showcase', backend, document.createElement('canvas'));
     const texels = new Uint8Array([255, 255, 1, 1, 255, 255, 1, 1]);
@@ -91,7 +91,8 @@ it.each(['webgpu', 'webgl'] as const)(
     input.needsUpdate = true;
     const target = new RenderTarget(1, 1, { type: FloatType, depthBuffer: false });
     const material = new NodeMaterial();
-    material.fragmentNode = vec4(sampleAoNormal(texture(input), vec2(0.5)), 1);
+    // Half-resolution AO texel centres land exactly on full-resolution texel corners.
+    material.fragmentNode = vec4(loadAoNormal(texture(input), vec2(0.5)), 1);
     material.depthTest = false;
     material.depthWrite = false;
     const quad = new QuadMesh(material);
@@ -102,7 +103,7 @@ it.each(['webgpu', 'webgl'] as const)(
       return [...new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4)];
     };
     try {
-      // Opposite corners encode the same south pole: interpolating the encoding would produce north.
+      // The fetched texel encodes the south pole: interpolating the encoding would produce north.
       const fold = await read();
       expect(fold[0]).toBeCloseTo(0, 5);
       expect(fold[1]).toBeCloseTo(0, 5);
@@ -111,14 +112,15 @@ it.each(['webgpu', 'webgl'] as const)(
       material.needsUpdate = true;
       const incorrectlyFiltered = await read();
       expect(incorrectlyFiltered[2]).toBeGreaterThan(0.99);
-      material.fragmentNode = vec4(sampleAoNormal(texture(input), vec2(0.5)), 1);
+      material.fragmentNode = vec4(loadAoNormal(texture(input), vec2(0.5)), 1);
       material.needsUpdate = true;
+      // A silhouette beside the cleared background: blending gave GTAO a false (-0.5, -0.5, 0) normal.
       texels.set([0, 0, 128, 128, 0, 0, 128, 128]);
       input.needsUpdate = true;
       const boundary = await read();
-      expect(boundary[0]).toBeCloseTo(-0.5, 5);
-      expect(boundary[1]).toBeCloseTo(-0.5, 5);
-      expect(boundary[2]).toBeCloseTo(0, 5);
+      expect(boundary[0]).toBeCloseTo(0, 2);
+      expect(boundary[1]).toBeCloseTo(0, 2);
+      expect(boundary[2]).toBeCloseTo(1, 4);
     } finally {
       renderer.setRenderTarget(null);
       input.dispose();

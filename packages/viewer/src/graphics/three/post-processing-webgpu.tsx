@@ -26,7 +26,7 @@ import {
   vec4,
 } from 'three/tsl';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
-import { encodeAoNormal, sampleAoNormal } from '#graphics/three/ao-normal.js';
+import { aoTexel, encodeAoNormal, loadAoNormal } from '#graphics/three/ao-normal.js';
 import { createAoDenoise } from '#graphics/three/ao-denoise.js';
 import {
   Mesh,
@@ -446,27 +446,25 @@ const createPipelineResources = ({
     }
     scenePass.getTexture('normal').type = UnsignedByteType;
     scenePass.getTexture('normal').format = compactNormals ? RGFormat : RGBAFormat;
+    // AO consumers want one surface per texel: depth and normal always come from the same texel.
+    const normalTexture = scenePass.getTextureNode('normal');
     const scenePassNormal = sample((uv) =>
       compactNormals
-        ? sampleAoNormal(scenePass.getTextureNode('normal'), uv)
-        : colorToDirection(scenePass.getTextureNode('normal').sample(uv)),
+        ? loadAoNormal(normalTexture, uv)
+        : colorToDirection(normalTexture.load(aoTexel(normalTexture, uv))),
     );
+    const loadDepth = (uv: Node): Node<'float'> => scenePassDepth.load(aoTexel(scenePassDepth, uv)).r;
 
     // GTAONode rejects forward depth >= 1 as background. Pair 1-depth with
     // forward projection matrices; changing only the samples corrupts positions.
     const logDepth = gpuRenderer.logarithmicDepthBuffer
-      ? createLogDepthAoAdapter(
-          camera,
-          sample((uv) => scenePassDepth.sample(uv).r),
-        )
+      ? createLogDepthAoAdapter(camera, sample(loadDepth))
       : undefined;
     const aoCamera = logDepth ?? createGtaoCameraAdapter(camera, gpuRenderer.reversedDepthBuffer);
     // oxlint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access -- TSL texture node fluent API.
     const aoDepth =
       logDepth?.forwardDepth ??
-      sample((uv) =>
-        gpuRenderer.reversedDepthBuffer ? scenePassDepth.sample(uv).r.oneMinus() : scenePassDepth.sample(uv).r,
-      );
+      sample((uv) => (gpuRenderer.reversedDepthBuffer ? loadDepth(uv).oneMinus() : loadDepth(uv)));
     aoNode = ao(logDepth?.gtaoDepth ?? aoDepth, scenePassNormal, aoCamera.camera as Camera);
     aoNode.resolutionScale = 0.5;
     // Temporal direction rotation shimmers under `frameloop='demand'` because the
@@ -493,13 +491,18 @@ const createPipelineResources = ({
       stencilBuffer: false,
     };
     denoiseInput = rtt(denoiseNode.visibility(screenUV), 1, 1, denoiseTargetOptions);
-    // Performance candidate: filter at the AO budget, then bilinearly reconstruct.
-    // This avoids native-resolution depth/normal gathers; boundary halos remain a visual gate.
+    // Filter at the AO budget, then reconstruct with depth/normal-aware weights. Bilinear
+    // reconstruction smeared contact shading across silhouettes in 2x2 blocks; the joint
+    // upsample costs about what texel-exact normals save in the denoiser.
     const composedSample = (uv: Node<'vec2'>): Node<'vec4'> => {
       // Materialize tone-mapped surface/AO once before filtering the stored color.
       // CAD line color never enters surface composition or its filter.
       const color = scenePassColor.sample(uv);
-      const aoFactor = select<'float'>(aoNode!.scale.greaterThan(0), denoiseInput!.sample(uv).r, float(1));
+      const aoFactor = select<'float'>(
+        aoNode!.scale.greaterThan(0),
+        denoiseNode!.upsample(denoiseInput!, uv, !frame!.sharedDepth),
+        float(1),
+      );
       const visibility = select<'float'>(displayMode.equal(2), float(1), aoFactor);
       const beforeTone = select<'float'>(compositeStage.equal(0), visibility, float(1));
       const afterTone = select<'float'>(compositeStage.equal(1), visibility, float(1));

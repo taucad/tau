@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NormalBlending } from 'three';
+import { gltfEdgeLineWidth } from '#graphics/three/materials/gltf-edges.js';
+import { gltfSurfacePolygonOffset } from '#graphics/three/materials/gltf-surface-depth-bias.js';
 import { infiniteGridNodeMaterial } from '#graphics/three/materials/infinite-grid-material.node.js';
 import { serialiseStrippedTslGraph } from '#graphics/three/utils/tsl-node-graph-snapshot.js';
 
@@ -16,6 +18,18 @@ describe('infiniteGridNodeMaterial TSL snapshots', () => {
       expect(material.blending).toBe(NormalBlending);
       expect(material.depthTest).toBe(true);
       expect(material.depthWrite).toBe(false);
+    } finally {
+      material.dispose();
+    }
+  });
+  it('should sit behind a coplanar part face on the reversed-depth viewport', () => {
+    const material = infiniteGridNodeMaterial();
+    try {
+      // The deepest surface bias the viewport applies, at a pixel ratio of 6 (reversed depth: negative is farther).
+      const surfaceFactor = -(gltfEdgeLineWidth * 0.5 * 6 + 0.5);
+      expect(material.polygonOffset).toBe(true);
+      expect(material.polygonOffsetFactor).toBeLessThan(surfaceFactor);
+      expect(material.polygonOffsetUnits).toBeLessThan(gltfSurfacePolygonOffset.webgpu.polygonOffsetUnits);
     } finally {
       material.dispose();
     }

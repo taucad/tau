@@ -111,7 +111,8 @@ describe('responsive dropdown menu', () => {
     const overlay = document.querySelector('[data-slot=drawer-overlay]');
     expect(drawer).toHaveClass('z-50');
     expect(overlay).toHaveClass('z-50');
-    expect(trigger.compareDocumentPosition(drawer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const inDocumentOrder = [...document.body.querySelectorAll('*')];
+    expect(inDocumentOrder.indexOf(drawer)).toBeGreaterThan(inDocumentOrder.indexOf(trigger));
   });
 
   it('should run an item’s onSelect and close the drawer', async () => {

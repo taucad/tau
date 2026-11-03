@@ -36,7 +36,9 @@ export const allowedOrigins = (binding: unknown): ReadonlySet<string> => {
 };
 
 /**
- * Set the CORS headers every files response carries.
+ * Set the CORS headers every files response carries. An allowed origin also
+ * gets `Timing-Allow-Origin`, so the page's Resource Timing reports the
+ * protocol and transfer size it needs for the open-time telemetry (STO-25).
  *
  * @param headers - The response headers to extend.
  * @param origin - The request's `Origin`, if any.
@@ -47,6 +49,7 @@ export const applyCors = (headers: Headers, origin: string | undefined, allowed:
   if (origin !== undefined && allowed.has(origin)) {
     headers.set('Access-Control-Allow-Origin', origin);
     headers.set('Access-Control-Expose-Headers', exposedHeaders);
+    headers.set('Timing-Allow-Origin', origin);
   }
 };
 

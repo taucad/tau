@@ -29,21 +29,23 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   # The reviewed PicoVoxel builder. `uses:` cannot read a variable, so the archive call repeats it.
-  # It is PicoVoxel#46 as merged, which evaluates proven-pure callback fields on every core of a threaded build
-  # (bytes unchanged). Under it are #42, which measures Firefox on Playwright 1.64.1 (1.61.1's Firefox
+  # It is PicoVoxel#48 as merged, which pins the archive's
+  # own sources to #47 as merged. #47 lifts a field's signed-distance IL to a native tape, admitted only
+  # after a bit check against the method (bytes unchanged). Under it are #46, which evaluates proven-pure
+  # callback fields on every core of a threaded build, #42, which measures Firefox on Playwright 1.64.1 (1.61.1's Firefox
   # pinned every page's wasm to the debug baseline tier), #41, which divides each browser path by
-  # native timed on the same runner, and #40, which judges only threaded paths against the 2x ceiling. `dotnet/inputs.json` still pins the
-  # browser source role to a commit on #39's branch; PicoVoxel's `archive/picogk-dual-runtime-builder-w0`
-  # keeps that commit reachable, and every checkout that reads the pinned tree fetches full history.
-  PICOVOXEL_REF: 6a0e6e55341fe645e1f0f75c990d908e0b24989d
+  # native timed on the same runner, and #40, which judges only threaded paths against the 2x ceiling. `dotnet/inputs.json` pins the
+  # archive's own picovoxel sources to a commit on main, and every checkout that reads the pinned tree
+  # fetches full history.
+  PICOVOXEL_REF: 9440db9a52109efbc5a4481cb25022328d9eaf31
   PACKAGE_VERSION: 0.2.1
   # Gyroid proves every run; the scheduled run, or a dispatch that asks for it, proves HeatX.
   SUBJECT: ${{ github.event_name == 'schedule' && 'heatx' || inputs.subject || 'gyroid' }}
 jobs:
   archive:
-    uses: taucad/picovoxel/.github/workflows/dotnet-archive.yml@6a0e6e55341fe645e1f0f75c990d908e0b24989d
+    uses: taucad/picovoxel/.github/workflows/dotnet-archive.yml@9440db9a52109efbc5a4481cb25022328d9eaf31
     with:
-      picovoxel-ref: 6a0e6e55341fe645e1f0f75c990d908e0b24989d
+      picovoxel-ref: 9440db9a52109efbc5a4481cb25022328d9eaf31
       adapter-path: packages/plugins/picogk/dotnet/native
 
   # Everything a parity run measures or compares against, built once: the two browser apps and the

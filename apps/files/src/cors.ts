@@ -37,8 +37,8 @@ export const allowedOrigins = (binding: unknown): ReadonlySet<string> => {
 
 /**
  * Set the CORS headers every files response carries. An allowed origin also
- * gets `Timing-Allow-Origin`, so the page's Resource Timing reports the
- * protocol and transfer size it needs for the open-time telemetry (STO-25).
+ * gets `Timing-Allow-Origin`, so the page's Resource Timing can report the
+ * protocol and transfer size of each download (needed to measure STO-25).
  *
  * @param headers - The response headers to extend.
  * @param origin - The request's `Origin`, if any.

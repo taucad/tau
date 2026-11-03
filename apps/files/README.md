@@ -60,7 +60,7 @@ With both set, LFS batch downloads for projects on Tau's default storage account
 - **Served object.** `200` or `206`, `ETag: "<oid>"`, `Cache-Control: private, max-age=31536000, immutable, no-transform`, `Content-Type: application/octet-stream`, `Accept-Ranges: bytes` and `Content-Length`.
 - **Range.** One `bytes=a-b`, `a-` or `-n` range is checked against the signed size before R2 is called. An unsatisfiable range gets `416` with `Content-Range: bytes */n`. Several ranges or an unparseable value get the whole object.
 - **If-None-Match.** A match gets `304` without an R2 call.
-- **CORS.** An allowed `Origin` is echoed with `Vary: Origin` and the `ETag, Content-Range, Accept-Ranges, X-Tau-Files-Error` exposed. Credentials are never allowed.
+- **CORS.** An allowed `Origin` is echoed with `Vary: Origin` and the `ETag, Content-Range, Accept-Ranges, X-Tau-Files-Error` exposed, plus `Timing-Allow-Origin` with the same origin so the page's Resource Timing shows protocol and sizes. Credentials are never allowed.
 
 | Status | `X-Tau-Files-Error`           | Body `code`                                     |
 | ------ | ----------------------------- | ----------------------------------------------- |

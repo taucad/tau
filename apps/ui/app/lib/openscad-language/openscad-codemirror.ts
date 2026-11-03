@@ -1,7 +1,7 @@
 import { completionTypeFromLsp } from '#components/code/editor-completion-icon.js';
 import { definitionProvider } from '#components/code/editor-definition.js';
 import { definitionLinkMarkdown, renderEditorDocumentation } from '#components/code/editor-documentation.js';
-import { languageFeatures, triggerParameterHints } from '#components/code/editor-language-features.js';
+import { languageFeatures, promptRename, triggerParameterHints } from '#components/code/editor-language-features.js';
 import type {
   CallHierarchyDirection,
   EditorLocationItem,
@@ -584,14 +584,8 @@ async function renameSymbol(
   if (!prepared || isDisposed() || document.version !== version) {
     return;
   }
-  const dialog = showDialog(view, {
-    label: 'Rename symbol',
-    input: { value: prepared.placeholder },
-    submitLabel: 'Rename',
-  });
-  const submitted = await dialog.result;
-  const name = submitted?.querySelector('input')?.value.trim();
-  if (!name || name === prepared.placeholder || document.version !== version) {
+  const name = await promptRename(view, { value: prepared.placeholder });
+  if (!name || document.version !== version) {
     return;
   }
   const edit = await client.request<LSP.WorkspaceEdit | undefined>('textDocument/rename', {

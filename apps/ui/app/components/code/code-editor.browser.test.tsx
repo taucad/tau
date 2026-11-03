@@ -961,7 +961,7 @@ it.each([Theme.LIGHT, Theme.DARK, Theme.BLACK, Theme.HIGH_CONTRAST])(
       view!.dispatch({ selection: { anchor: source.indexOf('value:') + 2 } });
       view!.focus();
       fireEvent.keyDown(view!.contentDOM, { key: 'F2', code: 'F2' });
-      await expect.poll(() => document.querySelector('.cm-dialog input')).toBeTruthy();
+      await expect.poll(() => document.querySelector('.cm-rename-input')).toBeTruthy();
       await page.screenshot();
     } finally {
       service.dispose();

@@ -2,7 +2,7 @@ import { completionTypeFromLsp } from '#components/code/editor-completion-icon.j
 import { definitionProvider } from '#components/code/editor-definition.js';
 import { renderEditorDocumentation } from '#components/code/editor-documentation.js';
 import type { DocumentationLinkHandler } from '#components/code/editor-documentation.js';
-import { languageFeatures } from '#components/code/editor-language-features.js';
+import { languageFeatures, promptRename } from '#components/code/editor-language-features.js';
 import type { EditorSignature } from '#components/code/editor-language-features.js';
 import { autocompletion } from '@codemirror/autocomplete';
 import type { Completion, CompletionSource } from '@codemirror/autocomplete';
@@ -635,14 +635,8 @@ async function renameSymbol(view: EditorView, options: ExtensionOptions): Promis
   if (!prepared || !('placeholder' in prepared) || isDisposed() || document.version !== version) {
     return;
   }
-  const dialog = showDialog(view, {
-    label: 'Rename symbol',
-    input: { value: prepared.placeholder },
-    submitLabel: 'Rename',
-  });
-  const submitted = await dialog.result;
-  const name = submitted?.querySelector('input')?.value.trim();
-  if (!name || name === prepared.placeholder || isDisposed() || document.version !== version) {
+  const name = await promptRename(view, { value: prepared.placeholder });
+  if (!name || isDisposed() || document.version !== version) {
     return;
   }
   const edit = await client.request<LSP.WorkspaceEdit>('textDocument/rename', {

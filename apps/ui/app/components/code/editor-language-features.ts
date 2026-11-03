@@ -476,6 +476,137 @@ export const renameSymbol = commandFor('rename', true);
 export const formatDocument = commandFor('format', true);
 export const quickFix = commandFor('quickFix', true);
 
+type RenameSession = Readonly<{ from: number; to: number; tooltip: Tooltip }>;
+
+const setRename = StateEffect.define<RenameSession | undefined>();
+
+const renameTargetMark = Decoration.mark({ class: 'cm-rename-target' });
+
+/** Wrapped so `state.field(renameField, false)` still tells an uninstalled field from a closed box. */
+const renameField = StateField.define<Readonly<{ session?: RenameSession }>>({
+  create: () => ({}),
+  update(value, transaction) {
+    for (const effect of transaction.effects) {
+      if (effect.is(setRename)) {
+        return { session: effect.value };
+      }
+    }
+    // An edit under the box invalidates the position the server prepared, so the rename is abandoned like VS Code.
+    return transaction.docChanged ? {} : value;
+  },
+  provide: (field) => [
+    showTooltip.from(field, ({ session }) => session?.tooltip ?? null),
+    EditorView.decorations.from(field, ({ session }) =>
+      session && session.from < session.to
+        ? Decoration.set(renameTargetMark.range(session.from, session.to))
+        : Decoration.none,
+    ),
+  ],
+});
+
+/** Where the inline rename box anchors and what it starts with; both default to the word at the cursor. */
+export type RenamePromptOptions = Readonly<{ from?: number; to?: number; value?: string }>;
+
+/**
+ * Open VS Code's inline rename box under the symbol at the cursor.
+ * Resolves to the trimmed new name, or `undefined` when cancelled, emptied or unchanged.
+ */
+export async function promptRename(view: EditorView, options: RenamePromptOptions = {}): Promise<string | undefined> {
+  const { state } = view;
+  const { head } = state.selection.main;
+  const word = state.wordAt(head);
+  const from = options.from ?? word?.from ?? head;
+  const to = options.to ?? word?.to ?? head;
+  const initial = options.value ?? state.sliceDoc(from, to);
+  const { ownerDocument } = view.dom;
+  const { promise, resolve } = Promise.withResolvers<string | undefined>();
+  let settled = false;
+
+  const dom = ownerDocument.createElement('div');
+  dom.className = 'cm-rename';
+  dom.setAttribute('role', 'dialog');
+  dom.setAttribute('aria-label', 'Rename symbol');
+  const input = ownerDocument.createElement('input');
+  input.className = 'cm-rename-input';
+  input.value = initial;
+  input.spellcheck = false;
+  input.autocomplete = 'off';
+  input.setAttribute('aria-label', 'New name');
+  const fit = (): void => {
+    input.size = Math.max(input.value.length + 4, 18);
+  };
+  fit();
+  const hint = ownerDocument.createElement('div');
+  hint.className = 'cm-rename-hint';
+  const key = (label: string): HTMLElement => {
+    const element = ownerDocument.createElement('kbd');
+    element.textContent = label;
+    return element;
+  };
+  hint.append(key('Enter'), ' to rename, ', key('Esc'), ' to cancel');
+  dom.append(input, hint);
+
+  const tooltip: Tooltip = {
+    pos: from,
+    above: false,
+    arrow: false,
+    create: () => ({
+      dom,
+      // Shift left by the box's border and padding so the typed name sits over the original, like VS Code.
+      offset: { x: -9, y: 2 },
+      mount: () => {
+        input.focus();
+        input.select();
+      },
+      destroy: () => {
+        settled = true;
+        resolve(undefined);
+      },
+    }),
+  };
+
+  const finish = (name: string | undefined, refocus: boolean): void => {
+    if (settled) {
+      return;
+    }
+    settled = true;
+    const trimmed = name?.trim();
+    resolve(trimmed && trimmed !== initial ? trimmed : undefined);
+    if (view.state.field(renameField, false)?.session?.tooltip === tooltip) {
+      view.dispatch({ effects: setRename.of(undefined) });
+    }
+    if (refocus) {
+      view.focus();
+    }
+  };
+
+  input.addEventListener('input', fit);
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.isComposing) {
+      event.preventDefault();
+      finish(input.value, true);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      finish(undefined, true);
+    }
+  });
+  // Clicking away cancels; deferred so a blur raised while CodeMirror removes the box never dispatches mid-update.
+  input.addEventListener('blur', () => {
+    queueMicrotask(() => {
+      finish(undefined, false);
+    });
+  });
+
+  const session: RenameSession = { from, to, tooltip };
+  view.dispatch({
+    effects:
+      state.field(renameField, false) === undefined
+        ? StateEffect.appendConfig.of(renameField.init(() => ({ session })))
+        : setRename.of(session),
+  });
+  return promise;
+}
+
 const setSignature = StateEffect.define<Tooltip | undefined>();
 
 const signatureField = StateField.define<Tooltip | undefined>({

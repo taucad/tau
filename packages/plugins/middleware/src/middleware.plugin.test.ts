@@ -22,7 +22,6 @@ describe('@taucad/middleware', () => {
       'parameterUnits',
       'geometryCache',
       'gltfEdgeDetection',
-      'displaySimplification',
     ]);
     expect(capabilities.bundlers.map(({ id }) => id)).toEqual([]);
     expect(capabilities.transcoders.map(({ id }) => id)).toEqual([]);

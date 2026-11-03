@@ -6,7 +6,7 @@ import { basename, dirname, join } from 'node:path';
 
 import { z } from 'zod';
 
-import { processTable, terminateOwnedProcesses } from '#shell/process-tree.js';
+import { processTable, tableObservationTimeout, terminateOwnedProcesses } from '#shell/process-tree.js';
 import type { ProcessRow } from '#shell/process-tree.js';
 import type { PreparedShell, ShellExecution, ShellRecovery, ShellResource } from '#shell/shell-provider.js';
 
@@ -235,7 +235,7 @@ export const createShellCustody = (
         new Promise<never>((_resolve, reject) => {
           timer = setTimeout(() => {
             reject(new Error('The process table did not answer in time.'));
-          }, 1000);
+          }, tableObservationTimeout);
         }),
       ]);
     } finally {

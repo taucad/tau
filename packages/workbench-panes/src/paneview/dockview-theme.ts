@@ -167,6 +167,13 @@ export const dockviewStyleOverrides = cn(
   '[&_.dv-tab:hover_.dv-default-tab_.dv-default-tab-action:not(:hover)]:!bg-accent',
   '[&_.dv-tab.dv-active-tab_.dv-default-tab_.dv-default-tab-action:not(:hover)]:!bg-accent',
   '[&_.dv-tab.dv-active-tab_.dockview-tab-title]:[--fade-label-size:var(--fade-label-size-actions)]',
+  // A coarse pointer shows every tab's close action (`pointer-coarse:opacity-100`), not only the active or hovered
+  // one. An inactive tab is transparent over the group, so its scrim dissolves into the group's background rather
+  // than the active fill (`--accent`, the token default), which drew a grey block beside each glyph; its title makes
+  // the same room the active tab's does. Fine pointers keep the hover-only reveal unchanged.
+  'pointer-coarse:[&_.dv-tab_.dockview-tab-title]:[--fade-label-size:var(--fade-label-size-actions)]',
+  'pointer-coarse:[&_.dv-tab:not(.dv-active-tab):not(:hover)]:[--fade-scrim-into:var(--dv-group-view-background-color)]',
+  'pointer-coarse:[&_.dv-tab:not(.dv-active-tab):not(:hover)_.dv-default-tab_.dv-default-tab-action:not(:hover)]:!bg-(--fade-scrim-into)',
   '[&_.dv-tab_.dv-default-tab_.dv-default-tab-action:hover]:text-foreground',
   '[&_.dv-tab_.dv-default-tab_.dv-default-tab-action:hover]:!bg-nested-action-hover',
 

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: All platforms, Linux-only staging evidence (not public promotion), or Mac-only staging ZIP/DMG evidence
+        description: All platforms, Linux-only staging evidence (not public promotion), or Apple silicon-only staging ZIP/DMG evidence
         required: true
         default: all
         type: choice
@@ -80,11 +80,14 @@ jobs:
             {"id": "windows-nsis-x64", "route": "windows-nsis", "host": "[\"windows-2025\"]"},
             {"id": "ubuntu-apt-x11", "route": "linux-apt", "host": "[\"self-hosted\", \"linux\", \"x64\", \"tau-disposable-ubuntu2404-x11\"]"},
             {"id": "ubuntu-appimage-x11", "route": "linux-appimage", "host": "[\"self-hosted\", \"linux\", \"x64\", \"tau-disposable-ubuntu2404-x11\"]"},
+            {"id": "ubuntu2604-apt-x11", "route": "linux-apt", "distro": "ubuntu2604", "host": "[\"self-hosted\", \"linux\", \"x64\", \"tau-disposable-ubuntu2604-x11\"]"},
+            {"id": "ubuntu2604-appimage-x11", "route": "linux-appimage", "distro": "ubuntu2604", "host": "[\"self-hosted\", \"linux\", \"x64\", \"tau-disposable-ubuntu2604-x11\"]"},
             {"id": "debian-apt-x11", "route": "linux-apt", "host": "[\"self-hosted\", \"linux\", \"x64\", \"tau-disposable-debian13-x11\"]"},
             {"id": "debian-appimage-x11", "route": "linux-appimage", "host": "[\"self-hosted\", \"linux\", \"x64\", \"tau-disposable-debian13-x11\"]"},
           ];
-          // A scoped run selects exactly its own platform's rows: Mac-only is ZIP and DMG on both native architectures.
-          const selected = scope === 'all' ? rows : rows.filter(row => row.route.startsWith(scope === 'linux' ? 'linux-' : 'macos-'));
+          // A scoped run selects exactly its own platform's rows. Mac-only is ZIP and DMG on Apple silicon: hosted Intel
+          // Macs have no WebGL, so Intel is out of the Mac-only scope by operator ruling.
+          const selected = scope === 'all' ? rows : rows.filter(row => scope === 'linux' ? row.route.startsWith('linux-') : row.route.startsWith('macos-') && row.id.endsWith('-arm64'));
           appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify(selected)}\n`);
           NODE
 
@@ -124,7 +127,7 @@ jobs:
         if: inputs.scope == 'linux'
         env:
           TAU_VM_MODE: qualification
-          TAU_VM_DISTRO: ${{ startsWith(matrix.id, 'ubuntu-') && 'ubuntu' || 'debian' }}
+          TAU_VM_DISTRO: ${{ matrix.distro || (startsWith(matrix.id, 'ubuntu-') && 'ubuntu' || 'debian') }}
         run: bash apps/desktop/scripts/hosted-linux-vm.sh
       - name: Run installed shipping renderer, explicit update and latest-feed update
         if: inputs.scope != 'linux'

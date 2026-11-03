@@ -3,15 +3,15 @@
 # unprivileged user against it. Called over SSH by shell-conformance-vm.sh with the distro as its argument.
 # Required files: ~/bwrap-fixture/*.deb (staging), ~/bwrap-fixture-production/*.deb, ~/node, ~/tau (tracked sources plus verified host-built Electron/UI artifacts).
 # Required env: GITHUB_SHA/GITHUB_RUN_ID/GITHUB_REPOSITORY, TAU_SHELL_CONFORMANCE_ROW (forwarded identities).
-# Usage: bash shell-conformance-guest.sh ubuntu|debian (inside the disposable guest only).
+# Usage: bash shell-conformance-guest.sh ubuntu|ubuntu2604|debian (inside the disposable guest only).
 # Exit: nonzero for any prerequisite, conformance/application assertion, evidence or stock-policy failure.
 set -euo pipefail
 umask 022
 export PATH="$HOME/node/bin:$PATH"
 [[ "$(id -un)" == tau && "$(id -u)" != 0 ]]
 source /etc/os-release
-[[ "$ID" == "$1" ]]
-case "$ID:$VERSION_ID" in ubuntu:24.04|debian:13) ;; *) exit 1 ;; esac
+# The argument names the expected image: each token admits exactly one release.
+case "$1:$ID:$VERSION_ID" in ubuntu:ubuntu:24.04|ubuntu2604:ubuntu:26.04|debian:debian:13) ;; *) exit 1 ;; esac
 printf 'Guest: %s (%s)\n' "$PRETTY_NAME" "$(uname -r)"
 before="$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || printf 'absent')"
 printf 'apparmor_restrict_unprivileged_userns: %s\n' "$before"

@@ -189,3 +189,58 @@ fn caps_auto_import_items_and_ranks_prefix_matches_first() {
     assert_eq!(imports.len(), 100);
     assert!(imports.iter().all(|label| label.starts_with("part_")), "{imports:?}");
 }
+
+/// Format `source` as the only open file and apply the edits the way an editor does: last edit first.
+fn format(source: &str, options: serde_json::Value) -> String {
+    let mut harness = Harness::new(&[("model.scad", source)]);
+    harness.open("model.scad");
+    let edits = harness.request(
+        "textDocument/formatting",
+        json!({ "textDocument": { "uri": uri("model.scad") }, "options": options }),
+    );
+    let lines = tau_openscad_language::text::LineIndex::new(source);
+    let mut text = source.to_owned();
+    let mut ranges: Vec<(usize, usize, String)> = edits
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|edit| {
+            let range = tau_openscad_language::text::Range::from_json(&edit["range"]).unwrap();
+            (
+                lines.offset(source, range.start),
+                lines.offset(source, range.end),
+                edit["newText"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    for pair in ranges.windows(2) {
+        assert!(pair[0].1 <= pair[1].0, "edits overlap: {ranges:?}");
+    }
+    ranges.reverse();
+    for (from, to, inserted) in ranges {
+        text.replace_range(from..to, &inserted);
+    }
+    text
+}
+
+#[test]
+fn formats_indentation_from_the_syntax_tree() {
+    let source = "\n\nmodule plate(w = 4,\nh = 2)\n{\n      difference() {\ncube([w,\n    h, 1]);   \n  for (i = [0:2])\n translate([i, 0, 0])\n        cylinder(r = 1);\n    }\n\n\n\nif (w > 2) cube();\n else\nsphere();\n}\n\nfunction area(w, h) =\n      w * h;\nlist = [\n[1, 2],\n    [3, 4]\n];\n\n\n";
+    let expected = "module plate(w = 4,\n  h = 2)\n{\n  difference() {\n    cube([w,\n      h, 1]);\n    for (i = [0:2])\n      translate([i, 0, 0])\n        cylinder(r = 1);\n  }\n\n  if (w > 2) cube();\n  else\n    sphere();\n}\n\nfunction area(w, h) =\n  w * h;\nlist = [\n  [1, 2],\n  [3, 4]\n];\n";
+    let formatted = format(source, json!({ "tabSize": 2, "insertSpaces": true }));
+    assert_eq!(formatted, expected);
+    assert_eq!(format(&formatted, json!({ "tabSize": 2, "insertSpaces": true })), expected, "formatting is stable");
+}
+
+#[test]
+fn formats_with_tabs_and_keeps_strings_and_comments() {
+    let source = "module m() {\n        /* note\n           continues */\n  echo(\"a\n   b  \n\");\n}";
+    let formatted = format(source, json!({ "tabSize": 4, "insertSpaces": false }));
+    assert_eq!(formatted, "module m() {\n\t/* note\n\t   continues */\n\techo(\"a\n   b  \n\");\n}\n");
+}
+
+#[test]
+fn leaves_files_with_syntax_errors_unformatted() {
+    let source = "module m( {\n      cube();\n";
+    assert_eq!(format(source, json!({ "tabSize": 2, "insertSpaces": true })), source);
+}

@@ -93,6 +93,13 @@ export type ShellLaunch = Readonly<{
    */
   environment: Readonly<Record<string, string>>;
   stdio: ShellStdio;
+  /**
+   * `zsh` lets the human macOS Terminal's system Zsh read the person's own Zsh startup files (operator ruling
+   * 2026-11-01T18:57Z): the provider reopens exactly those files read-only from the baseline and points `ZDOTDIR` at
+   * the home that holds them. It refuses the field on any other platform, a pipe launch or any executable but
+   * `/bin/zsh`. Agent launches never set it.
+   */
+  startupFiles?: 'zsh' | undefined;
   /** Aborting terminates the whole owned process tree; `exited` then settles. */
   signal: AbortSignal;
 }>;

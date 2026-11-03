@@ -82,6 +82,21 @@ describe('resolvePurposeAuthority', () => {
     expect(refusalOf(input, 'summary')).toBe('withdrawn');
   });
 
+  it('says when the allowing decision was taken, and only for an allowed purpose', () => {
+    const states = resolvePurposeAuthority(
+      authority({
+        decisions: [
+          { purpose: 'summary', granted: true, noticeVersion: notice, sequence: 1, decidedAt: 1000 },
+          { purpose: 'summary', granted: true, noticeVersion: notice, sequence: 2, decidedAt: 2000 },
+          { purpose: 'feedback', granted: false, noticeVersion: notice, sequence: 3, decidedAt: 3000 },
+        ],
+      }),
+    );
+
+    expect(states.find((state) => state.purpose === 'summary')).toMatchObject({ allowed: true, allowedSince: 2000 });
+    expect(states.find((state) => state.purpose === 'feedback')).not.toHaveProperty('allowedSince');
+  });
+
   describe('tier', () => {
     const granted = telemetryPurposes.map((purpose) => decided(purpose, true));
 

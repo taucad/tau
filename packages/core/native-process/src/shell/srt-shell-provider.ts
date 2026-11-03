@@ -28,7 +28,7 @@ import {
 } from '#native-sandbox.js';
 import { terminateOwnedProcesses, trackDescendants } from '#shell/process-tree.js';
 import type { ProcessRow } from '#shell/process-tree.js';
-import { shellBaselineDenied } from '#shell/shell-baseline.js';
+import { shellBaselineDenied, zshStartupFiles } from '#shell/shell-baseline.js';
 import { createShellCustody } from '#shell/shell-custody.js';
 import { refusedShellEnvironment } from '#shell/shell-environment.js';
 import { holdProtectedStandIns, useStandInJournal } from '#shell/shell-stand-ins.js';
@@ -250,15 +250,20 @@ const pinnedAncestors = (writable: readonly string[], protectedPaths: readonly s
 };
 
 export const shellSandboxProfile = (
-  launch: Pick<ShellLaunch, 'filesystem' | 'network'>,
+  launch: Pick<ShellLaunch, 'filesystem' | 'network' | 'startupFiles'>,
   options: SandboxShellProviderOptions = {},
   runtimeDirectory?: string,
 ): Record<string, unknown> => {
+  const home = options.home ?? homedir();
+  /* The human Terminal's Zsh reopens exactly its startup files, read-only; every other baseline entry stays denied. */
+  const startupFiles = launch.startupFiles === 'zsh' ? zshStartupFiles(home) : [];
   const denied = deniedVariants([
     ...launch.filesystem.denied,
-    ...shellBaselineDenied({ platform: process.platform, home: options.home ?? homedir(), environment: process.env }),
+    ...shellBaselineDenied({ platform: process.platform, home, environment: process.env }).filter(
+      (path) => !startupFiles.includes(path),
+    ),
   ]);
-  const readOnly = launch.filesystem.readOnly ?? [];
+  const readOnly = [...(launch.filesystem.readOnly ?? []), ...startupFiles];
   const pinned = pinnedAncestors(launch.filesystem.writable, [...readOnly, ...launch.filesystem.denied]);
   const { domains } = launch.network;
   return {
@@ -944,6 +949,12 @@ const admit = (launch: ShellLaunch, options: SandboxShellProviderOptions): Shell
   if (launch.network.domains.some((domain) => !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/u.test(domain))) {
     return unsupported('network-isolation', 'network grants name exact lowercase host names only.');
   }
+  if (
+    launch.startupFiles !== undefined &&
+    (process.platform !== 'darwin' || launch.stdio.kind !== 'terminal' || launch.executablePath !== '/bin/zsh')
+  ) {
+    return unsupported('filesystem-mask', 'only the macOS Terminal running /bin/zsh may read Zsh startup files.');
+  }
   if (launch.stdio.kind === 'terminal') {
     if (process.platform === 'darwin' && options.macOSTerminal !== true) {
       return unsupported('terminal', 'the macOS Terminal waits for the own-pty validation run.');
@@ -1031,7 +1042,13 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
       started = await startSupervisor(
         {
           profile,
-          command: shellSandboxCommand(launch),
+          /* Only the provider sets ZDOTDIR, and only for the Terminal Zsh it admitted: a host value stays refused. */
+          command: shellSandboxCommand(
+            launch.startupFiles === 'zsh'
+              ? // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names.
+                { ...launch, environment: { ...launch.environment, ZDOTDIR: options.home ?? homedir() } }
+              : launch,
+          ),
           workingDirectory: launch.workingDirectory,
           commandId: launch.commandId,
           guard: launch.network.domains.length > 0,

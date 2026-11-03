@@ -77,7 +77,6 @@ describe('the identity the record reports', () => {
       'parameterUnits',
       'geometryCache',
       'gltfEdgeDetection',
-      'displaySimplification',
     ]);
   });
 

@@ -3,6 +3,7 @@ import { PaneviewPanel } from 'dockview-react';
 import type { PaneviewApi } from 'dockview-react';
 import type { GeometryComponentNode } from '@taucad/types';
 import { SearchInput } from '@taucad/ui/components/search-input';
+import { PaneSearchRegion } from '@taucad/ui/components/pane-search';
 import type { PartThumbnailState } from '@taucad/viewer/cad/part-thumbnail-state';
 import type { WorkbenchUnit } from '#host/workbench-host.jsx';
 import { useWorkbenchPanesHost } from '#host/workbench-host.jsx';
@@ -141,7 +142,7 @@ export function ModelPane({ onRequestOpen }: { readonly onRequestOpen?: () => vo
 
   return (
     <div data-slot='model-panel-body' className='flex size-full min-h-0 flex-col overflow-hidden bg-sidebar text-sm'>
-      <div ref={filterRef} data-slot='model-filter' className='shrink-0 bg-sidebar px-2 pt-2'>
+      <PaneSearchRegion ref={filterRef} data-slot='model-filter' className='shrink-0 bg-sidebar px-2 pt-2'>
         <SearchInput
           aria-label='Filter parts'
           placeholder='Filter parts…'
@@ -154,7 +155,7 @@ export function ModelPane({ onRequestOpen }: { readonly onRequestOpen?: () => vo
             setQuery('');
           }}
         />
-      </div>
+      </PaneSearchRegion>
       <div className='min-h-0 flex-1 overflow-hidden'>
         {units.length === 0 ? (
           <ExplorerEmptyState />

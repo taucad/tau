@@ -52,7 +52,7 @@ export type RunRating = Readonly<{ chatId: string; runId: string; value: 'positi
 
 /** A composed host reporter, as the launcher calls it. @public */
 export type HostEvidence = Readonly<{
-  /** The launcher's quiescence hook. */
+  /** The launcher's quiescence hook: a chat going busy re-reads the grants, going quiescent reports its runs. */
   onChatQuiescent: (chatId: string, quiescent: boolean) => void;
   /**
    * The UI showed a live run's model text at `at`, on this device's clock. The first time per run is kept, for the most
@@ -100,6 +100,8 @@ const readGrant = async (
     `${options.apiBaseUrl}/v1/telemetry-purposes?projectId=${encodeURIComponent(options.project)}`,
     { credentials: 'include', headers: { accept: 'application/json' } },
   );
+  /* Read as the response arrives, which is after the server answered: it dates the grant on this host's clock. */
+  const receivedAt = (options.now ?? Date.now)();
   if (response.status === 401 || response.status === 403) {
     return undefined;
   }
@@ -109,7 +111,7 @@ const readGrant = async (
   const answer = (await response.json()) as EffectivePurposesAnswer;
   /* An account switched while the answer was in flight is not the account it answered for. */
   return options.principal() === principal
-    ? purposeGrantOf(answer, { principal, project: options.project }, purpose)
+    ? purposeGrantOf(answer, { principal, project: options.project, receivedAt }, purpose)
     : undefined;
 };
 
@@ -186,6 +188,13 @@ export const createHostEvidence = (options: HostEvidenceOptions): HostEvidence =
     onChatQuiescent: (chatId, quiescent) => {
       if (quiescent) {
         void quietly(async () => report(chatId));
+        return;
+      }
+      /* A run is starting: read the grant now, so a withdrawal since the last read purges before the run's facts are
+       * held. Facts from before the account's allowing decision are never backfilled. */
+      void quietly(async () => reporter.refresh());
+      if (feedback !== undefined) {
+        void quietly(async () => feedback.refresh());
       }
     },
     onPresented: (chatId, runId, at) => {

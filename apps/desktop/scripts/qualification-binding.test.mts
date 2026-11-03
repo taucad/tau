@@ -47,7 +47,8 @@ try {
     tag,
     ...identity,
     sourceCommit: source,
-    artifacts: (['arm64', 'x64'] as const).flatMap((arch) =>
+    // The Mac-only candidate is the Apple silicon ZIP/DMG pair (operator ruling: Intel is not qualified).
+    artifacts: (['arm64'] as const).flatMap((arch) =>
       (['macos-zip', 'macos-dmg'] as const).map((kind) => {
         const { platform: _platform, ...definition } = desktopArtifactKinds[kind];
         return {
@@ -262,6 +263,18 @@ else { if (!(path in responses)) throw new Error('Unexpected API path ' + path);
     return fetchDesktopQualifiedReceipts(manifest, directory, { ci: '123', scope: 'macos' });
   };
   assert.deepEqual(await fetchReceipts(), receipts);
+  // An Intel Mac receipt smuggled into the authenticated archive never joins the Apple silicon receipt set.
+  await assert.rejects(
+    fetchReceipts(binding, [
+      ...receipts,
+      {
+        ...receipts[0]!,
+        target: 'darwin-x64',
+        environment: { ...receipts[0]!.environment, arch: 'x64' },
+      },
+    ]),
+    /disagree with candidate route/u,
+  );
   await assert.rejects(fetchReceipts(null), /archive members/u);
   await assert.rejects(fetchReceipts(binding, receipts, { extraFile: true }), /archive members/u);
   await assert.rejects(fetchReceipts(binding, receipts, { extraFile: 'duplicate' }), /archive members/u);

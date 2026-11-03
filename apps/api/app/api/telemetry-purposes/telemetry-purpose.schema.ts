@@ -56,6 +56,12 @@ export const telemetryPurposeStateSchema = z.object({
   granted: z.boolean(),
   /** Absent only when `allowed` is true. */
   refusal: purposeRefusalSchema.optional(),
+  /**
+   * When the decision that allows this purpose was taken, in milliseconds since the epoch. Present only when
+   * `allowed` is true. A host reports facts from this time on, never from before it, however late it first read
+   * the answer: a project the API registers after its first run, or a host that restarts, loses nothing granted.
+   */
+  allowedSince: z.number().int().nonnegative().optional(),
 });
 
 /** The effective state of one purpose. */
@@ -78,6 +84,14 @@ export const effectiveTelemetryPurposesSchema = z
       .describe('The approved production notice in force. Absent while none is, which refuses every purpose.'),
     projectId: z.string().optional().describe('The project the answer was scoped to, absent for the account alone.'),
     purposes: z.array(telemetryPurposeStateSchema),
+    answeredAt: z
+      .number()
+      .int()
+      .nonnegative()
+      .optional()
+      .describe(
+        "The server's clock when it answered, in milliseconds, so a host can read `allowedSince` on its own clock.",
+      ),
   })
   .meta({ id: 'EffectiveTelemetryPurposes' });
 

@@ -1,5 +1,5 @@
 import type { ModelSummary } from '@taucad/chat/schemas/tools/evaluate-model';
-import type { KernelIssue, TessellationReport } from '@taucad/runtime/types';
+import type { TessellationReport } from '@taucad/runtime/types';
 
 import { isObject, renderedGlb } from '#runtime/glb-chunks.js';
 import type { JsonObject, RenderedArtifact } from '#runtime/glb-chunks.js';
@@ -18,10 +18,9 @@ export type ModelAdmissionLimits = Readonly<{
   maxSubjectBytes: number;
 }>;
 
-/** What {@link summarizeRenderedModel} reads: the default view's artifact and issues, and the engine limits. */
+/** What {@link summarizeRenderedModel} reads: the default view's artifact and report, and the engine limits. */
 type SummarizeRenderedModelInput = Readonly<{
   artifact: RenderedArtifact;
-  issues: readonly KernelIssue[];
   /** The default view's tessellation report, when its kernel gave one; read for an adaptive display mesh. */
   tessellation?: Pick<TessellationReport, 'adaptivity'> | undefined;
   /** Resolves the engine's limits, or `undefined` when this host cannot say; read only for a GLB. */
@@ -273,36 +272,11 @@ const meshFacts = (json: JsonObject): MeshFacts => {
   };
 };
 
-/**
- * The first full-mesh count a display simplification reported: exports, and so GeoSpec subjects,
- * keep the mesh the kernel produced.
- *
- * @param issues - The default view's rendering issues.
- * @returns The produced and delivered triangle counts, when the render was simplified.
- */
-const simplifiedFrom = (issues: readonly KernelIssue[]): Readonly<{ from: number; to: number }> | undefined => {
-  for (const issue of issues) {
-    const details = isObject(issue.details) ? issue.details : undefined;
-    const from = referenceOf(details, 'from');
-    const to = referenceOf(details, 'to');
-    if (issue.code === 'DISPLAY_SIMPLIFIED' && from !== undefined && to !== undefined && to > 0) {
-      return { from, to };
-    }
-  }
-  return undefined;
-};
-
 const admissionOf = (
   mesh: Readonly<{ triangles: number; vertices: number; adaptivity?: number | undefined }>,
-  issues: readonly KernelIssue[],
   limits: ModelAdmissionLimits,
 ): NonNullable<ModelSummary['admission']> => {
-  const { adaptivity } = mesh;
-  const simplified = simplifiedFrom(issues);
-  const triangles = simplified?.from ?? mesh.triangles;
-  // Simplification keeps the topology, so the produced mesh keeps the delivered vertex share.
-  const vertices =
-    simplified === undefined ? mesh.vertices : Math.round((mesh.vertices * simplified.from) / simplified.to);
+  const { triangles, vertices, adaptivity } = mesh;
   const estimates = {
     triangles: { estimated: triangles, limit: limits.maxTriangles },
     vertices: { estimated: vertices, limit: limits.maxVertices },
@@ -337,7 +311,7 @@ const admissionOf = (
  * in `warning`, because its subject is exported uniformly.
  *
  * @internal
- * @param input - The default view's artifact and issues, and the engine limits when known.
+ * @param input - The default view's artifact and tessellation report, and the engine limits when known.
  * @returns The summary, or `undefined` when the artifact is not a GLB.
  */
 export const summarizeRenderedModel = async (input: SummarizeRenderedModelInput): Promise<ModelSummary | undefined> => {
@@ -355,11 +329,7 @@ export const summarizeRenderedModel = async (input: SummarizeRenderedModelInput)
     ...(limits === undefined
       ? {}
       : {
-          admission: admissionOf(
-            { triangles, vertices, adaptivity: input.tessellation?.adaptivity },
-            input.issues,
-            limits,
-          ),
+          admission: admissionOf({ triangles, vertices, adaptivity: input.tessellation?.adaptivity }, limits),
         }),
   };
 };

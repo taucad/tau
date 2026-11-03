@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Run native-process-core:test:shell-conformance inside a disposable stock Linux guest (LNX-U, LNX-D).
+# Run native-process-core:test:shell-conformance inside a disposable stock Linux guest (LNX-U, LNX-U26, LNX-D).
 # The guest keeps its shipped AppArmor policy and kernel.apparmor_restrict_unprivileged_userns value; the sandbox
 # reaches user namespaces only through the Tau-scoped bwrap profile the real APT selector installs.
-# Required env: TAU_VM_DISTRO (ubuntu or debian), RUNNER_TEMP (disposable CI directory).
+# Required env: TAU_VM_DISTRO (ubuntu, ubuntu2604 or debian), RUNNER_TEMP (disposable CI directory).
 # Usage: TAU_VM_DISTRO=ubuntu bash packages/core/native-process/scripts/shell-conformance-vm.sh
 # Exit codes: 0 every row passed; 1 a row failed or an operation failed; 3 missing host prerequisite.
 set -euo pipefail
@@ -17,6 +17,11 @@ case "$TAU_VM_DISTRO" in
     row=LNX-U
     url=https://cloud-images.ubuntu.com/releases/noble/release-20261017/ubuntu-24.04-server-cloudimg-amd64.img
     digest=04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94
+    algorithm=sha256sum ;;
+  ubuntu2604)
+    row=LNX-U26
+    url=https://cloud-images.ubuntu.com/releases/resolute/release-20261016/ubuntu-26.04-server-cloudimg-amd64.img
+    digest=5645d0318ad21f643ebb1ac4567514620e9893380b07b0201fda163baa5b7eb5
     algorithm=sha256sum ;;
   debian)
     row=LNX-D

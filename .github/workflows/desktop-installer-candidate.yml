@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: All platforms, Linux-only staging qualification (not public promotion), or Mac-only staging ZIP/DMG candidate
+        description: All platforms, Linux-only staging qualification (not public promotion), or Apple silicon-only staging ZIP/DMG candidate
         required: true
         default: all
         type: choice
@@ -76,7 +76,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arch: [arm64, x64]
+        # The Mac-only staging scope is Apple silicon only (hosted Intel Macs cannot qualify the renderer).
+        arch: ${{ inputs.scope == 'macos' && fromJSON('["arm64"]') || fromJSON('["arm64", "x64"]') }}
     env:
       DESKTOP_RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
       TAU_DESKTOP_SOURCE_SHA: ${{ needs.resolve.outputs.source }}

@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Validate distro/kernel, systemd timer and a real Xorg/Openbox desktop in a disposable guest.
 # Called over authenticated loopback SSH by hosted-linux-vm.sh, never on the host.
-# Required env: none. Usage: bash hosted-linux-vm-guest.sh ubuntu|debian
+# Required env: none. Usage: bash hosted-linux-vm-guest.sh ubuntu|ubuntu2604|debian
 # Exit codes: 0 assertions passed; 1 assertion or guest setup failed.
 set -euo pipefail
 [[ "$(id -un)" == tau && "$(id -u)" != 0 && "$(uname -m)" == x86_64 ]]
 [[ "$(cat /proc/1/comm)" == systemd ]]
 # shellcheck source=/dev/null
 source /etc/os-release
-[[ "$ID" == "$1" ]]
-case "$ID:$VERSION_ID" in ubuntu:24.04|debian:13) ;; *) exit 1 ;; esac
+# The argument names the expected image: each token admits exactly one release.
+case "$1:$ID:$VERSION_ID" in ubuntu:ubuntu:24.04|ubuntu2604:ubuntu:26.04|debian:debian:13) ;; *) exit 1 ;; esac
 printf 'Guest: %s\n' "$PRETTY_NAME"
 uname -a
 systemd-detect-virt | grep -x kvm

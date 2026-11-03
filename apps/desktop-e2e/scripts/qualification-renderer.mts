@@ -5,7 +5,7 @@ import { readFile, readdir, writeFile, stat } from 'node:fs/promises';
 import { join, relative, resolve, dirname, basename } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { chromium } from 'playwright';
-import type { Browser, Page } from 'playwright';
+import type { Page } from 'playwright';
 import { z } from 'zod';
 /* oxlint-disable-next-line no-restricted-imports -- Installed qualification owns the bounded native close driver. */
 import { requestQualificationQuit } from './qualification-quit.mjs';
@@ -108,37 +108,16 @@ const exportGeometry = async (
   throw new Error('Installed renderer did not produce a fresh geometry export');
 };
 /**
- * Navigates to the retained project. The reinstalled launch is waited for only by its debugging port, so its
- * first app page can still be replaced while it starts (run 41568143873 macos-dmg-arm64 and macos-zip-arm64:
- * `ERR_ABORTED; maybe frame was detached?`, then the page closed). That launch retries on the one app page
- * that remains.
+ * Navigates only after the app's own first load has finished. A launch is waited for only by its debugging port,
+ * so the harness can attach while the main process still awaits `window.loadURL('/')`; navigating then aborts
+ * that load, which rejects the app's bootstrap and exits the app (run 41568143873 macos-dmg-arm64 and
+ * macos-zip-arm64 `ERR_ABORTED; maybe frame was detached?`, then run 41576899441 macos-dmg-arm64 with no app
+ * page left). Waiting for that document lets the app settle; it accepts nothing new.
  */
-const openProject = async (
-  browser: Browser,
-  first: Page,
-  { url, retry }: { url: string; retry: boolean },
-): Promise<Page> => {
-  let page = first;
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      await page.goto(url);
-      return page;
-    } catch (error) {
-      if (!retry || attempt >= 3) {
-        throw error;
-      }
-    }
-    await wait(2000);
-    const remaining = browser
-      .contexts()
-      .flatMap((context) => context.pages())
-      .filter((candidate) => !candidate.isClosed() && candidate.url().startsWith('app://tau/'));
-    if (remaining.length !== 1) {
-      throw new Error(`Reinstalled app has ${remaining.length} app pages after a failed navigation`);
-    }
-    page = remaining[0]!;
-    page.setDefaultTimeout(120_000);
-  }
+const navigateAfterFirstLoad = async (page: Page, url: string): Promise<void> => {
+  // The page's own document state, not Playwright's lifecycle record of a page it attached to mid-load.
+  await page.waitForFunction(() => document.readyState === 'complete');
+  await page.goto(url);
 };
 
 const main = async (): Promise<void> => {
@@ -256,10 +235,10 @@ const main = async (): Promise<void> => {
       if (!projectUrl?.startsWith('app://tau/w/')) {
         throw new Error('Retained project route required');
       }
-      page = await openProject(browser, page, { url: projectUrl, retry: action === 'reinstall-ui' });
+      await navigateAfterFirstLoad(page, projectUrl);
     }
     if (stage === 'a' && !process.env['TAU_QUALIFICATION_PROJECT_URL']) {
-      await page.goto('app://tau/projects/new');
+      await navigateAfterFirstLoad(page, 'app://tau/projects/new');
       await page.getByLabel('Project Name *', { exact: true }).fill('Qualification retained project');
       await page.locator('label[for="kernel-build123d"]').click();
       await page.getByRole('button', { name: /^Create Project/u }).click();

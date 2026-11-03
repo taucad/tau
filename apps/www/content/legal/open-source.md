@@ -281,7 +281,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@tanstack/react-query](https://github.com/TanStack/query) | 5.104.2 | MIT |
 | [@tanstack/react-store](https://github.com/TanStack/store) | 0.11.2 | MIT |
 | [@tanstack/store](https://github.com/TanStack/store) | 0.11.2 | MIT |
-| [@taucad/kcl-wasm-lib](https://github.com/taucad/modeling-app) | 0.1.191 | MIT |
+| [@taucad/kcl-wasm-lib](https://github.com/taucad/modeling-app) | 0.1.192 | MIT |
 | [@taulabs/openrscad-engine](https://github.com/taucad/openrscad) | 0.11.0-beta.4 | Apache-2.0 OR MIT |
 | [@taulabs/openrscad-engine-{platform}](https://github.com/taucad/openrscad) | 0.11.0-beta.4 | Apache-2.0 OR MIT |
 | [@taulabs/replicad](https://github.com/taucad/replicad) | 1.1.0-taulabs.1 | MIT |

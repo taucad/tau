@@ -214,7 +214,7 @@ services:
       retries: 10
 
   langfuse-clickhouse:
-    image: clickhouse/clickhouse-server:25.12
+    image: clickhouse/clickhouse-server:26.10
     container_name: tau-langfuse-clickhouse
     profiles: [langfuse]
     restart: unless-stopped

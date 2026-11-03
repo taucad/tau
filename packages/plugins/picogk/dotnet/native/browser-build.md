@@ -18,7 +18,9 @@ the hosted surface-normal batch callback. Do not link both adapters.
 
 For managed source, apply `PicoGK.hosted.patch`, then PicoVoxel's
 `browser-handles.patch`, then `PicoGK.browser.patch`, and include PicoVoxel's
-`BrowserCallbacks.cs` and `SdfTape.cs`. The latter is the signed-distance tape
+`BrowserCallbacks.cs`, `SdfTape.cs` and `SdfParallel.cs`. `SdfParallel.cs` proves a callback field pure
+from its IL and, on a threaded build, precomputes its samples on every core without changing a byte.
+`SdfTape.cs` is the signed-distance tape
 registry the browser boundary consults before falling back to a per-voxel
 callback; it is reached only from `PICOGK_BROWSER` branches and needs the
 archive's ordinary `Voxels_IntersectImplicitTape` and `Voxels_RenderImplicitTape`

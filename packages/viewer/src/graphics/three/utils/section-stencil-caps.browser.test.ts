@@ -306,7 +306,11 @@ describe.each(['webgl', 'webgpu', 'nodegl'] as const)('section stencil caps on %
     | Readonly<{
         built: ArrayLike<number>;
         reused: ArrayLike<number>;
+        /** A reused frame at a camera the build never saw, and a fresh build at that same camera. */
+        orbitedReused: ArrayLike<number>;
+        orbitedBuilt: ArrayLike<number>;
         stats: readonly SectionStencilCapStats[];
+        freshStats: readonly SectionStencilCapStats[];
       }>
     | undefined;
   const disposables: Array<{ dispose: () => void }> = [];
@@ -404,19 +408,26 @@ describe.each(['webgl', 'webgpu', 'nodegl'] as const)('section stencil caps on %
       });
     }
 
-    // A reused draw list must draw the pixels its build drew: the same camera, built and then reused.
+    // A reused draw list must draw the pixels a build would: at the camera it was built at, and at a camera it was not.
     {
       const scenario = scenarios[0]!;
       const camera = scenario.camera();
       writeSectionClip(clip, scenario.pieces);
       const reuseStats: SectionStencilCapStats[] = [];
-      const drawAt = async (position: THREE.Vector3): Promise<ArrayLike<number>> => {
+      const freshStats: SectionStencilCapStats[] = [];
+      const freshCaps = createSectionStencilCaps(backend);
+      disposables.push(freshCaps);
+      const drawAt = async (
+        position: THREE.Vector3,
+        drawing = caps,
+        stats = reuseStats,
+      ): Promise<ArrayLike<number>> => {
         camera.position.copy(position);
         camera.lookAt(centre);
         camera.updateMatrixWorld();
         return renderFrame(scene, camera, () => {
-          reuseStats.push(
-            caps.render(renderer, {
+          stats.push(
+            drawing.render(renderer, {
               camera,
               pieces: scenario.pieces,
               sources,
@@ -435,9 +446,11 @@ describe.each(['webgl', 'webgpu', 'nodegl'] as const)('section stencil caps on %
         .applyAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 36)
         .add(centre);
       const built = await drawAt(home);
-      await drawAt(orbited);
+      const orbitedReused = await drawAt(orbited);
       const reused = await drawAt(home);
-      reusePixels = { built, reused, stats: [...reuseStats] };
+      // A list that has never drawn builds at the orbited camera: what the reused list must have matched there.
+      const orbitedBuilt = await drawAt(orbited, freshCaps, freshStats);
+      reusePixels = { built, reused, orbitedReused, orbitedBuilt, stats: [...reuseStats], freshStats: [...freshStats] };
     }
 
     // Main-thread cost against triangle count: one closed sphere per owner, cut through, coarse and then fine.
@@ -542,6 +555,23 @@ describe.each(['webgl', 'webgpu', 'nodegl'] as const)('section stencil caps on %
       0,
     );
     expect(differing, `${differing} of ${built.length} channels differ between the built and reused frames`).toBe(0);
+  });
+
+  it('should draw the same pixels from a reused draw list at a new camera as a fresh build there', () => {
+    expect(reusePixels, 'the reuse pair was collected').toBeDefined();
+    const { orbitedBuilt, orbitedReused, stats, freshStats } = reusePixels!;
+    expect(stats[1]!.rebuilt, 'the orbited frame reused the build').toBe(false);
+    expect(freshStats.map(({ rebuilt }) => rebuilt)).toEqual([true]);
+    expect(freshStats[0]!.meshDrawCount).toBe(stats[1]!.meshDrawCount);
+    expect(freshStats[0]!.polygonDrawCount).toBe(stats[1]!.polygonDrawCount);
+    const differing = [...new Uint8Array(orbitedBuilt.length).keys()].reduce(
+      (total, index) => total + Number(orbitedBuilt[index] !== orbitedReused[index]),
+      0,
+    );
+    expect(
+      differing,
+      `${differing} of ${orbitedBuilt.length} channels differ between the reused and freshly built orbited frames`,
+    ).toBe(0);
   });
 
   it('should compile and draw every pass without a shader or pipeline error', () => {

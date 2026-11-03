@@ -3,7 +3,7 @@ import { mintViewRecordId } from '#workbench-records/converters.js';
 
 type CreationFile = { content: Uint8Array<ArrayBuffer>; mode?: '100644' | '100755' };
 
-/** Seed only an absent workbench. Imported and duplicated record bytes stay authoritative. */
+/** Seed only an absent workbench, opening Parameters. Imported and duplicated record bytes stay authoritative. */
 export function seedInitialWorkbenchFiles<T extends CreationFile>(
   files: Record<string, T>,
   mainEntryPath: string | undefined,
@@ -17,7 +17,7 @@ export function seedInitialWorkbenchFiles<T extends CreationFile>(
     version: 1,
     lanes: { chat: true, workbench: true },
     viewer: { kind: 'group', tabs: [{ kind: 'view', view: viewId }] },
-    workbench: { kind: 'group', tabs: [] },
+    workbench: { kind: 'group', tabs: [{ kind: 'pane', pane: 'parameters' }], active: 0 },
   });
   const encode = (value: string): CreationFile => ({ content: new TextEncoder().encode(value) });
   return {

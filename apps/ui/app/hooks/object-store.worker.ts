@@ -70,36 +70,21 @@ export function pickDuplicatedFocusedChatId(args: {
 }
 
 const createInitialEditorState = (args: {
-  readonly project: ProjectManifest;
   readonly projectId: string;
   /** Absent when the project was created without a chat (review R5). */
   readonly chatId: string | undefined;
   readonly overrides?: InitialEditorState;
   readonly timestamp: number;
-  readonly deferInitialView?: boolean;
 }): EditorState => {
-  const mainFile = args.deferInitialView ? undefined : args.project.assets.main.entryPath;
-  const seedPaneId = mainFile ? generatePrefixedId(idPrefix.pane) : undefined;
-  const openFiles: OpenFile[] =
-    args.overrides?.openFiles && args.overrides.openFiles.length > 0
-      ? args.overrides.openFiles
-      : mainFile && seedPaneId
-        ? [
-            {
-              paneId: seedPaneId,
-              path: mainFile,
-              name: mainFile.split('/').pop() ?? mainFile,
-              lastAccessedAt: args.timestamp,
-            },
-          ]
-        : [];
+  // A new project opens no file: the workbench record seeds Parameters beside a launcher.
+  const openFiles: OpenFile[] = args.overrides?.openFiles ?? [];
 
   const panelState = mergePanelState(defaultPanelState, args.overrides?.panelState);
 
   return {
     projectId: args.projectId,
     openFiles,
-    activePaneId: args.overrides?.activePaneId ?? seedPaneId,
+    activePaneId: args.overrides?.activePaneId,
     focusedChatId: args.chatId,
     panelState,
     fileSidebars: (args.overrides?.fileSidebars ?? {}) as EditorState['fileSidebars'],
@@ -169,12 +154,10 @@ const objectStoreWorker = {
       ...(chat === undefined ? {} : { chat }),
       ...(options.attachmentSource === undefined ? {} : { attachmentSource: options.attachmentSource }),
       editorState: createInitialEditorState({
-        project,
         projectId: options.projectId,
         chatId: chat?.id,
         overrides: options.editorState,
         timestamp,
-        deferInitialView: options.deferInitialView,
       }),
     };
     await storage.putPendingProjectOperation(operation);

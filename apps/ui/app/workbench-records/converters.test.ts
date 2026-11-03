@@ -100,6 +100,26 @@ describe('workbench Dockview converters', () => {
     });
   });
 
+  it('keeps a window-local launcher after the record tabs without stealing activation', () => {
+    const tabs: WorkbenchLaneTab[] = [{ kind: 'pane', pane: 'parameters' }];
+    const layout = toDockview(
+      'workbench',
+      { kind: 'group', tabs },
+      { dimensions: { width: 800, height: 600 }, launcherId: 'pane_launcher' },
+    );
+    const restored = mount(layout);
+    if (!Array.isArray(restored.grid.root.data)) {
+      throw new TypeError('Expected branch');
+    }
+    const only = restored.grid.root.data[0];
+    if (!only || Array.isArray(only.data)) {
+      throw new TypeError('Expected group');
+    }
+    expect(only.data.views).toEqual(['workbench:parameters', 'pane_launcher']);
+    expect(only.data.activeView).toBe('workbench:parameters');
+    expect(fromDockview('workbench', restored)).toEqual({ kind: 'group', size: undefined, tabs });
+  });
+
   it.each([
     { width: 1200, height: 800 },
     { width: 520, height: 1080 },

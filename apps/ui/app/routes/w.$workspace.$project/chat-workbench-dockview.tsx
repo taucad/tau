@@ -1876,6 +1876,8 @@ export const WorkbenchDockview = memo(function ({
         return;
       }
       const active = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+      // Launchers are window-local, so a record carries none; keep the open one beside the record's tabs.
+      const launcherId = api.panels.find((panel) => getPlaceholderParameters(panel)?.mode === 'launcher')?.id;
       isRestoringLayout.current = true;
       try {
         // Pruned here, not in the record: a web session's next edit writes the pruned layout back, dropping a desktop
@@ -1884,6 +1886,7 @@ export const WorkbenchDockview = memo(function ({
           toDockview('workbench', withoutUnshippedPanes(node), {
             dimensions: { width: Math.max(1, api.width), height: Math.max(1, api.height) },
             files,
+            ...(launcherId === undefined ? {} : { launcherId }),
           }),
           { reuseExistingPanels: true },
         );

@@ -101,8 +101,8 @@
   "peerDependencies": {
     "@taucad/revisions": "^0.1.0-beta.0",
     "@taucad/runtime": "^0.1.0-beta.0",
-    "geospec": "0.5.0",
-    "geospec-engine": "0.5.0",
+    "geospec": "0.5.1",
+    "geospec-engine": "0.5.1",
     "xstate": "^6.0.0-alpha.59",
     "zod": "^4.1.0"
   },

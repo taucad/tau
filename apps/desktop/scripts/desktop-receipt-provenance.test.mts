@@ -129,7 +129,7 @@ for (const difference of [
     verifyDesktopReceiptProvenance(vmRun, { ...macVm, ...difference }, { environment: 'vm', manifest, scope: 'macos' }),
   );
 }
-// Partial-architecture and per-row clean-host artifacts are never admitted as the Mac clean-host receipt set.
+// Per-row, all-platform and CI artifacts are never admitted as the Mac clean-host receipt set.
 for (const name of ['desktop-route-row-macos-dmg-arm64', 'desktop-route-vm-receipts', 'desktop-macos-ci-receipts']) {
   assert.throws(() =>
     verifyDesktopReceiptProvenance(vmRun, { ...macVm, name }, { environment: 'vm', manifest, scope: 'macos' }),

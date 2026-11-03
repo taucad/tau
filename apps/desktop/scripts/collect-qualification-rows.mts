@@ -27,9 +27,16 @@ const rows = [
 ] as const;
 const scopes = ['all', 'linux', 'macos', 'windows'] as const;
 type QualificationScope = (typeof scopes)[number];
-/** Rows each explicit scope must produce; a scoped run can neither omit nor add another platform's host. */
+/**
+ * Rows each explicit scope must produce; a scoped run can neither omit nor add another platform's host. The Mac-only
+ * scope is Apple silicon only (operator ruling: hosted Intel Macs cannot render, so Intel is not qualified).
+ */
 const scopeRows = (scope: QualificationScope) =>
-  scope === 'all' ? rows : rows.filter(([, route]) => route.startsWith(`${scope}-`));
+  scope === 'all'
+    ? rows
+    : rows.filter(
+        ([, route, target]) => route.startsWith(`${scope}-`) && (scope !== 'macos' || target === 'darwin-arm64'),
+      );
 const inputSchema = z.strictObject({
   scope: z.enum(scopes).default('all'),
   /** `vm` collects clean-host acceptance rows from the Mac- or Windows-scoped staging producer; never inferred from receipts. */

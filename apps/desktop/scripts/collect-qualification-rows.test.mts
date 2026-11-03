@@ -31,7 +31,9 @@ const specifications = [
   ['debian-apt-x11', 'linux-apt', 'linux-x64', '6.12.0 NAME="Debian GNU/Linux"\nID=debian\nVERSION_ID="13"'],
   ['debian-appimage-x11', 'linux-appimage', 'linux-x64', '6.12.0 NAME="Debian GNU/Linux"\nID=debian\nVERSION_ID="13"'],
 ] as const;
-const fixture = (macOnly = false) => {
+/** Without Mac targets, the full eleven-host fixture; with them, a Mac-only candidate and rows for exactly those targets. */
+const fixture = (macTargets?: readonly DesktopReleaseTarget[]) => {
+  const macOnly = macTargets !== undefined;
   const channel = 'staging';
   const version = '1.0.3';
   const targets: Array<[DesktopReleaseTarget, DesktopArtifactKind]> = (
@@ -47,7 +49,7 @@ const fixture = (macOnly = false) => {
       ['linux-x64', 'linux-appimage-deb-runtime'],
       ['linux-x64', 'linux-appimage-deb-selector'],
     ] as Array<[DesktopReleaseTarget, DesktopArtifactKind]>
-  ).filter(([target]) => !macOnly || target.startsWith('darwin-'));
+  ).filter(([target]) => !macOnly || macTargets.includes(target));
   const candidate = parseDesktopArtifactManifest({
     schemaVersion: 1,
     tag: 'desktop-staging@0.1.0-staging.3',
@@ -79,7 +81,7 @@ const fixture = (macOnly = false) => {
     runId: '1234',
     trustIdentities,
     rows: specifications
-      .filter(([, route]) => !macOnly || route.startsWith('macos-'))
+      .filter(([, route, target]) => !macOnly || (route.startsWith('macos-') && macTargets.includes(target)))
       .map(([id, route, target, os]) => ({
         id,
         receipts: [
@@ -251,10 +253,10 @@ reject((value) => ({
       : row,
   ),
 }));
-// A Mac-only run admits exactly ZIP and DMG on both native architectures from the Mac-only candidate, with only the
-// Apple identity; it can neither include nor omit another platform's row.
+// A Mac-only run admits exactly ZIP and DMG on Apple silicon from the Mac-only candidate, with only the Apple identity;
+// it can neither include nor omit another platform's row, and Intel Macs are outside the scope (operator ruling).
 const mac = {
-  ...fixture(true),
+  ...fixture(['darwin-arm64']),
   scope: 'macos',
   trustIdentities: {
     'macos-zip': complete.trustIdentities['macos-zip'],
@@ -264,11 +266,11 @@ const mac = {
 const macResult = collectQualificationRows(mac);
 assert.deepEqual(
   macResult.hostMatrix.map(({ id }) => id),
-  ['macos-zip-arm64', 'macos-dmg-arm64', 'macos-zip-x64', 'macos-dmg-x64'],
+  ['macos-zip-arm64', 'macos-dmg-arm64'],
 );
 assert.deepEqual(
   macResult.receipts.map(({ route, target }) => `${target}/${route}`),
-  ['darwin-arm64/macos-zip', 'darwin-arm64/macos-dmg', 'darwin-x64/macos-zip', 'darwin-x64/macos-dmg'],
+  ['darwin-arm64/macos-zip', 'darwin-arm64/macos-dmg'],
 );
 assert.ok(macResult.receipts.every((receipt) => receipt.environment.kind === 'ci'));
 const rejectMac = (change: (value: typeof mac) => unknown): void => {
@@ -278,8 +280,31 @@ for (const row of mac.rows) {
   rejectMac((value) => ({ ...value, rows: value.rows.filter((other) => other.id !== row.id) }));
   rejectMac((value) => ({ ...value, rows: [...value.rows, row] }));
 }
-// Single-architecture evidence, other-platform rows and a full or production candidate are refused.
-rejectMac((value) => ({ ...value, rows: value.rows.filter((row) => row.id.endsWith('-arm64')) }));
+// Intel Mac rows are refused alongside or in place of Apple silicon, and a candidate carrying any darwin-x64 artifact
+// is refused even with complete rows for it.
+const dualMac = fixture(['darwin-arm64', 'darwin-x64']);
+const intelRows = dualMac.rows.filter((row) => row.id.endsWith('-x64'));
+assert.deepEqual(
+  intelRows.map(({ id }) => id),
+  ['macos-zip-x64', 'macos-dmg-x64'],
+);
+assert.throws(
+  () => collectQualificationRows({ ...mac, candidate: dualMac.candidate, rows: dualMac.rows }),
+  /Mac-only publication requires exactly staging ZIP and DMG for Apple silicon/u,
+);
+assert.throws(
+  () =>
+    collectQualificationRows({
+      ...mac,
+      candidate: dualMac.candidate,
+      rows: dualMac.rows.filter((row) => row.id.endsWith('-arm64')),
+    }),
+  /Mac-only publication requires exactly staging ZIP and DMG for Apple silicon/u,
+);
+for (const rows of [...intelRows.map((row) => [...mac.rows, row]), [...mac.rows, ...intelRows], intelRows]) {
+  assert.throws(() => collectQualificationRows({ ...mac, rows }), /unexpected rows/u);
+}
+// Other-platform rows and a full or production candidate are refused.
 rejectMac((value) => ({ ...value, rows: complete.rows }));
 rejectMac((value) => ({ ...value, rows: [...value.rows, complete.rows[4]] }));
 rejectMac((value) => ({ ...value, candidate: complete.candidate, rows: complete.rows.slice(0, 4) }));
@@ -350,7 +375,22 @@ rejectVm((value) => ({ ...value, channel: 'production' }));
 // A CI receipt can never be collected as clean-host evidence, nor a clean-host receipt as CI.
 rejectVm((value) => ({ ...value, rows: mac.rows }));
 rejectVm((value) => ({ ...value, kind: 'ci' }));
-rejectVm((value) => ({ ...value, rows: value.rows.filter((row) => row.id.endsWith('-arm64')) }));
+// Intel clean-host rows are outside the Mac-only scope, alongside or in place of Apple silicon.
+const intelVmRows = intelRows.map((row) => ({
+  ...row,
+  receipts: row.receipts.map((receipt) => ({
+    ...receipt,
+    suite: 'clean-host-route-a-b-c-v1',
+    environment: { ...receipt.environment, kind: 'vm', host: cleanHost(receipt.environment.arch) },
+  })),
+}));
+for (const rows of [[...vm.rows, ...intelVmRows], intelVmRows]) {
+  assert.throws(() => collectQualificationRows({ ...vm, rows }), /unexpected rows/u);
+}
+assert.throws(
+  () => collectQualificationRows({ ...vm, candidate: dualMac.candidate, rows: [...vm.rows, ...intelVmRows] }),
+  /Mac-only publication requires exactly staging ZIP and DMG for Apple silicon/u,
+);
 for (const index of vm.rows.keys()) {
   const alterVm = (change: (receipt: DesktopAcceptanceReceipt) => unknown): void => {
     rejectVm((value) => ({
@@ -392,7 +432,7 @@ const cli = spawnSync(
 assert.equal(cli.status, 1);
 assert.match(cli.stderr, /trusted main dispatch/u);
 console.log(
-  'PASS synthetic eleven-host and Mac-only four-host admission, canonical receipts, strict source/route/signer/OS/run binding and main guard; no evidence files written',
+  'PASS synthetic eleven-host and Apple silicon Mac-only two-host admission, canonical receipts, strict source/route/signer/OS/run binding and main guard; no evidence files written',
 );
 
 const repository = mkdtempSync(join(tmpdir(), 'tau-qualification-source-'));

@@ -17,6 +17,21 @@ const readySchema = z.object({
   version: z.string().regex(/^\d+\.\d+\.\d+$/u),
 });
 
+/**
+ * Name what the kernel reports instead of the admitted outer path, so a mismatch is diagnosable from the CI log:
+ * only the APPIMAGE entries (a guest path, never a secret) and how many entries the record holds, which separates a
+ * different outer path from an environment block the process has overwritten. Run 41662259184 ubuntu-appimage-x11
+ * failed this check with nothing else to go on.
+ */
+const appImageMismatch = (outerPath: string, browserPid: number, environment: readonly string[]): string => {
+  const reported = environment.filter((entry) => entry.startsWith('APPIMAGE='));
+  const found = reported.length === 0 ? 'no APPIMAGE entry' : reported.map((entry) => JSON.stringify(entry)).join(', ');
+  return (
+    `Native quit requires the admitted AppImage outer path: expected APPIMAGE=${outerPath}; ` +
+    `/proc/${browserPid}/environ holds ${environment.length} entries and ${found}`
+  );
+};
+
 /** Bind the CDP browser PID to the probe and native executable before sending a user-style close request. */
 export const requestQualificationQuit = async (
   profile: string,
@@ -86,8 +101,9 @@ export const requestQualificationQuit = async (
         }[ready.installedPath];
         const outerPath = managed ? `${managed}/releases/${ready.version}/Tau.AppImage` : ready.installedPath;
         const environmentText = await readFile(`/proc/${browserPid}/environ`, 'utf8');
-        if (!environmentText.split('\0').includes(`APPIMAGE=${outerPath}`)) {
-          throw new Error('Native quit requires the admitted AppImage outer path');
+        const environment = environmentText.split('\0');
+        if (!environment.includes(`APPIMAGE=${outerPath}`)) {
+          throw new Error(appImageMismatch(outerPath, browserPid, environment));
         }
       } else {
         throw new Error('Unexpected Linux route');

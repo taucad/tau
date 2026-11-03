@@ -542,7 +542,7 @@ describe('ProjectNavigation', () => {
     expect(screen.queryByRole('button', { name: /^Project sync:/u })).not.toBeInTheDocument();
   });
 
-  /* A phone opens the sidebar as a sheet (z-100) a dropdown would sit behind; both menus open in drawers there. */
+  /* On a phone both menus open in drawers. */
   it('should open the Projects header and project row menus in drawers on a phone', () => {
     liveProjectIds = ['proj_one', 'proj_two'];
     mockLiveNow.mockReturnValue({ projects: 2, idleProjectIds: ['proj_two'] });

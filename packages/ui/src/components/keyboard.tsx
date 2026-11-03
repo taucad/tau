@@ -93,10 +93,12 @@ const nonEditableInputTypes = new Set(['button', 'submit', 'reset', 'checkbox', 
 
 /**
  * Selector for scoped containers where 'app'-scoped shortcuts are suppressed. A terminal (`data-slot="terminal"`)
- * owns ordinary keys such as Ctrl+D and Ctrl+I, so app shortcuts must not take them from the shell.
+ * owns ordinary keys such as Ctrl+D and Ctrl+I, so app shortcuts must not take them from the shell. Any element named
+ * by `data-shortcut-scope` is one too: an overlay that is not a dialog (a viewer's portalled controls, a blocking hold
+ * screen) takes the attribute so a shortcut cannot open a surface behind it.
  */
 const scopedContainerSelector =
-  '[role="dialog"], [role="alertdialog"], [data-slot="command-dialog"], [data-slot="terminal"]';
+  '[role="dialog"], [role="alertdialog"], [data-slot="command-dialog"], [data-slot="terminal"], [data-shortcut-scope]';
 
 // ---------------------------------------------------------------------------
 // Context

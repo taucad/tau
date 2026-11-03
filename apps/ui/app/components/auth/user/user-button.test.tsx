@@ -61,7 +61,6 @@ describe('UserButton', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Account' }));
 
     const drawer = await screen.findByRole('dialog', { name: 'Account' });
-    expect(drawer).toHaveClass('z-110');
     expect(within(drawer).getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/auth/sign-in');
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
   });

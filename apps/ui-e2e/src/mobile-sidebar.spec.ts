@@ -177,6 +177,57 @@ test.each([
   },
 );
 
+test('paints the sheet over the workbench nav and dims the nav beside it, all overlays sharing one layer', async () => {
+  const viewport = { width: 390, height: 844 };
+  await openSeededProject(viewport);
+  // Read before the modal sheet hides the page from the accessibility tree.
+  const nav = await target.boundingBox(navigation());
+  await openSidebarSheet();
+  const sheet = await target.boundingBox(sidebarSheet());
+  if (!sheet || !nav) {
+    throw new Error('The sidebar sheet or the workbench nav has no layout box.');
+  }
+  // What is painted where the nav runs, over the sheet and beside it, with hit testing on everywhere.
+  const painted = await target.evaluate(
+    ({ y, onSheet, beside }) => {
+      const probe = document.createElement('style');
+      probe.textContent = '* { pointer-events: auto !important; }';
+      document.head.append(probe);
+      try {
+        const slotAt = (x: number): string => {
+          const hit = document.elementFromPoint(x, y);
+          if (hit?.closest('[data-slot=sidebar][data-mobile=true]')) {
+            return 'sheet';
+          }
+          if (hit?.closest('nav[aria-label="Workbench"]')) {
+            return 'nav';
+          }
+          return hit?.closest<HTMLElement>('[data-slot]')?.dataset['slot'] ?? String(hit?.tagName);
+        };
+        return { onSheet: slotAt(onSheet), beside: slotAt(beside) };
+      } finally {
+        probe.remove();
+      }
+    },
+    { y: nav.y + nav.height / 2, onSheet: sheet.x + sheet.width / 2, beside: sheet.x + sheet.width + 8 },
+  );
+  expect(painted.onSheet, 'the sheet covers the nav').toBe('sheet');
+  expect(
+    await target.evaluateLocator(sidebarSheet(), (element) => getComputedStyle(element).zIndex),
+    'the sheet takes the shared overlay layer, so what opens from it stacks above by open order',
+  ).toBe('50');
+  expect(painted.beside, 'the sheet overlay dims the nav beside the sheet').toBe('sheet-overlay');
+
+  // A popper surface opened from inside the sheet (here the close button's tooltip) paints over it by open order.
+  await target.evaluateLocator(sidebarSheet().getByRole('button', { name: 'Close sidebar', exact: true }), (button) => {
+    (button as HTMLElement).focus();
+  });
+  // Radix's role=tooltip node is visually hidden; probe the painted content.
+  const tooltip = selectors.getByCss('[data-slot=tooltip-content]');
+  await target.expectVisible(tooltip);
+  expect(await isPaintedOnTop(tooltip), 'the tooltip is painted above the sheet').toBe(true);
+});
+
 test('opens a project row’s actions from ⋯ in a drawer and from a long press, with Move to Trash destructive', async () => {
   await openSeededProject({ width: 390, height: 844 });
   await openSidebarSheet();
@@ -291,7 +342,7 @@ test('paints a dialog opened from a sidebar drawer above the sheet: Help, then C
   await target.evaluateLocator(dialog, async (element) => {
     await Promise.all(element.getAnimations().map(async (animation) => animation.finished.catch(() => undefined)));
   });
-  // Its controls, its title and its overlay are above the sidebar sheet (z-100), which stays open beneath.
+  // Its controls, its title and its overlay are above the sidebar sheet, which stays open beneath.
   expect(await isPaintedOnTop(dialog.getByRole('heading', { name: 'Cookie preferences' })), 'the title').toBe(true);
   const controls = await target.evaluateLocator(dialog, (element) =>
     [...element.querySelectorAll<HTMLElement>('button')].map((button) => button.textContent.trim()).filter(Boolean),

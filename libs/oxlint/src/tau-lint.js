@@ -44,12 +44,13 @@ import { noArbitraryPixelSizeRule } from './rules/no-arbitrary-pixel-size.js';
 import { noAccentHoverRule } from './rules/no-accent-hover.js';
 import { noButtonSizeOverrideRule } from './rules/no-button-size-override.js';
 import { noRawPageHeadingRule } from './rules/no-raw-page-heading.js';
+import { noRaisedOverlayLayerRule } from './rules/no-raised-overlay-layer.js';
 
 /** @type {Plugin} */
 const plugin = {
   meta: {
     name: 'tau-lint',
-    version: '1.25.0',
+    version: '1.26.0',
   },
   rules: {
     'no-abusive-eslint-disable': noAbusiveEslintDisableRule,
@@ -89,6 +90,7 @@ const plugin = {
     'no-accent-hover': noAccentHoverRule,
     'no-button-size-override': noButtonSizeOverrideRule,
     'no-raw-page-heading': noRawPageHeadingRule,
+    'no-raised-overlay-layer': noRaisedOverlayLayerRule,
   },
 };
 

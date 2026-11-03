@@ -239,6 +239,7 @@ function ImageCarouselDialog({
             <div
               className='fixed top-4 right-4 z-102 flex items-center gap-2'
               data-image-carousel-overlay-control=''
+              data-shortcut-scope='image-carousel'
               {...dialogProps}
             >
               <DownloadLink directory={directory} item={currentItem} name={currentDownloadName} />
@@ -318,7 +319,12 @@ function ImageCarouselDialog({
               <>
                 {canUseDocument
                   ? createPortal(
-                      <div className='contents' data-image-carousel-overlay-control='' {...dialogProps}>
+                      <div
+                        className='contents'
+                        data-image-carousel-overlay-control=''
+                        data-shortcut-scope='image-carousel'
+                        {...dialogProps}
+                      >
                         <CarouselPrevious
                           className={cn(
                             imageCarouselControlClassName,

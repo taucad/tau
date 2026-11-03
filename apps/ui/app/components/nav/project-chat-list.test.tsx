@@ -510,7 +510,7 @@ describe('ProjectChatList', () => {
     expect(mockCloseChat).toHaveBeenCalledExactlyOnceWith('proj_one', 'chat_12');
   });
 
-  /* A phone opens the sidebar as a sheet (z-100) a dropdown would sit behind; the row's menu opens in a drawer there. */
+  /* On a phone the row's menu opens in a drawer. */
   it('should open a chat row menu in a drawer titled with the chat on a phone', () => {
     render(<ProjectChatList project={project} isProjectActive />);
 

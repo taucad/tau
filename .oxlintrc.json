@@ -1679,6 +1679,34 @@
       }
     },
     {
+      // Overlays share z-50 and stack by open order (each portals to the end of <body> as it opens). A surface raised
+      // above that layer forces everything opened from it to be raised too, and the one that is missed opens behind it.
+      "files": ["apps/ui/app/**/*.{ts,tsx}", "packages/ui/src/**/*.{ts,tsx}"],
+      "excludeFiles": ["**/*.{test,spec}.{ts,tsx}"],
+      "rules": {
+        "tau-lint/no-raised-overlay-layer": "error"
+      }
+    },
+    {
+      // Permanent: the WebXR DOM overlay must paint over everything the browser composites for the session.
+      "files": ["apps/ui/app/components/cad/ar-webxr-session.ts"],
+      "rules": {
+        "tau-lint/no-raised-overlay-layer": "off"
+      }
+    },
+    {
+      // Debt: hand-rolled image preview backdrops and the session hold screen predate the shared overlay layer. Move
+      // each onto it (z-50, stacked by open order) and drop it from this list.
+      "files": [
+        "apps/ui/app/components/ui/image-preview.tsx",
+        "apps/ui/app/components/ui/image-carousel-dialog.tsx",
+        "apps/ui/app/hooks/use-sessions.tsx"
+      ],
+      "rules": {
+        "tau-lint/no-raised-overlay-layer": "off"
+      }
+    },
+    {
       // Page Composition Policy gates (docs/policy/page-composition-policy.md, Enforcement).
       // Product page components only: tests and `[__e2e]` fixture routes author no product copy.
       // Autofixable rules are errors; judgment rules warn for one release, then become errors.

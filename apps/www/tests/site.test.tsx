@@ -229,7 +229,9 @@ test('should render download CTAs and every archive before JavaScript', () => {
   for (const platform of ['mac', 'macIntel', 'windows', 'linux'] as const) {
     expect(downloads).toContain(desktopDownloadHref(platform));
   }
-  expect(downloads).toContain('data-mac-intel="true" hidden=""');
+  // Intel Macs are unlisted without a qualified catalog: both entries render hidden.
+  expect(downloads).toContain('data-mac-intel="hero" hidden=""');
+  expect(downloads).toContain('data-mac-intel="list" hidden=""');
   expect(downloads).toContain('Download ZIP for Apple silicon');
   expect(downloads).toContain('Download ZIP for Intel Mac');
   // The icon is the link's own child, as the client renders the Apple silicon button, so both get the same padding.

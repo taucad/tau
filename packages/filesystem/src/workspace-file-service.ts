@@ -60,7 +60,7 @@ import type {
 /* The project-directory lifecycle is its own module (D5/W7); the authority
  * keeps the four public calls and owns nothing of the manifest. */
 import { ProjectDirectories } from '#project-directories.js';
-import type { ProjectDiscoveryResult, ResolvedDiscoveryRoot } from '#project-directories.js';
+import type { ProjectDiscoveryResult, ProjectRouteVerification, ResolvedDiscoveryRoot } from '#project-directories.js';
 import { assertRootedPath, joinRelativePath, parentDirectory, resolveAuthorityPath } from '@taucad/utils/path';
 import { MissingWorkspaceHandleError, WorkspaceMutationError } from '#workspace-errors.js';
 import { fileMetadataFields } from '#content-metadata.js';
@@ -162,6 +162,7 @@ export class WorkspaceFileService {
   private readonly _projectRoutes = new Set<string>();
   private readonly _checkoutRoutes = new Set<string>();
   private _projectConfigurationTail: Promise<void> = Promise.resolve();
+  private _projectConfigurationFailed = false;
   private _discoveryRoots: readonly ResolvedDiscoveryRoot[] = [];
   private readonly _pipeline: MutationPipeline;
   private readonly _rootedViews: RootedViews;
@@ -1053,12 +1054,47 @@ export class WorkspaceFileService {
     const settle = async (): Promise<void> => {
       try {
         await scheduled;
+        this._projectConfigurationFailed = false;
       } catch {
+        this._projectConfigurationFailed = true;
         // Keep the configuration queue live after a rejected predecessor.
       }
     };
     this._projectConfigurationTail = settle();
     return scheduled;
+  }
+
+  /**
+   * Verify only the current exact project binding, without scanning or repairing storage.
+   * @param input - Durable project identity to verify.
+   * @returns A verified project, discovery fallback, unavailable storage, or superseded authority.
+   */
+  public async verifyProjectRoute(input: { projectId: string }): Promise<ProjectRouteVerification> {
+    if (!projectIdSchema.safeParse(input.projectId).success) {
+      return { status: 'discovery-required' };
+    }
+    const configuration = this._projectConfigurationTail;
+    await configuration;
+    if (configuration !== this._projectConfigurationTail) {
+      return { status: 'superseded' };
+    }
+    if (this._projectConfigurationFailed) {
+      return { status: 'unavailable' };
+    }
+    const route = projectRoute(input.projectId);
+    const mount = this._mountTable.getExactMount(route);
+    if (!this._projectRoutes.has(route) || mount?.kind !== 'project' || mount.storageRootKey === undefined) {
+      return { status: 'discovery-required' };
+    }
+    const result = await this._projectDirectories.verifyProjectRoute({
+      projectId: input.projectId,
+      provider: mount.provider,
+      directory: mount.providerBasePath,
+      storageRootKey: mount.storageRootKey,
+    });
+    return configuration === this._projectConfigurationTail && this._mountTable.getExactMount(route) === mount
+      ? result
+      : { status: 'superseded' };
   }
 
   /**

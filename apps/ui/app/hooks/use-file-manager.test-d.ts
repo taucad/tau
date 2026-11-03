@@ -73,6 +73,7 @@ describe('useFileManager surface', () => {
     expectTypeOf<Context>().toHaveProperty('client');
     type Client = Context['client'];
     expectTypeOf<Client>().toHaveProperty('listProjectManifests');
+    expectTypeOf<Client>().toHaveProperty('verifyProjectRoute');
     expectTypeOf<Client>().toHaveProperty('commitPendingProjectDirectory');
     expectTypeOf<Client>().toHaveProperty('adoptProjectDirectory');
     expectTypeOf<Client>().toHaveProperty('permanentlyDeleteProjectDirectory');

@@ -91,6 +91,7 @@ export class TelemetryPurposeService {
           tierAssured: assurance.assured,
           project: projectAuthority,
         }),
+        answeredAt: Date.now(),
       },
       protection: assurance.assured ? (assurance.tier === 'free' ? 'free' : 'pro') : 'unknown',
     };

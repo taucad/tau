@@ -100,6 +100,8 @@ const readGrant = async (
     `${options.apiBaseUrl}/v1/telemetry-purposes?projectId=${encodeURIComponent(options.project)}`,
     { credentials: 'include', headers: { accept: 'application/json' } },
   );
+  /* Read as the response arrives, which is after the server answered: it dates the grant on this host's clock. */
+  const receivedAt = (options.now ?? Date.now)();
   if (response.status === 401 || response.status === 403) {
     return undefined;
   }
@@ -109,7 +111,7 @@ const readGrant = async (
   const answer = (await response.json()) as EffectivePurposesAnswer;
   /* An account switched while the answer was in flight is not the account it answered for. */
   return options.principal() === principal
-    ? purposeGrantOf(answer, { principal, project: options.project }, purpose)
+    ? purposeGrantOf(answer, { principal, project: options.project, receivedAt }, purpose)
     : undefined;
 };
 

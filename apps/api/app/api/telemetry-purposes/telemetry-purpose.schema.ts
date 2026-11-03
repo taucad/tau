@@ -84,6 +84,14 @@ export const effectiveTelemetryPurposesSchema = z
       .describe('The approved production notice in force. Absent while none is, which refuses every purpose.'),
     projectId: z.string().optional().describe('The project the answer was scoped to, absent for the account alone.'),
     purposes: z.array(telemetryPurposeStateSchema),
+    answeredAt: z
+      .number()
+      .int()
+      .nonnegative()
+      .optional()
+      .describe(
+        "The server's clock when it answered, in milliseconds, so a host can read `allowedSince` on its own clock.",
+      ),
   })
   .meta({ id: 'EffectiveTelemetryPurposes' });
 

@@ -404,13 +404,18 @@ export const projectRun = async (run: ProjectedRun, context: ProjectionContext):
       },
       occurredAt: run.ending.at,
       events: 'complete',
+      /* A run that began before the grant reports only the time since it: earlier phases are clipped, not sent. */
       intervals: run.intervals
-        .filter((phaseInterval) => phaseInterval.phase !== 'tool')
+        .filter(
+          (phaseInterval) =>
+            phaseInterval.phase !== 'tool' &&
+            (phaseInterval.end === undefined || phaseInterval.end > context.grantedAt),
+        )
         .slice(0, 32)
         .map((phaseInterval) => ({
           phase: phaseInterval.phase,
           domain: 'host-recorded',
-          start: phaseInterval.start,
+          start: Math.max(phaseInterval.start, context.grantedAt),
           end: phaseInterval.end ?? null,
         })),
     };

@@ -4,7 +4,7 @@ import type { SubmitOutcome } from '#delivery.js';
 import { createEvidenceOutbox, memoryPendingStore } from '#delivery.js';
 import type { ProjectedRun } from '#projection.js';
 import type { ReportingGrant } from '#reporter.js';
-import { createEvidenceReporter, summaryGrantOf } from '#reporter.js';
+import { createEvidenceReporter, purposeGrantOf, summaryGrantOf } from '#reporter.js';
 
 const at = Date.parse('2026-10-29T00:00:00.000Z');
 
@@ -96,17 +96,28 @@ describe('summaryGrantOf', () => {
     expect(summaryGrantOf(answer(true, 'project-b'), subject)).toBeUndefined();
   });
 
-  it('should carry when the server says the grant was given, and only a well-formed time', () => {
+  it('should date the grant on the host clock, shifted by how far it read ahead of the server', () => {
     const subject = { principal: 'user-a', project: 'project-a' };
-    const since = (allowedSince: number) => ({
+    const since = (allowedSince: number, answeredAt?: number) => ({
       epoch: 'policy-1',
       projectId: 'project-a',
       purposes: [{ purpose: 'summary', allowed: true, allowedSince }],
+      ...(answeredAt === undefined ? {} : { answeredAt }),
     });
 
-    expect(summaryGrantOf(since(at), subject)).toEqual(grant({ allowedSince: at }));
-    expect(summaryGrantOf(since(-1), subject)).toEqual(grant());
-    expect(summaryGrantOf(since(Number.NaN), subject)).toEqual(grant());
+    /* The host's clock reads 90 s ahead of the server's: the decision is 90 s later on it. */
+    expect(purposeGrantOf(since(at, at + 10_000), { ...subject, receivedAt: at + 100_000 }, 'summary')).toEqual(
+      grant({ allowedSince: at + 90_000 }),
+    );
+    /* Behind it, the decision is earlier on the host's clock by as much. */
+    expect(purposeGrantOf(since(at, at + 10_000), { ...subject, receivedAt: at }, 'summary')).toEqual(
+      grant({ allowedSince: at - 10_000 }),
+    );
+    /* Without the server's answer time, or the receipt time, nothing dates the grant. */
+    expect(purposeGrantOf(since(at), { ...subject, receivedAt: at }, 'summary')).toEqual(grant());
+    expect(purposeGrantOf(since(at, at), subject, 'summary')).toEqual(grant());
+    expect(purposeGrantOf(since(-1, at), { ...subject, receivedAt: at }, 'summary')).toEqual(grant());
+    expect(purposeGrantOf(since(Number.NaN, at), { ...subject, receivedAt: at }, 'summary')).toEqual(grant());
   });
 });
 
@@ -140,6 +151,18 @@ describe('createEvidenceReporter', () => {
 
     await reporter.refresh();
     await reporter.report([run(0, at)], () => true);
+
+    expect(sent).toHaveLength(1);
+  });
+
+  it('should adopt the decision time when a later read of the same grant gives it, and project its runs again', async () => {
+    const { reporter, sent, advance } = setup([grant(), grant(), grant({ allowedSince: at - 60_000 })]);
+
+    advance(30_000);
+    await reporter.refresh();
+    await reporter.report([run(0, at + 1000)], () => true);
+    expect(sent).toEqual([]);
+    await reporter.report([run(0, at + 1000)], () => true);
 
     expect(sent).toHaveLength(1);
   });

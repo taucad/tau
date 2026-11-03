@@ -114,6 +114,8 @@ describe('TelemetryPurposeService', () => {
       expect(effective.purposes.find((state) => state.purpose === 'summary')?.allowedSince).toBe(
         Date.UTC(2026, 9, 29) + 1000,
       );
+      /* Its own clock beside it, so a host can read that time on the host's clock. */
+      expect(effective.answeredAt).toEqual(expect.any(Number));
     });
 
     it('binds the answer to the principal and the project', async () => {

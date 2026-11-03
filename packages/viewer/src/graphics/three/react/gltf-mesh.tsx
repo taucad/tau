@@ -59,6 +59,7 @@ import {
   getGltfPrimitiveComponentId,
   hasComponentOrAncestor,
   hasComponentOrDescendant,
+  resolvePickableComponentId,
 } from '#graphics/metadata/gltf-component-visibility.js';
 import {
   applyInPlaceGeometryUpdate,
@@ -1504,6 +1505,14 @@ function getObjectComponentId(object: Object3D | undefined): string | undefined 
   return getModelComponentIdInHierarchy(object);
 }
 
+function getPickedComponentId(
+  object: Object3D | undefined,
+  manifest: GeometryComponentManifest | undefined,
+): string | undefined {
+  const componentId = getObjectComponentId(object);
+  return componentId && manifest ? resolvePickableComponentId(manifest, componentId) : componentId;
+}
+
 /**
  * Collect the surface meshes under a root that belong to a model component and are not tagged as scene UI.
  *
@@ -2582,7 +2591,7 @@ export function GltfMesh({
 
       event.stopPropagation();
       // The scene's raycast owner already resolved the nearest visible, unclipped surface.
-      const componentId = getObjectComponentId(event.object);
+      const componentId = getPickedComponentId(event.object, componentManifest);
       const hoverUpdate = resolveViewerHoverUpdate({
         isViewerHoverSuppressed: modelVisualState.isViewerHoverSuppressed,
         previousComponentId: lastHoveredComponentIdRef.current,
@@ -2598,7 +2607,7 @@ export function GltfMesh({
         });
       }
     },
-    [graphicsActor, modelVisualState.isViewerHoverSuppressed, unitId],
+    [componentManifest, graphicsActor, modelVisualState.isViewerHoverSuppressed, unitId],
   );
 
   const handlePointerOut = useCallback(() => {
@@ -2628,7 +2637,7 @@ export function GltfMesh({
       const graphicsContext = graphicsActor.getSnapshot().context;
       const clickAction = resolveModelPointerClickAction({
         intersections: event.intersections,
-        modelComponentId: getObjectComponentId(event.object),
+        modelComponentId: getPickedComponentId(event.object, componentManifest),
         suppressNextModelPointerClick: graphicsContext.suppressNextModelPointerClick,
         isModelPointerClickSuppressed: graphicsContext.modelPointerClickSuppressionReasons.length > 0,
       });
@@ -2645,7 +2654,7 @@ export function GltfMesh({
         graphicsActor.send(dispatchEvent);
       }
     },
-    [graphicsActor, unitId],
+    [componentManifest, graphicsActor, unitId],
   );
 
   const resolveContextMenuActionFromEvent = useCallback(
@@ -2653,12 +2662,12 @@ export function GltfMesh({
       const graphicsContext = graphicsActor.getSnapshot().context;
       return resolveModelContextMenuAction({
         intersections: event.intersections,
-        modelComponentId: getObjectComponentId(event.object),
+        modelComponentId: getPickedComponentId(event.object, componentManifest),
         suppressNextModelPointerClick: graphicsContext.suppressNextModelPointerClick,
         isModelPointerClickSuppressed: graphicsContext.modelPointerClickSuppressionReasons.length > 0,
       });
     },
-    [graphicsActor],
+    [componentManifest, graphicsActor],
   );
 
   const publishSecondaryPointerAction = useCallback(

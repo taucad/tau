@@ -19,26 +19,6 @@
         }
       }
     },
-    "test:shell-projection-conformance": {
-      "executor": "nx:run-commands",
-      "cache": false,
-      "metadata": {
-        "description": "The private Linux projection transport rows: builds the unqualified FUSE bridge from explicitly supplied pinned libfuse 3.17.2 headers and library (TAU_PROJECTION_NODE_HEADERS, TAU_PROJECTION_FUSE_HEADERS, TAU_PROJECTION_FUSE_LIBRARY, TAU_PROJECTION_FUSE_SHA256), checks with objdump -T that neither the bridge nor libfuse needs a glibc newer than D9's oldest Linux target (2.39, Ubuntu 24.04) and that a lower baseline refuses the build, then runs the native transport tests against a real kernel FUSE mount, the host's test-only owner harness that publishes the PP3 spelling families through a held rooted claim (G5), and the unactivated projection owner's inbound convergence, page-cache invalidation, conflict journal and quota. Proves transport, outbound classification and the owner's mechanisms, never D8 activation. Never cached."
-      },
-      "options": {
-        "cwd": "{workspaceRoot}/packages/core/native-process",
-        "commands": [
-          "node scripts/build-shell-projection.mts --node-headers \"$TAU_PROJECTION_NODE_HEADERS\" --fuse-headers \"$TAU_PROJECTION_FUSE_HEADERS\" --fuse-library \"$TAU_PROJECTION_FUSE_LIBRARY\" --fuse-sha256 \"$TAU_PROJECTION_FUSE_SHA256\"",
-          "if node scripts/build-shell-projection.mts --node-headers \"$TAU_PROJECTION_NODE_HEADERS\" --fuse-headers \"$TAU_PROJECTION_FUSE_HEADERS\" --fuse-library \"$TAU_PROJECTION_FUSE_LIBRARY\" --fuse-sha256 \"$TAU_PROJECTION_FUSE_SHA256\" --glibc-baseline 2.2.5; then echo 'ABI negative control: a bridge needing glibc above 2.2.5 was not refused' >&2; exit 1; fi",
-          "../../../node_modules/.bin/vitest run --config vitest.config.ts src/shell/shell-projection-native.test.ts",
-          "../../../node_modules/.bin/vitest run --root ../../host --config vitest.config.ts src/shell/shell-projection-fuse.test.ts src/shell/shell-projection-owner-fuse.test.ts"
-        ],
-        "parallel": false,
-        "env": {
-          "TAU_SHELL_PROJECTION_CONFORMANCE": "1"
-        }
-      }
-    },
     "formal": {},
     "formal:nightly": {}
   }

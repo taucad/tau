@@ -1,5 +1,6 @@
 import { completionTypeFromLsp } from '#components/code/editor-completion-icon.js';
 import { editorCompletionInfo, renderEditorDocumentation } from '#components/code/editor-documentation.js';
+import { startAfterLineBreaks } from '#components/code/editor-lint.js';
 import type { Extension } from '@codemirror/state';
 import { autocompletion, snippet } from '@codemirror/autocomplete';
 import type { Completion } from '@codemirror/autocomplete';
@@ -333,7 +334,7 @@ export async function acquireJsonLanguage({
       };
     }),
     linter(
-      async () => {
+      async (view) => {
         if (disposed) {
           return [];
         }
@@ -344,8 +345,7 @@ export async function acquireJsonLanguage({
           return [];
         }
         return diagnostics.map((diagnostic) => ({
-          from: diagnostic.from,
-          to: diagnostic.to,
+          ...startAfterLineBreaks(view.state.doc, diagnostic),
           message: diagnostic.message,
           severity: diagnostic.severity === 2 ? 'warning' : diagnostic.severity === 3 ? 'info' : 'error',
         }));

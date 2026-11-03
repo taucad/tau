@@ -2,7 +2,8 @@
 /** Request an ordinary native window close only for the admitted disposable process. */
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { readFile, realpath, readlink } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, readlink, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
@@ -77,8 +78,15 @@ export const requestQualificationQuit = async (
           throw new Error('APT running generation differs from the admitted probe');
         }
       } else if (ready.route === 'linux-appimage') {
+        // A managed install reports its /usr/bin launcher while the process runs the exact
+        // generation under /opt; a portable AppImage reports its own outer path.
+        const managed = {
+          '/usr/bin/tau-appimage': '/opt/tau-appimage',
+          '/usr/bin/tau-staging-appimage': '/opt/tau-staging-appimage',
+        }[ready.installedPath];
+        const outerPath = managed ? `${managed}/releases/${ready.version}/Tau.AppImage` : ready.installedPath;
         const environmentText = await readFile(`/proc/${browserPid}/environ`, 'utf8');
-        if (!environmentText.split('\0').includes(`APPIMAGE=${ready.installedPath}`)) {
+        if (!environmentText.split('\0').includes(`APPIMAGE=${outerPath}`)) {
           throw new Error('Native quit requires the admitted AppImage outer path');
         }
       } else {
@@ -96,8 +104,30 @@ export const requestQualificationQuit = async (
     case 'darwin': {
       const app = dirname(dirname(dirname(ready.installedPath)));
       const executable = join(app, 'Contents/MacOS/Tau');
-      const { stdout } = await execute('/bin/ps', ['-ww', '-p', String(browserPid), '-o', 'comm='], options);
-      if (stdout.trim() !== executable) {
+      // `ps -o comm=` can print the bare process name (run 41561293311 macos-dmg-arm64 got `Tau`), so the
+      // kernel's proc_pidpath names the running executable instead.
+      const temporary = await mkdtemp(join(tmpdir(), 'tau-quit-'));
+      let running: string;
+      try {
+        const source = join(temporary, 'pid-path.c');
+        const helper = join(temporary, 'pid-path');
+        await writeFile(
+          source,
+          `#include <libproc.h>
+#include <stdio.h>
+#include <stdlib.h>
+int main(int argc,char **argv) { if(argc!=2) return 2; pid_t pid=(pid_t)strtol(argv[1],0,10); if(pid<=0) return 3; char path[PROC_PIDPATHINFO_MAXSIZE]; if(proc_pidpath(pid,path,sizeof path)<=0) return 4; printf("%s\\n",path); return 0; }
+`,
+        );
+        await execute('/usr/bin/xcrun', ['clang', '-Wall', '-Werror', source, '-o', helper], {
+          ...options,
+          timeout: 120_000,
+        });
+        ({ stdout: running } = await execute(helper, [String(browserPid)], options));
+      } finally {
+        await rm(temporary, { recursive: true, force: true });
+      }
+      if (running.trim() !== executable) {
         throw new Error('Mac native quit requires the exact admitted executable');
       }
       // PID targeting avoids quitting another instance of the same bundle. Missing Accessibility permission fails closed.

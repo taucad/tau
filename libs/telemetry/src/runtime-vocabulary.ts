@@ -23,7 +23,6 @@ export const runtimeKernelIds = [
 
 /** First-party middleware names (`middleware.name`), as `middleware.wrap(<name>)` spans carry them. @public */
 export const middlewareIds = [
-  'DisplaySimplification',
   'GeometryCache',
   'GltfEdgeDetection',
   'ParameterCache',

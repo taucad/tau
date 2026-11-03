@@ -166,11 +166,36 @@ export const copyTerminalSelection = async (session: DesktopSession): Promise<vo
  * @param page - The desktop page.
  */
 export const openTerminalPane = async (page: Page): Promise<void> => {
-  if ((await terminalRegion(page).count()) > 0) {
-    return;
-  }
-  await page.getByRole('button', { name: 'Open workbench tab', exact: true }).first().click();
-  await page.getByRole('menuitem', { name: 'Terminal', exact: true }).click();
+  /*
+   * Just after a project opens, the workbench restores its layout and replaces the group headers, which closes a menu
+   * opened from the replaced header (shell conformance run 41186360781: the menu opened 0.5 s after navigation and
+   * never showed its items). A person whose menu vanished opens it again; so does this, within the same minute.
+   */
+  const item = page.getByRole('menuitem', { name: 'Terminal', exact: true });
+  const deadline = Date.now() + 60_000;
+  const choose = async (): Promise<void> => {
+    if ((await terminalRegion(page).count()) > 0) {
+      return;
+    }
+    /* Each attempt is bounded by what is left of the minute, so a retry never outlives it. */
+    const attempt = (): number => Math.max(1, Math.min(5000, deadline - Date.now()));
+    try {
+      if (!(await item.isVisible())) {
+        await page
+          .getByRole('button', { name: 'Open workbench tab', exact: true })
+          .first()
+          .click({ timeout: attempt() });
+      }
+      await item.click({ timeout: attempt() });
+    } catch (error) {
+      if (Date.now() >= deadline) {
+        throw error;
+      }
+      await page.keyboard.press('Escape');
+      await choose();
+    }
+  };
+  await choose();
   await terminalRegion(page).waitFor();
 };
 

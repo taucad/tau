@@ -40,7 +40,7 @@ export function applyTrsf(oc: Oc, shape: TopoDS_Shape, trsf: gp_Trsf): Applied {
     return { shape: shape.Moved(location, false), image: (sub) => sub.Moved(location, false) };
   }
 
-  const transform = new oc.BRepBuilderAPI_Transform(shape, trsf, true, false);
+  const transform = new oc.BRepBuilderAPI_Transform(shape, trsf, true, true);
   const result = transform.Shape();
   return {
     shape: result,

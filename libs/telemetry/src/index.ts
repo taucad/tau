@@ -1,5 +1,5 @@
 /* oxlint-disable no-barrel-files/no-barrel-files -- package entry point */
-export type { InstrumentType, MetricDefinition, MetricDeprecation } from '#define-metric.js';
+export type { InstrumentType, MetricDefinition } from '#define-metric.js';
 export { defineCounter, defineHistogram, defineGauge, defineUpDownCounter } from '#define-metric.js';
 export { TauMetrics } from '#registry.js';
 export {

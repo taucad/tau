@@ -52,6 +52,7 @@ export default defineConfig({
       'src/graphics/three/fxaa.browser.test.ts',
       'src/graphics/three/controls/viewport-gizmo-cube.browser.test.ts',
       'src/graphics/three/viewer-resize-continuation.browser.test.tsx',
+      'src/graphics/three/shared-quad-camera.browser.test.ts',
     ],
     testTimeout: 60_000,
     fileParallelism: false,

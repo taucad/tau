@@ -42,8 +42,8 @@ Project configuration and exports define current interfaces.
 - [libs/chat](libs/chat): Wire/tool schemas, prompts and RPC contracts
 - [apps/api](apps/api): NestJS/Fastify auth, billing, storage and models; `app/api/chat/chat.service.ts` owns name/commit generation
 - [apps/desktop](apps/desktop): Electron desktop composition and packaging
-- [apps/docs](apps/docs): Static documentation site, content and API/prose gates
-- [apps/libs](apps/libs): Private application capabilities, including billing hooks, fs-client, converter and LSP
+- [apps/docs](apps/docs): Static docs site and its gates
+- [apps/libs](apps/libs): Private app capabilities: billing hooks, fs-client, converter, LSP
 - [packages/runtime](packages/runtime): Multi-kernel runtime, clients, transports, artifacts and plugin contracts
 - [packages/plugins](packages/plugins): Standalone kernel/bundler/middleware/transcoder toolkits; available toolkits differ from product-selected kernels
 - [packages](packages): Public host/jobs/filesystem/GeoSpec/React/CLI/Three.js APIs
@@ -71,7 +71,7 @@ Read the owners for each touched concern:
 - Geometry assertions/GeoSpec: [GeoSpec](docs/policy/geospec-policy.md), [testing](docs/policy/testing-policy.md)
 - Policy/research/MDX: [documentation](docs/policy/documentation-policy.md); use `create-policy`/`create-research`; published content also follows docs-site gates
 - AGENTS, skills, agent/MCP config: [agent instructions](docs/policy/agents-md-policy.md), [MCP capabilities](docs/policy/mcp-tool-budget-policy.md); use `create-skill`
-- Dependencies/commits/releases: [npm](docs/policy/npm-policy.md), [commit](docs/policy/commit-policy.md), applicable procedure and authorization
+- Dependencies/commits/releases/size limits: [npm](docs/policy/npm-policy.md) (§ 7: never ask about in-band raises), [commit](docs/policy/commit-policy.md), applicable procedure and authorization
 - Cloud services, deploys, IaC, DNS, secrets, billing operations: [handbooks](docs/handbooks); use `create-handbook` to update affected pages and the go-live checklist in the same change. Outage, customer-impacting failure or credential leak: `create-incident` first; records in [incidents](docs/incidents)
 - Generated outputs or temporary files: [tool output locations](docs/policy/tool-output-location-policy.md)
 

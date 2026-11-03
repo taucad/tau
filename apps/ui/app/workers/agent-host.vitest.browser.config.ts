@@ -59,7 +59,6 @@ export default defineConfig({
       'manifold-3d/lib/scene-builder.js',
       'manifold-3d/lib/wasm.js',
       'manifold-3d/manifoldCAD',
-      '@taucad/middleware > meshoptimizer/simplifier',
       '@taucad/image > nanoraster/options',
       '@taucad/brep > occt-import-js',
       '@taucad/picovoxel > picovoxel',

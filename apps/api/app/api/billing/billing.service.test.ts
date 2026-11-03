@@ -34,7 +34,9 @@ const createService = (rows: SubscriptionRow[], bound = true, environment: Parti
   vi.useFakeTimers();
   vi.setSystemTime(now);
   const database = mockDeep<DatabaseService>();
-  database.database.query.user.findFirst.mockResolvedValue(mock<typeof user.$inferSelect>({ allowsAiTraining: true }));
+  database.database.query.user.findFirst.mockResolvedValue(
+    mock<typeof user.$inferSelect>({ allowsAiTraining: true, aiTrainingDecidedAt: null }),
+  );
   database.database.query.billingOwnerBinding.findFirst.mockResolvedValue(
     bound
       ? mock<typeof billingOwnerBinding.$inferSelect>({
@@ -130,12 +132,29 @@ describe('owned paid access deadlines', () => {
     expect(vi.mocked(resolveDefaultCard)).toHaveBeenCalledWith(expect.anything(), 'cus_owned');
   });
 
-  it('retains free privacy preference and refuses unknown plan names', async () => {
-    const { service } = createService([row({ plan: 'unknown' })]);
+  it('keeps a paid plan out of training until the user opts in themselves', async () => {
+    const { service, database } = createService([row()]);
+    database.database.query.user.findFirst.mockResolvedValue(
+      mock<typeof user.$inferSelect>({ allowsAiTraining: true, aiTrainingDecidedAt: new Date('2026-10-29T00:00:00Z') }),
+    );
+    expect(await service.getEntitlements('user-a')).toMatchObject({ tier: 'pro', trainingConsent: true });
+  });
+
+  it('refuses unknown plan names and treats their free fallback like a paid plan for training', async () => {
+    const { service, database } = createService([row({ plan: 'unknown' })]);
     expect(await service.getEntitlements('user-a')).toMatchObject({
       tier: 'free',
-      trainingConsent: true,
+      trainingConsent: false,
     });
+    database.database.query.user.findFirst.mockResolvedValue(
+      mock<typeof user.$inferSelect>({ allowsAiTraining: true, aiTrainingDecidedAt: new Date('2026-10-29T00:00:00Z') }),
+    );
+    expect(await service.getEntitlements('user-a')).toMatchObject({ tier: 'free', trainingConsent: true });
+  });
+
+  it("retains an assured free account's stored preference", async () => {
+    const { service } = createService([]);
+    expect(await service.getEntitlements('user-a')).toMatchObject({ tier: 'free', trainingConsent: true });
   });
 });
 

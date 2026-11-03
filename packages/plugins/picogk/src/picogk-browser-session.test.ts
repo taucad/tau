@@ -38,19 +38,20 @@ const tick = async () => {
     await Promise.resolve();
   }
 };
-const ready = (worker: Worker, generation = 1) =>
+const ready = (worker: Worker, generation = 1, heapBytes?: number) =>
   worker.dispatchEvent(
     new MessageEvent('message', {
       data: {
         generation,
         kind: 'ready',
         frame: { protocolVersion: 9, type: 'ready', dotnetVersion: '11', picogkVersion: '2.3' },
+        ...(heapBytes === undefined ? {} : { heapBytes }),
       },
     }),
   );
 const reply = (
   worker: Worker,
-  options: { generation?: number; requestId?: string; result?: unknown; error?: unknown },
+  options: { generation?: number; requestId?: string; result?: unknown; error?: unknown; heapBytes?: number },
 ) =>
   worker.dispatchEvent(
     new MessageEvent('message', {
@@ -62,6 +63,7 @@ const reply = (
           requestId: options.requestId ?? '1',
           ...(options.error === undefined ? { result: options.result ?? 7 } : { error: options.error }),
         },
+        ...(options.heapBytes === undefined ? {} : { heapBytes: options.heapBytes }),
       },
     }),
   );
@@ -373,6 +375,45 @@ describe('PicoGK browser session', () => {
     await expect(request(session, { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
     expect(worker.postMessage).not.toHaveBeenCalled();
     expect(worker.terminate).toHaveBeenCalledOnce();
+  });
+
+  // T26 (PR-1b): the observation-only heap is the live worker's `HEAPU8.byteLength` as of its latest reply, and none
+  // without a live worker; nothing here feeds the build's own recycling metric.
+  it("should observe the live worker's WebAssembly heap as of its latest reply, and none once it is gone", async () => {
+    const mebibyte = 2 ** 20;
+    const { session, workers } = harness();
+    expect(session.observedHeapBytes()).toBeUndefined();
+    const first = request(session);
+    await tick();
+    const worker = workers[0]!;
+    expect(session.observedHeapBytes()).toBeUndefined();
+    ready(worker, 1, 32 * mebibyte);
+    await tick();
+    expect(session.observedHeapBytes()).toBe(32 * mebibyte);
+    reply(worker, { requestId: '9', heapBytes: 999 * mebibyte });
+    reply(worker, { generation: 2, heapBytes: 999 * mebibyte });
+    expect(session.observedHeapBytes()).toBe(32 * mebibyte);
+    reply(worker, { heapBytes: 48 * mebibyte });
+    await expect(first).resolves.toBe(7);
+    expect(session.observedHeapBytes()).toBe(48 * mebibyte);
+    const second = request(session);
+    await tick();
+    reply(worker, { requestId: '2' });
+    await expect(second).resolves.toBe(7);
+    expect(session.observedHeapBytes()).toBe(48 * mebibyte);
+
+    const replaced = request(session, { source: { ...snapshot, revision: 'b' } });
+    await tick();
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    expect(session.observedHeapBytes()).toBeUndefined();
+    const next = workers[1]!;
+    ready(next, 2, 16 * mebibyte);
+    await tick();
+    reply(next, { generation: 2, requestId: '3', heapBytes: 24 * mebibyte });
+    await expect(replaced).resolves.toBe(7);
+    expect(session.observedHeapBytes()).toBe(24 * mebibyte);
+    session.cleanup();
+    expect(session.observedHeapBytes()).toBeUndefined();
   });
 
   it('should reject invalid timeout configuration', () => {

@@ -14,17 +14,43 @@ import { projectRun } from '#projection.js';
  */
 
 /** The server's current answer for one account and project: the scope to report summaries under. @public */
-export type ReportingGrant = DeliveryScope & Readonly<{ protection: ProjectionContext['protection'] }>;
+export type ReportingGrant = DeliveryScope &
+  Readonly<{
+    protection: ProjectionContext['protection'];
+    /** When the account's allowing decision was taken, as the server answers it; absent from an older server. */
+    allowedSince?: number | undefined;
+  }>;
 
 /** The parts of the server's effective-purposes answer a host reads. @public */
 export type EffectivePurposesAnswer = Readonly<{
   epoch: string;
   projectId?: string | undefined;
-  purposes: ReadonlyArray<Readonly<{ purpose: string; allowed: boolean }>>;
+  purposes: ReadonlyArray<Readonly<{ purpose: string; allowed: boolean; allowedSince?: number | undefined }>>;
+  /** The server's clock when it answered; with the host's receipt time it puts `allowedSince` on the host's clock. */
+  answeredAt?: number | undefined;
 }>;
 
 /** A purpose a host reports under; each is its own plane and grant. @public */
 export type ReportingPurpose = 'summary' | 'feedback';
+
+const isTime = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+
+/*
+ * The allowing decision's time on the host's clock. The server's decision time and the host's fact times come from
+ * different clocks, so the decision is shifted by how far the host's clock read ahead of the server's when the answer
+ * arrived. The answer was sent before it was received, so the shift errs late by the response's transit time, never
+ * early: a fact from before the decision is never let through by skew. Without the server's answer time or the
+ * receipt time there is no shift to apply, and the host falls back to when it first saw the grant.
+ */
+const hostClockSince = (
+  since: unknown,
+  answeredAt: unknown,
+  receivedAt: number | undefined,
+): Readonly<{ allowedSince?: number }> =>
+  isTime(since) && isTime(answeredAt) && receivedAt !== undefined && isTime(receivedAt)
+    ? { allowedSince: Math.max(0, since + (receivedAt - answeredAt)) }
+    : {};
 
 /**
  * The grant an effective-purposes answer gives for one purpose, if any. Only
@@ -32,14 +58,14 @@ export type ReportingPurpose = 'summary' | 'feedback';
  * anything else, including an answer for the account alone, grants nothing.
  *
  * @param answer - The server's answer, as received.
- * @param subject - The signed-in account and the project the host serves.
+ * @param subject - The signed-in account, the project the host serves, and when the answer arrived on its clock.
  * @param purpose - The purpose asked about; one never answers for another.
  * @returns The grant, or `undefined`.
  * @public
  */
 export const purposeGrantOf = (
   answer: EffectivePurposesAnswer,
-  subject: Readonly<{ principal: string; project: string }>,
+  subject: Readonly<{ principal: string; project: string; receivedAt?: number | undefined }>,
   purpose: ReportingPurpose,
 ): ReportingGrant | undefined => {
   const state = answer.purposes.find((candidate) => candidate.purpose === purpose);
@@ -47,7 +73,13 @@ export const purposeGrantOf = (
     return undefined;
   }
   /* The answer does not say the account's protection; `unknown` is the strictest claim, and the API only tightens it. */
-  return { principal: subject.principal, project: subject.project, policyEpoch: answer.epoch, protection: 'unknown' };
+  return {
+    principal: subject.principal,
+    project: subject.project,
+    policyEpoch: answer.epoch,
+    protection: 'unknown',
+    ...hostClockSince(state.allowedSince, answer.answeredAt, subject.receivedAt),
+  };
 };
 
 /**
@@ -71,7 +103,7 @@ export type ReporterCoverage = Readonly<{
   foreign: number;
   /** Runs still unended here whose newest rows another device wrote: a gap this device cannot fill. */
   openForeignTails: number;
-  /** Facts that happened before this reporter saw the grant; never backfilled. */
+  /** Facts that happened before the account granted (or, from an older server, before this reporter saw it); never backfilled. */
   beforeGrant: number;
   /** Facts not yet settled when last seen. */
   pending: number;
@@ -155,7 +187,12 @@ export const createEvidenceReporter = (options: EvidenceReporterOptions): Eviden
     ungranted: 0,
     unknownGrant: 0,
   };
-  /* `grantedAt` is when this reporter first saw the grant: never earlier than the grant itself. */
+  /*
+   * `grantedAt` is when the account's allowing decision was taken, as the server answers it: never earlier than the
+   * grant itself, and the same however late this host first read it. A project the API registered after its first run
+   * began, or a host that restarted mid-run, would otherwise drop the facts in between. A server that does not say
+   * falls back to when this reporter first saw the grant. A time the server puts ahead of this clock is capped at now.
+   */
   let bound: (ReportingGrant & Readonly<{ grantedAt: number }>) | undefined;
   let stop: DrainStop | undefined;
   let cancelRetry: (() => void) | undefined;
@@ -183,11 +220,22 @@ export const createEvidenceReporter = (options: EvidenceReporterOptions): Eviden
       return undefined;
     }
     if (!sameScope(bound, grant)) {
-      bound = { ...grant, grantedAt: now() };
+      bound = { ...grant, grantedAt: Math.min(grant.allowedSince ?? Number.POSITIVE_INFINITY, now()) };
       settled.clear();
       await outbox.bind(grant);
-    } else if (bound !== undefined && bound.protection !== grant.protection) {
-      bound = { ...bound, protection: grant.protection };
+    } else if (bound !== undefined) {
+      /* A first read that could not date the grant is replaced by one that can, and its runs are projected again. */
+      if (bound.allowedSince === undefined && grant.allowedSince !== undefined) {
+        bound = {
+          ...bound,
+          allowedSince: grant.allowedSince,
+          grantedAt: Math.min(grant.allowedSince, bound.grantedAt),
+        };
+        settled.clear();
+      }
+      if (bound.protection !== grant.protection) {
+        bound = { ...bound, protection: grant.protection };
+      }
     }
     return bound;
   };

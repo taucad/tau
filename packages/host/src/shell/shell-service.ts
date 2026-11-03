@@ -18,9 +18,11 @@ import { basename, dirname, join } from 'node:path';
 import type { InterruptResolution } from '@taucad/agent-host';
 import {
   resolveShellExecutable,
+  resolveTerminalZsh,
   shellCommandArguments,
   shellInteractiveArguments,
   shellVersionCommand,
+  terminalZshArguments,
 } from '@taucad/native-process-core/shell';
 import type {
   ShellExecutable,
@@ -31,6 +33,7 @@ import type {
   ShellLaunchOutcome,
   ShellProvider,
   ShellTerminalSize,
+  TerminalZsh,
 } from '@taucad/native-process-core/shell';
 
 import { shellLimits } from '#shell/shell-contract.js';
@@ -208,6 +211,11 @@ export type ShellServiceOptions = Readonly<{
   provider: ShellProvider;
   /** The machine's own shell ({@link resolveShellExecutable}). */
   executable: ShellExecutable;
+  /**
+   * The verified macOS system Zsh the human Terminal runs instead, loading the person's own Zsh startup files (operator
+   * ruling 2026-11-01T18:57Z; {@link resolveTerminalZsh}). Agent launches always run `executable`, clean.
+   */
+  terminalZsh?: TerminalZsh | undefined;
   identity: ShellIdentity;
   /** The admitted checkout of each live run, read at every call; an absent run is refused, never defaulted (F5). */
   checkouts: ReadonlyMap<string, ShellCheckout>;
@@ -1064,17 +1072,19 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         access,
         host,
       });
+      const { terminalZsh } = options;
       outcome = await provider.launch({
         executionId,
-        executablePath: executable.path,
-        arguments: shellInteractiveArguments(executable.kind),
+        executablePath: terminalZsh?.path ?? executable.path,
+        arguments: terminalZsh === undefined ? shellInteractiveArguments(executable.kind) : terminalZshArguments,
         workingDirectory: root,
         commandId: `terminal:${sessionId}`,
         filesystem,
         network: { domains: access.domains },
+        startupFiles: terminalZsh === undefined ? undefined : 'zsh',
         environment: shellEnvironment({
           platform,
-          executablePath: executable.path,
+          executablePath: terminalZsh?.path ?? executable.path,
           home: session.home,
           temporary: session.temporary,
           toolchainBins: options.toolchain?.bins ?? [],
@@ -1145,7 +1155,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
 export type ShellProbe = Readonly<{ status: 'available'; shell: HostShell }> | ShellUnavailable;
 
 /** @public */
-export type ProbeHostShellOptions = Omit<ShellServiceOptions, 'executable' | 'identity'>;
+export type ProbeHostShellOptions = Omit<ShellServiceOptions, 'executable' | 'identity' | 'terminalZsh'>;
 
 /**
  * Prove the provider and the machine's own shell on this host before anything is offered (D1, I2): resolve the shell
@@ -1274,7 +1284,10 @@ export const probeHostShell = async (options: ProbeHostShellOptions): Promise<Sh
       shellDigest: executable.digest,
       provider: options.provider.name,
     };
-    return { status: 'available', shell: createShellService({ ...options, executable, identity }) };
+    /* On macOS the human Terminal runs the verified system Zsh; without one it keeps the clean Bash. */
+    const zsh = platform === 'darwin' ? await resolveTerminalZsh(platform) : undefined;
+    const terminalZsh = zsh === undefined || 'status' in zsh ? undefined : zsh;
+    return { status: 'available', shell: createShellService({ ...options, executable, terminalZsh, identity }) };
   } catch (error) {
     return {
       status: 'unavailable',

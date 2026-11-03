@@ -27,13 +27,13 @@ export const content = (): React.JSX.Element => (
           <span className='w w1'>Design</span> <span className='w w2'>Verify</span> <span className='w w3'>Make.</span>
         </h1>
         <p className='lead'>
-          Describe the part you need. Tau creates editable parametric CAD and checks its geometry against your
-          requirements. Export for machining or 3D printing, then make it, assemble it and put it to work.
+          Describe the part you need. Tau builds it as editable parametric CAD, checks the geometry against your
+          requirements and exports STEP, STL or 3MF for machining and 3D printing.
         </p>
         <div className='actions'>
           {cta('Download Tau', '/download/', 'hero')}
           <SiteLink className='text-link' href='#story'>
-            Watch it come together {down}
+            See how it works {down}
           </SiteLink>
         </div>
         <div className='agent-prompt'>
@@ -63,17 +63,17 @@ export const content = (): React.JSX.Element => (
     {storyMarkup()}
     <section className='band product' aria-labelledby='product-title'>
       <header className='cell section-head split'>
-        {kicker('Your design, in view')}
+        {kicker('The workspace')}
         <h2 id='product-title'>
-          From a conversation
+          Chat, code and model
           <br />
-          to a useful part.
+          in one window.
         </h2>
         <p>
-          Talk through what the part needs to do. Shape it, check it and keep each revision as you work toward something
-          you can make and use.{' '}
+          The agent conversation, the source files, the 3D view and the parameters sit side by side, and every change is
+          kept in the project’s revision history.{' '}
           <SiteLink className='text-link' href='/product/'>
-            Inside the workspace →
+            More about the product →
           </SiteLink>
         </p>
       </header>
@@ -82,10 +82,11 @@ export const content = (): React.JSX.Element => (
     {ecosystemGrid()}
     <section className='band' aria-labelledby='cases-title'>
       <header className='cell section-head'>
-        {kicker('Built for the things you want to make')}
+        {kicker('Use cases')}
         <h2 id='cases-title'>
-          Parts with
-          <br />a purpose.
+          For makers, engineers
+          <br />
+          and students.
         </h2>
       </header>
       {caseCards()}
@@ -93,13 +94,10 @@ export const content = (): React.JSX.Element => (
     <section className='band pricing-teaser' aria-labelledby='pricing-title'>
       <header className='cell section-head split'>
         {kicker('Pricing')}
-        <h2 id='pricing-title'>
-          Start free.
-          <br />
-          Grow into Pro.
-        </h2>
+        <h2 id='pricing-title'>Free to start.</h2>
         <p>
-          Pay for hosted AI with credits, or choose Pro for a monthly allowance and Tau Cloud sync.{' '}
+          Use Tau for free and pay for hosted AI with credits. Pro is US$20 a month and adds 2,000 credits and Tau Cloud
+          backup and sync.{' '}
           <SiteLink className='text-link' href='/pricing/'>
             Compare plans →
           </SiteLink>
@@ -109,20 +107,18 @@ export const content = (): React.JSX.Element => (
     </section>
     <section className='band vision-teaser' aria-labelledby='vision-title'>
       <div className='cell'>
-        {kicker('The bigger picture')}
+        {kicker('Vision')}
         <h2 id='vision-title'>
-          CAD is
+          Where Tau
           <br />
-          chapter one.
+          is going.
         </h2>
       </div>
       <div className='cell'>
-        <p className='lead'>
-          The goal is a useful thing in the real world: machined, printed, assembled and put to work.
-        </p>
+        <p className='lead'>Today, Tau covers design, geometry checks and export for manufacturing.</p>
         <p>
-          Editable geometry and clear evidence are where that starts. See what you can do today and how we’re bringing
-          design and making closer together.
+          Next, we’re working on closer links between design, fabrication, sourcing and service. The vision page sets
+          out what works today and what is still in development.
         </p>
         <SiteLink className='text-link' href='/vision/'>
           Read the vision →

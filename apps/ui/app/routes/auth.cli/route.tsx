@@ -9,7 +9,7 @@ import { authClient } from '#lib/auth-client.js';
 import type { Handle } from '#types/matches.types.js';
 
 export const handle: Handle = { enablePageWrapper: false };
-export const meta = (): Array<{ title: string }> => [{ title: 'Authorize Tau CLI — Tau' }];
+export const meta = (): Array<{ title: string }> => [{ title: 'Authorize the Tau CLI · Tau' }];
 
 /** Explicit approval binds the code shown by the terminal to the signed-in account. */
 export default function AuthCliRoute(): React.JSX.Element {

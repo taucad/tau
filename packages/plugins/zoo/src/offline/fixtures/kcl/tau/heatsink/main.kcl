@@ -1,0 +1,23 @@
+// 40 mm square heat sink with nine straight fins, patterned across the base.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+// Parameters
+baseSize = 40
+baseThickness = 3
+finCount = 9
+finThickness = 1.2
+finHeight = 15
+
+finPitch = (baseSize - finThickness) / (finCount - 1)
+
+base = startSketchOn(XY)
+  |> rectangle(center = [0, 0], width = baseSize, height = baseSize)
+  |> extrude(length = baseThickness)
+
+// First fin at the -X edge, then repeated along +X.
+fin = startSketchOn(offsetPlane(XY, offset = baseThickness))
+  |> rectangle(corner = [-baseSize / 2, -baseSize / 2], width = finThickness, height = baseSize)
+  |> extrude(length = finHeight)
+fins = patternLinear3d(fin, instances = finCount, distance = finPitch, axis = [1, 0, 0])
+
+heatsink = union(concat([base], items = fins))

@@ -80,6 +80,8 @@ jobs:
             {"id": "windows-nsis-x64", "route": "windows-nsis", "host": "[\"windows-2025\"]"},
             {"id": "ubuntu-apt-x11", "route": "linux-apt", "host": "[\"self-hosted\", \"linux\", \"x64\", \"tau-disposable-ubuntu2404-x11\"]"},
             {"id": "ubuntu-appimage-x11", "route": "linux-appimage", "host": "[\"self-hosted\", \"linux\", \"x64\", \"tau-disposable-ubuntu2404-x11\"]"},
+            {"id": "ubuntu2604-apt-x11", "route": "linux-apt", "distro": "ubuntu2604", "host": "[\"self-hosted\", \"linux\", \"x64\", \"tau-disposable-ubuntu2604-x11\"]"},
+            {"id": "ubuntu2604-appimage-x11", "route": "linux-appimage", "distro": "ubuntu2604", "host": "[\"self-hosted\", \"linux\", \"x64\", \"tau-disposable-ubuntu2604-x11\"]"},
             {"id": "debian-apt-x11", "route": "linux-apt", "host": "[\"self-hosted\", \"linux\", \"x64\", \"tau-disposable-debian13-x11\"]"},
             {"id": "debian-appimage-x11", "route": "linux-appimage", "host": "[\"self-hosted\", \"linux\", \"x64\", \"tau-disposable-debian13-x11\"]"},
           ];
@@ -124,7 +126,7 @@ jobs:
         if: inputs.scope == 'linux'
         env:
           TAU_VM_MODE: qualification
-          TAU_VM_DISTRO: ${{ startsWith(matrix.id, 'ubuntu-') && 'ubuntu' || 'debian' }}
+          TAU_VM_DISTRO: ${{ matrix.distro || (startsWith(matrix.id, 'ubuntu-') && 'ubuntu' || 'debian') }}
         run: bash apps/desktop/scripts/hosted-linux-vm.sh
       - name: Run installed shipping renderer, explicit update and latest-feed update
         if: inputs.scope != 'linux'

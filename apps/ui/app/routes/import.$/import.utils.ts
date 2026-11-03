@@ -231,10 +231,10 @@ export function resolveImportRoute(
  */
 export function describeGitHubImport(target: GitHubRepoInfo): { title: string; description: string } {
   const folder = target.path ? `/${target.path}` : '';
-  const repo = `${target.owner}/${target.repo}${folder} ${target.ref === 'main' ? '' : `@ ${target.ref}`}`;
+  const repo = `${target.owner}/${target.repo}${folder}${target.ref === 'main' ? '' : ` @ ${target.ref}`}`;
   return {
     title: `Import ${repo} from GitHub into Tau`,
-    description: `Get started with ${repo} by importing it into Tau.`,
+    description: `Import ${repo} from GitHub and open it as a Tau project.`,
   };
 }
 

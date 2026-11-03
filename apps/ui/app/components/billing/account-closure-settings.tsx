@@ -2,10 +2,18 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import type { WireAccountClosure, WirePaymentAction } from '@taucad/billing';
 import { Button } from '@taucad/ui/components/button';
-import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@taucad/ui/components/alert-dialog';
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Label } from '@taucad/ui/components/label';
-import { SettingsSectionCard } from '#components/settings/settings-item.js';
+import { SettingsRow } from '#components/settings/settings-item.js';
 import { authClient } from '#lib/auth-client.js';
 import { createPaymentRequestId } from '#lib/billing-payment-client.js';
 import type { PaymentActionBinding } from '#lib/billing-payment-client.js';
@@ -103,6 +111,7 @@ export function AccountClosureSettings({
   const [confirmed, setConfirmed] = useState(false);
   const [notice, setNotice] = useState<Notice>();
   const [busy, setBusy] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
 
   useEffect(() => {
     if (!binding) {
@@ -155,20 +164,109 @@ export function AccountClosureSettings({
     financial.purge('closure');
   };
 
+  const prepare = (): void =>
+    void run(async () => {
+      const token = financial.capture();
+      const next = await prepareAccountClosure({ ...binding!, financialSession: token }, requestId.current);
+      if (token.isCurrent()) {
+        setIsConfirming(false);
+        rememberRevoked(next);
+      }
+    });
+
+  const control = closure ? (
+    closure.state === 'ready_for_auth_deletion' ? (
+      <Button
+        variant='destructive'
+        size='sm'
+        disabled={busy}
+        onClick={() =>
+          void run(async () => {
+            const token = financial.capture();
+            await authClient.deleteUser({
+              fetchOptions: { throw: true, signal: token.signal },
+            });
+            if (token.isCurrent()) {
+              setBusy(false);
+              financial.purge('closure');
+            }
+          })
+        }
+      >
+        Delete my account
+      </Button>
+    ) : ['closing', 'cancellation_pending', 'attention'].includes(closure.state) ? (
+      <Button
+        variant='outline'
+        size='sm'
+        disabled={busy}
+        onClick={() =>
+          void run(async () => {
+            const token = financial.capture();
+            const next = await getAccountClosure(
+              {
+                ...binding!,
+                subjectId: closure.subjectId,
+                financialSession: token,
+              },
+              closure.closureId,
+            );
+            if (token.isCurrent()) {
+              setClosure(next);
+            }
+          })
+        }
+      >
+        Refresh closure status
+      </Button>
+    ) : undefined
+  ) : (
+    <Button
+      variant='destructive'
+      size='sm'
+      disabled={!binding}
+      onClick={() => {
+        setConfirmed(false);
+        setIsConfirming(true);
+      }}
+    >
+      Close account
+    </Button>
+  );
+
   return (
-    <SettingsSectionCard>
-      <CardHeader>
-        <CardTitle className='text-base'>Close account</CardTitle>
-      </CardHeader>
-      <CardContent className='flex flex-col gap-3 border-destructive/40 text-sm'>
-        <p className='text-muted-foreground'>
-          Closing your account stops paid usage immediately and cancels your subscription. Once cancellation is
-          complete, you can delete your account.
-        </p>
-        {closure ? (
-          <p>Closure status: {closure.state.replaceAll('_', ' ')}</p>
-        ) : (
-          <div className='flex items-start gap-2'>
+    <>
+      <SettingsRow
+        settingId='close-account'
+        title='Close account'
+        description={
+          closure
+            ? `Closure status: ${closure.state.replaceAll('_', ' ')}`
+            : 'Cancels your plan right away and lets you delete your account'
+        }
+        control={control}
+      >
+        {closure?.attention?.action === 'contact_support' ? <SupportLink /> : undefined}
+        {notice && !isConfirming ? (
+          <ClosureNotice
+            notice={notice}
+            onReview={() => {
+              setNotice(undefined);
+              onReviewPayment();
+            }}
+          />
+        ) : undefined}
+      </SettingsRow>
+      <AlertDialog open={isConfirming} onOpenChange={setIsConfirming}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Close your account?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Paid usage stops and your plan is cancelled right away. To keep your plan until the end of your billing
+              period, cancel it in Billing instead.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className='flex items-start gap-2 text-sm'>
             <Checkbox
               id={confirmationId}
               className='mt-0.5'
@@ -181,86 +279,50 @@ export function AccountClosureSettings({
               I want to close my account.
             </Label>
           </div>
-        )}
-        {!closure ? (
-          <Button
-            variant='destructive'
-            disabled={!confirmed || busy || !binding}
-            onClick={() =>
-              void run(async () => {
-                const token = financial.capture();
-                const next = await prepareAccountClosure({ ...binding!, financialSession: token }, requestId.current);
-                if (token.isCurrent()) {
-                  rememberRevoked(next);
-                }
-              })
-            }
-          >
-            Close account
-          </Button>
-        ) : undefined}
-        {closure && ['closing', 'cancellation_pending', 'attention'].includes(closure.state) ? (
-          <Button
-            variant='outline'
-            disabled={busy}
-            onClick={() =>
-              void run(async () => {
-                const token = financial.capture();
-                const next = await getAccountClosure(
-                  { ...binding!, subjectId: closure.subjectId, financialSession: token },
-                  closure.closureId,
-                );
-                if (token.isCurrent()) {
-                  setClosure(next);
-                }
-              })
-            }
-          >
-            Refresh closure status
-          </Button>
-        ) : undefined}
-        {closure?.attention?.action === 'contact_support' ? <SupportLink /> : undefined}
-        {closure?.state === 'ready_for_auth_deletion' ? (
-          <Button
-            variant='destructive'
-            disabled={busy}
-            onClick={() =>
-              void run(async () => {
-                const token = financial.capture();
-                await authClient.deleteUser({ fetchOptions: { throw: true, signal: token.signal } });
-                if (token.isCurrent()) {
-                  setBusy(false);
-                  financial.purge('closure');
-                }
-              })
-            }
-          >
-            Delete my account
-          </Button>
-        ) : undefined}
-        {notice ? (
-          <div className='flex flex-col items-start gap-1'>
-            {/* The live region holds the sentence alone; colour marks only the glyph, and the step sits outside it. */}
-            <p role='alert' aria-label='Account closure notice' className='flex items-start gap-1.5'>
-              <AlertTriangle aria-hidden className='mt-0.5 size-4 shrink-0 text-warning' strokeWidth={1.5} />
-              <span>{notice.copy}</span>
-            </p>
-            {notice.next === 'support' ? <SupportLink /> : undefined}
-            {notice.next === 'review' ? (
-              <Button
-                variant='outline'
-                onClick={() => {
-                  setNotice(undefined);
-                  onReviewPayment();
-                }}
-              >
-                Open Add credits
-              </Button>
-            ) : undefined}
-          </div>
-        ) : undefined}
-      </CardContent>
-    </SettingsSectionCard>
+          {notice ? (
+            <ClosureNotice
+              notice={notice}
+              onReview={() => {
+                setNotice(undefined);
+                setIsConfirming(false);
+                onReviewPayment();
+              }}
+            />
+          ) : undefined}
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep account</AlertDialogCancel>
+            <Button variant='destructive' disabled={!confirmed || busy || !binding} onClick={prepare}>
+              Close account
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
+
+/** A refusal or failure, with the one step it offers. */
+function ClosureNotice({
+  notice,
+  onReview,
+}: {
+  readonly notice: Notice;
+  readonly onReview: () => void;
+}): React.JSX.Element {
+  return (
+    <div className='flex flex-col items-start gap-1 text-sm'>
+      {/* The live region holds the sentence alone; colour marks only the glyph, and the step sits outside it. */}
+      <p role='alert' aria-label='Account closure notice' className='flex items-start gap-1.5'>
+        <AlertTriangle aria-hidden className='mt-0.5 size-4 shrink-0 text-warning' strokeWidth={1.5} />
+        <span>{notice.copy}</span>
+      </p>
+      {notice.next === 'support' ? <SupportLink /> : undefined}
+      {notice.next === 'review' ? (
+        <Button variant='outline' size='sm' onClick={onReview}>
+          Open Add credits
+        </Button>
+      ) : undefined}
+    </div>
   );
 }
 /* oxlint-enable no-void, unicorn/no-negated-condition */

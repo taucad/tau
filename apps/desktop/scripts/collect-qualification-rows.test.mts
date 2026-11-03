@@ -26,6 +26,8 @@ const specifications = [
   ['windows-nsis-x64', 'windows-nsis', 'win32-x64', 'Microsoft Windows Server 2025 Datacenter 10.0.26100 26100'],
   ['ubuntu-apt-x11', 'linux-apt', 'linux-x64', '6.8.0 NAME="Ubuntu"\nID=ubuntu\nVERSION_ID="24.04"'],
   ['ubuntu-appimage-x11', 'linux-appimage', 'linux-x64', '6.8.0 NAME="Ubuntu"\nID=ubuntu\nVERSION_ID="24.04"'],
+  ['ubuntu2604-apt-x11', 'linux-apt', 'linux-x64', '6.17.0 NAME="Ubuntu"\nID=ubuntu\nVERSION_ID="26.04"'],
+  ['ubuntu2604-appimage-x11', 'linux-appimage', 'linux-x64', '6.17.0 NAME="Ubuntu"\nID=ubuntu\nVERSION_ID="26.04"'],
   ['debian-apt-x11', 'linux-apt', 'linux-x64', '6.12.0 NAME="Debian GNU/Linux"\nID=debian\nVERSION_ID="13"'],
   ['debian-appimage-x11', 'linux-appimage', 'linux-x64', '6.12.0 NAME="Debian GNU/Linux"\nID=debian\nVERSION_ID="13"'],
 ] as const;
@@ -111,7 +113,7 @@ const fixture = (macOnly = false) => {
 };
 const complete = fixture();
 const admitted = collectQualificationRows(complete);
-assert.equal(admitted.hostMatrix.length, 9);
+assert.equal(admitted.hostMatrix.length, 11);
 assert.equal(admitted.receipts.length, 7);
 assert.deepEqual(
   admitted.hostMatrix.map(({ id }) => id),
@@ -119,8 +121,8 @@ assert.deepEqual(
 );
 assert.equal(new Set(admitted.receipts.map(({ route, target }) => `${route}/${target}`)).size, 7);
 assert.deepEqual(collectQualificationRows({ ...complete, rows: [...complete.rows].reverse() }), admitted);
-assert.equal(admitted.hostMatrix.filter(({ receipt }) => receipt.route === 'linux-apt').length, 2);
-// Linux progress is independently complete only with both routes on both distros.
+assert.equal(admitted.hostMatrix.filter(({ receipt }) => receipt.route === 'linux-apt').length, 3);
+// Linux progress is independently complete only with both routes on all three distros.
 const linux = {
   ...fixture(),
   scope: 'linux',
@@ -131,7 +133,7 @@ const linux = {
   rows: complete.rows.filter((row) => row.id.startsWith('ubuntu') || row.id.startsWith('debian')),
 };
 const linuxResult = collectQualificationRows(linux);
-assert.equal(linuxResult.hostMatrix.length, 4);
+assert.equal(linuxResult.hostMatrix.length, 6);
 assert.equal(linuxResult.receipts.length, 2);
 assert.deepEqual(
   linuxResult.receipts.map((receipt) => receipt.route),
@@ -224,6 +226,26 @@ reject((value) => ({
           ...row,
           receipts: [
             { ...row.receipts[0], environment: { ...row.receipts[0]!.environment, os: 'ID=ubuntu\nID=debian' } },
+          ],
+        }
+      : row,
+  ),
+}));
+// A 26.04 row must observe 26.04; an Ubuntu 24.04 guest cannot stand in for it.
+reject((value) => ({
+  ...value,
+  rows: value.rows.map((row) =>
+    row.id === 'ubuntu2604-apt-x11'
+      ? {
+          ...row,
+          receipts: [
+            {
+              ...row.receipts[0],
+              environment: {
+                ...row.receipts[0]!.environment,
+                os: '6.8.0 NAME="Ubuntu"\nID=ubuntu\nVERSION_ID="24.04"',
+              },
+            },
           ],
         }
       : row,
@@ -370,7 +392,7 @@ const cli = spawnSync(
 assert.equal(cli.status, 1);
 assert.match(cli.stderr, /trusted main dispatch/u);
 console.log(
-  'PASS synthetic nine-host and Mac-only four-host admission, canonical receipts, strict source/route/signer/OS/run binding and main guard; no evidence files written',
+  'PASS synthetic eleven-host and Mac-only four-host admission, canonical receipts, strict source/route/signer/OS/run binding and main guard; no evidence files written',
 );
 
 const repository = mkdtempSync(join(tmpdir(), 'tau-qualification-source-'));

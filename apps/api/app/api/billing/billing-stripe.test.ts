@@ -338,6 +338,42 @@ describe('billing Stripe transport', () => {
     expect(fixture.requests).toHaveLength(2);
   });
 
+  it('dispatches a portal session opened on the subscription cancellation flow', async () => {
+    const fixture = await createFixture({
+      '/v1/billing_portal/sessions': {
+        id: 'bps_1',
+        object: 'billing_portal.session',
+        url: 'https://billing.stripe.com/p/session/1',
+      },
+    });
+    const leg = parseStripeCreateLeg({
+      kind: 'portal',
+      idempotencyKey: 'leg_portal_cancel',
+      request: {
+        customer: 'cus_1',
+        configuration: 'bpc_1',
+        return_url: 'https://tau.new/?settings=billing',
+        flow_data: {
+          type: 'subscription_cancel',
+          subscription_cancel: { subscription: 'sub_1' },
+          after_completion: { type: 'redirect', redirect: { return_url: 'https://tau.new/?settings=billing' } },
+        },
+      },
+    });
+    await expect(dispatchStripeLegOnce(fixture.stripe, leg)).resolves.toMatchObject({
+      kind: 'portal',
+      object: { id: 'bps_1' },
+    });
+    expect(fixture.requests).toStrictEqual(['POST /v1/billing_portal/sessions']);
+    expect(() =>
+      parseStripeCreateLeg({
+        kind: 'portal',
+        idempotencyKey: 'leg_portal_update',
+        request: { customer: 'cus_1', flow_data: { type: 'subscription_update' } },
+      }),
+    ).toThrow();
+  });
+
   it('dispatches the automatic reload metadata the service writes and rejects an unknown key', async () => {
     const fixture = await createFixture({
       '/v1/payment_intents': { id: 'pi_reload', object: 'payment_intent', status: 'succeeded', latest_charge: null },

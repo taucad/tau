@@ -41,6 +41,35 @@ export const patchBrowserThreadMailbox = (source: string): string => {
     .replace(route, 'if (d.targetThread && d.targetThread !== _pthread_self()) {');
 };
 
+const workerBootstrapStart = 'Me&&async function(){(function(){const e=new MessageChannel';
+const workerBootstrapLoaded =
+  'self.dispatchEvent(new MessageEvent("message",{data:{cmd:1,handlers:Fe.handlers,wasmMemory:Fe.wasmMemory,wasmModule:Fe.wasmModule}})),Fe}()';
+
+/**
+ * Hold the messages a pool worker receives while its bootstrap is still loading, and deliver them once it can act.
+ * Mono's pool hands a new pthread to a worker that has not finished loading when no loaded worker is free,
+ * and posts the start message at once. Until the native glue installs its handler, nothing listens on the
+ * worker, so Firefox drops that message and the pthread never runs: oneTBB then does all its work on the
+ * calling thread. Emscripten's own load message stays undelivered as before, because the bootstrap sends the
+ * load itself. Held messages are redelivered in arrival order on a later task, as they would have arrived.
+ * @param bootstrap - Generated dotnet.js from the admitted workload.
+ * @returns The bootstrap with its worker branch holding early messages, refusing a changed or patched workload.
+ */
+export const patchBrowserThreadWorkerMessages = (bootstrap: string): string => {
+  if (bootstrap.split(workerBootstrapStart).length !== 2 || bootstrap.split(workerBootstrapLoaded).length !== 2) {
+    throw new Error('The qualified .NET worker bootstrap sequence changed.');
+  }
+  const hold =
+    'const earlyMessages=[],holdEarlyMessage=e=>{1!==e.data?.cmd&&(earlyMessages.push(e),e.stopImmediatePropagation())};' +
+    'self.addEventListener("message",holdEarlyMessage);';
+  const release =
+    'setTimeout(()=>{self.removeEventListener("message",holdEarlyMessage);' +
+    'for(const e of earlyMessages)self.dispatchEvent(new MessageEvent("message",{data:e.data,ports:[...e.ports]}))}),Fe}()';
+  return bootstrap
+    .replace(workerBootstrapStart, workerBootstrapStart.replace('{(function', `{${hold}(function`))
+    .replace(workerBootstrapLoaded, workerBootstrapLoaded.replace(/,Fe\}\(\)$/u, `,${release}`));
+};
+
 const configSchema = z.looseObject({
   resources: z.looseObject({
     hash: z.string(),
@@ -121,7 +150,7 @@ export const patchBrowserThreadRuntime = (input: {
   runtime: string;
 }): { bootstrap: string; modules: Map<string, string> } => {
   const native = patchBrowserThreadMailbox(patchBrowserThreadStartup(input.native));
-  const boundNative = bindBrowserThreadStartup(input.bootstrap, native);
+  const boundNative = bindBrowserThreadStartup(patchBrowserThreadWorkerMessages(input.bootstrap), native);
   const runtime = patchBrowserThreadMemory(input.runtime);
   const boundRuntime = bindBrowserThreadStartup(boundNative.bootstrap, runtime, 'runtime');
   return {

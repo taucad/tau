@@ -45,6 +45,11 @@ export const user = pgTable('user', {
   image: text('image'),
   /** Whether the user allows their AI prompts and designs to be used for AI service improvement */
   allowsAiTraining: boolean('allows_ai_training').default(true).notNull(),
+  /**
+   * When the user last chose `allowsAiTraining` themselves. Paid plans count only a decided `true` as consent, so the
+   * column default never opts a paying user in.
+   */
+  aiTrainingDecidedAt: timestamp('ai_training_decided_at'),
   /** Whether the user allows anonymous, content-free usage metrics about agent turns to be reported for product improvement */
   allowsUsageMetrics: boolean('allows_usage_metrics').default(true).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),

@@ -1,5 +1,5 @@
 import { Line2NodeMaterial } from '#graphics/three/materials/line2.material.js';
-import { createSurfaceReuse } from '#graphics/three/surface-reuse.js';
+import { createSurfaceReuse, primeTargetDepth } from '#graphics/three/surface-reuse.js';
 import { createViewportFxaa } from '#graphics/three/fxaa.js';
 import { scheduleCameraPreparation } from '#graphics/three/camera-preparation.js';
 import type { ReactNode } from 'react';
@@ -508,7 +508,8 @@ const createPipelineResources = ({
       );
       return mix(beauty, vec4(vec3(aoFactor), color.a), select<'float'>(displayMode.equal(1), float(1), float(0)));
     };
-    outputQuad = createOutputQuad(composedSample(screenUV), frame.sharedDepth ? undefined : depthRestoreMaterial);
+    // Composition is color-only; the filter writes the reuse view's own depth.
+    outputQuad = createOutputQuad(composedSample(screenUV));
     const composedTarget = frame.target;
     composedTarget.texture.name = 'Tau composed surface';
     const reuse = createSurfaceReuse({
@@ -523,7 +524,10 @@ const createPipelineResources = ({
       NoToneMapping,
       gpuRenderer.outputColorSpace,
     );
-    const filtered = createOutputQuad(createViewportFxaa(texture(composedTarget.texture)));
+    const filtered = createOutputQuad(
+      createViewportFxaa(texture(composedTarget.texture)),
+      frame.sharedDepth ? undefined : depthRestoreMaterial,
+    );
     filtered.name = 'Tau reused surface FXAA';
     const compose = outputQuad.render.bind(outputQuad);
     outputQuad.render = (renderer) => {
@@ -854,11 +858,12 @@ function PostProcessingWebGpuActive({
         frame.target.height !== drawingSize.current.y
       ) {
         // Both targets belong to this graph. Retire both before reinitializing
-        // either: r184 initialization dirties depth, so it must precede scene writes.
+        // either, then consume the frame's first-draw depth clear before scene writes.
         selected.scenePass.renderTarget.setSize(drawingSize.current.x, drawingSize.current.y);
         frame.target.setSize(drawingSize.current.x, drawingSize.current.y);
         renderer.initRenderTarget(selected.scenePass.renderTarget);
         renderer.initRenderTarget(frame.target);
+        primeTargetDepth(renderer, frame.target);
         frame.depthPrepared = true;
       }
     } else {

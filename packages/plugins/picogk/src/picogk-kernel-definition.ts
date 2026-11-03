@@ -94,6 +94,8 @@ export type PicogkKernelContext = {
     readonly cleanup: () => Promise<void>;
   };
   readonly session: Pick<PicogkSession, 'recycle' | 'sampleResident' | 'cleanup'> & {
+    /** The browser worker's WebAssembly heap after its latest reply; the native session has none in this realm. */
+    readonly observedHeapBytes?: () => number | undefined;
     readonly request: <Result>(
       request: DotnetRequest<Result> & { readonly operationId: KernelServices['operationId'] },
     ) => Promise<Result>;
@@ -117,6 +119,8 @@ export const createPicogkKernelDefinition = <OptionsSchema extends z.ZodType>(se
   readonly version: string;
   readonly cancellation?: 'cooperative';
   readonly authoredOutputs?: boolean;
+  /** The environment's session reports a WebAssembly heap of its own (the browser .NET worker). */
+  readonly observesWasmHeap?: boolean;
   readonly initialize: KernelDefinition<
     'picogk',
     readonly ['cs'],
@@ -456,6 +460,12 @@ export const createPicogkKernelDefinition = <OptionsSchema extends z.ZodType>(se
     // Observation only: the resident set of the worker's process tree; `heapBytes` stays unimplemented, so recycling
     // and `rendering.heapBytes` are unchanged.
     observedChildResidentBytes: async (context) => context.session.sampleResident(),
+
+    // Observation only (T26): the browser .NET worker's linear memory as of its latest reply. The native kernel omits
+    // it and answers through its child-tree sample above; `heapBytes` stays unimplemented in both.
+    ...(setup.observesWasmHeap === true
+      ? { observedHeapBytes: (context: PicogkKernelContext) => context.session.observedHeapBytes?.() }
+      : {}),
 
     async onDispose(context) {
       try {

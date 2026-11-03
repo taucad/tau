@@ -3298,11 +3298,10 @@ describe('external turns through the revision port', () => {
     await expect(readSessionTextFile(cwd, { path: '.git/note.txt' })).rejects.toMatchObject({
       code: 'WORKSPACE_MASKED_PATH',
     });
-    /* Inside `.tau` a path that only *starts* like a masked one is still Tau's
-     * (P13); the authored controls are the rows that stay the agent's. */
-    await expect(writeSessionTextFile(cwd, { path: '.tau/chats-notes.md', content: 'mine' })).rejects.toMatchObject({
-      code: 'WORKSPACE_MASKED_PATH',
-    });
+    /* Inside `.tau` a path that only *starts* like a records row is an unlisted
+     * name, which is the agent's like any other project file (P13, mask retired
+     * 2026-10-31); only the declared rows are Tau's. */
+    await expect(writeSessionTextFile(cwd, { path: '.tau/chats-notes.md', content: 'mine' })).resolves.toBeUndefined();
     await expect(writeSessionTextFile(cwd, { path: '.tau/AGENTS.md', content: 'mine' })).resolves.toBeUndefined();
   });
 
@@ -3341,8 +3340,9 @@ describe('external turns through the revision port', () => {
     await symlink(join(root, 'publication'), join(skills, 'escape'), 'dir');
 
     await expect(readSessionTextFile(cwd, { path: resource }, [skills])).resolves.toBe('skill marker');
+    /* An unlisted `.tau` name is an ordinary project path: absent, it is simply not there. */
     await expect(readSessionTextFile(cwd, { path: '.tau/private.png' }, [skills])).rejects.toMatchObject({
-      message: 'No path under .tau/private.png exists for this agent.',
+      code: 'ENOENT',
     });
     await writeFile(join(cwd, 'image.png'), new Uint8Array([137, 80, 78, 71, 0, 255]));
     await expect(readSessionTextFile(cwd, { path: 'image.png' }, [skills])).rejects.toThrow('UTF-8 text');

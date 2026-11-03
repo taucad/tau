@@ -1,41 +1,14 @@
-import { useId } from 'react';
-import { SettingsItem, SettingsSectionCard } from '#components/settings/settings-item.js';
-import { legalUrl } from '#lib/legal-url.js';
-import { AlertCircle, Check, ChevronDown, Circle, Contrast, Laptop, Moon, ShieldCheck, Sun } from 'lucide-react';
-import { Loader } from '@taucad/ui/components/loader';
-import { usePrivacyPreferences } from '#hooks/use-privacy-preferences.js';
-import { telemetryCopy, useTelemetrySwitch } from '#hooks/use-telemetry-switch.js';
-import { useCommercialFeatures } from '#cloud/commercial-features.js';
+import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
+import { Check, ChevronDown, Circle, Contrast, Laptop, Moon, Sun } from 'lucide-react';
 import { Theme, useTheme, themeOptions } from '#hooks/use-theme.js';
 import type { ThemeWithSystem } from '#hooks/use-theme.js';
 import { useColor } from '#hooks/use-color.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
-import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import { ColorPicker } from '#components/ui/color-picker.js';
 import { Button } from '@taucad/ui/components/button';
 import { Switch } from '@taucad/ui/components/switch';
-import { AgentObservabilitySettings } from '#components/settings/agent-observability-settings.js';
-
-type PrivacyMode = {
-  id: 'share' | 'private';
-  name: string;
-  description: string;
-};
-
-const privacyModes: PrivacyMode[] = [
-  {
-    id: 'share',
-    name: 'Share Data',
-    description: 'Improve Tau for everyone',
-  },
-  {
-    id: 'private',
-    name: 'Privacy Mode',
-    description: 'No training. Your data is not used to improve AI.',
-  },
-];
 
 function getThemeIcon(themeId: ThemeWithSystem): React.JSX.Element {
   switch (themeId) {
@@ -62,26 +35,13 @@ function getThemeIcon(themeId: ThemeWithSystem): React.JSX.Element {
 }
 
 /**
- * General settings component containing privacy and appearance preferences.
+ * General settings: how Tau looks and feels on this device.
  */
 export function GeneralSettings(): React.JSX.Element {
-  const { preferences, isLoading, error, updatePreferences, isUpdating } = usePrivacyPreferences();
-  // T15/AD15: paid tiers carry a contractual no-train guarantee — the
-  // projection forces `trainingConsent: false`, so no toggle is rendered.
-  const { hasNoTrainGuarantee } = useCommercialFeatures();
-  const usageMetricsDescriptionId = useId();
-  const telemetrySwitch = useTelemetrySwitch();
   const { themeWithSystem, setTheme, currentOption } = useTheme();
   const { hue, setHue, resetHue } = useColor();
   const [areCodeInlayHintsEnabled, setCodeInlayHintsEnabled] = useCookie(cookieName.codeInlayHints, false);
   const [usePointerCursors, setUsePointerCursors] = useCookie(cookieName.pointerCursors, false);
-
-  const currentModeId = preferences?.allowsAiTraining ? 'share' : 'private';
-  const currentMode = privacyModes.find((mode) => mode.id === currentModeId) ?? privacyModes[0]!;
-
-  const handlePrivacyModeChange = (value: string): void => {
-    updatePreferences({ allowsAiTraining: value === 'share' });
-  };
 
   const handleThemeChange = (value: string): void => {
     const newTheme = value === 'null' ? null : (value as Theme);
@@ -90,242 +50,89 @@ export function GeneralSettings(): React.JSX.Element {
 
   return (
     <div className='flex flex-col gap-6 pb-6'>
-      {/* Appearance Section */}
-      <SettingsSectionCard>
-        <CardHeader>
-          <CardTitle>Appearance</CardTitle>
-        </CardHeader>
-        <CardContent className='flex flex-col gap-4'>
-          {/* Theme Selector */}
-          <SettingsItem settingId='theme'>
-            <div className='flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center'>
-              <div className='flex flex-col gap-1'>
-                <span className='font-medium'>Theme</span>
-                <span className='text-sm text-muted-foreground'>Select your preferred color scheme</span>
-              </div>
-              <ComboBoxResponsive
-                title='Theme'
-                description='Select your preferred color scheme'
-                groupedItems={[{ name: 'Theme', items: themeOptions }]}
-                getValue={(item) => String(item.id)}
-                value={currentOption}
-                isSearchEnabled={false}
-                renderLabel={(item, selectedItem) => (
-                  <span className='flex w-full items-center justify-between gap-4'>
-                    <div className='flex items-center gap-2'>
-                      {getThemeIcon(item.id)}
-                      <div className='flex flex-col gap-0.5'>
-                        <span className='font-medium'>{item.name}</span>
-                        <span className='text-xs text-muted-foreground'>{item.description}</span>
-                      </div>
+      <SettingsGroup title='Appearance'>
+        <SettingsRow
+          settingId='theme'
+          title='Theme'
+          description='Choose light, dark or match your system'
+          control={
+            <ComboBoxResponsive
+              title='Theme'
+              description='Select your preferred color scheme'
+              groupedItems={[{ name: 'Theme', items: themeOptions }]}
+              getValue={(item) => String(item.id)}
+              value={currentOption}
+              isSearchEnabled={false}
+              renderLabel={(item, selectedItem) => (
+                <span className='flex w-full items-center justify-between gap-4'>
+                  <div className='flex items-center gap-2'>
+                    {getThemeIcon(item.id)}
+                    <div className='flex flex-col gap-0.5'>
+                      <span className='font-medium'>{item.name}</span>
+                      <span className='text-xs text-muted-foreground'>{item.description}</span>
                     </div>
-                    {selectedItem?.id === item.id ? <Check className='size-4 shrink-0' /> : null}
-                  </span>
-                )}
-                onSelect={handleThemeChange}
-              >
-                <Button variant='outline' className='w-40 justify-between'>
-                  <span className='flex items-center gap-2'>
-                    {getThemeIcon(themeWithSystem)}
-                    <span className='truncate'>{currentOption.name}</span>
-                  </span>
-                  <ChevronDown className='size-4 shrink-0 opacity-50' />
-                </Button>
-              </ComboBoxResponsive>
-            </div>
-          </SettingsItem>
-
-          {/* Code Inlay Hints */}
-          <SettingsItem settingId='code-inlay-hints'>
-            <label className='flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center'>
-              <span className='flex flex-col gap-1'>
-                <span className='font-medium'>Code Inlay Hints</span>
-                <span className='text-sm text-muted-foreground'>Show inline parameter names in code editors</span>
-              </span>
-              <Switch
-                aria-label='Code Inlay Hints'
-                checked={areCodeInlayHintsEnabled}
-                onCheckedChange={setCodeInlayHintsEnabled}
-              />
-            </label>
-          </SettingsItem>
-
-          <SettingsItem settingId='pointer-cursors'>
-            <label className='flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center'>
-              <span className='flex flex-col gap-1'>
-                <span className='font-medium'>Use pointer cursors</span>
-                <span className='text-sm text-muted-foreground'>
-                  Change the cursor to a pointer when hovering over interactive elements
-                </span>
-              </span>
-              <Switch
-                aria-label='Use pointer cursors'
-                checked={usePointerCursors}
-                onCheckedChange={setUsePointerCursors}
-              />
-            </label>
-          </SettingsItem>
-
-          {/* Color Picker */}
-          <SettingsItem settingId='accent-color'>
-            <div className='flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center'>
-              <div className='flex flex-col gap-1'>
-                <span className='font-medium'>Accent Color</span>
-                <span className='text-sm text-muted-foreground'>Customize the primary accent color</span>
-              </div>
-              <ColorPicker
-                hasTooltip={false}
-                value={{ h: hue, s: 100, l: 75 }}
-                onReset={resetHue}
-                onChange={(value) => {
-                  setHue(value.h);
-                }}
-              >
-                <Button variant='outline' className='w-40 justify-between'>
-                  <span className='flex items-center gap-2'>
-                    <span className='size-4 shrink-0 rounded-full bg-primary' />
-                    <span className='truncate'>Hue: {hue}°</span>
-                  </span>
-                  <ChevronDown className='size-4 shrink-0 opacity-50' />
-                </Button>
-              </ColorPicker>
-            </div>
-          </SettingsItem>
-        </CardContent>
-      </SettingsSectionCard>
-
-      {/* Privacy Section */}
-      <SettingsItem settingId='privacy'>
-        <SettingsSectionCard>
-          <CardHeader>
-            <CardTitle>Privacy</CardTitle>
-          </CardHeader>
-          <CardContent className='flex flex-col gap-4'>
-            {/* One switch for usage and diagnostics data. It works signed out, so it sits outside the account
-             * preference's loading branch; usage metrics are not training data, so the no-train guarantee does not
-             * replace it. */}
-            <label className='flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center'>
-              <span className='flex flex-col gap-1'>
-                <span className='font-medium'>{telemetryCopy.label}</span>
-                <span id={usageMetricsDescriptionId} className='text-sm text-muted-foreground'>
-                  {telemetrySwitch.description}
-                  {telemetrySwitch.forcedOff
-                    ? ' Off because your browser sends Global Privacy Control or you declined analytics in Help → Cookie preferences.'
-                    : null}
-                </span>
-              </span>
-              <Switch
-                aria-label={telemetryCopy.label}
-                aria-describedby={usageMetricsDescriptionId}
-                checked={telemetrySwitch.checked}
-                disabled={telemetrySwitch.pending || telemetrySwitch.forcedOff}
-                onCheckedChange={telemetrySwitch.onCheckedChange}
-              />
-            </label>
-            {isLoading ? (
-              <div className='flex items-center justify-center py-4'>
-                <Loader className='size-5 text-muted-foreground' />
-              </div>
-            ) : error ? (
-              <div className='flex items-center gap-2 text-sm text-muted-foreground'>
-                <AlertCircle className='size-4 shrink-0' />
-                <span>Unable to load privacy preferences. Check your connection and refresh.</span>
-              </div>
-            ) : hasNoTrainGuarantee ? (
-              <div className='flex flex-col gap-1'>
-                <div className='flex items-center gap-2 font-medium'>
-                  <ShieldCheck className='size-4 text-primary' />
-                  No-train guarantee
-                </div>
-                <p className='text-sm text-muted-foreground'>
-                  Your plan never trains on your data — prompts and designs are excluded from AI training as part of
-                  your subscription.{' '}
-                  <a
-                    href={legalUrl('privacy#9.2.1-ai-service-improvement')}
-                    target='_blank'
-                    rel='noopener noreferrer'
-                    className='underline hover:text-foreground'
-                  >
-                    Learn more
-                  </a>
-                </p>
-              </div>
-            ) : (
-              <div className='flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center'>
-                <div className='flex flex-col gap-1'>
-                  <div className='flex items-center gap-2 font-medium'>
-                    {currentModeId === 'share' ? (
-                      <>
-                        <Check className='size-4 text-primary' />
-                        Data Sharing Enabled
-                      </>
-                    ) : (
-                      <>
-                        <ShieldCheck className='size-4 text-primary' />
-                        Privacy Mode Enabled
-                      </>
-                    )}
                   </div>
-                  <p className='text-sm text-muted-foreground'>
-                    {currentModeId === 'share' ? (
-                      <>
-                        Your prompts and generated designs will be stored and used to improve our AI features.{' '}
-                        <a
-                          href={legalUrl('privacy#9.2.1-ai-service-improvement')}
-                          target='_blank'
-                          rel='noopener noreferrer'
-                          className='underline hover:text-foreground'
-                        >
-                          Learn more
-                        </a>
-                      </>
-                    ) : (
-                      <>
-                        No training. Your data is not used to improve AI features.{' '}
-                        <a
-                          href={legalUrl('privacy#9.2.1-ai-service-improvement')}
-                          target='_blank'
-                          rel='noopener noreferrer'
-                          className='underline hover:text-foreground'
-                        >
-                          Learn more
-                        </a>
-                      </>
-                    )}
-                  </p>
-                </div>
-                <ComboBoxResponsive
-                  title='Privacy Mode'
-                  description='Select how your data is used'
-                  groupedItems={[{ name: 'Privacy Settings', items: privacyModes }]}
-                  getValue={(item) => item.id}
-                  value={currentMode}
-                  isSearchEnabled={false}
-                  renderLabel={(item, selectedItem) => (
-                    <span className='flex w-full items-center justify-between gap-4'>
-                      <div className='flex flex-col gap-0.5'>
-                        <span className='font-medium'>{item.name}</span>
-                        <span className='text-xs text-muted-foreground'>{item.description}</span>
-                      </div>
-                      {selectedItem?.id === item.id ? <Check className='size-4 shrink-0' /> : null}
-                    </span>
-                  )}
-                  onSelect={handlePrivacyModeChange}
-                >
-                  <Button variant='outline' disabled={isUpdating} className='w-40 justify-between'>
-                    <span className='truncate'>{currentMode.name}</span>
-                    <ChevronDown className='size-4 shrink-0 opacity-50' />
-                  </Button>
-                </ComboBoxResponsive>
-              </div>
-            )}
-          </CardContent>
-        </SettingsSectionCard>
-      </SettingsItem>
-
-      {/* Agent recording. Separate from the switch above: these purposes are
-       * account permissions resolved by the server, not a local preference. */}
-      <AgentObservabilitySettings />
+                  {selectedItem?.id === item.id ? <Check className='size-4 shrink-0' /> : null}
+                </span>
+              )}
+              onSelect={handleThemeChange}
+            >
+              <Button variant='outline' size='sm' className='w-36 justify-between'>
+                <span className='flex items-center gap-2'>
+                  {getThemeIcon(themeWithSystem)}
+                  <span className='truncate'>{currentOption.name}</span>
+                </span>
+                <ChevronDown className='size-4 shrink-0 opacity-50' />
+              </Button>
+            </ComboBoxResponsive>
+          }
+        />
+        <SettingsRow
+          settingId='accent-color'
+          title='Accent color'
+          description='Tint buttons, links and highlights'
+          control={
+            <ColorPicker
+              hasTooltip={false}
+              value={{ h: hue, s: 100, l: 75 }}
+              onReset={resetHue}
+              onChange={(value) => {
+                setHue(value.h);
+              }}
+            >
+              <Button variant='outline' size='sm' className='w-36 justify-between'>
+                <span className='flex items-center gap-2'>
+                  <span className='size-4 shrink-0 rounded-full bg-primary' />
+                  <span className='truncate'>Hue {hue}°</span>
+                </span>
+                <ChevronDown className='size-4 shrink-0 opacity-50' />
+              </Button>
+            </ColorPicker>
+          }
+        />
+        <SettingsRow
+          settingId='pointer-cursors'
+          title='Pointer cursors'
+          description='Show a hand cursor over buttons and links'
+          control={
+            <Switch aria-label='Pointer cursors' checked={usePointerCursors} onCheckedChange={setUsePointerCursors} />
+          }
+        />
+      </SettingsGroup>
+      <SettingsGroup title='Editor'>
+        <SettingsRow
+          settingId='code-inlay-hints'
+          title='Code inlay hints'
+          description='Show parameter names inline in code'
+          control={
+            <Switch
+              aria-label='Code inlay hints'
+              checked={areCodeInlayHintsEnabled}
+              onCheckedChange={setCodeInlayHintsEnabled}
+            />
+          }
+        />
+      </SettingsGroup>
     </div>
   );
 }

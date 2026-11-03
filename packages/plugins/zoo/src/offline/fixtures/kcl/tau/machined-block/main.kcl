@@ -1,0 +1,42 @@
+// Aluminium spacer block: rounded vertical edges, then a chamfer around the top.
+@settings(defaultLengthUnit = mm, kclVersion = 2.0)
+
+// Parameters
+blockLength = 60
+blockWidth = 40
+blockHeight = 25
+cornerRadius = 6
+edgeBreak = 1
+
+footprint = startSketchOn(XY)
+  |> startProfile(at = [-blockLength / 2, -blockWidth / 2])
+  |> xLine(length = blockLength, tag = $front)
+  |> yLine(length = blockWidth, tag = $right)
+  |> xLine(length = -blockLength, tag = $back)
+  |> close(tag = $left)
+
+block = extrude(footprint, length = blockHeight, tagEnd = $top)
+
+// Round the vertical edges first...
+rounded = fillet(
+  block,
+  radius = cornerRadius,
+  tags = [
+    getNextAdjacentEdge(front),
+    getNextAdjacentEdge(right),
+    getNextAdjacentEdge(back),
+    getNextAdjacentEdge(left)
+  ],
+)
+
+// ...then chamfer the top edges; the chamfer follows the tangent fillet arcs round the corners.
+finished = chamfer(
+  rounded,
+  length = edgeBreak,
+  tags = [
+    getOppositeEdge(front),
+    getOppositeEdge(right),
+    getOppositeEdge(back),
+    getOppositeEdge(left)
+  ],
+)

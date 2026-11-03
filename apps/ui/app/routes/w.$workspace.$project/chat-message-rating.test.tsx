@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { messageRole } from '@taucad/chat/constants';
 import type { MyUIMessage } from '@taucad/chat';
 import { ChatMessageRating } from '#routes/w.$workspace.$project/chat-message-rating.js';
@@ -30,6 +30,9 @@ const store = {
   rateRun: vi.fn((_chatId: string, _runId: string, value: 'positive' | 'negative') => value),
 };
 let allowed = true;
+let refusal: string | undefined;
+let canDecide = true;
+const decide = vi.fn(async () => ({}));
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatContext: () => ({ activeChatId: 'chat-1' }),
@@ -40,12 +43,21 @@ vi.mock('#hooks/use-chat.js', () => ({
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'project-1' }) }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: () => store }));
 vi.mock('#hooks/use-telemetry-purposes.js', () => ({
-  useTelemetryPurposes: () => ({ isAllowed: (purpose: string) => allowed && purpose === 'feedback' }),
+  useTelemetryPurposes: () => ({
+    isAllowed: (purpose: string) => allowed && purpose === 'feedback',
+    stateOf: () => ({ refusal }),
+    canDecide,
+    decide,
+    isDeciding: false,
+  }),
 }));
 
 describe('ChatMessageRating', () => {
   beforeEach(() => {
     allowed = true;
+    refusal = undefined;
+    canDecide = true;
+    decide.mockClear();
     store.ratableRun.mockReset().mockReturnValue('run-1');
     store.ratingOf.mockReset().mockReturnValue(undefined);
     store.rateRun.mockClear();
@@ -62,8 +74,49 @@ describe('ChatMessageRating', () => {
     expect(screen.getByRole('button', { name: 'Good reply' })).toHaveProperty('disabled', true);
   });
 
+  it('asks for feedback consent by the rating itself: records the grant, then rates', async () => {
+    allowed = false;
+    refusal = 'no-decision';
+    render(<ChatMessageRating messageId='reply-2' />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Good reply' }));
+
+    await waitFor(() => {
+      expect(store.rateRun).toHaveBeenCalledWith('chat-1', 'run-1', 'positive');
+    });
+    expect(decide).toHaveBeenCalledWith([{ purpose: 'feedback', granted: true }]);
+    expect(decide.mock.invocationCallOrder[0]).toBeLessThan(store.rateRun.mock.invocationCallOrder[0] ?? 0);
+  });
+
+  it('leaves the reply unrated when the feedback decision is refused', async () => {
+    allowed = false;
+    refusal = 'no-decision';
+    decide.mockRejectedValueOnce(new Error('409'));
+    render(<ChatMessageRating messageId='reply-2' />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Good reply' }));
+
+    await waitFor(() => {
+      expect(decide).toHaveBeenCalled();
+    });
+    expect(store.rateRun).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['the project is not owned', 'project-not-owned', true],
+    ['no recording notice is in force', 'notice-unapproved', false],
+  ])('shows nothing while %s', (_case, reason, decidable) => {
+    allowed = false;
+    refusal = reason;
+    canDecide = decidable;
+    const { container } = render(<ChatMessageRating messageId='reply-2' />);
+
+    expect(container.childElementCount).toBe(0);
+  });
+
   it('shows nothing while ratings are not allowed, before the run ends, or on an earlier message of the turn', () => {
     allowed = false;
+    refusal = 'project-fenced';
     const { container, rerender } = render(<ChatMessageRating messageId='reply-2' />);
     expect(container.childElementCount).toBe(0);
 

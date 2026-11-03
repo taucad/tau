@@ -7,7 +7,7 @@
  *
  * - `inline` — large card-like component used as an empty-state CTA.
  * - `banner` — compact one-row banner for warning callouts.
- * - `row` — table-row style for workspace lists.
+ * - `row` — one borderless row of a settings group's workspace list.
  *
  * The component is intentionally **presentational**: it doesn't own the
  * picker, the permission request, or persistence. Each call site supplies
@@ -125,11 +125,11 @@ export function WorkspaceDirectoryPanel({
 
   if (variant === 'row') {
     return (
-      <div className='flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-card px-3 py-2'>
+      <div className='flex flex-wrap items-center justify-between gap-3 py-3'>
         <div className='flex min-w-0 items-center gap-3'>
           {indicator}
           <div className='flex min-w-0 flex-col'>
-            <span className='truncate font-medium'>{workspaceName ?? copy.title}</span>
+            <span className='truncate text-sm font-medium'>{workspaceName ?? copy.title}</span>
             {description ? <span className='text-xs break-all text-muted-foreground'>{description}</span> : undefined}
             {status === 'connected' ? undefined : (
               <span className='truncate text-xs text-muted-foreground'>{copy.description}</span>

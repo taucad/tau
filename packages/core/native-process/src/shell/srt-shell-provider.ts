@@ -28,8 +28,7 @@ import {
 } from '#native-sandbox.js';
 import { terminateOwnedProcesses, trackDescendants } from '#shell/process-tree.js';
 import type { ProcessRow } from '#shell/process-tree.js';
-import { bindMaskedDirectories, maskProblem } from '#shell/shell-project-mask.js';
-import { shellBaselineDenied } from '#shell/shell-baseline.js';
+import { shellBaselineDenied, zshStartupFiles } from '#shell/shell-baseline.js';
 import { createShellCustody } from '#shell/shell-custody.js';
 import { refusedShellEnvironment } from '#shell/shell-environment.js';
 import { holdProtectedStandIns, useStandInJournal } from '#shell/shell-stand-ins.js';
@@ -251,33 +250,28 @@ const pinnedAncestors = (writable: readonly string[], protectedPaths: readonly s
 };
 
 export const shellSandboxProfile = (
-  launch: Pick<ShellLaunch, 'filesystem' | 'network'>,
+  launch: Pick<ShellLaunch, 'filesystem' | 'network' | 'startupFiles'>,
   options: SandboxShellProviderOptions = {},
   runtimeDirectory?: string,
 ): Record<string, unknown> => {
+  const home = options.home ?? homedir();
+  /* The human Terminal's Zsh reopens exactly its startup files, read-only; every other baseline entry stays denied. */
+  const startupFiles = launch.startupFiles === 'zsh' ? zshStartupFiles(home) : [];
   const denied = deniedVariants([
     ...launch.filesystem.denied,
-    ...shellBaselineDenied({ platform: process.platform, home: options.home ?? homedir(), environment: process.env }),
+    ...shellBaselineDenied({ platform: process.platform, home, environment: process.env }).filter(
+      (path) => !startupFiles.includes(path),
+    ),
   ]);
-  const readOnly = launch.filesystem.readOnly ?? [];
-  const masked = process.platform === 'linux' ? deniedVariants(launch.filesystem.masked ?? []) : [];
-  // A strict child makes SRT mount an empty directory at the absent container. A direct
-  // deny would mount /dev/null there and conflict with the directory stubs for protected children.
-  const absentMasked = masked.filter((path) => !existsSync(path)).map((path) => join(path, '.tau-mask-boundary'));
-  // A mask already pins its container. Rebinding that host directory would expose everything
-  // the tmpfs hid. Only ancestors within explicitly writable children may be restored.
-  const pinned = pinnedAncestors(launch.filesystem.writable, [...readOnly, ...launch.filesystem.denied]).filter(
-    (path) =>
-      !masked.some((root) => inside(path, root)) ||
-      launch.filesystem.writable.some((root) => masked.some((mask) => inside(root, mask)) && inside(path, root)),
-  );
+  const readOnly = [...(launch.filesystem.readOnly ?? []), ...startupFiles];
+  const pinned = pinnedAncestors(launch.filesystem.writable, [...readOnly, ...launch.filesystem.denied]);
   const { domains } = launch.network;
   return {
     seccomp: sandboxRuntimeSeccomp(),
     javaAgentJarPath: sandboxRuntimeJavaAgent(),
     network: { allowedDomains: [...domains], deniedDomains: domains.length > 0 ? [] : ['*'], strictAllowlist: true },
     filesystem: {
-      denyRead: [...new Set([...deniedReadRoots(), ...denied, ...masked])],
+      denyRead: [...new Set([...deniedReadRoots(), ...denied])],
       allowRead: physicalVariants([
         ...launch.filesystem.readable,
         ...launch.filesystem.writable,
@@ -286,7 +280,7 @@ export const shellSandboxProfile = (
         ...(runtimeDirectory === undefined ? [] : [runtimeDirectory]),
       ]),
       allowWrite: physicalVariants([...launch.filesystem.writable, ...pinned]),
-      denyWrite: [...new Set([...deniedWriteRoots(), ...denied, ...deniedVariants(readOnly), ...absentMasked])],
+      denyWrite: [...new Set([...deniedWriteRoots(), ...denied, ...deniedVariants(readOnly)])],
     },
     allowPty: false,
     ripgrep: { command: options.ripgrepPath ?? 'rg' },
@@ -941,10 +935,6 @@ const admit = (launch: ShellLaunch, options: SandboxShellProviderOptions): Shell
   if (refused.length > 0) {
     return unsupported('environment', `the shell may not receive ${refused.join(', ')}.`);
   }
-  const maskRefusal = maskProblem(launch.filesystem);
-  if (maskRefusal !== undefined) {
-    return unsupported('filesystem-mask', maskRefusal);
-  }
   const { readable, writable, denied, readOnly = [] } = launch.filesystem;
   const paths = [launch.executablePath, launch.workingDirectory, ...readable, ...writable, ...readOnly, ...denied];
   if (paths.some((path) => !isAbsolute(path) || path.includes('\0'))) {
@@ -959,6 +949,12 @@ const admit = (launch: ShellLaunch, options: SandboxShellProviderOptions): Shell
   if (launch.network.domains.some((domain) => !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/u.test(domain))) {
     return unsupported('network-isolation', 'network grants name exact lowercase host names only.');
   }
+  if (
+    launch.startupFiles !== undefined &&
+    (process.platform !== 'darwin' || launch.stdio.kind !== 'terminal' || launch.executablePath !== '/bin/zsh')
+  ) {
+    return unsupported('filesystem-mask', 'only the macOS Terminal running /bin/zsh may read Zsh startup files.');
+  }
   if (launch.stdio.kind === 'terminal') {
     if (process.platform === 'darwin' && options.macOSTerminal !== true) {
       return unsupported('terminal', 'the macOS Terminal waits for the own-pty validation run.');
@@ -970,7 +966,7 @@ const admit = (launch: ShellLaunch, options: SandboxShellProviderOptions): Shell
   return undefined;
 };
 
-/** The runtime lists a hold is computed from: exactly those of the profile, plus the grant's directory rows and masks. */
+/** The runtime lists a hold is computed from: exactly those of the profile, plus the grant's directory rows. */
 const standInProfile = (profile: Record<string, unknown>, launch: ShellLaunch): StandInProfile => {
   const { denyWrite, allowWrite } = profile['filesystem'] as Readonly<{
     denyWrite: readonly string[];
@@ -980,8 +976,6 @@ const standInProfile = (profile: Record<string, unknown>, launch: ShellLaunch): 
     denyWrite,
     allowWrite,
     directories: launch.filesystem.directories,
-    masked: deniedVariants(launch.filesystem.masked ?? []),
-    writable: physicalVariants(launch.filesystem.writable),
   };
 };
 
@@ -1028,26 +1022,12 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
     }
     const runtimeDirectory = createRuntimeDirectory();
     // Absent protected paths get shared stand-ins, computed from exactly the lists the runtime is handed, before it
-    // observes the filesystem; released only once this launch's supervisor is gone (see holdProtectedStandIns). A
-    // masked container's stand-in changes the profile (it is no longer absent), so the profile handed to the runtime is
-    // computed again once the stand-ins exist and held from its own lists.
+    // observes the filesystem; released only once this launch's supervisor is gone (see holdProtectedStandIns).
     let releaseStandIns: () => void;
     let profile: Record<string, unknown>;
     try {
-      const releaseFirst = holdProtectedStandIns(
-        standInProfile(shellSandboxProfile(launch, options, runtimeDirectory), launch),
-      );
-      try {
-        profile = shellSandboxProfile(launch, options, runtimeDirectory);
-        const releaseSecond = holdProtectedStandIns(standInProfile(profile, launch));
-        releaseStandIns = () => {
-          releaseSecond();
-          releaseFirst();
-        };
-      } catch (error) {
-        releaseFirst();
-        throw error;
-      }
+      profile = shellSandboxProfile(launch, options, runtimeDirectory);
+      releaseStandIns = holdProtectedStandIns(standInProfile(profile, launch));
     } catch (error) {
       if (runtimeDirectory !== undefined) {
         rmSync(runtimeDirectory, { recursive: true, force: true });
@@ -1062,7 +1042,13 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
       started = await startSupervisor(
         {
           profile,
-          command: shellSandboxCommand(launch),
+          /* Only the provider sets ZDOTDIR, and only for the Terminal Zsh it admitted: a host value stays refused. */
+          command: shellSandboxCommand(
+            launch.startupFiles === 'zsh'
+              ? // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names.
+                { ...launch, environment: { ...launch.environment, ZDOTDIR: options.home ?? homedir() } }
+              : launch,
+          ),
           workingDirectory: launch.workingDirectory,
           commandId: launch.commandId,
           guard: launch.network.domains.length > 0,
@@ -1092,18 +1078,7 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
       await supervisor.close();
       launch.signal.throwIfAborted();
     }
-    const maskedArgv =
-      process.platform === 'darwin'
-        ? bindMaskedDirectories(supervisor.reply.argv, launch.filesystem)
-        : supervisor.reply.argv;
-    if (maskedArgv === undefined) {
-      await supervisor.close();
-      return {
-        status: 'sandbox-unavailable',
-        message: 'the sandbox profile could not enforce masked directory creation.',
-      };
-    }
-    const argv = hostBound(maskedArgv, options.bwrapPath ?? '/usr/bin/bwrap');
+    const argv = hostBound(supervisor.reply.argv, options.bwrapPath ?? '/usr/bin/bwrap');
     const owner: LaunchOwner = { supervisor, table: options.processTable };
     let staged: Staged;
     if (launch.stdio.kind === 'pipes') {

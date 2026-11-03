@@ -1,5 +1,4 @@
 import { definePlugin } from '@taucad/runtime/plugin';
-import { displaySimplification } from '#display-simplification.middleware.js';
 import { geometryCache } from '#geometry-cache.middleware.js';
 import { gltfEdgeDetection } from '#gltf-edge-detection.middleware.js';
 import { parameterCache } from '#parameter-cache.middleware.js';
@@ -18,7 +17,6 @@ export const middleware = definePlugin({
     parameterUnits,
     geometryCache,
     gltfEdgeDetection,
-    displaySimplification,
   },
 
   presets: {
@@ -27,8 +25,6 @@ export const middleware = definePlugin({
       'middleware.parameterUnits',
       'middleware.geometryCache',
       'middleware.gltfEdgeDetection',
-      // After edge detection, so it sits nearer the kernel and fallback edges see the smaller mesh.
-      'middleware.displaySimplification',
     ],
     cache: ['middleware.geometryCache'],
     units: ['middleware.parameterUnits'],

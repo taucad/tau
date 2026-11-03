@@ -1,5 +1,19 @@
+diff --git a/build/three.module.js b/build/three.module.js
+index b1a0fdda8a14f71dd62d21325f3eb59afc45f1d0..f47c7245914e4e7a0f657af220df1781d9eb798e 100644
+--- a/build/three.module.js
++++ b/build/three.module.js
+@@ -11412,7 +11412,8 @@ function WebGLTextures( _gl, extensions, state, properties, capabilities, utils,
+ 
+ 		if ( renderTarget.isWebGLCubeRenderTarget ) {
+ 
+-			for ( let i = 0; i < 6; i ++ ) {
++			// A retired renderer may already have cleared its framebuffer properties.
++			for ( let i = 0; renderTargetProperties.__webglFramebuffer !== undefined && i < 6; i ++ ) {
+ 
+ 				if ( Array.isArray( renderTargetProperties.__webglFramebuffer[ i ] ) ) {
+ 
 diff --git a/build/three.webgpu.js b/build/three.webgpu.js
-index da6128d25f3443904c6be038b761365b7c884168..d70958d419ba13415ebf2c66e5311b4b55c27a1d 100644
+index da6128d25f3443904c6be038b761365b7c884168..b94eef9882d1158b06fcc0e7c6244ac946cb83de 100644
 --- a/build/three.webgpu.js
 +++ b/build/three.webgpu.js
 @@ -155,6 +155,7 @@ class NodeMaterialObserver {
@@ -80,7 +94,27 @@ index da6128d25f3443904c6be038b761365b7c884168..d70958d419ba13415ebf2c66e5311b4b
  
  		let textureNeedsUpdate = false;
  
-@@ -78657,6 +78705,20 @@ class WebGPUBindingUtils {
+@@ -59280,15 +59328,16 @@ class Renderer {
+ 
+ 			// reversed depth
+ 
+-			if ( this.reversedDepthBuffer === true && camera.reversedDepth !== true ) {
++			// Match the camera to this renderer both ways: cameras such as QuadMesh's are shared by every renderer.
++			if ( camera.reversedDepth !== this.reversedDepthBuffer ) {
+ 
+-				camera._reversedDepth = true;
++				camera._reversedDepth = this.reversedDepthBuffer;
+ 
+ 				if ( camera.isArrayCamera ) {
+ 
+ 					for ( const subCamera of camera.cameras ) {
+ 
+-						subCamera._reversedDepth = true;
++						subCamera._reversedDepth = this.reversedDepthBuffer;
+ 
+ 					}
+ 
+@@ -78657,6 +78706,20 @@ class WebGPUBindingUtils {
  
  		const bindingsData = backend.get( bindGroup );
  
@@ -102,7 +136,7 @@ index da6128d25f3443904c6be038b761365b7c884168..d70958d419ba13415ebf2c66e5311b4b
  
  			bindingsData.layout.usedTimes --;
 diff --git a/build/three.webgpu.nodes.js b/build/three.webgpu.nodes.js
-index 6834eb44a42521d85dd0da42bc84c09f286c9d3b..57135fb68307dffd58adcc5ffc9afbfb62db835b 100644
+index 6834eb44a42521d85dd0da42bc84c09f286c9d3b..e5405d99f5691f16d5d9572402476b65aba373a4 100644
 --- a/build/three.webgpu.nodes.js
 +++ b/build/three.webgpu.nodes.js
 @@ -155,6 +155,7 @@ class NodeMaterialObserver {
@@ -183,7 +217,27 @@ index 6834eb44a42521d85dd0da42bc84c09f286c9d3b..57135fb68307dffd58adcc5ffc9afbfb
  
  		let textureNeedsUpdate = false;
  
-@@ -78657,6 +78705,20 @@ class WebGPUBindingUtils {
+@@ -59280,15 +59328,16 @@ class Renderer {
+ 
+ 			// reversed depth
+ 
+-			if ( this.reversedDepthBuffer === true && camera.reversedDepth !== true ) {
++			// Match the camera to this renderer both ways: cameras such as QuadMesh's are shared by every renderer.
++			if ( camera.reversedDepth !== this.reversedDepthBuffer ) {
+ 
+-				camera._reversedDepth = true;
++				camera._reversedDepth = this.reversedDepthBuffer;
+ 
+ 				if ( camera.isArrayCamera ) {
+ 
+ 					for ( const subCamera of camera.cameras ) {
+ 
+-						subCamera._reversedDepth = true;
++						subCamera._reversedDepth = this.reversedDepthBuffer;
+ 
+ 					}
+ 
+@@ -78657,6 +78706,20 @@ class WebGPUBindingUtils {
  
  		const bindingsData = backend.get( bindGroup );
  
@@ -273,6 +327,30 @@ index 14bf760075160551f34bda034a6e79d5ef40c17a..3593add94ed5f63a638c4d1887c4cfb1
  		this.material.removeEventListener( 'dispose', this.onMaterialDispose );
  		this.geometry.removeEventListener( 'dispose', this.onGeometryDispose );
  
+diff --git a/src/renderers/common/Renderer.js b/src/renderers/common/Renderer.js
+index aee25e75e19df6654c2ea53037c52a0562cb241b..51b4dd7f8ef2aa66da3d4ff4943bf5ed3292f950 100644
+--- a/src/renderers/common/Renderer.js
++++ b/src/renderers/common/Renderer.js
+@@ -1513,15 +1513,16 @@ class Renderer {
+ 
+ 			// reversed depth
+ 
+-			if ( this.reversedDepthBuffer === true && camera.reversedDepth !== true ) {
++			// Match the camera to this renderer both ways: cameras such as QuadMesh's are shared by every renderer.
++			if ( camera.reversedDepth !== this.reversedDepthBuffer ) {
+ 
+-				camera._reversedDepth = true;
++				camera._reversedDepth = this.reversedDepthBuffer;
+ 
+ 				if ( camera.isArrayCamera ) {
+ 
+ 					for ( const subCamera of camera.cameras ) {
+ 
+-						subCamera._reversedDepth = true;
++						subCamera._reversedDepth = this.reversedDepthBuffer;
+ 
+ 					}
+ 
 diff --git a/src/renderers/common/Textures.js b/src/renderers/common/Textures.js
 index 32c4b07b42f53d84eac56fda18c4de0483f0a3a9..dbf5aae83ecf152c2ecd2c6cc3af74cf0797f281 100644
 --- a/src/renderers/common/Textures.js
@@ -293,6 +371,20 @@ index 32c4b07b42f53d84eac56fda18c4de0483f0a3a9..dbf5aae83ecf152c2ecd2c6cc3af74cf
 +		const useDepthTexture = ( renderTarget.depthBuffer === true || renderTarget.stencilBuffer === true ) && ! renderbufferOnlyDepth;
  
  		let textureNeedsUpdate = false;
+ 
+diff --git a/src/renderers/webgl/WebGLTextures.js b/src/renderers/webgl/WebGLTextures.js
+index 9b20f80169cb78caadcea570b0553a224fb5415a..7fd78fca346e7c27c086345b9c7d5a2cc9aff926 100644
+--- a/src/renderers/webgl/WebGLTextures.js
++++ b/src/renderers/webgl/WebGLTextures.js
+@@ -420,7 +420,8 @@ function WebGLTextures( _gl, extensions, state, properties, capabilities, utils,
+ 
+ 		if ( renderTarget.isWebGLCubeRenderTarget ) {
+ 
+-			for ( let i = 0; i < 6; i ++ ) {
++			// A retired renderer may already have cleared its framebuffer properties.
++			for ( let i = 0; renderTargetProperties.__webglFramebuffer !== undefined && i < 6; i ++ ) {
+ 
+ 				if ( Array.isArray( renderTargetProperties.__webglFramebuffer[ i ] ) ) {
  
 diff --git a/src/renderers/webgpu/utils/WebGPUBindingUtils.js b/src/renderers/webgpu/utils/WebGPUBindingUtils.js
 index 2f9488d22deacc333c2c68dd7facfdf61c8daa38..b66595840329589183d3d1dc035a29ae548c8ce1 100644
@@ -319,29 +411,3 @@ index 2f9488d22deacc333c2c68dd7facfdf61c8daa38..b66595840329589183d3d1dc035a29ae
  		if ( bindingsData.layout ) {
  
  			bindingsData.layout.usedTimes --;
-diff --git a/src/renderers/webgl/WebGLTextures.js b/src/renderers/webgl/WebGLTextures.js
---- a/src/renderers/webgl/WebGLTextures.js
-+++ b/src/renderers/webgl/WebGLTextures.js
-@@ -420,7 +420,8 @@
- 
- 		if ( renderTarget.isWebGLCubeRenderTarget ) {
- 
--			for ( let i = 0; i < 6; i ++ ) {
-+			// A retired renderer may already have cleared its framebuffer properties.
-+			for ( let i = 0; renderTargetProperties.__webglFramebuffer !== undefined && i < 6; i ++ ) {
- 
- 				if ( Array.isArray( renderTargetProperties.__webglFramebuffer[ i ] ) ) {
- 
-diff --git a/build/three.module.js b/build/three.module.js
---- a/build/three.module.js
-+++ b/build/three.module.js
-@@ -11412,7 +11412,8 @@
- 
- 		if ( renderTarget.isWebGLCubeRenderTarget ) {
- 
--			for ( let i = 0; i < 6; i ++ ) {
-+			// A retired renderer may already have cleared its framebuffer properties.
-+			for ( let i = 0; renderTargetProperties.__webglFramebuffer !== undefined && i < 6; i ++ ) {
- 
- 				if ( Array.isArray( renderTargetProperties.__webglFramebuffer[ i ] ) ) {
- 

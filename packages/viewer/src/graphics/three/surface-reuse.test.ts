@@ -8,7 +8,8 @@ describe('surface reuse ownership', () => {
   it('should retire every attachment user before initialization and retry a failed preparation', () => {
     const scene = new RenderTarget(1, 1, { type: HalfFloatType });
     const composed = new RenderTarget(1, 1);
-    composed.depthTexture = new DepthTexture(1, 1);
+    const depth = new DepthTexture(1, 1);
+    composed.depthTexture = depth;
     const renderer = mock<WebGPURenderer>();
     const reuse = createSurfaceReuse({ renderer, scene, composed });
     const events: string[] = [];
@@ -20,9 +21,16 @@ describe('surface reuse ownership', () => {
       target.addEventListener('dispose', () => events.push(`retire-${name}`));
     }
     renderer.initRenderTarget.mockImplementation(() => events.push('initialize'));
+    // The view's first-draw depth clear is consumed at allocation, not after composition.
+    renderer.clear.mockImplementation(() =>
+      events.push(`prime-${renderer.setRenderTarget.mock.lastCall?.[0] === reuse.target}`),
+    );
     try {
       expect(reuse.target.texture).toBe(scene.texture);
-      expect(reuse.target.depthTexture).toBe(composed.depthTexture);
+      // The view owns depth; composition stays color-only.
+      expect(reuse.target.depthTexture).toBe(depth);
+      expect(composed.depthTexture).toBeNull();
+      expect(composed.depthBuffer).toBe(false);
       reuse.prepare(5120, 2880);
       expect(events).toEqual([
         'retire-scene',
@@ -31,6 +39,7 @@ describe('surface reuse ownership', () => {
         'initialize',
         'initialize',
         'initialize',
+        'prime-true',
       ]);
       events.length = 0;
       reuse.prepare(5120, 2880);
@@ -43,7 +52,7 @@ describe('surface reuse ownership', () => {
       }).toThrow('allocation failed');
       events.length = 0;
       reuse.prepare(2560, 1440);
-      expect(events).toEqual(['initialize', 'initialize', 'initialize']);
+      expect(events).toEqual(['initialize', 'initialize', 'initialize', 'prime-true']);
       expect([reuse.target.width, reuse.target.height]).toEqual([2560, 1440]);
     } finally {
       reuse.target.dispose();
@@ -52,14 +61,12 @@ describe('surface reuse ownership', () => {
     }
   });
 
-  it.each(['compose', 'filter'] as const)('should restore target and depth clear state after %s fails', (failure) => {
+  it.each(['compose', 'filter'] as const)('should restore the target after %s fails', (failure) => {
     const scene = new RenderTarget();
     const composed = new RenderTarget();
     const destination = new RenderTarget();
     let current: ReturnType<WebGPURenderer['getRenderTarget']> = destination;
     const renderer = mock<WebGPURenderer>({
-      autoClearDepth: true,
-      autoClearStencil: true,
       getRenderTarget: () => current,
       setRenderTarget: (target) => {
         current = target;
@@ -74,8 +81,6 @@ describe('surface reuse ownership', () => {
     });
     const filter = vi.fn(() => {
       expect(current).toBe(reuse.target);
-      expect(renderer.autoClearDepth).toBe(false);
-      expect(renderer.autoClearStencil).toBe(false);
       throw new Error('filter failed');
     });
     try {
@@ -83,8 +88,6 @@ describe('surface reuse ownership', () => {
         reuse.render(compose, filter);
       }).toThrow(`${failure} failed`);
       expect(current).toBe(destination);
-      expect(renderer.autoClearDepth).toBe(true);
-      expect(renderer.autoClearStencil).toBe(true);
       if (failure === 'compose') {
         expect(filter).not.toHaveBeenCalled();
       }

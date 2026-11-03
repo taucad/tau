@@ -1,3 +1,4 @@
+import process from 'node:process';
 import { MessageChannel } from 'node:worker_threads';
 import { describe, expect, it } from 'vitest';
 import { contentDigest, digestAction, digestContent } from '@taucad/cache-core';
@@ -186,6 +187,52 @@ describe('compute store channel', () => {
     rawClient.dispose();
     bridge.dispose();
   });
+  it('closes relayed sessions without an unhandled rejection when their upstream is disposed with them', async () => {
+    // Electron main's shape (TAU-DESKTOP-4): a utility's relay serves sessions opened on an upstream client. When the
+    // utility exits its port is gone, so the relay's dispose closes it at once, and the upstream is disposed next.
+    const store = createMemoryComputeEngine();
+    const upstreamPorts = new MessageChannel();
+    const relayPorts = new MessageChannel();
+    const authority = exposeComputeStoreChannel({
+      port: upstreamPorts.port1,
+      engine: store.engine,
+      workspace: 'trusted',
+    });
+    const upstream = createComputeStoreChannelClient(upstreamPorts.port2);
+    const relayPort = relayPorts.port1;
+    const postToUtility = relayPort.postMessage.bind(relayPort);
+    let utilityExited = false;
+    relayPort.postMessage = (...frame: Parameters<typeof relayPort.postMessage>): void => {
+      if (utilityExited) {
+        throw new Error('The utility process is gone.');
+      }
+      postToUtility(...frame);
+    };
+    const relay = exposeComputeStoreChannel({ port: relayPort, engine: upstream.engine, workspace: 'trusted' });
+    const downstream = createComputeStoreChannelClient(relayPorts.port2);
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      await downstream.engine.open({ workspace: 'forged' });
+
+      utilityExited = true;
+      relay.dispose();
+      upstream.dispose();
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 50);
+      });
+
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+      downstream.dispose();
+      authority.dispose();
+    }
+  });
+
   it('mints independent remote sessions and keeps control at the authority', async () => {
     const store = createMemoryComputeEngine();
     const first = new MessageChannel();

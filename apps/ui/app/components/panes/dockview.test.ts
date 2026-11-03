@@ -538,6 +538,27 @@ describe('dockviewStyleOverrides', () => {
     );
   });
 
+  it('dissolves inactive titles into the group background where a coarse pointer always shows the close action', () => {
+    /* Touch screens show every tab's close action, so an inactive tab's scrim and glyph fill must
+       match its transparent box over the group rather than the active `--accent` default. */
+    expect(dockviewStyleOverrides).toContain(
+      'pointer-coarse:[&_.dv-tab_.dockview-tab-title]:[--fade-label-size:var(--fade-label-size-actions)]',
+    );
+    expect(dockviewStyleOverrides).toContain(
+      'pointer-coarse:[&_.dv-tab:not(.dv-active-tab):not(:hover)]:[--fade-scrim-into:var(--dv-group-view-background-color)]',
+    );
+    expect(dockviewStyleOverrides).toContain(
+      'pointer-coarse:[&_.dv-tab:not(.dv-active-tab):not(:hover)_.dv-default-tab_.dv-default-tab-action:not(:hover)]:!bg-(--fade-scrim-into)',
+    );
+    /* Fine pointers keep the hover-only reveal: no unscoped scrim or label override for inactive tabs. */
+    expect(dockviewStyleOverrides.split(' ')).not.toContain(
+      '[&_.dv-tab_.dockview-tab-title]:[--fade-label-size:var(--fade-label-size-actions)]',
+    );
+    expect(dockviewStyleOverrides.split(' ').filter((c) => c.includes('--fade-scrim-into:'))).toEqual([
+      'pointer-coarse:[&_.dv-tab:not(.dv-active-tab):not(:hover)]:[--fade-scrim-into:var(--dv-group-view-background-color)]',
+    ]);
+  });
+
   it('uses a tab-matching close-action backdrop until the action itself is hovered', () => {
     const closeSelector = '[&_.dv-tab_.dv-default-tab_.dv-default-tab-action]';
 

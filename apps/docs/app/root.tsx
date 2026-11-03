@@ -18,7 +18,7 @@ export const links: LinksFunction = () => [
   },
 ];
 
-const siteTitle = 'Tau Docs — Browser-native parametric CAD';
+const siteTitle = 'Tau Docs — Open-source, AI-native CAD';
 const siteDescription =
   'Documentation for Tau, the open-source parametric CAD platform, and its Apache-2.0 multi-kernel runtime packages.';
 

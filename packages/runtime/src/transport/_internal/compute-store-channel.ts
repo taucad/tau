@@ -146,7 +146,18 @@ export const exposeComputeStoreChannel = (input: {
   });
   server.onClose(() => {
     for (const session of sessions.values()) {
-      void session.close();
+      /* async-iife: bootstrap — the server is closing, so no caller waits on its sessions. A session whose own
+       * upstream channel closes with it (a utility exit disposes the relay and then the store connection in one
+       * turn) is already gone, so that refusal is not an error (TAU-DESKTOP-4). Any other failure still surfaces. */
+      void (async (): Promise<void> => {
+        try {
+          await session.close();
+        } catch (error) {
+          if (!(error instanceof ChannelClosedError)) {
+            throw error;
+          }
+        }
+      })();
     }
     sessions.clear();
   });

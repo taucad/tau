@@ -188,6 +188,21 @@ describe('reportSsrError', () => {
     });
   });
 
+  it('should file a staging harness request under the automated-run environment', async () => {
+    mocks.harnessEnabled = true;
+    const { reportSsrError } = await loadReporter();
+
+    reportSsrError(new Error('loader'), {
+      request: new Request('https://taucad.dev/__debug/observability?e2e_run=e2e-123&trigger=ssr-loader'),
+      routeId: harnessRoute,
+      status: 500,
+      channel: 'handle-error',
+    });
+    await settle();
+
+    expect(mocks.captured[0]?.event.environment).toBe('staging-e2e');
+  });
+
   it('should not read e2e_run where the harness is disabled', async () => {
     const { reportSsrError } = await loadReporter();
 

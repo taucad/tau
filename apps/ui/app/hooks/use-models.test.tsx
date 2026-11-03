@@ -9,6 +9,10 @@ import type { Model } from '#hooks/use-models.js';
 import { store } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { metaConfig } from '#constants/meta.constants.js';
+import { redeemLoopbackHandOff, resetLoopbackAgentHosts } from '#lib/agent-host-placement.js';
+
+const flags = vi.hoisted(() => ({ modelPinning: true }));
+vi.mock('#flags/use-feature.js', () => ({ useFeature: (name: 'modelPinning') => flags[name] }));
 
 const codex: AcpAgentExecution = {
   kind: 'acp',
@@ -49,6 +53,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetLoopbackAgentHosts();
+  flags.modelPinning = true;
   for (const key of storageKeys) {
     store.remove(key);
   }
@@ -112,6 +118,44 @@ describe('useModels', () => {
           effort: 'high',
         });
       });
+    });
+  });
+
+  describe('loopback daemon placement', () => {
+    const daemon = 'http://127.0.0.1:4100';
+    const onDaemon: TauAgentExecution = {
+      kind: 'tau',
+      model: 'anthropic-claude-opus-4.8',
+      hostId: `loopback:${daemon}`,
+    };
+    /** Redeem a hand-off of the daemon in this tab, as `tau open --desktop` does. */
+    const handOver = async (): Promise<void> => {
+      const daemonFetch = vi.fn(async (url: string) =>
+        url.endsWith('/.well-known/tau-host/session')
+          ? new Response(JSON.stringify({ v: 1, session: 'tab-session' }))
+          : new Response('{}', { status: 404 }),
+      );
+      await redeemLoopbackHandOff(
+        { origin: daemon, code: 'one-time-code' },
+        { fetch: daemonFetch as unknown as typeof fetch },
+      );
+    };
+
+    it('should start a new chat locally when another tab remembered a loopback daemon this tab was never handed', () => {
+      respond([]);
+      store.update(`${metaConfig.cookiePrefix}${cookieName.chatExecution}`, onDaemon);
+      const { result } = renderHook(() => useModels(), { wrapper });
+      expect(result.current.defaultExecution).toEqual({ kind: 'tau', model: 'anthropic-claude-opus-4.8' });
+    });
+
+    it('should start a new chat on the remembered loopback daemon once this tab is handed it', async () => {
+      respond([]);
+      store.update(`${metaConfig.cookiePrefix}${cookieName.chatExecution}`, onDaemon);
+      const { result } = renderHook(() => useModels(), { wrapper });
+      await act(async () => {
+        await handOver();
+      });
+      expect(result.current.defaultExecution).toEqual(onDaemon);
     });
   });
 
@@ -217,6 +261,15 @@ describe('useModels', () => {
         store.update(pinnedKey, { opus: true });
       });
       expect(result.current.pinnedIds).toEqual([]);
+    });
+
+    it('should ignore stored pins while the pinning flag is off', async () => {
+      flags.modelPinning = false;
+      store.update(pinnedKey, ['hidden']);
+      const { result } = await loaded();
+      expect(result.current.isPinningEnabled).toBe(false);
+      expect(result.current.pinnedIds).toEqual([]);
+      expect(result.current.isAvailable(row('hidden'))).toBe(false);
     });
 
     it('should keep pins the catalog cannot confirm while it is unavailable', () => {

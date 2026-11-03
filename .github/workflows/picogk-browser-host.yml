@@ -1,0 +1,183 @@
+# Prepare the PicoGK browser host the UI ships: the qualified PicoVoxel package, staged and published
+# as the content-addressed bundle `apps/ui` embeds when `PICOGK_BROWSER_ASSETS_ROOT` names it. The UI
+# advertises the browser PicoGK kernel only when its build embedded such a bundle.
+#
+# Callers download the `picogk-browser-host` artifact and point `PICOGK_BROWSER_ASSETS_ROOT` at it:
+#   - `picogk-browser-archive.yml` proves it with `ui-e2e:test:e2e:picogk` on every archive run.
+#   - `deploy-ui.yml` builds staging and production with it.
+#
+# The bundle depends only on the PicoVoxel builder and the files the key hashes, so a prepared bundle
+# is cached under that key and a deploy that changed none of them reuses it without rebuilding the
+# archives.
+name: PicoGK browser host
+on:
+  workflow_call:
+    inputs:
+      package-from-run:
+        description: The caller already built `picogk-browser-package` in this run, so use it rather than building the archives again (their artifact names would collide).
+        type: boolean
+        default: false
+    outputs:
+      artifact:
+        description: The artifact holding the prepared bundle (the directory to name in PICOGK_BROWSER_ASSETS_ROOT).
+        value: ${{ jobs.key.outputs.artifact }}
+permissions:
+  contents: read
+env:
+  # The reviewed PicoVoxel builder, the same commit `picogk-browser-archive.yml` qualifies. `uses:`
+  # cannot read a variable, so the archive call below repeats it.
+  PICOVOXEL_REF: 0623f63e59e8236213f0e1ace9000b7f58d56f00
+  PACKAGE_VERSION: 0.2.1
+jobs:
+  key:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      artifact: picogk-browser-host
+      key: ${{ steps.key.outputs.key }}
+      hit: ${{ steps.lookup.outputs.cache-hit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Key the bundle by everything that builds it
+        id: key
+        env:
+          FILES: ${{ hashFiles('packages/plugins/picogk/dotnet/**', 'packages/plugins/picogk/scripts/**', 'packages/plugins/picogk/src/**', 'packages/plugins/picogk/project.json', 'pnpm-lock.yaml', '.github/workflows/picogk-browser-host.yml') }}
+        run: echo "key=picogk-browser-host-v1-$PICOVOXEL_REF-$PACKAGE_VERSION-$FILES" >> "$GITHUB_OUTPUT"
+      - name: Look for a bundle prepared from the same inputs
+        id: lookup
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: out/picogk-browser-host/bundle
+          key: ${{ steps.key.outputs.key }}
+          lookup-only: true
+
+  archive:
+    needs: key
+    if: needs.key.outputs.hit != 'true' && !inputs.package-from-run
+    uses: taucad/picovoxel/.github/workflows/dotnet-archive.yml@0623f63e59e8236213f0e1ace9000b7f58d56f00
+    with:
+      picovoxel-ref: 0623f63e59e8236213f0e1ace9000b7f58d56f00
+      adapter-path: packages/plugins/picogk/dotnet/native
+
+  host:
+    needs: [key, archive]
+    if: ${{ !cancelled() && needs.key.result == 'success' && (needs.key.outputs.hit == 'true' || inputs.package-from-run || needs.archive.result == 'success') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Restore the prepared bundle
+        id: cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: out/picogk-browser-host/bundle
+          key: ${{ needs.key.outputs.key }}
+      # Everything below runs only on a miss, and prepares exactly as `picogk-browser-archive.yml`'s
+      # `parity-prepare` stages the package, then publishes the host instead of the parity apps.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          repository: taucad/picovoxel
+          ref: ${{ env.PICOVOXEL_REF }}
+          path: out/picovoxel
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-nx
+        if: steps.cache.outputs.cache-hit != 'true'
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          dotnet-version: '11.0.100-rc.3.26522.148'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          name: picogk-browser-package
+          path: out
+      - name: Install the matched workload and native build tools
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p out/workload-install
+          cp out/picovoxel/dotnet/global.json out/workload-install/global.json
+          cd out/workload-install
+          dotnet workload install wasm-tools --version 11.0.100-rc.3.26524.4
+          sudo apt-get update
+          sudo apt-get install -y ninja-build cmake
+      - name: Acquire the managed dependency the package declares
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p out/dependency-stage
+          unzip -p out/package/feed/PicoVoxel.PicoGK.*.nupkg build/PicoVoxel.PicoGK.props \
+            > out/dependency-stage/package.props
+          version=$(sed -n 's:.*<PicoVoxelPicoGKSkiaSharp>\(.*\)</PicoVoxelPicoGKSkiaSharp>.*:\1:p' \
+            out/dependency-stage/package.props)
+          test -n "$version"
+          cat > out/dependency-stage/Dependency.csproj <<XML
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <TargetFramework>net11.0</TargetFramework>
+            </PropertyGroup>
+            <ItemGroup>
+              <PackageReference Include="SkiaSharp" Version="$version" />
+            </ItemGroup>
+          </Project>
+          XML
+          dotnet restore out/dependency-stage/Dependency.csproj
+          test -f "$HOME/.nuget/packages/skiasharp/$version/lib/net8.0/SkiaSharp.dll"
+      - name: Stage the qualified package
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          cat > out/stage-config.json <<JSON
+          {
+            "dotnet": "$(command -v dotnet)",
+            "nuget": "$HOME/.nuget/packages",
+            "hostRid": "linux-x64",
+            "feed": "$PWD/out/package/feed",
+            "version": "$PACKAGE_VERSION",
+            "outputRoot": "$PWD/out/staged"
+          }
+          JSON
+          node --import @oxc-node/core/register \
+            packages/plugins/picogk/scripts/stage-picogk-package.mts out/stage-config.json
+      - name: Restore the pinned compiler and runtime packs the toolchain check reads
+        # The host's toolchain check digests the pinned Roslyn assemblies and resolves each runtime
+        # pack from this machine's NuGet cache, as the archive build did on its own runner.
+        if: steps.cache.outputs.cache-hit != 'true'
+        working-directory: out/picovoxel/dotnet
+        run: |
+          dotnet restore compiler-inputs.csproj --packages "$HOME/.nuget/packages" \
+            "-p:BaseIntermediateOutputPath=$RUNNER_TEMP/compiler-restore/"
+          for threads in false true; do
+            dotnet restore toolchain.csproj --packages "$HOME/.nuget/packages" "-p:WasmEnableThreads=$threads" \
+              "-p:BaseIntermediateOutputPath=$RUNNER_TEMP/runtime-restore-$threads/"
+          done
+      - name: Prepare the serial and threaded browser host
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          cat > out/host-config.json <<JSON
+          {
+            "dotnet": "$(command -v dotnet)",
+            "nuget": "$HOME/.nuget/packages",
+            "hostRid": "linux-x64",
+            "packageRoot": "$PWD/out/staged/packages/picovoxel.picogk/$PACKAGE_VERSION",
+            "picoGkProject": "$PWD/out/staged/base/PicoGK.csproj",
+            "referencesRoot": "$PWD/out/staged/references",
+            "outputRoot": "$PWD/out/picogk-browser-host"
+          }
+          JSON
+          pnpm nx run picogk:prepare-browser-host out/host-config.json
+          test -f out/picogk-browser-host/bundle/assets-manifest.json
+      - name: Keep the bundle for the next run with the same inputs
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: out/picogk-browser-host/bundle
+          key: ${{ needs.key.outputs.key }}
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: picogk-browser-host
+          path: out/picogk-browser-host/bundle/
+          if-no-files-found: error

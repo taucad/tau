@@ -141,18 +141,50 @@ export function patternTransform(engine: OfflineEngine, cmd: ModelingCommand): R
   const source = engine.scene.get(cmd['entity_id'] as string);
   const center = localOrigin(engine.oc, source);
   const frame = sketchFrameOf(source);
-  const instances = cmd['transforms'] as WireTransform[][];
-  const trsfs = instances
-    .filter((list) => list.every((transform) => transform.replicate !== false))
-    .map((list) => {
-      const total = new engine.oc.gp_Trsf();
+  const instances = (cmd['transforms'] as WireTransform[][]).filter((list) =>
+    list.every((transform) => transform.replicate !== false),
+  );
+  // A gp_Trsf only scales uniformly. A solid's copies with a per-axis scale (a vase's layers widened but not
+  // stretched) take the scale through `BRepBuilderAPI_GTransform`, then the rest of each transform as usual.
+  if (frame === undefined && instances.some((list) => list.some((transform) => perAxisScale(transform)))) {
+    const copies = instances.map((list) => {
+      let copy = transformEntity(engine.oc, source, engine.mint(), new engine.oc.gp_Trsf());
       for (const transform of list) {
-        total.PreMultiply(patternTrsf(engine.oc, transform, center, frame));
+        const factors = perAxisScale(transform);
+        if (factors) {
+          scaleEntityPerAxis(engine.oc, copy, center, factors);
+        }
+
+        const rest = factors ? { ...transform, scale: undefined } : transform;
+        copy = transformEntity(engine.oc, copy, copy.id, patternTrsf(engine.oc, rest, center, frame));
       }
 
-      return total;
+      engine.scene.entities.set(copy.id, copy);
+      return { object_id: copy.id, faces: [], edges: [] };
     });
+    return { entity_face_edge_ids: copies };
+  }
+
+  const trsfs = instances.map((list) => {
+    const total = new engine.oc.gp_Trsf();
+    for (const transform of list) {
+      total.PreMultiply(patternTrsf(engine.oc, transform, center, frame));
+    }
+
+    return total;
+  });
   return addCopies(engine, source.id, trsfs);
+}
+
+/**
+ * A pattern transform's scale when it differs per axis.
+ *
+ * @param transform - wire transform
+ * @returns the per-axis factors, or undefined for no scale or a uniform one
+ */
+function perAxisScale(transform: WireTransform): Vec3 | undefined {
+  const s = transform.scale;
+  return s && (Math.abs(s.x - s.y) > 1e-12 || Math.abs(s.y - s.z) > 1e-12) ? s : undefined;
 }
 
 /**

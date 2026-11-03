@@ -211,34 +211,6 @@ export class MetricsService {
     advice: { explicitBucketBoundaries: [...TauMetrics.kernelExportDuration.buckets] },
   });
 
-  // Client-reported: extended telemetry
-  public readonly wsReconnectionDuration = this.clientMeter.createHistogram(TauMetrics.wsReconnectionDuration.name, {
-    description: TauMetrics.wsReconnectionDuration.description,
-    unit: TauMetrics.wsReconnectionDuration.unit,
-    advice: { explicitBucketBoundaries: [...TauMetrics.wsReconnectionDuration.buckets] },
-  });
-
-  public readonly editorLoadDuration = this.clientMeter.createHistogram(TauMetrics.editorLoadDuration.name, {
-    description: TauMetrics.editorLoadDuration.description,
-    unit: TauMetrics.editorLoadDuration.unit,
-    advice: { explicitBucketBoundaries: [...TauMetrics.editorLoadDuration.buckets] },
-  });
-
-  public readonly wasmModuleLoadDuration = this.clientMeter.createHistogram(TauMetrics.wasmModuleLoadDuration.name, {
-    description: TauMetrics.wasmModuleLoadDuration.description,
-    unit: TauMetrics.wasmModuleLoadDuration.unit,
-    advice: { explicitBucketBoundaries: [...TauMetrics.wasmModuleLoadDuration.buckets] },
-  });
-
-  public readonly indexeddbOperationDuration = this.clientMeter.createHistogram(
-    TauMetrics.indexeddbOperationDuration.name,
-    {
-      description: TauMetrics.indexeddbOperationDuration.description,
-      unit: TauMetrics.indexeddbOperationDuration.unit,
-      advice: { explicitBucketBoundaries: [...TauMetrics.indexeddbOperationDuration.buckets] },
-    },
-  );
-
   // --- Billing / credit ledger (C11/C12) ---
 
   public readonly billingAttemptResolutions = this.apiMeter.createCounter(TauMetrics.billingAttemptResolutions.name, {

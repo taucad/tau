@@ -10,12 +10,17 @@ import {
   bindBrowserThreadStartup,
   browserThreadModuleNames,
   patchBrowserThreadRuntime,
+  patchBrowserThreadWorkerMessages,
 } from './browser-thread-startup.mjs';
 /* oxlint-enable no-restricted-imports */
 
 const source = `ENVIRONMENT_IS_WORKER = dotnet_replacements.ENVIRONMENT_IS_WORKER;
     Module.__dotnet_runtime.initializeReplacements(dotnet_replacements);
     onFinishedLoading(worker);`;
+// The pinned bootstrap's worker branch: it asks the page for its configuration, loads, then loads the glue.
+const bootstrapWorkerSource = 'Me&&async function(){(function(){const e=new MessageChannel';
+const bootstrapWorkerLoaded =
+  'self.dispatchEvent(new MessageEvent("message",{data:{cmd:1,handlers:Fe.handlers,wasmMemory:Fe.wasmMemory,wasmModule:Fe.wasmModule}})),Fe}()';
 
 describe('pinned Mono worker startup staging', () => {
   it('should notify the owner locally and forward only other live pthreads', () => {
@@ -71,6 +76,56 @@ describe('pinned Mono worker startup staging', () => {
     expect(context.ENVIRONMENT_IS_WORKER).toBe(worker);
   });
 
+  it('should deliver a pthread start that reaches a pool worker before its glue listens', async () => {
+    let finishLoading = (): void => undefined;
+    // The release is scheduled on a timer the test advances itself, so nothing races the assertions.
+    let release: (() => void) | undefined;
+    const delivered: unknown[] = [];
+    const self = new EventTarget();
+    const context = {
+      self,
+      MessageEvent,
+      MessageChannel,
+      setTimeout: (callback: () => void) => {
+        release = callback;
+      },
+      Fe: { handlers: [], wasmMemory: 0, wasmModule: 0 },
+      Me: true,
+      loaded: async () =>
+        new Promise<void>((resolve) => {
+          finishLoading = resolve;
+        }),
+      // The native glue's handler, registered only once its module has loaded.
+      handle: (event: MessageEvent<{ cmd: number }>) => delivered.push(event.data.cmd),
+    };
+    runInNewContext(
+      patchBrowserThreadWorkerMessages(
+        `${bootstrapWorkerSource}();})(),await loaded(),self.addEventListener("message",handle),${bootstrapWorkerLoaded}`,
+      ),
+      context,
+    );
+    const post = (cmd: number) => self.dispatchEvent(new MessageEvent('message', { data: { cmd } }));
+    // Emscripten's own load message and the start message both arrive while the bootstrap loads.
+    post(1);
+    post(2);
+    finishLoading();
+    await new Promise((resolve) => {
+      setImmediate(resolve);
+    });
+    // A notification that arrives after the load but before the release still keeps its place.
+    post(4);
+    expect(delivered).toEqual([1]);
+    expect(release).toBeDefined();
+    release?.();
+    expect(delivered).toEqual([1, 2, 4]);
+    post(4);
+    expect(delivered).toEqual([1, 2, 4, 4]);
+    const valid = `${bootstrapWorkerSource}${bootstrapWorkerLoaded}`;
+    for (const invalid of ['', valid + valid, patchBrowserThreadWorkerMessages(valid)]) {
+      expect(() => patchBrowserThreadWorkerMessages(invalid)).toThrow('worker bootstrap sequence changed');
+    }
+  });
+
   it('should let generated traces import the host shared-memory maximum', () => {
     const pages: number[] = [];
     const context = {
@@ -107,7 +162,7 @@ describe('pinned Mono worker startup staging', () => {
         wasmNative: [{ name: 'native.wasm' }],
       },
     };
-    const bootstrap = `prefix/*json-start*/${JSON.stringify(config)}/*json-end*/suffix`;
+    const bootstrap = `prefix${bootstrapWorkerSource}${bootstrapWorkerLoaded}/*json-start*/${JSON.stringify(config)}/*json-end*/suffix`;
     expect(browserThreadModuleNames(bootstrap)).toEqual({
       native: 'dotnet.native.aaaaaaaaaa.js',
       runtime: 'dotnet.runtime.bbbbbbbbbb.js',
@@ -127,6 +182,7 @@ describe('pinned Mono worker startup staging', () => {
     expect(patched.bootstrap).not.toContain('dotnet.native.aaaaaaaaaa.js');
     expect(patched.bootstrap).not.toContain('dotnet.runtime.bbbbbbbbbb.js');
     expect(patched.bootstrap).toContain('"wasmNative":[{"name":"native.wasm"}]');
+    expect(patched.bootstrap).toContain('holdEarlyMessage');
     expect(patched.modules.get(names[0]!)).toContain('ENVIRONMENT_IS_PTHREAD');
     expect(patched.modules.get(names[1]!)).toContain('appendULeb(65536)');
     // An already corrected runtime is refused rather than corrected twice.

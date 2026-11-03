@@ -1760,7 +1760,19 @@ describe('a chat continued on a second device', () => {
 
     /* A forgotten pause holds the chat for a bounded time, then its device stops writing and the fence lets go. */
     it('should stop a paused run’s heartbeats once its hold is over', async () => {
-      const clock = new SimulatedClock();
+      /* Records when the heartbeat was last armed (an interval of at most `runHeartbeat`): its row lands in the file a
+       * few ticks before the write re-arms it, and a clock step taken in between would arm the next heartbeat past
+       * every later step, so none would ever fire. */
+      class ArmedClock extends SimulatedClock {
+        public armedAt = -1;
+        public override setTimeout(callback: (...arguments_: unknown[]) => void, delayMilliseconds: number): number {
+          if (delayMilliseconds <= 10) {
+            this.armedAt = this.now();
+          }
+          return super.setTimeout(callback, delayMilliseconds);
+        }
+      }
+      const clock = new ArmedClock();
       vi.useFakeTimers({ toFake: ['Date'] });
       try {
         const { root } = await pausedRunOn({ clock, runHeartbeat: 10, pausedRunHold: 120, publish: sharedPublish });
@@ -1769,9 +1781,18 @@ describe('a chat continued on a second device', () => {
           vi.setSystemTime(Date.now() + milliseconds);
           clock.increment(milliseconds);
         };
+        const armed = async (): Promise<void> => {
+          for (let attempt = 0; attempt < 300 && clock.armedAt !== clock.now(); attempt++) {
+            // oxlint-disable-next-line no-await-in-loop -- polling for the host's re-arm is sequential by nature.
+            await sleep(10);
+          }
+          expect(clock.armedAt).toBe(clock.now());
+        };
         /* Wait for each real filesystem append before advancing the next interval. Worker starvation cannot
          * consume the whole hold before the first scheduled callback gets CPU time. */
         for (let count = 1; count <= 2; count++) {
+          // oxlint-disable-next-line no-await-in-loop -- the heartbeat must be armed before the clock steps over it.
+          await armed();
           advance(20);
           // oxlint-disable-next-line no-await-in-loop -- each heartbeat must land before the next clock step.
           await rowsUntil(root, (found) => heartbeatsAfter(found, 'paused').length >= count);

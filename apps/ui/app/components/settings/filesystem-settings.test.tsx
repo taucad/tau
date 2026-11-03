@@ -1,5 +1,7 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import userEvent from '@testing-library/user-event';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { mock } from 'vitest-mock-extended';
 import type { ProjectFileSystemConfig, Workspace, WorkspaceConnection } from '#filesystem/handle-store.js';
 import type { ConnectedWorkspace } from '#hooks/use-project-manager.js';
@@ -144,7 +146,7 @@ describe('FileSystemSettings storage usage', () => {
   it('warns when origin storage is above 80% of quota', async () => {
     stubEstimate(async () => ({ usage: 85, quota: 100 }));
 
-    render(<FileSystemSettings />);
+    render(<FileSystemSettings />, { wrapper: TooltipProvider });
 
     expect(await screen.findByText(/storage is nearly full/i)).toBeInTheDocument();
   });
@@ -152,9 +154,9 @@ describe('FileSystemSettings storage usage', () => {
   it('does not warn below the pressure threshold', async () => {
     stubEstimate(async () => ({ usage: 10, quota: 100 }));
 
-    render(<FileSystemSettings />);
+    render(<FileSystemSettings />, { wrapper: TooltipProvider });
 
-    await screen.findByText(/total/i);
+    await screen.findByText('Space used');
     expect(screen.queryByText(/storage is nearly full/i)).not.toBeInTheDocument();
   });
 
@@ -164,7 +166,7 @@ describe('FileSystemSettings storage usage', () => {
       throw new Error('estimate unavailable');
     });
 
-    render(<FileSystemSettings />);
+    render(<FileSystemSettings />, { wrapper: TooltipProvider });
 
     await waitFor(() => {
       expect(warn).toHaveBeenCalled();
@@ -179,7 +181,7 @@ describe('FileSystemSettings workspace creation', () => {
       configurable: true,
       value: async () => ({ name: 'tau-workspace' }),
     });
-    render(<FileSystemSettings />);
+    render(<FileSystemSettings />, { wrapper: TooltipProvider });
     const addButton = await screen.findByRole('button', { name: /add workspace/i });
     addButton.click();
   };
@@ -243,7 +245,7 @@ describe('FileSystemSettings workspace disconnect', () => {
   });
 
   it('should disconnect immediately even when projects remain bound and expose Undo', async () => {
-    render(<FileSystemSettings />);
+    render(<FileSystemSettings />, { wrapper: TooltipProvider });
 
     const disconnect = await screen.findByRole('button', { name: 'Disconnect workspace' });
     fireEvent.click(disconnect);
@@ -271,7 +273,7 @@ describe('FileSystemSettings workspace disconnect', () => {
   it('should render Reconnect instead of Disconnect when the handle is absent', async () => {
     mockGetWorkspace.mockResolvedValue(undefined);
 
-    render(<FileSystemSettings />);
+    render(<FileSystemSettings />, { wrapper: TooltipProvider });
 
     expect(await screen.findByRole('button', { name: 'Reconnect' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Disconnect workspace' })).not.toBeInTheDocument();
@@ -280,7 +282,7 @@ describe('FileSystemSettings workspace disconnect', () => {
   it('should surface Undo failures without an unhandled rejection', async () => {
     mockRestoreWorkspaceHandle.mockRejectedValue(new Error('restore failed'));
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    render(<FileSystemSettings />);
+    render(<FileSystemSettings />, { wrapper: TooltipProvider });
     const disconnect = await screen.findByRole('button', { name: 'Disconnect workspace' });
     fireEvent.click(disconnect);
     await waitFor(() => {
@@ -319,29 +321,33 @@ describe('FileSystemSettings Tau Cloud projects', () => {
   });
 
   it('should leave materialize on sign-in off by default', async () => {
-    render(<FileSystemSettings />);
+    render(<FileSystemSettings />, { wrapper: TooltipProvider });
 
-    const group = await screen.findByRole('group', { name: 'Workspace for Tau Cloud projects' });
-    expect(within(group).getByRole('radio', { name: 'Off' })).toBeChecked();
+    expect(await screen.findByRole('combobox', { name: 'Tau Cloud projects' })).toHaveTextContent('Off');
   });
 
   it('should remember the one workspace that receives Tau Cloud projects', async () => {
     const { materializeOnSignIn } = await import('#hooks/use-cloud-projects.js');
-    render(<FileSystemSettings />);
+    render(<FileSystemSettings />, { wrapper: TooltipProvider });
 
-    fireEvent.click(await screen.findByRole('radio', { name: 'Parts' }));
+    const select = await screen.findByRole('combobox', { name: 'Tau Cloud projects' });
+    await screen.findAllByText('Parts');
+    Element.prototype.scrollIntoView = vi.fn();
+    select.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(await screen.findByRole('option', { name: 'Parts' })).toBeInTheDocument();
+    await userEvent.keyboard('{ArrowDown}{ArrowDown}{Enter}');
 
     expect(materializeOnSignIn.get()).toEqual({ kind: 'workspace', workspaceId: 'wsp_aaaaaaaaaaaaaaaaaaaaa' });
-    expect(screen.getByRole('radio', { name: 'Parts' })).toBeChecked();
-    expect(screen.getByRole('radio', { name: 'Off' })).not.toBeChecked();
+    expect(screen.getByRole('combobox', { name: 'Tau Cloud projects' })).toHaveTextContent('Parts');
   });
 
   it('should not offer the setting on a plan without backup', async () => {
     Object.assign(plan, { canSyncFiles: false });
-    render(<FileSystemSettings />);
+    render(<FileSystemSettings />, { wrapper: TooltipProvider });
 
     await screen.findAllByText('Parts');
-    expect(screen.queryByRole('group', { name: 'Workspace for Tau Cloud projects' })).not.toBeInTheDocument();
-    expect(screen.queryByText('Tau Cloud Projects')).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Tau Cloud projects' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Tau Cloud projects')).not.toBeInTheDocument();
   });
 });

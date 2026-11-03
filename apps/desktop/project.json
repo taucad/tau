@@ -321,13 +321,13 @@
       "executor": "nx:run-commands",
       "cache": true,
       "metadata": {
-        "description": "Renderer ownership gate: fails when the renderer bundle carries kernel, converter or host payloads (only the KCL editor, Clipper section-cap and Terminal ghostty-vt WASM are allowed, one copy each, with producer provenance). Every package target depends on it. Cached on the bytes it checks, the renderer build and the main and preload bundles; `dist/dev-electron`, the branded Electron that `dev` and `serve` create, is left out of the key."
+        "description": "Renderer ownership gate: fails when the renderer bundle carries kernel, converter or host payloads (only the KCL editor, Clipper section-cap and Terminal ghostty-vt WASM are allowed, one copy each, with producer provenance, plus the C# and OpenSCAD editor language servers byte-matched to their prepared stage manifests). Every package target depends on it. Cached on the bytes it checks, the renderer build and the main and preload bundles; `dist/dev-electron`, the branded Electron that `dev` and `serve` create, is left out of the key."
       },
       "dependsOn": ["build"],
       "inputs": [
         "{projectRoot}/scripts/check-renderer-payload.mts",
         {
-          "dependentTasksOutputFiles": "{apps/ui/desktop/build,apps/desktop/dist/main,apps/desktop/dist/preload}/**",
+          "dependentTasksOutputFiles": "{apps/ui/desktop/build,apps/desktop/dist/main,apps/desktop/dist/preload,out/csharp-language/stage,out/openscad-language/stage}/**",
           "transitive": true
         }
       ],

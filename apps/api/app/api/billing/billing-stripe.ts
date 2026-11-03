@@ -309,6 +309,18 @@ export function parseStripeCreateLeg(input: unknown): StripeCreateLeg {
               customer: z.string().min(1),
               configuration: z.string().min(1).optional(),
               return_url: z.url().optional(),
+              // The one portal flow Tau opens: the plan's cancellation, ended at the period end by the portal's
+              // configuration, then back to Tau.
+              flow_data: z
+                .object({
+                  type: z.literal('subscription_cancel'),
+                  subscription_cancel: z.object({ subscription: z.string().min(1) }).strict(),
+                  after_completion: z
+                    .object({ type: z.literal('redirect'), redirect: z.object({ return_url: z.url() }).strict() })
+                    .strict(),
+                })
+                .strict()
+                .optional(),
             })
             .strict(),
         })
@@ -938,7 +950,7 @@ function assertClosedCreateRequest(leg: StripeCreateLeg): void {
             'setup_future_usage',
           ]
         : leg.kind === 'portal'
-          ? ['configuration', 'customer', 'return_url']
+          ? ['configuration', 'customer', 'flow_data', 'return_url']
           : [
               'automatic_tax',
               'billing_address_collection',

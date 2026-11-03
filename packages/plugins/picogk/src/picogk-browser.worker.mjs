@@ -251,7 +251,8 @@ const initialize = async (message) => {
       }
       const kind = 'type' in frame && frame.type === 'ready' ? 'ready' : 'response';
       state = 'ready';
-      globalThis.postMessage({ generation, kind, frame });
+      // Observation only: the session reports the heap of its last reply; recycling still reads the build metric.
+      globalThis.postMessage({ generation, kind, frame, heapBytes: runtime.Module.HEAPU8.byteLength });
     },
   });
   const code = await runtime.runMain(runtime.getConfig().mainAssemblyName, [
@@ -327,6 +328,7 @@ globalThis.addEventListener('message', async (/** @type {MessageEvent<Incoming |
             requestId: data.frame.requestId,
             result: bytes,
           },
+          heapBytes: runtime.Module.HEAPU8.byteLength,
         },
         { transfer: [bytes.buffer] },
       );

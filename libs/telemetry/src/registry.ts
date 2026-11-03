@@ -680,65 +680,6 @@ export const TauMetrics = {
     }),
   }),
 
-  // --- Client-reported: extended telemetry ---
-
-  wsReconnectionDuration: defineHistogram({
-    name: 'ws.reconnection.duration',
-    deprecated: {
-      removal: 'the Runtime Observability follow-up after PR-4 (Tau has no versioned releases; UI releases are SHAs)',
-      reason: 'D-T18: no producer in apps/ui or anywhere else; a follow-up deletes it and the panels that query it',
-    },
-    unit: 's',
-    description: 'WebSocket reconnection latency (reported by client)',
-    buckets: [0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
-    attributes: z.object({
-      'ws.reconnection.attempt': z.number().optional(),
-    }),
-  }),
-
-  editorLoadDuration: defineHistogram({
-    name: 'editor.load.duration',
-    deprecated: {
-      removal: 'the Runtime Observability follow-up after PR-4 (Tau has no versioned releases; UI releases are SHAs)',
-      reason: 'D-T18: no producer in apps/ui or anywhere else; a follow-up deletes it and the panels that query it',
-    },
-    unit: 's',
-    description: 'Editor initialization time (reported by client)',
-    buckets: [0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
-    attributes: z.object({
-      'editor.kernel': z.string().optional(),
-    }),
-  }),
-
-  wasmModuleLoadDuration: defineHistogram({
-    name: 'wasm.module.load.duration',
-    deprecated: {
-      removal: 'the Runtime Observability follow-up after PR-4 (Tau has no versioned releases; UI releases are SHAs)',
-      reason: 'D-T18: no producer in apps/ui or anywhere else; a follow-up deletes it and the panels that query it',
-    },
-    unit: 's',
-    description: 'WASM module download + instantiation time (reported by client)',
-    buckets: [0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60],
-    attributes: z.object({
-      'wasm.module': z.string().optional(),
-    }),
-  }),
-
-  indexeddbOperationDuration: defineHistogram({
-    name: 'indexeddb.operation.duration',
-    deprecated: {
-      removal: 'the Runtime Observability follow-up after PR-4 (Tau has no versioned releases; UI releases are SHAs)',
-      reason: 'D-T18: no producer in apps/ui or anywhere else; a follow-up deletes it and the panels that query it',
-    },
-    unit: 's',
-    description: 'IndexedDB operation latency (reported by client)',
-    buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 5],
-    attributes: z.object({
-      'indexeddb.operation': z.string().optional(),
-      'indexeddb.store': z.string().optional(),
-    }),
-  }),
-
   // --- Billing / credit ledger (blueprint C11/C12; no per-user labels — cardinality) ---
 
   billingAttemptResolutions: defineCounter({

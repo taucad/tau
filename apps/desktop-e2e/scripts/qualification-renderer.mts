@@ -34,7 +34,11 @@ const exportGeometry = async (
   formatTimeout: number,
 ): Promise<{ path: string; sha256: string; vertices: number }> => {
   const directory = join(projectRoot, 'exports');
-  const previousNames = await readdir(directory).catch(() => []);
+  // Only finished `.glb` files are observed: the app writes each export to a hidden `.<name>.<pid>.<uuid>.tmp` and
+  // renames it into place, so a temporary name can vanish between `readdir` and `stat` (run 41759324410
+  // debian-apt-x11 failed on exactly that ENOENT after the GLB export had started).
+  const existingNames = await readdir(directory).catch(() => []);
+  const previousNames = existingNames.filter((name) => name.endsWith('.glb'));
   const before = new Map(
     await Promise.all(
       previousNames.map(async (name) => {
@@ -76,9 +80,12 @@ const exportGeometry = async (
   const deadline = Date.now() + 180_000;
   while (Date.now() < deadline) {
     for (const name of await readdir(directory).catch(() => [])) {
+      if (!name.endsWith('.glb')) {
+        continue;
+      }
       const path = join(directory, name);
       const entry = await stat(path);
-      if (!name.endsWith('.glb') || entry.mtimeMs === before.get(name)) {
+      if (entry.mtimeMs === before.get(name)) {
         continue;
       }
       const bytes = await readFile(path);

@@ -126,8 +126,9 @@ export function toDockview<L extends Lane>(
       views.push(id);
     }
     const activeView = views[current.active ?? views.length - 1];
-    if (views.length === 0 || (options.launcherId !== undefined && firstGroup === groupId)) {
-      const id = options.launcherId ?? generatePrefixedId(idPrefix.pane);
+    const launcherId = firstGroup === groupId ? options.launcherId : undefined;
+    if (views.length === 0 || launcherId !== undefined) {
+      const id = launcherId ?? generatePrefixedId(idPrefix.pane);
       panels[id] = {
         id,
         contentComponent: 'newTab',

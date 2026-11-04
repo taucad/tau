@@ -9,6 +9,7 @@ import type { EditorDocument } from '#lib/editor-document.js';
 import { registerEditorView } from '#lib/editor-navigation-service.js';
 import type { ChatEditorViewerProps } from '#routes/w.$workspace.$project/chat-editor-viewer.types.js';
 import { Button } from '@taucad/ui/components/button';
+import { useEditorSymbolPathReporter } from '#routes/w.$workspace.$project/editor-symbol-path.js';
 
 export function ChatEditorCodeViewer({
   paneId,
@@ -50,6 +51,7 @@ function MountedCodeEditor({
   readonly projectId: string;
 }): React.JSX.Element {
   const environment = useEditorLanguageEnvironment();
+  const reportSymbolPath = useEditorSymbolPathReporter();
   const [semantic, setSemantic] = useState<{ document: EditorDocument; language: string; extensions: Extension }>();
   const [semanticFailure, setSemanticFailure] = useState<{
     document: EditorDocument;
@@ -132,6 +134,7 @@ function MountedCodeEditor({
             : undefined
         }
         diagnostics={environment?.diagnostics}
+        onSymbolPath={reportSymbolPath}
         onApply={document ? (transaction) => onApply(document, transaction) : undefined}
         onHistory={document ? (kind) => onHistory(document, kind) : undefined}
         onMount={

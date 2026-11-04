@@ -97,6 +97,8 @@ import { ParametersPanelBody } from '#routes/w.$workspace.$project/chat-paramete
 import { KinematicsPanelBody } from '#routes/w.$workspace.$project/chat-kinematics.js';
 import { FileTreePanelBody } from '#routes/w.$workspace.$project/chat-file-tree.js';
 import { ChatEditorBreadcrumbs } from '#routes/w.$workspace.$project/chat-editor-breadcrumbs.js';
+import { EditorSymbolPathProvider } from '#routes/w.$workspace.$project/editor-symbol-path.js';
+import type { EditorSymbolCrumb } from '#components/code/editor-language-features.js';
 import { ModelPanelBody } from '#routes/w.$workspace.$project/chat-explorer.js';
 import { RevisionsPanelBody } from '#routes/w.$workspace.$project/chat-revisions.js';
 import { AgentsPanelBody } from '#routes/w.$workspace.$project/chat-agents.js';
@@ -1181,6 +1183,7 @@ function FileWorkbenchPane({
     presentation,
   });
   const [fileActionsContainer, setFileActionsContainer] = useState<HTMLDivElement>();
+  const [symbolPath, setSymbolPath] = useState<readonly EditorSymbolCrumb[]>([]);
   const alternateView = presentation?.views.find((view) => view.id !== paneState.viewId);
   const filesAction = paneState.filesOpen ? `Hide files for ${title}` : `Show files for ${title}`;
 
@@ -1224,7 +1227,9 @@ function FileWorkbenchPane({
   return (
     <div className='flex size-full min-h-0 flex-col bg-background' data-file-pane-id={paneId}>
       {filePath ? (
-        <ChatEditorBreadcrumbs filePath={filePath}>{actions}</ChatEditorBreadcrumbs>
+        <ChatEditorBreadcrumbs filePath={filePath} symbolPath={symbolPath}>
+          {actions}
+        </ChatEditorBreadcrumbs>
       ) : (
         <div className='flex min-h-9 flex-row items-center justify-between border-b border-border bg-background px-1 py-1 text-muted-foreground'>
           <span className='truncate px-1 text-sm font-medium'>{title}</span>
@@ -1232,7 +1237,9 @@ function FileWorkbenchPane({
         </div>
       )}
       <div className='flex min-h-0 flex-1'>
-        <div className='min-h-0 min-w-0 flex-1'>{children}</div>
+        <div className='min-h-0 min-w-0 flex-1'>
+          <EditorSymbolPathProvider onSymbolPath={setSymbolPath}>{children}</EditorSymbolPathProvider>
+        </div>
         {paneState.filesOpen ? (
           <FilePaneFilesSidecar
             regionId={regionId}

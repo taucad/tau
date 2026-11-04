@@ -27,6 +27,7 @@ import { EditorDocumentSession, maxBackgroundDocuments } from '#lib/editor-docum
 import { clearEditorNavigation, registerEditorView, requestEditorNavigation } from '#lib/editor-navigation-service.js';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { EditorNavigationTarget } from '#lib/editor-language-environment.js';
+import type { EditorSymbolCrumb } from '#components/code/editor-language-features.js';
 import { Theme, ThemeProvider } from '#hooks/use-theme.js';
 import type { EditorView } from '@codemirror/view';
 
@@ -478,6 +479,7 @@ it('offers VS Code symbol navigation, references, call hierarchy, occurrences an
   const service = await createTypeScriptService({ dynamicTypes: false });
   let view: EditorView | undefined;
   let target: EditorNavigationTarget | undefined;
+  let symbolPath: readonly EditorSymbolCrumb[] = [];
   const modifier = { metaKey: isMac, ctrlKey: !isMac };
   const pickerItems = (): string[] =>
     [...document.querySelectorAll('.cm-picker-item .cm-picker-label')].map((label) => label.textContent);
@@ -507,6 +509,9 @@ it('offers VS Code symbol navigation, references, call hierarchy, occurrences an
           viewId='language-features'
           languageId='typescript'
           extensions={extensions}
+          onSymbolPath={(path) => {
+            symbolPath = path;
+          }}
           onMount={(mounted) => {
             view = mounted;
           }}
@@ -521,7 +526,11 @@ it('offers VS Code symbol navigation, references, call hierarchy, occurrences an
     editor.dispatch({ selection: { anchor: source.indexOf('total') + 1 } });
     await expect.poll(() => container.querySelectorAll('.cm-occurrence').length).toBe(4);
     expect(container.querySelectorAll('.cm-occurrence-write')).toHaveLength(2);
-    await expect.poll(() => container.querySelector('.cm-breadcrumbs')?.textContent).toContain('area');
+    // The path is reported to the host's breadcrumbs; nothing stacks inside the editor above app menus.
+    await expect.poll(() => symbolPath[0]?.name).toBe('area');
+    expect(container.querySelector('.cm-panels-top')).toBeNull();
+    // CodeMirror's gutters (z 200) and panels (z 300) stay inside the editor's stacking context, below app menus.
+    expect(getComputedStyle(editor.dom.parentElement!).isolation).toBe('isolate');
     await page.screenshot();
 
     // Go to Symbol in Editor filters the outline and moves the cursor.

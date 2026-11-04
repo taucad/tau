@@ -338,36 +338,13 @@ describe.runIf(supported)('tau prepare', () => {
         fetch: api as typeof globalThis.fetch,
       });
       telemetry.startIdentityBootstrap();
-      await vi.waitFor(() => {
-        expect(api.mock.calls.some(([url]) => urlOf(url).endsWith('/v1/privacy'))).toBe(true);
-      });
-      /*
-       * The command flushes at its end; a reporter whose policy probe (started by the first record) has not answered
-       * by then drops its queue as `policy-unknown`, so this host's shutdown waits for the answer first.
-       */
-      const host: NodeHostTelemetry = {
-        ...telemetry,
-        shutdown: async () => {
-          const reporter = telemetry.ensureReporter();
-          if (reporter !== undefined) {
-            await new Promise<void>((resolve) => {
-              reporter.onPolicy((policy) => {
-                if (policy === 'on') {
-                  resolve();
-                }
-              });
-            });
-          }
-          await telemetry.shutdown();
-        },
-      };
       /** The operation entries the command's shutdown flush sent. */
       const sent = (): Posted['entries'] =>
         api.mock.calls
           .filter(([, init]) => init?.method === 'POST')
           .flatMap(([, init]) => (JSON.parse(init?.body as string) as Posted).entries)
           .filter(({ name }) => name === 'runtime.operation');
-      return { telemetry: host, sent };
+      return { telemetry, sent };
     };
 
     it('T19: should record an offline miss as one refused prepare and still exit 3 with OFFLINE_MISS', async () => {

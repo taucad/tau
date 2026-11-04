@@ -1,10 +1,10 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Environment variables retain their wire names. */
 /** Purpose: Refuse foreign and stale process records before any native close request can run. */
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { randomUUID, createHash } from 'node:crypto';
 import { once } from 'node:events';
-import { chmod, copyFile, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdtemp, readFile, readlink, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 /* oxlint-disable-next-line no-restricted-imports -- Test the owning native close admission seam. */
@@ -71,25 +71,34 @@ try {
     // Only the window lookup may refuse it: an environment that could not be read is not a pass.
     assert.match(admitted.message, /xdotool/u);
     // With the environment block overwritten, the AppImage runtime that serves the mount still binds the outer
-    // path: it is a child of the browser process and its own executable is the outer file. A portable AppImage
-    // admits its outer path directly, so a copy of `sleep` named Tau.AppImage stands in for the runtime here.
+    // path: its own executable is the outer file and it holds the write end of the keepalive pipe whose read end the
+    // browser inherited. It is not the browser's child (it daemonizes), so here it is a sibling of the browser. A
+    // portable AppImage admits its outer path directly, so a copy of `sleep` named Tau.AppImage stands in for it.
     const portable = join(profile, 'Tau.AppImage');
     await copyFile(execFileSync('sh', ['-c', 'command -v sleep'], { encoding: 'utf8' }).trim(), portable);
     await chmod(portable, 0o755);
-    const runtimeQuit = async (runtimePath: string): Promise<unknown> => {
+    const runtimeQuit = async (runtimePath: string, sharePipe = true): Promise<unknown> => {
       const { APPIMAGE: _absent, ...withoutAppImage } = process.env;
-      const browser = spawn('sh', ['-c', '"$1" 60 & wait', 'sh', runtimePath], {
-        env: withoutAppImage,
-        stdio: 'ignore',
-      });
+      // A shell pipeline makes a kernel pipe (Node's own stdio pipes are socket pairs); `sleep` reads its end.
+      const script = sharePipe ? '"$1" 60 | sleep 60 & wait' : '"$1" 60 & sleep 60 & wait';
+      const shell = spawn('sh', ['-c', script, 'sh', runtimePath], { env: withoutAppImage, stdio: 'ignore' });
       try {
-        await once(browser, 'spawn');
-        // Wait until the shell has started its runtime child, which the binding looks for.
-        for (let attempt = 0; attempt < 50; attempt += 1) {
-          // oxlint-disable-next-line no-await-in-loop -- bounded wait for the child to exist
-          const children = await readFile(`/proc/${browser.pid}/task/${browser.pid}/children`, 'utf8').catch(() => '');
-          if (children.trim() !== '') {
-            break;
+        await once(shell, 'spawn');
+        // The stand-in browser is the shell's `sleep` child. Wait until both children have executed their programs:
+        // a child that is still the forked shell would hide the runtime from the binding scan.
+        const runtimeExe = await realpath(runtimePath);
+        let browserPid = 0;
+        for (let attempt = 0; attempt < 100 && browserPid === 0; attempt += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- bounded wait for the children to exist
+          const childrenText = await readFile(`/proc/${shell.pid}/task/${shell.pid}/children`, 'utf8').catch(() => '');
+          const children = childrenText.trim().split(/\s+/u).filter(Boolean);
+          // oxlint-disable-next-line no-await-in-loop -- at most two children per attempt
+          const executables = await Promise.all(
+            children.map(async (child) => readlink(`/proc/${child}/exe`).catch(() => '')),
+          );
+          const browserIndex = executables.findIndex((exe) => exe.endsWith('/sleep'));
+          if (children.length === 2 && browserIndex !== -1 && executables.includes(runtimeExe)) {
+            browserPid = Number(children[browserIndex]);
           }
           // oxlint-disable-next-line no-await-in-loop -- see above
           await new Promise((resolve) => {
@@ -100,25 +109,30 @@ try {
         await writeFile(join(profile, 'route-qualification.request.json'), JSON.stringify(request));
         await writeFile(
           join(profile, 'route-qualification.ready.json'),
-          JSON.stringify({ ...request, pid: browser.pid, route: 'linux-appimage', version: '1.5.71' }),
+          JSON.stringify({ ...request, pid: browserPid, route: 'linux-appimage', version: '1.5.71' }),
         );
-        return await requestQualificationQuit(profile, browser.pid ?? 0).then(
+        return await requestQualificationQuit(profile, browserPid).then(
           () => undefined,
           (error: unknown) => error,
         );
       } finally {
-        browser.kill();
+        // End both children first, then the shell; a child that already exited is not an error.
+        spawnSync('pkill', ['-P', String(shell.pid)]);
+        shell.kill();
       }
     };
     const runtimeBound = await runtimeQuit(portable);
     assert.ok(runtimeBound instanceof Error);
     assert.doesNotMatch(runtimeBound.message, /admitted AppImage outer path/u);
     assert.match(runtimeBound.message, /xdotool/u);
-    // A runtime child running some other file binds nothing.
+    // A runtime running some other file binds nothing.
     const other = join(profile, 'Other.AppImage');
     await copyFile(portable, other);
     const runtimeForeign = await runtimeQuit(other);
     assert.match(String(runtimeForeign), /admitted AppImage outer path/u);
+    // The admitted file running beside the browser without sharing its pipe binds nothing either.
+    const runtimeUnshared = await runtimeQuit(portable, false);
+    assert.match(String(runtimeUnshared), /admitted AppImage outer path.*none is shared/u);
   }
   console.log('Native quit guard tests passed without sending a close request.');
 } finally {

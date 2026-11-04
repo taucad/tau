@@ -981,7 +981,13 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     for (const [checkoutId, held] of deferredChanges) {
       if (held.root === root) {
         deferredChanges.delete(checkoutId);
-        changed(checkoutId, [...held.paths].toSorted());
+        /* Raised from the write's release, which runs in the apply's own `finally`: a failure here
+         * must not replace the apply's error, nor stop the other checkouts' changes. */
+        try {
+          changed(checkoutId, [...held.paths].toSorted());
+        } catch (error) {
+          console.error('[revisions] a held change could not be raised', error);
+        }
       }
     }
   }

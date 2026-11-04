@@ -1521,7 +1521,7 @@ export const TauMetrics = {
     name: 'tau.project.open.span.duration',
     unit: 's',
     description:
-      'Client-reported total time one file-manager worker span (an LFS store, a fence or queue wait, a fill flush, a capture, an apply, the record projection) took over a hosted open phase or large-object fetch',
+      'Client-reported total time one file-manager worker span (an LFS store, a fence or queue wait, a fill flush, a capture, an apply, the record projection) took over a hosted open phase or large-object fetch. A total sums every run of the span in that window, so concurrent runs (24 LFS stores at once) can add up to more than the window itself; the recorder is per worker, so it covers the reporting tab’s file-manager worker only',
     buckets: [0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30, 60, 120, 300, 900],
     attributes: z.object({
       stage: z.enum(['first_view', 'fully_fetched', 'lfs_fetch']),

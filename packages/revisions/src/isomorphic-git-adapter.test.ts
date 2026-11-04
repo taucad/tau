@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
-import type { FileSystemProvider } from '@taucad/filesystem';
+import type { FileSystemProvider, RootedPorcelain } from '@taucad/filesystem';
 
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import type { LfsFetchReport } from '#isomorphic-git-adapter.js';
@@ -548,7 +548,10 @@ describe('reading a tree with large objects', () => {
   const oidOf = (content: string): string => lfsPointerFor(encoder.encode(content)).pointer.oid;
 
   /* A Tau remote whose batch endpoint answers whatever it is asked; transfers go to the stubbed global fetch. */
-  const lfsStore = async (onLfsFetch?: (report: LfsFetchReport) => void) => {
+  const lfsStore = async (
+    onLfsFetch?: (report: LfsFetchReport) => void,
+    storePrivateObject?: (filesystem: MemoryProvider) => RootedPorcelain['storePrivateObject'],
+  ) => {
     const asked: string[][] = [];
     const contentOf = new Map(parts.map(([, content]) => [oidOf(content!), encoder.encode(content)]));
     const http: RevisionHttpClient = {
@@ -594,7 +597,10 @@ describe('reading a tree with large objects', () => {
     const filesystem = new MemoryProvider();
     providers.push(filesystem);
     const port = createIsomorphicGitRevisionPort({
-      filesystem,
+      filesystem:
+        storePrivateObject === undefined
+          ? filesystem
+          : Object.assign(filesystem, { storePrivateObject: storePrivateObject(filesystem) }),
       http,
       ...(onLfsFetch === undefined ? {} : { onLfsFetch }),
     });
@@ -646,6 +652,28 @@ describe('reading a tree with large objects', () => {
     await port.readTree(head);
     expect(asked).toHaveLength(1);
     expect(reports).toHaveLength(1);
+  });
+
+  /* Off the project's mutation claims: a rooted view's private store takes each object, and nothing else writes it. */
+  it("stores each fetched object through the filesystem's private store when it has one", async () => {
+    const stored: string[] = [];
+    const { port, head, evict, filesystem } = await lfsStore(undefined, (provider) => async (path, content) => {
+      stored.push(path);
+      await provider.writeFile(path, content);
+      return 'stored';
+    });
+    await evict(parts[0]![1]!, parts[2]![1]!);
+    /* The revision's own write stored all three; only the read's fetches count here. */
+    stored.length = 0;
+    const writes = vi.spyOn(filesystem, 'writeFile');
+    const read = await port.readTree(head);
+    expect(read?.get(parts[0]![0]!)).toStrictEqual(encoder.encode(parts[0]![1]));
+    expect(read?.get(parts[2]![0]!)).toStrictEqual(encoder.encode(parts[2]![1]));
+    expect(stored.toSorted()).toStrictEqual(
+      [`.git/${lfsObjectPath(oidOf(parts[0]![1]!))}`, `.git/${lfsObjectPath(oidOf(parts[2]![1]!))}`].toSorted(),
+    );
+    /* Only the private store's own writes: no `.partial` sibling went through the provider's write path. */
+    expect(writes.mock.calls.map(([path]) => path).toSorted()).toStrictEqual(stored.toSorted());
   });
 
   it('shares one download between two readers of the same tree', async () => {

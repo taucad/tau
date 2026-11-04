@@ -31,6 +31,7 @@ import type {
   FileStat,
   FileStatEntry,
 } from '@taucad/types';
+import { randomUuid } from '@taucad/utils/id';
 import { assertRootedPath, joinRelativePath, resolveAuthorityPath } from '@taucad/utils/path';
 import type {
   FileStatOptions,
@@ -83,6 +84,23 @@ export type RootedPorcelain = {
   canRename(source: string, newName: string): Promise<true | WorkspaceMutationError>;
   canCreate(path: string, kind: 'file' | 'directory'): Promise<true | WorkspaceMutationError>;
   canDelete(path: string): Promise<true | WorkspaceMutationError>;
+  /**
+   * Store one content-addressed file of a Git store (a path with a `.git`
+   * segment) straight on this root's provider, if it is not already there.
+   *
+   * Outside the mutation pipeline on purpose: no resource-queue or cross-tab
+   * claim, no change event, no index entry. A large object lands here once per
+   * download, and taking the project's claims for it serialized every download
+   * behind every checkout write (the cold open's ~1 object per second). Safe
+   * because the content is addressed by its own hash: it is written beside its
+   * name and renamed into place, so no reader sees a partial file, and two
+   * writers of one name write the same bytes — whichever loses the rename
+   * finds the other's file and leaves it. Nothing watches, captures or indexes
+   * a Git store's private files.
+   *
+   * @returns `'stored'` when this call wrote it, `'present'` when it was already there.
+   */
+  storePrivateObject(path: string, content: Uint8Array<ArrayBuffer>): Promise<'stored' | 'present'>;
 };
 
 /**
@@ -503,6 +521,34 @@ export class RootedViews {
       const { resolution } = resolveLocal(path);
       return resolution.provider.exists(resolution.path);
     };
+    const storePrivateObject = async (
+      path: string,
+      content: Uint8Array<ArrayBuffer>,
+    ): Promise<'stored' | 'present'> => {
+      const { localPath, resolution } = resolveLocal(path);
+      if (!localPath.split('/').slice(0, -1).includes('.git')) {
+        throw new TypeError(`Only a Git store's private files are stored outside the mutation pipeline: ${localPath}`);
+      }
+      const { provider, path: target } = resolution;
+      if (await provider.exists(target)) {
+        return 'present';
+      }
+      await provider.mkdir(target.slice(0, target.lastIndexOf('/')), { recursive: true });
+      const partial = `${target}.${randomUuid()}.partial`;
+      await provider.writeFile(partial, content);
+      try {
+        await provider.rename(partial, target);
+      } catch (error) {
+        const present = await provider.exists(target);
+        await provider.unlink(partial).catch(() => undefined);
+        if (present) {
+          return 'present';
+        }
+        throw error;
+      }
+      assertCurrent();
+      return 'stored';
+    };
     const lstat = async (path: string): Promise<FileStat> => {
       const { resolution } = resolveLocal(path);
       return resolution.provider.lstat(resolution.path);
@@ -624,6 +670,7 @@ export class RootedViews {
       canRename,
       canCreate,
       canDelete,
+      storePrivateObject,
     };
   }
 }

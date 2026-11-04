@@ -1875,3 +1875,118 @@ describe('directory capability replacement', () => {
     disposeChannel();
   });
 });
+
+describe('refresh pause during a revision apply', () => {
+  const resolvedTree = (): ReturnType<typeof createTreeHarness> =>
+    createTreeHarness({
+      initialEntries: [{ ...directoryEntry('src'), isDirectoryResolved: true }],
+    });
+
+  /** The events one staged swap of `path` raises: the staged write, then its rename into place. */
+  const emitStagedSwap = (emit: (event: ChangeEvent) => void, path: string): void => {
+    const separator = path.lastIndexOf('/');
+    const staged = `${path.slice(0, separator + 1)}.${path.slice(separator + 1)}.tau-staged.0.tmp`;
+    emit({ type: 'fileWritten', path: staged, backend: 'opfs' });
+    emit({ type: 'fileRenamed', oldPath: staged, newPath: path, backend: 'opfs' });
+  };
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('should list nothing while paused and re-read each touched directory once on release', async () => {
+    vi.useFakeTimers();
+    const { tree, proxy, emitFileChanged, disposeChannel } = resolvedTree();
+    try {
+      vi.mocked(proxy.readDirectory).mockClear();
+      const release = tree.pauseRefreshes();
+
+      for (let index = 0; index < 50; index++) {
+        emitStagedSwap(emitFileChanged, `file-${index}.ts`);
+        emitStagedSwap(emitFileChanged, `src/file-${index}.ts`);
+        // oxlint-disable-next-line no-await-in-loop -- Each step outlasts the debounce window an unpaused tree would fire on.
+        await vi.advanceTimersByTimeAsync(150);
+      }
+
+      expect(tree.refreshesPaused).toBe(true);
+      expect(proxy.readDirectory).not.toHaveBeenCalled();
+
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(tree.refreshesPaused).toBe(false);
+      expect(
+        vi
+          .mocked(proxy.readDirectory)
+          .mock.calls.map(([path]) => path)
+          .toSorted(),
+      ).toEqual(['/projects/abc', '/projects/abc/src']);
+
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(proxy.readDirectory).toHaveBeenCalledTimes(2);
+    } finally {
+      tree.dispose();
+      disposeChannel();
+    }
+  });
+
+  it('should cancel a re-read already scheduled when the pause begins', async () => {
+    vi.useFakeTimers();
+    const { tree, proxy, emitFileChanged, disposeChannel } = resolvedTree();
+    try {
+      vi.mocked(proxy.readDirectory).mockClear();
+      emitFileChanged({ type: 'fileWritten', path: 'src/early.ts', backend: 'opfs' });
+
+      const release = tree.pauseRefreshes();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(proxy.readDirectory).not.toHaveBeenCalled();
+
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(proxy.readDirectory).toHaveBeenCalledOnce();
+      expect(proxy.readDirectory).toHaveBeenCalledWith('/projects/abc/src');
+    } finally {
+      tree.dispose();
+      disposeChannel();
+    }
+  });
+
+  it('should hold until the last of nested pauses releases, and ignore a repeated release', async () => {
+    vi.useFakeTimers();
+    const { tree, proxy, emitFileChanged, disposeChannel } = resolvedTree();
+    try {
+      vi.mocked(proxy.readDirectory).mockClear();
+      const outer = tree.pauseRefreshes();
+      const inner = tree.pauseRefreshes();
+      emitStagedSwap(emitFileChanged, 'src/a.ts');
+
+      inner();
+      inner();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(tree.refreshesPaused).toBe(true);
+      expect(proxy.readDirectory).not.toHaveBeenCalled();
+
+      outer();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(proxy.readDirectory).toHaveBeenCalledOnce();
+    } finally {
+      tree.dispose();
+      disposeChannel();
+    }
+  });
+
+  it('should not re-read anything on release when nothing changed while paused', async () => {
+    vi.useFakeTimers();
+    const { tree, proxy, disposeChannel } = resolvedTree();
+    try {
+      vi.mocked(proxy.readDirectory).mockClear();
+      const release = tree.pauseRefreshes();
+      release();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(proxy.readDirectory).not.toHaveBeenCalled();
+    } finally {
+      tree.dispose();
+      disposeChannel();
+    }
+  });
+});

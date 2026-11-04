@@ -739,11 +739,13 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
     disposeChannel();
   });
 
-  it('clears an exact count when a shallow refresh cannot prove it is still current', async () => {
+  /* A head listing has no count: the one held stands while size and time do, and the row is not re-published. */
+  it('keeps a measured count through a head re-list of an unchanged file, without a new row', async () => {
     vi.useFakeTimers();
     const { tree, proxy, disposeChannel } = createTreeHarness();
     vi.mocked(proxy.readDirectory).mockResolvedValueOnce([textNode('a.ts', { size: 5, mtimeMs: 100, lineCount: 2 })]);
     await tree.listDirectory('');
+    const before = tree.getTreeSnapshot().get('a.ts');
     vi.mocked(proxy.readDirectory).mockResolvedValueOnce([
       { id: 'a.ts', name: 'a.ts', size: 5, mtimeMs: 100, contentKind: 'text' },
     ]);
@@ -751,6 +753,27 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
     tree.scheduleRefresh('');
     await vi.advanceTimersByTimeAsync(200);
 
+    const after = tree.getTreeSnapshot().get('a.ts');
+    expect(after).toBe(before);
+    expect(after).toMatchObject({ contentKind: 'text', lineCount: 2 });
+    tree.dispose();
+    disposeChannel();
+    vi.useRealTimers();
+  });
+
+  it('clears an exact count when a head re-list shows the file moved', async () => {
+    vi.useFakeTimers();
+    const { tree, proxy, disposeChannel } = createTreeHarness();
+    vi.mocked(proxy.readDirectory).mockResolvedValueOnce([textNode('a.ts', { size: 5, mtimeMs: 100, lineCount: 2 })]);
+    await tree.listDirectory('');
+    vi.mocked(proxy.readDirectory).mockResolvedValueOnce([
+      { id: 'a.ts', name: 'a.ts', size: 5, mtimeMs: 200, contentKind: 'text' },
+    ]);
+
+    tree.scheduleRefresh('');
+    await vi.advanceTimersByTimeAsync(200);
+
+    expect(tree.getTreeSnapshot().get('a.ts')).toMatchObject({ contentKind: 'text', mtimeMs: 200 });
     expect('lineCount' in (tree.getTreeSnapshot().get('a.ts') ?? {})).toBe(false);
     tree.dispose();
     disposeChannel();

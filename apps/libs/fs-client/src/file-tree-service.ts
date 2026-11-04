@@ -90,6 +90,26 @@ type PollingTelemetryState = {
 const isFileTreeFileNode = (entry: FileTreeNode): entry is FileTreeFileNode => entry.children === undefined;
 
 /**
+ * A head listing knows a text file is text, not how many lines it has. The
+ * count the tree already holds stands while the file's size and time do: a
+ * re-list that dropped it would read as a change on every refresh, and the
+ * chat snapshot would lose the file's kind with it.
+ *
+ * @param current - The row the tree holds.
+ * @param listed - The row a listing just produced.
+ * @returns The listed row, with the held count when nothing says the file moved.
+ */
+const keepMeasuredLineCount = (current: CachedFileEntry, listed: CachedFileEntry): CachedFileEntry =>
+  listed.contentKind === 'text' &&
+  listed.lineCount === undefined &&
+  current.contentKind === 'text' &&
+  current.lineCount !== undefined &&
+  current.size === listed.size &&
+  current.mtimeMs === listed.mtimeMs
+    ? { ...listed, lineCount: current.lineCount }
+    : listed;
+
+/**
  * Directories re-read per task when collected re-reads drain. An apply's
  * release can name hundreds at once, and each re-read that answers notifies
  * the tree's subscribers: drained a task at a time, a page renders between
@@ -1649,8 +1669,9 @@ export class FileTreeService {
           continue;
         }
         if (existing.type === 'file') {
-          if (this.hasFileEntryChanged(existing, nextFile)) {
-            newTree.set(entryPath, { ...nextFile, isLoaded: existing.isLoaded });
+          const listed = keepMeasuredLineCount(existing, nextFile);
+          if (this.hasFileEntryChanged(existing, listed)) {
+            newTree.set(entryPath, { ...listed, isLoaded: existing.isLoaded });
           }
           continue;
         }

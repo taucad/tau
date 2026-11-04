@@ -999,6 +999,27 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
     disposeChannel();
   });
 
+  /* An apply swaps each file through a staged and a backup sibling; the tree shows neither. */
+  it("should leave an apply's staging and backup siblings out of listings and change events", async () => {
+    const staged = '.main.ts.tau-staged.0f1e2d3c-4b5a-4968-8776-655443322110.tmp';
+    const backup = '.main.ts.tau-backup.0f1e2d3c-4b5a-4968-8776-655443322111.tmp';
+    const { tree, proxy, disposeChannel } = createTreeHarness();
+    vi.mocked(proxy.readDirectory).mockResolvedValueOnce([textNode('main.ts'), textNode(staged), textNode(backup)]);
+    await tree.listDirectory('');
+    const emit = connectContentService(tree);
+
+    emit({ type: 'written', path: staged, data: new TextEncoder().encode('cube(1);'), source: 'machine' });
+    emit({ type: 'renamed', oldPath: 'main.ts', newPath: backup });
+    emit({ type: 'renamed', oldPath: staged, newPath: 'main.ts' });
+    emit({ type: 'deleted', path: backup, source: 'machine' });
+    await Promise.resolve();
+
+    expect([...tree.getTreeSnapshot().keys()].filter((key) => key.includes('.tau-'))).toEqual([]);
+    expect(tree.getTreeSnapshot().has('main.ts')).toBe(true);
+    tree.dispose();
+    disposeChannel();
+  });
+
   it('should set isDirectoryResolved on root when initialEntries bootstrap runs', () => {
     const listen = vi.fn().mockReturnValue(vi.fn());
     const paths = new WorkspacePathResolver(workspaceRoot);

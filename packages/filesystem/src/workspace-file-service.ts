@@ -6,6 +6,7 @@ import type {
   FileStat,
   FileStatEntry,
   FileSystemBackend,
+  FileTreeContentMetadata,
 } from '@taucad/types';
 import type {
   FileStatOptions,
@@ -133,6 +134,17 @@ function isStructurallyValidWorkspacePath(path: string): boolean {
     return false;
   }
 }
+
+/** One listed row: a head listing knows a text file is text, not how many lines it has. */
+type ListedTreeEntry =
+  | Extract<TreeEntry, { type: 'dir' }>
+  | ({ name: string; type: 'file'; size: number; mtimeMs: number } & FileTreeContentMetadata);
+
+/* A row's content fields, with a line count only where the listing measured one. */
+const listedMetadataFields = (metadata: FileTreeContentMetadata): FileTreeContentMetadata =>
+  metadata.contentKind === 'text'
+    ? { contentKind: 'text', ...(metadata.lineCount === undefined ? {} : { lineCount: metadata.lineCount }) }
+    : { contentKind: 'binary' };
 
 /**
  * Layer 3a UI-side workspace orchestrator.
@@ -870,10 +882,16 @@ export class WorkspaceFileService {
     }
 
     const { provider, path: resolvedPath } = this._resolveProvider(path);
-    const entryMap = new Map<string, TreeEntry>();
+    const entryMap = new Map<string, ListedTreeEntry>();
 
     if (provider.readdirWithStats) {
-      const statsEntries = await provider.readdirWithStats(resolvedPath);
+      /* A tree row needs a name, a size and a kind, never a line count: an exact
+       * listing reads every text file whole to count its lines, which on a cold
+       * open is the whole checkout read once per directory refresh. */
+      const statsEntries =
+        provider.supportsHeadListing === true
+          ? await provider.readdirWithStats(resolvedPath, { content: 'head' })
+          : await provider.readdirWithStats(resolvedPath);
       for (const entry of statsEntries) {
         if (entry.type === 'dir') {
           entryMap.set(entry.name, {
@@ -888,7 +906,7 @@ export class WorkspaceFileService {
             type: 'file',
             size: entry.size,
             mtimeMs: entry.mtimeMs,
-            ...fileMetadataFields(entry),
+            ...listedMetadataFields(entry),
           });
         }
       }
@@ -1669,7 +1687,7 @@ export class WorkspaceFileService {
     }
   }
 
-  private _treeEntriesToNodes(entries: Map<string, TreeEntry>): FileTreeNode[] {
+  private _treeEntriesToNodes(entries: Map<string, ListedTreeEntry>): FileTreeNode[] {
     const nodes: FileTreeNode[] = [];
     for (const [, entry] of entries) {
       if (entry.type === 'dir') {
@@ -1680,7 +1698,7 @@ export class WorkspaceFileService {
           name: entry.name,
           size: entry.size,
           mtimeMs: entry.mtimeMs,
-          ...fileMetadataFields(entry),
+          ...listedMetadataFields(entry),
         });
       }
     }

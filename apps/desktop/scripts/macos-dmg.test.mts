@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 // oxlint-disable-next-line no-restricted-imports -- Operational helper under test.
-import { createMacosDmg, macosAppContentDigest, verifyMacosDmg } from './macos-dmg.mjs';
+import { createMacosDmg, macosAppContentDigest, macosDmgLayout, verifyMacosDmg } from './macos-dmg.mjs';
 
 const main = async (): Promise<void> => {
   const scratch = await mkdtemp(join(tmpdir(), 'tau-dmg-test-'));
@@ -37,6 +37,16 @@ const main = async (): Promise<void> => {
     assert.notEqual(await macosAppContentDigest(appPath), before, 'content proof includes executable modes');
     await chmod(join(appPath, 'Contents/MacOS/Tau'), 0o755);
     assert.equal(await macosAppContentDigest(appPath), before);
+    const layout = macosDmgLayout(appPath);
+    assert.deepEqual(layout.files, [appPath], 'the layout copies only the finalized app');
+    assert.deepEqual(Object.entries(layout.symlinks), [['Applications', '/Applications']]);
+    for (const [x, y] of Object.values(layout.iconLocations)) {
+      // Icons stay inside the 660×400 drawing with room for a 128-point icon and its label.
+      assert.ok(x - 64 >= 0 && x + 64 <= 660 && y - 64 >= 0 && y + 90 <= 400, `icon at ${x},${y} fits the backdrop`);
+    }
+    assert.deepEqual(layout.windowRect[1], [660, 428], 'window shows the whole 660×400 backdrop below the title bar');
+    await readFile(layout.background);
+    await readFile(layout.background.replace(/\.png$/u, '@2x.png'));
     if (process.platform !== 'darwin') {
       console.log('DMG trust and content checks passed; native hdiutil acceptance requires macOS.');
       return;

@@ -177,6 +177,8 @@ export class FileTreeService {
   /* Outstanding {@link FileTreeService.pauseRefreshes} holds. While any is
    * held, re-reads collect in `pendingRefreshPaths` and nothing lists. */
   private refreshPauses = 0;
+  /* Set by dispose: a hold released afterwards must not list through a closed proxy. */
+  private disposed = false;
   private pollingTimer: ReturnType<typeof setTimeout> | undefined;
   private pollingActive = false;
   private visibilityUnsub: (() => void) | undefined;
@@ -526,13 +528,14 @@ export class FileTreeService {
           }
         });
         const watch = this.channel.watchReady({ paths: [key], recursive: false }, (event) => {
-          fresh = true;
           if (event.type === 'reset') {
+            fresh = true;
             reset();
           } else if (this.refreshPauses > 0) {
             /* Re-read once the hold releases, through the leased observation. */
             this.pendingRefreshPaths.add(key);
           } else {
+            fresh = true;
             invalidate();
           }
         });
@@ -547,7 +550,11 @@ export class FileTreeService {
       },
       read: async ({ signal, isCurrent }) => {
         try {
-          if (fresh) {
+          if (fresh && this.refreshPauses > 0 && this.isDirectoryResolvedKey(key)) {
+            /* An optimistic patch while a hold is taken re-renders from the
+             * tree; the listing itself waits for the hold's release. */
+            this.pendingRefreshPaths.add(key);
+          } else if (fresh) {
             fresh = false;
             const epoch = this._epoch;
             const generation = this._refreshGuard.begin(key);
@@ -629,6 +636,9 @@ export class FileTreeService {
    * @param path - Directory to re-read once the window closes.
    */
   public scheduleRefresh(path: string): void {
+    if (this.disposed) {
+      return;
+    }
     this.pendingRefreshPaths.add(path);
 
     if (this.refreshTimer !== undefined) {
@@ -883,6 +893,8 @@ export class FileTreeService {
   }
 
   public dispose(): void {
+    this.disposed = true;
+    this.pendingRefreshPaths.clear();
     this.closedSignal.resolve();
     const observations = [...this.listingObservations.values()];
     for (const reference of observations) {
@@ -961,6 +973,10 @@ export class FileTreeService {
 
   /** Re-read every directory collected since the last flush, once each. */
   private flushPendingRefreshes(): void {
+    if (this.disposed) {
+      this.pendingRefreshPaths.clear();
+      return;
+    }
     const pendingPaths = [...this.pendingRefreshPaths];
     this.pendingRefreshPaths.clear();
     for (const pendingPath of pendingPaths) {

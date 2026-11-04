@@ -1975,6 +1975,75 @@ describe('refresh pause during a revision apply', () => {
     }
   });
 
+  it('should not re-list a leased open directory while paused, and re-list it once on release', async () => {
+    let onWatch = (_event: WatchEvent): void => undefined;
+    const readDirectory = vi
+      .fn<ComposedViewClient['readDirectory']>()
+      .mockResolvedValue([textNode('a.ts'), textNode('b.ts')]);
+    const { tree, emitFileChanged, disposeChannel } = createTreeHarness({
+      proxy: mock<ComposedViewClient>({ readDirectory }),
+      watchReady: (_request, handler) => {
+        onWatch = handler;
+        return { ready: Promise.resolve(), closed: Promise.withResolvers<void>().promise, unsubscribe: vi.fn() };
+      },
+    });
+    const lease = tree.observeDirectory('').acquire();
+    try {
+      await vi.waitFor(() => {
+        expect(lease.getSnapshot().value).toMatchObject({ kind: 'ready' });
+      });
+      expect(readDirectory).toHaveBeenCalledOnce();
+
+      const release = tree.pauseRefreshes();
+      for (const name of ['a.ts', 'b.ts']) {
+        const staged = `.${name}.tau-staged.0.tmp`;
+        const backup = `.${name}.tau-backup.0.tmp`;
+        emitFileChanged({ type: 'fileRenamed', oldPath: name, newPath: backup, backend: 'opfs' });
+        emitFileChanged({ type: 'fileRenamed', oldPath: staged, newPath: name, backend: 'opfs' });
+        emitFileChanged({ type: 'fileDeleted', path: backup, backend: 'opfs' });
+        onWatch({ type: 'rename', oldPath: staged, newPath: name });
+        onWatch({ type: 'change', path: name });
+      }
+      await new Promise((resolve) => {
+        setTimeout(resolve, 300);
+      });
+      expect(readDirectory).toHaveBeenCalledOnce();
+
+      release();
+      await vi.waitFor(() => {
+        expect(readDirectory).toHaveBeenCalledTimes(2);
+      });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 300);
+      });
+      expect(readDirectory).toHaveBeenCalledTimes(2);
+      expect(lease.getSnapshot().value).toMatchObject({ kind: 'ready', entries: [{ name: 'a.ts' }, { name: 'b.ts' }] });
+    } finally {
+      lease.release();
+      tree.dispose();
+      disposeChannel();
+    }
+  });
+
+  it('should not list through a disposed tree when a hold is released after dispose', async () => {
+    vi.useFakeTimers();
+    const { tree, proxy, emitFileChanged, disposeChannel } = resolvedTree();
+    try {
+      vi.mocked(proxy.readDirectory).mockClear();
+      const release = tree.pauseRefreshes();
+      emitStagedSwap(emitFileChanged, 'src/a.ts');
+
+      tree.dispose();
+      release();
+      tree.scheduleRefresh('src');
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(proxy.readDirectory).not.toHaveBeenCalled();
+    } finally {
+      disposeChannel();
+    }
+  });
+
   it('should not re-read anything on release when nothing changed while paused', async () => {
     vi.useFakeTimers();
     const { tree, proxy, disposeChannel } = resolvedTree();

@@ -122,6 +122,83 @@ describe('ClientOperationObserver', () => {
       expect(seen).toHaveLength(1);
     });
 
+    it('should join several attempts in flight in whatever order their facts arrive', () => {
+      const { observer, seen } = connect(['facts']);
+      for (const operationId of ['op-1', 'op-2', 'op-3']) {
+        observer.settle(observer.begin({ operation: 'render', operationId }), success);
+      }
+      observer.receiveFacts('op-2', facts);
+      observer.receiveFacts('op-1', { ...facts, plugin: 'converter' });
+      observer.settle(observer.begin({ operation: 'render', operationId: 'op-4' }), success);
+      observer.receiveFacts('op-4', facts);
+      observer.receiveFacts('op-3', facts);
+      expect(seen.map(({ operationId, facts: status, plugin }) => [operationId, status, plugin])).toEqual([
+        ['op-2', 'joined', undefined],
+        ['op-1', 'joined', 'converter'],
+        ['op-4', 'joined', undefined],
+        ['op-3', 'joined', undefined],
+      ]);
+    });
+
+    it('should give up on the oldest attempt first, past 64 waiting or after one second', () => {
+      const { observer, seen } = connect(['facts']);
+      for (let index = 0; index <= 64; index++) {
+        observer.settle(observer.begin({ operation: 'render', operationId: `op-${String(index)}` }), success);
+      }
+      expect(seen).toMatchObject([{ operationId: 'op-0', facts: 'missing-timeout' }]);
+      observer.receiveFacts('op-0', facts);
+      observer.receiveFacts('op-1', facts);
+      expect(seen.slice(1)).toMatchObject([{ operationId: 'op-1', facts: 'joined' }]);
+      vi.advanceTimersByTime(1000);
+      expect(seen.slice(2).map(({ operationId }) => operationId)).toEqual(
+        Array.from({ length: 63 }, (_, index) => `op-${String(index + 2)}`),
+      );
+      expect(seen.slice(2).every((observed) => observed.facts === 'missing-timeout')).toBe(true);
+    });
+
+    it('should emit the attempts still waiting in settlement order when the worker goes', () => {
+      const { observer, seen } = connect(['facts']);
+      for (const operationId of ['op-1', 'op-2', 'op-3']) {
+        observer.settle(observer.begin({ operation: 'render', operationId }), success);
+      }
+      observer.receiveFacts('op-1', facts);
+      observer.settle(observer.begin({ operation: 'render', operationId: 'op-4' }), success);
+      observer.workerGone();
+      expect(seen.map(({ operationId, facts: status }) => [operationId, status])).toEqual([
+        ['op-1', 'joined'],
+        ['op-2', 'missing-worker-gone'],
+        ['op-3', 'missing-worker-gone'],
+        ['op-4', 'missing-worker-gone'],
+      ]);
+    });
+
+    it('should keep the observation fields in one order whatever facts it joins', () => {
+      const { observer, seen } = connect(['facts']);
+      observer.settle(
+        observer.begin({ operation: 'transcode', operationId: 'op-1', sourceFormat: 'step', entryFormat: 'ts' }),
+        success,
+      );
+      observer.receiveFacts('op-1', { ...facts, plugin: 'converter' });
+      expect(Object.keys(seen[0]!)).toEqual([
+        'operationId',
+        'operation',
+        'kernel',
+        'outcome',
+        'transport',
+        'issues',
+        'adaptations',
+        'adaptationsDropped',
+        'limit',
+        'format',
+        'plugin',
+        'sourceFormat',
+        'entryFormat',
+        'duration',
+        'worker',
+        'facts',
+      ]);
+    });
+
     it('should build nothing when nobody listens', () => {
       const observer = new ClientOperationObserver('in-process');
       expect(observer.begin({ operation: 'evaluate', operationId: 'op-1' })).toBeUndefined();

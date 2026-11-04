@@ -87,27 +87,32 @@ const appImageRelaunchWaiters = new Set<ReturnType<typeof spawn>>();
  * A detached waiter on the host's own bash keeps the privileges of the session that started Tau, holds
  * nothing on this image's mount, and waits for this process to exit so the single-instance lock is free.
  */
-export const relaunchAppImage = (execPath: string, args: readonly string[]): void => {
+export const relaunchAppImage = async (execPath: string, args: readonly string[]): Promise<void> => {
   if (!isAbsolute(execPath)) {
     throw new Error('AppImage relaunch path must be absolute');
   }
   // Fail before quitting: the controller then reports a paused restart instead of closing for good.
   accessSync('/bin/bash', constants.X_OK);
-  const waiter = spawn('/bin/bash', ['-c', appImageRelaunchScript, 'tau-relaunch', execPath, ...args], {
-    shell: false,
-    detached: true,
-    stdio: ['pipe', 'ignore', 'ignore'],
-    env: appImageRelaunchEnvironment(process.env),
+  await new Promise<void>((resolve, reject) => {
+    const waiter = spawn('/bin/bash', ['-c', appImageRelaunchScript, 'tau-relaunch', execPath, ...args], {
+      shell: false,
+      detached: true,
+      stdio: ['pipe', 'ignore', 'ignore'],
+      env: appImageRelaunchEnvironment(process.env),
+    });
+    waiter.once('error', reject);
+    waiter.once('spawn', () => {
+      waiter.unref();
+      appImageRelaunchWaiters.add(waiter);
+      resolve();
+    });
   });
-  waiter.once('error', () => undefined);
-  waiter.unref();
-  appImageRelaunchWaiters.add(waiter);
 };
 
 /** APT runtimes are plain executables and keep Electron's relauncher; managed AppImages must mount. */
-const relaunchInstalled = (execPath: string, args: string[], appImage: boolean): void => {
+const relaunchInstalled = async (execPath: string, args: string[], appImage: boolean): Promise<void> => {
   if (appImage) {
-    relaunchAppImage(execPath, args);
+    await relaunchAppImage(execPath, args);
   } else {
     app.relaunch({ execPath, args });
   }
@@ -287,8 +292,8 @@ export const startPlatformUpdater = async (options: PlatformUpdateOptions): Prom
           release: () => undefined,
         };
       },
-      finish: () => {
-        relaunchInstalled(launcher, relaunchSwitches(process.argv), managedImage);
+      finish: async () => {
+        await relaunchInstalled(launcher, relaunchSwitches(process.argv), managedImage);
         app.quit();
       },
     });
@@ -476,9 +481,9 @@ export const startPlatformUpdater = async (options: PlatformUpdateOptions): Prom
         release: () => undefined,
       };
     },
-    finish: () => {
+    finish: async () => {
       if (image) {
-        relaunchAppImage(image.outerImagePath, relaunchSwitches(process.argv));
+        await relaunchAppImage(image.outerImagePath, relaunchSwitches(process.argv));
       }
       app.quit();
     },

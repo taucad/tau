@@ -2,7 +2,7 @@
 /** Request an ordinary native window close only for the admitted disposable process. */
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, realpath, readlink, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, realpath, readlink, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -17,19 +17,92 @@ const readySchema = z.object({
   version: z.string().regex(/^\d+\.\d+\.\d+$/u),
 });
 
+/** One mount from `/proc/<pid>/mountinfo`: where it is mounted, its filesystem type and its source. */
+type MountRecord = { readonly point: string; readonly type: string; readonly source: string };
+
+/** Decode the octal escapes (`\040` for a space) the kernel writes into mountinfo paths. */
+const decodeMountPath = (value: string): string =>
+  value.replaceAll(/\\([0-7]{3})/gu, (_, octal: string) => String.fromCodePoint(Number.parseInt(octal, 8)));
+
+/** The mount that holds `path` in `pid`'s mount namespace: the longest mount point that is a prefix of it. */
+const mountHolding = async (pid: number, path: string): Promise<MountRecord | undefined> => {
+  let best: MountRecord | undefined;
+  const mountinfo = await readFile(`/proc/${pid}/mountinfo`, 'utf8');
+  for (const line of mountinfo.split('\n')) {
+    const [fields, tail] = line.split(' - ');
+    const point = fields?.split(' ')[4];
+    const [type, source] = tail?.split(' ') ?? [];
+    if (point === undefined || type === undefined || source === undefined) {
+      continue;
+    }
+    const record = { point: decodeMountPath(point), type, source: decodeMountPath(source) };
+    const inside = record.point === '/' || path === record.point || path.startsWith(`${record.point}/`);
+    if (inside && (best === undefined || record.point.length > best.point.length)) {
+      best = record;
+    }
+  }
+  return best;
+};
+
+/** Every process whose executable is an AppImage, with its parent, read from the kernel's process table. */
+const appImageProcesses = async (): Promise<ReadonlyArray<{ pid: number; parent: number; exe: string }>> => {
+  const found: Array<{ pid: number; parent: number; exe: string }> = [];
+  for (const entry of await readdir('/proc')) {
+    if (!/^\d+$/u.test(entry)) {
+      continue;
+    }
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- a bounded scan of one disposable guest's process table
+      const exe = await readlink(`/proc/${entry}/exe`);
+      if (!exe.endsWith('.AppImage')) {
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      const stat = await readFile(`/proc/${entry}/stat`, 'utf8');
+      // The command name in field 2 may hold spaces and parentheses; the parent PID follows its last ')'.
+      const parent = Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]);
+      found.push({ pid: Number(entry), parent, exe });
+    } catch {
+      // A process that exited, or one this user may not inspect, binds nothing.
+    }
+  }
+  return found;
+};
+
 /**
- * Name what the kernel reports instead of the admitted outer path, so a mismatch is diagnosable from the CI log:
- * only the APPIMAGE entries (a guest path, never a secret) and how many entries the record holds, which separates a
- * different outer path from an environment block the process has overwritten. Run 41662259184 ubuntu-appimage-x11
- * failed this check with nothing else to go on.
+ * Bind the browser process to the admitted AppImage outer path, or say why it cannot be bound.
+ *
+ * The AppImage runtime exports `APPIMAGE` before it executes the app, but Chromium's process-title code may overwrite
+ * the browser's original environment block afterwards: on stock Ubuntu 24.04 (run 41735517425 ubuntu-appimage-x11)
+ * `/proc/<pid>/environ` held 3475 entries and no `APPIMAGE` at all. Two kernel records the process cannot rewrite
+ * name the same outer file, so any one of three exact matches binds it:
+ * - `APPIMAGE=<outer path>` in `/proc/<pid>/environ` (the original binding, still taken when it survives);
+ * - the FUSE mount that holds `/proc/<pid>/exe` has the outer path as its source, which the runtime gives it;
+ * - a child of the browser process whose own `/proc/<child>/exe` is the outer path: the runtime that serves the mount.
+ * @returns `undefined` when bound, otherwise the observations a CI log needs (guest paths only, never values).
  */
-const appImageMismatch = (outerPath: string, browserPid: number, environment: readonly string[]): string => {
+const appImageBinding = async (outerPath: string, browserPid: number): Promise<string | undefined> => {
+  const environmentText = await readFile(`/proc/${browserPid}/environ`, 'utf8');
+  const environment = environmentText.split('\0');
+  if (environment.includes(`APPIMAGE=${outerPath}`)) {
+    return undefined;
+  }
+  const executable = await readlink(`/proc/${browserPid}/exe`);
+  const mount = await mountHolding(browserPid, executable);
+  if (mount?.type.startsWith('fuse') === true && mount.source === outerPath) {
+    return undefined;
+  }
+  const runtimes = await appImageProcesses();
+  if (runtimes.some(({ parent, exe }) => parent === browserPid && exe === outerPath)) {
+    return undefined;
+  }
   const reported = environment.filter((entry) => entry.startsWith('APPIMAGE='));
-  const found = reported.length === 0 ? 'no APPIMAGE entry' : reported.map((entry) => JSON.stringify(entry)).join(', ');
-  return (
-    `Native quit requires the admitted AppImage outer path: expected APPIMAGE=${outerPath}; ` +
-    `/proc/${browserPid}/environ holds ${environment.length} entries and ${found}`
-  );
+  return [
+    `Native quit requires the admitted AppImage outer path ${outerPath}`,
+    `/proc/${browserPid}/environ holds ${environment.length} entries and ${reported.length === 0 ? 'no APPIMAGE entry' : reported.map((entry) => JSON.stringify(entry)).join(', ')}`,
+    `/proc/${browserPid}/exe is ${JSON.stringify(executable)} on ${mount === undefined ? 'no mount' : `${mount.type} ${JSON.stringify(mount.source)} at ${JSON.stringify(mount.point)}`}`,
+    `AppImage processes: ${runtimes.length === 0 ? 'none' : runtimes.map(({ pid, parent, exe }) => `${pid} (parent ${parent}) ${JSON.stringify(exe)}`).join(', ')}`,
+  ].join('; ');
 };
 
 /** Bind the CDP browser PID to the probe and native executable before sending a user-style close request. */
@@ -100,10 +173,9 @@ export const requestQualificationQuit = async (
           '/usr/bin/tau-staging-appimage': '/opt/tau-staging-appimage',
         }[ready.installedPath];
         const outerPath = managed ? `${managed}/releases/${ready.version}/Tau.AppImage` : ready.installedPath;
-        const environmentText = await readFile(`/proc/${browserPid}/environ`, 'utf8');
-        const environment = environmentText.split('\0');
-        if (!environment.includes(`APPIMAGE=${outerPath}`)) {
-          throw new Error(appImageMismatch(outerPath, browserPid, environment));
+        const unbound = await appImageBinding(outerPath, browserPid);
+        if (unbound !== undefined) {
+          throw new Error(unbound);
         }
       } else {
         throw new Error('Unexpected Linux route');

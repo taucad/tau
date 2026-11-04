@@ -1,10 +1,10 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Environment variables retain their wire names. */
 /** Purpose: Refuse foreign and stale process records before any native close request can run. */
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID, createHash } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 /* oxlint-disable-next-line no-restricted-imports -- Test the owning native close admission seam. */
@@ -62,7 +62,7 @@ try {
     // The refusal names what the kernel reported, so a CI mismatch is diagnosable without the guest.
     assert.match(
       String(foreign),
-      /expected APPIMAGE=\/opt\/tau-staging-appimage\/releases\/1\.5\.71\/Tau\.AppImage; .* "APPIMAGE=\/opt\/tau-staging-appimage\/releases\/1\.5\.70\/Tau\.AppImage"/u,
+      /outer path \/opt\/tau-staging-appimage\/releases\/1\.5\.71\/Tau\.AppImage; .* "APPIMAGE=\/opt\/tau-staging-appimage\/releases\/1\.5\.70\/Tau\.AppImage"; \/proc\/\d+\/exe is .*; AppImage processes: /u,
     );
     // The admitted generation passes the binding and fails later, at the absent window, without closing anything.
     const admitted = await appImageQuit('/opt/tau-staging-appimage/releases/1.5.71/Tau.AppImage');
@@ -70,6 +70,55 @@ try {
     assert.doesNotMatch(admitted.message, /admitted AppImage outer path/u);
     // Only the window lookup may refuse it: an environment that could not be read is not a pass.
     assert.match(admitted.message, /xdotool/u);
+    // With the environment block overwritten, the AppImage runtime that serves the mount still binds the outer
+    // path: it is a child of the browser process and its own executable is the outer file. A portable AppImage
+    // admits its outer path directly, so a copy of `sleep` named Tau.AppImage stands in for the runtime here.
+    const portable = join(profile, 'Tau.AppImage');
+    await copyFile(execFileSync('sh', ['-c', 'command -v sleep'], { encoding: 'utf8' }).trim(), portable);
+    await chmod(portable, 0o755);
+    const runtimeQuit = async (runtimePath: string): Promise<unknown> => {
+      const { APPIMAGE: _absent, ...withoutAppImage } = process.env;
+      const browser = spawn('sh', ['-c', '"$1" 60 & wait', 'sh', runtimePath], {
+        env: withoutAppImage,
+        stdio: 'ignore',
+      });
+      try {
+        await once(browser, 'spawn');
+        // Wait until the shell has started its runtime child, which the binding looks for.
+        for (let attempt = 0; attempt < 50; attempt += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- bounded wait for the child to exist
+          const children = await readFile(`/proc/${browser.pid}/task/${browser.pid}/children`, 'utf8').catch(() => '');
+          if (children.trim() !== '') {
+            break;
+          }
+          // oxlint-disable-next-line no-await-in-loop -- see above
+          await new Promise((resolve) => {
+            setTimeout(resolve, 20);
+          });
+        }
+        const request = { nonce: randomUUID(), profile, installedPath: portable };
+        await writeFile(join(profile, 'route-qualification.request.json'), JSON.stringify(request));
+        await writeFile(
+          join(profile, 'route-qualification.ready.json'),
+          JSON.stringify({ ...request, pid: browser.pid, route: 'linux-appimage', version: '1.5.71' }),
+        );
+        return await requestQualificationQuit(profile, browser.pid ?? 0).then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+      } finally {
+        browser.kill();
+      }
+    };
+    const runtimeBound = await runtimeQuit(portable);
+    assert.ok(runtimeBound instanceof Error);
+    assert.doesNotMatch(runtimeBound.message, /admitted AppImage outer path/u);
+    assert.match(runtimeBound.message, /xdotool/u);
+    // A runtime child running some other file binds nothing.
+    const other = join(profile, 'Other.AppImage');
+    await copyFile(portable, other);
+    const runtimeForeign = await runtimeQuit(other);
+    assert.match(String(runtimeForeign), /admitted AppImage outer path/u);
   }
   console.log('Native quit guard tests passed without sending a close request.');
 } finally {

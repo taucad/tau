@@ -399,6 +399,7 @@ describe.runIf(supported)('tau prepare', () => {
     });
 
     it('T19: should record nothing when telemetry is off, and refuse as before', async () => {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
       const { telemetry, sent } = await reporting({ TAU_TELEMETRY: 'off' });
 
       await expect(

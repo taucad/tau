@@ -180,6 +180,7 @@ describe('T19: prepare_kernel records one prepare entry per settled preparation'
   });
 
   it('T19: should record nothing when telemetry is off on this device', async () => {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
     const { telemetry, posted, api } = await reporterHarness({ env: { TAU_TELEMETRY: 'off' } });
     const blocked = { status: 'blocked', kernel: 'build123d', reason: 'offline-miss', message: 'offline' } as const;
 
@@ -304,6 +305,7 @@ describe('T19: the shared machine store records one admit entry per refused requ
   });
 
   it('T19: should record nothing when telemetry is off on this device', async () => {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
     const { telemetry, posted } = await reporterHarness({ env: { DO_NOT_TRACK: '1' } });
     const shared = await openStore(admissionRefusalReporter(telemetry));
 

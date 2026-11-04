@@ -222,6 +222,18 @@ describe('useModels', () => {
       expect(catalog.status).toBe('loaded');
       expect(result.current.resolveModel('anthropic-claude-opus-4.8').provider.id).toBe('anthropic');
     });
+
+    it('should fill a Tau execution chosen before the catalog answered with the catalog default', async () => {
+      respond([catalogRow('anthropic-claude-sonnet-5.5', true), catalogRow('anthropic-claude-opus-5.5', true, true)]);
+      const { result } = renderHook(() => useModels(), { wrapper });
+      const execution = result.current.defaultExecution;
+      expect(execution).toEqual({ kind: 'tau', model: '' });
+      await expect(result.current.withCatalogDefaultModel(execution)).resolves.toEqual({
+        kind: 'tau',
+        model: 'anthropic-claude-opus-5.5',
+      });
+      await expect(result.current.withCatalogDefaultModel(codex)).resolves.toBe(codex);
+    });
   });
 
   describe('pinned models and availability', () => {

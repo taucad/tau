@@ -11,7 +11,10 @@ import type { CadAgentExecution, TauAgentExecution } from '@taucad/chat';
 export type ModelCatalog =
   | Readonly<{ status: 'loading' }>
   | Readonly<{ status: 'unavailable' }>
-  | Readonly<{ status: 'loaded'; models: ReadonlyArray<Readonly<{ id: string; recommended?: boolean }>> }>;
+  | Readonly<{
+      status: 'loaded';
+      models: ReadonlyArray<Readonly<{ id: string; recommended?: boolean; default?: boolean }>>;
+    }>;
 
 /** Why a Tau model can or cannot start: the reason the picker shows and admission refuses with. */
 export type TauModelReadiness = 'ready' | 'checking' | 'catalog-unavailable' | 'not-offered';

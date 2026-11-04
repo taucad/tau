@@ -93,7 +93,9 @@ const catalogOf = (data: Model[] | undefined, isError: boolean): ModelCatalog =>
  * @param data - The loaded catalog, if any.
  * @returns The default model id, or `undefined` before the catalog answers or when it is empty.
  */
-export const catalogDefaultModelId = (data: readonly Model[] | undefined): string | undefined =>
+export const catalogDefaultModelId = (
+  data: ReadonlyArray<Readonly<{ id: string; recommended?: boolean; default?: boolean }>> | undefined,
+): string | undefined =>
   (data?.find((model) => model.default === true) ?? data?.find((model) => model.recommended === true) ?? data?.[0])?.id;
 
 /** A stored execution is untrusted: one that fails the wire schema would fail the turn. */
@@ -208,6 +210,22 @@ export const useModels = () => {
     }
   }, [queryClient]);
 
+  /**
+   * The execution a new chat is created with. A Tau execution with no model yet — chosen before the catalog first
+   * answered — waits for the catalog and takes its default, so the chat is never saved without a model.
+   */
+  const withCatalogDefaultModel = useCallback(
+    async (execution: CadAgentExecution): Promise<CadAgentExecution> => {
+      if (execution.kind !== 'tau' || execution.model !== '') {
+        return execution;
+      }
+      const loaded = await ensureModelCatalog();
+      const model = loaded.status === 'loaded' ? catalogDefaultModelId(loaded.models) : undefined;
+      return model === undefined ? execution : { ...execution, model };
+    },
+    [ensureModelCatalog],
+  );
+
   /*
    * Whether the loaded catalog offers a model id. While the catalog is loading or unavailable every id counts as
    * offered, so an offline session prunes nothing (R3).
@@ -294,6 +312,7 @@ export const useModels = () => {
     setSelectedModelId,
     catalog,
     ensureModelCatalog,
+    withCatalogDefaultModel,
     defaultExecution,
     lastTauExecution,
     rememberExecution,

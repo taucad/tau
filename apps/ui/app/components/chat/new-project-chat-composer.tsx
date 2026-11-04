@@ -8,6 +8,7 @@ import { WorkspaceSelector } from '#components/filesystem/workspace-selector.js'
 import { toast } from '#components/ui/sonner.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useKernel } from '#hooks/use-kernel.js';
+import { useModels } from '#hooks/use-models.js';
 import { useProjectCreationLocation } from '#hooks/use-project-creation-location.js';
 import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
@@ -34,6 +35,7 @@ export function NewProjectChatComposer({
   const location = useProjectCreationLocation();
   const presentLocationError = useProjectCreationLocationError();
   const textareaRef = useRef<ChatTextareaHandle>(null);
+  const { withCatalogDefaultModel } = useModels();
   const {
     draftActorRef,
     attachmentSource,
@@ -110,7 +112,7 @@ export function NewProjectChatComposer({
            * daemon. Both providers keep this execution's Tau model in step with
            * the model chip, so there is nothing left to override here. Project
            * creation keeps a device-relative host for this device only (XD2). */
-          activeExecution: execution,
+          activeExecution: await withCatalogDefaultModel(execution),
           initialMessage: { content, attachments, ...(attachmentSource === undefined ? {} : { attachmentSource }) },
           editorState: {
             panelState: { desktopLayout: { chatOpen: true, compactAuxiliary: 'chat' }, mobileActiveTab: 'chat' },
@@ -140,6 +142,7 @@ export function NewProjectChatComposer({
       navigate,
       presentLocationError,
       projectManager,
+      withCatalogDefaultModel,
     ],
   );
 

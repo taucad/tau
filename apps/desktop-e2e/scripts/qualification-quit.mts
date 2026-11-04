@@ -69,15 +69,30 @@ const appImageProcesses = async (): Promise<ReadonlyArray<{ pid: number; parent:
   return found;
 };
 
-/** The pipes `pid` holds open, as the kernel names them (`pipe:[<inode>]`); one end of a pipe names the same inode. */
-const pipesHeldBy = async (pid: number): Promise<ReadonlySet<string>> => {
+/** Open-file access modes from the low bits of `/proc/<pid>/fdinfo/<fd>` flags (octal). */
+type PipeAccess = 'read' | 'write';
+
+/**
+ * The pipes `pid` holds open for `access` only, as the kernel names them (`pipe:[<inode>]`). Both ends of a pipe name
+ * the same inode; a descriptor two processes inherited from one ancestor (a shared stderr, an IPC pipe) is the same
+ * open file with the same access mode in both, so pairing one process's read end with another's write end skips it.
+ */
+const pipesHeldBy = async (pid: number, access: PipeAccess): Promise<ReadonlySet<string>> => {
   const pipes = new Set<string>();
   const directory = `/proc/${pid}/fd`;
   const descriptors = await readdir(directory).catch(() => []);
   for (const descriptor of descriptors) {
     // oxlint-disable-next-line no-await-in-loop -- a bounded scan of one process's descriptor table
     const target = await readlink(join(directory, descriptor)).catch(() => '');
-    if (target.startsWith('pipe:[')) {
+    if (!target.startsWith('pipe:[')) {
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    const info = await readFile(`/proc/${pid}/fdinfo/${descriptor}`, 'utf8').catch(() => '');
+    const flags = /^flags:\s+([0-7]+)$/mu.exec(info)?.[1];
+    // O_ACCMODE: 0 is O_RDONLY, 1 is O_WRONLY; a read-write pipe end (2) is neither end alone.
+    const mode = flags === undefined ? undefined : Number.parseInt(flags, 8) % 4;
+    if ((access === 'read' && mode === 0) || (access === 'write' && mode === 1)) {
       pipes.add(target);
     }
   }
@@ -93,9 +108,11 @@ const pipesHeldBy = async (pid: number): Promise<ReadonlySet<string>> => {
  * name the same outer file, so any one of three exact matches binds it:
  * - `APPIMAGE=<outer path>` in `/proc/<pid>/environ` (the original binding, still taken when it survives);
  * - the FUSE mount that holds `/proc/<pid>/exe` has the outer path as its source, which the runtime gives it;
- * - a process whose own `/proc/<pid>/exe` is the outer path and that holds a pipe the browser process also holds. The
- *   type-2 runtime opens a keepalive pipe, forks, and the child mounts the image and daemonizes (so its parent is 1, run
- *   41771037853) holding the write end; the parent keeps the read end and executes the app, which becomes the browser.
+ * - a process whose own `/proc/<pid>/exe` is the outer path and holds the write end of a pipe whose read end the browser
+ *   holds. The type-2 runtime opens a keepalive pipe, forks, and the child mounts the image and daemonizes (so its
+ *   parent is 1, run 41771037853) holding the write end; the parent keeps the read end and executes the app, which
+ *   becomes the browser. A pipe both inherited from one ancestor (run 41798471175's CI runner) has one access mode in
+ *   both, so it never pairs.
  *   The mount's source is only the file's base name (`fuse.Tau.AppImage` "Tau.AppImage"), so it cannot bind on its own.
  * @returns `undefined` when bound, otherwise the observations a CI log needs (guest paths only, never values).
  */
@@ -111,9 +128,9 @@ const appImageBinding = async (outerPath: string, browserPid: number): Promise<s
     return undefined;
   }
   const runtimes = await appImageProcesses();
-  const browserPipes = await pipesHeldBy(browserPid);
+  const browserPipes = await pipesHeldBy(browserPid, 'read');
   const runtimePipes = await Promise.all(
-    runtimes.filter(({ exe }) => exe === outerPath).map(async ({ pid }) => pipesHeldBy(pid)),
+    runtimes.filter(({ exe }) => exe === outerPath).map(async ({ pid }) => pipesHeldBy(pid, 'write')),
   );
   if (runtimePipes.some((pipes) => [...pipes].some((pipe) => browserPipes.has(pipe)))) {
     return undefined;
@@ -124,7 +141,7 @@ const appImageBinding = async (outerPath: string, browserPid: number): Promise<s
     `/proc/${browserPid}/environ holds ${environment.length} entries and ${reported.length === 0 ? 'no APPIMAGE entry' : reported.map((entry) => JSON.stringify(entry)).join(', ')}`,
     `/proc/${browserPid}/exe is ${JSON.stringify(executable)} on ${mount === undefined ? 'no mount' : `${mount.type} ${JSON.stringify(mount.source)} at ${JSON.stringify(mount.point)}`}`,
     `AppImage processes: ${runtimes.length === 0 ? 'none' : runtimes.map(({ pid, parent, exe }) => `${pid} (parent ${parent}) ${JSON.stringify(exe)}`).join(', ')}`,
-    `browser holds ${browserPipes.size} pipes; none is shared with a process running the outer path`,
+    `browser reads ${browserPipes.size} pipes; none is shared with a process running the outer path`,
   ].join('; ');
 };
 

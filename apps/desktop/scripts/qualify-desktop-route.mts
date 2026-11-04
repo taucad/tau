@@ -59,6 +59,69 @@ const alive = (pid: number): boolean => {
     return false;
   }
 };
+/**
+ * What a process that ignored an ordinary quit was doing, for the job log of a disposable Linux guest: the app's own
+ * quit, shutdown and updater events since `logOffset` (event name and its first fields only, never the whole log), the kernel's
+ * process state, and every window it still maps with its title. Each part reports its own failure instead of hiding it.
+ */
+const linuxQuitDiagnostics = async (pid: number, logPath: string, logOffset: number): Promise<string> => {
+  const parts: string[] = [];
+  try {
+    // The offset is a byte count. When the log has rotated past it (diagnostics.ts renames it to desktop.1.log over
+    // 5 MiB), the offset belongs to the rotated file and the whole current file is newer.
+    const current = await readFile(logPath);
+    const sources =
+      current.length >= logOffset
+        ? [current.subarray(logOffset)]
+        : [
+            await readFile(join(dirname(logPath), 'desktop.1.log')).then(
+              (rotated) => rotated.subarray(logOffset),
+              () => Buffer.alloc(0),
+            ),
+            current,
+          ];
+    const events = sources
+      .map((bytes) => bytes.toString('utf8'))
+      .join('\n')
+      .split('\n')
+      .filter((line) =>
+        /^\S+ \S+ (?:main\.(?:\S*quiesce|\S*quit|shutdown\S*|window\S*)|services\.quiesced|updater\.\S+|window-state\.\S+)\b/u.test(
+          line,
+        ),
+      )
+      .map((line) => line.slice(0, 240));
+    parts.push(`shutdown events: ${events.length === 0 ? 'none' : events.join(' | ')}`);
+  } catch (error) {
+    parts.push(`shutdown events unreadable: ${String(error)}`);
+  }
+  try {
+    const status = await readFile(`/proc/${pid}/status`, 'utf8');
+    const state = status.split('\n').find((line) => line.startsWith('State:')) ?? 'State: unknown';
+    const wchan = await readFile(`/proc/${pid}/wchan`, 'utf8').catch(() => 'unknown');
+    parts.push(`${state.replaceAll(/\s+/gu, ' ')}, wchan ${wchan}`);
+  } catch (error) {
+    parts.push(`process state unreadable: ${String(error)}`);
+  }
+  try {
+    const { stdout } = await execFileAsync('xdotool', ['search', '--pid', String(pid)], { timeout: 15_000 });
+    const windows = stdout.trim().split(/\s+/u).filter(Boolean);
+    const named = await Promise.all(
+      windows.map(async (id) => {
+        const name = await execFileAsync('xdotool', ['getwindowname', id], { timeout: 15_000 }).then(
+          ({ stdout: title }) => JSON.stringify(title.trim()),
+          () => 'unnamed',
+        );
+        return `${id} ${name}`;
+      }),
+    );
+    parts.push(`windows: ${named.length === 0 ? 'none' : named.join(', ')}`);
+  } catch (error) {
+    // `xdotool search` exits 1 when nothing matches; any other failure is reported, not read as "no windows".
+    const { code } = error as { code?: unknown };
+    parts.push(code === 1 ? 'windows: none' : `windows unreadable: ${String(error)}`);
+  }
+  return parts.join('; ');
+};
 const readySchema = z.object({
   stage: z.enum(['a', 'b', 'c']),
   pid: z.number().int().positive(),
@@ -519,11 +582,20 @@ const main = async (): Promise<void> => {
         { flag: 'wx' },
       );
       await render('a', offlineReady.pid, apt ? 'quit' : 'quit-ready');
-      await waitFor(
-        async () => (alive(offlineReady.pid) ? undefined : true),
-        'Baseline ordinary quit did not exit',
-        60_000,
-      );
+      try {
+        await waitFor(
+          async () => (alive(offlineReady.pid) ? undefined : true),
+          'Baseline ordinary quit did not exit',
+          60_000,
+        );
+      } catch (error) {
+        // The ubuntu-apt-x11 row has stayed alive here in four runs (41783968750 the latest) while debian-apt-x11 exits.
+        if (process.platform !== 'linux' || !alive(offlineReady.pid)) {
+          throw error;
+        }
+        const diagnostics = await linuxQuitDiagnostics(offlineReady.pid, join(profile, 'logs/desktop.log'), offset);
+        throw new Error(`Baseline ordinary quit did not exit; ${diagnostics}`, { cause: error });
+      }
       if (route !== 'linux-apt') {
         ordinaryQuit = {
           probe: observed,

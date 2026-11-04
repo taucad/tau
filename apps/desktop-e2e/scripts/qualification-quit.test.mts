@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Environment variables retain their wire names. */
 /** Purpose: Refuse foreign and stale process records before any native close request can run. */
 import assert from 'node:assert/strict';
-import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID, createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { chmod, copyFile, mkdtemp, readFile, readlink, realpath, rm, writeFile } from 'node:fs/promises';
@@ -80,25 +80,37 @@ try {
     const runtimeQuit = async (runtimePath: string, sharePipe = true): Promise<unknown> => {
       const { APPIMAGE: _absent, ...withoutAppImage } = process.env;
       // A shell pipeline makes a kernel pipe (Node's own stdio pipes are socket pairs); `sleep` reads its end.
-      const script = sharePipe ? '"$1" 60 | sleep 60 & wait' : '"$1" 60 & sleep 60 & wait';
-      const shell = spawn('sh', ['-c', script, 'sh', runtimePath], { env: withoutAppImage, stdio: 'ignore' });
+      // Unshared, both children still write to one inherited pipe, as a CI runner's descriptor reaches both (run
+      // 41798471175): only a read end in the browser paired with a write end in the runtime binds.
+      const script = sharePipe ? '"$1" 60 | sleep 60 & wait' : '{ "$1" 60 & sleep 60 & wait; } | cat';
+      // Its own process group, so cleanup reaches the grandchildren of the unshared script too.
+      const shell = spawn('sh', ['-c', script, 'sh', runtimePath], {
+        env: withoutAppImage,
+        stdio: 'ignore',
+        detached: true,
+      });
       try {
         await once(shell, 'spawn');
-        // The stand-in browser is the shell's `sleep` child. Wait until both children have executed their programs:
-        // a child that is still the forked shell would hide the runtime from the binding scan.
+        // The stand-in browser is the `sleep` below the shell. Wait until both stand-ins have executed their programs:
+        // a process that is still the forked shell would hide the runtime from the binding scan.
         const runtimeExe = await realpath(runtimePath);
+        const descendants = async (pid: number): Promise<number[]> => {
+          const text = await readFile(`/proc/${pid}/task/${pid}/children`, 'utf8').catch(() => '');
+          const children = text.trim().split(/\s+/u).filter(Boolean).map(Number);
+          const below = await Promise.all(children.map(async (child) => descendants(child)));
+          return [...children, ...below.flat()];
+        };
         let browserPid = 0;
         for (let attempt = 0; attempt < 100 && browserPid === 0; attempt += 1) {
-          // oxlint-disable-next-line no-await-in-loop -- bounded wait for the children to exist
-          const childrenText = await readFile(`/proc/${shell.pid}/task/${shell.pid}/children`, 'utf8').catch(() => '');
-          const children = childrenText.trim().split(/\s+/u).filter(Boolean);
-          // oxlint-disable-next-line no-await-in-loop -- at most two children per attempt
+          // oxlint-disable-next-line no-await-in-loop -- bounded wait for the stand-ins to exist
+          const processes = await descendants(shell.pid ?? 0);
+          // oxlint-disable-next-line no-await-in-loop -- a handful of processes per attempt
           const executables = await Promise.all(
-            children.map(async (child) => readlink(`/proc/${child}/exe`).catch(() => '')),
+            processes.map(async (pid) => readlink(`/proc/${pid}/exe`).catch(() => '')),
           );
           const browserIndex = executables.findIndex((exe) => exe.endsWith('/sleep'));
-          if (children.length === 2 && browserIndex !== -1 && executables.includes(runtimeExe)) {
-            browserPid = Number(children[browserIndex]);
+          if (browserIndex !== -1 && executables.includes(runtimeExe)) {
+            browserPid = processes[browserIndex] ?? 0;
           }
           // oxlint-disable-next-line no-await-in-loop -- see above
           await new Promise((resolve) => {
@@ -116,9 +128,8 @@ try {
           (error: unknown) => error,
         );
       } finally {
-        // End both children first, then the shell; a child that already exited is not an error.
-        spawnSync('pkill', ['-P', String(shell.pid)]);
-        shell.kill();
+        // End the whole group: the shell, the stand-ins and, unshared, the subshell and `cat`.
+        process.kill(-(shell.pid ?? 0), 'SIGTERM');
       }
     };
     const runtimeBound = await runtimeQuit(portable);

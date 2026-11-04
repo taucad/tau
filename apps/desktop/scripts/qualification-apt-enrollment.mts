@@ -309,10 +309,13 @@ export const prepareQualificationAptEnrollment = async (options: {
         `APT::Periodic::Update-Package-Lists "always";\nAPT::Periodic::Unattended-Upgrade "always";\nUnattended-Upgrade::Origins-Pattern { "origin=Tau,label=${label},codename=${suite},component=main"; };\n`,
       );
       /* oxlint-disable no-await-in-loop -- Timer enrollment and cleanup have ordered system side effects. */
+      // OnUnitActiveSec counts from the service's last start, and a guest whose boot-time APT service never became
+      // active has no such start, so its timer never fires again (run 41841972307 Debian rows: both timers last fired
+      // at boot and the mirror saw no request for 15 minutes). OnActiveSec counts from the timer restart below.
       for (const timer of ['apt-daily.timer', 'apt-daily-upgrade.timer']) {
         await install(
           `/etc/systemd/system/${timer}.d/90-tau-qualification-${id}.conf`,
-          '[Timer]\nOnCalendar=\nOnBootSec=30s\nOnUnitActiveSec=30s\nRandomizedDelaySec=0\nPersistent=false\n',
+          '[Timer]\nOnCalendar=\nOnActiveSec=30s\nOnBootSec=30s\nOnUnitActiveSec=30s\nRandomizedDelaySec=0\nPersistent=false\n',
         );
       }
       /* oxlint-enable no-await-in-loop */

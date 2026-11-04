@@ -152,7 +152,7 @@ finally:
                     'apt-daily.service', 'apt-daily-upgrade.service', 'apt-daily.timer', 'apt-daily-upgrade.timer'],
                    check=False)
     subprocess.run(['sudo', 'sh', '-c', 'journalctl --no-pager -o short-iso -u apt-daily.service -u apt-daily-upgrade.service '
-                    '-g "Start|Finish|Fail|Deactivat|code=|timed out" | tail -n 40'], check=False)
+                    '-g "Start|Finish|Fail|Deactivat|skipped|condition|code=|timed out" | tail -n 40'], check=False)
     subprocess.run(['sh', '-c', 'ps -eo pid,etimes,args | grep -E "[a]pt|[d]pkg|[u]nattended" || true'], check=False)
     cleanup = subprocess.run(['pnpm', 'nx', 'run', 'desktop:cleanup-qualification-trust'], cwd=root, env=env).returncode
     config.unlink(missing_ok=True)

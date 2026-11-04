@@ -43,6 +43,7 @@ import {
   utilityProcess,
 } from 'electron';
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron';
+import { nativeSandboxBwrapVariable } from '@taucad/native-process-core';
 import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
 import { createZooProxyTokenSource } from '@taucad/zoo/proxy';
 import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
@@ -762,6 +763,32 @@ const bootstrapElectronApp = async (): Promise<void> => {
     }
     return appMetrics.residentBytes.get(utility.pid);
   };
+  /*
+   * The Tau-owned bubblewrap, when this installation has one. Stock Ubuntu 24.04 and Debian 13 keep
+   * `kernel.apparmor_restrict_unprivileged_userns=1`, which strips capabilities from an unprofiled binary's user
+   * namespace, so the distro `/usr/bin/bwrap` can create the namespace and then fail to bring loopback up
+   * (`bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`) and no shell starts. Stock Ubuntu 26.04 also
+   * confines `/usr/bin/bwrap` itself with `bwrap-userns-restrict`, so the sandbox runtime's `apply-seccomp` cannot open
+   * its nested namespace and every native kernel worker exits 1 (`write /proc/self/setgroups (nested userns is
+   * capability-restricted …)`): build123d never prepares and no model renders (qualification 41865985263,
+   * ubuntu2604-apt-x11 and ubuntu2604-appimage-x11). The selector package installs a copy at this stable path and
+   * attaches the one AppArmor profile that grants `userns` to it, so both the shell sandbox and every native worker run
+   * through it. An unpackaged build has no such file, so both variables stay unset and the runtimes keep their default.
+   */
+  const ownedBwrap = ((): string | undefined => {
+    if (process.platform !== 'linux') {
+      return undefined;
+    }
+    const { bwrap } = linuxInstallation(desktopChannel, process.env['APPIMAGE'] !== undefined);
+    return existsSync(bwrap) ? bwrap : undefined;
+  })();
+  const nativeSandboxBwrapEnvironment: Readonly<Record<string, string>> =
+    ownedBwrap === undefined ? {} : { [nativeSandboxBwrapVariable]: ownedBwrap };
+  /* Main seals prepared closures (their bytecode compile) in the native sandbox itself. */
+  Object.assign(process.env, nativeSandboxBwrapEnvironment);
+  const desktopShellBwrapEnvironment = (): Readonly<Record<string, string>> =>
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
+    ownedBwrap === undefined ? {} : { TAU_DESKTOP_SHELL_BWRAP: ownedBwrap };
   const baseForkResolver = createKernelForkResolver({
     registry: roots,
     defaultRoot: homeRoot,
@@ -779,6 +806,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
       ...esbuildEnvironment,
       ...compileCacheEnvironment(app.getPath('userData')),
       TAU_DESKTOP_LOG_DIR: logDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+      /* The kernel utility launches every native worker (python, dotnet) in the native sandbox. */
+      ...nativeSandboxBwrapEnvironment,
     }),
     forkEnvAllowlist: [...kernelForkEnvAllowlist],
     /* A fork-loop guard, not a concurrency policy: a live project costs one to
@@ -940,23 +969,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
       connection.control.collect({ budget: budget as number, ...(cursor ? { cursor } : {}) }),
     );
   });
-
-  /*
-   * The Tau-owned bubblewrap the shell sandbox runs, when this installation has one. Stock Ubuntu 24.04 and Debian 13
-   * keep `kernel.apparmor_restrict_unprivileged_userns=1`, which strips capabilities from an unprofiled binary's user
-   * namespace, so the distro `/usr/bin/bwrap` can create the namespace and then fail to bring loopback up
-   * (`bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`) and no shell starts. The selector package installs
-   * a copy at this stable path and attaches the one AppArmor profile that grants `userns` to it. An unpackaged build has
-   * no such file, so the variable is left unset and the provider keeps its own default.
-   */
-  const desktopShellBwrapEnvironment = (): Readonly<Record<string, string>> => {
-    if (process.platform !== 'linux') {
-      return {};
-    }
-    const { bwrap } = linuxInstallation(desktopChannel, process.env['APPIMAGE'] !== undefined);
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
-    return existsSync(bwrap) ? { TAU_DESKTOP_SHELL_BWRAP: bwrap } : {};
-  };
 
   const services = createServicesBroker({
     utilityEntry: servicesUtilityEntry,

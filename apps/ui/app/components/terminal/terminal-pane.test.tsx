@@ -245,6 +245,22 @@ describe('TerminalPane', () => {
     expect(harness.view.focus).toHaveBeenCalled();
   });
 
+  it('should refit and resize the session when the font loads after the Terminal opened', async () => {
+    render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
+    await startTerminal();
+    harness.emit(opened);
+    const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(800);
+    try {
+      harness.view.fit = () => ({ columns: 100, rows: 28 });
+      act(() => {
+        harness.options().onMetricsChange?.();
+      });
+      expect(harness.session.calls.resize.at(-1)).toEqual([{ columns: 100, rows: 28 }]);
+    } finally {
+      width.mockRestore();
+    }
+  });
+
   it('cannot start while the folder is still being looked up', () => {
     render(<TerminalPane availability={{ status: 'checking' }} loadRenderer={harness.loadRenderer} />);
     expect(screen.getByRole('status', { name: 'Starting Terminal' })).toHaveAttribute('aria-busy', 'true');

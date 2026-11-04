@@ -363,6 +363,12 @@ export function TerminalPane({
         onLeave() {
           chromeRef.current?.focus();
         },
+        onMetricsChange() {
+          const size = viewRef.current?.fit();
+          if (size && host.isConnected && host.clientWidth > 0) {
+            sessionRef.current?.resize(size);
+          }
+        },
       });
     } catch {
       if (generation === generationRef.current) {

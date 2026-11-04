@@ -30,6 +30,8 @@ export type TerminalRendererOptions = {
   readonly onLinkActivate: (uri: string) => void;
   /** The person pressed the documented leave key (Shift+Escape); the caller moves focus out. */
   readonly onLeave: () => void;
+  /** The cell metrics changed (a face that loaded late, another display); the caller refits and resizes the session. */
+  readonly onMetricsChange?: () => void;
 };
 
 /** @public */
@@ -389,6 +391,8 @@ export const createTerminalRenderer = async (options: TerminalRendererOptions): 
       renderer.resize(terminal.cols, terminal.rows);
       terminal.setPaused(true);
       terminal.setPaused(false);
+      /* The cells changed size, so the grid that fits the host did too. */
+      options.onMetricsChange?.();
     }
   };
   fonts?.addEventListener('loadingdone', onFontsLoaded);

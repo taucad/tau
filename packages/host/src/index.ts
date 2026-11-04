@@ -97,6 +97,7 @@ export {
 export type { CreateNodeMachineRuntimeOptions, MachineHostIdentity, MachineSecretStore } from '#machine-host.js';
 export { agentMachineFacet, openLocalMachines, openSharedMachineHost } from '#local-machines.js';
 export type {
+  AdmissionRefusalReport,
   LocalMachines,
   LocalMachinesRefusal,
   OpenLocalMachinesOptions,

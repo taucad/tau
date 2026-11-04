@@ -23,6 +23,8 @@ import type {
   RuntimeChildNativeKernels,
 } from '@taucad/host';
 import type { HostSystemSkillBundle } from '@taucad/host/agent-tools';
+import { preparationReporter, reportingPrepareKernel } from '@taucad/host/telemetry';
+import type { PreparationReport } from '@taucad/host/telemetry';
 import { nativeDeploymentReportSchema } from '@taucad/native-process-core/store';
 import type { NativeDeploymentReport, NativePreparation } from '@taucad/native-process-core/store';
 import { systemSkillBundles } from '@taucad/skills/resources';
@@ -404,10 +406,14 @@ export const acpAdapterResolveFrom = (from: string = import.meta.url): string =>
  * spawn, so this process starts each native worker on its behalf, from a closure it answered and through the OS
  * sandbox (North Star S2). The native packages load on first use.
  *
+ * @param report - Told each preparation `prepare_kernel` settles, for runtime telemetry (T19); none when the host does
+ *   not report.
  * @returns The children's native kernels, the preparation behind `prepare_kernel`, the kernels it takes, and its
  *   disposal.
  */
-export const serveNativeKernels = (): {
+export const serveNativeKernels = (
+  report?: PreparationReport,
+): {
   readonly native: RuntimeChildNativeKernels;
   readonly prepareKernel: HostPrepareKernel;
   readonly preparableKernels: () => readonly HostPreparableKernel[];
@@ -419,12 +425,27 @@ export const serveNativeKernels = (): {
     return loaded;
   };
   /* The latest child's report, and the kernels it declares: what `prepare_kernel` names. */
-  let report: NativeDeploymentReport = [];
+  let deploymentReport: NativeDeploymentReport = [];
   let preparable: readonly HostPreparableKernel[] = [];
   let preparation: Promise<NativePreparation> | undefined;
   const openPreparation = async (): Promise<NativePreparation> => {
     const { openNativePreparation, shippedDeploymentsOf } = await nativeKernels();
-    return openNativePreparation({ deployments: async () => shippedDeploymentsOf(report) });
+    return openNativePreparation({ deployments: async () => shippedDeploymentsOf(deploymentReport) });
+  };
+  const prepareKernel: HostPrepareKernel = async ({ kernel }, { signal, onProgress }) => {
+    const { shippedKernelsOf } = await nativeKernels();
+    const shipped = await shippedKernelsOf(deploymentReport);
+    if (!shipped.has(kernel) && preparable.some((row) => row.kernel === kernel)) {
+      return {
+        status: 'failed',
+        kernel,
+        code: 'KERNEL_NOT_SHIPPED',
+        message: `${kernel} comes from a plugin this Tau does not ship, so tau serve does not prepare it. Run \`tau prepare ${kernel}\` with the project's --plugin or --config, then call again.`,
+      };
+    }
+    preparation ??= openPreparation();
+    const opened = await preparation;
+    return opened.prepare(kernel, { signal, onProgress });
   };
   return {
     native: {
@@ -445,7 +466,7 @@ export const serveNativeKernels = (): {
           try {
             const { preparableKernelsOf } = await nativeKernels();
             preparable = preparableKernelsOf(parsed.data);
-            report = parsed.data;
+            deploymentReport = parsed.data;
           } catch (error) {
             consola.warn(`A runtime child reported native kernels that cannot be read: ${String(error)}`);
           }
@@ -459,21 +480,7 @@ export const serveNativeKernels = (): {
       },
     },
     preparableKernels: () => preparable,
-    prepareKernel: async ({ kernel }, { signal, onProgress }) => {
-      const { shippedKernelsOf } = await nativeKernels();
-      const shipped = await shippedKernelsOf(report);
-      if (!shipped.has(kernel) && preparable.some((row) => row.kernel === kernel)) {
-        return {
-          status: 'failed',
-          kernel,
-          code: 'KERNEL_NOT_SHIPPED',
-          message: `${kernel} comes from a plugin this Tau does not ship, so tau serve does not prepare it. Run \`tau prepare ${kernel}\` with the project's --plugin or --config, then call again.`,
-        };
-      }
-      preparation ??= openPreparation();
-      const opened = await preparation;
-      return opened.prepare(kernel, { signal, onProgress });
-    },
+    prepareKernel: report === undefined ? prepareKernel : reportingPrepareKernel(prepareKernel, report),
     dispose: async () => {
       if (preparation !== undefined) {
         const opened = await preparation;
@@ -705,16 +712,22 @@ const megabytes = (bytes: number): string => `${(bytes / 1_000_000).toFixed(1)} 
  * Prepare the pinned Tau UI layer into the payload store, saying what it downloads (I5: automatic, with visible
  * progress). A sealed layer answers at once and says nothing; a download reports every tenth of its bytes on stderr.
  *
- * @param options - Cancellation, and the preparation for tests.
+ * @param options - Cancellation, where the settled preparation is reported (runtime telemetry, T19), and the preparation
+ *   for tests.
  * @returns The sealed UI directory, or why there is none.
  */
 export const prepareStoreUi = async (
-  options: { readonly signal?: AbortSignal; readonly prepare?: typeof prepareServeUi } = {},
+  options: {
+    readonly signal?: AbortSignal;
+    readonly report?: PreparationReport;
+    readonly prepare?: typeof prepareServeUi;
+  } = {},
 ): Promise<ServeUi> => {
   /* Mutated by the progress callback, so an object: a `let` here narrows to its initial value. */
   const progress = { announced: false, reportedTenth: 0 };
   const ui = await (options.prepare ?? prepareServeUi)({
     signal: options.signal ?? new AbortController().signal,
+    ...(options.report === undefined ? {} : { report: options.report }),
     onProgress: ({ completedBytes, totalBytes }) => {
       if (!progress.announced) {
         progress.announced = true;
@@ -1005,10 +1018,16 @@ export const serveCommand = defineCommand({
     const apiUrl = relay ?? process.env['TAU_API_URL'] ?? 'https://api.tau.new';
     /* The UI: a development directory, none, or the pinned layer, prepared into the store on first use (W18). A layer
      * that cannot be prepared leaves agents served and says why; `tau open`, which needs a UI, refuses instead. */
+    /* Telemetry: self-hosted serve never reports; the provisioned cloud host (`TAU_CLOUD_HOST=1`) does, from its first
+     * preparation on. */
+    process.env['TAU_SERVE_ROLE'] ??= 'serve';
+    const runtimeTelemetry =
+      process.env['TAU_CLOUD_HOST'] === '1' ? cliRuntimeTelemetry('cloud', packageJson.version) : undefined;
+    const reportPreparation = runtimeTelemetry === undefined ? undefined : preparationReporter(runtimeTelemetry);
     const uiChoice = serveUiChoice(args.ui);
     let uiDirectory = uiChoice.kind === 'directory' ? uiChoice.directory : undefined;
     if (uiChoice.kind === 'store' && port !== undefined) {
-      const storeUi = await prepareStoreUi();
+      const storeUi = await prepareStoreUi(reportPreparation === undefined ? {} : { report: reportPreparation });
       if (storeUi.status === 'ready') {
         uiDirectory = storeUi.root;
       } else {
@@ -1067,7 +1086,7 @@ export const serveCommand = defineCommand({
         ? () => ({ mode: 'durable', store: ensureCompute().store })
         : { mode: args.computeMode }
       : undefined;
-    const kernels = serveNativeKernels();
+    const kernels = serveNativeKernels(reportPreparation);
     const skillBundles = await serveSkillBundles([args.plugin ?? []].flat());
     const configuredAgent = agent
       ? {
@@ -1109,10 +1128,6 @@ export const serveCommand = defineCommand({
       }
       reportEvent(event);
     };
-    /* Telemetry: self-hosted serve never reports; the provisioned cloud host (`TAU_CLOUD_HOST=1`) does. */
-    process.env['TAU_SERVE_ROLE'] ??= 'serve';
-    const runtimeTelemetry =
-      process.env['TAU_CLOUD_HOST'] === '1' ? cliRuntimeTelemetry('cloud', packageJson.version) : undefined;
     const observeChats = await loadCloudHostObserver();
     const daemon = startHostDaemon({
       relayUrl: new URL(apiUrl),

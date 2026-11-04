@@ -7,6 +7,8 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
 import { defaultPayloadStore } from '@taucad/host';
+import { failedPreparation } from '@taucad/host/telemetry';
+import type { PreparationReport } from '@taucad/host/telemetry';
 import { createPreparationHost, PreparationError, readManagedPreparation } from '@taucad/runtime/preparation/node';
 import type {
   DependencyTarget,
@@ -140,13 +142,15 @@ export type ServeUiProgress = { readonly completedBytes: number; readonly totalB
  * Prepare the pinned serve UI layer into the payload store and say where its build is. A sealed layer answers at once
  * with no request; otherwise its archive is downloaded once, verified against the pin while it is written, unpacked
  * and sealed. A missing UI is an answer, never a throw: the caller decides whether to serve agents without one.
- * @param options - Cancellation, progress, and the pin, store, environment, host indicators and transport (for tests).
+ * @param options - Cancellation, progress, where the settled preparation is reported (runtime telemetry, T19), and the
+ *   pin, store, environment, host indicators and transport (for tests).
  * @returns The sealed UI directory, or why there is none.
  * @throws {Error} When the managed profile in the environment is malformed (`readManagedPreparation`).
  */
 export const prepareServeUi = async (options: {
   readonly signal: AbortSignal;
   readonly onProgress?: (progress: ServeUiProgress) => void;
+  readonly report?: PreparationReport;
   readonly pin?: ServeUiLayerPin;
   readonly store?: string;
   readonly environment?: NodeJS.ProcessEnv;
@@ -179,8 +183,18 @@ export const prepareServeUi = async (options: {
       options.onProgress?.({ completedBytes: state.completedBytes, totalBytes: state.totalBytes });
     }
   });
+  const started = performance.now();
+  /* What the caller sees never depends on telemetry. */
+  const settle = (state: Parameters<PreparationReport>[0]): void => {
+    try {
+      options.report?.(state, performance.now() - started);
+    } catch {
+      /* Telemetry never changes the answer. */
+    }
+  };
   try {
     const outcome = await host.prepare({ ...serveUiSelection, offline: managed.offline, signal: options.signal });
+    settle(outcome);
     if (outcome.status === 'cancelled') {
       return { status: 'unavailable', reason: 'cancelled', message: 'Preparing the Tau UI was cancelled.' };
     }
@@ -202,6 +216,7 @@ export const prepareServeUi = async (options: {
       closureIntegrity: receipt.closureIntegrity,
     };
   } catch (error) {
+    settle(failedPreparation(error));
     return {
       status: 'unavailable',
       reason: 'failed',

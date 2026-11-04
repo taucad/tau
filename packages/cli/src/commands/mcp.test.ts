@@ -14,6 +14,9 @@ import type * as Host from '@taucad/host';
 import { createHostToolRegistry } from '@taucad/host/agent-tools';
 import type { HostRuntimeClient, HostToolRegistryOptions } from '@taucad/host/agent-tools';
 import type * as Runtime from '@taucad/runtime';
+import type { NodeHostTelemetry } from '@taucad/host/telemetry';
+
+import type * as NativeKernels from '#native-kernels.js';
 
 /** What each tool call does with its project's runtime; set by a test. */
 const toolBody = vi.hoisted(() => ({
@@ -31,9 +34,16 @@ const createRuntimeClient = vi.hoisted(() =>
   })),
 );
 
+/* `--machines`: the shared store is held by another app, so the server serves without it. */
+const openLocalMachines = vi.hoisted(() =>
+  vi.fn(async (_options: Host.OpenLocalMachinesOptions): Promise<Host.LocalMachinesRefusal> => ({ refused: 'in-use' })),
+);
+
 vi.mock('@taucad/host', async (importOriginal) => ({
   ...(await importOriginal<typeof Host>()),
   serveLocalHostMcp,
+  openLocalMachines,
+  defaultMachineProviders: async () => [],
 }));
 vi.mock('@taucad/host/agent-tools', () => ({
   createHostToolRegistry: vi.fn((options: HostToolRegistryOptions) => ({
@@ -49,6 +59,22 @@ vi.mock('@taucad/host/agent-tools', () => ({
 vi.mock('@taucad/runtime', async (importOriginal) => ({
   ...(await importOriginal<typeof Runtime>()),
   createRuntimeClient,
+}));
+/* The process's runtime telemetry: none unless a case composes one, so no case reads the keyring. */
+const telemetry = vi.hoisted(() => ({ composed: undefined as NodeHostTelemetry | undefined }));
+vi.mock('#runtime-telemetry.js', () => ({ cliRuntimeTelemetry: () => telemetry.composed }));
+/* What a native preparation answers; the runtime is described as listing no plugin, with no thread. */
+const preparation = vi.hoisted(() => ({
+  answer: { status: 'blocked', kernel: 'build123d', reason: 'offline-miss', message: 'offline at /fixture' } as const,
+}));
+vi.mock('#native-kernels.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof NativeKernels>()),
+  describeRuntime: vi.fn(async () => ({ report: [], plugins: [] })),
+  reportedDeployments: vi.fn(async () => []),
+  openNativePreparation: vi.fn(() => ({
+    prepare: async () => preparation.answer,
+    dispose: async () => undefined,
+  })),
 }));
 const exitNow = vi.hoisted(() => vi.fn(async () => undefined));
 vi.mock('#exit-now.js', () => ({ exitNow }));
@@ -106,6 +132,92 @@ describe('mcpCommand', () => {
     vi.restoreAllMocks();
     vi.clearAllMocks();
     vi.unstubAllEnvs();
+    telemetry.composed = undefined;
+  });
+
+  /** A host composition whose `record` the case reads; `shutdown` is what `tau mcp` calls as it stops. */
+  const recording = (): NodeHostTelemetry & { readonly record: ReturnType<typeof vi.fn> } =>
+    ({
+      record: vi.fn(),
+      context: (caller: string) => ({ route: 'mcp', caller, release: '1.0.0', platform: 'node', os: 'linux' }),
+      observe: () => () => undefined,
+      shutdown: async () => undefined,
+    }) as unknown as NodeHostTelemetry & { readonly record: ReturnType<typeof vi.fn> };
+
+  const prepareKernelOf = (): NonNullable<HostToolRegistryOptions['prepareKernel']> => {
+    const options = vi.mocked(createHostToolRegistry).mock.calls.at(-1)?.[0];
+    if (options?.prepareKernel === undefined) {
+      throw new Error('tau mcp gave the registry no prepare_kernel');
+    }
+    return options.prepareKernel;
+  };
+
+  const prepareContext = { signal: new AbortController().signal, onProgress: () => undefined };
+
+  it('T19: should record one refused prepare entry when prepare_kernel is blocked, and answer as before', async () => {
+    const composed = recording();
+    telemetry.composed = composed;
+    const server = await serve(['--project', '/fixture/project']);
+
+    await expect(prepareKernelOf()({ kernel: 'build123d' }, prepareContext)).resolves.toEqual(preparation.answer);
+
+    expect(composed.record).toHaveBeenCalledOnce();
+    const [entry] = composed.record.mock.calls[0] as [{ detail: Record<string, unknown> }];
+    expect(entry.detail).toMatchObject({
+      operation: 'prepare',
+      outcome: 'refused',
+      code: 'offline-miss',
+      route: 'mcp',
+    });
+    expect(JSON.stringify(entry)).not.toMatch(/build123d|fixture/u);
+    await server.stop();
+  });
+
+  it('T19: should hand the machine store a refusal reporter that records one admit entry per refusal', async () => {
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    vi.stubEnv('TAU_MACHINES_ENABLED', '1');
+    const composed = recording();
+    telemetry.composed = composed;
+    const server = await serve(['--project', '/fixture/project', '--machines']);
+
+    const onAdmissionRefusal = openLocalMachines.mock.calls.at(-1)?.[0].onAdmissionRefusal;
+    expect(onAdmissionRefusal).toBeTypeOf('function');
+    onAdmissionRefusal?.({ code: 'ROUTE_DENIED', actor: 'agent' });
+
+    expect(composed.record).toHaveBeenCalledOnce();
+    expect(composed.record.mock.calls[0]?.[0]).toMatchObject({
+      detail: { operation: 'admit', outcome: 'refused', code: 'ROUTE_DENIED', caller: 'agent' },
+    });
+    await server.stop();
+  });
+
+  it('T19: should hand the machine store no refusal reporter with no telemetry composed', async () => {
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    vi.stubEnv('TAU_MACHINES_ENABLED', '1');
+    const server = await serve(['--project', '/fixture/project', '--machines']);
+
+    expect(openLocalMachines.mock.calls.at(-1)?.[0]).not.toHaveProperty('onAdmissionRefusal');
+    await server.stop();
+  });
+
+  it('T19: should answer prepare_kernel the same with no telemetry composed', async () => {
+    const server = await serve(['--project', '/fixture/project']);
+
+    await expect(prepareKernelOf()({ kernel: 'build123d' }, prepareContext)).resolves.toEqual(preparation.answer);
+    await server.stop();
+  });
+
+  it('T19: should answer prepare_kernel the same when the reporter throws', async () => {
+    const faulty = recording();
+    faulty.record.mockImplementation(() => {
+      throw new Error('record fault');
+    });
+    telemetry.composed = faulty;
+    const server = await serve(['--project', '/fixture/project']);
+
+    await expect(prepareKernelOf()({ kernel: 'build123d' }, prepareContext)).resolves.toEqual(preparation.answer);
+    expect(faulty.record).toHaveBeenCalledOnce();
+    await server.stop();
   });
 
   it.each(['operation-timeout', 'idle-release'])(

@@ -643,8 +643,16 @@ describe('a large apply', () => {
 
     const applying = materializer(checkout)(liveCheckout, target, { before: new ImmutableRevisionTree([]) });
 
-    await expect(applying).rejects.toBe(missing);
-    expect(missing.message).toBe('ENOENT: no such file or directory 2 more files were refused: src/b.ts, src/c.ts.');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      await expect(applying).rejects.toBe(missing);
+      expect(missing.message).toBe('ENOENT: no such file or directory');
+      expect(warn).toHaveBeenCalledWith(
+        '[revisions] src/a.ts could not be published. 2 more files were refused: src/b.ts, src/c.ts.',
+      );
+    } finally {
+      warn.mockRestore();
+    }
     expect(await filesOf(context.tree)).toEqual([]);
   });
 

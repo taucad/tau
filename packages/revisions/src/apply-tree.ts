@@ -252,8 +252,10 @@ export const createApplyTreeEffects = (
     /* The pipeline wraps each move's failure; the per-file path raises the
      * provider's own error (an errno, a missing workspace handle), so this does too. */
     const raised: unknown = (refused.error as { cause?: unknown }).cause ?? refused.error;
-    if (also !== '' && raised instanceof Error) {
-      raised.message += also;
+    /* The provider's error is thrown unchanged: a DOMException's message cannot
+     * be assigned, so the other refusals are logged instead of appended. */
+    if (also !== '') {
+      console.warn(`[revisions] ${refused.edit.target} could not be published.${also}`);
     }
     throw raised;
   };

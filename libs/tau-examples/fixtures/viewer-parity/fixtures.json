@@ -1,0 +1,184 @@
+{
+  "$comment": "Viewer parity fixtures (Tau Brain research/nanoraster-viewer-parity-charter.md, W6, D3). GLB bytes are pinned: regenerate with libs/tau-examples/scripts/export-parity-fixtures.mts and update sha256 in the same change.",
+  "fixtures": [
+    {
+      "name": "flanged-housing",
+      "glb": "packages/viewer/src/graphics/three/utils/fixtures/flanged-housing.glb",
+      "source": "packages/viewer viewer fixture",
+      "class": "filleted, holes",
+      "rationale": "coordinator fixture: fillet arcs, bolt holes, AO-heavy flange",
+      "sha256": "bec3e4e883e0832c5b4c653c1d3cddd2211e02ae3e614b993bc1f4144f6f5a05"
+    },
+    {
+      "name": "gear-8",
+      "glb": "apps/ui/app/routes/convert/gear-8.glb",
+      "source": "apps/ui convert route sample",
+      "class": "prismatic, teeth",
+      "rationale": "coordinator fixture: gear teeth, small repeated features",
+      "sha256": "0a550c6f204c48d583a13aef7a1c7e834e27399d3599a59ac1f8e77d4c96e93a"
+    },
+    {
+      "name": "replicad.ibeam",
+      "glb": "libs/tau-examples/fixtures/viewer-parity/replicad.ibeam.glb",
+      "source": "replicad/ibeam",
+      "class": "prismatic",
+      "rationale": "large flat faces; separates lighting from AO",
+      "sha256": "a8357d9918b59613ba9a039d4e2192ddff704d45a93e8d2f0ac1057d1ffce8ff"
+    },
+    {
+      "name": "replicad.t-slot-rail",
+      "glb": "libs/tau-examples/fixtures/viewer-parity/replicad.t-slot-rail.glb",
+      "source": "replicad/t-slot-rail",
+      "class": "prismatic",
+      "rationale": "narrow slots, dense one-pixel parallel edges",
+      "sha256": "dc3705f09ee3c825273b490d834837aa667de25c9d5ba006951901c9a4ed3a8e",
+      "knownFailure": "nanoraster 2b47c47: D2 3.31% AO on, 3.10% AO off (edges and lighting, not AO); nanoraster lane N4 is fixing it"
+    },
+    {
+      "name": "replicad.lego",
+      "glb": "libs/tau-examples/fixtures/viewer-parity/replicad.lego.glb",
+      "source": "replicad/lego",
+      "class": "small features",
+      "rationale": "small studs, hollow underside",
+      "sha256": "3cc91c3667f0365234179443c28778b61aab829e2993a0f31b6ebbddfbd44acc"
+    },
+    {
+      "name": "smlib.parametric-plate",
+      "glb": "libs/tau-examples/fixtures/viewer-parity/smlib.parametric-plate.glb",
+      "source": "smlib/parametric-plate",
+      "class": "flat metallic",
+      "rationale": "flat metallic plate with a hole grid; SMLib tessellation",
+      "sha256": "6d5d6d2b494819eeb812bf592bda303ae86eb1bef1b93ee17c288fed482c31c8"
+    },
+    {
+      "name": "replicad.vase",
+      "glb": "libs/tau-examples/fixtures/viewer-parity/replicad.vase.glb",
+      "source": "replicad/vase",
+      "class": "turned, thin-walled",
+      "rationale": "thin wall with the interior visible",
+      "sha256": "3c2aa3dc121ce6c4356284661452da66e5997eabdea30191a8f9f725fde0ced6"
+    },
+    {
+      "name": "replicad.bottle",
+      "glb": "libs/tau-examples/fixtures/viewer-parity/replicad.bottle.glb",
+      "source": "replicad/bottle",
+      "class": "turned, filleted",
+      "rationale": "filleted shoulders",
+      "sha256": "c904f7f58a829bdd58edb9f8b2ede2ee49bae91ccf0f6fe5e8d48ce5be722a80"
+    },
+    {
+      "name": "replicad.hex-screwdriver",
+      "glb": "libs/tau-examples/fixtures/viewer-parity/replicad.hex-screwdriver.glb",
+      "source": "replicad/hex-screwdriver",
+      "class": "mixed scales",
+      "rationale": "mixed feature scales, few model pixels",
+      "sha256": "7613e6d617a07e6c9f9fd0c864cbb7386d649038333efe7a4a3ddc6217a16412",
+      "knownFailure": "nanoraster 2b47c47: D2 1.65% AO on, 1.68% AO off (not AO); nanoraster lane N4 is fixing it"
+    },
+    {
+      "name": "replicad.rao-nozzle",
+      "glb": "libs/tau-examples/fixtures/viewer-parity/replicad.rao-nozzle.glb",
+      "source": "replicad/rao-nozzle",
+      "class": "turned, deep cavity",
+      "rationale": "deep visible interior",
+      "sha256": "0b0bc7bff50ff11bcc15c771ad0edc88f74fce57d2049862586cd25cf04421dc"
+    },
+    {
+      "name": "replicad.tray",
+      "glb": "libs/tau-examples/fixtures/viewer-parity/replicad.tray.glb",
+      "source": "replicad/tray",
+      "class": "filleted",
+      "rationale": "large curved fillets",
+      "sha256": "f8b40c847d25cd09ab0b7a3899a80daf8d2ece9362f1a7ad3fbc47affb63d6fe"
+    },
+    {
+      "name": "replicad.wavy-vase",
+      "glb": "libs/tau-examples/fixtures/viewer-parity/replicad.wavy-vase.glb",
+      "source": "replicad/wavy-vase",
+      "class": "organic",
+      "rationale": "twisted facets, high curvature",
+      "sha256": "fab6c136128bb675ca1385f6a6411f5f156e12bc5805c04f7706567572bfb8e6"
+    },
+    {
+      "name": "openscad.fluted-vase",
+      "glb": "libs/tau-examples/fixtures/viewer-parity/openscad.fluted-vase.glb",
+      "source": "openscad/fluted-vase",
+      "class": "organic",
+      "rationale": "single polyhedron; OpenSCAD kernel",
+      "sha256": "fd0d976c32452a7a1116b9517c0b6f1f61f772d275d11e690a016d7857f7e945"
+    },
+    {
+      "name": "manifold.manifold-logo",
+      "glb": "libs/tau-examples/fixtures/viewer-parity/manifold.manifold-logo.glb",
+      "source": "manifold/manifold-logo",
+      "class": "deep cavities",
+      "rationale": "Menger cavities and vertex colours; Manifold kernel",
+      "sha256": "4d8cc33f0dfa95848c6b32383eda1c218c95f6026cf1fe56221a393189dd14a8",
+      "knownFailure": "nanoraster 2b47c47: D2 1.54% AO on, 0.79% AO off (AO in the Menger cavities); nanoraster lane N4 is fixing it"
+    },
+    {
+      "name": "replicad.hollow-box",
+      "glb": "libs/tau-examples/fixtures/viewer-parity/replicad.hollow-box.glb",
+      "source": "replicad/hollow-box",
+      "class": "thin-walled, cavity",
+      "rationale": "shelled open cavity",
+      "sha256": "a1114dcf74d875d20d91025f41a06dd8aa0c7ec7c38d5f941bc0a88d6aae99be"
+    },
+    {
+      "name": "replicad.simple-tray",
+      "glb": "libs/tau-examples/fixtures/viewer-parity/replicad.simple-tray.glb",
+      "source": "replicad/simple-tray",
+      "class": "inner corners",
+      "rationale": "compartment grid with inner corners",
+      "sha256": "94e58d95322a27f697d7f320bca7719a5c462f27a4bb710f36138cb03f554ca4"
+    },
+    {
+      "name": "picovoxel.lattice-regular",
+      "glb": "libs/tau-examples/fixtures/viewer-parity/picovoxel.lattice-regular.glb",
+      "source": "picovoxel/lattice-regular",
+      "class": "lattice",
+      "rationale": "dense lattice; PicoVoxel kernel",
+      "sha256": "21d6f8d708c93a5e6c5c07a4ce6aefe348bcb1c150531c7c9791c4358d5009e9"
+    },
+    {
+      "name": "picovoxel.gyroid-sdf",
+      "glb": "libs/tau-examples/fixtures/viewer-parity/picovoxel.gyroid-sdf.glb",
+      "source": "picovoxel/gyroid-sdf",
+      "class": "lattice",
+      "rationale": "TPMS tunnels",
+      "sha256": "1019992cfcb2650baf62badd6101ff3907edaeb9ad8ff3ed122b27b3fd58fd5a"
+    },
+    {
+      "name": "picovoxel.sphere-minus-beams",
+      "glb": "libs/tau-examples/fixtures/viewer-parity/picovoxel.sphere-minus-beams.glb",
+      "source": "picovoxel/sphere-minus-beams",
+      "class": "voxel boolean, holes",
+      "rationale": "voxel boolean with through holes",
+      "sha256": "bdcc029b1fd433c11940a9ef0a2b450dc0dbd148df5af99603e8f438d37d06a7"
+    },
+    {
+      "name": "replicad.spur-gearbox",
+      "glb": "libs/tau-examples/fixtures/viewer-parity/replicad.spur-gearbox.glb",
+      "source": "replicad/spur-gearbox",
+      "class": "assembly",
+      "rationale": "assembly with coloured materials",
+      "sha256": "4361748d6e210bbdcc2c3850dc6675a9043c7efd5d4fd29efd9d55fab50a0a3e"
+    },
+    {
+      "name": "jscad.planetary-gear-system",
+      "glb": "libs/tau-examples/fixtures/viewer-parity/jscad.planetary-gear-system.glb",
+      "source": "jscad/planetary-gear-system",
+      "class": "assembly",
+      "rationale": "assembly with flat-shaded JSCAD tessellation",
+      "sha256": "22ffb3665c81452b193ea0754de1575d7040715e730733dda186457662d7dec2"
+    },
+    {
+      "name": "replicad.heat-exchanger",
+      "glb": "libs/tau-examples/fixtures/viewer-parity/replicad.heat-exchanger.glb",
+      "source": "replicad/heat-exchanger",
+      "class": "mixed scales, metal",
+      "rationale": "mixed scales and PBR metal",
+      "sha256": "6ec5d3c67ddffc584470703c22118006a7487ff0aa936af483dc03277f35753f"
+    }
+  ]
+}

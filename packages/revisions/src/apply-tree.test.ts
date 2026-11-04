@@ -18,12 +18,13 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor } from 'xstate';
 
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { walk } from '@taucad/filesystem/content-ops';
-import type { FileMode, FileStatEntry } from '@taucad/filesystem';
+import type { BulkMoveEdit, BulkMoveResult, FileMode, FileStatEntry } from '@taucad/filesystem';
+import { WorkspaceMutationError } from '@taucad/filesystem';
 
 import { captureRevisionTree, ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import { createApplyTreeEffects } from '#apply-tree.js';
@@ -103,6 +104,15 @@ type CountingOptions = Readonly<{
   caseInsensitive?: boolean;
   /** Expose linked checkouts through the in-memory port. */
   linkedCheckouts?: boolean;
+  /**
+   * Offer a batch move shaped as the rooted view's: sequential moves, each one
+   * refusing an existing target as `NAME_EXISTS`, every other failure reported
+   * with its cause rather than thrown, and the batch going on after either.
+   * Each move counts as its own mutation, so a stop can land mid-batch.
+   */
+  bulkMove?: boolean;
+  /** Runs once as a batch move starts, before its first move: a concurrent writer's slot. */
+  beforeBulkMove?: () => Promise<void>;
 }>;
 
 /**
@@ -176,6 +186,36 @@ const countingCheckout = (
     setFileMode: async (path: string, mode: FileMode): Promise<void> =>
       mutate('setFileMode', async () => real.setFileMode(pathOf(path), mode)),
     ...(options.statAge === undefined ? {} : { statTree }),
+    ...(options.bulkMove === true
+      ? {
+          bulkMove: async (edits: readonly BulkMoveEdit[]): Promise<BulkMoveResult> => {
+            counts.calls.push('bulkMove');
+            await options.beforeBulkMove?.();
+            const moved: Array<BulkMoveResult['moved'][number]> = [];
+            const failed: Array<BulkMoveResult['failed'][number]> = [];
+            for (const edit of edits) {
+              // oxlint-disable-next-line no-await-in-loop -- the batch moves in order, as the pipeline does.
+              if (await real.exists(pathOf(edit.target))) {
+                failed.push({ edit, error: new WorkspaceMutationError('NAME_EXISTS', edit.target) });
+                continue;
+              }
+              try {
+                // oxlint-disable-next-line no-await-in-loop -- one move per edit, each a mutation a stop can land on.
+                await mutate('bulkMove:rename', async () => real.rename(pathOf(edit.source), pathOf(edit.target)));
+                // oxlint-disable-next-line no-await-in-loop -- the moved file's stat, as the pipeline answers.
+                moved.push({ edit, stat: await real.stat(pathOf(edit.target)) });
+              } catch (error) {
+                /* As the pipeline does: the failure is reported, wrapping its cause, and the batch goes on. */
+                failed.push({
+                  edit,
+                  error: new WorkspaceMutationError('OPERATION_FAILED', edit.source, { cause: error }),
+                });
+              }
+            }
+            return { moved, failed };
+          },
+        }
+      : {}),
     ...(options.batch === true
       ? {
           writeFiles: async (files: Record<string, { content: Uint8Array<ArrayBuffer> | string }>): Promise<void> => {
@@ -416,11 +456,15 @@ const baseFiles = { 'main.ts': 'export const size = 1;\n', 'drop.ts': 'export co
 const agentWrites = async (tree: NodeFsProvider): Promise<void> => {
   await tree.writeFile('main.ts', 'export const size = 22_222_222;\n');
   await tree.writeFile('added.ts', 'export const added = true;\n');
+  /* A second new file, so a stop can land between two moves of one batch. */
+  await tree.writeFile('lib/also-added.ts', 'export const alsoAdded = true;\n');
   await tree.unlink('drop.ts');
 };
 const putBack = async (tree: NodeFsProvider): Promise<void> => {
   await tree.writeFile('main.ts', baseFiles['main.ts']);
   await tree.unlink('added.ts');
+  await tree.unlink('lib/also-added.ts');
+  await tree.rmdir('lib');
   await tree.writeFile('drop.ts', baseFiles['drop.ts']);
 };
 
@@ -470,11 +514,191 @@ describe('a large apply', () => {
     expect(context.counts.writeFile).toBe(0);
     expect(context.counts.calls.filter((call) => call === 'setFileMode')).toHaveLength(2000);
     expect(context.counts.calls.filter((call) => call === 'rename')).toHaveLength(2000);
-    expect(context.counts.calls.filter((call) => call === 'unlink')).toHaveLength(2000);
+    /* A staged file that published has nothing left to sweep. */
+    expect(context.counts.calls.filter((call) => call === 'unlink')).toHaveLength(0);
     expect(context.counts.reads).toBe(2000);
     expect(context.counts.rootListings).toBe(1);
     expect(litterIn(await filesOf(context.tree))).toEqual([]);
   }, 120_000);
+
+  it('should publish 2,000 new files with one batch move and no per-file rename, check or sweep', async () => {
+    const context = await project({}, { ...trustedStats, bulkMove: true });
+    const target = new ImmutableRevisionTree(
+      Array.from({ length: 2000 }, (_, index) => [
+        `src/file-${String(index).padStart(4, '0')}.ts`,
+        `export const value = ${String(index)};\n`,
+      ]),
+    );
+    context.reset();
+    const exists = vi.spyOn(context.checkout, 'exists');
+
+    const result = await materializer(context.checkout)(liveCheckout, target, {
+      before: new ImmutableRevisionTree([]),
+    });
+
+    expect(result.paths).toHaveLength(2000);
+    expect(context.counts.writeFiles).toBe(1);
+    expect(context.counts.calls.filter((call) => call === 'bulkMove')).toHaveLength(1);
+    expect(context.counts.calls.filter((call) => call === 'bulkMove:rename')).toHaveLength(2000);
+    expect(context.counts.calls.filter((call) => call === 'rename')).toHaveLength(0);
+    expect(context.counts.calls.filter((call) => call === 'unlink')).toHaveLength(0);
+    expect(exists).not.toHaveBeenCalled();
+    expect(context.counts.reads).toBe(2000);
+    expect(litterIn(await filesOf(context.tree))).toEqual([]);
+    await expect(context.tree.readFile('src/file-1999.ts', 'utf8')).resolves.toBe('export const value = 1999;\n');
+  }, 120_000);
+
+  it('should swap a replaced file per file and publish the new ones in the same batch move', async () => {
+    const context = await project({ 'main.ts': 'old\n' }, { ...trustedStats, bulkMove: true });
+    const before = new ImmutableRevisionTree([['main.ts', 'old\n']]);
+    const target = new ImmutableRevisionTree([
+      ['main.ts', 'new\n'],
+      ['added/a.ts', 'a\n'],
+      ['added/b.ts', 'b\n'],
+    ]);
+    context.reset();
+
+    const result = await materializer(context.checkout)(liveCheckout, target, { before });
+
+    expect(result.paths).toEqual(['added/a.ts', 'added/b.ts', 'main.ts']);
+    expect(context.counts.calls.filter((call) => call === 'bulkMove:rename')).toHaveLength(2);
+    expect(context.counts.calls.filter((call) => call === 'rename')).toHaveLength(2);
+    await expect(context.tree.readFile('main.ts', 'utf8')).resolves.toBe('new\n');
+    await expect(context.tree.readFile('added/b.ts', 'utf8')).resolves.toBe('b\n');
+    expect(litterIn(await filesOf(context.tree))).toEqual([]);
+  });
+
+  it('should refuse a target created during the batch move, keep the concurrent file, and roll back the rest', async () => {
+    const concurrent: { tree?: NodeFsProvider } = {};
+    const context = await project(
+      {},
+      {
+        ...trustedStats,
+        bulkMove: true,
+        beforeBulkMove: async () => {
+          await concurrent.tree?.writeFile('src/b.ts', 'a person’s own b\n');
+        },
+      },
+    );
+    concurrent.tree = context.tree;
+    const target = new ImmutableRevisionTree([
+      ['src/a.ts', 'a\n'],
+      ['src/b.ts', 'b\n'],
+      ['src/c.ts', 'c\n'],
+    ]);
+
+    const applying = materializer(context.checkout)(liveCheckout, target, { before: new ImmutableRevisionTree([]) });
+
+    await expect(applying).rejects.toMatchObject({
+      code: 'CHECKOUT_CONFLICT',
+      message: 'src/b.ts was created while these files were being updated.',
+    });
+    await expect(context.tree.readFile('src/b.ts', 'utf8')).resolves.toBe('a person’s own b\n');
+    expect(await filesOf(context.tree)).toEqual(['src/b.ts']);
+  });
+
+  it('should raise a batch move’s own refusal, sweep the staged file it never moved, and roll back the one it did', async () => {
+    const context = await project({}, { ...trustedStats, bulkMove: true });
+    const { tree } = context;
+    /* The batch moves the first edit and refuses the second for a reason that is not a collision. */
+    const checkout: RevisionFileSystem = Object.assign(Object.create(context.checkout) as RevisionFileSystem, {
+      bulkMove: async (edits: readonly BulkMoveEdit[]): Promise<BulkMoveResult> => {
+        const [first, second] = edits;
+        await tree.rename(first!.source, first!.target);
+        return {
+          moved: [{ edit: first!, stat: await tree.stat(first!.target) }],
+          failed: [{ edit: second!, error: new WorkspaceMutationError('OPERATION_FAILED', second!.source) }],
+        };
+      },
+    });
+    const target = new ImmutableRevisionTree([
+      ['src/a.ts', 'a\n'],
+      ['src/b.ts', 'b\n'],
+    ]);
+
+    const applying = materializer(checkout)(liveCheckout, target, { before: new ImmutableRevisionTree([]) });
+
+    await expect(applying).rejects.toMatchObject({ code: 'OPERATION_FAILED' });
+    expect(await filesOf(context.tree)).toEqual([]);
+  });
+
+  it('should raise the provider’s own error a batch move wrapped, as the per-file path does, and name the other refusals', async () => {
+    const context = await project({}, { ...trustedStats, bulkMove: true });
+    const missing = Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+    /* The batch refuses every edit, wrapping the provider's errno as the pipeline does. */
+    const checkout: RevisionFileSystem = Object.assign(Object.create(context.checkout) as RevisionFileSystem, {
+      bulkMove: async (edits: readonly BulkMoveEdit[]): Promise<BulkMoveResult> => ({
+        moved: [],
+        failed: edits.map((edit) => ({
+          edit,
+          error: new WorkspaceMutationError('NOT_FOUND', edit.source, { cause: missing }),
+        })),
+      }),
+    });
+    const target = new ImmutableRevisionTree([
+      ['src/a.ts', 'a\n'],
+      ['src/b.ts', 'b\n'],
+      ['src/c.ts', 'c\n'],
+    ]);
+
+    const applying = materializer(checkout)(liveCheckout, target, { before: new ImmutableRevisionTree([]) });
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      await expect(applying).rejects.toBe(missing);
+      expect(missing.message).toBe('ENOENT: no such file or directory');
+      expect(warn).toHaveBeenCalledWith(
+        '[revisions] src/a.ts could not be published. 2 more files were refused: src/b.ts, src/c.ts.',
+      );
+    } finally {
+      warn.mockRestore();
+    }
+    expect(await filesOf(context.tree)).toEqual([]);
+  });
+
+  it('should name every other path a batch move refused as created alongside the conflict it raises', async () => {
+    const concurrent: { tree?: NodeFsProvider } = {};
+    const context = await project(
+      {},
+      {
+        ...trustedStats,
+        bulkMove: true,
+        beforeBulkMove: async () => {
+          await concurrent.tree?.writeFile('src/a.ts', 'mine a\n');
+          await concurrent.tree?.writeFile('src/c.ts', 'mine c\n');
+        },
+      },
+    );
+    concurrent.tree = context.tree;
+    const target = new ImmutableRevisionTree([
+      ['src/a.ts', 'a\n'],
+      ['src/b.ts', 'b\n'],
+      ['src/c.ts', 'c\n'],
+    ]);
+
+    const applying = materializer(context.checkout)(liveCheckout, target, { before: new ImmutableRevisionTree([]) });
+
+    await expect(applying).rejects.toMatchObject({
+      code: 'CHECKOUT_CONFLICT',
+      message: 'src/a.ts was created while these files were being updated. 1 more file was refused: src/c.ts.',
+    });
+    expect(await filesOf(context.tree)).toEqual(['src/a.ts', 'src/c.ts']);
+  });
+
+  it('should keep an executable mode on a new file the batch move publishes', async () => {
+    const context = await project({}, { ...trustedStats, bulkMove: true });
+    const target = new ImmutableRevisionTree([
+      ['bin/run.sh', '#!/bin/sh\necho run\n', '100755'],
+      ['bin/readme.txt', 'plain\n'],
+    ]);
+    context.reset();
+
+    await materializer(context.checkout)(liveCheckout, target, { before: new ImmutableRevisionTree([]) });
+
+    expect(context.counts.calls.filter((call) => call === 'bulkMove')).toHaveLength(1);
+    await expect(context.tree.getFileMode('bin/run.sh')).resolves.toBe('100755');
+    await expect(context.tree.getFileMode('bin/readme.txt')).resolves.toBe('100644');
+  });
 });
 
 describe('a case-insensitive checkout', () => {
@@ -597,66 +821,73 @@ describe('a checkout stopped inside an apply', () => {
     });
   }, 30_000);
 
-  it('should leave the files as they were or as the revision wanted them, with no temporary sibling behind', async () => {
-    /* The clean run says how many steps there are to stop at, and what the two
-     * admissible outcomes hash to. */
-    const clean = await project(baseFiles);
-    const cleanActors = clean.open();
-    const base = await save(cleanActors);
-    await agentWrites(clean.tree);
-    const cleanCapture = await run<{ captureId: string }>(cleanActors.turn.capture, {
-      checkoutId: 'live',
-      turnId: 'turn-1',
-    });
-    await putBack(clean.tree);
-    clean.reset();
-    const cleanMerge = await run<{ status: string }>(cleanActors.turn.merge, {
-      checkoutId: 'live',
-      captureId: cleanCapture.captureId,
-      baseRevisionId: base.revisionId,
-    });
-    expect(cleanMerge.status).toBe('recorded');
-    const settledTreeId = await cut(cleanActors);
-    const steps = clean.counts.mutations;
-    expect(steps).toBeGreaterThan(5);
-
-    for (const step of Array.from({ length: steps }, (_, index) => index + 1)) {
-      // oxlint-disable-next-line no-await-in-loop -- one whole project per step, in order.
-      const stopped = await project(baseFiles, { ...trustedStats, failMutation: (sequence) => sequence === step });
-      // oxlint-disable-next-line no-await-in-loop -- the base revision of this step's project.
-      const stoppedBase = await save(stopped.open());
-      // oxlint-disable-next-line no-await-in-loop -- this step's turn.
-      await agentWrites(stopped.tree);
-      const settling = stopped.open();
-      // oxlint-disable-next-line no-await-in-loop -- the capture this step's settlement applies.
-      const stoppedCapture = await run<{ captureId: string }>(settling.turn.capture, {
+  it.each([
+    { surface: 'per-file renames', options: trustedStats },
+    { surface: 'one batch move', options: { ...trustedStats, bulkMove: true } },
+  ])(
+    'should leave the files as they were or as the revision wanted them, with no temporary sibling behind, through $surface',
+    async ({ options }) => {
+      /* The clean run says how many steps there are to stop at, and what the two
+       * admissible outcomes hash to. */
+      const clean = await project(baseFiles, options);
+      const cleanActors = clean.open();
+      const base = await save(cleanActors);
+      await agentWrites(clean.tree);
+      const cleanCapture = await run<{ captureId: string }>(cleanActors.turn.capture, {
         checkoutId: 'live',
         turnId: 'turn-1',
       });
-      // oxlint-disable-next-line no-await-in-loop -- the tree the settlement has to write into.
-      await putBack(stopped.tree);
-      stopped.reset();
-      // oxlint-disable-next-line no-await-in-loop -- the settlement that stops at this step.
-      await run(settling.turn.merge, {
+      await putBack(clean.tree);
+      clean.reset();
+      const cleanMerge = await run<{ status: string }>(cleanActors.turn.merge, {
         checkoutId: 'live',
-        captureId: stoppedCapture.captureId,
-        baseRevisionId: stoppedBase.revisionId,
-      }).catch(() => undefined);
+        captureId: cleanCapture.captureId,
+        baseRevisionId: base.revisionId,
+      });
+      expect(cleanMerge.status).toBe('recorded');
+      const settledTreeId = await cut(cleanActors);
+      const steps = clean.counts.mutations;
+      expect(steps).toBeGreaterThan(5);
 
-      /* A fresh process over the same files: its first capture sweeps whatever
-       * the stopped one left staged or backed up (W8f). */
-      // oxlint-disable-next-line no-await-in-loop -- the reopened view of this step's files.
-      const reopenedTreeId = await cut(stopped.open());
-      // oxlint-disable-next-line no-await-in-loop -- the litter check for this step.
-      const found = await filesOf(stopped.tree);
+      for (const step of Array.from({ length: steps }, (_, index) => index + 1)) {
+        // oxlint-disable-next-line no-await-in-loop -- one whole project per step, in order.
+        const stopped = await project(baseFiles, { ...options, failMutation: (sequence) => sequence === step });
+        // oxlint-disable-next-line no-await-in-loop -- the base revision of this step's project.
+        const stoppedBase = await save(stopped.open());
+        // oxlint-disable-next-line no-await-in-loop -- this step's turn.
+        await agentWrites(stopped.tree);
+        const settling = stopped.open();
+        // oxlint-disable-next-line no-await-in-loop -- the capture this step's settlement applies.
+        const stoppedCapture = await run<{ captureId: string }>(settling.turn.capture, {
+          checkoutId: 'live',
+          turnId: 'turn-1',
+        });
+        // oxlint-disable-next-line no-await-in-loop -- the tree the settlement has to write into.
+        await putBack(stopped.tree);
+        stopped.reset();
+        // oxlint-disable-next-line no-await-in-loop -- the settlement that stops at this step.
+        await run(settling.turn.merge, {
+          checkoutId: 'live',
+          captureId: stoppedCapture.captureId,
+          baseRevisionId: stoppedBase.revisionId,
+        }).catch(() => undefined);
 
-      expect(litterIn(found), `step ${String(step)} left ${found.join(', ')}`).toEqual([]);
-      expect(
-        [stoppedBase.treeId, settledTreeId],
-        `stopping at ${clean.counts.calls[step - 1] ?? '?'} (step ${String(step)} of ${clean.counts.calls.join(', ')}) left ${found.join(', ')}`,
-      ).toContain(reopenedTreeId);
-    }
-  }, 300_000);
+        /* A fresh process over the same files: its first capture sweeps whatever
+         * the stopped one left staged or backed up (W8f). */
+        // oxlint-disable-next-line no-await-in-loop -- the reopened view of this step's files.
+        const reopenedTreeId = await cut(stopped.open());
+        // oxlint-disable-next-line no-await-in-loop -- the litter check for this step.
+        const found = await filesOf(stopped.tree);
+
+        expect(litterIn(found), `step ${String(step)} left ${found.join(', ')}`).toEqual([]);
+        expect(
+          [stoppedBase.treeId, settledTreeId],
+          `stopping at ${clean.counts.calls[step - 1] ?? '?'} (step ${String(step)} of ${clean.counts.calls.join(', ')}) left ${found.join(', ')}`,
+        ).toContain(reopenedTreeId);
+      }
+    },
+    300_000,
+  );
 });
 
 describe('a path that changes kind', () => {

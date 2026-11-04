@@ -187,6 +187,80 @@ export const createApplyTreeEffects = (
   };
 
   /**
+   * Whether the checkout surface publishes many moves under one lock set, as a rooted view does.
+   *
+   * @param live - The checkout's tree.
+   * @returns True when it carries `bulkMove`.
+   */
+  const hasBulkMove = (
+    live: RevisionFileSystem,
+  ): live is RevisionFileSystem & Required<Pick<RevisionFileSystem, 'bulkMove'>> => live.bulkMove !== undefined;
+
+  /**
+   * Publish every staged file whose target the checkout did not hold, as one move batch.
+   *
+   * One lock set and one provider refresh for the whole batch, instead of this
+   * call's own two `exists` checks and a separately locked rename per file. Each
+   * move still refuses a target that appeared since the capture (`EEXIST`, which
+   * the batch reports as `NAME_EXISTS`), the conflict those per-file checks
+   * existed to catch. Each move is the provider's own rename, exactly as the
+   * per-file path publishes: atomic where the platform moves natively (OPFS
+   * `move()`), the provider's copy-then-unlink where it does not. Every edit
+   * that moved is recorded in `published` before any refusal is raised, so the
+   * caller sweeps only the staged files that never reached their target.
+   *
+   * @param live - The checkout's tree, which moves in bulk.
+   * @param created - The staged files and the absent targets they publish to.
+   * @param publication - Receives each staged path that moved in `published`;
+   *   `signal` is checked once every staged file carries its mode.
+   */
+  const publishCreated = async (
+    live: RevisionFileSystem & Required<Pick<RevisionFileSystem, 'bulkMove'>>,
+    created: ReadonlyArray<Readonly<{ path: string; staged: string; entry: RevisionTreeEntry }>>,
+    { published, signal }: Readonly<{ published: Set<string>; signal: AbortSignal | undefined }>,
+  ): Promise<void> => {
+    if (created.length === 0) {
+      return;
+    }
+    if (live.setFileMode !== undefined) {
+      for (const { staged, entry } of created) {
+        // oxlint-disable-next-line no-await-in-loop -- mode belongs to each staged file before it publishes.
+        await live.setFileMode(staged, entry.mode);
+      }
+    }
+    signal?.throwIfAborted();
+    const result = await live.bulkMove(created.map(({ path, staged }) => ({ source: staged, target: path })));
+    for (const { edit } of result.moved) {
+      published.add(edit.source);
+    }
+    const [refused, ...others] = result.failed;
+    if (refused === undefined) {
+      return;
+    }
+    /* The first refusal is raised; the rest are named so a batch that refused
+     * many files never reads as a one-file failure. */
+    const also =
+      others.length === 0
+        ? ''
+        : ` ${String(others.length)} more ${others.length === 1 ? 'file was' : 'files were'} refused: ${others.map(({ edit }) => edit.target).join(', ')}.`;
+    if (refused.error.code === 'NAME_EXISTS') {
+      throw new RevisionPortError(
+        'CHECKOUT_CONFLICT',
+        `${refused.edit.target} was created while these files were being updated.${also}`,
+      );
+    }
+    /* The pipeline wraps each move's failure; the per-file path raises the
+     * provider's own error (an errno, a missing workspace handle), so this does too. */
+    const raised: unknown = (refused.error as { cause?: unknown }).cause ?? refused.error;
+    /* The provider's error is thrown unchanged: a DOMException's message cannot
+     * be assigned, so the other refusals are logged instead of appended. */
+    if (also !== '') {
+      console.warn(`[revisions] ${refused.edit.target} could not be published.${also}`);
+    }
+    throw raised;
+  };
+
+  /**
    * Write one tree over a checkout and verify exactly what it applied.
    *
    * The same primitive a settlement runs and a restore runs — applying a stored
@@ -247,12 +321,26 @@ export const createApplyTreeEffects = (
         }));
         signal?.throwIfAborted();
         await stageFiles(live, stagedFiles);
+        /* Staged paths whose bytes now sit at their target; every other one is swept below. */
+        const published = new Set<string>();
+        /* A path the checkout did not hold has no bytes to move aside or verify,
+         * so where the surface moves in bulk, all of them publish in one call. */
+        const movesInBulk = hasBulkMove(live);
         try {
-          for (const { path, entry, staged } of stagedFiles) {
+          if (movesInBulk) {
+            await publishCreated(
+              live,
+              stagedFiles.filter(({ path }) => !liveFiles.has(path)),
+              { published, signal },
+            );
+          }
+          /* The batch above already settled every path the checkout did not hold. */
+          for (const { path, entry, staged } of stagedFiles.filter(
+            (file) => !movesInBulk || liveFiles.has(file.path),
+          )) {
             signal?.throwIfAborted();
             const current = liveFiles.get(path);
             const backup = current === undefined ? undefined : temporarySibling(path, 'backup');
-            let published = false;
             try {
               if (live.setFileMode !== undefined) {
                 // oxlint-disable-next-line no-await-in-loop -- mode belongs to the staged file.
@@ -290,7 +378,7 @@ export const createApplyTreeEffects = (
               }
               // oxlint-disable-next-line no-await-in-loop -- one atomic rename publishes the already-written file.
               await live.rename(staged, path);
-              published = true;
+              published.add(staged);
             } finally {
               if (backup !== undefined) {
                 /* The bytes this replacement moved aside go back unless the swap
@@ -298,7 +386,7 @@ export const createApplyTreeEffects = (
                  * the path — so an apply that stops mid-file leaves the file it
                  * was replacing rather than a hole where neither version is. */
                 // oxlint-disable-next-line no-await-in-loop -- the backup belongs to this ordered mutation.
-                const replaced = published || (await live.exists(path));
+                const replaced = published.has(staged) || (await live.exists(path));
                 // oxlint-disable-next-line no-await-in-loop -- either the revision retains the prior bytes or the checkout must.
                 await (replaced ? unlinkIfPresent(live, backup) : live.rename(backup, path));
               }
@@ -308,8 +396,10 @@ export const createApplyTreeEffects = (
           /* Bytes staged and never published are this call's litter, swept
            * before the verification re-reads the tree they would appear in. */
           for (const { staged } of stagedFiles) {
-            // oxlint-disable-next-line no-await-in-loop -- one ordered sweep of what this call staged.
-            await unlinkIfPresent(live, staged);
+            if (!published.has(staged)) {
+              // oxlint-disable-next-line no-await-in-loop -- one ordered sweep of what this call staged.
+              await unlinkIfPresent(live, staged);
+            }
           }
         }
         signal?.throwIfAborted();

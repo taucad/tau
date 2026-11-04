@@ -12,9 +12,8 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import process from 'node:process';
-
-/** The cookie the server sets (`skewProtectionCookieName` in `app/lib/skew-protection.server.ts`). */
-export const skewProtectionCookieName = 'tau_skew';
+// oxlint-disable-next-line no-restricted-imports -- Native Node build step reads the server's cookie name without bundler aliases.
+import { skewProtectionCookieName } from '../app/lib/skew-protection.server.ts';
 
 /** The Frameworks API configuration: which paths are pinned, and where the token is read from. */
 export const skewProtectionConfig = {

@@ -4,88 +4,113 @@ import type { ServerVerdict } from '#filesystem/build-skew.js';
 
 const skew = vi.hoisted(() => ({
   verdict: 'live' as ServerVerdict,
+  hidden: false,
+  listeners: new Set<() => void>(),
   queryLiveBuild: vi.fn(async () => undefined),
 }));
 vi.mock('#filesystem/build-skew.js', () => ({
+  buildId: 1_793_602_644_446,
   queryLiveBuild: skew.queryLiveBuild,
   readServerVerdict: () => skew.verdict,
+  subscribeServerVerdict: (listener: () => void) => {
+    skew.listeners.add(listener);
+    return () => skew.listeners.delete(listener);
+  },
 }));
+vi.mock('#lib/page-visibility.js', () => ({ isPageHidden: () => skew.hidden }));
 
-const { hiddenRecheckAfter, installStaleBuildNavigation, visiblePollInterval } =
+const { documentHrefFor, hiddenRecheckAfter, installStaleBuildNavigation, visiblePollInterval } =
   await import('#lib/stale-build-navigation.js');
 
-const setVisibility = (state: DocumentVisibilityState): void => {
-  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue(state);
+/** The server's verdict changes, as `build-skew` announces it. */
+const setVerdict = (verdict: ServerVerdict): void => {
+  skew.verdict = verdict;
+  for (const listener of skew.listeners) {
+    listener();
+  }
+};
+
+const setHidden = (hidden: boolean): void => {
+  skew.hidden = hidden;
   document.dispatchEvent(new Event('visibilitychange'));
 };
 
-/** Click a link to `href`, as `init` says; `true` when the click reached the page (React's root listens there). */
-const clickLink = (href: string, init: MouseEventInit = {}, attributes: Record<string, string> = {}): boolean => {
-  const anchor = document.createElement('a');
-  anchor.href = href;
-  for (const [name, value] of Object.entries(attributes)) {
-    anchor.setAttribute(name, value);
-  }
-  const label = document.createElement('span');
-  anchor.append(label);
-  document.body.append(anchor);
-  let reached = false;
-  const onBody = (event: Event): void => {
-    reached = true;
-    // No navigation in jsdom: keep it from trying.
-    event.preventDefault();
-  };
-  document.body.addEventListener('click', onBody);
-  label.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, ...init }));
-  document.body.removeEventListener('click', onBody);
-  anchor.remove();
-  return reached;
+const routerNavigate = vi.fn(async () => undefined);
+const router: { navigate: (to: unknown, options?: Record<string, unknown>) => Promise<void> } = {
+  navigate: routerNavigate,
 };
-
+const assign = vi.fn();
+const replace = vi.fn();
 let uninstall: (() => void) | undefined;
 
 beforeEach(() => {
   vi.useFakeTimers();
   skew.verdict = 'live';
+  skew.hidden = false;
   skew.queryLiveBuild.mockClear();
-  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+  routerNavigate.mockClear();
+  router.navigate = routerNavigate;
+  vi.stubGlobal('__reactRouterDataRouter', router);
+  vi.stubGlobal('location', { ...globalThis.location, pathname: '/w/home/cube', search: '', assign, replace });
+  assign.mockClear();
+  replace.mockClear();
   uninstall = installStaleBuildNavigation();
 });
 
 afterEach(() => {
   uninstall?.();
   vi.useRealTimers();
-  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+describe('documentHrefFor', () => {
+  const here = new URL('https://taucad.dev/w/home/cube') as unknown as Location;
+
+  it('loads an absolute in-app path to another page', () => {
+    expect(documentHrefFor('/projects', undefined, here)).toBe('/projects');
+    expect(documentHrefFor({ pathname: '/projects', search: '?q=1' }, undefined, here)).toBe('/projects?q=1');
+  });
+
+  it('leaves relative, numeric, same-page, protocol-relative and submitting navigations to the router', () => {
+    expect(documentHrefFor('projects', undefined, here)).toBeUndefined();
+    expect(documentHrefFor(-1, undefined, here)).toBeUndefined();
+    expect(documentHrefFor('/w/home/cube#files', undefined, here)).toBeUndefined();
+    expect(documentHrefFor('//example.com/x', undefined, here)).toBeUndefined();
+    expect(documentHrefFor('/projects', { formData: new FormData() }, here)).toBeUndefined();
+  });
 });
 
 describe('installStaleBuildNavigation', () => {
-  it('leaves clicks to the router while the server names this build', () => {
-    expect(clickLink('/projects')).toBe(true);
+  it('leaves navigations to the router while the server names this build', async () => {
+    await router.navigate('/projects');
+    expect(routerNavigate).toHaveBeenCalledWith('/projects');
+    expect(assign).not.toHaveBeenCalled();
   });
 
-  it('keeps an in-app link click from the router once the server names another build', () => {
-    skew.verdict = 'replaced';
-    expect(clickLink('/projects')).toBe(false);
+  it('loads an in-app destination as a document once the server names another build, and stops when it no longer does', async () => {
+    setVerdict('replaced');
+    void router.navigate('/projects');
+    void router.navigate('/projects/new', { replace: true });
+    expect(assign).toHaveBeenCalledWith('/projects');
+    expect(replace).toHaveBeenCalledWith('/projects/new');
+    expect(routerNavigate).not.toHaveBeenCalled();
+
+    await router.navigate('projects');
+    expect(routerNavigate).toHaveBeenCalledWith('projects', undefined);
+
+    setVerdict('live');
+    expect(router.navigate).toBe(routerNavigate);
   });
 
-  it('leaves clicks the browser would not load in this tab, and hash jumps, to the page', () => {
-    skew.verdict = 'replaced';
-    expect(clickLink('/projects', { metaKey: true })).toBe(true);
-    expect(clickLink('/projects', {}, { target: '_blank' })).toBe(true);
-    expect(clickLink('/projects', {}, { download: '' })).toBe(true);
-    expect(clickLink('https://example.com/projects')).toBe(true);
-    expect(clickLink(`${globalThis.location.pathname}#section`)).toBe(true);
-  });
-
-  it('asks the server when a tab turns visible after a long absence, not after a short one', () => {
-    setVisibility('hidden');
+  it('asks the server when a tab is shown again after a long absence, not after a short one', () => {
+    setHidden(true);
     vi.advanceTimersByTime(hiddenRecheckAfter - 1);
-    setVisibility('visible');
+    setHidden(false);
     expect(skew.queryLiveBuild).not.toHaveBeenCalled();
 
-    setVisibility('hidden');
+    setHidden(true);
     vi.advanceTimersByTime(hiddenRecheckAfter);
-    setVisibility('visible');
+    setHidden(false);
     expect(skew.queryLiveBuild).toHaveBeenCalledTimes(1);
   });
 
@@ -93,8 +118,13 @@ describe('installStaleBuildNavigation', () => {
     vi.advanceTimersByTime(visiblePollInterval);
     expect(skew.queryLiveBuild).toHaveBeenCalledTimes(1);
 
-    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    skew.hidden = true;
     vi.advanceTimersByTime(visiblePollInterval);
+    expect(skew.queryLiveBuild).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks the server when the page comes back from the back/forward cache', () => {
+    globalThis.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
     expect(skew.queryLiveBuild).toHaveBeenCalledTimes(1);
   });
 });

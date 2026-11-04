@@ -53,8 +53,14 @@ export const servedAssetsIndexSchema = 'tau-ui-served-assets-v1';
 /** Deploys after its own that an asset stays served for, however long ago it left the live build. */
 export const retainedGenerations = 2;
 
-/** Milliseconds after leaving the live build that an asset stays served for, however many deploys pass. */
+/** Milliseconds after leaving the live build that an asset stays served for, up to {@link retainedGenerationsCap}. */
 export const retentionWindow = 7 * 24 * 60 * 60_000;
+
+/**
+ * Deploys after its own that the window keeps an asset for at most: each deploy downloads every retained
+ * asset again (about 15 MiB a staging deploy, measured 2026-11-05), so the window must not grow without bound.
+ */
+export const retainedGenerationsCap = 10;
 
 /** One served asset: its path under the client root, its SRI integrity and its age in deploys. */
 export type ServedAsset = {
@@ -197,11 +203,11 @@ export const isSameBuild = (previous: ServedAssetsIndex, own: readonly ServedAss
  * @param ownPaths - Asset paths the new build has itself.
  * @param options - `now`: this deploy's time (milliseconds since the epoch); `generations`: deploys after
  *   its own that an asset stays served for; `window`: milliseconds after leaving the live build that it
- *   stays served for; `shouldAge`: `false` for a redeploy of the same build ({@link isSameBuild}), whose
- *   ages stay as listed.
- * @returns The assets to download, one generation older than the live index lists them unless not aging,
- *   each stamped with when it left the live build (now, for those leaving with this deploy, and for
- *   entries an index from before the stamp lists).
+ *   stays served for, within `cap` deploys; `shouldAge`: `false` for a redeploy of the same build
+ *   ({@link isSameBuild}), whose ages stay as listed.
+ * @returns The assets to download, one generation older than the live index lists them unless not aging.
+ *   Those leaving the live build with this deploy are stamped now; an entry an index from before the stamp
+ *   lists stays unstamped and only the generation count keeps it.
  */
 export const planRetention = (
   previous: ServedAssetsIndex,
@@ -210,15 +216,29 @@ export const planRetention = (
     readonly now: number;
     readonly generations?: number;
     readonly window?: number;
+    readonly cap?: number;
     readonly shouldAge?: boolean;
   },
 ): readonly ServedAsset[] => {
-  const { now, generations = retainedGenerations, window = retentionWindow, shouldAge = true } = options;
+  const {
+    now,
+    generations = retainedGenerations,
+    window = retentionWindow,
+    cap = retainedGenerationsCap,
+    shouldAge = true,
+  } = options;
   const step = shouldAge ? 1 : 0;
   return previous.assets
     .filter((asset) => !ownPaths.has(asset.path))
-    .map((asset) => ({ ...asset, generation: asset.generation + step, retiredAt: asset.retiredAt ?? now }))
-    .filter((asset) => asset.generation <= generations || now - asset.retiredAt <= window);
+    .map((asset) => {
+      const aged = { ...asset, generation: asset.generation + step };
+      return asset.generation === 0 && shouldAge ? { ...aged, retiredAt: now } : aged;
+    })
+    .filter(
+      (asset) =>
+        asset.generation <= generations ||
+        (asset.generation <= cap && asset.retiredAt !== undefined && now - asset.retiredAt <= window),
+    );
 };
 
 /** Files hashed at once: the build holds about 2,000 files and 330 MiB, which must not all be read together. */

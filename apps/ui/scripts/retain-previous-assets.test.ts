@@ -11,6 +11,7 @@ import {
   parseServedAssetsIndex,
   planRetention,
   retainPreviousAssets,
+  retainedGenerationsCap,
   retentionWindow,
   servedAssetsIndexFileName,
   servedAssetsIndexSchema,
@@ -156,12 +157,28 @@ describe('planRetention', () => {
     ]);
   });
 
-  it('should stamp an entry an index from before the stamp lists as leaving now', () => {
-    const legacy = indexOf([{ path: 'assets/route-OLD3.js', integrity: integrityOf('old3'), generation: 2 }]);
+  it('should keep an entry an older index lists without a stamp only by its generations', () => {
+    const legacy = indexOf([
+      { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 1 },
+      { path: 'assets/route-OLD3.js', integrity: integrityOf('old3'), generation: 2 },
+    ]);
 
     expect(planRetention(legacy, new Set(), { now })).toStrictEqual([
-      { path: 'assets/route-OLD3.js', integrity: integrityOf('old3'), generation: 3, retiredAt: now },
+      { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 2 },
     ]);
+  });
+
+  it('should drop an asset within the window once it is past the generation cap', () => {
+    const many = indexOf([
+      {
+        path: 'assets/route-OLD3.js',
+        integrity: integrityOf('old3'),
+        generation: retainedGenerationsCap,
+        retiredAt: now,
+      },
+    ]);
+
+    expect(planRetention(many, new Set(), { now })).toStrictEqual([]);
   });
 
   it('should keep nothing when retention is off', () => {

@@ -332,6 +332,31 @@ describe('OPFS rename via native move', () => {
     await expect(provider.exists('source.txt')).resolves.toBe(false);
   });
 
+  it.each([
+    { refusal: 'NotFoundError', code: 'ENOENT' },
+    { refusal: 'InvalidModificationError', code: 'EEXIST' },
+    { refusal: 'TypeMismatchError', code: 'EEXIST' },
+  ])('should report a native $refusal as $code with the DOM exception as cause', async ({ refusal, code }) => {
+    const { root } = mountRoot({ nativeMove: true });
+    const provider = new OPFSProvider();
+    await provider.initialize();
+    await provider.writeFile('source.txt', 'payload');
+    const originalGetFileHandle = root.getFileHandle.bind(root);
+    vi.spyOn(root, 'getFileHandle').mockImplementation(async (name, options) => {
+      const handle = await originalGetFileHandle(name, options);
+      if (name === 'source.txt' && handle.move !== undefined) {
+        vi.spyOn(handle, 'move').mockRejectedValue(new DOMException('refused', refusal));
+      }
+      return handle;
+    });
+
+    await expect(provider.rename('source.txt', 'target.txt')).rejects.toMatchObject({
+      code,
+      cause: { name: refusal },
+    });
+    await expect(provider.readFile('source.txt', 'utf8')).resolves.toBe('payload');
+  });
+
   it('should remove the parents it created and keep the source when a native move fails', async () => {
     const { root } = mountRoot({ nativeMove: true });
     const provider = new OPFSProvider();
@@ -341,7 +366,8 @@ describe('OPFS rename via native move', () => {
     const contender = await sourceHandle.createSyncAccessHandle!();
     try {
       await expect(provider.rename('source.txt', 'created/target.txt')).rejects.toMatchObject({
-        name: 'NoModificationAllowedError',
+        code: 'EBUSY',
+        cause: { name: 'NoModificationAllowedError' },
       });
     } finally {
       contender.close();

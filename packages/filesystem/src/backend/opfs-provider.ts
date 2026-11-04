@@ -38,6 +38,9 @@ type OPFSCapabilities = Omit<ProviderCapabilities, 'durability'> & {
   durability: NonNullable<ProviderCapabilities['durability']>;
 };
 
+const hasDomName = (error: unknown, name: string): boolean =>
+  typeof error === 'object' && error !== null && 'name' in error && error.name === name;
+
 const writeAll = (handle: SyncAccessHandle, bytes: Uint8Array<ArrayBuffer>, offset: number): void => {
   let written = 0;
   while (written < bytes.byteLength) {
@@ -191,10 +194,13 @@ export class OPFSProvider extends FileSystemAccessProvider {
    * Move one file with the platform's native `move()`: one metadata operation
    * instead of reading the bytes, writing and flushing a copy, and unlinking
    * the source — and atomic, so an interrupted move never leaves both or
-   * neither. {@link FileSystemAccessProvider.rename} has already refused an
-   * existing destination with `EEXIST`, so the platform's own overwrite
-   * behaviour is never reached. An engine without `move()`, or one that
-   * refuses it as unsupported, takes the inherited copy path.
+   * neither. {@link FileSystemAccessProvider.rename} refuses an existing
+   * destination with `EEXIST` first, so the platform's own overwrite behaviour
+   * is reached only by a writer outside this provider that creates the target
+   * between that check and the move. An engine without `move()`, or one that
+   * refuses it as unsupported, takes the inherited copy path. Other platform
+   * refusals surface as the errno codes callers already branch on, with the
+   * DOM exception as `cause`.
    *
    * @param from - Source file path.
    * @param to - Absent destination file path.
@@ -213,11 +219,11 @@ export class OPFSProvider extends FileSystemAccessProvider {
       await move.call(source, directoryHandle, name);
     } catch (error) {
       await this._cleanupCreatedDirectories(createdDirectories);
-      if (error instanceof DOMException && error.name === 'NotSupportedError') {
+      if (hasDomName(error, 'NotSupportedError')) {
         await super._moveFile(from, to);
         return;
       }
-      throw error;
+      throw this._moveError(error, from, to);
     }
   }
 
@@ -225,6 +231,25 @@ export class OPFSProvider extends FileSystemAccessProvider {
     if (!this._initialized) {
       throw new Error('OPFSProvider is not initialized. Call initialize() first.');
     }
+  }
+
+  /**
+   * Translate a native `move()` refusal into the errno vocabulary of `rename`.
+   *
+   * @param error - What `move()` rejected with.
+   * @param from - Source file path.
+   * @param to - Destination file path.
+   * @returns The errno error carrying `error` as its cause, or `error` itself when it has no errno equivalent.
+   */
+  private _moveError(error: unknown, from: string, to: string): unknown {
+    const mapped = hasDomName(error, 'NotFoundError')
+      ? this._enoent(from)
+      : hasDomName(error, 'InvalidModificationError') || hasDomName(error, 'TypeMismatchError')
+        ? this._eexist(to)
+        : hasDomName(error, 'NoModificationAllowedError')
+          ? this._errno('EBUSY', 'resource busy or locked', from)
+          : undefined;
+    return mapped === undefined ? error : Object.assign(mapped, { cause: error });
   }
 
   private async _supportsSyncAccess(): Promise<boolean> {

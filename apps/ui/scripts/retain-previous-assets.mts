@@ -7,7 +7,10 @@
  * every chunk its final bytes. It reads the live deploy's index of served
  * assets, downloads each asset the new build lacks from the live origin, checks
  * it against the index's integrity, and writes it beside the new build's own.
- * An asset is kept for `retainedGenerations` deploys after the one that built it.
+ * An asset is kept while either holds: it left the live build at most `retentionWindow` ago
+ * (TAU-UI-S: staging deploys many times a day, so a count of deploys can pass within hours and a tab
+ * open since then fails its next navigation), or it is within `retainedGenerations` deploys of the
+ * one that built it (production deploys per release, so the window alone could keep less).
  * It then writes the new deploy's index (`tau-served-assets.json`), which the
  * next deploy reads in turn. Netlify stores files by content, so a retained
  * asset is not uploaded again.
@@ -47,8 +50,11 @@ export const servedAssetsIndexFileName = 'tau-served-assets.json';
 /** `schema` of {@link ServedAssetsIndex}. */
 export const servedAssetsIndexSchema = 'tau-ui-served-assets-v1';
 
-/** Deploys after its own that an asset stays served for. */
+/** Deploys after its own that an asset stays served for, however long ago it left the live build. */
 export const retainedGenerations = 2;
+
+/** Milliseconds after leaving the live build that an asset stays served for, however many deploys pass. */
+export const retentionWindow = 7 * 24 * 60 * 60_000;
 
 /** One served asset: its path under the client root, its SRI integrity and its age in deploys. */
 export type ServedAsset = {
@@ -56,6 +62,8 @@ export type ServedAsset = {
   readonly integrity: string;
   /** `0` for the deploy's own build, `n` for an asset kept from `n` deploys before. */
   readonly generation: number;
+  /** Milliseconds since the epoch when the asset left the live build; absent while it is part of it. */
+  readonly retiredAt?: number;
 };
 
 /** Every asset one deploy serves. */
@@ -120,7 +128,7 @@ const assertServedAsset = (entry: unknown): ServedAsset => {
   if (typeof entry !== 'object' || entry === null) {
     throw new TypeError(`The live asset index has a malformed entry: ${JSON.stringify(entry)}.`);
   }
-  const { path, integrity, generation } = entry as Partial<Record<keyof ServedAsset, unknown>>;
+  const { path, integrity, generation, retiredAt } = entry as Partial<Record<keyof ServedAsset, unknown>>;
   if (typeof path !== 'string' || typeof integrity !== 'string' || typeof generation !== 'number') {
     throw new TypeError(`The live asset index has a malformed entry: ${JSON.stringify(entry)}.`);
   }
@@ -130,7 +138,13 @@ const assertServedAsset = (entry: unknown): ServedAsset => {
   if (!sha384Integrity.test(integrity) || !Number.isInteger(generation) || generation < 0) {
     throw new Error(`The live asset index has a malformed entry for ${path}.`);
   }
-  return { path, integrity, generation };
+  if (retiredAt === undefined) {
+    return { path, integrity, generation };
+  }
+  if (typeof retiredAt !== 'number' || !Number.isInteger(retiredAt) || retiredAt < 0) {
+    throw new Error(`The live asset index has a malformed retirement time for ${path}.`);
+  }
+  return { path, integrity, generation, retiredAt };
 };
 
 /**
@@ -181,20 +195,30 @@ export const isSameBuild = (previous: ServedAssetsIndex, own: readonly ServedAss
  *
  * @param previous - The live deploy's index, checked ({@link parseServedAssetsIndex}).
  * @param ownPaths - Asset paths the new build has itself.
- * @param options - `generations`: deploys after its own that an asset stays served for; `shouldAge`:
- *   `false` for a redeploy of the same build ({@link isSameBuild}), whose ages stay as listed.
- * @returns The assets to download, one generation older than the live index lists them unless not aging.
+ * @param options - `now`: this deploy's time (milliseconds since the epoch); `generations`: deploys after
+ *   its own that an asset stays served for; `window`: milliseconds after leaving the live build that it
+ *   stays served for; `shouldAge`: `false` for a redeploy of the same build ({@link isSameBuild}), whose
+ *   ages stay as listed.
+ * @returns The assets to download, one generation older than the live index lists them unless not aging,
+ *   each stamped with when it left the live build (now, for those leaving with this deploy, and for
+ *   entries an index from before the stamp lists).
  */
 export const planRetention = (
   previous: ServedAssetsIndex,
   ownPaths: ReadonlySet<string>,
-  options: { readonly generations?: number; readonly shouldAge?: boolean } = {},
+  options: {
+    readonly now: number;
+    readonly generations?: number;
+    readonly window?: number;
+    readonly shouldAge?: boolean;
+  },
 ): readonly ServedAsset[] => {
-  const { generations = retainedGenerations, shouldAge = true } = options;
+  const { now, generations = retainedGenerations, window = retentionWindow, shouldAge = true } = options;
   const step = shouldAge ? 1 : 0;
   return previous.assets
-    .filter((asset) => asset.generation + step <= generations && !ownPaths.has(asset.path))
-    .map((asset) => ({ ...asset, generation: asset.generation + step }));
+    .filter((asset) => !ownPaths.has(asset.path))
+    .map((asset) => ({ ...asset, generation: asset.generation + step, retiredAt: asset.retiredAt ?? now }))
+    .filter((asset) => asset.generation <= generations || now - asset.retiredAt <= window);
 };
 
 /** Files hashed at once: the build holds about 2,000 files and 330 MiB, which must not all be read together. */
@@ -384,6 +408,8 @@ export const retainPreviousAssets = async (options: {
   readonly wait?: (milliseconds: number) => Promise<void>;
   /** Retain nothing and ask the live deploy nothing (`TAU_RETAIN_ASSETS_SKIP`): an emergency deploy while it is down. */
   readonly skip?: boolean;
+  /** This deploy's time in milliseconds since the epoch; replaceable in tests. */
+  readonly now?: number;
 }): Promise<{ readonly retained: number; readonly bytes: number; readonly index: ServedAssetsIndex }> => {
   const transport: Transport = {
     requestTimeout: options.requestTimeout ?? defaultRequestTimeout,
@@ -395,7 +421,10 @@ export const retainPreviousAssets = async (options: {
   const kept =
     previous === undefined
       ? []
-      : planRetention(previous, new Set(own.map((asset) => asset.path)), { shouldAge: !isSameBuild(previous, own) });
+      : planRetention(previous, new Set(own.map((asset) => asset.path)), {
+          now: options.now ?? Date.now(),
+          shouldAge: !isSameBuild(previous, own),
+        });
 
   const download: Download = { origin: origin ?? '', clientDirectory: options.clientDirectory, transport };
   const sizes = await mapWithConcurrency(kept, downloadConcurrency, async (asset) => downloadAsset(download, asset));

@@ -11,6 +11,7 @@ import {
   parseServedAssetsIndex,
   planRetention,
   retainPreviousAssets,
+  retentionWindow,
   servedAssetsIndexFileName,
   servedAssetsIndexSchema,
 } from '#scripts/retain-previous-assets.mts';
@@ -18,6 +19,10 @@ import type { ServedAsset, ServedAssetsIndex } from '#scripts/retain-previous-as
 
 const integrityOf = (bytes: string | Uint8Array<ArrayBuffer>): string =>
   `sha384-${createHash('sha384').update(bytes).digest('base64')}`;
+
+/** This deploy's time, and a retirement older than the window: only the generation count keeps such an asset. */
+const now = Date.UTC(2026, 10, 4);
+const longAgo = now - retentionWindow - 1;
 
 const indexOf = (assets: readonly ServedAsset[]): ServedAssetsIndex => ({ schema: servedAssetsIndexSchema, assets });
 
@@ -124,19 +129,48 @@ describe('planRetention', () => {
   const previous = indexOf([
     { path: 'assets/shared-AAAA.js', integrity: integrityOf('shared'), generation: 0 },
     { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 },
-    { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 1 },
-    { path: 'assets/route-OLD3.js', integrity: integrityOf('old3'), generation: 2 },
+    { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 1, retiredAt: longAgo },
+    { path: 'assets/route-OLD3.js', integrity: integrityOf('old3'), generation: 2, retiredAt: longAgo },
   ]);
 
   it('should keep the previous builds’ assets the new build lacks, one generation older', () => {
-    expect(planRetention(previous, new Set(['assets/shared-AAAA.js']), { generations: 2 })).toStrictEqual([
-      { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 1 },
-      { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 2 },
+    expect(planRetention(previous, new Set(['assets/shared-AAAA.js']), { now, generations: 2 })).toStrictEqual([
+      { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 1, retiredAt: now },
+      { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 2, retiredAt: longAgo },
+    ]);
+  });
+
+  it('should keep an asset past its generations while it left the live build within the window (TAU-UI-S)', () => {
+    const recent = indexOf([
+      { path: 'assets/route-OLD3.js', integrity: integrityOf('old3'), generation: 7, retiredAt: now - retentionWindow },
+      { path: 'assets/route-OLD4.js', integrity: integrityOf('old4'), generation: 7, retiredAt: longAgo },
+    ]);
+
+    expect(planRetention(recent, new Set(), { now })).toStrictEqual([
+      {
+        path: 'assets/route-OLD3.js',
+        integrity: integrityOf('old3'),
+        generation: 8,
+        retiredAt: now - retentionWindow,
+      },
+    ]);
+  });
+
+  it('should stamp an entry an index from before the stamp lists as leaving now', () => {
+    const legacy = indexOf([{ path: 'assets/route-OLD3.js', integrity: integrityOf('old3'), generation: 2 }]);
+
+    expect(planRetention(legacy, new Set(), { now })).toStrictEqual([
+      { path: 'assets/route-OLD3.js', integrity: integrityOf('old3'), generation: 3, retiredAt: now },
     ]);
   });
 
   it('should keep nothing when retention is off', () => {
-    expect(planRetention(previous, new Set(), { generations: 0 })).toStrictEqual([]);
+    expect(planRetention(previous, new Set(), { now, generations: 0, window: -1 })).toStrictEqual([]);
+  });
+
+  it('should call a malformed retirement time malformed', () => {
+    const entry = { path: 'assets/a-1.js', integrity: integrityOf('x'), generation: 1, retiredAt: -1 };
+    expect(() => parseServedAssetsIndex(indexOf([entry]), 'the live index')).toThrow('malformed retirement time');
   });
 
   it.each([
@@ -166,8 +200,8 @@ describe('planRetention', () => {
       'the live index',
     );
 
-    expect(planRetention(twice, new Set(), { generations: 2 })).toStrictEqual([
-      { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 1 },
+    expect(planRetention(twice, new Set(), { now, generations: 2 })).toStrictEqual([
+      { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 1, retiredAt: now },
     ]);
   });
 
@@ -191,13 +225,13 @@ describe('retainPreviousAssets', () => {
       indexOf([
         { path: 'assets/shared-AAAA.js', integrity: integrityOf('shared'), generation: 0 },
         { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 },
-        { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 1 },
-        { path: 'assets/route-OLD3.js', integrity: integrityOf('old3'), generation: 2 },
+        { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 1, retiredAt: longAgo },
+        { path: 'assets/route-OLD3.js', integrity: integrityOf('old3'), generation: 2, retiredAt: longAgo },
       ]),
     );
     const client = await createClient({ 'assets/shared-AAAA.js': 'shared', 'assets/route-NEW1.js': 'new1' });
 
-    const result = await retainPreviousAssets({ clientDirectory: client, origin: live.origin });
+    const result = await retainPreviousAssets({ clientDirectory: client, origin: live.origin, now });
 
     expect(await readFile(join(client, 'assets/route-OLD1.js'), 'utf8')).toBe('old1');
     expect(await readFile(join(client, 'assets/route-OLD2.js'), 'utf8')).toBe('old2');
@@ -207,8 +241,8 @@ describe('retainPreviousAssets', () => {
     expect(await readIndex(client)).toStrictEqual(
       indexOf([
         { path: 'assets/route-NEW1.js', integrity: integrityOf('new1'), generation: 0 },
-        { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 1 },
-        { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 2 },
+        { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 1, retiredAt: now },
+        { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 2, retiredAt: longAgo },
         { path: 'assets/shared-AAAA.js', integrity: integrityOf('shared'), generation: 0 },
       ]),
     );
@@ -219,19 +253,19 @@ describe('retainPreviousAssets', () => {
       { 'assets/route-NEW1.js': 'new1', 'assets/route-OLD1.js': 'old1', 'assets/route-OLD2.js': 'old2' },
       indexOf([
         { path: 'assets/route-NEW1.js', integrity: integrityOf('new1'), generation: 0 },
-        { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 1 },
-        { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 2 },
+        { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 1, retiredAt: longAgo },
+        { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 2, retiredAt: longAgo },
       ]),
     );
     const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
 
-    await retainPreviousAssets({ clientDirectory: client, origin: live.origin });
+    await retainPreviousAssets({ clientDirectory: client, origin: live.origin, now });
 
     expect(await readIndex(client)).toStrictEqual(
       indexOf([
         { path: 'assets/route-NEW1.js', integrity: integrityOf('new1'), generation: 0 },
-        { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 1 },
-        { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 2 },
+        { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 1, retiredAt: longAgo },
+        { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 2, retiredAt: longAgo },
       ]),
     );
   });
@@ -241,18 +275,19 @@ describe('retainPreviousAssets', () => {
       { 'assets/route-NEW1.js': 'new1 //# chunkId=run-1', 'assets/route-OLD2.js': 'old2' },
       indexOf([
         { path: 'assets/route-NEW1.js', integrity: integrityOf('new1 //# chunkId=run-1'), generation: 0 },
-        { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 2 },
+        { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 2, retiredAt: longAgo },
       ]),
     );
     const client = await createClient({ 'assets/route-NEW1.js': 'new1 //# chunkId=run-2' });
 
-    await retainPreviousAssets({ clientDirectory: client, origin: live.origin });
+    await retainPreviousAssets({ clientDirectory: client, origin: live.origin, now });
 
     const { assets } = await readIndex(client);
     expect(assets).toContainEqual({
       path: 'assets/route-OLD2.js',
       integrity: integrityOf('old2'),
       generation: 2,
+      retiredAt: longAgo,
     });
   });
 
@@ -261,19 +296,19 @@ describe('retainPreviousAssets', () => {
       { 'assets/route-NEW1.js': 'new1', 'assets/route-OLD1.js': 'old1', 'assets/route-OLD2.js': 'old2' },
       indexOf([
         { path: 'assets/route-NEW1.js', integrity: integrityOf('new1'), generation: 0 },
-        { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 1 },
-        { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 2 },
+        { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 1, retiredAt: longAgo },
+        { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 2, retiredAt: longAgo },
       ]),
     );
     const client = await createClient({ 'assets/route-NEW2.js': 'new2' });
 
-    await retainPreviousAssets({ clientDirectory: client, origin: live.origin });
+    await retainPreviousAssets({ clientDirectory: client, origin: live.origin, now });
 
     expect(await readIndex(client)).toStrictEqual(
       indexOf([
-        { path: 'assets/route-NEW1.js', integrity: integrityOf('new1'), generation: 1 },
+        { path: 'assets/route-NEW1.js', integrity: integrityOf('new1'), generation: 1, retiredAt: now },
         { path: 'assets/route-NEW2.js', integrity: integrityOf('new2'), generation: 0 },
-        { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 2 },
+        { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 2, retiredAt: longAgo },
       ]),
     );
   });

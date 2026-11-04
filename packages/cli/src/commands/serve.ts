@@ -1024,230 +1024,234 @@ export const serveCommand = defineCommand({
     const runtimeTelemetry =
       process.env['TAU_CLOUD_HOST'] === '1' ? cliRuntimeTelemetry('cloud', packageJson.version) : undefined;
     const reportPreparation = runtimeTelemetry === undefined ? undefined : preparationReporter(runtimeTelemetry);
-    const uiChoice = serveUiChoice(args.ui);
-    let uiDirectory = uiChoice.kind === 'directory' ? uiChoice.directory : undefined;
-    if (uiChoice.kind === 'store' && port !== undefined) {
-      const storeUi = await prepareStoreUi(reportPreparation === undefined ? {} : { report: reportPreparation });
-      if (storeUi.status === 'ready') {
-        uiDirectory = storeUi.root;
-      } else {
-        consola.warn(
-          `Serving agents without a UI: ${storeUi.message} Pass --ui=<directory of a Tau UI build> to serve one.`,
-        );
-      }
-    }
-    /* A hand-off admits its target's origin beside the listed ones (X54). */
-    /* `multiple` yields an array at run time though citty types one string. */
-    const listedOrigins: unknown = args.allowedOrigins;
-    const configured = await agentOptions(
-      {
-        ...args,
-        ui: uiDirectory,
-        ...(workspace === undefined ? {} : { workspace }),
-        apiUrl,
-        allowedOrigins: [listedOrigins, handOff?.origin]
-          .flat()
-          .filter((origin): origin is string => typeof origin === 'string'),
-      },
-      port,
-    );
-    if (args.machines && !configured) {
-      throw new TypeError('--machines serves beside the agent channel: pass --agentPort or --ui as well');
-    }
-    const machines = args.machines ? { providers: await defaultMachineProviders() } : undefined;
-    /* The served SPA learns the managed profile from the daemon's environment, not its build (W19, X43). */
-    const acquisitionValue = process.env['TAU_ACQUISITION'];
-    const stagedUi =
-      configured?.uiRoot === undefined
-        ? undefined
-        : await stageUiEnvironment(configured.uiRoot, {
-            // eslint-disable-next-line @typescript-eslint/naming-convention -- the client environment key keeps its wire name.
-            TAU_ACQUISITION:
-              acquisitionValue === undefined || acquisitionValue.trim() === ''
-                ? undefined
-                : acquisitionOf(acquisitionValue),
-          });
-    const agent = configured && stagedUi ? { ...configured, uiRoot: stagedUi.root } : configured;
-    const computeWorkspaceRoot = agent?.workspaceRoot;
-    const computeStore = createComputeStoreHost({
-      directory: join(defaultConfigDirectory(), 'compute'),
-      onError: (error) => {
-        consola.error(`Compute store worker failed: ${error.message.replaceAll(/\s+/gu, ' ')}`);
-      },
-    });
-    const ensureCompute = (): ComputeStoreConnection => {
-      if (!computeWorkspaceRoot) {
-        throw new Error('Durable compute requires an admitted workspace.');
-      }
-      return computeStore.connect(computeWorkspaceRoot);
-    };
-    const compute: ComputeBinding | (() => ComputeBinding) | undefined = agent
-      ? args.computeMode === 'durable'
-        ? () => ({ mode: 'durable', store: ensureCompute().store })
-        : { mode: args.computeMode }
-      : undefined;
-    const kernels = serveNativeKernels(reportPreparation);
-    const skillBundles = await serveSkillBundles([args.plugin ?? []].flat());
-    const configuredAgent = agent
-      ? {
-          ...agent,
-          prepareKernel: kernels.prepareKernel,
-          preparableKernels: kernels.preparableKernels,
-          ...(machines ? { machines } : {}),
-          compute: compute!,
-          ...(args.computeMode === 'durable'
-            ? {
-                computeControl: {
-                  inspect: async (input: { signal?: AbortSignal }) => ensureCompute().control.inspect(input),
-                  clear: async (input: { signal?: AbortSignal }) => ensureCompute().control.clear(input),
-                  collect: async (input: { budget: number; cursor?: string; signal?: AbortSignal }) =>
-                    ensureCompute().control.collect(input),
-                },
-              }
-            : {}),
-        }
-      : undefined;
-    const stopped = Promise.withResolvers<NodeJS.Signals>();
-    const onSignal = (signal: NodeJS.Signals): void => {
-      stopped.resolve(signal);
-    };
-    process.once('SIGINT', onSignal);
-    process.once('SIGTERM', onSignal);
-    /* The relay is this daemon's Tau API, so its Zoo proxy is too unless TAU_WEBSOCKET_URL says otherwise. */
-    /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
-    const zooProxyUrl = cliZooProxyUrl({
-      TAU_WEBSOCKET_URL: process.env['TAU_WEBSOCKET_URL'],
-      TAU_API_URL: apiUrl,
-    });
-    /* eslint-enable @typescript-eslint/naming-convention -- End environment variable names. */
-    /* The one served URL, printed once on stdout for a script (Q53, C1 R9) and opened for a person. */
-    const served = Promise.withResolvers<string>();
-    const onEvent = (event: HostDaemonEvent): void => {
-      if (event.type === 'agent' && event.state === 'ready' && event.url !== undefined) {
-        served.resolve(event.url);
-      }
-      reportEvent(event);
-    };
-    const observeChats = await loadCloudHostObserver();
-    const daemon = startHostDaemon({
-      relayUrl: new URL(apiUrl),
-      relay: relay !== undefined,
-      runtimeHost: {
-        modulePath: runtimeChildModulePath(),
-        args: childArguments({
-          plugin: args.plugin,
-          config: args.config,
-          zooProxyUrl,
-          acquisition: acquisitionOf(process.env['TAU_ACQUISITION']),
-        }),
-        native: kernels.native,
-      },
-      zooProxy: { url: zooProxyUrl, apiUrl, sessionToken: await resolveZooAuthToken(apiUrl, zooProxyUrl) },
-      maxSessions,
-      systemSkillBundles: skillBundles,
-      pair: args.pair,
-      ...(configuredAgent ? { agent: configuredAgent } : {}),
-      ...(runtimeTelemetry === undefined
-        ? {}
-        : { observeRuntimeClient: (client, caller) => runtimeTelemetry.observe(client, caller) }),
-      ...(observeChats === undefined ? {} : { observeChats }),
-      onEvent,
-    });
+    /* Shut the reporter down however serve ends, so a preparation recorded before a setup failure still flushes. */
     try {
-      /* A signal before the daemon is ready stops it too: opening the workspace's
-       * store can take a while, and Ctrl+C must not wait for it. */
-      const started = await Promise.race([
-        daemon.ready.then(
-          (): 'ready' => 'ready',
-          (error: unknown) => {
-            throw workspaceRefusal(error);
-          },
-        ),
-        stopped.promise.then((): 'signal' => 'signal'),
-      ]);
-      if (started === 'signal') {
-        return;
+      const uiChoice = serveUiChoice(args.ui);
+      let uiDirectory = uiChoice.kind === 'directory' ? uiChoice.directory : undefined;
+      if (uiChoice.kind === 'store' && port !== undefined) {
+        const storeUi = await prepareStoreUi(reportPreparation === undefined ? {} : { report: reportPreparation });
+        if (storeUi.status === 'ready') {
+          uiDirectory = storeUi.root;
+        } else {
+          consola.warn(
+            `Serving agents without a UI: ${storeUi.message} Pass --ui=<directory of a Tau UI build> to serve one.`,
+          );
+        }
       }
-      /* The agent channel names its URL once it listens; a daemon that stops first, or a signal, has nothing to announce. */
-      const url =
-        configuredAgent === undefined
+      /* A hand-off admits its target's origin beside the listed ones (X54). */
+      /* `multiple` yields an array at run time though citty types one string. */
+      const listedOrigins: unknown = args.allowedOrigins;
+      const configured = await agentOptions(
+        {
+          ...args,
+          ui: uiDirectory,
+          ...(workspace === undefined ? {} : { workspace }),
+          apiUrl,
+          allowedOrigins: [listedOrigins, handOff?.origin]
+            .flat()
+            .filter((origin): origin is string => typeof origin === 'string'),
+        },
+        port,
+      );
+      if (args.machines && !configured) {
+        throw new TypeError('--machines serves beside the agent channel: pass --agentPort or --ui as well');
+      }
+      const machines = args.machines ? { providers: await defaultMachineProviders() } : undefined;
+      /* The served SPA learns the managed profile from the daemon's environment, not its build (W19, X43). */
+      const acquisitionValue = process.env['TAU_ACQUISITION'];
+      const stagedUi =
+        configured?.uiRoot === undefined
           ? undefined
-          : await Promise.race([
-              served.promise,
-              daemon.closed.then(
-                () => undefined,
-                () => undefined,
-              ),
-              stopped.promise.then(() => undefined),
-            ]);
-      if (configuredAgent !== undefined && url !== undefined) {
-        const scripted = args.print || args.json || args.smokeTest;
-        const handOffUrl =
-          handOff === undefined
-            ? undefined
-            : handOffLink(handOff, url, await mintHandOffCode(url, configuredAgent.token));
-        await announceServed({
-          url,
-          handOff: handOffUrl,
-          workspace: configuredAgent.workspaceRoot,
-          relay,
-          ui: configuredAgent.uiRoot !== undefined,
-          print: args.print,
-          json: args.json,
-          /* A hand-off is the point of the run: it opens unless printed for a script or refused with --no-open. */
-          open:
-            handOffUrl === undefined
-              ? shouldOpenBrowser({
-                  open: args.open,
-                  ui: configuredAgent.uiRoot !== undefined,
-                  scripted,
-                  interactive: process.stdout.isTTY,
-                  ci: Boolean(process.env['CI']),
-                })
-              : (args.open ?? !scripted),
-        });
-        if (args.smokeTest) {
-          await smokeTest(url, configuredAgent.uiRoot !== undefined);
+          : await stageUiEnvironment(configured.uiRoot, {
+              // eslint-disable-next-line @typescript-eslint/naming-convention -- the client environment key keeps its wire name.
+              TAU_ACQUISITION:
+                acquisitionValue === undefined || acquisitionValue.trim() === ''
+                  ? undefined
+                  : acquisitionOf(acquisitionValue),
+            });
+      const agent = configured && stagedUi ? { ...configured, uiRoot: stagedUi.root } : configured;
+      const computeWorkspaceRoot = agent?.workspaceRoot;
+      const computeStore = createComputeStoreHost({
+        directory: join(defaultConfigDirectory(), 'compute'),
+        onError: (error) => {
+          consola.error(`Compute store worker failed: ${error.message.replaceAll(/\s+/gu, ' ')}`);
+        },
+      });
+      const ensureCompute = (): ComputeStoreConnection => {
+        if (!computeWorkspaceRoot) {
+          throw new Error('Durable compute requires an admitted workspace.');
+        }
+        return computeStore.connect(computeWorkspaceRoot);
+      };
+      const compute: ComputeBinding | (() => ComputeBinding) | undefined = agent
+        ? args.computeMode === 'durable'
+          ? () => ({ mode: 'durable', store: ensureCompute().store })
+          : { mode: args.computeMode }
+        : undefined;
+      const kernels = serveNativeKernels(reportPreparation);
+      const skillBundles = await serveSkillBundles([args.plugin ?? []].flat());
+      const configuredAgent = agent
+        ? {
+            ...agent,
+            prepareKernel: kernels.prepareKernel,
+            preparableKernels: kernels.preparableKernels,
+            ...(machines ? { machines } : {}),
+            compute: compute!,
+            ...(args.computeMode === 'durable'
+              ? {
+                  computeControl: {
+                    inspect: async (input: { signal?: AbortSignal }) => ensureCompute().control.inspect(input),
+                    clear: async (input: { signal?: AbortSignal }) => ensureCompute().control.clear(input),
+                    collect: async (input: { budget: number; cursor?: string; signal?: AbortSignal }) =>
+                      ensureCompute().control.collect(input),
+                  },
+                }
+              : {}),
+          }
+        : undefined;
+      const stopped = Promise.withResolvers<NodeJS.Signals>();
+      const onSignal = (signal: NodeJS.Signals): void => {
+        stopped.resolve(signal);
+      };
+      process.once('SIGINT', onSignal);
+      process.once('SIGTERM', onSignal);
+      /* The relay is this daemon's Tau API, so its Zoo proxy is too unless TAU_WEBSOCKET_URL says otherwise. */
+      /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
+      const zooProxyUrl = cliZooProxyUrl({
+        TAU_WEBSOCKET_URL: process.env['TAU_WEBSOCKET_URL'],
+        TAU_API_URL: apiUrl,
+      });
+      /* eslint-enable @typescript-eslint/naming-convention -- End environment variable names. */
+      /* The one served URL, printed once on stdout for a script (Q53, C1 R9) and opened for a person. */
+      const served = Promise.withResolvers<string>();
+      const onEvent = (event: HostDaemonEvent): void => {
+        if (event.type === 'agent' && event.state === 'ready' && event.url !== undefined) {
+          served.resolve(event.url);
+        }
+        reportEvent(event);
+      };
+      const observeChats = await loadCloudHostObserver();
+      const daemon = startHostDaemon({
+        relayUrl: new URL(apiUrl),
+        relay: relay !== undefined,
+        runtimeHost: {
+          modulePath: runtimeChildModulePath(),
+          args: childArguments({
+            plugin: args.plugin,
+            config: args.config,
+            zooProxyUrl,
+            acquisition: acquisitionOf(process.env['TAU_ACQUISITION']),
+          }),
+          native: kernels.native,
+        },
+        zooProxy: { url: zooProxyUrl, apiUrl, sessionToken: await resolveZooAuthToken(apiUrl, zooProxyUrl) },
+        maxSessions,
+        systemSkillBundles: skillBundles,
+        pair: args.pair,
+        ...(configuredAgent ? { agent: configuredAgent } : {}),
+        ...(runtimeTelemetry === undefined
+          ? {}
+          : { observeRuntimeClient: (client, caller) => runtimeTelemetry.observe(client, caller) }),
+        ...(observeChats === undefined ? {} : { observeChats }),
+        onEvent,
+      });
+      try {
+        /* A signal before the daemon is ready stops it too: opening the workspace's
+         * store can take a while, and Ctrl+C must not wait for it. */
+        const started = await Promise.race([
+          daemon.ready.then(
+            (): 'ready' => 'ready',
+            (error: unknown) => {
+              throw workspaceRefusal(error);
+            },
+          ),
+          stopped.promise.then((): 'signal' => 'signal'),
+        ]);
+        if (started === 'signal') {
           return;
         }
-      }
-      const signalOutcome = async (): Promise<{ readonly type: 'signal' }> => {
-        await stopped.promise;
-        return { type: 'signal' };
-      };
-      const daemonOutcome = async (): Promise<{
-        readonly type: 'closed';
-        readonly result: Awaited<typeof daemon.closed>;
-      }> => {
-        const result = await daemon.closed;
-        return { type: 'closed', result };
-      };
-      const outcome = await Promise.race([signalOutcome(), daemonOutcome()]);
-      if (outcome.type === 'closed' && outcome.result.cause === 'fatal') {
-        throw outcome.result.error;
+        /* The agent channel names its URL once it listens; a daemon that stops first, or a signal, has nothing to announce. */
+        const url =
+          configuredAgent === undefined
+            ? undefined
+            : await Promise.race([
+                served.promise,
+                daemon.closed.then(
+                  () => undefined,
+                  () => undefined,
+                ),
+                stopped.promise.then(() => undefined),
+              ]);
+        if (configuredAgent !== undefined && url !== undefined) {
+          const scripted = args.print || args.json || args.smokeTest;
+          const handOffUrl =
+            handOff === undefined
+              ? undefined
+              : handOffLink(handOff, url, await mintHandOffCode(url, configuredAgent.token));
+          await announceServed({
+            url,
+            handOff: handOffUrl,
+            workspace: configuredAgent.workspaceRoot,
+            relay,
+            ui: configuredAgent.uiRoot !== undefined,
+            print: args.print,
+            json: args.json,
+            /* A hand-off is the point of the run: it opens unless printed for a script or refused with --no-open. */
+            open:
+              handOffUrl === undefined
+                ? shouldOpenBrowser({
+                    open: args.open,
+                    ui: configuredAgent.uiRoot !== undefined,
+                    scripted,
+                    interactive: process.stdout.isTTY,
+                    ci: Boolean(process.env['CI']),
+                  })
+                : (args.open ?? !scripted),
+          });
+          if (args.smokeTest) {
+            await smokeTest(url, configuredAgent.uiRoot !== undefined);
+            return;
+          }
+        }
+        const signalOutcome = async (): Promise<{ readonly type: 'signal' }> => {
+          await stopped.promise;
+          return { type: 'signal' };
+        };
+        const daemonOutcome = async (): Promise<{
+          readonly type: 'closed';
+          readonly result: Awaited<typeof daemon.closed>;
+        }> => {
+          const result = await daemon.closed;
+          return { type: 'closed', result };
+        };
+        const outcome = await Promise.race([signalOutcome(), daemonOutcome()]);
+        if (outcome.type === 'closed' && outcome.result.cause === 'fatal') {
+          throw outcome.result.error;
+        }
+      } finally {
+        process.off('SIGINT', onSignal);
+        process.off('SIGTERM', onSignal);
+        try {
+          await daemon.close();
+        } catch (error) {
+          /* The last thing a stopping daemon does is record what this project
+           * changed, and a store that refuses that revision keeps the project
+           * rather than losing it (C70). Say which refusal it was and that
+           * stopping again re-attempts it, instead of ending on an unmapped store
+           * exception — reported rather than thrown, because a throw from this
+           * `finally` would replace whatever brought the daemon down. */
+          consola.error(
+            `Tau Host could not record this project’s last revision: ${error instanceof Error ? error.message : String(error)} Nothing was lost — run tau serve again to retry it.`,
+          );
+          process.exitCode = exitCodes.error;
+        } finally {
+          await computeStore.close();
+          await kernels.dispose().catch(() => undefined);
+          await stagedUi?.dispose();
+        }
       }
     } finally {
-      process.off('SIGINT', onSignal);
-      process.off('SIGTERM', onSignal);
-      try {
-        await daemon.close();
-      } catch (error) {
-        /* The last thing a stopping daemon does is record what this project
-         * changed, and a store that refuses that revision keeps the project
-         * rather than losing it (C70). Say which refusal it was and that
-         * stopping again re-attempts it, instead of ending on an unmapped store
-         * exception — reported rather than thrown, because a throw from this
-         * `finally` would replace whatever brought the daemon down. */
-        consola.error(
-          `Tau Host could not record this project’s last revision: ${error instanceof Error ? error.message : String(error)} Nothing was lost — run tau serve again to retry it.`,
-        );
-        process.exitCode = exitCodes.error;
-      } finally {
-        await computeStore.close();
-        await kernels.dispose().catch(() => undefined);
-        await stagedUi?.dispose();
-        await runtimeTelemetry?.shutdown();
-      }
+      await runtimeTelemetry?.shutdown();
     }
   },
 });

@@ -1205,6 +1205,7 @@ export const uiStartTauServeFixture: BrowserCommand<[options?: TauServeFixtureOp
           name: 'Claude Opus 4.8',
           slug: 'claude-opus-4-8',
           recommended: true,
+          default: true,
           model: 'claude-opus-4-8',
           provider: { id: 'anthropic', name: 'Anthropic' },
           details: {

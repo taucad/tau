@@ -12,7 +12,6 @@ import { useCookie } from '#hooks/use-cookie.js';
 import { usePlaceableExecution } from '#hooks/use-placeable-execution.js';
 import { useFeature } from '#flags/use-feature.js';
 import { cookieName } from '#constants/cookie.constants.js';
-import { defaultChatModel } from '#constants/chat.constants.js';
 import { unknownIconId } from '#components/icons/svg-icon.js';
 import { resolveNewChatExecution } from '#utils/new-chat-execution.js';
 import type { ModelCatalog } from '#utils/new-chat-execution.js';
@@ -87,6 +86,16 @@ const catalogWaitTimeout = 10_000;
 const catalogOf = (data: Model[] | undefined, isError: boolean): ModelCatalog =>
   data === undefined ? { status: isError ? 'unavailable' : 'loading' } : { status: 'loaded', models: data };
 
+/**
+ * The model a new chat starts on when nothing was chosen: the row the API marks `default`, else the recommended row,
+ * else the first.
+ *
+ * @param data - The loaded catalog, if any.
+ * @returns The default model id, or `undefined` before the catalog answers or when it is empty.
+ */
+export const catalogDefaultModelId = (data: readonly Model[] | undefined): string | undefined =>
+  (data?.find((model) => model.default === true) ?? data?.find((model) => model.recommended === true) ?? data?.[0])?.id;
+
 /** A stored execution is untrusted: one that fails the wire schema would fail the turn. */
 const parseStoredExecution = (value: unknown): CadAgentExecution | undefined => {
   const parsed = cadAgentExecutionSchema.safeParse(value);
@@ -107,7 +116,7 @@ const parsePinned = (value: unknown): readonly string[] =>
 export const useModels = () => {
   const queryClient = useQueryClient();
   const [storedExecution, setStoredExecution] = useCookie<unknown>(cookieName.chatExecution, undefined);
-  const [selectedModelId, setSelectedModelId] = useCookie(cookieName.chatModel, defaultChatModel);
+  const [storedModelId, setSelectedModelId] = useCookie<string | undefined>(cookieName.chatModel, undefined);
   const [overrides, setOverrides, resetOverrides] = useCookie<Readonly<Record<string, boolean>>>(
     cookieName.chatModelOverrides,
     noOverrides,
@@ -119,6 +128,18 @@ export const useModels = () => {
   // Stored preferences are untrusted: a level outside the vocabulary would fail the turn wire.
   const selectedEffort = reasoningLevels.find((level) => level === storedEffort);
 
+  const { data, isLoading, isError } = useQuery({
+    ...modelsQuery,
+    refetchInterval: 1000 * 60 * 5, // 5 minutes
+  });
+  const catalog = useMemo(() => catalogOf(data, isError), [data, isError]);
+
+  /*
+   * The Tau model chosen last, else the one the catalog names as its default. The API owns the default, so before
+   * the catalog first answers a visitor who never chose has no model yet and admission waits for the catalog.
+   */
+  const selectedModelId = storedModelId ?? catalogDefaultModelId(data) ?? '';
+
   /** The last Tau model and level chosen: where a chat returns to from an external agent. */
   const lastTauExecution = useMemo<TauAgentExecution>(
     () => ({
@@ -128,12 +149,6 @@ export const useModels = () => {
     }),
     [selectedModelId, selectedEffort],
   );
-
-  const { data, isLoading, isError } = useQuery({
-    ...modelsQuery,
-    refetchInterval: 1000 * 60 * 5, // 5 minutes
-  });
-  const catalog = useMemo(() => catalogOf(data, isError), [data, isError]);
 
   /**
    * The execution a chat with none of its own starts on: the last one used, of any agent, on a host this tab reaches.

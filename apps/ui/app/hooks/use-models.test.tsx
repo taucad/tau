@@ -21,10 +21,11 @@ const codex: AcpAgentExecution = {
   model: 'gpt-6-astra',
   config: { mode: 'high' },
 };
-const catalogRow = (id: string, recommended = false) => ({
+const catalogRow = (id: string, recommended = false, isDefault = false) => ({
   id,
   name: id,
   recommended,
+  ...(isDefault ? { default: true } : {}),
   provider: { id: 'anthropic', name: 'Anthropic' },
   details: { family: 'claude', contextWindow: 200_000 },
 });
@@ -98,11 +99,35 @@ describe('useModels', () => {
       expect(result.current.defaultExecution).toEqual(codex);
     });
 
-    it('should ignore a stored execution that fails the execution schema', () => {
-      respond([]);
+    it('should ignore a stored execution that fails the execution schema', async () => {
+      respond([catalogRow('anthropic-claude-opus-5.5', true, true)]);
       store.update(`${metaConfig.cookiePrefix}${cookieName.chatExecution}`, { kind: 'acp', agentId: 'codex' });
       const { result } = renderHook(() => useModels(), { wrapper });
-      expect(result.current.defaultExecution).toEqual({ kind: 'tau', model: 'anthropic-claude-opus-4.8' });
+      await waitFor(() => {
+        expect(result.current.defaultExecution).toEqual({ kind: 'tau', model: 'anthropic-claude-opus-5.5' });
+      });
+    });
+
+    it('should start a first visit on the model the catalog marks as default', async () => {
+      respond([catalogRow('anthropic-claude-sonnet-5.5', true), catalogRow('anthropic-claude-opus-5.5', true, true)]);
+      const { result } = renderHook(() => useModels(), { wrapper });
+      expect(result.current.selectedModelId).toBe('');
+      await waitFor(() => {
+        expect(result.current.selectedModelId).toBe('anthropic-claude-opus-5.5');
+      });
+      expect(result.current.defaultExecution).toEqual({ kind: 'tau', model: 'anthropic-claude-opus-5.5' });
+    });
+
+    it('should keep a chosen Tau model over the catalog default', async () => {
+      respond([catalogRow('anthropic-claude-opus-5.5', true, true), catalogRow('anthropic-claude-haiku-5.5')]);
+      const { result } = renderHook(() => useModels(), { wrapper });
+      act(() => {
+        result.current.setSelectedModelId('anthropic-claude-haiku-5.5');
+      });
+      await waitFor(() => {
+        expect(result.current.data).toHaveLength(2);
+      });
+      expect(result.current.selectedModelId).toBe('anthropic-claude-haiku-5.5');
     });
 
     it('should move a remembered Tau model the catalog no longer offers to the recommended model', async () => {

@@ -404,7 +404,9 @@ def _parameters(
             "$uses": ["JSONSchemaUnits"],
             "name": identity.name,
             "type": "object",
-            "properties": native_fields,
+            # JSON Structure rejects an empty `properties` map, so a parameterless `Params` (the new-project
+            # template) declares an object with no properties, as the JSON Schema adapter projects one.
+            **({"properties": native_fields} if native_fields else {}),
             "additionalProperties": False,
         },
         "defaults": defaults,

@@ -860,15 +860,44 @@ describe('FileSystemAccessProvider', () => {
         expect(lookups).toHaveBeenCalledWith('gone.ts');
       });
 
-      it('should still reject an unreadable entry that is still present', async () => {
+      it('should stat a file swapped in under the same name once more on a fresh handle', async () => {
+        await provider.writeFile('kept.ts', 'kept');
+        await provider.writeFile('swapped.ts', 'old');
+        interceptListing({
+          prepare: (name, handle) => {
+            if (name === 'swapped.ts') {
+              vi.spyOn(handle, 'getFile').mockImplementation(async () => {
+                await provider.writeFile('swapped.ts', 'the replacement');
+                throw unreadable();
+              });
+            }
+          },
+        });
+
+        const rows = await provider.readdirWithStats('');
+
+        expect(rows.map((row) => row.name)).toEqual(['kept.ts', 'swapped.ts']);
+        expect(rows[1]).toMatchObject({ type: 'file', size: 15 });
+      });
+
+      it('should still reject an entry that stays unreadable on a fresh handle', async () => {
         await provider.writeFile('locked.ts', 'locked');
+        const lookUp = rootHandle.getFileHandle.bind(rootHandle);
+        const lockedHandle = async (name: string, options?: { create?: boolean }) => {
+          const handle = await lookUp(name, options);
+          vi.spyOn(handle, 'getFile').mockRejectedValue(unreadable());
+          return handle;
+        };
         interceptListing({
           prepare: (_name, handle) => {
             vi.spyOn(handle, 'getFile').mockRejectedValue(unreadable());
           },
         });
+        const lookups = vi.spyOn(rootHandle, 'getFileHandle').mockImplementation(lockedHandle);
 
         await expect(provider.readdirWithStats('')).rejects.toMatchObject({ name: 'NotReadableError' });
+        expect(lookups).toHaveBeenCalledWith('locked.ts');
+        lookups.mockRestore();
         await expect(provider.readFile('locked.ts', 'utf8')).resolves.toBe('locked');
       });
     });

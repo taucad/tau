@@ -245,17 +245,32 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       if (handle.kind === 'directory') {
         return { name, type: 'dir', size: 0, mtimeMs: 0 } satisfies { name: string } & FileStat;
       }
-      try {
-        const file = await handle.getFile();
+      const statOf = async (
+        fileHandle: FileSystemFileHandle,
+      ): Promise<{ name: string } & (FileStat | HeadFileStat)> => {
+        const file = await fileHandle.getFile();
         return {
           name,
           ...(await (options?.content === 'head' ? headFileStatFromFile(file) : fileStatFromFile(file))),
         };
+      };
+      try {
+        return await statOf(handle);
       } catch (error) {
-        if (await this._vanishedDuringListing(directoryHandle, name, error)) {
+        const replacement = await this._listedAgain(directoryHandle, name, error);
+        if (replacement === undefined) {
           return undefined;
         }
-        throw error;
+        /* The name still answers: a writer swapped a new file in under it
+         * (backup out, staged in) after enumeration. Stat that file once. */
+        try {
+          return await statOf(replacement);
+        } catch (retryError) {
+          if (hasDomName(retryError, 'NotFoundError')) {
+            return undefined;
+          }
+          throw retryError;
+        }
       }
     });
     return listed.filter((entry) => entry !== undefined);
@@ -935,34 +950,38 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
   }
 
   /**
-   * Whether a listed file's stat failed because the file is no longer there.
+   * Decide what a listing does with a file whose stat failed after enumeration.
    *
-   * `getFile()` on a removed entry rejects `NotFoundError`; reading a `File`
-   * whose entry was removed after `getFile()` rejects `NotReadableError`, which
-   * a permission failure also raises — so that one is confirmed by looking the
-   * name up again.
+   * `getFile()` on a removed entry rejects `NotFoundError`, and the entry is
+   * skipped. Reading a `File` snapshot whose entry was removed or replaced
+   * after `getFile()` rejects `NotReadableError`, which a permission failure
+   * also raises: the name is looked up again, skipped when it is gone, and its
+   * fresh handle returned when something is there now.
    *
    * @param directory - The directory being listed.
    * @param name - The entry whose stat failed.
    * @param error - The stat failure.
-   * @returns `true` when the entry has gone and the listing should skip it.
+   * @returns A fresh handle to stat once more, or `undefined` to skip the entry.
+   * @throws The original failure when it is neither of the two above.
    */
-  private async _vanishedDuringListing(
+  private async _listedAgain(
     directory: FileSystemDirectoryHandle,
     name: string,
     error: unknown,
-  ): Promise<boolean> {
+  ): Promise<FileSystemFileHandle | undefined> {
     if (hasDomName(error, 'NotFoundError')) {
-      return true;
+      return undefined;
     }
     if (!hasDomName(error, 'NotReadableError')) {
-      return false;
+      throw error;
     }
     try {
-      await directory.getFileHandle(name);
-      return false;
+      return await directory.getFileHandle(name);
     } catch (lookupError) {
-      return hasDomName(lookupError, 'NotFoundError');
+      if (hasDomName(lookupError, 'NotFoundError')) {
+        return undefined;
+      }
+      throw error;
     }
   }
 

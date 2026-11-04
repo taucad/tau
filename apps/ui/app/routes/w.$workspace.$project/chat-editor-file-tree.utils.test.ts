@@ -73,6 +73,8 @@ describe('isEditorSystemArtifactPath', () => {
     'main.ts.tau-staged.1.tmp',
     '.main.ts.tau-staged.1.txt',
     '.main.ts.tau-pending.1.tmp',
+    '.main.ts.tau-staged.my-draft.tmp',
+    '.main.ts.tau-backup.0B6F2A52-6A4E-4C1D-9C4F-3F8E2D1A7B90.tmp',
   ])('keeps user-significant or near-miss path %s', (path) => {
     expect(isEditorSystemArtifactPath(path)).toBe(false);
   });

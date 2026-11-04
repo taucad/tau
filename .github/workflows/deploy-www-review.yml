@@ -13,12 +13,21 @@
 # origin https://tau.new.
 #
 # Manual redeploy: `gh workflow run deploy-www-review.yml` from `main`.
+# Website rollback of the desktop installer catalog: the same command with
+# `-f installer_catalog=false` republishes the page with its catalog-free ZIP
+# downloads, without touching the published catalog; dispatch again without
+# the input to restore it.
 
 name: Deploy marketing review site to Netlify
 
 on:
   workflow_call:
   workflow_dispatch:
+    inputs:
+      installer_catalog:
+        description: Read the published desktop installer catalog (false is the website rollback)
+        type: boolean
+        default: true
 
 # `actions: read` lets the deploy see whether a newer run already deployed.
 permissions:
@@ -36,7 +45,9 @@ jobs:
       cancel-in-progress: false
     env:
       # Job scope, so Netlify's own rebuild inside `netlify deploy` keeps the flag too.
-      WWW_INSTALLER_CATALOG: 'true'
+      # Only an explicit `installer_catalog=false` dispatch turns it off. A `staging.yml` call has no such input,
+      # even when `staging.yml` itself was dispatched, so it formats as '' and keeps the catalog.
+      WWW_INSTALLER_CATALOG: ${{ format('{0}', inputs.installer_catalog) == 'false' && 'false' || 'true' }}
       NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
       SITE_ID: 17066c91-5b08-4cc0-b45c-32b0ea08b4e9
       URL: https://staging--taucad-marketing-review.netlify.app

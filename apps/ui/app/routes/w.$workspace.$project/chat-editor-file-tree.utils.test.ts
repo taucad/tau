@@ -49,6 +49,9 @@ describe('isEditorSystemArtifactPath', () => {
     '.Trash-1000',
     '.main.ts.crswap',
     '.main.ts.1.crswap',
+    '.main.ts.tau-staged.0b6f2a52-6a4e-4c1d-9c4f-3f8e2d1a7b90.tmp',
+    '.main.ts.tau-backup.0b6f2a52-6a4e-4c1d-9c4f-3f8e2d1a7b90.tmp',
+    '.tau-watch.tau-staged.0b6f2a52-6a4e-4c1d-9c4f-3f8e2d1a7b90.tmp',
   ])('hides approved host artifact %s', (path) => {
     expect(isEditorSystemArtifactPath(path)).toBe(true);
     expect(isEditorSystemArtifactPath(`src/${path}/descendant.ts`)).toBe(true);
@@ -67,6 +70,11 @@ describe('isEditorSystemArtifactPath', () => {
     'notes.crswap.txt',
     'desktop.ini.txt',
     '.trash-1000',
+    'main.ts.tau-staged.1.tmp',
+    '.main.ts.tau-staged.1.txt',
+    '.main.ts.tau-pending.1.tmp',
+    '.main.ts.tau-staged.my-draft.tmp',
+    '.main.ts.tau-backup.0B6F2A52-6A4E-4C1D-9C4F-3F8E2D1A7B90.tmp',
   ])('keeps user-significant or near-miss path %s', (path) => {
     expect(isEditorSystemArtifactPath(path)).toBe(false);
   });

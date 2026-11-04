@@ -347,6 +347,36 @@ describe('FileSystemAccessProvider', () => {
       );
       await expect(provider.exists('denied')).rejects.toMatchObject({ name: 'NotAllowedError' });
     });
+
+    it('should return false beneath a file instead of reporting ENOTDIR', async () => {
+      await provider.writeFile('plain.txt', 'file');
+      expect(await provider.exists('plain.txt/child')).toBe(false);
+    });
+  });
+
+  describe('metadata-only preflights', () => {
+    it('should answer exists, unlink and rmdir checks without reading file bytes', async () => {
+      await provider.writeFile('a.txt', 'alpha');
+      await provider.mkdir('dir');
+      const slices = vi.spyOn(File.prototype, 'slice');
+      const reads = vi.spyOn(Blob.prototype, 'arrayBuffer');
+
+      expect(await provider.exists('a.txt')).toBe(true);
+      expect(await provider.exists('dir')).toBe(true);
+      expect(await provider.exists('missing.txt')).toBe(false);
+      await expect(provider.unlink('dir')).rejects.toMatchObject({ code: 'EISDIR' });
+      await expect(provider.unlink('missing.txt')).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(provider.rmdir('a.txt')).rejects.toMatchObject({ code: 'ENOTDIR' });
+      await expect(provider.rmdir('missing')).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(provider.rename('missing.txt', 'b.txt')).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(provider.rename('a.txt', 'dir')).rejects.toMatchObject({ code: 'EEXIST' });
+      await provider.unlink('a.txt');
+
+      expect(slices).not.toHaveBeenCalled();
+      expect(reads).not.toHaveBeenCalled();
+      expect(await provider.exists('a.txt')).toBe(false);
+      expect(await provider.exists('dir')).toBe(true);
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -757,6 +787,119 @@ describe('FileSystemAccessProvider', () => {
       expect(file!.size).toBeGreaterThan(0);
 
       expect(directory!.type).toBe('dir');
+    });
+
+    describe('when an entry disappears during the listing', () => {
+      type ListedHandle = Awaited<ReturnType<typeof rootHandle.getFileHandle>>;
+
+      /**
+       * Enumerate the root as usual, running `beforeStat` once enumeration has
+       * finished and before any child is stat'ed, and letting `prepare` adjust
+       * each file handle on the way out.
+       */
+      const interceptListing = ({
+        beforeStat,
+        prepare,
+      }: {
+        beforeStat?: () => Promise<void>;
+        prepare?: (name: string, handle: ListedHandle) => void;
+      }): void => {
+        const enumerate = rootHandle.entries.bind(rootHandle);
+        vi.spyOn(rootHandle, 'entries').mockImplementation(async function* () {
+          const listed: Array<[string, ListedHandle | Awaited<ReturnType<typeof rootHandle.getDirectoryHandle>>]> = [];
+          for await (const [name, handle] of enumerate()) {
+            if (handle.kind === 'file') {
+              prepare?.(name, handle);
+            }
+            listed.push([name, handle]);
+          }
+          await beforeStat?.();
+          yield* listed;
+        });
+      };
+
+      const unreadable = (): DOMException =>
+        new DOMException('The requested file could not be read.', 'NotReadableError');
+
+      it.each(['exact', 'head'])(
+        'should skip the vanished entry and list the rest for %s metadata',
+        async (content) => {
+          const staged = '.kept.ts.tau-staged.00000000-0000-4000-8000-000000000000.tmp';
+          await provider.writeFile('kept.ts', 'export {}');
+          await provider.writeFile(staged, 'staged');
+          interceptListing({ beforeStat: async () => rootHandle.removeEntry(staged) });
+
+          const rows =
+            content === 'head'
+              ? await provider.readdirWithStats('', { content: 'head' })
+              : await provider.readdirWithStats('');
+
+          expect(rows.map((row) => row.name)).toEqual(['kept.ts']);
+          expect(rows[0]).toMatchObject({ type: 'file', size: 9, contentKind: 'text' });
+        },
+      );
+
+      it('should skip an entry whose File became unreadable because it was removed', async () => {
+        await provider.writeFile('kept.ts', 'kept');
+        await provider.writeFile('gone.ts', 'gone');
+        interceptListing({
+          prepare: (name, handle) => {
+            if (name === 'gone.ts') {
+              vi.spyOn(handle, 'getFile').mockImplementation(async () => {
+                await rootHandle.removeEntry('gone.ts');
+                throw unreadable();
+              });
+            }
+          },
+        });
+        const lookups = vi.spyOn(rootHandle, 'getFileHandle');
+
+        const rows = await provider.readdirWithStats('');
+
+        expect(rows.map((row) => row.name)).toEqual(['kept.ts']);
+        expect(lookups).toHaveBeenCalledWith('gone.ts');
+      });
+
+      it('should stat a file swapped in under the same name once more on a fresh handle', async () => {
+        await provider.writeFile('kept.ts', 'kept');
+        await provider.writeFile('swapped.ts', 'old');
+        interceptListing({
+          prepare: (name, handle) => {
+            if (name === 'swapped.ts') {
+              vi.spyOn(handle, 'getFile').mockImplementation(async () => {
+                await provider.writeFile('swapped.ts', 'the replacement');
+                throw unreadable();
+              });
+            }
+          },
+        });
+
+        const rows = await provider.readdirWithStats('');
+
+        expect(rows.map((row) => row.name)).toEqual(['kept.ts', 'swapped.ts']);
+        expect(rows[1]).toMatchObject({ type: 'file', size: 15 });
+      });
+
+      it('should still reject an entry that stays unreadable on a fresh handle', async () => {
+        await provider.writeFile('locked.ts', 'locked');
+        const lookUp = rootHandle.getFileHandle.bind(rootHandle);
+        const lockedHandle = async (name: string, options?: { create?: boolean }) => {
+          const handle = await lookUp(name, options);
+          vi.spyOn(handle, 'getFile').mockRejectedValue(unreadable());
+          return handle;
+        };
+        interceptListing({
+          prepare: (_name, handle) => {
+            vi.spyOn(handle, 'getFile').mockRejectedValue(unreadable());
+          },
+        });
+        const lookups = vi.spyOn(rootHandle, 'getFileHandle').mockImplementation(lockedHandle);
+
+        await expect(provider.readdirWithStats('')).rejects.toMatchObject({ name: 'NotReadableError' });
+        expect(lookups).toHaveBeenCalledWith('locked.ts');
+        lookups.mockRestore();
+        await expect(provider.readFile('locked.ts', 'utf8')).resolves.toBe('locked');
+      });
     });
   });
 });

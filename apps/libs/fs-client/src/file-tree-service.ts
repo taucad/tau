@@ -174,6 +174,11 @@ export class FileTreeService {
   /* Every directory a mutation touched in this window. A re-read lists one
    * directory, so collapsing two to their common ancestor re-read neither. */
   private readonly pendingRefreshPaths = new Set<string>();
+  /* Outstanding {@link FileTreeService.pauseRefreshes} holds. While any is
+   * held, re-reads collect in `pendingRefreshPaths` and nothing lists. */
+  private refreshPauses = 0;
+  /* Set by dispose: a hold released afterwards must not list through a closed proxy. */
+  private disposed = false;
   private pollingTimer: ReturnType<typeof setTimeout> | undefined;
   private pollingActive = false;
   private visibilityUnsub: (() => void) | undefined;
@@ -523,10 +528,14 @@ export class FileTreeService {
           }
         });
         const watch = this.channel.watchReady({ paths: [key], recursive: false }, (event) => {
-          fresh = true;
           if (event.type === 'reset') {
+            fresh = true;
             reset();
+          } else if (this.refreshPauses > 0) {
+            /* Re-read once the hold releases, through the leased observation. */
+            this.pendingRefreshPaths.add(key);
           } else {
+            fresh = true;
             invalidate();
           }
         });
@@ -541,7 +550,11 @@ export class FileTreeService {
       },
       read: async ({ signal, isCurrent }) => {
         try {
-          if (fresh) {
+          if (fresh && this.refreshPauses > 0 && this.isDirectoryResolvedKey(key)) {
+            /* An optimistic patch while a hold is taken re-renders from the
+             * tree; the listing itself waits for the hold's release. */
+            this.pendingRefreshPaths.add(key);
+          } else if (fresh) {
             fresh = false;
             const epoch = this._epoch;
             const generation = this._refreshGuard.begin(key);
@@ -623,25 +636,59 @@ export class FileTreeService {
    * @param path - Directory to re-read once the window closes.
    */
   public scheduleRefresh(path: string): void {
+    if (this.disposed) {
+      return;
+    }
     this.pendingRefreshPaths.add(path);
 
     if (this.refreshTimer !== undefined) {
       clearTimeout(this.refreshTimer);
+      this.refreshTimer = undefined;
+    }
+    if (this.refreshPauses > 0) {
+      return;
     }
 
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = undefined;
-      const pendingPaths = [...this.pendingRefreshPaths];
-      this.pendingRefreshPaths.clear();
-      for (const pendingPath of pendingPaths) {
-        const observation = this.listingObservations.get(pendingPath)?.deref();
-        if (observation && observation.activeLeaseCount > 0) {
-          observation.refresh();
-        } else {
-          void this.executeRefresh(pendingPath);
-        }
-      }
+      this.flushPendingRefreshes();
     }, this.refreshDebounce);
+  }
+
+  /**
+   * Hold every directory re-read until the returned release is called.
+   *
+   * A revision apply writes and renames every file it touches, and each event
+   * would otherwise schedule a re-read of its parent while the apply is still
+   * changing it — listing work that grows with the square of the file count
+   * on a cold open. While held, events still patch the tree optimistically and
+   * the directories they name collect; the last release re-reads each of them
+   * once. Holds nest, and a release is idempotent.
+   *
+   * @returns The release for this hold.
+   */
+  public pauseRefreshes(): () => void {
+    this.refreshPauses += 1;
+    if (this.refreshTimer !== undefined) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = undefined;
+    }
+    let released = false;
+    return () => {
+      if (released) {
+        return;
+      }
+      released = true;
+      this.refreshPauses -= 1;
+      if (this.refreshPauses === 0) {
+        this.flushPendingRefreshes();
+      }
+    };
+  }
+
+  /** Whether a {@link FileTreeService.pauseRefreshes} hold is outstanding. */
+  public get refreshesPaused(): boolean {
+    return this.refreshPauses > 0;
   }
 
   /**
@@ -846,6 +893,8 @@ export class FileTreeService {
   }
 
   public dispose(): void {
+    this.disposed = true;
+    this.pendingRefreshPaths.clear();
     this.closedSignal.resolve();
     const observations = [...this.listingObservations.values()];
     for (const reference of observations) {
@@ -921,6 +970,24 @@ export class FileTreeService {
   }
 
   // === Private: Worker Event Handlers (workspace-relative paths) ===
+
+  /** Re-read every directory collected since the last flush, once each. */
+  private flushPendingRefreshes(): void {
+    if (this.disposed) {
+      this.pendingRefreshPaths.clear();
+      return;
+    }
+    const pendingPaths = [...this.pendingRefreshPaths];
+    this.pendingRefreshPaths.clear();
+    for (const pendingPath of pendingPaths) {
+      const observation = this.listingObservations.get(pendingPath)?.deref();
+      if (observation && observation.activeLeaseCount > 0) {
+        observation.refresh();
+      } else {
+        void this.executeRefresh(pendingPath);
+      }
+    }
+  }
 
   private handleFileWrittenRelative(relativePath: string): void {
     this.invalidatePendingDirectory(this.paths.parentOf(relativePath));

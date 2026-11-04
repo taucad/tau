@@ -217,6 +217,10 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    * listing. Child metadata comes from the `File` object; contents are read only
    * when {@link fileStatFromFile} needs them, in chunks of {@link statConcurrency}.
    *
+   * An entry removed between enumeration and its `getFile()` — a writer's
+   * temporary sibling renamed away mid-listing — is left out: the listing
+   * answers what is still there instead of rejecting the whole directory.
+   *
    * @param path - Absolute directory path to enumerate.
    * @returns Each entry's name paired with its stat metadata.
    */
@@ -237,16 +241,39 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       handles.push(entry);
     }
 
-    return mapConcurrent(handles, statConcurrency, async ([name, handle]) =>
-      handle.kind === 'directory'
-        ? ({ name, type: 'dir', size: 0, mtimeMs: 0 } satisfies { name: string } & FileStat)
-        : {
-            name,
-            ...(await (options?.content === 'head'
-              ? headFileStatFromFile(await handle.getFile())
-              : fileStatFromFile(await handle.getFile()))),
-          },
-    );
+    const listed = await mapConcurrent(handles, statConcurrency, async ([name, handle]) => {
+      if (handle.kind === 'directory') {
+        return { name, type: 'dir', size: 0, mtimeMs: 0 } satisfies { name: string } & FileStat;
+      }
+      const statOf = async (
+        fileHandle: FileSystemFileHandle,
+      ): Promise<{ name: string } & (FileStat | HeadFileStat)> => {
+        const file = await fileHandle.getFile();
+        return {
+          name,
+          ...(await (options?.content === 'head' ? headFileStatFromFile(file) : fileStatFromFile(file))),
+        };
+      };
+      try {
+        return await statOf(handle);
+      } catch (error) {
+        const replacement = await this._listedAgain(directoryHandle, name, error);
+        if (replacement === undefined) {
+          return undefined;
+        }
+        /* The name still answers: a writer swapped a new file in under it
+         * (backup out, staged in) after enumeration. Stat that file once. */
+        try {
+          return await statOf(replacement);
+        } catch (retryError) {
+          if (hasDomName(retryError, 'NotFoundError')) {
+            return undefined;
+          }
+          throw retryError;
+        }
+      }
+    });
+    return listed.filter((entry) => entry !== undefined);
   }
 
   /**
@@ -306,11 +333,34 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
 
     const parentHandle = await this._resolveDirectoryHandle(segments.slice(0, -1).join('/'));
     const name = segments.at(-1)!;
-    const entry = await this.stat(path);
-    if (entry.type === 'dir') {
+    const kind = await this._entryKind(path);
+    if (kind === undefined) {
+      throw this._enoent(path);
+    }
+    if (kind === 'dir') {
       throw this._eisdir(path);
     }
     await parentHandle.removeEntry(name);
+  }
+
+  /**
+   * Whether an entry exists at `path`, answered from the handles alone: unlike
+   * `stat`, it never reads the file's bytes to classify them.
+   *
+   * @param path - Absolute path to test.
+   * @returns `true` for a file or directory at `path`.
+   */
+  public override async exists(path: string): Promise<boolean> {
+    this._assertReady();
+    this._assertRootedPath(path);
+    try {
+      return (await this._entryKind(path)) !== undefined;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOTDIR') {
+        return false;
+      }
+      throw error;
+    }
   }
 
   /**
@@ -328,8 +378,11 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
 
     const parentHandle = await this._resolveDirectoryHandle(segments.slice(0, -1).join('/'));
     const name = segments.at(-1)!;
-    const entry = await this.stat(path);
-    if (entry.type !== 'dir') {
+    const kind = await this._entryKind(path);
+    if (kind === undefined) {
+      throw this._enoent(path);
+    }
+    if (kind !== 'dir') {
       throw this._enotdir(path);
     }
     try {
@@ -344,9 +397,10 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
   }
 
   /**
-   * Move the file or directory at `from` to `to`. Files are copied + unlinked
-   * (the FS Access API has no native rename); directories are walked
-   * recursively and re-created under the new path.
+   * Move the file or directory at `from` to `to`. Files go through
+   * {@link FileSystemAccessProvider._moveFile} (copy + unlink here; OPFS uses
+   * the native handle move); directories are walked recursively and re-created
+   * under the new path. An existing destination is refused with `EEXIST`.
    *
    * @param from - Source absolute path.
    * @param to - Destination absolute path.
@@ -355,32 +409,27 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     this._assertReady();
     this._assertRootedPath(from);
     this._assertRootedPath(to);
+    const sourceKind = await this._entryKind(from);
+    if (sourceKind === undefined) {
+      throw this._enoent(from);
+    }
     if (from === to) {
-      await this.stat(from);
       return;
     }
     if (from === '') {
       throw this._einval(from);
     }
-    const sourceStat = await this.stat(from);
-    if (sourceStat.type === 'dir' && to.startsWith(`${from}/`)) {
+    if (sourceKind === 'dir' && to.startsWith(`${from}/`)) {
       throw this._einval(to);
     }
-    try {
-      await this.stat(to);
+    if ((await this._entryKind(to)) !== undefined) {
       throw this._eexist(to);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        throw error;
-      }
     }
-    if (sourceStat.type === 'dir') {
+    if (sourceKind === 'dir') {
       await this._renameDirectory(from, to);
       return;
     }
-    const data = await this.readFileRaw(from);
-    await this.writeFile(to, data);
-    await this.unlink(from);
+    await this._moveFile(from, to);
     this._invalidateHandleCachePrefix(from);
   }
 
@@ -607,6 +656,21 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     }
   }
 
+  /**
+   * Move one regular file whose destination {@link FileSystemAccessProvider.rename}
+   * has already proven absent. A user-picked root has no portable native move,
+   * so the bytes are copied and the source unlinked; missing destination
+   * parents are created by the write.
+   *
+   * @param from - Source file path.
+   * @param to - Absent destination file path.
+   */
+  protected async _moveFile(from: string, to: string): Promise<void> {
+    const data = await this.readFileRaw(from);
+    await this.writeFile(to, data);
+    await this.unlink(from);
+  }
+
   protected async readFileRaw(path: string): Promise<Uint8Array<ArrayBuffer>> {
     this._assertReady();
     this._assertRootedPath(path);
@@ -749,29 +813,8 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       throw this._eisdir(path);
     }
     const fileName = segments.pop()!;
-    const createdDirectories: string[] = [];
-    let directoryHandle = this._rootHandle;
-    let directoryPath = '';
-
+    const { directoryHandle, createdDirectories } = await this._openDirectoryForWrite(segments.join('/'));
     try {
-      for (const segment of segments) {
-        directoryPath = directoryPath === '' ? segment : `${directoryPath}/${segment}`;
-        try {
-          // oxlint-disable-next-line no-await-in-loop -- Sequential directory traversal is required by the handle API.
-          directoryHandle = await directoryHandle.getDirectoryHandle(segment);
-        } catch (error) {
-          if (hasDomName(error, 'TypeMismatchError')) {
-            throw this._enotdir(directoryPath);
-          }
-          if (!hasDomName(error, 'NotFoundError')) {
-            throw error;
-          }
-          // oxlint-disable-next-line no-await-in-loop -- Missing ancestors are created in path order.
-          directoryHandle = await directoryHandle.getDirectoryHandle(segment, { create: true });
-          createdDirectories.push(directoryPath);
-        }
-      }
-
       try {
         return {
           fileHandle: await directoryHandle.getFileHandle(fileName),
@@ -797,6 +840,45 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     }
   }
 
+  /**
+   * Resolve the directory at `path` for a write, creating missing ancestors in
+   * path order. A failure removes exactly the directories this call created.
+   *
+   * @param path - Directory path; `''` is the root.
+   * @returns The directory handle and the paths this call created, shallowest first.
+   */
+  protected async _openDirectoryForWrite(path: string): Promise<{
+    directoryHandle: FileSystemDirectoryHandle;
+    createdDirectories: string[];
+  }> {
+    const createdDirectories: string[] = [];
+    let directoryHandle = this._rootHandle;
+    let directoryPath = '';
+    try {
+      for (const segment of this._splitPath(path)) {
+        directoryPath = directoryPath === '' ? segment : `${directoryPath}/${segment}`;
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- Sequential directory traversal is required by the handle API.
+          directoryHandle = await directoryHandle.getDirectoryHandle(segment);
+        } catch (error) {
+          if (hasDomName(error, 'TypeMismatchError')) {
+            throw this._enotdir(directoryPath);
+          }
+          if (!hasDomName(error, 'NotFoundError')) {
+            throw error;
+          }
+          // oxlint-disable-next-line no-await-in-loop -- Missing ancestors are created in path order.
+          directoryHandle = await directoryHandle.getDirectoryHandle(segment, { create: true });
+          createdDirectories.push(directoryPath);
+        }
+      }
+      return { directoryHandle, createdDirectories };
+    } catch (error) {
+      await this._cleanupCreatedDirectories(createdDirectories);
+      throw error;
+    }
+  }
+
   protected async _cleanupFailedFileCreation(
     path: string,
     created: { createdFile: boolean; createdDirectories: readonly string[] },
@@ -809,6 +891,98 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       }
     }
     await this._cleanupCreatedDirectories(created.createdDirectories);
+  }
+
+  protected async _cleanupCreatedDirectories(paths: readonly string[]): Promise<void> {
+    for (const path of paths.toReversed()) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- Cleanup must proceed from deepest child to parent.
+        await this._removeEntry(path, false);
+      } catch {
+        break;
+      }
+    }
+  }
+
+  /**
+   * What kind of entry `path` names, from the directory handles alone.
+   *
+   * `stat` reads a file's leading bytes to classify its content; the existence
+   * and kind checks a mutation makes before it writes need none of that, and
+   * on OPFS the read was most of what a rename cost.
+   *
+   * @param path - Absolute path to look up.
+   * @returns `'file'`, `'dir'`, or `undefined` when nothing is there.
+   * @throws `ENOTDIR` when an ancestor of `path` is a file.
+   */
+  private async _entryKind(path: string): Promise<'file' | 'dir' | undefined> {
+    const segments = this._splitPath(path);
+    if (segments.length === 0) {
+      return 'dir';
+    }
+    let parent: FileSystemDirectoryHandle;
+    try {
+      parent = await this._resolveDirectoryHandle(segments.slice(0, -1).join('/'));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return undefined;
+      }
+      throw error;
+    }
+    const name = segments.at(-1)!;
+    try {
+      await parent.getFileHandle(name);
+      return 'file';
+    } catch (error) {
+      if (!hasDomName(error, 'NotFoundError') && !hasDomName(error, 'TypeMismatchError')) {
+        throw error;
+      }
+    }
+    try {
+      await parent.getDirectoryHandle(name);
+      return 'dir';
+    } catch (error) {
+      if (hasDomName(error, 'NotFoundError') || hasDomName(error, 'TypeMismatchError')) {
+        return undefined;
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Decide what a listing does with a file whose stat failed after enumeration.
+   *
+   * `getFile()` on a removed entry rejects `NotFoundError`, and the entry is
+   * skipped. Reading a `File` snapshot whose entry was removed or replaced
+   * after `getFile()` rejects `NotReadableError`, which a permission failure
+   * also raises: the name is looked up again, skipped when it is gone, and its
+   * fresh handle returned when something is there now.
+   *
+   * @param directory - The directory being listed.
+   * @param name - The entry whose stat failed.
+   * @param error - The stat failure.
+   * @returns A fresh handle to stat once more, or `undefined` to skip the entry.
+   * @throws The original failure when it is neither of the two above.
+   */
+  private async _listedAgain(
+    directory: FileSystemDirectoryHandle,
+    name: string,
+    error: unknown,
+  ): Promise<FileSystemFileHandle | undefined> {
+    if (hasDomName(error, 'NotFoundError')) {
+      return undefined;
+    }
+    if (!hasDomName(error, 'NotReadableError')) {
+      throw error;
+    }
+    try {
+      return await directory.getFileHandle(name);
+    } catch (lookupError) {
+      if (hasDomName(lookupError, 'NotFoundError')) {
+        return undefined;
+      }
+      throw error;
+    }
   }
 
   private async _openExclusiveWritable(
@@ -853,17 +1027,6 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     this._exclusiveWritableSupported = false;
     await Promise.allSettled([writable.abort(), competing.abort()]);
     return undefined;
-  }
-
-  private async _cleanupCreatedDirectories(paths: readonly string[]): Promise<void> {
-    for (const path of paths.toReversed()) {
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- Cleanup must proceed from deepest child to parent.
-        await this._removeEntry(path, false);
-      } catch {
-        break;
-      }
-    }
   }
 
   private async _removeEntry(path: string, recursive: boolean): Promise<void> {

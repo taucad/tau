@@ -225,3 +225,155 @@ describe('OPFS writes via sync access handles', () => {
     await expect(provider.readFile('events.log', 'utf8')).resolves.toBe('head');
   });
 });
+
+describe('OPFS rename via native move', () => {
+  const mountRoot = (
+    options: MockRootHandleOptions,
+  ): { root: ReturnType<typeof createMockRootHandle>; acquired: string[]; moved: string[] } => {
+    const acquired: string[] = [];
+    const moved: string[] = [];
+    const root = createMockRootHandle({
+      ...options,
+      onAcquireWriteApi: (api) => acquired.push(api),
+      onMove: (from, to) => moved.push(`${from} to ${to}`),
+    });
+    vi.stubGlobal('navigator', { storage: { getDirectory: vi.fn().mockResolvedValue(root) } });
+    return { root, acquired, moved };
+  };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('should move a file with one native move and no byte copy', async () => {
+    const { acquired, moved } = mountRoot({ nativeMove: true });
+    const provider = new OPFSProvider();
+    await provider.initialize();
+    await provider.writeFile('dir/a.tau-staged.1.tmp', 'staged bytes');
+    acquired.length = 0;
+
+    await provider.rename('dir/a.tau-staged.1.tmp', 'dir/a.ts');
+
+    expect(moved).toEqual(['a.tau-staged.1.tmp to a.ts']);
+    expect(acquired).toEqual([]);
+    await expect(provider.readFile('dir/a.ts', 'utf8')).resolves.toBe('staged bytes');
+    await expect(provider.exists('dir/a.tau-staged.1.tmp')).resolves.toBe(false);
+  });
+
+  it('should create missing destination parents for a native move', async () => {
+    const { moved } = mountRoot({ nativeMove: true });
+    const provider = new OPFSProvider();
+    await provider.initialize();
+    await provider.writeFile('source.txt', 'payload');
+
+    await provider.rename('source.txt', 'new/nested/target.txt');
+
+    expect(moved).toEqual(['source.txt to target.txt']);
+    await expect(provider.readFile('new/nested/target.txt', 'utf8')).resolves.toBe('payload');
+    await expect(provider.stat('new/nested')).resolves.toMatchObject({ type: 'dir' });
+  });
+
+  it('should refuse an existing destination with EEXIST without moving', async () => {
+    const { moved } = mountRoot({ nativeMove: true });
+    const provider = new OPFSProvider();
+    await provider.initialize();
+    await provider.writeFile('source.txt', 'source');
+    await provider.writeFile('target.txt', 'target');
+
+    await expect(provider.rename('source.txt', 'target.txt')).rejects.toMatchObject({ code: 'EEXIST' });
+
+    expect(moved).toEqual([]);
+    await expect(provider.readFile('source.txt', 'utf8')).resolves.toBe('source');
+    await expect(provider.readFile('target.txt', 'utf8')).resolves.toBe('target');
+  });
+
+  it('should reject a missing source with ENOENT', async () => {
+    mountRoot({ nativeMove: true });
+    const provider = new OPFSProvider();
+    await provider.initialize();
+
+    await expect(provider.rename('missing.txt', 'target.txt')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('should copy through a sync handle when the engine has no native move', async () => {
+    const { acquired, moved } = mountRoot({ nativeMove: false });
+    const provider = new OPFSProvider();
+    await provider.initialize();
+    await provider.writeFile('source.txt', 'payload');
+    acquired.length = 0;
+
+    await provider.rename('source.txt', 'target.txt');
+
+    expect(moved).toEqual([]);
+    expect(acquired).toEqual(['sync']);
+    await expect(provider.readFile('target.txt', 'utf8')).resolves.toBe('payload');
+    await expect(provider.exists('source.txt')).resolves.toBe(false);
+  });
+
+  it('should fall back to the copy path when the engine refuses move as unsupported', async () => {
+    const { root, acquired } = mountRoot({ nativeMove: true });
+    const provider = new OPFSProvider();
+    await provider.initialize();
+    await provider.writeFile('source.txt', 'payload');
+    const originalGetFileHandle = root.getFileHandle.bind(root);
+    vi.spyOn(root, 'getFileHandle').mockImplementation(async (name, options) => {
+      const handle = await originalGetFileHandle(name, options);
+      if (name === 'source.txt' && handle.move !== undefined) {
+        vi.spyOn(handle, 'move').mockRejectedValue(new DOMException('unsupported', 'NotSupportedError'));
+      }
+      return handle;
+    });
+    acquired.length = 0;
+
+    await provider.rename('source.txt', 'out/target.txt');
+
+    expect(acquired).toEqual(['sync']);
+    await expect(provider.readFile('out/target.txt', 'utf8')).resolves.toBe('payload');
+    await expect(provider.exists('source.txt')).resolves.toBe(false);
+  });
+
+  it.each([
+    { refusal: 'NotFoundError', code: 'ENOENT' },
+    { refusal: 'InvalidModificationError', code: 'EEXIST' },
+    { refusal: 'TypeMismatchError', code: 'EEXIST' },
+  ])('should report a native $refusal as $code with the DOM exception as cause', async ({ refusal, code }) => {
+    const { root } = mountRoot({ nativeMove: true });
+    const provider = new OPFSProvider();
+    await provider.initialize();
+    await provider.writeFile('source.txt', 'payload');
+    const originalGetFileHandle = root.getFileHandle.bind(root);
+    vi.spyOn(root, 'getFileHandle').mockImplementation(async (name, options) => {
+      const handle = await originalGetFileHandle(name, options);
+      if (name === 'source.txt' && handle.move !== undefined) {
+        vi.spyOn(handle, 'move').mockRejectedValue(new DOMException('refused', refusal));
+      }
+      return handle;
+    });
+
+    await expect(provider.rename('source.txt', 'target.txt')).rejects.toMatchObject({
+      code,
+      cause: { name: refusal },
+    });
+    await expect(provider.readFile('source.txt', 'utf8')).resolves.toBe('payload');
+  });
+
+  it('should remove the parents it created and keep the source when a native move fails', async () => {
+    const { root } = mountRoot({ nativeMove: true });
+    const provider = new OPFSProvider();
+    await provider.initialize();
+    await provider.writeFile('source.txt', 'payload');
+    const sourceHandle = await root.getFileHandle('source.txt');
+    const contender = await sourceHandle.createSyncAccessHandle!();
+    try {
+      await expect(provider.rename('source.txt', 'created/target.txt')).rejects.toMatchObject({
+        code: 'EBUSY',
+        cause: { name: 'NoModificationAllowedError' },
+      });
+    } finally {
+      contender.close();
+    }
+
+    await expect(provider.exists('created')).resolves.toBe(false);
+    await expect(provider.readFile('source.txt', 'utf8')).resolves.toBe('payload');
+  });
+});

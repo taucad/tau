@@ -23,7 +23,17 @@ const editorHiddenWindows = new Set([
   '$recycle.bin',
 ]);
 
-/** Whether any path segment is host metadata hidden only from Tau's editor tree. */
+/**
+ * Tau's own revision staging and backup siblings (`.<name>.tau-staged.<id>.tmp`,
+ * `.<name>.tau-backup.<id>.tmp`). They exist only while an apply swaps a file
+ * into place, so a tree that lists them mid-apply would flash rows the person
+ * never wrote. The id is always a UUID; this mirrors `parseTemporarySibling`
+ * in `@taucad/revisions`, which that package keeps internal.
+ */
+const tauTemporarySiblingPattern =
+  /^\..+\.tau-(?:staged|backup)\.[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\.tmp$/u;
+
+/** Whether any path segment is host metadata or Tau apply litter hidden only from Tau's editor tree. */
 export const isEditorSystemArtifactPath = (path: string): boolean =>
   path
     .split('/')
@@ -34,7 +44,8 @@ export const isEditorSystemArtifactPath = (path: string): boolean =>
         segment.startsWith('._') ||
         segment.startsWith('.com.apple.timemachine.') ||
         segment.startsWith('.Trash-') ||
-        segment.endsWith('.crswap'),
+        segment.endsWith('.crswap') ||
+        tauTemporarySiblingPattern.test(segment),
     );
 
 /**

@@ -371,6 +371,12 @@ export const startGitHttpBackend = async (options: GitHttpBackendOptions): Promi
       response.writeHead(500);
       response.end();
     });
+    /*
+     * `git http-backend` may exit before it reads the whole request body (a refused push stops
+     * reading early). Writing the rest then fails with EPIPE on stdin; the reply is still sent
+     * from `close`, so swallow it here rather than let it escape as an uncaught exception.
+     */
+    child.stdin.on('error', () => undefined);
     request.pipe(child.stdin);
   };
 

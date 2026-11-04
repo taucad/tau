@@ -483,6 +483,53 @@ describe('advertisement cancellation', () => {
   });
 });
 
+/* R6 review: a server that answers protocol v2 to a v1 request lists no refs in its advertisement. */
+describe('a protocol-v2-only advertisement', () => {
+  it('lists through ls-refs rather than reading an empty repository, and keeps nothing for a fetch', async () => {
+    const pkt = (line: string): string => `${(line.length + 4).toString(16).padStart(4, '0')}${line}`;
+    const oid = 'a'.repeat(40);
+    const requests: string[] = [];
+    const answer = (request: RevisionHttpRequest, text: string, type: string): RevisionHttpResponse => ({
+      url: request.url,
+      method: request.method ?? 'GET',
+      headers: { 'content-type': type },
+      body: (async function* () {
+        await Promise.resolve();
+        yield encoder.encode(text);
+      })(),
+      statusCode: 200,
+      statusMessage: 'OK',
+    });
+    const http: RevisionHttpClient = {
+      request: async (request) => {
+        requests.push(`${request.method ?? 'GET'} ${new URL(request.url).pathname}`);
+        if ((request.method ?? 'GET') === 'GET') {
+          return answer(
+            request,
+            `${pkt('# service=git-upload-pack\n')}0000${pkt('version 2\n')}${pkt('ls-refs\n')}${pkt('fetch\n')}0000`,
+            'application/x-git-upload-pack-advertisement',
+          );
+        }
+        return answer(
+          request,
+          `${pkt(`${oid} HEAD symref-target:refs/heads/main\n`)}${pkt(`${oid} refs/heads/main\n`)}0000`,
+          'application/x-git-upload-pack-result',
+        );
+      },
+    };
+    const port = await storeWithRemote(http, 'tau');
+
+    const listed = await port.listRemoteRefs('tau');
+    expect(listed).toStrictEqual([{ name: 'refs/heads/main', head: oid }]);
+    expect(requests.filter((entry) => entry.startsWith('POST'))).toHaveLength(1);
+
+    /* The v2 answer is not an advertisement a fetch can reuse: it asks for its own. */
+    const before = requests.length;
+    await port.fetch({ remote: 'tau', refs: ['refs/heads/main'], advertised: listed });
+    expect(requests.slice(before)).toStrictEqual(['GET /v1/git/p1.git/info/refs']);
+  });
+});
+
 /*
  * Load-path audit fix 1: a tree read collects the pointers its store does not
  * hold, then fetches them together, where it used to make one batch call and
@@ -660,6 +707,28 @@ describe('reading a tree with large objects', () => {
     expect(read?.get('main.scad')).toStrictEqual(encoder.encode('cube(1);\n'));
     expect(asked).toStrictEqual([]);
     expect(transfer).not.toHaveBeenCalled();
+  });
+
+  /* R5: a reader that wants one file reads one file, not every blob and every large object. */
+  it('reads only the named paths, and leaves out what is missing or a directory', async () => {
+    const { port, head, asked, transfer, evict } = await lfsStore();
+    await evict(parts[0]![1]!, parts[1]![1]!);
+    const read = await port.readTree(head, {
+      largeObjects: 'local',
+      paths: ['main.scad', parts[2]![0]!, parts[0]![0]!, 'models', 'missing.json', 'main.scad/inner'],
+    });
+    expect(read?.entries().map(({ path }) => path)).toStrictEqual(
+      [parts[0]![0]!, parts[2]![0]!, 'main.scad'].toSorted(),
+    );
+    expect(read?.get('main.scad')).toStrictEqual(encoder.encode('cube(1);\n'));
+    expect(read?.get(parts[2]![0]!)).toStrictEqual(encoder.encode(parts[2]![1]));
+    expect(read?.get(parts[0]![0]!)).toStrictEqual(lfsPointerFor(encoder.encode(parts[0]![1])).bytes);
+    expect(asked).toStrictEqual([]);
+    expect(transfer).not.toHaveBeenCalled();
+    /* A fetching read of a subset fetches only that subset's large objects. */
+    const fetched = await port.readTree(head, { paths: [parts[0]![0]!] });
+    expect(fetched?.get(parts[0]![0]!)).toStrictEqual(encoder.encode(parts[0]![1]));
+    expect(asked).toStrictEqual([[oidOf(parts[0]![1]!)]]);
   });
 
   it('tells a fetching read about each object as it lands', async () => {

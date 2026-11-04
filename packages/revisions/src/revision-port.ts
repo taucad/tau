@@ -281,6 +281,14 @@ export type RevisionFetchInput = Readonly<{
    */
   refs?: readonly string[];
   /**
+   * The listing {@link RevisionPort.listRemoteRefs} just answered for this
+   * remote, when the caller is fetching what it listed (R6). A port that kept
+   * that listing's advertisement fetches against it instead of asking the
+   * remote again; any other port, or any other value, asks as before. The
+   * caller owns its freshness: hand back only a listing taken for this fetch.
+   */
+  advertised?: readonly RemoteRef[];
+  /**
    * Abandon this fetch when the caller cancels or its transfer budget expires.
    *
    * Browser transports pass it to their requests. Native Git terminates the
@@ -535,6 +543,13 @@ export type ReadTreeOptions = Readonly<{
    * Absent, every pointer is resolved, from the remote if need be.
    */
   largeObjects?: 'local';
+  /**
+   * Only these project-relative paths are wanted, so a host may read just
+   * them instead of every blob in the tree. A host may still answer the whole
+   * tree; a path the revision does not hold, or that names a directory, is
+   * absent either way. Callers read the answer with `get`.
+   */
+  paths?: readonly string[];
   /** Told about each large object as the remote delivers it, while a fetching read runs. */
   onLargeObject?: (oid: string, content: Uint8Array<ArrayBuffer>) => void;
   /** Stops a fetching read's transfers; the read then rejects. */

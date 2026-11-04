@@ -29,7 +29,8 @@ import type { LargeObjectsReport } from '#project-revisions.types.js';
 import { writeChatRef } from '#chat-ref.js';
 import { materializeConflict, readConflictTerms } from '#revision-conflict.js';
 import { RevisionPortError } from '#revision-port.js';
-import type { Checkout, ConflictRecord, RevisionPort } from '#revision-port.js';
+import { remoteTrackingRef } from '#remotes.js';
+import type { Checkout, ConflictRecord, RemoteRef, RevisionPort } from '#revision-port.js';
 import { gitToolchainOnPath, nativeHarness } from '#test/native-git-harness.js';
 import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
 import { createOpsLog, opsRefName } from '#ops-ref.js';
@@ -3209,6 +3210,343 @@ describe('independent sync record failures', () => {
     await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
     expect(requested).toHaveLength(5);
   }, 30_000);
+
+  /* R5: a fresh device learns the export preference from the manifest alone, not the whole tree. */
+  it('reads only the fetched manifest to learn a fresh device’s export preference', async () => {
+    const context = await fixture({});
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([
+        ['tau.json', '{"syncLargeExports":true}\n'],
+        ['main.ts', 'base\n'],
+        ['parts/a.step', 'solid a\n'],
+      ]),
+      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      summary: { generated: 'Main' },
+    });
+    const head = revisionId(receipt.commitId);
+    await context.port.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head });
+    const reads: Array<readonly string[] | undefined> = [];
+    const actors = createRevisionActors({
+      port: {
+        ...context.port,
+        readTree: async (id, options) => {
+          reads.push(options?.paths);
+          return context.port.readTree(id, options);
+        },
+        listRemoteRefs: async () => [
+          { name: 'refs/heads/main', head },
+          { name: 'refs/tau/evidence/exports', head },
+        ],
+        fetch: async () => ({ refs: [] }),
+      },
+      projectId: 'project-1',
+      filesystem: () => context.filesystem,
+    });
+
+    const fetched = await run<SyncFetchActorOutput>(actors.sync.fetch, {
+      remote: 'tau',
+      branch: 'main',
+      deadlineMilliseconds: 10_000,
+    });
+
+    expect(fetched.recordProjection?.syncLargeExports).toBe(true);
+    expect(reads).toStrictEqual([['tau.json']]);
+  }, 30_000);
+
+  /* R4: the connect-time fetch takes what the opening pull would, and that pull then fetches nothing. */
+  it('fetches only the authored refs on connect, and the opening pull does not fetch them again', async () => {
+    const context = await fixture({ 'main.ts': 'base\n' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['main.ts', 'base\n']]),
+      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      summary: { generated: 'Main' },
+    });
+    const head = revisionId(receipt.commitId);
+    await context.port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+    const advertised = [
+      { name: 'refs/heads/main', head },
+      { name: 'refs/heads/feature', head },
+      { name: 'refs/tags/v1', head },
+      { name: 'refs/tau/ops/device-b', head },
+      { name: 'refs/tau/chats/c1', head },
+      { name: 'refs/tau/evidence/exports', head },
+      { name: 'refs/tau/artifacts/geospec-candidates/device-b', head },
+    ];
+    const authored = ['refs/heads/main', 'refs/heads/feature', 'refs/tags/v1'];
+    let listings = 0;
+    const requested: Array<readonly string[] | undefined> = [];
+    const actors = createRevisionActors({
+      port: {
+        ...context.port,
+        listRemoteRefs: async () => {
+          listings += 1;
+          return advertised;
+        },
+        fetch: async (input) => {
+          requested.push(input.refs);
+          await Promise.all(
+            (input.refs ?? []).map(async (name) =>
+              context.port.updateRef({
+                name: remoteTrackingRef('tau', name),
+                expectedHead: await context.port.readRef(remoteTrackingRef('tau', name)),
+                head,
+              }),
+            ),
+          );
+          return { refs: [] };
+        },
+      },
+      projectId: 'project-1',
+      filesystem: () => context.filesystem,
+    });
+
+    await run(actors.remote.initialSync, { remote: 'tau', branch: 'main' });
+    expect(requested).toEqual([authored]);
+
+    const fetched = await run<SyncFetchActorOutput>(actors.sync.fetch, {
+      remote: 'tau',
+      branch: 'main',
+      deadlineMilliseconds: 10_000,
+    });
+    /* The opening pull still reads the remote once, for its leases, and fetches nothing. */
+    expect(listings).toBe(2);
+    expect(requested).toEqual([authored]);
+    /* The chat still arrives: the record projection asks for it by name. */
+    expect(fetched.recordProjection?.fetchRefs).toEqual(['refs/tau/chats/c1']);
+    await run(actors.sync.projectRecords, fetched.recordProjection);
+    expect(requested).toEqual([authored, ['refs/tau/chats/c1']]);
+    /* Another device's operation log never comes down. */
+    expect(requested.flat()).not.toContain('refs/tau/ops/device-b');
+  }, 30_000);
+
+  /* R6: `validate`'s listing is the connect-time fetch's advertisement, for the same destination only. */
+  it('hands validate’s listing to the connect-time fetch, and lists again for a changed destination', async () => {
+    const context = await fixture({ 'main.ts': 'base\n' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['main.ts', 'base\n']]),
+      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      summary: { generated: 'Main' },
+    });
+    const head = revisionId(receipt.commitId);
+    await context.port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+    const listings: Array<readonly RemoteRef[]> = [];
+    const handed: Array<readonly RemoteRef[] | undefined> = [];
+    const actors = createRevisionActors({
+      port: {
+        ...context.port,
+        listRemoteRefs: async () => {
+          const listed = Object.freeze([{ name: 'refs/heads/main', head }]);
+          listings.push(listed);
+          return listed;
+        },
+        fetch: async (input) => {
+          handed.push(input.advertised);
+          return { refs: [] };
+        },
+      },
+      projectId: 'project-1',
+      filesystem: () => context.filesystem,
+    });
+
+    await run(actors.remote.validate, { remote: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+    await run(actors.remote.initialSync, { remote: 'tau', branch: 'main' });
+    expect(listings).toHaveLength(1);
+    expect(handed).toHaveLength(1);
+    expect(handed[0]).toBe(listings[0]);
+
+    /* Taken once: a second connect-time fetch lists for itself. */
+    await run(actors.remote.initialSync, { remote: 'tau', branch: 'main' });
+    expect(listings).toHaveLength(2);
+    expect(handed[1]).toBe(listings[1]);
+
+    /* A destination re-pointed after `validate` read it is not the one it listed. */
+    await run(actors.remote.validate, { remote: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+    await context.port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-2.git' });
+    await run(actors.remote.initialSync, { remote: 'tau', branch: 'main' });
+    expect(listings).toHaveLength(4);
+    expect(handed[2]).toBe(listings[3]);
+
+    /* The pull hands its own listing to its fetch too. */
+    await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
+    expect(handed.at(-1)).toBe(listings.at(-1));
+  }, 30_000);
+
+  /* R6 review: only a validation that finished as the current, unstopped one leaves its listing behind. */
+  it('keeps no listing from a stopped or overtaken validation', async () => {
+    const context = await fixture({ 'main.ts': 'base\n' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['main.ts', 'base\n']]),
+      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      summary: { generated: 'Main' },
+    });
+    const head = revisionId(receipt.commitId);
+    await context.port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+    const listings: Array<readonly RemoteRef[]> = [];
+    const held: Array<PromiseWithResolvers<void>> = [];
+    let hold = false;
+    const handed: Array<readonly RemoteRef[] | undefined> = [];
+    const actors = createRevisionActors({
+      port: {
+        ...context.port,
+        listRemoteRefs: async () => {
+          const listed = Object.freeze([{ name: 'refs/heads/main', head }]);
+          listings.push(listed);
+          if (hold) {
+            const gate = Promise.withResolvers<void>();
+            held.push(gate);
+            await gate.promise;
+          }
+          return listed;
+        },
+        fetch: async (input) => {
+          handed.push(input.advertised);
+          return { refs: [] };
+        },
+      },
+      projectId: 'project-1',
+      filesystem: () => context.filesystem,
+    });
+    const input = { remote: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' };
+    const waitForListing = async (count: number): Promise<void> => {
+      await vi.waitFor(() => {
+        expect(listings).toHaveLength(count);
+      });
+    };
+
+    /* Stopped: its listing lands after the stop and is not kept. */
+    hold = true;
+    const stopped = createActor(actors.remote.validate, { input });
+    stopped.start();
+    await waitForListing(1);
+    stopped.stop();
+    held[0]!.resolve();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    hold = false;
+    await run(actors.remote.initialSync, { remote: 'tau', branch: 'main' });
+    expect(listings).toHaveLength(2);
+    expect(handed.at(-1)).toBe(listings[1]);
+
+    /* Overtaken: the newer validation's listing is the one kept. */
+    hold = true;
+    const older = createActor(actors.remote.validate, { input });
+    older.start();
+    await waitForListing(3);
+    hold = false;
+    await run(actors.remote.validate, input);
+    held[1]!.resolve();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    await run(actors.remote.initialSync, { remote: 'tau', branch: 'main' });
+    expect(listings).toHaveLength(4);
+    expect(handed.at(-1)).toBe(listings[3]);
+    older.stop();
+  }, 30_000);
+
+  it('forgets the connect-time proof when the connect-time fetch fails', async () => {
+    const context = await fixture({ 'main.ts': 'base\n' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['main.ts', 'base\n']]),
+      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      summary: { generated: 'Main' },
+    });
+    const head = revisionId(receipt.commitId);
+    await context.port.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head });
+    await context.port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+    let failNext = true;
+    const requested: Array<readonly string[] | undefined> = [];
+    const actors = createRevisionActors({
+      port: {
+        ...context.port,
+        listRemoteRefs: async () => [{ name: 'refs/heads/main', head }],
+        fetch: async (input) => {
+          requested.push(input.refs);
+          if (failNext) {
+            failNext = false;
+            throw new RevisionPortError('INVALID_TRANSPORT', 'LFS transfer failed.');
+          }
+          return { refs: [] };
+        },
+      },
+      projectId: 'project-1',
+      filesystem: () => context.filesystem,
+    });
+
+    await expect(run(actors.remote.initialSync, { remote: 'tau', branch: 'main' })).rejects.toThrow(
+      'LFS transfer failed',
+    );
+    /* The tracking ref already names the tip, but nothing this session proved it hydrated. */
+    await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
+    expect(requested).toEqual([['refs/heads/main'], ['refs/heads/main']]);
+  }, 30_000);
+
+  /* R4 review: the connect no longer writes the evidence tracking ref, so a reconnect's opening pull must still
+   * read a record this device already holds as applied, and never move its changed exports aside. */
+  it.each([
+    { name: 'its own ref names the remote record', local: 'same' },
+    { name: 'its own ref recorded on top of the remote record', local: 'ahead' },
+  ] as const)(
+    'keeps differing local exports on a reconnect when $name',
+    async ({ local }) => {
+      const context = await fixture({
+        'tau.json': '{"syncLargeExports":true}\n',
+        'exports/shared.step': 'edited since it was recorded\n',
+      });
+      await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+      const recorded = await context.port.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([['exports/shared.step', 'recorded output\n']]),
+        provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+        summary: { generated: 'Exports' },
+      });
+      const remoteHead = revisionId(recorded.commitId);
+      const ahead =
+        local === 'same'
+          ? undefined
+          : await context.port.writeRevision({
+              parents: [remoteHead],
+              tree: new ImmutableRevisionTree([['exports/shared.step', 'recorded again\n']]),
+              provenance: { source: 'user', actorId: 'device-a', createdAt: 2 },
+              summary: { generated: 'Exports again' },
+            });
+      const localHead = ahead === undefined ? remoteHead : revisionId(ahead.commitId);
+      await context.port.updateRef({ name: 'refs/tau/evidence/exports', expectedHead: undefined, head: localHead });
+      const actors = createRevisionActors({
+        port: {
+          ...context.port,
+          listRemoteRefs: async () => [{ name: 'refs/tau/evidence/exports', head: remoteHead }],
+          fetch: async () => ({ refs: [{ name: 'refs/remotes/tau/tau/evidence/exports', head: remoteHead }] }),
+        },
+        projectId: 'project-1',
+        filesystem: () => context.filesystem,
+      });
+
+      const fetched = await run<SyncFetchActorOutput>(actors.sync.fetch, {
+        remote: 'tau',
+        branch: 'main',
+        deadlineMilliseconds: 10_000,
+      });
+      expect(fetched.recordProjection?.priorEvidenceHead).toBe(remoteHead);
+      const projected = await run<SyncProjectRecordsActorOutput>(actors.sync.projectRecords, fetched.recordProjection);
+
+      expect(projected.records).toEqual([{ name: 'refs/tau/evidence/exports', status: 'upToDate', head: remoteHead }]);
+      expect(await context.filesystem.readFile('exports/shared.step', 'utf8')).toBe('edited since it was recorded\n');
+      expect(await context.filesystem.exists('.tau/artifacts/sync-conflicts')).toBe(false);
+    },
+    30_000,
+  );
 
   it('retains a differing local export before adopting and re-offering the fetched value', async () => {
     const context = await fixture({

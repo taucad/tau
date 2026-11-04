@@ -714,6 +714,45 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
   };
 
   /**
+   * The named file entries of one tree, read one directory per path segment.
+   *
+   * What a reader that wants only a few files (a manifest) pays instead of
+   * {@link flatTree}'s walk of every directory. A path that is missing, or that
+   * names a directory, is left out, as {@link flatTree} would leave it.
+   *
+   * @param oid - Root tree object.
+   * @param paths - Project-relative paths to look up.
+   * @returns Each found path's blob id and mode.
+   */
+  const selectedTree = async (
+    oid: string,
+    paths: readonly string[],
+  ): Promise<ReadonlyMap<string, Readonly<{ oid: string; mode: string }>>> => {
+    const entryAt = async (path: string): Promise<Readonly<{ oid: string; mode: string }> | undefined> => {
+      const segments = path.split('/');
+      let tree = oid;
+      for (const [index, segment] of segments.entries()) {
+        // oxlint-disable-next-line no-await-in-loop -- each directory names the next one to read.
+        const { tree: entries } = await readTree({ fs, cache: objectCache(), gitdir, oid: tree });
+        const entry = entries.find((candidate) => candidate.path === segment);
+        if (entry === undefined) {
+          return undefined;
+        }
+        if (index === segments.length - 1) {
+          return entry.type === 'tree' ? undefined : { oid: entry.oid, mode: entry.mode };
+        }
+        if (entry.type !== 'tree') {
+          return undefined;
+        }
+        tree = entry.oid;
+      }
+      return undefined;
+    };
+    const found = await Promise.all([...new Set(paths)].map(async (path) => [path, await entryAt(path)] as const));
+    return new Map(found.flatMap(([path, entry]) => (entry === undefined ? [] : [[path, entry] as const])));
+  };
+
+  /**
    * Point the index at the tree `HEAD`'s branch names (R14).
    *
    * Tau never reads the index; stock Git does, on a folder a person opened from
@@ -1303,11 +1342,24 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     return [...send];
   };
 
+  /*
+   * R6: the `upload-pack` advertisement behind each listing this port answered,
+   * keyed by the listing itself. A fetch handed that listing back reuses it, so
+   * a caller that lists and then fetches what it listed pays one `info/refs`.
+   * Keyed by identity, never by URL or time: only the caller knows whether the
+   * listing is still the one it means to act on.
+   */
+  const listedAdvertisements = new WeakMap<
+    readonly RemoteRef[],
+    Readonly<{ url: string; advertisement: Awaited<ReturnType<typeof getRemoteInfo2>> }>
+  >();
+
   /**
    * What the remote advertises, read through the client the caller gives.
    *
-   * A fetch reads its own advertisement, which carries the capabilities and
-   * the fetch's own deadline (P36); this one is `listRemoteRefs`'.
+   * The same protocol-v1 `upload-pack` advertisement a fetch reads, so the
+   * fetch that follows a listing may reuse it (R6) and still carries its own
+   * deadline (P36).
    *
    * @param remote - The remote's name in git's config, or an address not recorded yet (R2).
    * @returns Every advertised ref, `HEAD` and peeled tags dropped.
@@ -1324,15 +1376,30 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
      * verb does, so it is where a 401, a `403 GIT_SYNC_NOT_ENTITLED` and a 404
      * arrive — and until this catch existed the library's own
      * `HTTP Error: 403 Forbidden` escaped verbatim into a `role='alert'`. */
-    const advertised = await listServerRefs({ http, url }).catch((error: unknown) => {
-      throw http.refused(error, name);
-    });
-    return Object.freeze(
-      advertised
+    const advertisement = await getRemoteInfo2({ http, url, forPush: false, protocolVersion: 1 }).catch(
+      (error: unknown) => {
+        throw http.refused(error, name);
+      },
+    );
+    /* A server that answers protocol v2 whatever it is asked sends capabilities
+     * and no refs: an empty list here would read as an empty repository. Ask
+     * it with `ls-refs` instead, and keep nothing for a fetch to reuse. */
+    const references =
+      advertisement.protocolVersion === 1
+        ? (advertisement.refs ?? [])
+        : await listServerRefs({ http, url }).catch((error: unknown) => {
+            throw http.refused(error, name);
+          });
+    const listed = Object.freeze(
+      references
         /* `git ls-remote --refs`, as the native leg reads it: no `HEAD`, no peeled tags. */
         .filter((reference) => reference.ref.startsWith('refs/') && !reference.ref.endsWith('^{}'))
         .map((reference) => Object.freeze({ name: reference.ref, head: revisionId(reference.oid) })),
     );
+    if (advertisement.protocolVersion === 1) {
+      listedAdvertisements.set(listed, { url, advertisement });
+    }
+    return listed;
   };
 
   /**
@@ -1579,7 +1646,10 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       if (commit === undefined) {
         return undefined;
       }
-      const paths = await flatTree(commit.tree);
+      const paths =
+        readOptions?.paths === undefined
+          ? await flatTree(commit.tree)
+          : await selectedTree(commit.tree, readOptions.paths);
       /* Pointers first, then their bytes together: the files keep tree order,
        * and only the large objects' transfers run side by side, under the LFS
        * client's own count and byte bounds. */
@@ -1976,8 +2046,14 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         throw http.refused(error, input.remote);
       };
       /* The one advertisement: `upload-pack`'s own, which carries the
-       * capabilities the request below may use as well as the refs. */
-      const advertisement = await getRemoteInfo2({ http, url, forPush: false, protocolVersion: 1 }).catch(refused);
+       * capabilities the request below may use as well as the refs — the
+       * listing's, when the caller hands back one this port answered for the
+       * same address (R6). */
+      const listed = input.advertised === undefined ? undefined : listedAdvertisements.get(input.advertised);
+      const advertisement =
+        listed?.url === url && listed.advertisement.protocolVersion === 1
+          ? listed.advertisement
+          : await getRemoteInfo2({ http, url, forPush: false, protocolVersion: 1 }).catch(refused);
       const advertised = new Map((advertisement.refs ?? []).map((reference) => [reference.ref, reference.oid]));
       const wanted = (input.refs ?? [...advertised.keys()].filter((ref) => ref.startsWith('refs/'))).filter((ref) => {
         if (input.refs !== undefined) {

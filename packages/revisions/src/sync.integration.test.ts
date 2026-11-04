@@ -21,6 +21,7 @@
  * | 13c | **D14-P** | the remote answers the conflict line's push `503 GIT_PUSH_RACE_LOST` (another device's push committed first): the line is offered again after the backoff and reaches the remote (isomorphic-git leg) |
  * | 13b | **RV-W6 F2** | a line removed on the remote stays on the device that recorded it, still listed, and its next push offers it again |
  * | 19 | **D87** | another checkout's branch that diverged with overlapping changes records its conflict line on the pull and pushes it, and the live branch's next revision still reaches the remote (isomorphic-git leg) |
+ * | 20 | **R4, R6** | a cold connect fetches only the authored refs, once, over `validate`'s one advertisement, and the opening pull fetches only the chats; another device's operation log never comes down |
  * | 15 | **FX1 N** | a hook's plan-quota refusal of `main` reaches the per-ref result as the hook's sentence, and the push settles as a terminal quota answer |
  *
  * Each row runs on both legs: `isomorphic-git` (the browser's port) and native
@@ -724,6 +725,82 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
       expect(projectedChats).toEqual([[chatId]]);
 
       second.stop();
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
+  it('row 20 (R4, R6): a cold connect fetches the authored refs once, and the opening pull fetches only the chats', async () => {
+    const remoteRoot = await temporaryRoot('remote-cold-connect');
+    const remote = await startGitHttpBackend({ root: remoteRoot });
+    try {
+      const one = await device({
+        leg,
+        label: 'a-cold-connect',
+        remoteUrl: remote.url,
+        files: {
+          'bracket.scad': 'cube([7, 7, 7]);\n',
+          [`${chatRecordsPath(chatId)}/chat.json`]: '{"name":"Bracket"}\n',
+          [`${chatRecordsPath(chatId)}/events.jsonl`]: '{"type":"turn.start"}\n',
+        },
+      });
+      const head = await record({ device: one, files: { 'bracket.scad': 'cube([7, 7, 7]);\n' }, summary: 'Device A' });
+      const first = one.scheduler();
+      first.start();
+      first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head, branch: 'main' });
+      await vi.waitFor(
+        () => {
+          expect(selectSyncFacet(first.getSnapshot()).state).toBe('backedUp');
+        },
+        { timeout: 30_000 },
+      );
+      first.stop();
+      /* Another device's operation log: pushed by it, never pulled by anyone. */
+      const opsRef = 'refs/tau/ops/device-z';
+      await remote.git(['update-ref', opsRef, head]);
+
+      const two = await device({ leg, label: 'b-cold-connect', remoteUrl: remote.url });
+      const before = remote.trail().length;
+      await run(two.actors.remote.validate, { remote: 'tau', url: remote.url });
+      await run(two.actors.remote.initialSync, { remote: 'tau', branch: 'main' });
+      const connected = remote.trail().slice(before);
+      expect(await two.port.readRef(`refs/remotes/tau/main`)).toBe(head);
+      /* Neither the operation log nor the chat came with the connect. */
+      expect(await two.port.readRef('refs/remotes/tau/tau/ops/device-z')).toBeUndefined();
+      expect(await two.port.readRef('refs/remotes/tau/tau/chats/c1')).toBeUndefined();
+
+      const second = two.scheduler();
+      second.start();
+      await vi.waitFor(
+        () => {
+          expect(selectSyncFacet(second.getSnapshot()).state).toBe('backedUp');
+        },
+        { timeout: 30_000 },
+      );
+      second.stop();
+      const opened = remote.trail().slice(before + connected.length);
+
+      expect(await two.filesystem.readFile('bracket.scad', 'utf8')).toBe('cube([7, 7, 7]);\n');
+      /* The chat arrived with the opening pull's record projection. */
+      expect(await two.filesystem.readFile(`${chatRecordsPath(chatId)}/chat.json`, 'utf8')).toBe(
+        '{"name":"Bracket"}\n',
+      );
+      expect(await two.port.readRef('refs/remotes/tau/tau/ops/device-z')).toBeUndefined();
+
+      if (leg.name === 'isomorphic-git') {
+        const count = (trail: readonly string[], suffix: string): number =>
+          trail.filter((entry) => entry.endsWith(suffix)).length;
+        /* Connect: one advertisement, `validate`'s, which the fetch reuses (R6), and one pack. */
+        expect({
+          infoRefs: count(connected, '/info/refs'),
+          uploadPacks: count(connected, '/git-upload-pack'),
+        }).toStrictEqual({ infoRefs: 1, uploadPacks: 1 });
+        /* The opening pull: one listing for its leases, no authored fetch, and the chat by name. */
+        expect({
+          infoRefs: count(opened, '/info/refs'),
+          uploadPacks: count(opened, '/git-upload-pack'),
+        }).toStrictEqual({ infoRefs: 2, uploadPacks: 1 });
+      }
     } finally {
       await remote.close();
     }

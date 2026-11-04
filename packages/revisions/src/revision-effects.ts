@@ -1575,6 +1575,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   let hydratedTips: Readonly<{ identity: string; heads: ReadonlyMap<string, string> }> | undefined;
   /* `validate`'s listing, kept for the `initialSync` that follows it (R6): the
    * connect-time fetch then needs no advertisement of its own. */
+  let validations = 0;
   let validatedListing:
     | Readonly<{ remote: string; identity: string | undefined; refs: readonly RemoteRef[] }>
     | undefined;
@@ -4333,11 +4334,18 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
 
       /* The cheapest question that proves a remote is really there: what refs
        * does it advertise. No object is fetched. */
-      validate: fromAuthorityPromise<RemoteValidateActorOutput, RemoteValidateActorInput>(async ({ input }) => {
+      validate: fromAuthorityPromise<RemoteValidateActorOutput, RemoteValidateActorInput>(async ({ input, signal }) => {
+        /* Only the newest validation, and only one nobody stopped, leaves its
+         * listing for `initialSync`: a stopped or overtaken one is not the
+         * connection that state continues. */
+        validations += 1;
+        const validation = validations;
         validatedListing = undefined;
         const identity = await remoteIdentity(input.remote);
         const listed = await port.listRemoteRefs(input.remote);
-        validatedListing = { remote: input.remote, identity, refs: listed };
+        if (!signal.aborted && validation === validations) {
+          validatedListing = { remote: input.remote, identity, refs: listed };
+        }
         return {};
       }),
 

@@ -3377,6 +3377,82 @@ describe('independent sync record failures', () => {
     expect(handed.at(-1)).toBe(listings.at(-1));
   }, 30_000);
 
+  /* R6 review: only a validation that finished as the current, unstopped one leaves its listing behind. */
+  it('keeps no listing from a stopped or overtaken validation', async () => {
+    const context = await fixture({ 'main.ts': 'base\n' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['main.ts', 'base\n']]),
+      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      summary: { generated: 'Main' },
+    });
+    const head = revisionId(receipt.commitId);
+    await context.port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+    const listings: Array<readonly RemoteRef[]> = [];
+    const held: Array<PromiseWithResolvers<void>> = [];
+    let hold = false;
+    const handed: Array<readonly RemoteRef[] | undefined> = [];
+    const actors = createRevisionActors({
+      port: {
+        ...context.port,
+        listRemoteRefs: async () => {
+          const listed = Object.freeze([{ name: 'refs/heads/main', head }]);
+          listings.push(listed);
+          if (hold) {
+            const gate = Promise.withResolvers<void>();
+            held.push(gate);
+            await gate.promise;
+          }
+          return listed;
+        },
+        fetch: async (input) => {
+          handed.push(input.advertised);
+          return { refs: [] };
+        },
+      },
+      projectId: 'project-1',
+      filesystem: () => context.filesystem,
+    });
+    const input = { remote: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' };
+    const waitForListing = async (count: number): Promise<void> => {
+      await vi.waitFor(() => {
+        expect(listings).toHaveLength(count);
+      });
+    };
+
+    /* Stopped: its listing lands after the stop and is not kept. */
+    hold = true;
+    const stopped = createActor(actors.remote.validate, { input });
+    stopped.start();
+    await waitForListing(1);
+    stopped.stop();
+    held[0]!.resolve();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    hold = false;
+    await run(actors.remote.initialSync, { remote: 'tau', branch: 'main' });
+    expect(listings).toHaveLength(2);
+    expect(handed.at(-1)).toBe(listings[1]);
+
+    /* Overtaken: the newer validation's listing is the one kept. */
+    hold = true;
+    const older = createActor(actors.remote.validate, { input });
+    older.start();
+    await waitForListing(3);
+    hold = false;
+    await run(actors.remote.validate, input);
+    held[1]!.resolve();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    await run(actors.remote.initialSync, { remote: 'tau', branch: 'main' });
+    expect(listings).toHaveLength(4);
+    expect(handed.at(-1)).toBe(listings[3]);
+    older.stop();
+  }, 30_000);
+
   it('forgets the connect-time proof when the connect-time fetch fails', async () => {
     const context = await fixture({ 'main.ts': 'base\n' });
     await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });

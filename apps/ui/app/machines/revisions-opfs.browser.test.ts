@@ -6,7 +6,7 @@
  */
 
 import { afterEach, expect, it } from 'vitest';
-import type { OpfsRequest } from '#machines/revisions-opfs.fixture.worker.js';
+import type { OpfsRequest, PointerTreeApplied } from '#machines/revisions-opfs.fixture.worker.js';
 
 type OpfsWorker = Readonly<{ ask: (request: OpfsRequest) => Promise<unknown>; terminate: () => void }>;
 
@@ -84,3 +84,20 @@ it('should let exactly one of two workers publish over the same expected head', 
   await expect(first.ask({ op: 'readRef', directory })).resolves.toBe(winner);
   await expect(second.ask({ op: 'readRef', directory })).resolves.toBe(winner);
 });
+
+/*
+ * A cold open of a hosted project of about 450 files, most of them large-object
+ * pointers, spent minutes applying its tree on OPFS. The apply itself — staged
+ * writes, one native move per file, and the verifying re-read — runs over the
+ * bare provider here in about ten seconds on a CI-sized container (about 18 s
+ * with the copy-then-unlink rename); the bound guards the order of magnitude,
+ * not a benchmark.
+ */
+it('should apply 439 pointer-sized files to an empty OPFS checkout in seconds, not minutes', async () => {
+  const [worker] = twoWorkers();
+
+  const applied = (await worker.ask({ op: 'applyPointerTree', directory, files: 439 })) as PointerTreeApplied;
+
+  expect(applied).toMatchObject({ files: 439, matching: 439 });
+  expect(applied.milliseconds).toBeLessThan(20_000);
+}, 120_000);

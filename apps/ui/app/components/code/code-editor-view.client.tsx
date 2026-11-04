@@ -5,7 +5,11 @@ import '@vscode/codicons/dist/codicon.css';
 import '#components/code/code-editor.css';
 import { renderCompletionIcon } from '#components/code/editor-completion-icon.js';
 import { definitionNavigation, goToDefinition, hasDefinitionProvider } from '#components/code/editor-definition.js';
-import { availableLanguageActions, languageFeatureNavigation } from '#components/code/editor-language-features.js';
+import {
+  availableLanguageActions,
+  languageFeatureNavigation,
+  symbolPathListener,
+} from '#components/code/editor-language-features.js';
 import { storeDiagnostics } from '#components/code/editor-lint.js';
 import type { AvailableLanguageAction } from '#components/code/editor-language-features.js';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -179,6 +183,7 @@ export function CodeEditorView({
   onApply,
   onHistory,
   onMount,
+  onSymbolPath,
   lineHighlights,
   showLineNumbers = true,
 }: CodeEditorProps): React.JSX.Element {
@@ -190,7 +195,7 @@ export function CodeEditorView({
   const semantics = useRef(new Compartment());
   const editable = useRef(new Compartment());
   const highlightedLines = useRef(new Compartment());
-  const callbacksRef = useRef({ onApply, onHistory, onMount, readOnly });
+  const callbacksRef = useRef({ onApply, onHistory, onMount, onSymbolPath, readOnly });
   const mountRegistration = useRef<
     | {
         view: EditorView;
@@ -206,8 +211,8 @@ export function CodeEditorView({
   const [canGoToDefinition, setCanGoToDefinition] = useState(false);
   const [languageActions, setLanguageActions] = useState<readonly AvailableLanguageAction[]>([]);
   useEffect(() => {
-    callbacksRef.current = { onApply, onHistory, onMount, readOnly };
-  }, [onApply, onHistory, onMount, readOnly]);
+    callbacksRef.current = { onApply, onHistory, onMount, onSymbolPath, readOnly };
+  }, [onApply, onHistory, onMount, onSymbolPath, readOnly]);
 
   useLayoutEffect(() => {
     const host = hostRef.current;
@@ -256,6 +261,9 @@ export function CodeEditorView({
           tooltips({ parent: overlay, position: 'fixed' }),
           definitionNavigation(),
           languageFeatureNavigation(),
+          symbolPathListener.of((path) => {
+            callbacksRef.current.onSymbolPath?.(path);
+          }),
           Prec.highest(
             keymap.of([
               { key: 'Mod-z', run: () => applyHistory('undo') },
@@ -481,7 +489,11 @@ export function CodeEditorView({
       }}
     >
       <ContextMenuTrigger className='contents'>
-        <div ref={hostRef} className={cn('editor-container ph-no-capture size-full overflow-hidden', className)} />
+        {/* `isolate` keeps CodeMirror's own stacking (gutters 200, panels 300) below app menus and popovers at z-50. */}
+        <div
+          ref={hostRef}
+          className={cn('editor-container ph-no-capture isolate size-full overflow-hidden', className)}
+        />
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem

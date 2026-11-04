@@ -4,8 +4,8 @@ import type { DocumentationLinkHandler } from '#components/code/editor-documenta
 import { language as languageFacet } from '@codemirror/language';
 import { Facet, StateEffect, StateField } from '@codemirror/state';
 import type { EditorState, Extension, Transaction } from '@codemirror/state';
-import { Decoration, EditorView, ViewPlugin, keymap, showDialog, showPanel, showTooltip } from '@codemirror/view';
-import type { Command, DecorationSet, Panel, Tooltip, ViewUpdate } from '@codemirror/view';
+import { Decoration, EditorView, ViewPlugin, keymap, showDialog, showTooltip } from '@codemirror/view';
+import type { Command, DecorationSet, Tooltip, ViewUpdate } from '@codemirror/view';
 
 /** A symbol in the open document, nested like an LSP `DocumentSymbol`. */
 export type EditorSymbol = Readonly<{
@@ -808,82 +808,98 @@ const occurrenceHighlighter = ViewPlugin.fromClass(
   { decorations: (value) => value.decorations },
 );
 
-/** The symbol path at the cursor above the editor; each crumb jumps to its symbol. */
-function breadcrumbsPanel(view: EditorView): Panel {
-  const { ownerDocument } = view.dom;
-  const dom = ownerDocument.createElement('nav');
-  dom.className = 'cm-breadcrumbs';
-  dom.setAttribute('aria-label', 'Symbol breadcrumbs');
-  let symbols: readonly EditorSymbol[] = [];
-  let rendered = '';
-  let generation = 0;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const render = (): void => {
-    const path = symbolPathAt(symbols, view.state.selection.main.head);
-    const key = path.map((symbol) => `${symbol.kind}:${symbol.name}:${String(symbol.selectionFrom)}`).join('/');
-    if (key === rendered && dom.childElementCount > 0) {
-      return;
+/** One symbol in the cursor's path; `reveal` moves the cursor to its name and focuses the editor. */
+export type EditorSymbolCrumb = Readonly<{ name: string; kind: string; reveal: () => void }>;
+
+/**
+ * Receives the outermost-first symbol path at the cursor whenever it changes, so the host shows it in its own
+ * breadcrumbs, as VS Code does, instead of a panel stacked inside the editor.
+ */
+export const symbolPathListener = Facet.define<(path: readonly EditorSymbolCrumb[]) => void>();
+
+const symbolPathReporter = ViewPlugin.fromClass(
+  class {
+    private symbols: readonly EditorSymbol[] = [];
+    private reported: string | undefined;
+    private generation = 0;
+    private timer: ReturnType<typeof setTimeout> | undefined;
+    // oxlint-disable-next-line typescript/parameter-properties -- erasableSyntaxOnly rejects parameter properties.
+    private readonly view: EditorView;
+    public constructor(view: EditorView) {
+      this.view = view;
+      this.load();
     }
-    rendered = key;
-    dom.replaceChildren();
-    dom.hidden = path.length === 0;
-    for (const [index, symbol] of path.entries()) {
-      if (index > 0) {
-        const separator = ownerDocument.createElement('span');
-        separator.className = 'cm-breadcrumb-separator codicon codicon-chevron-right';
-        separator.setAttribute('aria-hidden', 'true');
-        dom.append(separator);
+    public update(update: ViewUpdate): void {
+      if (update.startState.facet(symbolPathListener) !== update.state.facet(symbolPathListener)) {
+        this.reported = undefined;
       }
-      const crumb = ownerDocument.createElement('button');
-      crumb.type = 'button';
-      crumb.className = 'cm-breadcrumb';
-      crumb.append(renderSymbolIcon(symbol.kind, ownerDocument), symbol.name);
-      crumb.addEventListener('click', () => {
-        moveTo(view, symbol.selectionFrom);
-      });
-      dom.append(crumb);
-    }
-  };
-  const reload = async (current: number): Promise<void> => {
-    const provider = featuresOf(view.state).documentSymbols;
-    if (!provider) {
-      return;
-    }
-    try {
-      const next = await provider(view);
-      if (current === generation) {
-        symbols = next;
-        render();
+      if (update.docChanged || update.startState.facet(languageFeatures) !== update.state.facet(languageFeatures)) {
+        this.load();
+      } else if (update.selectionSet || this.reported === undefined) {
+        this.report();
       }
-    } catch (error) {
-      report(error);
     }
-  };
-  const load = (): void => {
-    clearTimeout(timer);
-    const current = ++generation;
-    timer = setTimeout(() => {
-      void reload(current);
-    }, 300);
-  };
-  dom.hidden = true;
-  load();
-  return {
-    dom,
-    top: true,
-    update(update) {
-      if (update.docChanged) {
-        load();
-      } else if (update.selectionSet) {
-        render();
+    public destroy(): void {
+      clearTimeout(this.timer);
+      this.generation++;
+      if (this.reported) {
+        for (const listener of this.view.state.facet(symbolPathListener)) {
+          listener([]);
+        }
       }
-    },
-    destroy() {
-      clearTimeout(timer);
-      generation++;
-    },
-  };
-}
+    }
+    private load(): void {
+      clearTimeout(this.timer);
+      const current = ++this.generation;
+      if (!featuresOf(this.view.state).documentSymbols) {
+        this.symbols = [];
+        this.report();
+        return;
+      }
+      this.timer = setTimeout(() => {
+        void this.reload(current);
+      }, 300);
+    }
+    private async reload(current: number): Promise<void> {
+      const provider = featuresOf(this.view.state).documentSymbols;
+      if (!provider) {
+        return;
+      }
+      try {
+        const next = await provider(this.view);
+        if (current === this.generation) {
+          this.symbols = next;
+          this.report();
+        }
+      } catch (error) {
+        report(error);
+      }
+    }
+    private report(): void {
+      const listeners = this.view.state.facet(symbolPathListener);
+      if (listeners.length === 0) {
+        return;
+      }
+      const path = symbolPathAt(this.symbols, this.view.state.selection.main.head);
+      const key = path.map((symbol) => `${symbol.kind}:${symbol.name}:${String(symbol.selectionFrom)}`).join('/');
+      if (key === this.reported) {
+        return;
+      }
+      this.reported = key;
+      const { view } = this;
+      const crumbs = path.map((symbol) => ({
+        name: symbol.name,
+        kind: symbol.kind,
+        reveal: () => {
+          moveTo(view, Math.min(symbol.selectionFrom, view.state.doc.length));
+        },
+      }));
+      for (const listener of listeners) {
+        listener(crumbs);
+      }
+    }
+  },
+);
 
 type LanguageAction = Readonly<{
   id: string;
@@ -999,7 +1015,7 @@ export function languageFeatureNavigation(): Extension {
     signatureField,
     signatureHelpPlugin,
     occurrenceHighlighter,
-    showPanel.compute([languageFeatures], (state) => (featuresOf(state).documentSymbols ? breadcrumbsPanel : null)),
+    symbolPathReporter,
     keymap.of([
       { key: 'Escape', run: closeParameterHints },
       ...languageActions.flatMap((action) => action.keys.map((key) => ({ key, run: action.run }))),

@@ -1,5 +1,5 @@
 import type { ReactNode, RefCallback } from 'react';
-import { Fragment, useCallback, useId, useMemo } from 'react';
+import { Fragment, useCallback, useId, useLayoutEffect, useMemo, useRef } from 'react';
 import { ArrowLeft, ChevronRight, Lock } from 'lucide-react';
 import { Badge } from '@taucad/ui/components/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
@@ -15,13 +15,53 @@ import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { useFileReturn } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { paneTitle } from '#workbench-records/pane-titles.js';
 import { virtualDeclarationRoot } from '#lib/virtual-declarations.js';
+import { symbolGlyph } from '#components/code/editor-completion-icon.js';
+import type { EditorSymbolCrumb } from '#components/code/editor-language-features.js';
+import { cn } from '@taucad/ui/utils/cn';
+
+/** Every crumb, file or symbol, shares one height, text size and icon size, like VS Code's breadcrumbs. */
+const crumbClassName = 'max-w-48 gap-1 font-medium';
+const crumbIconClassName = 'size-3.5 shrink-0';
+const separator = <ChevronRight aria-hidden className='-mx-0.5 size-3.5 shrink-0' />;
+
+/** The syntax palette colour of a symbol glyph, matching the editor's suggestion and outline icons. */
+const symbolColors: Readonly<Record<string, string>> = {
+  method: 'var(--cm-function)',
+  class: 'var(--cm-variable)',
+  enum: 'var(--cm-variable)',
+  structure: 'var(--cm-variable)',
+  interface: 'var(--cm-type)',
+  'type-parameter': 'var(--cm-type)',
+  keyword: 'var(--cm-keyword)',
+};
+
+function SymbolIcon({ kind }: { readonly kind: string }): React.JSX.Element {
+  const glyph = symbolGlyph(kind);
+  return (
+    <span
+      aria-hidden
+      data-symbol={glyph}
+      // The codicon stylesheet fixes glyphs at 16px; size them with the file icon instead.
+      className={cn('codicon', `codicon-symbol-${glyph}`, crumbIconClassName, 'text-[0.875rem]! leading-none!')}
+      style={{ color: symbolColors[glyph] ?? 'var(--cm-number)' }}
+    />
+  );
+}
+
+const noSymbols: readonly EditorSymbolCrumb[] = [];
 
 type ChatEditorBreadcrumbsProperties = {
   readonly filePath: string;
+  /** The editor cursor's symbol path, shown after the file name like VS Code's outline breadcrumbs. */
+  readonly symbolPath?: readonly EditorSymbolCrumb[];
   readonly children?: ReactNode;
 };
 
-export function ChatEditorBreadcrumbs({ filePath, children }: ChatEditorBreadcrumbsProperties): ReactNode {
+export function ChatEditorBreadcrumbs({
+  filePath,
+  symbolPath = noSymbols,
+  children,
+}: ChatEditorBreadcrumbsProperties): ReactNode {
   const { editorRef } = useProject();
   const fileReturn = useFileReturn();
   // Only the file a pane opened, and only until it is used or another file opens.
@@ -38,7 +78,9 @@ export function ChatEditorBreadcrumbs({ filePath, children }: ChatEditorBreadcru
       }
     : fileProvenanceLabel(provenance, filePath);
   const descriptionId = useId();
+  const scrollerRef = useRef<HTMLDivElement | undefined>(undefined);
   const attachScroller = useCallback<RefCallback<HTMLDivElement>>((scroller) => {
+    scrollerRef.current = scroller ?? undefined;
     if (!scroller) {
       return;
     }
@@ -52,6 +94,15 @@ export function ChatEditorBreadcrumbs({ filePath, children }: ChatEditorBreadcru
       observer.disconnect();
     };
   }, []);
+
+  // Keep the innermost symbol in view as the cursor moves; the scroller's own size does not change.
+  const symbolKey = symbolPath.map((symbol) => symbol.name).join('/');
+  useLayoutEffect(() => {
+    const scroller = scrollerRef.current;
+    if (scroller) {
+      scroller.scrollLeft = scroller.scrollWidth;
+    }
+  }, [symbolKey]);
 
   // Derive breadcrumb data from the panel's own file path
   const activeFile = useMemo(
@@ -114,18 +165,16 @@ export function ChatEditorBreadcrumbs({ filePath, children }: ChatEditorBreadcru
                   // oxlint-disable-next-line react/no-array-index-key -- crumbs are positional
                   <Fragment key={index}>
                     <span
-                      className='flex max-w-48 items-center gap-1 px-1.5 text-sm font-medium'
+                      className={cn('flex h-7 shrink-0 items-center px-2 text-xs', crumbClassName)}
                       aria-current={index === names.length - 1 ? 'page' : undefined}
                       title={name}
                     >
                       {index === names.length - 1 ? (
-                        <FileExtensionIcon filename={name} className='size-3 shrink-0' />
+                        <FileExtensionIcon filename={name} className={crumbIconClassName} />
                       ) : undefined}
                       <span className='truncate'>{name}</span>
                     </span>
-                    {index === names.length - 1 ? undefined : (
-                      <ChevronRight aria-hidden className='-mx-1 size-4 shrink-0' />
-                    )}
+                    {index === names.length - 1 ? undefined : separator}
                   </Fragment>
                 ),
               )
@@ -141,23 +190,39 @@ export function ChatEditorBreadcrumbs({ filePath, children }: ChatEditorBreadcru
                   >
                     <PaneButton
                       size='label'
-                      className='max-w-48 gap-1 text-sm! font-medium'
+                      className={crumbClassName}
                       aria-current={crumb.isLast ? 'page' : undefined}
                       title={crumb.name}
                     >
                       {crumb.isLast ? (
-                        <FileExtensionIcon filename={crumb.name} className='size-3 shrink-0' />
+                        <FileExtensionIcon filename={crumb.name} className={crumbIconClassName} />
                       ) : undefined}
                       <span className='truncate'>{crumb.name}</span>
                     </PaneButton>
                   </FileSelector>
-                  {crumb.isLast ? undefined : <ChevronRight aria-hidden className='-mx-1 size-4 shrink-0' />}
+                  {crumb.isLast ? undefined : separator}
                 </Fragment>
               ))
             ) : (
               // Maintain height with invisible content when empty
               <span className='opacity-0'>placeholder</span>
             )}
+            {symbolPath.map((symbol, index) => (
+              // oxlint-disable-next-line react/no-array-index-key -- a symbol path is positional
+              <Fragment key={index}>
+                {separator}
+                <PaneButton
+                  size='label'
+                  className={crumbClassName}
+                  data-symbol-crumb=''
+                  title={symbol.name}
+                  onClick={symbol.reveal}
+                >
+                  <SymbolIcon kind={symbol.kind} />
+                  <span className='truncate'>{symbol.name}</span>
+                </PaneButton>
+              </Fragment>
+            ))}
           </OmniScroller>
           {label.breadcrumbBadge ? (
             <Popover>

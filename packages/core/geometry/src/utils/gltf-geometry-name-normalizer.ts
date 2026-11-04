@@ -109,7 +109,8 @@ const normalizeSceneNames = (
   }
 };
 
-const readGlbJson = (bytes: Uint8Array<ArrayBuffer>): JSONDocument['json'] => {
+/** @internal */
+export const readGlbJson = (bytes: Uint8Array<ArrayBuffer>): JSONDocument['json'] => {
   if (bytes.byteLength < 20) {
     throw new Error('Invalid glTF 2.0 binary');
   }
@@ -127,7 +128,8 @@ const readGlbJson = (bytes: Uint8Array<ArrayBuffer>): JSONDocument['json'] => {
   return JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + jsonLength)).trim()) as JSONDocument['json'];
 };
 
-const writeGlbJson = (source: Uint8Array<ArrayBuffer>, json: JSONDocument['json']): Uint8Array<ArrayBuffer> => {
+/** @internal */
+export const writeGlbJson = (source: Uint8Array<ArrayBuffer>, json: JSONDocument['json']): Uint8Array<ArrayBuffer> => {
   const sourceView = new DataView(source.buffer, source.byteOffset, source.byteLength);
   const sourceJsonLength = sourceView.getUint32(12, true);
   const remainder = source.subarray(20 + sourceJsonLength);

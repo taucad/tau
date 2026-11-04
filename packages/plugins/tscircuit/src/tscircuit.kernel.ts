@@ -12,7 +12,12 @@
  */
 
 import { Primitive, WebIO } from '@gltf-transform/core';
-import { allExtensions, detectEdges, normalizeGltfGeometryNames } from '@taucad/geometry-core';
+import {
+  allExtensions,
+  detectEdges,
+  markClosedMeshesSingleSided,
+  normalizeGltfGeometryNames,
+} from '@taucad/geometry-core';
 import type { Document, Root } from '@gltf-transform/core';
 import type { AnyCircuitElement } from 'circuit-json';
 import type { ComponentType } from 'react';
@@ -359,6 +364,7 @@ const applyGlbConvention = async (
   const io = new WebIO().registerExtensions(allExtensions);
   const document = await io.readBinary(glb);
   const root = document.getRoot();
+  markClosedMeshesSingleSided(document);
   addFeatureEdges(document, root);
   const scene = root.getDefaultScene() ?? root.listScenes()[0];
   if (!scene) {

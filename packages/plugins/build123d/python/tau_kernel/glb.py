@@ -57,6 +57,34 @@ def _uints(values: list[int]) -> bytes:
     return indices.astype("<u4").tobytes()
 
 
+def is_closed_mesh(positions: list[float], indices: list[int]) -> bool:
+    """Whether triangles bound a closed solid seen from outside, as `isClosedTriangleMesh` in `@taucad/geometry-core`.
+
+    Welded by exact float32 position, every edge is shared by exactly two triangles that traverse it in opposite
+    directions, and the enclosed volume is positive. No back face of such a mesh shows from outside, so it draws one side.
+    """
+
+    if not indices or len(indices) % 3:
+        return False
+    points = numpy.asarray(positions, dtype=numpy.float32).reshape(-1, 3) + numpy.float32(0)  # folds -0 into 0
+    if not numpy.isfinite(points).all():
+        return False
+    welded, weld = numpy.unique(points, axis=0, return_inverse=True)
+    triangles = weld.reshape(-1)[numpy.asarray(indices, dtype=numpy.int64)].reshape(-1, 3)
+    a, b, c = triangles.T
+    triangles = triangles[(a != b) & (b != c) & (c != a)]
+    if not len(triangles):
+        return False
+    edges = numpy.concatenate([triangles[:, [0, 1]], triangles[:, [1, 2]], triangles[:, [2, 0]]])
+    forward = numpy.unique(edges, axis=0)
+    if len(forward) != len(edges):
+        return False
+    if not numpy.array_equal(forward, numpy.unique(edges[:, ::-1], axis=0)):
+        return False
+    corners = welded.astype(numpy.float64)[triangles]
+    return float(numpy.einsum("ij,ij->i", corners[:, 0], numpy.cross(corners[:, 1], corners[:, 2])).sum()) > 0
+
+
 def validate_glb(payload: bytes) -> None:
     """Validate the container and every generated binary reference before publishing it."""
 
@@ -164,7 +192,8 @@ def write_glb(
                         "metallicFactor": 0,
                         "roughnessFactor": 0.65,
                     },
-                    "doubleSided": True,
+                    # A closed solid draws one side: no back face of it shows from outside.
+                    "doubleSided": color[3] < 1 or not is_closed_mesh(data["positions"], data["indices"]),
                     "alphaMode": "BLEND" if color[3] < 1 else "OPAQUE",
                 }
             )

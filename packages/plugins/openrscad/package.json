@@ -65,6 +65,7 @@
     "#*": "./src/*"
   },
   "dependencies": {
+    "@taucad/geometry-core": "workspace:*",
     "@taulabs/openrscad-engine": "catalog:"
   },
   "peerDependencies": {

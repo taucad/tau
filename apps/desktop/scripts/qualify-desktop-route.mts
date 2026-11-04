@@ -67,9 +67,22 @@ const alive = (pid: number): boolean => {
 const linuxQuitDiagnostics = async (pid: number, logPath: string, logOffset: number): Promise<string> => {
   const parts: string[] = [];
   try {
-    const text = await readFile(logPath, 'utf8');
-    const events = text
-      .slice(logOffset)
+    // The offset is a byte count. When the log has rotated past it (diagnostics.ts renames it to desktop.1.log over
+    // 5 MiB), the offset belongs to the rotated file and the whole current file is newer.
+    const current = await readFile(logPath);
+    const sources =
+      current.length >= logOffset
+        ? [current.subarray(logOffset)]
+        : [
+            await readFile(join(dirname(logPath), 'desktop.1.log')).then(
+              (rotated) => rotated.subarray(logOffset),
+              () => Buffer.alloc(0),
+            ),
+            current,
+          ];
+    const events = sources
+      .map((bytes) => bytes.toString('utf8'))
+      .join('\n')
       .split('\n')
       .filter((line) =>
         /^\S+ \S+ (?:main\.(?:\S*quiesce|\S*quit|shutdown\S*|window\S*)|services\.quiesced|updater\.\S+|window-state\.\S+)\b/u.test(
@@ -102,9 +115,10 @@ const linuxQuitDiagnostics = async (pid: number, logPath: string, logOffset: num
       }),
     );
     parts.push(`windows: ${named.length === 0 ? 'none' : named.join(', ')}`);
-  } catch {
-    // `xdotool search` exits 1 when nothing matches.
-    parts.push('windows: none');
+  } catch (error) {
+    // `xdotool search` exits 1 when nothing matches; any other failure is reported, not read as "no windows".
+    const { code } = error as { code?: unknown };
+    parts.push(code === 1 ? 'windows: none' : `windows unreadable: ${String(error)}`);
   }
   return parts.join('; ');
 };

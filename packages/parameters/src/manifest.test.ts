@@ -11,6 +11,7 @@ import {
   projectJsonSchemaToParameterDeclaration,
   projectParameterSchema,
   resolveParameterBinding,
+  resolveParameterInputValues,
 } from '@taucad/parameters';
 import type { ParameterDeclaration, ParameterProvenance } from '@taucad/parameters';
 
@@ -1540,5 +1541,44 @@ describe('data-valued keywords in value validation', () => {
     expect(() => {
       admitParameterValues(admitted, { choice: member('b') });
     }).toThrow(ParameterAdmissionError);
+  });
+});
+
+describe('parameterless declarations', () => {
+  // A Python kernel's new-project template has a `Params` dataclass with no fields. The analyzer used to declare it
+  // with `properties: {}`, which JSON Structure refuses, so every new Build123d project opened on
+  // "Build failed: INVALID_SCHEMA at /properties".
+  const parameterless = (extra: Readonly<Record<string, unknown>> = {}): ParameterDeclaration => ({
+    schema: {
+      $schema: 'https://json-structure.org/meta/extended/v0/#',
+      $id: 'urn:taucad:build123d:parameters',
+      $uses: ['JSONSchemaUnits'],
+      name: 'Build123dParameters',
+      type: 'object',
+      additionalProperties: false,
+      ...extra,
+    },
+    defaults: {},
+  });
+
+  it('admits an object with no properties and resolves empty values against it', async () => {
+    expect(() => admitParameterDeclaration(parameterless())).not.toThrow();
+    const manifest = await compile(parameterless());
+    expect(manifest.defaults).toEqual({});
+    expect(resolveParameterInputValues(manifest, {})).toEqual({});
+  });
+
+  it('refuses an empty properties map at /properties', () => {
+    expect(() => admitParameterDeclaration(parameterless({ properties: {} }))).toThrow(
+      expect.objectContaining({
+        message: 'INVALID_SCHEMA at /properties',
+        diagnostics: [
+          expect.objectContaining({
+            code: 'INVALID_SCHEMA',
+            schemaPointer: '/properties',
+          }),
+        ],
+      }),
+    );
   });
 });

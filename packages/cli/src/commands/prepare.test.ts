@@ -9,10 +9,13 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { createNodeHostTelemetry } from '@taucad/host/telemetry';
+import type { NodeHostTelemetry } from '@taucad/host/telemetry';
 import { computeClosureIntegrity, parsePluginDeployment } from '@taucad/runtime/preparation/node';
 import type { DependencyPayload, PreparationPlugin } from '@taucad/runtime/preparation/node';
 import { runCommand } from 'citty';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 
 import { exitCodes } from '#output.js';
 
@@ -70,10 +73,12 @@ describe.runIf(supported)('tau prepare', () => {
   let fetches: string[];
   let served: Map<string, Uint8Array<ArrayBuffer>>;
 
-  const command = () =>
+  /* No runtime telemetry unless a case composes one: the process's own would read the keyring. */
+  const command = (telemetry: () => NodeHostTelemetry | undefined = () => undefined) =>
     createPrepareCommand({
       plugins: async () => [plugin],
       hostPath,
+      telemetry,
       fetch: async (input) => {
         const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
         fetches.push(url);
@@ -304,6 +309,135 @@ describe.runIf(supported)('tau prepare', () => {
     await expect(runCommand(command(), { rawArgs: [] })).rejects.toMatchObject({
       code: 'ARG_KERNEL_MISSING',
       exit: exitCodes.usage,
+    });
+  });
+  describe('T19: runtime telemetry', () => {
+    type Posted = Readonly<{ entries: ReadonlyArray<{ name: string; detail: Record<string, unknown> }> }>;
+    const urlOf = (url: string | URL | Request): string =>
+      typeof url === 'string' ? url : 'href' in url ? url.href : url.url;
+
+    /** A signed-in CLI host whose API records everything. */
+    const reporting = async (env: Readonly<Record<string, string>> = {}) => {
+      const api = vi.fn(async (url: string | URL | Request, _init?: RequestInit): Promise<Response> => {
+        const target = urlOf(url);
+        const answer = target.endsWith('/v1/telemetry/policy')
+          ? { policy: 'on', maxAge: 900 }
+          : target.endsWith('/v1/privacy')
+            ? { allowsAiTraining: false, allowsUsageMetrics: true }
+            : { recorded: 1, rejected: 0, duplicate: 0, disabled: 0, policy: 'on' };
+        return new Response(JSON.stringify(answer), { headers: { 'content-type': 'application/json' } });
+      });
+      const telemetry = createNodeHostTelemetry({
+        route: 'cli',
+        release: '1.2.3',
+        apiOrigin: 'https://api.test',
+        configDir: join(sandbox, 'config'),
+        env,
+        cloudBuild: false,
+        readIdentity: async () => ({ kind: 'signed-in', authorization: 'Bearer test-token', principalId: 'account-1' }),
+        platform: 'linux',
+        fetch: api as typeof globalThis.fetch,
+      });
+      telemetry.startIdentityBootstrap();
+      /** The operation entries the command's shutdown flush sent. */
+      const sent = (): Posted['entries'] =>
+        api.mock.calls
+          .filter(([, init]) => init?.method === 'POST')
+          .flatMap(([, init]) => (JSON.parse(init?.body as string) as Posted).entries)
+          .filter(({ name }) => name === 'runtime.operation');
+      return { telemetry, sent };
+    };
+
+    it('T19: should record an offline miss as one refused prepare and still exit 3 with OFFLINE_MISS', async () => {
+      const { telemetry, sent } = await reporting();
+
+      await expect(
+        runCommand(
+          command(() => telemetry),
+          { rawArgs: ['demo', '--offline', '--json'] },
+        ),
+      ).rejects.toMatchObject({ code: 'OFFLINE_MISS', exit: exitCodes.refused });
+
+      const entries = sent();
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({
+        name: 'runtime.operation',
+        detail: { operation: 'prepare', outcome: 'refused', code: 'offline-miss', route: 'cli', caller: 'host' },
+      });
+      expect(JSON.stringify(entries)).not.toMatch(/demo|registry\.example|tau-cli-prepare/u);
+    });
+
+    it('T19: should record a failed download as one refused prepare with its code', async () => {
+      served.delete('https://registry.example/worker.py');
+      const { telemetry, sent } = await reporting();
+
+      await expect(
+        runCommand(
+          command(() => telemetry),
+          { rawArgs: ['demo'] },
+        ),
+      ).rejects.toMatchObject({
+        code: 'DOWNLOAD_FAILED',
+        exit: exitCodes.refused,
+      });
+
+      expect(sent().map(({ detail }) => [detail['operation'], detail['outcome'], detail['code']])).toEqual([
+        ['prepare', 'refused', 'DOWNLOAD_FAILED'],
+      ]);
+    });
+
+    it('T19: should record a ready kernel as prepare/succeeded', async () => {
+      const { telemetry, sent } = await reporting();
+
+      await runCommand(
+        command(() => telemetry),
+        { rawArgs: ['demo', '--json'] },
+      );
+
+      expect(records()[0]).toMatchObject({ kind: 'prepare', status: 'ready' });
+      expect(sent().map(({ detail }) => [detail['operation'], detail['outcome']])).toEqual([['prepare', 'succeeded']]);
+    });
+
+    it('T19: should record nothing when telemetry is off, and refuse as before', async () => {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
+      const { telemetry, sent } = await reporting({ TAU_TELEMETRY: 'off' });
+
+      await expect(
+        runCommand(
+          command(() => telemetry),
+          { rawArgs: ['demo', '--offline', '--json'] },
+        ),
+      ).rejects.toMatchObject({ code: 'OFFLINE_MISS', exit: exitCodes.refused });
+
+      expect(telemetry.ensureReporter()).toBeUndefined();
+      expect(sent()).toEqual([]);
+    });
+
+    it('T19: should refuse as before when the reporter throws', async () => {
+      const telemetry = mock<NodeHostTelemetry>({
+        context: () => {
+          throw new Error('context fault');
+        },
+        record: () => {
+          throw new Error('record fault');
+        },
+        shutdown: async () => undefined,
+      });
+
+      await expect(
+        runCommand(
+          command(() => telemetry),
+          { rawArgs: ['demo', '--offline', '--json'] },
+        ),
+      ).rejects.toMatchObject({ code: 'OFFLINE_MISS', exit: exitCodes.refused });
+    });
+
+    it('T19: should compose no telemetry for a verb that prepares nothing', async () => {
+      const compose = vi.fn((): NodeHostTelemetry | undefined => undefined);
+
+      await runCommand(command(compose), { rawArgs: ['--inspect', '--json'] });
+
+      expect(compose).not.toHaveBeenCalled();
     });
   });
 });

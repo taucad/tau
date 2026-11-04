@@ -23,6 +23,8 @@ import type {
   RuntimeChildNativeKernels,
 } from '@taucad/host';
 import type { HostSystemSkillBundle } from '@taucad/host/agent-tools';
+import { preparationReporter, reportingPrepareKernel } from '@taucad/host/telemetry';
+import type { PreparationReport } from '@taucad/host/telemetry';
 import { nativeDeploymentReportSchema } from '@taucad/native-process-core/store';
 import type { NativeDeploymentReport, NativePreparation } from '@taucad/native-process-core/store';
 import { systemSkillBundles } from '@taucad/skills/resources';
@@ -404,10 +406,14 @@ export const acpAdapterResolveFrom = (from: string = import.meta.url): string =>
  * spawn, so this process starts each native worker on its behalf, from a closure it answered and through the OS
  * sandbox (North Star S2). The native packages load on first use.
  *
+ * @param report - Told each preparation `prepare_kernel` settles, for runtime telemetry (T19); none when the host does
+ *   not report.
  * @returns The children's native kernels, the preparation behind `prepare_kernel`, the kernels it takes, and its
  *   disposal.
  */
-export const serveNativeKernels = (): {
+export const serveNativeKernels = (
+  report?: PreparationReport,
+): {
   readonly native: RuntimeChildNativeKernels;
   readonly prepareKernel: HostPrepareKernel;
   readonly preparableKernels: () => readonly HostPreparableKernel[];
@@ -419,12 +425,27 @@ export const serveNativeKernels = (): {
     return loaded;
   };
   /* The latest child's report, and the kernels it declares: what `prepare_kernel` names. */
-  let report: NativeDeploymentReport = [];
+  let deploymentReport: NativeDeploymentReport = [];
   let preparable: readonly HostPreparableKernel[] = [];
   let preparation: Promise<NativePreparation> | undefined;
   const openPreparation = async (): Promise<NativePreparation> => {
     const { openNativePreparation, shippedDeploymentsOf } = await nativeKernels();
-    return openNativePreparation({ deployments: async () => shippedDeploymentsOf(report) });
+    return openNativePreparation({ deployments: async () => shippedDeploymentsOf(deploymentReport) });
+  };
+  const prepareKernel: HostPrepareKernel = async ({ kernel }, { signal, onProgress }) => {
+    const { shippedKernelsOf } = await nativeKernels();
+    const shipped = await shippedKernelsOf(deploymentReport);
+    if (!shipped.has(kernel) && preparable.some((row) => row.kernel === kernel)) {
+      return {
+        status: 'failed',
+        kernel,
+        code: 'KERNEL_NOT_SHIPPED',
+        message: `${kernel} comes from a plugin this Tau does not ship, so tau serve does not prepare it. Run \`tau prepare ${kernel}\` with the project's --plugin or --config, then call again.`,
+      };
+    }
+    preparation ??= openPreparation();
+    const opened = await preparation;
+    return opened.prepare(kernel, { signal, onProgress });
   };
   return {
     native: {
@@ -445,7 +466,7 @@ export const serveNativeKernels = (): {
           try {
             const { preparableKernelsOf } = await nativeKernels();
             preparable = preparableKernelsOf(parsed.data);
-            report = parsed.data;
+            deploymentReport = parsed.data;
           } catch (error) {
             consola.warn(`A runtime child reported native kernels that cannot be read: ${String(error)}`);
           }
@@ -459,21 +480,7 @@ export const serveNativeKernels = (): {
       },
     },
     preparableKernels: () => preparable,
-    prepareKernel: async ({ kernel }, { signal, onProgress }) => {
-      const { shippedKernelsOf } = await nativeKernels();
-      const shipped = await shippedKernelsOf(report);
-      if (!shipped.has(kernel) && preparable.some((row) => row.kernel === kernel)) {
-        return {
-          status: 'failed',
-          kernel,
-          code: 'KERNEL_NOT_SHIPPED',
-          message: `${kernel} comes from a plugin this Tau does not ship, so tau serve does not prepare it. Run \`tau prepare ${kernel}\` with the project's --plugin or --config, then call again.`,
-        };
-      }
-      preparation ??= openPreparation();
-      const opened = await preparation;
-      return opened.prepare(kernel, { signal, onProgress });
-    },
+    prepareKernel: report === undefined ? prepareKernel : reportingPrepareKernel(prepareKernel, report),
     dispose: async () => {
       if (preparation !== undefined) {
         const opened = await preparation;
@@ -705,16 +712,22 @@ const megabytes = (bytes: number): string => `${(bytes / 1_000_000).toFixed(1)} 
  * Prepare the pinned Tau UI layer into the payload store, saying what it downloads (I5: automatic, with visible
  * progress). A sealed layer answers at once and says nothing; a download reports every tenth of its bytes on stderr.
  *
- * @param options - Cancellation, and the preparation for tests.
+ * @param options - Cancellation, where the settled preparation is reported (runtime telemetry, T19), and the preparation
+ *   for tests.
  * @returns The sealed UI directory, or why there is none.
  */
 export const prepareStoreUi = async (
-  options: { readonly signal?: AbortSignal; readonly prepare?: typeof prepareServeUi } = {},
+  options: {
+    readonly signal?: AbortSignal;
+    readonly report?: PreparationReport;
+    readonly prepare?: typeof prepareServeUi;
+  } = {},
 ): Promise<ServeUi> => {
   /* Mutated by the progress callback, so an object: a `let` here narrows to its initial value. */
   const progress = { announced: false, reportedTenth: 0 };
   const ui = await (options.prepare ?? prepareServeUi)({
     signal: options.signal ?? new AbortController().signal,
+    ...(options.report === undefined ? {} : { report: options.report }),
     onProgress: ({ completedBytes, totalBytes }) => {
       if (!progress.announced) {
         progress.announced = true;
@@ -1005,234 +1018,240 @@ export const serveCommand = defineCommand({
     const apiUrl = relay ?? process.env['TAU_API_URL'] ?? 'https://api.tau.new';
     /* The UI: a development directory, none, or the pinned layer, prepared into the store on first use (W18). A layer
      * that cannot be prepared leaves agents served and says why; `tau open`, which needs a UI, refuses instead. */
-    const uiChoice = serveUiChoice(args.ui);
-    let uiDirectory = uiChoice.kind === 'directory' ? uiChoice.directory : undefined;
-    if (uiChoice.kind === 'store' && port !== undefined) {
-      const storeUi = await prepareStoreUi();
-      if (storeUi.status === 'ready') {
-        uiDirectory = storeUi.root;
-      } else {
-        consola.warn(
-          `Serving agents without a UI: ${storeUi.message} Pass --ui=<directory of a Tau UI build> to serve one.`,
-        );
-      }
-    }
-    /* A hand-off admits its target's origin beside the listed ones (X54). */
-    /* `multiple` yields an array at run time though citty types one string. */
-    const listedOrigins: unknown = args.allowedOrigins;
-    const configured = await agentOptions(
-      {
-        ...args,
-        ui: uiDirectory,
-        ...(workspace === undefined ? {} : { workspace }),
-        apiUrl,
-        allowedOrigins: [listedOrigins, handOff?.origin]
-          .flat()
-          .filter((origin): origin is string => typeof origin === 'string'),
-      },
-      port,
-    );
-    if (args.machines && !configured) {
-      throw new TypeError('--machines serves beside the agent channel: pass --agentPort or --ui as well');
-    }
-    const machines = args.machines ? { providers: await defaultMachineProviders() } : undefined;
-    /* The served SPA learns the managed profile from the daemon's environment, not its build (W19, X43). */
-    const acquisitionValue = process.env['TAU_ACQUISITION'];
-    const stagedUi =
-      configured?.uiRoot === undefined
-        ? undefined
-        : await stageUiEnvironment(configured.uiRoot, {
-            // eslint-disable-next-line @typescript-eslint/naming-convention -- the client environment key keeps its wire name.
-            TAU_ACQUISITION:
-              acquisitionValue === undefined || acquisitionValue.trim() === ''
-                ? undefined
-                : acquisitionOf(acquisitionValue),
-          });
-    const agent = configured && stagedUi ? { ...configured, uiRoot: stagedUi.root } : configured;
-    const computeWorkspaceRoot = agent?.workspaceRoot;
-    const computeStore = createComputeStoreHost({
-      directory: join(defaultConfigDirectory(), 'compute'),
-      onError: (error) => {
-        consola.error(`Compute store worker failed: ${error.message.replaceAll(/\s+/gu, ' ')}`);
-      },
-    });
-    const ensureCompute = (): ComputeStoreConnection => {
-      if (!computeWorkspaceRoot) {
-        throw new Error('Durable compute requires an admitted workspace.');
-      }
-      return computeStore.connect(computeWorkspaceRoot);
-    };
-    const compute: ComputeBinding | (() => ComputeBinding) | undefined = agent
-      ? args.computeMode === 'durable'
-        ? () => ({ mode: 'durable', store: ensureCompute().store })
-        : { mode: args.computeMode }
-      : undefined;
-    const kernels = serveNativeKernels();
-    const skillBundles = await serveSkillBundles([args.plugin ?? []].flat());
-    const configuredAgent = agent
-      ? {
-          ...agent,
-          prepareKernel: kernels.prepareKernel,
-          preparableKernels: kernels.preparableKernels,
-          ...(machines ? { machines } : {}),
-          compute: compute!,
-          ...(args.computeMode === 'durable'
-            ? {
-                computeControl: {
-                  inspect: async (input: { signal?: AbortSignal }) => ensureCompute().control.inspect(input),
-                  clear: async (input: { signal?: AbortSignal }) => ensureCompute().control.clear(input),
-                  collect: async (input: { budget: number; cursor?: string; signal?: AbortSignal }) =>
-                    ensureCompute().control.collect(input),
-                },
-              }
-            : {}),
-        }
-      : undefined;
-    const stopped = Promise.withResolvers<NodeJS.Signals>();
-    const onSignal = (signal: NodeJS.Signals): void => {
-      stopped.resolve(signal);
-    };
-    process.once('SIGINT', onSignal);
-    process.once('SIGTERM', onSignal);
-    /* The relay is this daemon's Tau API, so its Zoo proxy is too unless TAU_WEBSOCKET_URL says otherwise. */
-    /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
-    const zooProxyUrl = cliZooProxyUrl({
-      TAU_WEBSOCKET_URL: process.env['TAU_WEBSOCKET_URL'],
-      TAU_API_URL: apiUrl,
-    });
-    /* eslint-enable @typescript-eslint/naming-convention -- End environment variable names. */
-    /* The one served URL, printed once on stdout for a script (Q53, C1 R9) and opened for a person. */
-    const served = Promise.withResolvers<string>();
-    const onEvent = (event: HostDaemonEvent): void => {
-      if (event.type === 'agent' && event.state === 'ready' && event.url !== undefined) {
-        served.resolve(event.url);
-      }
-      reportEvent(event);
-    };
-    /* Telemetry: self-hosted serve never reports; the provisioned cloud host (`TAU_CLOUD_HOST=1`) does. */
+    /* Telemetry: self-hosted serve never reports; the provisioned cloud host (`TAU_CLOUD_HOST=1`) does, from its first
+     * preparation on. */
     process.env['TAU_SERVE_ROLE'] ??= 'serve';
     const runtimeTelemetry =
       process.env['TAU_CLOUD_HOST'] === '1' ? cliRuntimeTelemetry('cloud', packageJson.version) : undefined;
-    const observeChats = await loadCloudHostObserver();
-    const daemon = startHostDaemon({
-      relayUrl: new URL(apiUrl),
-      relay: relay !== undefined,
-      runtimeHost: {
-        modulePath: runtimeChildModulePath(),
-        args: childArguments({
-          plugin: args.plugin,
-          config: args.config,
-          zooProxyUrl,
-          acquisition: acquisitionOf(process.env['TAU_ACQUISITION']),
-        }),
-        native: kernels.native,
-      },
-      zooProxy: { url: zooProxyUrl, apiUrl, sessionToken: await resolveZooAuthToken(apiUrl, zooProxyUrl) },
-      maxSessions,
-      systemSkillBundles: skillBundles,
-      pair: args.pair,
-      ...(configuredAgent ? { agent: configuredAgent } : {}),
-      ...(runtimeTelemetry === undefined
-        ? {}
-        : { observeRuntimeClient: (client, caller) => runtimeTelemetry.observe(client, caller) }),
-      ...(observeChats === undefined ? {} : { observeChats }),
-      onEvent,
-    });
+    const reportPreparation = runtimeTelemetry === undefined ? undefined : preparationReporter(runtimeTelemetry);
+    /* Shut the reporter down however serve ends, so a preparation recorded before a setup failure still flushes. */
     try {
-      /* A signal before the daemon is ready stops it too: opening the workspace's
-       * store can take a while, and Ctrl+C must not wait for it. */
-      const started = await Promise.race([
-        daemon.ready.then(
-          (): 'ready' => 'ready',
-          (error: unknown) => {
-            throw workspaceRefusal(error);
-          },
-        ),
-        stopped.promise.then((): 'signal' => 'signal'),
-      ]);
-      if (started === 'signal') {
-        return;
-      }
-      /* The agent channel names its URL once it listens; a daemon that stops first, or a signal, has nothing to announce. */
-      const url =
-        configuredAgent === undefined
-          ? undefined
-          : await Promise.race([
-              served.promise,
-              daemon.closed.then(
-                () => undefined,
-                () => undefined,
-              ),
-              stopped.promise.then(() => undefined),
-            ]);
-      if (configuredAgent !== undefined && url !== undefined) {
-        const scripted = args.print || args.json || args.smokeTest;
-        const handOffUrl =
-          handOff === undefined
-            ? undefined
-            : handOffLink(handOff, url, await mintHandOffCode(url, configuredAgent.token));
-        await announceServed({
-          url,
-          handOff: handOffUrl,
-          workspace: configuredAgent.workspaceRoot,
-          relay,
-          ui: configuredAgent.uiRoot !== undefined,
-          print: args.print,
-          json: args.json,
-          /* A hand-off is the point of the run: it opens unless printed for a script or refused with --no-open. */
-          open:
-            handOffUrl === undefined
-              ? shouldOpenBrowser({
-                  open: args.open,
-                  ui: configuredAgent.uiRoot !== undefined,
-                  scripted,
-                  interactive: process.stdout.isTTY,
-                  ci: Boolean(process.env['CI']),
-                })
-              : (args.open ?? !scripted),
-        });
-        if (args.smokeTest) {
-          await smokeTest(url, configuredAgent.uiRoot !== undefined);
-          return;
+      const uiChoice = serveUiChoice(args.ui);
+      let uiDirectory = uiChoice.kind === 'directory' ? uiChoice.directory : undefined;
+      if (uiChoice.kind === 'store' && port !== undefined) {
+        const storeUi = await prepareStoreUi(reportPreparation === undefined ? {} : { report: reportPreparation });
+        if (storeUi.status === 'ready') {
+          uiDirectory = storeUi.root;
+        } else {
+          consola.warn(
+            `Serving agents without a UI: ${storeUi.message} Pass --ui=<directory of a Tau UI build> to serve one.`,
+          );
         }
       }
-      const signalOutcome = async (): Promise<{ readonly type: 'signal' }> => {
-        await stopped.promise;
-        return { type: 'signal' };
+      /* A hand-off admits its target's origin beside the listed ones (X54). */
+      /* `multiple` yields an array at run time though citty types one string. */
+      const listedOrigins: unknown = args.allowedOrigins;
+      const configured = await agentOptions(
+        {
+          ...args,
+          ui: uiDirectory,
+          ...(workspace === undefined ? {} : { workspace }),
+          apiUrl,
+          allowedOrigins: [listedOrigins, handOff?.origin]
+            .flat()
+            .filter((origin): origin is string => typeof origin === 'string'),
+        },
+        port,
+      );
+      if (args.machines && !configured) {
+        throw new TypeError('--machines serves beside the agent channel: pass --agentPort or --ui as well');
+      }
+      const machines = args.machines ? { providers: await defaultMachineProviders() } : undefined;
+      /* The served SPA learns the managed profile from the daemon's environment, not its build (W19, X43). */
+      const acquisitionValue = process.env['TAU_ACQUISITION'];
+      const stagedUi =
+        configured?.uiRoot === undefined
+          ? undefined
+          : await stageUiEnvironment(configured.uiRoot, {
+              // eslint-disable-next-line @typescript-eslint/naming-convention -- the client environment key keeps its wire name.
+              TAU_ACQUISITION:
+                acquisitionValue === undefined || acquisitionValue.trim() === ''
+                  ? undefined
+                  : acquisitionOf(acquisitionValue),
+            });
+      const agent = configured && stagedUi ? { ...configured, uiRoot: stagedUi.root } : configured;
+      const computeWorkspaceRoot = agent?.workspaceRoot;
+      const computeStore = createComputeStoreHost({
+        directory: join(defaultConfigDirectory(), 'compute'),
+        onError: (error) => {
+          consola.error(`Compute store worker failed: ${error.message.replaceAll(/\s+/gu, ' ')}`);
+        },
+      });
+      const ensureCompute = (): ComputeStoreConnection => {
+        if (!computeWorkspaceRoot) {
+          throw new Error('Durable compute requires an admitted workspace.');
+        }
+        return computeStore.connect(computeWorkspaceRoot);
       };
-      const daemonOutcome = async (): Promise<{
-        readonly type: 'closed';
-        readonly result: Awaited<typeof daemon.closed>;
-      }> => {
-        const result = await daemon.closed;
-        return { type: 'closed', result };
+      const compute: ComputeBinding | (() => ComputeBinding) | undefined = agent
+        ? args.computeMode === 'durable'
+          ? () => ({ mode: 'durable', store: ensureCompute().store })
+          : { mode: args.computeMode }
+        : undefined;
+      const kernels = serveNativeKernels(reportPreparation);
+      const skillBundles = await serveSkillBundles([args.plugin ?? []].flat());
+      const configuredAgent = agent
+        ? {
+            ...agent,
+            prepareKernel: kernels.prepareKernel,
+            preparableKernels: kernels.preparableKernels,
+            ...(machines ? { machines } : {}),
+            compute: compute!,
+            ...(args.computeMode === 'durable'
+              ? {
+                  computeControl: {
+                    inspect: async (input: { signal?: AbortSignal }) => ensureCompute().control.inspect(input),
+                    clear: async (input: { signal?: AbortSignal }) => ensureCompute().control.clear(input),
+                    collect: async (input: { budget: number; cursor?: string; signal?: AbortSignal }) =>
+                      ensureCompute().control.collect(input),
+                  },
+                }
+              : {}),
+          }
+        : undefined;
+      const stopped = Promise.withResolvers<NodeJS.Signals>();
+      const onSignal = (signal: NodeJS.Signals): void => {
+        stopped.resolve(signal);
       };
-      const outcome = await Promise.race([signalOutcome(), daemonOutcome()]);
-      if (outcome.type === 'closed' && outcome.result.cause === 'fatal') {
-        throw outcome.result.error;
+      process.once('SIGINT', onSignal);
+      process.once('SIGTERM', onSignal);
+      /* The relay is this daemon's Tau API, so its Zoo proxy is too unless TAU_WEBSOCKET_URL says otherwise. */
+      /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
+      const zooProxyUrl = cliZooProxyUrl({
+        TAU_WEBSOCKET_URL: process.env['TAU_WEBSOCKET_URL'],
+        TAU_API_URL: apiUrl,
+      });
+      /* eslint-enable @typescript-eslint/naming-convention -- End environment variable names. */
+      /* The one served URL, printed once on stdout for a script (Q53, C1 R9) and opened for a person. */
+      const served = Promise.withResolvers<string>();
+      const onEvent = (event: HostDaemonEvent): void => {
+        if (event.type === 'agent' && event.state === 'ready' && event.url !== undefined) {
+          served.resolve(event.url);
+        }
+        reportEvent(event);
+      };
+      const observeChats = await loadCloudHostObserver();
+      const daemon = startHostDaemon({
+        relayUrl: new URL(apiUrl),
+        relay: relay !== undefined,
+        runtimeHost: {
+          modulePath: runtimeChildModulePath(),
+          args: childArguments({
+            plugin: args.plugin,
+            config: args.config,
+            zooProxyUrl,
+            acquisition: acquisitionOf(process.env['TAU_ACQUISITION']),
+          }),
+          native: kernels.native,
+        },
+        zooProxy: { url: zooProxyUrl, apiUrl, sessionToken: await resolveZooAuthToken(apiUrl, zooProxyUrl) },
+        maxSessions,
+        systemSkillBundles: skillBundles,
+        pair: args.pair,
+        ...(configuredAgent ? { agent: configuredAgent } : {}),
+        ...(runtimeTelemetry === undefined
+          ? {}
+          : { observeRuntimeClient: (client, caller) => runtimeTelemetry.observe(client, caller) }),
+        ...(observeChats === undefined ? {} : { observeChats }),
+        onEvent,
+      });
+      try {
+        /* A signal before the daemon is ready stops it too: opening the workspace's
+         * store can take a while, and Ctrl+C must not wait for it. */
+        const started = await Promise.race([
+          daemon.ready.then(
+            (): 'ready' => 'ready',
+            (error: unknown) => {
+              throw workspaceRefusal(error);
+            },
+          ),
+          stopped.promise.then((): 'signal' => 'signal'),
+        ]);
+        if (started === 'signal') {
+          return;
+        }
+        /* The agent channel names its URL once it listens; a daemon that stops first, or a signal, has nothing to announce. */
+        const url =
+          configuredAgent === undefined
+            ? undefined
+            : await Promise.race([
+                served.promise,
+                daemon.closed.then(
+                  () => undefined,
+                  () => undefined,
+                ),
+                stopped.promise.then(() => undefined),
+              ]);
+        if (configuredAgent !== undefined && url !== undefined) {
+          const scripted = args.print || args.json || args.smokeTest;
+          const handOffUrl =
+            handOff === undefined
+              ? undefined
+              : handOffLink(handOff, url, await mintHandOffCode(url, configuredAgent.token));
+          await announceServed({
+            url,
+            handOff: handOffUrl,
+            workspace: configuredAgent.workspaceRoot,
+            relay,
+            ui: configuredAgent.uiRoot !== undefined,
+            print: args.print,
+            json: args.json,
+            /* A hand-off is the point of the run: it opens unless printed for a script or refused with --no-open. */
+            open:
+              handOffUrl === undefined
+                ? shouldOpenBrowser({
+                    open: args.open,
+                    ui: configuredAgent.uiRoot !== undefined,
+                    scripted,
+                    interactive: process.stdout.isTTY,
+                    ci: Boolean(process.env['CI']),
+                  })
+                : (args.open ?? !scripted),
+          });
+          if (args.smokeTest) {
+            await smokeTest(url, configuredAgent.uiRoot !== undefined);
+            return;
+          }
+        }
+        const signalOutcome = async (): Promise<{ readonly type: 'signal' }> => {
+          await stopped.promise;
+          return { type: 'signal' };
+        };
+        const daemonOutcome = async (): Promise<{
+          readonly type: 'closed';
+          readonly result: Awaited<typeof daemon.closed>;
+        }> => {
+          const result = await daemon.closed;
+          return { type: 'closed', result };
+        };
+        const outcome = await Promise.race([signalOutcome(), daemonOutcome()]);
+        if (outcome.type === 'closed' && outcome.result.cause === 'fatal') {
+          throw outcome.result.error;
+        }
+      } finally {
+        process.off('SIGINT', onSignal);
+        process.off('SIGTERM', onSignal);
+        try {
+          await daemon.close();
+        } catch (error) {
+          /* The last thing a stopping daemon does is record what this project
+           * changed, and a store that refuses that revision keeps the project
+           * rather than losing it (C70). Say which refusal it was and that
+           * stopping again re-attempts it, instead of ending on an unmapped store
+           * exception — reported rather than thrown, because a throw from this
+           * `finally` would replace whatever brought the daemon down. */
+          consola.error(
+            `Tau Host could not record this project’s last revision: ${error instanceof Error ? error.message : String(error)} Nothing was lost — run tau serve again to retry it.`,
+          );
+          process.exitCode = exitCodes.error;
+        } finally {
+          await computeStore.close();
+          await kernels.dispose().catch(() => undefined);
+          await stagedUi?.dispose();
+        }
       }
     } finally {
-      process.off('SIGINT', onSignal);
-      process.off('SIGTERM', onSignal);
-      try {
-        await daemon.close();
-      } catch (error) {
-        /* The last thing a stopping daemon does is record what this project
-         * changed, and a store that refuses that revision keeps the project
-         * rather than losing it (C70). Say which refusal it was and that
-         * stopping again re-attempts it, instead of ending on an unmapped store
-         * exception — reported rather than thrown, because a throw from this
-         * `finally` would replace whatever brought the daemon down. */
-        consola.error(
-          `Tau Host could not record this project’s last revision: ${error instanceof Error ? error.message : String(error)} Nothing was lost — run tau serve again to retry it.`,
-        );
-        process.exitCode = exitCodes.error;
-      } finally {
-        await computeStore.close();
-        await kernels.dispose().catch(() => undefined);
-        await stagedUi?.dispose();
-        await runtimeTelemetry?.shutdown();
-      }
+      await runtimeTelemetry?.shutdown();
     }
   },
 });

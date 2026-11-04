@@ -1,11 +1,14 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Environment variable names. */
+import { execFile } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { reporterBounds, toRuntimeEntry } from '#client.js';
 import type { RuntimeObservationInput, TauIdentity } from '#client.js';
-import { createNodeHostTelemetry, createTauIdentityReader, nodeHoldBounds } from '#node-host.js';
+import { createNodeHostTelemetry, createTauIdentityReader, nodeHoldBounds, nodeShutdownWait } from '#node-host.js';
 import type { NodeHostTelemetryInput, NodeObservedClient, TauTokenRead } from '#node-host.js';
 
 const observation = (): RuntimeObservationInput => ({
@@ -228,6 +231,108 @@ describe('createNodeHostTelemetry', () => {
     await done;
     expect(posts().length).toBeGreaterThan(0);
   });
+});
+
+/** Whether `promise` has settled by now, without waiting for it. */
+const hasSettled = async (promise: Promise<unknown>): Promise<boolean> => {
+  const pending = Symbol('pending');
+  return (await Promise.race([promise, Promise.resolve(pending)])) !== pending;
+};
+
+describe('T19: createNodeHostTelemetry shutdown of a short-lived command', () => {
+  it('T19: should deliver an entry recorded right before shutdown, waiting for the identity read and the policy probe', async () => {
+    const { telemetry, posts, fetch } = harness({}, signedIn);
+    telemetry.startIdentityBootstrap();
+    telemetry.record(toRuntimeEntry(observation(), telemetry.context('host')));
+
+    await telemetry.shutdown();
+
+    expect(posts()).toHaveLength(1);
+    expect(posts()[0]?.body.entries.filter(({ name }) => name === 'runtime.operation')).toHaveLength(1);
+    expect(fetch.mock.calls.some(([url]) => urlOf(url).endsWith('/v1/telemetry/policy'))).toBe(true);
+  });
+
+  it('T19: should deliver it when the account answers usage metrics only after shutdown began', async () => {
+    const answers = harness({}, signedIn);
+    const slow = vi.fn(async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      if (urlOf(url).endsWith('/v1/privacy')) {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 200);
+        });
+      }
+      return answers.fetch(url, init);
+    });
+    const { telemetry } = harness({ fetch: slow as typeof globalThis.fetch }, signedIn);
+    telemetry.startIdentityBootstrap();
+    telemetry.record(toRuntimeEntry(observation(), telemetry.context('host')));
+
+    await telemetry.shutdown();
+
+    expect(slow.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+  });
+
+  it('T19: should return at once and send nothing when nothing was recorded', async () => {
+    vi.useFakeTimers();
+    try {
+      const { telemetry, fetch } = harness({}, signedIn);
+      telemetry.startIdentityBootstrap();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(telemetry.ensureReporter()).toBeDefined();
+      const done = telemetry.shutdown();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(await hasSettled(done)).toBe(true);
+      expect(fetch.mock.calls.some(([url]) => urlOf(url).endsWith('/v1/telemetry/policy'))).toBe(false);
+      expect(fetch.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    [
+      'an API that never answers',
+      async () =>
+        new Promise<Response>(() => {
+          /* Never settles. */
+        }),
+    ],
+    [
+      'an API that refuses every connection',
+      async () => {
+        throw new TypeError('fetch failed');
+      },
+    ],
+  ])('T19: should return within the shutdown bound with %s', async (_why, unreachable) => {
+    vi.useFakeTimers();
+    try {
+      const { telemetry } = harness({ fetch: unreachable as typeof globalThis.fetch }, signedIn);
+      telemetry.startIdentityBootstrap();
+      telemetry.record(toRuntimeEntry(observation(), telemetry.context('host')));
+      const done = telemetry.shutdown();
+      await vi.advanceTimersByTimeAsync(nodeShutdownWait - 1);
+      const before = await hasSettled(done);
+      await vi.advanceTimersByTimeAsync(1);
+
+      /* No policy answer ever arrives, so shutdown holds for the whole bound and not a millisecond longer. */
+      expect(before).toBe(false);
+      expect(await hasSettled(done)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('T19: a Node process awaiting shutdown', () => {
+  it('T19: should exit 0 within the bound while its identity read is still pending, never 13 from a drained loop', async () => {
+    const fixture = fileURLToPath(new URL('node-host-exit.fixture.ts', import.meta.url));
+    const started = Date.now();
+
+    const { stdout } = await promisify(execFile)(process.execPath, [fixture], { timeout: 20_000 });
+
+    expect(stdout).toBe('shutdown-returned\n');
+    expect(Date.now() - started).toBeLessThan(nodeShutdownWait + 5000);
+  }, 30_000);
 });
 
 describe('createTauIdentityReader', () => {

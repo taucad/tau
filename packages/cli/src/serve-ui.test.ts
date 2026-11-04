@@ -5,6 +5,8 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { preparationReporter } from '@taucad/host/telemetry';
+import type { NodeHostTelemetry } from '@taucad/host/telemetry';
 import type { HostIndicators } from '@taucad/runtime/preparation/node';
 
 // oxlint-disable-next-line no-restricted-imports -- the layer producer is a script; scripts have no `#` alias.
@@ -291,5 +293,126 @@ describe('prepareServeUi', () => {
       reason: 'failed',
       message: expect.stringMatching(/ENOTDIR/u) as string,
     });
+  });
+});
+
+describe('T19: prepareServeUi reports each settled preparation', () => {
+  const { signal } = new AbortController();
+
+  /** The host reporter over a recording sink: what `tau serve` hands `prepareServeUi` as a cloud host. */
+  const reporting = () => {
+    const record = vi.fn<NodeHostTelemetry['record']>();
+    const context: NodeHostTelemetry['context'] = (caller) => ({
+      route: 'cloud',
+      caller,
+      release: '1.0.0',
+      platform: 'node',
+      os: 'linux',
+    });
+    const details = (): Array<Record<string, unknown>> =>
+      record.mock.calls.map(([entry]) => ('detail' in entry ? { ...entry.detail } : {}));
+    return { report: preparationReporter({ record, context }), record, details };
+  };
+
+  it('T19: should record an offline miss as one refused prepare', async () => {
+    const root = await scratch();
+    const { pin } = await publishedLayer(root);
+    const { report, details, record } = reporting();
+
+    const outcome = await prepareServeUi({
+      signal,
+      pin,
+      store: join(root, 'store'),
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- the managed variable keeps its name.
+      environment: { TAU_ACQUISITION: 'locked' },
+      indicators: linuxHost,
+      fetch: vi.fn<typeof fetch>(),
+      report,
+    });
+
+    expect(outcome).toMatchObject({ status: 'unavailable', reason: 'offline-miss' });
+    expect(details()).toEqual([
+      expect.objectContaining({ operation: 'prepare', outcome: 'refused', code: 'offline-miss', caller: 'host' }),
+    ]);
+    expect(JSON.stringify(record.mock.calls)).not.toContain(root);
+  });
+
+  it('T19: should record bytes that do not match the pin as refused INTEGRITY_MISMATCH', async () => {
+    const root = await scratch();
+    const { pin } = await publishedLayer(root);
+    const { report, details } = reporting();
+
+    await expect(
+      prepareServeUi({
+        signal,
+        pin,
+        store: join(root, 'store'),
+        environment: {},
+        indicators: linuxHost,
+        fetch: serving(new Uint8Array(pin.byteLength).fill(1)),
+        report,
+      }),
+    ).resolves.toMatchObject({ status: 'unavailable', reason: 'failed' });
+
+    expect(details()).toEqual([
+      expect.objectContaining({ operation: 'prepare', outcome: 'refused', code: 'INTEGRITY_MISMATCH' }),
+    ]);
+  });
+
+  it('T19: should record a sealed layer as prepare/succeeded and a placeholder pin as nothing', async () => {
+    const root = await scratch();
+    const { pin, bytes } = await publishedLayer(root);
+    const { report, details } = reporting();
+
+    await expect(
+      prepareServeUi({
+        signal,
+        pin,
+        store: join(root, 'store'),
+        environment: {},
+        indicators: linuxHost,
+        fetch: serving(bytes),
+        report,
+      }),
+    ).resolves.toMatchObject({ status: 'ready' });
+    await expect(prepareServeUi({ signal, fetch: vi.fn<typeof fetch>(), report })).resolves.toMatchObject({
+      reason: 'unpublished',
+    });
+
+    expect(details()).toEqual([expect.objectContaining({ operation: 'prepare', outcome: 'succeeded' })]);
+  });
+
+  it('T19: should answer the refusal unchanged when the reporter throws', async () => {
+    const root = await scratch();
+    const { pin } = await publishedLayer(root);
+    const report = vi.fn(() => {
+      throw new Error('report fault');
+    });
+    const base = {
+      signal,
+      pin,
+      store: join(root, 'store'),
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- the managed variable keeps its name.
+      environment: { TAU_ACQUISITION: 'locked' },
+      indicators: linuxHost,
+      fetch: vi.fn<typeof fetch>(),
+    };
+
+    const reported = await prepareServeUi({
+      ...base,
+      report: preparationReporter({
+        record: () => {
+          throw new Error('record fault');
+        },
+        context: () => {
+          throw new Error('context fault');
+        },
+      }),
+    });
+
+    expect(reported).toEqual(await prepareServeUi(base));
+    expect(await prepareServeUi({ ...base, report })).toEqual(reported);
+    expect(reported).toMatchObject({ status: 'unavailable', reason: 'offline-miss' });
+    expect(report).toHaveBeenCalledOnce();
   });
 });

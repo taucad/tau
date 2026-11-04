@@ -1,6 +1,8 @@
 import { resolve } from 'node:path';
 
 import { defaultPayloadStore } from '@taucad/host';
+import { failedPreparation, preparationReporter } from '@taucad/host/telemetry';
+import type { NodeHostTelemetry, PreparationReport } from '@taucad/host/telemetry';
 import {
   createPreparationHost,
   describeEffectiveProfile,
@@ -36,6 +38,9 @@ import {
 import type { ClosureAudit, SeedClosure } from '#commands/prepare-seed.js';
 import { describeRuntime, preparationPluginsFor, readManaged } from '#native-kernels.js';
 import { cliError, createOutput, emit, exitCodes, sanitize, writeStdout } from '#output.js';
+import { cliRuntimeTelemetry } from '#runtime-telemetry.js';
+// oxlint-disable-next-line no-restricted-imports -- relative import is the only portable way to load the CLI's own package.json (matches `packages/runtime/src/utils/package-info.ts`).
+import packageJson from '../../package.json' with { type: 'json' };
 
 /** Progress lines on stderr are written at most this often. Milliseconds. */
 const progressInterval = 1000;
@@ -98,6 +103,11 @@ export type PrepareCommandOptions = {
   readonly plugins?: () => Promise<readonly PreparationPlugin[]>;
   readonly fetch?: typeof fetch;
   readonly hostPath?: string;
+  /**
+   * The process's runtime telemetry, composed when a verb prepares (runtime observability T19); `undefined` reports
+   * nothing. The CLI's own composition by default; reporting is gated by it (consent, `tau telemetry off`).
+   */
+  readonly telemetry?: () => NodeHostTelemetry | undefined;
 };
 
 const prepareArgs = {
@@ -203,6 +213,8 @@ type Session = {
   readonly offline: boolean;
   readonly signal: AbortSignal;
   readonly stoppedBy: () => NodeJS.Signals | undefined;
+  /** Told each preparation as it settles (runtime telemetry, T19). */
+  readonly report: PreparationReport;
 };
 
 const inspect = async ({ args, host, store, indicators, managed }: Session): Promise<void> => {
@@ -399,6 +411,7 @@ const prepareKernel = async (
     );
   });
   let outcome: PrepareOutcome;
+  const started = performance.now();
   try {
     outcome = await host.prepare({
       package: plugin.package,
@@ -407,10 +420,12 @@ const prepareKernel = async (
       signal,
     });
   } catch (error) {
+    session.report(failedPreparation(error), performance.now() - started);
     throw preparationFailure(error);
   } finally {
     unsubscribe();
   }
+  session.report(outcome, performance.now() - started);
   if (outcome.status !== 'ready') {
     throw refusal(kernel, outcome, session.stoppedBy());
   }
@@ -616,6 +631,11 @@ export const createPrepareCommand = (options: PrepareCommandOptions = {}): Comma
       };
       process.once('SIGINT', onSignal);
       process.once('SIGTERM', onSignal);
+      /* Only a verb that prepares reports; composed before it starts, so the identity read runs beside the download. */
+      const prepares = !(args.inspect || args.gc || args.verify || args.audit || args['verify-seed'] !== undefined);
+      const telemetry = prepares
+        ? (options.telemetry ?? (() => cliRuntimeTelemetry('cli', packageJson.version)))()
+        : undefined;
       const session: Session = {
         args,
         host,
@@ -626,6 +646,7 @@ export const createPrepareCommand = (options: PrepareCommandOptions = {}): Comma
         offline: args.seed !== undefined,
         signal: controller.signal,
         stoppedBy: () => stoppedBy,
+        report: telemetry === undefined ? () => undefined : preparationReporter(telemetry),
       };
       try {
         await (args.inspect
@@ -641,6 +662,7 @@ export const createPrepareCommand = (options: PrepareCommandOptions = {}): Comma
         process.off('SIGINT', onSignal);
         process.off('SIGTERM', onSignal);
         host.dispose();
+        await telemetry?.shutdown();
       }
     },
   });

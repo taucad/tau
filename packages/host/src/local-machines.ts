@@ -13,8 +13,8 @@ import { createHash } from 'node:crypto';
 import { readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 
-import { createHostAdmissionAuthority } from '@taucad/runtime/host';
-import type { HostAdmissionAuthority, HostSessionHandle } from '@taucad/runtime/host';
+import { createHostAdmissionAuthority, HostAdmissionRefusal } from '@taucad/runtime/host';
+import type { HostActor, HostAdmissionAuthority, HostSessionHandle } from '@taucad/runtime/host';
 import { createNodeMachineHost } from '@taucad/runtime/host/node';
 import type { CreateNodeMachineHostInput, NodeMachineHost } from '@taucad/runtime/host/node';
 import type { MachineClient } from '@taucad/runtime/machine';
@@ -57,7 +57,60 @@ export type OpenSharedMachineHostOptions = Readonly<{
   storeRoot?: string | undefined;
   /** Told once per new machine operation, for runtime telemetry; counts and closed codes only. */
   onOperation?: CreateNodeMachineHostInput['onOperation'];
+  /** Told once per request the host's admission refuses, for runtime telemetry; the closed code and the actor's kind. */
+  onAdmissionRefusal?: ((refusal: AdmissionRefusalReport) => void) | undefined;
 }>;
+
+/** One refused admission, as {@link OpenSharedMachineHostOptions.onAdmissionRefusal} is told it. @public */
+export type AdmissionRefusalReport = Readonly<{
+  code: HostAdmissionRefusal['code'];
+  /** The kind of actor the refused session was issued to; `undefined` for a session this authority never issued. */
+  actor: HostActor['kind'] | undefined;
+}>;
+
+/**
+ * An admission authority that tells `onRefusal` of each request it refuses, then refuses it as before. The refusal
+ * thrown, and every answer, is the authority's own; a listener that throws changes neither.
+ *
+ * @param authority - The authority.
+ * @param onRefusal - Told the code and the refused session's actor kind.
+ * @returns The observed authority.
+ */
+const observedAdmission = (
+  authority: HostAdmissionAuthority,
+  onRefusal: (refusal: AdmissionRefusalReport) => void,
+): HostAdmissionAuthority => {
+  const actors = new WeakMap<HostSessionHandle, HostActor['kind']>();
+  const actorOf = (input: unknown): HostActor['kind'] | undefined => {
+    const session: unknown = typeof input === 'object' && input !== null ? Reflect.get(input, 'session') : undefined;
+    return typeof session === 'object' && session !== null ? actors.get(session as HostSessionHandle) : undefined;
+  };
+  const observed = <Result>(input: unknown, admit: () => Result): Result => {
+    try {
+      return admit();
+    } catch (error) {
+      if (error instanceof HostAdmissionRefusal) {
+        try {
+          onRefusal({ code: error.code, actor: actorOf(input) });
+        } catch {
+          /* Telemetry never changes a refusal. */
+        }
+      }
+      throw error;
+    }
+  };
+  return Object.freeze({
+    hostId: authority.hostId,
+    issueTrustedSession: (input) => {
+      const session = authority.issueTrustedSession(input);
+      actors.set(session, input.actor.kind);
+      return session;
+    },
+    admitRoute: (input) => observed(input, () => authority.admitRoute(input)),
+    admit: (input) => observed(input, () => authority.admit(input)),
+    revoke: (session) => authority.revoke(session),
+  });
+};
 
 /**
  * Open the per-user machine store, `<config>/machines`: the one store the desktop app and every other Tau host on
@@ -75,7 +128,9 @@ export const openSharedMachineHost = async (
 ): Promise<SharedMachineHost | undefined> => {
   const storeRoot = options.storeRoot ?? join(defaultConfigDirectory(), 'machines');
   const identity = await openMachineHostIdentity(storeRoot);
-  const admission = createHostAdmissionAuthority({ hostId: identity.hostId });
+  const authority = createHostAdmissionAuthority({ hostId: identity.hostId });
+  const admission =
+    options.onAdmissionRefusal === undefined ? authority : observedAdmission(authority, options.onAdmissionRefusal);
   let host: NodeMachineHost;
   try {
     host = await createNodeMachineHost({

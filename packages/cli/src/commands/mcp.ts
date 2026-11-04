@@ -15,9 +15,14 @@ import {
   parseTauMcpLaunch,
   serveLocalHostMcp,
 } from '@taucad/host';
-import type { LocalMachines } from '@taucad/host';
+import type { HostPrepareKernel, LocalMachines } from '@taucad/host';
 import { createHostToolRegistry } from '@taucad/host/agent-tools';
-import { machineOperationReporter } from '@taucad/host/telemetry';
+import {
+  admissionRefusalReporter,
+  machineOperationReporter,
+  preparationReporter,
+  reportingPrepareKernel,
+} from '@taucad/host/telemetry';
 import type { HostSystemSkillBundle } from '@taucad/host/agent-tools';
 import { systemSkillBundles } from '@taucad/skills/resources';
 import type { AnyRuntimeDefinition, RuntimeClient } from '@taucad/runtime';
@@ -444,7 +449,12 @@ export const mcpCommand = defineCommand({
             requireProject: started.source !== 'working directory',
             providers: await defaultMachineProviders(),
             actorId: 'tau-mcp',
-            ...(telemetry === undefined ? {} : { onOperation: machineOperationReporter(telemetry) }),
+            ...(telemetry === undefined
+              ? {}
+              : {
+                  onOperation: machineOperationReporter(telemetry),
+                  onAdmissionRefusal: admissionRefusalReporter(telemetry),
+                }),
             onWarning: ({ message }) => {
               process.stderr.write(`tau mcp: ${message}\n`);
             },
@@ -475,6 +485,10 @@ export const mcpCommand = defineCommand({
         preparation ??= startPreparation();
         return preparation;
       };
+      const prepareKernel: HostPrepareKernel = async ({ kernel }, { signal, onProgress }) => {
+        const opened = await openPreparation();
+        return opened.prepare(kernel, { signal, onProgress });
+      };
       const tools = createHostToolRegistry({
         workspaceRoot,
         checkouts,
@@ -483,11 +497,12 @@ export const mcpCommand = defineCommand({
         systemSkillBundles: skillBundles,
         ...(machines === undefined ? {} : { machines: machines.facet, projectIdOf: machines.projectOf }),
         preparableKernels: () => preparable,
-        /* In this process, with its unrestricted fetch (D4); a ready kernel binds on its next operation. */
-        prepareKernel: async ({ kernel }, { signal, onProgress }) => {
-          const opened = await openPreparation();
-          return opened.prepare(kernel, { signal, onProgress });
-        },
+        /* In this process, with its unrestricted fetch (D4); a ready kernel binds on its next operation. Each settled
+         * preparation is one `prepare` entry (T19). */
+        prepareKernel:
+          telemetry === undefined
+            ? prepareKernel
+            : reportingPrepareKernel(prepareKernel, preparationReporter(telemetry)),
       });
       /* The idle release waits for a project's last tool call to settle, not its last operation: a call may work
        * between two operations (GeoSpec checks between a test's exports) for longer than the release. The project is

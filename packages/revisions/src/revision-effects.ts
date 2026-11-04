@@ -1661,7 +1661,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       return false;
     }
     const head = await port.readRef(remoteTrackingRef(remote, `refs/heads/${branch}`));
-    const tree = head === undefined ? undefined : await port.readTree(head, { largeObjects: 'local' });
+    /* R5: the manifest alone. An empty checkout is exactly the cold open, where
+     * reading the whole tree read every blob and looked up every large object. */
+    const tree =
+      head === undefined ? undefined : await port.readTree(head, { largeObjects: 'local', paths: ['tau.json'] });
     const manifest = tree?.get('tau.json');
     if (manifest === undefined) {
       return false;

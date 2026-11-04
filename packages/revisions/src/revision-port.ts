@@ -535,6 +535,13 @@ export type ReadTreeOptions = Readonly<{
    * Absent, every pointer is resolved, from the remote if need be.
    */
   largeObjects?: 'local';
+  /**
+   * Only these project-relative paths are wanted, so a host may read just
+   * them instead of every blob in the tree. A host may still answer the whole
+   * tree; a path the revision does not hold, or that names a directory, is
+   * absent either way. Callers read the answer with `get`.
+   */
+  paths?: readonly string[];
   /** Told about each large object as the remote delivers it, while a fetching read runs. */
   onLargeObject?: (oid: string, content: Uint8Array<ArrayBuffer>) => void;
   /** Stops a fetching read's transfers; the read then rejects. */

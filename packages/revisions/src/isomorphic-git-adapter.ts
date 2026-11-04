@@ -714,6 +714,45 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
   };
 
   /**
+   * The named file entries of one tree, read one directory per path segment.
+   *
+   * What a reader that wants only a few files (a manifest) pays instead of
+   * {@link flatTree}'s walk of every directory. A path that is missing, or that
+   * names a directory, is left out, as {@link flatTree} would leave it.
+   *
+   * @param oid - Root tree object.
+   * @param paths - Project-relative paths to look up.
+   * @returns Each found path's blob id and mode.
+   */
+  const selectedTree = async (
+    oid: string,
+    paths: readonly string[],
+  ): Promise<ReadonlyMap<string, Readonly<{ oid: string; mode: string }>>> => {
+    const entryAt = async (path: string): Promise<Readonly<{ oid: string; mode: string }> | undefined> => {
+      const segments = path.split('/');
+      let tree = oid;
+      for (const [index, segment] of segments.entries()) {
+        // oxlint-disable-next-line no-await-in-loop -- each directory names the next one to read.
+        const { tree: entries } = await readTree({ fs, cache: objectCache(), gitdir, oid: tree });
+        const entry = entries.find((candidate) => candidate.path === segment);
+        if (entry === undefined) {
+          return undefined;
+        }
+        if (index === segments.length - 1) {
+          return entry.type === 'tree' ? undefined : { oid: entry.oid, mode: entry.mode };
+        }
+        if (entry.type !== 'tree') {
+          return undefined;
+        }
+        tree = entry.oid;
+      }
+      return undefined;
+    };
+    const found = await Promise.all([...new Set(paths)].map(async (path) => [path, await entryAt(path)] as const));
+    return new Map(found.flatMap(([path, entry]) => (entry === undefined ? [] : [[path, entry] as const])));
+  };
+
+  /**
    * Point the index at the tree `HEAD`'s branch names (R14).
    *
    * Tau never reads the index; stock Git does, on a folder a person opened from
@@ -1579,7 +1618,10 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       if (commit === undefined) {
         return undefined;
       }
-      const paths = await flatTree(commit.tree);
+      const paths =
+        readOptions?.paths === undefined
+          ? await flatTree(commit.tree)
+          : await selectedTree(commit.tree, readOptions.paths);
       /* Pointers first, then their bytes together: the files keep tree order,
        * and only the large objects' transfers run side by side, under the LFS
        * client's own count and byte bounds. */

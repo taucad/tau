@@ -3211,6 +3211,50 @@ describe('independent sync record failures', () => {
     expect(requested).toHaveLength(5);
   }, 30_000);
 
+  /* R5: a fresh device learns the export preference from the manifest alone, not the whole tree. */
+  it('reads only the fetched manifest to learn a fresh device’s export preference', async () => {
+    const context = await fixture({});
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([
+        ['tau.json', '{"syncLargeExports":true}\n'],
+        ['main.ts', 'base\n'],
+        ['parts/a.step', 'solid a\n'],
+      ]),
+      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      summary: { generated: 'Main' },
+    });
+    const head = revisionId(receipt.commitId);
+    await context.port.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head });
+    const reads: Array<readonly string[] | undefined> = [];
+    const actors = createRevisionActors({
+      port: {
+        ...context.port,
+        readTree: async (id, options) => {
+          reads.push(options?.paths);
+          return context.port.readTree(id, options);
+        },
+        listRemoteRefs: async () => [
+          { name: 'refs/heads/main', head },
+          { name: 'refs/tau/evidence/exports', head },
+        ],
+        fetch: async () => ({ refs: [] }),
+      },
+      projectId: 'project-1',
+      filesystem: () => context.filesystem,
+    });
+
+    const fetched = await run<SyncFetchActorOutput>(actors.sync.fetch, {
+      remote: 'tau',
+      branch: 'main',
+      deadlineMilliseconds: 10_000,
+    });
+
+    expect(fetched.recordProjection?.syncLargeExports).toBe(true);
+    expect(reads).toStrictEqual([['tau.json']]);
+  }, 30_000);
+
   /* R4: the connect-time fetch takes what the opening pull would, and that pull then fetches nothing. */
   it('fetches only the authored refs on connect, and the opening pull does not fetch them again', async () => {
     const context = await fixture({ 'main.ts': 'base\n' });

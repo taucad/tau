@@ -662,6 +662,28 @@ describe('reading a tree with large objects', () => {
     expect(transfer).not.toHaveBeenCalled();
   });
 
+  /* R5: a reader that wants one file reads one file, not every blob and every large object. */
+  it('reads only the named paths, and leaves out what is missing or a directory', async () => {
+    const { port, head, asked, transfer, evict } = await lfsStore();
+    await evict(parts[0]![1]!, parts[1]![1]!);
+    const read = await port.readTree(head, {
+      largeObjects: 'local',
+      paths: ['main.scad', parts[2]![0]!, parts[0]![0]!, 'models', 'missing.json', 'main.scad/inner'],
+    });
+    expect(read?.entries().map(({ path }) => path)).toStrictEqual(
+      [parts[0]![0]!, parts[2]![0]!, 'main.scad'].toSorted(),
+    );
+    expect(read?.get('main.scad')).toStrictEqual(encoder.encode('cube(1);\n'));
+    expect(read?.get(parts[2]![0]!)).toStrictEqual(encoder.encode(parts[2]![1]));
+    expect(read?.get(parts[0]![0]!)).toStrictEqual(lfsPointerFor(encoder.encode(parts[0]![1])).bytes);
+    expect(asked).toStrictEqual([]);
+    expect(transfer).not.toHaveBeenCalled();
+    /* A fetching read of a subset fetches only that subset's large objects. */
+    const fetched = await port.readTree(head, { paths: [parts[0]![0]!] });
+    expect(fetched?.get(parts[0]![0]!)).toStrictEqual(encoder.encode(parts[0]![1]));
+    expect(asked).toStrictEqual([[oidOf(parts[0]![1]!)]]);
+  });
+
   it('tells a fetching read about each object as it lands', async () => {
     const { port, head, evict } = await lfsStore();
     await evict(parts[0]![1]!, parts[2]![1]!);

@@ -178,7 +178,8 @@ describe('the link refusal every launch carries', () => {
     const owned = '/opt/tau-staging/sandbox/bwrap';
     vi.stubEnv(nativeSandboxBwrapVariable, owned);
     sandbox.wrapped = (command) => `${owned} --unshare-net -- /bin/sh -c ${shellQuote(command)}`;
-    const wrapped = (await launchInNativeSandbox(launch)).at(2);
+    const vector = await launchInNativeSandbox(launch);
+    const wrapped = vector.at(2);
     expect(wrapped).toMatch(/^\/opt\/tau-staging\/sandbox\/bwrap --seccomp 3 --unshare-net -- \/bin\/sh -c '/u);
     const policy = sandbox.wrap.mock.calls.at(-1)![2] as { bwrapPath?: string };
     expect(policy.bwrapPath).toBe(owned);

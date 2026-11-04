@@ -13,12 +13,13 @@ import {
 } from '#graphics/three/overlay-colors.constants.js';
 import type { ModelComponentEmphasis } from '#graphics/three/materials/model-component-appearance.js';
 import { viewportRenderTiers } from '#graphics/three/utils/render-order.utils.js';
+import { viewerRenderProfile } from '@taucad/types/constants/viewer-render-profile';
 
 /**
- * Default line width in pixels for edge rendering.
+ * Default line width in CSS pixels for edge rendering, from the viewer render profile.
  * This is screen-space width, not world units.
  */
-export const gltfEdgeLineWidth = 1;
+export const gltfEdgeLineWidth = viewerRenderProfile.edges.lineWidthCssPixels;
 
 // Node edges do not write depth. Draw them after opaque surfaces so a later
 // surface cannot overwrite their color; depth testing still rejects hidden edges.

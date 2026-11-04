@@ -54,6 +54,7 @@ import { toThreeRenderPoint } from '@taucad/three/spatial';
 import { useCameraRetarget, useCameraRig } from '#hooks/use-graphics.jsx';
 import { pixelsToWorldUnits } from '#graphics/three/utils/spatial.utils.js';
 import { useOverlayDepthRestore } from '#graphics/three/scene-overlay.jsx';
+import { viewerRenderProfile } from '@taucad/types/constants/viewer-render-profile';
 import { defaultPostProcessingSettings, resolveAoRadiusCssPixels } from '#graphics/three/post-processing-settings.js';
 import type { PostProcessingSettings } from '#graphics/three/post-processing-settings.js';
 import { retireTransmissionCopy } from '#graphics/three/transmission-retirement.js';
@@ -91,7 +92,12 @@ type LinearFrame = {
 };
 
 // Preserve the tuned GTAO depth acceptance while making both values derive from one screen-space contract.
-const gtaoThicknessToRadiusRatio = 1 / 0.09;
+const {
+  thicknessRatio: gtaoThicknessToRadiusRatio,
+  denoiseDepthTolerance: aoDenoiseDepthTolerance,
+  samples: gtaoSamples,
+  resolutionScale: aoResolutionScale,
+} = viewerRenderProfile.ambientOcclusion;
 const aoDisplayModes = { combined: 0, ao: 1, 'no-ao': 2 } as const;
 
 const updateGtaoSpatialScale = ({
@@ -119,7 +125,7 @@ const updateGtaoSpatialScale = ({
       resource.aoNode.radius.value = radius;
       resource.aoNode.thickness.value = radius * gtaoThicknessToRadiusRatio;
       if (resource.denoiseNode) {
-        resource.denoiseNode.depthPhi.value = radius * 0.1;
+        resource.denoiseNode.depthPhi.value = radius * aoDenoiseDepthTolerance;
       }
     }
   }
@@ -466,11 +472,11 @@ const createPipelineResources = ({
       logDepth?.forwardDepth ??
       sample((uv) => (gpuRenderer.reversedDepthBuffer ? loadDepth(uv).oneMinus() : loadDepth(uv)));
     aoNode = ao(logDepth?.gtaoDepth ?? aoDepth, scenePassNormal, aoCamera.camera as Camera);
-    aoNode.resolutionScale = 0.5;
+    aoNode.resolutionScale = aoResolutionScale;
     // Temporal direction rotation shimmers under `frameloop='demand'` because the
     // viewport never accumulates frame-to-frame.
     aoNode.useTemporalFiltering = false;
-    aoNode.samples.value = 16;
+    aoNode.samples.value = gtaoSamples;
     aoNode.distanceFallOff.value = defaultPostProcessingSettings.gtaoDistanceFalloff;
 
     const aoTexture = aoNode.getTextureNode();
@@ -676,17 +682,20 @@ function PostProcessingWebGpuActive({
       if (!selected.aoNode) {
         return;
       }
-      selected.aoNode.resolutionScale = 0.5;
+      selected.aoNode.resolutionScale = aoResolutionScale;
       if (selected.denoiseNode) {
         // One AO texel per tap, matching the half drawing-buffer estimate.
-        selected.denoiseNode.step.value.set(2 / (size.width * viewport.dpr), 2 / (size.height * viewport.dpr));
+        selected.denoiseNode.step.value.set(
+          1 / aoResolutionScale / (size.width * viewport.dpr),
+          1 / aoResolutionScale / (size.height * viewport.dpr),
+        );
       }
       if (selected.denoiseInput) {
         // Estimate and smooth at half drawing-buffer resolution, including on Retina displays.
         // r184 RTTNode has no resolutionScale. Own physical dimensions explicitly;
         // its pixelRatio stays 1 and ordinary frames never resize the allocation.
-        const width = Math.max(1, Math.ceil(size.width * viewport.dpr * 0.5));
-        const height = Math.max(1, Math.ceil(size.height * viewport.dpr * 0.5));
+        const width = Math.max(1, Math.ceil(size.width * viewport.dpr * aoResolutionScale));
+        const height = Math.max(1, Math.ceil(size.height * viewport.dpr * aoResolutionScale));
         if (selected.denoiseInput.width !== width || selected.denoiseInput.height !== height) {
           selected.denoiseInput.setSize(width, height);
         }

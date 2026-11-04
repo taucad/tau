@@ -23,6 +23,8 @@
  *    WebGPU's linear blend.
  */
 
+import { viewerRenderProfile } from '@taucad/types/constants/viewer-render-profile';
+
 /**
  * Infinite grid line tint, **light theme**. sRGB hex.
  *
@@ -55,18 +57,19 @@ export const infiniteGridOpacityHighContrast = 0.7;
  * GLTF characteristic-edge tint, **light theme**. sRGB hex.
  *
  * Black matches the runtime edge middleware default and reads clearly over
- * matcap-lit surfaces on light viewport backgrounds.
+ * matcap-lit surfaces on light viewport backgrounds. Defined by the viewer render profile, which captures also read.
  */
-export const gltfEdgeColorLightMode = 0x00_00_00;
+export const gltfEdgeColorLightMode = viewerRenderProfile.colorSchemes.light.edgeColor;
 
 /**
  * GLTF characteristic-edge tint, **dark theme**. sRGB hex.
  *
  * Neutral gray only (no brand chroma): `oklch(0.62 0 0deg)` → `#868686`. Sits above
  * {@link infiniteGridColorDarkMode} (`#555555`) for readability on dimmed matcap faces,
- * but well below near-white so characteristic edges do not glare against `#171717`.
+ * but well below near-white so characteristic edges do not glare against `#171717`. Defined by the viewer render
+ * profile, which captures also read.
  */
-export const gltfEdgeColorDarkMode = 0x86_86_86;
+export const gltfEdgeColorDarkMode = viewerRenderProfile.colorSchemes.dark.edgeColor;
 
 /**
  * Edge tint of a **hovered** model component, drawn through occluding surfaces. Light yellow;

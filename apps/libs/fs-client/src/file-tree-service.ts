@@ -105,7 +105,8 @@ const keepMeasuredLineCount = (current: CachedFileEntry, listed: CachedFileEntry
   current.contentKind === 'text' &&
   current.lineCount !== undefined &&
   current.size === listed.size &&
-  current.mtimeMs === listed.mtimeMs
+  current.mtimeMs === listed.mtimeMs &&
+  sameProvenance(current.provenance, listed.provenance)
     ? { ...listed, lineCount: current.lineCount }
     : listed;
 
@@ -1097,9 +1098,15 @@ export class FileTreeService {
     }
     const oldRelative = event.oldPath;
     const newRelative = event.newPath;
-    if (oldRelative !== undefined && newRelative !== undefined) {
+    /* An apply's staged or backup sibling never enters the tree: renaming a
+     * row to or from one would drop the real name until the re-read lands, so
+     * only the parent re-reads below settle it. */
+    const touchesSibling = [oldRelative, newRelative].some(
+      (path) => path !== undefined && isTauTemporarySiblingPath(path),
+    );
+    if (!touchesSibling && oldRelative !== undefined && newRelative !== undefined) {
       this.optimisticRename(oldRelative, newRelative);
-    } else if (oldRelative !== undefined) {
+    } else if (!touchesSibling && oldRelative !== undefined) {
       this.optimisticDelete(oldRelative);
     }
     for (const path of [oldRelative, newRelative]) {

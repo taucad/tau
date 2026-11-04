@@ -780,6 +780,43 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
     vi.useRealTimers();
   });
 
+  it('drops a measured count when a head re-list shows another provenance', async () => {
+    vi.useFakeTimers();
+    const { tree, proxy, disposeChannel } = createTreeHarness();
+    vi.mocked(proxy.readDirectory).mockResolvedValueOnce([
+      { ...textNode('a.ts', { size: 5, mtimeMs: 100, lineCount: 2 }), provenance: provenanceOf(true) },
+    ]);
+    await tree.listDirectory('');
+    vi.mocked(proxy.readDirectory).mockResolvedValueOnce([
+      { id: 'a.ts', name: 'a.ts', size: 5, mtimeMs: 100, contentKind: 'text', provenance: provenanceOf(false) },
+    ]);
+
+    tree.scheduleRefresh('');
+    await vi.advanceTimersByTimeAsync(200);
+
+    expect('lineCount' in (tree.getTreeSnapshot().get('a.ts') ?? {})).toBe(false);
+    tree.dispose();
+    disposeChannel();
+    vi.useRealTimers();
+  });
+
+  /* A swap's backup rename is not a row rename: the real name stays until the parent re-read. */
+  it('keeps the real row when a file is renamed to its apply backup sibling', async () => {
+    vi.useFakeTimers();
+    const { tree, proxy, emitFileChanged, disposeChannel } = createTreeHarness();
+    vi.mocked(proxy.readDirectory).mockResolvedValue([textNode('a.ts', { size: 5, mtimeMs: 100, lineCount: 2 })]);
+    await tree.listDirectory('');
+    const backup = '.a.ts.tau-backup.01234567-89ab-cdef-0123-456789abcdef.tmp';
+
+    emitFileChanged({ type: 'fileRenamed', oldPath: 'a.ts', newPath: backup, backend: 'opfs' });
+
+    expect(tree.getTreeSnapshot().get('a.ts')).toMatchObject({ name: 'a.ts' });
+    expect(tree.getTreeSnapshot().has(backup)).toBe(false);
+    tree.dispose();
+    disposeChannel();
+    vi.useRealTimers();
+  });
+
   it('should preserve FileEntry object identity when disk listing is unchanged', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const listen = vi.fn().mockReturnValue(vi.fn());

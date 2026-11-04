@@ -971,7 +971,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     }
     deferredChanges.set(checkoutId, held);
   };
-  function closeWrite(root: string): void {
+  const closeWrite = (root: string): void => {
     const remaining = (writing.get(root) ?? 1) - 1;
     if (remaining > 0) {
       writing.set(root, remaining);
@@ -990,7 +990,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         }
       }
     }
-  }
+  };
   const changed = (checkoutId: string, paths: readonly string[]): void => {
     workerTimings.count('revisions.changed');
     /* One increment per content-change event, whatever its path count: the

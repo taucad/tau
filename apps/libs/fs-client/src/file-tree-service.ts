@@ -90,6 +90,14 @@ type PollingTelemetryState = {
 const isFileTreeFileNode = (entry: FileTreeNode): entry is FileTreeFileNode => entry.children === undefined;
 
 /**
+ * Directories re-read per task when collected re-reads drain. An apply's
+ * release can name hundreds at once, and each re-read that answers notifies
+ * the tree's subscribers: drained a task at a time, a page renders between
+ * them instead of nesting one update inside another's commit.
+ */
+const refreshesPerTask = 16;
+
+/**
  * Tau's own revision staging and backup siblings (`.<name>.tau-staged.<id>.tmp`,
  * `.<name>.tau-backup.<id>.tmp`). They exist only while an apply swaps a file
  * into place, so a tree that listed them would flash rows the person never
@@ -673,8 +681,7 @@ export class FileTreeService {
     }
 
     this.refreshTimer = setTimeout(() => {
-      this.refreshTimer = undefined;
-      this.flushPendingRefreshes();
+      this.drainPendingRefreshes();
     }, this.refreshDebounce);
   }
 
@@ -686,7 +693,9 @@ export class FileTreeService {
    * changing it — listing work that grows with the square of the file count
    * on a cold open. While held, events still patch the tree optimistically and
    * the directories they name collect; the last release re-reads each of them
-   * once. Holds nest, and a release is idempotent.
+   * once, from a later task and a few directories per task, never inside the
+   * caller's own call (which may be a React commit). Holds nest, and a release
+   * is idempotent.
    *
    * @returns The release for this hold.
    */
@@ -703,8 +712,13 @@ export class FileTreeService {
       }
       released = true;
       this.refreshPauses -= 1;
-      if (this.refreshPauses === 0) {
-        this.flushPendingRefreshes();
+      if (this.refreshPauses === 0 && !this.disposed && this.pendingRefreshPaths.size > 0) {
+        if (this.refreshTimer !== undefined) {
+          clearTimeout(this.refreshTimer);
+        }
+        this.refreshTimer = setTimeout(() => {
+          this.drainPendingRefreshes();
+        }, 0);
       }
     };
   }
@@ -994,14 +1008,34 @@ export class FileTreeService {
 
   // === Private: Worker Event Handlers (workspace-relative paths) ===
 
-  /** Re-read every directory collected since the last flush, once each. */
-  private flushPendingRefreshes(): void {
+  /*
+   * Re-read up to {@link refreshesPerTask} collected directories, once each,
+   * and leave the rest to the next task; a hold taken meanwhile keeps them.
+   */
+  private drainPendingRefreshes(): void {
+    this.refreshTimer = undefined;
     if (this.disposed) {
       this.pendingRefreshPaths.clear();
       return;
     }
-    const pendingPaths = [...this.pendingRefreshPaths];
-    this.pendingRefreshPaths.clear();
+    if (this.refreshPauses > 0) {
+      return;
+    }
+    const pendingPaths: string[] = [];
+    for (const pendingPath of this.pendingRefreshPaths) {
+      if (pendingPaths.length === refreshesPerTask) {
+        break;
+      }
+      pendingPaths.push(pendingPath);
+    }
+    for (const pendingPath of pendingPaths) {
+      this.pendingRefreshPaths.delete(pendingPath);
+    }
+    if (this.pendingRefreshPaths.size > 0) {
+      this.refreshTimer = setTimeout(() => {
+        this.drainPendingRefreshes();
+      }, 0);
+    }
     for (const pendingPath of pendingPaths) {
       const observation = this.listingObservations.get(pendingPath)?.deref();
       if (observation && observation.activeLeaseCount > 0) {

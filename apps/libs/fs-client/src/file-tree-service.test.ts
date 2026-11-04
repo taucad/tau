@@ -2065,6 +2065,61 @@ describe('refresh pause during a revision apply', () => {
     }
   });
 
+  /* React #185: a release can come from a store subscriber inside a commit; the re-reads it starts must not. */
+  it('should start no re-read inside the release call, only from a later task', async () => {
+    vi.useFakeTimers();
+    const { tree, proxy, emitFileChanged, disposeChannel } = resolvedTree();
+    try {
+      vi.mocked(proxy.readDirectory).mockClear();
+      const release = tree.pauseRefreshes();
+      emitStagedSwap(emitFileChanged, 'src/a.ts');
+
+      release();
+      expect(proxy.readDirectory).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(proxy.readDirectory).toHaveBeenCalledWith('/projects/abc/src');
+    } finally {
+      tree.dispose();
+      disposeChannel();
+    }
+  });
+
+  it('should drain a large release a few directories per task, and stop draining under a new hold', async () => {
+    vi.useFakeTimers();
+    const directories = Array.from({ length: 40 }, (_, index) => `dir-${String(index)}`);
+    const { tree, proxy, emitFileChanged, disposeChannel } = createTreeHarness({
+      initialEntries: directories.map((name) => ({ ...directoryEntry(name), isDirectoryResolved: true })),
+    });
+    try {
+      vi.mocked(proxy.readDirectory).mockClear();
+      const release = tree.pauseRefreshes();
+      for (const directory of directories) {
+        emitStagedSwap(emitFileChanged, `${directory}/a.ts`);
+      }
+
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(proxy.readDirectory).toHaveBeenCalledTimes(16);
+
+      const again = tree.pauseRefreshes();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(proxy.readDirectory).toHaveBeenCalledTimes(16);
+
+      again();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(
+        vi
+          .mocked(proxy.readDirectory)
+          .mock.calls.map(([path]) => path)
+          .toSorted(),
+      ).toEqual(directories.map((name) => `/projects/abc/${name}`).toSorted());
+    } finally {
+      tree.dispose();
+      disposeChannel();
+    }
+  });
+
   it('should not re-read anything on release when nothing changed while paused', async () => {
     vi.useFakeTimers();
     const { tree, proxy, disposeChannel } = resolvedTree();

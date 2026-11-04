@@ -851,10 +851,18 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       }
       republish();
     },
-    /* The page's file tree holds its re-reads for a root while an apply writes it, and lists it once after. */
-    onApplyingTree: ({ root }, paths) => {
+    /*
+     * The page's file tree holds its re-reads for a root while an apply writes
+     * it, and lists it once after. A fill's flush is left out: it replaces
+     * placeholders in place, once a second for minutes, and a hold taken and
+     * released per flush re-listed every directory it touched each time.
+     */
+    onApplyingTree: ({ root }, paths, bracket) => {
+      const holdsTree = bracket?.purpose !== 'fill';
       const startedAt = workerTimings.now();
-      applying.set(root, (applying.get(root) ?? 0) + 1);
+      if (holdsTree) {
+        applying.set(root, (applying.get(root) ?? 0) + 1);
+      }
       writing.set(root, (writing.get(root) ?? 0) + 1);
       republish();
       let released = false;
@@ -864,6 +872,9 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         }
         released = true;
         closeWrite(root);
+        if (!holdsTree) {
+          return;
+        }
         /* An apply that wrote nothing has nothing to account for; to the second, a window may include its neighbours. */
         if (paths.length > 0) {
           logWorkerTimings(`apply of ${String(paths.length)} paths`, workerTimings.summarize(startedAt));

@@ -867,6 +867,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(await project.readFile('models/part.step')).toStrictEqual(bytes);
 
     await project.writeFile(objectFile, part);
+    const framesBeforeFill = second.frames.length;
     second.send({ command: 'retryLargeObjects' });
     await vi.waitFor(
       () => {
@@ -876,6 +877,13 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       { timeout: 10_000 },
     );
     expect(await project.readFile('models/part.step', 'utf8')).toBe(part);
+    /* The fill's flush wrote the file without holding the page's file tree. */
+    expect(
+      second.frames
+        .slice(framesBeforeFill)
+        .flatMap((frame) => (frame.type === 'status' ? [frame.status.applyingRoots] : []))
+        .filter((roots) => roots !== undefined),
+    ).toEqual([]);
   }, 30_000);
 
   it('should restore a recorded revision through the port commands', async () => {

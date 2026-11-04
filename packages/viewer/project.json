@@ -19,6 +19,17 @@
         ],
         "parallel": false
       }
+    },
+    "capture:viewer-parity": {
+      "executor": "nx:run-commands",
+      "metadata": {
+        "description": "Viewer parity references (Tau Brain research/nanoraster-viewer-parity-charter.md, W6): the production viewer's frame and camera per parity fixture, AO on and off, for tau-examples:test:viewer-parity. Software GPUs need TAU_E2E_WEBGPU_PROFILE=software and PARITY_HEADED=1 under xvfb-run; inputs are documented in the config."
+      },
+      "cache": false,
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config src/graphics/three/viewer-parity-capture.vitest.browser.config.ts"
+      }
     }
   }
 }

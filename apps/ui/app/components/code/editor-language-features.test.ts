@@ -1,11 +1,13 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import {
   availableLanguageActions,
+  languageFeatureNavigation,
   languageFeatures,
   promptRename,
   symbolPathAt,
+  symbolPathListener,
 } from '#components/code/editor-language-features.js';
 import type { EditorSymbol } from '#components/code/editor-language-features.js';
 
@@ -41,6 +43,51 @@ describe('editor language features', () => {
     const readOnly = EditorState.create({ extensions: [contributions, EditorState.readOnly.of(true)] });
     expect(availableLanguageActions(readOnly).map((action) => action.disabled)).toEqual([false, true, true]);
     expect(availableLanguageActions(EditorState.create())).toEqual([]);
+  });
+});
+
+describe('symbol path reporting', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('reports the cursor path and clears it when a later symbol request fails', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const responses: Array<() => Promise<readonly EditorSymbol[]>> = [
+      async () => [symbol('Gear', [0, 20], [symbol('mesh', [5, 10])])],
+      async () => {
+        throw new Error('language server stopped');
+      },
+    ];
+    const paths: string[][] = [];
+    const view = new EditorView({
+      parent: document.body,
+      state: EditorState.create({
+        doc: 'x'.repeat(30),
+        selection: { anchor: 6 },
+        extensions: [
+          languageFeatureNavigation(),
+          languageFeatures.of({ documentSymbols: async () => responses.shift()!() }),
+          symbolPathListener.of((path) => {
+            paths.push(path.map((crumb) => crumb.name));
+          }),
+        ],
+      }),
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(300);
+      expect(paths.at(-1)).toEqual(['Gear', 'mesh']);
+
+      // An edit reloads the symbols; a failed reload must not leave the old path describing changed text.
+      view.dispatch({ changes: { from: 0, insert: 'y' } });
+      await vi.advanceTimersByTimeAsync(300);
+      expect(paths.at(-1)).toEqual([]);
+      expect(console.error).toHaveBeenCalledOnce();
+    } finally {
+      view.destroy();
+    }
   });
 });
 

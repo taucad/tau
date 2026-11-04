@@ -873,6 +873,11 @@ const symbolPathReporter = ViewPlugin.fromClass(
         }
       } catch (error) {
         report(error);
+        // The old symbols describe text that has since changed; show no path rather than a stale one.
+        if (current === this.generation) {
+          this.symbols = [];
+          this.report();
+        }
       }
     }
     private report(): void {

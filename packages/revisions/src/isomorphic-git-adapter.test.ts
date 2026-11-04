@@ -676,6 +676,27 @@ describe('reading a tree with large objects', () => {
     expect(writes.mock.calls.map(([path]) => path).toSorted()).toStrictEqual(stored.toSorted());
   });
 
+  /* Lock-free means the adapter never removes a copy itself: another tab's whole one may have just landed there. */
+  it('leaves a copy cut short to the private store, removing nothing itself', async () => {
+    const stored: string[] = [];
+    const { port, head, evict, filesystem } = await lfsStore(undefined, (provider) => async (path, content) => {
+      stored.push(path);
+      await provider.writeFile(path, content);
+      return 'stored';
+    });
+    await evict(parts[0]![1]!);
+    const file = `.git/${lfsObjectPath(oidOf(parts[0]![1]!))}`;
+    await filesystem.writeFile(file, 'sol');
+    stored.length = 0;
+    const unlinks = vi.spyOn(filesystem, 'unlink');
+
+    const read = await port.readTree(head);
+
+    expect(read?.get(parts[0]![0]!)).toStrictEqual(encoder.encode(parts[0]![1]));
+    expect(stored).toStrictEqual([file]);
+    expect(unlinks).not.toHaveBeenCalled();
+  });
+
   it('shares one download between two readers of the same tree', async () => {
     const { port, head, asked, transfer, evict } = await lfsStore();
     await evict(...parts.map(([, content]) => content!));

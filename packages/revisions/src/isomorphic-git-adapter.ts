@@ -904,16 +904,15 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       return;
     }
     const file = lfsObjectFile(oid);
-    /* A copy cut short by an earlier write; not every provider's rename replaces. */
-    const truncated = await filesystem.exists(file);
-    if (filesystem.storePrivateObject !== undefined) {
-      /* Off the project's mutation claims: a download no longer waits behind every checkout write. */
-      if (truncated) {
-        await filesystem.unlink(file);
-      }
+    /* The private store takes only the checkout's own `.git` store; another repository location stays on the pipeline. */
+    if (filesystem.storePrivateObject !== undefined && gitdir === '.git') {
+      /* Off the project's mutation claims: a download no longer waits behind every checkout write.
+       * The store keeps a whole copy another tab wrote and replaces only one cut short. */
       await filesystem.storePrivateObject(file, content);
       return;
     }
+    /* A copy cut short by an earlier write; not every provider's rename replaces. */
+    const truncated = await filesystem.exists(file);
     await filesystem.mkdir(file.slice(0, file.lastIndexOf('/')), { recursive: true });
     const partial = `${file}.${randomUuid()}.partial`;
     await filesystem.writeFile(partial, content);

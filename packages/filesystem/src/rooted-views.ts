@@ -55,6 +55,9 @@ import { bufferToStream, validateFileReadStreamOptions } from '#backend/stream-u
 import { getEventOrigin } from '#event-origin-registry.js';
 import { headFileStatFromStat } from '#content-metadata.js';
 
+/** A Git LFS object's place in a checkout: `.git/lfs/objects/<xx>/<yy>/<oid>`, the oid 64 lowercase hex. */
+const largeObjectPathPattern = /^\.git\/lfs\/objects\/([\da-f]{2})\/([\da-f]{2})\/([\da-f]{64})$/u;
+
 /**
  * The mutating porcelain a rooted view serves (charter D4).
  *
@@ -85,8 +88,8 @@ export type RootedPorcelain = {
   canCreate(path: string, kind: 'file' | 'directory'): Promise<true | WorkspaceMutationError>;
   canDelete(path: string): Promise<true | WorkspaceMutationError>;
   /**
-   * Store one content-addressed file of a Git store (a path with a `.git`
-   * segment) straight on this root's provider, if it is not already there.
+   * Store one Git LFS object, at this root's `.git/lfs/objects/<xx>/<yy>/<oid>`,
+   * straight on this root's provider, if it is not already there whole.
    *
    * Outside the mutation pipeline on purpose: no resource-queue or cross-tab
    * claim, no change event, no index entry. A large object lands here once per
@@ -95,9 +98,14 @@ export type RootedPorcelain = {
    * because the content is addressed by its own hash: it is written beside its
    * name and renamed into place, so no reader sees a partial file, and two
    * writers of one name write the same bytes — whichever loses the rename
-   * finds the other's file and leaves it. Nothing watches, captures or indexes
-   * a Git store's private files.
+   * finds the other's file and leaves it. A file already there at the content's
+   * size is kept; one at another size (a write a crash cut short) is replaced,
+   * after a second look just before its removal, so a whole copy another tab
+   * stored meanwhile is left alone. Nothing watches, captures or indexes a Git
+   * store's large objects.
    *
+   * @param path - The object's path in this root; any other path is refused.
+   * @param content - The object's bytes; their length is the object's size.
    * @returns `'stored'` when this call wrote it, `'present'` when it was already there.
    */
   storePrivateObject(path: string, content: Uint8Array<ArrayBuffer>): Promise<'stored' | 'present'>;
@@ -526,22 +534,48 @@ export class RootedViews {
       content: Uint8Array<ArrayBuffer>,
     ): Promise<'stored' | 'present'> => {
       const { localPath, resolution } = resolveLocal(path);
-      if (!localPath.split('/').slice(0, -1).includes('.git')) {
-        throw new TypeError(`Only a Git store's private files are stored outside the mutation pipeline: ${localPath}`);
+      const named = largeObjectPathPattern.exec(localPath);
+      if (named?.[3]?.startsWith(`${named[1]!}${named[2]!}`) !== true) {
+        throw new TypeError(`Only a Git LFS object is stored outside the mutation pipeline: ${localPath}`);
       }
       const { provider, path: target } = resolution;
-      if (await provider.exists(target)) {
+      /* The size of the file at the object's name, or `undefined` when there is none. */
+      const sizeHere = async (): Promise<number | undefined> => {
+        if (!(await provider.exists(target))) {
+          return undefined;
+        }
+        try {
+          const stat = await provider.stat(target, { content: 'head' });
+          return stat.size;
+        } catch {
+          /* Gone between the two looks. */
+          return undefined;
+        }
+      };
+      if ((await sizeHere()) === content.byteLength) {
         return 'present';
       }
       await provider.mkdir(target.slice(0, target.lastIndexOf('/')), { recursive: true });
       const partial = `${target}.${randomUuid()}.partial`;
       await provider.writeFile(partial, content);
+      const discardPartial = async (): Promise<void> => {
+        await provider.unlink(partial).catch(() => undefined);
+      };
+      /* Looked at again just before anything is removed: another tab may have stored it whole meanwhile. */
+      const here = await sizeHere();
+      if (here === content.byteLength) {
+        await discardPartial();
+        return 'present';
+      }
+      if (here !== undefined) {
+        /* A copy cut short; not every provider's rename replaces. */
+        await provider.unlink(target).catch(() => undefined);
+      }
       try {
         await provider.rename(partial, target);
       } catch (error) {
-        const present = await provider.exists(target);
-        await provider.unlink(partial).catch(() => undefined);
-        if (present) {
+        await discardPartial();
+        if ((await sizeHere()) === content.byteLength) {
           return 'present';
         }
         throw error;

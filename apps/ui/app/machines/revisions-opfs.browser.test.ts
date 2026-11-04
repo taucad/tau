@@ -98,6 +98,6 @@ it('should apply 439 pointer-sized files to an empty OPFS checkout in seconds, n
 
   const applied = (await worker.ask({ op: 'applyPointerTree', directory, files: 439 })) as PointerTreeApplied;
 
-  expect(applied).toMatchObject({ files: 439, matching: 439 });
+  expect(applied).toMatchObject({ files: 439, matching: 439, litter: [] });
   expect(applied.milliseconds).toBeLessThan(20_000);
 }, 120_000);

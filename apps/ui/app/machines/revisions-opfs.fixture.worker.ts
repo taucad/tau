@@ -23,7 +23,16 @@ export type OpfsRequest =
   | Readonly<{ op: 'applyPointerTree'; directory: string; files: number }>;
 
 /** What one cold apply of a pointer-sized tree cost, and what it left. */
-export type PointerTreeApplied = Readonly<{ milliseconds: number; files: number; matching: number }>;
+export type PointerTreeApplied = Readonly<{
+  milliseconds: number;
+  files: number;
+  matching: number;
+  /** Staging or backup siblings the apply left in any directory it wrote. */
+  litter: readonly string[];
+}>;
+
+/** Any `.tau-staged` or `.tau-backup` sibling, whatever its id. */
+const temporarySibling = /\.tau-(?:staged|backup)\./u;
 
 const encoder = new TextEncoder();
 const provider = new OPFSProvider();
@@ -103,10 +112,13 @@ const applyPointerTree = async (directory: string, files: number): Promise<Point
   const milliseconds = performance.now() - started;
 
   const contents = await Promise.all(paths.map(async (path) => checkout.readFile(path, 'utf8')));
+  const directories = new Set(['', 'models', ...paths.map((path) => path.slice(0, path.lastIndexOf('/')))]);
+  const listings = await Promise.all([...directories].map(async (path) => checkout.readdir(path)));
   return {
     milliseconds,
     files: contents.length,
     matching: contents.filter((content, index) => content === pointerSized(index)).length,
+    litter: listings.flat().filter((name) => temporarySibling.test(name)),
   };
 };
 

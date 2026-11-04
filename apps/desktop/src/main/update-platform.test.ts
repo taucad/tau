@@ -6,8 +6,11 @@ import { EventEmitter } from 'node:events';
 import type * as ChildProcess from 'node:child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  appImageRelaunchEnvironment,
+  appImageRelaunchScript,
   fetchUpdateDescriptor,
   launchWindowsUpdate,
+  relaunchAppImage,
   relaunchSwitches,
   verifyDownloadedUpdate,
   startPlatformUpdater,
@@ -272,4 +275,89 @@ describe('platform update transport and launch', () => {
     await expect(success).resolves.toBeUndefined();
     expect(child.unref).toHaveBeenCalled();
   });
+});
+describe('AppImage relaunch', () => {
+  const mount = '/tmp/.mount_Tau.Ap1fvY1k';
+  it('drops the running image identity and every search path under its mount', () => {
+    /* eslint-disable @typescript-eslint/naming-convention -- Environment names are the AppImage runtime's external contract. */
+    expect(
+      appImageRelaunchEnvironment({
+        APPDIR: mount,
+        APPIMAGE: '/opt/tau-staging-appimage/releases/1.7.43/Tau.AppImage',
+        ARGV0: 'Tau.AppImage',
+        OWD: '/home/tau',
+        LD_LIBRARY_PATH: `${mount}/usr/lib:/opt/other/lib`,
+        XDG_DATA_DIRS: `${mount}/usr/share:/usr/local/share:/usr/share`,
+        DISPLAY: ':0',
+      }),
+    ).toEqual({ LD_LIBRARY_PATH: '/opt/other/lib', XDG_DATA_DIRS: '/usr/local/share:/usr/share', DISPLAY: ':0' });
+    expect(appImageRelaunchEnvironment({ APPDIR: mount, LD_LIBRARY_PATH: `${mount}/usr/lib` })).toEqual({});
+    expect(appImageRelaunchEnvironment({ LD_LIBRARY_PATH: '/opt/lib', PATH: '/usr/bin' })).toEqual({
+      LD_LIBRARY_PATH: '/opt/lib',
+      PATH: '/usr/bin',
+    });
+    /* eslint-enable @typescript-eslint/naming-convention -- End environment names. */
+  });
+  it('starts a detached host bash waiter instead of Electron relaunch', () => {
+    // oxlint-disable-next-line unicorn/prefer-event-target -- Node child_process delivers spawn/error through EventEmitter.
+    const child = Object.assign(new EventEmitter(), { unref: vi.fn() });
+    mocks.spawn.mockReturnValue(child);
+    vi.stubEnv('APPDIR', mount);
+    try {
+      relaunchAppImage('/usr/bin/tau-staging-appimage', ['--ozone-platform=x11']);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(mocks.spawn).toHaveBeenCalledWith(
+      '/bin/bash',
+      ['-c', appImageRelaunchScript, 'tau-relaunch', '/usr/bin/tau-staging-appimage', '--ozone-platform=x11'],
+      expect.objectContaining({ shell: false, detached: true, stdio: ['pipe', 'ignore', 'ignore'] }),
+    );
+    const options = (mocks.spawn.mock.calls[0] as [string, string[], { env: NodeJS.ProcessEnv }])[2];
+    expect(options.env['APPDIR']).toBeUndefined();
+    expect(child.unref).toHaveBeenCalled();
+    expect(() => {
+      relaunchAppImage('tau-staging-appimage', []);
+    }).toThrow(/absolute/u);
+  });
+  it.runIf(process.platform === 'linux')(
+    'closes inherited descriptors and starts the target only after the parent end closes',
+    async () => {
+      const actual = await vi.importActual<typeof ChildProcess>('node:child_process');
+      const directory = await files.mkdtemp(join(tmpdir(), 'tau-appimage-relaunch-'));
+      const marker = join(directory, 'started');
+      const target = join(directory, 'target.sh');
+      const held = join(directory, 'held-on-old-mount');
+      await files.writeFile(held, '');
+      await files.writeFile(
+        target,
+        `#!/bin/sh\nfor f in /proc/$$/fd/*; do readlink "$f"; done > '${marker}.fds'\nprintf '%s\\n' "$@" > '${marker}'\n`,
+        { mode: 0o755 },
+      );
+      const inherited = await files.open(held, 'r');
+      try {
+        const waiter = actual.spawn(
+          '/bin/bash',
+          ['-c', appImageRelaunchScript, 'tau-relaunch', target, '--ozone-platform=x11'],
+          { stdio: ['pipe', 'ignore', 'ignore', inherited.fd] },
+        );
+        const exited = new Promise((resolve) => {
+          waiter.once('exit', resolve);
+        });
+        await new Promise((resolve) => {
+          setTimeout(resolve, 300);
+        });
+        await expect(files.access(marker)).rejects.toThrow();
+        waiter.stdin?.destroy();
+        await exited;
+        expect(await files.readFile(marker, 'utf8')).toBe('--ozone-platform=x11\n');
+        const descriptors = await files.readFile(`${marker}.fds`, 'utf8');
+        expect(descriptors).not.toContain(held);
+        expect(descriptors).not.toMatch(/pipe:|socket:/u);
+      } finally {
+        await inherited.close();
+        await files.rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
 });

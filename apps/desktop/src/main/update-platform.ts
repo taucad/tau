@@ -1,6 +1,6 @@
 /** Explicit installed-route updater; archives retain the legacy manual update experience. */
 import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import { accessSync, constants, createReadStream } from 'node:fs';
 import { readFile, stat, realpath } from 'node:fs/promises';
 import { join, isAbsolute } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -37,6 +37,80 @@ export const relaunchSwitches = (argv: readonly string[]): string[] => {
   return (separator === -1 ? options : options.slice(0, separator)).filter(
     (value) => value.startsWith('--') && value.length > 2,
   );
+};
+
+/** Variables the AppImage runtime sets for the image that is running now; the next image sets its own. */
+const appImageRuntimeVariables = new Set(['APPDIR', 'APPIMAGE', 'ARGV0', 'OWD']);
+/** Search paths our `AppRun` prefixes with the running image's mount, which disappears when it exits. */
+const appImageSearchPaths = new Set(['LD_LIBRARY_PATH', 'XDG_DATA_DIRS']);
+
+/**
+ * The environment an updated AppImage starts with: the running image's identity and the search-path
+ * entries under its mount are removed, because that mount is torn down when this process exits.
+ */
+export const appImageRelaunchEnvironment = (environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
+  const mount = environment['APPDIR'];
+  const outsideMount = (entry: string): boolean => !mount || (entry !== mount && !entry.startsWith(`${mount}/`));
+  return Object.fromEntries(
+    Object.entries(environment)
+      .filter(([name]) => !appImageRuntimeVariables.has(name))
+      .map(([name, value]): [string, string | undefined] => [
+        name,
+        appImageSearchPaths.has(name) && value !== undefined
+          ? value
+              .split(':')
+              .filter((entry) => outsideMount(entry))
+              .join(':')
+          : value,
+      ])
+      .filter(([name, value]) => !appImageSearchPaths.has(name) || Boolean(value)),
+  );
+};
+
+/**
+ * Close every inherited descriptor except the wait pipe, block until this process exits (the pipe's
+ * other end closes with it), then become the launcher. Bash because dash cannot close descriptors >9.
+ */
+export const appImageRelaunchScript = [
+  // oxlint-disable-next-line no-template-curly-in-string -- Bash parameter expansion, not a template.
+  'for fd in /proc/$$/fd/*; do fd=${fd##*/}; if [[ $fd -gt 2 ]]; then exec {fd}<&-; fi; done 2>/dev/null',
+  'read -r _ || :',
+  'exec "$@" </dev/null',
+].join('\n');
+/** Waiters stay referenced so their end of the wait pipe is never collected before this process exits. */
+const appImageRelaunchWaiters = new Set<ReturnType<typeof spawn>>();
+
+/**
+ * Restart into an AppImage without `app.relaunch`. Electron's relauncher starts the new process with
+ * `PR_SET_NO_NEW_PRIVS`, so the AppImage runtime cannot use the setuid `fusermount` to mount itself and
+ * the update never starts (qualification runs 41802518099 to 41865985263 on Debian 13 and Ubuntu 24.04).
+ * A detached waiter on the host's own bash keeps the privileges of the session that started Tau, holds
+ * nothing on this image's mount, and waits for this process to exit so the single-instance lock is free.
+ */
+export const relaunchAppImage = (execPath: string, args: readonly string[]): void => {
+  if (!isAbsolute(execPath)) {
+    throw new Error('AppImage relaunch path must be absolute');
+  }
+  // Fail before quitting: the controller then reports a paused restart instead of closing for good.
+  accessSync('/bin/bash', constants.X_OK);
+  const waiter = spawn('/bin/bash', ['-c', appImageRelaunchScript, 'tau-relaunch', execPath, ...args], {
+    shell: false,
+    detached: true,
+    stdio: ['pipe', 'ignore', 'ignore'],
+    env: appImageRelaunchEnvironment(process.env),
+  });
+  waiter.once('error', () => undefined);
+  waiter.unref();
+  appImageRelaunchWaiters.add(waiter);
+};
+
+/** APT runtimes are plain executables and keep Electron's relauncher; managed AppImages must mount. */
+const relaunchInstalled = (execPath: string, args: string[], appImage: boolean): void => {
+  if (appImage) {
+    relaunchAppImage(execPath, args);
+  } else {
+    app.relaunch({ execPath, args });
+  }
 };
 
 /** Bound metadata and refuse redirects rather than giving the server another origin's authority. */
@@ -214,7 +288,7 @@ export const startPlatformUpdater = async (options: PlatformUpdateOptions): Prom
         };
       },
       finish: () => {
-        app.relaunch({ execPath: launcher, args: relaunchSwitches(process.argv) });
+        relaunchInstalled(launcher, relaunchSwitches(process.argv), managedImage);
         app.quit();
       },
     });
@@ -404,7 +478,7 @@ export const startPlatformUpdater = async (options: PlatformUpdateOptions): Prom
     },
     finish: () => {
       if (image) {
-        app.relaunch({ execPath: image.outerImagePath, args: relaunchSwitches(process.argv) });
+        relaunchAppImage(image.outerImagePath, relaunchSwitches(process.argv));
       }
       app.quit();
     },

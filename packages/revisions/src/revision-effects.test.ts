@@ -29,6 +29,7 @@ import type { LargeObjectsReport } from '#project-revisions.types.js';
 import { writeChatRef } from '#chat-ref.js';
 import { materializeConflict, readConflictTerms } from '#revision-conflict.js';
 import { RevisionPortError } from '#revision-port.js';
+import { remoteTrackingRef } from '#remotes.js';
 import type { Checkout, ConflictRecord, RevisionPort } from '#revision-port.js';
 import { gitToolchainOnPath, nativeHarness } from '#test/native-git-harness.js';
 import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
@@ -3208,6 +3209,113 @@ describe('independent sync record failures', () => {
     expect(requested).toHaveLength(5);
     await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
     expect(requested).toHaveLength(5);
+  }, 30_000);
+
+  /* R4: the connect-time fetch takes what the opening pull would, and that pull then fetches nothing. */
+  it('fetches only the authored refs on connect, and the opening pull does not fetch them again', async () => {
+    const context = await fixture({ 'main.ts': 'base\n' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['main.ts', 'base\n']]),
+      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      summary: { generated: 'Main' },
+    });
+    const head = revisionId(receipt.commitId);
+    await context.port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+    const advertised = [
+      { name: 'refs/heads/main', head },
+      { name: 'refs/heads/feature', head },
+      { name: 'refs/tags/v1', head },
+      { name: 'refs/tau/ops/device-b', head },
+      { name: 'refs/tau/chats/c1', head },
+      { name: 'refs/tau/evidence/exports', head },
+      { name: 'refs/tau/artifacts/geospec-candidates/device-b', head },
+    ];
+    const authored = ['refs/heads/main', 'refs/heads/feature', 'refs/tags/v1'];
+    let listings = 0;
+    const requested: Array<readonly string[] | undefined> = [];
+    const actors = createRevisionActors({
+      port: {
+        ...context.port,
+        listRemoteRefs: async () => {
+          listings += 1;
+          return advertised;
+        },
+        fetch: async (input) => {
+          requested.push(input.refs);
+          await Promise.all(
+            (input.refs ?? []).map(async (name) =>
+              context.port.updateRef({
+                name: remoteTrackingRef('tau', name),
+                expectedHead: await context.port.readRef(remoteTrackingRef('tau', name)),
+                head,
+              }),
+            ),
+          );
+          return { refs: [] };
+        },
+      },
+      projectId: 'project-1',
+      filesystem: () => context.filesystem,
+    });
+
+    await run(actors.remote.initialSync, { remote: 'tau', branch: 'main' });
+    expect(requested).toEqual([authored]);
+
+    const fetched = await run<SyncFetchActorOutput>(actors.sync.fetch, {
+      remote: 'tau',
+      branch: 'main',
+      deadlineMilliseconds: 10_000,
+    });
+    /* The opening pull still reads the remote once, for its leases, and fetches nothing. */
+    expect(listings).toBe(2);
+    expect(requested).toEqual([authored]);
+    /* The chat still arrives: the record projection asks for it by name. */
+    expect(fetched.recordProjection?.fetchRefs).toEqual(['refs/tau/chats/c1']);
+    await run(actors.sync.projectRecords, fetched.recordProjection);
+    expect(requested).toEqual([authored, ['refs/tau/chats/c1']]);
+    /* Another device's operation log never comes down. */
+    expect(requested.flat()).not.toContain('refs/tau/ops/device-b');
+  }, 30_000);
+
+  it('forgets the connect-time proof when the connect-time fetch fails', async () => {
+    const context = await fixture({ 'main.ts': 'base\n' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['main.ts', 'base\n']]),
+      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      summary: { generated: 'Main' },
+    });
+    const head = revisionId(receipt.commitId);
+    await context.port.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head });
+    await context.port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+    let failNext = true;
+    const requested: Array<readonly string[] | undefined> = [];
+    const actors = createRevisionActors({
+      port: {
+        ...context.port,
+        listRemoteRefs: async () => [{ name: 'refs/heads/main', head }],
+        fetch: async (input) => {
+          requested.push(input.refs);
+          if (failNext) {
+            failNext = false;
+            throw new RevisionPortError('INVALID_TRANSPORT', 'LFS transfer failed.');
+          }
+          return { refs: [] };
+        },
+      },
+      projectId: 'project-1',
+      filesystem: () => context.filesystem,
+    });
+
+    await expect(run(actors.remote.initialSync, { remote: 'tau', branch: 'main' })).rejects.toThrow(
+      'LFS transfer failed',
+    );
+    /* The tracking ref already names the tip, but nothing this session proved it hydrated. */
+    await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
+    expect(requested).toEqual([['refs/heads/main'], ['refs/heads/main']]);
   }, 30_000);
 
   it('retains a differing local export before adopting and re-offering the fetched value', async () => {

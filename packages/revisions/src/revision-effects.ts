@@ -177,6 +177,7 @@ import type {
   CheckoutRecord,
   ConflictRecord,
   RevisionPortErrorCode,
+  RemoteRef,
   RemoteStorageRefusal,
   RevisionEngineDescriptor,
   RevisionPort,
@@ -1582,6 +1583,65 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
 
   const evidenceRefName = 'refs/tau/evidence/exports';
   const candidateRefName = 'refs/tau/artifacts/geospec-candidates';
+
+  /*
+   * The advertised refs a pull's authored fetch takes, and so the ones the
+   * connect-time fetch takes too (R4): one rule, so the opening pull finds
+   * every one of them already hydrated and does not fetch again.
+   *
+   * Operation logs are pushed, never pulled: *Undo* reads only this host's
+   * own, and fetching every device's on every pull is two requests each,
+   * forever (RV-W7 #1). Chats and generated evidence are the record set, which
+   * `projectRecords` fetches by name after the authored apply, and only when
+   * this project syncs them. Candidates have their own bounded transport.
+   */
+  const authoredFetchReferences = (advertised: readonly RemoteRef[], remote: string): string[] => {
+    const candidateTrackingRef = remoteTrackingRef(remote, candidateRefName);
+    return advertised
+      .map((entry) => entry.name)
+      .filter(
+        (name) =>
+          name !== candidateRefName &&
+          !name.startsWith(`${candidateRefName}/`) &&
+          name !== candidateTrackingRef &&
+          !name.startsWith(`${candidateTrackingRef}/`) &&
+          !name.startsWith(`${opsRefPrefix}/`) &&
+          !name.startsWith(`${chatRefPrefix}/`) &&
+          !name.startsWith('refs/tau/evidence/'),
+      );
+  };
+
+  /*
+   * Fetch the authored refs of one listing and, when the remote stayed the
+   * same destination throughout, remember those tips as hydrated by this
+   * session. A failed fetch forgets every earlier proof.
+   */
+  const fetchAuthored = async (
+    input: Readonly<{
+      remote: string;
+      wanted: readonly string[];
+      advertised: readonly RemoteRef[];
+      identity: string | undefined;
+      signal: AbortSignal;
+      /** Rejects when the caller's deadline passes; the fetch loses the race. */
+      deadline?: Promise<never>;
+    }>,
+  ): Promise<void> => {
+    const { remote, wanted, advertised, identity, signal } = input;
+    hydratedTips = undefined;
+    const fetched = port.fetch({ remote, signal, refs: wanted });
+    await (input.deadline === undefined ? fetched : Promise.race([fetched, input.deadline]));
+    signal.throwIfAborted();
+    const finalIdentity = await remoteIdentity(remote);
+    signal.throwIfAborted();
+    if (identity !== undefined && finalIdentity === identity) {
+      const advertisedHeads = new Map(advertised.map((entry) => [entry.name, String(entry.head)]));
+      hydratedTips = {
+        identity,
+        heads: new Map(wanted.map((name) => [name, advertisedHeads.get(name) ?? ''])),
+      };
+    }
+  };
   const isSyncedEvidencePath = (path: string): boolean =>
     path === '.tau' ||
     path === '.tau/artifacts' ||
@@ -4248,10 +4308,28 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       /*
        * Once, at connect time: bring the remote's graph in, then offer this
        * project's branch. Everything after this is `sync.machine`'s debounce.
+       *
+       * R4: only the refs the opening pull's own fetch would take, and those
+       * tips are remembered as hydrated, so that pull lists the remote and
+       * fetches nothing. Operation logs never come down; chats and evidence
+       * come with the opening pull's record projection, after the authored
+       * apply, exactly as on every later pull.
        */
       initialSync: fromAuthorityPromise<RemoteInitialSyncActorOutput, RemoteInitialSyncActorInput>(
         async ({ input, signal }) => {
-          await port.fetch({ remote: input.remote, signal });
+          const identity = await remoteIdentity(input.remote);
+          const advertised = await port.listRemoteRefs(input.remote, { signal });
+          signal.throwIfAborted();
+          const wanted = authoredFetchReferences(advertised, input.remote);
+          if (wanted.length > 0) {
+            await fetchAuthored({
+              remote: input.remote,
+              wanted,
+              advertised,
+              identity,
+              signal,
+            });
+          }
           const remotes = await port.listRemotes();
           const configured = remotes.find((remote) => remote.name === input.remote);
           if (configured?.fetchOnly === true || configured?.provider === 'github') {
@@ -4724,22 +4802,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         if (active !== undefined) {
           resumeFill(active);
         }
-        /* Operation logs are pushed, never pulled: *Undo* reads only this host's
-         * own, and fetching every device's on every pull is two requests each,
-         * forever (RV-W7 #1). */
-        const candidateTrackingRef = remoteTrackingRef(input.remote, candidateRefName);
-        const wanted = advertised
-          .map((entry) => entry.name)
-          .filter(
-            (name) =>
-              name !== candidateRefName &&
-              !name.startsWith(`${candidateRefName}/`) &&
-              name !== candidateTrackingRef &&
-              !name.startsWith(`${candidateTrackingRef}/`) &&
-              !name.startsWith(`${opsRefPrefix}/`) &&
-              !name.startsWith(`${chatRefPrefix}/`) &&
-              !name.startsWith('refs/tau/evidence/'),
-          );
+        const wanted = authoredFetchReferences(advertised, input.remote);
         /* Skip unchanged tips only after this effect session completed a fetch
          * for them. Older clients could publish tracking refs before LFS failed;
          * the first pull repairs that cache through the normal bounded fetch. */
@@ -4755,17 +4818,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           hydratedTips?.identity === identity &&
           wanted.every((name) => hydratedTips?.heads.get(name) === advertisedHeads.get(name));
         if (wanted.length > 0 && (current.length !== wanted.length || !hydrated)) {
-          hydratedTips = undefined;
-          await Promise.race([port.fetch({ remote: input.remote, signal: abort, refs: wanted }), deadline]);
-          abort.throwIfAborted();
-          const finalIdentity = await remoteIdentity(input.remote);
-          abort.throwIfAborted();
-          if (identity !== undefined && finalIdentity === identity) {
-            hydratedTips = {
-              identity,
-              heads: new Map(wanted.map((name) => [name, advertisedHeads.get(name) ?? ''])),
-            };
-          }
+          await fetchAuthored({
+            remote: input.remote,
+            wanted,
+            advertised,
+            identity,
+            signal: abort,
+            deadline,
+          });
         }
         signal.throwIfAborted();
         if (!syncLargeExports && (await fetchedProjectSyncsLargeExports(input.remote, input.branch))) {

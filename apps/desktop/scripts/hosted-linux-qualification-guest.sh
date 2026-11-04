@@ -139,6 +139,11 @@ status = 1
 try:
     status = subprocess.run(['pnpm', 'nx', 'run', 'desktop:qualify-installed-route'], cwd=root, env=env).returncode
 finally:
+    # Whether the X server stayed up for the whole run: its unit's start/stop lines only, and why any restart happened.
+    subprocess.run(['sudo', 'journalctl', '--no-pager', '-o', 'short-iso', '-u', 'tau-proof-xorg.service',
+                    '-g', 'Started|Stopping|Stopped|Deactivated|Failed|code=exited'], check=False)
+    subprocess.run(['sudo', 'sh', '-c', 'grep -h -A3 "Restarting services" /var/log/unattended-upgrades/*.log 2>/dev/null || true'],
+                   check=False)
     cleanup = subprocess.run(['pnpm', 'nx', 'run', 'desktop:cleanup-qualification-trust'], cwd=root, env=env).returncode
     config.unlink(missing_ok=True)
     if cleanup:

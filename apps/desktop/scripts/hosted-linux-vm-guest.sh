@@ -60,6 +60,13 @@ XORG
 export DISPLAY=:0 XAUTHORITY="$HOME/.Xauthority"
 touch "$XAUTHORITY"
 xauth add :0 . "$(mcookie)"
+# Stock needrestart never restarts a display manager (gdm, lightdm, sddm, ... in its override_rc), so a real
+# desktop keeps its X server through unattended upgrades. This guest's X server is a transient unit those
+# defaults do not name: give it the same exclusion. In run 41783968750 Tau died with "X connection error
+# received" on ubuntu-appimage-x11 and ubuntu2604-apt-x11 while unattended-upgrades held the dpkg lock.
+sudo mkdir -p /etc/needrestart/conf.d
+# shellcheck disable=SC2016 # The Perl line is written literally.
+printf '%s\n' '$nrconf{override_rc}{qr(^tau-proof-xorg\.service$)} = 0;' | sudo tee /etc/needrestart/conf.d/tau-proof-xorg.conf >/dev/null
 sudo systemd-run --unit=tau-proof-xorg /usr/lib/xorg/Xorg :0 -config /tmp/tau-xorg.conf -auth "$XAUTHORITY" -nolisten tcp -noreset
 for _attempt in $(seq 1 30); do xdpyinfo >/dev/null 2>&1 && break; sleep 1; done
 xdpyinfo | head -20 || true

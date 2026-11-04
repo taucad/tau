@@ -84,18 +84,21 @@ try {
       const shell = spawn('sh', ['-c', script, 'sh', runtimePath], { env: withoutAppImage, stdio: 'ignore' });
       try {
         await once(shell, 'spawn');
-        // The stand-in browser is the shell's `sleep` child; wait until both children exist.
+        // The stand-in browser is the shell's `sleep` child. Wait until both children have executed their programs:
+        // a child that is still the forked shell would hide the runtime from the binding scan.
+        const runtimeExe = await realpath(runtimePath);
         let browserPid = 0;
         for (let attempt = 0; attempt < 100 && browserPid === 0; attempt += 1) {
           // oxlint-disable-next-line no-await-in-loop -- bounded wait for the children to exist
           const childrenText = await readFile(`/proc/${shell.pid}/task/${shell.pid}/children`, 'utf8').catch(() => '');
           const children = childrenText.trim().split(/\s+/u).filter(Boolean);
-          for (const child of children) {
-            // oxlint-disable-next-line no-await-in-loop -- at most two children
-            const exe = await readlink(`/proc/${child}/exe`).catch(() => '');
-            if (exe.endsWith('/sleep') && children.length === 2) {
-              browserPid = Number(child);
-            }
+          // oxlint-disable-next-line no-await-in-loop -- at most two children per attempt
+          const executables = await Promise.all(
+            children.map(async (child) => readlink(`/proc/${child}/exe`).catch(() => '')),
+          );
+          const browserIndex = executables.findIndex((exe) => exe.endsWith('/sleep'));
+          if (children.length === 2 && browserIndex !== -1 && executables.includes(runtimeExe)) {
+            browserPid = Number(children[browserIndex]);
           }
           // oxlint-disable-next-line no-await-in-loop -- see above
           await new Promise((resolve) => {

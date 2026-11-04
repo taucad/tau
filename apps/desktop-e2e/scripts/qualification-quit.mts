@@ -69,6 +69,21 @@ const appImageProcesses = async (): Promise<ReadonlyArray<{ pid: number; parent:
   return found;
 };
 
+/** The pipes `pid` holds open, as the kernel names them (`pipe:[<inode>]`); one end of a pipe names the same inode. */
+const pipesHeldBy = async (pid: number): Promise<ReadonlySet<string>> => {
+  const pipes = new Set<string>();
+  const directory = `/proc/${pid}/fd`;
+  const descriptors = await readdir(directory).catch(() => []);
+  for (const descriptor of descriptors) {
+    // oxlint-disable-next-line no-await-in-loop -- a bounded scan of one process's descriptor table
+    const target = await readlink(join(directory, descriptor)).catch(() => '');
+    if (target.startsWith('pipe:[')) {
+      pipes.add(target);
+    }
+  }
+  return pipes;
+};
+
 /**
  * Bind the browser process to the admitted AppImage outer path, or say why it cannot be bound.
  *
@@ -78,7 +93,10 @@ const appImageProcesses = async (): Promise<ReadonlyArray<{ pid: number; parent:
  * name the same outer file, so any one of three exact matches binds it:
  * - `APPIMAGE=<outer path>` in `/proc/<pid>/environ` (the original binding, still taken when it survives);
  * - the FUSE mount that holds `/proc/<pid>/exe` has the outer path as its source, which the runtime gives it;
- * - a child of the browser process whose own `/proc/<child>/exe` is the outer path: the runtime that serves the mount.
+ * - a process whose own `/proc/<pid>/exe` is the outer path and that holds a pipe the browser process also holds. The
+ *   type-2 runtime opens a keepalive pipe, forks, and the child mounts the image and daemonizes (so its parent is 1, run
+ *   41771037853) holding the write end; the parent keeps the read end and executes the app, which becomes the browser.
+ *   The mount's source is only the file's base name (`fuse.Tau.AppImage` "Tau.AppImage"), so it cannot bind on its own.
  * @returns `undefined` when bound, otherwise the observations a CI log needs (guest paths only, never values).
  */
 const appImageBinding = async (outerPath: string, browserPid: number): Promise<string | undefined> => {
@@ -93,7 +111,11 @@ const appImageBinding = async (outerPath: string, browserPid: number): Promise<s
     return undefined;
   }
   const runtimes = await appImageProcesses();
-  if (runtimes.some(({ parent, exe }) => parent === browserPid && exe === outerPath)) {
+  const browserPipes = await pipesHeldBy(browserPid);
+  const runtimePipes = await Promise.all(
+    runtimes.filter(({ exe }) => exe === outerPath).map(async ({ pid }) => pipesHeldBy(pid)),
+  );
+  if (runtimePipes.some((pipes) => [...pipes].some((pipe) => browserPipes.has(pipe)))) {
     return undefined;
   }
   const reported = environment.filter((entry) => entry.startsWith('APPIMAGE='));
@@ -102,6 +124,7 @@ const appImageBinding = async (outerPath: string, browserPid: number): Promise<s
     `/proc/${browserPid}/environ holds ${environment.length} entries and ${reported.length === 0 ? 'no APPIMAGE entry' : reported.map((entry) => JSON.stringify(entry)).join(', ')}`,
     `/proc/${browserPid}/exe is ${JSON.stringify(executable)} on ${mount === undefined ? 'no mount' : `${mount.type} ${JSON.stringify(mount.source)} at ${JSON.stringify(mount.point)}`}`,
     `AppImage processes: ${runtimes.length === 0 ? 'none' : runtimes.map(({ pid, parent, exe }) => `${pid} (parent ${parent}) ${JSON.stringify(exe)}`).join(', ')}`,
+    `browser holds ${browserPipes.size} pipes; none is shared with a process running the outer path`,
   ].join('; ');
 };
 

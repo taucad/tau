@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { modelSupportsInput } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
 import type { ConfigService } from '@nestjs/config';
-import { isModelListEntryEnabled, modelList } from '#api/models/model.constants.js';
+import { assertSingleDefaultModel, isModelListEntryEnabled, modelList } from '#api/models/model.constants.js';
 import { ModelService } from '#api/models/model.service.js';
 import { gatewayModelRoutes } from '#api/providers/provider-gateway.js';
 import { ProviderService } from '#api/providers/provider.service.js';
@@ -93,6 +93,12 @@ const createModelService = () => {
 };
 
 describe('modelList', () => {
+  it('should name Opus 5.5 as the single enabled default model', () => {
+    const defaults = getCloudCatalogEntries().filter((model) => model.default === true);
+    expect(defaults.map((model) => model.id)).toEqual(['anthropic-claude-opus-5.5']);
+    expect(isModelListEntryEnabled(defaults[0]!)).toBe(true);
+  });
+
   it('marks every cloud catalog entry as explicitly Tau-hosted', () => {
     for (const model of getCloudCatalogEntries()) {
       expect(model.providerKind, model.id).toBe('tau-hosted');
@@ -238,6 +244,13 @@ describe('ModelService', () => {
     for (const modelId of cappedModelIds) {
       expect(service.getContextWindow(modelId), modelId).toBe(maxEffectiveContextWindow);
     }
+  });
+
+  it('sends the default model with the listed models', async () => {
+    const listedModels = await createModelService().getModels();
+    expect(listedModels.filter((model) => model.default === true).map((model) => model.id)).toEqual([
+      'anthropic-claude-opus-5.5',
+    ]);
   });
 
   it('recommends Sonnet 5.5 while retaining Sonnet 5', async () => {
@@ -516,5 +529,22 @@ describe('ModelService', () => {
         toolNames: [toolName.screenshot, toolName.testModel, toolName.evaluateModel, toolName.exportModel],
       }),
     ).toEqual([toolName.testModel, toolName.evaluateModel, toolName.exportModel]);
+  });
+});
+
+describe('assertSingleDefaultModel', () => {
+  it('should accept a catalog with no default and one with a single default', () => {
+    expect(() => {
+      assertSingleDefaultModel([{ id: 'a' }, { id: 'b', default: false }]);
+    }).not.toThrow();
+    expect(() => {
+      assertSingleDefaultModel([{ id: 'a', default: true }, { id: 'b' }]);
+    }).not.toThrow();
+  });
+
+  it('should throw when more than one model is the default', () => {
+    expect(() => {
+      assertSingleDefaultModel([{ id: 'a', default: true }, { id: 'b' }, { id: 'c', default: true }]);
+    }).toThrow('Only one model may be the default, but 2 are: a, c');
   });
 });

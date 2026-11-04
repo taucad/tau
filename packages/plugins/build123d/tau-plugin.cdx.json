@@ -788,40 +788,6 @@
       ]
     },
     {
-      "bom-ref": "2fad7013b0c934bbca072164b89d1b5b8bb8990983b66846e4348b732563ed94",
-      "type": "file",
-      "name": "tau-worker/tau_kernel/analyzer.py",
-      "hashes": [
-        {
-          "alg": "SHA-256",
-          "content": "2fad7013b0c934bbca072164b89d1b5b8bb8990983b66846e4348b732563ed94"
-        }
-      ],
-      "licenses": [
-        {
-          "expression": "Apache-2.0"
-        }
-      ],
-      "properties": [
-        {
-          "name": "taucad:target",
-          "value": "darwin-arm64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "darwin-x64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-arm64-glibc"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-x64-glibc"
-        }
-      ]
-    },
-    {
       "bom-ref": "38c3dcb9a1ffb85505ec53d54c7b4aea0cff70050425a7760c2af661ac85df05",
       "type": "library",
       "name": "scikit-learn",
@@ -1657,6 +1623,40 @@
         {
           "type": "distribution",
           "url": "https://files.pythonhosted.org/packages/2d/1e/65b59cf518c106aa755e7f7da3099027738687a862ec785060702a481320/ipython-9.17.1-py3-none-any.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "70a210c2149a6ede7068635fb071db1754af8f755f4cdd330b490f743558659a",
+      "type": "file",
+      "name": "tau-worker/tau_kernel/analyzer.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "70a210c2149a6ede7068635fb071db1754af8f755f4cdd330b490f743558659a"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
         }
       ],
       "properties": [

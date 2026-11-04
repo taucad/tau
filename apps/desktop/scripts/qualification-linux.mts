@@ -45,6 +45,13 @@ const command = (file: string, args: string[], inheritOutput = false): string =>
   }
   return inheritOutput ? '' : result.stdout.trim();
 };
+/**
+ * Whether apt refused for a lock another apt process holds. apt waits for the dpkg frontend lock under
+ * `DPkg::Lock::Timeout` but never for /var/lib/apt/lists/lock, which the guest's own apt-daily takes every 30 s once a
+ * Tau source is enrolled (run 41802518099 ubuntu-apt-x11), so `apt-get update` callers retry on this alone.
+ */
+export const isAptLockRefusal = (output: string): boolean =>
+  /Could not get lock \/var\/lib\/(?:apt\/lists|dpkg)\//u.test(output);
 /** Let an existing unattended upgrade finish without disabling it or removing its lock. */
 export const runQualificationApt = (operation: 'install' | 'remove' | 'purge', packages: string[]): void => {
   command(

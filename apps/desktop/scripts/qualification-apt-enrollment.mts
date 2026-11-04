@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { lstat, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
 import { linuxDebKinds } from '#shared/linux-installation.js';
 import { parseDesktopArtifactManifest } from '#shared/desktop-release.js';
@@ -11,6 +12,7 @@ import { parseDesktopArtifactManifest } from '#shared/desktop-release.js';
 import { readDesktopAptSnapshot } from './desktop-apt-publication.mjs';
 import { QualificationUnavailable } from './qualification-platform-types.mjs';
 import type { QualificationCandidate } from './qualification-platform-types.mjs';
+import { isAptLockRefusal } from './qualification-linux.mjs';
 import type { AptQualificationRepository } from './qualification-linux.mjs';
 /* oxlint-enable no-restricted-imports */
 const hashSchema = z.string().regex(/^[a-f\d]{64}$/u);
@@ -316,7 +318,22 @@ export const prepareQualificationAptEnrollment = async (options: {
       /* oxlint-enable no-await-in-loop */
       sudo(['systemctl', 'daemon-reload']);
       sudo(['systemctl', 'restart', 'apt-daily.timer', 'apt-daily-upgrade.timer']);
-      sudo(['apt-get', 'update', '--error-on=any']);
+      // The timers just restarted take the package-list lock within seconds; wait for it rather than fail on it.
+      const deadline = Date.now() + 600_000;
+      /* oxlint-disable no-await-in-loop -- one update at a time until the lock is free. */
+      for (;;) {
+        try {
+          sudo(['apt-get', 'update', '--error-on=any']);
+          break;
+        } catch (error) {
+          const { stderr } = error as { stderr?: string };
+          if (!isAptLockRefusal(stderr ?? '') || Date.now() >= deadline) {
+            throw error;
+          }
+        }
+        await delay(5000);
+      }
+      /* oxlint-enable no-await-in-loop */
     },
     async cleanup() {
       guard();

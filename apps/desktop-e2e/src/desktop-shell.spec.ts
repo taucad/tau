@@ -19,7 +19,7 @@ import {
   terminalRegion,
   terminalAction,
   expectTerminalRunning,
-  answerUnloadQuestion,
+  recordNativeQuestions,
   nativeQuestionsAsked,
   pasteIntoTerminal,
   copyTerminalSelection,
@@ -174,12 +174,10 @@ describe('production Electron Terminal keyboard qualification', () => {
     await page.keyboard.type('printf replayed >> reload-count.txt');
     // Wait for the ordinary layout write before the renderer goes away.
     await expect.poll(async () => readFile(join(root, '.tau/workbench/layout.json'), 'utf8')).toContain('terminal');
-    /* A running session holds the window's unload (T15), so the reload asks before it stops the session. */
-    await answerUnloadQuestion(desktop, 'Close and stop');
+    /* A running session never holds the window's unload: the reload stops it without asking. */
+    await recordNativeQuestions(desktop);
     await page.reload();
-    expect(await nativeQuestionsAsked(desktop)).toEqual([
-      { message: 'A Terminal session is running in this window.', buttons: ['Keep open', 'Close and stop'] },
-    ]);
+    expect(await nativeQuestionsAsked(desktop)).toEqual([]);
     /* The restored pane starts a session of its own; the typed-but-unsent line is not carried into it. */
     await expectTerminalRunning(page);
     expect(await readFile(join(root, 'reload-count.txt'), 'utf8')).toBe('once');
@@ -194,12 +192,8 @@ describe('production Electron Terminal keyboard qualification', () => {
     const writer = await startTerminalWriter(page, root);
     await page.keyboard.type('printf replayed > close-replay.txt');
     await page.locator('.dv-tab[data-tab-panel-id="workbench:terminal"]').click({ button: 'right' });
+    /* Closing a running Terminal stops it at once, without asking. */
     await page.getByRole('menuitem', { name: 'Close', exact: true }).click();
-    /* Closing a running Terminal asks in the pane first (T15); nothing stops until the person answers. */
-    const closeDecision = page.locator('[data-slot="terminal-close-decision"]');
-    await expect.poll(async () => closeDecision.textContent()).toContain('Close the Terminal in shell-qualification?');
-    expect(await survivingTerminalWriter(writer)).not.toEqual([]);
-    await closeDecision.getByRole('button', { name: 'Close and stop', exact: true }).click();
     await terminalRegion(page).waitFor({ state: 'detached' });
     await expectTerminalWriterStopped(writer);
     await openTerminalPane(page);
@@ -214,12 +208,8 @@ describe('production Electron Terminal keyboard qualification', () => {
     const { page } = desktop;
     const writer = await startTerminalWriter(page, root);
     await page.keyboard.type('printf stale > project-replay.txt');
-    /* Leaving the project the session belongs to asks first (T15), on the route a person actually takes. */
+    /* Leaving the project the session belongs to stops it without asking, on the route a person actually takes. */
     await page.getByRole('link', { name: 'Projects', exact: true }).click();
-    const guard = page.locator('[data-slot="terminal-navigation-guard"]');
-    await expect.poll(async () => guard.textContent()).toContain('Close the Terminal in shell-qualification?');
-    expect(await survivingTerminalWriter(writer)).not.toEqual([]);
-    await guard.getByRole('button', { name: 'Close and stop', exact: true }).click();
     await page.locator('[data-slot="new-project-link"]').first().click();
     await page.getByLabel('Project Name *').fill('Other shell project');
     await page.getByRole('button', { name: /^Create Project/u }).click();

@@ -1,11 +1,5 @@
 import type { DockviewPanelApi } from 'dockview-react';
 import { toast } from '#components/ui/sonner.js';
-import { closePanel } from '#components/terminal/terminal-close.js';
-
-/*
- * Each close goes through `closePanel`: a running Terminal holds its own close for the person's choice, and the
- * others close as asked.
- */
 
 /**
  * Close all panels in the same group except the given one.
@@ -15,7 +9,7 @@ export function closeOtherPanels(api: DockviewPanelApi): void {
   const panelsToClose = group.panels.filter((panel) => panel.id !== api.id);
 
   for (const panel of panelsToClose) {
-    closePanel(panel.api);
+    panel.api.close();
   }
 }
 
@@ -34,7 +28,7 @@ export function closePanelsToTheRight(api: DockviewPanelApi): void {
   // Close from end to avoid index shifting issues
   const panelsToClose = panels.slice(currentIndex + 1);
   for (const panel of [...panelsToClose].reverse()) {
-    closePanel(panel.api);
+    panel.api.close();
   }
 }
 
@@ -53,7 +47,7 @@ export function closePanelsToTheLeft(api: DockviewPanelApi): void {
   // Close from end of the slice to avoid index shifting issues
   const panelsToClose = panels.slice(0, currentIndex);
   for (const panel of [...panelsToClose].reverse()) {
-    closePanel(panel.api);
+    panel.api.close();
   }
 }
 
@@ -65,7 +59,7 @@ export function closeAllPanelsInGroup(api: DockviewPanelApi): void {
   const panelsToClose = [...group.panels];
 
   for (const panel of panelsToClose.reverse()) {
-    closePanel(panel.api);
+    panel.api.close();
   }
 }
 

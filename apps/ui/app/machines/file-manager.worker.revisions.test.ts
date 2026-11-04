@@ -927,6 +927,49 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
   });
 
   /*
+   * A restore writes the checkout through `applyTree`; while it does, the
+   * projection names the root so the page's file tree holds its re-reads, and
+   * the root leaves the projection once the apply settles.
+   */
+  it('should publish the checkout root as applying while a restore writes it, then clear it', async () => {
+    const fixture = harness(['alpha']);
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    const session = await root.placementSession();
+    await place(session, turnKey(1));
+    await project.writeFile('main.scad', 'cube(20);');
+    await finish(session, turnKey(1));
+    await turnFinalized(alpha, 'turn-1');
+    const head = alpha.frames.findLast((frame) => frame.type === 'status')?.status.headRevisionId;
+    expect(head).toBeDefined();
+    await settle(10);
+    const statusesBefore = alpha.frames.filter((frame) => frame.type === 'status').length;
+    expect(alpha.frames.findLast((frame) => frame.type === 'status')?.status.applyingRoots).toBeUndefined();
+
+    await project.writeFile('main.scad', 'cube(30);');
+    const before = await root.log();
+    alpha.send({ command: 'restore', revisionId: head! });
+    await vi.waitFor(
+      async () => {
+        expect(await root.log()).toHaveLength(before.length + 2);
+      },
+      { timeout: 10_000 },
+    );
+    await settle(10);
+
+    const applying = alpha.frames
+      .filter((frame) => frame.type === 'status')
+      .slice(statusesBefore)
+      .map((frame) => frame.status.applyingRoots);
+    expect(applying).toContainEqual(['/projects/alpha']);
+    expect(applying.at(-1)).toBeUndefined();
+    expect(root.status().applyingRoots).toBeUndefined();
+    expect(await project.readFile('main.scad', 'utf8')).toBe('cube(20);');
+  });
+
+  /*
    * D3: a save that loses its compare-and-swap is answered at once and out loud.
    *
    * Another writer moved `main` under this checkout. The cut's candidate loses

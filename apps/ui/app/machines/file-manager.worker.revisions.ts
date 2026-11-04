@@ -712,6 +712,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   const toasts = new Topic<RevisionToast>({ name: 'WorkerProjectRevisionToasts' });
   /* Each checkout's large-object fill, as the effects last told it; the selected one rides the projection. */
   const largeObjects = new Map<string, LargeObjectsReport>();
+  /* How many applies are writing each checkout root, as `onApplyingTree` brackets them; rides the projection. */
+  const applying = new Map<string, number>();
 
   const { actor, settled, turns, recordEditorConflict, readConflict, pullsChats } = createProjectRevisionsActor({
     port: options.port,
@@ -826,12 +828,36 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       }
       republish();
     },
+    /* The page's file tree holds its re-reads for a root while an apply writes it, and lists it once after. */
+    onApplyingTree: ({ root }) => {
+      applying.set(root, (applying.get(root) ?? 0) + 1);
+      republish();
+      let released = false;
+      return () => {
+        if (released) {
+          return;
+        }
+        released = true;
+        const remaining = (applying.get(root) ?? 1) - 1;
+        if (remaining === 0) {
+          applying.delete(root);
+        } else {
+          applying.set(root, remaining);
+        }
+        republish();
+      };
+    },
   });
 
   const statusOf = (snapshot: ReturnType<typeof actor.getSnapshot>): RevisionStatusProjection => {
     const status = selectRevisionStatus(snapshot);
     const facet = status.checkoutId === undefined ? undefined : largeObjects.get(status.checkoutId)?.facet;
-    return facet === undefined ? status : { ...status, largeObjects: facet };
+    const applyingRoots = [...applying.keys()].toSorted();
+    return {
+      ...status,
+      ...(facet === undefined ? {} : { largeObjects: facet }),
+      ...(applyingRoots.length === 0 ? {} : { applyingRoots }),
+    };
   };
   let published: RevisionStatusProjection = statusOf(actor.getSnapshot());
   const republish = (): void => {

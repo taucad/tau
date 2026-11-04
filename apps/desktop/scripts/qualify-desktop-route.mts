@@ -18,7 +18,7 @@ import { qualificationArtifactObjects, qualificationFeed } from './qualification
 import { startQualificationMirrorProcess } from './qualification-mirror-process.mjs';
 import { assertDisposableQualificationHost, prepareQualificationTls } from './qualification-tls.mjs';
 import { createWindowsQualificationDriver, observeWindowsConsumerHost } from './qualification-windows.mjs';
-import { createLinuxAptQualificationDriver } from './qualification-linux.mjs';
+import { createLinuxAptQualificationDriver, isAptLockRefusal } from './qualification-linux.mjs';
 import { prepareQualificationAptEnrollment } from './qualification-apt-enrollment.mjs';
 import type { QualificationAptEnrollment } from './qualification-apt-enrollment.mjs';
 import type { LinuxAptQualificationDriver } from './qualification-linux.mjs';
@@ -121,6 +121,32 @@ const linuxQuitDiagnostics = async (pid: number, logPath: string, logOffset: num
     parts.push(code === 1 ? 'windows: none' : `windows unreadable: ${String(error)}`);
   }
   return parts.join('; ');
+};
+/**
+ * `apt-get update` on a host whose own apt-daily and unattended-upgrades may hold a lock ({@link isAptLockRefusal}): a
+ * lock refusal is retried until the deadline and every other outcome is returned, so an update that failed for its own
+ * reason (the offline mirror) stays a failure the caller can require.
+ */
+const aptUpdate = async (deadlineMs = 600_000): Promise<{ ok: true } | { ok: false; error: unknown }> => {
+  const deadline = Date.now() + deadlineMs;
+  for (;;) {
+    try {
+      await execFileAsync(
+        'sudo',
+        ['-n', 'apt-get', '-o', 'APT::Update::Error-Mode=any', '-o', 'DPkg::Lock::Timeout=120', 'update'],
+        {
+          timeout: 180_000,
+        },
+      );
+      return { ok: true };
+    } catch (error) {
+      const { stderr } = error as { stderr?: string };
+      if (!isAptLockRefusal(stderr ?? '') || Date.now() >= deadline) {
+        return { ok: false, error };
+      }
+    }
+    await wait(5000);
+  }
 };
 const readySchema = z.object({
   stage: z.enum(['a', 'b', 'c']),
@@ -534,15 +560,9 @@ const main = async (): Promise<void> => {
       }, 'Initial observe command did not release updater initialization');
       const beforeReconnect = await driver.observe(candidate(0));
       if (apt) {
-        let failed = false;
-        try {
-          await execFileAsync('sudo', ['-n', 'apt-get', '-o', 'APT::Update::Error-Mode=any', 'update'], {
-            timeout: 180_000,
-          });
-        } catch {
-          failed = true;
-        }
-        if (!failed) {
+        // The offline update must fail on the unavailable mirror, not on another apt process holding a lock.
+        const offline = await aptUpdate();
+        if (offline.ok) {
           throw new Error('Offline APT transport unexpectedly succeeded');
         }
       } else {
@@ -551,9 +571,10 @@ const main = async (): Promise<void> => {
       const reconnectStart = Date.now();
       await transport.setAvailable(true);
       if (apt) {
-        await execFileAsync('sudo', ['-n', 'apt-get', '-o', 'APT::Update::Error-Mode=any', 'update'], {
-          timeout: 180_000,
-        });
+        const reconnected = await aptUpdate();
+        if (!reconnected.ok) {
+          throw reconnected.error;
+        }
       } else {
         await render('a', offlineReady.pid, 'check');
       }

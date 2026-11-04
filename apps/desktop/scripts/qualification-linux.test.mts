@@ -13,11 +13,25 @@ import {
   linuxQualificationPackageSchema,
   aptQualificationPayloadHashes,
   createLinuxAppImageQualificationDriver,
+  isAptLockRefusal,
   waitForScheduledAptCompletion,
 } from './qualification-linux.mjs';
 import { QualificationUnavailable } from './qualification-platform-types.mjs';
 /* oxlint-enable no-restricted-imports */
 const main = async (): Promise<void> => {
+  // Only another apt process's lock is retried; an offline mirror or a bad source stays a failure.
+  assert.ok(
+    isAptLockRefusal(
+      'E: Could not get lock /var/lib/apt/lists/lock. It is held by process 15299 (apt-get)\nE: Unable to lock directory /var/lib/apt/lists/',
+    ),
+  );
+  assert.ok(
+    isAptLockRefusal('E: Could not get lock /var/lib/dpkg/lock-frontend. It is held by process 9 (unattended-upgr)'),
+  );
+  assert.ok(
+    !isAptLockRefusal('E: Failed to fetch https://127.0.0.1:41209/dists/staging/InRelease  503  Service Unavailable'),
+  );
+  assert.ok(!isAptLockRefusal(''));
   // Exact desktopManifestFields production contract omits channel and false environmentOverrides.
   const packageMetadata = {
     version: '1.0.1',

@@ -103,7 +103,7 @@ export const createLargeObjectFill = (
     materializeTree: (
       place: Checkout,
       target: ImmutableRevisionTree,
-      materialization: Readonly<{ before: ImmutableRevisionTree }>,
+      materialization: Readonly<{ before: ImmutableRevisionTree; purpose: 'fill' }>,
     ) => Promise<unknown>;
     report?: ((report: LargeObjectsReport) => void) | undefined;
     flushMilliseconds?: number;
@@ -230,7 +230,7 @@ export const createLargeObjectFill = (
       }
     }
     if (filled.length > 0) {
-      await materializeTree(fill.place, new ImmutableRevisionTree(entries), { before });
+      await materializeTree(fill.place, new ImmutableRevisionTree(entries), { before, purpose: 'fill' });
     }
     for (const path of [...filled, ...gone]) {
       fill.pending.delete(path);

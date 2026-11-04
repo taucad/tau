@@ -57,7 +57,7 @@ const setup = (options: Readonly<{ flushBytes?: number; flushMilliseconds?: numb
   let gate: Promise<void> = Promise.resolve();
   let writing = 0;
   let mostWriting = 0;
-  const materializeTree = vi.fn(async (_place: Checkout, target: ImmutableRevisionTree) => {
+  const materializeTree = vi.fn(async (_place: Checkout, target: ImmutableRevisionTree, _materialization?: unknown) => {
     writing += 1;
     mostWriting = Math.max(mostWriting, writing);
     try {
@@ -199,6 +199,8 @@ describe('large-object fill', () => {
     await vi.waitFor(() => {
       expect(harness.materializeTree).toHaveBeenCalledTimes(1);
     });
+    /* A fill's flush tells the host's bracket what it is, so the host need not hold a file tree for it. */
+    expect(harness.materializeTree.mock.calls[0]?.[2]).toMatchObject({ purpose: 'fill' });
     /* Arrivals and timers while the first flush is still writing. */
     harness.land('models/b.step');
     await new Promise((resolve) => {

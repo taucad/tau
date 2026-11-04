@@ -732,6 +732,10 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   };
   /* How many applies are writing each checkout root, as `onApplyingTree` brackets them; rides the projection. */
   const applying = new Map<string, number>();
+  /* How many host writes (applies and fill flushes) are open on each checkout root. */
+  const writing = new Map<string, number>();
+  /* Each checkout's changes observed while a host write held its root: raised once, together, when the last closes. */
+  const deferredChanges = new Map<string, Readonly<{ root: string; paths: Set<string> }>>();
 
   const { actor, settled, turns, recordEditorConflict, readConflict, pullsChats } = createProjectRevisionsActor({
     port: options.port,
@@ -851,6 +855,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     onApplyingTree: ({ root }, paths) => {
       const startedAt = workerTimings.now();
       applying.set(root, (applying.get(root) ?? 0) + 1);
+      writing.set(root, (writing.get(root) ?? 0) + 1);
       republish();
       let released = false;
       return () => {
@@ -858,6 +863,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           return;
         }
         released = true;
+        closeWrite(root);
         /* An apply that wrote nothing has nothing to account for; to the second, a window may include its neighbours. */
         if (paths.length > 0) {
           logWorkerTimings(`apply of ${String(paths.length)} paths`, workerTimings.summarize(startedAt));
@@ -936,6 +942,38 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     events.emit(failure);
     console.error('[revisions] turn', failure.code, failure.reason);
   });
+  /*
+   * A host write's own change events, one per file, would each re-enter the
+   * checkout's comparison and start another capture of the whole tree. Held
+   * while the write is open, they reach the checkout as one change naming
+   * every path, which is the same content-change fact once (F9: one
+   * generation per raised change; a deferred write is late, never lost).
+   */
+  const observedChange = (checkoutId: string, root: string, paths: readonly string[]): void => {
+    if ((writing.get(root) ?? 0) === 0) {
+      changed(checkoutId, paths);
+      return;
+    }
+    const held = deferredChanges.get(checkoutId) ?? { root, paths: new Set<string>() };
+    for (const path of paths) {
+      held.paths.add(path);
+    }
+    deferredChanges.set(checkoutId, held);
+  };
+  function closeWrite(root: string): void {
+    const remaining = (writing.get(root) ?? 1) - 1;
+    if (remaining > 0) {
+      writing.set(root, remaining);
+      return;
+    }
+    writing.delete(root);
+    for (const [checkoutId, held] of deferredChanges) {
+      if (held.root === root) {
+        deferredChanges.delete(checkoutId);
+        changed(checkoutId, [...held.paths].toSorted());
+      }
+    }
+  }
   const changed = (checkoutId: string, paths: readonly string[]): void => {
     workerTimings.count('revisions.changed');
     /* One increment per content-change event, whatever its path count: the
@@ -973,7 +1011,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         observations.set(
           checkout.id,
           observe(checkout.root, (paths) => {
-            changed(checkout.id, paths);
+            observedChange(checkout.id, checkout.root, paths);
           }),
         );
       }

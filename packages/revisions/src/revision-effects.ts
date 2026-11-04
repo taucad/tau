@@ -215,6 +215,7 @@ import type { RevisionActorsOptions, RevisionFileSystem, UseCheckoutFileSystem }
 
 /* oxlint-disable no-barrel-files/no-barrel-files -- Preserve the published revision-effects contract names. */
 export type {
+  ApplyingTreePurpose,
   CheckoutFileSystems,
   RevisionActorsOptions,
   RevisionFileSystem,
@@ -951,7 +952,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   };
 
   /* D4's and I6's comparison capture, published for a cut on the same write generation to reuse. */
-  const compareCheckout = async (input: CheckoutCaptureTreeActorInput): Promise<CheckoutCaptureTreeActorOutput> => {
+  const compareCheckout = async (
+    input: CheckoutCaptureTreeActorInput,
+    signal?: AbortSignal,
+  ): Promise<CheckoutCaptureTreeActorOutput> => {
     const memos = memosOf(input.checkoutId);
     let published: CheckoutMemos['comparing'];
     const captured = (async () => {
@@ -959,6 +963,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         return await captureCheckout(await placeOf(input.checkoutId), {
           bypassMemo: false,
           changed: { paths: input.changedPaths },
+          ...(signal === undefined ? {} : { signal }),
         });
       } finally {
         if (published !== undefined && memos.comparing === published) {
@@ -1347,9 +1352,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       changed?: Readonly<{ paths: readonly string[] | undefined }>;
       /** Paths the person's own Git ignores, in an adopted repository. */
       ignored?: ReadonlySet<string> | undefined;
+      /** A comparison a newer write has made stale: the walk stops rather than finish for nobody. */
+      signal?: AbortSignal | undefined;
     }>,
   ): Promise<ImmutableRevisionTree> => {
-    const { memos, bypassMemo, changed, ignored } = captureOptions;
+    const { memos, bypassMemo, changed, ignored, signal } = captureOptions;
     const started = ++captureSequence;
     /* Git lists an ignored directory once, with its trailing `/`; capture never
      * descends into an excluded directory, so the directory is enough. */
@@ -1369,12 +1376,15 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               await rooted.statTree?.('', { admits: (path) => !exclude(path) }),
               observedAt,
             );
+            signal?.throwIfAborted();
             const basis = await basisOf();
+            signal?.throwIfAborted();
             return captureRevisionTree(rooted, {
               exclude,
               inheritedMode: (path) => basis?.mode(path),
               reuse: bypassMemo ? undefined : memoOptions.reuse,
               onRead: memoOptions.onRead,
+              ...(signal === undefined ? {} : { signal }),
             });
           })()
         : /* `last` carries the modes it inherited, and a moved head empties
@@ -1383,6 +1393,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             exclude,
             inheritedMode: (path) => since.mode(path),
             changedSince: { tree: since, paths: changed.paths },
+            ...(signal === undefined ? {} : { signal }),
           });
     const collisions = caseCollisions(tree);
     if (collisions.length > 0) {
@@ -1420,20 +1431,23 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       modeBasis?: ImmutableRevisionTree | undefined;
       bypassMemo: boolean;
       changed?: Readonly<{ paths: readonly string[] | undefined }>;
+      signal?: AbortSignal | undefined;
     }>,
   ): Promise<ImmutableRevisionTree> =>
     useFileSystem(place, async (rooted) => {
+      captureOptions.signal?.throwIfAborted();
       await sweepTemporarySiblings(place, rooted);
       /* The project directory, where an open writes placeholders; a pull resumes any other checkout's. */
       if (place.kind === 'live') {
         resumeFill(place);
       }
-      const { modeBasis, bypassMemo, changed } = captureOptions;
+      const { modeBasis, bypassMemo, changed, signal } = captureOptions;
       const memos = memosOf(place.id);
       const ignored = await port.ignoredPaths?.(place.kind === 'live' ? undefined : place.root);
       return captureFileSystem(rooted, async () => modeBasis ?? headBasis(place, memos), {
         memos,
         bypassMemo,
+        signal,
         ...(changed === undefined ? {} : { changed }),
         ...(ignored === undefined ? {} : { ignored: new Set(ignored) }),
       });
@@ -3396,11 +3410,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       /* D4's and I6's comparison: the same memoised capture a cut reads, and
        * the next cut's starting tree, so that cut re-reads only what changed after it. */
       captureTree: fromAuthorityPromise<CheckoutCaptureTreeActorOutput, CheckoutCaptureTreeActorInput>(
-        async ({ input }) => {
+        async ({ input, signal }) => {
           const startedAt = workerTimings.now();
           workerTimings.gauge('capture.inflight', 1);
           try {
-            return await compareCheckout(input);
+            /* A `changed` re-enters `comparing` and stops this actor: the stale walk stops with it. */
+            return await compareCheckout(input, signal);
           } finally {
             workerTimings.gauge('capture.inflight', -1);
             workerTimings.record('capture.tree', startedAt);

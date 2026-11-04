@@ -246,8 +246,21 @@ const main = async (): Promise<void> => {
       await page.locator('label[for="kernel-build123d"]').click();
       await page.getByRole('button', { name: /^Create Project/u }).click();
       // The viewer and source panes share a filename; explicitly open the source editor.
-      await page.getByRole('tab', { name: 'main.py', exact: true }).first().click({ button: 'right' });
-      await page.getByRole('menuitem', { name: 'Open in Editor', exact: true }).click();
+      // A right-click straight after creation can land before the new tab handles it (run 41752524959
+      // macos-zip-arm64 stage A showed the `main.py` tab with no menu for two minutes), so open the menu until its
+      // item shows. The item and the editor it opens are unchanged.
+      const sourceTab = page.getByRole('tab', { name: 'main.py', exact: true }).first();
+      const openInEditor = page.getByRole('menuitem', { name: 'Open in Editor', exact: true });
+      const menuDeadline = Date.now() + 120_000;
+      let menuOpen = false;
+      while (!menuOpen && Date.now() < menuDeadline) {
+        await sourceTab.click({ button: 'right' });
+        menuOpen = await openInEditor.waitFor({ state: 'visible', timeout: 5000 }).then(
+          () => true,
+          () => false,
+        );
+      }
+      await openInEditor.click();
       // Candidates span code-editor generations, so find the editable surface by its textbox role rather than by
       // one editor's class names, and focus it rather than its surrounding scroll container. Some generations
       // render that surface with zero width, so wait for it to attach rather than to become visible, then

@@ -120,6 +120,17 @@ export type RevisionStatusProjection = Readonly<{
    * {@link LargeObjectsReport} told it (the browser worker does).
    */
   largeObjects?: LargeObjectsFacet;
+  /**
+   * The checkout roots a tree apply is writing right now, sorted. Absent when
+   * none is.
+   *
+   * A file view rooted at one of them holds its directory re-reads until the
+   * root leaves this list: every file the apply swaps into place raises its own
+   * events, and re-listing the directory after each one is work that grows with
+   * the square of the file count. Like `largeObjects`, the root does not set
+   * it: the host that brackets the apply (`onApplyingTree`) merges it.
+   */
+  applyingRoots?: readonly string[];
 }>;
 
 /**

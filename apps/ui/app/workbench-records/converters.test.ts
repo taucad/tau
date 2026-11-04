@@ -100,6 +100,45 @@ describe('workbench Dockview converters', () => {
     });
   });
 
+  it('keeps a window-local launcher after the record tabs without stealing activation', () => {
+    const tabs: WorkbenchLaneTab[] = [{ kind: 'pane', pane: 'parameters' }];
+    const layout = toDockview(
+      'workbench',
+      { kind: 'group', tabs },
+      { dimensions: { width: 800, height: 600 }, launcherId: 'pane_launcher' },
+    );
+    const restored = mount(layout);
+    if (!Array.isArray(restored.grid.root.data)) {
+      throw new TypeError('Expected branch');
+    }
+    const only = restored.grid.root.data[0];
+    if (!only || Array.isArray(only.data)) {
+      throw new TypeError('Expected group');
+    }
+    expect(only.data.views).toEqual(['workbench:parameters', 'pane_launcher']);
+    expect(only.data.activeView).toBe('workbench:parameters');
+    expect(fromDockview('workbench', restored)).toEqual({ kind: 'group', size: undefined, tabs });
+  });
+
+  it('gives later empty groups their own launcher instead of the window launcher', () => {
+    const node: WorkbenchLaneNode = {
+      kind: 'split',
+      direction: 'row',
+      children: [
+        { kind: 'group', tabs: [{ kind: 'pane', pane: 'parameters' }] },
+        { kind: 'group', tabs: [] },
+      ],
+    };
+    const layout = toDockview('workbench', node, {
+      dimensions: { width: 800, height: 600 },
+      launcherId: 'pane_launcher',
+    });
+    const launchers = Object.values(layout.panels).filter((panel) => panel.contentComponent === 'newTab');
+    expect(launchers).toHaveLength(2);
+    expect(new Set(launchers.map((panel) => panel.id)).size).toBe(2);
+    expect(() => fromDockview('workbench', mount(layout))).not.toThrow();
+  });
+
   it.each([
     { width: 1200, height: 800 },
     { width: 520, height: 1080 },

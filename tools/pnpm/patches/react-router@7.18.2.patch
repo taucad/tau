@@ -1,0 +1,88 @@
+diff --git a/dist/development/chunk-62JRHF6Z.mjs b/dist/development/chunk-62JRHF6Z.mjs
+index 43c3c5eae20fb44356130bd8b37ecc277ffdb62a..ca6a7451ae6edeaddb2a859deab96eaeb88f2452 100644
+--- a/dist/development/chunk-62JRHF6Z.mjs
++++ b/dist/development/chunk-62JRHF6Z.mjs
+@@ -8718,7 +8718,16 @@ async function loadRouteModule(route, routeModulesCache) {
+     import.meta.hot) {
+       throw error;
+     }
+-    window.location.reload();
++    // tau patch (TAU-UI-S): during a navigation the URL still names the page being
++    // left, so reloading it drops the user back there. Load the destination
++    // instead; anything else (hydration, a non-GET submission) still reloads.
++    let tauRouter = window.__reactRouterDataRouter;
++    let tauNavigation = tauRouter && tauRouter.state.navigation;
++    if (tauNavigation && tauNavigation.location && (!tauNavigation.formMethod || tauNavigation.formMethod.toUpperCase() === "GET")) {
++      window.location.assign(tauRouter.createHref(tauNavigation.location));
++    } else {
++      window.location.reload();
++    }
+     return new Promise(() => {
+     });
+   }
+diff --git a/dist/development/chunk-HHGH3NKS.js b/dist/development/chunk-HHGH3NKS.js
+index 1d73113db1986be2ef9e4026e0ba5f73209542f8..d891d40f2c337eafe5e30119bb152dd091019f94 100644
+--- a/dist/development/chunk-HHGH3NKS.js
++++ b/dist/development/chunk-HHGH3NKS.js
+@@ -7863,7 +7863,16 @@ async function loadRouteModule(route, routeModulesCache) {
+     void 0) {
+       throw error;
+     }
+-    window.location.reload();
++    // tau patch (TAU-UI-S): during a navigation the URL still names the page being
++    // left, so reloading it drops the user back there. Load the destination
++    // instead; anything else (hydration, a non-GET submission) still reloads.
++    let tauRouter = window.__reactRouterDataRouter;
++    let tauNavigation = tauRouter && tauRouter.state.navigation;
++    if (tauNavigation && tauNavigation.location && (!tauNavigation.formMethod || tauNavigation.formMethod.toUpperCase() === "GET")) {
++      window.location.assign(tauRouter.createHref(tauNavigation.location));
++    } else {
++      window.location.reload();
++    }
+     return new Promise(() => {
+     });
+   }
+diff --git a/dist/production/chunk-TP6EHSSF.js b/dist/production/chunk-TP6EHSSF.js
+index 31f84960fa1c21e8f0c1c4e6b144b81241ddc83c..8d4c66112dbb606673df5e497651f30af8af420e 100644
+--- a/dist/production/chunk-TP6EHSSF.js
++++ b/dist/production/chunk-TP6EHSSF.js
+@@ -7863,7 +7863,16 @@ async function loadRouteModule(route, routeModulesCache) {
+     void 0) {
+       throw error;
+     }
+-    window.location.reload();
++    // tau patch (TAU-UI-S): during a navigation the URL still names the page being
++    // left, so reloading it drops the user back there. Load the destination
++    // instead; anything else (hydration, a non-GET submission) still reloads.
++    let tauRouter = window.__reactRouterDataRouter;
++    let tauNavigation = tauRouter && tauRouter.state.navigation;
++    if (tauNavigation && tauNavigation.location && (!tauNavigation.formMethod || tauNavigation.formMethod.toUpperCase() === "GET")) {
++      window.location.assign(tauRouter.createHref(tauNavigation.location));
++    } else {
++      window.location.reload();
++    }
+     return new Promise(() => {
+     });
+   }
+diff --git a/dist/production/chunk-YBLPXYCV.mjs b/dist/production/chunk-YBLPXYCV.mjs
+index e9c83c3123c4ac53a21256629fd2b965aa8a2fd7..6f86e37cb70b1caa0956feeaad40ed5510829b65 100644
+--- a/dist/production/chunk-YBLPXYCV.mjs
++++ b/dist/production/chunk-YBLPXYCV.mjs
+@@ -8718,7 +8718,16 @@ async function loadRouteModule(route, routeModulesCache) {
+     import.meta.hot) {
+       throw error;
+     }
+-    window.location.reload();
++    // tau patch (TAU-UI-S): during a navigation the URL still names the page being
++    // left, so reloading it drops the user back there. Load the destination
++    // instead; anything else (hydration, a non-GET submission) still reloads.
++    let tauRouter = window.__reactRouterDataRouter;
++    let tauNavigation = tauRouter && tauRouter.state.navigation;
++    if (tauNavigation && tauNavigation.location && (!tauNavigation.formMethod || tauNavigation.formMethod.toUpperCase() === "GET")) {
++      window.location.assign(tauRouter.createHref(tauNavigation.location));
++    } else {
++      window.location.reload();
++    }
+     return new Promise(() => {
+     });
+   }

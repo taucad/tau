@@ -195,6 +195,15 @@ export const createLargeObjectFill = (
    *
    * Answers whether arrived objects were left for the next flush.
    */
+  /* The landed bytes a later flush still has to write: one count per object a tracked placeholder still names. */
+  const unflushedOf = (fill: Fill): number => {
+    let total = 0;
+    for (const oid of new Set([...fill.pending.values()].map((placeholder) => placeholder.oid))) {
+      total += fill.landed.get(oid)?.byteLength ?? 0;
+    }
+    return total;
+  };
+
   const sweep = async (fill: Fill): Promise<boolean> => {
     const before = await capture(fill.place);
     const filled: string[] = [];
@@ -235,7 +244,10 @@ export const createLargeObjectFill = (
     for (const path of [...filled, ...gone]) {
       fill.pending.delete(path);
     }
-    fill.unflushedBytes = Math.max(0, fill.unflushedBytes - written);
+    /* Counted again from what is still owed, not decremented by what was written: an object whose
+     * placeholder is gone or already real would otherwise stay counted, and every later arrival
+     * would flush at once. */
+    fill.unflushedBytes = unflushedOf(fill);
     return more;
   };
 

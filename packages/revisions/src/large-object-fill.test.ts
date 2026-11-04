@@ -51,8 +51,11 @@ const setup = (options: Readonly<{ flushBytes?: number; flushMilliseconds?: numb
       ['main.scad', files.get('main.scad')!],
       ...Object.entries(parts).map(([path, content]) => [path, encoder.encode(content)] as const),
     ]);
-  const capture = async (): Promise<ImmutableRevisionTree> =>
-    new ImmutableRevisionTree([...files].map(([path, content]) => [path, content] as const));
+  let captures = 0;
+  const capture = async (): Promise<ImmutableRevisionTree> => {
+    captures += 1;
+    return new ImmutableRevisionTree([...files].map(([path, content]) => [path, content] as const));
+  };
   /* A gate the test may close, so a materialization waits like a slow OPFS write; open by default. */
   let gate: Promise<void> = Promise.resolve();
   let writing = 0;
@@ -115,6 +118,8 @@ const setup = (options: Readonly<{ flushBytes?: number; flushMilliseconds?: numb
       };
     },
     mostWriting: () => mostWriting,
+    /** How many sweeps (one capture each) have run. */
+    captures: () => captures,
   };
 };
 
@@ -201,19 +206,64 @@ describe('large-object fill', () => {
     });
     /* A fill's flush tells the host's bracket what it is, so the host need not hold a file tree for it. */
     expect(harness.materializeTree.mock.calls[0]?.[2]).toMatchObject({ purpose: 'fill' });
-    /* Arrivals and timers while the first flush is still writing. */
-    harness.land('models/b.step');
-    await new Promise((resolve) => {
-      setTimeout(resolve, 20);
-    });
+    /* Arrivals and timers while the first flush is still writing: each would have queued a flush of its own. */
+    const sweepsBefore = harness.captures();
+    for (let landing = 0; landing < 3; landing++) {
+      harness.land('models/b.step');
+      // oxlint-disable-next-line no-await-in-loop -- each landing outlasts the flush timer.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 10);
+      });
+    }
     expect(harness.materializeTree).toHaveBeenCalledTimes(1);
     release();
     await vi.waitFor(() => {
       expect(harness.text('models/b.step')).toBe('solid bb');
     });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
+    });
+    /* One flush again after the slow one, not one per timer that fired behind it. */
+    expect(harness.captures() - sweepsBefore).toBe(1);
     expect(harness.mostWriting()).toBe(1);
     harness.finish(harness.fullTree());
     await done;
+    expect(harness.reports.at(-1)?.facet).toBeUndefined();
+  });
+
+  /* An object whose placeholder is gone is owed to nobody: counted as unwritten, it made every flush start the next at once. */
+  it('stops counting an object whose placeholder is gone, rather than flushing again and again', async () => {
+    const harness = setup({ flushBytes: 7, flushMilliseconds: 60_000 });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.files.set('models/a.step', encoder.encode('solid mine'));
+    const sweepsBefore = harness.captures();
+    /* Seven bytes reach the batch, so one flush starts at once and finds nothing to fill. */
+    harness.land('models/a.step');
+    await vi.waitFor(() => {
+      expect(harness.captures()).toBeGreaterThan(sweepsBefore);
+    });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 30);
+    });
+    expect(harness.captures() - sweepsBefore).toBe(1);
+    expect(harness.materializeTree).not.toHaveBeenCalled();
+    /* The transfer tells of it again: owed to nobody, it waits for the timer instead of flushing at once. */
+    harness.land('models/a.step');
+    await new Promise((resolve) => {
+      setTimeout(resolve, 30);
+    });
+    expect(harness.captures() - sweepsBefore).toBe(1);
+
+    harness.land('models/b.step');
+    await vi.waitFor(() => {
+      expect(harness.text('models/b.step')).toBe('solid bb');
+    });
+    harness.finish(harness.fullTree());
+    await done;
+    expect(harness.text('models/a.step')).toBe('solid mine');
     expect(harness.reports.at(-1)?.facet).toBeUndefined();
   });
 

@@ -1,5 +1,5 @@
 import type { ReactNode, RefCallback } from 'react';
-import { Fragment, useCallback, useId, useLayoutEffect, useMemo, useRef } from 'react';
+import { Fragment, useCallback, useId, useMemo } from 'react';
 import { ArrowLeft, ChevronRight, Lock } from 'lucide-react';
 import { Badge } from '@taucad/ui/components/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
@@ -78,9 +78,7 @@ export function ChatEditorBreadcrumbs({
       }
     : fileProvenanceLabel(provenance, filePath);
   const descriptionId = useId();
-  const scrollerRef = useRef<HTMLDivElement | undefined>(undefined);
   const attachScroller = useCallback<RefCallback<HTMLDivElement>>((scroller) => {
-    scrollerRef.current = scroller ?? undefined;
     if (!scroller) {
       return;
     }
@@ -89,20 +87,15 @@ export function ChatEditorBreadcrumbs({
     };
     const observer = new ResizeObserver(revealFilename);
     observer.observe(scroller);
+    // Symbol crumbs change as the cursor moves without resizing the scroller; keep the innermost one in view.
+    const crumbs = new MutationObserver(revealFilename);
+    crumbs.observe(scroller, { childList: true, subtree: true, characterData: true });
     revealFilename();
     return () => {
       observer.disconnect();
+      crumbs.disconnect();
     };
   }, []);
-
-  // Keep the innermost symbol in view as the cursor moves; the scroller's own size does not change.
-  const symbolKey = symbolPath.map((symbol) => symbol.name).join('/');
-  useLayoutEffect(() => {
-    const scroller = scrollerRef.current;
-    if (scroller) {
-      scroller.scrollLeft = scroller.scrollWidth;
-    }
-  }, [symbolKey]);
 
   // Derive breadcrumb data from the panel's own file path
   const activeFile = useMemo(

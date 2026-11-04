@@ -1632,6 +1632,37 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
         });
       }, 180_000);
 
+      /* R6: a fetch handed the listing it follows reuses that advertisement on
+       * the browser leg; any other value is ignored and the port asks again. */
+      it('fetches against the listing it is handed, with no second advertisement', async () => {
+        const name = 'refs/heads/r6-shared';
+        const receipt = await port.writeRevision({
+          parents: [head],
+          tree: tree({ 'a.txt': 'a\n', 'r6.txt': 'shared\n' }),
+          provenance: provenance('user'),
+          summary: summary('R6'),
+        });
+        const shared = revisionId(receipt.commitId);
+        await harness.writeRawRef(name, shared);
+        await port.push({ remote: 'tau', refs: [{ name }] });
+        await port.updateRef({ name: 'refs/remotes/tau/r6-shared', expectedHead: shared });
+        const advertisements = (trail: readonly string[]): number =>
+          trail.filter((entry) => entry === `GET ${new URL(fixture.url).pathname}/info/refs`).length;
+
+        const before = fixture.trail().length;
+        const listed = await port.listRemoteRefs('tau');
+        const fetched = await port.fetch({ remote: 'tau', refs: [name], advertised: listed });
+        const trail = fixture.trail().slice(before);
+
+        expect(fetched.refs).toStrictEqual([{ name: 'refs/remotes/tau/r6-shared', head: shared }]);
+        expect(advertisements(trail)).toBe(adapter.name === 'isomorphic-git' ? 1 : 2);
+
+        /* A listing this port did not answer is not an advertisement it kept. */
+        const copied = fixture.trail().length;
+        await port.fetch({ remote: 'tau', refs: [name], advertised: [...listed] });
+        expect(advertisements(fixture.trail().slice(copied))).toBe(1);
+      }, 180_000);
+
       /* One request carries the whole set, so `atomic` means what it means on
        * the disk leg: one stale lease refuses every ref, and a rewind without a
        * lease is refused per ref, before anything is sent. */

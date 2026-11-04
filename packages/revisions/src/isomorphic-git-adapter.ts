@@ -28,7 +28,6 @@ import {
   isDescendent,
   listRefs,
   listRemotes,
-  listServerRefs,
   packObjects,
   readBlob,
   readObject,
@@ -1342,11 +1341,24 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     return [...send];
   };
 
+  /*
+   * R6: the `upload-pack` advertisement behind each listing this port answered,
+   * keyed by the listing itself. A fetch handed that listing back reuses it, so
+   * a caller that lists and then fetches what it listed pays one `info/refs`.
+   * Keyed by identity, never by URL or time: only the caller knows whether the
+   * listing is still the one it means to act on.
+   */
+  const listedAdvertisements = new WeakMap<
+    readonly RemoteRef[],
+    Readonly<{ url: string; advertisement: Awaited<ReturnType<typeof getRemoteInfo2>> }>
+  >();
+
   /**
    * What the remote advertises, read through the client the caller gives.
    *
-   * A fetch reads its own advertisement, which carries the capabilities and
-   * the fetch's own deadline (P36); this one is `listRemoteRefs`'.
+   * The same protocol-v1 `upload-pack` advertisement a fetch reads, so the
+   * fetch that follows a listing may reuse it (R6) and still carries its own
+   * deadline (P36).
    *
    * @param remote - The remote's name in git's config, or an address not recorded yet (R2).
    * @returns Every advertised ref, `HEAD` and peeled tags dropped.
@@ -1363,15 +1375,19 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
      * verb does, so it is where a 401, a `403 GIT_SYNC_NOT_ENTITLED` and a 404
      * arrive — and until this catch existed the library's own
      * `HTTP Error: 403 Forbidden` escaped verbatim into a `role='alert'`. */
-    const advertised = await listServerRefs({ http, url }).catch((error: unknown) => {
-      throw http.refused(error, name);
-    });
-    return Object.freeze(
-      advertised
+    const advertisement = await getRemoteInfo2({ http, url, forPush: false, protocolVersion: 1 }).catch(
+      (error: unknown) => {
+        throw http.refused(error, name);
+      },
+    );
+    const listed = Object.freeze(
+      (advertisement.refs ?? [])
         /* `git ls-remote --refs`, as the native leg reads it: no `HEAD`, no peeled tags. */
         .filter((reference) => reference.ref.startsWith('refs/') && !reference.ref.endsWith('^{}'))
         .map((reference) => Object.freeze({ name: reference.ref, head: revisionId(reference.oid) })),
     );
+    listedAdvertisements.set(listed, { url, advertisement });
+    return listed;
   };
 
   /**
@@ -2018,8 +2034,14 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         throw http.refused(error, input.remote);
       };
       /* The one advertisement: `upload-pack`'s own, which carries the
-       * capabilities the request below may use as well as the refs. */
-      const advertisement = await getRemoteInfo2({ http, url, forPush: false, protocolVersion: 1 }).catch(refused);
+       * capabilities the request below may use as well as the refs — the
+       * listing's, when the caller hands back one this port answered for the
+       * same address (R6). */
+      const listed = input.advertised === undefined ? undefined : listedAdvertisements.get(input.advertised);
+      const advertisement =
+        listed?.url === url
+          ? listed.advertisement
+          : await getRemoteInfo2({ http, url, forPush: false, protocolVersion: 1 }).catch(refused);
       const advertised = new Map((advertisement.refs ?? []).map((reference) => [reference.ref, reference.oid]));
       const wanted = (input.refs ?? [...advertised.keys()].filter((ref) => ref.startsWith('refs/'))).filter((ref) => {
         if (input.refs !== undefined) {

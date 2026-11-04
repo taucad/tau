@@ -21,7 +21,7 @@
  * | 13c | **D14-P** | the remote answers the conflict line's push `503 GIT_PUSH_RACE_LOST` (another device's push committed first): the line is offered again after the backoff and reaches the remote (isomorphic-git leg) |
  * | 13b | **RV-W6 F2** | a line removed on the remote stays on the device that recorded it, still listed, and its next push offers it again |
  * | 19 | **D87** | another checkout's branch that diverged with overlapping changes records its conflict line on the pull and pushes it, and the live branch's next revision still reaches the remote (isomorphic-git leg) |
- * | 20 | **R4** | a cold connect fetches only the authored refs, once, and the opening pull fetches only the chats; another device's operation log never comes down |
+ * | 20 | **R4, R6** | a cold connect fetches only the authored refs, once, over `validate`'s one advertisement, and the opening pull fetches only the chats; another device's operation log never comes down |
  * | 15 | **FX1 N** | a hook's plan-quota refusal of `main` reaches the per-ref result as the hook's sentence, and the push settles as a terminal quota answer |
  *
  * Each row runs on both legs: `isomorphic-git` (the browser's port) and native
@@ -730,7 +730,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
     }
   }, 180_000);
 
-  it('row 20 (R4): a cold connect fetches the authored refs once, and the opening pull fetches only the chats', async () => {
+  it('row 20 (R4, R6): a cold connect fetches the authored refs once, and the opening pull fetches only the chats', async () => {
     const remoteRoot = await temporaryRoot('remote-cold-connect');
     const remote = await startGitHttpBackend({ root: remoteRoot });
     try {
@@ -790,11 +790,11 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
       if (leg.name === 'isomorphic-git') {
         const count = (trail: readonly string[], suffix: string): number =>
           trail.filter((entry) => entry.endsWith(suffix)).length;
-        /* Connect: `validate`'s listing, the authored listing and the fetch's own, and one pack. */
+        /* Connect: one advertisement, `validate`'s, which the fetch reuses (R6), and one pack. */
         expect({
           infoRefs: count(connected, '/info/refs'),
           uploadPacks: count(connected, '/git-upload-pack'),
-        }).toStrictEqual({ infoRefs: 3, uploadPacks: 1 });
+        }).toStrictEqual({ infoRefs: 1, uploadPacks: 1 });
         /* The opening pull: one listing for its leases, no authored fetch, and the chat by name. */
         expect({
           infoRefs: count(opened, '/info/refs'),

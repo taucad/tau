@@ -1573,6 +1573,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * Keep only this session's latest successful remote/tip set, bounded by the
    * selected refs. The first pull re-establishes hydration without reading trees. */
   let hydratedTips: Readonly<{ identity: string; heads: ReadonlyMap<string, string> }> | undefined;
+  /* `validate`'s listing, kept for the `initialSync` that follows it (R6): the
+   * connect-time fetch then needs no advertisement of its own. */
+  let validatedListing:
+    | Readonly<{ remote: string; identity: string | undefined; refs: readonly RemoteRef[] }>
+    | undefined;
   const remoteIdentity = async (name: string): Promise<string | undefined> => {
     const remotes = await port.listRemotes();
     const remote = remotes.find((entry) => entry.name === name);
@@ -1629,7 +1634,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   ): Promise<void> => {
     const { remote, wanted, advertised, identity, signal } = input;
     hydratedTips = undefined;
-    const fetched = port.fetch({ remote, signal, refs: wanted });
+    /* The listing goes back with the fetch, so a port that kept its advertisement does not ask again (R6). */
+    const fetched = port.fetch({ remote, signal, refs: wanted, advertised });
     await (input.deadline === undefined ? fetched : Promise.race([fetched, input.deadline]));
     signal.throwIfAborted();
     const finalIdentity = await remoteIdentity(remote);
@@ -4296,7 +4302,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       /* The cheapest question that proves a remote is really there: what refs
        * does it advertise. No object is fetched. */
       validate: fromAuthorityPromise<RemoteValidateActorOutput, RemoteValidateActorInput>(async ({ input }) => {
-        await port.listRemoteRefs(input.remote);
+        validatedListing = undefined;
+        const identity = await remoteIdentity(input.remote);
+        const listed = await port.listRemoteRefs(input.remote);
+        validatedListing = { remote: input.remote, identity, refs: listed };
         return {};
       }),
 
@@ -4321,7 +4330,18 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       initialSync: fromAuthorityPromise<RemoteInitialSyncActorOutput, RemoteInitialSyncActorInput>(
         async ({ input, signal }) => {
           const identity = await remoteIdentity(input.remote);
-          const advertised = await port.listRemoteRefs(input.remote, { signal });
+          /* R6: `validating` hands straight to this state, so its listing is
+           * the one this fetch acts on — taken once, and only for the same
+           * recorded destination. */
+          const validated = validatedListing;
+          validatedListing = undefined;
+          const advertised =
+            validated !== undefined &&
+            validated.remote === input.remote &&
+            validated.identity !== undefined &&
+            validated.identity === identity
+              ? validated.refs
+              : await port.listRemoteRefs(input.remote, { signal });
           signal.throwIfAborted();
           const wanted = authoredFetchReferences(advertised, input.remote);
           if (wanted.length > 0) {

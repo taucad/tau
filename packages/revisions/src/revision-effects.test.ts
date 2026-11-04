@@ -30,7 +30,7 @@ import { writeChatRef } from '#chat-ref.js';
 import { materializeConflict, readConflictTerms } from '#revision-conflict.js';
 import { RevisionPortError } from '#revision-port.js';
 import { remoteTrackingRef } from '#remotes.js';
-import type { Checkout, ConflictRecord, RevisionPort } from '#revision-port.js';
+import type { Checkout, ConflictRecord, RemoteRef, RevisionPort } from '#revision-port.js';
 import { gitToolchainOnPath, nativeHarness } from '#test/native-git-harness.js';
 import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
 import { createOpsLog, opsRefName } from '#ops-ref.js';
@@ -3321,6 +3321,60 @@ describe('independent sync record failures', () => {
     expect(requested).toEqual([authored, ['refs/tau/chats/c1']]);
     /* Another device's operation log never comes down. */
     expect(requested.flat()).not.toContain('refs/tau/ops/device-b');
+  }, 30_000);
+
+  /* R6: `validate`'s listing is the connect-time fetch's advertisement, for the same destination only. */
+  it('hands validate’s listing to the connect-time fetch, and lists again for a changed destination', async () => {
+    const context = await fixture({ 'main.ts': 'base\n' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['main.ts', 'base\n']]),
+      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      summary: { generated: 'Main' },
+    });
+    const head = revisionId(receipt.commitId);
+    await context.port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+    const listings: Array<readonly RemoteRef[]> = [];
+    const handed: Array<readonly RemoteRef[] | undefined> = [];
+    const actors = createRevisionActors({
+      port: {
+        ...context.port,
+        listRemoteRefs: async () => {
+          const listed = Object.freeze([{ name: 'refs/heads/main', head }]);
+          listings.push(listed);
+          return listed;
+        },
+        fetch: async (input) => {
+          handed.push(input.advertised);
+          return { refs: [] };
+        },
+      },
+      projectId: 'project-1',
+      filesystem: () => context.filesystem,
+    });
+
+    await run(actors.remote.validate, { remote: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+    await run(actors.remote.initialSync, { remote: 'tau', branch: 'main' });
+    expect(listings).toHaveLength(1);
+    expect(handed).toHaveLength(1);
+    expect(handed[0]).toBe(listings[0]);
+
+    /* Taken once: a second connect-time fetch lists for itself. */
+    await run(actors.remote.initialSync, { remote: 'tau', branch: 'main' });
+    expect(listings).toHaveLength(2);
+    expect(handed[1]).toBe(listings[1]);
+
+    /* A destination re-pointed after `validate` read it is not the one it listed. */
+    await run(actors.remote.validate, { remote: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+    await context.port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-2.git' });
+    await run(actors.remote.initialSync, { remote: 'tau', branch: 'main' });
+    expect(listings).toHaveLength(4);
+    expect(handed[2]).toBe(listings[3]);
+
+    /* The pull hands its own listing to its fetch too. */
+    await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
+    expect(handed.at(-1)).toBe(listings.at(-1));
   }, 30_000);
 
   it('forgets the connect-time proof when the connect-time fetch fails', async () => {

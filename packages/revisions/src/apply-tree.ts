@@ -8,6 +8,7 @@
  * refuse (W8c).
  */
 import type { FileMode, PathPolicy } from '@taucad/filesystem';
+import { workerTimings } from '@taucad/filesystem';
 import { ImmutableRevisionTree } from '#algorithms/index.js';
 import type { RevisionTreeEntry, RevisionTreeInput } from '#algorithms/index.js';
 import { equalBytes } from '#object-hash.js';
@@ -293,6 +294,7 @@ export const createApplyTreeEffects = (
       });
       const writtenPaths = changedFiles.map(([path]) => path);
       const release = onApplyingTree?.(place, [...removedPaths, ...writtenPaths].sort());
+      const heldAt = workerTimings.now();
       try {
         for (const path of removedPaths) {
           signal?.throwIfAborted();
@@ -426,6 +428,7 @@ export const createApplyTreeEffects = (
         }
         return [...removedPaths, ...writtenPaths].sort();
       } finally {
+        workerTimings.record('apply.hold', heldAt);
         release?.();
       }
     });

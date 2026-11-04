@@ -39,6 +39,7 @@ function createMockMetrics() {
     syncClientLfsObjects: { add: vi.fn() },
     syncClientLfsBytes: { add: vi.fn() },
     projectOpenDuration: { record: vi.fn() },
+    projectOpenSpanDuration: { record: vi.fn() },
   };
 }
 
@@ -272,6 +273,39 @@ describe('TelemetryController', () => {
       ]);
       expect(mockMetrics.projectOpenDuration.record.mock.calls).toEqual([
         [6.1, { phase: 'fully_fetched', cache: 'cold', 'tau.lfs.transport': 'r2_presigned' }],
+      ]);
+    });
+  });
+
+  describe('worker span totals', () => {
+    it('should record each worker span total by stage, in seconds, and nothing for an entry without spans', () => {
+      ingestSignedIn({
+        entries: [
+          {
+            name: IngestEntryName.LFS_FETCH,
+            duration: 6000,
+            detail: {
+              placement: 'browser',
+              networkObjects: 2,
+              networkBytes: 20,
+              localObjects: 0,
+              localBytes: 0,
+              spans: { 'lfs.store': 1500, 'queue.wait': 1e12 },
+            },
+          },
+          {
+            name: IngestEntryName.PROJECT_OPEN,
+            duration: 6100,
+            detail: { phase: 'first_view', cache: 'cold', spans: { 'apply.hold': 2500 } },
+          },
+          { name: IngestEntryName.PROJECT_OPEN, duration: 6100, detail: { phase: 'fully_fetched', cache: 'cold' } },
+        ],
+      });
+
+      expect(mockMetrics.projectOpenSpanDuration.record.mock.calls).toEqual([
+        [1.5, { stage: 'lfs_fetch', span: 'lfs.store' }],
+        [3600, { stage: 'lfs_fetch', span: 'queue.wait' }],
+        [2.5, { stage: 'first_view', span: 'apply.hold' }],
       ]);
     });
   });

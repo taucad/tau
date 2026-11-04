@@ -75,9 +75,11 @@ import { requireParameterRecord, serializeParameterRecord } from '@taucad/parame
 import { revisionId, compareRevisionFile, captureRevisionTree, diffRevisionTrees } from '@taucad/revisions/algorithms';
 import type { RevisionFileComparison } from '@taucad/revisions/algorithms';
 import type { FileMode, MountTable, RootedFileSystem, WorkspaceFileService } from '@taucad/filesystem';
+import { workerTimings } from '@taucad/filesystem';
 import type { ActorOptions, AnyActorLogic } from 'xstate';
 import type { ChangeEvent } from '@taucad/types';
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
+import { logWorkerTimings } from '#lib/worker-timing-report.js';
 import { randomUuid } from '@taucad/utils/id';
 import { createFileSystemBridgePort } from '@taucad/fs-bridge';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
@@ -712,6 +714,22 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   const toasts = new Topic<RevisionToast>({ name: 'WorkerProjectRevisionToasts' });
   /* Each checkout's large-object fill, as the effects last told it; the selected one rides the projection. */
   const largeObjects = new Map<string, LargeObjectsReport>();
+  /* Each checkout's running fill: when it began and how many objects it fetches, for its timing line at the end. */
+  const fillWindows = new Map<string, Readonly<{ startedAt: number; objects: number }>>();
+  const timeFill = (report: LargeObjectsReport): void => {
+    const window = fillWindows.get(report.checkoutId);
+    if (report.facet !== undefined && report.facet.phase !== 'failed') {
+      if (window === undefined) {
+        fillWindows.set(report.checkoutId, { startedAt: workerTimings.now(), objects: report.facet.totalObjects });
+      }
+      return;
+    }
+    if (window !== undefined) {
+      fillWindows.delete(report.checkoutId);
+      const outcome = report.facet === undefined ? 'fill' : 'failed fill';
+      logWorkerTimings(`${outcome} of ${String(window.objects)} objects`, workerTimings.summarize(window.startedAt));
+    }
+  };
   /* How many applies are writing each checkout root, as `onApplyingTree` brackets them; rides the projection. */
   const applying = new Map<string, number>();
 
@@ -821,6 +839,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     },
     /* Files open before their large objects arrive (the operator's "open the UI, model waits"): the page's viewer waits on this. */
     onLargeObjects: (report) => {
+      timeFill(report);
       if (report.facet === undefined) {
         largeObjects.delete(report.checkoutId);
       } else {
@@ -829,7 +848,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       republish();
     },
     /* The page's file tree holds its re-reads for a root while an apply writes it, and lists it once after. */
-    onApplyingTree: ({ root }) => {
+    onApplyingTree: ({ root }, paths) => {
+      const startedAt = workerTimings.now();
       applying.set(root, (applying.get(root) ?? 0) + 1);
       republish();
       let released = false;
@@ -838,6 +858,10 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           return;
         }
         released = true;
+        /* An apply that wrote nothing has nothing to account for; to the second, a window may include its neighbours. */
+        if (paths.length > 0) {
+          logWorkerTimings(`apply of ${String(paths.length)} paths`, workerTimings.summarize(startedAt));
+        }
         const remaining = (applying.get(root) ?? 1) - 1;
         if (remaining === 0) {
           applying.delete(root);
@@ -913,6 +937,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     console.error('[revisions] turn', failure.code, failure.reason);
   });
   const changed = (checkoutId: string, paths: readonly string[]): void => {
+    workerTimings.count('revisions.changed');
     /* One increment per content-change event, whatever its path count: the
      * checkout takes `Math.max` of it across a mint, so a counter that
      * repeated would hide a write that landed during one (F9, F4). */

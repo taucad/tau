@@ -15,6 +15,7 @@
  * its path, so one renamed, moved, duplicated or restored meanwhile is filled
  * where it now is.
  */
+import { workerTimings } from '@taucad/filesystem';
 import { ImmutableRevisionTree } from '#algorithms/index.js';
 import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import { lfsPointerFor, readLfsPointer } from '#lfs.js';
@@ -214,22 +215,24 @@ export const createLargeObjectFill = (
     if (!isCurrent(fill)) {
       return;
     }
-    const swept = await withCheckoutFence(fill.place.id, async () => {
-      for (let attempt = 1; ; attempt += 1) {
-        try {
-          // oxlint-disable-next-line no-await-in-loop -- each sweep re-reads what the last one lost to a writer.
-          await sweep(fill);
-          return true;
-        } catch (error) {
-          if (!(error instanceof RevisionPortError && error.code === 'CHECKOUT_CONFLICT')) {
-            throw error;
-          }
-          if (attempt >= conflictSweeps) {
-            return false;
+    const swept = await workerTimings.span('fill.flush', async () =>
+      withCheckoutFence(fill.place.id, async () => {
+        for (let attempt = 1; ; attempt += 1) {
+          try {
+            // oxlint-disable-next-line no-await-in-loop -- each sweep re-reads what the last one lost to a writer.
+            await sweep(fill);
+            return true;
+          } catch (error) {
+            if (!(error instanceof RevisionPortError && error.code === 'CHECKOUT_CONFLICT')) {
+              throw error;
+            }
+            if (attempt >= conflictSweeps) {
+              return false;
+            }
           }
         }
-      }
-    });
+      }),
+    );
     if (!swept) {
       scheduleFlush(fill);
     }

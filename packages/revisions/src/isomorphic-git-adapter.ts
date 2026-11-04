@@ -42,7 +42,7 @@ import {
   writeTree,
 } from 'isomorphic-git';
 import type { TreeEntry } from 'isomorphic-git';
-import { ResourceQueue } from '@taucad/filesystem';
+import { ResourceQueue, workerTimings } from '@taucad/filesystem';
 import { randomUuid } from '@taucad/utils/id';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { FileMode, FileSystemProvider } from '@taucad/filesystem';
@@ -892,7 +892,9 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    * @param oid - The pointer's object id.
    * @param content - The object's real bytes.
    */
-  const storeLfsObject = async (oid: string, content: Uint8Array<ArrayBuffer>): Promise<void> => {
+  const storeLfsObject = async (oid: string, content: Uint8Array<ArrayBuffer>): Promise<void> =>
+    workerTimings.span('lfs.store', async () => storeLfsObjectBytes(oid, content));
+  const storeLfsObjectBytes = async (oid: string, content: Uint8Array<ArrayBuffer>): Promise<void> => {
     if ((await readLocalLfsObject({ oid, size: content.byteLength })) !== undefined) {
       return;
     }

@@ -969,6 +969,43 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(await project.readFile('main.scad', 'utf8')).toBe('cube(20);');
   });
 
+  /* The worker's own timing line: one `console.info` per apply, naming its spans and never a path. */
+  it('should log one worker timing line when a restore finishes writing the checkout', async () => {
+    const fixture = harness(['alpha']);
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    const session = await root.placementSession();
+    await place(session, turnKey(1));
+    await project.writeFile('main.scad', 'cube(20);');
+    await finish(session, turnKey(1));
+    await turnFinalized(alpha, 'turn-1');
+    const head = alpha.frames.findLast((frame) => frame.type === 'status')?.status.headRevisionId;
+    await settle(10);
+    await project.writeFile('main.scad', 'cube(30);');
+    const before = await root.log();
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    try {
+      alpha.send({ command: 'restore', revisionId: head! });
+      await vi.waitFor(
+        async () => {
+          expect(await root.log()).toHaveLength(before.length + 2);
+        },
+        { timeout: 10_000 },
+      );
+      await settle(10);
+
+      const lines = info.mock.calls.map(([line]) => String(line)).filter((line) => line.startsWith('[worker-timings]'));
+      expect(lines).toEqual([
+        expect.stringMatching(/^\[worker-timings\] apply of 1 paths took \d+\.\ds: .*apply\.hold \d+×/u),
+      ]);
+      expect(lines.join('\n')).not.toContain('main.scad');
+    } finally {
+      info.mockRestore();
+    }
+  });
+
   /*
    * D3: a save that loses its compare-and-swap is answered at once and out loud.
    *

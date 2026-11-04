@@ -298,6 +298,36 @@ const syncAttemptEntrySchema = z.object({
  */
 export const lfsTransports = ['files', 'r2_presigned', 'relay', 'other'] as const;
 
+/**
+ * The file-manager worker's timed spans (`@taucad/filesystem`'s `workerTimingSpans`, pinned to this copy by the UI
+ * worker's tests): where a hosted open's time went inside the worker, which page resource timing cannot see.
+ * @public
+ */
+export const workerTimingSpanNames = [
+  'lfs.store',
+  'fence.wait',
+  'fence.held',
+  'queue.wait',
+  'queue.held',
+  'fill.flush',
+  'capture.tree',
+  'apply.hold',
+  'records.project',
+] as const;
+
+/** Total milliseconds per worker span over the entry's window; a span that never ran is absent. */
+const workerSpanTotalsSchema = z.strictObject({
+  'lfs.store': z.number().nonnegative().optional(),
+  'fence.wait': z.number().nonnegative().optional(),
+  'fence.held': z.number().nonnegative().optional(),
+  'queue.wait': z.number().nonnegative().optional(),
+  'queue.held': z.number().nonnegative().optional(),
+  'fill.flush': z.number().nonnegative().optional(),
+  'capture.tree': z.number().nonnegative().optional(),
+  'apply.hold': z.number().nonnegative().optional(),
+  'records.project': z.number().nonnegative().optional(),
+});
+
 /** One client tree read that fetched large objects from the remote; `duration` is its large-object phase. */
 const lfsFetchEntrySchema = z.object({
   name: z.literal(IngestEntryName.LFS_FETCH),
@@ -310,6 +340,8 @@ const lfsFetchEntrySchema = z.object({
     localBytes: z.number().int().nonnegative(),
     /** The transport that served most of the fetched objects; absent from clients older than the files service. */
     transport: z.enum(lfsTransports).optional(),
+    /** Worker span totals over the phase; absent from older clients. */
+    spans: workerSpanTotalsSchema.optional(),
   }),
 });
 
@@ -325,6 +357,8 @@ const projectOpenEntrySchema = z.object({
     cache: z.enum(['cold', 'warm']),
     /** On a cold open, the transport of its latest network fetch; absent on a warm open and from older clients. */
     transport: z.enum(lfsTransports).optional(),
+    /** Worker span totals from the root opening to this phase; absent from older clients. */
+    spans: workerSpanTotalsSchema.optional(),
   }),
 });
 

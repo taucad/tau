@@ -25,7 +25,8 @@
  */
 
 import { parseProjectManifestBytes } from '@taucad/project-core';
-import { ResourceQueue } from '@taucad/filesystem';
+import { ResourceQueue, workerTimings } from '@taucad/filesystem';
+import type { WorkerTimingSpan } from '@taucad/filesystem';
 import { randomUuid } from '@taucad/utils/id';
 import { walk } from '@taucad/filesystem/content-ops';
 import {
@@ -949,6 +950,39 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     return { name, url };
   };
 
+  /* D4's and I6's comparison capture, published for a cut on the same write generation to reuse. */
+  const compareCheckout = async (input: CheckoutCaptureTreeActorInput): Promise<CheckoutCaptureTreeActorOutput> => {
+    const memos = memosOf(input.checkoutId);
+    let published: CheckoutMemos['comparing'];
+    const captured = (async () => {
+      try {
+        return await captureCheckout(await placeOf(input.checkoutId), {
+          bypassMemo: false,
+          changed: { paths: input.changedPaths },
+        });
+      } finally {
+        if (published !== undefined && memos.comparing === published) {
+          memos.comparing = undefined;
+        }
+      }
+    })();
+    /* Published before the first await, so a cut asked on the next event finds it. */
+    if (input.generation !== undefined) {
+      published = { generation: input.generation, tree: captured };
+      memos.comparing = published;
+    }
+    return { treeId: await checkoutTreeId(input.checkoutId, await captured) };
+  };
+
+  /* An effect timed as one worker span, whether it settles or fails. */
+  const timedEffect =
+    <Output, Input>(
+      span: WorkerTimingSpan,
+      effect: AsyncLogicFunction<Output, Input>,
+    ): AsyncLogicFunction<Output, Input> =>
+    async (arguments_, enqueue) =>
+      workerTimings.span(span, async () => effect(arguments_, enqueue));
+
   const fromAuthorityPromise = <Output, Input>(
     effect: AsyncLogicFunction<Output, Input>,
   ): AsyncActorLogic<Output, Input> =>
@@ -988,11 +1022,15 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
 
   const withCheckoutFence = async <Result>(checkoutId: string, operation: () => Promise<Result>): Promise<Result> => {
     const fence = acquireCheckoutFence(checkoutId);
+    const waitedAt = workerTimings.now();
     await fence.granted;
+    workerTimings.record('fence.wait', waitedAt);
+    const heldAt = workerTimings.now();
     try {
       return await operation();
     } finally {
       fence.release();
+      workerTimings.record('fence.held', heldAt);
     }
   };
 
@@ -3359,26 +3397,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
        * the next cut's starting tree, so that cut re-reads only what changed after it. */
       captureTree: fromAuthorityPromise<CheckoutCaptureTreeActorOutput, CheckoutCaptureTreeActorInput>(
         async ({ input }) => {
-          const memos = memosOf(input.checkoutId);
-          let published: CheckoutMemos['comparing'];
-          const captured = (async () => {
-            try {
-              return await captureCheckout(await placeOf(input.checkoutId), {
-                bypassMemo: false,
-                changed: { paths: input.changedPaths },
-              });
-            } finally {
-              if (published !== undefined && memos.comparing === published) {
-                memos.comparing = undefined;
-              }
-            }
-          })();
-          /* Published before the first await, so a cut asked on the next event finds it. */
-          if (input.generation !== undefined) {
-            published = { generation: input.generation, tree: captured };
-            memos.comparing = published;
+          const startedAt = workerTimings.now();
+          workerTimings.gauge('capture.inflight', 1);
+          try {
+            return await compareCheckout(input);
+          } finally {
+            workerTimings.gauge('capture.inflight', -1);
+            workerTimings.record('capture.tree', startedAt);
           }
-          return { treeId: await checkoutTreeId(input.checkoutId, await captured) };
         },
       ),
 
@@ -5151,7 +5177,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       }),
 
       projectRecords: fromAuthorityPromise<SyncProjectRecordsActorOutput, SyncProjectRecordsActorInput>(
-        async ({ input, signal }) => {
+        timedEffect('records.project', async ({ input, signal }) => {
           const { syncChats } = await projectSyncPreferences();
           const fetchReferences = input.fetchRefs.filter((ref) => syncChats || !ref.startsWith(`${chatRefPrefix}/`));
           const fetched =
@@ -5273,7 +5299,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
                 : 'ready'
               : 'disabled',
           };
-        },
+        }),
       ),
 
       /** A clean checkout takes the remote head; nothing is composed (A2). */

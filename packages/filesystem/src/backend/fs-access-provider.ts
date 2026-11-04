@@ -217,6 +217,10 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    * listing. Child metadata comes from the `File` object; contents are read only
    * when {@link fileStatFromFile} needs them, in chunks of {@link statConcurrency}.
    *
+   * An entry removed between enumeration and its `getFile()` — a writer's
+   * temporary sibling renamed away mid-listing — is left out: the listing
+   * answers what is still there instead of rejecting the whole directory.
+   *
    * @param path - Absolute directory path to enumerate.
    * @returns Each entry's name paired with its stat metadata.
    */
@@ -237,16 +241,24 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       handles.push(entry);
     }
 
-    return mapConcurrent(handles, statConcurrency, async ([name, handle]) =>
-      handle.kind === 'directory'
-        ? ({ name, type: 'dir', size: 0, mtimeMs: 0 } satisfies { name: string } & FileStat)
-        : {
-            name,
-            ...(await (options?.content === 'head'
-              ? headFileStatFromFile(await handle.getFile())
-              : fileStatFromFile(await handle.getFile()))),
-          },
-    );
+    const listed = await mapConcurrent(handles, statConcurrency, async ([name, handle]) => {
+      if (handle.kind === 'directory') {
+        return { name, type: 'dir', size: 0, mtimeMs: 0 } satisfies { name: string } & FileStat;
+      }
+      try {
+        const file = await handle.getFile();
+        return {
+          name,
+          ...(await (options?.content === 'head' ? headFileStatFromFile(file) : fileStatFromFile(file))),
+        };
+      } catch (error) {
+        if (await this._vanishedDuringListing(directoryHandle, name, error)) {
+          return undefined;
+        }
+        throw error;
+      }
+    });
+    return listed.filter((entry) => entry !== undefined);
   }
 
   /**
@@ -851,6 +863,38 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       } catch {
         break;
       }
+    }
+  }
+
+  /**
+   * Whether a listed file's stat failed because the file is no longer there.
+   *
+   * `getFile()` on a removed entry rejects `NotFoundError`; reading a `File`
+   * whose entry was removed after `getFile()` rejects `NotReadableError`, which
+   * a permission failure also raises — so that one is confirmed by looking the
+   * name up again.
+   *
+   * @param directory - The directory being listed.
+   * @param name - The entry whose stat failed.
+   * @param error - The stat failure.
+   * @returns `true` when the entry has gone and the listing should skip it.
+   */
+  private async _vanishedDuringListing(
+    directory: FileSystemDirectoryHandle,
+    name: string,
+    error: unknown,
+  ): Promise<boolean> {
+    if (hasDomName(error, 'NotFoundError')) {
+      return true;
+    }
+    if (!hasDomName(error, 'NotReadableError')) {
+      return false;
+    }
+    try {
+      await directory.getFileHandle(name);
+      return false;
+    } catch (lookupError) {
+      return hasDomName(lookupError, 'NotFoundError');
     }
   }
 

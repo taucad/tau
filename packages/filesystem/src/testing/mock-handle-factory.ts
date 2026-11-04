@@ -184,6 +184,7 @@ class MockFileHandle {
   public move?: (destination: MockDirectoryHandle, name: string) => Promise<void>;
   private readonly _entry: FileEntry;
   private readonly _options: MockRootHandleOptions;
+  private readonly _parent: Map<string, Entry>;
 
   public constructor(
     name: string,
@@ -193,6 +194,7 @@ class MockFileHandle {
     this.name = name;
     this._entry = entry;
     this._options = options;
+    this._parent = parent;
     if (options.nativeMove === true) {
       this.move = async (destination, newName): Promise<void> => {
         options.onMove?.(name, newName);
@@ -226,6 +228,9 @@ class MockFileHandle {
   }
 
   public async getFile(): Promise<File> {
+    if (this._parent.get(this.name) !== this._entry) {
+      throw new DOMException(`File not found: ${this.name}`, 'NotFoundError');
+    }
     return new File([this._entry.content], this.name, {
       lastModified: this._entry.lastModified,
     });

@@ -144,6 +144,16 @@ finally:
                     '-g', 'Started|Stopping|Stopped|Deactivated|Failed|code=exited'], check=False)
     subprocess.run(['sudo', 'sh', '-c', 'grep -h -A3 "Restarting services" /var/log/unattended-upgrades/*.log 2>/dev/null || true'],
                    check=False)
+    # Whether the scheduler could still run when an upgrade wait expired (run 41827213025 Debian rows saw no mirror
+    # request for 15 minutes after reconnect): each APT unit's state, its start and finish lines, and any APT process
+    # still running.
+    subprocess.run(['systemctl', 'show',
+                    '--property=Id,ActiveState,SubState,ExecMainStartTimestamp,LastTriggerUSec,NextElapseUSecRealtime',
+                    'apt-daily.service', 'apt-daily-upgrade.service', 'apt-daily.timer', 'apt-daily-upgrade.timer'],
+                   check=False)
+    subprocess.run(['sudo', 'sh', '-c', 'journalctl --no-pager -o short-iso -u apt-daily.service -u apt-daily-upgrade.service '
+                    '-g "Start|Finish|Fail|Deactivat|code=|timed out" | tail -n 40'], check=False)
+    subprocess.run(['sh', '-c', 'ps -eo pid,etimes,args | grep -E "[a]pt|[d]pkg|[u]nattended" || true'], check=False)
     cleanup = subprocess.run(['pnpm', 'nx', 'run', 'desktop:cleanup-qualification-trust'], cwd=root, env=env).returncode
     config.unlink(missing_ok=True)
     if cleanup:

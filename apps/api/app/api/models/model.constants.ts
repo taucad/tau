@@ -38,6 +38,20 @@ export function isModelListEntryEnabled(entry: ModelListEntry): boolean {
   return entry.enabled !== false;
 }
 
+/**
+ * Refuse a catalog that names more than one default model. `default` is optional, so rows that omit it are not
+ * defaults; a catalog with none leaves the client to fall back to its recommended row.
+ *
+ * @param models - The catalog rows.
+ * @throws {Error} When more than one row sets `default: true`.
+ */
+export function assertSingleDefaultModel(models: ReadonlyArray<Pick<Model, 'id' | 'default'>>): void {
+  const defaults = models.filter((model) => model.default === true).map((model) => model.id);
+  if (defaults.length > 1) {
+    throw new Error(`Only one model may be the default, but ${defaults.length} are: ${defaults.join(', ')}`);
+  }
+}
+
 export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListEntry>> = {
   anthropic: {
     'claude-fable-5.1': {
@@ -139,6 +153,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       name: 'Opus 5.5',
       slug: 'claude-opus-5.5',
       recommended: true,
+      default: true,
       description:
         'Most capable Opus model for long-horizon agentic CAD design, complex multi-part assemblies, and multi-file work.',
       provider: {

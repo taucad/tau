@@ -117,6 +117,34 @@ export const projectViewerSelection = (
  *
  * @returns ChatSnapshot object or undefined if no context is enabled/available
  */
+/**
+ * The project's files as the snapshot tells them to the model.
+ *
+ * Only the project's own rows: the pane composes read-only overlays into the
+ * same tree (W2), and advertising several hundred system skill bundle files as
+ * project context is exactly the noise the Exclusion Matrix keeps out. A text
+ * file's kind travels with its line count, which the wire requires beside it;
+ * a text row a head listing has not counted yet goes without either.
+ *
+ * @param entries - The file tree's rows.
+ * @returns The snapshot's `fileTree`.
+ */
+export const projectFileTree = (entries: Iterable<FileEntry>): NonNullable<ChatSnapshot['fileTree']> =>
+  [...entries]
+    .filter(
+      (entry): entry is Extract<FileEntry, { type: 'file' }> =>
+        entry.type === 'file' && (entry.provenance === undefined || entry.provenance.source === 'project'),
+    )
+    .map((item): NonNullable<ChatSnapshot['fileTree']>[number] => {
+      const name = item.path.split('/').pop() ?? item.path;
+      if (item.contentKind === 'binary') {
+        return { path: item.path, name, type: 'file', size: item.size, contentKind: 'binary' };
+      }
+      return item.lineCount === undefined
+        ? { path: item.path, name, type: 'file', size: item.size }
+        : { path: item.path, name, type: 'file', size: item.size, contentKind: 'text', lineCount: item.lineCount };
+    });
+
 export function useChatSnapshot(): ChatSnapshot | undefined {
   const projectContext = useProject({ enableNoContext: true });
   // oxlint-disable-next-line typescript/no-unnecessary-condition -- chat can mount without the project workspace provider.
@@ -138,37 +166,7 @@ export function useChatSnapshot(): ChatSnapshot | undefined {
     }
 
     const sync = (): void => {
-      /* The snapshot tells the model what the *project* holds. The pane composes
-       * read-only overlays into the same tree (W2), and advertising several
-       * hundred system skill bundle files as project context is exactly the noise the
-       * Exclusion Matrix keeps out, so the rows are filtered on provenance. */
-      const items = [...treeService.getTreeSnapshot().values()].filter(
-        (entry): entry is Extract<FileEntry, { type: 'file' }> =>
-          entry.type === 'file' && (entry.provenance === undefined || entry.provenance.source === 'project'),
-      );
-      setFileTree(
-        items.map((item): NonNullable<ChatSnapshot['fileTree']>[number] => {
-          const name = item.path.split('/').pop() ?? item.path;
-          return item.contentKind === 'text'
-            ? item.lineCount === undefined
-              ? { path: item.path, name, type: 'file', size: item.size }
-              : {
-                  path: item.path,
-                  name,
-                  type: 'file',
-                  size: item.size,
-                  contentKind: 'text',
-                  lineCount: item.lineCount,
-                }
-            : {
-                path: item.path,
-                name,
-                type: 'file',
-                size: item.size,
-                contentKind: 'binary',
-              };
-        }),
-      );
+      setFileTree(projectFileTree(treeService.getTreeSnapshot().values()));
     };
 
     sync();

@@ -655,6 +655,12 @@ export class MetricsService {
     advice: { explicitBucketBoundaries: [...TauMetrics.projectOpenDuration.buckets] },
   });
 
+  public readonly projectOpenSpanDuration = this.clientMeter.createHistogram(TauMetrics.projectOpenSpanDuration.name, {
+    description: TauMetrics.projectOpenSpanDuration.description,
+    unit: TauMetrics.projectOpenSpanDuration.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.projectOpenSpanDuration.buckets] },
+  });
+
   // --- Storage accounting scheduler (W14 OB3) ---
 
   /* Observed at collection from the scheduler's shared snapshot, so every Machine exports the same figures. */

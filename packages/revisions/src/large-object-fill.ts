@@ -15,6 +15,7 @@
  * its path, so one renamed, moved, duplicated or restored meanwhile is filled
  * where it now is.
  */
+import { workerTimings } from '@taucad/filesystem';
 import { ImmutableRevisionTree } from '#algorithms/index.js';
 import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import { lfsPointerFor, readLfsPointer } from '#lfs.js';
@@ -46,11 +47,24 @@ type Fill = {
   flushing: Promise<void>;
   flushTimer: ReturnType<typeof setTimeout> | undefined;
   reportTimer: ReturnType<typeof setTimeout> | undefined;
+  /** A timed flush is writing; another timer waits for it rather than queueing behind it. */
+  flushRunning: boolean;
+  /** Objects arrived while a timed flush ran: the next one is scheduled when it ends. */
+  flushAgain: boolean;
+  /** Bytes arrived since the last flush that wrote, which start the next one early once they reach the batch. */
+  unflushedBytes: number;
 };
 
 /** How often arrived objects are written into the checkout, and progress told. Milliseconds. */
 const defaultFlushMilliseconds = 1000;
 const defaultReportMilliseconds = 250;
+/**
+ * The most large-object bytes one flush writes into the checkout. A flush holds
+ * the checkout's fence and its writes hold the project's mutation claims, so an
+ * unbounded batch (everything that arrived in a second, or a backlog) kept every
+ * other writer waiting; the rest is written by the next flush, which starts at once.
+ */
+const defaultFlushBytes = 32 * 1024 * 1024;
 /** How many times one flush re-sweeps a checkout a writer changed under it before leaving it to the next flush. */
 const conflictSweeps = 3;
 
@@ -89,11 +103,13 @@ export const createLargeObjectFill = (
     materializeTree: (
       place: Checkout,
       target: ImmutableRevisionTree,
-      materialization: Readonly<{ before: ImmutableRevisionTree }>,
+      materialization: Readonly<{ before: ImmutableRevisionTree; purpose: 'fill' }>,
     ) => Promise<unknown>;
     report?: ((report: LargeObjectsReport) => void) | undefined;
     flushMilliseconds?: number;
     reportMilliseconds?: number;
+    /** The most bytes one flush writes; see {@link defaultFlushBytes}. */
+    flushBytes?: number;
   }>,
 ): Readonly<{
   fill: (place: Checkout, head: RevisionId, placeholders?: ReadonlyMap<string, Placeholder>) => Promise<void>;
@@ -103,6 +119,7 @@ export const createLargeObjectFill = (
   const { port, capture, withCheckoutFence, materializeTree, report } = dependencies;
   const flushMilliseconds = dependencies.flushMilliseconds ?? defaultFlushMilliseconds;
   const reportMilliseconds = dependencies.reportMilliseconds ?? defaultReportMilliseconds;
+  const flushBytes = dependencies.flushBytes ?? defaultFlushBytes;
   /* One fill per checkout; a newer one replaces it, and the older one's callbacks go quiet. */
   const fills = new Map<string, Fill>();
   const isCurrent = (fill: Fill): boolean => fills.get(fill.place.id) === fill;
@@ -173,12 +190,26 @@ export const createLargeObjectFill = (
    * One pass over the checkout: every placeholder naming an arrived object is
    * filled, wherever it now is; one naming an object still on its way is
    * tracked at its path; a tracked path that no longer holds its pointer is
-   * someone else's now and dropped.
+   * someone else's now and dropped. At most {@link flushBytes} are written
+   * (always at least one file); the rest stay tracked for the next flush.
+   *
+   * Answers whether arrived objects were left for the next flush.
    */
-  const sweep = async (fill: Fill): Promise<void> => {
+  /* The landed bytes a later flush still has to write: one count per object a tracked placeholder still names. */
+  const unflushedOf = (fill: Fill): number => {
+    let total = 0;
+    for (const oid of new Set([...fill.pending.values()].map((placeholder) => placeholder.oid))) {
+      total += fill.landed.get(oid)?.byteLength ?? 0;
+    }
+    return total;
+  };
+
+  const sweep = async (fill: Fill): Promise<boolean> => {
     const before = await capture(fill.place);
     const filled: string[] = [];
     const gone: string[] = [];
+    let written = 0;
+    let more = false;
     const entries: RevisionTreeInput[] = before.entries().map(({ path, content, mode }) => {
       const known = fill.pending.get(path);
       const placeholder = placeholderAt(fill, known, content);
@@ -193,7 +224,13 @@ export const createLargeObjectFill = (
         fill.pending.set(path, placeholder);
         return [path, content, mode];
       }
+      if (filled.length > 0 && written + bytes.byteLength > flushBytes) {
+        fill.pending.set(path, placeholder);
+        more = true;
+        return [path, content, mode];
+      }
       filled.push(path);
+      written += bytes.byteLength;
       return [path, bytes, mode];
     });
     for (const path of fill.pending.keys()) {
@@ -202,62 +239,108 @@ export const createLargeObjectFill = (
       }
     }
     if (filled.length > 0) {
-      await materializeTree(fill.place, new ImmutableRevisionTree(entries), { before });
+      await materializeTree(fill.place, new ImmutableRevisionTree(entries), { before, purpose: 'fill' });
     }
     for (const path of [...filled, ...gone]) {
       fill.pending.delete(path);
     }
+    /* Counted again from what is still owed, not decremented by what was written: an object whose
+     * placeholder is gone or already real would otherwise stay counted, and every later arrival
+     * would flush at once. */
+    fill.unflushedBytes = unflushedOf(fill);
+    return more;
   };
 
-  /* A sweep under the checkout's fence. A writer that moved the checkout under it is swept again, never a failure. */
-  const flushNow = async (fill: Fill): Promise<void> => {
+  /*
+   * A sweep under the checkout's fence. A writer that moved the checkout under
+   * it is swept again, never a failure. Answers whether arrived objects were
+   * left for the next flush.
+   */
+  const flushNow = async (fill: Fill): Promise<boolean> => {
     if (!isCurrent(fill)) {
-      return;
+      return false;
     }
-    const swept = await withCheckoutFence(fill.place.id, async () => {
-      for (let attempt = 1; ; attempt += 1) {
-        try {
-          // oxlint-disable-next-line no-await-in-loop -- each sweep re-reads what the last one lost to a writer.
-          await sweep(fill);
-          return true;
-        } catch (error) {
-          if (!(error instanceof RevisionPortError && error.code === 'CHECKOUT_CONFLICT')) {
-            throw error;
-          }
-          if (attempt >= conflictSweeps) {
-            return false;
+    let more = false;
+    const swept = await workerTimings.span('fill.flush', async () =>
+      withCheckoutFence(fill.place.id, async () => {
+        for (let attempt = 1; ; attempt += 1) {
+          try {
+            // oxlint-disable-next-line no-await-in-loop -- each sweep re-reads what the last one lost to a writer.
+            more = await sweep(fill);
+            return true;
+          } catch (error) {
+            if (!(error instanceof RevisionPortError && error.code === 'CHECKOUT_CONFLICT')) {
+              throw error;
+            }
+            if (attempt >= conflictSweeps) {
+              return false;
+            }
           }
         }
-      }
-    });
+      }),
+    );
     if (!swept) {
       scheduleFlush(fill);
+      return false;
     }
+    return more;
   };
-  const flush = async (fill: Fill): Promise<void> => {
+  const flush = async (fill: Fill): Promise<boolean> => {
     clearTimeout(fill.flushTimer);
     fill.flushTimer = undefined;
     // oxlint-disable-next-line promise/prefer-await-to-then -- one writer at a time per fill, in arrival order.
     const next = fill.flushing.then(async () => flushNow(fill));
-    // oxlint-disable-next-line promise/prefer-await-to-then -- the chain survives a failed write; the caller still sees it.
-    fill.flushing = next.catch(() => undefined);
+    /* The chain survives a failed write; the caller still sees it. */
+    fill.flushing = (async (): Promise<void> => {
+      try {
+        await next;
+      } catch {
+        /* Reported to the flush's own caller. */
+      }
+    })();
     return next;
   };
-  const scheduleFlush = (fill: Fill): void => {
+  /* Flush until no arrived object is left waiting: the end of a run writes everything, a batch at a time. */
+  const flushAll = async (fill: Fill): Promise<void> => {
+    // oxlint-disable-next-line no-await-in-loop -- each batch writes what the last one left.
+    while ((await flush(fill)) && isCurrent(fill)) {
+      /* The next batch. */
+    }
+  };
+  /*
+   * One timed flush at a time: a timer that fires while one is writing marks
+   * the fill to flush again when it ends instead of queueing behind it, and a
+   * flush that left objects for later starts the next one at once.
+   */
+  const scheduleFlush = (fill: Fill, delay = flushMilliseconds): void => {
     if (!isCurrent(fill)) {
       return;
     }
+    if (fill.flushRunning) {
+      fill.flushAgain = true;
+      return;
+    }
     fill.flushTimer ??= setTimeout(() => {
+      fill.flushTimer = undefined;
+      fill.flushRunning = true;
+      fill.flushAgain = false;
       // async-iife: bootstrap -- a timer's flush; a failed one is retried by the next, and the last is awaited by the run.
       void (async (): Promise<void> => {
+        let more = false;
         try {
-          await flush(fill);
+          more = await flush(fill);
         } catch {
           /* The run's final flush writes whatever this one could not. */
+        } finally {
+          fill.flushRunning = false;
         }
         tellSoon(fill);
+        if (more || fill.flushAgain) {
+          fill.flushAgain = false;
+          scheduleFlush(fill, more || fill.unflushedBytes >= flushBytes ? 0 : flushMilliseconds);
+        }
       })();
-    }, flushMilliseconds);
+    }, delay);
   };
 
   const arrive = (fill: Fill, oid: string, content: Uint8Array<ArrayBuffer>): void => {
@@ -266,6 +349,7 @@ export const createLargeObjectFill = (
     }
     fill.arrived.add(oid);
     fill.bytes += content.byteLength;
+    fill.unflushedBytes += content.byteLength;
     fill.landed.set(oid, content);
   };
 
@@ -294,14 +378,21 @@ export const createLargeObjectFill = (
           }
           arrive(fill, oid, content);
           tellSoon(fill);
-          scheduleFlush(fill);
+          /* A full batch flushes now rather than waiting out the timer. */
+          if (fill.unflushedBytes >= flushBytes && !fill.flushRunning) {
+            clearTimeout(fill.flushTimer);
+            fill.flushTimer = undefined;
+            scheduleFlush(fill, 0);
+          } else {
+            scheduleFlush(fill);
+          }
         },
       });
       if (!isCurrent(fill)) {
         return;
       }
       arriveFromTree(fill, full);
-      await flush(fill);
+      await flushAll(fill);
       if (!isCurrent(fill)) {
         return;
       }
@@ -317,7 +408,7 @@ export const createLargeObjectFill = (
         return;
       }
       /* Whatever arrived before the failure is still written, and what changed meanwhile swept. */
-      await flush(fill).catch(() => undefined);
+      await flushAll(fill).catch(() => undefined);
       fill.error = error instanceof Error ? error.message : String(error);
       tell(fill);
     }
@@ -364,6 +455,9 @@ export const createLargeObjectFill = (
       flushing: Promise.resolve(),
       flushTimer: undefined,
       reportTimer: undefined,
+      flushRunning: false,
+      flushAgain: false,
+      unflushedBytes: 0,
     };
     fills.set(place.id, next);
     next.running = run(next);

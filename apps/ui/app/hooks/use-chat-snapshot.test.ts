@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { workbenchRecords } from '@taucad/workbench';
-import type { GeometryComponentManifest } from '@taucad/types';
-import { projectViewerSelection, projectWorkbenchSnapshot } from '#hooks/use-chat-snapshot.js';
+import { snapshotSchema } from '@taucad/chat';
+import type { FileEntry, FileProvenance, GeometryComponentManifest } from '@taucad/types';
+import { projectFileTree, projectViewerSelection, projectWorkbenchSnapshot } from '#hooks/use-chat-snapshot.js';
 import type { WorkbenchLayoutSnapshot } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 
 describe('projectWorkbenchSnapshot', () => {
@@ -178,5 +179,49 @@ describe('projectViewerSelection', () => {
         'a.ts',
       ),
     ).toBeUndefined();
+  });
+});
+
+describe('projectFileTree', () => {
+  type FileRow = Extract<FileEntry, { type: 'file' }>;
+  const text = (path: string, lineCount?: number, provenance?: FileProvenance): FileRow => ({
+    path,
+    name: path.split('/').pop()!,
+    type: 'file',
+    size: 12,
+    mtimeMs: 1,
+    isLoaded: false,
+    contentKind: 'text',
+    ...(lineCount === undefined ? {} : { lineCount }),
+    ...(provenance === undefined ? {} : { provenance }),
+  });
+  const binary: FileRow = {
+    path: 'models/a.step',
+    name: 'a.step',
+    type: 'file',
+    size: 12,
+    mtimeMs: 1,
+    isLoaded: false,
+    contentKind: 'binary',
+  };
+  const folder: FileEntry = { path: 'models', name: 'models', type: 'dir', size: 0, mtimeMs: 1, isLoaded: true };
+  const skill: FileProvenance = { source: 'system-skills', versioned: false, agentAccess: 'read-only' };
+
+  /* A head listing leaves a text row uncounted; the wire takes a text kind only with its count. */
+  it('keeps each file’s kind where the wire can carry it, and only the project’s rows', () => {
+    const rows = projectFileTree([
+      text('main.scad', 3),
+      text('notes.md'),
+      binary,
+      text('.agents/skills/x/SKILL.md', 2, skill),
+      folder,
+    ]);
+
+    expect(rows).toStrictEqual([
+      { path: 'main.scad', name: 'main.scad', type: 'file', size: 12, contentKind: 'text', lineCount: 3 },
+      { path: 'notes.md', name: 'notes.md', type: 'file', size: 12 },
+      { path: 'models/a.step', name: 'a.step', type: 'file', size: 12, contentKind: 'binary' },
+    ]);
+    expect(snapshotSchema.safeParse({ fileTree: rows }).success).toBe(true);
   });
 });

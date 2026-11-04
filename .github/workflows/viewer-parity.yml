@@ -1,0 +1,181 @@
+name: Viewer parity
+
+# Viewer parity gate (Tau Brain research/nanoraster-viewer-parity-charter.md, W6, D2, D7): every parity fixture's
+# nanoraster capture, from the options Tau sends for the viewer's camera, is within 1% mean absolute RGB difference of
+# the production viewer's frame, with ambient occlusion on and off, on software GPUs.
+#
+# 1. `viewer` (four shards): the production viewer in headed Chromium under Xvfb on SwiftShader WebGPU. Headless
+#    Chromium loses the SwiftShader WebGPU device on its first present and the viewer falls back to WebGL2; the capture
+#    refuses such a frame. The software-adapter AO gate is the harness's one bypass (I2), named in the test.
+# 2. `gate`: nanoraster's native addon on lavapipe (Mesa's Vulkan CPU driver) renders each fixture at the captured
+#    camera and the gate compares (`tau-examples:test:viewer-parity`). Desktop, the CLI and the MCP host ship this
+#    native build; the web app ships nanoraster's WASM build in a worker, which this workflow does not render yet.
+#
+# Until Tau's catalog moves to nanoraster 0.9.0 the gate renders with the program branch built at
+# NANORASTER_PARITY_REF. At that bump (charter W8, resume P5) delete NANORASTER_PARITY_REF, the `Build nanoraster`
+# steps and TAU_PARITY_NANORASTER below: the gate then loads the installed package and refuses one older than 0.9.0.
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/viewer-parity.yml'
+      - '.github/actions/setup-nx/**'
+      - 'pnpm-workspace.yaml'
+      - 'packages/viewer/src/**'
+      - 'packages/plugins/image/src/**'
+      - 'libs/types/src/constants/viewer-render-profile*'
+      - 'libs/agent-tools/src/capture/viewer-capture-options*'
+      - 'libs/tau-examples/fixtures/viewer-parity/**'
+      - 'libs/tau-examples/scripts/viewer-parity*'
+      - 'libs/tau-examples/vitest.viewer-parity.config.ts'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/viewer-parity.yml'
+      - 'pnpm-workspace.yaml'
+      - 'packages/viewer/src/**'
+      - 'packages/plugins/image/src/**'
+      - 'libs/types/src/constants/viewer-render-profile*'
+      - 'libs/agent-tools/src/capture/viewer-capture-options*'
+      - 'libs/tau-examples/fixtures/viewer-parity/**'
+      - 'libs/tau-examples/scripts/viewer-parity*'
+  workflow_dispatch:
+    inputs:
+      nanoraster-ref:
+        description: 'taucad/nanoraster commit to render with (default: NANORASTER_PARITY_REF)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: viewer-parity-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  NX_DAEMON: 'false'
+  NX_NO_CLOUD: 'true'
+  # The nanoraster program branch (claude/nanoraster-ambient-occlusion-32nhl5, nanoraster#130) with W1-W4.
+  NANORASTER_PARITY_REF: 2b47c470981093dd6b6ca80d603f3a385b7ecf9b
+  PARITY_VIEWER_OUT: out/test-results/viewer-parity/viewer
+  PARITY_OUT: out/test-results/viewer-parity/nanoraster
+
+jobs:
+  viewer:
+    name: Viewer references (${{ matrix.shard }}/4)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+      - name: Install Chromium and Xvfb
+        run: |
+          pnpm exec playwright install --with-deps chromium
+          sudo apt-get install -y xvfb
+      - name: Capture the viewer's frames
+        env:
+          TAU_E2E_WEBGPU_PROFILE: software
+          PARITY_HEADED: '1'
+          PARITY_SHARD: ${{ matrix.shard }}/4
+        run: xvfb-run -a -s '-screen 0 1280x1024x24' pnpm nx run viewer:capture:viewer-parity
+      - name: Upload the viewer references
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: viewer-parity-viewer-${{ matrix.shard }}
+          path: ${{ env.PARITY_VIEWER_OUT }}
+          if-no-files-found: error
+          retention-days: 14
+
+  gate:
+    name: Parity gate (nanoraster native, lavapipe)
+    needs: viewer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      NANORASTER_REF: ${{ inputs.nanoraster-ref || 'unset' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+      - name: Install lavapipe
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers
+          echo 'VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json' >> "$GITHUB_ENV"
+      # Build nanoraster: remove at the 0.9.0 catalog bump (see the header).
+      - name: Build nanoraster (check out)
+        run: |
+          ref="$NANORASTER_PARITY_REF"
+          if [ "$NANORASTER_REF" != 'unset' ]; then ref="$NANORASTER_REF"; fi
+          checkout="$RUNNER_TEMP/nanoraster"
+          git clone --filter=blob:none https://github.com/taucad/nanoraster "$checkout"
+          git -C "$checkout" checkout --detach "$ref"
+          echo "TAU_PARITY_NANORASTER=$checkout" >> "$GITHUB_ENV"
+          echo "NANORASTER_COMMIT=$(git -C "$checkout" rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: Build nanoraster (cache)
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ${{ runner.temp }}/nanoraster/rust/target
+          key: viewer-parity-nanoraster-${{ env.NANORASTER_COMMIT }}
+          restore-keys: viewer-parity-nanoraster-
+      - name: Build nanoraster (native addon)
+        working-directory: ${{ runner.temp }}/nanoraster
+        env:
+          CARGO_BUILD_JOBS: '2'
+        run: |
+          rustup toolchain install
+          pnpm install --frozen-lockfile
+          pnpm run build:napi
+      - name: Download the viewer references
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: viewer-parity-viewer-*
+          path: ${{ env.PARITY_VIEWER_OUT }}
+          merge-multiple: true
+      - name: Run the parity gate
+        run: pnpm nx run tau-examples:test:viewer-parity
+      - name: Summarize
+        if: always()
+        run: |
+          results="$PARITY_OUT/results.json"
+          if [ -f "$results" ]; then
+            {
+              echo "### Viewer parity against nanoraster ${NANORASTER_COMMIT:-installed}"
+              echo
+              echo '| Fixture | AO on | AO off | AO correlation | Result |'
+              echo '| --- | --- | --- | --- | --- |'
+              jq -r '.results[] | "| \(.fixture) | \(.aoOn.percent * 1000 | round / 1000)% | \(.aoOff.percent * 1000 | round / 1000)% | \(.aoCorrelation // "n/a" | tostring | .[0:5]) | \(if .pass then "pass" elif .knownFailure then "known failure" else "FAIL" end) |"' "$results"
+              echo
+              jq -r '.summary' "$results"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload the parity results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: viewer-parity-results
+          path: ${{ env.PARITY_OUT }}
+          retention-days: 14

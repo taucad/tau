@@ -41,6 +41,9 @@ export const dockviewStyleOverrides = cn(
   // Two 2px horizontal margins combine into the same 4px gap as the vertical inset.
   '[--dv-tab-margin:0.25rem_0.125rem]',
   '[--dv-overlay-z-index:999]',
+  // Contain Dockview's own stacking (sashes 99, drop targets and overlays up to 9999) so it orders only Dockview's
+  // parts: app menus, popovers and tooltips portal to the body at z-50 and must draw above every pane.
+  'isolate',
   // ── Drag & drop ──
   '[--dv-drag-over-background-color:color-mix(in_oklch,var(--primary),transparent_80%)]',
   '[--dv-drag-over-border-color:var(--primary)]',

@@ -347,6 +347,36 @@ describe('FileSystemAccessProvider', () => {
       );
       await expect(provider.exists('denied')).rejects.toMatchObject({ name: 'NotAllowedError' });
     });
+
+    it('should return false beneath a file instead of reporting ENOTDIR', async () => {
+      await provider.writeFile('plain.txt', 'file');
+      expect(await provider.exists('plain.txt/child')).toBe(false);
+    });
+  });
+
+  describe('metadata-only preflights', () => {
+    it('should answer exists, unlink and rmdir checks without reading file bytes', async () => {
+      await provider.writeFile('a.txt', 'alpha');
+      await provider.mkdir('dir');
+      const slices = vi.spyOn(File.prototype, 'slice');
+      const reads = vi.spyOn(Blob.prototype, 'arrayBuffer');
+
+      expect(await provider.exists('a.txt')).toBe(true);
+      expect(await provider.exists('dir')).toBe(true);
+      expect(await provider.exists('missing.txt')).toBe(false);
+      await expect(provider.unlink('dir')).rejects.toMatchObject({ code: 'EISDIR' });
+      await expect(provider.unlink('missing.txt')).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(provider.rmdir('a.txt')).rejects.toMatchObject({ code: 'ENOTDIR' });
+      await expect(provider.rmdir('missing')).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(provider.rename('missing.txt', 'b.txt')).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(provider.rename('a.txt', 'dir')).rejects.toMatchObject({ code: 'EEXIST' });
+      await provider.unlink('a.txt');
+
+      expect(slices).not.toHaveBeenCalled();
+      expect(reads).not.toHaveBeenCalled();
+      expect(await provider.exists('a.txt')).toBe(false);
+      expect(await provider.exists('dir')).toBe(true);
+    });
   });
 
   // ---------------------------------------------------------------------------

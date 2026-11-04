@@ -318,11 +318,34 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
 
     const parentHandle = await this._resolveDirectoryHandle(segments.slice(0, -1).join('/'));
     const name = segments.at(-1)!;
-    const entry = await this.stat(path);
-    if (entry.type === 'dir') {
+    const kind = await this._entryKind(path);
+    if (kind === undefined) {
+      throw this._enoent(path);
+    }
+    if (kind === 'dir') {
       throw this._eisdir(path);
     }
     await parentHandle.removeEntry(name);
+  }
+
+  /**
+   * Whether an entry exists at `path`, answered from the handles alone: unlike
+   * `stat`, it never reads the file's bytes to classify them.
+   *
+   * @param path - Absolute path to test.
+   * @returns `true` for a file or directory at `path`.
+   */
+  public override async exists(path: string): Promise<boolean> {
+    this._assertReady();
+    this._assertRootedPath(path);
+    try {
+      return (await this._entryKind(path)) !== undefined;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOTDIR') {
+        return false;
+      }
+      throw error;
+    }
   }
 
   /**
@@ -340,8 +363,11 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
 
     const parentHandle = await this._resolveDirectoryHandle(segments.slice(0, -1).join('/'));
     const name = segments.at(-1)!;
-    const entry = await this.stat(path);
-    if (entry.type !== 'dir') {
+    const kind = await this._entryKind(path);
+    if (kind === undefined) {
+      throw this._enoent(path);
+    }
+    if (kind !== 'dir') {
       throw this._enotdir(path);
     }
     try {
@@ -368,26 +394,23 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     this._assertReady();
     this._assertRootedPath(from);
     this._assertRootedPath(to);
+    const sourceKind = await this._entryKind(from);
+    if (sourceKind === undefined) {
+      throw this._enoent(from);
+    }
     if (from === to) {
-      await this.stat(from);
       return;
     }
     if (from === '') {
       throw this._einval(from);
     }
-    const sourceStat = await this.stat(from);
-    if (sourceStat.type === 'dir' && to.startsWith(`${from}/`)) {
+    if (sourceKind === 'dir' && to.startsWith(`${from}/`)) {
       throw this._einval(to);
     }
-    try {
-      await this.stat(to);
+    if ((await this._entryKind(to)) !== undefined) {
       throw this._eexist(to);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        throw error;
-      }
     }
-    if (sourceStat.type === 'dir') {
+    if (sourceKind === 'dir') {
       await this._renameDirectory(from, to);
       return;
     }
@@ -863,6 +886,51 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       } catch {
         break;
       }
+    }
+  }
+
+  /**
+   * What kind of entry `path` names, from the directory handles alone.
+   *
+   * `stat` reads a file's leading bytes to classify its content; the existence
+   * and kind checks a mutation makes before it writes need none of that, and
+   * on OPFS the read was most of what a rename cost.
+   *
+   * @param path - Absolute path to look up.
+   * @returns `'file'`, `'dir'`, or `undefined` when nothing is there.
+   * @throws `ENOTDIR` when an ancestor of `path` is a file.
+   */
+  private async _entryKind(path: string): Promise<'file' | 'dir' | undefined> {
+    const segments = this._splitPath(path);
+    if (segments.length === 0) {
+      return 'dir';
+    }
+    let parent: FileSystemDirectoryHandle;
+    try {
+      parent = await this._resolveDirectoryHandle(segments.slice(0, -1).join('/'));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return undefined;
+      }
+      throw error;
+    }
+    const name = segments.at(-1)!;
+    try {
+      await parent.getFileHandle(name);
+      return 'file';
+    } catch (error) {
+      if (!hasDomName(error, 'NotFoundError') && !hasDomName(error, 'TypeMismatchError')) {
+        throw error;
+      }
+    }
+    try {
+      await parent.getDirectoryHandle(name);
+      return 'dir';
+    } catch (error) {
+      if (hasDomName(error, 'NotFoundError') || hasDomName(error, 'TypeMismatchError')) {
+        return undefined;
+      }
+      throw error;
     }
   }
 

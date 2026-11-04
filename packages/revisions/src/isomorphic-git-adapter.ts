@@ -28,6 +28,7 @@ import {
   isDescendent,
   listRefs,
   listRemotes,
+  listServerRefs,
   packObjects,
   readBlob,
   readObject,
@@ -1380,13 +1381,24 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         throw http.refused(error, name);
       },
     );
+    /* A server that answers protocol v2 whatever it is asked sends capabilities
+     * and no refs: an empty list here would read as an empty repository. Ask
+     * it with `ls-refs` instead, and keep nothing for a fetch to reuse. */
+    const references =
+      advertisement.protocolVersion === 1
+        ? (advertisement.refs ?? [])
+        : await listServerRefs({ http, url }).catch((error: unknown) => {
+            throw http.refused(error, name);
+          });
     const listed = Object.freeze(
-      (advertisement.refs ?? [])
+      references
         /* `git ls-remote --refs`, as the native leg reads it: no `HEAD`, no peeled tags. */
         .filter((reference) => reference.ref.startsWith('refs/') && !reference.ref.endsWith('^{}'))
         .map((reference) => Object.freeze({ name: reference.ref, head: revisionId(reference.oid) })),
     );
-    listedAdvertisements.set(listed, { url, advertisement });
+    if (advertisement.protocolVersion === 1) {
+      listedAdvertisements.set(listed, { url, advertisement });
+    }
     return listed;
   };
 
@@ -2039,7 +2051,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
        * same address (R6). */
       const listed = input.advertised === undefined ? undefined : listedAdvertisements.get(input.advertised);
       const advertisement =
-        listed?.url === url
+        listed?.url === url && listed.advertisement.protocolVersion === 1
           ? listed.advertisement
           : await getRemoteInfo2({ http, url, forPush: false, protocolVersion: 1 }).catch(refused);
       const advertised = new Map((advertisement.refs ?? []).map((reference) => [reference.ref, reference.oid]));

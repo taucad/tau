@@ -344,9 +344,10 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
   }
 
   /**
-   * Move the file or directory at `from` to `to`. Files are copied + unlinked
-   * (the FS Access API has no native rename); directories are walked
-   * recursively and re-created under the new path.
+   * Move the file or directory at `from` to `to`. Files go through
+   * {@link FileSystemAccessProvider._moveFile} (copy + unlink here; OPFS uses
+   * the native handle move); directories are walked recursively and re-created
+   * under the new path. An existing destination is refused with `EEXIST`.
    *
    * @param from - Source absolute path.
    * @param to - Destination absolute path.
@@ -378,9 +379,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       await this._renameDirectory(from, to);
       return;
     }
-    const data = await this.readFileRaw(from);
-    await this.writeFile(to, data);
-    await this.unlink(from);
+    await this._moveFile(from, to);
     this._invalidateHandleCachePrefix(from);
   }
 
@@ -607,6 +606,21 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     }
   }
 
+  /**
+   * Move one regular file whose destination {@link FileSystemAccessProvider.rename}
+   * has already proven absent. A user-picked root has no portable native move,
+   * so the bytes are copied and the source unlinked; missing destination
+   * parents are created by the write.
+   *
+   * @param from - Source file path.
+   * @param to - Absent destination file path.
+   */
+  protected async _moveFile(from: string, to: string): Promise<void> {
+    const data = await this.readFileRaw(from);
+    await this.writeFile(to, data);
+    await this.unlink(from);
+  }
+
   protected async readFileRaw(path: string): Promise<Uint8Array<ArrayBuffer>> {
     this._assertReady();
     this._assertRootedPath(path);
@@ -749,29 +763,8 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       throw this._eisdir(path);
     }
     const fileName = segments.pop()!;
-    const createdDirectories: string[] = [];
-    let directoryHandle = this._rootHandle;
-    let directoryPath = '';
-
+    const { directoryHandle, createdDirectories } = await this._openDirectoryForWrite(segments.join('/'));
     try {
-      for (const segment of segments) {
-        directoryPath = directoryPath === '' ? segment : `${directoryPath}/${segment}`;
-        try {
-          // oxlint-disable-next-line no-await-in-loop -- Sequential directory traversal is required by the handle API.
-          directoryHandle = await directoryHandle.getDirectoryHandle(segment);
-        } catch (error) {
-          if (hasDomName(error, 'TypeMismatchError')) {
-            throw this._enotdir(directoryPath);
-          }
-          if (!hasDomName(error, 'NotFoundError')) {
-            throw error;
-          }
-          // oxlint-disable-next-line no-await-in-loop -- Missing ancestors are created in path order.
-          directoryHandle = await directoryHandle.getDirectoryHandle(segment, { create: true });
-          createdDirectories.push(directoryPath);
-        }
-      }
-
       try {
         return {
           fileHandle: await directoryHandle.getFileHandle(fileName),
@@ -797,6 +790,45 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     }
   }
 
+  /**
+   * Resolve the directory at `path` for a write, creating missing ancestors in
+   * path order. A failure removes exactly the directories this call created.
+   *
+   * @param path - Directory path; `''` is the root.
+   * @returns The directory handle and the paths this call created, shallowest first.
+   */
+  protected async _openDirectoryForWrite(path: string): Promise<{
+    directoryHandle: FileSystemDirectoryHandle;
+    createdDirectories: string[];
+  }> {
+    const createdDirectories: string[] = [];
+    let directoryHandle = this._rootHandle;
+    let directoryPath = '';
+    try {
+      for (const segment of this._splitPath(path)) {
+        directoryPath = directoryPath === '' ? segment : `${directoryPath}/${segment}`;
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- Sequential directory traversal is required by the handle API.
+          directoryHandle = await directoryHandle.getDirectoryHandle(segment);
+        } catch (error) {
+          if (hasDomName(error, 'TypeMismatchError')) {
+            throw this._enotdir(directoryPath);
+          }
+          if (!hasDomName(error, 'NotFoundError')) {
+            throw error;
+          }
+          // oxlint-disable-next-line no-await-in-loop -- Missing ancestors are created in path order.
+          directoryHandle = await directoryHandle.getDirectoryHandle(segment, { create: true });
+          createdDirectories.push(directoryPath);
+        }
+      }
+      return { directoryHandle, createdDirectories };
+    } catch (error) {
+      await this._cleanupCreatedDirectories(createdDirectories);
+      throw error;
+    }
+  }
+
   protected async _cleanupFailedFileCreation(
     path: string,
     created: { createdFile: boolean; createdDirectories: readonly string[] },
@@ -809,6 +841,17 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       }
     }
     await this._cleanupCreatedDirectories(created.createdDirectories);
+  }
+
+  protected async _cleanupCreatedDirectories(paths: readonly string[]): Promise<void> {
+    for (const path of paths.toReversed()) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- Cleanup must proceed from deepest child to parent.
+        await this._removeEntry(path, false);
+      } catch {
+        break;
+      }
+    }
   }
 
   private async _openExclusiveWritable(
@@ -853,17 +896,6 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     this._exclusiveWritableSupported = false;
     await Promise.allSettled([writable.abort(), competing.abort()]);
     return undefined;
-  }
-
-  private async _cleanupCreatedDirectories(paths: readonly string[]): Promise<void> {
-    for (const path of paths.toReversed()) {
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- Cleanup must proceed from deepest child to parent.
-        await this._removeEntry(path, false);
-      } catch {
-        break;
-      }
-    }
   }
 
   private async _removeEntry(path: string, recursive: boolean): Promise<void> {

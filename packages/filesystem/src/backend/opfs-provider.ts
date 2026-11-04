@@ -26,6 +26,14 @@ type SyncAccessCapableFileHandle = FileSystemFileHandle & {
   createSyncAccessHandle?: () => Promise<SyncAccessHandle>;
 };
 
+/**
+ * `FileSystemHandle.move()` as OPFS ships it. Declared locally because the DOM
+ * lib does not type it yet, and absent in engines that never shipped it.
+ */
+type MovableFileHandle = FileSystemFileHandle & {
+  move?: (destination: FileSystemDirectoryHandle, name: string) => Promise<void>;
+};
+
 type OPFSCapabilities = Omit<ProviderCapabilities, 'durability'> & {
   durability: NonNullable<ProviderCapabilities['durability']>;
 };
@@ -176,6 +184,40 @@ export class OPFSProvider extends FileSystemAccessProvider {
       handle.flush();
     } finally {
       handle.close();
+    }
+  }
+
+  /**
+   * Move one file with the platform's native `move()`: one metadata operation
+   * instead of reading the bytes, writing and flushing a copy, and unlinking
+   * the source — and atomic, so an interrupted move never leaves both or
+   * neither. {@link FileSystemAccessProvider.rename} has already refused an
+   * existing destination with `EEXIST`, so the platform's own overwrite
+   * behaviour is never reached. An engine without `move()`, or one that
+   * refuses it as unsupported, takes the inherited copy path.
+   *
+   * @param from - Source file path.
+   * @param to - Absent destination file path.
+   */
+  protected override async _moveFile(from: string, to: string): Promise<void> {
+    const source = (await this._resolveFileHandle(from)) as MovableFileHandle;
+    const { move } = source;
+    if (typeof move !== 'function') {
+      await super._moveFile(from, to);
+      return;
+    }
+    const segments = this._splitPath(to);
+    const name = segments.pop()!;
+    const { directoryHandle, createdDirectories } = await this._openDirectoryForWrite(segments.join('/'));
+    try {
+      await move.call(source, directoryHandle, name);
+    } catch (error) {
+      await this._cleanupCreatedDirectories(createdDirectories);
+      if (error instanceof DOMException && error.name === 'NotSupportedError') {
+        await super._moveFile(from, to);
+        return;
+      }
+      throw error;
     }
   }
 

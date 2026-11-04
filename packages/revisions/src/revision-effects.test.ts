@@ -3416,6 +3416,62 @@ describe('independent sync record failures', () => {
     expect(requested).toEqual([['refs/heads/main'], ['refs/heads/main']]);
   }, 30_000);
 
+  /* R4 review: the connect no longer writes the evidence tracking ref, so a reconnect's opening pull must still
+   * read a record this device already holds as applied, and never move its changed exports aside. */
+  it.each([
+    { name: 'its own ref names the remote record', local: 'same' },
+    { name: 'its own ref recorded on top of the remote record', local: 'ahead' },
+  ] as const)(
+    'keeps differing local exports on a reconnect when $name',
+    async ({ local }) => {
+      const context = await fixture({
+        'tau.json': '{"syncLargeExports":true}\n',
+        'exports/shared.step': 'edited since it was recorded\n',
+      });
+      await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+      const recorded = await context.port.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([['exports/shared.step', 'recorded output\n']]),
+        provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+        summary: { generated: 'Exports' },
+      });
+      const remoteHead = revisionId(recorded.commitId);
+      const ahead =
+        local === 'same'
+          ? undefined
+          : await context.port.writeRevision({
+              parents: [remoteHead],
+              tree: new ImmutableRevisionTree([['exports/shared.step', 'recorded again\n']]),
+              provenance: { source: 'user', actorId: 'device-a', createdAt: 2 },
+              summary: { generated: 'Exports again' },
+            });
+      const localHead = ahead === undefined ? remoteHead : revisionId(ahead.commitId);
+      await context.port.updateRef({ name: 'refs/tau/evidence/exports', expectedHead: undefined, head: localHead });
+      const actors = createRevisionActors({
+        port: {
+          ...context.port,
+          listRemoteRefs: async () => [{ name: 'refs/tau/evidence/exports', head: remoteHead }],
+          fetch: async () => ({ refs: [{ name: 'refs/remotes/tau/tau/evidence/exports', head: remoteHead }] }),
+        },
+        projectId: 'project-1',
+        filesystem: () => context.filesystem,
+      });
+
+      const fetched = await run<SyncFetchActorOutput>(actors.sync.fetch, {
+        remote: 'tau',
+        branch: 'main',
+        deadlineMilliseconds: 10_000,
+      });
+      expect(fetched.recordProjection?.priorEvidenceHead).toBe(remoteHead);
+      const projected = await run<SyncProjectRecordsActorOutput>(actors.sync.projectRecords, fetched.recordProjection);
+
+      expect(projected.records).toEqual([{ name: 'refs/tau/evidence/exports', status: 'upToDate', head: remoteHead }]);
+      expect(await context.filesystem.readFile('exports/shared.step', 'utf8')).toBe('edited since it was recorded\n');
+      expect(await context.filesystem.exists('.tau/artifacts/sync-conflicts')).toBe(false);
+    },
+    30_000,
+  );
+
   it('retains a differing local export before adopting and re-offering the fetched value', async () => {
     const context = await fixture({
       'tau.json': '{"syncLargeExports":true}\n',

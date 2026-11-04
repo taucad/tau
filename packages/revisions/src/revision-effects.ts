@@ -1684,6 +1684,38 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
   };
 
+  /*
+   * The remote's evidence head, when this device's own evidence ref already
+   * holds it: the head itself, or a descendant of it this device recorded.
+   *
+   * Before R4 the connect-time fetch wrote the evidence tracking ref, so the
+   * opening pull read the remote's record as already applied and never
+   * restored it over local exports. The connect no longer fetches records, so
+   * a reconnecting device with no tracking ref would restore — and move every
+   * export it changed since into `sync-conflicts`. A record this device's own
+   * ref already contains is not news to it (C21); one it does not hold, as on
+   * a fresh device, is restored as before. A head this store cannot walk to is
+   * not held.
+   */
+  const heldEvidenceHead = async (remoteHead: string | undefined): Promise<string | undefined> => {
+    if (remoteHead === undefined) {
+      return undefined;
+    }
+    const local = await port.readRef(evidenceRefName);
+    if (local === undefined) {
+      return undefined;
+    }
+    if (String(local) === remoteHead) {
+      return remoteHead;
+    }
+    try {
+      const { behind } = await port.divergence({ head: local, base: revisionId(remoteHead) });
+      return behind === 0 ? remoteHead : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
   /** Record generated evidence on its own ref; authored history stays clean. */
   const recordEvidence = async (enabled: boolean, remoteHead?: string): Promise<readonly SyncRefOutcome[]> => {
     if (!enabled) {
@@ -5100,8 +5132,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               (entry) => entry.operation === 'projection' && entry.ref === evidenceRefName,
             )
               ? undefined
-              : trackingBefore.find((ref) => ref.name === evidenceRefName || ref.name.endsWith('/tau/evidence/exports'))
-                  ?.head,
+              : (trackingBefore.find(
+                  (ref) => ref.name === evidenceRefName || ref.name.endsWith('/tau/evidence/exports'),
+                )?.head ?? (await heldEvidenceHead(advertised.find((ref) => ref.name === evidenceRefName)?.head))),
           },
           ...(advanced.length === 0 ? {} : { advanced }),
           ...(merged.length === 0 ? {} : { merged }),

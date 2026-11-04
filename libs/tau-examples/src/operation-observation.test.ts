@@ -3,7 +3,11 @@
  * T28: the evaluate observation's `parameters` facts on the real kitchen-sink and hinged-box examples. Each example's
  * kernel describes its own parameters, `@taucad/parameters` compiles the manifest and the worker walks it, so the counts
  * come from the examples themselves rather than from a transcribed schema.
+ *
+ * `runtime:test` repeats these facts from `packages/runtime/src/client/fixtures/<example>.parameters.json`, copies of the
+ * declarations these examples describe; the last block here fails when a copy no longer equals the live description.
  */
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { RuntimeOperationObservation } from '@taucad/runtime/types';
@@ -75,5 +79,36 @@ describe('parameter facts on the compiled example manifests (T28)', { timeout: 1
   it('should count the two overridden hinged-box lengths and angle as modified', async () => {
     const observation = await observeEvaluate(hingedBox, { wall: 3, maxOpening: 95 });
     expect(observation?.worker?.parameters).toEqual({ declared: 7, modified: 2, features: ['units'] });
+  });
+});
+
+/** The runtime's copy of an example's described declaration, read as data: the runtime package is not imported. */
+const runtimeFixturePath = (name: string): URL =>
+  new URL(`../../../packages/runtime/src/client/fixtures/${name}.parameters.json`, import.meta.url);
+
+describe('runtime parameter fixtures match the examples (T28)', { timeout: 120_000 }, () => {
+  it.each([
+    { label: 'kitchen-sink', example: kitchenSink },
+    { label: 'hinged-box', example: hingedBox },
+  ])('should describe the $label declaration the runtime fixture copies', async ({ example }) => {
+    const client = await createExampleRuntimeClient(examplePath(example.kernel, example.name));
+    try {
+      const description = await client.describe({ source: { path: example.entry } });
+      if (!description.success) {
+        expect.fail(`${example.name} did not describe: ${JSON.stringify(description.issues)}`);
+      }
+      const { parameters } = description;
+      const fixture: unknown = JSON.parse(readFileSync(runtimeFixturePath(example.name), 'utf8'));
+      // On failure, regenerate the fixture from this description: `{ schema, resources, defaults, bindings }`, with
+      // `bindings` taken from the manifest's `bindingDeclarations`.
+      expect(fixture).toEqual({
+        schema: parameters.schema,
+        resources: parameters.resources,
+        defaults: parameters.defaults,
+        bindings: parameters.bindingDeclarations,
+      });
+    } finally {
+      client.terminate();
+    }
   });
 });

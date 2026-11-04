@@ -261,11 +261,24 @@ const main = async (): Promise<void> => {
       const menuDeadline = Date.now() + 120_000;
       let menuOpen = false;
       while (!menuOpen && Date.now() < menuDeadline) {
-        await sourceTab.click({ button: 'right' });
+        // A menu that opens after the 5 s window covers the tab, and another right-click then waits on the tab for
+        // the page's whole default timeout (run 41813999069 ubuntu-apt-x11 stage A failed on that click with the
+        // menu and its item on screen), so take a late menu as open and let a blocked right-click retry inside
+        // the deadline.
+        if (await openInEditor.isVisible()) {
+          menuOpen = true;
+          break;
+        }
+        await sourceTab
+          .click({ button: 'right', timeout: Math.max(1, Math.min(10_000, menuDeadline - Date.now())) })
+          .catch(() => undefined);
         menuOpen = await openInEditor.waitFor({ state: 'visible', timeout: 5000 }).then(
           () => true,
           () => false,
         );
+      }
+      if (!menuOpen) {
+        throw new Error('The main.py tab menu did not show Open in Editor');
       }
       await openInEditor.click();
       // Candidates span code-editor generations, so find the editable surface by its textbox role rather than by

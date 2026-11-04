@@ -233,17 +233,29 @@ export const createApplyTreeEffects = (
     for (const { edit } of result.moved) {
       published.add(edit.source);
     }
-    const [refused] = result.failed;
+    const [refused, ...others] = result.failed;
     if (refused === undefined) {
       return;
     }
+    /* The first refusal is raised; the rest are named so a batch that refused
+     * many files never reads as a one-file failure. */
+    const also =
+      others.length === 0
+        ? ''
+        : ` ${String(others.length)} more ${others.length === 1 ? 'file was' : 'files were'} refused: ${others.map(({ edit }) => edit.target).join(', ')}.`;
     if (refused.error.code === 'NAME_EXISTS') {
       throw new RevisionPortError(
         'CHECKOUT_CONFLICT',
-        `${refused.edit.target} was created while these files were being updated.`,
+        `${refused.edit.target} was created while these files were being updated.${also}`,
       );
     }
-    throw refused.error;
+    /* The pipeline wraps each move's failure; the per-file path raises the
+     * provider's own error (an errno, a missing workspace handle), so this does too. */
+    const raised: unknown = (refused.error as { cause?: unknown }).cause ?? refused.error;
+    if (also !== '' && raised instanceof Error) {
+      raised.message += also;
+    }
+    throw raised;
   };
 
   /**

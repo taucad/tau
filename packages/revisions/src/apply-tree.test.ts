@@ -106,8 +106,9 @@ type CountingOptions = Readonly<{
   linkedCheckouts?: boolean;
   /**
    * Offer a batch move shaped as the rooted view's: sequential moves, each one
-   * refusing an existing target as `NAME_EXISTS` and reported rather than
-   * thrown. Each move counts as its own mutation, so a stop can land mid-batch.
+   * refusing an existing target as `NAME_EXISTS`, every other failure reported
+   * with its cause rather than thrown, and the batch going on after either.
+   * Each move counts as its own mutation, so a stop can land mid-batch.
    */
   bulkMove?: boolean;
   /** Runs once as a batch move starts, before its first move: a concurrent writer's slot. */
@@ -198,10 +199,18 @@ const countingCheckout = (
                 failed.push({ edit, error: new WorkspaceMutationError('NAME_EXISTS', edit.target) });
                 continue;
               }
-              // oxlint-disable-next-line no-await-in-loop -- one move per edit, each a mutation a stop can land on.
-              await mutate('bulkMove:rename', async () => real.rename(pathOf(edit.source), pathOf(edit.target)));
-              // oxlint-disable-next-line no-await-in-loop -- the moved file's stat, as the pipeline answers.
-              moved.push({ edit, stat: await real.stat(pathOf(edit.target)) });
+              try {
+                // oxlint-disable-next-line no-await-in-loop -- one move per edit, each a mutation a stop can land on.
+                await mutate('bulkMove:rename', async () => real.rename(pathOf(edit.source), pathOf(edit.target)));
+                // oxlint-disable-next-line no-await-in-loop -- the moved file's stat, as the pipeline answers.
+                moved.push({ edit, stat: await real.stat(pathOf(edit.target)) });
+              } catch (error) {
+                /* As the pipeline does: the failure is reported, wrapping its cause, and the batch goes on. */
+                failed.push({
+                  edit,
+                  error: new WorkspaceMutationError('OPERATION_FAILED', edit.source, { cause: error }),
+                });
+              }
             }
             return { moved, failed };
           },
@@ -447,11 +456,15 @@ const baseFiles = { 'main.ts': 'export const size = 1;\n', 'drop.ts': 'export co
 const agentWrites = async (tree: NodeFsProvider): Promise<void> => {
   await tree.writeFile('main.ts', 'export const size = 22_222_222;\n');
   await tree.writeFile('added.ts', 'export const added = true;\n');
+  /* A second new file, so a stop can land between two moves of one batch. */
+  await tree.writeFile('lib/also-added.ts', 'export const alsoAdded = true;\n');
   await tree.unlink('drop.ts');
 };
 const putBack = async (tree: NodeFsProvider): Promise<void> => {
   await tree.writeFile('main.ts', baseFiles['main.ts']);
   await tree.unlink('added.ts');
+  await tree.unlink('lib/also-added.ts');
+  await tree.rmdir('lib');
   await tree.writeFile('drop.ts', baseFiles['drop.ts']);
 };
 
@@ -607,6 +620,76 @@ describe('a large apply', () => {
 
     await expect(applying).rejects.toMatchObject({ code: 'OPERATION_FAILED' });
     expect(await filesOf(context.tree)).toEqual([]);
+  });
+
+  it('should raise the provider’s own error a batch move wrapped, as the per-file path does, and name the other refusals', async () => {
+    const context = await project({}, { ...trustedStats, bulkMove: true });
+    const missing = Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+    /* The batch refuses every edit, wrapping the provider's errno as the pipeline does. */
+    const checkout: RevisionFileSystem = Object.assign(Object.create(context.checkout) as RevisionFileSystem, {
+      bulkMove: async (edits: readonly BulkMoveEdit[]): Promise<BulkMoveResult> => ({
+        moved: [],
+        failed: edits.map((edit) => ({
+          edit,
+          error: new WorkspaceMutationError('NOT_FOUND', edit.source, { cause: missing }),
+        })),
+      }),
+    });
+    const target = new ImmutableRevisionTree([
+      ['src/a.ts', 'a\n'],
+      ['src/b.ts', 'b\n'],
+      ['src/c.ts', 'c\n'],
+    ]);
+
+    const applying = materializer(checkout)(liveCheckout, target, { before: new ImmutableRevisionTree([]) });
+
+    await expect(applying).rejects.toBe(missing);
+    expect(missing.message).toBe('ENOENT: no such file or directory 2 more files were refused: src/b.ts, src/c.ts.');
+    expect(await filesOf(context.tree)).toEqual([]);
+  });
+
+  it('should name every other path a batch move refused as created alongside the conflict it raises', async () => {
+    const concurrent: { tree?: NodeFsProvider } = {};
+    const context = await project(
+      {},
+      {
+        ...trustedStats,
+        bulkMove: true,
+        beforeBulkMove: async () => {
+          await concurrent.tree?.writeFile('src/a.ts', 'mine a\n');
+          await concurrent.tree?.writeFile('src/c.ts', 'mine c\n');
+        },
+      },
+    );
+    concurrent.tree = context.tree;
+    const target = new ImmutableRevisionTree([
+      ['src/a.ts', 'a\n'],
+      ['src/b.ts', 'b\n'],
+      ['src/c.ts', 'c\n'],
+    ]);
+
+    const applying = materializer(context.checkout)(liveCheckout, target, { before: new ImmutableRevisionTree([]) });
+
+    await expect(applying).rejects.toMatchObject({
+      code: 'CHECKOUT_CONFLICT',
+      message: 'src/a.ts was created while these files were being updated. 1 more file was refused: src/c.ts.',
+    });
+    expect(await filesOf(context.tree)).toEqual(['src/a.ts', 'src/c.ts']);
+  });
+
+  it('should keep an executable mode on a new file the batch move publishes', async () => {
+    const context = await project({}, { ...trustedStats, bulkMove: true });
+    const target = new ImmutableRevisionTree([
+      ['bin/run.sh', '#!/bin/sh\necho run\n', '100755'],
+      ['bin/readme.txt', 'plain\n'],
+    ]);
+    context.reset();
+
+    await materializer(context.checkout)(liveCheckout, target, { before: new ImmutableRevisionTree([]) });
+
+    expect(context.counts.calls.filter((call) => call === 'bulkMove')).toHaveLength(1);
+    await expect(context.tree.getFileMode('bin/run.sh')).resolves.toBe('100755');
+    await expect(context.tree.getFileMode('bin/readme.txt')).resolves.toBe('100644');
   });
 });
 

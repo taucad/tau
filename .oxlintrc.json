@@ -1695,18 +1695,6 @@
       }
     },
     {
-      // Debt: hand-rolled image preview backdrops and the session hold screen predate the shared overlay layer. Move
-      // each onto it (z-50, stacked by open order) and drop it from this list.
-      "files": [
-        "apps/ui/app/components/ui/image-preview.tsx",
-        "apps/ui/app/components/ui/image-carousel-dialog.tsx",
-        "apps/ui/app/hooks/use-sessions.tsx"
-      ],
-      "rules": {
-        "tau-lint/no-raised-overlay-layer": "off"
-      }
-    },
-    {
       // Page Composition Policy gates (docs/policy/page-composition-policy.md, Enforcement).
       // Product page components only: tests and `[__e2e]` fixture routes author no product copy.
       // Autofixable rules are errors; judgment rules warn for one release, then become errors.

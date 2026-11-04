@@ -10,6 +10,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 
 import { runCommand } from 'citty';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import type * as Host from '@taucad/host';
 import { createHostToolRegistry } from '@taucad/host/agent-tools';
 import type { HostRuntimeClient, HostToolRegistryOptions } from '@taucad/host/agent-tools';
@@ -136,13 +137,12 @@ describe('mcpCommand', () => {
   });
 
   /** A host composition whose `record` the case reads; `shutdown` is what `tau mcp` calls as it stops. */
-  const recording = (): NodeHostTelemetry & { readonly record: ReturnType<typeof vi.fn> } =>
-    ({
-      record: vi.fn(),
+  const recording = () =>
+    mock<NodeHostTelemetry>({
       context: (caller: string) => ({ route: 'mcp', caller, release: '1.0.0', platform: 'node', os: 'linux' }),
       observe: () => () => undefined,
       shutdown: async () => undefined,
-    }) as unknown as NodeHostTelemetry & { readonly record: ReturnType<typeof vi.fn> };
+    });
 
   const prepareKernelOf = (): NonNullable<HostToolRegistryOptions['prepareKernel']> => {
     const options = vi.mocked(createHostToolRegistry).mock.calls.at(-1)?.[0];

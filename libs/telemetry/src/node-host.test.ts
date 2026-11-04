@@ -306,7 +306,7 @@ describe('T19: createNodeHostTelemetry shutdown of a short-lived command', () =>
   ])('T19: should return within the shutdown bound with %s', async (_why, unreachable) => {
     vi.useFakeTimers();
     try {
-      const { telemetry } = harness({ fetch: vi.fn(unreachable) as unknown as typeof globalThis.fetch }, signedIn);
+      const { telemetry } = harness({ fetch: unreachable as typeof globalThis.fetch }, signedIn);
       telemetry.startIdentityBootstrap();
       telemetry.record(toRuntimeEntry(observation(), telemetry.context('host')));
       const done = telemetry.shutdown();

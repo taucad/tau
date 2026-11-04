@@ -15,6 +15,7 @@ import { computeClosureIntegrity, parsePluginDeployment } from '@taucad/runtime/
 import type { DependencyPayload, PreparationPlugin } from '@taucad/runtime/preparation/node';
 import { runCommand } from 'citty';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 
 import { exitCodes } from '#output.js';
 
@@ -412,7 +413,7 @@ describe.runIf(supported)('tau prepare', () => {
     });
 
     it('T19: should refuse as before when the reporter throws', async () => {
-      const telemetry = {
+      const telemetry = mock<NodeHostTelemetry>({
         context: () => {
           throw new Error('context fault');
         },
@@ -420,7 +421,7 @@ describe.runIf(supported)('tau prepare', () => {
           throw new Error('record fault');
         },
         shutdown: async () => undefined,
-      } as unknown as NodeHostTelemetry;
+      });
 
       await expect(
         runCommand(

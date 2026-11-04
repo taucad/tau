@@ -310,7 +310,7 @@ describe('T19: prepareServeUi reports each settled preparation', () => {
       os: 'linux',
     });
     const details = (): Array<Record<string, unknown>> =>
-      record.mock.calls.map(([entry]) => (entry as unknown as { detail: Record<string, unknown> }).detail);
+      record.mock.calls.map(([entry]) => ('detail' in entry ? { ...entry.detail } : {}));
     return { report: preparationReporter({ record, context }), record, details };
   };
 

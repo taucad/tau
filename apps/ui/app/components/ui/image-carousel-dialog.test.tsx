@@ -288,6 +288,42 @@ describe('ImageCarouselDialog', () => {
     expect(screen.getByRole('dialog', { name: 'Image preview carousel' })).toBeInTheDocument();
   });
 
+  it('should open on the shared overlay layer, with its backdrop, image and controls ordered inside it', async () => {
+    render(
+      <>
+        <div data-testid='earlier-overlay' />
+        <ImageCarouselDialog
+          directory={attachmentDirectory}
+          initialIndex={0}
+          isOpen
+          items={items}
+          onOpenChange={vi.fn()}
+        />
+      </>,
+    );
+    const dialog = await screen.findByRole('dialog', { name: 'Image preview carousel' });
+
+    // One layer on z-50, last in <body>, so it stacks by open order like every other overlay.
+    const layers = document.querySelectorAll('[data-slot=viewer-layer]');
+    expect(layers).toHaveLength(1);
+    const layer = layers[0]!;
+    expect(layer).toHaveClass('z-50', 'isolate');
+    expect(layer.parentElement).toBe(document.body);
+    const bodyChildren = [...document.body.children];
+    const page = screen.getByTestId('earlier-overlay').closest('body > *')!;
+    expect(bodyChildren.indexOf(layer)).toBeGreaterThan(bodyChildren.indexOf(page));
+    // Its parts order themselves inside the layer, whatever order their portals land in.
+    const backdrop = layer.querySelector(':scope > [aria-hidden=true]');
+    expect(backdrop).toHaveClass('z-0');
+    expect(layer).toContainElement(dialog);
+    expect(dialog).toHaveClass('z-1');
+    for (const name of ['Close image preview', 'Previous slide', 'Next slide']) {
+      const control = screen.getByRole('button', { name });
+      expect(layer).toContainElement(control);
+      expect(control.closest('.z-2')).not.toBeNull();
+    }
+  });
+
   it('should eager-load full dialog images', () => {
     render(
       <ImageCarouselDialog

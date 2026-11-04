@@ -10,6 +10,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import type { sessionsMachine } from '#machines/sessions.machine.js';
@@ -90,7 +91,7 @@ export function SessionsProvider({
  *
  * @returns The overlay, while quit is held.
  */
-function SessionsQuitHold(): React.JSX.Element | undefined {
+function SessionsQuitHold(): React.ReactPortal | undefined {
   const actor = useSessions();
   const flushProducers = useFlushProducers();
   const [held, setHeld] = useState(false);
@@ -151,12 +152,13 @@ function SessionsQuitHold(): React.JSX.Element | undefined {
     return undefined;
   }
 
-  return (
+  // On the shared overlay layer (z-50), portalled as it appears so it covers whatever overlay is already open. App
+  // shortcuts stay off while focus is inside it, so none opens a surface (such as the sidebar sheet) under it.
+  return createPortal(
     <div
-      className='fixed inset-0 z-[100] flex items-center justify-center bg-background/80 backdrop-blur-sm'
+      className='fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm'
       role='status'
       aria-live='polite'
-      // It covers the page at z-100, so app shortcuts stay off here: the sidebar sheet (z-50) would open behind it.
       data-shortcut-scope='session-quit-hold'
     >
       <div className='max-w-sm space-y-3 text-center'>
@@ -189,7 +191,8 @@ function SessionsQuitHold(): React.JSX.Element | undefined {
           Quit anyway
         </Button>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

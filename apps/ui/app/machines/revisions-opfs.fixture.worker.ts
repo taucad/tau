@@ -6,6 +6,7 @@
 
 import { createActor } from 'xstate';
 import type { AnyActorLogic } from 'xstate';
+import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import { OPFSProvider } from '@taucad/filesystem/backend';
 import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
 import type { RevisionPort } from '@taucad/revisions';
@@ -20,7 +21,15 @@ export type OpfsRequest =
   | Readonly<{ op: 'readRef'; directory: string }>
   | Readonly<{ op: 'writeLease'; directory: string; runId: string }>
   | Readonly<{ op: 'readLeases'; directory: string }>
-  | Readonly<{ op: 'applyPointerTree'; directory: string; files: number }>;
+  | Readonly<{ op: 'applyPointerTree'; directory: string; files: number; surface: PointerTreeSurface }>;
+
+/**
+ * What the revision effects apply through: the bare provider, as the revision tests hand one;
+ * the worker's rooted view without its batch move, so every file publishes through its own
+ * locked rename; or the rooted view as the worker hands it, which publishes every new file in
+ * one batch move.
+ */
+export type PointerTreeSurface = 'provider' | 'rooted-per-file' | 'rooted-bulk';
 
 /** What one cold apply of a pointer-sized tree cost, and what it left. */
 export type PointerTreeApplied = Readonly<{
@@ -87,10 +96,27 @@ const runActor = async <Output>(logic: AnyActorLogic, input: unknown): Promise<O
  * A cold open's apply: an empty checkout takes a stored tree of `files` pointer-sized files
  * through the revision effects' own `materializeTree`. Only the apply is timed.
  */
-const applyPointerTree = async (directory: string, files: number): Promise<PointerTreeApplied> => {
+const applyPointerTree = async (
+  directory: string,
+  files: number,
+  surface: PointerTreeSurface,
+): Promise<PointerTreeApplied> => {
   const checkout = new ScopedOpfsProvider(directory);
   await checkout.initialize();
-  const port = createIsomorphicGitRevisionPort({ filesystem: checkout });
+  const mountTable = new MountTable();
+  mountTable.mount('/projects/cold-open', checkout, {
+    class: 'authored',
+    backend: 'opfs',
+    storageRootKey: `opfs:${directory}`,
+  });
+  const rooted = new WorkspaceFileService({
+    providerRegistry: new ProviderRegistry(),
+    resourceQueue: new ResourceQueue(),
+    eventBus: new ChangeEventBus(),
+    mountTable,
+  }).createRootedFileSystem('/projects/cold-open');
+  /* The bare-provider row reads its objects through the provider too, as it always has. */
+  const port = createIsomorphicGitRevisionPort({ filesystem: surface === 'provider' ? checkout : rooted });
   await port.init({ author: { name: 'Tau', email: 'tau@example.test' }, createSetupFiles: false });
   const paths = Array.from({ length: files }, (_, index) => `models/part-${Math.floor(index / 40)}/${index}.step`);
   const receipt = await port.writeRevision({
@@ -100,11 +126,17 @@ const applyPointerTree = async (directory: string, files: number): Promise<Point
     summary: { generated: 'pointer tree' },
   });
   await port.updateRef({ name: 'stored', expectedHead: undefined, head: revisionId(receipt.commitId) });
+  const { bulkMove: _bulkMove, ...perFile } = rooted;
+  const surfaces: Record<PointerTreeSurface, RevisionFileSystem> = {
+    /* A bare provider: the apply reads and writes only its port methods. */
+    provider: Object.create(checkout) as RevisionFileSystem,
+    'rooted-per-file': perFile,
+    'rooted-bulk': rooted,
+  };
   const actors = createRevisionActors({
     port,
     projectId: 'cold-open',
-    /* A bare provider, as the revision tests hand one: the apply reads and writes only its port methods. */
-    filesystem: async () => Object.create(checkout) as RevisionFileSystem,
+    filesystem: async () => surfaces[surface],
   });
 
   const started = performance.now();
@@ -161,7 +193,7 @@ const handle = async (request: OpfsRequest): Promise<unknown> => {
       return undefined;
     }
     case 'applyPointerTree': {
-      return applyPointerTree(request.directory, request.files);
+      return applyPointerTree(request.directory, request.files, request.surface);
     }
     case 'readLeases': {
       const runs = runsOf(request.directory);

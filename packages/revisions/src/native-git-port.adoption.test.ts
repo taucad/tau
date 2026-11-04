@@ -193,3 +193,30 @@ describe.runIf(gitToolchainOnPath)('an adopted repository', () => {
     ]);
   });
 });
+
+/*
+ * Two opens of one fresh store at once: a caller's `init` and the effects'
+ * `ensureStore`, which the large-object resume reaches on a timer as the root
+ * starts. Each used to run `git init` and `git lfs install --local`, and the
+ * loser of `.git/config.lock` failed with "could not lock config file".
+ */
+describe.runIf(gitToolchainOnPath)('opening a fresh store from two places at once', () => {
+  it('creates the store once and answers every open', async () => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one fresh repository per attempt.
+      const root = await mkdtemp(join(tmpdir(), 'tau-revisions-concurrent-init-'));
+      roots.push(root);
+      const project = join(root, 'project');
+      // oxlint-disable-next-line no-await-in-loop -- see above.
+      await mkdir(project);
+      const port = createNativeGitRevisionPort({ repositoryPath: project });
+      // oxlint-disable-next-line no-await-in-loop -- the opens race each other, not the attempts.
+      await expect(
+        Promise.all([port.init({ author }), port.init({ author }), port.init({ author })]),
+      ).resolves.toHaveLength(3);
+      expect(git(project, ['symbolic-ref', 'HEAD'])).toBe('refs/heads/main');
+      // oxlint-disable-next-line no-await-in-loop -- see above.
+      expect(await readdir(join(project, '.git'))).not.toContain('config.lock');
+    }
+  }, 120_000);
+});

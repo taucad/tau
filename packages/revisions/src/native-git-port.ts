@@ -1240,6 +1240,69 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     }
   };
 
+  const initStore = async (input: InitRevisionStoreInput): Promise<void> => {
+    /* Asked first, and it throws for a bare repository or a `.git` file: a path this port
+     * refuses is left exactly as it was, ignore file included (review 4 R40).
+     * The ordering that matters is the ignore file before `git init`, not
+     * before the question of what is already here. */
+    const { owned, adopted } = await openState();
+    if (adopted) {
+      await assertAdoptable();
+      /* The person's ignore file stays theirs. Tau's block goes where stock
+       * Git reads it and no revision records it, so the records Tau keeps
+       * under `.tau/` stay out of their `git status`. */
+      const excludePath = join(repositoryPath, gitDirectoryName, 'info', 'exclude');
+      const existing = await readFile(excludePath, 'utf8').catch(() => undefined);
+      const exclude = generatedIgnoreContent(existing, input.additionalIgnores ?? []);
+      if (exclude !== existing) {
+        await mkdir(dirname(excludePath), { recursive: true });
+        await writeFile(excludePath, exclude);
+      }
+    } else if (input.createSetupFiles !== false) {
+      const ignorePath = join(repositoryPath, generatedIgnorePath);
+      const existing = await readFile(ignorePath, 'utf8').catch(() => undefined);
+      const ignore = generatedIgnoreContent(existing, input.additionalIgnores ?? []);
+      if (ignore !== existing) {
+        await writeFile(ignorePath, ignore);
+      }
+      /* Beside the ignore file and versioned like it (D24): the two together are
+       * what a stock clone needs to read this project the way Tau wrote it. */
+      const attributesPath = join(repositoryPath, generatedGitattributesPath);
+      const attributes = await readFile(attributesPath, 'utf8').catch(() => undefined);
+      const merged = generatedGitattributesContent(attributes);
+      if (merged !== attributes) {
+        await writeFile(attributesPath, merged);
+      }
+    }
+    // Only now: the repository is created after the file that decides what a
+    // snapshot may ever contain already exists.
+    if (!owned) {
+      await output(['init', '--quiet', `--initial-branch=${initialBranch}`]);
+      /* The store is ours now: a later `init` must not run `git init` again. */
+      opened = Promise.resolve({ owned: true, adopted });
+    }
+    /* Pointers are Tau's (they must be identical on every host), but a *stock*
+     * checkout of this repository — `git worktree add` for a linked checkout,
+     * or somebody's own `git clone` — needs git-lfs's filters configured to
+     * resolve them. Best effort: a machine without the binary still records
+     * and reads revisions through this port, and `resolveGitLfs` is what tells
+     * an operator the transport half is missing. An adopted repository
+     * records no pointers, and its config is the person's. */
+    if (!adopted) {
+      await run(['lfs', 'install', '--local']);
+    }
+    /* Every project an older build recorded has no index at all, so this open
+     * heals it. An existing index is left alone: in a repository Tau adopted
+     * it may hold the person's own staged work. */
+    const indexed = await access(join(repositoryPath, gitDirectoryName, 'index')).then(
+      () => true,
+      () => false,
+    );
+    if (!indexed) {
+      await syncIndexes(undefined);
+    }
+  };
+
   const port: RevisionPort = Object.freeze({
     describe: async (): Promise<RevisionEngineDescriptor> => {
       const reported = await text(['--version']);
@@ -1265,66 +1328,17 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      * so a current project's working copy is not touched on every open and a
      * rewrite cannot repeat.
      */
-    init: async (input: InitRevisionStoreInput): Promise<void> => {
-      /* Asked first, and it throws for a bare repository or a `.git` file: a path this port
-       * refuses is left exactly as it was, ignore file included (review 4 R40).
-       * The ordering that matters is the ignore file before `git init`, not
-       * before the question of what is already here. */
-      const { owned, adopted } = await openState();
-      if (adopted) {
-        await assertAdoptable();
-        /* The person's ignore file stays theirs. Tau's block goes where stock
-         * Git reads it and no revision records it, so the records Tau keeps
-         * under `.tau/` stay out of their `git status`. */
-        const excludePath = join(repositoryPath, gitDirectoryName, 'info', 'exclude');
-        const existing = await readFile(excludePath, 'utf8').catch(() => undefined);
-        const exclude = generatedIgnoreContent(existing, input.additionalIgnores ?? []);
-        if (exclude !== existing) {
-          await mkdir(dirname(excludePath), { recursive: true });
-          await writeFile(excludePath, exclude);
-        }
-      } else if (input.createSetupFiles !== false) {
-        const ignorePath = join(repositoryPath, generatedIgnorePath);
-        const existing = await readFile(ignorePath, 'utf8').catch(() => undefined);
-        const ignore = generatedIgnoreContent(existing, input.additionalIgnores ?? []);
-        if (ignore !== existing) {
-          await writeFile(ignorePath, ignore);
-        }
-        /* Beside the ignore file and versioned like it (D24): the two together are
-         * what a stock clone needs to read this project the way Tau wrote it. */
-        const attributesPath = join(repositoryPath, generatedGitattributesPath);
-        const attributes = await readFile(attributesPath, 'utf8').catch(() => undefined);
-        const merged = generatedGitattributesContent(attributes);
-        if (merged !== attributes) {
-          await writeFile(attributesPath, merged);
-        }
-      }
-      // Only now: the repository is created after the file that decides what a
-      // snapshot may ever contain already exists.
-      if (!owned) {
-        await output(['init', '--quiet', `--initial-branch=${initialBranch}`]);
-      }
-      /* Pointers are Tau's (they must be identical on every host), but a *stock*
-       * checkout of this repository — `git worktree add` for a linked checkout,
-       * or somebody's own `git clone` — needs git-lfs's filters configured to
-       * resolve them. Best effort: a machine without the binary still records
-       * and reads revisions through this port, and `resolveGitLfs` is what tells
-       * an operator the transport half is missing. An adopted repository
-       * records no pointers, and its config is the person's. */
-      if (!adopted) {
-        await run(['lfs', 'install', '--local']);
-      }
-      /* Every project an older build recorded has no index at all, so this open
-       * heals it. An existing index is left alone: in a repository Tau adopted
-       * it may hold the person's own staged work. */
-      const indexed = await access(join(repositoryPath, gitDirectoryName, 'index')).then(
-        () => true,
-        () => false,
-      );
-      if (!indexed) {
-        await syncIndexes(undefined);
-      }
-    },
+    /*
+     * One `init` at a time per repository. A host opens its store from more
+     * than one place — the effects' `ensureStore`, which the large-object
+     * resume reaches on a timer as the root starts, and a caller's own
+     * `init` — and two runs at once each ran `git init` and `git lfs install
+     * --local`, which take `.git/config.lock`: the loser failed with
+     * "could not lock config file". Queued, the second run finds the store
+     * the first one made.
+     */
+    init: async (input: InitRevisionStoreInput): Promise<void> =>
+      refQueue.queueFor(`${repositoryPath}:init`, async () => initStore(input)),
 
     ignoredPaths: async (root?: string): Promise<readonly string[] | undefined> => {
       if (!(await isAdopted())) {

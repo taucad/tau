@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 const allowsAiTrainingDescription =
-  'Whether the user allows their AI prompts and designs to be used for AI service improvement';
+  'Legacy supplier-training preference; does not authorize recording, Tau training or reusable evaluation';
 const allowsUsageMetricsDescription =
   'Whether the user allows anonymous, content-free usage metrics about agent turns to be reported for product improvement';
 

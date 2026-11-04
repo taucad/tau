@@ -35,9 +35,11 @@ export type Entitlements = {
   readonly canCreateGeoSpecEvidenceReports: boolean;
   readonly geospecEvidenceRetentionDays: number;
   /**
-   * Data-flywheel consent (AD15): whether this account's runs may enter the
-   * training corpus. Free: the user's preference, on by default. Pro/Enterprise:
-   * off until the user opts in themselves.
+   * Legacy supplier-training preference, not permission to record or reuse runs.
+   * The API resolves the Free preference (on by default) and paid-plan explicit
+   * choices (off until chosen). Tier-only projections default to false.
+   * Tau training and reusable evaluation require separate current purpose grants
+   * and verified source rights under the agent observability policy.
    */
   readonly trainingConsent: boolean;
   /** The end of the last paid subscription period: the renewal date, or the access end once cancelled. */

@@ -32,9 +32,9 @@ function LearnMore(): React.JSX.Element {
 const improvementPurposes: readonly TelemetryPurpose[] = ['summary', 'content', 'reuse', 'training'];
 
 /**
- * Whether the owner's chats may improve the service. The server answers with the effective consent: on by default for
- * Free, off for a paid plan until its owner turns it on here. Turning it on or off also records an explicit decision
- * for each improvement purpose once a recording notice is in force; the Free default alone records nothing.
+ * The legacy improvement preference is on by default for Free and off for paid plans until explicitly chosen.
+ * It is not recording or reuse authority. Turning the switch on or off also records an explicit decision for each
+ * named improvement purpose once a recording notice is in force; the Free default alone records nothing.
  */
 function ImproveServiceRow(): React.JSX.Element {
   const { data: session } = useSession(authClient);
@@ -50,9 +50,14 @@ function ImproveServiceRow(): React.JSX.Element {
       title='Improve Tau for everyone'
       info={
         <>
-          <p>Covers your chats, the designs Tau generates for you and summaries of agent tasks.</p>
-          <p>On by default on the free plan. Off on paid plans until you turn it on.</p>
-          <p>Rating a reply shares that rating and the reply it rates.</p>
+          <p>Turning this on lets Tau record account-linked task summaries, chats and generated designs.</p>
+          <p>It also lets Tau reuse eligible content for evaluation, prompt optimization and training Tau models.</p>
+          <p>
+            Recording and reuse require your explicit opt-in on every plan. Paid plans start off. The Free plan’s
+            existing preference can start on, but that default does not grant recording or reuse permission.
+          </p>
+          <p>This does not permit AI providers to train their models on your data.</p>
+          <p>Rating a reply shares your rating only; it does not grant access to the reply or permission to train.</p>
         </>
       }
       description={

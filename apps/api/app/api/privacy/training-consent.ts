@@ -1,7 +1,7 @@
 import type { BillingTier } from '@taucad/billing';
 
 /**
- * Whether an account's chats may be used to improve the service.
+ * Resolve the legacy supplier-training preference, not authority to record or reuse chats.
  *
  * An assured Free account follows its stored preference, which defaults on. Every other account, paid or with a tier
  * that could not be established, counts only a `true` it chose itself: the column default never opts a paying user in.

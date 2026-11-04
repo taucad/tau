@@ -3,7 +3,9 @@ title: 'Vision Policy'
 description: "Tau's long-term vision for connecting hardware engineering through code, AI agents, and verification as the reward function."
 status: active
 created: '2026-03-04'
-updated: '2026-08-31'
+updated: '2026-10-31'
+related:
+  - docs/policy/agent-observability-policy.md
 ---
 
 # Vision Policy
@@ -108,7 +110,7 @@ boundary is the operated assurance layer, not permission to use the code.
 
 Three positions follow from this boundary and must not drift:
 
-- **The data flywheel is the durable moat.** Every verified run is a labeled `(design, spec, pass/fail, repair)` example — a dataset that does not exist publicly. We capture it **train-public, retrieve-private**: bootstrap models on public CAD corpora and Tau-generated synthetic labels, learn from opt-in free-tier runs, and never train on customers' proprietary designs. Engine speed commoditizes; the dataset compounds.
+- **The data flywheel is the durable moat.** Every verified run is a labeled `(design, spec, pass/fail, repair)` example — a dataset that does not exist publicly. Bootstrap models on public CAD corpora and Tau-generated synthetic labels. Customer content enters training, reusable evaluation or prompt optimization only with explicit current purpose authorization and verified rights under the [agent observability policy](agent-observability-policy.md#5-apply-purpose-and-destination-controls-before-collection). Paid plans default off; content captured without opt-in remains excluded through plan changes and derivation. Contractual no-train guarantees remain binding. Engine speed commoditizes; the dataset compounds.
 - **Build the oracle, rent the physics.** Tau builds and owns the geometric, manufacturability, and tolerance verification engine — the scarce, compounding layer. It does not build CFD/FEA/thermal solvers; it orchestrates them (Vanellus, Navier, OpenFOAM) behind a unified assertion contract and meters the orchestration. Surrogate/loop physics is a future option, kept open by the solver-provider seam — not a commodity-solver rebuild.
 - **Independence is a feature.** A verdict from a neutral oracle is worth more than one from the tool that generated the part — you don't let the fox certify the henhouse. Apache-2.0 lets third parties, including competitors, embed, audit, extend, and independently operate Tau's verification. Official certification and contractual no-train guarantees remain separate trust products.
 

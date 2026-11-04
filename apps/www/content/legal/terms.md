@@ -73,7 +73,7 @@ You retain all ownership rights to your User Data, including CAD designs, code, 
 
 ### 5.1 License Grant
 
-By uploading or creating content through the Service, you grant us a worldwide, non-exclusive, royalty-free license to use, reproduce, store, and process your User Data solely as necessary to provide the Service to you, improve our AI features (subject to your opt-out rights), prevent or address technical or security issues, respond to customer support requests, and comply with legal obligations.
+By uploading or creating content through the Service, you grant us a worldwide, non-exclusive, royalty-free license to use, reproduce, store, and process your User Data solely as necessary to provide the Service to you, improve our AI features only with your explicit opt-in for the relevant purposes described in our [Privacy Policy](/legal/privacy#9.2.1-ai-service-improvement), prevent or address technical or security issues, respond to customer support requests, and comply with legal obligations.
 
 ### 5.2 AI Output Ownership
 

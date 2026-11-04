@@ -99,13 +99,33 @@ const lightingSchema = z.union([
     .strict()
     .meta({ title: 'Directional lights' }),
 ]);
+// `thicknessRatio`, `denoiseDepthTolerance`, `samples` and `resolutionScale` are nanoraster's viewer-parity GTAO
+// controls (Tau charter W2), bounded as nanoraster bounds them; the transcoder withholds them from a backend that
+// predates them.
 const aoSchema = z
   .object({
     radiusPixels: pixels().min(1).max(128).optional(),
     intensity: ratio().min(0).max(8).optional(),
     distanceFalloff: ratio().min(0.01).max(1).optional(),
+    thicknessRatio: ratio()
+      .min(0.1)
+      .max(100)
+      .optional()
+      .describe('GTAO depth acceptance as a multiple of the world-space sampling radius'),
+    denoiseDepthTolerance: ratio()
+      .min(0.01)
+      .max(10)
+      .optional()
+      .describe('Denoise and upsample plane-distance tolerance as a fraction of the sampling radius'),
+    samples: z.number().int().min(1).max(64).optional().describe('Horizon samples per pixel'),
+    resolutionScale: ratio()
+      .min(0.25)
+      .max(1)
+      .optional()
+      .describe('Estimate and denoise resolution as a fraction of the output size'),
   })
   .strict();
+const toneMappingSchema = z.enum(['neutral', 'aces', 'linear', 'none']);
 const defaultImageLighting = {
   lights: [
     { direction: [1, 1, 1], color: [2.5, 2.5, 2.5] },
@@ -285,6 +305,10 @@ const baseImageShape = {
   ao: aoSchema
     .optional()
     .describe('Screen-space ambient occlusion for opaque contact shadows; on by default, intensity 0 disables it'),
+  lineColor: hexColor.optional().describe('sRGB #RRGGBB or #RRGGBBAA colour replacing every authored line colour'),
+  toneMapping: toneMappingSchema
+    .optional()
+    .describe('Display transform after exposure: Khronos PBR Neutral, ACES Filmic, linear or none'),
 } as const;
 
 const validateAnnotatedDimensions = (

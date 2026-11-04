@@ -304,6 +304,46 @@ describe('imageEdgeSchemas', () => {
       expect(imageEdgeSchemas.webp.safeParse({ ao: { other: 1 } }).success).toBe(false);
     });
 
+    it('should accept and bound the viewer GTAO controls', () => {
+      const ao = {
+        radiusPixels: 9.6,
+        intensity: 0.75,
+        distanceFalloff: 1,
+        thicknessRatio: 1 / 0.09,
+        denoiseDepthTolerance: 0.1,
+        samples: 16,
+        resolutionScale: 0.5,
+      };
+      expect(imageEdgeSchemas.png.parse({ ao }).ao).toEqual(ao);
+      for (const invalid of [
+        { thicknessRatio: 0.09 },
+        { thicknessRatio: 101 },
+        { denoiseDepthTolerance: 0.009 },
+        { denoiseDepthTolerance: 10.5 },
+        { samples: 0 },
+        { samples: 8.5 },
+        { samples: 65 },
+        { resolutionScale: 0.2 },
+        { resolutionScale: 1.5 },
+      ]) {
+        expect(imageEdgeSchemas.png.safeParse({ ao: invalid }).success).toBe(false);
+      }
+    });
+
+    it('should accept a line colour and a tone-mapping operator without defaulting either', () => {
+      expect(imageEdgeSchemas.webp.parse({})).not.toHaveProperty('lineColor');
+      expect(imageEdgeSchemas.webp.parse({})).not.toHaveProperty('toneMapping');
+      expect(imageEdgeSchemas.webp.parse({ lineColor: '#868686', toneMapping: 'neutral' })).toMatchObject({
+        lineColor: '#868686',
+        toneMapping: 'neutral',
+      });
+      for (const toneMapping of ['aces', 'linear', 'none'] as const) {
+        expect(imageEdgeSchemas.jpeg.parse({ toneMapping }).toneMapping).toBe(toneMapping);
+      }
+      expect(imageEdgeSchemas.png.safeParse({ lineColor: 'grey' }).success).toBe(false);
+      expect(imageEdgeSchemas.png.safeParse({ toneMapping: 'filmic' }).success).toBe(false);
+    });
+
     it('should treat a supported label as its own switch and reject unsupported characters', () => {
       expect(imageEdgeSchemas.webp.parse({ label: 'Front — View From +Z' })).toMatchObject({
         label: 'Front — View From +Z',

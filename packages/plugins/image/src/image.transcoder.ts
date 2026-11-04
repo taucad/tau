@@ -27,6 +27,7 @@ import { readGltfSceneBounds } from '#gltf-scene-bounds.js';
 import { loadImageBackend } from '#image-backend.js';
 import { imageEdgeSchemas } from '#image-export-options.js';
 import { toNanorasterCamera } from '#nanoraster-camera.js';
+import { backendAcceptsViewerProfileOptions, withholdViewerProfileOptions } from '#viewer-profile-options.js';
 
 /**
  * Static edges declared as a `readonly` tuple so each element keeps its literal
@@ -147,7 +148,9 @@ export const imageTranscoder = defineTranscoder({
   // 13.0.0 = nanoraster 0.7: sections are never refused; open cut outlines are drawn in red.
   // 13.0.1 = nanoraster 0.7.1: hidden edges ending on a face boundary no longer show past it.
   // 14.0.0 = nanoraster 0.8: ambient occlusion is on unless `ao.intensity` is 0.
-  version: '14.0.0',
+  // 15.0.0 = viewer render profile: `lineColor`, `toneMapping` and the GTAO controls reach a backend that accepts them;
+  //          Tau captures pass the viewer's lights, AO and one-CSS-pixel edges.
+  version: '15.0.0',
   edges,
 
   async initialize() {
@@ -178,7 +181,12 @@ export const imageTranscoder = defineTranscoder({
     let renderSpan: ReturnType<typeof services.tracer.startSpan> | undefined;
     try {
       // The runtime validates each edge payload before invoking its transcoder.
-      const options = input.options as ImageExportOptions;
+      const options = withholdViewerProfileOptions(input.options as ImageExportOptions, {
+        accepted: backendAcceptsViewerProfileOptions,
+        onWithheld: (names) => {
+          services.logger.warn(`The installed nanoraster predates ${names.join(', ')}; rendering without them`);
+        },
+      });
       const { renderImages } = context.renderer;
       renderSpan = services.tracer.startSpan('image.render', {
         mode: options.mode,

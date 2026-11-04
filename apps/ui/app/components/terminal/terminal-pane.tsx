@@ -10,7 +10,7 @@
  *   and stop. A project change ends it unconditionally and opens a fresh session for the new project.
  */
 
-import { useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { SquareTerminal } from 'lucide-react';
 import { terminalAccessSchema, terminalLimits } from '@taucad/types/desktop-terminal';
 import type {
@@ -38,9 +38,6 @@ import { useTerminalAvailability } from '#components/terminal/terminal-availabil
 import type { TerminalAvailability } from '#components/terminal/terminal-availability.js';
 import type { TerminalRendererOptions, TerminalRendererView } from '#components/terminal/terminal-renderer.js';
 import { outputSlices } from '#components/terminal/terminal-output-text.js';
-import { TerminalCloseContext, TerminalCloseDecision } from '#components/terminal/terminal-close.js';
-import type { TerminalCloseChoice } from '#components/terminal/terminal-close.js';
-import { TerminalNavigationGuard } from '#components/terminal/terminal-navigation-guard.js';
 import { highContrastQuery, highContrastRatio, readTerminalTheme } from '#components/terminal/terminal-theme.js';
 
 /** Loads the renderer; the default imports it lazily so no other surface pays for it. @public */
@@ -64,8 +61,17 @@ type PaneState =
     }>
   | Readonly<{ phase: 'refused'; refusal: TerminalRefusal }>;
 
-const fontFamily = "'Geist Mono', ui-monospace, monospace";
-const fontSize = 13;
+/* The code editor's font (`--font-mono`, 14px), so the Terminal and the editor set code the same way. */
+const fallbackFontFamily = "'Geist Mono', ui-monospace, monospace";
+const fontSize = 14;
+/**
+ * The editor's monospace family, read from the `--font-mono` token the code editor uses.
+ *
+ * @param element - An element inside the themed document.
+ * @returns The font family list.
+ */
+const readEditorFontFamily = (element: Element): string =>
+  getComputedStyle(element).getPropertyValue('--font-mono').trim() || fallbackFontFamily;
 const scrollbackLines = 10_000;
 // Bound synchronous bridge startup separately from the host's ongoing backpressure window.
 const initialFrameLimit = 64;
@@ -239,12 +245,9 @@ function TerminalAccessForm({
 export function TerminalPane({
   availability,
   loadRenderer = loadTerminalRenderer,
-  onRunningChange,
 }: {
   readonly availability: TerminalAvailability;
   readonly loadRenderer?: TerminalRendererLoader;
-  /** Told the running session's project label, and `undefined` once no session runs. */
-  readonly onRunningChange?: (projectLabel: string | undefined) => void;
 }): React.JSX.Element {
   const actionsDescriptionId = useId();
   const [state, setState] = useState<PaneState>({ phase: 'idle' });
@@ -255,8 +258,6 @@ export function TerminalPane({
   const actionInputRef = useRef<HTMLInputElement>(null);
   const restartRef = useRef(false);
   const [notice, setNotice] = useState<string | undefined>(undefined);
-  const [isConfirmingClose, setIsConfirmingClose] = useState(false);
-  const closeHost = useContext(TerminalCloseContext);
   const [screenReaderMode] = useCookie(cookieName.terminalScreenReader, true);
   const hostRef = useRef<HTMLDivElement>(null);
   const chromeRef = useRef<HTMLDivElement>(null);
@@ -269,30 +270,7 @@ export function TerminalPane({
   /* The project root and bridge the current or last session was started against. */
   const targetRef = useRef<{ projectRoot: string; bridge: DesktopTerminalBridge } | undefined>(undefined);
 
-  /* The phase a close request reads; a request arrives from outside React, after the render it acts on. */
-  const phaseRef = useRef<PaneState['phase']>(state.phase);
-  useLayoutEffect(() => {
-    phaseRef.current = state.phase;
-  }, [state.phase]);
-  const runningLabel = state.phase === 'running' ? state.projectLabel : undefined;
-  useEffect(() => {
-    onRunningChange?.(runningLabel);
-  }, [onRunningChange, runningLabel]);
-  /* A running session holds the page's unload, so Tau desktop asks before closing or reloading the window stops it
-   * (T15). Only while it runs: no other page state ever holds an unload. */
   const isRunning = state.phase === 'running';
-  useEffect(() => {
-    if (!isRunning) {
-      return;
-    }
-    const holdUnload = (event: BeforeUnloadEvent): void => {
-      event.preventDefault();
-    };
-    globalThis.addEventListener('beforeunload', holdUnload);
-    return () => {
-      globalThis.removeEventListener('beforeunload', holdUnload);
-    };
-  }, [isRunning]);
 
   const projectRoot = availability.status === 'available' ? availability.projectRoot : undefined;
   const bridge = availability.status === 'available' ? availability.bridge : undefined;
@@ -317,46 +295,8 @@ export function TerminalPane({
       teardown();
       setState({ phase: 'idle' });
       setAccessRequest(undefined);
-      setIsConfirmingClose(false);
     },
     [projectRoot, bridge, teardown],
-  );
-
-  /* A running session holds the host's close for the person's choice; any other phase closes at once. */
-  useEffect(
-    () =>
-      closeHost?.register(() => {
-        if (phaseRef.current !== 'running') {
-          return false;
-        }
-        setIsConfirmingClose(true);
-        return true;
-      }),
-    [closeHost],
-  );
-
-  const chooseClose = useCallback(
-    (choice: TerminalCloseChoice) => {
-      setIsConfirmingClose(false);
-      switch (choice) {
-        case 'keep': {
-          viewRef.current?.focus();
-          break;
-        }
-        case 'hide': {
-          closeHost?.hide();
-          break;
-        }
-        case 'stop': {
-          targetRef.current = undefined;
-          teardown();
-          setState({ phase: 'idle' });
-          closeHost?.close();
-          break;
-        }
-      }
-    },
-    [closeHost, teardown],
   );
 
   useEffect(() => {
@@ -403,14 +343,13 @@ export function TerminalPane({
     setState({ phase: 'starting' });
     setIsRequestingAccess(false);
     setFindTerm(undefined);
-    setIsConfirmingClose(false);
     setAccessRequest(undefined);
     setNotice(undefined);
     let view: TerminalRendererView;
     try {
       view = await loadRenderer({
         host,
-        fontFamily,
+        fontFamily: readEditorFontFamily(host),
         fontSize,
         theme: readTerminalTheme(host),
         scrollback: scrollbackLines,
@@ -473,8 +412,6 @@ export function TerminalPane({
           break;
         }
         case 'exited': {
-          /* The close question is about a running session; once it ends, closing needs no answer. */
-          setIsConfirmingClose(false);
           setAccessRequest(undefined);
           if (frame.reason === 'replaced') {
             shell += 1;
@@ -501,7 +438,6 @@ export function TerminalPane({
             break;
           }
           sessionRef.current = undefined;
-          setIsConfirmingClose(false);
           setAccessRequest(undefined);
           restartRef.current = false;
           setState({ phase: 'refused', refusal: frame });
@@ -636,9 +572,6 @@ export function TerminalPane({
           <span id={actionsDescriptionId} className='sr-only'>
             Press Shift+F10 for Terminal actions.
           </span>
-          {isConfirmingClose && state.phase === 'running' ? (
-            <TerminalCloseDecision projectLabel={state.projectLabel} onChoose={chooseClose} />
-          ) : null}
           {notice ? (
             <p role='status' className='border-b px-3 py-2 text-xs text-muted-foreground'>
               {notice}
@@ -769,7 +702,7 @@ export function TerminalPane({
 
 /**
  * The Terminal pane for the current project, gated by the shared predicate. The Workbench catalog and the narrow
- * layout both mount this. While its session runs, leaving the project asks first.
+ * layout both mount this. Closing the pane or leaving the project ends its session without asking.
  *
  * @param props - The workbench profile; a shared or public view omits the Terminal.
  * @returns The pane.
@@ -781,14 +714,5 @@ export function ProjectTerminalPane({
   readonly profile?: 'editor' | 'shared';
 }): React.JSX.Element {
   const { projectId } = useProject();
-  const [runningLabel, setRunningLabel] = useState<string | undefined>(undefined);
-  return (
-    <>
-      <TerminalPane availability={useTerminalAvailability(projectId, profile)} onRunningChange={setRunningLabel} />
-      {/* Only a running session holds the router's blocker (T15). */}
-      {runningLabel === undefined ? null : (
-        <TerminalNavigationGuard projectId={projectId} projectLabel={runningLabel} />
-      )}
-    </>
-  );
+  return <TerminalPane availability={useTerminalAvailability(projectId, profile)} />;
 }

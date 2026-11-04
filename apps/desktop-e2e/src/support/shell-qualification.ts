@@ -77,37 +77,28 @@ export type NativeQuestion = Readonly<{ message: string; buttons: readonly strin
 const unloadAnswers = '__TAU_E2E_UNLOAD_QUESTIONS__';
 
 /**
- * Answer the window's running-Terminal question the way a person would, and record it.
+ * Record every native question the window's main process puts, so a test can prove none was asked.
  *
- * A running session holds the page's unload (T15), so reloading the window or closing it asks first through
- * `dialog.showMessageBoxSync` — a native modal no browser automation can reach, which is why the answer is installed
- * before the navigation rather than clicked afterwards. Only the operating system's message box stands in; the hold
- * itself, the main process's handler and the session's end are the production ones, and
- * {@link nativeQuestionsAsked} proves the question was really put.
+ * Closing or reloading a window never asks about a running Terminal (T15). A question through
+ * `dialog.showMessageBoxSync` would be a native modal no browser automation can reach, so the recorder is installed
+ * before the navigation; it answers with the first button, and {@link nativeQuestionsAsked} reports what was put.
  *
  * @param session - The running desktop session.
- * @param choice - The button a person would press.
  */
-export const answerUnloadQuestion = async (
-  session: DesktopSession,
-  choice: 'Keep open' | 'Close and stop',
-): Promise<void> => {
-  await session.application.evaluate(
-    ({ dialog }, [key, answer]) => {
-      const asked: NativeQuestion[] = (Reflect.get(globalThis, key!) as NativeQuestion[] | undefined) ?? [];
-      Reflect.set(globalThis, key!, asked);
-      dialog.showMessageBoxSync = (...args: readonly unknown[]): number => {
-        const options = (args.length > 1 ? args[1] : args[0]) as { message: string; buttons: string[] };
-        asked.push({ message: options.message, buttons: [...options.buttons] });
-        return options.buttons.indexOf(answer!);
-      };
-    },
-    [unloadAnswers, choice],
-  );
+export const recordNativeQuestions = async (session: DesktopSession): Promise<void> => {
+  await session.application.evaluate(({ dialog }, key) => {
+    const asked: NativeQuestion[] = (Reflect.get(globalThis, key) as NativeQuestion[] | undefined) ?? [];
+    Reflect.set(globalThis, key, asked);
+    dialog.showMessageBoxSync = (...args: readonly unknown[]): number => {
+      const options = (args.length > 1 ? args[1] : args[0]) as { message: string; buttons: string[] };
+      asked.push({ message: options.message, buttons: [...options.buttons] });
+      return 0;
+    };
+  }, unloadAnswers);
 };
 
 /**
- * The native questions this session has asked since {@link answerUnloadQuestion} was installed.
+ * The native questions this session has asked since {@link recordNativeQuestions} was installed.
  *
  * @param session - The desktop session.
  * @returns Each question's message and buttons, oldest first.

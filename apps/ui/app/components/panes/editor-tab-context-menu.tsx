@@ -13,7 +13,6 @@ import { useSelector } from '@xstate/react';
 import { useProject } from '#hooks/use-project.js';
 import { NativeFileManagerIcon, useRevealInFileManager } from '#hooks/use-native-file-manager.js';
 import { withTabContextMenu } from '#components/panes/with-tab-context-menu.js';
-import { closePanel } from '#components/terminal/terminal-close.js';
 
 type EditorPanelParameters = {
   filePath: string;
@@ -46,7 +45,7 @@ export function WorkbenchTabContextMenu(properties: IDockviewPanelHeaderProps): 
 
   // ── Close actions ──
   const handleClose = useCallback(() => {
-    closePanel(api);
+    api.close();
   }, [api]);
 
   const handleCloseOthers = useCallback(() => {

@@ -6,7 +6,6 @@ import { defineConfig } from 'vitest/config';
 const testEntries = [
   'app/components/terminal/terminal-renderer.browser.test.ts',
   'app/components/terminal/terminal-pane.browser.test.tsx',
-  'app/components/terminal/terminal-close.browser.test.tsx',
 ];
 
 /** The Terminal's acceptance (A15, I9, T15) runs the real AurigaX engine and its WASM, and the shipped styles, in Chromium. */

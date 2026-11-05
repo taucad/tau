@@ -48,7 +48,7 @@ import type { TreeIndex, TreeIndexAdmits, TreeSearchOptions } from '#tree-index.
 import type { WalkOptions } from '#content-ops/walk.js';
 import { causeToMutationError, preflightCreate, preflightDelete, preflightMove } from '#mutation-pipeline.js';
 import type { BulkMoveEdit, BulkMoveResult, MutationPipeline, ResolvedChangesetEntry } from '#mutation-pipeline.js';
-import type { Changeset, ChangesetReceipt } from '#changeset.js';
+import type { AppendFence, Changeset, ChangesetReceipt } from '#changeset.js';
 import type { ChangeSetWatchRequest, WatchRegistry } from '#watch-registry.js';
 import type { ChangeSet, ChangeSetEntry } from '#change-event-bus.js';
 import { RootedFileSystemError, WorkspaceMutationError } from '#workspace-errors.js';
@@ -159,6 +159,12 @@ export type RootedFileSystem = Omit<FileSystemProvider, 'writeFileChecked' | 'de
      * for one mount, so it carries the option rather than silently dropping it.
      */
     rmdir(path: string, options?: { recursive?: boolean }): Promise<void>;
+    /**
+     * Append only while the file is still `fence.expectedLength` bytes and no
+     * newer `fence.token` has appended (D23); a refusal (`EAPPENDSTALE`,
+     * `EFENCED`) writes nothing. Optional: only the authority's own view fences.
+     */
+    appendFileFenced?(path: string, data: Uint8Array<ArrayBuffer> | string, fence: AppendFence): Promise<void>;
     watch(request: WatchRequest, handler: (event: WatchEvent) => void): () => void;
     /**
      * Watch in the change-set form (charter D6): one {@link ChangeSet} per
@@ -413,6 +419,20 @@ export class RootedViews {
     const appendFile = async (path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> => {
       const { authorityPath, resolution } = resolveLocal(path);
       await this._pipeline.appendFileResolved({ path: authorityPath, resolution, data, context: mutationContext });
+    };
+    const appendFileFenced = async (
+      path: string,
+      data: Uint8Array<ArrayBuffer> | string,
+      fence: AppendFence,
+    ): Promise<void> => {
+      const { authorityPath, resolution } = resolveLocal(path);
+      await this._pipeline.appendFileResolved({
+        path: authorityPath,
+        resolution,
+        data,
+        fence,
+        context: mutationContext,
+      });
     };
     const mkdir = async (path: string, options?: MkdirOptions): Promise<void> => {
       const { authorityPath, resolution } = resolveLocal(path);
@@ -870,6 +890,7 @@ export class RootedViews {
       writeFileChecked,
       deleteFileChecked,
       appendFile,
+      appendFileFenced,
       readdir,
       readdirWithStats,
       readdirEntries,

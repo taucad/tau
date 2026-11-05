@@ -57,7 +57,14 @@ import { readDirectoryEntries } from '#backend/directory-entries.js';
 import { tagEventAuthorities, tagEventOrigin } from '#event-origin-registry.js';
 import { parseRoute } from '#project-routes.js';
 import { applyBatchWithPrimitives, mapRolling } from '#backend/batch.js';
-import type { BatchEntry, BatchReceipt, ChangesetEntry, ChangesetEntryReceipt, ChangesetReceipt } from '#changeset.js';
+import type {
+  AppendFence,
+  BatchEntry,
+  BatchReceipt,
+  ChangesetEntry,
+  ChangesetEntryReceipt,
+  ChangesetReceipt,
+} from '#changeset.js';
 import {
   changesetReceipt,
   inHandBytes,
@@ -1206,14 +1213,22 @@ export class MutationPipeline {
     path,
     resolution,
     data,
+    fence,
     context,
   }: {
     path: string;
     resolution: MountResolution;
     data: Uint8Array<ArrayBuffer> | string;
+    /** Refuse the append unless the file is still `expectedLength` bytes and `token` is current (D23). */
+    fence?: AppendFence;
     context?: WorkspaceMutationContext;
   }): Promise<void> {
-    await this._settle(this.enqueue({ entry: { op: 'append', path, data }, resolution }, context));
+    await this._settle(
+      this.enqueue(
+        { entry: { op: 'append', path, data, ...(fence === undefined ? {} : { fence }) }, resolution },
+        context,
+      ),
+    );
   }
 
   public async moveResolved({

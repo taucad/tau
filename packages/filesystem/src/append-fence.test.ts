@@ -3,6 +3,8 @@ import 'fake-indexeddb/auto';
 import { describe, it, expect } from 'vitest';
 import { applyChangesetToProvider } from '#changeset-provider.js';
 import { MemoryProvider } from '#backend/memory-provider.js';
+import { composeView } from '#composed-view.js';
+import { tauPathPolicy } from '#path-registry.js';
 import { createWorkspaceFileService } from '#testing/workspace-service-harness.js';
 
 const projectId = 'proj_eeeeeeeeeeeeeeeeeeeee';
@@ -93,6 +95,23 @@ describe('fenced record-log appends (D23)', () => {
       });
 
       expect(receipt.entries.map((entry) => entry.outcome)).toEqual(['failed', 'applied']);
+    } finally {
+      context.service.dispose();
+    }
+  });
+
+  it('serves the fence as one call on the rooted view and the composed user view', async () => {
+    const { context, rooted } = await projectRoot();
+    try {
+      await rooted.appendFileFenced!(log, line('a'), { expectedLength: 0 });
+      const view = composeView({ filesystem: rooted }, { consumer: 'user', policy: tauPathPolicy });
+      await view.appendFileFenced!(log, line('b'), { expectedLength: 2 });
+
+      await expect(view.appendFileFenced!(log, line('late'), { expectedLength: 2 })).rejects.toMatchObject({
+        code: 'EAPPENDSTALE',
+        actualLength: 4,
+      });
+      expect(new TextDecoder().decode(await rooted.readFile(log))).toBe('a\nb\n');
     } finally {
       context.service.dispose();
     }

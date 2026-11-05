@@ -334,7 +334,7 @@ const cloneWriteArgsForTransfer = (method: string, args: unknown[]): unknown[] =
       },
     ];
   }
-  if ((method === 'writeFile' || method === 'appendFile') && args.length >= 2) {
+  if ((method === 'writeFile' || method === 'appendFile' || method === 'appendFileFenced') && args.length >= 2) {
     return [args[0], cloneWritePayloadForTransfer(args[1]), ...args.slice(2)];
   }
 

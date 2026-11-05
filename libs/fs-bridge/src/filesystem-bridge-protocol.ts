@@ -1,4 +1,5 @@
 import type {
+  AppendFence,
   ProviderCapabilities,
   FileSystemProvider,
   FileStatOptions,
@@ -292,6 +293,11 @@ export type FileSystemBridgeRootedCalls = MachineSettingsService &
   Pick<WorkspaceFileService, RootedBridgeContentMethodName> &
   Pick<ComposedView, 'provenance' | 'readdirWithStats'> & {
     readFile: FileSystemBridgeReadFile;
+    /**
+     * A fenced record-log append (D23): refused with `EAPPENDSTALE` or
+     * `EFENCED`, writing nothing, when the log is no longer the one the writer read.
+     */
+    appendFileFenced(path: string, data: Uint8Array<ArrayBuffer> | string, fence: AppendFence): Promise<void>;
     writeFileChecked(input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
     deleteFileChecked(input: {
       path: string;
@@ -934,6 +940,17 @@ const callSchemas = {
     result: checkedWriteResultSchema,
   },
   appendFile: { args: z.tuple([z.string(), writePayloadSchema]), result: voidResult },
+  appendFileFenced: {
+    args: z.tuple([
+      z.string(),
+      writePayloadSchema,
+      z.strictObject({
+        expectedLength: z.number().int().nonnegative(),
+        token: z.number().int().optional(),
+      }),
+    ]),
+    result: voidResult,
+  },
   writeFiles: {
     args: z.tuple([z.record(z.string(), z.looseObject({ content: writePayloadSchema }))]),
     result: voidResult,

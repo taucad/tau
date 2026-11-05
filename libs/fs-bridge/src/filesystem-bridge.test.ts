@@ -1664,6 +1664,14 @@ describe('exposeFileSystem skip-originator dispatch', () => {
       expect(handlerForRoot.mock.calls[0]?.[1].originClientId).toMatch(/^port_/u);
       expect(handlerForRoot.mock.calls[1]?.[0]).toBe(`/projects/${betaProjectId}`);
       expect(handlerForRoot.mock.calls[1]?.[1].originClientId).toMatch(/^port_/u);
+
+      /* D23: a fenced append crosses the rooted wire as one call, and its
+       * refusal keeps its code and writes nothing. */
+      await alpha.appendFileFenced('log.jsonl', 'a\n', { expectedLength: 0, token: 1 });
+      await expect(
+        alpha.appendFileFenced('log.jsonl', 'late\n', { expectedLength: 0, token: 1 }),
+      ).rejects.toMatchObject({ code: 'EAPPENDSTALE' });
+      await expect(alpha.readFile('log.jsonl', 'utf8')).resolves.toBe('a\n');
     } finally {
       stopWatch();
       stopBroadcast();

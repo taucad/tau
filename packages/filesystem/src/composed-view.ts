@@ -51,6 +51,7 @@ import type {
 import { bufferToStream } from '#backend/stream-utils.js';
 import { headFileStatFromStat } from '#content-metadata.js';
 import type { TreeSearchOptions } from '#tree-index.js';
+import type { AppendFence } from '#changeset.js';
 import type { RootedPorcelain } from '#rooted-views.js';
 import type { WorkspaceMutationError } from '#workspace-errors.js';
 
@@ -129,7 +130,9 @@ export type ComposedViewCheckout = Readonly<{
     RecursiveRmdir &
     Partial<WatchableFileSystem> &
     Partial<IndexedFileSystem> &
-    Partial<RootedPorcelain>;
+    Partial<RootedPorcelain> & {
+      appendFileFenced?(path: string, data: Uint8Array<ArrayBuffer> | string, fence: AppendFence): Promise<void>;
+    };
   /** Stable checkout id, reported as the `identity` of project entries. */
   id?: string;
 }>;
@@ -166,6 +169,8 @@ export type ComposedView = Omit<FileSystemProvider, 'rmdir'> &
   Partial<WatchableFileSystem> &
   Partial<IndexedFileSystem> &
   Partial<RootedPorcelain> & {
+    /** A fenced record-log append (D23), mask-checked like `appendFile`. */
+    appendFileFenced?(path: string, data: Uint8Array<ArrayBuffer> | string, fence: AppendFence): Promise<void>;
     /** What this view knows about one checkout-relative path. */
     provenance(path: string): Promise<FileProvenance>;
     /** One directory's immediate children with stat metadata and provenance. */
@@ -959,6 +964,15 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
       : {
           appendFile: async (path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> =>
             mutate(path, async (target) => base.appendFile!(target, data)),
+        }),
+    ...(base.appendFileFenced === undefined
+      ? {}
+      : {
+          appendFileFenced: async (
+            path: string,
+            data: Uint8Array<ArrayBuffer> | string,
+            fence: AppendFence,
+          ): Promise<void> => mutate(path, async (target) => base.appendFileFenced!(target, data, fence)),
         }),
     ...(base.watch === undefined
       ? {}

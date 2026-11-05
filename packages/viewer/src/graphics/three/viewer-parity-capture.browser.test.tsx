@@ -210,9 +210,11 @@ it.each(cases)('should capture the viewer frame of %s on %s with ao=%s', async (
       </ViewerEnvironmentProvider>
     </div>,
   );
-  // The renderer draws on demand: wait for three frames, then drive it with invalidate() until it settles.
+  // The renderer draws on demand and may stop after its first frames with nothing left to request another (manifold-logo
+  // with AO off stopped at two). Invalidate while waiting for three frames, then drive it until it settles.
   await vi.waitFor(
     () => {
+      state?.invalidate();
       expect(frames).toBeGreaterThan(2);
     },
     { timeout: 240_000, interval: 200 },

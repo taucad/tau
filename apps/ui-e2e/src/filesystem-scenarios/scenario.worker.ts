@@ -636,7 +636,18 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
       /* I1: what an open after the kill does first, then what every path holds. */
       return measure(async () => {
         await sweepTemporarySiblings(live, (path) => tauPathPolicy.classify(path).versioned);
-        const outcome = { old: 0, new: 0, missing: 0, partial: 0, litter: 0, staged: 0 };
+        /* The open already verified the creates a killed realm recorded and removed the short ones. */
+        const totals = productionCounterTotals();
+        const outcome = {
+          old: 0,
+          new: 0,
+          missing: 0,
+          partial: 0,
+          litter: 0,
+          staged: 0,
+          verified: totals['uncommitted.verified'] ?? 0,
+          removed: totals['uncommitted.removed'] ?? 0,
+        };
         for (let index = 0; index < replaceFiles; index += 1) {
           // oxlint-disable-next-line no-await-in-loop -- one read per file, in order.
           const bytes = await live.readFile(replacePath(index)).catch(() => undefined);

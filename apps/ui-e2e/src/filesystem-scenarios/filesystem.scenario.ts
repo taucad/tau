@@ -666,6 +666,9 @@ describe(`filesystem scenarios (${profileName} profile)`, { concurrent: false },
         killedAt: `${String(outcome['killAfter'])} of ${String(outcome['total'])} mutations`,
         result: `old ${String(outcome['old'])}, new ${String(outcome['new'])}, missing ${String(outcome['missing'])}, partial ${String(outcome['partial'])}`,
         residue: [
+          ...(outcome['removed'] === 0 || outcome['removed'] === undefined
+            ? []
+            : [`${String(outcome['removed'])} short creates removed on open`]),
           ...(outcome['litter'] === 0 ? [] : [`${String(outcome['litter'])} temporary siblings`]),
           ...(outcome['staged'] === 0 ? [] : [`${String(outcome['staged'])} staged files`]),
         ],
@@ -686,9 +689,9 @@ describe(`filesystem scenarios (${profileName} profile)`, { concurrent: false },
     }
   });
 
-  test('I1: a create killed at any step of its changeset leaves each path absent or new, never empty', async () => {
+  test('I1: a create killed at any step of its changeset reads back absent or new: the open removes what it left short', async () => {
     const outcomes = await killApplyAcrossItsMutations('i1-create', true);
-    recordAtomicity('applyTree create (staged create, publish)', outcomes);
+    recordAtomicity('applyTree create (final-path write, recorded size)', outcomes);
     for (const outcome of outcomes) {
       expect(outcome['killed'], JSON.stringify(outcome)).toBe(1);
       expect(outcome['old'], JSON.stringify(outcome)).toBe(0);
@@ -696,7 +699,14 @@ describe(`filesystem scenarios (${profileName} profile)`, { concurrent: false },
       expect(outcome['litter'], JSON.stringify(outcome)).toBe(0);
       expect(outcome['staged'], JSON.stringify(outcome)).toBe(0);
       expect((outcome['missing'] ?? 0) + (outcome['new'] ?? 0), JSON.stringify(outcome)).toBe(48);
+      /* Every create the record named was checked on the open (none when the kill landed before the first). */
+      expect(outcome['verified'] ?? 0, JSON.stringify(outcome)).toBeGreaterThanOrEqual(outcome['removed'] ?? 0);
     }
+    /* A kill lands while a writable is open: the file it left empty was found and removed, not reported. */
+    expect(
+      outcomes.reduce((total, outcome) => total + (outcome['removed'] ?? 0), 0),
+      JSON.stringify(outcomes),
+    ).toBeGreaterThan(0);
   });
 
   test('pending scenarios are declared with their reason and gates', () => {

@@ -333,12 +333,25 @@ export const createNodeHostTelemetry = (input: NodeHostTelemetryInput): NodeHost
       credentials: 'omit',
     });
 
+  /**
+   * Checked on every call, not only at creation: before identity resolves, a set `TAU_AUTH_TOKEN` is only a guess
+   * at signed-in, and an invalid or expired token resolves signed-out. Until then a host that reports only when
+   * signed in neither composes nor prints its notice.
+   */
+  const reportingAllowed = (): boolean => {
+    const host = deployment();
+    if (!resolvedOnce && !isCloudHost({ ...host, signedIn: false })) {
+      return false;
+    }
+    return isCloudHost(host) && consent() !== 'denied';
+  };
+
   const ensureReporter = (): IngestReporter | undefined => {
+    if (!reportingAllowed()) {
+      return undefined;
+    }
     if (reporter !== undefined) {
       return reporter;
-    }
-    if (!isCloudHost(deployment()) || consent() === 'denied') {
-      return undefined;
     }
     try {
       input.firstRunNotice?.();
@@ -447,11 +460,21 @@ export const createNodeHostTelemetry = (input: NodeHostTelemetryInput): NodeHost
         client.observe?.(policy === 'on' ? 'facts' : 'off');
       });
     };
+    let subscribed = true;
     listenPolicy();
+    /* A signed-in host composes only once its token resolves; ask again then, so its first operation gets facts. */
+    const listenOnceResolved = async (): Promise<void> => {
+      await drained.promise;
+      if (subscribed) {
+        listenPolicy();
+      }
+    };
+    void listenOnceResolved();
     const offFirst = client.on('operation', () => {
       listenPolicy();
     });
     return () => {
+      subscribed = false;
       client.observe?.('off');
       offPolicy?.();
       offFirst();

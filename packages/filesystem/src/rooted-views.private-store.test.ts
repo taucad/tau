@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ChangeEvent } from '#types.js';
+import type { ChangeEvent, FileReadStreamOptions } from '#types.js';
 import { createWorkspaceFileService, decoder, encoder } from '#testing/workspace-service-harness.js';
 
-const oid = `abcd${'0'.repeat(60)}`;
-const object = `.git/lfs/objects/ab/cd/${oid}`;
+const pack = '.git/objects/pack/pack-1.pack';
 
-describe('rooted storePrivateObject', () => {
-  it('should store a large object once, with no change event and no mutation claim', async () => {
+describe('rooted privateStore', () => {
+  it('should write, move and remove control-plane files with no change event and no mutation claim', async () => {
     const { service, eventBus, resourceQueue } = await createWorkspaceFileService();
     const rooted = service.createRootedFileSystem('/');
+    const store = rooted.privateStore!;
     const events: ChangeEvent[] = [];
     eventBus.subscribe((event) => {
       events.push(event);
@@ -18,107 +18,81 @@ describe('rooted storePrivateObject', () => {
       vi.spyOn(resourceQueue, 'queueForMany'),
       vi.spyOn(resourceQueue, 'queueForClaims'),
     ];
-    const content = encoder.encode('solid a');
 
-    expect(await rooted.storePrivateObject!(object, content)).toBe('stored');
-    expect(await rooted.storePrivateObject!(object, content)).toBe('present');
+    await store.mkdir('.git/refs/heads', { recursive: true });
+    await store.writeFile('.git/refs/heads/main.lock', `${'a'.repeat(40)}\n`);
+    await store.rename('.git/refs/heads/main.lock', '.git/refs/heads/main');
+    await store.writeFile('.git/HEAD', 'ref: refs/heads/main\n');
+    await store.unlink('.git/HEAD');
 
-    /* Sampled once both stores have settled: neither asked the queue for anything. */
+    /* Sampled once every write has settled: none asked the queue for anything. */
     expect(claims.map((claim) => claim.mock.calls.length)).toStrictEqual([0, 0, 0]);
     expect(resourceQueue.depth).toBe(0);
     expect(events).toStrictEqual([]);
-    expect(decoder.decode(await rooted.readFile(object))).toBe('solid a');
-    expect(await rooted.readdir('.git/lfs/objects/ab/cd')).toStrictEqual([oid]);
+    expect(await store.readFile('.git/refs/heads/main', 'utf8')).toBe(`${'a'.repeat(40)}\n`);
+    expect(await store.readdir('.git/refs/heads')).toStrictEqual(['main']);
+    expect(await store.exists('.git/HEAD')).toBe(false);
+    const stat = await store.stat('.git/refs/heads/main');
+    expect(stat.size).toBe(41);
   });
 
-  it.each([
-    'models/a.step',
-    '.git',
-    '.git/HEAD',
-    '.git/index',
-    '.git/refs/heads/main',
-    `vendor/x/.git/lfs/objects/ab/cd/${oid}`,
-    `.git/lfs/objects/ab/ce/${oid}`,
-    '.git/lfs/objects/ab/cd/abcd',
-    `.git/lfs/objects/AB/CD/${oid.toUpperCase()}`,
-    `.git/lfs/objects/ab/cd/${oid}.partial`,
-  ])('should refuse %s, which belongs to the mutation pipeline', async (path) => {
-    const { service } = await createWorkspaceFileService();
-    const rooted = service.createRootedFileSystem('/');
-
-    await expect(rooted.storePrivateObject!(path, encoder.encode('solid a'))).rejects.toThrow(TypeError);
-    expect(await rooted.exists(path)).toBe(false);
-  });
-
-  it('should replace a copy cut short, and keep a whole one', async () => {
-    const { service } = await createWorkspaceFileService();
-    const rooted = service.createRootedFileSystem('/');
-    await rooted.writeFile(object, 'sol');
-
-    expect(await rooted.storePrivateObject!(object, encoder.encode('solid a'))).toBe('stored');
-    expect(decoder.decode(await rooted.readFile(object))).toBe('solid a');
-    expect(await rooted.readdir('.git/lfs/objects/ab/cd')).toStrictEqual([oid]);
-  });
-
-  /* Two tabs storing one oid: the one that sees a whole copy appear while it writes keeps it. */
-  it('should keep a whole copy another writer stored while this one was writing', async () => {
+  it("should read one range of a file through the provider's ranged stream, never the whole file", async () => {
     const { service, provider } = await createWorkspaceFileService();
-    const rooted = service.createRootedFileSystem('/');
-    await rooted.writeFile(object, 'sol');
-    const unlink = vi.spyOn(provider, 'unlink');
-    const write = provider.writeFile.bind(provider);
-    vi.spyOn(provider, 'writeFile').mockImplementation(async (path, data) => {
-      await write(path, data);
-      if (path.endsWith('.partial')) {
-        /* The other tab's store lands, whole, between this one's two looks. */
-        await write(object, 'solid a');
-      }
+    const ranges: Array<FileReadStreamOptions | undefined> = [];
+    const whole = provider.readFile.bind(provider) as (path: string) => Promise<Uint8Array<ArrayBuffer>>;
+    const readFile = vi.spyOn(provider, 'readFile');
+    Object.assign(provider, {
+      readFileStream: (path: string, options?: FileReadStreamOptions) => {
+        ranges.push(options);
+        return new ReadableStream<Uint8Array<ArrayBuffer>>({
+          start: async (controller) => {
+            const content = await whole(path);
+            const start = options?.position ?? 0;
+            controller.enqueue(content.slice(start, start + (options?.length ?? content.byteLength)));
+            controller.close();
+          },
+        });
+      },
     });
+    const store = service.createRootedFileSystem('/').privateStore!;
+    await store.writeFile(pack, encoder.encode('PACK0123456789'));
+    readFile.mockClear();
 
-    expect(await rooted.storePrivateObject!(object, encoder.encode('solid a'))).toBe('present');
-    expect(unlink.mock.calls.map(([path]) => path).filter((path) => !path.endsWith('.partial'))).toStrictEqual([]);
-    expect(await rooted.readdir('.git/lfs/objects/ab/cd')).toStrictEqual([oid]);
-  });
-
-  it('should answer present when it loses the rename to another writer', async () => {
-    const { service, provider } = await createWorkspaceFileService();
-    const rooted = service.createRootedFileSystem('/');
-    const rename = provider.rename.bind(provider);
-    vi.spyOn(provider, 'rename').mockImplementation(async (from, to) => {
-      if (from.endsWith('.partial')) {
-        await provider.writeFile(to, 'solid a');
-        throw Object.assign(new Error('EEXIST: file already exists'), { code: 'EEXIST' });
-      }
-      return rename(from, to);
-    });
-
-    expect(await rooted.storePrivateObject!(object, encoder.encode('solid a'))).toBe('present');
-    expect(await rooted.readdir('.git/lfs/objects/ab/cd')).toStrictEqual([oid]);
-  });
-
-  it('should fail when the rename fails and nothing whole is there', async () => {
-    const { service, provider } = await createWorkspaceFileService();
-    const rooted = service.createRootedFileSystem('/');
-    vi.spyOn(provider, 'rename').mockRejectedValue(Object.assign(new Error('EIO: rename failed'), { code: 'EIO' }));
-
-    await expect(rooted.storePrivateObject!(object, encoder.encode('solid a'))).rejects.toThrow('EIO');
-    expect(await rooted.readdir('.git/lfs/objects/ab/cd')).toStrictEqual([]);
-  });
-
-  it('should leave one whole object after concurrent stores of the same oid', async () => {
-    const { service } = await createWorkspaceFileService();
-    const first = service.createRootedFileSystem('/');
-    const second = service.createRootedFileSystem('/');
-    const content = encoder.encode('solid a');
-
-    const answers = await Promise.all([
-      first.storePrivateObject!(object, content),
-      second.storePrivateObject!(object, content),
-      first.storePrivateObject!(object, content),
+    expect(decoder.decode(await store.readRange!(pack, 4, 4))).toBe('0123');
+    expect(decoder.decode(await store.readRange!(pack, 12, 10))).toBe('89');
+    expect(ranges).toStrictEqual([
+      { position: 4, length: 4 },
+      { position: 12, length: 10 },
     ]);
+    expect(readFile).not.toHaveBeenCalled();
+  });
 
-    expect(answers).toContain('stored');
-    expect(decoder.decode(await first.readFile(object))).toBe('solid a');
-    expect(await first.readdir('.git/lfs/objects/ab/cd')).toStrictEqual([oid]);
+  it('should offer no range read over a provider that cannot stream ranges', async () => {
+    const { service } = await createWorkspaceFileService();
+
+    expect(service.createRootedFileSystem('/').privateStore!.readRange).toBeUndefined();
+  });
+
+  it.each(['models/a.step', '', 'vendor/x/.git/HEAD', '.github/workflows/ci.yml', '.gitignore', '.git-x/HEAD'])(
+    'should refuse %s, which belongs to the mutation pipeline',
+    async (path) => {
+      const { service } = await createWorkspaceFileService();
+      const rooted = service.createRootedFileSystem('/');
+
+      await expect(rooted.privateStore!.writeFile(path, encoder.encode('solid a'))).rejects.toThrow(TypeError);
+      await expect(rooted.privateStore!.readFile(path)).rejects.toThrow(TypeError);
+      if (path !== '') {
+        expect(await rooted.exists(path)).toBe(false);
+      }
+    },
+  );
+
+  it('should refuse a move out of the control plane', async () => {
+    const { service } = await createWorkspaceFileService();
+    const rooted = service.createRootedFileSystem('/');
+    await rooted.privateStore!.writeFile('.git/a', 'a');
+
+    await expect(rooted.privateStore!.rename('.git/a', 'a')).rejects.toThrow(TypeError);
+    expect(await rooted.exists('a')).toBe(false);
   });
 });

@@ -65,7 +65,7 @@ export type {
  * `WorkspaceFileService`, never by constructing one, so only the shapes they
  * hand back are exported. */
 export type { BulkMoveEdit, BulkMoveResult } from '#mutation-pipeline.js';
-export type { RootedFileSystem, RootedPorcelain } from '#rooted-views.js';
+export type { PrivateStore, RootedFileSystem, RootedPorcelain } from '#rooted-views.js';
 
 export { ProviderRegistry } from '#provider-registry.js';
 export type { ProviderRegistryOptions } from '#provider-registry.js';

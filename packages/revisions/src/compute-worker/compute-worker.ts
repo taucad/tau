@@ -62,13 +62,41 @@ export type ComputeWorker = Readonly<{
   ) => Promise<Uint8Array<ArrayBuffer>>;
 }>;
 
-const drain = async (stream: ReadableStream<Uint8Array<ArrayBuffer>>): Promise<Uint8Array<ArrayBuffer>> =>
-  new Uint8Array(await new Response(stream).arrayBuffer());
+const drain = async (stream: ReadableStream<Uint8Array<ArrayBuffer>>): Promise<Uint8Array<ArrayBuffer>> => {
+  const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+  let size = 0;
+  const reader = stream.getReader();
+  // oxlint-disable-next-line no-await-in-loop -- a stream is read one chunk after another.
+  for (let read = await reader.read(); !read.done; read = await reader.read()) {
+    chunks.push(read.value);
+    size += read.value.byteLength;
+  }
+  const joined = new Uint8Array(size);
+  let at = 0;
+  for (const chunk of chunks) {
+    joined.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return joined;
+};
 
+/*
+ * The bytes written to the transform's own writer and its output drained:
+ * no `Blob.stream()` or `Response`, which not every host the store runs in
+ * has (jsdom has neither a `Blob.stream` nor streams on a `Response`).
+ */
 const through = async (
   transform: CompressionStream | DecompressionStream,
   bytes: Uint8Array<ArrayBuffer>,
-): Promise<Uint8Array<ArrayBuffer>> => drain(new Blob([bytes]).stream().pipeThrough(transform));
+): Promise<Uint8Array<ArrayBuffer>> => {
+  const writer = transform.writable.getWriter();
+  const written = (async (): Promise<void> => {
+    await writer.write(bytes);
+    await writer.close();
+  })();
+  const [output] = await Promise.all([drain(transform.readable), written]);
+  return output;
+};
 
 const subtle = (): SubtleCrypto | undefined => (globalThis as { crypto?: Crypto }).crypto?.subtle;
 

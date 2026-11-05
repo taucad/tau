@@ -12,10 +12,10 @@ import { createObjectStore, gitFilesOf } from '#object-store/object-store.js';
 import { readTreeEntries } from '#object-store/tree-codec.js';
 import type { TreeCodecEntry } from '#object-store/tree-codec.js';
 
-/** One entry of a stored tree. @public */
+/** One entry of a stored tree. */
 export type RawTreeEntry = TreeCodecEntry;
 
-/** Stored objects, read raw. @public */
+/** Stored objects, read raw. */
 export type RawObjectReader = Readonly<{
   /** One tree's entries in stored order, or `undefined` when no tree has that id. */
   readTree: (oid: string) => Promise<readonly RawTreeEntry[] | undefined>;

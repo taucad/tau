@@ -9,7 +9,6 @@
 export { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 export type { IsomorphicGitCheckoutOptions } from '#isomorphic-git-adapter.js';
 export { createRawObjectReader } from '#object-store/raw-object-reader.js';
-export type { RawObjectReader, RawTreeEntry } from '#object-store/raw-object-reader.js';
 export { bootstrapRemoteRevisionStore } from '#remote-bootstrap.js';
 export { revisionBranchName } from '#revision-authority.js';
 export type {

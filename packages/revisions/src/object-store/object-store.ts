@@ -515,9 +515,10 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
    * reader ever sees part of it. A writer whose rename loses to a file already
    * there keeps that file only when it is the same size as its own content —
    * a whole copy another writer landed; a shorter or longer one (a copy cut
-   * short by a host that died) is replaced.
+   * short by a host that died) is replaced. `replace` replaces it whatever
+   * its size: a pack this store dropped as corrupt, fetched again whole.
    */
-  const landAddressed = async (path: string, content: Uint8Array<ArrayBuffer>): Promise<void> => {
+  const landAddressed = async (path: string, content: Uint8Array<ArrayBuffer>, replace = false): Promise<void> => {
     await files.mkdir(path.slice(0, path.lastIndexOf('/')), { recursive: true });
     const partial = `${path}.${randomUuid()}.partial`;
     await files.writeFile(partial, content);
@@ -526,7 +527,7 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
       return;
     } catch (error) {
       const held = await files.stat(path).catch(() => undefined);
-      if (held === undefined || held.size === content.byteLength) {
+      if (held === undefined || (held.size === content.byteLength && !replace)) {
         await files.unlink(partial).catch(() => undefined);
         if (held === undefined) {
           throw error;
@@ -586,11 +587,14 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
     checksum: string,
   ): Promise<string> => {
     const base = `pack-${checksum}`;
+    const packPath = `${packDirectory}/${base}.pack`;
+    /* A pack this store dropped as corrupt is written over even under the same name and size, so a fetch heals it. */
+    const heal = droppedPacks.has(packPath);
     await files.mkdir(packDirectory, { recursive: true });
-    await landAddressed(`${packDirectory}/${base}.pack`, pack);
-    await landAddressed(`${packDirectory}/${base}.idx`, packIndex);
+    await landAddressed(packPath, pack, heal);
+    await landAddressed(`${packDirectory}/${base}.idx`, packIndex, heal);
     const opened = openPack(base, packIndex, pack.byteLength);
-    droppedPacks.delete(opened.path);
+    droppedPacks.delete(packPath);
     const known = packs ?? (await listPacks());
     packs = [opened, ...known.filter((held) => held.path !== opened.path)];
     return base;

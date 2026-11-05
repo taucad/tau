@@ -651,23 +651,39 @@ describe('pack index checks (W2 re-review 5)', () => {
 describe('a pack whose index is whole but whose bytes are not (W2 PR review)', () => {
   /* Two packs as fetches bring them, and one loose object: what each store below starts from. */
   const seeded = async (): Promise<
-    Readonly<{ provider: MemoryProvider; corrupted: string; inCorrupt: string[]; inOther: string; loose: string }>
+    Readonly<{
+      provider: MemoryProvider;
+      corrupted: string;
+      corruptBytes: Uint8Array<ArrayBuffer>;
+      inCorrupt: string[];
+      inOther: string;
+      loose: string;
+    }>
   > => {
     const provider = memory();
     const writer = storeOver(rangedFiles(provider));
-    const fetch = async (texts: readonly string[]): Promise<Readonly<{ name: string; oids: string[] }>> => {
+    const fetch = async (
+      texts: readonly string[],
+    ): Promise<Readonly<{ name: string; oids: string[]; pack: Uint8Array<ArrayBuffer> }>> => {
       const objects = texts.map((text): Blob => ({ type: 'blob', data: encoder.encode(text) }));
       const oids = objects.map(({ type, data }) => oidOf(type, data));
       const built = await buildPack(
         objects.map((object, index) => ({ oid: oids[index]!, ...object })),
         createInlineCompute(),
       );
-      return { name: await writer.addPack(built.pack), oids };
+      return { name: await writer.addPack(new Uint8Array(built.pack)), oids, pack: built.pack };
     };
     const corrupt = await fetch(['a\n', 'b\n']);
     const other = await fetch(['c\n']);
     const [loose] = await writer.writeLoose([{ type: 'blob', data: encoder.encode('unrelated\n') }]);
-    return { provider, corrupted: corrupt.name, inCorrupt: corrupt.oids, inOther: other.oids[0]!, loose: loose! };
+    return {
+      provider,
+      corrupted: corrupt.name,
+      corruptBytes: corrupt.pack,
+      inCorrupt: corrupt.oids,
+      inOther: other.oids[0]!,
+      loose: loose!,
+    };
   };
 
   /* Damage a pack's bytes and leave its index valid: its last trailer byte, or an entry re-signed so only it is wrong. */
@@ -716,6 +732,26 @@ describe('a pack whose index is whole but whose bytes are not (W2 PR review)', (
         String(message).includes(`${corrupted}.pack is left unread`),
       );
       expect(dropped).toHaveLength(1);
+    },
+  );
+
+  it.each(['trailer', 'entry'] as const)(
+    'heals a dropped pack (%s) when the same pack arrives again under the same name and size',
+    async (where) => {
+      const { provider, corrupted, corruptBytes, inCorrupt } = await seeded();
+      await damage(provider, corrupted, where);
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const store = storeOver(rangedFiles(provider), { name: `heal-${where}` });
+      await expect(store.read(inCorrupt[0]!)).resolves.toBeUndefined();
+
+      await expect(store.addPack(new Uint8Array(corruptBytes))).resolves.toBe(corrupted);
+
+      expect(await provider.readFile(`.git/objects/pack/${corrupted}.pack`)).toStrictEqual(corruptBytes);
+      await expect(store.has(inCorrupt[1]!)).resolves.toBe(true);
+      await expect(store.read(inCorrupt[0]!)).resolves.toStrictEqual({ type: 'blob', data: encoder.encode('a\n') });
+      await expect(store.read(inCorrupt[1]!)).resolves.toStrictEqual({ type: 'blob', data: encoder.encode('b\n') });
+      const fresh = storeOver(rangedFiles(provider), { name: `healed-${where}` });
+      await expect(fresh.read(inCorrupt[1]!)).resolves.toStrictEqual({ type: 'blob', data: encoder.encode('b\n') });
     },
   );
 

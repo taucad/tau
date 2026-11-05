@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CrossTabCoordinator, withCrossTabLocks } from '#cross-tab-coordinator.js';
 
+/** Any sending tab's id: a string the receiver does not interpret. */
+const anyTabId: unknown = expect.any(String);
+
 it('should request each token once in its strongest mode, in sorted order', async () => {
   const acquired: Array<[string, LockMode | undefined]> = [];
   const request = vi.fn(async (name: string, options: LockOptions, run: () => Promise<unknown>) => {
@@ -94,7 +97,7 @@ describe('CrossTabCoordinator', () => {
       );
 
       await expect(received).resolves.toEqual({
-        tabId: expect.any(String),
+        tabId: anyTabId,
         seq: 1,
         changes: [{ type: 'write', path: '/remote.txt', authority }],
       });
@@ -159,14 +162,14 @@ describe('CrossTabCoordinator', () => {
 
       expect(received).toEqual([
         {
-          tabId: expect.any(String),
+          tabId: anyTabId,
           seq: 1,
           changes: [
             { type: 'write', path: '/a.txt', authority },
             { type: 'delete', path: '/b.txt', authority },
           ],
         },
-        { tabId: expect.any(String), seq: 2, changes: [{ type: 'directory-change', path: '/c', authority }] },
+        { tabId: anyTabId, seq: 2, changes: [{ type: 'directory-change', path: '/c', authority }] },
       ]);
     } finally {
       sibling.close();

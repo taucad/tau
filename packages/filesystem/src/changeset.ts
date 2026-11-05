@@ -188,7 +188,7 @@ export const inHandBytes = (entry: ChangesetEntry | BatchEntry): number => {
  *   {@link maximumChangesetBytes} in-hand bytes, or is a single entry.
  * @public
  */
-export const isBoundedChangeset = (entries: readonly (ChangesetEntry | BatchEntry)[]): boolean =>
+export const isBoundedChangeset = (entries: ReadonlyArray<ChangesetEntry | BatchEntry>): boolean =>
   entries.length <= 1 ||
   (entries.length <= maximumChangesetEntries &&
     entries.reduce((total, entry) => total + inHandBytes(entry), 0) <= maximumChangesetBytes);

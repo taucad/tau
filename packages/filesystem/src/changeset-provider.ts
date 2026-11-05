@@ -189,7 +189,7 @@ export const applyChangesetToProvider = async (
   });
   const receipts = Array.from<ChangesetEntryReceipt>({ length: entries.length });
   let halted = false;
-  for (const phase of [...phases.keys()].sort()) {
+  for (const phase of [...phases.keys()].sort((left, right) => left - right)) {
     const indexes = entries.flatMap((entry, index) => ((entry.phase ?? 0) === phase ? [index] : []));
     if (halted || signal?.aborted === true) {
       for (const index of indexes) {

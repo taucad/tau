@@ -101,17 +101,16 @@ export const batchTasks = (entries: readonly BatchEntry[]): number[][] => {
  * `limit` tasks in flight, stopping new entries once `signal` aborts.
  *
  * @param entries - The batch.
- * @param options - Its abort signal.
  * @param run - One entry's work, returning its receipt; must not reject.
- * @param limit - Rolling window size.
+ * @param options - Its abort signal and rolling window size (default {@link batchConcurrency}).
  * @returns One receipt per entry, in entry order.
  */
 export const runBatch = async (
   entries: readonly BatchEntry[],
-  options: BatchOptions | undefined,
   run: (entry: BatchEntry) => Promise<BatchReceipt>,
-  limit = batchConcurrency,
+  options?: BatchOptions & Readonly<{ limit?: number }>,
 ): Promise<BatchReceipt[]> => {
+  const limit = options?.limit ?? batchConcurrency;
   const receipts = Array.from<BatchReceipt>({ length: entries.length });
   await mapRolling(batchTasks(entries), limit, async (task) => {
     for (const index of task) {
@@ -151,7 +150,8 @@ export const removeTree = async (provider: BatchPrimitives, path: string): Promi
  */
 const kindAt = async (provider: BatchPrimitives, path: string): Promise<'file' | 'dir' | undefined> => {
   try {
-    return (await provider.stat(path)).type;
+    const stat = await provider.stat(path);
+    return stat.type;
   } catch (error) {
     const { code } = error as { code?: unknown };
     if (code === 'ENOENT' || code === 'ENOTDIR') {
@@ -285,4 +285,4 @@ export const applyBatchWithPrimitives = async (
   provider: BatchPrimitives,
   entries: readonly BatchEntry[],
   options?: BatchOptions,
-): Promise<BatchReceipt[]> => runBatch(entries, options, async (entry) => applyEntryWithPrimitives(provider, entry));
+): Promise<BatchReceipt[]> => runBatch(entries, async (entry) => applyEntryWithPrimitives(provider, entry), options);

@@ -152,12 +152,15 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
         }
       }
     };
-    for (const path of [...this._paths]) {
+    /* Purging deletes from the set being walked, so walk a copy. */
+    const paths = [...this._paths];
+    for (const path of paths) {
       if (inScope(path)) {
         this._purgeFileProjection(path);
       }
     }
-    for (const directory of [...this._dirs]) {
+    const directories = [...this._dirs];
+    for (const directory of directories) {
       if (directory !== '' && inScope(directory)) {
         this._dirs.delete(directory);
       }
@@ -215,7 +218,10 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
    * @returns One receipt per entry, in entry order.
    */
   public override async applyBatch(entries: readonly BatchEntry[], options?: BatchOptions): Promise<BatchReceipt[]> {
-    return runBatch(entries, options, async (entry) => applyEntryWithPrimitives(this, entry), Math.max(1, entries.length));
+    return runBatch(entries, async (entry) => applyEntryWithPrimitives(this, entry), {
+      ...options,
+      limit: Math.max(1, entries.length),
+    });
   }
 
   /**
@@ -778,10 +784,10 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
           for (const key of Array.isArray(result) ? result : result === undefined ? [] : [result]) {
             const storagePath = typeof key === 'string' ? key : JSON.stringify(key);
             const directoryPath = directoryPathFromKey(storagePath);
-            if (directoryPath !== undefined) {
-              directories.push(directoryPath);
-            } else {
+            if (directoryPath === undefined) {
               into.push(fromStoragePath(storagePath));
+            } else {
+              directories.push(directoryPath);
             }
           }
         });
@@ -791,9 +797,9 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
         const file = toStoragePath(scope);
         const directory = directoryStorageKey(scope);
         collect(store.getKey(file), files);
-        collect(store.getAllKeys(IDBKeyRange.bound(`${file}/`, `${file}/\uffff`)), files);
+        collect(store.getAllKeys(IDBKeyRange.bound(`${file}/`, `${file}/\uFFFF`)), files);
         collect(store.getKey(directory), files);
-        collect(store.getAllKeys(IDBKeyRange.bound(`${directory}/`, `${directory}/\uffff`)), files);
+        collect(store.getAllKeys(IDBKeyRange.bound(`${directory}/`, `${directory}/\uFFFF`)), files);
         for (let parent = parentDirectory(scope); parent !== ''; parent = parentDirectory(parent)) {
           ancestors.add(parent);
         }

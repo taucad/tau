@@ -8,6 +8,7 @@
  * Progressive enhancement: no-op when `navigator.locks` is unavailable.
  */
 
+import { randomUuid } from '@taucad/utils/id';
 import { z } from 'zod';
 import { assertRootedPath, resolveAuthorityPath } from '@taucad/utils/path';
 import { projectRoute } from '#project-routes.js';
@@ -178,7 +179,7 @@ export const withRequiredCrossTabLocks = async <T>(
 export class CrossTabCoordinator {
   private _channel: BroadcastChannel | undefined;
   private _changeHandler: ((notice: ChangeNotice) => void) | undefined;
-  private readonly _tabId = crypto.randomUUID();
+  private readonly _tabId = randomUuid();
   private _seq = 0;
   /** Last sequence number seen from each sibling tab. */
   private readonly _lastSeen = new Map<string, number>();
@@ -222,10 +223,7 @@ export class CrossTabCoordinator {
   }
 
   /** Execute under required cross-tab exclusion, failing closed when unavailable. */
-  public async withRequiredLocks<T>(
-    paths: ReadonlyArray<string | LockClaim>,
-    operation: () => Promise<T>,
-  ): Promise<T> {
+  public async withRequiredLocks<T>(paths: ReadonlyArray<string | LockClaim>, operation: () => Promise<T>): Promise<T> {
     return withRequiredCrossTabLocks(paths, operation);
   }
 

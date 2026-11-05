@@ -448,7 +448,7 @@ describe('what a settlement walks', () => {
     expect(counts.rootListings).toBe(2);
     /* Two new files written in place, and one replacement staged beside main.ts. */
     expect(counts.writeFile).toBe(3);
-    /* drop.ts and main.ts aside, and the staged main.ts published. */
+    /* The removed drop.ts and the replaced main.ts aside, and the staged main.ts published. */
     expect(counts.calls.filter((call) => call === 'rename')).toHaveLength(3);
     expect(litterIn(await filesOf(tree))).toEqual([]);
   }, 30_000);

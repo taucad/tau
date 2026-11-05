@@ -343,6 +343,16 @@ type ResolvedMoveEdit = {
 
 export { causeToMutationError, isProjectDirectoryPath };
 
+/** Convenience entries one origin is coalescing into one changeset (D22). */
+type PendingChangeset = {
+  entries: ResolvedChangesetEntry[];
+  admission: PhaseAdmission;
+  /** Close the changeset to new entries and start it. */
+  open: () => void;
+  /** The changeset's receipt once it applied. */
+  receipt: Promise<ChangesetReceipt>;
+};
+
 /**
  * The resolved-mutation half of the filesystem authority.
  *
@@ -364,15 +374,7 @@ export class MutationPipeline {
    */
   private readonly _filePool: () => SharedPool | undefined;
   /** Convenience entries this task is coalescing into one changeset, per origin (D22). */
-  private readonly _pending = new Map<
-    string,
-    {
-      entries: ResolvedChangesetEntry[];
-      waiters: Array<PromiseWithResolvers<ChangesetEntryReceipt>>;
-      admission: PhaseAdmission;
-      context: WorkspaceMutationContext | undefined;
-    }
-  >();
+  private readonly _pending = new Map<string, PendingChangeset>();
 
   /**
    * Create the pipeline over the authority's own collaborators.
@@ -458,7 +460,14 @@ export class MutationPipeline {
       pending = undefined;
     }
     if (pending === undefined) {
-      pending = { entries: [], waiters: [], admission: new PhaseAdmission(), context };
+      const opened = Promise.withResolvers<void>();
+      const entries: ResolvedChangesetEntry[] = [];
+      pending = {
+        entries,
+        admission: new PhaseAdmission(),
+        open: opened.resolve,
+        receipt: this._applyWhenOpened(entries, opened.promise, context),
+      };
       this._pending.set(origin, pending);
       const scheduled = pending;
       queueMicrotask(() => {
@@ -468,10 +477,9 @@ export class MutationPipeline {
       });
     }
     pending.admission.admit(occupancy);
-    pending.entries.push(resolved);
-    const waiter = Promise.withResolvers<ChangesetEntryReceipt>();
-    pending.waiters.push(waiter);
-    return waiter.promise;
+    const index = pending.entries.push(resolved) - 1;
+    const receipt = await pending.receipt;
+    return receipt.entries[index]!;
   }
 
   /**
@@ -1359,19 +1367,24 @@ export class MutationPipeline {
       return;
     }
     this._pending.delete(origin);
-    const { entries, waiters, context } = pending;
-    this.apply({ entries }, context).then(
-      (receipt) => {
-        for (const [index, waiter] of waiters.entries()) {
-          waiter.resolve(receipt.entries[index]!);
-        }
-      },
-      (error: unknown) => {
-        for (const waiter of waiters) {
-          waiter.reject(error);
-        }
-      },
-    );
+    pending.open();
+  }
+
+  /**
+   * Apply a pending changeset once it is flushed; every entry's caller awaits it.
+   *
+   * @param entries - The entries being coalesced; complete once `opened` settles.
+   * @param opened - Settles when {@link _flush} closes it to new entries.
+   * @param context - Its callers' shared mutation context.
+   * @returns Its receipt.
+   */
+  private async _applyWhenOpened(
+    entries: ResolvedChangesetEntry[],
+    opened: Promise<void>,
+    context: WorkspaceMutationContext | undefined,
+  ): Promise<ChangesetReceipt> {
+    await opened;
+    return this.apply({ entries }, context);
   }
 
   /**
@@ -1475,7 +1488,7 @@ export class MutationPipeline {
       refreshFailure = error;
     }
     let halted = refreshFailure !== undefined;
-    for (const phase of [...new Set(prepared.map((entry) => entry.phase))].sort()) {
+    for (const phase of [...new Set(prepared.map((entry) => entry.phase))].sort((left, right) => left - right)) {
       const indexes = prepared.flatMap((entry, index) => (entry.phase === phase ? [index] : []));
       if (halted || signal?.aborted === true) {
         const error = refreshFailure ?? (signal?.aborted === true ? abortError(signal) : undefined);
@@ -1983,7 +1996,7 @@ export class MutationPipeline {
       } else {
         // oxlint-disable-next-line no-await-in-loop -- Sequential reads required to bound memory
         const data = await sourceProvider.readFile(sourceEntry);
-        // oxlint-disable-next-line no-await-in-loop -- Sequential writes required for ordered creation
+        // oxlint-disable-next-line no-await-in-loop, tau-lint/no-awaited-mutation-in-loop -- a provider primitive, not a convenience: one read in memory at a time across providers.
         await targetProvider.writeFile(targetEntry, data);
       }
     }

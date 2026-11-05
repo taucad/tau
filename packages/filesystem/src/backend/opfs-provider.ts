@@ -160,9 +160,8 @@ export class OPFSProvider extends FileSystemAccessProvider {
       await super._writeBatchData(fileHandle, data, destination);
       return;
     }
-    const staging = await (
-      await this._rootHandle.getDirectoryHandle(opfsStagingDirectory, { create: true })
-    ).getDirectoryHandle(stagingOwnerId, { create: true });
+    const stagingRoot = await this._rootHandle.getDirectoryHandle(opfsStagingDirectory, { create: true });
+    const staging = await stagingRoot.getDirectoryHandle(stagingOwnerId, { create: true });
     const stagedName = randomUuid();
     const staged = (await staging.getFileHandle(stagedName, { create: true })) as SyncAccessCapableFileHandle &
       MovableFileHandle;

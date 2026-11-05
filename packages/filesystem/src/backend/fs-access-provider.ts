@@ -499,8 +499,11 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       }
       return pending;
     };
-    return runBatch(entries, options, async (entry) =>
-      entry.op === 'write' ? this._applyBatchWrite(entry, openForWrite) : applyEntryWithPrimitives(this, entry),
+    return runBatch(
+      entries,
+      async (entry) =>
+        entry.op === 'write' ? this._applyBatchWrite(entry, openForWrite) : applyEntryWithPrimitives(this, entry),
+      options,
     );
   }
 
@@ -686,7 +689,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    *
    * @param fileHandle - Handle for the target, created if it was absent.
    * @param data - The bytes, in hand or staged.
-   * @param destination - The target's directory and name, for a provider that stages and moves.
+   * @param _destination - The target's directory and name, for a provider that stages and moves.
    */
   protected async _writeBatchData(
     fileHandle: FileSystemFileHandle,

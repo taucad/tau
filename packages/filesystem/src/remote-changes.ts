@@ -166,7 +166,8 @@ export class RemoteChanges {
     const pendingProvider = this._registry.getOwnedProvider(first.authority.storageRootKey);
     if (pendingProvider !== undefined) {
       try {
-        await (await pendingProvider).refresh?.();
+        const provider = await pendingProvider;
+        await provider.refresh?.();
       } catch {
         // The reset below is the answer to a refresh that failed as well.
       }

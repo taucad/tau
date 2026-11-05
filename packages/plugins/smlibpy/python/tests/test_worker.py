@@ -284,6 +284,36 @@ class GeometryTest(unittest.TestCase):
         arrays = worker._edge_arrays([(4, numpy.array([(0, 0, 0), (1, 0, 0), (1, 1, 0)]))])
         self.assertEqual(arrays["edgeGroups"], [{"start": 0, "count": 12, "edgeId": 4}])
 
+    def test_edge_polylines_follow_the_face_mesh(self) -> None:
+        # A spline-toothed wheel on a boss: curved edges whose own samples cut across the faceted surface.
+        teeth = [(20 if i % 4 < 2 else 17) for i in range(72)]
+        outline = [(r * math.cos(2 * math.pi * i / 72), r * math.sin(2 * math.pi * i / 72), 0) for i, r in enumerate(teeth)]
+        from smlibpy._kernel import ext
+
+        wheel = smlibpy.fuse(smlibpy.extrude(smlibpy.make_face(smlibpy.Spline(*outline, outline[0])), 6), Cylinder(6, 14))
+        for tolerance in (0.2, 0.02):
+            surface = worker._surface(wheel, tolerance, 20)
+            faces = worker._face_arrays(surface[0], surface[1])
+            owner = numpy.zeros(len(faces["triangles"]) // 3, dtype=numpy.int64)
+            for group in faces["faceGroups"]:
+                owner[group["start"] // 3 : (group["start"] + group["count"]) // 3] = group["faceId"]
+            sides: dict[tuple[Any, ...], set[int]] = {}
+            vertices = [tuple(vertex) for vertex in faces["vertices"].tolist()]
+            for triangle, corners in enumerate(faces["triangles"].reshape(-1, 3).tolist()):
+                for a, b in ((0, 1), (1, 2), (2, 0)):
+                    sides.setdefault(tuple(sorted((vertices[corners[a]], vertices[corners[b]]))), set()).add(int(owner[triangle]))
+            boundary = {segment for segment, owners in sides.items() if len(owners) > 1}
+            polylines = worker._edge_polylines(wheel, 20, surface, tolerance)
+            seams = set(ext.seam_edges(wheel._brep))
+            self.assertEqual({index for index, _ in polylines}, set(range(len(wheel.edges(seams=True)))) - seams)
+            drawn = {
+                tuple(sorted((tuple(a), tuple(b))))
+                for _, line in polylines
+                for a, b in zip(line[:-1].tolist(), line[1:].tolist())
+            }
+            self.assertEqual(drawn, boundary, "every edge segment is a face mesh boundary segment, and every one is drawn")
+            self.assertGreater(len(drawn), len(wheel.edges()) * 20)
+
     def test_bundle_pads_slices(self) -> None:
         bundle = worker._Bundle()
         self.assertEqual(bundle.add(b"abc"), [0, 3])

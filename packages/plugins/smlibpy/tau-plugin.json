@@ -69,8 +69,8 @@
           },
           {
             "name": "worker.py",
-            "integrity": "sha256-mHw44T/hN5MRoCXLVSXlowgc5b7pcJ/6PvLuc7tUM70=",
-            "byteLength": 32009,
+            "integrity": "sha256-mXDhQyLAYfrHgsW3CNCkfte/4Ivv6AmsN5mXEy5KxiI=",
+            "byteLength": 38437,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -213,8 +213,8 @@
           },
           {
             "name": "worker.py",
-            "integrity": "sha256-mHw44T/hN5MRoCXLVSXlowgc5b7pcJ/6PvLuc7tUM70=",
-            "byteLength": 32009,
+            "integrity": "sha256-mXDhQyLAYfrHgsW3CNCkfte/4Ivv6AmsN5mXEy5KxiI=",
+            "byteLength": 38437,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -358,8 +358,8 @@
           },
           {
             "name": "worker.py",
-            "integrity": "sha256-mHw44T/hN5MRoCXLVSXlowgc5b7pcJ/6PvLuc7tUM70=",
-            "byteLength": 32009,
+            "integrity": "sha256-mXDhQyLAYfrHgsW3CNCkfte/4Ivv6AmsN5mXEy5KxiI=",
+            "byteLength": 38437,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -503,8 +503,8 @@
           },
           {
             "name": "worker.py",
-            "integrity": "sha256-mHw44T/hN5MRoCXLVSXlowgc5b7pcJ/6PvLuc7tUM70=",
-            "byteLength": 32009,
+            "integrity": "sha256-mXDhQyLAYfrHgsW3CNCkfte/4Ivv6AmsN5mXEy5KxiI=",
+            "byteLength": 38437,
             "format": "raw",
             "origin": {
               "kind": "packagePath",

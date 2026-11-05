@@ -330,13 +330,13 @@
       ]
     },
     {
-      "bom-ref": "987c38e13fe1379311a025cb5525e5a3081ce5bee9709ffa3ef2ee73bb5433bd",
+      "bom-ref": "9970e14322c061fac782c5b708d0a47ed7bfe08befe809ac379997132e4ac622",
       "type": "file",
       "name": "tau-worker/worker.py",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "987c38e13fe1379311a025cb5525e5a3081ce5bee9709ffa3ef2ee73bb5433bd"
+          "content": "9970e14322c061fac782c5b708d0a47ed7bfe08befe809ac379997132e4ac622"
         }
       ],
       "licenses": [

@@ -12,6 +12,7 @@ import type { GlbMaterial } from '@taucad/geometry-core';
 import type { ShapeConfig, SmlibShape } from '#model.js';
 import type { GeometrySmlib } from '#smlib.types.js';
 import { normalizeColor } from '#utils/normalize-color.js';
+import { meshBoundaryPolylines } from '#utils/mesh-edges.js';
 import { projectSurfaceCoordinates } from '#utils/surface-coordinates.js';
 
 /** The `@classcad/smlibwasm` module the kernel loaded. */
@@ -284,27 +285,60 @@ function sampleEdge(edge: SmlibModule.Edge, tessellation: Tessellation): number[
 }
 
 /**
- * Append edges as a segment soup, one scalar range per edge.
+ * Append a body's edges as a segment soup, one scalar range per edge.
+ *
+ * Each edge is drawn through the face mesh's own samples of it (see {@link meshBoundaryPolylines}),
+ * so the line lies on the triangles' edges at any tessellation. An edge the mesh does not bound (the
+ * faces were not told apart) falls back to sampling its curve; a seam, which lies inside one face,
+ * is left out, as `smlibpy` leaves it out.
  * @param target - The shape's edge buffers.
- * @param edges - The body's edges, in order.
- * @param tessellation - Linear and angular tolerances.
+ * @param shape - The body or face whose edges are drawn.
+ * @param surface - The mesh of the whole shape, which face each triangle belongs to, and the tolerances it was made with.
  */
 function appendEdges(
   target: GeometrySmlib['edges'],
-  edges: readonly SmlibModule.Edge[],
-  tessellation: Tessellation,
+  shape: SmlibModule.Shape,
+  surface: { mesh: FaceMesh; runs: readonly FaceRun[]; tessellation: Tessellation },
 ): void {
+  const { tessellation } = surface;
+  const edges = [...shape.edges()];
+  let fromMesh = new Map<number, number[][][]>();
+  try {
+    const owners = new Int32Array(surface.mesh.triangles.length / 3);
+    for (const { faceId, start, end } of surface.runs) {
+      owners.fill(faceId, start, end);
+    }
+    fromMesh = meshBoundaryPolylines({
+      mesh: surface.mesh,
+      owners,
+      edges,
+      vertices: [...shape.vertices()],
+      tolerance: tessellation.linearTolerance,
+    });
+  } catch {
+    // A body the kernel cannot measure against: every edge samples its curve.
+  }
   for (const [edgeId, edge] of edges.entries()) {
-    const points = sampleEdge(edge, tessellation);
+    const polylines = fromMesh.get(edgeId) ?? (isSeam(edge) ? [] : [sampleEdge(edge, tessellation)]);
     const start = target.lines.length;
-    for (let index = 1; index < points.length; index++) {
-      target.lines.push(...points[index - 1]!, ...points[index]!);
+    for (const points of polylines) {
+      for (let index = 1; index < points.length; index++) {
+        target.lines.push(...points[index - 1]!, ...points[index]!);
+      }
     }
     if (target.lines.length > start) {
       target.edgeGroups.push({ start, count: target.lines.length - start, edgeId });
     }
   }
 }
+
+const isSeam = (edge: SmlibModule.Edge): boolean => {
+  try {
+    return edge.isSeam;
+  } catch {
+    return false;
+  }
+};
 
 /** One face's triangles in a whole-body mesh: the half-open range `[start, end)` of triangle indices. */
 type FaceRun = { faceId: number; start: number; end: number };
@@ -459,6 +493,7 @@ function renderMesh(config: NamedInputShape, options: RenderOptions): GeometrySm
     collectBrepEdges,
   };
 
+  let surface: { mesh: FaceMesh; runs: FaceRun[] } | undefined;
   withSpan({ tracer, name: 'smlib.tessellate.faces', attributes: { ...attributes, output: 'faces' } }, () => {
     if (shape instanceof library.Mesh) {
       appendFaceMesh(geometry.faces, shape, 0);
@@ -472,6 +507,7 @@ function renderMesh(config: NamedInputShape, options: RenderOptions): GeometrySm
     } catch {
       runs = [];
     }
+    surface = { mesh, runs };
     if (runs.length === 0) {
       appendFaceMesh(geometry.faces, mesh, 0);
       return;
@@ -497,9 +533,10 @@ function renderMesh(config: NamedInputShape, options: RenderOptions): GeometrySm
     };
   }
 
-  if (collectBrepEdges && !(shape instanceof library.Mesh)) {
+  if (collectBrepEdges && surface && !(shape instanceof library.Mesh)) {
+    const faceMesh = surface;
     withSpan({ tracer, name: 'smlib.tessellate.edges', attributes: { ...attributes, output: 'edges' } }, () => {
-      appendEdges(geometry.edges, [...shape.edges()], tessellation);
+      appendEdges(geometry.edges, shape, { ...faceMesh, tessellation });
     });
   }
 

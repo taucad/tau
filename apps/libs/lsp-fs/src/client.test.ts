@@ -1,8 +1,6 @@
 import { JSONRPCServer } from 'json-rpc-2.0';
 import type { JSONRPCID, JSONRPCRequest } from 'json-rpc-2.0';
 import { describe, it, expect, vi } from 'vitest';
-import { SharedPool } from '@taucad/memory';
-import { joinPath } from '@taucad/utils/path';
 
 import { attachLanguageFsClient } from '#client.js';
 import type { FileType } from '#protocol.js';
@@ -16,7 +14,7 @@ import {
 } from '#protocol.js';
 
 describe('attachLanguageFsClient', () => {
-  it('Tier 1: readFile issues fs/content and decodes base64', async () => {
+  it('readFile issues fs/content and decodes base64', async () => {
     const server = new JSONRPCServer();
     const payload = new Uint8Array(new ArrayBuffer(3));
     payload.set([10, 20, 30]);
@@ -35,7 +33,6 @@ describe('attachLanguageFsClient', () => {
     });
 
     const client = attachLanguageFsClient({
-      absolutePathForUri: () => '/virtual/a.txt',
       sendJsonRpc,
     });
 
@@ -44,28 +41,7 @@ describe('attachLanguageFsClient', () => {
     expect(sendJsonRpc).toHaveBeenCalledOnce();
   });
 
-  it('Tier 0: skips JSON-RPC when SharedPool has the absolute key', async () => {
-    const sab = new SharedArrayBuffer(256 * 1024);
-    const writerPool = new SharedPool(sab);
-    const key = joinPath('/workspace', 'pool-hit.txt');
-    const stored = new Uint8Array(new ArrayBuffer(2));
-    stored.set([7, 8]);
-    expect(writerPool.store(key, stored)).toBe(true);
-
-    const sendJsonRpc = vi.fn();
-
-    const reader = attachLanguageFsClient({
-      filePoolBuffer: sab,
-      absolutePathForUri: () => key,
-      sendJsonRpc,
-    });
-
-    const out = await reader.readFile('file:///pool-hit.txt');
-    expect([...out]).toEqual([7, 8]);
-    expect(sendJsonRpc).not.toHaveBeenCalled();
-  });
-
-  it('forwards stat, readDirectory, and findFiles as Tier 1', async () => {
+  it('forwards stat, readDirectory, and findFiles', async () => {
     const server = new JSONRPCServer();
 
     server.addMethodAdvanced(fsStatRequest.method, async (request) => {
@@ -98,7 +74,6 @@ describe('attachLanguageFsClient', () => {
     );
 
     const client = attachLanguageFsClient({
-      absolutePathForUri: () => '/x',
       sendJsonRpc,
     });
 

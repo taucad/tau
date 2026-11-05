@@ -176,7 +176,6 @@ export class KclBackend {
         fileManager: environment.fileManager,
         treeService: environment.treeService,
         paths,
-        filePoolBuffer: snapshot.context.filePoolBuffer,
       },
       onNotification: (notification) => {
         void this.#onNotification(notification);

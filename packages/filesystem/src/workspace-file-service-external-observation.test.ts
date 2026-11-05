@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { SharedPool } from '@taucad/memory';
 import { ChangeEventBus } from '#change-event-bus.js';
 import { isEventGloballyVisible } from '#event-origin-registry.js';
 import { MountTable } from '#mount-table.js';
@@ -186,16 +185,12 @@ describe('WorkspaceFileService external webaccess observation', () => {
     expect(unmountedEntries?.mock.calls).toHaveLength(0);
   });
 
-  it('invalidates only the changed subtree when the external diff is localizable', async () => {
+  it('refreshes only the changed subtree when the external diff is localizable', async () => {
     const { service, provider } = await createWebAccessService();
-    const pool = new SharedPool(new SharedArrayBuffer(128 * 1024), { maxEntries: 32 });
-    service.setFilePool(pool);
     const alphaFile = `/projects/${alphaProjectId}/main.ts`;
     const betaFile = `/projects/${betaProjectId}/main.ts`;
     await service.readFile(alphaFile);
     await service.readFile(betaFile);
-    expect(pool.has(alphaFile)).toBe(true);
-    expect(pool.has(betaFile)).toBe(true);
 
     const refresh = vi.spyOn(provider, 'refresh');
     await service.pollExternalChanges(`/projects/${alphaProjectId}`);
@@ -205,11 +200,9 @@ describe('WorkspaceFileService external webaccess observation', () => {
 
     expect(refresh).toHaveBeenCalledOnce();
     expect(refresh).toHaveBeenCalledWith([`${alphaPhysicalRoot}/main.ts`]);
-    expect(pool.has(alphaFile)).toBe(false);
-    expect(pool.has(betaFile)).toBe(true);
   });
 
-  it('falls back to a full invalidation when the external diff cannot be localized', async () => {
+  it('falls back to a full refresh when the external diff cannot be localized', async () => {
     const { service, provider, handle } = await createWebAccessService({
       beforeConfigure: async ({ provider: seedProvider }) => {
         for (let index = 0; index < 70; index++) {
@@ -218,8 +211,6 @@ describe('WorkspaceFileService external webaccess observation', () => {
         }
       },
     });
-    const pool = new SharedPool(new SharedArrayBuffer(128 * 1024), { maxEntries: 32 });
-    service.setFilePool(pool);
     const alphaFile = `/projects/${alphaProjectId}/main.ts`;
     const betaFile = `/projects/${betaProjectId}/main.ts`;
     await service.readFile(alphaFile);
@@ -233,8 +224,6 @@ describe('WorkspaceFileService external webaccess observation', () => {
 
     expect(refresh).toHaveBeenCalledOnce();
     expect(refresh).toHaveBeenCalledWith(undefined);
-    expect(pool.has(alphaFile)).toBe(false);
-    expect(pool.has(betaFile)).toBe(false);
   });
 
   it('reads external snapshot file metadata with bounded concurrency', async () => {

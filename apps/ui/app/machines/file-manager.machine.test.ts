@@ -1645,8 +1645,8 @@ describe('fileManagerMachine', () => {
     });
   });
 
-  describe('shared file pool', () => {
-    it('should post filePool message to worker after ready', async () => {
+  describe('without a shared file pool', () => {
+    it('should reach ready and post no filePool message to the worker', async () => {
       const actor = createActor(fileManagerMachine, {
         input: {
           rootDirectory: '/test',
@@ -1662,152 +1662,9 @@ describe('fileManagerMachine', () => {
       const { worker: fmWorker } = actor.getSnapshot().context;
       expect(fmWorker).toBeDefined();
       const postMessage = vi.mocked(fmWorker!.postMessage);
-      const filePoolCall = postMessage.mock.calls.find(
-        ([message]) => (message as { type?: string }).type === 'filePool',
+      expect(postMessage.mock.calls.some(([message]) => (message as { type?: string }).type === 'filePool')).toBe(
+        false,
       );
-      expect(filePoolCall).toBeDefined();
-      expect((filePoolCall![0] as { buffer: SharedArrayBuffer }).buffer).toBeInstanceOf(SharedArrayBuffer);
-
-      actor.stop();
-    });
-
-    it('should store filePoolBuffer on context after worker connect', async () => {
-      const actor = createActor(fileManagerMachine, {
-        input: {
-          rootDirectory: '/test',
-          shouldInitializeOnStart: true,
-        },
-      });
-      actor.start();
-
-      await vi.waitFor(() => {
-        expect(actor.getSnapshot().value).toBe('ready');
-      });
-
-      expect(actor.getSnapshot().context.filePoolBuffer).toBeInstanceOf(SharedArrayBuffer);
-
-      actor.stop();
-    });
-
-    it('should reach ready state when SharedArrayBuffer is unavailable', async () => {
-      const original = globalThis.SharedArrayBuffer;
-      (globalThis as Record<string, unknown>)['SharedArrayBuffer'] = undefined;
-
-      try {
-        const actor = createActor(fileManagerMachine, {
-          input: {
-            rootDirectory: '/test',
-            shouldInitializeOnStart: true,
-          },
-        });
-        actor.start();
-
-        await vi.waitFor(() => {
-          expect(actor.getSnapshot().value).toBe('ready');
-        });
-
-        expect(actor.getSnapshot().context.filePoolBuffer).toBeUndefined();
-
-        actor.stop();
-      } finally {
-        (globalThis as Record<string, unknown>)['SharedArrayBuffer'] = original;
-      }
-    });
-
-    it('should not post filePool message to worker when SharedArrayBuffer is unavailable', async () => {
-      const original = globalThis.SharedArrayBuffer;
-      (globalThis as Record<string, unknown>)['SharedArrayBuffer'] = undefined;
-
-      try {
-        const actor = createActor(fileManagerMachine, {
-          input: {
-            rootDirectory: '/test',
-            shouldInitializeOnStart: true,
-          },
-        });
-        actor.start();
-
-        await vi.waitFor(() => {
-          expect(actor.getSnapshot().value).toBe('ready');
-        });
-
-        const { worker: fmWorker } = actor.getSnapshot().context;
-        expect(fmWorker).toBeDefined();
-        const postMessage = vi.mocked(fmWorker!.postMessage);
-        const filePoolCall = postMessage.mock.calls.find(
-          ([message]) => (message as { type?: string }).type === 'filePool',
-        );
-        expect(filePoolCall).toBeUndefined();
-
-        actor.stop();
-      } finally {
-        (globalThis as Record<string, unknown>)['SharedArrayBuffer'] = original;
-      }
-    });
-
-    // ── nested FM reuses parent SAB instead of allocating a new one ──────
-    it('should reuse parent sharedFilePoolBuffer instead of allocating a new SAB', async () => {
-      const sharedWorker = {
-        terminate: vi.fn(),
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-        postMessage: vi.fn(),
-      } as unknown as Worker;
-
-      // Match the production filePoolBytes size (50 MiB) so pool initialization succeeds.
-      const parentBuffer = new SharedArrayBuffer(50 * 1024 * 1024);
-
-      const actor = createActor(fileManagerMachine, {
-        input: {
-          rootDirectory: '/projects/nested',
-          shouldInitializeOnStart: true,
-          projectId: 'nested',
-          sharedWorker,
-          sharedFilePoolBuffer: parentBuffer,
-        },
-      });
-      actor.start();
-
-      await vi.waitFor(() => {
-        expect(actor.getSnapshot().value).toBe('ready');
-      });
-
-      // The nested machine inherits the parent's SAB by reference.
-      expect(actor.getSnapshot().context.filePoolBuffer).toBe(parentBuffer);
-
-      // It must not re-post `filePool` to the shared worker — the parent FM
-      // already did that for this worker instance.
-      const sharedPostMessage = vi.mocked(sharedWorker.postMessage);
-      const filePoolCall = sharedPostMessage.mock.calls.find(
-        ([message]) => (message as { type?: string }).type === 'filePool',
-      );
-      expect(filePoolCall).toBeUndefined();
-
-      actor.stop();
-    });
-
-    it('should allocate exactly one SAB per machine when no sharedFilePoolBuffer provided', async () => {
-      const actor = createActor(fileManagerMachine, {
-        input: {
-          rootDirectory: '/test',
-          shouldInitializeOnStart: true,
-        },
-      });
-      actor.start();
-
-      await vi.waitFor(() => {
-        expect(actor.getSnapshot().value).toBe('ready');
-      });
-
-      const { worker: fmWorker, filePoolBuffer } = actor.getSnapshot().context;
-      expect(filePoolBuffer).toBeInstanceOf(SharedArrayBuffer);
-
-      const postMessage = vi.mocked(fmWorker!.postMessage);
-      const filePoolCalls = postMessage.mock.calls.filter(
-        ([message]) => (message as { type?: string }).type === 'filePool',
-      );
-      expect(filePoolCalls).toHaveLength(1);
-      expect((filePoolCalls[0]![0] as { buffer: SharedArrayBuffer }).buffer).toBe(filePoolBuffer);
 
       actor.stop();
     });

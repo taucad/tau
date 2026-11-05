@@ -34,7 +34,6 @@ import {
   parentDirectory,
   resolveAuthorityPath,
 } from '@taucad/utils/path';
-import type { SharedPool } from '@taucad/memory';
 import type {
   ChangeEvent,
   ChangeSetEvent,
@@ -376,11 +375,6 @@ export class MutationPipeline {
   private readonly _eventBus: ChangeEventBus;
   private readonly _crossTabCoordinator: CrossTabCoordinator;
   private readonly _treeIndexes: TreeIndexes;
-  /**
-   * Read through a function, not a field: the writer-side pool arrives after
-   * construction (`setFilePool`) and stays owned by the composition root.
-   */
-  private readonly _filePool: () => SharedPool | undefined;
   /** Convenience entries this task is coalescing into one changeset, per origin (D22). */
   private readonly _pending = new Map<string, PendingChangeset>();
   /** The highest fencing token applied per record-log path (D23); a lower one is a stale writer. */
@@ -397,14 +391,12 @@ export class MutationPipeline {
     eventBus: ChangeEventBus;
     crossTabCoordinator: CrossTabCoordinator;
     treeIndexes: TreeIndexes;
-    filePool: () => SharedPool | undefined;
   }) {
     this._mountTable = options.mountTable;
     this._resourceQueue = options.resourceQueue;
     this._eventBus = options.eventBus;
     this._crossTabCoordinator = options.crossTabCoordinator;
     this._treeIndexes = options.treeIndexes;
-    this._filePool = options.filePool;
   }
 
   /**
@@ -842,7 +834,6 @@ export class MutationPipeline {
         continue;
       }
       const resolution = this._mountTable.resolve(path);
-      this._filePool()?.invalidate(path);
       this._treeIndexes.removeFile(path);
       events.push({
         event: { type: 'fileDeleted', path, backend: resolution.backend },
@@ -851,7 +842,6 @@ export class MutationPipeline {
       notices.push({ type: 'delete', path, authority: this.physicalAuthority(resolution) });
     }
     if (unrouted) {
-      this._filePool()?.clear();
       this._treeIndexes.clear();
       events.push({ event: { type: 'backendChanged', backend }, operations: [] });
       notices.push({ type: 'directory-change', path: '/', authority: { storageRootKey, providerBasePath: '' } });
@@ -1185,7 +1175,6 @@ export class MutationPipeline {
         }
         if (result.status === 'applied') {
           if (this.isCurrentResolution(path, resolution)) {
-            this._filePool()?.invalidate(path);
             this._treeIndexes.removeFile(path);
           }
           this.emitChangeEvent({ type: 'fileDeleted', path, backend: resolution.backend }, context, { operations });
@@ -1947,7 +1936,6 @@ export class MutationPipeline {
         case 'write':
         case 'append': {
           if (current) {
-            this._filePool()?.invalidate(path);
             if (batch.op === 'write' && entry.bytes !== undefined) {
               this._treeIndexes.addFile(path, { size: entry.bytes.byteLength, ...getFileContentMetadata(entry.bytes) });
             } else if (batch.op === 'write') {
@@ -1976,16 +1964,12 @@ export class MutationPipeline {
         case 'delete': {
           if (kind === 'dir') {
             if (current) {
-              if (batch.recursive === true) {
-                this._filePool()?.clear();
-              }
               this._treeIndexes.removeDirectory(path);
             }
             events.push({ event: { type: 'directoryDeleted', path, backend }, operations });
             notify('rmdir', path, resolution);
           } else {
             if (current) {
-              this._filePool()?.invalidate(path);
               this._treeIndexes.removeFile(path);
             }
             events.push({ event: { type: 'fileDeleted', path, backend }, operations });
@@ -1998,11 +1982,8 @@ export class MutationPipeline {
           const targetResolution = entry.targetResolution ?? resolution;
           const targetIsCurrent = this.isCurrentResolution(target, targetResolution);
           if (current && targetIsCurrent) {
-            this._filePool()?.invalidate(path);
-            this._filePool()?.invalidate(target);
             this._treeIndexes.rename(path, target);
           } else if (current || targetIsCurrent) {
-            this._filePool()?.clear();
             this._treeIndexes.evict(path);
             this._treeIndexes.evict(target);
           }
@@ -2032,10 +2013,8 @@ export class MutationPipeline {
           continue;
         }
         if (batch.op === 'write' || batch.op === 'append' || (batch.op === 'delete' && batch.kind === 'file')) {
-          this._filePool()?.invalidate(path);
           this._treeIndexes.removeFile(path);
         } else {
-          this._filePool()?.clear();
           this._treeIndexes.evict(path);
         }
       }
@@ -2111,7 +2090,6 @@ export class MutationPipeline {
   }): void {
     const { backend: resolvedBackend } = resolution;
     if (this.isCurrentResolution(path, resolution)) {
-      this._filePool()?.invalidate(path);
       this._treeIndexes.addFile(path, {
         size: bytes.byteLength,
         ...getFileContentMetadata(bytes),

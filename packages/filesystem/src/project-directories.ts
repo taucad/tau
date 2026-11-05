@@ -55,7 +55,6 @@ import type {
   ProjectManifestParseIssue,
 } from '@taucad/types';
 import { assertRootedPath, isSafeRelativePath, joinRelativePath } from '@taucad/utils/path';
-import type { SharedPool } from '@taucad/memory';
 import type { FileSystemProvider, WorkspaceMutationContext } from '#types.js';
 import type { BatchEntry } from '#changeset.js';
 import type {
@@ -311,7 +310,6 @@ export class ProjectDirectories {
   private readonly _treeIndexes: TreeIndexes;
   /** The configured discovery roots, owned by the authority's mount lifecycle. */
   private readonly _discoveryRoots: () => readonly ResolvedDiscoveryRoot[];
-  private readonly _filePool: () => SharedPool | undefined;
   /** Retire one logical project route the authority installed, as a delete must. */
   private readonly _revokeProjectRoute: (path: string, notifyPeers: boolean) => void;
 
@@ -327,7 +325,6 @@ export class ProjectDirectories {
     pipeline: MutationPipeline;
     treeIndexes: TreeIndexes;
     discoveryRoots: () => readonly ResolvedDiscoveryRoot[];
-    filePool: () => SharedPool | undefined;
     revokeProjectRoute: (path: string, notifyPeers: boolean) => void;
   }) {
     this._observedIdentityResolver = createProjectIdentityResolver({
@@ -357,7 +354,6 @@ export class ProjectDirectories {
     this._pipeline = options.pipeline;
     this._treeIndexes = options.treeIndexes;
     this._discoveryRoots = options.discoveryRoots;
-    this._filePool = options.filePool;
     this._revokeProjectRoute = options.revokeProjectRoute;
   }
 
@@ -606,7 +602,6 @@ export class ProjectDirectories {
         try {
           await this._deleteProjectDirectory({ provider, directoryPath: path, manifest, identity: identityBytes });
         } finally {
-          this._filePool()?.clear();
           this._treeIndexes.clear();
           this._pipeline.emitChangeEvent({ type: 'directoryChanged', path: authorityParent, backend: scope.backend });
           this._crossTabCoordinator.notifyDirectoryChange(authorityParent, parentAuthority);
@@ -686,7 +681,6 @@ export class ProjectDirectories {
 
           mutationBegan = true;
           await provider.mkdir(path, { recursive: true });
-          this._filePool()?.clear();
           this._treeIndexes.removeDirectory(logicalRoot);
           const identity = await this._resolveIdentity({
             provider,
@@ -728,7 +722,6 @@ export class ProjectDirectories {
           return { status: 'committed' };
         } catch (error) {
           if (mutationBegan) {
-            this._filePool()?.clear();
             this._treeIndexes.removeDirectory(logicalRoot);
             this._crossTabCoordinator.notifyDirectoryChange(logicalRoot, this._scopedPhysicalAuthority(scope, path));
           }
@@ -909,7 +902,6 @@ export class ProjectDirectories {
     if (result.status === 'applied') {
       const relativePath = input.path.slice(input.directory.length + 1);
       const logicalPath = `${projectRoute(input.projectId)}/${relativePath}`;
-      this._filePool()?.invalidate(logicalPath);
       this._treeIndexes.evict(logicalPath);
       if (input.alreadyLocked !== true) {
         this._pipeline.emitChangeEvent({ type: 'fileWritten', path: logicalPath, backend: input.scope.backend });

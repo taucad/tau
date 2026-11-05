@@ -89,7 +89,6 @@ export type KclLspFsBridgeOptions = Readonly<{
   fileManager: Pick<FileManagerApi, 'readFile'>;
   treeService: FileTreeService;
   paths: WorkspacePathResolver;
-  filePoolBuffer?: SharedArrayBuffer;
 }>;
 
 export type KclLspClientOptions = Readonly<{
@@ -340,7 +339,6 @@ export class KclLspClient {
       fileManager: this.options.fs.fileManager,
       treeService: this.options.fs.treeService,
       paths: this.options.fs.paths,
-      filePoolBuffer: this.options.fs.filePoolBuffer,
     });
 
     this.worker = new Worker(new URL('kcl-lsp-worker.ts', import.meta.url), { type: 'module', name: 'kcl-lsp' });
@@ -422,7 +420,6 @@ export class KclLspClient {
       token: '',
       apiBaseUrl: '',
       workspaceRootPath: this.options.fs.paths.root,
-      filePoolBuffer: this.options.fs.filePoolBuffer,
     };
     log.debug('Posting Init event to worker');
     this.worker.postMessage({ worker: kclWorkerType, eventType: lspWorkerEventType.init, eventData: initOptions });

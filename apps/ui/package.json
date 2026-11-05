@@ -67,7 +67,6 @@
     "@taucad/lsp": "workspace:*",
     "@taucad/lsp-fs": "workspace:*",
     "@taucad/manifold": "workspace:*",
-    "@taucad/memory": "workspace:*",
     "@taucad/middleware": "workspace:*",
     "@taucad/occt-core": "workspace:*",
     "@taucad/opencascade": "workspace:*",

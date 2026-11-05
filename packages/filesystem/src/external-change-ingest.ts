@@ -17,7 +17,6 @@
 
 import type { FileSystemBackend } from '@taucad/types';
 import { assertRootedPath, parentDirectory, resolveAuthorityPath } from '@taucad/utils/path';
-import type { SharedPool } from '@taucad/memory';
 import type { ExternalChangeFact, FileSystemProvider } from '#types.js';
 import { isChromiumSwapArtifactName } from '#backend/fs-access-provider.js';
 import { mapConcurrent } from '#concurrency.js';
@@ -115,8 +114,6 @@ export class ExternalChangeIngest {
   private readonly _pipeline: MutationPipeline;
   private readonly _crossTabCoordinator: CrossTabCoordinator;
   private readonly _treeIndexes: TreeIndexes;
-  /** Read through a function: the writer-side pool arrives after construction. */
-  private readonly _filePool: () => SharedPool | undefined;
   /** Drops the registry's provider for a root whose physical identity changed. */
   private readonly _disposeStorageRoot: (storageRootKey: string) => void;
   private readonly _observedExternalRoots = new Map<string, ObservedExternalRoot>();
@@ -132,7 +129,6 @@ export class ExternalChangeIngest {
     pipeline: MutationPipeline;
     crossTabCoordinator: CrossTabCoordinator;
     treeIndexes: TreeIndexes;
-    filePool: () => SharedPool | undefined;
     disposeStorageRoot: (storageRootKey: string) => void;
   }) {
     this._registry = options.registry;
@@ -140,7 +136,6 @@ export class ExternalChangeIngest {
     this._pipeline = options.pipeline;
     this._crossTabCoordinator = options.crossTabCoordinator;
     this._treeIndexes = options.treeIndexes;
-    this._filePool = options.filePool;
     this._disposeStorageRoot = options.disposeStorageRoot;
   }
 
@@ -461,7 +456,7 @@ export class ExternalChangeIngest {
     if (this._observedExternalRoots.get(state.storageRootKey) !== state) {
       return;
     }
-    this._invalidateExternalDerivatives({ state, physicalPaths });
+    this._invalidateExternalDerivatives();
     let discoveryChanged = false;
     for (const change of prepared) {
       discoveryChanged ||= this._touchesDiscovery(change);
@@ -708,23 +703,8 @@ export class ExternalChangeIngest {
 
   /**
    * Drop the derivatives an external change invalidated.
-   *
-   * @param scoped - Root and provider-physical paths whose subtrees changed. Omit
-   *                 for a full drop when the change cannot be localized.
    */
-  private _invalidateExternalDerivatives(scoped?: {
-    state: ObservedExternalRoot;
-    physicalPaths: readonly string[];
-  }): void {
-    if (scoped === undefined) {
-      this._filePool()?.clear();
-    } else {
-      for (const physicalPath of scoped.physicalPaths) {
-        for (const { path } of this._logicalMappingsForPhysicalPath(scoped.state, physicalPath)) {
-          this._filePool()?.invalidate(path);
-        }
-      }
-    }
+  private _invalidateExternalDerivatives(): void {
     // oxlint-disable-next-line capitalized-comments -- Ponytail debt markers intentionally use the lowercase `ponytail:` tag.
     // ponytail: the tree is dropped whole even for a localized change — TreeIndex
     // cannot express "this subtree is unknown", and a scoped removal would publish a
@@ -953,7 +933,7 @@ export class ExternalChangeIngest {
     if (this._observedExternalRoots.get(state.storageRootKey) !== state) {
       return;
     }
-    this._invalidateExternalDerivatives(physicalPaths === undefined ? undefined : { state, physicalPaths });
+    this._invalidateExternalDerivatives();
     this._emitExternalRootSummaries(state, scope === '*' ? undefined : scope);
     this._emitGlobalDiscoveryChange(state);
     state.pollSnapshots.set(scope, next);

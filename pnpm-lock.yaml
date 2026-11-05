@@ -2355,9 +2355,6 @@ importers:
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../../../packages/filesystem
-      '@taucad/memory':
-        specifier: workspace:*
-        version: link:../../../libs/memory
       '@taucad/types':
         specifier: workspace:*
         version: link:../../../libs/types
@@ -2395,9 +2392,6 @@ importers:
       '@taucad/lsp-fs':
         specifier: workspace:*
         version: link:../lsp-fs
-      '@taucad/memory':
-        specifier: workspace:*
-        version: link:../../../libs/memory
       '@taucad/types':
         specifier: workspace:*
         version: link:../../../libs/types
@@ -2426,9 +2420,6 @@ importers:
       '@taucad/fs-bridge':
         specifier: workspace:*
         version: link:../../../libs/fs-bridge
-      '@taucad/memory':
-        specifier: workspace:*
-        version: link:../../../libs/memory
       '@taucad/utils':
         specifier: workspace:*
         version: link:../../../libs/utils
@@ -2885,9 +2876,6 @@ importers:
       '@taucad/manifold':
         specifier: workspace:*
         version: link:../../packages/plugins/manifold
-      '@taucad/memory':
-        specifier: workspace:*
-        version: link:../../libs/memory
       '@taucad/middleware':
         specifier: workspace:*
         version: link:../../packages/plugins/middleware
@@ -4286,9 +4274,6 @@ importers:
       '@taucad/events':
         specifier: workspace:*
         version: link:../../libs/events
-      '@taucad/memory':
-        specifier: workspace:*
-        version: link:../../libs/memory
       '@taucad/nx':
         specifier: workspace:*
         version: link:../../tools/nx

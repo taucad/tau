@@ -23,7 +23,6 @@ import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
 import { normalizePath } from '@taucad/utils/path';
 import { FileContentBudget } from '@taucad/fs-client/file-content-budget';
 import { FileContentService } from '@taucad/fs-client/file-content-service';
-import { SharedPool } from '@taucad/memory';
 import { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import type { ExternalPollTelemetry } from '@taucad/fs-client/file-tree-service';
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
@@ -50,8 +49,6 @@ const fileCacheMaxSingleFileBytes = 1024 * 1024;
  * with the number of mounts.
  */
 const documentFileContentBudget = new FileContentBudget({ maxTotalBytes: fileCacheMaxTotalBytes });
-
-const filePoolBytes = 50 * 1024 * 1024;
 
 const computeOpeners = (worker: Worker, admittedProjectId: string | undefined) => {
   const openComputeStorePort = (projectId: string): MessagePort => {
@@ -150,7 +147,6 @@ type FileManagerContext = {
   openComputeStorePort?: (projectId: string) => MessagePort;
   computeControl?: ReturnType<typeof computeOpeners>['computeControl'];
   openRevisionSessionPort?: ReturnType<typeof computeOpeners>['openRevisionSessionPort'];
-  filePoolBuffer: SharedArrayBuffer | undefined;
   contentService: FileContentService | undefined;
   treeService: FileTreeService | undefined;
   /** The one composed client the file services and the Files pane both use. */
@@ -208,7 +204,6 @@ type WorkerConnectedEvent = {
   openComputeStorePort: (projectId: string) => MessagePort;
   computeControl: ReturnType<typeof computeOpeners>['computeControl'];
   openRevisionSessionPort: ReturnType<typeof computeOpeners>['openRevisionSessionPort'];
-  filePoolBuffer: SharedArrayBuffer | undefined;
 };
 
 /**
@@ -386,22 +381,6 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     }
     armed = false;
 
-    // Allocate the file-pool SharedArrayBuffer at most once per worker instance.
-    // When `sharedWorker` is supplied, the parent FM has already allocated the
-    // SAB and posted the `filePool` message to that worker; nested FMs reuse
-    // the parent's SAB by reading it from `context.filePoolBuffer` so the
-    // 50 MiB pool isn't duplicated per project route.
-    const { filePoolBuffer: inheritedPoolBuffer } = context;
-    let filePoolBuffer: SharedArrayBuffer | undefined = inheritedPoolBuffer;
-    if (!inheritedPoolBuffer) {
-      try {
-        filePoolBuffer = new SharedArrayBuffer(filePoolBytes);
-        worker.postMessage({ type: 'filePool', buffer: filePoolBuffer });
-      } catch {
-        filePoolBuffer = undefined;
-      }
-    }
-
     const bridge = createFileSystemBridge(worker);
     const { dispose: bridgeDispose } = bridge;
     const proxy = createFileSystemBridgeProxy(bridge);
@@ -436,7 +415,6 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
       openComputeStorePort,
       computeControl,
       openRevisionSessionPort,
-      filePoolBuffer,
     };
   },
 );
@@ -499,8 +477,6 @@ const initializeServicesActor = fromSafeAsync<
       };
     }
   }
-
-  const filePool = context.filePoolBuffer ? new SharedPool(context.filePoolBuffer) : undefined;
 
   const paths = new WorkspacePathResolver(context.rootDirectory);
   const refreshGuard = new RefreshGenerationGuard();
@@ -615,7 +591,6 @@ const initializeServicesActor = fromSafeAsync<
         maxTotalBytes: fileCacheMaxTotalBytes,
         maxSingleFileBytes: fileCacheMaxSingleFileBytes,
       },
-      filePool,
       budget: documentFileContentBudget,
     });
     contentService = initializedContentService;
@@ -713,12 +688,6 @@ type FileManagerInput = {
   shouldInitializeOnStart?: boolean;
   projectId?: string;
   sharedWorker?: Worker;
-  /**
-   * SharedArrayBuffer to reuse for the file-pool when nested under another
-   * `FileManagerProvider`. Set to the parent FM's `filePoolBuffer` so the
-   * nested machine skips its own allocation/post.
-   */
-  sharedFilePoolBuffer?: SharedArrayBuffer;
   onExternalPollTelemetry?: (aggregate: ExternalPollTelemetry) => void;
   /** Telemetry sink for workspaces the route snapshot had to skip (R13). */
   onRootSkipped?: (skip: WorkspaceRootSkip) => void;
@@ -866,9 +835,6 @@ export const fileManagerMachine = setup({
     openComputeStorePort: undefined,
     computeControl: undefined,
     openRevisionSessionPort: undefined,
-    // Seed with the parent's SAB when nested so the connect actor's gate
-    // observes a non-undefined buffer and skips re-allocation.
-    filePoolBuffer: input.sharedFilePoolBuffer,
     contentService: undefined,
     treeService: undefined,
     viewClient: undefined,
@@ -928,7 +894,6 @@ export const fileManagerMachine = setup({
             openComputeStorePort: event.openComputeStorePort,
             computeControl: event.computeControl,
             openRevisionSessionPort: event.openRevisionSessionPort,
-            filePoolBuffer: event.filePoolBuffer,
           }),
         },
       },

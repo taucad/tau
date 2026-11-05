@@ -24,6 +24,7 @@ import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client'
 import { createRootedContentClient, rootedPathOf } from '@taucad/fs-client/rooted-content-client';
 import type { RootedContentClient, RootedContentOwner } from '@taucad/fs-client/rooted-content-client';
 import type { FileManagerRef, FileManagerProxy } from '#machines/file-manager.machine.types.js';
+import { watchByChangeSets } from '@taucad/filesystem';
 import type { MountConfig, WorkspaceMutationError, WorkspaceScope, WatchEvent } from '@taucad/filesystem';
 import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
 import { pathRegistry } from '@taucad/filesystem/path-registry';
@@ -458,14 +459,6 @@ const FileManagerContext = createContext<FileManagerContextType | undefined>(und
 
 const SharedWorkerContext = createContext<Worker | undefined>(undefined);
 
-/**
- * Carries the root FileManagerProvider's file-pool SharedArrayBuffer down to
- * nested providers. Nested machines reuse this SAB instead of allocating
- * their own 50 MiB pool, avoiding duplicate `postMessage({ type: 'filePool' })`
- * traffic to the shared worker.
- */
-const SharedFilePoolBufferContext = createContext<SharedArrayBuffer | undefined>(undefined);
-
 const HomeStorageBackendContext = createContext<
   | { readonly backend: HomeStorageBackend | undefined; readonly error: Error | undefined; readonly retry: () => void }
   | undefined
@@ -740,7 +733,6 @@ function FileManagerProviderCore({
   readonly projectId?: string;
 }): React.JSX.Element {
   const parentWorker = useContext(SharedWorkerContext);
-  const parentFilePoolBuffer = useContext(SharedFilePoolBufferContext);
 
   const workspaceTelemetry = useWorkspaceTelemetry();
 
@@ -751,7 +743,6 @@ function FileManagerProviderCore({
       ...(initialBackend === undefined ? { backendResolution: 'pending' } : { initialBackend }),
       projectId,
       sharedWorker: parentWorker,
-      sharedFilePoolBuffer: parentFilePoolBuffer,
       onExternalPollTelemetry: workspaceTelemetry.workspaceExternalPoll,
       onRootSkipped: workspaceTelemetry.workspaceRootSkipped,
     },
@@ -1058,7 +1049,6 @@ function FileManagerProviderCore({
           await whenServicesReady();
           abort.signal.throwIfAborted();
           const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
-          const { watchByChangeSets } = await import('@taucad/filesystem');
           abort.signal.throwIfAborted();
           const proxy = createFileSystemBridgeProxy((bridgeOpener ?? openRootedFileSystemBridge)(root, 'working-copy'));
           /* A chat's append storm reaches this watch once per committed changeset (D6, D23). */
@@ -1605,18 +1595,11 @@ function FileManagerProviderCore({
 
   const isRoot = parentWorker === undefined;
   const workerForChildren = useSelector(fileManagerRef, (state) => state.context.worker);
-  const filePoolBufferForChildren = useSelector(fileManagerRef, (state) => state.context.filePoolBuffer);
 
   const provider = <FileManagerContext.Provider value={value}>{children}</FileManagerContext.Provider>;
 
   if (isRoot) {
-    return (
-      <SharedWorkerContext.Provider value={workerForChildren}>
-        <SharedFilePoolBufferContext.Provider value={filePoolBufferForChildren}>
-          {provider}
-        </SharedFilePoolBufferContext.Provider>
-      </SharedWorkerContext.Provider>
-    );
+    return <SharedWorkerContext.Provider value={workerForChildren}>{provider}</SharedWorkerContext.Provider>;
   }
 
   return provider;

@@ -40,7 +40,6 @@
   "dependencies": {
     "@taucad/fs-client": "workspace:*",
     "@taucad/lsp-fs": "workspace:*",
-    "@taucad/memory": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",
     "json-rpc-2.0": "^1.7.1",

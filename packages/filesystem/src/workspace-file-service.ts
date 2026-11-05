@@ -42,7 +42,6 @@ import { CrossTabCoordinator } from '#cross-tab-coordinator.js';
 import { ExternalChangeIngest } from '#external-change-ingest.js';
 import type { StagedDiscoveryRoot } from '#external-change-ingest.js';
 import { RemoteChanges } from '#remote-changes.js';
-import type { SharedPool } from '@taucad/memory';
 import type {
   CheckoutRootConfig,
   MountTable,
@@ -162,7 +161,6 @@ export class WorkspaceFileService {
   private readonly _eventBus: ChangeEventBus;
   private readonly _watchRegistry: WatchRegistry;
   private readonly _crossTabCoordinator: CrossTabCoordinator;
-  private _filePool: SharedPool | undefined;
   private readonly _mountTable: MountTable;
   private readonly _policy: PathPolicy | undefined;
   /* Told the live mount prefixes, an index never answers for a path behind a nested mount. */
@@ -191,8 +189,6 @@ export class WorkspaceFileService {
     resourceQueue: ResourceQueue;
     eventBus: ChangeEventBus;
     crossTabCoordinator?: CrossTabCoordinator;
-    /** Writer-side shared file pool for zero-IPC cached reads across threads. */
-    filePool?: SharedPool;
     /** Mount table for multi-backend path routing. */
     mountTable: MountTable;
     /**
@@ -211,7 +207,6 @@ export class WorkspaceFileService {
       leadingEdge: true,
     });
     this._crossTabCoordinator = options.crossTabCoordinator ?? new CrossTabCoordinator();
-    this._filePool = options.filePool;
     this._mountTable = options.mountTable;
     this._policy = options.policy;
     this._pipeline = new MutationPipeline({
@@ -220,7 +215,6 @@ export class WorkspaceFileService {
       eventBus: this._eventBus,
       crossTabCoordinator: this._crossTabCoordinator,
       treeIndexes: this._treeIndexes,
-      filePool: () => this._filePool,
     });
     this._rootedViews = new RootedViews({
       mountTable: this._mountTable,
@@ -235,7 +229,6 @@ export class WorkspaceFileService {
       pipeline: this._pipeline,
       treeIndexes: this._treeIndexes,
       discoveryRoots: () => this._discoveryRoots,
-      filePool: () => this._filePool,
       revokeProjectRoute: (path, notifyPeers) => {
         this._revokeProjectRoute(path, notifyPeers);
       },
@@ -246,7 +239,6 @@ export class WorkspaceFileService {
       pipeline: this._pipeline,
       crossTabCoordinator: this._crossTabCoordinator,
       treeIndexes: this._treeIndexes,
-      filePool: () => this._filePool,
       disposeStorageRoot: (storageRootKey) => {
         this.disposeStorageRoot(storageRootKey);
       },
@@ -257,7 +249,6 @@ export class WorkspaceFileService {
       pipeline: this._pipeline,
       treeIndexes: this._treeIndexes,
       watchRegistry: this._watchRegistry,
-      filePool: () => this._filePool,
       discoveryRoots: () => this._discoveryRoots,
       revokeProjectRoute: (path, notifyPeers) => {
         this._revokeProjectRoute(path, notifyPeers);
@@ -272,16 +263,6 @@ export class WorkspaceFileService {
       const backend: FileSystemBackend = storageRootKey.startsWith('webaccess:') ? 'webaccess' : 'opfs';
       this._pipeline.publishRecoveredRemovals(storageRootKey, backend, providerPaths);
     });
-  }
-
-  /**
-   * Set or replace the shared file pool for zero-IPC cached reads.
-   * Enables late binding when the SharedArrayBuffer arrives after construction.
-   *
-   * @param pool - Writer-side shared file pool.
-   */
-  public setFilePool(pool: SharedPool): void {
-    this._filePool = pool;
   }
 
   /**
@@ -323,9 +304,6 @@ export class WorkspaceFileService {
     const encoding = options === 'utf8' || optionsObject?.encoding === 'utf8' ? 'utf8' : undefined;
 
     const data = await provider.readFile(resolvedPath);
-    if (optionsObject?.scope === undefined) {
-      this._filePool?.store(canonicalPath, data);
-    }
     return encoding === 'utf8' ? new TextDecoder().decode(data) : data;
   }
 
@@ -1250,8 +1228,6 @@ export class WorkspaceFileService {
   public dispose(): void {
     this._projectDirectories.dispose();
     this._externalChanges.dispose();
-    this._filePool?.clear();
-    this._filePool = undefined;
     this._treeIndexes.clear();
     this._pendingTreeScans.clear();
     this._projectRoutes.clear();
@@ -1538,7 +1514,6 @@ export class WorkspaceFileService {
    * and the one that now covers it; every other root stays warm (W7c).
    */
   private _resetTopologyState(prefixes: readonly string[]): void {
-    this._filePool?.clear();
     for (const prefix of prefixes) {
       this._treeIndexes.evict(prefix);
     }

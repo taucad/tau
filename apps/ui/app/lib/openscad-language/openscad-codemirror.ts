@@ -144,7 +144,6 @@ export class OpenscadBackend {
         fileManager: environment.fileManager,
         treeService: environment.treeService,
         paths: new WorkspacePathResolver(snapshot.context.rootDirectory),
-        filePoolBuffer: snapshot.context.filePoolBuffer,
         rootDirectory: snapshot.context.rootDirectory,
       },
       onFatal: (error) => {

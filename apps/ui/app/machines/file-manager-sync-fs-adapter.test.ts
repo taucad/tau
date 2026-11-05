@@ -5,12 +5,14 @@ describe('listWorkspaceDirectories', () => {
   it('lists directory names from one kind-carrying listing, with no stat per child', async () => {
     const fileSystem: Parameters<typeof listWorkspaceDirectories>[0] = {
       readdir: vi.fn(async () => []),
-      stat: vi.fn(async () => ({ type: 'file' as const })),
-      readdirEntries: vi.fn(async () => [
-        { name: 'file.ts', kind: 'file' as const },
-        { name: 'src', kind: 'dir' as const },
-        { name: 'types', kind: 'dir' as const },
-      ]),
+      stat: vi.fn(async (): Promise<{ type: 'file' | 'dir' }> => ({ type: 'file' })),
+      readdirEntries: vi.fn(
+        async (): Promise<Array<{ name: string; kind: 'file' | 'dir' }>> => [
+          { name: 'file.ts', kind: 'file' },
+          { name: 'src', kind: 'dir' },
+          { name: 'types', kind: 'dir' },
+        ],
+      ),
     };
 
     await expect(listWorkspaceDirectories(fileSystem, '')).resolves.toEqual(['src', 'types']);

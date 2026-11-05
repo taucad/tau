@@ -668,6 +668,38 @@ describe('downloadMany', () => {
     expect(received).toEqual(contentOf);
   });
 
+  /* D10: an opened path jumps the fill queue, ahead of objects already answered and of later batches. */
+  it('transfers the objects `first` names before the rest, even one named while the download runs', async () => {
+    const { request, asked } = batchEndpoint();
+    const order: string[] = [];
+    const first = new Set<string>();
+    const late = pointers[150]!.oid;
+    const answered = pointers[50]!.oid;
+    await createLfsClient({
+      url: 'https://api.tau.test/git',
+      http: { request },
+      fetch: async (url) => new Response(contentOf.get(oidOf(url))),
+      downloadConcurrency: 1,
+    }).downloadMany({
+      pointers,
+      first: () => first,
+      received: async (pointer) => {
+        order.push(pointer.oid);
+        if (order.length === 3) {
+          first.add(late);
+          first.add(answered);
+        }
+      },
+    });
+    /* At most one object was already admitted when the promotion landed. */
+    expect(order.indexOf(answered)).toBeLessThanOrEqual(4);
+    expect(order.indexOf(late)).toBeLessThanOrEqual(5);
+    /* The unasked one got a batch call of its own. */
+    expect(asked[1]).toEqual([late]);
+    expect(order).toHaveLength(pointers.length);
+    expect(new Set(order)).toEqual(new Set(contentOf.keys()));
+  });
+
   it('should hand each object over with the transport its action named', async () => {
     const { request } = batchEndpoint();
     const transports: string[] = [];

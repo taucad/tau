@@ -789,6 +789,15 @@ describe('reading a tree with large objects', () => {
     );
   });
 
+  /* D10: the fill names an opened path's object, and the read asks for it before the rest. */
+  it('asks for the objects a fetching read names first before the others', async () => {
+    const { port, head, asked, evict } = await lfsStore();
+    await evict(parts[0]![1]!, parts[2]![1]!);
+    const first = new Set([oidOf(parts[2]![1]!)]);
+    await port.readTree(head, { firstLargeObjects: () => first });
+    expect(asked).toStrictEqual([[oidOf(parts[2]![1]!)], [oidOf(parts[0]![1]!)]]);
+  });
+
   it('tells a second reader about an object the first reader is fetching', async () => {
     const { port, head, asked, transfer, evict } = await lfsStore();
     await evict(parts[1]![1]!);

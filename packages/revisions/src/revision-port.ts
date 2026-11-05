@@ -552,6 +552,12 @@ export type ReadTreeOptions = Readonly<{
   paths?: readonly string[];
   /** Told about each large object as the remote delivers it, while a fetching read runs. */
   onLargeObject?: (oid: string, content: Uint8Array<ArrayBuffer>) => void;
+  /**
+   * Large objects to fetch before the rest, asked again before each transfer
+   * starts, so an oid added while the read runs goes next (D10). A host that
+   * cannot order its transfers may ignore it.
+   */
+  firstLargeObjects?: () => ReadonlySet<string>;
   /** Stops a fetching read's transfers; the read then rejects. */
   signal?: AbortSignal;
 }>;

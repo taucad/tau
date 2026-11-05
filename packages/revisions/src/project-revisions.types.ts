@@ -180,6 +180,12 @@ export type LargeObjectsReport = Readonly<{
   facet: LargeObjectsFacet | undefined;
   /** Start the transfer again after a failure; a no-op otherwise. */
   retry: () => void;
+  /**
+   * Fetch and write these checkout-relative paths' objects before the rest:
+   * an opened path jumps the fill queue (D10). Paths that hold no placeholder
+   * are ignored.
+   */
+  prioritize: (paths: readonly string[]) => void;
 }>;
 
 /**

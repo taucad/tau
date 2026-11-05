@@ -211,6 +211,12 @@ export type LfsDownloadManyInput = Readonly<{
    * keeps the whole download bounded. A rejection stops the rest.
    */
   received: (pointer: LfsPointer, content: Uint8Array<ArrayBuffer>, transfer: LfsDownloadTransfer) => Promise<void>;
+  /**
+   * Oids to transfer before the rest (D10: an opened path jumps the fill
+   * queue). Asked before each object is handed out, so an oid named while the
+   * download runs goes next, behind only the transfers already in flight.
+   */
+  first?: () => ReadonlySet<string>;
 }>;
 
 /** One project's LFS transport. @public */
@@ -790,12 +796,33 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
      * when it expired while it waited, and handed over as soon as it arrives,
      * so a reload part-way through keeps what was already stored.
      */
-    downloadMany: async ({ pointers, received, signal }: LfsDownloadManyInput): Promise<void> => {
+    downloadMany: async ({ pointers, received, signal, first }: LfsDownloadManyInput): Promise<void> => {
       signal?.throwIfAborted();
-      const unique = [...new Map(pointers.map((pointer) => [pointer.oid, pointer] as const)).values()];
+      /* Not yet asked of the batch endpoint, in tree order. */
+      const queued = new Map(pointers.map((pointer) => [pointer.oid, pointer] as const));
       const answered = async function* (batchSignal: AbortSignal): AsyncGenerator<BatchObject> {
-        for (let start = 0; start < unique.length; start += lfsDownloadBatchSize) {
-          yield* await batch('download', unique.slice(start, start + lfsDownloadBatchSize), batchSignal);
+        const ready: BatchObject[] = [];
+        while (queued.size > 0 || ready.length > 0) {
+          const promoted = first?.() ?? new Set<string>();
+          const at = ready.findIndex(({ oid }) => promoted.has(oid));
+          const jumping = [...promoted].flatMap((oid) => queued.get(oid) ?? []);
+          if (at === -1 && (jumping.length > 0 || ready.length === 0)) {
+            const asked = (jumping.length > 0 ? jumping : [...queued.values()]).slice(0, lfsDownloadBatchSize);
+            for (const { oid } of asked) {
+              queued.delete(oid);
+            }
+            const answers = await batch('download', asked, batchSignal);
+            if (jumping.length > 0) {
+              ready.unshift(...answers);
+            } else {
+              ready.push(...answers);
+            }
+            continue;
+          }
+          const [next] = ready.splice(Math.max(at, 0), 1);
+          if (next !== undefined) {
+            yield next;
+          }
         }
       };
       await pool(

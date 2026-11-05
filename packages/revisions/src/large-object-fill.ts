@@ -37,6 +37,8 @@ type Fill = {
   /** Arrived bytes, by oid: kept until the fill ends, so a placeholder copied or moved later is still filled. */
   readonly landed: Map<string, Uint8Array<ArrayBuffer>>;
   readonly arrived: Set<string>;
+  /** Objects an opened path names: fetched before the rest and written as soon as they land (D10). */
+  readonly promoted: Set<string>;
   readonly totalObjects: number;
   readonly totalBytes: number;
   /** Stops the fill's transfers when the checkout closes or a newer fill replaces this one. */
@@ -166,7 +168,27 @@ export const createLargeObjectFill = (
           fill.running = run(fill);
         }
       },
+      prioritize: (paths) => {
+        prioritize(fill, paths);
+      },
     });
+  };
+  /* An opened path jumps the queue: its object is asked for next, and written the moment it is here. */
+  const prioritize = (fill: Fill, paths: readonly string[]): void => {
+    if (!isCurrent(fill)) {
+      return;
+    }
+    let landed = false;
+    for (const path of paths) {
+      const oid = fill.pending.get(path)?.oid;
+      if (oid !== undefined) {
+        fill.promoted.add(oid);
+        landed ||= fill.landed.has(oid);
+      }
+    }
+    if (landed) {
+      flushSoon(fill);
+    }
   };
   const tellSoon = (fill: Fill): void => {
     fill.reportTimer ??= setTimeout(() => {
@@ -227,7 +249,8 @@ export const createLargeObjectFill = (
         fill.pending.set(path, placeholder);
         return [path, content, mode];
       }
-      if (filled.length > 0 && written + bytes.byteLength > flushBytes) {
+      /* A promoted object is never left for a later batch: someone has its file open. */
+      if (filled.length > 0 && written + bytes.byteLength > flushBytes && !fill.promoted.has(placeholder.oid)) {
         fill.pending.set(path, placeholder);
         more = true;
         return [path, content, mode];
@@ -340,10 +363,25 @@ export const createLargeObjectFill = (
         tellSoon(fill);
         if (more || fill.flushAgain) {
           fill.flushAgain = false;
-          scheduleFlush(fill, more || fill.unflushedBytes >= flushBytes ? 0 : flushMilliseconds);
+          scheduleFlush(fill, more || fill.unflushedBytes >= flushBytes || owesPromoted(fill) ? 0 : flushMilliseconds);
         }
       })();
     }, delay);
+  };
+
+  /* Whether an object an open file waits for has landed and is not written yet. */
+  const owesPromoted = (fill: Fill): boolean =>
+    [...fill.pending.values()].some(({ oid }) => fill.promoted.has(oid) && fill.landed.has(oid));
+
+  /* A flush at once, unless one is writing: that one's end starts the next at once instead. */
+  const flushSoon = (fill: Fill): void => {
+    if (fill.flushRunning) {
+      fill.flushAgain = true;
+      return;
+    }
+    clearTimeout(fill.flushTimer);
+    fill.flushTimer = undefined;
+    scheduleFlush(fill, 0);
   };
 
   const arrive = (fill: Fill, oid: string, content: Uint8Array<ArrayBuffer>): void => {
@@ -375,17 +413,16 @@ export const createLargeObjectFill = (
     try {
       const full = await port.readTree(fill.head, {
         signal: fill.controller.signal,
+        firstLargeObjects: () => fill.promoted,
         onLargeObject: (oid, content) => {
           if (!isCurrent(fill) || !fill.wanted.has(oid)) {
             return;
           }
           arrive(fill, oid, content);
           tellSoon(fill);
-          /* A full batch flushes now rather than waiting out the timer. */
-          if (fill.unflushedBytes >= flushBytes && !fill.flushRunning) {
-            clearTimeout(fill.flushTimer);
-            fill.flushTimer = undefined;
-            scheduleFlush(fill, 0);
+          /* A full batch, or an object an open file waits for, flushes now rather than waiting out the timer. */
+          if (fill.unflushedBytes >= flushBytes || fill.promoted.has(oid)) {
+            flushSoon(fill);
           } else {
             scheduleFlush(fill);
           }
@@ -438,7 +475,7 @@ export const createLargeObjectFill = (
     if (pending.size === 0) {
       if (previous !== undefined || !told.has(place.id)) {
         told.add(place.id);
-        report?.({ checkoutId: place.id, facet: undefined, retry: () => undefined });
+        report?.({ checkoutId: place.id, facet: undefined, retry: () => undefined, prioritize: () => undefined });
       }
       return;
     }
@@ -450,6 +487,8 @@ export const createLargeObjectFill = (
       wanted,
       landed: new Map(),
       arrived: new Set(),
+      /* A refill keeps what open files asked for. */
+      promoted: new Set([...(previous?.promoted ?? [])].filter((oid) => wanted.has(oid))),
       totalObjects: wanted.size,
       totalBytes: [...wanted.values()].reduce((sum, size) => sum + size, 0),
       controller: new AbortController(),
@@ -464,8 +503,6 @@ export const createLargeObjectFill = (
       unflushedBytes: 0,
     };
     fills.set(place.id, next);
-    /* Told before the first object is asked for: a host never shows this checkout's tree as filled over its pointers. */
-    tell(next);
     next.running = run(next);
     await next.running;
   };

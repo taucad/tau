@@ -149,6 +149,65 @@ describe('large-object fill', () => {
     expect(harness.reports.at(-1)?.facet).toBeUndefined();
   });
 
+  /* D10: an opened path jumps the fill queue, and is written the moment its object lands. */
+  it('asks for an opened path’s object first and writes it without waiting for the timer', async () => {
+    const harness = setup({ flushMilliseconds: 60_000 });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    const first = harness.readTree.mock.calls[0]?.[1]?.firstLargeObjects;
+    expect([...(first?.() ?? [])]).toStrictEqual([]);
+    harness.reports.at(-1)?.prioritize(['models/b.step', 'main.scad', 'missing.step']);
+    expect([...(first?.() ?? [])]).toStrictEqual([pointerOf(parts['models/b.step']).pointer.oid]);
+    harness.land('models/a.step');
+    harness.land('models/b.step');
+    /* Long before the minute-long timer: the flush also writes whatever else has landed. */
+    await vi.waitFor(() => {
+      expect(harness.text('models/b.step')).toBe('solid bb');
+    });
+    harness.finish(harness.fullTree());
+    await done;
+    expect(harness.text('models/a.step')).toBe('solid a');
+  });
+
+  it('writes an opened path at once when its object has already landed', async () => {
+    const harness = setup({ flushMilliseconds: 60_000 });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.land('models/a.step');
+    await new Promise((resolve) => {
+      setTimeout(resolve, 5);
+    });
+    expect(harness.files.get('models/a.step')).toStrictEqual(pointerOf('solid a').bytes);
+    harness.reports.at(-1)?.prioritize(['models/a.step']);
+    await vi.waitFor(() => {
+      expect(harness.text('models/a.step')).toBe('solid a');
+    });
+    harness.finish(harness.fullTree());
+    await done;
+  });
+
+  it('writes a promoted object past the byte bound of a flush', async () => {
+    const harness = setup({ flushBytes: 1, flushMilliseconds: 60_000 });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.reports.at(-1)?.prioritize(['models/a.step', 'models/b.step']);
+    harness.land('models/a.step');
+    harness.land('models/b.step');
+    await vi.waitFor(() => {
+      expect(harness.text('models/a.step')).toBe('solid a');
+      expect(harness.text('models/b.step')).toBe('solid bb');
+    });
+    expect(harness.materializeTree.mock.calls.length).toBeLessThanOrEqual(2);
+    harness.finish(harness.fullTree());
+    await done;
+  });
+
   it('gives its word once on a checkout with nothing to fill', async () => {
     const harness = setup();
     harness.files.set('models/a.step', encoder.encode(parts['models/a.step']));

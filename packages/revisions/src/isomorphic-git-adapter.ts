@@ -1015,12 +1015,14 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    * @param pointers - The pointers, in tree order; repeats are resolved once.
    * @param delivered - Told about each object this read fetched, as it lands.
    * @param signal - Stops this read's transfers; a concurrent reader waiting on one fetches it itself.
+   * @param first - Oids to fetch before the rest, asked again before each transfer.
    * @returns The bytes by oid, and what the phase cost.
    */
   const hydrate = async (
     pointers: readonly LfsPointer[],
     delivered?: ReadTreeOptions['onLargeObject'],
     signal?: AbortSignal,
+    first?: ReadTreeOptions['firstLargeObjects'],
   ): Promise<Readonly<{ contents: ReadonlyMap<string, Uint8Array<ArrayBuffer>>; report: LfsFetchReport }>> => {
     const startedAt = Date.now();
     const contents = new Map<string, Uint8Array<ArrayBuffer>>();
@@ -1048,6 +1050,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       await client.downloadMany({
         pointers: [...wanted.values()],
         ...(signal === undefined ? {} : { signal }),
+        ...(first === undefined ? {} : { first }),
         received: async (pointer, content, { transport }) => {
           transports.set(transport, (transports.get(transport) ?? 0) + 1);
           await storeLfsObject(pointer.oid, content);
@@ -1781,7 +1784,9 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         );
       }
       const hydrated =
-        pointers.length === 0 ? undefined : await hydrate(pointers, readOptions?.onLargeObject, readOptions?.signal);
+        pointers.length === 0
+          ? undefined
+          : await hydrate(pointers, readOptions?.onLargeObject, readOptions?.signal, readOptions?.firstLargeObjects);
       if (hydrated !== undefined && hydrated.report.networkObjects > 0) {
         options.onLfsFetch?.(hydrated.report);
       }

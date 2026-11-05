@@ -22,6 +22,18 @@ const textEntry = (name: string, size: number, lineCount = 1): RpcDirectoryEntry
 });
 
 describe('handleGrep', () => {
+  /* W3 a3: grep reads every file it finds, so its walk asks the listing for no content facts. */
+  it('should walk the project without asking the listing for content facts', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+    fileSystem.readdir.mockResolvedValue([{ name: 'app.ts', type: 'file', size: 20 }]);
+    fileSystem.readFile.mockResolvedValue('const marker = 1;');
+
+    const result = await handleGrep({ pattern: 'marker', path: '' }, fileSystem);
+
+    expect(fileSystem.readdir).toHaveBeenCalledWith('', { contentFacts: false });
+    expect(result).toMatchObject({ success: true, totalMatches: 1 });
+  });
+
   it('should return matches when pattern matches file contents in a directory walk', async () => {
     const fileSystem = mock<RpcFileSystem>();
     fileSystem.stat.mockResolvedValue({

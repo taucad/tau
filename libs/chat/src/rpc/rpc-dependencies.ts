@@ -81,6 +81,20 @@ export type RpcDirectoryEntry =
     } & StatContentMetadata);
 
 /**
+ * Options for {@link RpcFileSystem.readdir}.
+ *
+ * @public
+ */
+export type RpcReaddirOptions = Readonly<{
+  /**
+   * False when the caller needs names, types and sizes only — a walk that
+   * reads every file anyway (`grep`) — so the listing measures no content
+   * facts. Defaults to true.
+   */
+  contentFacts?: boolean;
+}>;
+
+/**
  * Abstract filesystem for RPC handlers.
  * Implementations can wrap browser fileManager, `fromMemoryFS()` / `fromNodeFS()` (which yield a `RuntimeFileSystemHandle`), etc.
  *
@@ -114,7 +128,7 @@ export type RpcFileSystem = {
   }): Promise<CheckedFileWriteResult>;
   writeBinaryFile(path: string, data: Uint8Array<ArrayBuffer>): Promise<void>;
   deleteFile(path: string): Promise<void>;
-  readdir(path: string): Promise<RpcDirectoryEntry[]>;
+  readdir(path: string, options?: RpcReaddirOptions): Promise<RpcDirectoryEntry[]>;
   exists(path: string): Promise<boolean>;
   appendFile(path: string, content: string): Promise<void>;
   editFile(input: DeterministicEditFileInput): Promise<{

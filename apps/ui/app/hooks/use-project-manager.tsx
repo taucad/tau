@@ -110,20 +110,22 @@ import type {
 
 /*
  * Discovery and chat membership watch only their kinds (charter D18): the
- * manifest kind is a configured root's non-dot top-level directories and every
- * `tau.json` outside a dot directory; the chat-metadata kind is a project's
+ * manifest kind is a configured root's non-dot top-level directories, every
+ * `tau.json` outside a dot directory and every `.tau/project.json` (a peer
+ * tab's identity change); the chat-metadata kind is a project's
  * directory, its `.tau/chats` rows and their `chat.json`. The authority filters
  * by these globs before delivery, so an agent turn's or a chat log's writes
  * never reach either watch: the two app-lifetime watches of every path under
  * `''` are gone.
  */
-const dotSegmentExcludes = ['.*', '.*/**', '**/.*', '**/.*/**'];
 /** The manifest-kind watch: what can change the discovered project list. @public */
 export const manifestWatchRequest = {
   paths: [''],
   recursive: true,
-  includes: ['*', '**/tau.json'],
-  excludes: dotSegmentExcludes,
+  includes: ['*', '**/tau.json', '**/.tau/project.json'],
+  /* The registry applies excludes first, so they name only what the includes must not admit: a top-level dot
+   * entry and a `tau.json` under any dot directory. `.tau/project.json` stays admitted. */
+  excludes: ['.*', '**/.*/**/tau.json'],
 };
 /** The chat-metadata-kind watch: what can change a project's chat membership. @public */
 export const chatMetadataWatchRequest = {

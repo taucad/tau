@@ -44,12 +44,29 @@ describe('project discovery and chat membership watch only their kinds (D18)', (
       await writer.writeFile('projects/p1/.tau/cache/tau.json', '{}');
 
       expect(pathsOf(manifests)).toContain('projects/p1/tau.json');
+      expect(pathsOf(manifests)).not.toContain('projects/p1/.tau/cache/tau.json');
       expect(pathsOf(chats)).toContain('projects/p1/.tau/chats/c1/chat.json');
       expect(manifests).toHaveLength(before.manifests);
       expect(chats).toHaveLength(before.chats);
     } finally {
       stopManifests();
       stopChats();
+      service.dispose();
+    }
+  });
+
+  it("hears a peer tab's project identity write", async () => {
+    const service = await workspace();
+    const home = service.createRootedFileSystem('/');
+    const peer = service.createRootedFileSystem('/', { originClientId: 'peer' });
+    const manifests: ChangeSet[] = [];
+    const stop = home.watchChangeSets!(manifestWatchRequest, (set) => manifests.push(set));
+    try {
+      await peer.writeFile('projects/p1/.tau/project.json', '{"id":"p1"}');
+
+      expect(pathsOf(manifests)).toContain('projects/p1/.tau/project.json');
+    } finally {
+      stop();
       service.dispose();
     }
   });

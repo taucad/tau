@@ -55,6 +55,8 @@ export type WorkerTimingSpan = (typeof workerTimingSpans)[number];
  * - `locks.set`: ordered Web Lock sets a mutation acquired (one per `withCrossTabLocks` call).
  * - `locks.token`: the tokens those sets named, so `locks.token / locks.set` is the mean set size.
  * - `changesets`: changesets the authority applied under their lock set (one per `apply`, D2).
+ * - `uncommitted.verified` / `uncommitted.removed`: recorded creates an initialise checked after their
+ *   realm died, and those it removed for not holding their recorded size or oid (I1).
  *
  * @public
  */
@@ -65,6 +67,8 @@ export const workerTimingCounters = [
   'locks.set',
   'locks.token',
   'changesets',
+  'uncommitted.verified',
+  'uncommitted.removed',
 ] as const;
 
 /** One counter's name. @public */

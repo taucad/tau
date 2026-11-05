@@ -8,6 +8,8 @@
 import type { ProviderCapabilities } from '#types.js';
 import { FileSystemAccessProvider } from '#backend/fs-access-provider.js';
 import { RootedFileSystemError } from '#workspace-errors.js';
+import { createIndexedDbUncommittedStore } from '#backend/uncommitted-changesets.js';
+import type { UncommittedChangesetStore } from '#backend/uncommitted-changesets.js';
 import { randomUuid } from '@taucad/utils/id';
 
 /**
@@ -108,15 +110,19 @@ export class OPFSProvider extends FileSystemAccessProvider {
   };
 
   private _initialized = false;
-  /** Whether staged files can move into place; learnt from the first staged file. */
-  private _stagedMoves: boolean | undefined;
-  /** This realm's staging directory, looked up once per initialized root. */
-  private _staging: Promise<FileSystemDirectoryHandle> | undefined;
 
-  /** Create an uninitialized provider. Call {@link initialize} before use. */
+  /**
+   * Create an uninitialized provider. Call {@link initialize} before use.
+   *
+   * @param options - Where unsettled create changesets are recorded (I1);
+   *   IndexedDB by default, `false` to keep no record.
+   */
   // oxlint-disable-next-line typescript/no-unsafe-argument -- Placeholder handle is replaced in initialize().
-  public constructor() {
+  public constructor(options?: Readonly<{ uncommitted?: UncommittedChangesetStore | false }>) {
     super(undefined as unknown as FileSystemDirectoryHandle);
+    const store = options?.uncommitted ?? createIndexedDbUncommittedStore();
+    this._uncommitted =
+      store === false || store === undefined ? undefined : { store, root: 'opfs', owner: stagingOwnerId };
   }
 
   /**
@@ -131,7 +137,6 @@ export class OPFSProvider extends FileSystemAccessProvider {
    */
   public async initialize(): Promise<void> {
     this._initialized = false;
-    this._staging = undefined;
     try {
       this._rootHandle = await navigator.storage.getDirectory();
     } catch (error) {
@@ -141,7 +146,7 @@ export class OPFSProvider extends FileSystemAccessProvider {
     this._initialized = true;
     await super.refresh();
     await holdStagingOwner();
-    await this._sweepStaging();
+    await this._recoverDeadOwners();
   }
 
   /** Revoke the acquired OPFS root until the next successful initialize. */
@@ -171,25 +176,38 @@ export class OPFSProvider extends FileSystemAccessProvider {
       await super._writeBatchData(fileHandle, data, destination);
       return;
     }
-    if (!(await this._stageAndMove(data, destination))) {
+    const stagingRoot = await this._rootHandle.getDirectoryHandle(opfsStagingDirectory, { create: true });
+    const staging = await stagingRoot.getDirectoryHandle(stagingOwnerId, { create: true });
+    const stagedName = randomUuid();
+    const staged = (await staging.getFileHandle(stagedName, { create: true })) as SyncAccessCapableFileHandle &
+      MovableFileHandle;
+    if (typeof staged.move !== 'function' || typeof staged.createSyncAccessHandle !== 'function') {
+      await staging.removeEntry(stagedName);
       await super._writeBatchData(fileHandle, data, destination);
+      return;
     }
-  }
-
-  /**
-   * Publish a batch create through the staging directory and one native move,
-   * so its path is absent until it holds every byte (I1); a crash leaves only
-   * the staged file, which the next {@link initialize} removes.
-   *
-   * @param data - The bytes, in hand or staged.
-   * @param destination - The target's directory and name.
-   * @returns Whether the file was published; `false` where the engine lacks sync handles or `move`.
-   */
-  protected override async _publishCreatedFile(
-    data: Uint8Array<ArrayBuffer> | Blob,
-    destination: Readonly<{ directory: FileSystemDirectoryHandle; name: string }>,
-  ): Promise<boolean> {
-    return this.capabilities.durability === 'exclusive-append' && this._stageAndMove(data, destination);
+    try {
+      const handle = await staged.createSyncAccessHandle();
+      try {
+        if (data instanceof Blob) {
+          for (let offset = 0; offset < size; offset += readChunkBytes) {
+            // oxlint-disable-next-line no-await-in-loop -- one bounded chunk in memory at a time.
+            const chunk = new Uint8Array(await data.slice(offset, offset + readChunkBytes).arrayBuffer());
+            writeAll(handle, chunk, offset);
+          }
+        } else {
+          writeAll(handle, data, 0);
+        }
+        handle.truncate(size);
+        handle.flush();
+      } finally {
+        handle.close();
+      }
+      await staged.move(destination.directory, destination.name);
+    } catch (error) {
+      await staging.removeEntry(stagedName).catch(() => undefined);
+      throw error;
+    }
   }
 
   /**
@@ -338,89 +356,33 @@ export class OPFSProvider extends FileSystemAccessProvider {
   }
 
   /**
-   * Write `data` to a fresh file in this realm's staging directory through a
-   * sync access handle, then move it onto `destination` natively.
-   *
-   * @param data - The bytes, in hand or staged.
-   * @param destination - The target's directory and name.
-   * @returns `false`, having written nothing, when the engine lacks sync handles or `move`.
+   * Recover what owner realms that are gone left behind: staging directories
+   * of large writes that never reached their move, and create changesets
+   * recorded but never settled, whose files are verified by size (I1). An
+   * owner whose lock is still held is writing, so its leftovers stay.
    */
-  private async _stageAndMove(
-    data: Uint8Array<ArrayBuffer> | Blob,
-    destination: Readonly<{ directory: FileSystemDirectoryHandle; name: string }>,
-  ): Promise<boolean> {
-    if (this._stagedMoves === false) {
-      return false;
-    }
-    const size = data instanceof Blob ? data.size : data.byteLength;
-    this._staging ??= (async () => {
-      const stagingRoot = await this._rootHandle.getDirectoryHandle(opfsStagingDirectory, { create: true });
-      return stagingRoot.getDirectoryHandle(stagingOwnerId, { create: true });
-    })();
-    let staging: FileSystemDirectoryHandle;
-    try {
-      staging = await this._staging;
-    } catch (error) {
-      this._staging = undefined;
-      throw error;
-    }
-    const stagedName = randomUuid();
-    const staged = (await staging.getFileHandle(stagedName, { create: true })) as SyncAccessCapableFileHandle &
-      MovableFileHandle;
-    const { move, createSyncAccessHandle } = staged;
-    this._stagedMoves = typeof move === 'function' && typeof createSyncAccessHandle === 'function';
-    if (typeof move !== 'function' || typeof createSyncAccessHandle !== 'function') {
-      await staging.removeEntry(stagedName);
-      return false;
-    }
-    try {
-      const handle = await createSyncAccessHandle.call(staged);
-      try {
-        if (data instanceof Blob) {
-          for (let offset = 0; offset < size; offset += readChunkBytes) {
-            // oxlint-disable-next-line no-await-in-loop -- one bounded chunk in memory at a time.
-            const chunk = new Uint8Array(await data.slice(offset, offset + readChunkBytes).arrayBuffer());
-            writeAll(handle, chunk, offset);
-          }
-        } else {
-          writeAll(handle, data, 0);
-        }
-        /* A fresh staged file needs no truncate, and close persists its bytes
-         * before the move publishes them; a flush per create cost a disk sync each. */
-      } finally {
-        handle.close();
-      }
-      await move.call(staged, destination.directory, destination.name);
-      return true;
-    } catch (error) {
-      await staging.removeEntry(stagedName).catch(() => undefined);
-      throw error;
-    }
-  }
-
-  /**
-   * Remove staging directories whose owner realm is gone: a large write that
-   * never reached its move (I1). An owner whose lock is still held is writing.
-   */
-  private async _sweepStaging(): Promise<void> {
+  private async _recoverDeadOwners(): Promise<void> {
     if (typeof navigator === 'undefined' || !('locks' in navigator)) {
       return;
     }
-    let staging: FileSystemDirectoryHandle;
+    let staging: FileSystemDirectoryHandle | undefined;
     try {
       staging = await this._rootHandle.getDirectoryHandle(opfsStagingDirectory);
     } catch {
-      return;
+      staging = undefined;
     }
-    // List the owner directories before asking which locks are held. An owner
-    // takes its lock before it creates its directory, so every directory listed
-    // here belonged to an owner that held its lock by then; querying first
-    // would miss an owner that started between the query and the listing and
-    // delete the directory it is writing into.
+    // List the owner directories and records before asking which locks are
+    // held. An owner takes its lock before it creates its directory or records
+    // a changeset, so everything listed here belonged to an owner that held its
+    // lock by then; querying first would miss an owner that started between
+    // the query and the listing and remove what it is writing.
     const owners: string[] = [];
-    for await (const name of (staging as FileSystemDirectoryHandle & { keys(): AsyncIterable<string> }).keys()) {
-      owners.push(name);
+    if (staging !== undefined) {
+      for await (const name of (staging as FileSystemDirectoryHandle & { keys(): AsyncIterable<string> }).keys()) {
+        owners.push(name);
+      }
     }
+    const records = (await this._uncommitted?.store.list(this._uncommitted.root).catch(() => [])) ?? [];
     const snapshot = await navigator.locks.query();
     const live = new Set(
       (snapshot.held ?? []).flatMap(({ name }) =>
@@ -430,8 +392,9 @@ export class OPFSProvider extends FileSystemAccessProvider {
     await Promise.all(
       owners
         .filter((owner) => owner !== stagingOwnerId && !live.has(owner))
-        .map(async (owner) => staging.removeEntry(owner, { recursive: true }).catch(() => undefined)),
+        .map(async (owner) => staging?.removeEntry(owner, { recursive: true }).catch(() => undefined)),
     );
+    await this._verifyUncommitted(live, records);
   }
 
   private async _supportsSyncAccess(): Promise<boolean> {

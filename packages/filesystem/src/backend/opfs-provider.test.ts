@@ -4,6 +4,8 @@ import { OPFSProvider } from '#backend/opfs-provider.js';
 import { createMockRootHandle } from '#testing/mock-handle-factory.js';
 import type { MockRootHandleOptions } from '#testing/mock-handle-factory.js';
 import { RootedFileSystemError } from '#workspace-errors.js';
+import { gitBlobOid } from '#backend/uncommitted-changesets.js';
+import type { UncommittedChangesetStore, UncommittedRecord } from '#backend/uncommitted-changesets.js';
 
 describe('OPFSProvider lifecycle', () => {
   beforeEach(() => {
@@ -407,62 +409,143 @@ describe('OPFS rename via native move', () => {
   });
 });
 
-describe('OPFS batch creates', () => {
+describe('OPFS uncommitted create changesets', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
   const bytes = (value: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(value);
 
-  it('should stage a create and move it into place, so the path never holds an empty file', async () => {
-    const moved: string[] = [];
-    const root = createMockRootHandle({ nativeMove: true, onMove: (from, to) => moved.push(`${from} to ${to}`) });
-    vi.stubGlobal('navigator', { storage: { getDirectory: vi.fn().mockResolvedValue(root) } });
-    const provider = new OPFSProvider();
-    await provider.initialize();
-    const directory = await root.getDirectoryHandle('dir', { create: true });
-    const getFileHandle = vi.spyOn(directory, 'getFileHandle');
+  /** An in-memory record store that logs every call, in order. */
+  const memoryStore = (seed: readonly UncommittedRecord[] = []) => {
+    const records = new Map(seed.map((record) => [record.changesetId, record]));
+    const calls: string[] = [];
+    const store: UncommittedChangesetStore = {
+      put: async (record) => {
+        calls.push(`put ${record.entries.map(({ path, size }) => `${path}:${String(size)}`).join(',')}`);
+        records.set(record.changesetId, record);
+      },
+      delete: async ({ changesetId }) => {
+        calls.push('delete');
+        records.delete(changesetId);
+      },
+      list: async (root) => [...records.values()].filter((record) => record.root === root),
+    };
+    return { store, records, calls };
+  };
 
-    const [receipt] = await provider.applyBatch([
-      { op: 'write', path: 'dir/new.ts', data: bytes('new'), create: true },
-    ]);
-
-    expect(receipt).toMatchObject({ outcome: 'applied', created: true });
-    expect(moved).toHaveLength(1);
-    expect(moved[0]).toMatch(/ to new\.ts$/u);
-    expect(getFileHandle.mock.calls.some(([, options]) => options?.create === true)).toBe(false);
-    await expect(provider.readFile('dir/new.ts', 'utf8')).resolves.toBe('new');
-  });
-
-  it('should leave a create whose move failed absent', async () => {
+  const stubRoot = (held: readonly string[] = []) => {
     const root = createMockRootHandle({
-      nativeMove: true,
-      onMove: () => {
-        throw new DOMException('the move did not land', 'UnknownError');
+      onAcquireWriteApi: (api) => {
+        writes.push(api);
       },
     });
-    vi.stubGlobal('navigator', { storage: { getDirectory: vi.fn().mockResolvedValue(root) } });
-    const provider = new OPFSProvider();
+    const writes: string[] = [];
+    vi.stubGlobal('navigator', {
+      storage: { getDirectory: vi.fn().mockResolvedValue(root) },
+      locks: {
+        request: async (_name: string, _options: unknown, callback: () => Promise<void>): Promise<void> => {
+          // The owner lock is held for the realm's lifetime: its callback never settles.
+          await callback();
+        },
+        query: async () => ({ held: held.map((owner) => ({ name: `tau-fs-staging-owner:${owner}` })), pending: [] }),
+      },
+    });
+    return { root, writes };
+  };
+
+  it('should record a batch’s creates before they write and delete the record once they settle', async () => {
+    const { root, writes } = stubRoot();
+    const { store: inner, records, calls } = memoryStore();
+    const store: UncommittedChangesetStore = {
+      ...inner,
+      put: async (record) => {
+        calls.push(`writes before put ${String(writes.length)}`);
+        await inner.put(record);
+      },
+    };
+    const provider = new OPFSProvider({ uncommitted: store });
     await provider.initialize();
-
-    const [receipt] = await provider.applyBatch([{ op: 'write', path: 'new.ts', data: bytes('new'), create: true }]);
-
-    expect(receipt?.outcome).not.toBe('applied');
-    await expect(provider.exists('new.ts')).resolves.toBe(false);
-  });
-
-  it('should create in place where the engine cannot move staged files', async () => {
-    const root = createMockRootHandle({ nativeMove: false });
-    vi.stubGlobal('navigator', { storage: { getDirectory: vi.fn().mockResolvedValue(root) } });
-    const provider = new OPFSProvider();
-    await provider.initialize();
+    writes.length = 0;
 
     const receipts = await provider.applyBatch([
-      { op: 'write', path: 'a.ts', data: bytes('a'), create: true },
-      { op: 'write', path: 'b.ts', data: bytes('b'), create: true },
+      { op: 'write', path: 'dir/new.ts', data: bytes('new'), create: true },
+      { op: 'write', path: 'other.ts', data: bytes('replace') },
     ]);
 
     expect(receipts.map(({ outcome }) => outcome)).toEqual(['applied', 'applied']);
-    await expect(provider.readFile('b.ts', 'utf8')).resolves.toBe('b');
+    expect(calls).toEqual(['writes before put 0', 'put dir/new.ts:3', 'delete']);
+    expect(records.size).toBe(0);
+    expect(writes.length).toBeGreaterThan(0);
+    await expect(root.getDirectoryHandle('dir')).resolves.toBeDefined();
+  });
+
+  it('should remove a create a dead realm left short, keep one that landed, and drop the record', async () => {
+    const { root } = stubRoot();
+    const directory = await root.getDirectoryHandle('src', { create: true });
+    await directory.getFileHandle('torn.ts', { create: true });
+    const landed = await directory.getFileHandle('landed.ts', { create: true });
+    const writable = await landed.createWritable();
+    await writable.write(bytes('done'));
+    await writable.close();
+    const { store, records } = memoryStore([
+      {
+        root: 'opfs',
+        owner: 'dead-owner',
+        changesetId: 'changeset-1',
+        entries: [
+          { path: 'src/torn.ts', size: 12 },
+          { path: 'src/landed.ts', size: 4 },
+          { path: 'src/never-started.ts', size: 7 },
+        ],
+      },
+    ]);
+
+    const provider = new OPFSProvider({ uncommitted: store });
+    await provider.initialize();
+
+    await expect(provider.exists('src/torn.ts')).resolves.toBe(false);
+    await expect(provider.readFile('src/landed.ts', 'utf8')).resolves.toBe('done');
+    expect(records.size).toBe(0);
+  });
+
+  it('should remove a small create whose bytes do not hash to its recorded oid', async () => {
+    const { root } = stubRoot();
+    const file = await root.getFileHandle('same-size.ts', { create: true });
+    const writable = await file.createWritable();
+    await writable.write(bytes('ABCD'));
+    await writable.close();
+    const { store } = memoryStore([
+      {
+        root: 'opfs',
+        owner: 'dead-owner',
+        changesetId: 'changeset-1',
+        entries: [
+          { path: 'same-size.ts', size: 4, oid: await gitBlobOid(bytes('abcd')) },
+          { path: 'kept.ts', size: 0 },
+        ],
+      },
+    ]);
+
+    await new OPFSProvider({ uncommitted: store }).initialize();
+
+    await expect(root.getFileHandle('same-size.ts')).rejects.toMatchObject({ name: 'NotFoundError' });
+  });
+
+  it('should leave a live realm’s record and its files alone', async () => {
+    const { root } = stubRoot(['live-owner']);
+    await root.getFileHandle('writing.ts', { create: true });
+    const { store, records } = memoryStore([
+      { root: 'opfs', owner: 'live-owner', changesetId: 'changeset-1', entries: [{ path: 'writing.ts', size: 9 }] },
+    ]);
+
+    await new OPFSProvider({ uncommitted: store }).initialize();
+
+    await expect(root.getFileHandle('writing.ts')).resolves.toBeDefined();
+    expect(records.size).toBe(1);
+  });
+
+  it('should hash a known blob as git does', async () => {
+    await expect(gitBlobOid(bytes('hello\n'))).resolves.toBe('ce013625030ba8dba906f756967f9e9ca394464a');
   });
 });

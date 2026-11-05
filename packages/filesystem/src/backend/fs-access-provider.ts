@@ -24,6 +24,9 @@ import { applyEntryWithPrimitives, runBatch } from '#backend/batch.js';
 import { mapConcurrent, statConcurrency } from '#concurrency.js';
 import { fileStatFromFile, headFileStatFromFile, headSniffByteLength } from '#content-metadata.js';
 import { workerTimings } from '#worker-timings.js';
+import { gitBlobOid, uncommittedOidLimitBytes } from '#backend/uncommitted-changesets.js';
+import type { UncommittedChangesetStore, UncommittedRecord } from '#backend/uncommitted-changesets.js';
+import { randomUuid } from '@taucad/utils/id';
 import { validateFileReadStreamOptions } from '#backend/stream-utils.js';
 
 const handleCacheMaxEntries = 10_000;
@@ -127,6 +130,11 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
   };
 
   protected _rootHandle: FileSystemDirectoryHandle;
+  /**
+   * Where this root records a create changeset until it settles, and as which
+   * owner realm (I1, C8); unset where nothing would verify the record.
+   */
+  protected _uncommitted: Readonly<{ store: UncommittedChangesetStore; root: string; owner: string }> | undefined;
   private readonly _handleCache = new Map<string, FileSystemDirectoryHandle>();
   private readonly _pendingDirectoryHandles = new Map<string, Promise<FileSystemDirectoryHandle>>();
   private _handleGeneration = 0;
@@ -512,6 +520,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       }
       return pending;
     };
+    const record = await this._recordUncommitted(entries);
     const receipts = await runBatch(
       entries,
       async (entry) =>
@@ -525,6 +534,10 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
         // oxlint-disable-next-line no-await-in-loop -- Cleanup must proceed from deepest child to parent.
         await this._removeEntry(path, false).catch(() => undefined);
       }
+    }
+    if (record !== undefined) {
+      /* Every writable of the batch has closed: the creates have settled. */
+      await this._uncommitted?.store.delete(record).catch(() => undefined);
     }
     return receipts;
   }
@@ -702,24 +715,6 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       }
       throw error;
     }
-  }
-
-  /**
-   * Publish a batch create's bytes at a path known to be absent without ever
-   * creating the file empty first, so a realm killed mid-write leaves the path
-   * absent rather than holding an empty file (I1). A provider that can stage
-   * the bytes elsewhere and move them into place overrides this; the default
-   * cannot and answers `false`, and the caller creates the file and writes it.
-   *
-   * @param _data - The bytes, in hand or staged.
-   * @param _destination - The target's directory and name.
-   * @returns Whether the file now holds the bytes.
-   */
-  protected async _publishCreatedFile(
-    _data: Uint8Array<ArrayBuffer> | Blob,
-    _destination: Readonly<{ directory: FileSystemDirectoryHandle; name: string }>,
-  ): Promise<boolean> {
-    return false;
   }
 
   /**
@@ -1003,6 +998,47 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     }
   }
 
+  /**
+   * Verify the create changesets an owner realm that is gone left unsettled,
+   * by metadata alone: a file whose size differs from the one recorded (or,
+   * when small, whose oid differs) is removed and so reads absent, for the
+   * apply or large-object fill to write again. Each record is deleted once
+   * its entries are checked. Records of live owners are left to them.
+   *
+   * @param liveOwners - Owner realms still holding their lock, read after the records were listed.
+   * @param records - The root's records, listed before `liveOwners` was read.
+   * @returns How many entries were checked and how many were removed.
+   */
+  protected async _verifyUncommitted(
+    liveOwners: ReadonlySet<string>,
+    records: readonly UncommittedRecord[],
+  ): Promise<Readonly<{ verified: number; removed: number }>> {
+    const uncommitted = this._uncommitted;
+    let verified = 0;
+    let removed = 0;
+    if (uncommitted === undefined) {
+      return { verified, removed };
+    }
+    for (const record of records) {
+      if (record.owner === uncommitted.owner || liveOwners.has(record.owner)) {
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- a record's entries are checked before it is deleted.
+      const outcomes = await Promise.all(record.entries.map(async (entry) => this._verifyUncommittedEntry(entry)));
+      verified += outcomes.length;
+      removed += outcomes.filter((outcome) => outcome === 'removed').length;
+      // oxlint-disable-next-line no-await-in-loop -- as above.
+      await uncommitted.store.delete(record).catch(() => undefined);
+    }
+    if (verified > 0) {
+      workerTimings.count('uncommitted.verified', verified);
+    }
+    if (removed > 0) {
+      workerTimings.count('uncommitted.removed', removed);
+    }
+    return { verified, removed };
+  }
+
   protected async _cleanupFailedFileCreation(
     path: string,
     created: { createdFile: boolean; createdDirectories: readonly string[] },
@@ -1037,6 +1073,81 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    * @param openForWrite - The batch's directory memo, creating missing parents.
    * @returns Its receipt; never rejects.
    */
+  /**
+   * Record a batch's creates before any of them writes, so a realm killed
+   * mid-batch leaves the next initialise a list of paths to verify.
+   *
+   * @param entries - The batch.
+   * @returns The record kept, or `undefined` when the batch creates nothing or the root keeps none.
+   */
+  private async _recordUncommitted(entries: readonly BatchEntry[]): Promise<UncommittedRecord | undefined> {
+    const uncommitted = this._uncommitted;
+    if (uncommitted === undefined) {
+      return undefined;
+    }
+    const creates = entries.flatMap((entry) =>
+      entry.op === 'write' && entry.create === true
+        ? [{ path: entry.path, size: entry.data instanceof Blob ? entry.data.size : entry.data.byteLength }]
+        : [],
+    );
+    if (creates.length === 0) {
+      return undefined;
+    }
+    const record: UncommittedRecord = {
+      root: uncommitted.root,
+      owner: uncommitted.owner,
+      changesetId: randomUuid(),
+      entries: creates,
+    };
+    try {
+      await uncommitted.store.put(record);
+    } catch (error) {
+      /* Without the record the creates still run; only their crash recovery is lost. */
+      console.warn('[filesystem] The uncommitted-changeset record could not be kept.', error);
+      return undefined;
+    }
+    return record;
+  }
+
+  /**
+   * Check one recorded create against what its path holds.
+   *
+   * @param entry - The path and its expected size and oid.
+   * @returns `removed` when the file did not match and was removed, otherwise `kept`.
+   */
+  private async _verifyUncommittedEntry(
+    entry: Readonly<{ path: string; size: number; oid?: string }>,
+  ): Promise<'kept' | 'removed'> {
+    const segments = this._splitPath(entry.path);
+    const name = segments.pop();
+    if (name === undefined) {
+      return 'kept';
+    }
+    let file: File;
+    try {
+      const directory = await this._resolveDirectoryHandle(segments.join('/'));
+      const handle = await directory.getFileHandle(name);
+      file = await handle.getFile();
+    } catch {
+      /* Absent, or not a file: nothing short can be reported complete. */
+      return 'kept';
+    }
+    const matches =
+      file.size === entry.size &&
+      (entry.oid === undefined ||
+        file.size > uncommittedOidLimitBytes ||
+        (await gitBlobOid(new Uint8Array(await file.arrayBuffer()))) === entry.oid);
+    if (matches) {
+      return 'kept';
+    }
+    try {
+      await this._removeEntry(entry.path, false);
+      return 'removed';
+    } catch {
+      return 'kept';
+    }
+  }
+
   private async _applyBatchWrite(
     entry: Extract<BatchEntry, { op: 'write' }>,
     openForWrite: (path: string) => Promise<FileSystemDirectoryHandle>,
@@ -1062,13 +1173,6 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
             throw error;
           }
         }
-      }
-      if (entry.create === true) {
-        began = true;
-        if (await this._publishCreatedFile(entry.data, { directory, name })) {
-          return { outcome: 'applied', kind: 'file', created: true };
-        }
-        began = false;
       }
       let fileHandle: FileSystemFileHandle | undefined;
       if (entry.create !== true) {

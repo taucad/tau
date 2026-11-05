@@ -28,6 +28,20 @@ type RendererOutput = {
 
 const outputs = new WeakMap<RendererInstance, RendererOutput>();
 const captureDimensions = new WeakMap<Uint8ClampedArray, Readonly<{ width: number; height: number }>>();
+const premultipliedCaptures = new WeakMap<Uint8ClampedArray, Uint8ClampedArray>();
+
+/**
+ * The premultiplied bytes of a capture, as the canvas holds them and the page compositor blends them: each colour
+ * channel already multiplied by alpha in the encoded (sRGB) domain. The straight-alpha capture cannot carry them: an
+ * edge pixel whose encoded colour exceeds its alpha (three premultiplies before it encodes) clamps at 255 when
+ * un-premultiplied, so compositing the straight pixels darkens antialiased silhouettes against what the page shows.
+ * Compositing these over a background `b` as `min(255, c + b·(255 − a)/255)` reproduces the page.
+ * @param pixels - Pixels returned by {@link captureRendererOutput}.
+ * @returns Packed RGBA rows with premultiplied colour, or undefined for pixels this module did not capture.
+ * @public
+ */
+export const premultipliedRendererOutput = (pixels: Uint8ClampedArray): Uint8ClampedArray | undefined =>
+  premultipliedCaptures.get(pixels);
 
 /**
  * Build a detached 2D snapshot matching the renderer's drawing buffer and viewport on the page.
@@ -76,7 +90,10 @@ export const installRendererOutput = (renderer: RendererInstance, profile: Rende
   }
   const copy = document.createElement('canvas');
   const context = copy.getContext('2d', { willReadFrequently: true });
-  if (!context) {
+  // An opaque black canvas: drawing the presented canvas over it leaves exactly its premultiplied colour.
+  const opaqueCopy = document.createElement('canvas');
+  const opaqueContext = opaqueCopy.getContext('2d', { alpha: false, willReadFrequently: true });
+  if (!context || !opaqueContext) {
     throw new Error('A 2D context is required for renderer capture');
   }
   const output: RendererOutput = {
@@ -86,7 +103,17 @@ export const installRendererOutput = (renderer: RendererInstance, profile: Rende
       copy.height = renderer.domElement.height;
       context.drawImage(renderer.domElement, 0, 0);
       const pixels = context.getImageData(0, 0, copy.width, copy.height).data;
+      opaqueCopy.width = copy.width;
+      opaqueCopy.height = copy.height;
+      opaqueContext.fillStyle = '#000000';
+      opaqueContext.fillRect(0, 0, copy.width, copy.height);
+      opaqueContext.drawImage(renderer.domElement, 0, 0);
+      const premultiplied = opaqueContext.getImageData(0, 0, copy.width, copy.height).data;
+      for (let index = 3; index < premultiplied.length; index += 4) {
+        premultiplied[index] = pixels[index]!;
+      }
       captureDimensions.set(pixels, { width: copy.width, height: copy.height });
+      premultipliedCaptures.set(pixels, premultiplied);
       return pixels;
     },
     restore: () => undefined,
@@ -161,16 +188,20 @@ export const installRendererOutput = (renderer: RendererInstance, profile: Rende
           throw new RangeError('GPU readback dimensions do not match the output target');
         }
         const pixels = new Uint8ClampedArray(rowBytes * height);
+        const premultiplied = new Uint8ClampedArray(rowBytes * height);
         for (let index = 0; index < pixels.length; index += 4) {
           const source = Math.floor(index / rowBytes) * stride + (index % rowBytes);
           const alpha = data[source + 3]!;
           // Canvas2D getImageData returns straight alpha; the renderer's output is premultiplied.
           for (let channel = 0; channel < 3; channel++) {
             pixels[index + channel] = alpha === 0 ? 0 : (data[source + channel]! * 255) / alpha;
+            premultiplied[index + channel] = data[source + channel]!;
           }
           pixels[index + 3] = alpha;
+          premultiplied[index + 3] = alpha;
         }
         captureDimensions.set(pixels, { width, height });
+        premultipliedCaptures.set(pixels, premultiplied);
         return pixels;
       };
       output.restore = () => {

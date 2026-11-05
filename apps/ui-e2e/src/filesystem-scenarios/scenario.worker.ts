@@ -549,16 +549,15 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
     case 'agent-write': {
       /* One agent turn: the model's fifty parallel write calls, dispatched
        * together through the host's RPC filesystem as one task issues them. */
+      /* The gate counts what the rooted watch's consumers receive. The
+       * authority's change-set plane is recorded beside it, for information. */
       let deliveries = 0;
-      let pathDeliveries = 0;
-      /* The change-set watch (D6) on the authority's watch plane is the gate;
-       * the rooted per-path watch, which consumers still hold until they move
-       * to change sets, is recorded beside it. */
-      const stopChangeSets = watchPlane.watchChangeSets({ paths: [`/projects/${projectId}`], recursive: true }, () => {
+      let planeChangeSets = 0;
+      const stopPaths = live.watch({ paths: [''], recursive: true }, () => {
         deliveries += 1;
       });
-      const stopPaths = live.watch({ paths: [''], recursive: true }, () => {
-        pathDeliveries += 1;
+      const stopChangeSets = watchPlane.watchChangeSets({ paths: [`/projects/${projectId}`], recursive: true }, () => {
+        planeChangeSets += 1;
       });
       const stop = (): void => {
         stopChangeSets();
@@ -580,7 +579,7 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
         await quiet(300);
         return {
           ...measured,
-          extra: { ...measured.extra, watchDeliveries: deliveries, pathWatchDeliveries: pathDeliveries },
+          extra: { ...measured.extra, watchDeliveries: deliveries, planeChangeSetDeliveries: planeChangeSets },
         };
       } finally {
         stop();

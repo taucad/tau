@@ -24,6 +24,7 @@ import {
   repositoryByteCeiling,
   retentionWindowMilliseconds,
 } from '#api/git/store/limits.js';
+import { listedHeadsOf, listingPuts, prepareListings, sweepListings } from '#api/git/store/listing.js';
 import { putRetirementMarker, sweepRepository } from '#api/git/store/sweep.js';
 import type { SweepOutcome } from '#api/git/store/sweep.js';
 import {
@@ -374,13 +375,22 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
   // git error on first read instead — the trade W1's port makes, since git
   // verifies what it reads.
   assertDeadline();
-  const files = await timed(args.onPhase, 'hash', async () =>
-    readyFiles(
-      uploads.flatMap((upload) => [
-        { key: upload.key, file: upload.file },
-        { key: indexKeyFor(upload.key), file: `${upload.file.slice(0, -'.pack'.length)}.idx` },
-      ]),
-    ),
+  const [files, listings] = await timed(args.onPhase, 'hash', async () =>
+    Promise.all([
+      readyFiles(
+        uploads.flatMap((upload) => [
+          { key: upload.key, file: upload.file },
+          { key: indexKeyFor(upload.key), file: `${upload.file.slice(0, -'.pack'.length)}.idx` },
+        ]),
+      ),
+      // The head listing of every branch this push moved (D8): derived and never rejecting.
+      prepareListings({
+        store,
+        locator: lease.locator,
+        directory: lease.directory,
+        commits: listedHeadsOf(lease.manifest?.refs ?? {}, references),
+      }),
+    ]),
   );
   assertDeadline();
   await timed(args.onPhase, 'object_puts', async () =>
@@ -405,6 +415,8 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
         ),
       async (signal: AbortSignal) =>
         writeSpilledPushLog({ store, locator: lease.locator, base: lease.manifest, next, signal }),
+      // In the same round, so the manifest that names a tip is never ahead of its listing.
+      ...listingPuts(store, lease.locator, listings),
     ]),
   );
   await args.faults?.('after-pack-upload');
@@ -484,16 +496,21 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
               ...(options.faults === undefined && args.faults !== undefined ? { faults: args.faults } : {}),
             }),
         }),
-    sweep: async () =>
-      compacted
-        ? sweepQuietly({
-            store,
-            locator: lease.locator,
-            committed,
-            at,
-            ...(args.faults === undefined ? {} : { faults: args.faults }),
-          })
-        : undefined,
+    sweep: async () => {
+      if (!compacted) {
+        return undefined;
+      }
+      const outcome = await sweepQuietly({
+        store,
+        locator: lease.locator,
+        committed,
+        at,
+        ...(args.faults === undefined ? {} : { faults: args.faults }),
+      });
+      /* Listings of tips no ref names, past the window; never rejects (D8). */
+      await sweepListings({ store, locator: lease.locator, committed, at });
+      return outcome;
+    },
     moved: movedReferences(lease.manifest?.refs ?? {}, references),
   };
 };

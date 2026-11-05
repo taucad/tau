@@ -13,7 +13,7 @@ import { gitChildEnvironment, gitCommandTimeoutMilliseconds, gitMaxBufferBytes }
  * the walk never reads it — which is what keeps the second pass proportional
  * to the pointers in the repository rather than to its bytes.
  */
-const pointerSizeCeilingBytes = 1024;
+export const pointerSizeCeilingBytes = 1024;
 
 /** Every object git names, in either hash algorithm. */
 const objectNamePattern = /^[\da-f]{40}(?:[\da-f]{24})?$/u;
@@ -38,7 +38,11 @@ const decode = (bytes: Uint8Array<ArrayBuffer>, start?: number, end?: number): s
  * hex; if it ever reaches 64 MiB the upgrade is to stream the three children
  * into each other rather than to add a second walker.
  */
-const runGitWithInput = async (cwd: string, args: readonly string[], input: string): Promise<Uint8Array<ArrayBuffer>> =>
+export const runGitWithInput = async (
+  cwd: string,
+  args: readonly string[],
+  input: string,
+): Promise<Uint8Array<ArrayBuffer>> =>
   new Promise<Uint8Array<ArrayBuffer>>((resolve, reject) => {
     const child = spawn('git', [...args], {
       cwd,

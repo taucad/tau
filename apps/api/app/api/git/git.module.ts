@@ -8,6 +8,7 @@ import { ProjectAccessModule } from '#api/collaboration/project-access.module.js
 import { DurableEventsModule } from '#api/durable-events/durable-events.module.js';
 import { repositoryStoreKey } from '#api/git/git.constants.js';
 import { GitBasicAuthMiddleware, registerGitContentTypeParsers } from '#api/git/git-transport.js';
+import { GitCatalogueController } from '#api/git/catalogue.controller.js';
 import { GitController } from '#api/git/git.controller.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
 import { GitProxyController } from '#api/git/git-proxy.controller.js';
@@ -37,7 +38,14 @@ import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
  */
 @Module({
   imports: [DatabaseModule, ProjectAccessModule, DurableEventsModule],
-  controllers: [GitController, GitProxyController, RevisionSaltController, UsageController, StorageReceiptsController],
+  controllers: [
+    GitController,
+    GitCatalogueController,
+    GitProxyController,
+    RevisionSaltController,
+    UsageController,
+    StorageReceiptsController,
+  ],
   providers: [
     GitRepositoryService,
     /* The API's one Redis budget primitive (D22). Provided here as well as in

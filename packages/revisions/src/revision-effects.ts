@@ -28,7 +28,6 @@ import { parseProjectManifestBytes } from '@taucad/project-core';
 import { ResourceQueue, workerTimings } from '@taucad/filesystem';
 import type { WorkerTimingSpan } from '@taucad/filesystem';
 import { randomUuid } from '@taucad/utils/id';
-import { walk } from '@taucad/filesystem/content-ops';
 import {
   captureRevisionTree,
   createCaptureMemo,
@@ -38,8 +37,7 @@ import {
   revisionId,
 } from '#algorithms/index.js';
 import type { CaptureMemo, RevisionId, RevisionTreeInput } from '#algorithms/index.js';
-import { parseTemporarySibling } from '#revision-temporary-sibling.js';
-import { createApplyTreeEffects } from '#apply-tree.js';
+import { createApplyTreeEffects, sweepTemporarySiblings as sweepApplyLitter } from '#apply-tree.js';
 import { createLargeObjectFill, largeObjectPlaceholders } from '#large-object-fill.js';
 import {
   prepareProjectManifest,
@@ -1288,29 +1286,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       return;
     }
     swept.add(place.id);
-    try {
-      for await (const entry of walk(live, '', { admits: (path) => policy.classify(path).versioned })) {
-        const temporary = entry.kind === 'file' ? parseTemporarySibling(entry.relativePath) : undefined;
-        if (temporary !== undefined) {
-          // oxlint-disable-next-line no-await-in-loop -- each sibling is recovered as the walk reaches it.
-          const originalPresent = await live.exists(temporary.originalPath);
-          // oxlint-disable-next-line no-await-in-loop -- a backup is the only copy when its original is absent.
-          await (temporary.role === 'backup' && !originalPresent
-            ? live.rename(entry.relativePath, temporary.originalPath)
-            : unlinkIfPresent(live, entry.relativePath));
-        }
-      }
-    } catch (error) {
-      /* A listing is a snapshot: an entry can be gone before the sweep reaches
-       * it. Litter nobody removed is swept at the next open, so a vanished
-       * directory is not a project that cannot be opened. */
-      if (
-        (error as NodeJS.ErrnoException).code !== 'ENOENT' &&
-        (error as { name?: unknown }).name !== 'NotFoundError'
-      ) {
-        throw error;
-      }
-    }
+    await sweepApplyLitter(live, (path) => policy.classify(path).versioned);
   };
 
   /**

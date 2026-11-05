@@ -9,18 +9,66 @@
  */
 import type { ChangesetEntry, ChangesetEntryReceipt, FileMode, PathPolicy } from '@taucad/filesystem';
 import { applyChangesetToProvider, maximumChangesetEntries, splitChangeset, workerTimings } from '@taucad/filesystem';
+import { walk } from '@taucad/filesystem/content-ops';
 import { ImmutableRevisionTree } from '#algorithms/index.js';
 import type { RevisionTreeEntry, RevisionTreeInput } from '#algorithms/index.js';
 import { equalBytes } from '#object-hash.js';
 import { assertMaterializableRevisionTree } from '#portable-tree.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { Checkout } from '#revision-port.js';
+import { parseTemporarySibling } from '#revision-temporary-sibling.js';
 import type {
   ApplyingTreePurpose,
   RevisionActorsOptions,
   RevisionFileSystem,
   UseCheckoutFileSystem,
 } from '#revision-effects.types.js';
+
+/**
+ * Recover a checkout an apply died in: put back every backup sibling whose
+ * original is missing, and remove every other staged or backup sibling.
+ *
+ * An apply moves a replaced file aside before it publishes its staged bytes,
+ * so between the two the path is absent and the backup is its only copy; this
+ * leaves every path holding its old bytes or its new ones (I1). Exported at
+ * `@taucad/revisions/apply-tree` beside the apply so the filesystem scenario
+ * harness recovers a killed apply exactly as an open does.
+ *
+ * @param live - The checkout's tree.
+ * @param admits - Whether the walk descends into a path (the checkout's versioned paths).
+ * @public
+ */
+export const sweepTemporarySiblings = async (
+  live: RevisionFileSystem,
+  admits: (path: string) => boolean,
+): Promise<void> => {
+  try {
+    for await (const entry of walk(live, '', { admits })) {
+      const temporary = entry.kind === 'file' ? parseTemporarySibling(entry.relativePath) : undefined;
+      if (temporary !== undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- each sibling is recovered as the walk reaches it.
+        const originalPresent = await live.exists(temporary.originalPath);
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- a backup is the only copy when its original is absent.
+          await (temporary.role === 'backup' && !originalPresent
+            ? live.rename(entry.relativePath, temporary.originalPath)
+            : live.unlink(entry.relativePath));
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+            throw error;
+          }
+        }
+      }
+    }
+  } catch (error) {
+    /* A listing is a snapshot: an entry can be gone before the sweep reaches
+     * it. Litter nobody removed is swept at the next open, so a vanished
+     * directory is not a project that cannot be opened. */
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && (error as { name?: unknown }).name !== 'NotFoundError') {
+      throw error;
+    }
+  }
+};
 
 /** Cancellation, the caller's own capture, and the brackets around one write. */
 type MaterializeTreeOptions<Result> = Readonly<{

@@ -11,7 +11,7 @@
 
 ## Real parts
 
-Plain footprinter strings already get real KiCad bodies offline: `res0201` to `res2512` and `cap0201` to `cap1812` (write `footprint='0603'` on a `<resistor>` or `<capacitor>`), `0402` to `1206` on `<led>` and `<inductor>`, `sot23`, `sot23_5`, `sot23_6`, `sot223`, `sot323`, `sot363`, `to220`, `soic8`, `soic14`, `soic16`, `qfn16`, `qfn20`, `qfn24`, `qfn32`, `lqfp48`, `lqfp64`, `dip8`, `dip14`, `dip16`, `pinrow2` to `pinrow10`, `hc49`, `sod123`, `sod123f`, `sod323`, `sod523`, `sma`, `smb`, `smc` and `minimelf`. Other strings (`tssop16`, `msop8`, `to92`, `axial`, `electrolytic`) keep generic bodies.
+Plain footprinter strings already get real KiCad bodies offline: `res0201` to `res2512` and `cap0201` to `cap1812` (write `footprint='0603'` on a `<resistor>` or `<capacitor>`), `0402` to `1206` on `<led>` and `<inductor>`, `sot23`, `sot23_5`, `sot23_6`, `sot223`, `sot323`, `sot363`, `to220`, `soic8`, `soic14`, `soic16`, `qfn16`, `qfn20`, `qfn24`, `qfn32`, `lqfp48`, `lqfp64`, `dip8`, `dip14`, `dip16`, `pinrow2` to `pinrow10`, `pinrow2_p5.08mm` and `pinrow3_p5.08mm` (screw terminals), `hc49`, `sod123`, `sod123f`, `sod323`, `sod523`, `sma`, `smb`, `smc` and `minimelf`. Options that never change the part (`_color(green)`, `_nopinlabels`, `_id`/`_od` ring sizes) still match. Other strings (`tssop16`, `msop8`, `to92`, `axial`, `electrolytic`) keep generic bodies, and a part with an inline `<footprint>` gets a plain box sized from its `<courtyardrect>` (else its pads): add a courtyard to size it.
 
 Write `kicad:<Library>/<Footprint>` for a part outside that list. The bundled pack (about a hundred footprints) also holds, among others:
 

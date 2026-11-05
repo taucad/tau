@@ -176,6 +176,26 @@ describe('viewer kernel settings', () => {
       { id: 'model', options: { tessellation: { linearTolerance: 0.02, angularTolerance: 22 } } },
     ]);
     vi.useRealTimers();
+    // The write resolving is not the pane seeing it: the draft stays until the viewer sees the record hold it.
+    await act(async () => {
+      await mockState.edit.mock.results[0]?.value;
+    });
+    expect(getLiveViewOptions('pane-1')).toEqual({
+      viewId: 'model',
+      options: { tessellation: { linearTolerance: 0.02, angularTolerance: 22 } },
+    });
+  });
+
+  it('drops the draft when the record refuses the write, so the viewer returns to the saved options', async () => {
+    mockState.edit.mockResolvedValue(false);
+    offer([model]);
+    const menu = render(<SettingsMenu />);
+    fireEvent.click(screen.getByRole('menuitem', { name: /Kernel settings/ }));
+    fireEvent.keyDown(screen.getByRole('menuitem', { name: /^Linear tolerance/ }), { key: 'ArrowLeft' });
+    expect(getLiveViewOptions('pane-1')).toBeDefined();
+
+    menu.rerender(<SettingsMenu isOpen={false} />);
+
     await vi.waitFor(() => {
       expect(getLiveViewOptions('pane-1')).toBeUndefined();
     });

@@ -94,6 +94,28 @@ describe('buildPresentationBoard', () => {
     expect(boundsOf(document, 'top-silkscreen')!.max[1]).toBeGreaterThan(boundsOf(document, 'top-mask')!.max[1]!);
   });
 
+  it.each([
+    { fontSize: 1, glyph: 0.72 },
+    // tscircuit's reference designators: no fixed minimum line, so small labels keep their counters open.
+    { fontSize: 0.4, glyph: 0.288 },
+  ])(
+    'draws $fontSize mm silkscreen text at the PCB view size with a line 1/7 of its height',
+    async ({ fontSize, glyph }) => {
+      const document = new Document();
+      await buildPresentationBoard(document, [
+        circuitJson[0]!,
+        { type: 'pcb_silkscreen_text', layer: 'top', text: 'I', font_size: fontSize, anchor_position: { x: 0, y: 0 } },
+      ]);
+
+      const silkscreen = boundsOf(document, 'top-silkscreen')!;
+      const [width, , depth] = [0, 1, 2].map((axis) => silkscreen.max[axis]! - silkscreen.min[axis]!);
+      // An `I` is one vertical stroke: its width is the line, its depth the stem plus the line's round caps.
+      expect(width).toBeCloseTo(glyph / 7, 2);
+      expect(depth! / width!).toBeGreaterThan(5);
+      expect(depth).toBeLessThan(glyph + width!);
+    },
+  );
+
   it('colours the mask from the board and the exposed pads from the finish', async () => {
     const blue = new Document();
     await buildPresentationBoard(blue, [{ ...circuitJson[0]!, solder_mask_color: 'blue' }, ...circuitJson.slice(1)], {

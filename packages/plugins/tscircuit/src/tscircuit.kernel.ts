@@ -35,6 +35,7 @@ import {
   loadPackFootprint,
   loadPackModel,
   packModelScheme,
+  loadPackPadCentre,
   packModelUrl,
 } from '#kicad-pack.js';
 
@@ -138,7 +139,10 @@ const boardViewOptionsSchema = z.object({
     description:
       "Presentation builds real copper, mask and silkscreen layers; technical shows a plain slab with edges. Defaults to the kernel's board style.",
   }),
-  finish: z.enum(['enig', 'hasl', 'bare']).optional().meta({ title: 'Pad finish' }),
+  finish: z
+    .enum(['enig', 'hasl', 'bare'])
+    .optional()
+    .meta({ title: 'Pad finish', 'x-tau-labels': { enig: 'ENIG', hasl: 'HASL', bare: 'Bare copper' } }),
 });
 
 type BoardViewOptions = z.output<typeof boardViewOptionsSchema>;
@@ -349,6 +353,13 @@ const guardedFetch: typeof globalThis.fetch = async (input, init) => {
       headers: { 'content-type': 'model/gltf-binary' },
     });
   }
+  if (pack) {
+    const { buildGenericBodyGlb, parseGenericBodyUrl } = await import('#generic-body.js');
+    const body = parseGenericBodyUrl(url);
+    if (body) {
+      return new Response(await buildGenericBodyGlb(body), { headers: { 'content-type': 'model/gltf-binary' } });
+    }
+  }
   // A request passes only when every call sharing the trap opted in.
   if (replacedFetch && isOnlinePartUrl(url) && [...activeCalls].every((call) => call.online)) {
     return replacedFetch(input, init);
@@ -455,17 +466,19 @@ const modelUrlKeys = [
 ] as const;
 
 // Converter input with pack models swapped in: a KiCad STEP/WRL model the pack carries, or a
-// generic footprinter body the pack maps by its exact footprinter string (and source `ftype`),
-// becomes a `tau-models:` GLB. The handle's circuit JSON is untouched, so exports keep tscircuit's
-// canonical URLs.
+// generic footprinter body the pack maps by its footprinter string (and source `ftype`), becomes a
+// `tau-models:` GLB; a part with no model at all (an inline `<footprint>`) gets a generic body
+// sized from its courtyard, so no part renders as bare pads. The handle's circuit JSON is
+// untouched, so exports keep tscircuit's canonical URLs.
 const withPackModels = async (circuitJson: CircuitElement[]): Promise<CircuitElement[]> => {
   const pack = await loadKicadPack();
+  const { genericBodyOf, genericBodyUrl } = await import('#generic-body.js');
   const ftypes = new Map(
     circuitJson
       .filter((element) => element.type === 'source_component')
       .map((element) => [stringField(element, 'source_component_id'), stringField(element, 'ftype')] as const),
   );
-  return circuitJson.map((element) => {
+  const mapped = circuitJson.map(async (element) => {
     if (element.type !== 'cad_component') {
       return element;
     }
@@ -481,7 +494,17 @@ const withPackModels = async (circuitJson: CircuitElement[]): Promise<CircuitEle
         : undefined;
     const entry = kicadName === undefined ? footprinterEntry : pack.entry(kicadName);
     if (!entry) {
-      return element;
+      const pcbComponentId = stringField(element, 'pcb_component_id');
+      const body =
+        hasModel || footprinterString !== undefined || pcbComponentId === undefined
+          ? undefined
+          : genericBodyOf(circuitJson, pcbComponentId, ftypes.get(stringField(element, 'source_component_id')));
+      // The body is built about the component centre, so its own origin places it.
+      /* eslint-disable @typescript-eslint/naming-convention -- circuit JSON field names. */
+      return body
+        ? { ...element, model_glb_url: genericBodyUrl(body), model_origin_position: { x: 0, y: 0, z: 0 } }
+        : element;
+      /* eslint-enable @typescript-eslint/naming-convention */
     }
     const rest = Object.fromEntries(
       Object.entries(element).filter(([key]) => key !== 'model_step_url' && key !== 'model_wrl_url'),
@@ -493,9 +516,15 @@ const withPackModels = async (circuitJson: CircuitElement[]): Promise<CircuitEle
       turn !== 0 && isRecordObject(rotation)
         ? { rotation: { ...rotation, z: (typeof z === 'number' ? z : 0) + turn } }
         : {};
+    // A footprinter footprint is centred on its pads; KiCad's origin is often pin 1 (headers, terminals).
+    // The converter reads the origin in its loaded mesh frame: Y up, the KiCad model's Y along Z.
+    const centre = footprinterEntry ? await loadPackPadCentre(footprinterEntry, hostFetch) : undefined;
     // eslint-disable-next-line @typescript-eslint/naming-convention -- circuit JSON field name.
-    return { ...rest, ...turned, type: element.type, model_glb_url: packModelUrl(entry) };
+    const origin = centre ? { model_origin_position: { x: centre.x, y: 0, z: centre.y } } : {};
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- circuit JSON field name.
+    return { ...rest, ...turned, ...origin, type: element.type, model_glb_url: packModelUrl(entry) };
   });
+  return Promise.all(mapped);
 };
 
 // Transports may deliver the snapshot as any view or buffer; TextDecoder accepts either.

@@ -3,11 +3,13 @@ import { fp } from '@tscircuit/footprinter';
 import { describe, expect, it } from 'vitest';
 
 import {
+  footprinterCandidates,
   kicadFootprintCacheUrl,
   kicadNameOfModelUrl,
   loadKicadPack,
   loadPackFootprint,
   loadPackModel,
+  loadPackPadCentre,
   packModelUrl,
 } from '#kicad-pack.js';
 
@@ -116,5 +118,45 @@ describe('KiCad pack', () => {
     expect(pack.forFootprinter('res0603', 'simple_resistor')?.name).toBe('Resistor_SMD/R_0603_1608Metric');
     expect(pack.ofModelUrl(packModelUrl(entry!))).toBe(entry);
     expect(pack.ofModelUrl('tau-models:kicad/Unknown/Part.glb')).toBeUndefined();
+  });
+
+  it.each([
+    ['soic8', ['soic8']],
+    ['0603_color(green)', ['0603_color(green)', '0603']],
+    ['pinrow2_nopinlabels', ['pinrow2_nopinlabels', 'pinrow2']],
+    ['pinrow2_p2.54mm_id1mm_od1.5mm', ['pinrow2_p2.54mm_id1mm_od1.5mm', 'pinrow2']],
+    ['pinrow2_p5.08mm_id1.3mm_od2.4mm', ['pinrow2_p5.08mm_id1.3mm_od2.4mm', 'pinrow2_p5.08mm']],
+    // Parameters that change the part stay: a female or SMD row is not a vertical pin header.
+    ['pinrow4_female_nopinlabels', ['pinrow4_female_nopinlabels', 'pinrow4_female']],
+    ['soic8_p1.27mm', ['soic8_p1.27mm']],
+  ])('matches %s by what it means', (value, candidates) => {
+    expect(footprinterCandidates(value)).toEqual(candidates);
+  });
+
+  it('ignores colours, pin labels, ring sizes and the default pitch when it maps a footprinter string', () => {
+    expect(pack.forFootprinter('0603_color(green)', 'simple_led')?.name).toBe('LED_SMD/LED_0603_1608Metric');
+    expect(pack.forFootprinter('pinrow2_p2.54mm_nopinlabels')?.name).toBe(
+      'Connector_PinHeader_2.54mm/PinHeader_1x02_P2.54mm_Vertical',
+    );
+    expect(pack.forFootprinter('pinrow2_p5.08mm_id1.3mm_od2.4mm')?.name).toBe(
+      'TerminalBlock_Phoenix/TerminalBlock_Phoenix_MKDS-1,5-2-5.08_1x02_P5.08mm_Horizontal',
+    );
+    expect(pack.forFootprinter('pinrow3_p5.08mm')?.name).toBe(
+      'TerminalBlock_Phoenix/TerminalBlock_Phoenix_MKDS-1,5-3-5.08_1x03_P5.08mm_Horizontal',
+    );
+    // A pitch the pack has no part for, or a different part, still gets tscircuit's own body.
+    expect(pack.forFootprinter('pinrow2_p3.5mm')).toBeUndefined();
+    expect(pack.forFootprinter('pinrow4_female')).toBeUndefined();
+  });
+
+  it('finds the pad centre of a KiCad footprint whose origin is pin 1', async () => {
+    const header = pack.entry('Connector_PinHeader_2.54mm/PinHeader_1x02_P2.54mm_Vertical')!;
+    expect(await loadPackPadCentre(header, noFetch)).toEqual({ x: 0, y: -1.27 });
+    const terminal = pack.forFootprinter('pinrow2_p5.08mm')!;
+    expect(await loadPackPadCentre(terminal, noFetch)).toEqual({ x: 2.54, y: 0 });
+    // A centred SMD footprint keeps its origin.
+    const soic = await loadPackPadCentre(pack.entry('Package_SO/SOIC-8_3.9x4.9mm_P1.27mm')!, noFetch);
+    expect(soic.x).toBeCloseTo(0, 6);
+    expect(soic.y).toBeCloseTo(0, 6);
   });
 });

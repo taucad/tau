@@ -159,3 +159,148 @@ describe('kernel settings for a preset-or-explicit union', () => {
     });
   });
 });
+
+/** A board view's options as the runtime derives them from Zod: optional string enums, no declared defaults. */
+const enumSchema = {
+  type: 'object',
+  properties: {
+    style: { type: 'string', title: 'Style', enum: ['presentation', 'technical'] },
+    finish: {
+      type: 'string',
+      title: 'Pad finish',
+      enum: ['enig', 'hasl', 'bare'],
+      'x-tau-labels': { enig: 'ENIG', hasl: 'HASL' },
+    },
+    palette: { type: 'string', enum: ['fabrication', 'engineering'], default: 'fabrication' },
+  },
+};
+
+const renderEnumSettings = (values: Record<string, unknown>, onChange = vi.fn()) => {
+  render(
+    <DropdownMenu open>
+      <DropdownMenuTrigger>Viewer settings</DropdownMenuTrigger>
+      <DropdownMenuContent>
+        <KernelSettings
+          isDefaultOpen
+          groups={kernelSettingsGroups(enumSchema, {})}
+          values={values}
+          defaults={{}}
+          onChange={onChange}
+          onReset={vi.fn()}
+        />
+      </DropdownMenuContent>
+    </DropdownMenu>,
+  );
+  return onChange;
+};
+
+const openSubmenu = async (name: RegExp): Promise<HTMLElement> => {
+  const trigger = screen.getByRole('menuitem', { name });
+  act(() => {
+    trigger.focus();
+  });
+  fireEvent.keyDown(trigger, { key: 'ArrowRight' });
+  return screen.findByRole('group', { name: trigger.getAttribute('aria-label')?.split(',')[0] });
+};
+
+describe('kernel settings for a string enum', () => {
+  it('reads each string enum as one dropdown row with its labels', () => {
+    const [group] = kernelSettingsGroups(enumSchema, {});
+    expect(group?.fields).toEqual([
+      {
+        kind: 'enum',
+        path: ['style'],
+        label: 'Style',
+        values: [
+          { value: 'presentation', label: 'Presentation' },
+          { value: 'technical', label: 'Technical' },
+        ],
+        defaultValue: undefined,
+      },
+      {
+        kind: 'enum',
+        path: ['finish'],
+        label: 'Pad finish',
+        values: [
+          { value: 'enig', label: 'ENIG' },
+          { value: 'hasl', label: 'HASL' },
+          { value: 'bare', label: 'Bare' },
+        ],
+        defaultValue: undefined,
+      },
+      {
+        kind: 'enum',
+        path: ['palette'],
+        label: 'Palette',
+        values: [
+          { value: 'fabrication', label: 'Fabrication' },
+          { value: 'engineering', label: 'Engineering' },
+        ],
+        defaultValue: 'fabrication',
+      },
+    ]);
+  });
+
+  it('never reads a mixed or non-string enum as a dropdown', () => {
+    const groups = kernelSettingsGroups(
+      { type: 'object', properties: { mixed: { enum: ['a', 1] }, numbers: { type: 'number', enum: [1, 2] } } },
+      {},
+    );
+    expect(groups.flatMap((group) => group.fields).map((field) => field.kind)).toEqual(['number']);
+  });
+
+  it('shows the current value on each row, Default for an unset value the kernel resolves', () => {
+    renderEnumSettings({ finish: 'hasl' });
+    expect(screen.getByRole('menuitem', { name: 'Style, Default' })).toHaveTextContent('StyleDefault');
+    expect(screen.getByRole('menuitem', { name: 'Pad finish, HASL' })).toBeInTheDocument();
+    // A declared default shows as itself, with no Default entry.
+    expect(screen.getByRole('menuitem', { name: 'Palette, Fabrication' })).toBeInTheDocument();
+  });
+
+  it('opens the values as a dropdown and sets the chosen one, keeping the other settings', async () => {
+    const onChange = renderEnumSettings({ finish: 'hasl' });
+    const style = await openSubmenu(/^Style/);
+    expect(
+      within(style)
+        .getAllByRole('menuitemradio')
+        .map((item) => item.textContent),
+    ).toEqual(['Default', 'Presentation', 'Technical']);
+    expect(within(style).getByRole('menuitemradio', { name: 'Default' })).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.click(within(style).getByRole('menuitemradio', { name: 'Technical' }));
+
+    expect(onChange).toHaveBeenCalledWith({ finish: 'hasl', style: 'technical' });
+  });
+
+  it('unsets the value when Default is chosen, so the kernel option decides again', async () => {
+    const onChange = renderEnumSettings({ style: 'technical', finish: 'hasl' });
+    const style = await openSubmenu(/^Style/);
+
+    fireEvent.click(within(style).getByRole('menuitemradio', { name: 'Default' }));
+
+    expect(onChange).toHaveBeenCalledWith({ finish: 'hasl' });
+  });
+
+  it('does nothing when the selected value is chosen again', async () => {
+    const onChange = renderEnumSettings({ style: 'technical' });
+    const style = await openSubmenu(/^Style/);
+
+    fireEvent.click(within(style).getByRole('menuitemradio', { name: 'Technical' }));
+
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('counts a set value as a change and an unset one as the default', () => {
+    const groups = kernelSettingsGroups(enumSchema, {});
+    expect(countChangedSettings(groups, {}, {})).toBe(0);
+    expect(countChangedSettings(groups, { style: 'technical', palette: 'engineering' }, {})).toBe(2);
+  });
+
+  it('removes a top-level setting set to undefined', () => {
+    expect(withSetting({ values: { style: 'technical', finish: 'hasl' }, defaults: {} }, ['style'], undefined)).toEqual(
+      {
+        finish: 'hasl',
+      },
+    );
+  });
+});

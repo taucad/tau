@@ -610,7 +610,8 @@ export const kicadCatalog: readonly KicadPackEntry[] = [
   },
   {
     name: 'TerminalBlock_Phoenix/TerminalBlock_Phoenix_MKDS-1,5-2-5.08_1x02_P5.08mm_Horizontal',
-    footprinters: [],
+    // KiCad has no 5.08 mm pin header: a 5.08 mm pin row is a screw terminal's footprint.
+    footprinters: [{ string: 'pinrow2_p5.08mm' }],
     footprint: new URL(
       '../assets/kicad/TerminalBlock_Phoenix_TerminalBlock_Phoenix_MKDS-1_5-2-5.08_1x02_P5.08mm_Horizontal.circuit.json',
       import.meta.url,
@@ -622,7 +623,8 @@ export const kicadCatalog: readonly KicadPackEntry[] = [
   },
   {
     name: 'TerminalBlock_Phoenix/TerminalBlock_Phoenix_MKDS-1,5-3-5.08_1x03_P5.08mm_Horizontal',
-    footprinters: [],
+    // KiCad has no 5.08 mm pin header: a 5.08 mm pin row is a screw terminal's footprint.
+    footprinters: [{ string: 'pinrow3_p5.08mm' }],
     footprint: new URL(
       '../assets/kicad/TerminalBlock_Phoenix_TerminalBlock_Phoenix_MKDS-1_5-3-5.08_1x03_P5.08mm_Horizontal.circuit.json',
       import.meta.url,

@@ -279,10 +279,23 @@ const alphabetBounds = (() => {
   return { width: maxX, height: maxY - minY };
 })();
 
+/**
+ * Glyph height per unit of `font_size`: the cap height of the Arial text circuit-to-svg's PCB view draws at that font
+ * size, so the 3D board's labels are the size the PCB view shows.
+ */
+const silkscreenGlyphHeight = 0.72;
+
+/**
+ * Stroke width per unit of glyph height. Fabricated silkscreen uses a line about 1/6 to 1/8 of the text height
+ * (KiCad's default is 1.0 mm text with a 0.15 mm line); a fixed minimum width would fill small labels' counters.
+ */
+const silkscreenStrokeRatio = 1 / 7;
+
 const textSegments = (element: Element): { segments: Array<[Point, Point]>; strokeWidth: number } => {
   const text = typeof element['text'] === 'string' ? element['text'] : '';
   const fontSize = numberOf(element, 'font_size', 1);
-  const scale = (fontSize * (2 / 3)) / alphabetBounds.height;
+  const glyphHeight = fontSize * silkscreenGlyphHeight;
+  const scale = glyphHeight / alphabetBounds.height;
   const spacing = alphabetBounds.width * 0.2;
   const advance = (alphabetBounds.width + spacing) * scale;
   const space = advance * 0.6;
@@ -337,7 +350,7 @@ const textSegments = (element: Element): { segments: Array<[Point, Point]>; stro
     const ly = point.y - anchorY;
     return { x: anchor.x + lx * cos - ly * sin, y: anchor.y + lx * sin + ly * cos };
   };
-  return { segments: raw.map(([a, b]) => [place(a), place(b)]), strokeWidth: Math.max(fontSize * 0.1, 0.1) };
+  return { segments: raw.map(([a, b]) => [place(a), place(b)]), strokeWidth: glyphHeight * silkscreenStrokeRatio };
 };
 
 const collectRegions = (shapes: Shapes, elements: Element[], board: Element): BoardRegions => {

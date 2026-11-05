@@ -14,9 +14,12 @@
  */
 import {
   ChangeEventBus,
+  headSniffByteLength,
+  lineCountByteCap,
   MountTable,
   ProviderRegistry,
   ResourceQueue,
+  seemsBinary,
   WorkspaceFileService,
   workerTimings,
 } from '@taucad/filesystem';
@@ -338,10 +341,16 @@ const grepAndGlob = async (
     textBytesRead: number;
     walkCalls: number;
     authorityReads: number;
+    listingBytesRead: number;
   }>
 > => {
   const tally: AgentTally = { readdirCalls: 0, reads: 0, binaryBytesRead: 0, textBytesRead: 0 };
   const fileSystem = agentFileSystem(live, tally);
+  const listingBytes = (): number => {
+    const totals = productionCounterTotals();
+    return (totals['index.facts.bytes'] ?? 0) + (totals['view.facts.bytes'] ?? 0);
+  };
+  const listingBefore = listingBytes();
   const grepStart = performance.now();
   const grep = await handleGrep({ pattern: fixtureMarker, path: '' }, fileSystem);
   const grepDuration = performance.now() - grepStart;
@@ -361,12 +370,48 @@ const grepAndGlob = async (
     textBytesRead: tally.textBytesRead,
     walkCalls: tally.readdirCalls,
     authorityReads: tally.reads,
+    listingBytesRead: listingBytes() - listingBefore,
   };
+};
+
+/**
+ * What the listings' content facts may read (D4): each file's head, and a
+ * file whose head reads as text, within the line-count cap, once more in full.
+ * Every file of the project counts, the manifest the import added included; a
+ * path the fixture does not name is taken as text. A fixture binary is seeded
+ * noise, so its head is judged as production judges it: the import wrote
+ * revision 0, whose first bytes do not depend on the size. Taken after the
+ * measured window: its `statTree` opens the root's index, which the scenario
+ * itself never needs.
+ */
+const listingByteCeiling = async (live: RootedFileSystem): Promise<number> => {
+  const binaryByHead = new Set(
+    fixturePlan()
+      .entries.filter(
+        (entry) =>
+          entry.kind === 'binary' &&
+          seemsBinary(fixtureBytes({ ...entry, size: Math.min(entry.size, headSniffByteLength) })),
+      )
+      .map((entry) => entry.path),
+  );
+  return ((await live.statTree?.('')) ?? []).reduce(
+    (total, row) =>
+      total +
+      Math.min(row.size, headSniffByteLength) +
+      (!binaryByHead.has(row.path) && row.size > headSniffByteLength && row.size <= lineCountByteCap ? row.size : 0),
+    0,
+  );
 };
 
 let probe:
   | { stop: () => void; done: Promise<void>; latencies: number[]; reads: number; invalidations: number; events: number }
   | undefined;
+
+/* S19's viewer: one read every 20 ms, and at least 40 reads a sample, so its p95 is never just the maximum. */
+const s19ReadInterval = 20;
+const s19MinimumReads = 40;
+/** Reads the running probe has timed (none running: the sample is as full as it gets). */
+const probeReads = (): number => (probe === undefined ? s19MinimumReads : probe.latencies.length);
 
 const startProbe = (projectId: string, readInterval: number): void => {
   const live = rootedFor(projectId);
@@ -422,6 +467,24 @@ const stopProbe = async (): Promise<ProbeReport> => {
     invalidationsReceived: invalidationsReceived - running.invalidations,
     busEvents: busEvents - running.events,
   };
+};
+
+/* The Project Index probes' own paths (W3). */
+const indexTabPath = 'w3-tab-write.txt';
+const indexExternalPath = 'w3-external-edit.txt';
+
+/** A project's directory on OPFS, as the provider lays it out under the origin root. */
+const projectDirectory = async (projectId: string): Promise<FileSystemDirectoryHandle> => {
+  const project = projects.get(projectId);
+  if (project === undefined) {
+    throw new Error(`Unknown project ${projectId}.`);
+  }
+  let directory = await navigator.storage.getDirectory();
+  for (const segment of project.providerBasePath.split('/').filter(Boolean)) {
+    // oxlint-disable-next-line no-await-in-loop -- one level at a time.
+    directory = await directory.getDirectoryHandle(segment);
+  }
+  return directory;
 };
 
 const run = async (runner: RunnerName, projectId: string, parameters: Readonly<Record<string, number>>) => {
@@ -483,20 +546,87 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
       return measured;
     }
     case 'warm-open': {
-      /* S5 on a fresh authority: one tree listing as the file tree asks for it,
-       * then one exact stat per file — the per-file metadata compare a status
-       * check makes at HEAD. */
+      /* S5 on a fresh authority: the file tree's listing loads the root's
+       * persisted Project Index and runs its one head-metadata compare, then one
+       * exact stat per file stands in for the per-file metadata compare a status
+       * check still makes at HEAD until W6 drives status from the index. */
       return measure(async () => {
-        let metadataRequests = 0;
+        const listingStart = performance.now();
         const listing = await live.statTree?.('');
-        metadataRequests += 1;
-        const files = entries.length;
+        const statsStart = performance.now();
+        let metadataRequests = 1;
         for (const entry of entries) {
-          // oxlint-disable-next-line no-await-in-loop -- the compare stats each entry in order.
+          // oxlint-disable-next-line no-await-in-loop -- the stand-in stats each entry in order.
           await live.stat(entry.path);
           metadataRequests += 1;
         }
-        return { listed: listing?.length ?? 0, files, metadataRequests };
+        /* Reported apart, so the stand-in's share is never mistaken for the index's (W3.2). */
+        return {
+          listed: listing?.length ?? 0,
+          files: entries.length,
+          metadataRequests,
+          indexOpenDuration: statsStart - listingStart,
+          statusStandInDuration: performance.now() - statsStart,
+        };
+      });
+    }
+    case 'index-open': {
+      /* The Project Index across reloads (D5): a compare of a cold root is its
+       * open, so this reports what the load's compare found against the stored
+       * snapshot; the listing then comes from the warm index. */
+      return measure(async () => {
+        const compared = await live.compareIndex?.();
+        const listing = (await live.statTree?.('')) ?? [];
+        const external = listing.find((row) => row.path === indexExternalPath);
+        return {
+          listed: listing.length,
+          mismatched: compared?.mismatched.length ?? 0,
+          externalMismatched: compared?.mismatched.includes(indexExternalPath) === true ? 1 : 0,
+          externalSize: external?.size ?? -1,
+          tabWriteListed: listing.some((row) => row.path === indexTabPath) ? 1 : 0,
+        };
+      });
+    }
+    case 'index-write': {
+      /* One write through this authority: its tab's change notice and its index entry. */
+      return measure(async () => {
+        await live.writeFile(indexTabPath, textEncoder.encode('written by one tab\n'));
+      });
+    }
+    case 'external-edit': {
+      /* An edit no authority sees: straight to OPFS, no notice, no index entry. */
+      return measure(async () => {
+        const directory = await projectDirectory(projectId);
+        const file = await directory.getFileHandle(indexExternalPath, { create: true });
+        const writable = await file.createWritable();
+        await writable.write(new Uint8Array(parameters['bytes'] ?? 1).fill(0x78));
+        await writable.close();
+      });
+    }
+    case 'index-snapshot': {
+      /* The stored snapshot as a next load would read it. */
+      return measure(async (): Promise<Readonly<Record<string, number>>> => {
+        try {
+          const project = await projectDirectory(projectId);
+          const tau = await project.getDirectoryHandle('.tau');
+          const directory = await tau.getDirectoryHandle('index');
+          const handle = await directory.getFileHandle('snapshot.json');
+          const snapshot = await handle.getFile();
+          const stored = JSON.parse(await snapshot.text()) as {
+            vector: { seqByTab: Record<string, number> };
+            rescan: boolean;
+            entries: ReadonlyArray<readonly [string, ...unknown[]]>;
+          };
+          return {
+            present: 1,
+            tabs: Object.keys(stored.vector.seqByTab).length,
+            rescan: stored.rescan ? 1 : 0,
+            entries: stored.entries.length,
+            tabWriteStored: stored.entries.some(([path]) => path === indexTabPath) ? 1 : 0,
+          };
+        } catch {
+          return { present: 0 };
+        }
       });
     }
     case 'import': {
@@ -570,24 +700,35 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
       }
     }
     case 'grep-glob': {
-      return measure(async () => grepAndGlob(live));
+      const measured = await measure(async () => grepAndGlob(live));
+      return { ...measured, extra: { ...measured.extra, listingByteCeiling: await listingByteCeiling(live) } };
     }
     case 'grep-with-save-and-reads': {
       return measure(async () => {
-        startProbe(projectId, 20);
+        startProbe(projectId, s19ReadInterval);
         const grepping = grepAndGlob(live);
         await quiet(parameters['saveDelay'] ?? 20);
         const saveStart = performance.now();
         await live.writeFile('src/s19-save.ts', saveText(saveSize, 19));
         const saveLatency = performance.now() - saveStart;
         const grep = await grepping;
+        /* Info only, never gated: how many reads the grep window itself held. */
+        const readsDuringGrep = probeReads();
+        /* A p95 over a dozen reads is the slowest one: the viewer keeps reading
+         * until the sample holds enough reads for the percentile to be one. */
+        while (probeReads() < s19MinimumReads) {
+          // oxlint-disable-next-line no-await-in-loop -- the probe's own cadence fills the sample.
+          await quiet(s19ReadInterval);
+        }
         const reads = await stopProbe();
         return {
           grepDuration: grep.grepDuration,
           authorityReads: grep.authorityReads,
           saveLatency,
           readP95: percentile(reads.latencies, 0.95),
+          readMax: Math.max(0, ...reads.latencies),
           reads: reads.reads,
+          readsDuringGrep,
         };
       });
     }

@@ -148,6 +148,7 @@ describe('generated ignore file', () => {
 /.tau/library.json
 /exports/
 /thumbnail.webp
+/.tau/index/
 /.tau/cache/
 **/node_modules/
 # END Tau generated

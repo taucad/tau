@@ -4,13 +4,9 @@ import type {
   CheckedFileWriteResult,
   FileWritePrecondition,
   FileStat,
-  FileStatEntry,
   FileSystemBackend,
-  FileTreeContentMetadata,
 } from '@taucad/types';
 import type {
-  FileStatOptions,
-  HeadFileStat,
   FileSystemProvider,
   FileTreeNode,
   FileReadStreamOptions,
@@ -28,14 +24,12 @@ import type { RootedFileSystem } from '#rooted-views.js';
 import type { ProviderRegistry } from '#provider-registry.js';
 import type { ResourceQueue } from '#resource-queue.js';
 import type { ChangeEventBus } from '#change-event-bus.js';
-import { TreeIndexes } from '#tree-index.js';
-import type { TreeIndex } from '#tree-index.js';
+import { ProjectIndexes } from '#project-index/project-indexes.js';
 import { WatchRegistry } from '#watch-registry.js';
 import { bufferToStream, validateFileReadStreamOptions } from '#backend/stream-utils.js';
 /* The scope discriminants are the backend layer's own vocabulary (D13); the
  * authority reads capabilities and admission answers, never a backend name. */
 import { isDurableScope, matchesProtectedMountScope, scopeForRouteConfig, toScope } from '#backend/scope.js';
-import { directoryConcurrency, mapConcurrent, statConcurrency } from '#concurrency.js';
 import { CrossTabCoordinator } from '#cross-tab-coordinator.js';
 /* External change and cross-tab receive are their own modules (D13/W9); the
  * authority keeps the one public poll and owns nothing of either mechanism. */
@@ -70,7 +64,6 @@ import { checkoutRoute, nodeModulesRoute, parseRoute, projectRoute } from '#proj
 
 /** Milliseconds. */
 const kernelCoalescingWindow = 75;
-const treeIndexBuildAttempts = 3;
 
 /** One project or checkout route staged for installation, before its provider is resolved. */
 type StagedRouteMount = {
@@ -135,17 +128,6 @@ function isStructurallyValidWorkspacePath(path: string): boolean {
   }
 }
 
-/** One listed row: a head listing knows a text file is text, not how many lines it has. */
-type ListedTreeEntry =
-  | Extract<TreeEntry, { type: 'dir' }>
-  | ({ name: string; type: 'file'; size: number; mtimeMs: number } & FileTreeContentMetadata);
-
-/* A row's content fields, with a line count only where the listing measured one. */
-const listedMetadataFields = (metadata: FileTreeContentMetadata): FileTreeContentMetadata =>
-  metadata.contentKind === 'text'
-    ? { contentKind: 'text', ...(metadata.lineCount === undefined ? {} : { lineCount: metadata.lineCount }) }
-    : { contentKind: 'binary' };
-
 /**
  * Layer 3a UI-side workspace orchestrator.
  *
@@ -166,11 +148,7 @@ export class WorkspaceFileService {
   private readonly _mountTable: MountTable;
   private readonly _policy: PathPolicy | undefined;
   /* Told the live mount prefixes, an index never answers for a path behind a nested mount. */
-  private readonly _treeIndexes = new TreeIndexes(() => this._mountTable.prefixes);
-  private readonly _pendingTreeScans = new Map<
-    string,
-    { generation: number; promise: Promise<TreeIndex | undefined> }
-  >();
+  private readonly _projectIndexes: ProjectIndexes;
   private readonly _projectRoutes = new Set<string>();
   private readonly _checkoutRoutes = new Set<string>();
   private _projectConfigurationTail: Promise<void> = Promise.resolve();
@@ -214,26 +192,33 @@ export class WorkspaceFileService {
     this._filePool = options.filePool;
     this._mountTable = options.mountTable;
     this._policy = options.policy;
+    const coordinator = this._crossTabCoordinator;
+    this._projectIndexes = new ProjectIndexes({
+      mountPrefixes: () => this._mountTable.prefixes,
+      resolve: (root) => this._indexRoot(root),
+      policy: options.policy,
+      tab: () => ({ tabId: coordinator.tabId, seq: coordinator.seq }),
+    });
     this._pipeline = new MutationPipeline({
       mountTable: this._mountTable,
       resourceQueue: this._resourceQueue,
       eventBus: this._eventBus,
       crossTabCoordinator: this._crossTabCoordinator,
-      treeIndexes: this._treeIndexes,
+      projectIndexes: this._projectIndexes,
       filePool: () => this._filePool,
     });
     this._rootedViews = new RootedViews({
       mountTable: this._mountTable,
       pipeline: this._pipeline,
       watchRegistry: this._watchRegistry,
-      treeIndexFor: async (root) => this._treeIndexFor(root),
+      projectIndexes: this._projectIndexes,
     });
     this._projectDirectories = new ProjectDirectories({
       registry: this._registry,
       resourceQueue: this._resourceQueue,
       crossTabCoordinator: this._crossTabCoordinator,
       pipeline: this._pipeline,
-      treeIndexes: this._treeIndexes,
+      projectIndexes: this._projectIndexes,
       discoveryRoots: () => this._discoveryRoots,
       filePool: () => this._filePool,
       revokeProjectRoute: (path, notifyPeers) => {
@@ -245,7 +230,8 @@ export class WorkspaceFileService {
       mountTable: this._mountTable,
       pipeline: this._pipeline,
       crossTabCoordinator: this._crossTabCoordinator,
-      treeIndexes: this._treeIndexes,
+      projectIndexes: this._projectIndexes,
+      policy: options.policy,
       filePool: () => this._filePool,
       disposeStorageRoot: (storageRootKey) => {
         this.disposeStorageRoot(storageRootKey);
@@ -255,7 +241,7 @@ export class WorkspaceFileService {
       registry: this._registry,
       mountTable: this._mountTable,
       pipeline: this._pipeline,
-      treeIndexes: this._treeIndexes,
+      projectIndexes: this._projectIndexes,
       watchRegistry: this._watchRegistry,
       filePool: () => this._filePool,
       discoveryRoots: () => this._discoveryRoots,
@@ -384,11 +370,9 @@ export class WorkspaceFileService {
    * @param path - Absolute path.
    * @returns Stat information (type, size, mtime).
    */
-  public async stat(path: string): Promise<FileStat>;
-  public async stat(path: string, options: FileStatOptions): Promise<FileStat | HeadFileStat>;
-  public async stat(path: string, options?: FileStatOptions): Promise<FileStat | HeadFileStat> {
+  public async stat(path: string): Promise<FileStat> {
     const { provider, path: resolvedPath } = this._resolveProvider(path);
-    return options ? provider.stat(resolvedPath, options) : provider.stat(resolvedPath);
+    return provider.stat(resolvedPath);
   }
 
   /**
@@ -888,16 +872,11 @@ export class WorkspaceFileService {
     }
 
     const { provider, path: resolvedPath } = this._resolveProvider(path);
-    const entryMap = new Map<string, ListedTreeEntry>();
+    const entryMap = new Map<string, TreeEntry>();
 
     if (provider.readdirWithStats) {
-      /* A tree row needs a name, a size and a kind, never a line count: an exact
-       * listing reads every text file whole to count its lines, which on a cold
-       * open is the whole checkout read once per directory refresh. */
-      const statsEntries =
-        provider.supportsHeadListing === true
-          ? await provider.readdirWithStats(resolvedPath, { content: 'head' })
-          : await provider.readdirWithStats(resolvedPath);
+      /* A tree row needs a name, a size and a kind, never a line count (I3). */
+      const statsEntries = await provider.readdirWithStats(resolvedPath);
       for (const entry of statsEntries) {
         if (entry.type === 'dir') {
           entryMap.set(entry.name, {
@@ -912,7 +891,7 @@ export class WorkspaceFileService {
             type: 'file',
             size: entry.size,
             mtimeMs: entry.mtimeMs,
-            ...listedMetadataFields(entry),
+            ...fileMetadataFields(entry),
           });
         }
       }
@@ -962,7 +941,7 @@ export class WorkspaceFileService {
    * consumer reaches the same index through `statTree` and `search` on the
    * rooted surface, where the composed view applies its policy before the
    * descent. The index itself stays — {@link WorkspaceFileService.createRootedFileSystem}
-   * builds it through `_treeIndexFor` and every mutation still invalidates it.
+   * opens it through `ProjectIndexes.ready` and every mutation still feeds it.
    */
 
   /**
@@ -1049,14 +1028,21 @@ export class WorkspaceFileService {
   }
 
   /**
-   * Safety-reconcile one routed project, or every configured webaccess root when omitted.
+   * Safety-reconcile one routed project, or every configured webaccess root when
+   * omitted, then run the head-metadata compare of the warm Project Indexes it
+   * covers whose roots other programs edit (D5): that project's, or every one.
    *
    * @param root - Optional routed project root.
    * @returns `true` when every root this call covered is under live `FileSystemObserver`
    *          delivery, which lets the caller poll on a slow safety-net cadence instead.
    */
   public async pollExternalChanges(root?: string): Promise<boolean> {
-    return this._externalChanges.poll(root);
+    const nativelyObserved = await this._externalChanges.poll(root);
+    /* The same moments — a poll, a tab regaining visibility — compare the warm
+     * Project Indexes of the roots other programs edit (D5); a root only Tau
+     * writes learns every change from its own hooks and is never compared here. */
+    await this._projectIndexes.compareExternallyEdited(root);
+    return nativelyObserved;
   }
 
   // --- Backend management ---
@@ -1252,8 +1238,7 @@ export class WorkspaceFileService {
     this._externalChanges.dispose();
     this._filePool?.clear();
     this._filePool = undefined;
-    this._treeIndexes.clear();
-    this._pendingTreeScans.clear();
+    this._projectIndexes.clear();
     this._projectRoutes.clear();
     this._discoveryRoots = [];
     this._mountTable.dispose();
@@ -1540,7 +1525,7 @@ export class WorkspaceFileService {
   private _resetTopologyState(prefixes: readonly string[]): void {
     this._filePool?.clear();
     for (const prefix of prefixes) {
-      this._treeIndexes.evict(prefix);
+      this._projectIndexes.evict(prefix);
     }
     this._watchRegistry.emitResetAll();
   }
@@ -1566,134 +1551,34 @@ export class WorkspaceFileService {
     }
   }
 
-  private async _collectDirectoryStatsFromProvider(
-    provider: {
-      readdir(path: string): Promise<string[]>;
-      stat(path: string): Promise<FileStat>;
-      readdirWithStats?(path: string): Promise<Array<{ name: string } & FileStat>>;
-    },
-    scan: { walkPath: string; basePath: string },
-    options?: { signal?: AbortSignal },
-  ): Promise<FileStatEntry[]> {
-    const { walkPath, basePath } = scan;
-    const assertLive = (): void => {
-      if (options?.signal?.aborted) {
-        throw new DOMException('The operation was aborted.', 'AbortError');
-      }
-    };
-
-    /** One directory's rows, batched when the provider offers the batch. */
-    const listEntries = async (directory: string): Promise<Array<{ name: string } & FileStat>> => {
-      assertLive();
-      if (provider.readdirWithStats) {
-        return provider.readdirWithStats(directory);
-      }
-      const names = await provider.readdir(directory);
-      return mapConcurrent(names, statConcurrency, async (name) => ({
-        name,
-        ...(await provider.stat(joinRelativePath(directory, name))),
-      }));
-    };
-
-    /* Listed one tree level at a time from a bounded pool. A bounded *recursion*
-     * would instead put `directoryConcurrency ** depth` listings in flight, which
-     * on a real tree is no bound at all. */
-    const listings = new Map<string, Array<{ name: string } & FileStat>>();
-    let level = [walkPath];
-    while (level.length > 0) {
-      // oxlint-disable-next-line no-await-in-loop -- One level at a time is what bounds the pool.
-      const resolved = await mapConcurrent(
-        level,
-        directoryConcurrency,
-        async (directory) => [directory, await listEntries(directory)] as const,
-      );
-      const next: string[] = [];
-      for (const [directory, entries] of resolved) {
-        listings.set(directory, entries);
-        for (const entry of entries) {
-          if (entry.type !== 'file') {
-            next.push(joinRelativePath(directory, entry.name));
-          }
-        }
-      }
-      level = next;
-    }
-
-    /* Emitted depth-first, in the order the sequential walk produced: the index
-     * keeps children in first-mention order, and `search` caps its results. */
-    const fileStats: FileStatEntry[] = [];
-    const emit = (directory: string): void => {
-      for (const entry of listings.get(directory) ?? []) {
-        const fullPath = joinRelativePath(directory, entry.name);
-        if (entry.type !== 'file') {
-          emit(fullPath);
-          continue;
-        }
-        const relativePath = basePath === '' ? fullPath : fullPath.slice(basePath.length + 1);
-        fileStats.push({
-          path: relativePath,
-          name: relativePath.split('/').at(-1) ?? relativePath,
-          type: 'file',
-          size: entry.size,
-          mtimeMs: entry.mtimeMs,
-          ...fileMetadataFields(entry),
-        });
-      }
-    };
-    emit(walkPath);
-    return fileStats;
-  }
-
   /**
-   * One root's index, scanned from its provider only when cold (D3).
+   * How the Project Indexes reach one root: its provider and provider path,
+   * and — for a durable mount of exactly this root on a provider whose mtime
+   * can key facts — where its snapshot lives and the lock it is written under.
    *
-   * @param root - Absolute authority root the index is keyed by.
-   * @returns The warm index for that root.
+   * @param root - Absolute index root.
+   * @returns The resolution.
    */
-  private async _treeIndexFor(root: string): Promise<TreeIndex> {
-    for (let attempt = 0; attempt < treeIndexBuildAttempts; attempt++) {
-      const warm = this._treeIndexes.get(root);
-      if (warm !== undefined) {
-        return warm;
-      }
-      const generation = this._treeIndexes.generation(root);
-      // oxlint-disable-next-line no-await-in-loop -- An invalidated cold scan must retry from current storage.
-      const published = await this._scanTreeIndex(root, generation);
-      if (published !== undefined) {
-        return published;
-      }
-    }
-    const { provider, path } = this._resolveProvider(root);
-    const stats = await this._collectDirectoryStatsFromProvider(provider, { walkPath: path, basePath: path });
-    return this._treeIndexes.buildDetached(stats);
-  }
-
-  private async _scanTreeIndex(root: string, generation: number): Promise<TreeIndex | undefined> {
-    const existing = this._pendingTreeScans.get(root);
-    if (existing?.generation === generation) {
-      return existing.promise;
-    }
-
-    const { provider, path } = this._resolveProvider(root);
-    const pending = {
-      generation,
-      promise: (async () => {
-        const stats = await this._collectDirectoryStatsFromProvider(provider, { walkPath: path, basePath: path });
-        return this._treeIndexes.build(root, stats, generation);
-      })(),
+  private _indexRoot(root: string): {
+    provider: FileSystemProvider;
+    path: string;
+    persist?: { lockName: string };
+  } {
+    const { provider, path, entry } = this._resolveProvider(root);
+    const persists =
+      entry !== undefined &&
+      entry.prefix === root &&
+      entry.storageRootKey !== undefined &&
+      provider.capabilities.persistent &&
+      provider.capabilities.trustworthyMtime === true;
+    return {
+      provider,
+      path,
+      ...(persists ? { persist: { lockName: `tau-index:${entry.storageRootKey}:${path}` } } : {}),
     };
-    this._pendingTreeScans.set(root, pending);
-    try {
-      return await pending.promise;
-    } finally {
-      // An obsolete generation may finish after a newer scan has taken ownership.
-      if (this._pendingTreeScans.get(root) === pending) {
-        this._pendingTreeScans.delete(root);
-      }
-    }
   }
 
-  private _treeEntriesToNodes(entries: Map<string, ListedTreeEntry>): FileTreeNode[] {
+  private _treeEntriesToNodes(entries: Map<string, TreeEntry>): FileTreeNode[] {
     const nodes: FileTreeNode[] = [];
     for (const [, entry] of entries) {
       if (entry.type === 'dir') {
@@ -1704,7 +1589,7 @@ export class WorkspaceFileService {
           name: entry.name,
           size: entry.size,
           mtimeMs: entry.mtimeMs,
-          ...listedMetadataFields(entry),
+          ...fileMetadataFields(entry),
         });
       }
     }

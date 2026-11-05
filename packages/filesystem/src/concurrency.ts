@@ -15,13 +15,13 @@ export const statConcurrency = 16;
 /**
  * Directory listings one tree walk may have in flight.
  *
- * Deliberately far below {@link statConcurrency}: a listing is itself a pool of
- * that many reads, and the node provider sniffs content per row, so the product
- * is the walk's real open-descriptor ceiling — 4 × 16 stays well inside a
- * default 256-descriptor limit. Raise it only with a measurement that says the
- * listings, not the reads, are the wall.
+ * A listing is itself a pool of {@link statConcurrency} metadata reads, none of
+ * which opens a file (I3), so the product bounds stat calls rather than open
+ * descriptors. A checkout is many small directories, so the listings, not the
+ * reads, are the wall: S5's warm open of 2,000 files in several hundred
+ * directories measured 2.2 s at 4 and 0.9 s at 16, against its 2 s target.
  */
-export const directoryConcurrency = 4;
+export const directoryConcurrency = 16;
 
 /**
  * Map `items` with at most `limit` calls in flight, in input order.
@@ -30,6 +30,7 @@ export const directoryConcurrency = 4;
  * @param limit - Maximum number of concurrent calls.
  * @param map - Per-item work.
  * @returns One result per input, in input order.
+ * @public
  */
 export async function mapConcurrent<Item, Result>(
   items: readonly Item[],

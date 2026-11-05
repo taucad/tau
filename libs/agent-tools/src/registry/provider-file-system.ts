@@ -25,7 +25,8 @@
  * @module
  */
 
-import type { DirectoryStatRow, ResourceQueue } from '@taucad/filesystem';
+import { fileMetadataFields, getFileContentMetadata, lineCountByteCap } from '@taucad/filesystem';
+import type { ContentFacts, DirectoryStatRow, ResourceQueue } from '@taucad/filesystem';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
 import type { CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
 import { applyClientTextMutation, createExactReplacementPlan } from '@taucad/chat/rpc';
@@ -163,6 +164,29 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
       throw manifestRefusal(refusal);
     }
   };
+  /*
+   * A stat or listing carries content facts only when the view already knows
+   * them (I3), so the missing ones are asked for in one call (D4, EQ15): the
+   * kind from each file's head, a line count only for text within the byte
+   * cap. A listing past the cap shows the size alone; a single stat counts.
+   */
+  const factsOf = async (
+    files: ReadonlyArray<
+      Readonly<{ path: string; size: number; mtimeMs: number; contentKind?: string; lineCount?: number }>
+    >,
+    byteCap?: number,
+  ): Promise<ReadonlyMap<string, ContentFacts>> => {
+    const unknown = files.filter(
+      (file) => file.contentKind === undefined || (file.contentKind === 'text' && file.lineCount === undefined),
+    );
+    /* The listing's own size and mtime let facts an earlier read measured be checked as current without a stat. */
+    return unknown.length === 0
+      ? new Map()
+      : provider.facts(
+          unknown.map((file) => file.path),
+          { lineCount: true, byteCap, listed: unknown.map(({ size, mtimeMs }) => ({ size, mtimeMs })) },
+        );
+  };
   const stat = async (path: string): Promise<RpcFileStat> => {
     const target = assertRootedPath(path);
     const value = await provider.stat(target);
@@ -171,14 +195,21 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
     if (value.type === 'dir') {
       return { size: value.size, isDirectory: true, createdAt: date, modifiedAt: date, provenance };
     }
-    return value.contentKind === 'text'
+    const facts = await factsOf([{ ...value, path: target }]);
+    const known = facts.get(target) ?? value;
+    /* A stat asks with no cap, so only a view that cannot answer facts leaves a gap; one read fills it. */
+    const measured =
+      known.contentKind === 'binary' || (known.contentKind === 'text' && known.lineCount !== undefined)
+        ? known
+        : getFileContentMetadata(await bytes(target));
+    return measured.contentKind === 'text' && measured.lineCount !== undefined
       ? {
           size: value.size,
           isDirectory: false,
           createdAt: date,
           modifiedAt: date,
           contentKind: 'text',
-          lineCount: value.lineCount,
+          lineCount: measured.lineCount,
           provenance,
         }
       : {
@@ -232,7 +263,7 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
       await provider.writeFile(path, new Uint8Array(replacement));
       return { status: 'committed', committedBytes: await bytes(path) } as const;
     });
-  const directoryEntry = (row: DirectoryStatRow): RpcDirectoryEntry => {
+  const directoryEntry = (row: DirectoryStatRow, facts: ContentFacts | undefined): RpcDirectoryEntry => {
     const { name, provenance } = row;
     const modifiedAt = row.mtimeMs > 0 ? new Date(row.mtimeMs).toISOString() : undefined;
     if (row.type === 'dir') {
@@ -252,7 +283,7 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
       name,
       type: 'file',
       size: row.size,
-      ...(row.contentKind === 'text' ? { contentKind: 'text', lineCount: row.lineCount } : { contentKind: 'binary' }),
+      ...fileMetadataFields(facts ?? row),
       ...(modifiedAt ? { modifiedAt } : {}),
       ...(provenance ? { provenance } : {}),
     };
@@ -385,9 +416,18 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
         await (value.type === 'dir' ? provider.rmdir(target) : provider.unlink(target));
       });
     },
-    async readdir(path) {
-      const rows = await provider.readdirWithStats(assertRootedPath(path));
-      return rows.map((row) => directoryEntry(row));
+    async readdir(path, options) {
+      const directory = assertRootedPath(path);
+      const rows = await provider.readdirWithStats(directory);
+      const pathOf = (name: string): string => (directory === '' ? name : `${directory}/${name}`);
+      const facts =
+        options?.contentFacts === false
+          ? new Map<string, ContentFacts>()
+          : await factsOf(
+              rows.flatMap((row) => (row.type === 'file' ? [{ ...row, path: pathOf(row.name) }] : [])),
+              lineCountByteCap,
+            );
+      return rows.map((row) => directoryEntry(row, facts.get(pathOf(row.name))));
     },
     async exists(path) {
       return provider.exists(assertRootedPath(path));

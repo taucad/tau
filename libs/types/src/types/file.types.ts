@@ -40,6 +40,18 @@ export type FileTreeContentMetadata =
   | BinaryFileContentMetadata;
 
 /**
+ * Content facts a stat or listing carries **only when already known** (charter
+ * D4, I3): metadata never reads content, so a provider answers kind, size and
+ * time, and `contentKind`/`lineCount` arrive from the write path or an explicit
+ * `facts` request. Absent means unmeasured, never "text" or "binary".
+ *
+ * @public
+ */
+export type StatContentMetadata =
+  | FileTreeContentMetadata
+  | { readonly contentKind?: undefined; readonly lineCount?: undefined };
+
+/**
  * Base file tree entry for API transfer and serialization.
  * Represents files and directories in a file tree snapshot.
  *
@@ -57,7 +69,7 @@ export type FileTreeEntry =
       name: string;
       type: 'file';
       size: number;
-    } & FileTreeContentMetadata);
+    } & StatContentMetadata);
 
 /**
  * File or directory entry in the filesystem with client-side loading state.
@@ -82,6 +94,9 @@ export type FileEntry = FileTreeEntry & {
  * Stat result from virtual filesystem `stat` / `lstat` operations.
  * Aligns with the subset of Node.js `fs.Stats` used by the VFS layer.
  *
+ * Head metadata only (I3): a file's content facts are present only when known
+ * (see {@link StatContentMetadata}); no stat reads file content to produce them.
+ *
  * @public
  */
 export type FileStat =
@@ -98,7 +113,7 @@ export type FileStat =
       readonly mtimeMs: number;
       /** What a composed view says about this path; absent on a raw provider stat. */
       readonly provenance?: FileProvenance;
-    } & FileContentMetadata);
+    } & StatContentMetadata);
 
 /**
  * Where a composed entry's bytes come from.

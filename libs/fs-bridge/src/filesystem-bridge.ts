@@ -33,7 +33,6 @@ import { catchMessages, createBridgeCall, createBridgePort, createBridgeServer }
 import { z } from 'zod';
 import {
   createFileSystemBridgeHello,
-  exactComposedDirectoryRowsSchema,
   fileSystemBridgeProtocolVersion,
   fileSystemBridgeSchemas,
   FileSystemBridgeProtocolVersionError,
@@ -1562,22 +1561,7 @@ export function createFileSystemBridgeProxy(
           }
         }
         try {
-          const result = await timeFileSystemBridgeCall(connectionId, property, async () => call(property, args));
-          if (
-            property === 'readdirWithStats' &&
-            args[1] === undefined &&
-            !exactComposedDirectoryRowsSchema.safeParse(result).success
-          ) {
-            throw new TypeError('Exact readdirWithStats response is missing required metadata.');
-          }
-          if (
-            property === 'stat' &&
-            args[1] === undefined &&
-            !fileSystemBridgeSchemas.calls.lstat.result.safeParse(result).success
-          ) {
-            throw new TypeError('Exact stat response is missing required metadata.');
-          }
-          return result;
+          return await timeFileSystemBridgeCall(connectionId, property, async () => call(property, args));
         } catch (error) {
           if (property === 'writeFileChecked' || property === 'deleteFileChecked') {
             throw classifyCheckedWriteFailure(error);

@@ -277,7 +277,7 @@ describe('DirectIdbProvider', () => {
         await writer.refresh();
         await writer.rmdir('replaced');
         await writer.writeFile('replaced', 'current');
-        await expect(reader.stat('replaced', { content: 'head' })).resolves.toMatchObject({ type: 'file', size: 7 });
+        await expect(reader.stat('replaced')).resolves.toMatchObject({ type: 'file', size: 7 });
         await expect(reader.readFile('replaced', 'utf8')).resolves.toBe('current');
       } finally {
         reader.dispose();
@@ -363,16 +363,16 @@ describe('DirectIdbProvider', () => {
       const reader = new DirectIdbProvider(prefix);
       await reader.initialize();
       try {
-        await expect(reader.stat('log.txt', { content: 'head' })).resolves.toEqual({
+        await expect(reader.stat('log.txt')).resolves.toEqual({
           type: 'file',
           size: 4,
           mtimeMs: 0,
           contentKind: 'text',
+          lineCount: 2,
         });
-        await expect(reader.stat('log.txt')).resolves.toMatchObject({ size: 4, lineCount: 2 });
         await reader.rename('log.txt', 'sub/log.txt');
         await reader.rename('sub', 'moved');
-        await expect(reader.stat('moved/log.txt', { content: 'head' })).resolves.toMatchObject({ size: 4 });
+        await expect(reader.stat('moved/log.txt')).resolves.toMatchObject({ size: 4 });
         await expect(reader.stat('sub/log.txt')).rejects.toThrow('ENOENT');
         await reader.unlink('moved/log.txt');
         await expect(reader.stat('moved/log.txt')).rejects.toThrow('ENOENT');
@@ -401,7 +401,7 @@ describe('DirectIdbProvider', () => {
           }
           return request;
         });
-      await expect(provider.stat('legacy.txt', { content: 'head' })).rejects.toThrow('Metadata read');
+      await expect(provider.stat('legacy.txt')).rejects.toThrow('Metadata read');
       put.mockRestore();
       await provider.writeFile('legacy.txt', 'current\ncontent\n');
       await expect(provider.stat('legacy.txt')).resolves.toMatchObject({ size: 16, lineCount: 3 });
@@ -929,18 +929,11 @@ describe('DirectIdbProvider', () => {
   });
 
   describe('readdirWithStats', () => {
-    it('omits text counts in head mode and reuses warm metadata', async () => {
+    it('answers the facts its metadata rows already know and reuses warm metadata (I3)', async () => {
       await provider.writeFile('large.txt', `${'x'.repeat(1024)}\nend`);
       const get = vi.spyOn(IDBObjectStore.prototype, 'get');
-      const head = await provider.readdirWithStats('', { content: 'head' });
-      const exact = await provider.readdirWithStats('');
-      expect(head[0]).toMatchObject({
-        name: 'large.txt',
-        contentKind: 'text',
-        size: 1028,
-      });
-      expect(head[0]).not.toHaveProperty('lineCount');
-      expect(exact[0]).toMatchObject({ contentKind: 'text', lineCount: 2 });
+      const rows = await provider.readdirWithStats('');
+      expect(rows[0]).toMatchObject({ name: 'large.txt', contentKind: 'text', lineCount: 2, size: 1028 });
       expect(get).not.toHaveBeenCalled();
     });
 

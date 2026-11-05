@@ -675,6 +675,29 @@ describe('serializeMessage', () => {
       );
     });
 
+    it('serializes a glob entry whose kind or line count was not measured by its size alone', () => {
+      const message = baseMessage([
+        {
+          type: 'tool-glob_search',
+          toolCallId: 'c1',
+          state: 'output-available',
+          input: { pattern: '**/*' },
+          output: {
+            files: ['big.log', 'huge.txt'],
+            entries: [
+              { path: 'big.log', size: 5_242_880 },
+              { path: 'huge.txt', size: 2048, contentKind: 'text' },
+            ],
+            totalFiles: 2,
+          },
+        },
+      ]);
+
+      expect(serializeMessage(message)).toBe(
+        '<tool_call name="glob_search">\npattern: **/*\n</tool_call>\n<tool_result>\nTotal: 2\nbig.log (5.0MB)\nhuge.txt (2KB)\n</tool_result>',
+      );
+    });
+
     it('serializes tool-grep output-available', () => {
       const message = baseMessage([
         {

@@ -152,6 +152,12 @@ const spawn = async (name: string): Promise<ScenarioWorker> => {
   };
 };
 
+/** Past the authority's snapshot debounce (two seconds), so the Project Index is stored. */
+const indexPersisted = async (): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, 3000);
+  });
+
 const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 const newProject = (label: string): ScenarioProject => {
   const random = crypto.getRandomValues(new Uint8Array(21));
@@ -209,6 +215,10 @@ const flatten = (measurement: WorkerMeasurement): Record<string, number> => {
     lockTokens: measurement.productionCounters['locks.token'] ?? 0,
     /* Changesets the authority applied under their lock set (production's own counter). */
     changesets: measurement.productionCounters['changesets'] ?? 0,
+    /* Project Index opens from a stored snapshot and from a full scan (production's own counters). */
+    indexLoads: measurement.productionCounters['index.load'] ?? 0,
+    indexScans: measurement.productionCounters['index.scan'] ?? 0,
+    indexCompares: measurement.productionCounters['index.compare'] ?? 0,
     networkRequests,
     ...Object.fromEntries(Object.entries(network).map(([kind, value]) => [`network.${kind}`, value])),
     ...measurement.extra,
@@ -428,6 +438,9 @@ describe(`filesystem scenarios (${profileName} profile)`, { concurrent: false },
     applied = newProject('applied');
     const writer = await openWorker('applied-writer', [applied]);
     await runOn(writer, { runner: 'materialize', project: applied });
+    /* The writer's own index compares once more and stores its snapshot, as a tab does before a reload. */
+    await runOn(writer, { runner: 'index-open', project: applied });
+    await indexPersisted();
     writer.terminate();
     const row = await (async () => {
       const samples: Array<Record<string, number>> = [];
@@ -447,6 +460,63 @@ describe(`filesystem scenarios (${profileName} profile)`, { concurrent: false },
       return record('S5', samples, spans);
     })();
     expect(row.metrics['files']).toBe(plan.totals.files);
+    /* Warm: every run loaded the stored index rather than scanning (D5). */
+    expect(row.metrics['indexLoads']).toBe(1);
+    expect(row.metrics['indexScans']).toBe(0);
+  });
+
+  /*
+   * D5 across reloads and tabs, on real OPFS with real Web Locks and
+   * BroadcastChannel: each worker is one tab's authority.
+   */
+  test('W3: the Project Index survives a reload, sees an external edit, and keeps the newer snapshot', async () => {
+    const project = newProject('index');
+    const open = async (name: string) => openWorker(`index-${name}`, [project]);
+    const writer = await open('writer');
+    await runOn(writer, { runner: 'materialize', project });
+    await runOn(writer, { runner: 'index-open', project });
+    await indexPersisted();
+    writer.terminate();
+
+    /* A reload loads the stored index, compares it, and reads no file content. */
+    const reload = await open('reload');
+    const reloaded = await runOn(reload, { runner: 'index-open', project });
+    reload.terminate();
+    expect(reloaded.productionCounters['index.load']).toBe(1);
+    expect(reloaded.productionCounters['index.scan'] ?? 0).toBe(0);
+    expect(reloaded.counts.bytesRead).toBe(0);
+    expect(reloaded.extra['mismatched']).toBe(0);
+
+    /* An edit no authority saw is found by the next load's compare. */
+    const editor = await open('editor');
+    await runOn(editor, { runner: 'external-edit', project, parameters: { bytes: 4321 } });
+    editor.terminate();
+    const edited = await open('edited');
+    const compared = await runOn(edited, { runner: 'index-open', project });
+    await indexPersisted();
+    edited.terminate();
+    expect(compared.extra['externalMismatched']).toBe(1);
+    expect(compared.extra['externalSize']).toBe(4321);
+
+    /* Tab B writes and stores its snapshot; tab A opened before it could hear B's
+     * notice, so its later snapshot is behind B's and must not replace it. */
+    const tabB = await open('tab-b');
+    await runOn(tabB, { runner: 'index-open', project });
+    await runOn(tabB, { runner: 'index-write', project });
+    const tabA = await open('tab-a');
+    const openedA = await runOn(tabA, { runner: 'index-open', project });
+    expect(openedA.extra['tabWriteListed']).toBe(1);
+    await indexPersisted();
+    tabA.terminate();
+    tabB.terminate();
+    const reader = await open('reader');
+    const stored = await runOn(reader, { runner: 'index-snapshot', project });
+    const reopened = await runOn(reader, { runner: 'index-open', project });
+    reader.terminate();
+    /* B's snapshot: the writer's notices and B's own; A, which never wrote, would have stored the writer's alone. */
+    expect(stored.extra).toMatchObject({ present: 1, rescan: 0, tabs: 2, tabWriteStored: 1 });
+    expect(reopened.productionCounters['index.load']).toBe(1);
+    expect(reopened.extra['tabWriteListed']).toBe(1);
   });
 
   test('S7 and S8: save one file, then an agent turn of 50 files', async () => {

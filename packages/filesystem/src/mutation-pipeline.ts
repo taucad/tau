@@ -49,7 +49,7 @@ import type { ChangeEventBus } from '#change-event-bus.js';
 import type { ResourceQueue, ResourceQueueClaim } from '#resource-queue.js';
 import type { ChangeNotification, CrossTabCoordinator, LockClaim, PhysicalAuthority } from '#cross-tab-coordinator.js';
 import { normalizeLockClaims } from '#cross-tab-coordinator.js';
-import type { TreeIndexes } from '#tree-index.js';
+import type { ProjectIndexes } from '#project-index/project-indexes.js';
 import type { WalkOptions } from '#content-ops/walk.js';
 import { MissingWorkspaceHandleError, WorkspaceMutationError } from '#workspace-errors.js';
 import { getFileContentMetadata } from '#content-metadata.js';
@@ -368,7 +368,7 @@ export class MutationPipeline {
   private readonly _resourceQueue: ResourceQueue;
   private readonly _eventBus: ChangeEventBus;
   private readonly _crossTabCoordinator: CrossTabCoordinator;
-  private readonly _treeIndexes: TreeIndexes;
+  private readonly _projectIndexes: ProjectIndexes;
   /**
    * Read through a function, not a field: the writer-side pool arrives after
    * construction (`setFilePool`) and stays owned by the composition root.
@@ -387,14 +387,14 @@ export class MutationPipeline {
     resourceQueue: ResourceQueue;
     eventBus: ChangeEventBus;
     crossTabCoordinator: CrossTabCoordinator;
-    treeIndexes: TreeIndexes;
+    projectIndexes: ProjectIndexes;
     filePool: () => SharedPool | undefined;
   }) {
     this._mountTable = options.mountTable;
     this._resourceQueue = options.resourceQueue;
     this._eventBus = options.eventBus;
     this._crossTabCoordinator = options.crossTabCoordinator;
-    this._treeIndexes = options.treeIndexes;
+    this._projectIndexes = options.projectIndexes;
     this._filePool = options.filePool;
   }
 
@@ -834,7 +834,7 @@ export class MutationPipeline {
       }
       const resolution = this._mountTable.resolve(path);
       this._filePool()?.invalidate(path);
-      this._treeIndexes.removeFile(path);
+      this._projectIndexes.removeFile(path);
       events.push({
         event: { type: 'fileDeleted', path, backend: resolution.backend },
         operations: [{ path, resolution }],
@@ -843,7 +843,7 @@ export class MutationPipeline {
     }
     if (unrouted) {
       this._filePool()?.clear();
-      this._treeIndexes.clear();
+      this._projectIndexes.invalidate('/');
       events.push({ event: { type: 'backendChanged', backend }, operations: [] });
       notices.push({ type: 'directory-change', path: '/', authority: { storageRootKey, providerBasePath: '' } });
     }
@@ -1177,7 +1177,7 @@ export class MutationPipeline {
         if (result.status === 'applied') {
           if (this.isCurrentResolution(path, resolution)) {
             this._filePool()?.invalidate(path);
-            this._treeIndexes.removeFile(path);
+            this._projectIndexes.removeFile(path);
           }
           this.emitChangeEvent({ type: 'fileDeleted', path, backend: resolution.backend }, context, { operations });
         }
@@ -1855,11 +1855,13 @@ export class MutationPipeline {
           if (current) {
             this._filePool()?.invalidate(path);
             if (batch.op === 'write' && entry.bytes !== undefined) {
-              this._treeIndexes.addFile(path, { size: entry.bytes.byteLength, ...getFileContentMetadata(entry.bytes) });
-            } else if (batch.op === 'write') {
-              this._treeIndexes.evict(path);
+              /* The write path is where content facts are recorded: the bytes are in hand (D4). */
+              this._projectIndexes.addFile(path, {
+                size: entry.bytes.byteLength,
+                facts: getFileContentMetadata(entry.bytes),
+              });
             } else {
-              this._treeIndexes.removeFile(path);
+              this._projectIndexes.invalidate(path);
             }
           }
           if (resolution.entry !== undefined) {
@@ -1873,7 +1875,7 @@ export class MutationPipeline {
             break;
           }
           if (current) {
-            this._treeIndexes.addDirectory(path);
+            this._projectIndexes.addDirectory(path);
           }
           events.push({ event: { type: 'directoryCreated', path, backend }, operations });
           notify('mkdir', path, resolution);
@@ -1885,14 +1887,14 @@ export class MutationPipeline {
               if (batch.recursive === true) {
                 this._filePool()?.clear();
               }
-              this._treeIndexes.removeDirectory(path);
+              this._projectIndexes.removeDirectory(path);
             }
             events.push({ event: { type: 'directoryDeleted', path, backend }, operations });
             notify('rmdir', path, resolution);
           } else {
             if (current) {
               this._filePool()?.invalidate(path);
-              this._treeIndexes.removeFile(path);
+              this._projectIndexes.removeFile(path);
             }
             events.push({ event: { type: 'fileDeleted', path, backend }, operations });
             notify('delete', path, resolution);
@@ -1906,11 +1908,11 @@ export class MutationPipeline {
           if (current && targetIsCurrent) {
             this._filePool()?.invalidate(path);
             this._filePool()?.invalidate(target);
-            this._treeIndexes.rename(path, target);
+            this._projectIndexes.rename(path, target);
           } else if (current || targetIsCurrent) {
             this._filePool()?.clear();
-            this._treeIndexes.evict(path);
-            this._treeIndexes.evict(target);
+            this._projectIndexes.invalidate(path);
+            this._projectIndexes.invalidate(target);
           }
           events.push({
             event:
@@ -1939,15 +1941,15 @@ export class MutationPipeline {
         }
         if (batch.op === 'write' || batch.op === 'append' || (batch.op === 'delete' && batch.kind === 'file')) {
           this._filePool()?.invalidate(path);
-          this._treeIndexes.removeFile(path);
         } else {
           this._filePool()?.clear();
-          this._treeIndexes.evict(path);
         }
+        /* An entry that may have landed leaves its path unknown, never the whole root (D5). */
+        this._projectIndexes.invalidate(path);
       }
       for (const { batch, target } of uncertain) {
         if (batch.op === 'move' && target !== undefined) {
-          this._treeIndexes.evict(target);
+          this._projectIndexes.invalidate(target);
         }
       }
       /* A half-finished recursive mkdir or removal may have changed anything up
@@ -2018,10 +2020,7 @@ export class MutationPipeline {
     const { backend: resolvedBackend } = resolution;
     if (this.isCurrentResolution(path, resolution)) {
       this._filePool()?.invalidate(path);
-      this._treeIndexes.addFile(path, {
-        size: bytes.byteLength,
-        ...getFileContentMetadata(bytes),
-      });
+      this._projectIndexes.addFile(path, { size: bytes.byteLength, facts: getFileContentMetadata(bytes) });
     }
     if (resolution.entry !== undefined) {
       this.emitChangeEvent(

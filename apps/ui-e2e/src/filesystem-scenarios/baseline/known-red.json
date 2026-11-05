@@ -2,14 +2,6 @@
   "description": "Count gates red at HEAD (W0 baseline). A gate leaves this list in the change that turns it green and never re-enters it (I8: count gates never loosen). atHead holds the value recorded at HEAD per engine and fixture profile (key engine-profile); a known-red gate fails if it moves further from its limit than that. Record mode (TAU_FS_SCENARIO_RECORD=true) rewrites atHead for the engine and profile it ran, keeping the better of the recorded and observed value (an equals gate only moving toward its limit); TAU_FS_SCENARIO_RECORD=force records the observed value as it is. Model-bound gates are not listed: the harness reports them without asserting.",
   "gates": [
     {
-      "id": "S5.blob-reads",
-      "limit": 0,
-      "atHead": {
-        "chromium-full": 106522886,
-        "chromium-small": 5326234
-      }
-    },
-    {
       "id": "S6.hash-passes",
       "limit": 1,
       "atHead": {
@@ -39,14 +31,6 @@
       "atHead": {
         "chromium-full": 2680,
         "chromium-small": 320
-      }
-    },
-    {
-      "id": "S13.metadata-bytes",
-      "limit": 0,
-      "atHead": {
-        "chromium-full": 18438032,
-        "chromium-small": 10096967
       }
     }
   ]

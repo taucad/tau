@@ -1,4 +1,4 @@
-import type { FileProvenance, FileTreeContentMetadata } from '@taucad/types';
+import type { FileProvenance, StatContentMetadata } from '@taucad/types';
 
 /**
  * Typed directory listing surface for {@link FileTreeService.listDirectory}.
@@ -27,7 +27,7 @@ export type ListedDirectoryEntry =
       mtimeMs: number;
       /** What the composed view says about this entry; absent until a view stamps it. */
       provenance?: FileProvenance;
-    } & FileTreeContentMetadata);
+    } & StatContentMetadata);
 
 /**
  * Discriminated snapshot for reactive directory listing consumers (see {@link useDirectoryListing}).

@@ -14,9 +14,9 @@ import type {
   CheckedFileWrite,
   CheckedFileWriteResult,
   FileWritePrecondition,
-  FileContentMetadata,
   FileProvenance,
   FileStat,
+  StatContentMetadata,
 } from '@taucad/types';
 
 // oxlint-disable-next-line no-barrel-files/no-barrel-files -- re-export for internal consumers that import from #types.js
@@ -65,23 +65,48 @@ export type PathPolicy = {
  */
 export type FileMode = '100644' | '100755';
 
-/** Options for authoritative metadata without exact text line counting. @public */
-export type FileStatOptions = Readonly<{ content: 'head' }>;
+/** One directory row with head metadata (I3: content facts only when known). @public */
+export type DirectoryStatRow = { readonly name: string } & FileStat;
 
-/** Metadata from a head-only stat or listing. Text line counts are unknown. @public */
-export type HeadFileStat =
-  | Extract<FileStat, { type: 'dir' }>
-  | {
-      readonly type: 'file';
-      readonly size: number;
-      readonly mtimeMs: number;
-      readonly contentKind: 'text' | 'binary';
-      readonly lineCount?: never;
-      readonly provenance?: FileProvenance;
-    };
+/**
+ * What a file's bytes are, measured once from the bytes themselves (charter D4).
+ *
+ * Recorded on the write path, where the bytes are in hand, or by an explicit
+ * lazy `facts` request; never by a metadata call. `blobOid` and `sha256` are
+ * present only when something hashed exactly these bytes.
+ *
+ * @public
+ */
+export type ContentFacts = Readonly<{
+  contentKind: 'text' | 'binary';
+  /** Exact `split('\n')` line count; text only. */
+  lineCount?: number;
+  /** Lowercase hexadecimal SHA-256 of the bytes. */
+  sha256?: string;
+  /** Git blob object id (SHA-1) of the bytes. */
+  blobOid?: string;
+}>;
 
-/** One directory row with exact or head-only metadata. @public */
-export type DirectoryStatRow<Stat extends FileStat | HeadFileStat = FileStat> = { readonly name: string } & Stat;
+/** Options for a lazy {@link ContentFacts} request. @public */
+export type ContentFactsOptions = Readonly<{
+  /**
+   * Count the lines of text files. Without it a request learns the kind only,
+   * from each file's first 512 bytes.
+   */
+  lineCount?: boolean;
+  /**
+   * Largest file read in full, to count lines or digest it; omitted means no
+   * cap. A larger file answers its kind and nothing else (D4).
+   */
+  byteCap?: number;
+  /**
+   * The head metadata the caller already listed, one per requested path in
+   * request order (`undefined` where it has none): what lets facts measured
+   * from an earlier read be checked as current without another stat.
+   */
+  listed?: ReadonlyArray<Readonly<{ size: number; mtimeMs: number }> | undefined>;
+  signal?: AbortSignal;
+}>;
 
 /**
  * Capability flags describing what a storage provider supports.
@@ -103,6 +128,18 @@ export type ProviderCapabilities = {
    * does not receives them one at a time.
    */
   readonly coalescesWrites?: boolean;
+  /**
+   * Whether `mtimeMs` changes whenever a file's bytes do, so a Project Index
+   * may key content facts on `(size, mtimeMs)` (D5). A provider without it
+   * opts out: no snapshot is kept and every fact is re-read (closeout EQ7).
+   */
+  readonly trustworthyMtime?: boolean;
+  /**
+   * Whether programs other than Tau's authorities write this root (a folder
+   * the user picked, a checkout on disk), so an indexed digest must be
+   * compared against the provider before a cut trusts it (D5).
+   */
+  readonly externallyEdited?: boolean;
 };
 
 /**
@@ -150,13 +187,8 @@ export type ExternalChangeFact =
 export type FileSystemProvider = {
   readonly id: string;
   readonly capabilities: ProviderCapabilities;
-  /** Explicit opt-in to head-only listing; absent on exact-only legacy providers. */
-  readonly supportsHeadListing?: true;
-  /** Optional batched listing. Omission returns exact metadata; `head` omits unknown line counts. */
-  readdirWithStats?: {
-    (path: string): Promise<DirectoryStatRow[]>;
-    (path: string, options: { readonly content: 'head' }): Promise<Array<DirectoryStatRow<FileStat | HeadFileStat>>>;
-  };
+  /** Optional batched listing: one level with head metadata, reading no file content (I3). */
+  readdirWithStats?(path: string): Promise<DirectoryStatRow[]>;
   readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
   readFile(path: string, encoding: 'utf8'): Promise<string>;
   /** Persist a file, creating any missing parent directories. */
@@ -171,8 +203,8 @@ export type FileSystemProvider = {
   /** Append bytes in enqueue order, creating the file and missing parent directories when absent. */
   appendFile?(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
   readdir(path: string): Promise<string[]>;
+  /** Head metadata of one path: kind, size and time, reading no file content (I3). */
   stat(path: string): Promise<FileStat>;
-  stat(path: string, options: FileStatOptions): Promise<FileStat | HeadFileStat>;
   mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
   unlink(path: string): Promise<void>;
   rmdir(path: string): Promise<void>;
@@ -282,7 +314,7 @@ export type FileTreeNode =
       children?: never;
       /** What a composed view says about this entry; absent on a raw authority listing. */
       provenance?: FileProvenance;
-    } & ({ contentKind: 'text'; lineCount?: number } | { contentKind: 'binary'; lineCount?: never }));
+    } & StatContentMetadata);
 
 /**
  * Directory listing row with stat metadata (worker readDirectory aggregation).
@@ -300,7 +332,7 @@ export type TreeEntry =
       type: 'file';
       size: number;
       mtimeMs: number;
-    } & FileContentMetadata);
+    } & StatContentMetadata);
 
 // =============================================================================
 // Watch API types

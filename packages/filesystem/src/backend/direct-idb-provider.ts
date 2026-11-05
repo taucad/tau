@@ -8,12 +8,12 @@
  */
 
 import type { FileContentMetadata } from '@taucad/types';
-import type { DirectoryEntry, FileStatOptions, FileStat, HeadFileStat, ProviderCapabilities } from '#types.js';
+import type { DirectoryEntry, FileStat, ProviderCapabilities } from '#types.js';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
 import type { BatchEntry, BatchOptions, BatchReceipt } from '#changeset.js';
 import { applyEntryWithPrimitives, runBatch } from '#backend/batch.js';
 import { indexDirectoryEntries } from '#backend/directory-entries.js';
-import { getFileContentMetadata, headFileStatFromStat } from '#content-metadata.js';
+import { getFileContentMetadata } from '#content-metadata.js';
 
 const storeName = 'files';
 const metadataStoreName = 'file-metadata';
@@ -39,10 +39,6 @@ function parentDirectory(path: string): string {
  * @public
  */
 export class DirectIdbProvider extends AbstractFileSystemProvider {
-  /** @returns `true` for the supported head listing mode. */
-  public get supportsHeadListing(): true {
-    return true;
-  }
   /* eslint-disable @typescript-eslint/member-ordering -- `_renameDirectory` and the IDB flush helpers are intentionally co-located with the public methods that call them so the IDB-transaction lifecycle stays readable; relocating them would split a tightly-coupled triple. */
   /**
    * Backend identifier; always `'indexeddb'`.
@@ -258,21 +254,14 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
 
   /**
    * Batched readdir + stat — eliminates the N+1 stat round-trips per directory listing.
-   * Head mode drops line counts from warm metadata. A cold legacy IDB value is
-   * still cloned whole because this store persists a raw Uint8Array.
+   * This store persists a raw Uint8Array with no separate metadata row, so a
+   * cold value is cloned whole to learn its size; the facts those bytes give
+   * are then known and carried (I3: known, not sniffed for the listing).
    *
    * @param path - Absolute directory path to enumerate.
    * @returns Each entry's name paired with its stat metadata.
    */
-  public readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>>;
-  public readdirWithStats(
-    path: string,
-    options: { readonly content: 'head' },
-  ): Promise<Array<{ name: string } & HeadFileStat>>;
-  public async readdirWithStats(
-    path: string,
-    options?: { readonly content: 'head' },
-  ): Promise<Array<{ name: string } & (FileStat | HeadFileStat)>> {
+  public async readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>> {
     this._assertRootedPath(path);
     const names = await this.readdir(path);
     const prefix = path === '' ? '' : `${path}/`;
@@ -297,16 +286,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
         const cached = this._fileMeta.get(fullPath);
         fileMetadataPaths.push({ index: result.length, fullPath, cached });
         result.push(
-          cached
-            ? { name, type: 'file', mtimeMs: 0, ...cached }
-            : {
-                name,
-                type: 'file',
-                size: 0,
-                mtimeMs: 0,
-                contentKind: 'text',
-                lineCount: 1,
-              },
+          cached ? { name, type: 'file', mtimeMs: 0, ...cached } : { name, type: 'file', size: 0, mtimeMs: 0 },
         );
       }
     }
@@ -356,13 +336,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
       });
     }
 
-    const present = result.filter((_, index) => !missingIndexes.has(index));
-    return options?.content === 'head'
-      ? present.map(({ name, ...stat }) => ({
-          name,
-          ...headFileStatFromStat(stat),
-        }))
-      : present;
+    return result.filter((_, index) => !missingIndexes.has(index));
   }
 
   /**
@@ -371,9 +345,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
    * @param path - Absolute path to stat.
    * @returns Type/size/mtime for the entry at `path`.
    */
-  public async stat(path: string): Promise<FileStat>;
-  public async stat(path: string, options: FileStatOptions): Promise<FileStat | HeadFileStat>;
-  public async stat(path: string, options?: FileStatOptions): Promise<FileStat | HeadFileStat> {
+  public async stat(path: string): Promise<FileStat> {
     this._ensureOpen();
     this._assertRootedPath(path);
     if (path === '' || (this._dirs.has(path) && (await this._idbHasStorageKey(directoryStorageKey(path))))) {
@@ -393,8 +365,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     this._paths.add(path);
     this._ensureParentDirs(path);
     this._fileMeta.set(path, metadata);
-    const result: FileStat = { type: 'file', mtimeMs: 0, ...metadata };
-    return options?.content === 'head' ? headFileStatFromStat(result) : result;
+    return { type: 'file', mtimeMs: 0, ...metadata };
   }
 
   /**

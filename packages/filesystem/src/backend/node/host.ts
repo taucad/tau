@@ -1059,12 +1059,6 @@ const runOperation = async (
     case 'readdirWithStats': {
       return provider.readdirWithStats(request.path);
     }
-    case 'readdirHeadWithStats': {
-      return provider.readdirWithStats(request.path, { content: 'head' });
-    }
-    case 'headStat': {
-      return provider.stat(request.path, { content: 'head' });
-    }
     case 'stat': {
       return provider.stat(request.path);
     }
@@ -1364,11 +1358,7 @@ export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions
           encoding === undefined ? provider.readFile(rootedPath) : provider.readFile(rootedPath, encoding),
         )) as NodeFsRootScope['readFile'],
       readdir: async (rootedPath) => call(async () => provider.readdir(rootedPath)),
-      // oxlint-disable-next-line typescript/promise-function-async -- Overloads forward to the provider's own.
-      stat: ((rootedPath: string, statOptions?: Parameters<NodeFsProvider['stat']>[1]) =>
-        call(async () =>
-          statOptions === undefined ? provider.stat(rootedPath) : provider.stat(rootedPath, statOptions),
-        )) as NodeFsRootScope['stat'],
+      stat: async (rootedPath) => call(async () => provider.stat(rootedPath)),
       exists: async (rootedPath) => call(async () => provider.exists(rootedPath)),
       writeFileChecked: async ({ signal: writeSignal, ...input }): Promise<CheckedFileWriteResult> =>
         mutate(writeSignal, [input.path], async () => writeNodeFileCheckedWithAuthority(provider, input, writer)),

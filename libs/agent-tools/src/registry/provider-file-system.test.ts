@@ -1,4 +1,11 @@
-import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
+import {
+  ChangeEventBus,
+  lineCountByteCap,
+  MountTable,
+  ProviderRegistry,
+  ResourceQueue,
+  WorkspaceFileService,
+} from '@taucad/filesystem';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -187,6 +194,32 @@ describe('createProviderRpcFileSystem', () => {
     expect(entries.map((entry) => entry.name).toSorted()).toStrictEqual(['a.ts', 'nested']);
     expect(entries.find((entry) => entry.name === 'nested')).toMatchObject({ type: 'dir' });
     expect(entries.find((entry) => entry.name === 'a.ts')).toMatchObject({ type: 'file', contentKind: 'text' });
+  });
+
+  /* W3 a3: a walk that reads every file anyway lists without measuring any. */
+  it('lists without measuring content when the caller asks for no content facts', async () => {
+    await provider.writeFile('src/a.ts', 'a\n');
+    const reads = vi.spyOn(provider, 'readFile');
+
+    const entries = await fileSystemFor().readdir('src', { contentFacts: false });
+
+    expect(entries).toStrictEqual([expect.objectContaining({ name: 'a.ts', type: 'file', size: 2 })]);
+    expect(entries[0]).not.toHaveProperty('contentKind');
+    expect(reads).not.toHaveBeenCalled();
+  });
+
+  /* D4, EQ15: a listing counts lines only within its byte cap and never calls an unmeasured file binary. */
+  it('lists a file above the line-count cap by kind and size alone', async () => {
+    await provider.writeFile('logs/large.log', 'line\n'.repeat(lineCountByteCap / 4));
+    await provider.writeFile('logs/part.glb', Uint8Array.from([0, 1, 2, 3]));
+
+    const entries = await fileSystemFor().readdir('logs');
+    const large = entries.find((entry) => entry.name === 'large.log');
+    /* A memory checkout has no ranged read, so above the cap it measures nothing and reports the size. */
+    expect(large).toMatchObject({ type: 'file', size: lineCountByteCap * 1.25 });
+    expect(large).not.toHaveProperty('contentKind');
+    expect(large).not.toHaveProperty('lineCount');
+    expect(entries.find((entry) => entry.name === 'part.glb')).toMatchObject({ type: 'file', contentKind: 'binary' });
   });
 
   it('edits a file by exact replacement and reports the occurrence count', async () => {

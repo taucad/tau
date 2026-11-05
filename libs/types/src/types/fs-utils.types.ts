@@ -31,6 +31,5 @@ export function toFileStat(stats: NativeStats): FileStat {
     type: 'file',
     size: stats.size,
     mtimeMs: stats.mtimeMs,
-    contentKind: 'binary',
   };
 }

@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createHash } from 'node:crypto';
 import type * as ChatRpc from '@taucad/chat/rpc';
 import type * as AwaitFreshRender from '#machines/await-fresh-render.js';
-import { rpcClientErrorCodeSchema } from '@taucad/chat';
+import { rpcClientErrorCode, rpcClientErrorCodeSchema } from '@taucad/chat';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import type { Rendering } from '@taucad/runtime';
 import type { DirectoryStatRow } from '@taucad/filesystem';
@@ -420,6 +420,34 @@ describe('rpc-handlers', () => {
         fileSystem.deleteFileChecked({ path: '../escape', preconditions: [{ path: '../escape', expected: null }] }),
       ).rejects.toThrow();
       expect(mockFm.workbenchFiles.deleteFileChecked).toHaveBeenCalledTimes(1);
+    });
+
+    /* W3 a4: this client has no ranged read, so a stat past the line-count cap reports the size alone. */
+    it('should stat a file past the line-count cap by its size alone, reading none of it', async () => {
+      mockFm.stat.mockResolvedValueOnce({ type: 'file', size: 5_000_000, mtimeMs: 100 });
+
+      const stat = await fileSystem.stat('assets/scan.bin');
+
+      expect(stat).toStrictEqual({
+        size: 5_000_000,
+        isDirectory: false,
+        createdAt: new Date(100).toISOString(),
+        modifiedAt: new Date(100).toISOString(),
+      });
+      expect(mockFm.readFile).not.toHaveBeenCalled();
+    });
+
+    /* Review L1: past the cap the stat carries no kind, so the text read itself refuses a binary by its head. */
+    it('should refuse a text read of a binary past the line-count cap by its 512 B head', async () => {
+      const bytes = new Uint8Array(5_000_000);
+      bytes.fill(0x41);
+      bytes[100] = 0;
+      mockFm.readFile.mockResolvedValueOnce(bytes);
+
+      await expect(fileSystem.readFile('assets/scan.bin')).rejects.toMatchObject({
+        code: rpcClientErrorCode.ioError,
+        message: 'File is binary (5000000 bytes) and cannot be read as text.',
+      });
     });
 
     it('rejects malformed UTF-8 record bytes with a typed error', async () => {

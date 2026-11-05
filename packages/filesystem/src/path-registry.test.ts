@@ -356,6 +356,18 @@ describe('path registry', () => {
     ]);
   });
 
+  /* D5: an agent that lists or greps the project never walks into the Project
+   * Index's snapshot, and no watcher echoes the index's own write. */
+  it('hides the project-root Project Index snapshot from agents and watchers, and only at the root', () => {
+    expect(classify('.tau/index/snapshot.json')).toStrictEqual({
+      class: 'cache',
+      versioned: false,
+      agentAccess: 'hidden',
+      watch: 'none',
+    });
+    expect(classify('src/.tau/index/snapshot.json')).toStrictEqual(unlistedPathClassification);
+  });
+
   it('matches a nested node_modules but only a project-root exports', () => {
     expect(classify('node_modules/replicad/index.d.ts').class).toBe('cache');
     expect(classify('packages/kernel/node_modules/x.js').class).toBe('cache');

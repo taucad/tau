@@ -12,9 +12,7 @@ import type {
   DirectoryEntry,
   ExternalChangeFact,
   FileReadStreamOptions,
-  FileStatOptions,
   FileStat,
-  HeadFileStat,
   ProviderCapabilities,
 } from '#types.js';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
@@ -22,7 +20,6 @@ import type { BatchEntry, BatchOptions, BatchReceipt } from '#changeset.js';
 import { isRefusal } from '#changeset.js';
 import { applyEntryWithPrimitives, runBatch } from '#backend/batch.js';
 import { mapConcurrent, statConcurrency } from '#concurrency.js';
-import { fileStatFromFile, headFileStatFromFile, headSniffByteLength } from '#content-metadata.js';
 import { workerTimings } from '#worker-timings.js';
 import {
   createIndexedDbUncommittedStore,
@@ -181,10 +178,6 @@ const hasDomName = (error: unknown, name: string): boolean =>
  * @public
  */
 export class FileSystemAccessProvider extends AbstractFileSystemProvider {
-  /** @returns `true` for the supported head listing mode. */
-  public get supportsHeadListing(): true {
-    return true;
-  }
   /**
    * Backend identifier; always `'webaccess'`.
    * @returns The literal string `'webaccess'`.
@@ -198,6 +191,8 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     writable: true,
     quotaBased: false,
     durability: 'stream-append',
+    trustworthyMtime: true,
+    externallyEdited: true,
   };
 
   protected _rootHandle: FileSystemDirectoryHandle;
@@ -307,8 +302,8 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
 
   /**
    * Batched readdir + stat — eliminates the N+1 stat round-trips per directory
-   * listing. Child metadata comes from the `File` object; contents are read only
-   * when {@link fileStatFromFile} needs them, in chunks of {@link statConcurrency}.
+   * listing. Child metadata comes from the `File` object alone — size and
+   * `lastModified`, no content (I3) — in chunks of {@link statConcurrency}.
    *
    * An entry removed between enumeration and its `getFile()` — a writer's
    * temporary sibling renamed away mid-listing — is left out: the listing
@@ -317,15 +312,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    * @param path - Absolute directory path to enumerate.
    * @returns Each entry's name paired with its stat metadata.
    */
-  public readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>>;
-  public readdirWithStats(
-    path: string,
-    options: { readonly content: 'head' },
-  ): Promise<Array<{ name: string } & HeadFileStat>>;
-  public async readdirWithStats(
-    path: string,
-    options?: { readonly content: 'head' },
-  ): Promise<Array<{ name: string } & (FileStat | HeadFileStat)>> {
+  public async readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>> {
     this._assertReady();
     this._assertRootedPath(path);
     const directoryHandle = await this._resolveDirectoryHandle(path);
@@ -338,19 +325,9 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       if (handle.kind === 'directory') {
         return { name, type: 'dir', size: 0, mtimeMs: 0 } satisfies { name: string } & FileStat;
       }
-      const statOf = async (
-        fileHandle: FileSystemFileHandle,
-      ): Promise<{ name: string } & (FileStat | HeadFileStat)> => {
+      const statOf = async (fileHandle: FileSystemFileHandle): Promise<{ name: string } & FileStat> => {
         const file = await fileHandle.getFile();
-        const stat = await (options?.content === 'head' ? headFileStatFromFile(file) : fileStatFromFile(file));
-        /* What describing the entry read: the sniff window, or the whole of a text file a line count needed. */
-        workerTimings.count(
-          'listing.bytes',
-          options?.content !== 'head' && stat.type === 'file' && stat.contentKind === 'text'
-            ? file.size
-            : Math.min(file.size, headSniffByteLength),
-        );
-        return { name, ...stat };
+        return { name, type: 'file', size: file.size, mtimeMs: file.lastModified };
       };
       try {
         return await statOf(handle);
@@ -380,9 +357,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    * @param path - Absolute path to stat.
    * @returns Type/size/mtime for the entry at `path`.
    */
-  public async stat(path: string): Promise<FileStat>;
-  public async stat(path: string, options: FileStatOptions): Promise<FileStat | HeadFileStat>;
-  public async stat(path: string, options?: FileStatOptions): Promise<FileStat | HeadFileStat> {
+  public async stat(path: string): Promise<FileStat> {
     this._assertReady();
     this._assertRootedPath(path);
     const segments = this._splitPath(path);
@@ -398,7 +373,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     try {
       const fileHandle = await parentHandle.getFileHandle(name);
       const file = await fileHandle.getFile();
-      return options?.content === 'head' ? await headFileStatFromFile(file) : await fileStatFromFile(file);
+      return { type: 'file', size: file.size, mtimeMs: file.lastModified };
     } catch (error) {
       fileError = error;
     }

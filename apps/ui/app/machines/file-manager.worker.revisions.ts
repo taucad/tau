@@ -758,6 +758,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   };
   /* How many applies are writing each checkout root, as `onApplyingTree` brackets them; rides the projection. */
   const applying = new Map<string, number>();
+  /* How many writes of another revision's tree each checkout has begun: each is a new tree for readiness (D10, I7). */
+  const treeWrites = new Map<string, number>();
   /* How many host writes (applies and fill flushes) are open on each checkout root. */
   const writing = new Map<string, number>();
   /* Each checkout's changes observed while a host write held its root: raised once, together, when the last closes. */
@@ -885,9 +887,16 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
        * placeholders in place, once a second for minutes, and a hold taken and
        * released per flush re-listed every directory it touched each time.
        */
-      onApplyingTree: ({ root }, paths, bracket) => {
+      onApplyingTree: ({ id, root }, paths, bracket) => {
         const holdsTree = bracket?.purpose !== 'fill';
         const startedAt = workerTimings.now();
+        /* A new tree: the old one's fill has ended silently, and the reading waits for the new one's word. */
+        if (bracket?.purpose === 'tree') {
+          treeWrites.set(id, (treeWrites.get(id) ?? 0) + 1);
+          largeObjectsTold.delete(id);
+          largeObjects.delete(id);
+          fillWindows.delete(id);
+        }
         if (holdsTree) {
           applying.set(root, (applying.get(root) ?? 0) + 1);
         }
@@ -931,7 +940,11 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     };
     readiness = settleReadiness(
       readiness,
-      readinessOf(merged, status.checkoutId !== undefined && largeObjectsTold.has(status.checkoutId)),
+      readinessOf(
+        merged,
+        status.checkoutId !== undefined && largeObjectsTold.has(status.checkoutId),
+        status.checkoutId === undefined ? 0 : (treeWrites.get(status.checkoutId) ?? 0),
+      ),
     );
     return { ...merged, readiness: readiness.state };
   };
@@ -1372,7 +1385,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     }
   };
 
-  const comparisonCheckout = async () => {
+  /* The checkout a comparison reads, and its head's modes: of `paths` only when it compares those (S11). */
+  const comparisonCheckout = async (paths?: readonly string[]) => {
     const snapshot = actor.getSnapshot();
     const status = selectRevisionStatus(snapshot);
     const checkout = snapshot.context.checkouts.find((entry) => entry.id === status.checkoutId);
@@ -1381,7 +1395,12 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     }
     const [filesystem, basis] = await Promise.all([
       options.filesystem(checkout.root),
-      status.headRevisionId === undefined ? undefined : options.port.readTree(revisionId(status.headRevisionId)),
+      status.headRevisionId === undefined
+        ? undefined
+        : options.port.readTree(revisionId(status.headRevisionId), {
+            largeObjects: 'local',
+            ...(paths === undefined ? {} : { paths }),
+          }),
     ]);
     if (status.headRevisionId !== undefined && basis === undefined) {
       throw new Error('The checkout head tree is unavailable.');
@@ -1701,12 +1720,13 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       /* S38's second half: the right-hand side is the working copy rather than
        * another revision, so a reader can see what they have changed since the
        * revision they are looking at. One round trip, same viewer. */
+      /* One path's objects, never two whole trees (S11): the store reads only the compared path. */
       if (compareOptions?.against === 'checkout') {
-        const tree = await options.port.readTree(revisionId(revision));
+        const tree = await options.port.readTree(revisionId(revision), { paths: [path] });
         if (tree === undefined) {
           throw new Error('The selected revision is unavailable.');
         }
-        const checkout = await comparisonCheckout();
+        const checkout = await comparisonCheckout([path]);
         const { filesystem } = checkout;
         const recorded = tree.get(path);
         let working: Uint8Array<ArrayBuffer> | undefined;
@@ -1738,8 +1758,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       }
       const base = compareOptions?.from ?? record.parents[0];
       const [before, after] = await Promise.all([
-        base === undefined ? undefined : options.port.readTree(revisionId(base)),
-        options.port.readTree(revisionId(revision)),
+        base === undefined ? undefined : options.port.readTree(revisionId(base), { paths: [path] }),
+        options.port.readTree(revisionId(revision), { paths: [path] }),
       ]);
       if (after === undefined || (base !== undefined && before === undefined)) {
         throw new Error('The selected revision tree is unavailable.');

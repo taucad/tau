@@ -1000,6 +1000,14 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(applying.at(-1)).toBeUndefined();
     expect(root.status().applyingRoots).toBeUndefined();
     expect(await project.readFile('main.scad', 'utf8')).toBe('cube(20);');
+    /* D10, I7: the restore's write is a new tree from its start, and re-enters from there to what it leaves. */
+    const readiness = alpha.frames
+      .filter((frame) => frame.type === 'status')
+      .slice(statusesBefore)
+      .map((frame) => frame.status.readiness);
+    expect(readiness).toContain('treeReady');
+    expect(readiness.slice(readiness.indexOf('treeReady'))).not.toContain('connected');
+    expect(root.status().readiness).toBe('filled');
   });
 
   /*
@@ -1217,6 +1225,35 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     await vi.waitFor(() => {
       expect(root.status().conflicts.map((conflict) => conflict.branch)).toEqual([line]);
     });
+  });
+
+  /* S11: a one-file comparison reads that file's objects, never two whole trees. */
+  it('should read only the compared path from the store when comparing revisions (S11)', async () => {
+    const asked: Array<readonly string[] | undefined> = [];
+    const fixture = harness(['alpha'], (port) => ({
+      ...port,
+      readTree: async (id, options) => {
+        asked.push(options?.paths);
+        return port.readTree(id, options);
+      },
+    }));
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    await project.writeFile('other.scad', 'sphere(1);');
+    const alpha = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    const session = await root.placementSession();
+    await place(session, turnKey(1));
+    await project.writeFile('main.scad', 'cube(20);');
+    await finish(session, turnKey(1));
+    await turnFinalized(alpha, 'turn-1');
+    const head = root.status().headRevisionId;
+    expect(head).toBeDefined();
+    asked.length = 0;
+    expect(await root.compare(head!, 'main.scad')).toMatchObject({ original: 'cube(10);', modified: 'cube(20);' });
+    expect(await root.compare(head!, 'main.scad', { against: 'checkout' })).toMatchObject({ change: 'unchanged' });
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.every((paths) => paths?.length === 1 && paths[0] === 'main.scad')).toBe(true);
   });
 
   it('should compare a recorded revision against the files as they are now (S38)', async () => {

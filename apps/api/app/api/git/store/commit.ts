@@ -24,8 +24,8 @@ import {
   repositoryByteCeiling,
   retentionWindowMilliseconds,
 } from '#api/git/store/limits.js';
-import { listedHeadsOf, listingPuts, prepareListings, sweepListings } from '#api/git/store/listing.js';
-import { putRetirementMarker, sweepRepository } from '#api/git/store/sweep.js';
+import { listedHeadsOf, listingPuts, prepareListings } from '#api/git/store/listing.js';
+import { putRetirementMarker, sweepListings, sweepRepository } from '#api/git/store/sweep.js';
 import type { SweepOutcome } from '#api/git/store/sweep.js';
 import {
   ManifestError,

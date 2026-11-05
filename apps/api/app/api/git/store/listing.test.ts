@@ -8,14 +8,13 @@ import { gunzipSync } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   buildHeadListing,
-  commitOfListingKey,
   headListingMagic,
   listedHeadsOf,
-  listingKeyFor,
   listingPuts,
   prepareListings,
-  sweepListings,
 } from '#api/git/store/listing.js';
+import { commitOfListingKey, listingKeyFor } from '#api/git/store/listing-key.js';
+import { sweepListings } from '#api/git/store/sweep.js';
 import { retentionWindowMilliseconds } from '#api/git/store/limits.js';
 import { succeedManifest } from '#api/git/store/manifest.js';
 import type { RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';

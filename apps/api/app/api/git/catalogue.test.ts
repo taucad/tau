@@ -12,7 +12,7 @@ import {
 } from '#api/git/catalogue.js';
 import { GitCatalogueController } from '#api/git/catalogue.controller.js';
 import type { GitAccess, GitRepositoryService } from '#api/git/git.service.js';
-import { listingKeyFor } from '#api/git/store/listing.js';
+import { listingKeyFor } from '#api/git/store/listing-key.js';
 import { encodeManifest, indexKeyFor, succeedManifest } from '#api/git/store/manifest.js';
 import type { Manifest } from '#api/git/store/manifest.js';
 import { repositoryLocator } from '#api/git/store/locator.js';

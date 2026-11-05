@@ -3,8 +3,8 @@ import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import { Logger } from '@nestjs/common';
 import { pointerSizeCeilingBytes, runGitWithInput } from '#api/git/lfs-references.js';
-import { retentionWindowMilliseconds } from '#api/git/store/limits.js';
 import type { Manifest } from '#api/git/store/manifest.js';
+import { commitOfListingKey, listingKeyFor } from '#api/git/store/listing-key.js';
 import type { RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';
 
 /**
@@ -39,13 +39,6 @@ export const headListingFormat = 1;
 
 /** The first field of a listing's header line. */
 export const headListingMagic = 'tau-head-listing';
-
-/** Where one commit's listing lives in its repository. */
-export const listingKeyFor = (commit: string): string => `listings/${commit}.tsv.gz`;
-
-/** The commit a listing key names, or `undefined` for any other key. */
-export const commitOfListingKey = (key: string): string | undefined =>
-  /^listings\/(?<commit>[\da-f]{40}(?:[\da-f]{24})?)\.tsv\.gz$/u.exec(key)?.groups?.['commit'];
 
 const logger = new Logger('HeadListing');
 
@@ -249,40 +242,3 @@ export const listingPuts = (
       warnSkipped(locator, commitOfListingKey(listing.key) ?? listing.key, error);
     }
   });
-
-/**
- * Remove the listings of commits no ref of `committed` names any longer,
- * once the retention window has passed since they were written, so a client
- * that read a catalogue minutes ago still finds the listing it was handed.
- * Never rejects: a listing left behind is a few kilobytes, swept next time.
- *
- * @param args - The store, the repository, the manifest just committed and the time.
- * @returns The listing keys deleted.
- */
-export const sweepListings = async (args: {
-  readonly store: RepositoryStore;
-  readonly locator: RepositoryLocator;
-  readonly committed: Manifest;
-  readonly at: Date;
-}): Promise<readonly string[]> => {
-  const live = new Set(Object.values(args.committed.refs).map((tip) => tip.oid));
-  const doomed: string[] = [];
-  try {
-    for await (const stored of args.store.listObjects(args.locator, 'listings/')) {
-      const commit = commitOfListingKey(stored.key);
-      const old =
-        stored.modifiedAt !== undefined &&
-        args.at.getTime() - stored.modifiedAt.getTime() > retentionWindowMilliseconds;
-      if (commit !== undefined && !live.has(commit) && old) {
-        doomed.push(stored.key);
-      }
-    }
-    if (doomed.length > 0) {
-      await args.store.deleteObjects(args.locator, doomed);
-    }
-    return doomed;
-  } catch (error) {
-    logger.warn(`the listings of ${args.locator.projectId} were not swept: ${String(error)}`);
-    return [];
-  }
-};

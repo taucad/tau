@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+import { Logger } from '@nestjs/common';
 import { orphanThresholdMilliseconds, retentionWindowMilliseconds } from '#api/git/store/limits.js';
+import { commitOfListingKey } from '#api/git/store/listing-key.js';
 import type { Manifest } from '#api/git/store/manifest.js';
 import type { RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';
 import type { FaultInjector } from '#api/git/store/fault-points.js';
@@ -150,3 +152,42 @@ export const sweepRepository = async (args: {
  * orphans. Real storage the plan does not charge.
  */
 export type SweepOutcome = { readonly deleted: readonly string[]; readonly retainedBytes: number };
+
+const listingLogger = new Logger('HeadListing');
+
+/**
+ * Remove the listings of commits no ref of `committed` names any longer,
+ * once the retention window has passed since they were written, so a client
+ * that read a catalogue minutes ago still finds the listing it was handed.
+ * Never rejects: a listing left behind is a few kilobytes, swept next time.
+ *
+ * @param args - The store, the repository, the manifest just committed and the time.
+ * @returns The listing keys deleted.
+ */
+export const sweepListings = async (args: {
+  readonly store: RepositoryStore;
+  readonly locator: RepositoryLocator;
+  readonly committed: Manifest;
+  readonly at: Date;
+}): Promise<readonly string[]> => {
+  const live = new Set(Object.values(args.committed.refs).map((tip) => tip.oid));
+  const doomed: string[] = [];
+  try {
+    for await (const stored of args.store.listObjects(args.locator, 'listings/')) {
+      const commit = commitOfListingKey(stored.key);
+      const old =
+        stored.modifiedAt !== undefined &&
+        args.at.getTime() - stored.modifiedAt.getTime() > retentionWindowMilliseconds;
+      if (commit !== undefined && !live.has(commit) && old) {
+        doomed.push(stored.key);
+      }
+    }
+    if (doomed.length > 0) {
+      await args.store.deleteObjects(args.locator, doomed);
+    }
+    return doomed;
+  } catch (error) {
+    listingLogger.warn(`the listings of ${args.locator.projectId} were not swept: ${String(error)}`);
+    return [];
+  }
+};

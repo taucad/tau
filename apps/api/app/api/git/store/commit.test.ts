@@ -11,7 +11,7 @@ import { commitLease } from '#api/git/store/commit.js';
 import type { CommitPhase, CommitResult } from '#api/git/store/commit.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
 import { hydrateLease } from '#api/git/store/lease.js';
-import { listingKeyFor } from '#api/git/store/listing.js';
+import { listingKeyFor } from '#api/git/store/listing-key.js';
 import type { RepositoryLease } from '#api/git/store/lease.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import {

@@ -1,4 +1,4 @@
-import { listingKeyFor } from '#api/git/store/listing.js';
+import { listingKeyFor } from '#api/git/store/listing-key.js';
 import { indexKeyFor } from '#api/git/store/manifest.js';
 import type { Manifest } from '#api/git/store/manifest.js';
 import type { RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';

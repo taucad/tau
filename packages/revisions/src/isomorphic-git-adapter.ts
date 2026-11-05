@@ -66,7 +66,7 @@ import { createInlineCompute } from '#compute-worker/compute-worker.js';
 import type { ComputeWorker } from '#compute-worker/compute-worker.js';
 import { createObjectStore, gitFilesOf, isMissing } from '#object-store/object-store.js';
 import type { GitFiles, ObjectStore } from '#object-store/object-store.js';
-import { treeEntriesOf, treeBodyOf } from '#object-store/tree-codec.js';
+import { readTreeEntries, writeTreeObject } from '#object-store/tree-codec.js';
 import type { TreeCodecEntry } from '#object-store/tree-codec.js';
 import { RevisionPortError } from '#revision-port.js';
 import { assertMaterializableRevisionTree } from '#portable-tree.js';
@@ -449,11 +449,11 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    * @throws RevisionPortError when the store does not hold it.
    */
   const treeEntries = async (oid: string): Promise<readonly TreeCodecEntry[]> => {
-    const object = await objects.read(oid);
-    if (object?.type !== 'tree') {
+    const entries = await readTreeEntries(objects, oid);
+    if (entries === undefined) {
       throw new RevisionPortError('ENGINE_FAILED', `The store does not hold the tree ${oid}.`);
     }
-    return treeEntriesOf(object.data);
+    return entries;
   };
 
   /**
@@ -655,8 +655,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         }
       }),
     );
-    await objects.writeLoose([{ type: 'tree', data: treeBodyOf(node.entries), oid: node.oid }]);
-    return node.oid;
+    return writeTreeObject(objects, node);
   };
 
   const readCheckoutRecord = async (id: string): Promise<Checkout | undefined> => {

@@ -552,7 +552,8 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
   const readThrough = async (oid: string): Promise<StoredObject | undefined> => {
     for (const source of sources) {
       // oxlint-disable-next-line no-await-in-loop -- the first source that holds it answers.
-      const found = (await source.readMany([oid])).get(oid);
+      const answered = await source.readMany([oid]);
+      const found = answered.get(oid);
       if (found !== undefined) {
         // oxlint-disable-next-line no-await-in-loop -- kept before it is answered, so the next read is local.
         await writeLoose([{ ...found, oid }]);
@@ -747,9 +748,7 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
       }
     }
     const object = await read(oid);
-    return object === undefined
-      ? undefined
-      : (new Blob([object.data]).stream() as ReadableStream<Uint8Array<ArrayBuffer>>);
+    return object === undefined ? undefined : new Blob([object.data]).stream();
   };
 
   /**

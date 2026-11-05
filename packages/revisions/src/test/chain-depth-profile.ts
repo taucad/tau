@@ -113,9 +113,12 @@ const main = async (): Promise<void> => {
     if (indexUrl === undefined || !Number.isSafeInteger(packBytes)) {
       throw new Error('--pack-url needs --index-url and --pack-bytes.');
     }
-    index = readPackIndex(new Uint8Array(await (await fetch(indexUrl)).arrayBuffer()));
+    const indexResponse = await fetch(indexUrl);
+    index = readPackIndex(new Uint8Array(await indexResponse.arrayBuffer()));
     readHead = async (offset, length) => {
-      const response = await fetch(packUrl, { headers: { range: `bytes=${String(offset)}-${String(offset + length - 1)}` } });
+      const response = await fetch(packUrl, {
+        headers: { range: `bytes=${String(offset)}-${String(offset + length - 1)}` },
+      });
       if (response.status !== 206) {
         throw new Error(`The pack answered ${String(response.status)} to a Range read.`);
       }

@@ -24,7 +24,7 @@ import type { ComputeWorker } from '#compute-worker/compute-worker.js';
 import type { ObjectSource, ObjectStore } from '#object-store/object-store.js';
 import { openRemotePack } from '#object-store/remote-pack.js';
 import type { RemotePack, RemotePackCounters } from '#object-store/remote-pack.js';
-import { decodeTree } from '#object-store/tree-codec.js';
+import { readTreeEntries } from '#object-store/tree-codec.js';
 import type { StoredObject } from '#pack-reader/pack-reader.js';
 
 /** The ref families a catalogue answers; ops are never among them. */
@@ -139,10 +139,11 @@ export type ColdOpenOptions = Readonly<{
 }>;
 
 const isCatalogue = (value: unknown): value is Catalogue => {
-  const candidate = value as Partial<Catalogue> | null;
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const candidate = value as Partial<Catalogue>;
   return (
-    candidate !== null &&
-    typeof candidate === 'object' &&
     candidate.format === 1 &&
     Array.isArray(candidate.refs) &&
     Array.isArray(candidate.listings) &&
@@ -238,8 +239,11 @@ const importHeads = async ({ references, listings, readAll, keep, batchBytes }: 
       seenTrees.add(oid);
     }
     const next = new Set<string>();
-    for (const tree of trees.values()) {
-      for (const entry of decodeTree(tree.data)) {
+    const held = { read: async (oid: string) => trees.get(oid) };
+    // oxlint-disable-next-line no-await-in-loop -- the level is already held: this only decodes it.
+    const decoded = await Promise.all([...trees.keys()].map(async (oid) => readTreeEntries(held, oid)));
+    for (const entries of decoded) {
+      for (const entry of entries ?? []) {
         if (entry.type === 'tree' && !seenTrees.has(entry.oid)) {
           next.add(entry.oid);
         } else if (entry.type === 'blob' && unlisted) {
@@ -331,7 +335,8 @@ export const coldOpenFromCatalogue = async (options: ColdOpenOptions): Promise<C
   let imported = 0;
   let packsWritten = 0;
   const keep = async (objects: ReadonlyMap<string, StoredObject>): Promise<void> => {
-    packsWritten += (await store.importObjects([...objects].map(([oid, object]) => ({ oid, ...object })))).length;
+    const written = await store.importObjects([...objects].map(([oid, object]) => ({ oid, ...object })));
+    packsWritten += written.length;
     imported += objects.size;
   };
   const readAll = async (oids: readonly string[]): Promise<Map<string, StoredObject>> => {
@@ -351,9 +356,19 @@ export const coldOpenFromCatalogue = async (options: ColdOpenOptions): Promise<C
     return undefined;
   }
   /* History stays on the server, read through while the links last. */
-  const expires = catalogue.expiresAt * 1000;
+  const linksExpireAt = catalogue.expiresAt * 1000;
   store.attachSource({
-    readMany: async (oids) => (Date.now() < expires ? source.readMany(oids).catch(() => new Map()) : new Map()),
+    readMany: async (oids) => {
+      if (Date.now() >= linksExpireAt) {
+        return new Map();
+      }
+      try {
+        return await source.readMany(oids);
+      } catch {
+        /* A lapsed or refused link reads as absent: the caller reports the object missing. */
+        return new Map();
+      }
+    },
   });
   const ranges: RemotePackCounters = { rangeRequests: 0, bytesFetched: 0, waves: 0 };
   for (const pack of packs) {

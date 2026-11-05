@@ -419,21 +419,6 @@ const fileSystemShim = (provider: GitFiles) => {
   };
 };
 
-/**
- * Create a `RevisionPort` over a filesystem provider, backed by `isomorphic-git`.
- *
- * @param options - Provider, control-plane location, object format and checkouts.
- * @returns A port whose revision ids are Git commit ids.
- * @public
- * @example <caption>Record a revision in the page</caption>
- * ```typescript
- * import { createMemoryProvider } from '@taucad/filesystem/backend';
- * import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
- *
- * const port = createIsomorphicGitRevisionPort({ filesystem: await createMemoryProvider() });
- * await port.init({ author: { name: 'Tau', email: 'tau@example.com' } });
- * ```
- */
 /** The families a set of refs falls in, or `undefined` when one is outside them all (ops, a remote's own). */
 const catalogueFamiliesOf = (references: readonly string[]): CatalogueFamily[] | undefined => {
   const families = new Set<CatalogueFamily>(['heads', 'tags']);
@@ -450,6 +435,21 @@ const catalogueFamiliesOf = (references: readonly string[]): CatalogueFamily[] |
 /** The largest `upload-pack` answer a fetch reads: the pack ceiling and its framing. Bytes. */
 const uploadPackCeilingBytes = 64 * 1024 * 1024 + 64 * 1024;
 
+/**
+ * Create a `RevisionPort` over a filesystem provider, backed by `isomorphic-git`.
+ *
+ * @param options - Provider, control-plane location, object format and checkouts.
+ * @returns A port whose revision ids are Git commit ids.
+ * @public
+ * @example <caption>Record a revision in the page</caption>
+ * ```typescript
+ * import { createMemoryProvider } from '@taucad/filesystem/backend';
+ * import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
+ *
+ * const port = createIsomorphicGitRevisionPort({ filesystem: await createMemoryProvider() });
+ * await port.init({ author: { name: 'Tau', email: 'tau@example.com' } });
+ * ```
+ */
 export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPortOptions): RevisionPort => {
   const { filesystem, checkouts } = options;
   const gitdir = options.gitDirectory ?? defaultGitDirectory;
@@ -684,11 +684,14 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    * store then holds every one of them.
    */
   async function openFromCatalogue(
-    url: string,
-    families: readonly CatalogueFamily[] | undefined,
-    signal: AbortSignal | undefined,
-    wants?: readonly string[],
+    request: Readonly<{
+      url: string;
+      families: readonly CatalogueFamily[] | undefined;
+      signal: AbortSignal | undefined;
+      wants?: readonly string[];
+    }>,
   ): Promise<Map<string, string> | undefined> {
+    const { url, families, signal, wants } = request;
     const access = options.catalogue;
     const catalogueUrl = access?.url(url);
     if (access === undefined || catalogueUrl === undefined) {
@@ -2021,15 +2024,22 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
        * listing's, when the caller hands back one this port answered for the
        * same address (R6). */
       const listed = input.advertised === undefined ? undefined : listedAdvertisements.get(input.advertised);
-      const advertise = async (): Promise<Awaited<ReturnType<typeof getRemoteInfo2>>> =>
-        listed?.url === url && listed.advertisement.protocolVersion === 1
-          ? listed.advertisement
-          : getRemoteInfo2({ http, url, forPush: false, protocolVersion: 1 }).catch(refused);
+      const advertise = async (): Promise<Awaited<ReturnType<typeof getRemoteInfo2>>> => {
+        if (listed?.url === url && listed.advertisement.protocolVersion === 1) {
+          return listed.advertisement;
+        }
+        try {
+          return await getRemoteInfo2({ http, url, forPush: false, protocolVersion: 1 });
+        } catch (error) {
+          return refused(error);
+        }
+      };
       /* A store with no refs yet opens from the catalogue, when every asked-for ref is in its families (D8). */
       const coldFamilies = input.refs === undefined ? undefined : catalogueFamiliesOf(input.refs);
+      const heldReferences = coldFamilies === undefined ? [] : await listRefs({ fs, gitdir, filepath: 'refs' });
       const cold =
-        coldFamilies !== undefined && (await listRefs({ fs, gitdir, filepath: 'refs' })).length === 0
-          ? await openFromCatalogue(url, coldFamilies, input.signal)
+        coldFamilies !== undefined && heldReferences.length === 0
+          ? await openFromCatalogue({ url, families: coldFamilies, signal: input.signal })
           : undefined;
       let advertisement = cold === undefined ? await advertise() : undefined;
       const advertised =
@@ -2085,7 +2095,10 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           body,
           maximumBytes: uploadPackCeilingBytes,
         }).catch(async (error: unknown) => {
-          if (error instanceof PackCeilingError && (await openFromCatalogue(url, coldFamilies, input.signal, wants))) {
+          if (
+            error instanceof PackCeilingError &&
+            (await openFromCatalogue({ url, families: coldFamilies, signal: input.signal, wants }))
+          ) {
             return undefined;
           }
           return refused(error);

@@ -72,8 +72,12 @@ const trailerBytes = 20;
 
 type Span = Readonly<{ start: number; bytes: Uint8Array<ArrayBuffer> }>;
 
+/** The longest Range read sent: the files host's segment ceiling (D7), which refuses a longer one. Bytes. */
+export const maximumRangeBytes = 64 * 1024 * 1024;
+
 /**
- * Merge ranges that touch into one: contiguous only, never across a gap.
+ * Merge ranges that touch into one: contiguous only, never across a gap, and
+ * never past {@link maximumRangeBytes}.
  *
  * @param ranges - `[start, end)` pairs, in any order.
  * @returns The merged ranges, ascending.
@@ -82,7 +86,7 @@ export const coalesceRanges = (ranges: Iterable<readonly [number, number]>): Arr
   const merged: Array<[number, number]> = [];
   for (const [start, end] of [...ranges].toSorted((left, right) => left[0] - right[0])) {
     const last = merged.at(-1);
-    if (last !== undefined && start <= last[1]) {
+    if (last !== undefined && start <= last[1] && Math.max(last[1], end) - last[0] <= maximumRangeBytes) {
       last[1] = Math.max(last[1], end);
     } else {
       merged.push([start, end]);
@@ -107,7 +111,7 @@ export const openRemotePack = async (options: RemotePackOptions): Promise<Remote
     throw new TypeError(`The index of ${name} is the index of another pack.`);
   }
   const counters: RemotePackCounters = { rangeRequests: 0, bytesFetched: 0, waves: 0 };
-  let spans: Span[] = [];
+  const spans: Span[] = [];
   const heldAt = (offset: number, length: number): Uint8Array<ArrayBuffer> | undefined => {
     for (const span of spans) {
       if (offset >= span.start && offset + length <= span.start + span.bytes.byteLength) {
@@ -131,8 +135,14 @@ export const openRemotePack = async (options: RemotePackOptions): Promise<Remote
     path: name,
     size,
     index,
-    readRange: async (_path, offset, length) =>
-      heldAt(offset, length) ?? (await fetchSpan(offset, offset + length)).bytes,
+    readRange: async (_path, offset, length) => {
+      const held = heldAt(offset, length);
+      if (held !== undefined) {
+        return held;
+      }
+      const span = await fetchSpan(offset, offset + length);
+      return span.bytes;
+    },
     compute,
     cache: createBaseCache(options.cacheBytes ?? 8 * 1024 * 1024),
     counters: emptyReadCounters(),
@@ -156,7 +166,7 @@ export const openRemotePack = async (options: RemotePackOptions): Promise<Remote
       }
       // oxlint-disable-next-line no-await-in-loop -- a wave's bases are known only once the wave has landed.
       const fetched = await Promise.all(coalesceRanges(ranges).map(async ([start, end]) => fetchSpan(start, end)));
-      spans = [...spans, ...fetched];
+      spans.push(...fetched);
       const next = new Set<number>();
       for (const offset of wave) {
         const base = deltaBaseOf(heldAt(offset, index.endOf(offset, size) - offset)!, offset);
@@ -172,15 +182,23 @@ export const openRemotePack = async (options: RemotePackOptions): Promise<Remote
       return new Map(read.filter((entry): entry is readonly [string, StoredObject] => entry[1] !== undefined));
     } finally {
       /* What one call fetched is held only for that call. */
-      spans = [];
+      spans.length = 0;
     }
   };
 
   /* One call at a time: a call's ranges are held for it alone and dropped when it ends. */
   let queue: Promise<unknown> = Promise.resolve();
   const serialized = async (oids: Iterable<string>): Promise<Map<string, StoredObject>> => {
-    const run = queue.then(async () => readMany(oids));
-    queue = run.catch(() => undefined);
+    const previous = queue;
+    const run = (async (): Promise<Map<string, StoredObject>> => {
+      try {
+        await previous;
+      } catch {
+        /* The call before failed on its own; this one runs regardless. */
+      }
+      return readMany(oids);
+    })();
+    queue = run;
     return run;
   };
 

@@ -68,9 +68,9 @@ describe('viewer render profile adoption', () => {
     });
   });
 
-  it('should keep one-CSS-pixel edges black in both themes', () => {
+  it('should keep one-CSS-pixel edges in black and grey', () => {
     expect(gltfEdgeLineWidth).toBe(1);
     expect(gltfEdgeColorLightMode).toBe(0x00_00_00);
-    expect(gltfEdgeColorDarkMode).toBe(0x00_00_00);
+    expect(gltfEdgeColorDarkMode).toBe(0x86_86_86);
   });
 });

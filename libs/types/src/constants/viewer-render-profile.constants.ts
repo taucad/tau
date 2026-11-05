@@ -136,11 +136,8 @@ export const viewerRenderProfile = {
     dark: {
       lightIntensityScale: 1,
       ambientBoost: 1.15,
-      /**
-       * Characteristic-edge tint, sRGB hex: black, the same as the light scheme. Chosen by the operator on 2026-11-05 so
-       * edges look the same in both schemes and in every capture, which renders with this scheme.
-       */
-      edgeColor: 0x00_00_00,
+      /** Neutral grey `oklch(0.62 0 0deg)`: readable on dimmed faces, below near-white glare against `#171717`. */
+      edgeColor: 0x86_86_86,
     },
   },
 } as const;

@@ -45,12 +45,12 @@ describe('viewerRenderProfile', () => {
     });
   });
 
-  it('should draw one-CSS-pixel edges, black in both colour schemes', () => {
+  it('should draw one-CSS-pixel edges, black in light mode and grey in dark mode', () => {
     expect(viewerRenderProfile.edges.lineWidthCssPixels).toBe(1);
     expect(viewerRenderProfile.edges.cardLineWidthCssPixels).toBe(2);
     expect(viewerRenderProfile.colorSchemes).toStrictEqual({
       light: { lightIntensityScale: 1, ambientBoost: 1, edgeColor: 0x00_00_00 },
-      dark: { lightIntensityScale: 1, ambientBoost: 1.15, edgeColor: 0x00_00_00 },
+      dark: { lightIntensityScale: 1, ambientBoost: 1.15, edgeColor: 0x86_86_86 },
     });
   });
 });

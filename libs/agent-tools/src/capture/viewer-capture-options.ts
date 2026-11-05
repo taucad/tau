@@ -105,7 +105,7 @@ export const resolveViewerCapturePixelRatio = (size: Readonly<{ width: number; h
  * import { buildViewerCaptureImageOptions } from '@taucad/agent-tools/capture';
  *
  * const look = buildViewerCaptureImageOptions({ width: 1536, height: 1152, colorScheme: 'dark' });
- * // look.lineWidth === 2, look.lineColor === '#000000'
+ * // look.lineWidth === 2, look.lineColor === '#868686'
  * ```
  *
  * @example <caption>A 1536 px card thumbnail shown at 512 px</caption>

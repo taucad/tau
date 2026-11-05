@@ -33,8 +33,8 @@ describe('Grid theme colors', () => {
 });
 
 describe('GLTF edge theme colors', () => {
-  it('uses black in both light and dark mode', () => {
+  it('uses black in light mode and neutral gray in dark mode', () => {
     expect(gltfEdgeColorLightMode).toBe(0x00_00_00);
-    expect(gltfEdgeColorDarkMode).toBe(0x00_00_00);
+    expect(gltfEdgeColorDarkMode).toBe(0x86_86_86);
   });
 });

@@ -62,8 +62,10 @@ export const gltfEdgeColorLightMode = viewerRenderProfile.colorSchemes.light.edg
 /**
  * GLTF characteristic-edge tint, **dark theme**. sRGB hex.
  *
- * Black, the same as {@link gltfEdgeColorLightMode}, so characteristic edges look the same in both themes and in
- * every capture. Defined by the viewer render profile, which captures also read.
+ * Neutral gray only (no brand chroma): `oklch(0.62 0 0deg)` → `#868686`. Opaque, so it reads
+ * well above the 30%-alpha grid ({@link infiniteGridColorDarkMode}) on dimmed matcap faces,
+ * but well below near-white so characteristic edges do not glare against `#171717`. Defined by the viewer render
+ * profile, which captures also read.
  */
 export const gltfEdgeColorDarkMode = viewerRenderProfile.colorSchemes.dark.edgeColor;
 

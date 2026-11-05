@@ -62,7 +62,14 @@ import { decodeTextFile, encodeTextFile } from '#utils/filesystem.utils.js';
 import { createSkillResolver } from '#lib/skill-resolver.js';
 import type { HeadlessImageService } from '#services/headless-image.service.js';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
-import { getFileContentMetadata, ResourceQueue } from '@taucad/filesystem';
+import {
+  factsConcurrency,
+  fileMetadataFields,
+  getFileContentMetadata,
+  lineCountByteCap,
+  mapConcurrent,
+  ResourceQueue,
+} from '@taucad/filesystem';
 import { z } from 'zod';
 import {
   canonicalCaptureViews,
@@ -169,9 +176,10 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
     preconditions.map((precondition) => ({ ...precondition, path: absolute(precondition.path) }));
   const readFileBytes = async (path: string): Promise<Uint8Array<ArrayBuffer>> =>
     new Uint8Array(await fileManager.readFile(path));
-  /* A stat or listing carries content facts only when already known (I3); the
-   * model sees a line count for every text file, so a missing one is measured
-   * here. W9 caps this by bytes (EQ15). */
+  /* A stat or listing carries content facts only when already known (I3), so
+   * a missing one is measured here from one read. This client has no ranged
+   * read to classify from a head, so a listing measures only files within the
+   * byte cap and shows the rest by size alone (D4, EQ15); a single stat counts. */
   const factsOf = async (path: string, known: StatContentMetadata): Promise<FileContentMetadata> => {
     if (known.contentKind === 'binary') {
       return { contentKind: 'binary' };
@@ -181,6 +189,10 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
     }
     return getFileContentMetadata(await readFileBytes(path));
   };
+  const listedFactsOf = async (
+    path: string,
+    known: StatContentMetadata & Readonly<{ size: number }>,
+  ): Promise<StatContentMetadata> => (known.size > lineCountByteCap ? fileMetadataFields(known) : factsOf(path, known));
   const writeFileIfUnchanged = async (
     path: string,
     expected: Uint8Array<ArrayBuffer>,
@@ -291,30 +303,26 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
       const { treeService } = await fileManager.whenServicesReady();
       try {
         const entries = await treeService.listDirectoryExact(path);
-        return await Promise.all(
-          entries.map(async (entry): Promise<RpcDirectoryEntry> => {
-            const modifiedAt = entry.mtimeMs > 0 ? new Date(entry.mtimeMs).toISOString() : undefined;
-            const common = {
-              name: entry.name,
-              size: entry.size,
-              ...(modifiedAt ? { modifiedAt } : {}),
-              ...(entry.provenance === undefined ? {} : { provenance: entry.provenance }),
+        return await mapConcurrent(entries, factsConcurrency, async (entry): Promise<RpcDirectoryEntry> => {
+          const modifiedAt = entry.mtimeMs > 0 ? new Date(entry.mtimeMs).toISOString() : undefined;
+          const common = {
+            name: entry.name,
+            size: entry.size,
+            ...(modifiedAt ? { modifiedAt } : {}),
+            ...(entry.provenance === undefined ? {} : { provenance: entry.provenance }),
+          };
+          if (entry.type === 'dir') {
+            return {
+              ...common,
+              type: 'dir',
+              ...(entry.provenance !== undefined && entry.provenance.source !== 'project'
+                ? { traverseOnImplicitSearch: false }
+                : {}),
             };
-            if (entry.type === 'dir') {
-              return {
-                ...common,
-                type: 'dir',
-                ...(entry.provenance !== undefined && entry.provenance.source !== 'project'
-                  ? { traverseOnImplicitSearch: false }
-                  : {}),
-              };
-            }
-            const facts = await factsOf(path === '' ? entry.name : `${path}/${entry.name}`, entry);
-            return facts.contentKind === 'text'
-              ? { ...common, type: 'file', contentKind: 'text', lineCount: facts.lineCount }
-              : { ...common, type: 'file', contentKind: 'binary' };
-          }),
-        );
+          }
+          const facts = await listedFactsOf(path === '' ? entry.name : `${path}/${entry.name}`, entry);
+          return { ...common, type: 'file', ...facts };
+        });
       } catch (error) {
         if (error instanceof DirectoryListingFailedError) {
           const mappedError = new Error(error.message) as Error & { code?: string };

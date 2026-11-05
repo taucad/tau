@@ -103,12 +103,26 @@ export type {
   WorkerTimingSummary,
   WorkerTimings,
 } from '#worker-timings.js';
-export { ChangeEventBus } from '#change-event-bus.js';
-export { EventCoalescer, coalesceChangeEvents } from '#event-coalescer.js';
-export type { CoalescerOptions } from '#event-coalescer.js';
+export { ChangeEventBus, toChangeSet, touchedDirectoriesOf } from '#change-event-bus.js';
+export type {
+  ChangeSet,
+  ChangeSetEntry,
+  ChangeSetOp,
+  ChangeSetReset,
+  ChangeSetResetReason,
+  ChangeSetSegment,
+} from '#change-event-bus.js';
+export {
+  EventCoalescer,
+  coalesceChangeEvents,
+  ChangeSetCoalescer,
+  mergeChangeSets,
+  nextFrame,
+} from '#event-coalescer.js';
+export type { CoalescerOptions, ChangeSetCoalescerOptions, FrameScheduler } from '#event-coalescer.js';
 export { tagEventOrigin, getEventOrigin, isEventGloballyVisible } from '#event-origin-registry.js';
 export { WatchRegistry } from '#watch-registry.js';
-export type { WatchRegistryOptions } from '#watch-registry.js';
+export type { ChangeSetWatchRequest, WatchRegistryOptions } from '#watch-registry.js';
 export { streamChunkSize, bufferToStream } from '#backend/stream-utils.js';
 export { CrossTabCoordinator } from '#cross-tab-coordinator.js';
 export {

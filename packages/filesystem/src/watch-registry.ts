@@ -54,6 +54,7 @@ type ChangeSetSubscription = SubscriptionBase & {
   readonly form: 'changeSets';
   readonly handlers: Topic<ChangeSet>;
   readonly frame?: ChangeSetCoalescer;
+  readonly skipOrigin?: string;
   /** Facts this subscription admitted from the event being dispatched. */
   facts: PathChangeEvent[];
   /** A reset this subscription earned from the event being dispatched. */
@@ -355,6 +356,8 @@ export type WatchRegistryOptions = {
 /** Internal authority selector used by captured rooted filesystems. */
 type WatchRegistrationOptions = {
   authority?: WeakKey;
+  /** Change-set watches only: leave out every fact this bridge port originated (skip-originator). */
+  skipOrigin?: string;
 };
 
 /**
@@ -447,7 +450,7 @@ export class WatchRegistry {
    *
    * @param request - Watch paths, recursion, include/exclude globs and the delivery cadence.
    * @param handler - Receives each change set.
-   * @param options - Optional captured authority filter.
+   * @param options - Optional captured authority filter and the port whose own facts are left out.
    * @returns unsubscribe function
    */
   public watchChangeSets(
@@ -457,7 +460,8 @@ export class WatchRegistry {
   ): () => void {
     const snapshot = snapshotWatchRequest(request);
     const coalesce = request.coalesce ?? 'immediate';
-    const hash = `changeSets\0${coalesce}\0${JSON.stringify(snapshot)}`;
+    const skipOrigin = options?.skipOrigin;
+    const hash = `changeSets\0${coalesce}\0${skipOrigin ?? ''}\0${JSON.stringify(snapshot)}`;
     const subscriptions = this._subscriptionsFor(options?.authority);
     let subscription = subscriptions.get(hash) as ChangeSetSubscription | undefined;
 
@@ -485,6 +489,7 @@ export class WatchRegistry {
         hash,
         request: snapshot,
         authority: options?.authority,
+        ...(skipOrigin === undefined ? {} : { skipOrigin }),
         handlers,
         ...(frame === undefined ? {} : { frame }),
         facts: [],
@@ -608,6 +613,9 @@ export class WatchRegistry {
         }
         if (subscription.form === 'events') {
           this._deliverEvent(subscription, fact, admission);
+          continue;
+        }
+        if (subscription.skipOrigin !== undefined && getEventOrigin(fact) === subscription.skipOrigin) {
           continue;
         }
         if (admission.verdict === 'match' || admission.summary) {

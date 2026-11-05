@@ -49,7 +49,8 @@ import type { WalkOptions } from '#content-ops/walk.js';
 import { causeToMutationError, preflightCreate, preflightDelete, preflightMove } from '#mutation-pipeline.js';
 import type { BulkMoveEdit, BulkMoveResult, MutationPipeline, ResolvedChangesetEntry } from '#mutation-pipeline.js';
 import type { Changeset, ChangesetReceipt } from '#changeset.js';
-import type { WatchRegistry } from '#watch-registry.js';
+import type { ChangeSetWatchRequest, WatchRegistry } from '#watch-registry.js';
+import type { ChangeSet, ChangeSetEntry } from '#change-event-bus.js';
 import { RootedFileSystemError, WorkspaceMutationError } from '#workspace-errors.js';
 import { bufferToStream, validateFileReadStreamOptions } from '#backend/stream-utils.js';
 import { getEventOrigin } from '#event-origin-registry.js';
@@ -159,6 +160,12 @@ export type RootedFileSystem = Omit<FileSystemProvider, 'writeFileChecked' | 'de
      */
     rmdir(path: string, options?: { recursive?: boolean }): Promise<void>;
     watch(request: WatchRequest, handler: (event: WatchEvent) => void): () => void;
+    /**
+     * Watch in the change-set form (charter D6): one {@link ChangeSet} per
+     * committed changeset that reaches the request, in this root's namespace.
+     * Optional: a rooted surface that is not the authority's own may only offer `watch`.
+     */
+    watchChangeSets?(request: ChangeSetWatchRequest, handler: (set: ChangeSet) => void): () => void;
     /**
      * Search this root's own index, which no other root's queries evict (D3).
      *
@@ -741,6 +748,114 @@ export class RootedViews {
       );
       return stop;
     };
+    /*
+     * The change-set form (D6): one set per committed changeset that reaches
+     * the request, spelled in this root's namespace. An entry with neither edge
+     * inside the root is dropped; a move with one edge inside arrives as that
+     * edge's creation or deletion; a reset above the root resets the root.
+     */
+    const toLocalEntry = (entry: ChangeSetEntry): ChangeSetEntry | undefined => {
+      const path = toLocalPath(entry.path);
+      if (entry.op !== 'moved' || entry.oldPath === undefined) {
+        return path === undefined ? undefined : { ...entry, path };
+      }
+      const oldPath = toLocalPath(entry.oldPath);
+      if (path !== undefined && oldPath !== undefined) {
+        return { ...entry, path, oldPath };
+      }
+      if (path !== undefined) {
+        return {
+          op: 'created',
+          path,
+          kind: entry.kind,
+          ...(entry.target === undefined ? {} : { target: entry.target }),
+        };
+      }
+      return oldPath === undefined ? undefined : { op: 'deleted', path: oldPath, kind: entry.kind };
+    };
+    const toLocalSet = (set: ChangeSet): ChangeSet | undefined => {
+      const base = {
+        generation: set.generation,
+        ...(set.origin === undefined ? {} : { origin: set.origin }),
+        ...(set.backend === undefined ? {} : { backend: set.backend }),
+      };
+      if (set.reset !== undefined) {
+        const resetPrefix = set.reset.prefix;
+        const prefix =
+          toLocalPath(resetPrefix) ?? (resetPrefix === '/' || root.startsWith(`${resetPrefix}/`) ? '' : undefined);
+        return prefix === undefined
+          ? undefined
+          : { ...base, entries: [], touchedDirectories: [], reset: { prefix, reason: set.reset.reason } };
+      }
+      const entries = set.entries.flatMap((entry) => toLocalEntry(entry) ?? []);
+      if (entries.length === 0) {
+        return undefined;
+      }
+      const touchedDirectories = set.touchedDirectories.flatMap((directory) => toLocalPath(directory) ?? []);
+      const segments = set.segments?.flatMap((segment) => {
+        const path = toLocalPath(segment.path);
+        return path === undefined ? [] : [{ path, writes: segment.writes }];
+      });
+      return {
+        ...base,
+        entries,
+        touchedDirectories,
+        ...(segments === undefined || segments.length === 0 ? {} : { segments }),
+      };
+    };
+    const watchChangeSets = (request: ChangeSetWatchRequest, handler: (set: ChangeSet) => void): (() => void) => {
+      assertCurrent();
+      if (request.paths.length === 0) {
+        throw new TypeError('A rooted watch requires at least one path.');
+      }
+      const paths = request.paths.map((path) => resolveLocal(path).authorityPath);
+      let active = true;
+      let unsubscribe = (): void => undefined;
+      const stop = (): void => {
+        if (!active) {
+          return;
+        }
+        active = false;
+        unsubscribe();
+      };
+      unsubscribe = this._watchRegistry.watchChangeSets(
+        {
+          ...request,
+          paths,
+          includes: request.includes?.map(prefixGlob),
+          excludes: request.excludes?.map(prefixGlob),
+        },
+        (set) => {
+          if (!active) {
+            return;
+          }
+          try {
+            assertCurrent();
+          } catch (error) {
+            if (error instanceof RootedFileSystemError && error.code === 'ESTALE') {
+              stop();
+              handler({
+                generation: set.generation,
+                entries: [],
+                touchedDirectories: [],
+                reset: { prefix: '', reason: 'topology' },
+              });
+              return;
+            }
+            throw error;
+          }
+          const local = toLocalSet(set);
+          if (local !== undefined) {
+            handler(local);
+          }
+        },
+        {
+          authority: captured,
+          ...(mutationContext?.originClientId === undefined ? {} : { skipOrigin: mutationContext.originClientId }),
+        },
+      );
+      return stop;
+    };
     return {
       id: 'workspace-root',
       capabilities: captured.provider.capabilities,
@@ -768,6 +883,7 @@ export class RootedViews {
       exists,
       lstat,
       watch,
+      watchChangeSets,
       search,
       statTree,
       copyTree,

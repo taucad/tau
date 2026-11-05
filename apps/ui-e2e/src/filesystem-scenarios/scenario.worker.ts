@@ -18,8 +18,11 @@ import {
   ProviderRegistry,
   ResourceQueue,
   WorkspaceFileService,
+  watchByChangeSets,
   workerTimings,
 } from '@taucad/filesystem';
+import { createFileSystemBridgePort, createFileSystemBridgeProxy } from '@taucad/fs-bridge';
+import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import type { RootedFileSystem } from '@taucad/filesystem';
 import { composeView } from '@taucad/filesystem/composed-view';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
@@ -424,6 +427,138 @@ const stopProbe = async (): Promise<ProbeReport> => {
   };
 };
 
+/**
+ * One agent turn: the model's fifty parallel write calls, dispatched together
+ * through the host's RPC filesystem as one task issues them.
+ *
+ * @param live - The project's rooted view.
+ * @param turn - The turn's directory name.
+ */
+const agentTurn = async (live: RootedFileSystem, turn: string): Promise<void> => {
+  const tally: AgentTally = { readdirCalls: 0, reads: 0, binaryBytesRead: 0, textBytesRead: 0 };
+  const fileSystem = agentFileSystem(live, tally);
+  const text = new TextDecoder();
+  await Promise.all(
+    Array.from({ length: 50 }, async (_, index) =>
+      fileSystem.writeFile(`agent/${turn}/file-${String(index)}.ts`, text.decode(saveText(2048, index))),
+    ),
+  );
+};
+
+/**
+ * The production consumers that hear an agent turn, each registered as
+ * production registers it, over a real bridge connection to this authority:
+ * the file manager's `WorkerChangeChannel` (whose watches the Files tree and
+ * the open documents take) over a user-masked view, a kernel's dependency
+ * watch as the runtime's worker-filesystem proxy issues it
+ * (`watchByChangeSets` over a bridge proxy), and the agent host's `observeLog`
+ * (`watchByChangeSets` over the project root). Each request reaches the turn,
+ * so a consumer that fell back to the per-path form would show in
+ * production's `watch.pathEvents` counter.
+ *
+ * @param live - The project's rooted view.
+ * @param turn - The turn the consumers must hear.
+ * @returns How many consumers are registered, and their disposer.
+ */
+const productionTurnConsumers = async (
+  live: RootedFileSystem,
+  turn: string,
+): Promise<{ count: number; dispose(): void }> => {
+  const userConnection = createFileSystemBridgePort(
+    composeView({ filesystem: live }, { consumer: 'user', policy: tauPathPolicy }),
+  );
+  const rootConnection = createFileSystemBridgePort(live);
+  const viewProxy = createFileSystemBridgeProxy(userConnection);
+  const projectRoot = createFileSystemBridgeProxy(rootConnection);
+  await Promise.all([viewProxy.ready, projectRoot.ready]);
+  const channel = new WorkerChangeChannel({
+    transport: {
+      listen: viewProxy.listen,
+      closed: viewProxy.closed,
+      watchChangeSets: (request, handler) => viewProxy.watchChangeSets(request, handler),
+      watchReady: (request, handler) => viewProxy.watchReady(request, handler),
+    },
+  });
+  const noop = (): void => undefined;
+  const tree = channel.watchReady({ paths: [''], recursive: true }, noop);
+  const kernel = watchByChangeSets(viewProxy, { paths: ['agent'], recursive: true }, noop);
+  const log = watchByChangeSets(projectRoot, { paths: [`agent/${turn}/file-0.ts`] }, noop);
+  const consumers = [
+    { ready: tree.ready, dispose: tree.dispose },
+    { ready: kernel.ready, dispose: kernel.unsubscribe },
+    { ready: log.ready, dispose: log.unsubscribe },
+  ];
+  await Promise.all(consumers.map(async ({ ready }) => ready));
+  return {
+    count: consumers.length,
+    dispose: (): void => {
+      for (const { dispose } of consumers) {
+        dispose();
+      }
+      channel.dispose();
+      viewProxy.dispose();
+      projectRoot.dispose();
+      userConnection.dispose();
+      rootConnection.dispose();
+    },
+  };
+};
+
+/**
+ * S8's three turns (D6, I8). The measured turn has one rooted recursive
+ * change-set watch, and production's `watch.changeSets` counter must read 1.
+ * The second has the production consumers registered over real bridge
+ * connections; each must hear it once, and production's `watch.pathEvents`
+ * counter must read 0. The third adds one per-path consumer, the form the
+ * gate keeps off the hot path, and the same counter must read 50: the zero
+ * is a measurement, not a counter nothing increments.
+ *
+ * @param live - The project's rooted view.
+ * @returns The measured turn, with the other two turns' counts beside it.
+ */
+const agentTurns = async (live: RootedFileSystem): Promise<WorkerMeasurement> => {
+  const noop = (): void => undefined;
+  const stopRooted = live.watchChangeSets!({ paths: [''], recursive: true }, noop);
+  let measured: WorkerMeasurement;
+  try {
+    measured = await measure(async () => {
+      await agentTurn(live, randomUuid().slice(0, 8));
+    });
+  } finally {
+    stopRooted();
+  }
+
+  const consumed = randomUuid().slice(0, 8);
+  const consumers = await productionTurnConsumers(live, consumed);
+  try {
+    const withConsumers = await measure(async () => {
+      await agentTurn(live, consumed);
+    });
+    const stopPerPath = live.watch({ paths: ['agent'], recursive: true }, noop);
+    let withPerPath: WorkerMeasurement;
+    try {
+      withPerPath = await measure(async () => {
+        await agentTurn(live, randomUuid().slice(0, 8));
+      });
+    } finally {
+      stopPerPath();
+    }
+    return {
+      ...measured,
+      extra: {
+        ...measured.extra,
+        watchDeliveries: measured.productionCounters['watch.changeSets'] ?? 0,
+        consumers: consumers.count,
+        consumerChangeSets: withConsumers.productionCounters['watch.changeSets'] ?? 0,
+        pathWatchDeliveries: withConsumers.productionCounters['watch.pathEvents'] ?? 0,
+        armedPathWatchDeliveries: withPerPath.productionCounters['watch.pathEvents'] ?? 0,
+      },
+    };
+  } finally {
+    consumers.dispose();
+  }
+};
+
 const run = async (runner: RunnerName, projectId: string, parameters: Readonly<Record<string, number>>) => {
   const live = rootedFor(projectId);
   const { entries } = fixturePlan();
@@ -544,41 +679,7 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
       });
     }
     case 'agent-write': {
-      /* One agent turn: the model's fifty parallel write calls, dispatched
-       * together through the host's RPC filesystem as one task issues them. */
-      /* The gate counts what a consumer of the rooted watch receives in the
-       * change-set form (D6), the form every production consumer of the hot
-       * write path registers; per-path deliveries are counted by production's
-       * own `watch.pathEvents` counter and gated at zero. */
-      let deliveries = 0;
-      const stop = live.watchChangeSets!({ paths: [''], recursive: true }, () => {
-        deliveries += 1;
-      });
-      const turn = randomUuid().slice(0, 8);
-      const tally: AgentTally = { readdirCalls: 0, reads: 0, binaryBytesRead: 0, textBytesRead: 0 };
-      const fileSystem = agentFileSystem(live, tally);
-      const text = new TextDecoder();
-      try {
-        const measured = await measure(async () => {
-          await Promise.all(
-            Array.from({ length: 50 }, async (_, index) =>
-              fileSystem.writeFile(`agent/${turn}/file-${String(index)}.ts`, text.decode(saveText(2048, index))),
-            ),
-          );
-          return {};
-        });
-        await quiet(300);
-        return {
-          ...measured,
-          extra: {
-            ...measured.extra,
-            watchDeliveries: deliveries,
-            pathWatchDeliveries: measured.productionCounters['watch.pathEvents'] ?? 0,
-          },
-        };
-      } finally {
-        stop();
-      }
+      return agentTurns(live);
     }
     case 'grep-glob': {
       return measure(async () => grepAndGlob(live));

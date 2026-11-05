@@ -33,8 +33,7 @@ Do not send ambiguous raw paths or probe multiple guessed workspace keys.
 
 ### 3. Use the defined read tiers
 
-- Tier 0 reads a copy from the shared file pool when available.
-- Tier 1 uses the `fs/*` JSON-RPC bridge when Tier 0 misses.
+- Tier 1 uses the `fs/*` JSON-RPC bridge. (There is no Tier 0: the shared file pool it read from was removed.)
 - Tier 2 uses the `@taucad/lsp-fs/sync` SharedArrayBuffer request channel for synchronous TypeScript language-service probes.
 
 Tier 2 is TypeScript-worker infrastructure. Other language contributions must not add blocking reads without an explicit architecture change and cross-origin-isolation support.
@@ -83,7 +82,7 @@ Before applying a semantic workspace edit, verify every target against the exact
 
 ### 11. Test each boundary
 
-Cover URI normalization, Tier 0 and Tier 1 fallback, Tier 2 closed-file reads, version lookup, synthetic dependency directories, worker boot ordering, lazy activation, and disposal. Use the smallest real worker integration needed to prove the browser boundary.
+Cover URI normalization, Tier 1 reads, Tier 2 closed-file reads, version lookup, synthetic dependency directories, worker boot ordering, lazy activation, and disposal. Use the smallest real worker integration needed to prove the browser boundary.
 
 ## Ownership
 

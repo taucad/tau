@@ -93,7 +93,7 @@ Use the path grammar owned by the boundary. Authority routing uses `resolveAutho
 
 ### Rule 0c: Preserve full write and watch semantics inside the view
 
-A rooted view supports the same authored-data writes, queues, cache invalidation, persistence, and events as global WFS operations. Do not add cache-only writes, read-only source trees, or generic path allowlists. Apply only the canonical host-record protection in [filesystem authority Rule 15](filesystem-authority-policy.md#15-rooted-views-are-the-runtime-reachability-boundary), covering all mutation routes without duplicating its ownership rules here. Rebase watch requests and emitted events to the capability-local namespace (`''`, `main.ts`, `lib/part.ts`), and never deliver sibling-project events. Scoped runtime bridges use transfer/copy delivery and must not receive the authority-global shared file pool, because a pool hit would bypass rooted RPC dispatch.
+A rooted view supports the same authored-data writes, queues, cache invalidation, persistence, and events as global WFS operations. Do not add cache-only writes, read-only source trees, or generic path allowlists. Apply only the canonical host-record protection in [filesystem authority Rule 15](filesystem-authority-policy.md#15-rooted-views-are-the-runtime-reachability-boundary), covering all mutation routes without duplicating its ownership rules here. Rebase watch requests and emitted events to the capability-local namespace (`''`, `main.ts`, `lib/part.ts`), and never deliver sibling-project events. Scoped runtime bridges receive file bytes only by transfer or copy through rooted RPC dispatch; there is no shared file pool, and none may be added that a read could hit without that dispatch.
 
 A rooted view preserves the exact canonical virtual paths carried by concrete create, change, delete, and rename events regardless of backing-filesystem naming semantics. It must not lowercase, normalize Unicode, infer aliases, or widen a concrete event to `reset`. Only explicit information-loss signals—such as overflow, observer `unknown`/`errored`, stale-root detection, backend replacement, or an irreducibly summarized change—use reset recovery. Preserve the hidden mutation origin through rooted writes and suppress only the originating scoped port's echo.
 
@@ -161,7 +161,7 @@ If a future backend reintroduces parent-directory read-modify-write metadata, us
 
 Implement batch and composite mutations by delegating each resource to the canonical primitive mutation unless the provider exposes a real transaction contract. Every committed resource must retain the primitive's path normalization, mount/backend resolution, queue and cross-tab lock, writer-owned cache invalidation, in-memory index update, exact change event, and origin metadata.
 
-Delivery coalescers may batch exact mutation facts after commit. They must not replace affected paths with a lossy root-directory summary.
+Delivery coalescers may batch exact mutation facts after commit, and may merge the change sets of one delivery window into one (D6). They must not replace affected paths with a lossy root-directory summary. A merge that cannot stay exact (an entry bound, or a member that already carries a reset) becomes an explicit `ChangeSetReset` scoped to the common ancestor of everything it merged, never a silent truncation. Merging keeps order where order carries meaning: moves stay in place, and a deleted directory is never folded into a later create at the same path, so a consumer still learns the old directory's descendants are gone. When one changeset replaces two watched ancestors, the reset covers both.
 
 **Why**: A successful provider write is incomplete while writer caches retain old bytes or exact-path watchers cannot observe the committed path.
 
@@ -264,6 +264,8 @@ Implement and maintain two distinct watch planes:
 
 Do not mix these planes into a single coarse "watch everything" stream.
 
+Both planes, and every other consumer on the hot write path (the Files tree and open documents through `WorkerChangeChannel`, a kernel's dependency watch through the runtime's worker-filesystem proxy, and the agent host's chat-log observation), register in the change-set form (Rule 19a), so an agent turn of fifty writes reaches each consumer once rather than fifty times. The per-path form remains for a source that answers the change-set form with `ENOTSUP`.
+
 ```mermaid
 flowchart LR
     FileServiceWrite["WorkspaceFileService mutation"]
@@ -292,6 +294,10 @@ flowchart LR
 - `excludes`: optional exclude patterns
 
 `watch()` must return an unsubscribe function (`() => void`) and be wrappable into `Disposable` via `toDisposable`, per `library-api-policy.md`.
+
+### Rule 19a: The change-set form delivers one change set per committed changeset
+
+`watchChangeSets(request, handler)` takes the same request and delivers one `ChangeSet` per committed changeset that reaches the watched paths, carrying only the facts the request admits (or one per frame with `coalesce: 'frame'`). Includes and excludes match the same globs as `watch()`, and excludes are applied first. Loss of exactness is an explicit `reset` with a prefix and a reason (`overflow`, `observer-uncertain`, `topology`, `sequence-gap`, `permission-lost`), never an empty or partial set. Across a bridge the form crosses the wire as one frame; a connection whose handlers have no change-set watch refuses it with `ENOTSUP`, and the client (`watchByChangeSets`) falls back to the per-path form. A rooted or composed view rebases the set's paths and reset prefix to its own namespace and masks what its consumer may not see.
 
 ### Rule 20: Watch requests must be deduplicated and ref-counted
 
@@ -366,7 +372,7 @@ External changes (outside Tau writes) are handled in this order:
 
 Treat `FileSystemObserver` as progressive enhancement, not a universal baseline.
 
-Every successful local or remote mutation, and every concrete observer event, enters the same invalidation plane: invalidate shared file-pool bytes and provider/file-tree projections, repair a DirectIDB index miss from backing storage when necessary, emit the ordinary change event, and refresh discovery when a project manifest may have appeared or disappeared. Web Locks serialize multi-path mutations when available; BroadcastChannel notification and invalidation still occur when locks are unavailable.
+Every successful local or remote mutation, and every concrete observer event, enters the same invalidation plane: invalidate provider and file-tree projections, repair a DirectIDB index miss from backing storage when necessary, emit the ordinary change event, and refresh discovery when a project manifest may have appeared or disappeared. Web Locks serialize multi-path mutations when available; BroadcastChannel notification and invalidation still occur when locks are unavailable.
 
 Apply remote facts in arrival order. Resolve only an already registry-owned provider by `storageRootKey`; notification data must not instantiate a provider. Build refreshed provider metadata off to the side and swap it only after successful hydration; a refresh failure emits `backendChanged` through the same channel consumed by kernel, tree, and fs-client caches. One `EventCoalescer` is the only bounded queue in the worker delivery path.
 
@@ -421,6 +427,7 @@ Expose watcher diagnostics from worker internals:
 - queue depth and coalescing window stats
 - dropped/overflow event counters
 - average and p95 delivery latency
+- per-form delivery counters: `watch.changeSets` (change sets delivered, one per handler) and `watch.pathEvents` (per-path events delivered, one per handler). The filesystem scenario S8 gates both: one change set to a rooted watch for an agent turn, and no per-path delivery with the production consumers registered.
 
 A watcher path that cannot be observed cannot be trusted at scale.
 

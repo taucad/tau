@@ -5,7 +5,7 @@ import { recordChannelDiagnostic } from '#db/channel-diagnostics.js';
  * the origin's tabs by M2 inside the browser chat store; nothing here elects, forwards or tails.
  */
 
-import { ResourceQueue } from '@taucad/filesystem';
+import { ResourceQueue, watchByChangeSets } from '@taucad/filesystem';
 import type { FileSystemProvider } from '@taucad/filesystem';
 import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { toRpcError } from '@taucad/chat/rpc';
@@ -816,7 +816,6 @@ const composeProjectHost = async (
           : { kind: 'opfs', directory: opfs },
       observeLog: async ({ path, signal, onChange, onError }) => {
         let released = false;
-        const { watchByChangeSets } = await import('@taucad/filesystem');
         /* A peer's append storm on this log arrives once per committed changeset (D6, D23). */
         const subscription = watchByChangeSets(projectRoot, { paths: [path] }, onChange);
         const release = (): void => {

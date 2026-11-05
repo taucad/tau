@@ -237,6 +237,7 @@ describe('boundedProjectFileTree', () => {
     name: path.split('/').pop()!,
     type: 'file',
     size: 1,
+    contentKind: 'binary',
     mtimeMs: 1,
     isLoaded: false,
   });

@@ -40,7 +40,7 @@ describe('project discovery and chat membership watch only their kinds (D18)', (
           ]),
         ),
       );
-      await writer.appendFile('projects/p1/.tau/chats/c1/events/segment-0001.jsonl', '{}\n');
+      await writer.appendFile!('projects/p1/.tau/chats/c1/events/segment-0001.jsonl', '{}\n');
       await writer.writeFile('projects/p1/.tau/cache/tau.json', '{}');
 
       expect(pathsOf(manifests)).toContain('projects/p1/tau.json');

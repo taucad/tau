@@ -434,7 +434,7 @@ describe('createViewerFileDataSource', () => {
         listDirectory: async () => {
           throw failure;
         },
-        searchFiles: async () => [],
+        searchFilesDebounced: async () => [],
         getTreeSnapshot: () => new Map(),
       },
       capabilities,

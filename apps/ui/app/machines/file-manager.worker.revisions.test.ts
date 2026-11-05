@@ -264,14 +264,22 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
         },
       }),
       {
+        /* The queue is a `.git` record: it is written through the private store, off the pipeline (I6). */
         wrapFileSystem: (filesystem) => ({
           ...filesystem,
-          writeFile: async (path, data) => {
-            if (refuseQueue && path.startsWith('.git/sync-pending')) {
-              throw new Error('Pending queue storage is full.');
-            }
-            await filesystem.writeFile(path, data);
-          },
+          ...(filesystem.privateStore === undefined
+            ? {}
+            : {
+                privateStore: {
+                  ...filesystem.privateStore,
+                  writeFile: async (path, data) => {
+                    if (refuseQueue && path.startsWith('.git/sync-pending')) {
+                      throw new Error('Pending queue storage is full.');
+                    }
+                    await filesystem.privateStore!.writeFile(path, data);
+                  },
+                },
+              }),
         }),
       },
     );

@@ -445,7 +445,8 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
   {
     id: 'S19',
     title: 'Grep while saving and reading',
-    model: 'S12 grep while a 1 MiB save (S7) lands and a viewer reads one file every 20 ms, all on one authority.',
+    model:
+      'S12 grep while a 1 MiB save (S7) lands and a viewer reads one file every 20 ms, all on one authority; the viewer keeps reading until the sample holds at least 40 reads, so p95 is a percentile and not the slowest read.',
     times: [
       { metric: 'saveLatency', limit: 100, description: 'S7 unchanged' },
       { metric: 'readP95', limit: 200, description: 'reads p95 ≤ 200 ms' },

@@ -407,6 +407,12 @@ let probe:
   | { stop: () => void; done: Promise<void>; latencies: number[]; reads: number; invalidations: number; events: number }
   | undefined;
 
+/* S19's viewer: one read every 20 ms, and at least 40 reads a sample, so its p95 is never just the maximum. */
+const s19ReadInterval = 20;
+const s19MinimumReads = 40;
+/** Reads the running probe has timed (none running: the sample is as full as it gets). */
+const probeReads = (): number => (probe === undefined ? s19MinimumReads : probe.latencies.length);
+
 const startProbe = (projectId: string, readInterval: number): void => {
   const live = rootedFor(projectId);
   const target = fixturePlan().entries.find((entry) => entry.kind === 'text' && entry.path !== '.gitattributes');
@@ -699,13 +705,19 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
     }
     case 'grep-with-save-and-reads': {
       return measure(async () => {
-        startProbe(projectId, 20);
+        startProbe(projectId, s19ReadInterval);
         const grepping = grepAndGlob(live);
         await quiet(parameters['saveDelay'] ?? 20);
         const saveStart = performance.now();
         await live.writeFile('src/s19-save.ts', saveText(saveSize, 19));
         const saveLatency = performance.now() - saveStart;
         const grep = await grepping;
+        /* A p95 over a dozen reads is the slowest one: the viewer keeps reading
+         * until the sample holds enough reads for the percentile to be one. */
+        while (probeReads() < s19MinimumReads) {
+          // oxlint-disable-next-line no-await-in-loop -- the probe's own cadence fills the sample.
+          await quiet(s19ReadInterval);
+        }
         const reads = await stopProbe();
         return {
           grepDuration: grep.grepDuration,

@@ -449,7 +449,15 @@ export class MutationPipeline {
     context?: WorkspaceMutationContext,
   ): Promise<ChangesetEntryReceipt> {
     const origin = context?.originClientId ?? '';
-    const prepared = this._prepare(resolved);
+    let prepared: PreparedEntry;
+    try {
+      /* A refusal of this entry alone is its own receipt: it never joins, and so
+       * never fails, the changeset its neighbours coalesce into. */
+      prepared = this._prepare(resolved);
+      this._assertEntryAdmissible(prepared);
+    } catch (error) {
+      return { index: 0, outcome: 'failed', error };
+    }
     const occupancy = occupancyOf(prepared);
     let pending = this._pending.get(origin);
     if (
@@ -488,6 +496,10 @@ export class MutationPipeline {
    * for a caller that already holds a lifecycle fence over the whole subtree
    * and publishes its own invalidation (a pending project commit).
    *
+   * A chunk with an entry that did not apply ends the run: its callers treat
+   * any failure as the whole operation's, so the entries after it are
+   * answered `failed`, never attempted, rather than written into an operation already lost.
+   *
    * @param provider - The provider.
    * @param entries - Entries in provider paths, in order; each chunk is one batch.
    * @returns One receipt per entry.
@@ -508,8 +520,16 @@ export class MutationPipeline {
       }
       const chunk = entries.slice(start, end);
       // oxlint-disable-next-line no-await-in-loop -- each bounded chunk is one batch, in order.
-      receipts.push(...(await (provider.applyBatch?.(chunk) ?? applyBatchWithPrimitives(provider, chunk))));
+      const chunkReceipts = await (provider.applyBatch?.(chunk) ?? applyBatchWithPrimitives(provider, chunk));
+      receipts.push(...chunkReceipts);
       start = end;
+      if (chunkReceipts.some(({ outcome }) => outcome !== 'applied')) {
+        break;
+      }
+    }
+    const notAttempted = new Error('Not attempted: an earlier batch of this run did not apply.');
+    for (let index = start; index < entries.length; index += 1) {
+      receipts.push({ outcome: 'failed', error: notAttempted });
     }
     return receipts;
   }
@@ -1312,6 +1332,80 @@ export class MutationPipeline {
     };
   }
 
+  public async rmdirRecursive(provider: FileSystemProvider, directoryPath: string): Promise<void> {
+    const entries = await readDirectoryEntries(provider, directoryPath);
+    for (const entry of entries) {
+      const fullPath = joinRelativePath(directoryPath, entry.name);
+      // oxlint-disable-next-line no-await-in-loop -- Sequential traversal required for recursive deletion
+      await (entry.kind === 'dir' ? this.rmdirRecursive(provider, fullPath) : provider.unlink(fullPath));
+    }
+    await provider.rmdir(directoryPath);
+  }
+
+  /**
+   * Remove either a file or a directory recursively from `provider`. Used to
+   * clear a successfully copied cross-provider move source and to remove
+   * project-directory contents while preserving the manifest until last.
+   *
+   * @param provider - Provider that owns the path being removed.
+   * @param path     - Provider-relative absolute path.
+   */
+  public async removeRecursive(provider: FileSystemProvider, path: string): Promise<void> {
+    const targetStat = await provider.stat(path);
+    // oxlint-disable-next-line unicorn/prefer-ternary -- explicit if/else preserves the dir-vs-file branch order so call sites can reason about the recursive walk symmetrically.
+    if (targetStat.type === 'dir') {
+      await this.rmdirRecursive(provider, path);
+    } else {
+      await provider.unlink(path);
+    }
+  }
+
+  /**
+   * Walk a directory into its files and directories, keyed relative to it.
+   *
+   * @param provider - Provider to enumerate and read through.
+   * @param path     - Provider-relative directory path.
+   * @returns File bytes keyed by relative path, and the relative directories walked.
+   */
+  public async directoryContents(
+    provider: {
+      readdir(path: string): Promise<string[]>;
+      stat(path: string): Promise<FileStat>;
+      readdirEntries?(path: string): Promise<DirectoryEntry[]>;
+      readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
+    },
+    path: string,
+    options?: Pick<WalkOptions, 'admits'>,
+  ): Promise<{
+    files: Record<string, Uint8Array<ArrayBuffer>>;
+    directories: string[];
+  }> {
+    const files: Record<string, Uint8Array<ArrayBuffer>> = {};
+    const directories: string[] = [];
+
+    const collect = async (currentPath: string, basePath: string): Promise<void> => {
+      const entries = await readDirectoryEntries(provider, currentPath);
+      for (const entry of entries) {
+        const fullPath = joinRelativePath(currentPath, entry.name);
+        const relativePath = basePath === '' ? fullPath : fullPath.slice(basePath.length + 1);
+        if (options?.admits?.(relativePath, entry.kind) === false) {
+          continue;
+        }
+        if (entry.kind === 'file') {
+          // oxlint-disable-next-line no-await-in-loop -- Sequential reads required for recursive collection
+          files[relativePath] = await provider.readFile(fullPath);
+        } else {
+          directories.push(relativePath);
+          // oxlint-disable-next-line no-await-in-loop -- Sequential traversal required for recursive collection
+          await collect(fullPath, basePath);
+        }
+      }
+    };
+
+    await collect(path, path);
+    return { files, directories };
+  }
+
   /**
    * Hold `claims` across tabs and in this realm's queue while `operation` runs.
    *
@@ -1434,15 +1528,32 @@ export class MutationPipeline {
         throw errnoError('EINVAL', `changeset entries of one phase overlap at '${conflict}'`);
       }
       admission.admit(occupancy);
-      if (prepared.batch.op === 'delete' && prepared.batch.kind !== 'file') {
-        this._assertNoDescendantMounts(prepared.path, 'recursive remove');
-      }
-      if (prepared.batch.op === 'move') {
-        this._assertNoDescendantMounts(prepared.path, 'move');
-        this._assertNoDescendantMounts(prepared.target!, 'move');
-      }
+      this._assertEntryAdmissible(prepared);
       return prepared;
     });
+  }
+
+  /**
+   * Refuse one entry on its own grounds, before it joins a changeset: a
+   * recursive delete or a move that would cross a mount boundary, or a path its
+   * lock claims cannot name (outside its authority root, or not rooted).
+   *
+   * @param prepared - The entry.
+   */
+  private _assertEntryAdmissible(prepared: PreparedEntry): void {
+    if (prepared.batch.op === 'delete' && prepared.batch.recursive === true) {
+      this._assertNoDescendantMounts(prepared.path, 'recursive remove');
+    }
+    if (prepared.batch.op === 'move') {
+      this._assertNoDescendantMounts(prepared.path, 'move');
+      this._assertNoDescendantMounts(prepared.target!, 'move');
+    }
+    this.lockClaims([
+      { path: prepared.path, resolution: prepared.resolution },
+      ...(prepared.target === undefined
+        ? []
+        : [{ path: prepared.target, resolution: prepared.targetResolution ?? prepared.resolution }]),
+    ]);
   }
 
   /**
@@ -1809,80 +1920,6 @@ export class MutationPipeline {
         tagEventAuthorities(event, authorities, globallyVisible);
       }
     }
-  }
-
-  public async rmdirRecursive(provider: FileSystemProvider, directoryPath: string): Promise<void> {
-    const entries = await readDirectoryEntries(provider, directoryPath);
-    for (const entry of entries) {
-      const fullPath = joinRelativePath(directoryPath, entry.name);
-      // oxlint-disable-next-line no-await-in-loop -- Sequential traversal required for recursive deletion
-      await (entry.kind === 'dir' ? this.rmdirRecursive(provider, fullPath) : provider.unlink(fullPath));
-    }
-    await provider.rmdir(directoryPath);
-  }
-
-  /**
-   * Remove either a file or a directory recursively from `provider`. Used to
-   * clear a successfully copied cross-provider move source and to remove
-   * project-directory contents while preserving the manifest until last.
-   *
-   * @param provider - Provider that owns the path being removed.
-   * @param path     - Provider-relative absolute path.
-   */
-  public async removeRecursive(provider: FileSystemProvider, path: string): Promise<void> {
-    const targetStat = await provider.stat(path);
-    // oxlint-disable-next-line unicorn/prefer-ternary -- explicit if/else preserves the dir-vs-file branch order so call sites can reason about the recursive walk symmetrically.
-    if (targetStat.type === 'dir') {
-      await this.rmdirRecursive(provider, path);
-    } else {
-      await provider.unlink(path);
-    }
-  }
-
-  /**
-   * Walk a directory into its files and directories, keyed relative to it.
-   *
-   * @param provider - Provider to enumerate and read through.
-   * @param path     - Provider-relative directory path.
-   * @returns File bytes keyed by relative path, and the relative directories walked.
-   */
-  public async directoryContents(
-    provider: {
-      readdir(path: string): Promise<string[]>;
-      stat(path: string): Promise<FileStat>;
-      readdirEntries?(path: string): Promise<DirectoryEntry[]>;
-      readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
-    },
-    path: string,
-    options?: Pick<WalkOptions, 'admits'>,
-  ): Promise<{
-    files: Record<string, Uint8Array<ArrayBuffer>>;
-    directories: string[];
-  }> {
-    const files: Record<string, Uint8Array<ArrayBuffer>> = {};
-    const directories: string[] = [];
-
-    const collect = async (currentPath: string, basePath: string): Promise<void> => {
-      const entries = await readDirectoryEntries(provider, currentPath);
-      for (const entry of entries) {
-        const fullPath = joinRelativePath(currentPath, entry.name);
-        const relativePath = basePath === '' ? fullPath : fullPath.slice(basePath.length + 1);
-        if (options?.admits?.(relativePath, entry.kind) === false) {
-          continue;
-        }
-        if (entry.kind === 'file') {
-          // oxlint-disable-next-line no-await-in-loop -- Sequential reads required for recursive collection
-          files[relativePath] = await provider.readFile(fullPath);
-        } else {
-          directories.push(relativePath);
-          // oxlint-disable-next-line no-await-in-loop -- Sequential traversal required for recursive collection
-          await collect(fullPath, basePath);
-        }
-      }
-    };
-
-    await collect(path, path);
-    return { files, directories };
   }
 
   private _recordCompletedWrite({

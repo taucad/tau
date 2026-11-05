@@ -471,6 +471,10 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    * or the new ones, never a torn file. Every other entry takes the provider's
    * own primitives — native recursive removal and native move.
    *
+   * A write that fails leaves nothing it created behind: its file is removed
+   * at once, and once the batch settles, every directory the batch created
+   * that is still empty is removed deepest first, as `writeFile` does.
+   *
    * @param entries - One phase's entries for this provider, in provider paths.
    * @param options - The changeset's abort signal.
    * @returns One receipt per entry, in entry order.
@@ -478,6 +482,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
   public override async applyBatch(entries: readonly BatchEntry[], options?: BatchOptions): Promise<BatchReceipt[]> {
     this._assertReady();
     const directories = new Map<string, Promise<FileSystemDirectoryHandle>>();
+    const createdDirectories: string[] = [];
     const openForWrite = async (path: string): Promise<FileSystemDirectoryHandle> => {
       if (path === '') {
         return this._rootHandle;
@@ -490,21 +495,38 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
         pending = (async () => {
           const handle = await openForWrite(parent);
           try {
-            return await handle.getDirectoryHandle(name, { create: true });
+            return await handle.getDirectoryHandle(name);
           } catch (error) {
-            throw hasDomName(error, 'TypeMismatchError') ? this._enotdir(path) : error;
+            if (hasDomName(error, 'TypeMismatchError')) {
+              throw this._enotdir(path);
+            }
+            if (!hasDomName(error, 'NotFoundError')) {
+              throw error;
+            }
           }
+          const created = await handle.getDirectoryHandle(name, { create: true });
+          createdDirectories.push(path);
+          return created;
         })();
         directories.set(path, pending);
       }
       return pending;
     };
-    return runBatch(
+    const receipts = await runBatch(
       entries,
       async (entry) =>
         entry.op === 'write' ? this._applyBatchWrite(entry, openForWrite) : applyEntryWithPrimitives(this, entry),
       options,
     );
+    if (createdDirectories.length > 0 && receipts.some(({ outcome }) => outcome !== 'applied')) {
+      // Deepest first; a directory that holds anything (a write that landed)
+      // refuses the non-recursive removal and stays.
+      for (const path of createdDirectories.toSorted((a, b) => b.split('/').length - a.split('/').length)) {
+        // oxlint-disable-next-line no-await-in-loop -- Cleanup must proceed from deepest child to parent.
+        await this._removeEntry(path, false).catch(() => undefined);
+      }
+    }
+    return receipts;
   }
 
   /**
@@ -680,6 +702,24 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       }
       throw error;
     }
+  }
+
+  /**
+   * Publish a batch create's bytes at a path known to be absent without ever
+   * creating the file empty first, so a realm killed mid-write leaves the path
+   * absent rather than holding an empty file (I1). A provider that can stage
+   * the bytes elsewhere and move them into place overrides this; the default
+   * cannot and answers `false`, and the caller creates the file and writes it.
+   *
+   * @param _data - The bytes, in hand or staged.
+   * @param _destination - The target's directory and name.
+   * @returns Whether the file now holds the bytes.
+   */
+  protected async _publishCreatedFile(
+    _data: Uint8Array<ArrayBuffer> | Blob,
+    _destination: Readonly<{ directory: FileSystemDirectoryHandle; name: string }>,
+  ): Promise<boolean> {
+    return false;
   }
 
   /**
@@ -989,8 +1029,9 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
   }
 
   /**
-   * One batch write: the parent from the batch's memo, one handle lookup that
-   * creates the file when absent, then the bytes.
+   * One batch write: the parent from the batch's memo, one handle lookup (and
+   * a second that creates the file when absent), then the bytes. A file this
+   * entry created is removed again when the bytes do not land.
    *
    * @param entry - The write entry.
    * @param openForWrite - The batch's directory memo, creating missing parents.
@@ -1001,6 +1042,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     openForWrite: (path: string) => Promise<FileSystemDirectoryHandle>,
   ): Promise<BatchReceipt> {
     let began = false;
+    let createdFile = false;
     try {
       const segments = this._splitPath(entry.path);
       const name = segments.pop();
@@ -1021,16 +1063,48 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
           }
         }
       }
-      let fileHandle: FileSystemFileHandle;
-      try {
-        fileHandle = await directory.getFileHandle(name, { create: true });
-      } catch (error) {
-        throw hasDomName(error, 'TypeMismatchError') ? this._eisdir(entry.path) : error;
+      if (entry.create === true) {
+        began = true;
+        if (await this._publishCreatedFile(entry.data, { directory, name })) {
+          return { outcome: 'applied', kind: 'file', created: true };
+        }
+        began = false;
+      }
+      let fileHandle: FileSystemFileHandle | undefined;
+      if (entry.create !== true) {
+        try {
+          fileHandle = await directory.getFileHandle(name);
+        } catch (error) {
+          if (hasDomName(error, 'TypeMismatchError')) {
+            throw this._eisdir(entry.path);
+          }
+          if (!hasDomName(error, 'NotFoundError')) {
+            throw error;
+          }
+        }
+      }
+      if (fileHandle === undefined) {
+        try {
+          fileHandle = await directory.getFileHandle(name, { create: true });
+        } catch (error) {
+          throw hasDomName(error, 'TypeMismatchError') ? this._eisdir(entry.path) : error;
+        }
+        createdFile = true;
       }
       began = true;
       await this._writeBatchData(fileHandle, entry.data, { directory, name });
       return { outcome: 'applied', kind: 'file', ...(entry.create === true ? { created: true } : {}) };
     } catch (error) {
+      if (createdFile) {
+        // The file did not exist before this entry: leave no empty or partial
+        // file behind, so the path is absent, as it was.
+        try {
+          await this._removeEntry(entry.path, false);
+          return { outcome: 'failed', error };
+        } catch {
+          return { outcome: 'uncertain', error };
+        }
+      }
       return !began || isRefusal(error) ? { outcome: 'failed', error } : { outcome: 'uncertain', error };
     }
   }

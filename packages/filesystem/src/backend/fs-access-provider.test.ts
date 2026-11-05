@@ -902,4 +902,31 @@ describe('FileSystemAccessProvider', () => {
       });
     });
   });
+
+  describe('applyBatch', () => {
+    it('should leave no file or parent a failed write created, and keep what landed', async () => {
+      await provider.writeFile('existing.txt', 'old');
+      const writeError = new Error('the writable did not commit');
+      const target = provider as unknown as { _writeBatchData: (handle: { name: string }) => Promise<void> };
+      const original = target._writeBatchData.bind(provider);
+      vi.spyOn(target, '_writeBatchData').mockImplementation(async (...args) => {
+        if (args[0].name === 'new.txt' || args[0].name === 'existing.txt') {
+          throw writeError;
+        }
+        return original(...args);
+      });
+      const bytes = (value: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(value);
+
+      const receipts = await provider.applyBatch([
+        { op: 'write', path: 'fresh/deep/new.txt', data: bytes('new') },
+        { op: 'write', path: 'fresh/ok.txt', data: bytes('ok') },
+        { op: 'write', path: 'existing.txt', data: bytes('new') },
+      ]);
+
+      expect(receipts.map(({ outcome }) => outcome)).toEqual(['failed', 'applied', 'uncertain']);
+      await expect(provider.exists('fresh/deep')).resolves.toBe(false);
+      await expect(provider.readFile('fresh/ok.txt', 'utf8')).resolves.toBe('ok');
+      await expect(provider.readFile('existing.txt', 'utf8')).resolves.toBe('old');
+    });
+  });
 });

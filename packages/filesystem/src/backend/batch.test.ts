@@ -140,6 +140,18 @@ describe('applyEntryWithPrimitives', () => {
     await expect(provider.exists('dir')).resolves.toBe(false);
   });
 
+  it('should report a recursive delete that failed partway as uncertain, even on a refusal', async () => {
+    const provider = new MemoryProvider();
+    await provider.mkdir('dir');
+    await provider.writeFile('dir/a.txt', 'a');
+    vi.spyOn(provider, 'rmdir').mockRejectedValueOnce(Object.assign(new Error('ENOTEMPTY'), { code: 'ENOTEMPTY' }));
+
+    await expect(
+      applyEntryWithPrimitives(provider, { op: 'delete', path: 'dir', recursive: true }),
+    ).resolves.toMatchObject({ outcome: 'uncertain', error: { code: 'ENOTEMPTY' } });
+    await expect(provider.exists('dir/a.txt')).resolves.toBe(false);
+  });
+
   it('should refuse a move onto a taken path unless it replaces a file with a file', async () => {
     const provider = new MemoryProvider();
     await provider.writeFile('from.txt', 'new');

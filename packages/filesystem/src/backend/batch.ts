@@ -237,7 +237,12 @@ export const applyEntryWithPrimitives = async (provider: BatchPrimitives, entry:
         if (kind === 'file') {
           await provider.unlink(entry.path);
         } else if (entry.recursive === true) {
-          await removeTree(provider, entry.path);
+          try {
+            await removeTree(provider, entry.path);
+          } catch (error) {
+            /* Children may already be gone, so even a refusal here changed the tree. */
+            return { outcome: 'uncertain', error };
+          }
         } else {
           await provider.rmdir(entry.path);
         }

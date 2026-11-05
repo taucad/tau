@@ -8,6 +8,7 @@ import type { ChangesetEntry } from '#changeset.js';
 import type { ChangeEvent } from '#types.js';
 import type { RootedFileSystem } from '#rooted-views.js';
 import { workerTimings } from '#worker-timings.js';
+import { MemoryProvider } from '#backend/memory-provider.js';
 
 /** A rooted view's `apply`, which every authority view offers. */
 const applyOf = (rooted: RootedFileSystem): NonNullable<RootedFileSystem['apply']> => {
@@ -138,5 +139,27 @@ describe('apply', () => {
     expect(results[0]).toEqual({ status: 'fulfilled', value: undefined });
     expect(results[1]).toMatchObject({ status: 'rejected' });
     await expect(context.service.readFile('/new.txt', 'utf8')).resolves.toBe('new');
+  });
+
+  it('should refuse a recursive remove across a mount alone, never the write coalesced beside it', async () => {
+    await context.service.mkdir('/scope/dir', { recursive: true });
+    context.mountTable.mount('/scope/dir/mounted', new MemoryProvider(), {
+      class: 'authored',
+      backend: 'memory',
+      storageRootKey: 'memory:mounted',
+    });
+    queueForClaims.mockClear();
+
+    const results = await Promise.allSettled([
+      context.service.writeFile('/other.txt', 'other'),
+      context.service.rmdir('/scope/dir', { recursive: true }),
+    ]);
+
+    expect(results[0]).toEqual({ status: 'fulfilled', value: undefined });
+    expect(results[1].status).toBe('rejected');
+    expect(String((results[1] as PromiseRejectedResult).reason)).toContain('mount boundary');
+    expect(queueForClaims).toHaveBeenCalledTimes(1);
+    await expect(context.service.readFile('/other.txt', 'utf8')).resolves.toBe('other');
+    await expect(context.service.exists('/scope/dir')).resolves.toBe(true);
   });
 });

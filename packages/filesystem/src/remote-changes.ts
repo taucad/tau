@@ -132,10 +132,14 @@ export class RemoteChanges {
         facts.push(notification);
       }
     }
+    if (notice.gap === true) {
+      await this._resetEveryStorageRoot(facts);
+      return;
+    }
     const byStorageRoot = Map.groupBy(facts, ({ authority }) => authority.storageRootKey);
     for (const group of byStorageRoot.values()) {
       // oxlint-disable-next-line no-await-in-loop -- storage roots apply in arrival order on the one tail.
-      await (notice.gap === true ? this._resetStorageRoot(group) : this._applyRemoteFacts(group));
+      await this._applyRemoteFacts(group);
     }
   }
 
@@ -151,28 +155,41 @@ export class RemoteChanges {
   }
 
   /**
-   * After a lost notice, nothing this authority holds for the storage root is
-   * trustworthy: drop its projections whole and say so once.
+   * After a lost notice, nothing this authority holds is trustworthy: the lost
+   * notice could have named any storage root, so the facts that did arrive
+   * bound nothing. Refresh every storage root this authority owns, drop its
+   * projections whole, and say so once per backend — even when the notice that
+   * revealed the gap carried only revoked projects.
    *
-   * @param facts - The notice's facts on one storage root.
+   * @param facts - The arriving notice's path facts, whose roots are reset too.
    */
-  private async _resetStorageRoot(
+  private async _resetEveryStorageRoot(
     facts: ReadonlyArray<Exclude<ChangeNotification, { type: 'project-unavailable' }>>,
   ): Promise<void> {
-    const [first] = facts;
-    if (first === undefined) {
-      return;
+    const owned = this._registry.ownedStorageRootKeys();
+    await Promise.all(
+      owned.map(async (storageRootKey) => {
+        try {
+          const provider = await this._registry.getOwnedProvider(storageRootKey);
+          await provider?.refresh?.();
+        } catch {
+          // The reset below is the answer to a refresh that failed as well.
+        }
+      }),
+    );
+    const backends = new Set<FileSystemBackend>([
+      ...this._mountTable.listMounts().flatMap((mount) => (mount.storageRootKey === undefined ? [] : [mount.backend])),
+      ...owned.map((storageRootKey) => this._backendForPhysicalAuthority({ storageRootKey, providerBasePath: '' })),
+      ...facts.map(({ authority }) => this._backendForPhysicalAuthority(authority)),
+    ]);
+    this._filePool()?.clear();
+    this._treeIndexes.clear();
+    if (backends.size === 0) {
+      this._watchRegistry.emitResetAll();
     }
-    const pendingProvider = this._registry.getOwnedProvider(first.authority.storageRootKey);
-    if (pendingProvider !== undefined) {
-      try {
-        const provider = await pendingProvider;
-        await provider.refresh?.();
-      } catch {
-        // The reset below is the answer to a refresh that failed as well.
-      }
+    for (const backend of backends) {
+      this._pipeline.emitChangeEvent({ type: 'backendChanged', backend });
     }
-    this._handleRemoteFailure(first);
   }
 
   /**

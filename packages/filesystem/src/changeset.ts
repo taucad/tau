@@ -42,7 +42,10 @@ export type ChangesetWriteData = Uint8Array<ArrayBuffer> | Blob | ReadableStream
  * - `write` replaces or creates a file, creating missing parents. `create`
  *   refuses with `EEXIST` when anything is already at the path.
  * - `append` appends at the file's current length under an exclusive handle;
- *   appends to one path keep their entry order (D23).
+ *   appends to one path keep their entry order (D23). Appends are ordered
+ *   only, not fenced: no entry carries an expected length or a writer's
+ *   fence token, so two writers' appends to one path interleave by arrival.
+ *   Fenced appends arrive with the agent event log's writer fence (W8).
  * - `delete` removes what is at the path. `kind` refuses the other kind
  *   (`EISDIR`/`ENOTDIR`); a directory needs `recursive` unless it is empty.
  * - `move` renames; `replace` lets a file replace an existing file atomically
@@ -65,7 +68,6 @@ export type ChangesetEntry =
       op: 'append';
       path: string;
       data: Uint8Array<ArrayBuffer> | string;
-      fenced?: boolean;
       phase?: ChangesetPhase;
     }>
   | Readonly<{ op: 'delete'; path: string; kind?: 'file' | 'dir'; recursive?: boolean; phase?: ChangesetPhase }>
@@ -119,7 +121,7 @@ export type ChangesetReceipt = Readonly<{
  */
 export type BatchEntry =
   | Readonly<{ op: 'write'; path: string; data: Uint8Array<ArrayBuffer> | Blob; mode?: FileMode; create?: boolean }>
-  | Readonly<{ op: 'append'; path: string; data: Uint8Array<ArrayBuffer>; fenced?: boolean }>
+  | Readonly<{ op: 'append'; path: string; data: Uint8Array<ArrayBuffer> }>
   | Readonly<{ op: 'delete'; path: string; kind?: 'file' | 'dir'; recursive?: boolean }>
   | Readonly<{ op: 'move'; from: string; to: string; replace?: boolean }>
   | Readonly<{ op: 'mkdir'; path: string; recursive?: boolean }>;

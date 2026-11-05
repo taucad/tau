@@ -75,6 +75,35 @@ describe('OPFSProvider lifecycle', () => {
     provider.dispose();
     await expect(provider.readFile('file.txt')).rejects.toThrow('not initialized');
   });
+
+  it('should sweep a dead owner and keep one that started while the sweep asked for locks', async () => {
+    const root = createMockRootHandle() as unknown as FileSystemDirectoryHandle;
+    const staging = await root.getDirectoryHandle('.tau-staging', { create: true });
+    await staging.getDirectoryHandle('dead-owner', { create: true });
+    vi.stubGlobal('navigator', {
+      storage: { getDirectory: vi.fn().mockResolvedValue(root) },
+      locks: {
+        request: async (_name: string, _options: unknown, callback: () => Promise<void>): Promise<void> => {
+          // The owner lock is held for the realm's lifetime: its callback never settles.
+          await callback();
+        },
+        // An owner that takes its lock and creates its directory after this
+        // query answers is still writing, and must survive the sweep.
+        query: async () => {
+          await staging.getDirectoryHandle('late-owner', { create: true });
+          return { held: [], pending: [] };
+        },
+      },
+    });
+
+    await new OPFSProvider().initialize();
+
+    const left: string[] = [];
+    for await (const [name] of (staging as unknown as { entries(): AsyncIterable<[string, unknown]> }).entries()) {
+      left.push(name);
+    }
+    expect(left).toEqual(['late-owner']);
+  });
 });
 
 describe('OPFS writes via sync access handles', () => {
@@ -375,5 +404,65 @@ describe('OPFS rename via native move', () => {
 
     await expect(provider.exists('created')).resolves.toBe(false);
     await expect(provider.readFile('source.txt', 'utf8')).resolves.toBe('payload');
+  });
+});
+
+describe('OPFS batch creates', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const bytes = (value: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(value);
+
+  it('should stage a create and move it into place, so the path never holds an empty file', async () => {
+    const moved: string[] = [];
+    const root = createMockRootHandle({ nativeMove: true, onMove: (from, to) => moved.push(`${from} to ${to}`) });
+    vi.stubGlobal('navigator', { storage: { getDirectory: vi.fn().mockResolvedValue(root) } });
+    const provider = new OPFSProvider();
+    await provider.initialize();
+    const directory = await root.getDirectoryHandle('dir', { create: true });
+    const getFileHandle = vi.spyOn(directory, 'getFileHandle');
+
+    const [receipt] = await provider.applyBatch([
+      { op: 'write', path: 'dir/new.ts', data: bytes('new'), create: true },
+    ]);
+
+    expect(receipt).toMatchObject({ outcome: 'applied', created: true });
+    expect(moved).toHaveLength(1);
+    expect(moved[0]).toMatch(/ to new\.ts$/u);
+    expect(getFileHandle.mock.calls.some(([, options]) => options?.create === true)).toBe(false);
+    await expect(provider.readFile('dir/new.ts', 'utf8')).resolves.toBe('new');
+  });
+
+  it('should leave a create whose move failed absent', async () => {
+    const root = createMockRootHandle({
+      nativeMove: true,
+      onMove: () => {
+        throw new DOMException('the move did not land', 'UnknownError');
+      },
+    });
+    vi.stubGlobal('navigator', { storage: { getDirectory: vi.fn().mockResolvedValue(root) } });
+    const provider = new OPFSProvider();
+    await provider.initialize();
+
+    const [receipt] = await provider.applyBatch([{ op: 'write', path: 'new.ts', data: bytes('new'), create: true }]);
+
+    expect(receipt?.outcome).not.toBe('applied');
+    await expect(provider.exists('new.ts')).resolves.toBe(false);
+  });
+
+  it('should create in place where the engine cannot move staged files', async () => {
+    const root = createMockRootHandle({ nativeMove: false });
+    vi.stubGlobal('navigator', { storage: { getDirectory: vi.fn().mockResolvedValue(root) } });
+    const provider = new OPFSProvider();
+    await provider.initialize();
+
+    const receipts = await provider.applyBatch([
+      { op: 'write', path: 'a.ts', data: bytes('a'), create: true },
+      { op: 'write', path: 'b.ts', data: bytes('b'), create: true },
+    ]);
+
+    expect(receipts.map(({ outcome }) => outcome)).toEqual(['applied', 'applied']);
+    await expect(provider.readFile('b.ts', 'utf8')).resolves.toBe('b');
   });
 });

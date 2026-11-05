@@ -104,6 +104,15 @@ export class ProviderRegistry {
   }
 
   /**
+   * Every storage root this registry owns a provider for, initialized or not.
+   *
+   * @returns The canonical storage-root keys.
+   */
+  public ownedStorageRootKeys(): string[] {
+    return [...this._providers.keys()];
+  }
+
+  /**
    * Dispose and remove cached standalone providers. When `workspaceId`
    * is supplied for the `webaccess` backend, only that workspace's
    * cached entry is dropped; otherwise every entry for the backend is

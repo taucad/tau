@@ -69,7 +69,6 @@ export const toBatchEntry = (entry: ChangesetEntry, path: string, to?: string): 
         op: 'append',
         path,
         data: typeof entry.data === 'string' ? encoder.encode(entry.data) : entry.data,
-        ...(entry.fenced === undefined ? {} : { fenced: entry.fenced }),
       };
     }
     case 'delete': {

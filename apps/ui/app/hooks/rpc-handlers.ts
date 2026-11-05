@@ -179,21 +179,20 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
     new Uint8Array(await fileManager.readFile(path));
   /* A stat or listing carries content facts only when already known (I3), so
    * a missing one is measured here from one read. This client has no ranged
-   * read to classify from a head, so a listing measures only files within the
-   * byte cap and shows the rest by size alone (D4, EQ15); a single stat counts. */
-  const factsOf = async (path: string, known: StatContentMetadata): Promise<FileContentMetadata> => {
-    if (known.contentKind === 'binary') {
-      return { contentKind: 'binary' };
-    }
-    if (known.contentKind === 'text' && known.lineCount !== undefined) {
-      return { contentKind: 'text', lineCount: known.lineCount };
-    }
-    return getFileContentMetadata(await readFileBytes(path));
-  };
-  const listedFactsOf = async (
+   * read to classify from a head, so a stat or listing measures only files
+   * within the byte cap and shows the rest by size alone (D4, EQ15): no file
+   * larger than the cap is ever read whole for its facts. */
+  const factsOf = async (
     path: string,
     known: StatContentMetadata & Readonly<{ size: number }>,
-  ): Promise<StatContentMetadata> => (known.size > lineCountByteCap ? fileMetadataFields(known) : factsOf(path, known));
+  ): Promise<StatContentMetadata> => {
+    if (known.contentKind === 'binary' || (known.contentKind === 'text' && known.lineCount !== undefined)) {
+      return fileMetadataFields(known);
+    }
+    return known.size > lineCountByteCap
+      ? fileMetadataFields(known)
+      : getFileContentMetadata(await readFileBytes(path));
+  };
   const writeFileIfUnchanged = async (
     path: string,
     expected: Uint8Array<ArrayBuffer>,
@@ -225,22 +224,7 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
       };
     }
     const facts = await factsOf(path, s);
-    return facts.contentKind === 'text'
-      ? {
-          size: s.size,
-          isDirectory: false,
-          createdAt: isoDate,
-          modifiedAt: isoDate,
-          contentKind: 'text',
-          lineCount: facts.lineCount,
-        }
-      : {
-          size: s.size,
-          isDirectory: false,
-          createdAt: isoDate,
-          modifiedAt: isoDate,
-          contentKind: 'binary',
-        };
+    return { size: s.size, isDirectory: false, createdAt: isoDate, modifiedAt: isoDate, ...facts };
   };
 
   return {
@@ -324,7 +308,7 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
           const facts =
             options?.contentFacts === false
               ? fileMetadataFields(entry)
-              : await listedFactsOf(path === '' ? entry.name : `${path}/${entry.name}`, entry);
+              : await factsOf(path === '' ? entry.name : `${path}/${entry.name}`, entry);
           return { ...common, type: 'file', ...facts };
         });
       } catch (error) {

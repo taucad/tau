@@ -422,6 +422,21 @@ describe('rpc-handlers', () => {
       expect(mockFm.workbenchFiles.deleteFileChecked).toHaveBeenCalledTimes(1);
     });
 
+    /* W3 a4: this client has no ranged read, so a stat past the line-count cap reports the size alone. */
+    it('should stat a file past the line-count cap by its size alone, reading none of it', async () => {
+      mockFm.stat.mockResolvedValueOnce({ type: 'file', size: 5_000_000, mtimeMs: 100 });
+
+      const stat = await fileSystem.stat('assets/scan.bin');
+
+      expect(stat).toStrictEqual({
+        size: 5_000_000,
+        isDirectory: false,
+        createdAt: new Date(100).toISOString(),
+        modifiedAt: new Date(100).toISOString(),
+      });
+      expect(mockFm.readFile).not.toHaveBeenCalled();
+    });
+
     it('rejects malformed UTF-8 record bytes with a typed error', async () => {
       mockFm.readFile.mockResolvedValue(new Uint8Array([0xc3, 0x28]));
       await expect(fileSystem.readFile('views/bad.json')).rejects.toMatchObject({ code: 'INVALID_TEXT_ENCODING' });

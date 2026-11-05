@@ -119,7 +119,7 @@ export const readViewerParityReference = (
 /** The nanoraster module under test and where it came from. @public */
 export type ViewerParityRenderer = Readonly<{
   module: ViewerParityNanorasterModule;
-  /** `package nanoraster@<version>` or `checkout <path>`. */
+  /** `package nanoraster@<version>`. */
   source: string;
 }>;
 
@@ -127,7 +127,7 @@ export type ViewerParityRenderer = Readonly<{
 export type ViewerParityNanorasterEntry = Readonly<{
   /** Absolute path of the entry module. */
   entry: string;
-  /** `package nanoraster@<version>` or `checkout <path>`. */
+  /** `package nanoraster@<version>`. */
   source: string;
 }>;
 
@@ -142,54 +142,32 @@ const declaresParityOptions = (version: string): boolean => {
 };
 
 /**
- * Locate the nanoraster under test for one build. `TAU_PARITY_NANORASTER` names a nanoraster checkout, the program
- * branch until its release, built with `pnpm run build:napi` (native) and `pnpm run build:wasm` (WASM). Without it the
- * package `@taucad/image` installs is used, which must be the parity release (0.9.0) or later; an older one cannot
- * accept the viewer-parity options.
+ * Locate the nanoraster under test for one build: the package `@taucad/image` installs, which must be the parity
+ * release (0.9.0) or later; an older one cannot accept the viewer-parity options.
  *
  * The native build is the Node entry (`index.node`), which installs the addon. The WASM build is the universal entry
  * (`index`), the one a browser bundle such as the web app's image worker resolves: it has no addon and renders through
  * the WASM artifact on the page's WebGPU.
  *
- * @param input - The checkout, the Tau checkout and the build.
- * @param input.checkout - `TAU_PARITY_NANORASTER`, if set.
+ * @param input - The Tau checkout and the build.
  * @param input.workspaceRoot - The Tau checkout.
  * @param input.backend - The nanoraster build.
  * @returns The entry module and its source.
  */
 export const resolveViewerParityNanorasterEntry = ({
-  checkout,
   workspaceRoot,
   backend,
 }: Readonly<{
-  checkout: string | undefined;
   workspaceRoot: string;
   backend: ViewerParityBackend;
 }>): ViewerParityNanorasterEntry => {
-  if (checkout) {
-    const root = resolve(checkout);
-    const built = join(
-      root,
-      'src',
-      backend === 'native' ? join('native', 'index.js') : join('wasm', 'render_wasm_bg.wasm'),
-    );
-    if (!existsSync(built)) {
-      throw new Error(
-        `TAU_PARITY_NANORASTER has no ${backend} build: ${built} does not exist; run \`pnpm run build:${backend === 'native' ? 'napi' : 'wasm'}\` there`,
-      );
-    }
-    return {
-      entry: join(root, 'src', backend === 'native' ? 'index.node.ts' : 'index.ts'),
-      source: `checkout ${root}`,
-    };
-  }
   // `require.resolve('nanoraster')` returns the CommonJS stub that throws; locate the ESM builds by path.
   const requireFromImage = createRequire(join(workspaceRoot, 'packages', 'plugins', 'image', 'package.json'));
   const packageJsonPath = requireFromImage.resolve('nanoraster/package.json');
   const { version } = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as { version: string };
   if (!declaresParityOptions(version)) {
     throw new Error(
-      `The installed nanoraster ${version} predates the viewer-parity options (0.9.0); set TAU_PARITY_NANORASTER to a nanoraster checkout built with \`pnpm run build:napi\` and \`pnpm run build:wasm\``,
+      `The installed nanoraster ${version} predates the viewer-parity options (0.9.0); install the catalog's nanoraster with \`pnpm install\``,
     );
   }
   return {
@@ -201,15 +179,11 @@ export const resolveViewerParityNanorasterEntry = ({
 /**
  * Load nanoraster's native build for the Node gate.
  *
- * @param checkout - `TAU_PARITY_NANORASTER`, if set.
  * @param workspaceRoot - The Tau checkout.
  * @returns The module and its source.
  */
-export const loadViewerParityRenderer = async (
-  checkout: string | undefined,
-  workspaceRoot: string,
-): Promise<ViewerParityRenderer> => {
-  const { entry, source } = resolveViewerParityNanorasterEntry({ checkout, workspaceRoot, backend: 'native' });
+export const loadViewerParityRenderer = async (workspaceRoot: string): Promise<ViewerParityRenderer> => {
+  const { entry, source } = resolveViewerParityNanorasterEntry({ workspaceRoot, backend: 'native' });
   const module = (await import(pathToFileURL(entry).href)) as ViewerParityNanorasterModule;
   return { module, source };
 };

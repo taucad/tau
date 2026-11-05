@@ -6,29 +6,26 @@
 # ping 1. Builds everything in a throwaway directory under $TMPDIR and leaves only the log:
 #   1. a detached git worktree of the Tau commit (default FETCH_HEAD); the checkout it runs from is not touched
 #      (no branch, stash, index, hook or working-tree change; the worktree's registration is removed on exit);
-#   2. `pnpm install --frozen-lockfile` there, as CI does, and Playwright's Chromium;
-#   3. nanoraster cloned at the workflow's NANORASTER_PARITY_REF, native addon and WASM built as the workflow's
-#      `Build nanoraster` steps do (rustup toolchain from rust-toolchain.toml, wasm-pack 0.15.0);
-#   4. the fixture GLBs exported from tau-examples source;
-#   5. the viewer references captured on the GPU with TAU_E2E_WEBGPU_PROFILE=hardware: the production
+#   2. `pnpm install --frozen-lockfile` there, as CI does, which installs the catalog's published nanoraster (0.9.0 or
+#      later; the gate refuses an older one), and Playwright's Chromium;
+#   3. the fixture GLBs exported from tau-examples source;
+#   4. the viewer references captured on the GPU with TAU_E2E_WEBGPU_PROFILE=hardware: the production
 #      software-adapter gate is left in place (no I2 mock), and a frame on a software adapter or on WebGL2 fails;
-#   6. the gate: nanoraster native on Metal and WASM in Chromium on the same GPU;
-#   7. one summary line, `parity: <passed>/<fixtures> under 1% (max <x.xxx>%)`.
+#   5. the gate: nanoraster native on Metal and WASM in Chromium on the same GPU;
+#   6. one summary line, `parity: <passed>/<fixtures> under 1% (max <x.xxx>%)`.
 # Progress goes to stderr; everything else goes to the log, whose path is printed first.
 #
 # Usage (in a Tau checkout, any branch, network on):
 #   git fetch origin claude/project-thread-ithsz5 &&
 #     git show FETCH_HEAD:libs/tau-examples/scripts/viewer-parity-hardware.sh | bash -s
-#   bash libs/tau-examples/scripts/viewer-parity-hardware.sh [--ref <commit>] [--nanoraster-ref <commit>]
-#     [--fixtures <name,...>] [--headless] [--keep]
+#   bash libs/tau-examples/scripts/viewer-parity-hardware.sh [--ref <commit>] [--fixtures <name,...>] [--headless]
+#     [--keep]
 #
 # Options:
-#   --ref <commit>             Tau commit to check (default: FETCH_HEAD)
-#   --nanoraster-ref <commit>  nanoraster commit (default: NANORASTER_PARITY_REF in the commit's viewer-parity.yml; when
-#                              the workflow pins none, the gate uses the installed nanoraster package)
-#   --fixtures <name,...>      only these fixtures, by fixtures.json name (default: all)
-#   --headless                 run Chromium headless (default on macOS: headed; two Chromium windows open in turn)
-#   --keep                     keep the work directory for inspection
+#   --ref <commit>         Tau commit to check (default: FETCH_HEAD)
+#   --fixtures <name,...>  only these fixtures, by fixtures.json name (default: all)
+#   --headless             run Chromium headless (default on macOS: headed; two Chromium windows open in turn)
+#   --keep                 keep the work directory for inspection
 #
 # Optional env vars:
 #   TMPDIR                 where the work directory and the log go (default: /tmp)
@@ -39,13 +36,12 @@
 # Exit codes:
 #   0  Every fixture under 1% on the real GPU (native and WASM)
 #   1  Parity failure, a render on a software adapter or WebGL2, or bad arguments
-#   2  A step failed (network, install, build, capture); see the log
+#   2  A step failed (network, install, capture); see the log
 #   3  Missing prerequisite
 
 set -euo pipefail
 
 readonly tau_branch_hint='claude/project-thread-ithsz5'
-readonly wasm_pack_version='0.15.0'
 readonly min_free_gb=6
 
 # Terminal stdout (3) and stderr (4), kept before everything else is sent to the log.
@@ -233,8 +229,8 @@ usage() {
 Usage (in a Tau checkout, any branch, network on):
   git fetch origin claude/project-thread-ithsz5 &&
     git show FETCH_HEAD:libs/tau-examples/scripts/viewer-parity-hardware.sh | bash -s
-  bash libs/tau-examples/scripts/viewer-parity-hardware.sh [--ref <commit>] [--nanoraster-ref <commit>]
-    [--fixtures <name,...>] [--headless] [--keep]
+  bash libs/tau-examples/scripts/viewer-parity-hardware.sh [--ref <commit>] [--fixtures <name,...>] [--headless]
+    [--keep]
 USAGE
 }
 
@@ -242,11 +238,10 @@ main() {
   # Children never read the terminal or, under `bash -s`, the rest of this script.
   exec </dev/null
 
-  local ref='FETCH_HEAD' nanoraster_ref='' fixtures='' headless=0
+  local ref='FETCH_HEAD' fixtures='' headless=0
   while [[ $# -gt 0 ]]; do
     case $1 in
       --ref) ref=${2:?--ref needs a commit}; shift 2 ;;
-      --nanoraster-ref) nanoraster_ref=${2:?--nanoraster-ref needs a commit}; shift 2 ;;
       --fixtures) fixtures=${2:?--fixtures needs names}; shift 2 ;;
       --headless) headless=1; shift ;;
       --keep) KEEP=1; shift ;;
@@ -268,9 +263,7 @@ main() {
     die 3 "run this on a Mac with Apple Silicon (charter D7 needs a real GPU); PARITY_ALLOW_SOFTWARE=1 runs it on Linux's software GPUs only to test the script"
   fi
   require git 'install the Xcode Command Line Tools: xcode-select --install'
-  if [[ $mode == hardware ]]; then
-    xcode-select -p >/dev/null 2>&1 || die 3 'the Xcode Command Line Tools are required (Rust links with them): xcode-select --install'
-  else
+  if [[ $mode == software ]]; then
     require xvfb-run 'apt-get install -y xvfb'
     [[ -f /usr/share/vulkan/icd.d/lvp_icd.json ]] || die 3 'lavapipe is required: apt-get install -y mesa-vulkan-drivers'
   fi
@@ -290,18 +283,6 @@ main() {
     die 1 "no commit $ref; run: git fetch origin $tau_branch_hint"
   git -C "$REPO_ROOT" cat-file -e "$sha:libs/tau-examples/fixtures/viewer-parity/fixtures.json" 2>/dev/null ||
     die 1 "$ref ($sha) is not a Tau commit with the viewer parity gate"
-  if [[ -z $nanoraster_ref ]]; then
-    nanoraster_ref=$(git -C "$REPO_ROOT" show "$sha:.github/workflows/viewer-parity.yml" |
-      sed -n 's/^ *NANORASTER_PARITY_REF: *\([0-9a-f]\{7,40\}\).*/\1/p' | head -n 1)
-  fi
-
-  # The pinned Rust toolchain needs rustup; the installed nanoraster package (after the 0.9.0 bump) needs no Rust.
-  local rust_hint
-  rust_hint="install Rust through rustup (nanoraster pins its toolchain in rust-toolchain.toml; Homebrew's 'rust' cannot): curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal && . \"\$HOME/.cargo/env\""
-  if [[ -n $nanoraster_ref ]]; then
-    require rustup "$rust_hint"
-    require cargo "$rust_hint"
-  fi
 
   local tmp_root free_kb
   tmp_root=$(cd "${TMPDIR:-/tmp}" && pwd -P)
@@ -331,7 +312,6 @@ main() {
   export PARITY_VIEWER_OUT=out/test-results/viewer-parity/viewer
   export PARITY_OUT=out/test-results/viewer-parity/nanoraster
   export TAU_E2E_WEBGPU_PROFILE=$mode
-  export WASM_PACK_CACHE="$WORK/wasm-pack-cache"
   if [[ -n $fixtures ]]; then
     export PARITY_FIXTURES=$fixtures
   else
@@ -343,10 +323,9 @@ main() {
   if [[ $os == Darwin ]]; then
     printf 'macOS %s, %s\n' "$(sw_vers -productVersion)" "$(sysctl -n machdep.cpu.brand_string)"
   fi
-  printf 'Tau checkout: %s\nTau commit: %s (%s)\nnanoraster: %s\nWork directory: %s\n' \
-    "$REPO_ROOT" "$sha" "$ref" "${nanoraster_ref:-installed package}" "$WORK"
+  printf 'Tau checkout: %s\nTau commit: %s (%s)\nWork directory: %s\n' "$REPO_ROOT" "$sha" "$ref" "$WORK"
   printf 'node %s, pnpm %s, git %s\n' "$(node --version)" "$(pnpm --version)" "$(git --version)"
-  say "Checking viewer parity of Tau ${sha:0:10} against nanoraster ${nanoraster_ref:0:10} on the $mode profile"
+  say "Checking viewer parity of Tau ${sha:0:10} against its installed nanoraster on the $mode profile"
   say '(about 30 minutes on an Apple Silicon Mac; leave the Chromium windows alone)'
 
   # --- 1. Tau worktree ------------------------------------------------------------------------------------------
@@ -363,44 +342,13 @@ main() {
     step "Playwright's Chromium" pnpm exec playwright install chromium
   fi
 
-  # --- 3. nanoraster ------------------------------------------------------------------------------------------------
-  if [[ -n $nanoraster_ref ]]; then
-    local nanoraster="$WORK/nanoraster"
-    step 'nanoraster clone' git clone --quiet --filter=blob:none --no-checkout https://github.com/taucad/nanoraster "$nanoraster"
-    step "nanoraster checkout $nanoraster_ref" git -C "$nanoraster" checkout --quiet --detach "$nanoraster_ref"
-    local channel
-    channel=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$nanoraster/rust-toolchain.toml")
-    [[ -n $channel ]] || die 2 "no toolchain channel in nanoraster's rust-toolchain.toml"
-    step "Rust $channel (rustup)" rustup toolchain install "$channel" --profile minimal
-    step "Rust $channel WASM target" rustup target add --toolchain "$channel" wasm32-unknown-unknown
-    # The pinned toolchain first on PATH, whichever cargo the shell would otherwise find.
-    local toolchain_cargo
-    toolchain_cargo=$(rustup which --toolchain "$channel" cargo) || die 2 "rustup has no cargo for $channel"
-    export PATH="${toolchain_cargo%/*}:$PATH"
-    local host
-    host=$(rustc -vV | sed -n 's/^host: //p')
-    printf 'rustc: %s (host %s)\n' "$(rustc --version)" "$host"
-    if [[ $mode == hardware && $host != aarch64-apple-darwin ]]; then
-      die 3 "the Rust toolchain targets $host; reinstall rustup for aarch64-apple-darwin"
-    fi
-    if [[ $(wasm-pack --version 2>/dev/null || true) != "wasm-pack $wasm_pack_version" ]]; then
-      # As the workflow does, but into the work directory, so nothing outside it changes.
-      step "wasm-pack $wasm_pack_version (cargo install, into the work directory)" \
-        cargo install wasm-pack --version "$wasm_pack_version" --locked --root "$WORK/tools"
-      export PATH="$WORK/tools/bin:$PATH"
-    fi
-    printf 'wasm-pack: %s\n' "$(wasm-pack --version)"
-    cd "$nanoraster"
-    step 'nanoraster dependencies (pnpm install)' pnpm install --frozen-lockfile
-    step 'nanoraster native addon (build:napi)' pnpm run build:napi
-    step 'nanoraster WASM (build:wasm)' pnpm run build:wasm
-    cd "$tau"
-    export TAU_PARITY_NANORASTER="$nanoraster"
-  else
-    unset TAU_PARITY_NANORASTER
-  fi
+  local nanoraster_version
+  nanoraster_version=$(cd packages/plugins/image && node -p 'require("nanoraster/package.json").version') ||
+    die 2 '@taucad/image has no installed nanoraster'
+  printf 'nanoraster: %s (installed package)\n' "$nanoraster_version"
+  say "  nanoraster $nanoraster_version"
 
-  # --- 4. Fixtures --------------------------------------------------------------------------------------------------
+  # --- 3. Fixtures --------------------------------------------------------------------------------------------------
   local manifest="$tau/libs/tau-examples/fixtures/viewer-parity/fixtures.json" sources=''
   write_checks "$WORK/checks.cjs"
   if [[ -n $fixtures ]]; then
@@ -414,7 +362,7 @@ main() {
       pnpm exec tsx libs/tau-examples/scripts/export-parity-fixtures.mts --out="$PARITY_FIXTURES_OUT" --only="$sources"
   fi
 
-  # --- 5. Viewer references -----------------------------------------------------------------------------------------
+  # --- 4. Viewer references -----------------------------------------------------------------------------------------
   if [[ $mode == software ]]; then
     # CI's viewer job: SwiftShader WebGPU presents only headed, under Xvfb.
     PARITY_HEADED=1 step "Viewer references ($mode GPU)" \
@@ -429,7 +377,7 @@ main() {
     die 1 'the viewer references are not real-GPU WebGPU frames (PROBLEM lines in the log)'
   say "  viewer: WebGPU on $viewer_adapter"
 
-  # --- 6. Gate ------------------------------------------------------------------------------------------------------
+  # --- 5. Gate ------------------------------------------------------------------------------------------------------
   local gate_status=0 gate_started=$SECONDS
   say "→ Parity gate (nanoraster native and WASM on the $mode GPU)"
   printf '\n=== Parity gate (%s)\n' "$(date -u +%H:%M:%SZ)"
@@ -443,7 +391,7 @@ main() {
   fi
   printf '=== Parity gate exited %s after %ss\n' "$gate_status" "$((SECONDS - gate_started))"
 
-  # --- 7. Summary -----------------------------------------------------------------------------------------------
+  # --- 6. Summary -----------------------------------------------------------------------------------------------
   local results="$tau/$PARITY_OUT/results.json"
   [[ -f $results ]] || die 2 "the parity gate wrote no results (exit $gate_status)"
   printf '\n=== results.json\n'

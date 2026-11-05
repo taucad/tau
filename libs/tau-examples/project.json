@@ -121,7 +121,7 @@
     "test:viewer-parity": {
       "command": "vitest run --config vitest.viewer-parity.config.ts",
       "metadata": {
-        "description": "Viewer parity gate (Tau Brain research/nanoraster-viewer-parity-charter.md, W6, D2): nanoraster against the references viewer:capture:viewer-parity writes, every fixture under 1%. TAU_PARITY_NANORASTER names the nanoraster checkout until the catalog moves to 0.9.0."
+        "description": "Viewer parity gate (Tau Brain research/nanoraster-viewer-parity-charter.md, W6, D2): nanoraster against the references viewer:capture:viewer-parity writes, every fixture under 1%. Both builds are the installed nanoraster package, 0.9.0 or later."
       },
       "options": {
         "cwd": "{projectRoot}"

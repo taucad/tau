@@ -40,16 +40,12 @@ const viewerDirectory = resolve(
 );
 const outDirectory = resolve(workspaceRoot, process.env['PARITY_OUT'] ?? 'out/test-results/viewer-parity/nanoraster');
 /*
- * Tooling such as knip loads this config without a nanoraster build, so an entry that does not resolve fails the WASM
- * pass when it runs, not the config.
+ * Tooling such as knip loads this config too, so an installed nanoraster the gate refuses fails the WASM pass when it
+ * runs, not the config.
  */
 const resolveWasmEntry = (): ViewerParityNanorasterEntry | Readonly<{ unavailable: string }> => {
   try {
-    return resolveViewerParityNanorasterEntry({
-      checkout: process.env['TAU_PARITY_NANORASTER'],
-      workspaceRoot,
-      backend: 'wasm',
-    });
+    return resolveViewerParityNanorasterEntry({ workspaceRoot, backend: 'wasm' });
   } catch (error) {
     return { unavailable: error instanceof Error ? error.message : String(error) };
   }

@@ -23,7 +23,7 @@ type ViewerParityWasmConfig = (
   | Readonly<{
       /** Absolute path of nanoraster's universal entry. */
       entry: string;
-      /** `package nanoraster@<version>` or `checkout <path>`. */
+      /** `package nanoraster@<version>`. */
       source: string;
     }>
   | Readonly<{

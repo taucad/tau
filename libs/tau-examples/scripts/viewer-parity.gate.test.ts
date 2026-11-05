@@ -8,10 +8,7 @@
  * Run by `pnpm nx run tau-examples:test:viewer-parity` after `export-parity-fixtures.mts` has generated the fixture
  * GLBs and `pnpm nx run viewer:capture:viewer-parity` has written the viewer references from those same files (the
  * `viewer-parity` workflow does all three on software GPUs). Each GLB's size and SHA-256 are recorded in results.json,
- * not pinned. Inputs:
- *   TAU_PARITY_NANORASTER  nanoraster checkout built with `pnpm run build:napi` and `pnpm run build:wasm`. Until the
- *                          catalog moves to nanoraster 0.9.0 the gate runs against the program branch build the
- *                          workflow pins; afterwards it is unset and the gate runs against the installed package.
+ * not pinned. Both builds are the installed nanoraster package, 0.9.0 or later. Inputs:
  *   PARITY_VIEWER_OUT      viewer references (default: out/test-results/viewer-parity/viewer)
  *   PARITY_OUT             nanoraster renders and results.json (default: out/test-results/viewer-parity/nanoraster)
  *   PARITY_FIXTURES        comma-separated fixture names (default: every fixture)
@@ -59,7 +56,7 @@ const viewerDirectory = resolve(
 const outDirectory = resolve(workspaceRoot, process.env['PARITY_OUT'] ?? 'out/test-results/viewer-parity/nanoraster');
 const only = new Set((process.env['PARITY_FIXTURES'] ?? '').split(',').filter(Boolean));
 const fixtures = manifest.fixtures.filter((fixture) => only.size === 0 || only.has(fixture.name));
-const renderer = await loadViewerParityRenderer(process.env['TAU_PARITY_NANORASTER'], workspaceRoot);
+const renderer = await loadViewerParityRenderer(workspaceRoot);
 const nativeAdapter = await renderer.module.describeAdapter();
 
 /** One build's D2 on one fixture. */

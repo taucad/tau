@@ -60,8 +60,13 @@ describe('no-awaited-mutation-in-loop', () => {
         },
         {
           name: 'awaited rename nested in a conditional',
-          code: 'async function f(fs, xs) { for (const x of xs) { if (x) { await this.fs.rename(x, `${x}.bak`); } } }',
+          code: 'async function f(fs, xs) { for (const x of xs) { if (x) { await this.fs.rename(x, x + ".bak"); } } }',
           errors: [{ messageId: 'awaitedMutationInLoop', data: { method: 'rename' } }],
+        },
+        {
+          name: 'awaited writeFile whose rejection is handled in a chain',
+          code: 'async function f(fs, xs) { for (const x of xs) { await fs.writeFile(x, "").catch(() => undefined).finally(() => undefined); } }',
+          errors: [{ messageId: 'awaitedMutationInLoop', data: { method: 'writeFile' } }],
         },
       ],
     });

@@ -29,6 +29,9 @@ const MUTATION_METHODS = new Set([
   'rmdirResolved',
 ]);
 
+/** Promise methods an awaited mutation may be chained through. */
+const PROMISE_CHAIN_METHODS = new Set(['then', 'catch', 'finally']);
+
 const LOOP_TYPES = new Set(['ForStatement', 'ForInStatement', 'ForOfStatement', 'WhileStatement', 'DoWhileStatement']);
 
 const FUNCTION_TYPES = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression']);
@@ -47,7 +50,11 @@ const mutationMethodOf = (argument) => {
   if (callee.type !== 'MemberExpression' || callee.computed || callee.property.type !== 'Identifier') {
     return undefined;
   }
-  return MUTATION_METHODS.has(callee.property.name) ? callee.property.name : undefined;
+  if (MUTATION_METHODS.has(callee.property.name)) {
+    return callee.property.name;
+  }
+  /* `await fs.writeFile(p).catch(handle)` still awaits the mutation: look through the chain. */
+  return PROMISE_CHAIN_METHODS.has(callee.property.name) ? mutationMethodOf(callee.object) : undefined;
 };
 
 /**

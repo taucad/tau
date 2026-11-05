@@ -5,8 +5,12 @@
  * A row always names its fixture, browser, server and network profile (I8).
  * Count gates are hard: a gate listed in `baseline/known-red.json` is red at
  * HEAD and is expected to stay red until the work package that fixes it lands,
- * which then removes it from that list; any other gate must be green. Time
- * targets are recorded, not asserted, until W13.
+ * which then removes it from that list, and it may never move further from its
+ * limit than the value recorded for its profile and engine (I8: count gates
+ * never loosen); any other gate must be green. A model-bound gate is declared
+ * and reported but not asserted, because the harness has nothing real to
+ * measure for it yet; a vacuous gate is asserted but cannot fail until its
+ * server tier exists. Time targets are recorded, not asserted, until W13.
  *
  * @module
  */
@@ -22,6 +26,12 @@ export type CountGate = Readonly<{
   /** A number, or the name of another metric in the same row (`writes = files`). */
   limit: number | string;
   description: string;
+  /**
+   * `model-bound`: what the harness can measure today is fixed by its own
+   * model, so the gate is declared and reported but not asserted. `vacuous`:
+   * asserted, but it cannot fail before the server tier exists.
+   */
+  qualifier?: Readonly<{ kind: 'model-bound' | 'vacuous'; reason: string }>;
 }>;
 
 /** One time target: `metric` (milliseconds) at most `limit`. */
@@ -101,7 +111,7 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
     id: 'S3',
     title: 'Cold open: all text materialised',
     model:
-      'apply-tree.ts on an empty checkout: one writeFiles batch to tau-staged siblings, setFileMode per staged file, one bulkMove to the targets; text bytes plus LFS pointers for every binary. Git fetch, inflate and capture are not part of the window.',
+      "The production applyTree (@taucad/revisions/apply-tree, createApplyTreeEffects) materialising the fixture's tree (text bytes plus an LFS pointer per binary) over an empty checkout, with the seams createRevisionActors passes: the rooted view, tau-<role> siblings, and a capture from the production statTree + capture memo + captureRevisionTree. Git fetch and inflate are not part of the window; the apply's own verifying capture is.",
     times: [{ metric: 'duration', limit: 15_000, description: '≤ 15 s' }],
     gates: [
       {
@@ -113,10 +123,11 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
       },
       {
         id: 'S3.events',
-        metric: 'eventsPerPort',
+        metric: 'busEvents',
         comparison: 'at-most',
         limit: 1,
-        description: '1 event per changeset per port',
+        description:
+          "1 event per changeset per port (counted at the authority's change bus, which every port fans out from)",
       },
       { id: 'S3.writes', metric: 'writes', comparison: 'equals', limit: 'files', description: 'writes = N' },
       {
@@ -166,6 +177,10 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
         comparison: 'equals',
         limit: 0,
         description: '0 network for content',
+        qualifier: {
+          kind: 'vacuous',
+          reason: 'The harness has no server: a warm open cannot reach the network until the server tier (S1/S9) runs.',
+        },
       },
       {
         id: 'S5.blob-reads',
@@ -180,6 +195,11 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
         comparison: 'at-most',
         limit: 1,
         description: '1 head-metadata compare of N entries',
+        qualifier: {
+          kind: 'model-bound',
+          reason:
+            "The runner's compare is its own loop of one stat per entry, so the count is fixed by the model; it becomes real when W3's Project Index gives warm open a production compare to drive.",
+        },
       },
     ],
   },
@@ -197,7 +217,13 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
         limit: 1.01,
         description: 'durable writes = 1× bytes (manifest and identity allowed)',
       },
-      { id: 'S6.hash-passes', metric: 'hashPasses', comparison: 'at-most', limit: 1, description: 'hash passes = 1' },
+      {
+        id: 'S6.hash-passes',
+        metric: 'hashPasses',
+        comparison: 'equals',
+        limit: 1,
+        description: 'hash passes = 1 (the import hashes every byte once, for its object ids)',
+      },
     ],
   },
   {
@@ -213,7 +239,13 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
         limit: 1,
         description: '1 changeset (one lock set)',
       },
-      { id: 'S7.events', metric: 'eventsPerPort', comparison: 'at-most', limit: 1, description: '1 event' },
+      {
+        id: 'S7.events',
+        metric: 'busEvents',
+        comparison: 'at-most',
+        limit: 1,
+        description: "1 event (at the authority's change bus)",
+      },
       {
         id: 'S7.copies',
         metric: 'wholeFileCopies',
@@ -227,7 +259,7 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
     id: 'S8',
     title: 'Agent turn writing 50 files',
     model:
-      "Fifty rooted writeFile calls in order, as the agent's write tool issues them; one recursive watch counts deliveries.",
+      "One agent turn's fifty write tool calls dispatched together through agent-tools' createProviderRpcFileSystem over an agent-masked composed view, as the host issues a turn's parallel calls; one recursive watch counts deliveries.",
     times: [{ metric: 'duration', limit: 500, description: '≤ 500 ms to durable' }],
     gates: [
       { id: 'S8.changesets', metric: 'lockSets', comparison: 'at-most', limit: 1, description: '1 changeset' },
@@ -284,13 +316,13 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
       },
     ],
     pending:
-      "Needs a git object store holding the fixture's 200 revisions, built through the revision port; @taucad/revisions is not a dependency ui-e2e resolves, so wiring it is a follow-up (W0.2) rather than part of this harness.",
+      "Needs a git object store holding the fixture's 200 revisions, built through the revision port (createIsomorphicGitRevisionPort) rather than a tree applied in place; a follow-up (W0.2).",
   },
   {
     id: 'S12',
     title: 'Agent grep / glob over the project',
     model:
-      "The chat RPC handlers handleGrep (fixture marker, whole project) and handleGlobSearch ('**/*.ts') over a composed agent view of the rooted project, mapped as agent-tools' provider filesystem maps it; runs on the authority's thread.",
+      "The chat RPC handlers handleGrep (fixture marker, whole project) and handleGlobSearch ('**/*.ts') over agent-tools' createProviderRpcFileSystem on an agent-masked composed view of the imported project (every binary's bytes present); runs on the authority's thread.",
     times: [
       { metric: 'grepDuration', limit: 2000, description: 'grep ≤ 2 s' },
       { metric: 'globDuration', limit: 200, description: 'glob ≤ 200 ms' },
@@ -343,7 +375,7 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
     id: 'S16',
     title: 'Second tab during S3',
     model:
-      "S3 in one authority worker while a second authority worker on the same project (a peer tab's file-manager worker, same origin) reads one file every 50 ms and counts the cross-tab invalidations it receives.",
+      "S3 (the production applyTree) in one authority worker while a second authority worker on the same project (a peer tab's file-manager worker, same origin) reads one file every 50 ms and counts the cross-tab invalidations it receives.",
     times: [{ metric: 'readP95', limit: 200, description: 'no stall: second tab read p95 ≤ 200 ms' }],
     gates: [
       {
@@ -358,15 +390,17 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
   {
     id: 'S17',
     title: 'Save during S3',
-    model: 'S3 while a 1 MiB rooted writeFile to a path the apply never touches is issued once the apply is writing.',
+    model:
+      'S3 (the production applyTree) while a 1 MiB rooted writeFile to a path the apply never touches is issued as soon as the apply has written its first byte, and before it finishes.',
     times: [{ metric: 'saveLatency', limit: 250, description: 'S7 + ≤ 150 ms' }],
     gates: [
       {
         id: 'S17.lock-wait',
-        metric: 'saveWait',
+        metric: 'applyOperationsBeforeSave',
         comparison: 'at-most',
-        limit: 50,
-        description: "the save's lock set waits only on tokens it shares (ms from the save's call to its first byte)",
+        limit: 8,
+        description:
+          "the save's lock set waits only on tokens it shares (apply writes and renames completed between the save's call and its first byte; 8 allows the writes already in flight)",
       },
     ],
   },
@@ -401,6 +435,11 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
         comparison: 'equals',
         limit: 0,
         description: 'grep runs on the compute worker (authority reads during grep = 0)',
+        qualifier: {
+          kind: 'model-bound',
+          reason:
+            "The runner calls the grep handler on the authority's own thread, so its reads are the authority's by construction; it becomes real when W9 moves grep to the compute worker and the runner drives that path.",
+        },
       },
     ],
   },
@@ -437,8 +476,10 @@ export type GateResult = Readonly<{
   metric: string;
   value: number | undefined;
   limit: number;
+  comparison: CountGate['comparison'];
   pass: boolean;
   knownRed: boolean;
+  qualifier?: CountGate['qualifier'];
 }>;
 
 /** One measured or pending row. */
@@ -492,7 +533,36 @@ export const evaluateGate = (
   const limit = typeof gate.limit === 'number' ? gate.limit : (metrics[gate.limit] ?? Number.NaN);
   const pass =
     value !== undefined && (gate.comparison === 'equals' ? value === limit : value <= limit + Number.EPSILON);
-  return { id: gate.id, metric: gate.metric, value, limit, pass, knownRed: knownRed.has(gate.id) };
+  return {
+    id: gate.id,
+    metric: gate.metric,
+    value,
+    limit,
+    comparison: gate.comparison,
+    pass,
+    knownRed: knownRed.has(gate.id),
+    ...(gate.qualifier === undefined ? {} : { qualifier: gate.qualifier }),
+  };
+};
+
+/**
+ * Whether a known-red gate has held or improved on its value at HEAD.
+ *
+ * A known-red gate stays red until its work package lands, but it must not
+ * regress: an at-most gate may not exceed its recorded value, and an equals
+ * gate may not move further from its limit than it was.
+ *
+ * @param gate - The evaluated gate.
+ * @param atHead - The value recorded at HEAD for this engine and profile.
+ * @returns True when the value is no worse than at HEAD.
+ */
+export const withinBaseline = (gate: GateResult, atHead: number): boolean => {
+  if (gate.value === undefined) {
+    return false;
+  }
+  return gate.comparison === 'equals'
+    ? Math.abs(gate.value - gate.limit) <= Math.abs(atHead - gate.limit) + Number.EPSILON
+    : gate.value <= atHead + Number.EPSILON;
 };
 
 /**
@@ -560,8 +630,10 @@ export const pendingRow = (
     metric: gate.metric,
     value: undefined,
     limit: typeof gate.limit === 'number' ? gate.limit : Number.NaN,
+    comparison: gate.comparison,
     pass: false,
     knownRed: knownRed.has(gate.id),
+    ...(gate.qualifier === undefined ? {} : { qualifier: gate.qualifier }),
   })),
 });
 
@@ -573,6 +645,17 @@ const formatNumber = (value: number | undefined): string => {
     return '∞';
   }
   return Number.isInteger(value) ? String(value) : value.toFixed(value < 10 ? 2 : 0);
+};
+
+const gateLabel = (row: ScenarioRow, gate: GateResult): string => {
+  if (row.status === 'pending') {
+    return 'declared';
+  }
+  if (gate.qualifier?.kind === 'model-bound') {
+    return 'declared (model-bound)';
+  }
+  const outcome = gate.pass ? 'green' : gate.knownRed ? 'red (known)' : 'RED';
+  return gate.qualifier?.kind === 'vacuous' ? `${outcome} (vacuous)` : outcome;
 };
 
 /**
@@ -601,10 +684,7 @@ export const renderMarkdown = (rows: readonly ScenarioRow[]): string => {
       const targets = row.times.map((time) => `${time.metric} ≤ ${formatNumber(time.limit)} ms`).join('; ');
       const gates =
         row.gates
-          .map(
-            (gate) =>
-              `${row.status === 'pending' ? 'declared' : gate.pass ? 'green' : gate.knownRed ? 'red (known)' : 'RED'} ${gate.id} ${formatNumber(gate.value)} / ${formatNumber(gate.limit)}`,
-          )
+          .map((gate) => `${gateLabel(row, gate)} ${gate.id} ${formatNumber(gate.value)} / ${formatNumber(gate.limit)}`)
           .join('; ') || '—';
       return `| ${row.id} | ${row.title} | ${row.status === 'pending' ? 'pending' : 'measured'} | ${row.status === 'pending' ? '—' : times} | ${targets} | ${gates} | ${String(row.samples.length)} |`;
     }),

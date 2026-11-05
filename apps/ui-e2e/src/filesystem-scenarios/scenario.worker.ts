@@ -2,10 +2,13 @@
  * One filesystem authority, as the file-manager worker composes it, with the
  * scenario runners that drive it on real OPFS.
  *
- * Each runner replays the filesystem calls the HEAD code path it models makes
- * (named in the scenario table's `model` column), against the production
- * `WorkspaceFileService` and `OPFSProvider`; the counts come from
- * `counters.ts` and the spans from the production `workerTimings`.
+ * Each runner drives the production code path its scenario names (the table's
+ * `model` column): the revisions package's own `createApplyTreeEffects` for an
+ * apply, agent-tools' `createProviderRpcFileSystem` under the chat RPC handlers
+ * for an agent turn, grep and glob, and the production `WorkspaceFileService`
+ * and `OPFSProvider` beneath both. What the harness supplies is only what the
+ * revision actors would (the checkout fence, its capture memo, sibling names);
+ * the counts come from `counters.ts` and the production `workerTimings`.
  *
  * @module
  */
@@ -19,9 +22,14 @@ import {
 } from '@taucad/filesystem';
 import type { RootedFileSystem } from '@taucad/filesystem';
 import { composeView } from '@taucad/filesystem/composed-view';
+import type { ComposedView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { handleGlobSearch, handleGrep } from '@taucad/chat/rpc';
-import type { RpcDirectoryEntry, RpcFileStat, RpcFileSystem } from '@taucad/chat/rpc';
+import type { RpcFileSystem } from '@taucad/chat/rpc';
+import { createProviderRpcFileSystem } from '@taucad/agent-tools/registry';
+import { createApplyTreeEffects } from '@taucad/revisions/apply-tree';
+import { captureRevisionTree, createCaptureMemo, ImmutableRevisionTree } from '@taucad/revisions/algorithms';
+import type { Checkout } from '@taucad/revisions';
 import { projectToManifest, serializeProjectManifest } from '@taucad/project-core';
 import { randomUuid } from '@taucad/utils/id';
 import { installScenarioCounters } from '#filesystem-scenarios/counters.js';
@@ -54,7 +62,7 @@ invalidations.addEventListener('message', () => {
 const service = new WorkspaceFileService({
   providerRegistry: new ProviderRegistry({ databasePrefix: self.name || 'filesystem-scenarios' }),
   mountTable: new MountTable(),
-  resourceQueue: new ResourceQueue(),
+  resourceQueue: new ResourceQueue({ timings: workerTimings }),
   eventBus,
   policy: tauPathPolicy,
 });
@@ -98,16 +106,35 @@ const settle = async (milliseconds = 150): Promise<void> => {
  * @param body - The runner; resolves with its extra figures once durable.
  * @returns The measurement.
  */
+/** A fixed reading from the worker's start, so two cumulative counter readings subtract exactly. */
+const timingsOrigin = workerTimings.now();
+const productionCounterTotals = (): Readonly<Record<string, number>> =>
+  Object.fromEntries(
+    Object.entries(workerTimings.summarize(timingsOrigin).counters).map(([name, summary]) => [name, summary.total]),
+  );
+
 const measure = async (body: () => Promise<Readonly<Record<string, number>> | void>): Promise<WorkerMeasurement> => {
   await settle(50);
   counters.reset();
   busEvents = 0;
   const spanStart = workerTimings.now();
+  const countersBefore = productionCounterTotals();
   const startedAt = performance.now();
   const extra = (await body()) ?? {};
   const duration = performance.now() - startedAt;
   await settle();
-  return { duration, counts: counters.read(), busEvents, spans: workerTimings.summarize(spanStart), extra };
+  const countersAfter = productionCounterTotals();
+  const productionCounters = Object.fromEntries(
+    Object.entries(countersAfter).map(([name, total]) => [name, total - (countersBefore[name] ?? 0)]),
+  );
+  return {
+    duration,
+    counts: counters.read(),
+    busEvents,
+    spans: workerTimings.summarize(spanStart),
+    productionCounters,
+    extra,
+  };
 };
 
 const textEncoder = new TextEncoder();
@@ -119,37 +146,71 @@ const percentile = (values: readonly number[], fraction: number): number => {
   return sorted[Math.min(sorted.length - 1, Math.ceil(fraction * sorted.length) - 1)] ?? 0;
 };
 
-/** The unique sibling `temporarySibling(path, 'staged')` names in `revision-effects.ts`. */
-const stagedSibling = (path: string): string => {
-  const separator = path.lastIndexOf('/');
-  return `${path.slice(0, separator + 1)}.${path.slice(separator + 1)}.tau-staged.${randomUuid()}.tmp`;
-};
-
 /**
- * Replay `applyTree` on an empty checkout (`apply-tree.ts`): stage every file
- * with one `writeFiles` batch, give each staged file its mode, then publish
- * them all with one `bulkMove`.
+ * One checkout's apply, through the revisions package's own `applyTree`.
+ *
+ * The seams are the ones `createRevisionActors` passes (`revision-effects.ts`):
+ * the rooted view as the checkout filesystem, the same `tau-<role>` sibling
+ * names, a capture built from the same production algorithms
+ * (`statTree` + `createCaptureMemo` + `captureRevisionTree`, minus the head
+ * mode basis and case-collision check an empty target never needs), and a
+ * fence that is uncontended because nothing else applies to this checkout.
  *
  * @param live - The checkout's rooted view.
- * @param entries - The tree's files.
+ * @param projectId - Its project.
+ * @returns `materialize(entries)`, which writes the tree over an empty checkout.
  */
-const applyOnEmptyTarget = async (live: RootedFileSystem, entries: readonly FixtureEntry[]): Promise<void> => {
-  const staged = entries.map((entry) => ({ entry, staged: stagedSibling(entry.path) }));
-  const files = Object.fromEntries(staged.map(({ entry, staged: path }) => [path, { content: checkoutBytes(entry) }]));
-  if (live.writeFiles === undefined || live.bulkMove === undefined) {
-    throw new Error('The rooted view lacks the batch porcelain applyTree uses.');
-  }
-  await live.writeFiles(files);
-  if (live.setFileMode !== undefined) {
-    for (const { staged: path } of staged) {
-      // oxlint-disable-next-line no-await-in-loop -- apply-tree sets each staged file's mode in order.
-      await live.setFileMode(path, '100644');
-    }
-  }
-  const result = await live.bulkMove(staged.map(({ entry, staged: path }) => ({ source: path, target: entry.path })));
-  if (result.failed.length > 0) {
-    throw new Error(`${String(result.failed.length)} staged files did not publish.`);
-  }
+const checkoutApply = (live: RootedFileSystem, projectId: string) => {
+  const memo = createCaptureMemo();
+  const exclude = (path: string): boolean => !tauPathPolicy.classify(path).versioned;
+  const capture = async (_place: Checkout, modeBasis?: ImmutableRevisionTree): Promise<ImmutableRevisionTree> => {
+    const observedAt = Date.now();
+    const memoOptions = memo.unchanged(await live.statTree?.('', { admits: (path) => !exclude(path) }), observedAt);
+    return captureRevisionTree(live, {
+      exclude,
+      inheritedMode: (path) => modeBasis?.mode(path),
+      ...memoOptions,
+    });
+  };
+  const { materializeTree } = createApplyTreeEffects({
+    useFileSystem: async (_place, operation) => operation(live),
+    capture,
+    onApplyingTree: undefined,
+    policy: tauPathPolicy,
+    withCheckoutFence: async (_checkoutId, operation) => operation(),
+    /* Read only when an apply fails and must restore the prior tree. */
+    checkoutTreeId: async (_checkoutId, tree) =>
+      tree
+        .entries()
+        .map((entry) => `${entry.path}:${String(entry.content.byteLength)}:${entry.mode}`)
+        .join('\n'),
+    temporarySibling: (path, role) => {
+      const separator = path.lastIndexOf('/');
+      return `${path.slice(0, separator + 1)}.${path.slice(separator + 1)}.tau-${role}.${randomUuid()}.tmp`;
+    },
+    unlinkIfPresent: async (filesystem, path) => {
+      try {
+        await filesystem.unlink(path);
+      } catch (error) {
+        if ((error as { code?: unknown }).code !== 'ENOENT') {
+          throw error;
+        }
+      }
+    },
+  });
+  const place: Checkout = {
+    id: `checkout-${projectId}`,
+    projectId,
+    root: `/projects/${projectId}`,
+    kind: 'live',
+    branch: 'main',
+    baseRevisionId: undefined,
+  };
+  return async (entries: readonly FixtureEntry[]): Promise<number> => {
+    const target = new ImmutableRevisionTree(entries.map((entry) => [entry.path, checkoutBytes(entry), '100644']));
+    const { paths } = await materializeTree(place, target, { before: new ImmutableRevisionTree([]) });
+    return paths.length;
+  };
 };
 
 const assertMaterialized = async (live: RootedFileSystem, entries: readonly FixtureEntry[]): Promise<void> => {
@@ -171,76 +232,49 @@ const saveText = (size: number, salt: number): Uint8Array<ArrayBuffer> => {
   return bytes;
 };
 
+/** What the agent's view served during one scenario, by kind. */
+type AgentTally = { readdirCalls: number; reads: number; binaryBytesRead: number; textBytesRead: number };
+
 /**
- * The agent's RPC filesystem over a composed view, mapped as
- * `libs/agent-tools/src/registry/provider-file-system.ts` maps it, for the
- * three calls `handleGrep` and `handleGlobSearch` make.
+ * The agent's RPC filesystem exactly as a host builds it: agent-tools'
+ * `createProviderRpcFileSystem` over an agent-masked composed view of the
+ * project. The view is wrapped only to tally what it served.
  *
  * @param live - The project's rooted view.
- * @param tally - Receives each read and listing.
- * @returns The adapter.
+ * @param tally - Receives each listing and read.
+ * @returns The RPC filesystem the chat handlers consume.
  */
-const agentFileSystem = (
-  live: RootedFileSystem,
-  tally: (event: Readonly<{ kind: 'readdir' | 'read'; path: string; bytes: number }>) => void,
-): RpcFileSystem => {
+const agentFileSystem = (live: RootedFileSystem, tally: AgentTally): RpcFileSystem => {
+  const kinds = new Map(fixturePlan().entries.map((entry) => [entry.path, entry.kind]));
   const view = composeView({ filesystem: live }, { consumer: 'agent', policy: tauPathPolicy });
-  const refuse = async (): Promise<never> => {
-    throw new Error('Not used by the grep and glob handlers.');
-  };
-  const date = (mtimeMs: number): string => new Date(mtimeMs).toISOString();
-  return {
-    readFile: async (path) => {
-      const bytes = await view.readFile(path);
-      tally({ kind: 'read', path, bytes: bytes.byteLength });
-      return new TextDecoder().decode(bytes);
-    },
-    readdir: async (path) => {
-      tally({ kind: 'readdir', path, bytes: 0 });
-      const rows = await view.readdirWithStats(path);
-      return rows.map(
-        (row): RpcDirectoryEntry =>
-          row.type === 'dir'
-            ? { name: row.name, type: 'dir', size: row.size, modifiedAt: date(row.mtimeMs) }
-            : row.contentKind === 'text'
-              ? {
-                  name: row.name,
-                  type: 'file',
-                  size: row.size,
-                  modifiedAt: date(row.mtimeMs),
-                  contentKind: 'text',
-                  lineCount: row.lineCount,
-                }
-              : { name: row.name, type: 'file', size: row.size, modifiedAt: date(row.mtimeMs), contentKind: 'binary' },
-      );
-    },
-    stat: async (path): Promise<RpcFileStat> => {
-      const value = await view.stat(path);
-      const at = date(value.mtimeMs);
-      if (value.type === 'dir') {
-        return { size: value.size, isDirectory: true, createdAt: at, modifiedAt: at };
+  const counted = new Proxy(view, {
+    get: (target, property, receiver) => {
+      const value: unknown = Reflect.get(target, property, receiver);
+      if (property === 'readdirWithStats' && typeof value === 'function') {
+        return async (...parameters: unknown[]) => {
+          tally.readdirCalls += 1;
+          return (value as (...values: unknown[]) => Promise<unknown>).apply(target, parameters);
+        };
       }
-      return value.contentKind === 'text'
-        ? {
-            size: value.size,
-            isDirectory: false,
-            createdAt: at,
-            modifiedAt: at,
-            contentKind: 'text',
-            lineCount: value.lineCount,
+      if (property === 'readFile' && typeof value === 'function') {
+        return async (path: string, ...rest: unknown[]) => {
+          const bytes = await (value as (...values: unknown[]) => Promise<Uint8Array<ArrayBuffer>>).apply(target, [
+            path,
+            ...rest,
+          ]);
+          tally.reads += 1;
+          if (kinds.get(path) === 'binary') {
+            tally.binaryBytesRead += bytes.byteLength;
+          } else {
+            tally.textBytesRead += bytes.byteLength;
           }
-        : { size: value.size, isDirectory: false, createdAt: at, modifiedAt: at, contentKind: 'binary' };
+          return bytes;
+        };
+      }
+      return typeof value === 'function' ? (value as (...values: unknown[]) => unknown).bind(target) : value;
     },
-    exists: async (path) => view.exists(path),
-    readBinaryFile: refuse,
-    writeFile: refuse,
-    writeFileChecked: refuse,
-    deleteFileChecked: refuse,
-    writeBinaryFile: refuse,
-    deleteFile: refuse,
-    appendFile: refuse,
-    editFile: refuse,
-  };
+  }) satisfies ComposedView;
+  return createProviderRpcFileSystem({ provider: counted, mutations: new ResourceQueue({ timings: workerTimings }) });
 };
 
 const grepAndGlob = async (
@@ -255,23 +289,8 @@ const grepAndGlob = async (
     authorityReads: number;
   }>
 > => {
-  const kinds = new Map(fixturePlan().entries.map((entry) => [entry.path, entry.kind]));
-  let binaryBytesRead = 0;
-  let textBytesRead = 0;
-  let walkCalls = 0;
-  let authorityReads = 0;
-  const fileSystem = agentFileSystem(live, ({ kind, path, bytes }) => {
-    if (kind === 'readdir') {
-      walkCalls += 1;
-      return;
-    }
-    authorityReads += 1;
-    if (kinds.get(path) === 'binary') {
-      binaryBytesRead += bytes;
-    } else {
-      textBytesRead += bytes;
-    }
-  });
+  const tally: AgentTally = { readdirCalls: 0, reads: 0, binaryBytesRead: 0, textBytesRead: 0 };
+  const fileSystem = agentFileSystem(live, tally);
   const grepStart = performance.now();
   const grep = await handleGrep({ pattern: fixtureMarker, path: '' }, fileSystem);
   const grepDuration = performance.now() - grepStart;
@@ -284,7 +303,14 @@ const grepAndGlob = async (
   if (!glob.success) {
     throw new Error(`glob failed: ${JSON.stringify(glob)}`);
   }
-  return { grepDuration, globDuration, binaryBytesRead, textBytesRead, walkCalls, authorityReads };
+  return {
+    grepDuration,
+    globDuration,
+    binaryBytesRead: tally.binaryBytesRead,
+    textBytesRead: tally.textBytesRead,
+    walkCalls: tally.readdirCalls,
+    authorityReads: tally.reads,
+  };
 };
 
 let probe:
@@ -353,34 +379,46 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
   const saveSize = parameters['saveBytes'] ?? 1024 * 1024;
   switch (runner) {
     case 'materialize': {
-      const measured = await measure(async () => {
-        await applyOnEmptyTarget(live, entries);
-        return { files: entries.length };
-      });
+      const materialize = checkoutApply(live, projectId);
+      const measured = await measure(async () => ({ files: await materialize(entries) }));
       await assertMaterialized(live, entries);
       return measured;
     }
     case 'materialize-with-save': {
       /* S17: a person's save to a path the apply never touches, issued once the apply is writing. */
       const savePath = 'notes/s17-save.ts';
+      const materialize = checkoutApply(live, projectId);
       counters.trace(['s17-save.ts']);
       const measured = await measure(async () => {
-        const applying = applyOnEmptyTarget(live, entries);
-        while (counters.read().bytesWritten === 0) {
+        /* An object, so the loop below sees the apply's completion flip it. */
+        const progress = { applied: false };
+        const applying = materialize(entries).finally(() => {
+          progress.applied = true;
+        });
+        /* Issue the save once the apply is writing, and while it still is. */
+        const deadline = performance.now() + 60_000;
+        while (counters.read().bytesWritten === 0 && !progress.applied) {
+          if (performance.now() > deadline) {
+            throw new Error('The apply wrote nothing within a minute.');
+          }
           // oxlint-disable-next-line no-await-in-loop -- wait for the apply's first byte.
-          await quiet(5);
+          await quiet(2);
         }
-        await quiet(parameters['saveDelay'] ?? 20);
+        const issuedDuringApply = progress.applied ? 0 : 1;
+        const atCall = counters.read();
+        const operationsAtCall = atCall.writes + atCall.renames;
         const saveStart = performance.now();
         await live.writeFile(savePath, saveText(saveSize, 17));
         const saveEnd = performance.now();
-        const applyStillRunning = await Promise.race([applying.then(() => 0), quiet(0).then(() => 1)]);
         await applying;
         const firstWrite = counters.traced().find((write) => write.name === 's17-save.ts');
         return {
           saveLatency: saveEnd - saveStart,
           saveStartDelay: firstWrite === undefined ? saveEnd - saveStart : firstWrite.startedAt - saveStart,
-          saveOverlappedApply: applyStillRunning,
+          saveIssuedDuringApply: issuedDuringApply,
+          /* Apply writes and renames that completed while the save waited for its first byte. */
+          applyOperationsBeforeSave:
+            firstWrite === undefined ? Number.NaN : firstWrite.operationsBefore - operationsAtCall,
         };
       });
       counters.trace([]);
@@ -449,17 +487,23 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
       });
     }
     case 'agent-write': {
+      /* One agent turn: the model's fifty parallel write calls, dispatched
+       * together through the host's RPC filesystem as one task issues them. */
       let deliveries = 0;
       const stop = live.watch({ paths: [''], recursive: true }, () => {
         deliveries += 1;
       });
       const turn = randomUuid().slice(0, 8);
+      const tally: AgentTally = { readdirCalls: 0, reads: 0, binaryBytesRead: 0, textBytesRead: 0 };
+      const fileSystem = agentFileSystem(live, tally);
+      const text = new TextDecoder();
       try {
         const measured = await measure(async () => {
-          for (let index = 0; index < 50; index += 1) {
-            // oxlint-disable-next-line no-await-in-loop -- the agent's tool calls write one file each, in order.
-            await live.writeFile(`agent/${turn}/file-${String(index)}.ts`, saveText(2048, index));
-          }
+          await Promise.all(
+            Array.from({ length: 50 }, async (_, index) =>
+              fileSystem.writeFile(`agent/${turn}/file-${String(index)}.ts`, text.decode(saveText(2048, index))),
+            ),
+          );
           return {};
         });
         await quiet(300);

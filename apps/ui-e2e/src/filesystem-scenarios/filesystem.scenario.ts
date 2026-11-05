@@ -5,7 +5,9 @@
  * records one row per scenario (time + counts, named fixture, browser, server
  * and network), probes the engine's `createWritable` atomicity, and asserts the
  * count gates against `baseline/known-red.json`: a known-red gate must still be
- * red (fixing it means removing it from the list), every other gate green.
+ * red (fixing it means removing it from the list) and no worse than its value
+ * at HEAD for this engine and profile, every other gate green. A model-bound
+ * gate is reported, not asserted: the runner fixes its value.
  */
 import { afterAll, beforeAll, describe, expect, inject, test } from 'vitest';
 import { commands, server } from 'vitest/browser';
@@ -22,7 +24,13 @@ import type {
   WorkerMeasurement,
   WorkerResponse,
 } from '#filesystem-scenarios/protocol.js';
-import { measuredRow, pendingRow, renderMarkdown, scenarioTable } from '#filesystem-scenarios/scenarios.js';
+import {
+  measuredRow,
+  pendingRow,
+  renderMarkdown,
+  scenarioTable,
+  withinBaseline,
+} from '#filesystem-scenarios/scenarios.js';
 import type { RowProfile, ScenarioDefinition, ScenarioId, ScenarioRow } from '#filesystem-scenarios/scenarios.js';
 
 declare module 'vitest' {
@@ -38,7 +46,12 @@ declare module 'vitest' {
 
 const profileName = inject('filesystemScenarioProfile');
 const runs = inject('filesystemScenarioRuns');
-const knownRed = new Set<string>(knownRedList.gates.map((gate) => gate.id));
+type KnownRedGate = Readonly<{ id: string; limit: number; atHead: Readonly<Record<string, number>> }>;
+const knownRedGates: readonly KnownRedGate[] = knownRedList.gates;
+const knownRed = new Set<string>(knownRedGates.map((gate) => gate.id));
+/** The known-red ratchet key: values at HEAD differ by engine and fixture profile. */
+const baselineKey = `${server.browser}-${profileName}`;
+const recording = inject('filesystemScenarioRecord');
 const fixture = { seed: defaultFixtureSeed, scale: fixtureProfiles[profileName].scale };
 /** Every OPFS directory this harness creates starts with this, so a run can clear the last one's. */
 const directoryPrefix = 'fsx-';
@@ -177,7 +190,10 @@ const flatten = (measurement: WorkerMeasurement): Record<string, number> => {
   return {
     duration: measurement.duration,
     ...counts,
-    eventsPerPort: measurement.busEvents,
+    busEvents: measurement.busEvents,
+    /* Lock sets and tokens come from production's own counters (cross-tab coordinator). */
+    lockSets: measurement.productionCounters['locks.set'] ?? 0,
+    lockTokens: measurement.productionCounters['locks.token'] ?? 0,
     networkRequests,
     ...Object.fromEntries(Object.entries(network).map(([kind, value]) => [`network.${kind}`, value])),
     ...measurement.extra,
@@ -351,6 +367,11 @@ describe(`filesystem scenarios (${profileName} profile)`, { concurrent: false },
     }
     atomicity = outcomes;
     await clearScenarioDirectories();
+    for (const outcome of outcomes) {
+      /* Every writer must have been killed while writing or closing, never after it finished. */
+      expect(['mid-write', 'closing'], JSON.stringify(outcome)).toContain(outcome['killedAt']);
+      expect(outcome['residue'], JSON.stringify(outcome)).toStrictEqual([]);
+    }
     /* I1 relies on createWritable's swap-file commit; a sync-handle rewrite is
      * write-then-truncate and expected to tear, which is why replacements stage. */
     for (const outcome of outcomes.filter((row) => row['writer'] !== 'sync-handle')) {
@@ -519,7 +540,7 @@ describe(`filesystem scenarios (${profileName} profile)`, { concurrent: false },
         second.terminate();
       }
     });
-    expect(row.metrics['secondTabReads']).toBeGreaterThanOrEqual(0);
+    expect(row.metrics['secondTabReads']).toBeGreaterThan(0);
   });
 
   test('S17: a save while S3 materialises', async () => {
@@ -535,6 +556,10 @@ describe(`filesystem scenarios (${profileName} profile)`, { concurrent: false },
       }
     });
     expect(row.metrics['saveLatency']).toBeGreaterThan(0);
+    /* Every sample's save was issued while the apply was still writing; otherwise S17 measured nothing. */
+    for (const sample of row.samples) {
+      expect(sample['saveIssuedDuringApply'], JSON.stringify(sample)).toBe(1);
+    }
   });
 
   test('pending scenarios are declared with their reason and gates', () => {
@@ -544,21 +569,45 @@ describe(`filesystem scenarios (${profileName} profile)`, { concurrent: false },
     }
   });
 
-  describe('count gates (known-red gates must stay red until their package lands)', () => {
+  /** Values of known-red gates this run, recorded into known-red.json in record mode. */
+  const observedAtHead = new Map<string, Readonly<{ value: number; limit: number }>>();
+
+  describe('count gates (known-red gates stay red, and no worse than at HEAD, until their package lands)', () => {
     for (const row of scenarioTable.filter((scenarioRow) => scenarioRow.pending === undefined)) {
       for (const gate of row.gates) {
         const red = knownRed.has(gate.id);
-        test(`${gate.id}: ${gate.description}${red ? ' [known red at HEAD]' : ''}`, () => {
+        const modelBound = gate.qualifier?.kind === 'model-bound';
+        const suffix = modelBound ? ' [model-bound: reported only]' : red ? ' [known red at HEAD]' : '';
+        test(`${gate.id}: ${gate.description}${suffix}`, () => {
           const measured = rows.get(row.id);
           expect(measured, `${row.id} produced no row`).toBeDefined();
           const result = measured?.gates.find((candidate) => candidate.id === gate.id);
           expect(result?.value, `${gate.id} has no ${gate.metric}`).toBeDefined();
+          if (result === undefined || modelBound) {
+            return;
+          }
           expect(
-            result?.pass,
+            result.pass,
             red
-              ? `${gate.id} is green (${String(result?.value)} vs ${String(result?.limit)}): remove it from baseline/known-red.json`
-              : `${gate.id} is red: ${String(result?.value)} vs ${String(result?.limit)}`,
+              ? `${gate.id} is green (${String(result.value)} vs ${String(result.limit)}): remove it from baseline/known-red.json`
+              : `${gate.id} is red: ${String(result.value)} vs ${String(result.limit)}`,
           ).toBe(!red);
+          if (!red) {
+            return;
+          }
+          observedAtHead.set(gate.id, { value: result.value ?? Number.NaN, limit: result.limit });
+          if (recording) {
+            return;
+          }
+          const atHead = knownRedGates.find((entry) => entry.id === gate.id)?.atHead[baselineKey];
+          expect(
+            atHead,
+            `${gate.id} has no atHead for ${baselineKey}: re-record with TAU_FS_SCENARIO_RECORD=true`,
+          ).toBeDefined();
+          expect(
+            withinBaseline(result, atHead ?? Number.NaN),
+            `${gate.id} regressed: ${String(result.value)} is worse than ${String(atHead)} at HEAD (${baselineKey})`,
+          ).toBe(true);
         });
       }
     }
@@ -606,6 +655,22 @@ describe(`filesystem scenarios (${profileName} profile)`, { concurrent: false },
     if (inject('filesystemScenarioRecord')) {
       await commands.writeFile(`baseline/${engine}-${profileName}.json`, json);
       await commands.writeFile(`baseline/${engine}-${profileName}.md`, markdown);
+      const updated = {
+        ...knownRedList,
+        gates: knownRedGates.map((entry) => ({
+          ...entry,
+          limit: observedAtHead.get(entry.id)?.limit ?? entry.limit,
+          atHead: Object.fromEntries(
+            Object.entries({
+              ...entry.atHead,
+              [baselineKey]: observedAtHead.get(entry.id)?.value ?? entry.atHead[baselineKey],
+            })
+              .filter((pair): pair is [string, number] => pair[1] !== undefined)
+              .sort(([left], [right]) => left.localeCompare(right)),
+          ),
+        })),
+      };
+      await commands.writeFile('baseline/known-red.json', `${JSON.stringify(updated, null, 2)}\n`);
     }
   });
 });

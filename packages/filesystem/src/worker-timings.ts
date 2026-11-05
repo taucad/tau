@@ -52,10 +52,18 @@ export type WorkerTimingSpan = (typeof workerTimingSpans)[number];
  * - `events.change`: change events the worker's bus delivered.
  * - `revisions.changed`: `changed` events sent to a checkout machine.
  * - `listing.bytes`: file bytes a directory listing read to describe its entries.
+ * - `locks.set`: ordered Web Lock sets a mutation acquired (one per `withCrossTabLocks` call).
+ * - `locks.token`: the tokens those sets named, so `locks.token / locks.set` is the mean set size.
  *
  * @public
  */
-export const workerTimingCounters = ['events.change', 'revisions.changed', 'listing.bytes'] as const;
+export const workerTimingCounters = [
+  'events.change',
+  'revisions.changed',
+  'listing.bytes',
+  'locks.set',
+  'locks.token',
+] as const;
 
 /** One counter's name. @public */
 export type WorkerTimingCounter = (typeof workerTimingCounters)[number];

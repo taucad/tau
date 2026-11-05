@@ -37,7 +37,7 @@ env:
   TAU_WEBSOCKET_URL: ws://localhost:4001
   TAU_FRONTEND_URL: http://localhost:3000
   # End-to-end suites that open no chat, so capture no chat log for the empty-capture rule to find.
-  SUITES_WITHOUT_CHAT: '["test:e2e:non-isolated", "test:e2e:deploy-skew"]'
+  SUITES_WITHOUT_CHAT: '["test:e2e:non-isolated", "test:e2e:deploy-skew", "test:e2e:filesystem-scenarios"]'
 
 jobs:
   # Picks the commit and lists every suite. Selectors are target names, so a new e2e
@@ -79,7 +79,7 @@ jobs:
             suites=$(jq -c --arg target "$1" --argjson projects "$2" \
               '. + [$projects[] | {project: ., target: $target, slug: ("\(.)-\($target)" | gsub(":"; "-"))}]' <<< "$suites")
           }
-          for target in test:e2e test:e2e:development test:e2e:browser-host test:e2e:daemon-host test:e2e:non-isolated test:e2e:deploy-skew; do
+          for target in test:e2e test:e2e:development test:e2e:browser-host test:e2e:daemon-host test:e2e:non-isolated test:e2e:deploy-skew test:e2e:filesystem-scenarios; do
             add_suites "$target" "$(pnpm nx show projects --with-target "$target" --json | tail -1)"
           done
           webgpu=$(pnpm nx show projects --with-target test:e2e:webgpu --json | tail -1)
@@ -166,7 +166,8 @@ jobs:
       # Field trace validation: every events.jsonl the suites above captured at
       # teardown is validated against ChatLog.tla, including after a failed suite.
       # `SUITES_WITHOUT_CHAT` names the suites that open no chat: `test:e2e:non-isolated` runs
-      # only PicoVoxel specs and `test:e2e:deploy-skew` only the TAU-UI-6 deploy check.
+      # only PicoVoxel specs, `test:e2e:deploy-skew` only the TAU-UI-6 deploy check and
+      # `test:e2e:filesystem-scenarios` only the filesystem scenario harness (Chromium, small profile).
       - name: Setup formal toolchains
         if: always() && !contains(fromJSON(env.SUITES_WITHOUT_CHAT), matrix.suite.target)
         uses: ./.github/actions/setup-formal
@@ -192,6 +193,7 @@ jobs:
           path: |
             out/test-results/vitest-browser
             out/test-results/desktop-e2e
+            out/test-results/filesystem-scenarios
             out/test-results/chat-logs
             out/reports/formal
           if-no-files-found: ignore

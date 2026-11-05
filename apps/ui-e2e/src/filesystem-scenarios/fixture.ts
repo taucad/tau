@@ -122,7 +122,9 @@ const spreadSizes = (
 
 const textAreas = ['src', 'lib', 'docs', 'models', 'parts', 'tests', 'scripts', 'config'] as const;
 const textExtensions = ['ts', 'ts', 'ts', 'tsx', 'js', 'json', 'md', 'scad', 'py', 'kcl'] as const;
-const binaryAreas = ['assets/meshes', 'assets/cad', 'assets/textures', 'exports', 'scans'] as const;
+/* Every area is versioned under Tau's path policy: a root `exports/` is Tau's generated
+ * output, which no revision carries, so a checkout of a tree holding it is refused. */
+const binaryAreas = ['assets/meshes', 'assets/cad', 'assets/textures', 'renders', 'scans'] as const;
 const binaryExtensions = ['stl', 'step', 'glb', 'png', '3mf'] as const;
 
 const pick = <Value>(random: () => number, values: readonly Value[]): Value =>

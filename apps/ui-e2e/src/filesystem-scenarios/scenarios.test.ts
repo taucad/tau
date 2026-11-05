@@ -3,8 +3,17 @@ import { describe, expect, it } from 'vitest';
 import knownRed from './baseline/known-red.json' with { type: 'json' };
 // oxlint-disable-next-line no-restricted-imports -- The Node-only unit target intentionally runs without browser aliases.
 import { networkKind } from './counters.ts';
-// oxlint-disable-next-line no-restricted-imports -- The Node-only unit target intentionally runs without browser aliases.
-import { evaluateGate, measuredRow, p75, pendingRow, renderMarkdown, scenarioTable } from './scenarios.ts';
+/* oxlint-disable no-restricted-imports -- The Node-only unit target intentionally runs without browser aliases. */
+import {
+  evaluateGate,
+  measuredRow,
+  p75,
+  pendingRow,
+  renderMarkdown,
+  scenarioTable,
+  withinBaseline,
+} from './scenarios.ts';
+/* oxlint-enable no-restricted-imports */
 // oxlint-disable-next-line no-restricted-imports -- The Node-only unit target intentionally runs without browser aliases.
 import type { RowProfile } from './scenarios.ts';
 
@@ -39,6 +48,35 @@ describe('scenarioTable', () => {
 
     for (const gate of knownRed.gates) {
       expect(runnable.has(gate.id), gate.id).toBe(true);
+    }
+  });
+
+  it("should list each known-red gate with the table's own limit", () => {
+    const limits = new Map(scenarioTable.flatMap((row) => row.gates.map((gate) => [gate.id, gate.limit])));
+    for (const gate of knownRed.gates) {
+      expect(gate.limit, gate.id).toBe(limits.get(gate.id));
+    }
+  });
+
+  it('should record an atHead value per engine and profile for every known-red gate', () => {
+    for (const gate of knownRed.gates) {
+      expect(Object.keys(gate.atHead).length, gate.id).toBeGreaterThan(0);
+      for (const [key, value] of Object.entries(gate.atHead)) {
+        expect(key, gate.id).toMatch(/^(?:chromium|firefox|webkit)-(?:small|full)$/u);
+        expect(Number.isFinite(value), gate.id).toBe(true);
+      }
+    }
+  });
+
+  it('should never list a model-bound gate as known red, and give every qualifier a reason', () => {
+    const listed = new Set(knownRed.gates.map((gate) => gate.id));
+    for (const gate of scenarioTable.flatMap((row) => row.gates)) {
+      if (gate.qualifier !== undefined) {
+        expect(gate.qualifier.reason.length, gate.id).toBeGreaterThan(20);
+      }
+      if (gate.qualifier?.kind === 'model-bound') {
+        expect(listed.has(gate.id), gate.id).toBe(false);
+      }
     }
   });
 });
@@ -81,6 +119,38 @@ describe('evaluateGate', () => {
   });
 });
 
+describe('withinBaseline', () => {
+  const none = new Set<string>();
+
+  it('should hold an at-most gate to its value at HEAD', () => {
+    const gate = { id: 'S3.renames', metric: 'renames', comparison: 'at-most', limit: 0, description: '' } as const;
+
+    expect(withinBaseline(evaluateGate(gate, { renames: 100 }, none), 100)).toBe(true);
+    expect(withinBaseline(evaluateGate(gate, { renames: 60 }, none), 100)).toBe(true);
+    expect(withinBaseline(evaluateGate(gate, { renames: 101 }, none), 100)).toBe(false);
+  });
+
+  it('should hold an equals gate to its distance from the limit at HEAD', () => {
+    const gate = {
+      id: 'S6.hash-passes',
+      metric: 'hashPasses',
+      comparison: 'equals',
+      limit: 1,
+      description: '',
+    } as const;
+
+    expect(withinBaseline(evaluateGate(gate, { hashPasses: 0 }, none), 0)).toBe(true);
+    expect(withinBaseline(evaluateGate(gate, { hashPasses: 2 }, none), 0)).toBe(true);
+    expect(withinBaseline(evaluateGate(gate, { hashPasses: 3 }, none), 0)).toBe(false);
+  });
+
+  it('should fail a gate with no value', () => {
+    const gate = { id: 'S3.renames', metric: 'renames', comparison: 'at-most', limit: 0, description: '' } as const;
+
+    expect(withinBaseline(evaluateGate(gate, {}, none), 100)).toBe(false);
+  });
+});
+
 describe('rows', () => {
   it('should report the p75 of each metric over the samples', () => {
     expect(p75([4, 1, 3, 2])).toBe(3);
@@ -114,6 +184,22 @@ describe('rows', () => {
     expect(markdown).toContain('Server: none');
     expect(markdown).toContain('| S1 | Cold open: tree visible | pending |');
     expect(markdown).toContain('declared S1.blob-reads — / 0');
+  });
+
+  it('should label model-bound gates as declared and vacuous gates as vacuous', () => {
+    const s5 = scenarioTable.find((row) => row.id === 'S5');
+    if (s5 === undefined) {
+      throw new Error('S5 is missing.');
+    }
+    const row = measuredRow(
+      s5,
+      { profile, samples: [{ duration: 1, networkRequests: 0, metadataRequests: 101, bytesRead: 0, files: 100 }] },
+      new Set(),
+    );
+    const markdown = renderMarkdown([row]);
+
+    expect(markdown).toContain('green (vacuous) S5.network');
+    expect(markdown).toContain('declared (model-bound) S5.compares');
   });
 });
 

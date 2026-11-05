@@ -1,7 +1,7 @@
 {
   "harness": "filesystem-scenarios",
-  "head": "ffaf44beff71",
-  "recordedAt": "2026-11-05T01:54:13.096Z",
+  "head": "21f0a09ef6f5",
+  "recordedAt": "2026-11-05T02:29:19.067Z",
   "profile": {
     "fixture": {
       "name": "small",
@@ -83,6 +83,7 @@
           "id": "S1.blob-reads",
           "metric": "blobReadsBeforeTree",
           "limit": 0,
+          "comparison": "equals",
           "pass": false,
           "knownRed": false
         },
@@ -90,6 +91,7 @@
           "id": "S1.whole-packs",
           "metric": "wholePacksBeforeTree",
           "limit": 0,
+          "comparison": "equals",
           "pass": false,
           "knownRed": false
         },
@@ -97,6 +99,7 @@
           "id": "S1.upload-pack",
           "metric": "uploadPackOnListing",
           "limit": 0,
+          "comparison": "equals",
           "pass": false,
           "knownRed": false
         }
@@ -138,6 +141,7 @@
           "id": "S2.objects",
           "metric": "objectsBeyondClosure",
           "limit": 0,
+          "comparison": "equals",
           "pass": false,
           "knownRed": false
         },
@@ -145,6 +149,7 @@
           "id": "S2.lfs-batches",
           "metric": "lfsBatchesBeyondCeiling",
           "limit": 0,
+          "comparison": "equals",
           "pass": false,
           "knownRed": false
         }
@@ -154,7 +159,7 @@
       "id": "S3",
       "title": "Cold open: all text materialised",
       "status": "measured",
-      "model": "apply-tree.ts on an empty checkout: one writeFiles batch to tau-staged siblings, setFileMode per staged file, one bulkMove to the targets; text bytes plus LFS pointers for every binary. Git fetch, inflate and capture are not part of the window.",
+      "model": "The production applyTree (@taucad/revisions/apply-tree, createApplyTreeEffects) materialising the fixture's tree (text bytes plus an LFS pointer per binary) over an empty checkout, with the seams createRevisionActors passes: the rooted view, tau-<role> siblings, and a capture from the production statTree + capture memo + captureRevisionTree. Git fetch and inflate are not part of the window; the apply's own verifying capture is.",
       "profile": {
         "fixture": {
           "name": "small",
@@ -174,11 +179,11 @@
       },
       "samples": [
         {
-          "duration": 1423.6999999999534,
+          "duration": 1728.3999999999069,
           "lockRequests": 6,
-          "lockSets": 2,
-          "lockWait": 2.6000000000931323,
-          "lockWaitMax": 1.1999999999534339,
+          "lockChains": 2,
+          "lockWait": 4.999999999534339,
+          "lockWaitMax": 2.599999999627471,
           "writableOpens": 0,
           "writableCommits": 0,
           "syncHandleOpens": 100,
@@ -187,25 +192,27 @@
           "bytesWritten": 2624717,
           "renames": 100,
           "removes": 0,
-          "getFileCalls": 200,
-          "handleLookups": 2084,
-          "blobReads": 350,
-          "bytesRead": 5326234,
+          "getFileCalls": 400,
+          "handleLookups": 2184,
+          "blobReads": 625,
+          "bytesRead": 10614068,
           "digests": 0,
           "bytesHashed": 0,
           "broadcastPosts": 200,
           "portPosts": 0,
-          "eventsPerPort": 200,
+          "busEvents": 200,
+          "lockSets": 2,
+          "lockTokens": 6,
           "networkRequests": 0,
           "files": 100,
           "mainThreadLongTasks": 0
         },
         {
-          "duration": 1339.8999999999069,
+          "duration": 1689.1000000000931,
           "lockRequests": 6,
-          "lockSets": 2,
-          "lockWait": 2.5,
-          "lockWaitMax": 1.0999999998603016,
+          "lockChains": 2,
+          "lockWait": 4.7000000001862645,
+          "lockWaitMax": 2.7000000001862645,
           "writableOpens": 0,
           "writableCommits": 0,
           "syncHandleOpens": 100,
@@ -214,25 +221,27 @@
           "bytesWritten": 2624717,
           "renames": 100,
           "removes": 0,
-          "getFileCalls": 200,
-          "handleLookups": 2084,
-          "blobReads": 350,
-          "bytesRead": 5326234,
+          "getFileCalls": 400,
+          "handleLookups": 2184,
+          "blobReads": 625,
+          "bytesRead": 10614068,
           "digests": 0,
           "bytesHashed": 0,
           "broadcastPosts": 200,
           "portPosts": 0,
-          "eventsPerPort": 200,
+          "busEvents": 200,
+          "lockSets": 2,
+          "lockTokens": 6,
           "networkRequests": 0,
           "files": 100,
           "mainThreadLongTasks": 0
         },
         {
-          "duration": 1514.6999999999534,
+          "duration": 1875.5,
           "lockRequests": 6,
-          "lockSets": 2,
-          "lockWait": 4.100000000093132,
-          "lockWaitMax": 2,
+          "lockChains": 2,
+          "lockWait": 6.199999999720603,
+          "lockWaitMax": 3.8999999999068677,
           "writableOpens": 0,
           "writableCommits": 0,
           "syncHandleOpens": 100,
@@ -241,36 +250,40 @@
           "bytesWritten": 2624717,
           "renames": 100,
           "removes": 0,
-          "getFileCalls": 200,
-          "handleLookups": 2084,
-          "blobReads": 350,
-          "bytesRead": 5326234,
+          "getFileCalls": 400,
+          "handleLookups": 2184,
+          "blobReads": 625,
+          "bytesRead": 10614068,
           "digests": 0,
           "bytesHashed": 0,
           "broadcastPosts": 200,
           "portPosts": 0,
-          "eventsPerPort": 200,
+          "busEvents": 200,
+          "lockSets": 2,
+          "lockTokens": 6,
           "networkRequests": 0,
           "files": 100,
           "mainThreadLongTasks": 0
         }
       ],
       "metrics": {
-        "blobReads": 350,
+        "blobReads": 625,
         "broadcastPosts": 200,
+        "busEvents": 200,
         "bytesHashed": 0,
-        "bytesRead": 5326234,
+        "bytesRead": 10614068,
         "bytesWritten": 2624717,
         "digests": 0,
-        "duration": 1514.6999999999534,
-        "eventsPerPort": 200,
+        "duration": 1875.5,
         "files": 100,
-        "getFileCalls": 200,
-        "handleLookups": 2084,
+        "getFileCalls": 400,
+        "handleLookups": 2184,
+        "lockChains": 2,
         "lockRequests": 6,
         "lockSets": 2,
-        "lockWait": 4.100000000093132,
-        "lockWaitMax": 2,
+        "lockTokens": 6,
+        "lockWait": 6.199999999720603,
+        "lockWaitMax": 3.8999999999068677,
         "mainThreadLongTasks": 0,
         "networkRequests": 0,
         "portPosts": 0,
@@ -285,7 +298,7 @@
       "times": [
         {
           "metric": "duration",
-          "value": 1514.6999999999534,
+          "value": 1875.5,
           "limit": 15000,
           "met": true
         }
@@ -296,14 +309,16 @@
           "metric": "lockSets",
           "value": 2,
           "limit": 1,
+          "comparison": "at-most",
           "pass": false,
           "knownRed": true
         },
         {
           "id": "S3.events",
-          "metric": "eventsPerPort",
+          "metric": "busEvents",
           "value": 200,
           "limit": 1,
+          "comparison": "at-most",
           "pass": false,
           "knownRed": true
         },
@@ -312,6 +327,7 @@
           "metric": "writes",
           "value": 100,
           "limit": 100,
+          "comparison": "equals",
           "pass": true,
           "knownRed": false
         },
@@ -320,14 +336,44 @@
           "metric": "renames",
           "value": 100,
           "limit": 0,
+          "comparison": "equals",
           "pass": false,
           "knownRed": true
         }
       ],
       "spans": {
-        "durationMilliseconds": 1665.3999999999069,
-        "spans": {},
-        "counters": {},
+        "durationMilliseconds": 2026.2999999998137,
+        "spans": {
+          "queue.wait": {
+            "count": 2,
+            "totalMilliseconds": 0,
+            "maxMilliseconds": 0
+          },
+          "queue.held": {
+            "count": 2,
+            "totalMilliseconds": 1503,
+            "maxMilliseconds": 1034
+          },
+          "apply.hold": {
+            "count": 1,
+            "totalMilliseconds": 1836,
+            "maxMilliseconds": 1836
+          }
+        },
+        "counters": {
+          "locks.set": {
+            "total": 2,
+            "peakPerSecond": 1
+          },
+          "locks.token": {
+            "total": 6,
+            "peakPerSecond": 3
+          },
+          "listing.bytes": {
+            "total": 2624717,
+            "peakPerSecond": 2624717
+          }
+        },
         "gauges": {}
       }
     },
@@ -367,6 +413,7 @@
           "id": "S4.downloads",
           "metric": "downloadPasses",
           "limit": 1,
+          "comparison": "at-most",
           "pass": false,
           "knownRed": false
         },
@@ -374,6 +421,7 @@
           "id": "S4.writes",
           "metric": "writePasses",
           "limit": 1,
+          "comparison": "at-most",
           "pass": false,
           "knownRed": false
         },
@@ -381,6 +429,7 @@
           "id": "S4.hashes",
           "metric": "hashPasses",
           "limit": 1,
+          "comparison": "at-most",
           "pass": false,
           "knownRed": false
         },
@@ -388,6 +437,7 @@
           "id": "S4.read-back",
           "metric": "readBackPasses",
           "limit": 1,
+          "comparison": "at-most",
           "pass": false,
           "knownRed": false
         }
@@ -417,9 +467,9 @@
       },
       "samples": [
         {
-          "duration": 508.4000000001397,
+          "duration": 472.10000000009313,
           "lockRequests": 0,
-          "lockSets": 0,
+          "lockChains": 0,
           "lockWait": 0,
           "lockWaitMax": 0,
           "writableOpens": 0,
@@ -438,16 +488,18 @@
           "bytesHashed": 0,
           "broadcastPosts": 0,
           "portPosts": 0,
-          "eventsPerPort": 0,
+          "busEvents": 0,
+          "lockSets": 0,
+          "lockTokens": 0,
           "networkRequests": 0,
           "listed": 100,
           "files": 100,
           "metadataRequests": 101
         },
         {
-          "duration": 461.80000000004657,
+          "duration": 462.39999999990687,
           "lockRequests": 0,
-          "lockSets": 0,
+          "lockChains": 0,
           "lockWait": 0,
           "lockWaitMax": 0,
           "writableOpens": 0,
@@ -466,16 +518,18 @@
           "bytesHashed": 0,
           "broadcastPosts": 0,
           "portPosts": 0,
-          "eventsPerPort": 0,
+          "busEvents": 0,
+          "lockSets": 0,
+          "lockTokens": 0,
           "networkRequests": 0,
           "listed": 100,
           "files": 100,
           "metadataRequests": 101
         },
         {
-          "duration": 478.60000000009313,
+          "duration": 546.5,
           "lockRequests": 0,
-          "lockSets": 0,
+          "lockChains": 0,
           "lockWait": 0,
           "lockWaitMax": 0,
           "writableOpens": 0,
@@ -494,7 +548,9 @@
           "bytesHashed": 0,
           "broadcastPosts": 0,
           "portPosts": 0,
-          "eventsPerPort": 0,
+          "busEvents": 0,
+          "lockSets": 0,
+          "lockTokens": 0,
           "networkRequests": 0,
           "listed": 100,
           "files": 100,
@@ -504,18 +560,20 @@
       "metrics": {
         "blobReads": 350,
         "broadcastPosts": 0,
+        "busEvents": 0,
         "bytesHashed": 0,
         "bytesRead": 5326234,
         "bytesWritten": 0,
         "digests": 0,
-        "duration": 508.4000000001397,
-        "eventsPerPort": 0,
+        "duration": 546.5,
         "files": 100,
         "getFileCalls": 200,
         "handleLookups": 259,
         "listed": 100,
+        "lockChains": 0,
         "lockRequests": 0,
         "lockSets": 0,
+        "lockTokens": 0,
         "lockWait": 0,
         "lockWaitMax": 0,
         "metadataRequests": 101,
@@ -532,7 +590,7 @@
       "times": [
         {
           "metric": "duration",
-          "value": 508.4000000001397,
+          "value": 546.5,
           "limit": 2000,
           "met": true
         }
@@ -543,14 +601,20 @@
           "metric": "networkRequests",
           "value": 0,
           "limit": 0,
+          "comparison": "equals",
           "pass": true,
-          "knownRed": false
+          "knownRed": false,
+          "qualifier": {
+            "kind": "vacuous",
+            "reason": "The harness has no server: a warm open cannot reach the network until the server tier (S1/S9) runs."
+          }
         },
         {
           "id": "S5.blob-reads",
           "metric": "bytesRead",
           "value": 5326234,
           "limit": 0,
+          "comparison": "equals",
           "pass": false,
           "knownRed": true
         },
@@ -559,12 +623,17 @@
           "metric": "metadataRequests",
           "value": 101,
           "limit": 1,
+          "comparison": "at-most",
           "pass": false,
-          "knownRed": true
+          "knownRed": false,
+          "qualifier": {
+            "kind": "model-bound",
+            "reason": "The runner's compare is its own loop of one stat per entry, so the count is fixed by the model; it becomes real when W3's Project Index gives warm open a production compare to drive."
+          }
         }
       ],
       "spans": {
-        "durationMilliseconds": 629.1000000000931,
+        "durationMilliseconds": 697.3000000002794,
         "spans": {},
         "counters": {
           "listing.bytes": {
@@ -599,11 +668,73 @@
       },
       "samples": [
         {
-          "duration": 574.5999999998603,
+          "duration": 522.1999999997206,
           "lockRequests": 2,
-          "lockSets": 1,
+          "lockChains": 1,
+          "lockWait": 1.599999999627471,
+          "lockWaitMax": 1.2999999998137355,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 102,
+          "syncHandleWriteSessions": 102,
+          "writes": 102,
+          "bytesWritten": 26214642,
+          "renames": 0,
+          "removes": 0,
+          "getFileCalls": 2,
+          "handleLookups": 759,
+          "blobReads": 2,
+          "bytesRead": 242,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 1,
+          "portPosts": 0,
+          "busEvents": 0,
+          "lockSets": 2,
+          "lockTokens": 2,
+          "networkRequests": 0,
+          "payloadBytes": 26214400,
+          "mainThreadLongTasks": 0,
+          "durableWriteRatio": 1.0000092315673828,
+          "hashPasses": 0
+        },
+        {
+          "duration": 572,
+          "lockRequests": 2,
+          "lockChains": 1,
+          "lockWait": 1.2999999998137355,
+          "lockWaitMax": 1.2000000001862645,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 102,
+          "syncHandleWriteSessions": 102,
+          "writes": 102,
+          "bytesWritten": 26214642,
+          "renames": 0,
+          "removes": 0,
+          "getFileCalls": 2,
+          "handleLookups": 759,
+          "blobReads": 2,
+          "bytesRead": 242,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 1,
+          "portPosts": 0,
+          "busEvents": 0,
+          "lockSets": 2,
+          "lockTokens": 2,
+          "networkRequests": 0,
+          "payloadBytes": 26214400,
+          "mainThreadLongTasks": 0,
+          "durableWriteRatio": 1.0000092315673828,
+          "hashPasses": 0
+        },
+        {
+          "duration": 632.5,
+          "lockRequests": 2,
+          "lockChains": 1,
           "lockWait": 1.3999999999068677,
-          "lockWaitMax": 1.1999999999534339,
+          "lockWaitMax": 1.1999999997206032,
           "writableOpens": 0,
           "writableCommits": 0,
           "syncHandleOpens": 102,
@@ -620,65 +751,9 @@
           "bytesHashed": 0,
           "broadcastPosts": 1,
           "portPosts": 0,
-          "eventsPerPort": 0,
-          "networkRequests": 0,
-          "payloadBytes": 26214400,
-          "mainThreadLongTasks": 0,
-          "durableWriteRatio": 1.0000092315673828,
-          "hashPasses": 0
-        },
-        {
-          "duration": 572.4000000001397,
-          "lockRequests": 2,
-          "lockSets": 1,
-          "lockWait": 2,
-          "lockWaitMax": 1.4000000001396984,
-          "writableOpens": 0,
-          "writableCommits": 0,
-          "syncHandleOpens": 102,
-          "syncHandleWriteSessions": 102,
-          "writes": 102,
-          "bytesWritten": 26214642,
-          "renames": 0,
-          "removes": 0,
-          "getFileCalls": 2,
-          "handleLookups": 759,
-          "blobReads": 2,
-          "bytesRead": 242,
-          "digests": 0,
-          "bytesHashed": 0,
-          "broadcastPosts": 1,
-          "portPosts": 0,
-          "eventsPerPort": 0,
-          "networkRequests": 0,
-          "payloadBytes": 26214400,
-          "mainThreadLongTasks": 0,
-          "durableWriteRatio": 1.0000092315673828,
-          "hashPasses": 0
-        },
-        {
-          "duration": 625.8999999999069,
-          "lockRequests": 2,
-          "lockSets": 1,
-          "lockWait": 1.7999999998137355,
-          "lockWaitMax": 1.3999999999068677,
-          "writableOpens": 0,
-          "writableCommits": 0,
-          "syncHandleOpens": 102,
-          "syncHandleWriteSessions": 102,
-          "writes": 102,
-          "bytesWritten": 26214642,
-          "renames": 0,
-          "removes": 0,
-          "getFileCalls": 2,
-          "handleLookups": 759,
-          "blobReads": 2,
-          "bytesRead": 242,
-          "digests": 0,
-          "bytesHashed": 0,
-          "broadcastPosts": 1,
-          "portPosts": 0,
-          "eventsPerPort": 0,
+          "busEvents": 0,
+          "lockSets": 2,
+          "lockTokens": 2,
           "networkRequests": 0,
           "payloadBytes": 26214400,
           "mainThreadLongTasks": 0,
@@ -689,20 +764,22 @@
       "metrics": {
         "blobReads": 2,
         "broadcastPosts": 1,
+        "busEvents": 0,
         "bytesHashed": 0,
         "bytesRead": 242,
         "bytesWritten": 26214642,
         "digests": 0,
         "durableWriteRatio": 1.0000092315673828,
-        "duration": 625.8999999999069,
-        "eventsPerPort": 0,
+        "duration": 632.5,
         "getFileCalls": 2,
         "handleLookups": 759,
         "hashPasses": 0,
+        "lockChains": 1,
         "lockRequests": 2,
-        "lockSets": 1,
-        "lockWait": 2,
-        "lockWaitMax": 1.4000000001396984,
+        "lockSets": 2,
+        "lockTokens": 2,
+        "lockWait": 1.599999999627471,
+        "lockWaitMax": 1.2999999998137355,
         "mainThreadLongTasks": 0,
         "networkRequests": 0,
         "payloadBytes": 26214400,
@@ -718,7 +795,7 @@
       "times": [
         {
           "metric": "duration",
-          "value": 625.8999999999069,
+          "value": 632.5,
           "limit": 20000,
           "met": true
         }
@@ -729,6 +806,7 @@
           "metric": "durableWriteRatio",
           "value": 1.0000092315673828,
           "limit": 1.01,
+          "comparison": "at-most",
           "pass": true,
           "knownRed": false
         },
@@ -737,14 +815,35 @@
           "metric": "hashPasses",
           "value": 0,
           "limit": 1,
-          "pass": true,
-          "knownRed": false
+          "comparison": "equals",
+          "pass": false,
+          "knownRed": true
         }
       ],
       "spans": {
-        "durationMilliseconds": 776.6000000000931,
-        "spans": {},
-        "counters": {},
+        "durationMilliseconds": 783.6000000000931,
+        "spans": {
+          "queue.wait": {
+            "count": 1,
+            "totalMilliseconds": 0,
+            "maxMilliseconds": 0
+          },
+          "queue.held": {
+            "count": 1,
+            "totalMilliseconds": 608,
+            "maxMilliseconds": 608
+          }
+        },
+        "counters": {
+          "locks.set": {
+            "total": 2,
+            "peakPerSecond": 2
+          },
+          "locks.token": {
+            "total": 2,
+            "peakPerSecond": 2
+          }
+        },
         "gauges": {}
       }
     },
@@ -772,11 +871,11 @@
       },
       "samples": [
         {
-          "duration": 29.9000000001397,
+          "duration": 11.200000000186265,
           "lockRequests": 7,
-          "lockSets": 1,
-          "lockWait": 6.699999999953434,
-          "lockWaitMax": 3.1000000000931323,
+          "lockChains": 1,
+          "lockWait": 1.7999999998137355,
+          "lockWaitMax": 0.6999999997206032,
           "writableOpens": 0,
           "writableCommits": 0,
           "syncHandleOpens": 1,
@@ -793,17 +892,19 @@
           "bytesHashed": 0,
           "broadcastPosts": 1,
           "portPosts": 0,
-          "eventsPerPort": 1,
+          "busEvents": 1,
+          "lockSets": 1,
+          "lockTokens": 7,
           "networkRequests": 0,
           "savedBytes": 1048576,
           "wholeFileCopies": 0
         },
         {
-          "duration": 13,
+          "duration": 10.699999999720603,
           "lockRequests": 7,
-          "lockSets": 1,
-          "lockWait": 2.5,
-          "lockWaitMax": 1.3000000000465661,
+          "lockChains": 1,
+          "lockWait": 2.1000000000931323,
+          "lockWaitMax": 0.7000000001862645,
           "writableOpens": 0,
           "writableCommits": 0,
           "syncHandleOpens": 1,
@@ -820,17 +921,19 @@
           "bytesHashed": 0,
           "broadcastPosts": 1,
           "portPosts": 0,
-          "eventsPerPort": 1,
+          "busEvents": 1,
+          "lockSets": 1,
+          "lockTokens": 7,
           "networkRequests": 0,
           "savedBytes": 1048576,
           "wholeFileCopies": 0
         },
         {
-          "duration": 12.799999999813735,
+          "duration": 11.200000000186265,
           "lockRequests": 7,
-          "lockSets": 1,
-          "lockWait": 2.6000000000931323,
-          "lockWaitMax": 1.3000000000465661,
+          "lockChains": 1,
+          "lockWait": 1.6000000000931323,
+          "lockWaitMax": 0.7999999998137355,
           "writableOpens": 0,
           "writableCommits": 0,
           "syncHandleOpens": 1,
@@ -847,7 +950,9 @@
           "bytesHashed": 0,
           "broadcastPosts": 1,
           "portPosts": 0,
-          "eventsPerPort": 1,
+          "busEvents": 1,
+          "lockSets": 1,
+          "lockTokens": 7,
           "networkRequests": 0,
           "savedBytes": 1048576,
           "wholeFileCopies": 0
@@ -856,18 +961,20 @@
       "metrics": {
         "blobReads": 0,
         "broadcastPosts": 1,
+        "busEvents": 1,
         "bytesHashed": 0,
         "bytesRead": 0,
         "bytesWritten": 1048576,
         "digests": 0,
-        "duration": 29.9000000001397,
-        "eventsPerPort": 1,
+        "duration": 11.200000000186265,
         "getFileCalls": 0,
         "handleLookups": 3,
+        "lockChains": 1,
         "lockRequests": 7,
         "lockSets": 1,
-        "lockWait": 6.699999999953434,
-        "lockWaitMax": 3.1000000000931323,
+        "lockTokens": 7,
+        "lockWait": 2.1000000000931323,
+        "lockWaitMax": 0.7999999998137355,
         "networkRequests": 0,
         "portPosts": 0,
         "removes": 0,
@@ -883,7 +990,7 @@
       "times": [
         {
           "metric": "duration",
-          "value": 29.9000000001397,
+          "value": 11.200000000186265,
           "limit": 100,
           "met": true
         }
@@ -894,14 +1001,16 @@
           "metric": "lockSets",
           "value": 1,
           "limit": 1,
+          "comparison": "at-most",
           "pass": true,
           "knownRed": false
         },
         {
           "id": "S7.events",
-          "metric": "eventsPerPort",
+          "metric": "busEvents",
           "value": 1,
           "limit": 1,
+          "comparison": "at-most",
           "pass": true,
           "knownRed": false
         },
@@ -910,14 +1019,35 @@
           "metric": "wholeFileCopies",
           "value": 0,
           "limit": 0,
+          "comparison": "equals",
           "pass": true,
           "knownRed": false
         }
       ],
       "spans": {
-        "durationMilliseconds": 163.0999999998603,
-        "spans": {},
-        "counters": {},
+        "durationMilliseconds": 161.79999999981374,
+        "spans": {
+          "queue.wait": {
+            "count": 1,
+            "totalMilliseconds": 0,
+            "maxMilliseconds": 0
+          },
+          "queue.held": {
+            "count": 1,
+            "totalMilliseconds": 7,
+            "maxMilliseconds": 7
+          }
+        },
+        "counters": {
+          "locks.set": {
+            "total": 1,
+            "peakPerSecond": 1
+          },
+          "locks.token": {
+            "total": 7,
+            "peakPerSecond": 7
+          }
+        },
         "gauges": {}
       }
     },
@@ -925,7 +1055,7 @@
       "id": "S8",
       "title": "Agent turn writing 50 files",
       "status": "measured",
-      "model": "Fifty rooted writeFile calls in order, as the agent's write tool issues them; one recursive watch counts deliveries.",
+      "model": "One agent turn's fifty write tool calls dispatched together through agent-tools' createProviderRpcFileSystem over an agent-masked composed view, as the host issues a turn's parallel calls; one recursive watch counts deliveries.",
       "profile": {
         "fixture": {
           "name": "small",
@@ -945,11 +1075,11 @@
       },
       "samples": [
         {
-          "duration": 262.0999999998603,
+          "duration": 265.1999999997206,
           "lockRequests": 450,
-          "lockSets": 50,
-          "lockWait": 64.30000000004657,
-          "lockWaitMax": 0.8000000000465661,
+          "lockChains": 50,
+          "lockWait": 6785.800000000279,
+          "lockWaitMax": 254.20000000018626,
           "writableOpens": 0,
           "writableCommits": 0,
           "syncHandleOpens": 50,
@@ -966,16 +1096,18 @@
           "bytesHashed": 0,
           "broadcastPosts": 50,
           "portPosts": 0,
-          "eventsPerPort": 50,
+          "busEvents": 50,
+          "lockSets": 50,
+          "lockTokens": 450,
           "networkRequests": 0,
           "watchDeliveries": 50
         },
         {
-          "duration": 241.10000000009313,
+          "duration": 271.5,
           "lockRequests": 450,
-          "lockSets": 50,
-          "lockWait": 61.09999999892898,
-          "lockWaitMax": 1.8000000000465661,
+          "lockChains": 50,
+          "lockWait": 6739.399999999441,
+          "lockWaitMax": 260.60000000009313,
           "writableOpens": 0,
           "writableCommits": 0,
           "syncHandleOpens": 50,
@@ -992,16 +1124,18 @@
           "bytesHashed": 0,
           "broadcastPosts": 50,
           "portPosts": 0,
-          "eventsPerPort": 50,
+          "busEvents": 50,
+          "lockSets": 50,
+          "lockTokens": 450,
           "networkRequests": 0,
           "watchDeliveries": 50
         },
         {
-          "duration": 257.29999999981374,
+          "duration": 270.1999999997206,
           "lockRequests": 450,
-          "lockSets": 50,
-          "lockWait": 63.3000000002794,
-          "lockWaitMax": 1,
+          "lockChains": 50,
+          "lockWait": 6258.500000000931,
+          "lockWaitMax": 261.79999999981374,
           "writableOpens": 0,
           "writableCommits": 0,
           "syncHandleOpens": 50,
@@ -1018,7 +1152,9 @@
           "bytesHashed": 0,
           "broadcastPosts": 50,
           "portPosts": 0,
-          "eventsPerPort": 50,
+          "busEvents": 50,
+          "lockSets": 50,
+          "lockTokens": 450,
           "networkRequests": 0,
           "watchDeliveries": 50
         }
@@ -1026,18 +1162,20 @@
       "metrics": {
         "blobReads": 0,
         "broadcastPosts": 50,
+        "busEvents": 50,
         "bytesHashed": 0,
         "bytesRead": 0,
         "bytesWritten": 102400,
         "digests": 0,
-        "duration": 262.0999999998603,
-        "eventsPerPort": 50,
+        "duration": 271.5,
         "getFileCalls": 0,
         "handleLookups": 252,
+        "lockChains": 50,
         "lockRequests": 450,
         "lockSets": 50,
-        "lockWait": 64.30000000004657,
-        "lockWaitMax": 1.8000000000465661,
+        "lockTokens": 450,
+        "lockWait": 6785.800000000279,
+        "lockWaitMax": 261.79999999981374,
         "networkRequests": 0,
         "portPosts": 0,
         "removes": 0,
@@ -1052,7 +1190,7 @@
       "times": [
         {
           "metric": "duration",
-          "value": 262.0999999998603,
+          "value": 271.5,
           "limit": 500,
           "met": true
         }
@@ -1063,6 +1201,7 @@
           "metric": "lockSets",
           "value": 50,
           "limit": 1,
+          "comparison": "at-most",
           "pass": false,
           "knownRed": true
         },
@@ -1071,14 +1210,35 @@
           "metric": "watchDeliveries",
           "value": 50,
           "limit": 1,
+          "comparison": "at-most",
           "pass": false,
           "knownRed": true
         }
       ],
       "spans": {
-        "durationMilliseconds": 407.5999999998603,
-        "spans": {},
-        "counters": {},
+        "durationMilliseconds": 420.5,
+        "spans": {
+          "queue.wait": {
+            "count": 101,
+            "totalMilliseconds": 40,
+            "maxMilliseconds": 1
+          },
+          "queue.held": {
+            "count": 101,
+            "totalMilliseconds": 6756,
+            "maxMilliseconds": 269
+          }
+        },
+        "counters": {
+          "locks.set": {
+            "total": 51,
+            "peakPerSecond": 51
+          },
+          "locks.token": {
+            "total": 457,
+            "peakPerSecond": 457
+          }
+        },
         "gauges": {}
       }
     },
@@ -1118,6 +1278,7 @@
           "id": "S9.unchanged-blobs",
           "metric": "unchangedBlobReads",
           "limit": 0,
+          "comparison": "equals",
           "pass": false,
           "knownRed": false
         },
@@ -1125,6 +1286,7 @@
           "id": "S9.lfs-batch",
           "metric": "lfsBatchOldOids",
           "limit": 0,
+          "comparison": "equals",
           "pass": false,
           "knownRed": false
         },
@@ -1132,6 +1294,7 @@
           "id": "S9.info-refs",
           "metric": "infoRefs",
           "limit": 1,
+          "comparison": "at-most",
           "pass": false,
           "knownRed": false
         }
@@ -1173,6 +1336,7 @@
           "id": "S10.files",
           "metric": "filesTouched",
           "limit": 1,
+          "comparison": "at-most",
           "pass": false,
           "knownRed": false
         },
@@ -1180,6 +1344,7 @@
           "id": "S10.captures",
           "metric": "captures",
           "limit": 0,
+          "comparison": "equals",
           "pass": false,
           "knownRed": false
         }
@@ -1190,7 +1355,7 @@
       "title": "Revision compare / switch",
       "status": "pending",
       "model": "Compare one file across two of the fixture's 200 revisions.",
-      "pending": "Needs a git object store holding the fixture's 200 revisions, built through the revision port; @taucad/revisions is not a dependency ui-e2e resolves, so wiring it is a follow-up (W0.2) rather than part of this harness.",
+      "pending": "Needs a git object store holding the fixture's 200 revisions, built through the revision port (createIsomorphicGitRevisionPort) rather than a tree applied in place; a follow-up (W0.2).",
       "profile": {
         "fixture": {
           "name": "small",
@@ -1221,6 +1386,7 @@
           "id": "S11.objects",
           "metric": "objectsBeyondPaths",
           "limit": 0,
+          "comparison": "equals",
           "pass": false,
           "knownRed": false
         }
@@ -1230,7 +1396,7 @@
       "id": "S12",
       "title": "Agent grep / glob over the project",
       "status": "measured",
-      "model": "The chat RPC handlers handleGrep (fixture marker, whole project) and handleGlobSearch ('**/*.ts') over a composed agent view of the rooted project, mapped as agent-tools' provider filesystem maps it; runs on the authority's thread.",
+      "model": "The chat RPC handlers handleGrep (fixture marker, whole project) and handleGlobSearch ('**/*.ts') over agent-tools' createProviderRpcFileSystem on an agent-masked composed view of the imported project (every binary's bytes present); runs on the authority's thread.",
       "profile": {
         "fixture": {
           "name": "small",
@@ -1250,9 +1416,9 @@
       },
       "samples": [
         {
-          "duration": 1166.1000000000931,
+          "duration": 909.1000000000931,
           "lockRequests": 0,
-          "lockSets": 0,
+          "lockChains": 0,
           "lockWait": 0,
           "lockWaitMax": 0,
           "writableOpens": 0,
@@ -1271,19 +1437,21 @@
           "bytesHashed": 0,
           "broadcastPosts": 0,
           "portPosts": 0,
-          "eventsPerPort": 0,
+          "busEvents": 0,
+          "lockSets": 0,
+          "lockTokens": 0,
           "networkRequests": 0,
-          "grepDuration": 849.1000000000931,
-          "globDuration": 316.0999999998603,
+          "grepDuration": 540.2000000001863,
+          "globDuration": 367.60000000009313,
           "binaryBytesRead": 23592960,
           "textBytesRead": 2621627,
           "walkCalls": 320,
           "authorityReads": 101
         },
         {
-          "duration": 1093.3000000000466,
+          "duration": 839.8999999999069,
           "lockRequests": 0,
-          "lockSets": 0,
+          "lockChains": 0,
           "lockWait": 0,
           "lockWaitMax": 0,
           "writableOpens": 0,
@@ -1302,19 +1470,21 @@
           "bytesHashed": 0,
           "broadcastPosts": 0,
           "portPosts": 0,
-          "eventsPerPort": 0,
+          "busEvents": 0,
+          "lockSets": 0,
+          "lockTokens": 0,
           "networkRequests": 0,
-          "grepDuration": 774.1000000000931,
-          "globDuration": 319.10000000009313,
+          "grepDuration": 429.70000000018626,
+          "globDuration": 410,
           "binaryBytesRead": 23592960,
           "textBytesRead": 2621627,
           "walkCalls": 320,
           "authorityReads": 101
         },
         {
-          "duration": 1094.3000000000466,
+          "duration": 808.2999999998137,
           "lockRequests": 0,
-          "lockSets": 0,
+          "lockChains": 0,
           "lockWait": 0,
           "lockWaitMax": 0,
           "writableOpens": 0,
@@ -1333,10 +1503,12 @@
           "bytesHashed": 0,
           "broadcastPosts": 0,
           "portPosts": 0,
-          "eventsPerPort": 0,
+          "busEvents": 0,
+          "lockSets": 0,
+          "lockTokens": 0,
           "networkRequests": 0,
-          "grepDuration": 753.4000000001397,
-          "globDuration": 340.80000000004657,
+          "grepDuration": 422.60000000009313,
+          "globDuration": 385.5,
           "binaryBytesRead": 23592960,
           "textBytesRead": 2621627,
           "walkCalls": 320,
@@ -1348,18 +1520,20 @@
         "binaryBytesRead": 23592960,
         "blobReads": 459,
         "broadcastPosts": 0,
+        "busEvents": 0,
         "bytesHashed": 0,
         "bytesRead": 32154027,
         "bytesWritten": 0,
         "digests": 0,
-        "duration": 1166.1000000000931,
-        "eventsPerPort": 0,
+        "duration": 909.1000000000931,
         "getFileCalls": 305,
-        "globDuration": 340.80000000004657,
-        "grepDuration": 849.1000000000931,
+        "globDuration": 410,
+        "grepDuration": 540.2000000001863,
         "handleLookups": 261,
+        "lockChains": 0,
         "lockRequests": 0,
         "lockSets": 0,
+        "lockTokens": 0,
         "lockWait": 0,
         "lockWaitMax": 0,
         "networkRequests": 0,
@@ -1377,13 +1551,13 @@
       "times": [
         {
           "metric": "grepDuration",
-          "value": 849.1000000000931,
+          "value": 540.2000000001863,
           "limit": 2000,
           "met": true
         },
         {
           "metric": "globDuration",
-          "value": 340.80000000004657,
+          "value": 410,
           "limit": 200,
           "met": false
         }
@@ -1394,6 +1568,7 @@
           "metric": "binaryBytesRead",
           "value": 23592960,
           "limit": 0,
+          "comparison": "equals",
           "pass": false,
           "knownRed": true
         },
@@ -1402,17 +1577,18 @@
           "metric": "walkCalls",
           "value": 320,
           "limit": 0,
+          "comparison": "equals",
           "pass": false,
           "knownRed": true
         }
       ],
       "spans": {
-        "durationMilliseconds": 1244.6999999999534,
+        "durationMilliseconds": 958.6999999997206,
         "spans": {},
         "counters": {
           "listing.bytes": {
             "total": 5860592,
-            "peakPerSecond": 5364324
+            "peakPerSecond": 5279407
           }
         },
         "gauges": {}
@@ -1442,9 +1618,9 @@
       },
       "samples": [
         {
-          "duration": 2138.6999999999534,
+          "duration": 2426.5999999996275,
           "lockRequests": 0,
-          "lockSets": 0,
+          "lockChains": 0,
           "lockWait": 0,
           "lockWaitMax": 0,
           "writableOpens": 0,
@@ -1463,15 +1639,17 @@
           "bytesHashed": 0,
           "broadcastPosts": 0,
           "portPosts": 0,
-          "eventsPerPort": 0,
+          "busEvents": 0,
+          "lockSets": 0,
+          "lockTokens": 0,
           "networkRequests": 0,
           "probes": 2000,
           "hits": 500
         },
         {
-          "duration": 2230.8000000000466,
+          "duration": 2240.7999999998137,
           "lockRequests": 0,
-          "lockSets": 0,
+          "lockChains": 0,
           "lockWait": 0,
           "lockWaitMax": 0,
           "writableOpens": 0,
@@ -1490,15 +1668,17 @@
           "bytesHashed": 0,
           "broadcastPosts": 0,
           "portPosts": 0,
-          "eventsPerPort": 0,
+          "busEvents": 0,
+          "lockSets": 0,
+          "lockTokens": 0,
           "networkRequests": 0,
           "probes": 2000,
           "hits": 500
         },
         {
-          "duration": 2156.3000000000466,
+          "duration": 2231.6999999997206,
           "lockRequests": 0,
-          "lockSets": 0,
+          "lockChains": 0,
           "lockWait": 0,
           "lockWaitMax": 0,
           "writableOpens": 0,
@@ -1517,7 +1697,9 @@
           "bytesHashed": 0,
           "broadcastPosts": 0,
           "portPosts": 0,
-          "eventsPerPort": 0,
+          "busEvents": 0,
+          "lockSets": 0,
+          "lockTokens": 0,
           "networkRequests": 0,
           "probes": 2000,
           "hits": 500
@@ -1526,17 +1708,19 @@
       "metrics": {
         "blobReads": 1000,
         "broadcastPosts": 0,
+        "busEvents": 0,
         "bytesHashed": 0,
         "bytesRead": 10096967,
         "bytesWritten": 0,
         "digests": 0,
-        "duration": 2230.8000000000466,
-        "eventsPerPort": 0,
+        "duration": 2426.5999999996275,
         "getFileCalls": 500,
         "handleLookups": 2500,
         "hits": 500,
+        "lockChains": 0,
         "lockRequests": 0,
         "lockSets": 0,
+        "lockTokens": 0,
         "lockWait": 0,
         "lockWaitMax": 0,
         "networkRequests": 0,
@@ -1553,7 +1737,7 @@
       "times": [
         {
           "metric": "duration",
-          "value": 2230.8000000000466,
+          "value": 2426.5999999996275,
           "limit": 300,
           "met": false
         }
@@ -1564,17 +1748,18 @@
           "metric": "bytesRead",
           "value": 10096967,
           "limit": 0,
+          "comparison": "equals",
           "pass": false,
           "knownRed": true
         }
       ],
       "spans": {
-        "durationMilliseconds": 2306.600000000093,
+        "durationMilliseconds": 2382.100000000093,
         "spans": {},
         "counters": {
           "listing.bytes": {
-            "total": 181076,
-            "peakPerSecond": 181076
+            "total": 5279407,
+            "peakPerSecond": 5279407
           }
         },
         "gauges": {}
@@ -1650,7 +1835,7 @@
       "id": "S16",
       "title": "Second tab during S3",
       "status": "measured",
-      "model": "S3 in one authority worker while a second authority worker on the same project (a peer tab's file-manager worker, same origin) reads one file every 50 ms and counts the cross-tab invalidations it receives.",
+      "model": "S3 (the production applyTree) in one authority worker while a second authority worker on the same project (a peer tab's file-manager worker, same origin) reads one file every 50 ms and counts the cross-tab invalidations it receives.",
       "profile": {
         "fixture": {
           "name": "small",
@@ -1670,11 +1855,11 @@
       },
       "samples": [
         {
-          "duration": 1563.8000000000466,
+          "duration": 2007.6999999997206,
           "lockRequests": 6,
-          "lockSets": 2,
-          "lockWait": 9.099999999860302,
-          "lockWaitMax": 4.300000000046566,
+          "lockChains": 2,
+          "lockWait": 8.999999999534339,
+          "lockWaitMax": 6.7000000001862645,
           "writableOpens": 0,
           "writableCommits": 0,
           "syncHandleOpens": 100,
@@ -1683,29 +1868,31 @@
           "bytesWritten": 2624717,
           "renames": 100,
           "removes": 0,
-          "getFileCalls": 200,
-          "handleLookups": 2084,
-          "blobReads": 350,
-          "bytesRead": 5326234,
+          "getFileCalls": 400,
+          "handleLookups": 2184,
+          "blobReads": 625,
+          "bytesRead": 10614068,
           "digests": 0,
           "bytesHashed": 0,
           "broadcastPosts": 200,
           "portPosts": 0,
-          "eventsPerPort": 200,
+          "busEvents": 200,
+          "lockSets": 2,
+          "lockTokens": 6,
           "networkRequests": 0,
           "files": 100,
-          "secondTabReads": 20,
-          "readP95": 7,
+          "secondTabReads": 21,
+          "readP95": 8.399999999906868,
           "invalidationsReceived": 200,
           "secondTabBusEvents": 200,
           "invalidationsPerChangeset": 200
         },
         {
-          "duration": 1586.1999999999534,
+          "duration": 1895.6000000000931,
           "lockRequests": 6,
-          "lockSets": 2,
-          "lockWait": 5.000000000232831,
-          "lockWaitMax": 1.5999999998603016,
+          "lockChains": 2,
+          "lockWait": 5.900000000372529,
+          "lockWaitMax": 2.1999999997206032,
           "writableOpens": 0,
           "writableCommits": 0,
           "syncHandleOpens": 100,
@@ -1714,29 +1901,31 @@
           "bytesWritten": 2624717,
           "renames": 100,
           "removes": 0,
-          "getFileCalls": 200,
-          "handleLookups": 2084,
-          "blobReads": 350,
-          "bytesRead": 5326234,
+          "getFileCalls": 400,
+          "handleLookups": 2184,
+          "blobReads": 625,
+          "bytesRead": 10614068,
           "digests": 0,
           "bytesHashed": 0,
           "broadcastPosts": 200,
           "portPosts": 0,
-          "eventsPerPort": 200,
+          "busEvents": 200,
+          "lockSets": 2,
+          "lockTokens": 6,
           "networkRequests": 0,
           "files": 100,
-          "secondTabReads": 21,
-          "readP95": 8,
+          "secondTabReads": 19,
+          "readP95": 13.200000000186265,
           "invalidationsReceived": 200,
           "secondTabBusEvents": 200,
           "invalidationsPerChangeset": 200
         },
         {
-          "duration": 1534.1000000000931,
+          "duration": 1841.5,
           "lockRequests": 6,
-          "lockSets": 2,
-          "lockWait": 6.5,
-          "lockWaitMax": 4.300000000046566,
+          "lockChains": 2,
+          "lockWait": 7.800000000745058,
+          "lockWaitMax": 5.7000000001862645,
           "writableOpens": 0,
           "writableCommits": 0,
           "syncHandleOpens": 100,
@@ -1745,45 +1934,49 @@
           "bytesWritten": 2624717,
           "renames": 100,
           "removes": 0,
-          "getFileCalls": 200,
-          "handleLookups": 2084,
-          "blobReads": 350,
-          "bytesRead": 5326234,
+          "getFileCalls": 400,
+          "handleLookups": 2184,
+          "blobReads": 625,
+          "bytesRead": 10614068,
           "digests": 0,
           "bytesHashed": 0,
           "broadcastPosts": 200,
           "portPosts": 0,
-          "eventsPerPort": 200,
+          "busEvents": 200,
+          "lockSets": 2,
+          "lockTokens": 6,
           "networkRequests": 0,
           "files": 100,
-          "secondTabReads": 21,
-          "readP95": 6.800000000046566,
+          "secondTabReads": 18,
+          "readP95": 10.399999999906868,
           "invalidationsReceived": 200,
           "secondTabBusEvents": 200,
           "invalidationsPerChangeset": 200
         }
       ],
       "metrics": {
-        "blobReads": 350,
+        "blobReads": 625,
         "broadcastPosts": 200,
+        "busEvents": 200,
         "bytesHashed": 0,
-        "bytesRead": 5326234,
+        "bytesRead": 10614068,
         "bytesWritten": 2624717,
         "digests": 0,
-        "duration": 1586.1999999999534,
-        "eventsPerPort": 200,
+        "duration": 2007.6999999997206,
         "files": 100,
-        "getFileCalls": 200,
-        "handleLookups": 2084,
+        "getFileCalls": 400,
+        "handleLookups": 2184,
         "invalidationsPerChangeset": 200,
         "invalidationsReceived": 200,
+        "lockChains": 2,
         "lockRequests": 6,
         "lockSets": 2,
-        "lockWait": 9.099999999860302,
-        "lockWaitMax": 4.300000000046566,
+        "lockTokens": 6,
+        "lockWait": 8.999999999534339,
+        "lockWaitMax": 6.7000000001862645,
         "networkRequests": 0,
         "portPosts": 0,
-        "readP95": 8,
+        "readP95": 13.200000000186265,
         "removes": 0,
         "renames": 100,
         "secondTabBusEvents": 200,
@@ -1797,7 +1990,7 @@
       "times": [
         {
           "metric": "readP95",
-          "value": 8,
+          "value": 13.200000000186265,
           "limit": 200,
           "met": true
         }
@@ -1808,14 +2001,44 @@
           "metric": "invalidationsPerChangeset",
           "value": 200,
           "limit": 1,
+          "comparison": "at-most",
           "pass": false,
           "knownRed": true
         }
       ],
       "spans": {
-        "durationMilliseconds": 1684.6000000000931,
-        "spans": {},
-        "counters": {},
+        "durationMilliseconds": 1992.1999999997206,
+        "spans": {
+          "queue.wait": {
+            "count": 2,
+            "totalMilliseconds": 0,
+            "maxMilliseconds": 0
+          },
+          "queue.held": {
+            "count": 2,
+            "totalMilliseconds": 1476,
+            "maxMilliseconds": 995
+          },
+          "apply.hold": {
+            "count": 1,
+            "totalMilliseconds": 1801,
+            "maxMilliseconds": 1801
+          }
+        },
+        "counters": {
+          "locks.set": {
+            "total": 2,
+            "peakPerSecond": 2
+          },
+          "locks.token": {
+            "total": 6,
+            "peakPerSecond": 6
+          },
+          "listing.bytes": {
+            "total": 2624717,
+            "peakPerSecond": 2624717
+          }
+        },
         "gauges": {}
       }
     },
@@ -1823,7 +2046,7 @@
       "id": "S17",
       "title": "Save during S3",
       "status": "measured",
-      "model": "S3 while a 1 MiB rooted writeFile to a path the apply never touches is issued once the apply is writing.",
+      "model": "S3 (the production applyTree) while a 1 MiB rooted writeFile to a path the apply never touches is issued as soon as the apply has written its first byte, and before it finishes.",
       "profile": {
         "fixture": {
           "name": "small",
@@ -1843,11 +2066,11 @@
       },
       "samples": [
         {
-          "duration": 1579.6000000000931,
+          "duration": 1819.3000000002794,
           "lockRequests": 13,
-          "lockSets": 3,
-          "lockWait": 432.9000000001397,
-          "lockWaitMax": 421,
+          "lockChains": 3,
+          "lockWait": 455.79999999981374,
+          "lockWaitMax": 443.60000000009313,
           "writableOpens": 0,
           "writableCommits": 0,
           "syncHandleOpens": 101,
@@ -1856,27 +2079,30 @@
           "bytesWritten": 3673293,
           "renames": 100,
           "removes": 0,
-          "getFileCalls": 200,
-          "handleLookups": 2089,
-          "blobReads": 350,
-          "bytesRead": 5326234,
+          "getFileCalls": 402,
+          "handleLookups": 2191,
+          "blobReads": 628,
+          "bytesRead": 12711732,
           "digests": 0,
           "bytesHashed": 0,
           "broadcastPosts": 201,
           "portPosts": 0,
-          "eventsPerPort": 201,
+          "busEvents": 201,
+          "lockSets": 3,
+          "lockTokens": 13,
           "networkRequests": 0,
-          "saveLatency": 432.30000000004657,
-          "saveStartDelay": 428.39999999990687,
-          "saveOverlappedApply": 1,
-          "saveWait": 428.39999999990687
+          "saveLatency": 454.3000000002794,
+          "saveStartDelay": 450.39999999990687,
+          "saveIssuedDuringApply": 1,
+          "applyOperationsBeforeSave": 99,
+          "saveWait": 450.39999999990687
         },
         {
-          "duration": 1642.0999999998603,
+          "duration": 1895.5,
           "lockRequests": 13,
-          "lockSets": 3,
-          "lockWait": 467.20000000018626,
-          "lockWaitMax": 453,
+          "lockChains": 3,
+          "lockWait": 493.89999999990687,
+          "lockWaitMax": 481.29999999981374,
           "writableOpens": 0,
           "writableCommits": 0,
           "syncHandleOpens": 101,
@@ -1885,27 +2111,30 @@
           "bytesWritten": 3673293,
           "renames": 100,
           "removes": 0,
-          "getFileCalls": 200,
-          "handleLookups": 2089,
-          "blobReads": 350,
-          "bytesRead": 5326234,
+          "getFileCalls": 402,
+          "handleLookups": 2191,
+          "blobReads": 628,
+          "bytesRead": 12711732,
           "digests": 0,
           "bytesHashed": 0,
           "broadcastPosts": 201,
           "portPosts": 0,
-          "eventsPerPort": 201,
+          "busEvents": 201,
+          "lockSets": 3,
+          "lockTokens": 13,
           "networkRequests": 0,
-          "saveLatency": 465.20000000018626,
-          "saveStartDelay": 461.10000000009313,
-          "saveOverlappedApply": 1,
-          "saveWait": 461.10000000009313
+          "saveLatency": 492.3000000002794,
+          "saveStartDelay": 488.39999999990687,
+          "saveIssuedDuringApply": 1,
+          "applyOperationsBeforeSave": 99,
+          "saveWait": 488.39999999990687
         },
         {
-          "duration": 1603.8999999999069,
+          "duration": 1840.0999999996275,
           "lockRequests": 13,
-          "lockSets": 3,
-          "lockWait": 482.0999999998603,
-          "lockWaitMax": 469.10000000009313,
+          "lockChains": 3,
+          "lockWait": 485.8000000002794,
+          "lockWaitMax": 470,
           "writableOpens": 0,
           "writableCommits": 0,
           "syncHandleOpens": 101,
@@ -1914,45 +2143,51 @@
           "bytesWritten": 3673293,
           "renames": 100,
           "removes": 0,
-          "getFileCalls": 200,
-          "handleLookups": 2089,
-          "blobReads": 350,
-          "bytesRead": 5326234,
+          "getFileCalls": 402,
+          "handleLookups": 2191,
+          "blobReads": 628,
+          "bytesRead": 12711732,
           "digests": 0,
           "bytesHashed": 0,
           "broadcastPosts": 201,
           "portPosts": 0,
-          "eventsPerPort": 201,
+          "busEvents": 201,
+          "lockSets": 3,
+          "lockTokens": 13,
           "networkRequests": 0,
-          "saveLatency": 481.9000000001397,
-          "saveStartDelay": 477.80000000004657,
-          "saveOverlappedApply": 1,
-          "saveWait": 477.80000000004657
+          "saveLatency": 483.20000000018626,
+          "saveStartDelay": 478,
+          "saveIssuedDuringApply": 1,
+          "applyOperationsBeforeSave": 99,
+          "saveWait": 478
         }
       ],
       "metrics": {
-        "blobReads": 350,
+        "applyOperationsBeforeSave": 99,
+        "blobReads": 628,
         "broadcastPosts": 201,
+        "busEvents": 201,
         "bytesHashed": 0,
-        "bytesRead": 5326234,
+        "bytesRead": 12711732,
         "bytesWritten": 3673293,
         "digests": 0,
-        "duration": 1642.0999999998603,
-        "eventsPerPort": 201,
-        "getFileCalls": 200,
-        "handleLookups": 2089,
+        "duration": 1895.5,
+        "getFileCalls": 402,
+        "handleLookups": 2191,
+        "lockChains": 3,
         "lockRequests": 13,
         "lockSets": 3,
-        "lockWait": 482.0999999998603,
-        "lockWaitMax": 469.10000000009313,
+        "lockTokens": 13,
+        "lockWait": 493.89999999990687,
+        "lockWaitMax": 481.29999999981374,
         "networkRequests": 0,
         "portPosts": 0,
         "removes": 0,
         "renames": 100,
-        "saveLatency": 481.9000000001397,
-        "saveOverlappedApply": 1,
-        "saveStartDelay": 477.80000000004657,
-        "saveWait": 477.80000000004657,
+        "saveIssuedDuringApply": 1,
+        "saveLatency": 492.3000000002794,
+        "saveStartDelay": 488.39999999990687,
+        "saveWait": 488.39999999990687,
         "syncHandleOpens": 101,
         "syncHandleWriteSessions": 101,
         "writableCommits": 0,
@@ -1962,7 +2197,7 @@
       "times": [
         {
           "metric": "saveLatency",
-          "value": 481.9000000001397,
+          "value": 492.3000000002794,
           "limit": 250,
           "met": false
         }
@@ -1970,17 +2205,47 @@
       "gates": [
         {
           "id": "S17.lock-wait",
-          "metric": "saveWait",
-          "value": 477.80000000004657,
-          "limit": 50,
+          "metric": "applyOperationsBeforeSave",
+          "value": 99,
+          "limit": 8,
+          "comparison": "at-most",
           "pass": false,
           "knownRed": true
         }
       ],
       "spans": {
-        "durationMilliseconds": 1754.5,
-        "spans": {},
-        "counters": {},
+        "durationMilliseconds": 1991,
+        "spans": {
+          "queue.wait": {
+            "count": 3,
+            "totalMilliseconds": 0,
+            "maxMilliseconds": 0
+          },
+          "queue.held": {
+            "count": 3,
+            "totalMilliseconds": 1419,
+            "maxMilliseconds": 936
+          },
+          "apply.hold": {
+            "count": 1,
+            "totalMilliseconds": 1796,
+            "maxMilliseconds": 1796
+          }
+        },
+        "counters": {
+          "locks.set": {
+            "total": 3,
+            "peakPerSecond": 2
+          },
+          "locks.token": {
+            "total": 13,
+            "peakPerSecond": 10
+          },
+          "listing.bytes": {
+            "total": 3673293,
+            "peakPerSecond": 3673293
+          }
+        },
         "gauges": {}
       }
     },
@@ -2020,6 +2285,7 @@
           "id": "S18.fill-waits",
           "metric": "lockWaitsOnFill",
           "limit": 0,
+          "comparison": "equals",
           "pass": false,
           "knownRed": false
         }
@@ -2049,11 +2315,11 @@
       },
       "samples": [
         {
-          "duration": 1371.6999999999534,
+          "duration": 1049.5999999996275,
           "lockRequests": 7,
-          "lockSets": 1,
-          "lockWait": 3.0999999998603016,
-          "lockWaitMax": 1.1000000000931323,
+          "lockChains": 1,
+          "lockWait": 3.6999999997206032,
+          "lockWaitMax": 1.3999999999068677,
           "writableOpens": 0,
           "writableCommits": 0,
           "syncHandleOpens": 1,
@@ -2062,27 +2328,29 @@
           "bytesWritten": 1048576,
           "renames": 0,
           "removes": 0,
-          "getFileCalls": 366,
-          "handleLookups": 324,
-          "blobReads": 551,
-          "bytesRead": 36297625,
+          "getFileCalls": 364,
+          "handleLookups": 322,
+          "blobReads": 548,
+          "bytesRead": 36263251,
           "digests": 0,
           "bytesHashed": 0,
           "broadcastPosts": 1,
           "portPosts": 0,
-          "eventsPerPort": 1,
+          "busEvents": 1,
+          "lockSets": 1,
+          "lockTokens": 7,
           "networkRequests": 0,
-          "grepDuration": 834.5999999998603,
+          "grepDuration": 527.6999999997206,
           "authorityReads": 102,
-          "saveLatency": 29.899999999906868,
-          "readP95": 25.799999999813735,
-          "reads": 29
+          "saveLatency": 34.299999999813735,
+          "readP95": 27.299999999813735,
+          "reads": 28
         },
         {
-          "duration": 1313.4000000001397,
+          "duration": 1008.7999999998137,
           "lockRequests": 7,
-          "lockSets": 1,
-          "lockWait": 2.9000000001396984,
+          "lockChains": 1,
+          "lockWait": 3.1000000000931323,
           "lockWaitMax": 0.8999999999068677,
           "writableOpens": 0,
           "writableCommits": 0,
@@ -2100,20 +2368,22 @@
           "bytesHashed": 0,
           "broadcastPosts": 1,
           "portPosts": 0,
-          "eventsPerPort": 1,
+          "busEvents": 1,
+          "lockSets": 1,
+          "lockTokens": 7,
           "networkRequests": 0,
-          "grepDuration": 824.3000000000466,
+          "grepDuration": 487.5,
           "authorityReads": 102,
-          "saveLatency": 17.5999999998603,
-          "readP95": 8.600000000093132,
+          "saveLatency": 11.899999999906868,
+          "readP95": 11.899999999906868,
           "reads": 28
         },
         {
-          "duration": 1409.6000000000931,
+          "duration": 1076.1000000000931,
           "lockRequests": 7,
-          "lockSets": 1,
-          "lockWait": 2.5,
-          "lockWaitMax": 0.6999999999534339,
+          "lockChains": 1,
+          "lockWait": 2.3000000002793968,
+          "lockWaitMax": 0.5,
           "writableOpens": 0,
           "writableCommits": 0,
           "syncHandleOpens": 1,
@@ -2122,47 +2392,51 @@
           "bytesWritten": 1048576,
           "renames": 0,
           "removes": 0,
-          "getFileCalls": 368,
-          "handleLookups": 325,
-          "blobReads": 554,
-          "bytesRead": 36331999,
+          "getFileCalls": 370,
+          "handleLookups": 327,
+          "blobReads": 557,
+          "bytesRead": 36366373,
           "digests": 0,
           "bytesHashed": 0,
           "broadcastPosts": 1,
           "portPosts": 0,
-          "eventsPerPort": 1,
+          "busEvents": 1,
+          "lockSets": 1,
+          "lockTokens": 7,
           "networkRequests": 0,
-          "grepDuration": 873.8000000000466,
+          "grepDuration": 549,
           "authorityReads": 102,
-          "saveLatency": 15.5,
-          "readP95": 12.800000000046566,
-          "reads": 30
+          "saveLatency": 14.199999999720603,
+          "readP95": 11.5,
+          "reads": 31
         }
       ],
       "metrics": {
         "authorityReads": 102,
-        "blobReads": 554,
+        "blobReads": 557,
         "broadcastPosts": 1,
+        "busEvents": 1,
         "bytesHashed": 0,
-        "bytesRead": 36331999,
+        "bytesRead": 36366373,
         "bytesWritten": 1048576,
         "digests": 0,
-        "duration": 1409.6000000000931,
-        "eventsPerPort": 1,
-        "getFileCalls": 368,
-        "grepDuration": 873.8000000000466,
-        "handleLookups": 325,
+        "duration": 1076.1000000000931,
+        "getFileCalls": 370,
+        "grepDuration": 549,
+        "handleLookups": 327,
+        "lockChains": 1,
         "lockRequests": 7,
         "lockSets": 1,
-        "lockWait": 3.0999999998603016,
-        "lockWaitMax": 1.1000000000931323,
+        "lockTokens": 7,
+        "lockWait": 3.6999999997206032,
+        "lockWaitMax": 1.3999999999068677,
         "networkRequests": 0,
         "portPosts": 0,
-        "readP95": 25.799999999813735,
-        "reads": 30,
+        "readP95": 27.299999999813735,
+        "reads": 31,
         "removes": 0,
         "renames": 0,
-        "saveLatency": 29.899999999906868,
+        "saveLatency": 34.299999999813735,
         "syncHandleOpens": 1,
         "syncHandleWriteSessions": 1,
         "writableCommits": 0,
@@ -2172,13 +2446,13 @@
       "times": [
         {
           "metric": "saveLatency",
-          "value": 29.899999999906868,
+          "value": 34.299999999813735,
           "limit": 100,
           "met": true
         },
         {
           "metric": "readP95",
-          "value": 25.799999999813735,
+          "value": 27.299999999813735,
           "limit": 200,
           "met": true
         }
@@ -2189,17 +2463,41 @@
           "metric": "authorityReads",
           "value": 102,
           "limit": 0,
+          "comparison": "equals",
           "pass": false,
-          "knownRed": true
+          "knownRed": false,
+          "qualifier": {
+            "kind": "model-bound",
+            "reason": "The runner calls the grep handler on the authority's own thread, so its reads are the authority's by construction; it becomes real when W9 moves grep to the compute worker and the runner drives that path."
+          }
         }
       ],
       "spans": {
-        "durationMilliseconds": 1559.8999999999069,
-        "spans": {},
+        "durationMilliseconds": 1226.5,
+        "spans": {
+          "queue.wait": {
+            "count": 1,
+            "totalMilliseconds": 0,
+            "maxMilliseconds": 0
+          },
+          "queue.held": {
+            "count": 1,
+            "totalMilliseconds": 8,
+            "maxMilliseconds": 8
+          }
+        },
         "counters": {
           "listing.bytes": {
             "total": 11936616,
-            "peakPerSecond": 7553334
+            "peakPerSecond": 6498582
+          },
+          "locks.set": {
+            "total": 1,
+            "peakPerSecond": 1
+          },
+          "locks.token": {
+            "total": 7,
+            "peakPerSecond": 7
           }
         },
         "gauges": {}
@@ -2241,6 +2539,7 @@
           "id": "S20.downloads",
           "metric": "downloadsPerDevice",
           "limit": 1,
+          "comparison": "at-most",
           "pass": false,
           "knownRed": false
         }

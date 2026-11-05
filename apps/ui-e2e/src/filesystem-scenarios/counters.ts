@@ -17,8 +17,12 @@
 export type ScenarioCounts = {
   /** `navigator.locks.request` calls. */
   lockRequests: number;
-  /** Lock chains: requests not issued from inside another lock's callback. */
-  lockSets: number;
+  /**
+   * Lock chains as seen from outside: requests not issued from inside another
+   * lock's callback. A cross-check only; the gated lock-set count is the
+   * production `locks.set` counter.
+   */
+  lockChains: number;
   /** Total milliseconds requests waited before their callback ran. */
   lockWait: number;
   /** Longest single wait. */
@@ -54,7 +58,7 @@ export type ScenarioCounts = {
 
 const emptyCounts = (): ScenarioCounts => ({
   lockRequests: 0,
-  lockSets: 0,
+  lockChains: 0,
   lockWait: 0,
   lockWaitMax: 0,
   writableOpens: 0,
@@ -76,8 +80,8 @@ const emptyCounts = (): ScenarioCounts => ({
   network: {},
 });
 
-/** When a write to a traced handle name first began, on `performance.now()`. */
-export type TracedWrite = Readonly<{ name: string; startedAt: number }>;
+/** When a write to a traced handle name first began, on `performance.now()`, and the writes and renames before it. */
+export type TracedWrite = Readonly<{ name: string; startedAt: number; operationsBefore: number }>;
 
 /** The installed instrumentation. */
 export type ScenarioCounters = Readonly<{
@@ -142,7 +146,7 @@ export const installScenarioCounters = (): ScenarioCounters => {
   let tracedWrites: TracedWrite[] = [];
   const noteWriteStart = (name: string): void => {
     if (tracedNames.has(name) && !tracedWrites.some((write) => write.name === name)) {
-      tracedWrites.push({ name, startedAt: performance.now() });
+      tracedWrites.push({ name, startedAt: performance.now(), operationsBefore: counts.writes + counts.renames });
     }
   };
 
@@ -155,7 +159,7 @@ export const installScenarioCounters = (): ScenarioCounters => {
   locks.request = async (name, ...rest) => {
     counts.lockRequests += 1;
     if (insideCallback === 0) {
-      counts.lockSets += 1;
+      counts.lockChains += 1;
     }
     const requestedAt = performance.now();
     const callbackIndex = rest.findIndex((value) => typeof value === 'function');

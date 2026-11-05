@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { createWorkerTimings, formatWorkerTimingSummary } from '#worker-timings.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { withCrossTabLocks } from '#cross-tab-coordinator.js';
+import { createWorkerTimings, formatWorkerTimingSummary, workerTimings } from '#worker-timings.js';
 import { ResourceQueue } from '#resource-queue.js';
 
 /** A recorder on a clock the test moves. */
@@ -111,5 +112,25 @@ describe('ResourceQueue timings', () => {
     const { spans } = timings.summarize(startedAt);
     expect(spans['queue.held']).toEqual({ count: 2, totalMilliseconds: 500, maxMilliseconds: 400 });
     expect(spans['queue.wait']).toEqual({ count: 2, totalMilliseconds: 400, maxMilliseconds: 400 });
+  });
+});
+
+describe('cross-tab lock timings', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('should count one lock set per withCrossTabLocks call and the distinct tokens it names', async () => {
+    const request = vi.fn(async (_name: string, _options: unknown, callback: () => Promise<unknown>) => callback());
+    vi.stubGlobal('navigator', { locks: { request } });
+    const startedAt = workerTimings.now();
+
+    await withCrossTabLocks(['project:a', '/projects/a/x', 'project:a'], async () => 'done');
+    await withCrossTabLocks(['project:a'], async () => 'done');
+
+    const { counters } = workerTimings.summarize(startedAt);
+    expect(counters['locks.set']?.total).toBe(2);
+    expect(counters['locks.token']?.total).toBe(3);
+    expect(request).toHaveBeenCalledTimes(3);
   });
 });

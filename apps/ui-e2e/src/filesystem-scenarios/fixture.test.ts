@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 /* oxlint-disable no-restricted-imports -- The Node-only unit target intentionally runs without browser aliases. */
 import {
   checkoutBytes,
@@ -33,6 +34,14 @@ describe('planFixture', () => {
     expect(large).toHaveLength(5);
     expect(large.every((entry) => entry.lfs && entry.size <= 102 * mebibyte)).toBe(true);
     expect(new Set(plan.entries.map((entry) => entry.path)).size).toBe(plan.entries.length);
+  });
+
+  it("should place every path where Tau's policy versions it, so a checkout can carry the whole tree", () => {
+    const unversioned = planFixture({ seed: defaultFixtureSeed, scale: 1 }).entries.filter(
+      (entry) => !tauPathPolicy.classify(entry.path).versioned,
+    );
+
+    expect(unversioned.map((entry) => entry.path)).toStrictEqual([]);
   });
 
   it('should scale counts and bytes by the profile factor', () => {

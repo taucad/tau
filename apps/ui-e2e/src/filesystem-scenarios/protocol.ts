@@ -21,6 +21,12 @@ export type WorkerMeasurement = Readonly<{
   busEvents: number;
   /** The production #1410 spans and counters over the same window. */
   spans: WorkerTimingSummary;
+  /**
+   * Exact production counter movement over the window. The summary above is
+   * bucketed by the second, so it can include a neighbouring run's counts;
+   * this is the difference of two cumulative readings from the worker's start.
+   */
+  productionCounters: Readonly<Record<string, number>>;
   /** Runner-specific figures (other clocks, per-phase counts). */
   extra: Readonly<Record<string, number>>;
 }>;

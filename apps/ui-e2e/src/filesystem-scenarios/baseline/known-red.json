@@ -1,70 +1,101 @@
 {
-  "description": "Count gates red at HEAD (W0 baseline, Chromium, small and full profiles). A gate leaves this list in the change that turns it green and never re-enters it (I8: count gates never loosen). atHead is the small-profile value recorded at ffaf44beff71.",
+  "description": "Count gates red at HEAD (W0 baseline). A gate leaves this list in the change that turns it green and never re-enters it (I8: count gates never loosen). atHead holds the value recorded at HEAD per engine and fixture profile (key engine-profile); a known-red gate fails if it moves further from its limit than that. Record mode (TAU_FS_SCENARIO_RECORD=true) rewrites atHead for the engine and profile it ran. Model-bound gates are not listed: the harness reports them without asserting.",
   "gates": [
     {
       "id": "S3.lock-sets",
-      "atHead": 2,
-      "limit": 1
+      "limit": 1,
+      "atHead": {
+        "chromium-full": 2,
+        "chromium-small": 2
+      }
     },
     {
       "id": "S3.events",
-      "atHead": 200,
-      "limit": 1
+      "limit": 1,
+      "atHead": {
+        "chromium-full": 4000,
+        "chromium-small": 200
+      }
     },
     {
       "id": "S3.renames",
-      "atHead": 100,
-      "limit": 0
+      "limit": 0,
+      "atHead": {
+        "chromium-full": 2000,
+        "chromium-small": 100
+      }
     },
     {
       "id": "S5.blob-reads",
-      "atHead": 5326234,
-      "limit": 0
+      "limit": 0,
+      "atHead": {
+        "chromium-full": 106522886,
+        "chromium-small": 5326234
+      }
     },
     {
-      "id": "S5.compares",
-      "atHead": 101,
-      "limit": 1
+      "id": "S6.hash-passes",
+      "limit": 1,
+      "atHead": {
+        "chromium-full": 0,
+        "chromium-small": 0
+      }
     },
     {
       "id": "S8.changesets",
-      "atHead": 50,
-      "limit": 1
+      "limit": 1,
+      "atHead": {
+        "chromium-full": 50,
+        "chromium-small": 50
+      }
     },
     {
       "id": "S8.watch",
-      "atHead": 50,
-      "limit": 1
+      "limit": 1,
+      "atHead": {
+        "chromium-full": 50,
+        "chromium-small": 50
+      }
     },
     {
       "id": "S12.binary-bytes",
-      "atHead": 23592960,
-      "limit": 0
+      "limit": 0,
+      "atHead": {
+        "chromium-full": 471859200,
+        "chromium-small": 23592960
+      }
     },
     {
       "id": "S12.walks",
-      "atHead": 320,
-      "limit": 0
+      "limit": 0,
+      "atHead": {
+        "chromium-full": 2680,
+        "chromium-small": 320
+      }
     },
     {
       "id": "S13.metadata-bytes",
-      "atHead": 10096967,
-      "limit": 0
+      "limit": 0,
+      "atHead": {
+        "chromium-full": 18438032,
+        "chromium-small": 10096967
+      }
     },
     {
       "id": "S16.invalidations",
-      "atHead": 200,
-      "limit": 1
+      "limit": 1,
+      "atHead": {
+        "chromium-full": 4000,
+        "chromium-small": 200
+      }
     },
     {
       "id": "S17.lock-wait",
-      "atHead": 483.6,
-      "limit": 50
-    },
-    {
-      "id": "S19.compute-worker",
-      "atHead": 102,
-      "limit": 0
+      "limit": 8,
+      "atHead": {
+        "chromium-full": 1999,
+        "chromium-small": 99
+      }
     }
   ]
 }

@@ -23,7 +23,11 @@ const profile = process.env['TAU_FS_SCENARIO_PROFILE'] ?? 'small';
 if (profile !== 'small' && profile !== 'full') {
   throw new Error(`TAU_FS_SCENARIO_PROFILE must be small or full; got ${profile}.`);
 }
-const runs = Number(process.env['TAU_FS_SCENARIO_RUNS'] ?? (profile === 'full' ? 1 : 3));
+const runsSetting = process.env['TAU_FS_SCENARIO_RUNS'] ?? (profile === 'full' ? '1' : '3');
+const runs = Number(runsSetting);
+if (!/^\d+$/u.test(runsSetting) || !Number.isSafeInteger(runs) || runs < 1) {
+  throw new Error(`TAU_FS_SCENARIO_RUNS must be a whole number of at least 1; got ${runsSetting}.`);
+}
 const head = (() => {
   try {
     return execFileSync('git', ['rev-parse', '--short=12', 'HEAD'], { cwd: workspaceRoot, encoding: 'utf8' }).trim();
@@ -68,6 +72,19 @@ for (const engine of engines) {
 export default defineConfig({
   root: import.meta.dirname,
   server: { fs: { allow: [workspaceRoot] } },
+  /* Pre-bundle what the workers import so a cold dev server does not reload a worker mid-load (as the main config does). */
+  optimizeDeps: {
+    include: [
+      '@cfworker/json-schema',
+      '@opentelemetry/api',
+      'diff',
+      'es-module-lexer',
+      'jszip',
+      'minimatch',
+      'xstate',
+      'zod',
+    ],
+  },
   resolve: {
     alias: [
       { find: /^#filesystem-scenarios\/(.*)\.js$/u, replacement: `${import.meta.dirname}/$1.ts` },

@@ -1,5 +1,7 @@
 import type {
   AppendFence,
+  ChangeSet,
+  ChangeSetWatchRequest,
   ProviderCapabilities,
   FileSystemProvider,
   FileStatOptions,
@@ -613,11 +615,28 @@ const projectRootDiscoveryStatusSchema: z.ZodType<ProjectRootDiscoveryStatus> = 
   z.looseObject({ status: z.literal('inaccessible'), root: storageRootConfigSchema, reason: z.string() }),
 ]);
 
-const watchRequestSchema: z.ZodType<WatchRequest> = z.looseObject({
+/**
+ * A watch request on the wire. `form: 'change-sets'` asks a rooted connection
+ * for its change-set form (charter D6): one {@link ChangeSet} frame per
+ * committed changeset that reaches the request, instead of a frame per path.
+ *
+ * @public
+ */
+export type FileSystemBridgeWatchRequest = WatchRequest & {
+  readonly form?: 'change-sets';
+  readonly coalesce?: ChangeSetWatchRequest['coalesce'];
+};
+
+/** One frame of a bridge watch: a per-path event, or a change set for a `form: 'change-sets'` request. @public */
+export type FileSystemBridgeWatchFrame = WatchEvent | ChangeSet;
+
+const watchRequestSchema: z.ZodType<FileSystemBridgeWatchRequest> = z.looseObject({
   paths: z.array(z.string()),
   recursive: z.boolean().optional(),
   includes: z.array(z.string()).optional(),
   excludes: z.array(z.string()).optional(),
+  form: z.literal('change-sets').optional(),
+  coalesce: z.enum(['immediate', 'frame']).optional(),
 });
 const watchEventSchema: z.ZodType<WatchEvent> = z.discriminatedUnion('type', [
   z.looseObject({ type: z.literal('reset') }),
@@ -627,6 +646,28 @@ const watchEventSchema: z.ZodType<WatchEvent> = z.discriminatedUnion('type', [
 ]);
 
 const filesystemBackendSchema = z.enum(filesystemBackends);
+const changeSetEntrySchema = z.looseObject({
+  op: z.enum(['created', 'written', 'deleted', 'moved']),
+  path: z.string(),
+  oldPath: z.string().optional(),
+  kind: z.enum(['file', 'dir']),
+  target: z.looseObject({ type: z.enum(['file', 'dir']), size: z.number(), mtimeMs: z.number() }).optional(),
+});
+const changeSetSchema: z.ZodType<ChangeSet> = z.looseObject({
+  generation: z.number(),
+  origin: z.string().optional(),
+  backend: filesystemBackendSchema.optional(),
+  entries: z.array(changeSetEntrySchema),
+  touchedDirectories: z.array(z.string()),
+  segments: z.array(z.looseObject({ path: z.string(), writes: z.number() })).optional(),
+  reset: z
+    .looseObject({
+      prefix: z.string(),
+      reason: z.enum(['overflow', 'observer-uncertain', 'topology', 'sequence-gap', 'permission-lost']),
+    })
+    .optional(),
+});
+const watchFrameSchema: z.ZodType<FileSystemBridgeWatchFrame> = z.union([watchEventSchema, changeSetSchema]);
 const changeEventStatSchema = z.looseObject({
   type: z.enum(['file', 'dir']),
   size: z.number(),
@@ -1029,11 +1070,11 @@ export const fileSystemBridgeSchemas = {
   listens: {
     watch: {
       args: watchRequestSchema,
-      event: watchEventSchema,
+      event: watchFrameSchema,
     },
     broadcast: { event: broadcastValidator },
   },
-} satisfies BridgeProtocolSchemas<FileSystemBridgeHello, WatchRequest, WatchEvent>;
+} satisfies BridgeProtocolSchemas<FileSystemBridgeHello, FileSystemBridgeWatchRequest, FileSystemBridgeWatchFrame>;
 
 type HelloInput =
   | {

@@ -1312,6 +1312,15 @@ export class FileTreeService {
     this.optimisticRename(oldPath, newPath);
   }
 
+  /*
+   * Cost (accepted, review W8): a scoped reset re-reads every resolved
+   * directory at or below its prefix, so an observer-uncertain reset of the
+   * root re-reads every directory listed this session, one `readDirectory`
+   * each, issued {@link refreshesPerTask} per task. That is bounded by what
+   * the tree has listed, not by the project's size, and such a reset comes
+   * only from an observer that lost events (a native watcher overflow, a
+   * cross-tab sequence gap), not from ordinary writes.
+   */
   private handleResetRelative(prefix: string): void {
     this.invalidatePendingSubtree(prefix);
     const refreshes: string[] = [];

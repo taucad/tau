@@ -19,7 +19,7 @@ import type {
 } from '@taucad/types';
 
 // oxlint-disable-next-line no-barrel-files/no-barrel-files -- re-export for internal consumers that import from #types.js
-export type { ChangeEvent, FileStat, FileStatEntry } from '@taucad/types';
+export type { ChangeEvent, ChangeSetEvent, PathChangeEvent, FileStat, FileStatEntry } from '@taucad/types';
 
 /** Rule 16's four storage classes. @public */
 export type PathClass = 'authored' | 'records' | 'cache' | 'control-plane';

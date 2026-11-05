@@ -111,16 +111,6 @@ export const shaderSites = [
     risks: ['camera', 'transparency', 'depth', 'clipping', 'hot-path', 'private-api', 'upstream-drift'],
   },
   {
-    id: 'morphing-points',
-    modules: [
-      'apps/ui/app/components/geometry/splash/morphing-points-material.ts',
-      'apps/ui/app/components/geometry/splash/morphing-points-material.node.ts',
-    ],
-    authoring: ['glsl', 'tsl'],
-    backends: ['webgl', 'webgpu'],
-    risks: ['camera', 'transparency', 'custom-position', 'lifecycle', 'hot-path'],
-  },
-  {
     id: 'webgl-post',
     modules: ['packages/viewer/src/graphics/three/post-processing-webgl.tsx'],
     authoring: ['glsl', 'render-pass'],
@@ -447,11 +437,6 @@ export const shaderEvidence = {
     ],
     'gpu-whole-frame': [`${graphicsBackendEndToEnd}::records warmed whole-frame benchmark`],
   },
-  'morphing-points': evidence(
-    'apps/ui/app/components/geometry/splash/morphing-points-semantics.test.ts',
-    'starts exactly at source, ends at target',
-    'apps/ui/app/components/geometry/splash/morphing-points-material.node.test.ts::matches stable stripped points node material snapshot',
-  ),
   'webgl-post': {
     ...evidence(
       'packages/viewer/src/graphics/three/post-processing-webgl.test.tsx',

@@ -4,12 +4,12 @@ import type { MetaFunction } from 'react-router';
 import { useSession } from '@better-auth-ui/react';
 import { Auth } from '#components/auth/auth.js';
 import { AuthEmailDraftProvider } from '#components/auth/auth-email-draft.js';
+import { AuthShowcase } from '#components/auth/auth-showcase.js';
 import { MagicLinkVerify } from '#components/auth/magic-link-verify.js';
 import { sanitizeVerifyEmailRedirectTo, VerifyEmail } from '#components/auth/verify-email.js';
 import { TauWordmark } from '#components/icons/tau-wordmark.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import type { Handle } from '#types/matches.types.js';
-import { DesignStory } from '#components/geometry/splash/design-story.js';
 import { setEntryPreference } from '#lib/entry-preference.js';
 import { authClient } from '#lib/auth-client.js';
 import { isDesktopTarget } from '#lib/build-target.js';
@@ -212,8 +212,8 @@ export default function AuthPage(): React.JSX.Element {
             )}
           </div>
         </div>
-        <div className='relative hidden lg:block'>
-          <DesignStory />
+        <div className='hidden lg:block'>
+          <AuthShowcase />
         </div>
       </main>
     </AuthEmailDraftProvider>

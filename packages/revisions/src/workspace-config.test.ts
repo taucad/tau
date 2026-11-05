@@ -131,7 +131,6 @@ describe('generated ignore file', () => {
 !/.tau/skills
 !/.tau/AGENTS.md
 **/.tau/binding.json
-**/.tau-index
 **/.tau-staging
 **/.jj
 **/.git
@@ -150,6 +149,7 @@ describe('generated ignore file', () => {
 /.tau/library.json
 /exports/
 /thumbnail.webp
+/.tau/index/
 /.tau/cache/
 **/node_modules/
 # END Tau generated

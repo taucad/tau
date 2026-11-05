@@ -1750,6 +1750,12 @@ export class MutationPipeline {
    * check reads metadata only; the exclusive token on the path keeps it true
    * until the append lands.
    *
+   * Appends to one path are judged in entry order against a running length
+   * and token, not each against the length before the changeset: two appends
+   * that both fence at L cannot both pass, and a pipelined append at L then
+   * one at L + n both can. An append that is refused adds nothing to the
+   * running length, so whatever was built on it is refused too.
+   *
    * @param prepared - Every admitted entry.
    * @param indexes - This phase's entries.
    * @returns A refusal per fenced append whose condition does not hold.
@@ -1759,47 +1765,71 @@ export class MutationPipeline {
     indexes: readonly number[],
   ): Promise<Map<number, BatchReceipt>> {
     const refusals = new Map<number, BatchReceipt>();
+    const byPath = Map.groupBy(
+      indexes.toSorted((left, right) => left - right),
+      (index) => prepared[index]!.path,
+    );
     await Promise.all(
-      indexes.map(async (index) => {
-        const { entry, path, resolution } = prepared[index]!;
-        if (entry.op !== 'append' || entry.fence === undefined) {
+      [...byPath.values()].map(async (group) => {
+        if (!group.some((index) => prepared[index]!.entry.op === 'append' && prepared[index]!.entry.fence)) {
           return;
         }
-        const { expectedLength, token } = entry.fence;
-        const highest = this._appendFences.get(path);
-        if (token !== undefined && highest !== undefined && token < highest) {
-          refusals.set(index, {
-            outcome: 'failed',
-            error: Object.assign(
-              errnoError('EFENCED', `append to '${path}' from fence ${String(token)} after ${String(highest)}`),
-              {
-                token,
-                highest,
-              },
-            ),
-          });
-          return;
-        }
-        let actualLength: number;
+        const { path, resolution } = prepared[group[0]!]!;
+        let length: number | undefined;
         try {
           const stat = await resolution.provider.stat(resolution.path, { content: 'head' });
-          actualLength = stat.size;
+          length = stat.size;
         } catch (error) {
           const { code } = error as { code?: unknown };
           if (code !== 'ENOENT' && code !== 'ENOTDIR') {
-            refusals.set(index, { outcome: 'failed', error });
+            for (const index of group) {
+              if (prepared[index]!.entry.op === 'append' && prepared[index]!.entry.fence !== undefined) {
+                refusals.set(index, { outcome: 'failed', error });
+              }
+            }
             return;
           }
-          actualLength = 0;
+          length = 0;
         }
-        if (actualLength !== expectedLength) {
-          refusals.set(index, {
-            outcome: 'failed',
-            error: Object.assign(
-              errnoError('EAPPENDSTALE', `'${path}' is ${String(actualLength)} bytes, not ${String(expectedLength)}`),
-              { expectedLength, actualLength },
-            ),
-          });
+        let highest = this._appendFences.get(path);
+        for (const index of group) {
+          const { entry, batch } = prepared[index]!;
+          if (entry.op !== 'append') {
+            /* Any other change to the path in this phase leaves its length unknown to the appends after it. */
+            length = undefined;
+            continue;
+          }
+          const added = batch.op === 'append' ? batch.data.byteLength : 0;
+          if (entry.fence === undefined) {
+            length = length === undefined ? undefined : length + added;
+            continue;
+          }
+          const { expectedLength, token } = entry.fence;
+          if (token !== undefined && highest !== undefined && token < highest) {
+            refusals.set(index, {
+              outcome: 'failed',
+              error: Object.assign(
+                errnoError('EFENCED', `append to '${path}' from fence ${String(token)} after ${String(highest)}`),
+                { token, highest },
+              ),
+            });
+            continue;
+          }
+          if (length !== expectedLength) {
+            const actualLength = length ?? Number.NaN;
+            refusals.set(index, {
+              outcome: 'failed',
+              error: Object.assign(
+                errnoError('EAPPENDSTALE', `'${path}' is ${String(actualLength)} bytes, not ${String(expectedLength)}`),
+                { expectedLength, actualLength },
+              ),
+            });
+            continue;
+          }
+          length += added;
+          if (token !== undefined) {
+            highest = Math.max(highest ?? token, token);
+          }
         }
       }),
     );

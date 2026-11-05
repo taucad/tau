@@ -84,6 +84,43 @@ describe('fenced record-log appends (D23)', () => {
     }
   });
 
+  it('lets only one of two appends fenced at the same length land', async () => {
+    const { context, rooted } = await projectRoot();
+    try {
+      const result = await rooted.apply!({
+        entries: [
+          { op: 'append', path: log, data: line('a'), fence: { expectedLength: 0 } },
+          { op: 'append', path: log, data: line('b'), fence: { expectedLength: 0 } },
+        ],
+      });
+
+      expect(result.entries.map(({ outcome }) => outcome)).toEqual(['applied', 'failed']);
+      expect(result.entries[1]).toMatchObject({
+        error: { code: 'EAPPENDSTALE', expectedLength: 0, actualLength: 2 },
+      });
+      expect(new TextDecoder().decode(await rooted.readFile(log))).toBe('a\n');
+    } finally {
+      context.service.dispose();
+    }
+  });
+
+  it('applies pipelined appends fenced at L and then at L + n in one changeset', async () => {
+    const { context, rooted } = await projectRoot();
+    try {
+      const result = await rooted.apply!({
+        entries: [
+          { op: 'append', path: log, data: line('a'), fence: { expectedLength: 0, token: 1 } },
+          { op: 'append', path: log, data: line('b'), fence: { expectedLength: 2, token: 1 } },
+        ],
+      });
+
+      expect(result.state).toBe('applied');
+      expect(new TextDecoder().decode(await rooted.readFile(log))).toBe('a\nb\n');
+    } finally {
+      context.service.dispose();
+    }
+  });
+
   it('keeps a stale fence from halting nothing but its own phase', async () => {
     const { context, rooted } = await projectRoot();
     try {

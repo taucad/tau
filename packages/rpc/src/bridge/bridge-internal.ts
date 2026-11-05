@@ -1,10 +1,31 @@
 import type { WithTransferables } from '#channel.js';
 import type { BridgeError } from '#bridge/bridge-errors.js';
+import type { BridgeProgress } from '#bridge/bridge-protocol.js';
 import { extractTransferables } from '#bridge/transferables.js';
 import { z } from 'zod';
 
 /** Milliseconds. */
 export const messagePortCallTimeout = 30_000;
+
+/**
+ * Milliseconds. A `'liveness'` call fails only after this long without a frame
+ * for it: the ordinary deadline, measured from the last sign of life instead of
+ * from the start.
+ */
+export const bridgeCallLivenessTimeout = messagePortCallTimeout;
+
+/** Milliseconds. A third of the liveness window, so two lost heartbeats still leave the call alive. */
+export const bridgeCallHeartbeatInterval = bridgeCallLivenessTimeout / 3;
+
+const progressCountSchema = z.number().int().nonnegative();
+
+/** Wire shape of one long-call progress report. */
+export const bridgeProgressSchema: z.ZodType<BridgeProgress> = z.strictObject({
+  done: progressCountSchema,
+  total: progressCountSchema.optional(),
+  bytes: progressCountSchema,
+  totalBytes: progressCountSchema.optional(),
+});
 
 export const broadcastEvent = 'broadcast';
 export const watchEvent = 'watch';

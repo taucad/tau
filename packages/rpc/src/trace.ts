@@ -25,6 +25,9 @@ const summarize = (frame: WireMessage): string => {
     case 'rc': {
       return `rc i=${frame.i}`;
     }
+    case 'rp': {
+      return frame.d === undefined ? `rp i=${frame.i}` : `rp i=${frame.i} progress`;
+    }
     case 'nt': {
       return `nt n=${frame.n}`;
     }

@@ -4,6 +4,7 @@ import type { Port } from '#port.js';
 import type {
   WireMessage,
   WireRequestCancel,
+  WireRequestProgress,
   WireBye,
   WireNotify,
   WireError,
@@ -79,6 +80,43 @@ const validateWireFrame = (input: ValidateWireFrameInput): unknown => {
 export type ChannelContext = {
   readonly sessionKey: string;
 };
+
+/**
+ * What a {@link ChannelServer.call} handler receives: the session context plus
+ * this one call's progress sink.
+ *
+ * @public
+ */
+export type ChannelCallContext = ChannelContext & {
+  /**
+   * Report progress for this call as one `rp` frame carrying `data`. Dropped once
+   * the call has settled, been cancelled or the channel has closed, so a late
+   * report never reaches a caller that has moved on.
+   */
+  readonly progress: (data: unknown) => void;
+};
+
+/**
+ * Per-call client options for {@link Channel.call}.
+ *
+ * @public
+ */
+export type ChannelCallOptions = {
+  /** Receive each progress report the server sends for this call. A throwing handler is ignored. */
+  readonly onProgress?: (data: unknown) => void;
+  /**
+   * Milliseconds. Reject this call with code `PEER_UNRESPONSIVE` when no frame for
+   * it (`rp` heartbeat, `rp` progress or the `rs` reply) has arrived for this long,
+   * measured on `performance.now()`. The bound replaces a wall-clock deadline for
+   * calls whose duration grows with their input: the call lives as long as the
+   * server keeps saying it is working on it. The server must send heartbeats
+   * (`callHeartbeatInterval`) more often than this, or a long call expires.
+   */
+  readonly livenessTimeout?: number;
+};
+
+/** Code of the rejection a call's {@link ChannelCallOptions.livenessTimeout} produces. */
+const callUnresponsiveCode = 'PEER_UNRESPONSIVE';
 
 /**
  * Envelope for binary payloads that need zero-copy transfer over a {@link Port}.
@@ -170,6 +208,7 @@ export type Channel<P extends RpcProtocol = EmptyRpcProtocol> = {
     name: N,
     args?: CallArgs<P, N> | WithTransferables<CallArgs<P, N>>,
     signal?: AbortSignal,
+    options?: ChannelCallOptions,
   ): Promise<CallResult<P, N>>;
   /** Send a fire-and-forget notification. */
   notify<N extends NotifyNames<P>>(name: N, args?: NotifyArgs<P, N> | WithTransferables<NotifyArgs<P, N>>): void;
@@ -202,7 +241,7 @@ export type Channel<P extends RpcProtocol = EmptyRpcProtocol> = {
  */
 export type ChannelServer<P extends RpcProtocol = EmptyRpcProtocol> = {
   call<N extends CallNames<P>>(
-    context: ChannelContext,
+    context: ChannelCallContext,
     name: N,
     args: CallArgs<P, N>,
     signal: AbortSignal,
@@ -282,6 +321,12 @@ type ChannelServerOptionsBase<P extends RpcProtocol> = {
    * one. Off by default.
    */
   keepaliveInterval?: number;
+  /**
+   * Send an `rp` heartbeat for every call still running, every this many
+   * milliseconds, so a client's per-call `livenessTimeout` can tell a long call
+   * from a dead server. Off by default.
+   */
+  callHeartbeatInterval?: number;
 };
 
 type ChannelServerHelloOption<P extends RpcProtocol> = P extends { readonly hello: infer Hello }
@@ -346,6 +391,8 @@ type PendingCall = {
   resolve: (v: unknown) => void;
   reject: (reason: unknown) => void;
   cleanup: () => void;
+  /** An `rp` frame for this call arrived: re-arm its liveness bound and deliver any progress. */
+  progress?: (frame: WireRequestProgress) => void;
 };
 
 type ListenQueueValue = {
@@ -547,7 +594,7 @@ const estimateOwnedBytes = (value: unknown): number => {
  * inspects formal parameter count, not tuple arity.
  */
 type WidenedCallImpl = (
-  ...args: [context: ChannelContext, name: string, args: unknown, signal: AbortSignal]
+  ...args: [context: ChannelCallContext, name: string, args: unknown, signal: AbortSignal]
 ) => Promise<unknown>;
 type WidenedListenImpl = (
   ...args: [context: ChannelContext, event: string, args: unknown, signal: AbortSignal]
@@ -1129,6 +1176,10 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
         handleResponseFrame(raw);
         return;
       }
+      case 'rp': {
+        callPending.get(raw.i)?.progress?.(raw);
+        return;
+      }
       case 'sn':
       case 'sc':
       case 'se': {
@@ -1230,13 +1281,67 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
     port,
     hello,
 
-    call: (async (name: CallNames<P>, args?: unknown, signal?: AbortSignal): Promise<unknown> => {
+    // oxlint-disable-next-line max-params -- Channel.call keeps its positional (name, args, signal) and adds options last
+    call: (async (
+      name: CallNames<P>,
+      args?: unknown,
+      signal?: AbortSignal,
+      callOptions?: ChannelCallOptions,
+    ): Promise<unknown> => {
       ensureOpen();
       if (signal?.aborted) {
         throw new DOMException('The operation was aborted.', 'AbortError');
       }
+      const callLiveness = callOptions?.livenessTimeout;
+      if (callLiveness !== undefined) {
+        positiveSafeInteger(callLiveness, 'livenessTimeout');
+      }
+      const onProgress = callOptions?.onProgress;
       const id = createId();
       return new Promise<unknown>((resolve, reject) => {
+        /* Per-call liveness: any `rp` or the `rs` proves the server is still on it.
+         * Checked lazily when the timer fires, so a heartbeat costs one assignment. */
+        let lastCallFrameAt = performance.now();
+        let callLivenessTimer: ReturnType<typeof setTimeout> | undefined;
+        let forgaveCallFreeze = false;
+        const expireCall = (): void => {
+          const pending = callPending.get(id);
+          if (!pending) {
+            return;
+          }
+          callPending.delete(id);
+          callPendingNames.delete(id);
+          try {
+            port.postMessage({ v: 1, k: 'rc', i: id, e: { m: 'unresponsive' } } satisfies WireRequestCancel);
+          } catch {
+            // The peer may already be gone; the rejection below is the answer.
+          }
+          pending.reject(
+            Object.assign(
+              new Error(`Call '${name}' received no frame for ${String(callLiveness)}ms; the server is unresponsive.`),
+              { code: callUnresponsiveCode },
+            ),
+          );
+        };
+        const scheduleCallLiveness = (bound: number, checkDelay: number): void => {
+          const due = performance.now() + checkDelay;
+          callLivenessTimer = setTimeout(() => {
+            const now = performance.now();
+            const idle = now - lastCallFrameAt;
+            if (idle < bound) {
+              scheduleCallLiveness(bound, bound - idle);
+              return;
+            }
+            /* A frozen page's timers fire late while its peer could not reach it (RV7-F1). */
+            if (!forgaveCallFreeze && now - due > bound / 4) {
+              forgaveCallFreeze = true;
+              scheduleCallLiveness(bound, bound);
+              return;
+            }
+            expireCall();
+          }, checkDelay);
+          unrefTimer(callLivenessTimer);
+        };
         const onAbort = (): void => {
           /* A request still queued behind the hello never reached the server:
            * drop it rather than let the server run it after the caller left. */
@@ -1261,6 +1366,7 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
           signal.addEventListener('abort', onAbort, { once: true });
         }
         const cleanup = (): void => {
+          clearTimeout(callLivenessTimer);
           if (signal) {
             signal.removeEventListener('abort', onAbort);
           }
@@ -1276,7 +1382,22 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
             cleanup();
             reject(reason instanceof Error ? reason : new Error(String(reason)));
           },
+          progress: (frame) => {
+            lastCallFrameAt = performance.now();
+            forgaveCallFreeze = false;
+            if (frame.d === undefined || onProgress === undefined) {
+              return;
+            }
+            try {
+              onProgress(frame.d);
+            } catch {
+              // A failing progress observer must not settle or strand the call.
+            }
+          },
         });
+        if (callLiveness !== undefined) {
+          scheduleCallLiveness(callLiveness, callLiveness);
+        }
         const { value, transfer } = unwrapTransferables(args);
         post({ v: 1, k: 'rq', i: id, n: name, a: value ?? null }, transfer);
       });
@@ -1474,10 +1595,14 @@ export const createChannelServer = <P extends RpcProtocol = EmptyRpcProtocol>(
     protocolSchemas,
     streamFlowControl: streamFlowControlOptions,
     keepaliveInterval,
+    callHeartbeatInterval,
   } = options;
   const streamFlowControl = resolveStreamFlowControl(streamFlowControlOptions);
   if (keepaliveInterval !== undefined) {
     positiveSafeInteger(keepaliveInterval, 'keepaliveInterval');
+  }
+  if (callHeartbeatInterval !== undefined) {
+    positiveSafeInteger(callHeartbeatInterval, 'callHeartbeatInterval');
   }
   const context: ChannelContext = { sessionKey };
   const inFlightCalls = new Map<string, AbortController>();
@@ -1520,11 +1645,46 @@ export const createChannelServer = <P extends RpcProtocol = EmptyRpcProtocol>(
       const ac = new AbortController();
       inFlightCalls.set(id, ac);
       const callImpl = impl.call as WidenedCallImpl;
+      /* A call is still being served while it is in flight and the channel is open:
+       * a cancelled call (`rc` removed it) or a closed channel sends nothing more. */
+      const serving = (): boolean => inFlightCalls.get(id) === ac && !closeController.isClosed();
+      const postCallProgress = (frame: WireRequestProgress): void => {
+        if (!serving()) {
+          return;
+        }
+        try {
+          port.postMessage(frame);
+        } catch {
+          // An uncloneable report is dropped; the call's own reply still settles it.
+        }
+      };
+      const callContext: ChannelCallContext = {
+        sessionKey,
+        progress: (data) => {
+          postCallProgress({ v: 1, k: 'rp', i: id, d: data });
+        },
+      };
+      let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+      if (callHeartbeatInterval !== undefined) {
+        heartbeatTimer = setInterval(() => {
+          postCallProgress({ v: 1, k: 'rp', i: id });
+        }, callHeartbeatInterval);
+        unrefTimer(heartbeatTimer);
+        /* Cancelled (`rc`) or torn down while the handler still runs: nobody is
+         * listening, and a handler that never settles must not keep a timer. */
+        ac.signal.addEventListener(
+          'abort',
+          () => {
+            clearInterval(heartbeatTimer);
+          },
+          { once: true },
+        );
+      }
       // async-iife: bootstrap — wire handlers are sync per Port contract; per-frame
       // dispatch is tracked via inFlightCalls AbortController registry below.
       void (async () => {
         try {
-          const out = await callImpl(context, raw.n, validatedArgs, ac.signal);
+          const out = await callImpl(callContext, raw.n, validatedArgs, ac.signal);
           if (closeController.isClosed()) {
             return;
           }
@@ -1536,6 +1696,7 @@ export const createChannelServer = <P extends RpcProtocol = EmptyRpcProtocol>(
           }
           port.postMessage({ v: 1, k: 'rs', i: id, o: 0, e: toWireError(error) });
         } finally {
+          clearInterval(heartbeatTimer);
           inFlightCalls.delete(id);
         }
       })();

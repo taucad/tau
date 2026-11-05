@@ -15,7 +15,7 @@ import { Topic } from '@taucad/events';
 import { parentDirectory } from '@taucad/utils/path';
 import type { ChangeEventStat, FileSystemBackend } from '@taucad/types';
 import { getEventOrigin } from '#event-origin-registry.js';
-import type { ChangeEvent, PathChangeEvent } from '#types.js';
+import type { ChangeEvent, PathChangeEvent, WatchEvent } from '#types.js';
 
 /**
  * What happened to one path. A copy target is `created`; `written` does not
@@ -166,6 +166,30 @@ export const touchedDirectoriesOf = (entries: readonly ChangeSetEntry[]): readon
     }
   }
   return [...directories].sort();
+};
+
+/**
+ * A change set spelled as the per-path watch events a {@link WatchEvent} consumer
+ * expects: a creation or write is a `change`, a deletion a `delete`, a move a
+ * `rename`, and a scoped reset a `reset`.
+ *
+ * @param set - One delivered change set.
+ * @returns Its watch events, in commit order.
+ * @public
+ */
+export const watchEventsOfChangeSet = (set: ChangeSet): WatchEvent[] => {
+  if (set.reset !== undefined) {
+    return [{ type: 'reset' }];
+  }
+  return set.entries.map((entry): WatchEvent => {
+    if (entry.op === 'deleted') {
+      return { type: 'delete', path: entry.path };
+    }
+    if (entry.op === 'moved' && entry.oldPath !== undefined) {
+      return { type: 'rename', oldPath: entry.oldPath, newPath: entry.path };
+    }
+    return { type: 'change', path: entry.path };
+  });
 };
 
 /**

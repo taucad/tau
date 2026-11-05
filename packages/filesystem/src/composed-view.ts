@@ -52,6 +52,8 @@ import { bufferToStream } from '#backend/stream-utils.js';
 import { headFileStatFromStat } from '#content-metadata.js';
 import type { TreeSearchOptions } from '#tree-index.js';
 import type { AppendFence } from '#changeset.js';
+import type { ChangeSet, ChangeSetEntry } from '#change-event-bus.js';
+import type { ChangeSetWatchRequest } from '#watch-registry.js';
 import type { RootedPorcelain } from '#rooted-views.js';
 import type { WorkspaceMutationError } from '#workspace-errors.js';
 
@@ -101,6 +103,8 @@ export type ComposedViewOverlay = Readonly<{
 /** Optional watch surface a rooted filesystem brings to the view. @public */
 type WatchableFileSystem = {
   watch(request: WatchRequest, handler: (event: WatchEvent) => void): (() => void) | Promise<() => void>;
+  /** The change-set form (D6): one {@link ChangeSet} per committed changeset, masked like `watch`. */
+  watchChangeSets(request: ChangeSetWatchRequest, handler: (set: ChangeSet) => void): () => void;
 };
 
 /**
@@ -309,6 +313,50 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
       return { type: 'change', path: to };
     }
     return from === undefined ? undefined : { type: 'delete', path: from };
+  };
+
+  /** One change-set fact as this view serves it: a move with one hidden edge is the other edge's arrival or departure. */
+  const visibleEntry = (entry: ChangeSetEntry): ChangeSetEntry | undefined => {
+    if (entry.op !== 'moved' || entry.oldPath === undefined) {
+      return hidden(entry.path) ? undefined : entry;
+    }
+    const to = !hidden(entry.path);
+    const from = !hidden(entry.oldPath);
+    if (to && from) {
+      return entry;
+    }
+    if (to) {
+      return {
+        op: 'created',
+        path: entry.path,
+        kind: entry.kind,
+        ...(entry.target === undefined ? {} : { target: entry.target }),
+      };
+    }
+    return from ? { op: 'deleted', path: entry.oldPath, kind: entry.kind } : undefined;
+  };
+
+  /** A change set with every hidden fact removed; `undefined` when nothing visible is left. */
+  const visibleSet = (set: ChangeSet): ChangeSet | undefined => {
+    if (set.reset !== undefined) {
+      return set;
+    }
+    const entries = set.entries.flatMap((entry) => visibleEntry(entry) ?? []);
+    if (entries.length === 0) {
+      return undefined;
+    }
+    if (entries.length === set.entries.length && entries.every((entry, index) => entry === set.entries[index])) {
+      return set;
+    }
+    const segments = set.segments?.filter((segment) => !hidden(segment.path));
+    return {
+      generation: set.generation,
+      ...(set.origin === undefined ? {} : { origin: set.origin }),
+      ...(set.backend === undefined ? {} : { backend: set.backend }),
+      entries,
+      touchedDirectories: set.touchedDirectories.filter((directory) => directory === '' || !hidden(directory)),
+      ...(segments === undefined || segments.length === 0 ? {} : { segments }),
+    };
   };
 
   const writablePath = (path: string): string => {
@@ -986,6 +1034,20 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
               { ...request, paths: request.paths.map((path) => readablePath(canonical(path))) },
               (event: WatchEvent) => {
                 const visible = visibleEvent(event);
+                if (visible !== undefined) {
+                  handler(visible);
+                }
+              },
+            ),
+        }),
+    ...(base.watchChangeSets === undefined
+      ? {}
+      : {
+          watchChangeSets: (request: ChangeSetWatchRequest, handler: (set: ChangeSet) => void): (() => void) =>
+            base.watchChangeSets!(
+              { ...request, paths: request.paths.map((path) => readablePath(canonical(path))) },
+              (set: ChangeSet) => {
+                const visible = visibleSet(set);
                 if (visible !== undefined) {
                   handler(visible);
                 }

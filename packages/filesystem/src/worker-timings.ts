@@ -59,6 +59,8 @@ export type WorkerTimingSpan = (typeof workerTimingSpans)[number];
  *   realm died, and those it removed as the empty file a crashed create left (I1).
  * - `uncommitted.puts`: puts of a batch's create record, each covering up to eight creates (I1).
  * - `uncommitted.deleteFailed`: settled or checked records whose delete failed after retries; left behind, harmless.
+ * - `watch.pathEvents`: per-path watch events delivered to handlers (the `watch` form), one per handler.
+ * - `watch.changeSets`: change sets delivered to handlers (the `watchChangeSets` form, D6), one per handler.
  *
  * @public
  */
@@ -73,6 +75,8 @@ export const workerTimingCounters = [
   'uncommitted.removed',
   'uncommitted.puts',
   'uncommitted.deleteFailed',
+  'watch.pathEvents',
+  'watch.changeSets',
 ] as const;
 
 /** One counter's name. @public */

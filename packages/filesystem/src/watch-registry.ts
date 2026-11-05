@@ -26,6 +26,7 @@ import { ChangeSetCoalescer, EventCoalescer } from '#event-coalescer.js';
 import type { FrameScheduler } from '#event-coalescer.js';
 import { getEventAuthorities, getEventOrigin, isEventGloballyVisible, tagEventOrigin } from '#event-origin-registry.js';
 import { canonicalizePath, parentDirectory } from '@taucad/utils/path';
+import { workerTimings } from '#worker-timings.js';
 
 /**
  * A watch on the change-set form of the plane.
@@ -422,6 +423,8 @@ export class WatchRegistry {
           for (const event of events) {
             const watchEvent = changeEventToWatchEvent(event);
             if (watchEvent !== undefined) {
+              /* Per-path deliveries, counted so a gate can hold the hot write path to the change-set form (S8). */
+              workerTimings.count('watch.pathEvents', handlers.size);
               handlers.emit(watchEvent);
             }
           }
@@ -476,6 +479,7 @@ export class WatchRegistry {
         coalesce === 'frame'
           ? new ChangeSetCoalescer(
               (set) => {
+                workerTimings.count('watch.changeSets', handlers.size);
                 handlers.emit(set);
               },
               {
@@ -634,6 +638,7 @@ export class WatchRegistry {
         continue;
       }
       if (subscription.frame === undefined) {
+        workerTimings.count('watch.changeSets', subscription.handlers.size);
         subscription.handlers.emit(set);
       } else {
         subscription.frame.push(set);

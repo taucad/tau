@@ -20,8 +20,7 @@ await mkdir(output, { recursive: true });
 const scratch = await mkdtemp(join(tmpdir(), 'tau-dmg-preview-'));
 const appPath = join(scratch, 'Tau.app');
 const dmgPath = join(output, 'Tau-preview.dmg');
-const mount = '/Volumes/Tau';
-let mounted = false;
+let device: string | undefined;
 try {
   // A stand-in bundle with the real icon: Finder draws it exactly as it draws the shipped app.
   await mkdir(join(appPath, 'Contents/MacOS'), { recursive: true });
@@ -43,12 +42,21 @@ try {
   );
   await createMacosDmg({ appPath, dmgPath, trust: { signed: false, notarized: false } });
   // Mount where Finder can see it, as a user's double-click would, then let Finder open the window.
-  execFileSync('/usr/bin/hdiutil', ['attach', '-readonly', dmgPath], { stdio: 'inherit' });
-  mounted = true;
-  execFileSync('/usr/bin/open', [mount]);
+  // Use the device and mount point hdiutil reports: another volume named Tau would move this one off /Volumes/Tau.
+  const attached = execFileSync('/usr/bin/hdiutil', ['attach', '-readonly', dmgPath], { encoding: 'utf8' });
+  const volumeRow = attached
+    .split('\n')
+    .map((row) => row.split('\t').map((field) => field.trim()))
+    .find((fields) => fields.length >= 3 && fields[2]!.startsWith('/Volumes/'));
+  // Checksum lines come first in hdiutil output; the image's whole-disk device is the first /dev/ row.
+  device = /^(\/dev\/disk\d+)\s/mu.exec(attached)?.[1];
+  if (volumeRow === undefined) {
+    throw new Error(`hdiutil attach reported no mount point:\n${attached}`);
+  }
+  execFileSync('/usr/bin/open', [volumeRow[2]!]);
   await delay(6000);
-  execFileSync('/usr/sbin/screencapture', ['-x', join(output, 'screen.png')]);
   try {
+    execFileSync('/usr/sbin/screencapture', ['-x', join(output, 'screen.png')]);
     const bounds = execFileSync('/usr/bin/osascript', ['-e', 'tell application "Finder" to get bounds of window 1'], {
       encoding: 'utf8',
     })
@@ -65,12 +73,12 @@ try {
       ]);
     }
   } catch (error) {
-    console.warn('Finder window bounds unavailable; keeping only the full-screen capture:', error);
+    console.warn('Screen capture incomplete; screenshots are best-effort evidence:', error);
   }
   console.log(`DMG preview written to ${output}`);
 } finally {
-  if (mounted) {
-    execFileSync('/usr/bin/hdiutil', ['detach', mount, '-force']);
+  if (device !== undefined) {
+    execFileSync('/usr/bin/hdiutil', ['detach', device, '-force']);
   }
   await rm(scratch, { recursive: true, force: true });
 }

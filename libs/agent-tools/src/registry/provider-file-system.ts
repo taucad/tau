@@ -408,14 +408,17 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
         await (value.type === 'dir' ? provider.rmdir(target) : provider.unlink(target));
       });
     },
-    async readdir(path) {
+    async readdir(path, options) {
       const directory = assertRootedPath(path);
       const rows = await provider.readdirWithStats(directory);
       const pathOf = (name: string): string => (directory === '' ? name : `${directory}/${name}`);
-      const facts = await factsOf(
-        rows.flatMap((row) => (row.type === 'file' ? [{ ...row, path: pathOf(row.name) }] : [])),
-        lineCountByteCap,
-      );
+      const facts =
+        options?.contentFacts === false
+          ? new Map<string, ContentFacts>()
+          : await factsOf(
+              rows.flatMap((row) => (row.type === 'file' ? [{ ...row, path: pathOf(row.name) }] : [])),
+              lineCountByteCap,
+            );
       return rows.map((row) => directoryEntry(row, facts.get(pathOf(row.name))));
     },
     async exists(path) {

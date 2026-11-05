@@ -196,6 +196,18 @@ describe('createProviderRpcFileSystem', () => {
     expect(entries.find((entry) => entry.name === 'a.ts')).toMatchObject({ type: 'file', contentKind: 'text' });
   });
 
+  /* W3 a3: a walk that reads every file anyway lists without measuring any. */
+  it('lists without measuring content when the caller asks for no content facts', async () => {
+    await provider.writeFile('src/a.ts', 'a\n');
+    const reads = vi.spyOn(provider, 'readFile');
+
+    const entries = await fileSystemFor().readdir('src', { contentFacts: false });
+
+    expect(entries).toStrictEqual([expect.objectContaining({ name: 'a.ts', type: 'file', size: 2 })]);
+    expect(entries[0]).not.toHaveProperty('contentKind');
+    expect(reads).not.toHaveBeenCalled();
+  });
+
   /* D4, EQ15: a listing counts lines only within its byte cap and never calls an unmeasured file binary. */
   it('lists a file above the line-count cap by kind and size alone', async () => {
     await provider.writeFile('logs/large.log', 'line\n'.repeat(lineCountByteCap / 4));

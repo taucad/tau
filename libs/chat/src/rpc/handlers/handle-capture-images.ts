@@ -22,7 +22,8 @@ const savedViews = async (fileSystem: RpcFileSystem): Promise<string> => {
     if (!(await fileSystem.exists(viewsFolder))) {
       return 'none';
     }
-    const entries = await fileSystem.readdir(viewsFolder);
+    /* Names only: the refusal lists view ids, never their contents. */
+    const entries = await fileSystem.readdir(viewsFolder, { contentFacts: false });
     const ids = entries
       .map(({ name }) => name)
       .filter((name) => name.endsWith('.json'))

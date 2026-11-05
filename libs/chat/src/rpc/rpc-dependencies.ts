@@ -170,7 +170,7 @@ export type RpcFileStat =
       modifiedAt: string;
       /** What the composed view says about this path. */
       provenance?: FileProvenance;
-    } & FileContentMetadata);
+    } & StatContentMetadata);
 
 /**
  * Abstract runtime client for getting compilation results.

@@ -277,6 +277,14 @@ const networkIssue = (url: string): KernelIssue => ({
   details: { url, producer: 'tscircuit' },
 });
 
+const boardTextureIssue = (error: unknown): KernelIssue => ({
+  message: `Board textures are unavailable, so the board renders without copper, mask or silkscreen: ${String(error)}`,
+  code: 'RUNTIME',
+  type: 'runtime',
+  severity: 'warning',
+  details: { producer: 'tscircuit' },
+});
+
 // Run `task` with `globalThis.fetch` replaced by a recorder that rejects every request (charter I1):
 // `@tscircuit/core` fetches `http(s)` footprints and `circuit-json-to-gltf` fetches `cadModel`
 // URLs through the global. Nested calls share the one installation; the value replaced by the
@@ -417,8 +425,13 @@ const circuitJsonToGlb = async (
     import('#engine/svg-to-png.js'),
   ]);
   // Board layers rasterize through `svg-to-png.ts`, which must be ready before conversion: the converter catches a
-  // rasterizer failure and silently draws an untextured board.
-  await loadBoardTextureRenderer(await compileWasmStreaming(resvgWasmUrl));
+  // rasterizer failure and silently draws an untextured board. A failed load keeps that fallback and says so.
+  const textureIssues: KernelIssue[] = [];
+  try {
+    await loadBoardTextureRenderer(await compileWasmStreaming(resvgWasmUrl));
+  } catch (error) {
+    textureIssues.push(boardTextureIssue(error));
+  }
   const { value: content, issues } = await withOfflineFetch(async () => {
     const glb = await convertCircuitJsonToGltf(asCircuitJson(circuitJson), { format: 'glb' });
     if (!(glb instanceof ArrayBuffer)) {
@@ -426,7 +439,7 @@ const circuitJsonToGlb = async (
     }
     return applyGlbConvention(new Uint8Array(glb), convention);
   });
-  return { content, issues };
+  return { content, issues: [...textureIssues, ...issues] };
 };
 
 const textExportFile = (format: 'csv' | 'txt' | 'json', name: string, text: string) =>

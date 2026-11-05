@@ -74,6 +74,21 @@ vi.mock('@resvg/resvg-js', () => ({
   }),
 }));
 
+// Lets one test fail the board-texture WASM compile; every other call compiles the real module.
+const wasmCompile = vi.hoisted(() => ({ fail: false }));
+vi.mock(import('@taucad/runtime/kernel'), async (importOriginal) => {
+  const original = await importOriginal();
+  return {
+    ...original,
+    compileWasmStreaming: async (...parameters: Parameters<typeof original.compileWasmStreaming>) => {
+      if (wasmCompile.fail) {
+        throw new Error('resvg WASM is unavailable');
+      }
+      return original.compileWasmStreaming(...parameters);
+    },
+  };
+});
+
 const fetchGuard = vi.fn((): never => {
   throw new Error('network access is not allowed during a tscircuit render');
 });
@@ -682,6 +697,25 @@ describe('TscircuitKernel', () => {
       for (const material of faces ?? []) {
         expect(material?.getBaseColorTexture()?.getMimeType()).toBe('image/png');
         expect(material?.getBaseColorTexture()?.getSize()?.[0]).toBe(1024);
+      }
+    });
+
+    it('should still render the board, with a warning, when the texture rasterizer cannot load', async () => {
+      const client = createClient({ 'main.tsx': fixtureBoard });
+      wasmCompile.fail = true;
+
+      try {
+        const result = expectGeometry(await render(client, 'main.tsx'));
+
+        expectGlb(result);
+        expect(result.issues).toContainEqual(
+          expect.objectContaining({
+            severity: 'warning',
+            message: expect.stringContaining('resvg WASM is unavailable') as string,
+          }),
+        );
+      } finally {
+        wasmCompile.fail = false;
       }
     });
 

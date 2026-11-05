@@ -30,6 +30,8 @@ export type TerminalRendererOptions = {
   readonly onLinkActivate: (uri: string) => void;
   /** The person pressed the documented leave key (Shift+Escape); the caller moves focus out. */
   readonly onLeave: () => void;
+  /** The cell metrics changed (a face that loaded late, another display); the caller refits and resizes the session. */
+  readonly onMetricsChange?: () => void;
 };
 
 /** @public */
@@ -233,6 +235,22 @@ const createScreenMirror = (
 };
 
 /**
+ * Load the Terminal's face before the canvas measures it. Resolves either way: a missing font set or a failed load
+ * leaves the fallback in the family list.
+ *
+ * @param fontFamily - The CSS font family list.
+ * @param fontSize - The size in pixels.
+ */
+const loadTerminalFont = async (fontFamily: string, fontSize: number): Promise<void> => {
+  const { fonts } = document as Partial<Pick<Document, 'fonts'>>;
+  try {
+    await fonts?.load(`${String(fontSize)}px ${fontFamily}`);
+  } catch {
+    /* The fallback face draws instead. */
+  }
+};
+
+/**
  * Create the Terminal renderer inside `options.host`. One WASM instance per terminal, disposed with it.
  *
  * @param options - Font, theme, scrollback, accessibility and the two trusted callbacks.
@@ -244,6 +262,9 @@ export const createTerminalRenderer = async (options: TerminalRendererOptions): 
   /* (1) The selection manager auto-scrolls while a drag is within 30 px of an edge, so a drag along the first rows
    * grows upward. Zero keeps auto-scroll for drags that leave the canvas, as xterm does. */
   Reflect.set(aurigax.SelectionManager, 'AUTO_SCROLL_EDGE_SIZE', 0);
+  /* The canvas measures its cell from whatever face is loaded when it opens, so a webfont that has not loaded yet would
+   * fix the fallback's metrics. Wait for the editor's face first; a face that never loads leaves the fallback. */
+  await loadTerminalFont(options.fontFamily, options.fontSize);
   const terminal = new aurigax.Terminal({
     ghostty: await aurigax.Ghostty.load(wasmUrl),
     fontFamily: options.fontFamily,
@@ -360,6 +381,23 @@ export const createTerminalRenderer = async (options: TerminalRendererOptions): 
   watchResolution();
   disposers.push(() => {
     resolution?.removeEventListener('change', onResolutionChange);
+  });
+  /* A face that finishes loading later (the page's first Terminal, a slow disk) re-measures the same way. */
+  const { fonts } = document as Partial<Pick<Document, 'fonts'>>;
+  const onFontsLoaded = (): void => {
+    const { renderer } = terminal;
+    if (renderer) {
+      renderer.remeasureFont();
+      renderer.resize(terminal.cols, terminal.rows);
+      terminal.setPaused(true);
+      terminal.setPaused(false);
+      /* The cells changed size, so the grid that fits the host did too. */
+      options.onMetricsChange?.();
+    }
+  };
+  fonts?.addEventListener('loadingdone', onFontsLoaded);
+  disposers.push(() => {
+    fonts?.removeEventListener('loadingdone', onFontsLoaded);
   });
 
   /* (6) After a GPU process restart the Canvas 2D fallback's context comes back blank, and only dirty rows repaint. */

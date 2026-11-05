@@ -154,6 +154,9 @@ describe('Vitest Browser test-runner ownership', () => {
       // Clean-host Mac acceptance downloads candidate bytes in a real browser so macOS applies its own quarantine,
       // which Browser Mode cannot host.
       'apps/desktop/scripts/qualification-browser-download.mts',
+      // The DMG backdrop render rasterizes its SVG with the Geist faces into committed PNGs; it is a dev-only asset
+      // render with no test runner, which Browser Mode does not host.
+      'apps/desktop/scripts/render-dmg-background.mts',
       'apps/docs/scripts/verify-browser.mts',
       'apps/react-e2e/browser-command.ts',
       'apps/react-e2e/scripts/benchmark-bundler-products.mts',
@@ -251,6 +254,7 @@ describe('Vitest Browser test-runner ownership', () => {
     expect(allowWriteFiles.map(([path]) => path).sort()).toEqual(
       [
         'apps/react-e2e/vitest.config.ts',
+        'apps/ui-e2e/src/filesystem-scenarios/vitest.config.ts',
         'apps/ui-e2e/vitest.config.ts',
         'packages/plugins/rolldown/vitest.browser.benchmark.config.ts',
       ].sort(),
@@ -286,6 +290,7 @@ describe('Vitest Browser test-runner ownership', () => {
         'apps/libs/lsp/src/typescript-worker/vitest.browser.config.ts',
         'apps/react-e2e/vitest.bundlers.config.ts',
         'apps/react-e2e/vitest.config.ts',
+        'apps/ui-e2e/src/filesystem-scenarios/vitest.config.ts',
         'apps/ui-e2e/vitest.config.ts',
         'apps/ui/app/components/chat/chat-message-queue.vitest.browser.config.ts',
         'apps/ui/app/components/chat/chat-textarea.vitest.browser.config.ts',

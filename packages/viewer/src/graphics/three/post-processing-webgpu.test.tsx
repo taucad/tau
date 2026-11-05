@@ -20,6 +20,7 @@ import type { ToneMapping, Vector2 } from 'three';
 import type { WebGPURenderer } from 'three/webgpu';
 import type { PostProcessingSettings } from '#graphics/three/post-processing-settings.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type * as Three from 'three';
 
 type MockCameraSnapshot = { view: { target: [number, number, number] } };
 type MockAoNode = {
@@ -375,6 +376,14 @@ vi.mock('#graphics/three/ao-denoise.js', () => ({ createAoDenoise: mocks.denoise
 vi.mock('#graphics/three/gtao-depth-camera.js', () => ({
   createGtaoCameraAdapter: mocks.createGtaoCameraAdapter,
 }));
+
+// The frame encode is its own graph; observe it as the output pass's renderOutput call.
+vi.mock('#graphics/three/frame-output.js', async () => {
+  const { NoToneMapping: none } = await vi.importActual<typeof Three>('three');
+  return {
+    encodeFrameOutput: (color: unknown, colorSpace: unknown): unknown => mocks.renderOutput(color, none, colorSpace),
+  };
+});
 
 vi.mock('three/tsl', () => ({
   texture: (value: unknown) => ({ kind: 'frame-texture', value }),

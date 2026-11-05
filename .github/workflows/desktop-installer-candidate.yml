@@ -165,6 +165,11 @@ jobs:
             echo "TAU_SIGNING_KEYCHAIN=$keychain"
           } >> "$GITHUB_ENV"
 
+      # The DMG window layout is built by hash-pinned dmgbuild wheels installed with uv.
+      - name: Install uv for the DMG layout builder
+        run: |
+          command -v uv || pipx install uv
+          uv --version
       - name: Wrap the exact finalized ZIP application in a signed notarized DMG
         run: pnpm nx run desktop:installer-candidate --args=dmg
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

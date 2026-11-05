@@ -423,6 +423,13 @@
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --unsigned"
       }
     },
+    "render-dmg-background": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/render-dmg-background.mts"
+      }
+    },
     "test-macos-dmg": {
       "executor": "nx:run-commands",
       "options": {

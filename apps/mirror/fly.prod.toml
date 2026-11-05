@@ -20,7 +20,7 @@
 # TAU_S3_COPY_ERASE_* for DX1; nothing in the copier reads them.
 
 app = 'tau-mirror'
-primary_region = 'syd'
+primary_region = 'sjc'
 kill_signal = 'SIGTERM'
 # A round stops at its next object on SIGTERM; nothing half-written is ever visible (snapshot last).
 kill_timeout = '60s'

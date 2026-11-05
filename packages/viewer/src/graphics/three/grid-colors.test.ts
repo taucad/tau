@@ -20,9 +20,9 @@ import {
 } from '#graphics/three/overlay-colors.constants.js';
 
 describe('Grid theme colors', () => {
-  it('uses linear-blend tuned tints visible on both WebGL gamma blend and WebGPU linear blend', () => {
+  it('uses tints tuned for gamma compositing over the page background in both themes', () => {
     expect(infiniteGridColorLightMode).toBe(0x73_73_73);
-    expect(infiniteGridColorDarkMode).toBe(0x55_55_55);
+    expect(infiniteGridColorDarkMode).toBe(0x99_99_99);
   });
 
   it('uses maximum neutral tints and stronger opacity in high-contrast mode', () => {

@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest';
 import type { ConfigService } from '@nestjs/config';
 import type { Environment } from '#config/environment.config.js';
 import type { MetricsService } from '#telemetry/metrics.js';
-import { RedisService } from '#redis/redis.service.js';
+import { parseMemoryUtilization, RedisService } from '#redis/redis.service.js';
 
 const createService = (): RedisService => {
   const configService = { get: () => 'redis://127.0.0.1:6379' } as unknown as ConfigService<Environment, true>;
-  const metrics = { redisConnectionState: { record: () => undefined } } as unknown as MetricsService;
+  const metrics = {
+    redisConnectionState: { record: () => undefined },
+    redisMemoryUtilization: { record: () => undefined },
+  } as unknown as MetricsService;
   return new RedisService(configService, metrics);
 };
 
@@ -53,5 +56,34 @@ describe('RedisService client policy', () => {
       duplicate.disconnect();
       service.client.disconnect();
     }
+  });
+
+  it('should keep reconnecting with a capped backoff however long Redis is gone', () => {
+    const service = createService();
+
+    try {
+      /* A `null` here ends reconnection for the life of the process and leaves
+       * the Machine unready after Redis recovers. */
+      const retry = service.client.options.retryStrategy!;
+      expect(retry(1)).toBe(100);
+      expect(retry(10)).toBe(1000);
+      expect(retry(11)).toBe(1100);
+      expect(retry(10_000)).toBe(3000);
+    } finally {
+      service.client.disconnect();
+    }
+  });
+});
+
+describe('parseMemoryUtilization', () => {
+  it('should divide used_memory by maxmemory', () => {
+    expect(parseMemoryUtilization('# Memory\r\nused_memory:50\r\nused_memory_human:50B\r\nmaxmemory:200\r\n')).toBe(
+      0.25,
+    );
+  });
+
+  it('should report nothing when the server has no memory limit', () => {
+    expect(parseMemoryUtilization('used_memory:50\r\nmaxmemory:0\r\n')).toBeUndefined();
+    expect(parseMemoryUtilization('# Memory\r\n')).toBeUndefined();
   });
 });

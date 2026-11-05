@@ -21,6 +21,18 @@ type SharedService = {
 const services = new WeakMap<EditorLanguageRequest['environment']['session'], SharedService>();
 const decoder = new TextDecoder();
 
+/**
+ * The tscircuit kernel claims `.tsx` and `.jsx` by extension, and its authors write bare `<board>`
+ * JSX with no import, so those documents always compile against the core's intrinsic elements.
+ * `@tscircuit/core`'s declarations pull in `@tscircuit/props` and React's `react/jsx-runtime`, so
+ * a project without a `package.json` (created from code) still type-checks.
+ */
+const jsxDocumentPackages = ['@tscircuit/core'] as const;
+
+export function implicitTypePackages(uri: string): readonly string[] {
+  return /\.[jt]sx$/u.test(uri) ? jsxDocumentPackages : [];
+}
+
 function reportTypeScriptError(error: Error): void {
   // oxlint-disable-next-line no-console -- semantic failure should remain visible without stopping text editing.
   console.warn('[typescript] language service operation failed', error);
@@ -80,6 +92,7 @@ async function bootService(
     openLanguageHostPort: () => openTauLanguageHostPort(request.environment.fileManagerRef),
     dependencyReader,
     dynamicTypes: ENV.TAU_ACQUISITION !== 'locked',
+    implicitPackages: implicitTypePackages,
     onError: reportTypeScriptError,
     onWorkerFailure,
     readProjectFile: async (path) => {

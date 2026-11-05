@@ -14,12 +14,19 @@ describe('PicoGK browser snapshot', () => {
       if (path === 'Helpers') {
         return [file('Shape.cs')];
       }
+      if (path === '.agents') {
+        return [directory('skills'), directory('local')];
+      }
+      if (path === '.agents/local') {
+        return [file('Note.cs')];
+      }
       if (path !== '') {
         throw new Error('An excluded directory was read.');
       }
       return [
         file('main.cs'),
         directory('Helpers'),
+        directory('.agents'),
         file('asset.bin'),
         file('Lib.dll'),
         file('App.exe'),
@@ -37,10 +44,18 @@ describe('PicoGK browser snapshot', () => {
         ['asset.bin', cached],
       ]),
     });
-    expect(result.files.map(({ path }) => path)).toEqual(['Helpers/Shape.cs', 'asset.bin', 'main.cs']);
-    expect(filesystem.mocks.readFile).toHaveBeenCalledExactlyOnceWith('Helpers/Shape.cs', undefined);
+    expect(result.files.map(({ path }) => path)).toEqual([
+      '.agents/local/Note.cs',
+      'Helpers/Shape.cs',
+      'asset.bin',
+      'main.cs',
+    ]);
+    expect(filesystem.mocks.readFile.mock.calls).toEqual([
+      ['.agents/local/Note.cs', undefined],
+      ['Helpers/Shape.cs', undefined],
+    ]);
     cached.fill(9);
-    expect(result.files[1]!.contents).toEqual(new Uint8Array([1, 2, 3, 4]));
+    expect(result.files[2]!.contents).toEqual(new Uint8Array([1, 2, 3, 4]));
   });
 
   it('should identify content changes and ignore filesystem listing order', async () => {

@@ -120,7 +120,6 @@
   },
   "dependencies": {
     "@gltf-transform/core": "catalog:",
-    "@resvg/resvg-wasm": "2.6.2",
     "@taucad/geometry-core": "workspace:*",
     "@tscircuit/manifold-2d": "catalog:"
   },

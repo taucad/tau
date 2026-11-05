@@ -1567,6 +1567,9 @@ importers:
       '@taucad/agent-host':
         specifier: workspace:*
         version: link:packages/agent-host
+      '@taucad/agent-tools':
+        specifier: workspace:*
+        version: link:libs/agent-tools
       '@taucad/chat':
         specifier: workspace:*
         version: link:libs/chat
@@ -1594,6 +1597,9 @@ importers:
       '@taucad/react':
         specifier: workspace:*
         version: link:packages/react
+      '@taucad/revisions':
+        specifier: workspace:*
+        version: link:packages/revisions
       '@taucad/runtime':
         specifier: workspace:*
         version: link:packages/runtime
@@ -5263,9 +5269,6 @@ importers:
       '@gltf-transform/core':
         specifier: 'catalog:'
         version: 4.5.1
-      '@resvg/resvg-wasm':
-        specifier: 2.6.2
-        version: 2.6.2
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../../core/geometry

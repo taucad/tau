@@ -348,6 +348,25 @@ describe('parameterFacts', () => {
     expect(facts).not.toHaveProperty('truncated');
   });
 
+  it('should compare structured leaves by their canonical JSON form', () => {
+    const pairs: ReadonlyArray<readonly [unknown, unknown, 'same' | 'modified' | 'unknown']> = [
+      [{ b: 1, a: [1, 2] }, { a: [1, 2], b: 1 }, 'same'],
+      [{ a: -0 }, { a: 0 }, 'same'],
+      [[Number.NaN, null], [Infinity, null], 'same'],
+      [{ a: [1, 2] }, { a: { 0: 1, 1: 2 } }, 'modified'],
+      [{ '10': 1, '2': 1 }, { '2': 1, '10': 2 }, 'modified'],
+      [{ 'a"b': 'é' }, { 'a"b': 'é' }, 'same'],
+      [{ a: 1 }, { a: 1, b: undefined }, 'unknown'],
+      [{ text: 'x'.repeat(240) }, { text: 'x'.repeat(240) }, 'same'],
+      [{ text: 'x'.repeat(250) }, { text: 'x'.repeat(250) }, 'unknown'],
+    ];
+    for (const [fallback, value, expected] of pairs) {
+      const facts = parameterFacts(shaped({ '/s': {} }, { s: fallback }), { s: value });
+      const found = facts.unknown === 1 ? 'unknown' : facts.modified === 1 ? 'modified' : 'same';
+      expect(found, JSON.stringify([fallback, value])).toBe(expected);
+    }
+  });
+
   it('should stop a 5,000-leaf sweep at 1,000 leaves and say so', () => {
     const sweep = Array.from({ length: 5000 }, (_, index) => index);
     const started = performance.now();

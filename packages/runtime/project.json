@@ -13,6 +13,30 @@
         "cwd": "{projectRoot}"
       }
     },
+    "build-observability-bench": {
+      "command": "tsdown -c tsdown.bench.config.ts",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "dependsOn": ["build"],
+      "cache": false
+    },
+    "observability-bench": {
+      "command": "node node_modules/.cache/runtime-bench/observability-bench.mjs",
+      "options": {
+        "cwd": "{workspaceRoot}"
+      },
+      "configurations": {
+        "full": {
+          "args": "--mode=full"
+        },
+        "calibrate": {
+          "args": "--mode=calibrate --samples=60"
+        }
+      },
+      "dependsOn": ["build-observability-bench"],
+      "cache": false
+    },
     "audit-public-surface": {
       "command": "node --import @oxc-node/core/register scripts/audit-public-surface.mts",
       "options": {

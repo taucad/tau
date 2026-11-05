@@ -8,6 +8,7 @@ const baseConfig: UserConfig = {
     'src/index.ts',
     'src/algorithms/index.ts',
     'src/node/index.ts',
+    'src/apply-tree.ts',
     'src/revision-effects.ts',
     'src/revision-projection.ts',
     'src/project-revisions.machine.ts',

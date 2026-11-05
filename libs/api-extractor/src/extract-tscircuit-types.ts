@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 /**
- * Regenerate `generated/tscircuit/tscircuit.corpus.json` from the tscircuit
- * packages the `@taucad/tscircuit` plugin resolves.
+ * Regenerate `generated/tscircuit/tscircuit.corpus.json` (the skill reference)
+ * and `generated/tscircuit/tscircuit.bundled.json` (the editor declarations)
+ * from the tscircuit packages the `@taucad/tscircuit` plugin resolves.
  *
  * pnpm links `@tscircuit/*` into the plugin's own `node_modules`, not the
  * workspace root, so resolution starts there and follows the store symlink;
@@ -19,8 +20,11 @@ import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
 
 import { extractTscircuitApi, tscircuitCorpusFile } from '#languages/typescript/tscircuit.js';
+import { buildTscircuitTypes } from '#languages/typescript/tscircuit-declarations.js';
 
 const pluginModules = join(import.meta.dirname, '../../../packages/plugins/tscircuit/node_modules');
+const workspaceModules = join(import.meta.dirname, '../../../node_modules');
+const bundledTypesFile = join(import.meta.dirname, 'generated/tscircuit/tscircuit.bundled.json');
 
 const packageDirectory = (name: string): string => realpathSync(join(pluginModules, name));
 
@@ -50,6 +54,19 @@ const main = (): void => {
   console.log(`${String(corpus.metadata.totalEntries)} symbols -> ${tscircuitCorpusFile}`);
 };
 
+const writeBundledTypes = (): void => {
+  const core = packageDirectory('@tscircuit/core');
+  const bundle = buildTscircuitTypes({
+    coreDeclarations: join(core, 'dist/index.d.ts'),
+    reactTypesDirectory: realpathSync(join(workspaceModules, '@types/react')),
+    coreVersion: versionOf(core),
+    propsVersion: versionOf(packageDirectory('@tscircuit/props')),
+  });
+  writeFileSync(bundledTypesFile, JSON.stringify(bundle));
+  console.log(`${String(Object.keys(bundle).length)} editor packages -> ${bundledTypesFile}`);
+};
+
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main();
+  writeBundledTypes();
 }

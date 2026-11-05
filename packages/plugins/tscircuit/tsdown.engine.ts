@@ -211,6 +211,7 @@ export default defineConfig({
     netlist: 'src/engine/netlist.ts',
     react: 'src/engine/react.ts',
     'jsx-runtime': 'src/engine/jsx-runtime.ts',
+    alphabet: 'src/engine/alphabet.ts',
   },
   outDir: 'dist/engine',
   format: 'esm',

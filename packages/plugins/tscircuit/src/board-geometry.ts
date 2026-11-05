@@ -12,7 +12,7 @@
  */
 
 import type { Document, Extension, Material, Node } from '@gltf-transform/core';
-import { lineAlphabet } from '@tscircuit/alphabet';
+import { lineAlphabet } from '#engine/alphabet.js';
 import type { CrossSection, ManifoldToplevel, Vec2 } from '@tscircuit/manifold-2d';
 import { allExtensions } from '@taucad/geometry-core';
 

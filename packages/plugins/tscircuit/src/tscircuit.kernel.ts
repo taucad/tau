@@ -249,8 +249,10 @@ const activeUrlSinks = new Set<Set<string>>();
 let replacedFetch: typeof globalThis.fetch | undefined;
 
 const absoluteUrl = (url: string): string => {
+  const location: unknown = Reflect.get(globalThis, 'location');
+  const base = isRecordObject(location) && typeof location['href'] === 'string' ? location['href'] : undefined;
   try {
-    return new URL(url, (globalThis as { location?: { href: string } }).location?.href).href;
+    return new URL(url, base).href;
   } catch {
     return url;
   }

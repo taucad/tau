@@ -58,6 +58,21 @@ export const expectTerminalRunning = async (page: Page): Promise<void> => {
 };
 
 /**
+ * Wait until the Terminal's screen mirror shows `text`. The output of a command reaches the mirror only after the
+ * shell writes it, the PTY bridge forwards it, AurigaX renders a frame and the mirror's own debounce fires, so it can
+ * trail a file the same command wrote by more than vitest's one-second default poll. Every mirror check goes through
+ * here, with the same window as the Terminal's other qualification waits.
+ *
+ * @param page - The desktop page showing the Terminal pane.
+ * @param text - The text the visible screen must contain.
+ */
+export const expectTerminalScreen = async (page: Page, text: string): Promise<void> => {
+  await expect
+    .poll(async () => page.locator('[data-terminal-screen-mirror]').textContent(), { timeout: 30_000 })
+    .toContain(text);
+};
+
+/**
  * Choose one of the pane's own actions the way a person does, from the Terminal actions menu the pane advertises as
  * Shift+F10 and opens on a real right-click. They are deliberately not buttons in an inner header.
  *

@@ -1,8 +1,8 @@
 [
   {
-    "name": "Tau toolkit (ESM JS)",
+    "name": "Tau toolkit (ESM JS) — measured 13.22 kB brotli on 2026-11-05, after the KiCad pack, online parts option and SVG themes",
     "path": ["dist/**/*.mjs", "!dist/engine/**"],
-    "limit": "12 kB"
+    "limit": "14 kB"
   },
   {
     "name": "Offline circuit engine (ESM JS and embedded textures)",

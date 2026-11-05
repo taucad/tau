@@ -874,6 +874,20 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     );
     /* D10: every authored file is here, the large object is not. */
     expect(second.frames.findLast((frame) => frame.type === 'status')?.status.readiness).toBe('materialized');
+    /* D9: the page reads it as pending, never as its pointer, and a materialize that cannot fetch says so. */
+    second.send({ command: 'readContent', id: 71, path: 'models/part.step' });
+    second.send({ command: 'materialize', id: 72, paths: ['models/part.step'] });
+    await vi.waitFor(() => {
+      expect(second.frames.filter((frame) => 'id' in frame && (frame.id === 71 || frame.id === 72))).toHaveLength(2);
+    });
+    expect(second.frames.find((frame) => 'id' in frame && frame.id === 71)).toMatchObject({
+      type: 'result',
+      result: { kind: 'content', content: { outcome: 'pending', size: part.length, reason: 'not-fetched' } },
+    });
+    expect(second.frames.find((frame) => 'id' in frame && frame.id === 72)).toMatchObject({
+      type: 'error',
+      code: 'PENDING',
+    });
     expect(await project.readFile('models/part.step')).toStrictEqual(bytes);
 
     await project.writeFile(objectFile, part);

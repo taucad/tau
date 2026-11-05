@@ -48,6 +48,7 @@ import type {
   KeepalivePushOutcome,
   LargeObjectsReport,
   ProjectReadinessReading,
+  ReadOutcome,
   PublishDraft,
   RevisionDiffEntry,
   RevisionDivergence,
@@ -275,7 +276,17 @@ export type WorkerRevisionCommand =
   | Readonly<{ command: 'diff'; revisionId: string; from?: string; against?: 'checkout' }>
   | Readonly<{ command: 'compare'; revisionId: string; path: string; from?: string; against?: 'checkout' }>
   /** Both sides of one conflicted revision as text, for the agent's `revisions` tool (rule 8). */
-  | Readonly<{ command: 'readConflict'; revisionId: string }>;
+  | Readonly<{ command: 'readConflict'; revisionId: string }>
+  /** One file with its large-object placeholder resolved, or `pending` (D9); the project directory when no checkout is named. */
+  | Readonly<{
+      command: 'readContent';
+      checkoutId?: string;
+      path: string;
+      /** Milliseconds to wait for an object a running fill is fetching. */
+      wait?: number;
+    }>
+  /** Make these paths physical files, their objects fetched first (D9). */
+  | Readonly<{ command: 'materialize'; checkoutId?: string; paths: readonly string[] }>;
 
 /**
  * One settled signal from the worker revision root.
@@ -454,6 +465,14 @@ export type WorkerProjectRevisions = Readonly<{
   recordEditorConflict: (input: EditorConflictInput) => Promise<EditorConflictOutcome>;
   /** Both sides of one conflicted revision as text (rule 8). */
   readConflict: (revision: string) => Promise<RevisionConflictRead>;
+  /** One file with its large-object placeholder resolved to its object, or `pending` (D9). */
+  readContent: (
+    checkoutId: string | undefined,
+    path: string,
+    options?: Readonly<{ wait?: number }>,
+  ) => Promise<ReadOutcome>;
+  /** Make these paths physical files; rejects with code `PENDING` for one whose object could not be fetched (D9). */
+  materialize: (checkoutId: string | undefined, paths: readonly string[]) => Promise<void>;
   /** One content-change event on a checkout, already filtered to versioned paths. */
   changed: (checkoutId: string, paths: readonly string[]) => void;
   /** Name one revision, or re-point an existing name (S31). */
@@ -744,159 +763,160 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   /* Each checkout's changes observed while a host write held its root: raised once, together, when the last closes. */
   const deferredChanges = new Map<string, Readonly<{ root: string; paths: Set<string> }>>();
 
-  const { actor, settled, turns, recordEditorConflict, readConflict, pullsChats } = createProjectRevisionsActor({
-    port: options.port,
-    projectId,
-    ...(options.clock === undefined ? {} : { clock: options.clock }),
-    ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
-    actorId: projectId,
-    /* Only a feed that sees every write lets a cut skip the files it did not name (E1). */
-    completeChanges: options.completeChanges === true && options.observe !== undefined,
-    deviceId: () => device,
-    ...(options.recordHistoryPush === undefined ? {} : { recordHistoryPush: options.recordHistoryPush }),
-    /*
-     * The scheduler's three exits need to know whether this document can reach
-     * anything (S41). A worker has the events itself — `globalThis` is a
-     * `WorkerGlobalScope` and fires `online`/`offline` — so nothing is injected
-     * from the page for this one.
-     */
-    /* D12: the same `.tau/parameters/**` codec the desktop host injects, at every merge. */
-    parameters: { read: requireParameterRecord, serialize: serializeParameterRecord },
-    /*
-     * D13: another device's push wakes this open project over the API's long
-     * poll, with this document's session — the same cookie the git routes take.
-     * The origin is read per request, so a page that names it later is heard.
-     */
-    remoteMoves: (input, handlers) => {
-      const open = (streamHandlers: RevisionStreamHandlers): (() => void) =>
-        watchRevisionStream(
-          {
-            projectId: input.projectId,
-            apiBaseUrl: () => options.apiBaseUrl?.(),
-            auth: () => ({ kind: 'cookie' }),
-          },
-          streamHandlers,
-        );
-      return options.attention === undefined ? open(handlers) : options.attention.gate(open, handlers);
-    },
-    connectivity: (report) => {
-      const online = (): void => {
-        report(true);
-      };
-      const offline = (): void => {
-        report(false);
-      };
-      globalThis.addEventListener('online', online);
-      globalThis.addEventListener('offline', offline);
-      return () => {
-        globalThis.removeEventListener('online', online);
-        globalThis.removeEventListener('offline', offline);
-      };
-    },
-    actor: ({ runId }) => {
-      if (person === undefined) {
-        return undefined;
-      }
-      /* A cut a run holds is the agent's: `git log`'s author stays the person
-       * through `onBehalfOf`, while `Tau-Actor` names the model. */
-      return runId === undefined ? person : { kind: 'agent', id: 'agent', runId, onBehalfOf: person };
-    },
-    filesystem: async (checkout) => options.filesystem(checkout.root),
-    /* Tau Cloud's repository for this project, from the origin the page named. */
-    remoteUrl: (id) => {
-      const apiBaseUrl = options.apiBaseUrl?.();
-      return apiBaseUrl === undefined ? undefined : tauRemoteUrl(apiBaseUrl, id);
-    },
-    /* D18: the owner's usage for the Sync region, with the page's own session. */
-    remoteStorage: async () => {
-      const apiBaseUrl = options.apiBaseUrl?.();
-      return apiBaseUrl === undefined
-        ? undefined
-        : readRemoteStorageOverHttp(apiBaseUrl, { kind: 'cookie' }, projectId);
-    },
-    /* P51: connecting registers the project before anything asks the remote
-     * for an advertisement it would otherwise answer `404`. */
-    registerRemoteProject: async (id) => {
-      let name: string | undefined;
-      try {
-        const filesystem = await options.filesystem(`/projects/${id}`);
-        const manifest = JSON.parse(await filesystem.readFile('tau.json', 'utf8')) as {
-          readonly name?: unknown;
+  const { actor, settled, turns, recordEditorConflict, readConflict, readContent, materialize, pullsChats } =
+    createProjectRevisionsActor({
+      port: options.port,
+      projectId,
+      ...(options.clock === undefined ? {} : { clock: options.clock }),
+      ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
+      actorId: projectId,
+      /* Only a feed that sees every write lets a cut skip the files it did not name (E1). */
+      completeChanges: options.completeChanges === true && options.observe !== undefined,
+      deviceId: () => device,
+      ...(options.recordHistoryPush === undefined ? {} : { recordHistoryPush: options.recordHistoryPush }),
+      /*
+       * The scheduler's three exits need to know whether this document can reach
+       * anything (S41). A worker has the events itself — `globalThis` is a
+       * `WorkerGlobalScope` and fires `online`/`offline` — so nothing is injected
+       * from the page for this one.
+       */
+      /* D12: the same `.tau/parameters/**` codec the desktop host injects, at every merge. */
+      parameters: { read: requireParameterRecord, serialize: serializeParameterRecord },
+      /*
+       * D13: another device's push wakes this open project over the API's long
+       * poll, with this document's session — the same cookie the git routes take.
+       * The origin is read per request, so a page that names it later is heard.
+       */
+      remoteMoves: (input, handlers) => {
+        const open = (streamHandlers: RevisionStreamHandlers): (() => void) =>
+          watchRevisionStream(
+            {
+              projectId: input.projectId,
+              apiBaseUrl: () => options.apiBaseUrl?.(),
+              auth: () => ({ kind: 'cookie' }),
+            },
+            streamHandlers,
+          );
+        return options.attention === undefined ? open(handlers) : options.attention.gate(open, handlers);
+      },
+      connectivity: (report) => {
+        const online = (): void => {
+          report(true);
         };
-        name = typeof manifest.name === 'string' && manifest.name.trim() !== '' ? manifest.name.trim() : undefined;
-      } catch {
-        /* Registration still makes an empty or incomplete local project
-         * recoverable; the API's fallback name is honest until tau.json exists. */
-      }
-      const apiBaseUrl = options.apiBaseUrl?.();
-      if (apiBaseUrl === undefined) {
-        /* No origin means no session: the same sentence the API's own 401
-         * answers, from the one ladder both hosts read (C6). */
-        throw new Error(registerProjectFailureMessage(401));
-      }
-      await registerProjectOverHttp(apiBaseUrl, { kind: 'cookie' }, { id, name });
-    },
-    publishPublication: async (input) => {
-      const apiBaseUrl = options.apiBaseUrl?.();
-      if (apiBaseUrl === undefined) {
-        throw new Error(publishFailureMessage(401));
-      }
-      /* The document's session is the whole credential (I8): nothing is carried
-       * through this module and nothing is written under the project. */
-      return publishOverHttp(apiBaseUrl, { kind: 'cookie' }, input);
-    },
-    onChatsProjected: (chatIds) => {
-      events.emit({ type: 'chats.projected', projectId, chatIds });
-    },
-    /* Files open before their large objects arrive (the operator's "open the UI, model waits"): the page's viewer waits on this. */
-    onLargeObjects: (report) => {
-      timeFill(report);
-      largeObjectsTold.add(report.checkoutId);
-      if (report.facet === undefined) {
-        largeObjects.delete(report.checkoutId);
-      } else {
-        largeObjects.set(report.checkoutId, report);
-      }
-      republish();
-    },
-    /*
-     * The page's file tree holds its re-reads for a root while an apply writes
-     * it, and lists it once after. A fill's flush is left out: it replaces
-     * placeholders in place, once a second for minutes, and a hold taken and
-     * released per flush re-listed every directory it touched each time.
-     */
-    onApplyingTree: ({ root }, paths, bracket) => {
-      const holdsTree = bracket?.purpose !== 'fill';
-      const startedAt = workerTimings.now();
-      if (holdsTree) {
-        applying.set(root, (applying.get(root) ?? 0) + 1);
-      }
-      writing.set(root, (writing.get(root) ?? 0) + 1);
-      republish();
-      let released = false;
-      return () => {
-        if (released) {
-          return;
+        const offline = (): void => {
+          report(false);
+        };
+        globalThis.addEventListener('online', online);
+        globalThis.addEventListener('offline', offline);
+        return () => {
+          globalThis.removeEventListener('online', online);
+          globalThis.removeEventListener('offline', offline);
+        };
+      },
+      actor: ({ runId }) => {
+        if (person === undefined) {
+          return undefined;
         }
-        released = true;
-        closeWrite(root);
-        if (!holdsTree) {
-          return;
+        /* A cut a run holds is the agent's: `git log`'s author stays the person
+         * through `onBehalfOf`, while `Tau-Actor` names the model. */
+        return runId === undefined ? person : { kind: 'agent', id: 'agent', runId, onBehalfOf: person };
+      },
+      filesystem: async (checkout) => options.filesystem(checkout.root),
+      /* Tau Cloud's repository for this project, from the origin the page named. */
+      remoteUrl: (id) => {
+        const apiBaseUrl = options.apiBaseUrl?.();
+        return apiBaseUrl === undefined ? undefined : tauRemoteUrl(apiBaseUrl, id);
+      },
+      /* D18: the owner's usage for the Sync region, with the page's own session. */
+      remoteStorage: async () => {
+        const apiBaseUrl = options.apiBaseUrl?.();
+        return apiBaseUrl === undefined
+          ? undefined
+          : readRemoteStorageOverHttp(apiBaseUrl, { kind: 'cookie' }, projectId);
+      },
+      /* P51: connecting registers the project before anything asks the remote
+       * for an advertisement it would otherwise answer `404`. */
+      registerRemoteProject: async (id) => {
+        let name: string | undefined;
+        try {
+          const filesystem = await options.filesystem(`/projects/${id}`);
+          const manifest = JSON.parse(await filesystem.readFile('tau.json', 'utf8')) as {
+            readonly name?: unknown;
+          };
+          name = typeof manifest.name === 'string' && manifest.name.trim() !== '' ? manifest.name.trim() : undefined;
+        } catch {
+          /* Registration still makes an empty or incomplete local project
+           * recoverable; the API's fallback name is honest until tau.json exists. */
         }
-        /* An apply that wrote nothing has nothing to account for; to the second, a window may include its neighbours. */
-        if (paths.length > 0) {
-          logWorkerTimings(`apply of ${String(paths.length)} paths`, workerTimings.summarize(startedAt));
+        const apiBaseUrl = options.apiBaseUrl?.();
+        if (apiBaseUrl === undefined) {
+          /* No origin means no session: the same sentence the API's own 401
+           * answers, from the one ladder both hosts read (C6). */
+          throw new Error(registerProjectFailureMessage(401));
         }
-        const remaining = (applying.get(root) ?? 1) - 1;
-        if (remaining === 0) {
-          applying.delete(root);
+        await registerProjectOverHttp(apiBaseUrl, { kind: 'cookie' }, { id, name });
+      },
+      publishPublication: async (input) => {
+        const apiBaseUrl = options.apiBaseUrl?.();
+        if (apiBaseUrl === undefined) {
+          throw new Error(publishFailureMessage(401));
+        }
+        /* The document's session is the whole credential (I8): nothing is carried
+         * through this module and nothing is written under the project. */
+        return publishOverHttp(apiBaseUrl, { kind: 'cookie' }, input);
+      },
+      onChatsProjected: (chatIds) => {
+        events.emit({ type: 'chats.projected', projectId, chatIds });
+      },
+      /* Files open before their large objects arrive (the operator's "open the UI, model waits"): the page's viewer waits on this. */
+      onLargeObjects: (report) => {
+        timeFill(report);
+        largeObjectsTold.add(report.checkoutId);
+        if (report.facet === undefined) {
+          largeObjects.delete(report.checkoutId);
         } else {
-          applying.set(root, remaining);
+          largeObjects.set(report.checkoutId, report);
         }
         republish();
-      };
-    },
-  });
+      },
+      /*
+       * The page's file tree holds its re-reads for a root while an apply writes
+       * it, and lists it once after. A fill's flush is left out: it replaces
+       * placeholders in place, once a second for minutes, and a hold taken and
+       * released per flush re-listed every directory it touched each time.
+       */
+      onApplyingTree: ({ root }, paths, bracket) => {
+        const holdsTree = bracket?.purpose !== 'fill';
+        const startedAt = workerTimings.now();
+        if (holdsTree) {
+          applying.set(root, (applying.get(root) ?? 0) + 1);
+        }
+        writing.set(root, (writing.get(root) ?? 0) + 1);
+        republish();
+        let released = false;
+        return () => {
+          if (released) {
+            return;
+          }
+          released = true;
+          closeWrite(root);
+          if (!holdsTree) {
+            return;
+          }
+          /* An apply that wrote nothing has nothing to account for; to the second, a window may include its neighbours. */
+          if (paths.length > 0) {
+            logWorkerTimings(`apply of ${String(paths.length)} paths`, workerTimings.summarize(startedAt));
+          }
+          const remaining = (applying.get(root) ?? 1) - 1;
+          if (remaining === 0) {
+            applying.delete(root);
+          } else {
+            applying.set(root, remaining);
+          }
+          republish();
+        };
+      },
+    });
 
   /* The last readiness reading: settled here, where the fill and the apply bracket are merged (D10, I7). */
   let readiness: ProjectReadinessReading | undefined;
@@ -1630,6 +1650,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         case 'diff':
         case 'compare':
         case 'readConflict':
+        case 'readContent':
+        case 'materialize':
         case 'recordEditorConflict':
         case 'pullRemote': {
           break;
@@ -1749,6 +1771,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     saveRevision,
     recordEditorConflict,
     readConflict,
+    readContent,
+    materialize,
     createBranch,
     pullRemote: async (chatId) => {
       const answer = await session?.pull({ requestId: `page-pull:${chatId}:${String(Date.now())}`, chatId });
@@ -1855,6 +1879,8 @@ export type WorkerRevisionResult =
   | Readonly<{ kind: 'diff'; entries: readonly RevisionDiffEntry[] }>
   | Readonly<{ kind: 'comparison'; comparison: RevisionFileComparison }>
   | Readonly<{ kind: 'conflict'; conflict: RevisionConflictRead }>
+  | Readonly<{ kind: 'content'; content: ReadOutcome }>
+  | Readonly<{ kind: 'materialized' }>
   | Readonly<{ kind: 'geoSpecCandidates'; candidates: ReadonlyArray<Uint8Array<ArrayBuffer>> }>
   | Readonly<{ kind: 'geoSpecCandidatePublication'; status: 'updated' | 'upToDate' | 'rejected' }>
   /** `tag` answers with the named version; `deleteTag` answers with nothing. */
@@ -2077,6 +2103,14 @@ const answerOf = (
     }
     case 'readConflict': {
       return tree.readConflict(request.revisionId).then((conflict) => ({ kind: 'conflict', conflict }) as const);
+    }
+    case 'readContent': {
+      return tree
+        .readContent(request.checkoutId, request.path, request.wait === undefined ? {} : { wait: request.wait })
+        .then((content) => ({ kind: 'content', content }) as const);
+    }
+    case 'materialize': {
+      return tree.materialize(request.checkoutId, request.paths).then(() => ({ kind: 'materialized' }) as const);
     }
     case 'fetchGeoSpecCandidates': {
       return tree.fetchGeoSpecCandidates().then((candidates) => ({ kind: 'geoSpecCandidates', candidates }) as const);

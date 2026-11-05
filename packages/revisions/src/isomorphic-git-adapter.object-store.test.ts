@@ -42,14 +42,14 @@ vi.mock('isomorphic-git', async (importOriginal) => {
   return {
     ...actual,
     readBlob: recorded('readBlob', actual.readBlob),
-    // eslint-disable-next-line @typescript-eslint/no-deprecated -- recorded so that no caller is left.
+    // oxlint-disable-next-line typescript/no-deprecated -- recorded so that no caller is left.
     readObject: recorded('readObject', actual.readObject),
     readTree: recorded('readTree', actual.readTree),
     isDescendent: recorded('isDescendent', actual.isDescendent),
     packObjects: recorded('packObjects', actual.packObjects),
     writeBlob: recorded('writeBlob', actual.writeBlob),
     writeTree: recorded('writeTree', actual.writeTree),
-    // eslint-disable-next-line @typescript-eslint/no-deprecated -- recorded so that no caller is left.
+    // oxlint-disable-next-line typescript/no-deprecated -- recorded so that no caller is left.
     writeObject: recorded('writeObject', actual.writeObject),
   };
 });
@@ -139,6 +139,7 @@ describe('reading revisions through the object store (W2)', () => {
       cacheHits: 0,
       looseReads: 0,
       wholePackLoads: 0,
+      packChecks: 1,
     });
     expect(packReads).toStrictEqual([]);
     expect(libraryObjectCalls).toStrictEqual([]);

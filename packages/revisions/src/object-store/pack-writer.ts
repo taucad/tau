@@ -3,7 +3,9 @@
  *
  * Undeltified on purpose: a push's pack and a repack's are bounded (the
  * compute worker's 64 MiB ceiling), and every object in them is one inflate
- * away in the reader, so the codec stays the format and nothing more.
+ * away in the reader, so the codec stays the format and nothing more. Objects
+ * are deflated as they are added: a pack in progress holds compressed entries,
+ * never the raw objects behind them.
  *
  * @module
  */
@@ -69,41 +71,96 @@ export type BuiltPack = Readonly<{
   entries: readonly PackIndexEntry[];
 }>;
 
+/** A pack being written: each object is deflated as it is added and only its compressed entry kept. */
+export type PackBuilder = Readonly<{
+  /**
+   * Deflate one object into the pack; its raw bytes are not kept.
+   *
+   * @param object - The object.
+   */
+  add: (object: PackObject) => Promise<void>;
+  /**
+   * Add one object whose body is already deflated (a whole entry of another pack), copied verbatim.
+   *
+   * @param object - The object, its raw size and its deflated body.
+   */
+  addCompressed: (
+    object: Readonly<{ oid: string; type: GitObjectKind; size: number; compressed: Uint8Array<ArrayBuffer> }>,
+  ) => void;
+  /** Objects added so far. */
+  count: () => number;
+  /** Forget the objects added after the first `count`: a set that did not fit is dropped whole. */
+  truncate: (count: number) => void;
+  /**
+   * Close the pack: its header, its entries and its SHA-1 trailer.
+   *
+   * @returns The pack's bytes, trailer and per-entry offsets and CRCs.
+   */
+  finish: () => Promise<BuiltPack>;
+}>;
+
 /**
- * Build one version-2 pack.
+ * Start one version-2 pack, undeltified.
+ *
+ * @param compute - Deflate and SHA-1.
+ * @returns The builder.
+ */
+export const createPackBuilder = (compute: ComputeWorker): PackBuilder => {
+  const parts: Array<readonly [head: Uint8Array<ArrayBuffer>, body: Uint8Array<ArrayBuffer>, oid: string]> = [];
+  const addCompressed: PackBuilder['addCompressed'] = (object) => {
+    parts.push([entryHeader(object.type, object.size), object.compressed, object.oid]);
+  };
+  return Object.freeze({
+    add: async (object: PackObject): Promise<void> => {
+      const compressed = await compute.deflate(object.data);
+      addCompressed({ oid: object.oid, type: object.type, size: object.data.byteLength, compressed });
+    },
+    addCompressed,
+    count: () => parts.length,
+    truncate: (count: number) => {
+      parts.length = Math.min(parts.length, count);
+    },
+    finish: async (): Promise<BuiltPack> => {
+      const entries: PackIndexEntry[] = [];
+      let offset = 12;
+      for (const [head, body, oid] of parts) {
+        entries.push({ oid, offset, crc32: crc32(head, body) });
+        offset += head.byteLength + body.byteLength;
+      }
+      const pack = new Uint8Array(offset + 20);
+      const view = new DataView(pack.buffer);
+      pack.set([0x50, 0x41, 0x43, 0x4b]);
+      view.setUint32(4, 2);
+      view.setUint32(8, parts.length);
+      let at = 12;
+      for (const [head, body] of parts) {
+        pack.set(head, at);
+        pack.set(body, at + head.byteLength);
+        at += head.byteLength + body.byteLength;
+      }
+      const checksum = await compute.sha1(pack.subarray(0, offset));
+      for (let index = 0; index < 20; index += 1) {
+        pack[offset + index] = Number.parseInt(checksum.slice(index * 2, index * 2 + 2), 16);
+      }
+      return Object.freeze({ pack, checksum, entries });
+    },
+  });
+};
+
+/**
+ * Build one version-2 pack, each object deflated in turn.
  *
  * @param objects - The objects, in the order to write them.
  * @param compute - Deflate and SHA-1.
  * @returns The pack's bytes, trailer and per-entry offsets and CRCs.
  */
 export const buildPack = async (objects: readonly PackObject[], compute: ComputeWorker): Promise<BuiltPack> => {
-  const header = new Uint8Array(12);
-  const view = new DataView(header.buffer);
-  header.set([0x50, 0x41, 0x43, 0x4b]);
-  view.setUint32(4, 2);
-  view.setUint32(8, objects.length);
-  const parts: Array<Uint8Array<ArrayBuffer>> = [header];
-  const entries: PackIndexEntry[] = [];
-  let offset = header.byteLength;
-  const compressed = await Promise.all(objects.map(async (object) => compute.deflate(object.data)));
-  for (const [index, object] of objects.entries()) {
-    const head = entryHeader(object.type, object.data.byteLength);
-    const body = compressed[index]!;
-    entries.push({ oid: object.oid, offset, crc32: crc32(head, body) });
-    parts.push(head, body);
-    offset += head.byteLength + body.byteLength;
+  const builder = createPackBuilder(compute);
+  for (const object of objects) {
+    // oxlint-disable-next-line no-await-in-loop -- one object deflated at a time.
+    await builder.add(object);
   }
-  const pack = new Uint8Array(offset + 20);
-  let at = 0;
-  for (const part of parts) {
-    pack.set(part, at);
-    at += part.byteLength;
-  }
-  const checksum = await compute.sha1(pack.subarray(0, offset));
-  for (let index = 0; index < 20; index += 1) {
-    pack[offset + index] = Number.parseInt(checksum.slice(index * 2, index * 2 + 2), 16);
-  }
-  return Object.freeze({ pack, checksum, entries });
+  return builder.finish();
 };
 
 /**

@@ -34,6 +34,8 @@ export type ObjectReadCounters = {
   looseReads: number;
   /** Packs read whole, only where the files cannot read a range. */
   wholePackLoads: number;
+  /** Pack trailers compared with their index: one per pack opened. */
+  packChecks: number;
 };
 
 /**
@@ -48,11 +50,17 @@ export const emptyReadCounters = (): ObjectReadCounters => ({
   cacheHits: 0,
   looseReads: 0,
   wholePackLoads: 0,
+  packChecks: 0,
 });
 
 const kinds: Readonly<Record<number, GitObjectKind>> = { 1: 'commit', 2: 'tree', 3: 'blob', 4: 'tag' };
 const ofsDelta = 6;
 const refDelta = 7;
+const packHeaderBytes = 12;
+const trailerBytes = 20;
+
+/** The longest delta chain a read follows; git's own default depth is 50. */
+export const maximumDeltaDepth = 10_000;
 
 /** Resolved delta bases, bounded by bytes. */
 export type BaseCache = Readonly<{
@@ -96,24 +104,36 @@ export const createBaseCache = (maximumBytes: number): BaseCache => {
 };
 
 /**
- * Apply one git delta to its base.
+ * Apply one git delta to its base, every instruction checked against the
+ * base, the delta and the target size it declares.
  *
  * @param delta - The inflated delta instructions.
  * @param base - The base object's body.
  * @returns The target body.
+ * @throws TypeError when the delta is malformed or reaches outside its base or itself.
  */
 export const applyDelta = (delta: Uint8Array<ArrayBuffer>, base: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> => {
   let at = 0;
+  const next = (): number => {
+    if (at >= delta.byteLength) {
+      throw new TypeError('A delta is truncated.');
+    }
+    const byte = delta[at]!;
+    at += 1;
+    return byte;
+  };
   const size = (): number => {
     let value = 0;
     let shift = 1;
     let byte: number;
     do {
-      byte = delta[at]!;
-      at += 1;
+      byte = next();
       value += (byte & 0x7f) * shift;
       shift *= 128;
-    } while ((byte & 0x80) !== 0);
+    } while ((byte & 0x80) !== 0 && shift <= 2 ** 49);
+    if ((byte & 0x80) !== 0) {
+      throw new TypeError('A delta declares a size too large to hold.');
+    }
     return value;
   };
   if (size() !== base.byteLength) {
@@ -122,29 +142,32 @@ export const applyDelta = (delta: Uint8Array<ArrayBuffer>, base: Uint8Array<Arra
   const target = new Uint8Array(size());
   let written = 0;
   while (at < delta.byteLength) {
-    const op = delta[at]!;
-    at += 1;
+    const op = next();
     if ((op & 0x80) !== 0) {
       let offset = 0;
       let length = 0;
       for (let bit = 0; bit < 4; bit += 1) {
         if ((op & (1 << bit)) !== 0) {
-          offset += delta[at]! * 2 ** (8 * bit);
-          at += 1;
+          offset += next() * 2 ** (8 * bit);
         }
       }
       for (let bit = 0; bit < 3; bit += 1) {
         if ((op & (0x10 << bit)) !== 0) {
-          length += delta[at]! * 2 ** (8 * bit);
-          at += 1;
+          length += next() * 2 ** (8 * bit);
         }
       }
       if (length === 0) {
         length = 0x1_00_00;
       }
+      if (offset + length > base.byteLength || written + length > target.byteLength) {
+        throw new TypeError('A delta copies from outside its base or past its target.');
+      }
       target.set(base.subarray(offset, offset + length), written);
       written += length;
     } else if (op > 0) {
+      if (at + op > delta.byteLength || written + op > target.byteLength) {
+        throw new TypeError('A delta inserts past its own end or past its target.');
+      }
       target.set(delta.subarray(at, at + op), written);
       at += op;
       written += op;
@@ -171,9 +194,17 @@ export type PackReaderOptions = Readonly<{
   compute: ComputeWorker;
   cache: BaseCache;
   counters: ObjectReadCounters;
-  /** A ref-delta's base, which may live anywhere in the store. */
-  readBase: (oid: string) => Promise<StoredObject | undefined>;
+  /**
+   * A ref-delta's base, which may live anywhere in the store.
+   *
+   * @param oid - The base's id.
+   * @param depth - Delta hops already taken to reach it.
+   */
+  readBase: (oid: string, depth: number) => Promise<StoredObject | undefined>;
 }>;
+
+/** One object read for a repack: a whole entry's deflated body comes with it, to copy verbatim. */
+export type CopiedObject = StoredObject & Readonly<{ compressed?: Uint8Array<ArrayBuffer> }>;
 
 /** One pack's objects, read entry by entry. */
 export type PackReader = Readonly<{
@@ -183,45 +214,125 @@ export type PackReader = Readonly<{
    * One object of this pack, or `undefined` when the pack lacks it.
    *
    * @param oid - Lowercase hex object id.
+   * @param depth - Delta hops already taken to reach it; 0 for a caller's read.
    */
-  read: (oid: string) => Promise<StoredObject | undefined>;
+  read: (oid: string, depth?: number) => Promise<StoredObject | undefined>;
+  /**
+   * One object for a repack: as {@link PackReader.read}, with a whole (non-delta)
+   * entry's deflated body alongside, so the repack need not deflate it again.
+   *
+   * @param oid - Lowercase hex object id.
+   */
+  readForCopy: (oid: string) => Promise<CopiedObject | undefined>;
 }>;
 
+/* One entry's header: its kind and the size it declares (the object's, or a delta's own). */
+const entryHeader = (entry: Uint8Array<ArrayBuffer>): Readonly<{ kind: number; size: number; at: number }> => {
+  let at = 0;
+  const next = (): number => {
+    if (at >= entry.byteLength) {
+      throw new TypeError('A pack entry is truncated.');
+    }
+    const byte = entry[at]!;
+    at += 1;
+    return byte;
+  };
+  let byte = next();
+  const kind = (byte >> 4) & 0x07;
+  let size = byte & 0x0f;
+  let shift = 16;
+  while ((byte & 0x80) !== 0) {
+    byte = next();
+    size += (byte & 0x7f) * shift;
+    shift *= 128;
+    if (shift > 2 ** 53) {
+      throw new TypeError('A pack entry declares a size too large to hold.');
+    }
+  }
+  return { kind, size, at };
+};
+
 /**
- * Open one pack for object reads.
+ * Open one pack for object reads. Its index must place every entry inside the
+ * pack; the pack's own trailer is compared with the index's record of it on
+ * the first read.
  *
  * @param options - The pack, its tables and the store around it.
  * @returns Its objects, read entry by entry.
+ * @throws TypeError when the index places an entry outside the pack.
  */
 export const createPackReader = (options: PackReaderOptions): PackReader => {
   const { path, size, index, readRange, compute, cache, counters, readBase } = options;
-  const entryAt = async (offset: number): Promise<StoredObject> => {
+  const [smallest, largest] = index.offsetRange;
+  if (index.count > 0 && (smallest < packHeaderBytes || largest >= size - trailerBytes)) {
+    throw new TypeError(`The pack ${path} is shorter than its index says.`);
+  }
+  let checked: Promise<void> | undefined;
+  const checkTrailer = async (): Promise<void> => {
+    checked ??= (async (): Promise<void> => {
+      counters.packChecks += 1;
+      const trailer = await readRange(path, size - trailerBytes, trailerBytes);
+      let hex = '';
+      for (const byte of trailer) {
+        hex += byte.toString(16).padStart(2, '0');
+      }
+      if (hex !== index.packChecksum) {
+        throw new TypeError(`The pack ${path} does not end with the checksum its index records.`);
+      }
+    })();
+    await checked;
+  };
+
+  const inflateExactly = async (
+    compressed: Uint8Array<ArrayBuffer>,
+    declared: number,
+  ): Promise<Uint8Array<ArrayBuffer>> => {
+    const inflated = await compute.inflate(compressed);
+    if (inflated.byteLength !== declared) {
+      throw new TypeError(`A pack entry in ${path} inflates to a size other than the one it declares.`);
+    }
+    return inflated;
+  };
+
+  const entryAt = async (offset: number, depth: number, keepCompressed = false): Promise<CopiedObject> => {
+    if (depth > maximumDeltaDepth) {
+      throw new TypeError(`A delta chain in ${path} is longer than ${String(maximumDeltaDepth)}.`);
+    }
+    await checkTrailer();
     const end = index.endOf(offset, size);
     const entry = await readRange(path, offset, end - offset);
     counters.rangeReads += 1;
-    let at = 0;
-    let byte = entry[at]!;
-    at += 1;
-    const kind = (byte >> 4) & 0x07;
-    while ((byte & 0x80) !== 0) {
-      byte = entry[at]!;
-      at += 1;
-    }
+    const { kind, size: declared, at: bodyAt } = entryHeader(entry);
+    let at = bodyAt;
     if (kind in kinds) {
-      return { type: kinds[kind]!, data: await compute.inflate(entry.subarray(at)) };
+      const compressed = entry.subarray(at);
+      const data = await inflateExactly(compressed, declared);
+      return keepCompressed ? { type: kinds[kind]!, data, compressed } : { type: kinds[kind]!, data };
     }
     let base: StoredObject | undefined;
     if (kind === ofsDelta) {
-      byte = entry[at]!;
+      if (at >= entry.byteLength) {
+        throw new TypeError('A pack entry is truncated.');
+      }
+      let byte = entry[at]!;
       at += 1;
       let distance = byte & 0x7f;
       while ((byte & 0x80) !== 0) {
+        if (at >= entry.byteLength || distance > 2 ** 46) {
+          throw new TypeError('A pack entry is truncated.');
+        }
         byte = entry[at]!;
         at += 1;
         distance = (distance + 1) * 128 + (byte & 0x7f);
       }
-      base = await baseAt(offset - distance);
+      if (distance === 0 || distance > offset) {
+        throw new TypeError(`A delta in ${path} names a base that is not before it.`);
+      }
+      base = await baseAt(offset - distance, depth + 1);
     } else if (kind === refDelta) {
+      if (at + 20 > entry.byteLength) {
+        throw new TypeError('A pack entry is truncated.');
+      }
       let oid = '';
       for (let index_ = at; index_ < at + 20; index_ += 1) {
         oid += entry[index_]!.toString(16).padStart(2, '0');
@@ -230,9 +341,9 @@ export const createPackReader = (options: PackReaderOptions): PackReader => {
       const own = index.offsetOf(oid);
       if (own === undefined) {
         counters.deltaHops += 1;
-        base = await readBase(oid);
+        base = await readBase(oid, depth + 1);
       } else {
-        base = await baseAt(own);
+        base = await baseAt(own, depth + 1);
       }
     } else {
       throw new TypeError(`A pack entry has an unknown type ${String(kind)}.`);
@@ -240,9 +351,9 @@ export const createPackReader = (options: PackReaderOptions): PackReader => {
     if (base === undefined) {
       throw new TypeError('A delta names a base this store does not hold.');
     }
-    return { type: base.type, data: applyDelta(await compute.inflate(entry.subarray(at)), base.data) };
+    return { type: base.type, data: applyDelta(await inflateExactly(entry.subarray(at), declared), base.data) };
   };
-  const baseAt = async (offset: number): Promise<StoredObject> => {
+  const baseAt = async (offset: number, depth: number): Promise<StoredObject> => {
     const key = `${path}:${String(offset)}`;
     const held = cache.get(key);
     if (held !== undefined) {
@@ -250,20 +361,27 @@ export const createPackReader = (options: PackReaderOptions): PackReader => {
       return held;
     }
     counters.deltaHops += 1;
-    const base = await entryAt(offset);
+    const base = await entryAt(offset, depth);
     cache.set(key, base);
     return base;
+  };
+  const located = (oid: string): number | undefined => {
+    const offset = index.offsetOf(oid);
+    if (offset !== undefined) {
+      counters.lookups += 1;
+    }
+    return offset;
   };
   return Object.freeze({
     path,
     index,
-    read: async (oid: string): Promise<StoredObject | undefined> => {
-      const offset = index.offsetOf(oid);
-      if (offset === undefined) {
-        return undefined;
-      }
-      counters.lookups += 1;
-      return entryAt(offset);
+    read: async (oid: string, depth = 0): Promise<StoredObject | undefined> => {
+      const offset = located(oid);
+      return offset === undefined ? undefined : entryAt(offset, depth);
+    },
+    readForCopy: async (oid: string): Promise<CopiedObject | undefined> => {
+      const offset = located(oid);
+      return offset === undefined ? undefined : entryAt(offset, 0, true);
     },
   });
 };

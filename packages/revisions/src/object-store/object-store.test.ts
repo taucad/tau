@@ -147,7 +147,9 @@ describe.runIf(gitToolchainOnPath)('the object store over a pack git wrote', () 
     /* One range per object, plus one per delta base that was not already cached. */
     expect(counters.rangeReads).toBe(expected.length + counters.deltaHops);
     expect(counters.deltaHops).toBeGreaterThan(0);
-    expect(ranges).toHaveLength(counters.rangeReads);
+    /* And the pack's trailer, compared with its index once. */
+    expect(counters.packChecks).toBe(1);
+    expect(ranges).toHaveLength(counters.rangeReads + counters.packChecks);
     expect(counters.wholePackLoads).toBe(0);
     expect(counters.looseReads).toBe(0);
     expect(packReads).toStrictEqual([]);
@@ -209,6 +211,7 @@ describe('the object store', () => {
       cacheHits: 0,
       looseReads: 0,
       wholePackLoads: 0,
+      packChecks: 1,
     });
     expect(packReads).toStrictEqual([]);
   });

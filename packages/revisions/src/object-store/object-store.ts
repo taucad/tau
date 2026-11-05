@@ -22,11 +22,18 @@ import type { FileSystemProvider, PrivateStore } from '@taucad/filesystem';
 import { ResourceQueue } from '@taucad/filesystem';
 import { randomUuid } from '@taucad/utils/id';
 import type { ComputeWorker } from '#compute-worker/compute-worker.js';
+import { readControlRecord, writeControlRecord } from '#control-plane-records.js';
 import { readPackIndex } from '#pack-reader/pack-index.js';
 import { createBaseCache, createPackReader, emptyReadCounters } from '#pack-reader/pack-reader.js';
-import type { GitObjectKind, ObjectReadCounters, PackReader, StoredObject } from '#pack-reader/pack-reader.js';
-import { buildPack, indexBuiltPack } from '#object-store/pack-writer.js';
-import type { PackObject } from '#object-store/pack-writer.js';
+import type {
+  CopiedObject,
+  GitObjectKind,
+  ObjectReadCounters,
+  PackReader,
+  StoredObject,
+} from '#pack-reader/pack-reader.js';
+import { createPackBuilder, indexBuiltPack } from '#object-store/pack-writer.js';
+import type { PackBuilder } from '#object-store/pack-writer.js';
 
 /** The files a Git store lives in: a rooted view's private store, or a provider's own primitives. */
 export type GitFiles = PrivateStore;
@@ -62,6 +69,7 @@ export const gitFilesOf = (
       ? {}
       : {
           readRange: async (path: string, offset: number, length: number) => {
+            checkRange(offset, length);
             const reader = filesystem.readFileStream!(path, { position: offset, length }).getReader();
             const chunks: Array<Uint8Array<ArrayBuffer>> = [];
             // oxlint-disable-next-line no-await-in-loop -- a stream is read one chunk after another.
@@ -72,6 +80,19 @@ export const gitFilesOf = (
           },
         }),
   };
+};
+
+/**
+ * Refuse a range that is not two whole, non-negative numbers.
+ *
+ * @param offset - The range's first byte.
+ * @param length - Its length.
+ * @throws RangeError for anything else.
+ */
+const checkRange = (offset: number, length: number): void => {
+  if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < 0 || length < 0) {
+    throw new RangeError(`A range read needs a whole offset and length, not ${String(offset)} and ${String(length)}.`);
+  }
 };
 
 const joinBytes = (chunks: ReadonlyArray<Uint8Array<ArrayBuffer>>): Uint8Array<ArrayBuffer> => {
@@ -100,6 +121,10 @@ const textDecoder = new TextDecoder();
 const looseName = /^[\da-f]{38}$/u;
 const fanoutName = /^[\da-f]{2}$/u;
 const packIndexName = /^pack-([\da-f]{40})\.idx$/u;
+const packName = /^pack-[\da-f]{40}\.pack$/u;
+const looseKinds = new Set(['commit', 'tree', 'blob', 'tag']);
+/* How long a pack read whole stays held after its last read. Milliseconds. */
+const wholePackIdle = 2000;
 
 /** Bounds of one repack. */
 export type RepackOptions = Readonly<{
@@ -206,32 +231,55 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
   const packDirectory = `${gitdir}/objects/pack`;
   const retiredPath = `${gitdir}/objects/tau-retired.json`;
   const loosePath = (oid: string): string => `${gitdir}/objects/${oid.slice(0, 2)}/${oid.slice(2)}`;
+  /* Loose objects this store wrote since its last repack decision. */
   let looseWrites = 0;
+  /* Packs a repack retired and that still sit on disk for the window: not live, never counted. */
+  let retiredPacks = new Set<string>();
+  /* Live packs when this store last decided about a repack: the same count does not start another. */
+  let settledPacks = -1;
 
   /*
    * One range of a pack: a slice where the files read ranges, else the pack
-   * read whole once and held while the store is open — a provider that keeps
-   * its bytes in memory or in one record (the memory provider, the IndexedDB
-   * fallback) has no cheaper way.
+   * read whole and held while it is in use — a provider that keeps its bytes
+   * in memory or in one record (the memory provider, the IndexedDB fallback)
+   * has no cheaper way. A pack no read has touched for a while is dropped.
    */
-  const wholePacks = new Map<string, Promise<Uint8Array<ArrayBuffer>>>();
+  const wholePacks = new Map<
+    string,
+    { bytes: Promise<Uint8Array<ArrayBuffer>>; idle?: ReturnType<typeof setTimeout> }
+  >();
+  const dropWhole = (path: string): void => {
+    const held = wholePacks.get(path);
+    clearTimeout(held?.idle);
+    wholePacks.delete(path);
+  };
   const readRange =
     files.readRange?.bind(files) ??
     (async (path: string, offset: number, length: number): Promise<Uint8Array<ArrayBuffer>> => {
-      let whole = wholePacks.get(path);
-      if (whole === undefined) {
+      checkRange(offset, length);
+      let held = wholePacks.get(path);
+      if (held === undefined) {
         counters.wholePackLoads += 1;
-        whole = (async (): Promise<Uint8Array<ArrayBuffer>> => {
+        const bytes = (async (): Promise<Uint8Array<ArrayBuffer>> => {
           try {
             return await files.readFile(path);
           } catch (error) {
-            wholePacks.delete(path);
+            dropWhole(path);
             throw error;
           }
         })();
-        wholePacks.set(path, whole);
+        held = { bytes };
+        wholePacks.set(path, held);
       }
-      const bytes = await whole;
+      const touched = held;
+      clearTimeout(touched.idle);
+      touched.idle = setTimeout(() => {
+        if (wholePacks.get(path) === touched) {
+          wholePacks.delete(path);
+        }
+      }, wholePackIdle);
+      (touched.idle as { unref?: () => void }).unref?.();
+      const bytes = await touched.bytes;
       return bytes.subarray(offset, offset + length);
     });
 
@@ -249,7 +297,7 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
       compute,
       cache,
       counters,
-      readBase: async (oid) => read(oid),
+      readBase: async (oid, depth) => readAt(oid, depth),
     });
   };
   let listing: Promise<PackReader[]> | undefined;
@@ -304,11 +352,15 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
   };
   const knownPacks = async (): Promise<PackReader[]> => packs ?? listPacks();
 
-  const parseLoose = (framed: Uint8Array<ArrayBuffer>): StoredObject => {
+  const parseLoose = (framed: Uint8Array<ArrayBuffer>, oid: string): StoredObject => {
     const space = framed.indexOf(0x20);
-    const nul = framed.indexOf(0, space);
-    const type = textDecoder.decode(framed.subarray(0, space)) as GitObjectKind;
-    return { type, data: framed.slice(nul + 1) };
+    const nul = space === -1 ? -1 : framed.indexOf(0, space);
+    const type = textDecoder.decode(framed.subarray(0, Math.max(space, 0)));
+    const declared = nul === -1 ? Number.NaN : Number(textDecoder.decode(framed.subarray(space + 1, nul)));
+    if (!looseKinds.has(type) || declared !== framed.byteLength - nul - 1) {
+      throw new TypeError(`The loose object ${oid} is not a whole object.`);
+    }
+    return { type: type as GitObjectKind, data: framed.slice(nul + 1) };
   };
 
   const readLoose = async (oid: string): Promise<StoredObject | undefined> => {
@@ -322,14 +374,14 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
       throw error;
     }
     counters.looseReads += 1;
-    return parseLoose(await compute.inflate(compressed));
+    return parseLoose(await compute.inflate(compressed), oid);
   };
 
   /* One pass over the packs this store knows, then the loose file. */
-  const readOnce = async (oid: string): Promise<StoredObject | undefined> => {
+  const readOnce = async (oid: string, depth: number): Promise<StoredObject | undefined> => {
     for (const pack of await knownPacks()) {
       // oxlint-disable-next-line no-await-in-loop -- the first pack that holds it answers; most reads ask one.
-      const found = await pack.read(oid);
+      const found = await pack.read(oid, depth);
       if (found !== undefined) {
         return found;
       }
@@ -337,15 +389,10 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
     return readLoose(oid);
   };
 
-  /**
-   * One object, or `undefined` when the store does not hold it.
-   *
-   * @param oid - Lowercase hex object id.
-   * @returns Its kind and body.
-   */
-  const read = async (oid: string): Promise<StoredObject | undefined> => {
+  /* One object at a delta depth: a ref-delta's base read from anywhere in the store counts its hops. */
+  const readAt = async (oid: string, depth: number): Promise<StoredObject | undefined> => {
     try {
-      const found = await readOnce(oid);
+      const found = await readOnce(oid, depth);
       if (found !== undefined) {
         return found;
       }
@@ -357,8 +404,16 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
     }
     /* Another writer — a fetch or a repack in another tab — may have packed it since this store last listed. */
     await listPacks();
-    return readOnce(oid);
+    return readOnce(oid, depth);
   };
+
+  /**
+   * One object, or `undefined` when the store does not hold it.
+   *
+   * @param oid - Lowercase hex object id.
+   * @returns Its kind and body.
+   */
+  const read = async (oid: string): Promise<StoredObject | undefined> => readAt(oid, 0);
 
   /**
    * Whether the store holds an object: its packs' tables, then its loose file.
@@ -377,8 +432,10 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
 
   /*
    * Land one content-addressed file by rename: written beside its name, so no
-   * reader ever sees part of it, and a writer that loses the race to another
-   * writer of the same bytes keeps the winner's.
+   * reader ever sees part of it. A writer whose rename loses to a file already
+   * there keeps that file only when it is the same size as its own content —
+   * a whole copy another writer landed; a shorter or longer one (a copy cut
+   * short by a host that died) is replaced.
    */
   const landAddressed = async (path: string, content: Uint8Array<ArrayBuffer>): Promise<void> => {
     await files.mkdir(path.slice(0, path.lastIndexOf('/')), { recursive: true });
@@ -386,12 +443,36 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
     await files.writeFile(partial, content);
     try {
       await files.rename(partial, path);
+      return;
     } catch (error) {
-      await files.unlink(partial).catch(() => undefined);
-      if (!(await files.exists(path))) {
-        throw error;
+      const held = await files.stat(path).catch(() => undefined);
+      if (held === undefined || held.size === content.byteLength) {
+        await files.unlink(partial).catch(() => undefined);
+        if (held === undefined) {
+          throw error;
+        }
+        return;
       }
     }
+    try {
+      await files.unlink(path).catch((error: unknown) => {
+        if (!isMissing(error)) {
+          throw error;
+        }
+      });
+      await files.rename(partial, path);
+    } catch (error) {
+      await files.unlink(partial).catch(() => undefined);
+      throw error;
+    }
+  };
+
+  const framedOf = (type: GitObjectKind, data: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> => {
+    const head = textEncoder.encode(`${type} ${String(data.byteLength)}\0`);
+    const framed = new Uint8Array(head.byteLength + data.byteLength);
+    framed.set(head);
+    framed.set(data, head.byteLength);
+    return framed;
   };
 
   /**
@@ -404,10 +485,7 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
   const writeLoose = async (objects: readonly LooseObject[]): Promise<string[]> =>
     Promise.all(
       objects.map(async (object) => {
-        const head = textEncoder.encode(`${object.type} ${String(object.data.byteLength)}\0`);
-        const framed = new Uint8Array(head.byteLength + object.data.byteLength);
-        framed.set(head);
-        framed.set(object.data, head.byteLength);
+        const framed = framedOf(object.type, object.data);
         const oid = object.oid ?? (await compute.sha1(framed));
         if (await has(oid)) {
           return oid;
@@ -446,64 +524,87 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
    */
   const addPack = async (pack: Uint8Array<ArrayBuffer>): Promise<string> => {
     const checksum = [...pack.subarray(-20)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-    /* Indexed from a copy: a compute worker takes the bytes it is handed. */
-    const packIndex = await compute.indexPack(new Uint8Array(pack));
+    const packIndex = await compute.indexPack(pack);
     return publishPack(pack, packIndex, checksum);
   };
 
   /**
-   * One pack holding these objects, for a push.
+   * One pack holding these objects, for a push: each read and deflated in
+   * turn, so only compressed entries are held.
    *
    * @param oids - The objects, each read through this store.
    * @returns The pack's bytes.
    */
   const packObjects = async (oids: readonly string[]): Promise<Uint8Array<ArrayBuffer>> => {
-    const objects = await Promise.all(
-      oids.map(async (oid): Promise<PackObject> => {
-        const object = await read(oid);
-        if (object === undefined) {
-          throw new TypeError(`The store does not hold ${oid}.`);
-        }
-        return { oid, ...object };
-      }),
-    );
-    const built = await buildPack(objects, compute);
+    const builder = createPackBuilder(compute);
+    for (const oid of oids) {
+      // oxlint-disable-next-line no-await-in-loop -- one object resident at a time beside the compressed pack.
+      const object = await read(oid);
+      if (object === undefined) {
+        throw new TypeError(`The store does not hold ${oid}.`);
+      }
+      // oxlint-disable-next-line no-await-in-loop -- deflated before the next object is read.
+      await builder.add({ oid, ...object });
+    }
+    const built = await builder.finish();
     return built.pack;
   };
 
   const readRetired = async (): Promise<RetiredRecord> => {
     try {
-      const stored = JSON.parse(await files.readFile(retiredPath, 'utf8')) as RetiredRecord;
-      return Array.isArray(stored.retired) ? stored : { version: 1, retired: [] };
+      const stored = JSON.parse((await readControlRecord(files, retiredPath)) ?? '{}') as Partial<RetiredRecord>;
+      return Array.isArray(stored.retired) ? { version: 1, retired: stored.retired } : { version: 1, retired: [] };
     } catch {
       return { version: 1, retired: [] };
     }
   };
+  /* Only the fence holder writes the record, and a reader of a missing one retires nothing early. */
   const writeRetired = async (record: RetiredRecord): Promise<void> => {
-    const writing = `${retiredPath}.${randomUuid()}.writing`;
-    await files.writeFile(writing, `${JSON.stringify(record)}\n`);
-    try {
-      await files.rename(writing, retiredPath);
-    } catch {
-      /* Not every provider's rename replaces. Only the fence holder writes the
-       * record, and a reader of a missing one retires nothing early. */
-      await files.unlink(retiredPath).catch(() => undefined);
-      await files.rename(writing, retiredPath);
-    }
+    await writeControlRecord(files, retiredPath, `${JSON.stringify(record)}\n`);
+    retiredPacks = new Set(record.retired.map((entry) => entry.path).filter((path) => path.endsWith('.pack')));
   };
 
-  /* Every loose object on disk, by id. */
-  const listLoose = async (): Promise<string[]> => {
+  /* Every loose object on disk, by id, and every partial write beside them. */
+  const listLoose = async (): Promise<Readonly<{ oids: string[]; partials: string[] }>> => {
     const listed = await files.readdir(`${gitdir}/objects`).catch(() => [] as string[]);
     const named = await Promise.all(
       listed
         .filter((name) => fanoutName.test(name))
         .map(async (directory) => {
           const names = await files.readdir(`${gitdir}/objects/${directory}`).catch(() => [] as string[]);
-          return names.filter((name) => looseName.test(name)).map((name) => `${directory}${name}`);
+          return {
+            oids: names.filter((name) => looseName.test(name)).map((name) => `${directory}${name}`),
+            partials: names
+              .filter((name) => name.endsWith('.partial'))
+              .map((name) => `${gitdir}/objects/${directory}/${name}`),
+          };
         }),
     );
-    return named.flat();
+    return { oids: named.flatMap((entry) => entry.oids), partials: named.flatMap((entry) => entry.partials) };
+  };
+
+  /*
+   * Remove what a dead writer left, once it is older than the window: a
+   * partial write never renamed into place, and a pack whose index never
+   * landed (no reader can find it).
+   */
+  const sweepLeftovers = async (loosePartials: readonly string[]): Promise<void> => {
+    const names = await files.readdir(packDirectory).catch(() => [] as string[]);
+    const indexed = new Set(names.filter((name) => name.endsWith('.idx')).map((name) => name.slice(0, -4)));
+    const candidates = [
+      ...loosePartials,
+      ...names
+        .filter((name) => name.endsWith('.partial') || (packName.test(name) && !indexed.has(name.slice(0, -5))))
+        .map((name) => `${packDirectory}/${name}`),
+    ];
+    await Promise.all(
+      candidates.map(async (path) => {
+        const stat = await files.stat(path).catch(() => undefined);
+        if (stat !== undefined && now() - stat.mtimeMs >= bounds.retention) {
+          await files.unlink(path).catch(() => undefined);
+        }
+      }),
+    );
   };
 
   /* Remove what was retired longer ago than the window; answer what stays recorded. */
@@ -522,24 +623,52 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
     return { kept: record.retired.filter((entry) => !expired.includes(entry)), swept: expired.length > 0 };
   };
 
-  /* Smallest packs first, up to the ceiling; the rest wait for another repack. */
-  const choosePacks = (candidates: readonly PackReader[]): PackReader[] => {
-    const chosen: PackReader[] = [];
-    let budget = bounds.maxPackBytes;
-    const sizeOf = (pack: PackReader): number => packSizes.get(pack.path) ?? 0;
-    for (const pack of candidates.toSorted((left, right) => sizeOf(left) - sizeOf(right))) {
-      if (sizeOf(pack) > budget) {
-        break;
-      }
-      chosen.push(pack);
-      budget -= sizeOf(pack);
+  /*
+   * One object into the pack being built, checked first: it is hashed and
+   * must be the object its id names. It is deflated before the next is read
+   * (a whole entry of a pack is copied as it is stored), so the raw bytes
+   * resident are one object's — and the resolved bases in the bounded cache.
+   * Answers `false`, adding nothing, when the object would take the pack past
+   * its byte bound.
+   */
+  const foldObject = async (
+    into: Readonly<{ builder: PackBuilder; budget: { left: number } }>,
+    oid: string,
+    object: CopiedObject | undefined,
+  ): Promise<boolean> => {
+    const { builder, budget } = into;
+    if (object === undefined) {
+      throw new TypeError(`A repack could not read ${oid}.`);
     }
-    return chosen;
+    if ((await compute.sha1(framedOf(object.type, object.data))) !== oid) {
+      throw new TypeError(`A repack read ${oid} and found another object's bytes.`);
+    }
+    if (object.data.byteLength > budget.left) {
+      return false;
+    }
+    budget.left -= object.data.byteLength;
+    if (object.compressed === undefined) {
+      await builder.add({ oid, type: object.type, data: object.data });
+    } else {
+      builder.addCompressed({
+        oid,
+        type: object.type,
+        size: object.data.byteLength,
+        compressed: new Uint8Array(object.compressed),
+      });
+    }
+    return true;
   };
 
   /**
    * Fold loose objects and small packs into one pack, under the exclusive
    * fence; another tab already repacking means this one does nothing.
+   *
+   * The pack holds at most {@link RepackOptions.maxPackBytes} of resolved
+   * objects: packs are taken smallest first, each whole or not at all, then
+   * loose objects, until the next would pass the bound. Every object is read
+   * and hashed before it is written; one that cannot be read or does not
+   * hash to its id aborts the repack, which then writes and retires nothing.
    *
    * Nothing is deleted that a reader may have located: what this repack
    * replaces is recorded with the time, and removed by a later repack once
@@ -547,6 +676,7 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
    *
    * @param force - Repack whatever is there, whatever the thresholds say.
    * @returns Whether a pack was written.
+   * @throws TypeError when an object to fold cannot be read or is not what its id names.
    */
   const repack = async (force = false): Promise<boolean> => {
     let wrote = false;
@@ -557,41 +687,69 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
       const listedPacks = await listPacks();
       const live = listedPacks.filter((pack) => !retiredPaths.has(pack.path));
       const listedLoose = await listLoose();
-      const loose = listedLoose.filter((oid) => !retiredPaths.has(loosePath(oid)));
+      await sweepLeftovers(listedLoose.partials);
+      const loose = listedLoose.oids.filter((oid) => !retiredPaths.has(loosePath(oid)));
       const foldPacks = live.length > bounds.maxPacks || force ? live : [];
+      /* Decided: whatever happens below, the writes and packs counted so far start no other repack. */
+      looseWrites = 0;
+      settledPacks = live.length;
+      retiredPacks = new Set([...retiredPaths].filter((path) => path.endsWith('.pack')));
       if (!force && loose.length < bounds.maxLoose && foldPacks.length === 0) {
         if (swept) {
           await writeRetired({ version: 1, retired: kept });
         }
         return;
       }
-      const chosen = choosePacks(foldPacks);
-      const oids = new Set<string>();
-      for (const pack of chosen) {
+      const builder = createPackBuilder(compute);
+      const budget = { left: bounds.maxPackBytes };
+      const into = { builder, budget };
+      const included = new Set<string>();
+      const chosen: PackReader[] = [];
+      const sizeOf = (pack: PackReader): number => packSizes.get(pack.path) ?? 0;
+      for (const pack of foldPacks.toSorted((left, right) => sizeOf(left) - sizeOf(right))) {
+        const mark = { count: builder.count(), left: budget.left };
+        const added: string[] = [];
+        let fits = true;
         for (const [oid] of pack.index.entries()) {
-          oids.add(oid);
+          if (!included.has(oid)) {
+            // oxlint-disable-next-line no-await-in-loop -- one object resident at a time beside the compressed pack.
+            fits = await foldObject(into, oid, await pack.readForCopy(oid));
+            if (!fits) {
+              break;
+            }
+            included.add(oid);
+            added.push(oid);
+          }
         }
+        if (!fits) {
+          /* A pack is retired whole or not at all: what it added is dropped, and the rest wait. */
+          builder.truncate(mark.count);
+          budget.left = mark.left;
+          for (const oid of added) {
+            included.delete(oid);
+          }
+          break;
+        }
+        chosen.push(pack);
       }
       const folded: string[] = [];
       for (const oid of loose) {
-        if (!oids.has(oid)) {
-          oids.add(oid);
+        if (!included.has(oid)) {
+          // oxlint-disable-next-line no-await-in-loop -- one object resident at a time beside the compressed pack.
+          if (!(await foldObject(into, oid, await readLoose(oid)))) {
+            break;
+          }
+          included.add(oid);
           folded.push(oid);
         }
       }
-      if (oids.size === 0 || (chosen.length <= 1 && folded.length === 0)) {
-        await writeRetired({ version: 1, retired: kept });
+      if (builder.count() === 0 || (chosen.length <= 1 && folded.length === 0)) {
+        if (swept) {
+          await writeRetired({ version: 1, retired: kept });
+        }
         return;
       }
-      const objects: PackObject[] = [];
-      for (const oid of oids) {
-        // oxlint-disable-next-line no-await-in-loop -- one object resident at a time beside the pack being built.
-        const object = await read(oid);
-        if (object !== undefined) {
-          objects.push({ oid, ...object });
-        }
-      }
-      const built = await buildPack(objects, compute);
+      const built = await builder.finish();
       await publishPack(built.pack, await indexBuiltPack(built, compute), built.checksum);
       const at = now();
       const replaced = [
@@ -601,14 +759,17 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
       await writeRetired({ version: 1, retired: [...kept, ...replaced.map((path) => ({ path, at }))] });
       const replacedPacks = new Set(chosen.map((pack) => pack.path));
       for (const path of replacedPacks) {
-        wholePacks.delete(path);
+        dropWhole(path);
       }
       packs = (packs ?? []).filter((pack) => !replacedPacks.has(pack.path) || pack.path.includes(built.checksum));
-      looseWrites = 0;
+      settledPacks = packs.length;
       wrote = true;
     });
     return wrote;
   };
+
+  /* Live packs: those this store has open that no repack retired. */
+  const livePacks = (): number => (packs ?? []).filter((pack) => !retiredPacks.has(pack.path)).length;
 
   return Object.freeze({
     counters,
@@ -618,7 +779,18 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
     addPack,
     packObjects,
     repack,
-    repackIfDue: async (): Promise<boolean> =>
-      looseWrites >= bounds.maxLoose || (packs?.length ?? 0) > bounds.maxPacks ? repack() : false,
+    repackIfDue: async (): Promise<boolean> => {
+      const due = looseWrites >= bounds.maxLoose || (livePacks() > bounds.maxPacks && livePacks() !== settledPacks);
+      if (!due) {
+        return false;
+      }
+      try {
+        return await repack();
+      } catch (error) {
+        /* The store is left as it was; a write that asked for the repack has landed and stands. */
+        console.warn(`[revisions] A repack was abandoned: ${error instanceof Error ? error.message : String(error)}`);
+        return false;
+      }
+    },
   });
 };

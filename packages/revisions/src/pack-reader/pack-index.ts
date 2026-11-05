@@ -10,6 +10,8 @@
  */
 /* oxlint-disable no-bitwise -- pack and index records are bit fields. */
 
+import { bytesToHex, digest } from '#object-hash.js';
+
 const indexMagic = 0xff_74_4f_63;
 const indexVersion = 2;
 const oidBytes = 20;
@@ -24,6 +26,8 @@ export type PackIndex = Readonly<{
   count: number;
   /** The pack's own SHA-1 trailer, lowercase hex: its name. */
   packChecksum: string;
+  /** The smallest and the largest entry offset; both 0 for an empty pack. */
+  offsetRange: readonly [smallest: number, largest: number];
   /**
    * Where one object's entry starts in the pack, or `undefined` when this pack lacks it.
    *
@@ -70,11 +74,13 @@ const compareAt = (table: Uint8Array<ArrayBuffer>, at: number, oid: Uint8Array<A
 };
 
 /**
- * Read a version-2 `.idx` into its lookup tables.
+ * Read a version-2 `.idx` into its lookup tables, checking it whole first: its
+ * SHA-1 trailer, its size against its own object count, a fanout that never
+ * decreases, ids in strictly ascending order and every large offset in range.
  *
  * @param stored - The whole index file.
  * @returns The tables.
- * @throws TypeError when the bytes are not a version-2 index.
+ * @throws TypeError when the bytes are not a whole, consistent version-2 index.
  */
 export const readPackIndex = (stored: Uint8Array<ArrayBuffer>): PackIndex => {
   const view = new DataView(stored.buffer, stored.byteOffset, stored.byteLength);
@@ -84,28 +90,53 @@ export const readPackIndex = (stored: Uint8Array<ArrayBuffer>): PackIndex => {
   if (view.getUint32(4) !== indexVersion) {
     throw new TypeError('Only version 2 pack indexes are read.');
   }
+  const ownTrailer = stored.byteLength - trailerBytes;
+  if (bytesToHex(digest('sha1', stored.subarray(0, ownTrailer))) !== hexOf(stored, ownTrailer, trailerBytes)) {
+    throw new TypeError('A pack index does not match its own checksum.');
+  }
   const fanout = new Uint32Array(256);
   for (let bucket = 0; bucket < 256; bucket += 1) {
     fanout[bucket] = view.getUint32(headerBytes + bucket * 4);
+    if (bucket > 0 && fanout[bucket]! < fanout[bucket - 1]!) {
+      throw new TypeError('A pack index has a fanout table that decreases.');
+    }
   }
   const count = fanout[255]!;
   const oidsStart = headerBytes + fanoutBytes;
   const crcStart = oidsStart + count * oidBytes;
   const offsetsStart = crcStart + count * 4;
   const largeStart = offsetsStart + count * 4;
+  /* Whatever lies between the offsets and the trailers is the large-offset table, eight bytes an entry. */
+  const largeBytes = stored.byteLength - 2 * trailerBytes - largeStart;
+  if (largeBytes < 0 || largeBytes % 8 !== 0 || largeBytes / 8 > Math.max(count - 1, 0)) {
+    throw new TypeError('A pack index is not the size its object count gives.');
+  }
+  for (let index = 1; index < count; index += 1) {
+    if (compareAt(stored, oidsStart + index * oidBytes, stored.subarray(oidsStart + (index - 1) * oidBytes)) <= 0) {
+      throw new TypeError('A pack index lists its object ids out of order.');
+    }
+  }
   /* Copies, so the file's buffer is not kept alive past the tables. */
   const oids = stored.slice(oidsStart, crcStart);
   const offsets = new Float64Array(count);
   for (let index = 0; index < count; index += 1) {
     const small = view.getUint32(offsetsStart + index * 4);
-    offsets[index] =
-      (small & largeOffsetFlag) === 0 ? small : Number(view.getBigUint64(largeStart + (small & ~largeOffsetFlag) * 8));
+    if ((small & largeOffsetFlag) === 0) {
+      offsets[index] = small;
+    } else {
+      const large = small & ~largeOffsetFlag;
+      if (large >= largeBytes / 8) {
+        throw new TypeError('A pack index names a large offset it does not hold.');
+      }
+      offsets[index] = Number(view.getBigUint64(largeStart + large * 8));
+    }
   }
   const sorted = Float64Array.from(offsets).sort();
   const packChecksum = hexOf(stored, stored.byteLength - 2 * trailerBytes, trailerBytes);
   return Object.freeze({
     count,
     packChecksum,
+    offsetRange: count === 0 ? ([0, 0] as const) : ([sorted[0]!, sorted[count - 1]!] as const),
     offsetOf: (oid: string): number | undefined => {
       const wanted = bytesOfHex(oid);
       const bucket = wanted[0]!;

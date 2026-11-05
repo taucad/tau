@@ -127,18 +127,29 @@ describe.runIf(gitToolchainOnPath)('the tree codec against native git', () => {
 });
 
 describe('the tree codec', () => {
-  it('refuses a truncated body and an unsafe name', () => {
-    const entry = (name: string): Uint8Array<ArrayBuffer> =>
-      new Uint8Array([...encoder.encode(`100644 ${name}\0`), ...new Uint8Array(20)]);
+  const entry = (name: string, mode = '100644'): Uint8Array<ArrayBuffer> =>
+    new Uint8Array([...encoder.encode(`${mode} ${name}\0`), ...new Uint8Array(20)]);
+
+  it('refuses a truncated body and a name that is not one', () => {
     expect(() => decodeTree(entry('ok').subarray(0, 12))).toThrow(/truncated/u);
-    for (const name of ['..', '.', 'a/b', String.raw`a\b`]) {
+    for (const name of ['..', '.', 'a/b', '']) {
       expect(() => decodeTree(entry(name))).toThrow(/unsafe name/u);
     }
   });
 
-  it('refuses an unknown mode', () => {
-    expect(() => decodeTree(new Uint8Array([...encoder.encode('100600 x\0'), ...new Uint8Array(20)]))).toThrow(
-      /unknown mode/u,
-    );
+  it('reads a backslash as an ordinary byte of a name, as git does', () => {
+    expect(decodeTree(entry(String.raw`a\b`)).map((read) => read.path)).toStrictEqual([String.raw`a\b`]);
+  });
+
+  /* Old git wrote group-writable and other file modes; git and `isomorphic-git` read them as 644 or 755. */
+  it('reads legacy modes as the canonical ones', () => {
+    const read = (mode: string) => decodeTree(entry('x', mode)).map(({ mode: canonical, type }) => [canonical, type]);
+    expect(read('100664')).toStrictEqual([['100644', 'blob']]);
+    expect(read('100600')).toStrictEqual([['100644', 'blob']]);
+    expect(read('100775')).toStrictEqual([['100755', 'blob']]);
+    expect(read('40000')).toStrictEqual([['040000', 'tree']]);
+    expect(read('120000')).toStrictEqual([['120000', 'blob']]);
+    expect(read('160000')).toStrictEqual([['160000', 'commit']]);
+    expect(() => read('10064x')).toThrow(/unknown mode/u);
   });
 });

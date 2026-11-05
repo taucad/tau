@@ -3,8 +3,9 @@
  * trees with.
  *
  * Decoded entries match what `isomorphic-git`'s tree reader returned — a
- * directory's mode spelled `040000`, the kind derived from the mode — so a
- * reader that moved off the library sees the same values.
+ * directory's mode spelled `040000`, a legacy file mode such as `100664`
+ * read as `100644`, the kind derived from the mode — so a reader that moved
+ * off the library sees the same values.
  *
  * @module
  */
@@ -27,24 +28,36 @@ const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 const oidBytes = 20;
 
-const kindOf = (mode: string): TreeCodecEntry['type'] => {
-  switch (mode) {
-    case '040000': {
-      return 'tree';
+/* oxlint-disable no-bitwise -- a mode is a bit field. */
+/*
+ * A stored mode in the five git keeps, as git and `isomorphic-git` read it:
+ * a regular file's permissions collapse to 644 or 755 by its owner's execute
+ * bit (old git wrote 100664 and others), and file-type bits that name none of
+ * the four kinds read as a regular file. Only a mode that is not octal is
+ * refused.
+ */
+const canonicalMode = (stored: string): Readonly<{ mode: string; type: TreeCodecEntry['type'] }> => {
+  if (!/^[0-7]{1,6}$/u.test(stored)) {
+    throw new TypeError(`A tree entry has an unknown mode ${stored}.`);
+  }
+  const value = Number.parseInt(stored, 8);
+  switch (value & 0o17_0000) {
+    case 0o4_0000: {
+      return { mode: '040000', type: 'tree' };
     }
-    case '100644':
-    case '100755':
-    case '120000': {
-      return 'blob';
+    case 0o12_0000: {
+      return { mode: '120000', type: 'blob' };
     }
-    case '160000': {
-      return 'commit';
+    case 0o16_0000: {
+      return { mode: '160000', type: 'commit' };
     }
     default: {
-      throw new TypeError(`A tree entry has an unknown mode ${mode}.`);
+      /* A regular file, and any other file-type bits, as `isomorphic-git` reads them. */
+      return { mode: (value & 0o100) === 0 ? '100644' : '100755', type: 'blob' };
     }
   }
 };
+/* oxlint-enable no-bitwise */
 
 /**
  * The entries of one tree object's body.
@@ -61,13 +74,13 @@ export const decodeTree = (body: Uint8Array<ArrayBuffer>): TreeCodecEntry[] => {
     if (space === -1 || nul === -1 || nul + 1 + oidBytes > body.byteLength) {
       throw new TypeError('A tree object is truncated.');
     }
-    const stored = textDecoder.decode(body.subarray(cursor, space));
-    const mode = stored === '40000' ? '040000' : stored;
+    const { mode, type } = canonicalMode(textDecoder.decode(body.subarray(cursor, space)));
     const path = textDecoder.decode(body.subarray(space + 1, nul));
-    if (path.includes('/') || path.includes('\\') || path === '' || path === '.' || path === '..') {
+    /* A backslash is an ordinary byte of a name in git; a slash, an empty name, `.` and `..` are not names. */
+    if (path.includes('/') || path === '' || path === '.' || path === '..') {
       throw new TypeError(`A tree entry has an unsafe name ${JSON.stringify(path)}.`);
     }
-    entries.push({ mode, path, oid: bytesToHex(body.slice(nul + 1, nul + 1 + oidBytes)), type: kindOf(mode) });
+    entries.push({ mode, path, oid: bytesToHex(body.slice(nul + 1, nul + 1 + oidBytes)), type });
     cursor = nul + 1 + oidBytes;
   }
   return entries;

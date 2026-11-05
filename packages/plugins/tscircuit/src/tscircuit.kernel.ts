@@ -218,6 +218,11 @@ const stringField = (element: CircuitElement, key: string): string | undefined =
   return typeof value === 'string' && value !== '' ? value : undefined;
 };
 
+const numberField = (element: CircuitElement, key: string): number | undefined => {
+  const value: unknown = Reflect.get(element, key);
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+};
+
 // Names supplied by an author are stable across reordered evaluations. Generated names and
 // duplicate names are evaluation-local; a fresh random token prevents a saved choice from retargeting.
 const sheetsOf = (circuitJson: CircuitElement[], authoredSheets: ReadonlyMap<string, string>) => {
@@ -444,11 +449,11 @@ const withPackModels = (circuitJson: CircuitElement[]): CircuitElement[] =>
     if (element.type !== 'cad_component') {
       return element;
     }
-    const record = element as CircuitElement & Partial<Record<(typeof modelUrlKeys)[number], string>>;
-    const kicadUrl = record.model_step_url ?? record.model_wrl_url;
+    const kicadUrl = stringField(element, 'model_step_url') ?? stringField(element, 'model_wrl_url');
     const kicadName = kicadUrl === undefined ? undefined : kicadNameOfModelUrl(kicadUrl);
     // Core writes absent model fields as present-but-undefined keys.
-    const hasModel = modelUrlKeys.some((key) => Boolean(record[key])) || Boolean(Reflect.get(record, 'model_jscad'));
+    const hasModel =
+      modelUrlKeys.some((key) => Boolean(Reflect.get(element, key))) || Boolean(Reflect.get(element, 'model_jscad'));
     const footprinterString = stringField(element, 'footprinter_string');
     const entry =
       kicadName === undefined
@@ -459,9 +464,11 @@ const withPackModels = (circuitJson: CircuitElement[]): CircuitElement[] =>
     if (!entry) {
       return element;
     }
-    const { model_step_url: _step, model_wrl_url: _wrl, ...rest } = record;
+    const rest = Object.fromEntries(
+      Object.entries(element).filter(([key]) => key !== 'model_step_url' && key !== 'model_wrl_url'),
+    );
     // eslint-disable-next-line @typescript-eslint/naming-convention -- circuit JSON field name.
-    return { ...rest, model_glb_url: packModelUrl(entry) };
+    return { ...rest, type: element.type, model_glb_url: packModelUrl(entry) };
   });
 
 // Transports may deliver the snapshot as any view or buffer; TextDecoder accepts either.
@@ -561,9 +568,7 @@ const presentBoard = async (
 ): Promise<void> => {
   const { buildPresentationBoard } = await import('#board-geometry.js');
   const { applyPresentationMaterial } = await import('#presentation-materials.js');
-  const boards = circuitJson.filter((element) => element.type === 'pcb_board') as Array<
-    CircuitElement & { width?: number; height?: number; thickness?: number }
-  >;
+  const boards = circuitJson.filter((element) => element.type === 'pcb_board');
   const isBoardSlab = (node: Node): boolean => {
     const bounds = boundsOf(node);
     if (!bounds) {
@@ -572,9 +577,9 @@ const presentBoard = async (
     const size = bounds.max.map((value, axis) => value - bounds.min[axis]!);
     return boards.some(
       (board) =>
-        Math.abs((size[0] ?? 0) - (board.width ?? Number.NaN)) < 0.5 &&
-        Math.abs((size[2] ?? 0) - (board.height ?? Number.NaN)) < 0.5 &&
-        Math.abs((size[1] ?? 0) - (board.thickness ?? 1.6)) < 0.2,
+        Math.abs((size[0] ?? 0) - (numberField(board, 'width') ?? Number.NaN)) < 0.5 &&
+        Math.abs((size[2] ?? 0) - (numberField(board, 'height') ?? Number.NaN)) < 0.5 &&
+        Math.abs((size[1] ?? 0) - (numberField(board, 'thickness') ?? 1.6)) < 0.2,
     );
   };
   const slabMaterials = new Set<Material>();

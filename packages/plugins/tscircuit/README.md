@@ -52,14 +52,27 @@ const pcb = document.view('pcb', { options: { pinNumbers: true } });
 const outcome = await pcb.rendering();
 ```
 
-Rendering is offline: local autorouter, no parts engine. `fetch` is disabled while the board evaluates and while
-the GLB is built, so `http(s)://` footprint and `cadModel` URLs are never requested — each attempt becomes a
-`warning` issue naming the URL — and `kicad:`/`jlcpcb:` references produce a `warning` and an unplaced part.
+Rendering is offline by default: local autorouter, no parts engine. `fetch` is disabled while the board
+evaluates and while the GLB is built, and each attempted URL becomes a `warning` issue naming it. Tau's
+bundled KiCad pack (about a hundred footprints: passives, LEDs, diodes, SOT/TO packages, SOIC, TSSOP, QFN,
+QFP and DIP ICs, headers, connectors, crystals, switches and modules) gives common parts real 3D bodies
+offline: plain footprint strings such as `0603`, `soic8`, `sot23`, `qfn32` or `pinrow4` use the matching
+KiCad model, and `kicad:` footprints in the pack, such as `kicad:Package_SO/SOIC-8_3.9x4.9mm_P1.27mm`, load
+their KiCad footprint and model. Other `kicad:` names and `jlcpcb:` references produce a `warning` and an
+unplaced part. Set the kernel option `parts: 'online'` to let `kicad:` footprints and
+their models load from tscircuit's part hosts (`*.tscircuit.com`, https only); every other URL stays blocked.
+
+The `schematic` view takes a `theme` option (`light` by default, `dark`, or `engineering` for KiCad's
+colours) and the `pcb` view a `palette` option (`fabrication` by default, drawing the top side in the
+board's solder mask colour with gold pads, or `engineering`).
 Exports are named `board` (`glb`), `bom` (`csv`), `netlist` (`txt`), and `circuit` (`json`).
 An authored schematic sheet with a unique name keeps its selection across reorder; unnamed or
 ambiguous sheets receive evaluation-local IDs and titles marked “current evaluation”; their choices expire on the next evaluation. Parts outside
 all sheets produce a warning naming the parts. SVG output is fitted in pixels and carries no
-physical units. The GLB includes board-layer textures and feature-edge lines.
+physical units. The GLB builds the board from its copper, finish, solder mask and silkscreen layer geometry.
+The kernel option `boardStyle` picks the default 3D look, `presentation` (the default) or `technical` (a plain
+slab with feature edges), and the `board` view and export take a `style` option that overrides it. Neither
+style rasterizes a board texture.
 
 Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, or your own host. See
 [`@taucad/runtime`](https://www.npmjs.com/package/@taucad/runtime) for the client lifecycle.
@@ -70,7 +83,7 @@ Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, o
 | ----------------- | --------------- | ----------------------------------------------------------------------------- |
 | `tscircuit`       | toolkit factory | package-named authoring factory; presets select capabilities                  |
 | `plugin`          | toolkit factory | the same factory under its mechanical name, for loaders that read a fixed key |
-| `tscircuitKernel` | kernel factory  | direct `kernels` composition; declares no options                             |
+| `tscircuitKernel` | kernel factory  | direct `kernels` composition; declares the `parts` option                     |
 
 One preset, `default`, selecting `kernels.default`.
 

@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { defineConfig } from 'tsdown';
 import type { Plugin } from 'rolldown';
 
@@ -8,14 +8,11 @@ const require = createRequire(import.meta.url);
 // These chunk names belong to pinned circuit-json-to-gltf 0.0.123; refresh both on a catalog bump.
 const converterRoot = require.resolve('circuit-json-to-gltf');
 const browserTexture = require.resolve('circuit-json-to-gltf/dist/svg-to-png-browser-MXUWCXAZ.js');
-const wasmPath = require.resolve('@resvg/resvg-wasm/index_bg.wasm');
-const wasmBase64 = readFileSync(wasmPath).toString('base64');
 const nativeStub = new URL('src/engine/native-stub.ts', import.meta.url).pathname;
 // Licence texts the published packages omit, copied from each upstream repository's default branch
 // on 2026-10-02 into `licenses/`. Packages still missing text are DEFERRED, not blocking: every one
 // declares or is known to carry an OSS licence, and the text is tracked as follow-up work.
 const upstreamLicenses = new Map([
-  ['@resvg/resvg-wasm', 'https://github.com/yisibl/resvg-js/blob/main/LICENSE'],
   ['@tscircuit/mm', 'https://github.com/tscircuit/mm/blob/main/LICENSE'],
   ['@tscircuit/soup-util', 'https://github.com/tscircuit/soup-util/blob/main/LICENSE'],
   ['boolbase', 'https://github.com/fb55/boolbase/blob/master/LICENSE'],
@@ -160,32 +157,10 @@ const engineRules: Plugin = {
     if (id !== browserTexture) {
       return undefined;
     }
-    return `import { Resvg, initWasm } from '@resvg/resvg-wasm';
-import { tscircuit_font_default as font } from './chunk-W5ZY3YD5.js';
-let ready;
-export async function svgToPngDataUrl(svg, options = {}) {
-  ready ??= initWasm(Uint8Array.fromBase64('${wasmBase64}')).catch((error) => {
-    if (!String(error).includes('Already initialized')) throw error;
-  });
-  await ready;
-  const resvg = new Resvg(svg, {
-    background: options.background,
-    font: { loadSystemFonts: false, fontBuffers: [Uint8Array.fromBase64(font)], defaultFontFamily: 'TscircuitAlphabet' },
-    fitTo: options.width ? { mode: 'width', value: options.width } : options.height ? { mode: 'height', value: options.height } : undefined,
-  });
-  try {
-    const rendered = resvg.render();
-    try {
-      const image = rendered.asPng();
-      let binary = '';
-      for (const byte of image) binary += String.fromCharCode(byte);
-      return 'data:image/png;base64,' + btoa(binary);
-    } finally {
-      rendered.free();
-    }
-  } finally {
-    resvg.free();
-  }
+    // The kernel always passes `boardTextureResolution: 0`, so the converter never rasterizes a
+    // board texture; this stub keeps resvg (native and WASM) out of the engine.
+    return `export async function svgToPngDataUrl() {
+  throw new Error('Tau renders tscircuit boards without raster textures.');
 }`;
   },
   generateBundle() {
@@ -196,8 +171,6 @@ export async function svgToPngDataUrl(svg, options = {}) {
         roots.add(root);
       }
     }
-    // The WASM bytes are embedded in the lazy texture chunk, while its JS wrapper stays external.
-    roots.add(dirname(wasmPath));
     writeLicenses(roots);
   },
 };
@@ -211,6 +184,8 @@ export default defineConfig({
     netlist: 'src/engine/netlist.ts',
     react: 'src/engine/react.ts',
     'jsx-runtime': 'src/engine/jsx-runtime.ts',
+    alphabet: 'src/engine/alphabet.ts',
+    'kicad-catalog': 'src/engine/kicad-catalog.ts',
   },
   outDir: 'dist/engine',
   format: 'esm',
@@ -225,10 +200,9 @@ export default defineConfig({
   define: { 'process.env.NODE_ENV': '"production"' },
   plugins: [engineRules],
   deps: {
-    alwaysBundle: (id) =>
-      !/^(?:@taucad\/|@tscircuit\/manifold-2d(?:\/|$)|@resvg\/resvg-wasm(?:\/|$)|zod(?:\/|$))/u.test(id),
-    neverBundle: [/^@tscircuit\/manifold-2d(?:\/|$)/u, /^@resvg\/resvg-wasm(?:\/|$)/u],
-    onlyImport: [/^@tscircuit\/manifold-2d(?:\/|$)/u, /^@resvg\/resvg-wasm(?:\/|$)/u, /^zod(?:\/|$)/u],
+    alwaysBundle: (id) => !/^(?:@taucad\/|@tscircuit\/manifold-2d(?:\/|$)|zod(?:\/|$))/u.test(id),
+    neverBundle: [/^@tscircuit\/manifold-2d(?:\/|$)/u],
+    onlyImport: [/^@tscircuit\/manifold-2d(?:\/|$)/u, /^zod(?:\/|$)/u],
     onlyBundle: false,
   },
 });

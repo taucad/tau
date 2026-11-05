@@ -5272,9 +5272,6 @@ importers:
       '@gltf-transform/core':
         specifier: 'catalog:'
         version: 4.5.1
-      '@resvg/resvg-wasm':
-        specifier: 2.6.2
-        version: 2.6.2
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../../core/geometry
@@ -5282,6 +5279,9 @@ importers:
         specifier: 'catalog:'
         version: 0.0.6
     devDependencies:
+      '@gltf-transform/functions':
+        specifier: 'catalog:'
+        version: 4.5.1(@types/node@24.0.15)
       '@taucad/esbuild':
         specifier: workspace:*
         version: link:../esbuild
@@ -5396,6 +5396,9 @@ importers:
       nanoid:
         specifier: 'catalog:'
         version: 5.1.16
+      occt-import-js:
+        specifier: ^0.0.23
+        version: 0.0.23
       react:
         specifier: 'catalog:'
         version: 19.3.1

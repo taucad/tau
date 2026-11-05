@@ -165,13 +165,24 @@ export const createApplyTreeEffects = (
       return;
     }
     const { error } = receipts[index]!;
-    const others = receipts.filter(({ outcome }, position) => position !== index && outcome === 'failed').length;
-    const also = others === 0 ? '' : ` ${String(others)} more ${others === 1 ? 'file was' : 'files were'} refused.`;
+    const others = paths.filter(
+      (_, position) =>
+        position !== index && receipts[position]?.outcome !== undefined && receipts[position].outcome !== 'applied',
+    );
+    const also =
+      others.length === 0
+        ? ''
+        : ` ${String(others.length)} more ${others.length === 1 ? 'file was' : 'files were'} refused: ${others.join(', ')}.`;
     if ((error as { code?: unknown } | undefined)?.code === 'EEXIST') {
       throw new RevisionPortError(
         'CHECKOUT_CONFLICT',
         `${paths[index]!} was created while these files were being updated.${also}`,
       );
+    }
+    /* The provider's error is thrown unchanged: a DOMException's message cannot
+     * be assigned, so the other refusals are logged instead of appended. */
+    if (also !== '') {
+      console.warn(`[revisions] ${paths[index]!} could not be published.${also}`);
     }
     throw error instanceof Error ? error : new Error(`Writing ${paths[index]!} did not apply.`, { cause: error });
   };
@@ -401,9 +412,15 @@ export const createApplyTreeEffects = (
             undefined,
           );
           const publications: ChangesetEntryReceipt[] = [];
+          const backupsDropped = new Set<string>();
           let offset = 0;
           for (const chunk of chunks) {
             publications.push(...publishReceipts.slice(offset, offset + chunk.length));
+            for (const [position, { backup }] of chunk.entries()) {
+              if (publishReceipts[offset + chunk.length + position]?.outcome === 'applied') {
+                backupsDropped.add(backup);
+              }
+            }
             offset += chunk.length * 2;
           }
           for (const [index, { staged: from }] of replaced.entries()) {
@@ -424,7 +441,7 @@ export const createApplyTreeEffects = (
           );
           await Promise.all(
             replaced
-              .filter(({ staged: from }) => published.has(from))
+              .filter(({ staged: from, backup }) => published.has(from) && !backupsDropped.has(backup))
               .map(async ({ backup }) => unlinkIfPresent(live, backup)),
           );
           raiseRefusal(

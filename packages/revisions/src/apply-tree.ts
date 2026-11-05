@@ -7,8 +7,8 @@
  * capture and the apply is what closes the window `materializeTree` used to
  * refuse (W8c).
  */
-import type { FileMode, PathPolicy } from '@taucad/filesystem';
-import { workerTimings } from '@taucad/filesystem';
+import type { ChangesetEntry, ChangesetEntryReceipt, FileMode, PathPolicy } from '@taucad/filesystem';
+import { applyChangesetToProvider, maximumChangesetEntries, splitChangeset, workerTimings } from '@taucad/filesystem';
 import { ImmutableRevisionTree } from '#algorithms/index.js';
 import type { RevisionTreeEntry, RevisionTreeInput } from '#algorithms/index.js';
 import { equalBytes } from '#object-hash.js';
@@ -123,38 +123,103 @@ export const createApplyTreeEffects = (
   };
 
   /**
-   * Stage every file's bytes before the first swap.
-   *
-   * The one step of the protocol with no order of its own, so it is one batch
-   * where the surface has one; the rename / verify / swap chain that follows is
-   * ordered and stays sequential (W8d).
+   * Apply entries as bounded changesets through the checkout surface's own
+   * `apply` (one lock set, one change event and one cross-tab notice each), or
+   * straight to a bare provider that has no authority above it.
    *
    * @param live - The checkout's tree.
-   * @param files - Each changed file's bytes and the sibling they stage at.
+   * @param changesets - Each changeset's entries, every one within the bound.
+   * @param signal - Abort stops later changesets and later phases.
+   * @returns Every entry's receipt, in the order given.
    */
-  const stageFiles = async (
+  const applyChangesets = async (
     live: RevisionFileSystem,
-    files: ReadonlyArray<Readonly<{ staged: string; entry: RevisionTreeEntry }>>,
-  ): Promise<void> => {
-    if (files.length === 0) {
-      return;
-    }
-    if (live.writeFiles === undefined) {
-      /* Every write settles before the first failure is raised, exactly as the
-       * batch does: a write still in flight would land after the cleanup that
-       * removes what this call staged. */
-      const staged = await Promise.allSettled(
-        files.map(async ({ staged: path, entry }) => live.writeFile(path, entry.content)),
-      );
-      const refused = staged.find((result): result is PromiseRejectedResult => result.status === 'rejected');
-      if (refused !== undefined) {
-        throw refused.reason instanceof Error
-          ? refused.reason
-          : new Error('Staging the bytes of this change failed.', { cause: refused.reason });
+    changesets: ReadonlyArray<readonly ChangesetEntry[]>,
+    signal: AbortSignal | undefined,
+  ): Promise<ChangesetEntryReceipt[]> => {
+    const receipts: ChangesetEntryReceipt[] = [];
+    for (const entries of changesets) {
+      if (entries.length === 0) {
+        continue;
       }
+      const changeset = { entries, ...(signal === undefined ? {} : { signal }) };
+      // oxlint-disable-next-line no-await-in-loop -- bounded changesets land in order so a save can interleave (D2).
+      const receipt = await (live.apply === undefined
+        ? applyChangesetToProvider(live, changeset)
+        : live.apply(changeset));
+      receipts.push(...receipt.entries);
+    }
+    return receipts;
+  };
+
+  /**
+   * Raise the first entry that did not apply: a create that found its path
+   * taken is a checkout conflict, anything else the provider's own error.
+   *
+   * @param receipts - Receipts, in the order of `paths`.
+   * @param paths - The checkout path each receipt is for.
+   */
+  const raiseRefusal = (receipts: readonly ChangesetEntryReceipt[], paths: readonly string[]): void => {
+    const index = receipts.findIndex(({ outcome }) => outcome !== 'applied');
+    if (index === -1) {
       return;
     }
-    await live.writeFiles(Object.fromEntries(files.map(({ staged, entry }) => [staged, { content: entry.content }])));
+    const { error } = receipts[index]!;
+    const others = receipts.filter(({ outcome }, position) => position !== index && outcome === 'failed').length;
+    const also = others === 0 ? '' : ` ${String(others)} more ${others === 1 ? 'file was' : 'files were'} refused.`;
+    if ((error as { code?: unknown } | undefined)?.code === 'EEXIST') {
+      throw new RevisionPortError(
+        'CHECKOUT_CONFLICT',
+        `${paths[index]!} was created while these files were being updated.${also}`,
+      );
+    }
+    throw error instanceof Error ? error : new Error(`Writing ${paths[index]!} did not apply.`, { cause: error });
+  };
+
+  /**
+   * Move each path aside to its backup and prove the bytes moved are the ones
+   * this apply expected to replace. On a mismatch or a refusal every backup
+   * goes back where nothing took its path since, and the apply stops.
+   *
+   * @param live - The checkout's tree.
+   * @param moves - Each live path, its expected entry and its backup sibling.
+   * @param signal - Abort stops later changesets.
+   */
+  const moveAsideVerified = async (
+    live: RevisionFileSystem,
+    moves: ReadonlyArray<Readonly<{ path: string; backup: string; expected: RevisionTreeEntry | undefined }>>,
+    signal: AbortSignal | undefined,
+  ): Promise<void> => {
+    const receipts = await applyChangesets(
+      live,
+      splitChangeset(moves.map(({ path, backup }): ChangesetEntry => ({ op: 'move', from: path, to: backup }))),
+      signal,
+    );
+    const moved = moves.filter((_, index) => receipts[index]?.outcome === 'applied');
+    const verified = await Promise.all(
+      moved.map(async (move) => equalEntry(await entryOf(live, move.backup), move.expected)),
+    );
+    const changed = moved.find((_, index) => !verified[index]);
+    if (changed === undefined && moved.length === moves.length) {
+      return;
+    }
+    const free = await Promise.all(moved.map(async ({ path }) => !(await live.exists(path))));
+    await applyChangesets(
+      live,
+      splitChangeset(
+        moved.flatMap(({ path, backup }, index): ChangesetEntry[] =>
+          free[index] === true ? [{ op: 'move', from: backup, to: path }] : [],
+        ),
+      ),
+      undefined,
+    );
+    if (changed !== undefined) {
+      throw new RevisionPortError('CHECKOUT_CONFLICT', `${changed.path} changed while these files were being updated.`);
+    }
+    raiseRefusal(
+      receipts,
+      moves.map(({ path }) => path),
+    );
   };
 
   /**
@@ -200,80 +265,6 @@ export const createApplyTreeEffects = (
   };
 
   /**
-   * Whether the checkout surface publishes many moves under one lock set, as a rooted view does.
-   *
-   * @param live - The checkout's tree.
-   * @returns True when it carries `bulkMove`.
-   */
-  const hasBulkMove = (
-    live: RevisionFileSystem,
-  ): live is RevisionFileSystem & Required<Pick<RevisionFileSystem, 'bulkMove'>> => live.bulkMove !== undefined;
-
-  /**
-   * Publish every staged file whose target the checkout did not hold, as one move batch.
-   *
-   * One lock set and one provider refresh for the whole batch, instead of this
-   * call's own two `exists` checks and a separately locked rename per file. Each
-   * move still refuses a target that appeared since the capture (`EEXIST`, which
-   * the batch reports as `NAME_EXISTS`), the conflict those per-file checks
-   * existed to catch. Each move is the provider's own rename, exactly as the
-   * per-file path publishes: atomic where the platform moves natively (OPFS
-   * `move()`), the provider's copy-then-unlink where it does not. Every edit
-   * that moved is recorded in `published` before any refusal is raised, so the
-   * caller sweeps only the staged files that never reached their target.
-   *
-   * @param live - The checkout's tree, which moves in bulk.
-   * @param created - The staged files and the absent targets they publish to.
-   * @param publication - Receives each staged path that moved in `published`;
-   *   `signal` is checked once every staged file carries its mode.
-   */
-  const publishCreated = async (
-    live: RevisionFileSystem & Required<Pick<RevisionFileSystem, 'bulkMove'>>,
-    created: ReadonlyArray<Readonly<{ path: string; staged: string; entry: RevisionTreeEntry }>>,
-    { published, signal }: Readonly<{ published: Set<string>; signal: AbortSignal | undefined }>,
-  ): Promise<void> => {
-    if (created.length === 0) {
-      return;
-    }
-    if (live.setFileMode !== undefined) {
-      for (const { staged, entry } of created) {
-        // oxlint-disable-next-line no-await-in-loop -- mode belongs to each staged file before it publishes.
-        await live.setFileMode(staged, entry.mode);
-      }
-    }
-    signal?.throwIfAborted();
-    const result = await live.bulkMove(created.map(({ path, staged }) => ({ source: staged, target: path })));
-    for (const { edit } of result.moved) {
-      published.add(edit.source);
-    }
-    const [refused, ...others] = result.failed;
-    if (refused === undefined) {
-      return;
-    }
-    /* The first refusal is raised; the rest are named so a batch that refused
-     * many files never reads as a one-file failure. */
-    const also =
-      others.length === 0
-        ? ''
-        : ` ${String(others.length)} more ${others.length === 1 ? 'file was' : 'files were'} refused: ${others.map(({ edit }) => edit.target).join(', ')}.`;
-    if (refused.error.code === 'NAME_EXISTS') {
-      throw new RevisionPortError(
-        'CHECKOUT_CONFLICT',
-        `${refused.edit.target} was created while these files were being updated.${also}`,
-      );
-    }
-    /* The pipeline wraps each move's failure; the per-file path raises the
-     * provider's own error (an errno, a missing workspace handle), so this does too. */
-    const raised: unknown = (refused.error as { cause?: unknown }).cause ?? refused.error;
-    /* The provider's error is thrown unchanged: a DOMException's message cannot
-     * be assigned, so the other refusals are logged instead of appended. */
-    if (also !== '') {
-      console.warn(`[revisions] ${refused.edit.target} could not be published.${also}`);
-    }
-    throw raised;
-  };
-
-  /**
    * Write one tree over a checkout and verify exactly what it applied.
    *
    * The same primitive a settlement runs and a restore runs — applying a stored
@@ -308,113 +299,144 @@ export const createApplyTreeEffects = (
       const release = onApplyingTree?.(place, [...removedPaths, ...writtenPaths].sort(), { purpose });
       const heldAt = workerTimings.now();
       try {
-        for (const path of removedPaths) {
-          signal?.throwIfAborted();
-          const expected = liveFiles.get(path);
-          const backup = temporarySibling(path, 'backup');
-          // oxlint-disable-next-line no-await-in-loop -- ordered application keeps retries deterministic.
-          await live.rename(path, backup);
-          // oxlint-disable-next-line no-await-in-loop -- the moved bytes prove what the rename removed.
-          const moved = await entryOf(live, backup);
-          if (!equalEntry(moved, expected)) {
-            // oxlint-disable-next-line no-await-in-loop -- recovery belongs to this ordered mutation.
-            if (!(await live.exists(path))) {
-              // oxlint-disable-next-line no-await-in-loop -- restore the concurrent winner before refusing the operation.
-              await live.rename(backup, path);
-            }
-            throw new RevisionPortError('CHECKOUT_CONFLICT', `${path} changed while these files were being updated.`);
-          }
-          // oxlint-disable-next-line no-await-in-loop -- the revision retains the removed bytes; the temporary copy is no longer needed.
-          await live.unlink(backup);
-        }
-        await pruneEmptiedDirectories(live, removedPaths, targetFiles.keys());
-        const stagedFiles = changedFiles.map(([path, entry]) => ({
-          path,
-          entry,
-          staged: temporarySibling(path, 'staged'),
-        }));
+        /* Removals: every removed file moves aside, its moved bytes prove it
+         * was the file this apply meant to remove, and the backups go — a
+         * changeset per bound for each step, not a lock set per file. */
         signal?.throwIfAborted();
-        await stageFiles(live, stagedFiles);
-        /* Staged paths whose bytes now sit at their target; every other one is swept below. */
+        const removals = removedPaths.map((path) => ({
+          path,
+          backup: temporarySibling(path, 'backup'),
+          expected: liveFiles.get(path),
+        }));
+        await moveAsideVerified(live, removals, signal);
+        raiseRefusal(
+          await applyChangesets(
+            live,
+            splitChangeset(
+              removals.map(({ backup }): ChangesetEntry => ({ op: 'delete', path: backup, kind: 'file' })),
+            ),
+            undefined,
+          ),
+          removals.map(({ backup }) => backup),
+        );
+        await pruneEmptiedDirectories(live, removedPaths, targetFiles.keys());
+        signal?.throwIfAborted();
+
+        /* A path the checkout did not hold has nothing to move aside or verify:
+         * its final path is written directly with its mode, refused if anything
+         * took it since the capture (`create`) — no staged sibling, no rename. */
+        const created = changedFiles.filter(([path]) => !liveFiles.has(path));
+        raiseRefusal(
+          await applyChangesets(
+            live,
+            splitChangeset(
+              created.map(
+                ([path, entry]): ChangesetEntry => ({
+                  op: 'write',
+                  path,
+                  data: entry.content,
+                  mode: entry.mode,
+                  create: true,
+                }),
+              ),
+            ),
+            signal,
+          ),
+          created.map(([path]) => path),
+        );
+
+        /* A replacement stages its bytes beside the file, moves the file aside
+         * and verifies it, then publishes the staged sibling with one native
+         * move and drops the backup a phase later — so the checkout holds the
+         * old bytes or the new ones at every instant (I1). */
+        const replaced = changedFiles
+          .filter(([path]) => liveFiles.has(path))
+          .map(([path, entry]) => ({
+            path,
+            entry,
+            staged: temporarySibling(path, 'staged'),
+            backup: temporarySibling(path, 'backup'),
+            expected: liveFiles.get(path),
+          }));
+        const staged = new Set<string>();
         const published = new Set<string>();
-        /* A path the checkout did not hold has no bytes to move aside or verify,
-         * so where the surface moves in bulk, all of them publish in one call. */
-        const movesInBulk = hasBulkMove(live);
         try {
-          if (movesInBulk) {
-            await publishCreated(
-              live,
-              stagedFiles.filter(({ path }) => !liveFiles.has(path)),
-              { published, signal },
-            );
-          }
-          /* The batch above already settled every path the checkout did not hold. */
-          for (const { path, entry, staged } of stagedFiles.filter(
-            (file) => !movesInBulk || liveFiles.has(file.path),
-          )) {
-            signal?.throwIfAborted();
-            const current = liveFiles.get(path);
-            const backup = current === undefined ? undefined : temporarySibling(path, 'backup');
-            try {
-              if (live.setFileMode !== undefined) {
-                // oxlint-disable-next-line no-await-in-loop -- mode belongs to the staged file.
-                await live.setFileMode(staged, entry.mode);
-              }
-              if (backup !== undefined) {
-                // oxlint-disable-next-line no-await-in-loop -- moving first lets us verify the exact bytes being replaced.
-                await live.rename(path, backup);
-                // oxlint-disable-next-line no-await-in-loop -- the moved bytes are the replacement precondition.
-                const moved = await entryOf(live, backup);
-                if (!equalEntry(moved, current)) {
-                  // oxlint-disable-next-line no-await-in-loop -- recovery belongs to this ordered mutation.
-                  if (!(await live.exists(path))) {
-                    // oxlint-disable-next-line no-await-in-loop -- put the concurrent winner back before refusing.
-                    await live.rename(backup, path);
-                  }
-                  throw new RevisionPortError(
-                    'CHECKOUT_CONFLICT',
-                    `${path} changed while these files were being updated.`,
-                  );
-                }
-                // oxlint-disable-next-line no-await-in-loop -- this is the new-file compare step.
-              } else if (await live.exists(path)) {
-                throw new RevisionPortError(
-                  'CHECKOUT_CONFLICT',
-                  `${path} was created while these files were being updated.`,
-                );
-              }
-              // oxlint-disable-next-line no-await-in-loop -- the target must still be absent immediately before publication.
-              if (await live.exists(path)) {
-                throw new RevisionPortError(
-                  'CHECKOUT_CONFLICT',
-                  `${path} changed while these files were being updated.`,
-                );
-              }
-              // oxlint-disable-next-line no-await-in-loop -- one atomic rename publishes the already-written file.
-              await live.rename(staged, path);
-              published.add(staged);
-            } finally {
-              if (backup !== undefined) {
-                /* The bytes this replacement moved aside go back unless the swap
-                 * that replaces them completed, or something else already took
-                 * the path — so an apply that stops mid-file leaves the file it
-                 * was replacing rather than a hole where neither version is. */
-                // oxlint-disable-next-line no-await-in-loop -- the backup belongs to this ordered mutation.
-                const replaced = published.has(staged) || (await live.exists(path));
-                // oxlint-disable-next-line no-await-in-loop -- either the revision retains the prior bytes or the checkout must.
-                await (replaced ? unlinkIfPresent(live, backup) : live.rename(backup, path));
-              }
+          const stagedReceipts = await applyChangesets(
+            live,
+            splitChangeset(
+              replaced.map(
+                ({ staged: stagedPath, entry }): ChangesetEntry => ({
+                  op: 'write',
+                  path: stagedPath,
+                  data: entry.content,
+                  mode: entry.mode,
+                  create: true,
+                }),
+              ),
+            ),
+            signal,
+          );
+          for (const [index, { staged: stagedPath }] of replaced.entries()) {
+            if (stagedReceipts[index]?.outcome !== 'failed') {
+              staged.add(stagedPath);
             }
           }
+          raiseRefusal(
+            stagedReceipts,
+            replaced.map(({ staged: stagedPath }) => stagedPath),
+          );
+          await moveAsideVerified(live, replaced, signal);
+          /* Each replacement is one publish and, a phase later, one backup removal. */
+          const pairs = Math.floor(maximumChangesetEntries / 2);
+          const chunks: Array<typeof replaced> = [];
+          for (let start = 0; start < replaced.length; start += pairs) {
+            chunks.push(replaced.slice(start, start + pairs));
+          }
+          const publishReceipts = await applyChangesets(
+            live,
+            chunks.map((chunk) => [
+              ...chunk.map(({ staged: from, path }): ChangesetEntry => ({ op: 'move', from, to: path })),
+              ...chunk.map(({ backup }): ChangesetEntry => ({ op: 'delete', path: backup, kind: 'file', phase: 1 })),
+            ]),
+            undefined,
+          );
+          const publications: ChangesetEntryReceipt[] = [];
+          let offset = 0;
+          for (const chunk of chunks) {
+            publications.push(...publishReceipts.slice(offset, offset + chunk.length));
+            offset += chunk.length * 2;
+          }
+          for (const [index, { staged: from }] of replaced.entries()) {
+            if (publications[index]?.outcome === 'applied') {
+              published.add(from);
+            }
+          }
+          /* A replacement whose publish did not land puts its backup back; one
+           * that did drops a backup its removal phase skipped. */
+          await applyChangesets(
+            live,
+            splitChangeset(
+              replaced
+                .filter(({ staged: from }) => !published.has(from))
+                .map(({ backup, path }): ChangesetEntry => ({ op: 'move', from: backup, to: path })),
+            ),
+            undefined,
+          );
+          await Promise.all(
+            replaced
+              .filter(({ staged: from }) => published.has(from))
+              .map(async ({ backup }) => unlinkIfPresent(live, backup)),
+          );
+          raiseRefusal(
+            publications,
+            replaced.map(({ path }) => path),
+          );
         } finally {
           /* Bytes staged and never published are this call's litter, swept
            * before the verification re-reads the tree they would appear in. */
-          for (const { staged } of stagedFiles) {
-            if (!published.has(staged)) {
-              // oxlint-disable-next-line no-await-in-loop -- one ordered sweep of what this call staged.
-              await unlinkIfPresent(live, staged);
-            }
-          }
+          await Promise.all(
+            [...staged].filter((path) => !published.has(path)).map(async (path) => unlinkIfPresent(live, path)),
+          );
         }
         signal?.throwIfAborted();
         const reread = await capture(place, target);

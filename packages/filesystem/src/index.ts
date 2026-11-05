@@ -36,6 +36,7 @@ export {
   isRefusal,
   splitChangeset,
 } from '#changeset.js';
+export { applyChangesetToProvider } from '#changeset-provider.js';
 export type {
   BatchEntry,
   BatchOptions,

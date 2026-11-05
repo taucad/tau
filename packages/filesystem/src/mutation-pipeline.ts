@@ -47,12 +47,7 @@ import type {
 import type { MountResolution, MountTable } from '#mount-table.js';
 import type { ChangeEventBus } from '#change-event-bus.js';
 import type { ResourceQueue, ResourceQueueClaim } from '#resource-queue.js';
-import type {
-  ChangeNotification,
-  CrossTabCoordinator,
-  LockClaim,
-  PhysicalAuthority,
-} from '#cross-tab-coordinator.js';
+import type { ChangeNotification, CrossTabCoordinator, LockClaim, PhysicalAuthority } from '#cross-tab-coordinator.js';
 import { normalizeLockClaims } from '#cross-tab-coordinator.js';
 import type { TreeIndexes } from '#tree-index.js';
 import type { WalkOptions } from '#content-ops/walk.js';
@@ -62,13 +57,7 @@ import { readDirectoryEntries } from '#backend/directory-entries.js';
 import { tagEventAuthorities, tagEventOrigin } from '#event-origin-registry.js';
 import { parseRoute } from '#project-routes.js';
 import { applyBatchWithPrimitives, mapRolling } from '#backend/batch.js';
-import type {
-  BatchEntry,
-  BatchReceipt,
-  ChangesetEntry,
-  ChangesetEntryReceipt,
-  ChangesetReceipt,
-} from '#changeset.js';
+import type { BatchEntry, BatchReceipt, ChangesetEntry, ChangesetEntryReceipt, ChangesetReceipt } from '#changeset.js';
 import {
   changesetReceipt,
   inHandBytes,
@@ -78,6 +67,12 @@ import {
   splitChangeset,
 } from '#changeset.js';
 import { PhaseAdmission } from '#changeset-admission.js';
+import {
+  assertBoundedChangeset,
+  isStreamData,
+  occupancyOf as batchOccupancy,
+  toBatchEntry,
+} from '#changeset-provider.js';
 import type { Occupancy } from '#changeset-admission.js';
 
 const maximumCheckedWritePreconditions = 32;
@@ -147,103 +142,18 @@ const abortError = (signal: AbortSignal | undefined): unknown =>
 const toQueueClaims = (claims: readonly LockClaim[]): ResourceQueueClaim[] =>
   claims.map(({ token, shared }) => (shared === true ? { key: token, shared } : { key: token }));
 
-const isStreamData = (data: unknown): data is ReadableStream<Uint8Array<ArrayBuffer>> =>
-  typeof ReadableStream !== 'undefined' && data instanceof ReadableStream;
-
-/**
- * The provider batch entry one changeset entry becomes.
- *
- * @param entry - The changeset entry, its write data already in hand or staged.
- * @param resolution - Where its path (a move's `from`) resolved.
- * @param targetResolution - Where a move's `to` resolved.
- * @returns The batch entry, in provider paths.
- */
-const toBatchEntry = (
-  entry: ChangesetEntry,
-  resolution: MountResolution,
-  targetResolution: MountResolution | undefined,
-): BatchEntry => {
-  switch (entry.op) {
-    case 'write': {
-      const { data } = entry;
-      if (isStreamData(data)) {
-        throw new TypeError('A streamed write must be staged before it is batched.');
-      }
-      return {
-        op: 'write',
-        path: resolution.path,
-        data: typeof data === 'string' ? asBytes(data) : data,
-        ...(entry.mode === undefined ? {} : { mode: entry.mode }),
-        ...(entry.create === undefined ? {} : { create: entry.create }),
-      };
-    }
-    case 'append': {
-      return {
-        op: 'append',
-        path: resolution.path,
-        data: asBytes(entry.data),
-        ...(entry.fenced === undefined ? {} : { fenced: entry.fenced }),
-      };
-    }
-    case 'delete': {
-      return {
-        op: 'delete',
-        path: resolution.path,
-        ...(entry.kind === undefined ? {} : { kind: entry.kind }),
-        ...(entry.recursive === undefined ? {} : { recursive: entry.recursive }),
-      };
-    }
-    case 'move': {
-      if (targetResolution === undefined) {
-        throw new TypeError(`Move to '${entry.to}' has no resolved target.`);
-      }
-      return {
-        op: 'move',
-        from: resolution.path,
-        to: targetResolution.path,
-        ...(entry.replace === undefined ? {} : { replace: entry.replace }),
-      };
-    }
-    case 'mkdir': {
-      return {
-        op: 'mkdir',
-        path: resolution.path,
-        ...(entry.recursive === undefined ? {} : { recursive: entry.recursive }),
-      };
-    }
-  }
-};
-
 /**
  * The footprint one prepared entry leaves on its provider paths.
  *
  * @param prepared - The entry.
  * @returns Its occupancies.
  */
-const occupancyOf = (prepared: Pick<PreparedEntry, 'batch' | 'resolution' | 'targetResolution'>): Occupancy[] => {
-  const { batch, resolution, targetResolution } = prepared;
-  const space = providerSpace(resolution.provider);
-  switch (batch.op) {
-    case 'write': {
-      return [{ space, path: batch.path, kind: 'write' }];
-    }
-    case 'append': {
-      return [{ space, path: batch.path, kind: 'append' }];
-    }
-    case 'mkdir': {
-      return [{ space, path: batch.path, kind: batch.recursive === true ? 'mkdir' : 'write' }];
-    }
-    case 'delete': {
-      return [{ space, path: batch.path, kind: 'destructive' }];
-    }
-    case 'move': {
-      return [
-        { space, path: batch.from, kind: 'destructive' },
-        { space: providerSpace((targetResolution ?? resolution).provider), path: batch.to, kind: 'destructive' },
-      ];
-    }
-  }
-};
+const occupancyOf = (prepared: Pick<PreparedEntry, 'batch' | 'resolution' | 'targetResolution'>): Occupancy[] =>
+  batchOccupancy(
+    prepared.batch,
+    providerSpace(prepared.resolution.provider),
+    providerSpace((prepared.targetResolution ?? prepared.resolution).provider),
+  );
 
 const bytesEqual = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
   left.byteLength === right.byteLength && left.every((value, index) => value === right[index]);
@@ -505,12 +415,7 @@ export class MutationPipeline {
     if (entries.length === 0) {
       return changesetReceipt([]);
     }
-    if (!isBoundedChangeset(entries.map(({ entry }) => entry))) {
-      throw errnoError(
-        'EINVAL',
-        `a changeset holds at most ${String(maximumChangesetEntries)} entries and ${String(maximumChangesetBytes)} bytes; split it with splitChangeset`,
-      );
-    }
+    assertBoundedChangeset(entries.map(({ entry }) => entry));
     signal?.throwIfAborted();
     const staged = entries.some(({ entry }) => entry.op === 'write' && isStreamData(entry.data))
       ? await this._stageStreams(entries)
@@ -675,7 +580,11 @@ export class MutationPipeline {
         if (stat === undefined) {
           failed.push({
             edit,
-            error: causeToMutationError(errnoError('ENOENT', `moved target vanished '${edit.target}'`), edit.source, edit.target),
+            error: causeToMutationError(
+              errnoError('ENOENT', `moved target vanished '${edit.target}'`),
+              edit.source,
+              edit.target,
+            ),
           });
         } else {
           moved.push({ edit, stat });
@@ -1419,9 +1328,7 @@ export class MutationPipeline {
   private async _refreshScoped(resolutions: readonly MountResolution[]): Promise<void> {
     const byProvider = Map.groupBy(resolutions, ({ provider }) => provider);
     await Promise.all(
-      [...byProvider].map(async ([provider, group]) =>
-        provider.refresh?.([...new Set(group.map(({ path }) => path))]),
-      ),
+      [...byProvider].map(async ([provider, group]) => provider.refresh?.([...new Set(group.map(({ path }) => path))])),
     );
   }
 
@@ -1475,7 +1382,7 @@ export class MutationPipeline {
    */
   private _prepare(resolved: ResolvedChangesetEntry): PreparedEntry {
     const { entry, resolution, targetResolution } = resolved;
-    const batch = toBatchEntry(entry, resolution, targetResolution);
+    const batch = toBatchEntry(entry, resolution.path, targetResolution?.path);
     const bytes =
       (batch.op === 'write' || batch.op === 'append') && batch.data instanceof Uint8Array ? batch.data : undefined;
     return {
@@ -1632,12 +1539,17 @@ export class MutationPipeline {
           results = entries.map(() => ({ outcome: 'uncertain', error }));
         }
         for (const [position, index] of group.entries()) {
-          settle(index, results[position] ?? { outcome: 'uncertain', error: new Error('Provider batch lost a receipt.') });
+          settle(
+            index,
+            results[position] ?? { outcome: 'uncertain', error: new Error('Provider batch lost a receipt.') },
+          );
         }
       }),
-      ...indexes.filter((index) => isCrossProvider(index)).map(async (index) => {
-        settle(index, await this._moveAcrossProviders(prepared[index]!));
-      }),
+      ...indexes
+        .filter((index) => isCrossProvider(index))
+        .map(async (index) => {
+          settle(index, await this._moveAcrossProviders(prepared[index]!));
+        }),
     ]);
   }
 

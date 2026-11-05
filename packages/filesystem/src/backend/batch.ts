@@ -181,7 +181,12 @@ export const applyEntryWithPrimitives = async (provider: BatchPrimitives, entry:
         began = true;
         await provider.writeFile(entry.path, bytes);
         if (entry.mode !== undefined) {
-          await provider.setFileMode?.(entry.path, entry.mode);
+          try {
+            await provider.setFileMode?.(entry.path, entry.mode);
+          } catch (error) {
+            /* The bytes landed; only their mode did not. */
+            return { outcome: 'uncertain', error };
+          }
         }
         return { outcome: 'applied', kind: 'file', ...(entry.create === true ? { created: true } : {}) };
       }
@@ -280,5 +285,4 @@ export const applyBatchWithPrimitives = async (
   provider: BatchPrimitives,
   entries: readonly BatchEntry[],
   options?: BatchOptions,
-): Promise<BatchReceipt[]> =>
-  runBatch(entries, options, async (entry) => applyEntryWithPrimitives(provider, entry));
+): Promise<BatchReceipt[]> => runBatch(entries, options, async (entry) => applyEntryWithPrimitives(provider, entry));

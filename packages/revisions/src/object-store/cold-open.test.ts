@@ -554,6 +554,45 @@ describe.runIf(gitToolchainOnPath)('the cold open from a hosted catalogue (D8)',
     expect(record?.parents).toEqual([hosted.parent]);
   });
 
+  it('reads the boundary afresh for each walk: a failed read fails one walk, and another writer is seen', async () => {
+    const filesystem = await createMemoryProvider();
+    const port = createIsomorphicGitRevisionPort({
+      filesystem,
+      http: {
+        request: async () => {
+          throw new Error('No smart HTTP on a cold open.');
+        },
+      },
+      catalogue: { url: () => catalogueUrl, fetch: serve(hosted).fetch },
+    });
+    await port.init({ author: { name: 'Tau', email: 'tau@example.com' } });
+    await port.setRemote({ name: 'origin', url: 'https://api.test/git/project-1.git' });
+    await port.fetch({ remote: 'origin', refs: ['refs/heads/main', 'refs/tags/v1'] });
+    const main = revisionId(hosted.main);
+    const walked = async (): Promise<readonly string[]> => {
+      const log = await port.log({ heads: [main] });
+      return log.map((entry) => entry.id);
+    };
+    const boundary = String(await filesystem.readFile('.git/shallow', 'utf8'));
+
+    /* A read that fails once: that walk fails, and the next one reads the boundary again. */
+    await filesystem.unlink('.git/shallow');
+    await filesystem.mkdir('.git/shallow');
+    await expect(walked()).rejects.toThrow();
+    await filesystem.rmdir('.git/shallow');
+    await filesystem.writeFile('.git/shallow', boundary);
+    expect(await walked()).toEqual([hosted.main]);
+
+    /* Another tab's settle took main off the boundary: this port walks on below it (read through). */
+    await filesystem.writeFile('.git/shallow', `${hosted.tagged}\n`);
+    expect(await walked()).toEqual([hosted.main, hosted.parent, hosted.tagged]);
+
+    /* Between a writer's removal and its rename, the next file is the boundary. */
+    await filesystem.unlink('.git/shallow');
+    await filesystem.writeFile('.git/shallow.lock', `${hosted.main}\n`);
+    expect(await walked()).toEqual([hosted.main]);
+  });
+
   it('never counts a read-through object as held, so an import walks a tree it only read through', async () => {
     const compute = countingCompute();
     const store = await emptyStore(compute, 'through');

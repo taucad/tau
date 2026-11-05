@@ -526,13 +526,11 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
   /*
    * The parents a history walk follows: none for a commit on the shallow
    * boundary, as git walks it, since the store lacks them. Only the walkers
-   * (log, divergence, ancestry, a push's object set) ask this; a revision
-   * read keeps its real parents.
+   * (log, divergence, ancestry, a push's object set) ask this, each with the
+   * boundary it read when it started; a revision read keeps its real parents.
    */
-  const historyParents = async (id: string, commit: DecodedCommit): Promise<readonly string[]> => {
-    const shallow = await readShallow();
-    return shallow.has(id) ? [] : commit.parents;
-  };
+  const historyParents = (shallow: ReadonlySet<string>, id: string, commit: DecodedCommit): readonly string[] =>
+    shallow.has(id) ? [] : commit.parents;
 
   const requireCommit = async (id: RevisionId): Promise<DecodedCommit> => {
     const commit = await commitOf(id);
@@ -699,17 +697,24 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    * remote where its history stops.
    */
   const shallowFile = `${gitdir}/shallow`;
-  const shallowOnDisk = async (): Promise<Set<string>> => {
-    if (!(await gitFiles.exists(shallowFile))) {
-      return new Set();
+  /* The next boundary, whole before the file it replaces is removed (git's own `shallow.lock`). */
+  const shallowNext = `${shallowFile}.lock`;
+  /*
+   * The boundary as it is on disk now: read afresh by every walk and fetch,
+   * never kept, so another tab's settle is seen and a failed read is only that
+   * walk's. Between a writer's removal and its rename, the next file is the
+   * boundary.
+   */
+  const readShallow = async (): Promise<Set<string>> => {
+    for (const path of [shallowFile, shallowNext]) {
+      // oxlint-disable-next-line no-await-in-loop -- the next file is read only when the boundary file is not there.
+      if (await gitFiles.exists(path)) {
+        // oxlint-disable-next-line no-await-in-loop -- as above.
+        const text = await gitFiles.readFile(path, 'utf8');
+        return new Set(text.split('\n').filter((line) => line !== ''));
+      }
     }
-    const text = await gitFiles.readFile(shallowFile, 'utf8');
-    return new Set(text.split('\n').filter((line) => line !== ''));
-  };
-  let shallowCommits: Promise<ReadonlySet<string>> | undefined;
-  const readShallow = async (): Promise<ReadonlySet<string>> => {
-    shallowCommits ??= shallowOnDisk();
-    return shallowCommits;
+    return new Set();
   };
   /*
    * Add `commits` to the boundary, and drop every boundary commit whose
@@ -719,9 +724,8 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    */
   const settleShallow = async (commits: readonly string[]): Promise<void> => {
     await withRefLock(`${filesystem.id}:${gitdir}:shallow`, async () => {
-      const boundary = await shallowOnDisk();
+      const boundary = await readShallow();
       if (boundary.size === 0 && commits.length === 0) {
-        shallowCommits = Promise.resolve(boundary);
         return;
       }
       for (const commit of commits) {
@@ -737,16 +741,23 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           return held.every(Boolean);
         }),
       );
-      const next = new Set([...boundary].filter((_oid, at) => complete[at] !== true));
-      if (next.size === 0) {
-        if (await gitFiles.exists(shallowFile)) {
-          await gitFiles.unlink(shallowFile);
-        }
-      } else {
-        /* Written in place: every writer holds the lock, and a reader outside it reads one line or the next. */
-        await gitFiles.writeFile(shallowFile, `${[...next].toSorted().join('\n')}\n`);
+      const next = [...boundary].filter((_oid, at) => complete[at] !== true);
+      /*
+       * Never written in place, where a reader could find half of it: the next
+       * boundary is written whole beside it, the old one removed, and the next
+       * renamed into its place. A reader between the two reads the next file.
+       */
+      if (next.length > 0) {
+        await gitFiles.writeFile(shallowNext, `${next.toSorted().join('\n')}\n`);
       }
-      shallowCommits = Promise.resolve(next);
+      if (await gitFiles.exists(shallowFile)) {
+        await gitFiles.unlink(shallowFile);
+      }
+      if (next.length > 0) {
+        await gitFiles.rename(shallowNext, shallowFile);
+      } else if (await gitFiles.exists(shallowNext)) {
+        await gitFiles.unlink(shallowNext);
+      }
     });
   };
 
@@ -1260,12 +1271,13 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    * @returns `true` when it does.
    */
   const descendsFrom = async (head: string, ancestor: string): Promise<boolean> => {
+    const shallow = await readShallow();
     const seen = new Set<string>([head]);
     let frontier = [head];
     while (frontier.length > 0) {
       // oxlint-disable-next-line no-await-in-loop -- one generation of parents at a time.
       const lineages = await Promise.all(
-        frontier.map(async (oid) => historyParents(oid, await requireCommit(revisionId(oid)))),
+        frontier.map(async (oid) => historyParents(shallow, oid, await requireCommit(revisionId(oid)))),
       );
       frontier = [];
       for (const parents of lineages) {
@@ -1377,6 +1389,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    * @returns The ids to pack.
    */
   const missingObjects = async (tips: readonly string[], haves: ReadonlySet<string>): Promise<readonly string[]> => {
+    const shallow = await readShallow();
     const send = new Set<string>();
     const entriesOf = async (oid: string): Promise<ReadonlyMap<string, TreeCodecEntry>> => {
       const entries = await treeEntries(oid);
@@ -1414,7 +1427,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       }
       const commit = await requireCommit(revisionId(oid));
       send.add(oid);
-      const lineage = await historyParents(oid, commit);
+      const lineage = historyParents(shallow, oid, commit);
       const parent = lineage[0] === undefined ? undefined : await commitOf(revisionId(lineage[0]));
       await treeObjects(commit.tree, parent?.tree);
       for (const next of lineage) {
@@ -1989,13 +2002,14 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     log: async (input?: RevisionLogInput): Promise<readonly RevisionLogEntry[]> => {
       const references = input?.heads === undefined ? await port.listRefs() : undefined;
       const heads = [...(input?.heads ?? (references ?? []).map((reference) => reference.head))];
+      const shallow = await readShallow();
       // One object read per revision the order needs, and no tree is touched.
       return Object.freeze(
         await walkRevisionLog(
           heads,
           async (id) => {
             const commit = await commitOf(id);
-            const lineage = commit === undefined ? [] : await historyParents(id, commit);
+            const lineage = commit === undefined ? [] : historyParents(shallow, id, commit);
             return commit === undefined
               ? undefined
               : {
@@ -2023,6 +2037,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
      * by thousands of revisions.
      */
     divergence: async (input: RevisionDivergenceInput): Promise<RevisionDivergence> => {
+      const shallow = await readShallow();
       /* Which head reaches each revision read so far. */
       const sides = new Map<string, 'head' | 'base' | 'both'>();
       const nodes = new Map<string, Readonly<{ parents: readonly string[]; seconds: number }>>();
@@ -2035,7 +2050,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         }
         if (!nodes.has(id)) {
           const commit = await requireCommit(revisionId(id));
-          nodes.set(id, { parents: await historyParents(id, commit), seconds: commit.committer.seconds });
+          nodes.set(id, { parents: historyParents(shallow, id, commit), seconds: commit.committer.seconds });
         }
         sides.set(id, joined);
         queue.add(id);

@@ -1,8 +1,7 @@
 /** Private, optional GeoSpec candidate transport; foreign bytes are never proof. */
 import { ImmutableRevisionTree, revisionId } from '@taucad/revisions/algorithms';
-import { readBlob, readTree } from 'isomorphic-git';
 import { sha256Bytes } from '@taucad/utils/hash';
-import type { RootedFileSystem } from '@taucad/filesystem';
+import { createRawObjectReader } from '@taucad/revisions';
 import type { RevisionPort, RevisionPushRef } from '@taucad/revisions';
 import { candidateConsentChannelName, withCandidateConsentLock } from '#lib/geospec-candidate-consent.js';
 
@@ -12,55 +11,8 @@ const candidatePath = (hash: string): string => `candidates/${hash}.json`;
 const candidatePathPattern = /^candidates\/([0-9a-f]{64})\.json$/u;
 const lfsPointer = 'version https://git-lfs.github.com/spec/v1\n';
 const decoder = new TextDecoder('utf-8', { fatal: true });
-type CandidateGitFileSystem = Pick<RootedFileSystem, 'readFile' | 'readdir' | 'stat'>;
-
-/** Read Git objects in the project root without the revision port's LFS smudge. */
-const rawGit = (filesystem: CandidateGitFileSystem) => {
-  const at = (path: string): string =>
-    path
-      .split('/')
-      .filter((segment) => segment !== '' && segment !== '.')
-      .join('/');
-  const stats = async (path: string) => {
-    const stat = await filesystem.stat(at(path));
-    return {
-      size: stat.size,
-      mtimeMs: stat.mtimeMs,
-      isFile: () => stat.type !== 'dir',
-      isDirectory: () => stat.type === 'dir',
-      isSymbolicLink: () => false,
-    };
-  };
-  return {
-    promises: {
-      readFile: async (path: string, encoding?: string | { encoding?: string }) =>
-        (typeof encoding === 'string' ? encoding : encoding?.encoding) === 'utf8'
-          ? filesystem.readFile(at(path), 'utf8')
-          : filesystem.readFile(at(path)),
-      readdir: async (path: string) => filesystem.readdir(at(path)),
-      stat: stats,
-      lstat: stats,
-      writeFile: () => {
-        throw new Error('Candidate Git reader is read-only.');
-      },
-      unlink: () => {
-        throw new Error('Candidate Git reader is read-only.');
-      },
-      mkdir: () => {
-        throw new Error('Candidate Git reader is read-only.');
-      },
-      rmdir: () => {
-        throw new Error('Candidate Git reader is read-only.');
-      },
-      readlink: () => {
-        throw new Error('Candidate Git reader does not follow symlinks.');
-      },
-      symlink: () => {
-        throw new Error('Candidate Git reader is read-only.');
-      },
-    },
-  };
-};
+/** The project's filesystem: its `.git` objects are read raw, without the revision port's LFS smudge. */
+type CandidateGitFileSystem = Parameters<typeof createRawObjectReader>[0];
 
 const requireConsent = async (readConsent: () => Promise<boolean>): Promise<void> => {
   if (!(await readConsent())) {
@@ -80,13 +32,16 @@ export const readCandidateTree = async (
   if (record.parents.length > 0) {
     throw new Error('GeoSpec candidate ref must name a parentless snapshot.');
   }
-  const fs = rawGit(filesystem);
-  const root = await readTree({ fs, gitdir: '.git', oid: record.treeId });
-  const candidateRoot = root.tree[0];
-  if (root.tree.length !== 1 || candidateRoot?.path !== 'candidates' || candidateRoot.type !== 'tree') {
+  const objects = createRawObjectReader(filesystem);
+  const root = (await objects.readTree(record.treeId)) ?? [];
+  const candidateRoot = root[0];
+  if (root.length !== 1 || candidateRoot?.path !== 'candidates' || candidateRoot.type !== 'tree') {
     throw new Error('GeoSpec candidate closure contains a foreign path.');
   }
-  const { tree } = await readTree({ fs, gitdir: '.git', oid: candidateRoot.oid });
+  const tree = await objects.readTree(candidateRoot.oid);
+  if (tree === undefined) {
+    throw new Error('GeoSpec candidate closure is missing an object.');
+  }
   if (tree.length > 32) {
     throw new Error('GeoSpec candidate closure exceeds its entry limit.');
   }
@@ -98,12 +53,15 @@ export const readCandidateTree = async (
       throw new Error('GeoSpec candidate closure contains a foreign object.');
     }
     // oxlint-disable-next-line no-await-in-loop -- Foreign blobs are bounded and read one at a time.
-    const { blob } = await readBlob({ fs, gitdir: '.git', oid: entry.oid });
+    const blob = await objects.readBlob(entry.oid);
+    if (blob === undefined) {
+      throw new Error('GeoSpec candidate closure is missing an object.');
+    }
     total += blob.byteLength;
     if (total > maximumClosureBytes) {
       throw new Error('GeoSpec candidate closure exceeds its byte limit.');
     }
-    entries.push([path, new Uint8Array(blob), '100644']);
+    entries.push([path, blob, '100644']);
   }
   return new ImmutableRevisionTree(entries);
 };

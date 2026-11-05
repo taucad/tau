@@ -546,21 +546,14 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
     case 'agent-write': {
       /* One agent turn: the model's fifty parallel write calls, dispatched
        * together through the host's RPC filesystem as one task issues them. */
-      /* The gate counts what the rooted watch's consumers receive. The rooted
-       * change-set watch (D6) is recorded beside it, for information, until
-       * every rooted consumer receives change sets. */
+      /* The gate counts what a consumer of the rooted watch receives in the
+       * change-set form (D6), the form every production consumer of the hot
+       * write path registers; per-path deliveries are counted by production's
+       * own `watch.pathEvents` counter and gated at zero. */
       let deliveries = 0;
-      let rootedChangeSets = 0;
-      const stopPaths = live.watch({ paths: [''], recursive: true }, () => {
+      const stop = live.watchChangeSets!({ paths: [''], recursive: true }, () => {
         deliveries += 1;
       });
-      const stopChangeSets = live.watchChangeSets!({ paths: [''], recursive: true }, () => {
-        rootedChangeSets += 1;
-      });
-      const stop = (): void => {
-        stopChangeSets();
-        stopPaths();
-      };
       const turn = randomUuid().slice(0, 8);
       const tally: AgentTally = { readdirCalls: 0, reads: 0, binaryBytesRead: 0, textBytesRead: 0 };
       const fileSystem = agentFileSystem(live, tally);
@@ -577,7 +570,11 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
         await quiet(300);
         return {
           ...measured,
-          extra: { ...measured.extra, watchDeliveries: deliveries, rootedChangeSetDeliveries: rootedChangeSets },
+          extra: {
+            ...measured.extra,
+            watchDeliveries: deliveries,
+            pathWatchDeliveries: measured.productionCounters['watch.pathEvents'] ?? 0,
+          },
         };
       } finally {
         stop();

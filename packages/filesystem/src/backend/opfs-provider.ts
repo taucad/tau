@@ -110,6 +110,8 @@ export class OPFSProvider extends FileSystemAccessProvider {
   private _initialized = false;
   /** Whether staged files can move into place; learnt from the first staged file. */
   private _stagedMoves: boolean | undefined;
+  /** This realm's staging directory, looked up once per initialized root. */
+  private _staging: Promise<FileSystemDirectoryHandle> | undefined;
 
   /** Create an uninitialized provider. Call {@link initialize} before use. */
   // oxlint-disable-next-line typescript/no-unsafe-argument -- Placeholder handle is replaced in initialize().
@@ -129,6 +131,7 @@ export class OPFSProvider extends FileSystemAccessProvider {
    */
   public async initialize(): Promise<void> {
     this._initialized = false;
+    this._staging = undefined;
     try {
       this._rootHandle = await navigator.storage.getDirectory();
     } catch (error) {
@@ -350,8 +353,17 @@ export class OPFSProvider extends FileSystemAccessProvider {
       return false;
     }
     const size = data instanceof Blob ? data.size : data.byteLength;
-    const stagingRoot = await this._rootHandle.getDirectoryHandle(opfsStagingDirectory, { create: true });
-    const staging = await stagingRoot.getDirectoryHandle(stagingOwnerId, { create: true });
+    this._staging ??= (async () => {
+      const stagingRoot = await this._rootHandle.getDirectoryHandle(opfsStagingDirectory, { create: true });
+      return stagingRoot.getDirectoryHandle(stagingOwnerId, { create: true });
+    })();
+    let staging: FileSystemDirectoryHandle;
+    try {
+      staging = await this._staging;
+    } catch (error) {
+      this._staging = undefined;
+      throw error;
+    }
     const stagedName = randomUuid();
     const staged = (await staging.getFileHandle(stagedName, { create: true })) as SyncAccessCapableFileHandle &
       MovableFileHandle;
@@ -373,8 +385,8 @@ export class OPFSProvider extends FileSystemAccessProvider {
         } else {
           writeAll(handle, data, 0);
         }
-        handle.truncate(size);
-        handle.flush();
+        /* A fresh staged file needs no truncate, and close persists its bytes
+         * before the move publishes them; a flush per create cost a disk sync each. */
       } finally {
         handle.close();
       }

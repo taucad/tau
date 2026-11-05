@@ -354,10 +354,12 @@ const guardedFetch: typeof globalThis.fetch = async (input, init) => {
     });
   }
   if (pack) {
-    const { buildGenericBodyGlb, parseGenericBodyUrl } = await import('#generic-body.js');
+    const { buildGenericBodyGlb, parseGenericBodyUrl } = await import('#engine/generic-body.js');
     const body = parseGenericBodyUrl(url);
     if (body) {
-      return new Response(await buildGenericBodyGlb(body), { headers: { 'content-type': 'model/gltf-binary' } });
+      // The toolkit's own glTF-Transform, so the engine bundles no second copy.
+      const glb = await buildGenericBodyGlb(body, await import('@gltf-transform/core'));
+      return new Response(glb, { headers: { 'content-type': 'model/gltf-binary' } });
     }
   }
   // A request passes only when every call sharing the trap opted in.
@@ -472,7 +474,7 @@ const modelUrlKeys = [
 // untouched, so exports keep tscircuit's canonical URLs.
 const withPackModels = async (circuitJson: CircuitElement[]): Promise<CircuitElement[]> => {
   const pack = await loadKicadPack();
-  const { genericBodyOf, genericBodyUrl } = await import('#generic-body.js');
+  const { genericBodyOf, genericBodyUrl } = await import('#engine/generic-body.js');
   const ftypes = new Map(
     circuitJson
       .filter((element) => element.type === 'source_component')

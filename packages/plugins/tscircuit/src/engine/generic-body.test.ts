@@ -1,9 +1,17 @@
 /* eslint-disable @typescript-eslint/naming-convention -- circuit JSON field names are snake_case. */
+import * as gltfTransform from '@gltf-transform/core';
 import { WebIO, getBounds } from '@gltf-transform/core';
 import { describe, expect, it } from 'vitest';
 
-import { buildGenericBodyGlb, genericBodyOf, genericBodyUrl, parseGenericBodyUrl } from '#generic-body.js';
-import type { GenericBody } from '#generic-body.js';
+import {
+  buildGenericBodyGlb,
+  genericBodyOf,
+  genericBodyPrefix,
+  genericBodyUrl,
+  parseGenericBodyUrl,
+} from '#engine/generic-body.js';
+import type { GenericBody } from '#engine/generic-body.js';
+import { packModelScheme } from '#kicad-pack.js';
 
 type Element = { type: string } & Record<string, unknown>;
 
@@ -78,6 +86,7 @@ describe('generic bodies', () => {
     const url = genericBodyUrl(body);
     expect(url).toBe('tau-models:generic/moulded/7.5x7.5x3@-0.25,1.glb');
     expect(parseGenericBodyUrl(url)).toEqual(body);
+    expect(genericBodyPrefix.startsWith(packModelScheme)).toBe(true);
     expect(parseGenericBodyUrl('tau-models:kicad/Package_SO/SOIC-8.glb')).toBeUndefined();
     expect(parseGenericBodyUrl('tau-models:generic/glass/1x1x1@0,0.glb')).toBeUndefined();
     expect(parseGenericBodyUrl('tau-models:generic/moulded/0x1x1@0,0.glb')).toBeUndefined();
@@ -86,7 +95,7 @@ describe('generic bodies', () => {
 
   it('builds the body as a closed box in KiCad frame: Z-up millimetres standing on z = 0', async () => {
     const body: GenericBody = { kind: 'ceramic', width: 4, depth: 2, height: 1, x: 0.5, y: -0.5 };
-    const document = await new WebIO().readBinary(await buildGenericBodyGlb(body));
+    const document = await new WebIO().readBinary(await buildGenericBodyGlb(body, gltfTransform));
     const [scene] = document.getRoot().listScenes();
     const bounds = getBounds(scene!);
     expect(bounds.min).toEqual([-1.5, -1.5, 0]);

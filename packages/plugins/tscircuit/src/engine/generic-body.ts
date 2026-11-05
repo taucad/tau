@@ -6,11 +6,12 @@
  * kernel gives each such part a moulded box sized from its courtyard (else its pads) and coloured by
  * its kind, served as a `tau-models:generic/...` GLB in KiCad's frame: Z-up millimetres, the
  * component centre at the origin, the board surface at z = 0.
+ *
+ * It lives in the lazily loaded engine so the toolkit stays small. The kernel hands it the
+ * glTF-Transform classes it already loads, so the engine bundles no second copy.
  */
 
-import { Document, VertexLayout, WebIO } from '@gltf-transform/core';
-
-import { packModelScheme } from '#kicad-pack.js';
+import type * as GltfTransform from '@gltf-transform/core';
 
 /** The finish a generic body reads as: moulded power parts, black IC packages, ceramic, or grey plastic. */
 export type GenericBodyKind = 'moulded' | 'package' | 'ceramic' | 'plastic';
@@ -29,7 +30,8 @@ export type GenericBody = {
 type Element = { readonly type: string } & Record<string, unknown>;
 type Point = { x: number; y: number };
 
-const genericPrefix = `${packModelScheme}generic/`;
+/** The URL prefix of generic bodies, under the pack's `tau-models:` scheme (`kicad-pack.ts`). @public */
+export const genericBodyPrefix = 'tau-models:generic/';
 
 /** Base colours (sRGB) the presentation materials classify as the kind's finish. */
 const kindColors: Readonly<Record<GenericBodyKind, readonly [number, number, number]>> = {
@@ -187,7 +189,7 @@ export const genericBodyOf = (
 
 /** The converter-input URL that names a generic body; the kernel's fetch guard serves it. @public */
 export const genericBodyUrl = (body: GenericBody): string =>
-  `${genericPrefix}${body.kind}/${body.width}x${body.depth}x${body.height}@${body.x},${body.y}.glb`;
+  `${genericBodyPrefix}${body.kind}/${body.width}x${body.depth}x${body.height}@${body.x},${body.y}.glb`;
 
 const genericBodyKinds: readonly GenericBodyKind[] = ['moulded', 'package', 'ceramic', 'plastic'];
 
@@ -195,10 +197,10 @@ const genericUrlPattern = /^(\w+)\/([\d.]+)x([\d.]+)x([\d.]+)@(-?[\d.]+),(-?[\d.
 
 /** The generic body a `tau-models:generic/...` URL names. @public */
 export const parseGenericBodyUrl = (url: string): GenericBody | undefined => {
-  if (!url.startsWith(genericPrefix)) {
+  if (!url.startsWith(genericBodyPrefix)) {
     return undefined;
   }
-  const match = genericUrlPattern.exec(url.slice(genericPrefix.length));
+  const match = genericUrlPattern.exec(url.slice(genericBodyPrefix.length));
   if (!match) {
     return undefined;
   }
@@ -225,12 +227,18 @@ const faces = [
   [2, -1],
 ] as const;
 
+/** The glTF-Transform classes the GLB builder needs, passed in from the caller's own import. */
+export type GltfTransformClasses = Pick<typeof GltfTransform, 'Document' | 'VertexLayout' | 'WebIO'>;
+
 /**
  * A generic body as GLB bytes: one box with flat-shaded faces, its bottom on z = 0.
  *
  * @public
  */
-export const buildGenericBodyGlb = async (body: GenericBody): Promise<Uint8Array<ArrayBuffer>> => {
+export const buildGenericBodyGlb = async (
+  body: GenericBody,
+  { Document, VertexLayout, WebIO }: GltfTransformClasses,
+): Promise<Uint8Array<ArrayBuffer>> => {
   const half = [body.width / 2, body.depth / 2, body.height / 2];
   const centre = [body.x, body.y, body.height / 2];
   const positions: number[] = [];

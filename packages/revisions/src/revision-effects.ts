@@ -131,7 +131,7 @@ import type {
 import type { RemoteStorage } from '#remote.types.js';
 import { isHostLocalRef, remoteKindOf, remoteOf, remoteTrackingRef, tauRemoteName } from '#remotes.js';
 import type { RevisionStreamMove } from '#revision-stream.js';
-import { controlPlaneFiles, writeControlRecord } from '#control-plane-records.js';
+import { controlPlaneFiles, readControlRecord, writeControlRecord } from '#control-plane-records.js';
 import { createSyncQueue } from '#sync-queue.js';
 import { createOpsLog, opsRefName, opsRefPrefix, undoCandidates } from '#ops-ref.js';
 import { restoreMachine } from '#restore.machine.js';
@@ -2059,10 +2059,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    */
   const readRemovedCheckouts = async (): Promise<ReadonlySet<string>> => {
     const records = controlPlaneFiles(await recordsFileSystem());
-    if (!(await records.exists(removedCheckoutsPath))) {
+    const text = await readControlRecord(records, removedCheckoutsPath);
+    if (text === undefined) {
       return new Set();
     }
-    const text = await records.readFile(removedCheckoutsPath, 'utf8');
     let stored: unknown;
     try {
       stored = JSON.parse(text);

@@ -5,7 +5,7 @@
  * the records filesystem and the single-writer chain it owns itself.
  */
 import type { SyncQueueEntry, SyncQueueRecord } from '#sync.types.js';
-import { controlPlaneFiles, writeControlRecord } from '#control-plane-records.js';
+import { controlPlaneFiles, readControlRecord, writeControlRecord } from '#control-plane-records.js';
 import type { RevisionFileSystem } from '#revision-effects.types.js';
 
 /**
@@ -47,7 +47,7 @@ export const createSyncQueue = (
   const readPendingQueue = async (): Promise<SyncQueueRecord> => {
     const records = controlPlaneFiles(await recordsFileSystem());
     try {
-      const stored: unknown = JSON.parse(await records.readFile(syncQueuePath, 'utf8'));
+      const stored: unknown = JSON.parse((await readControlRecord(records, syncQueuePath)) ?? '{}');
       const entries: unknown = (stored as { entries?: unknown }).entries;
       return { version: 1, entries: Array.isArray(entries) ? entries.filter((entry) => isQueueEntry(entry)) : [] };
     } catch {

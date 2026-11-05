@@ -27,6 +27,7 @@ import { graphicsMachine } from '#machines/graphics.machine.js';
 import type * as threeContextModule from '#graphics/three/three-context.jsx';
 import type { ThreeProvider } from '#graphics/three/three-context.jsx';
 import type * as rendererModule from '#graphics/three/renderer.js';
+import type * as softwareRasterizerModule from '#graphics/three/utils/software-rasterizer.js';
 import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
 import { defaultPostProcessingSettings } from '#graphics/three/post-processing-settings.js';
 import { defaultViewerEnvironment, ViewerEnvironmentProvider } from '#environment/viewer-environment.jsx';
@@ -46,14 +47,17 @@ declare module 'vitest' {
 }
 
 /*
- * I2: THE ONLY ALTERATION OF THE PRODUCTION VIEWER PIPELINE. On a software adapter (SwiftShader in CI)
- * `rendererUsesSoftwareRasterizer` is true, which disables GTAO, FXAA and speculative camera preparation
+ * I2: THE ONLY ALTERATION OF THE PRODUCTION VIEWER PIPELINE, software profile only. On a software adapter (SwiftShader
+ * in CI) `rendererUsesSoftwareRasterizer` is true, which disables GTAO, FXAA and speculative camera preparation
  * (post-processing.tsx) and drops the environment cubemap from 512 to 64 (react/lights.tsx). Mocking it false makes
- * the software GPU run the hardware pipeline: AO on, FXAA on, 512 environment.
+ * the software GPU run the hardware pipeline: AO on, FXAA on, 512 environment. The hardware profile (a real GPU,
+ * charter D7) keeps the production gate, and the capture refuses a frame that gate calls software.
  */
-vi.mock('#graphics/three/utils/software-rasterizer.js', () => ({
-  rendererUsesSoftwareRasterizer: (): boolean => false,
-}));
+vi.mock('#graphics/three/utils/software-rasterizer.js', async (importOriginal) =>
+  inject('webGpuProfile') === 'software'
+    ? { rendererUsesSoftwareRasterizer: (): boolean => false }
+    : importOriginal<typeof softwareRasterizerModule>(),
+);
 
 let state: RootState | undefined;
 let frames = 0;
@@ -109,6 +113,7 @@ afterEach(async () => {
 });
 
 const config = inject('parity');
+const webGpuProfile = inject('webGpuProfile');
 const width = 768;
 const height = 576;
 const settleInvalidations = 20;
@@ -267,6 +272,14 @@ it.each(cases)('should capture the viewer frame of %s on %s with ao=%s', async (
     // A WebGPU capture that fell back to WebGL2 is not a WebGPU reference.
     expect(isWebGpuBackend, 'WebGPU capture fell back to WebGL2').toBe(true);
   }
+  // The production gate's own answer, whatever the software profile mocks.
+  const { rendererUsesSoftwareRasterizer } = await vi.importActual<typeof softwareRasterizerModule>(
+    '#graphics/three/utils/software-rasterizer.js',
+  );
+  const softwareAdapter = rendererUsesSoftwareRasterizer(renderer);
+  if (webGpuProfile === 'hardware') {
+    expect(softwareAdapter, 'the hardware profile rendered on a software adapter').toBe(false);
+  }
   let pixels: Uint8ClampedArray = new Uint8ClampedArray();
   for (let sample = 0; sample < captureSamples; sample++) {
     // oxlint-disable-next-line eslint/no-await-in-loop -- Frames are captured one after another; the last one is kept.
@@ -310,7 +323,9 @@ it.each(cases)('should capture the viewer frame of %s on %s with ao=%s', async (
         adapter,
         // eslint-disable-next-line @typescript-eslint/naming-convention -- Three's own flag name, read by the gate.
         isWebGPUBackend: isWebGpuBackend,
-        softwareRasterizerGate: 'mocked false (I2)',
+        profile: webGpuProfile,
+        softwareAdapter,
+        softwareRasterizerGate: webGpuProfile === 'software' ? 'mocked false (I2)' : 'production',
         userAgent: navigator.userAgent,
       },
       undefined,

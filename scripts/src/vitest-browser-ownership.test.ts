@@ -218,7 +218,8 @@ describe('Vitest Browser test-runner ownership', () => {
     // The clean-host Mac acceptance workflow installs the Chromium its browser download uses.
     // The PicoGK browser archive workflow installs the one engine each parity leg measures the browser
     // runtime in, which Browser Mode cannot host.
-    // The viewer parity workflow installs the Chromium its viewer-reference capture runs in (Vitest Browser Mode).
+    // The viewer parity workflow installs the Chromium its viewer-reference capture runs in (Vitest Browser Mode), and
+    // its real-GPU check installs the same Chromium on the operator's Mac.
     expect(installFiles.sort()).toEqual(
       [
         '.agents/skills/create-repo/templates/ci.yml',
@@ -238,6 +239,7 @@ describe('Vitest Browser test-runner ownership', () => {
         'apps/docs/project.json',
         'apps/ui/scripts/check-asset-integrity.mts',
         'apps/www/README.md',
+        'libs/tau-examples/scripts/viewer-parity-hardware.sh',
       ].sort(),
     );
   });
@@ -283,8 +285,10 @@ describe('Vitest Browser test-runner ownership', () => {
 
   it('launches every Vitest Playwright Chromium instance through managed full Chromium', () => {
     // Headed on request: SwiftShader WebGPU presents only in headed Chromium (under Xvfb in CI). Headless loses the
-    // device on its first present and the viewer falls back to WebGL2, which the parity capture refuses.
+    // device on its first present and the viewer falls back to WebGL2, which the parity capture refuses. The parity
+    // gate's WASM pass runs headed only in the real-GPU check on macOS, beside the headed viewer capture.
     const headedConfigs = new Set([
+      'libs/tau-examples/vitest.viewer-parity.config.ts',
       'packages/viewer/src/graphics/three/viewer-parity-capture.vitest.browser.config.ts',
     ]);
     const configs = vitestPlaywrightConfigs();

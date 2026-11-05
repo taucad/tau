@@ -19,6 +19,8 @@ import {
  * Inputs are documented in scripts/viewer-parity.gate.test.ts. The WASM pass also reads:
  *   TAU_E2E_WEBGPU_PROFILE  software (SwiftShader, CI) | hardware (default)
  *   PARITY_CHROMIUM         Chromium executable (default: Playwright's Chromium)
+ *   PARITY_HEADED           1 runs Chromium headed with --ignore-gpu-blocklist, as the real-GPU check
+ *                           (scripts/viewer-parity-hardware.sh) does on macOS, where the viewer capture is headed too
  */
 const webGpuProfile = process.env['TAU_E2E_WEBGPU_PROFILE'] ?? 'hardware';
 if (webGpuProfile !== 'hardware' && webGpuProfile !== 'software') {
@@ -54,6 +56,7 @@ const resolveWasmEntry = (): ViewerParityNanorasterEntry | Readonly<{ unavailabl
 };
 const wasm = resolveWasmEntry();
 const executablePath = process.env['PARITY_CHROMIUM'];
+const headed = process.env['PARITY_HEADED'] === '1';
 
 export default defineConfig({
   test: {
@@ -86,14 +89,16 @@ export default defineConfig({
           browser: {
             enabled: true,
             // The renderer reads its frames back from an offscreen target and never presents, so headless SwiftShader
-            // WebGPU keeps its device (the viewer capture, which presents to a canvas, needs a headed browser).
-            headless: true,
+            // WebGPU keeps its device (the viewer capture, which presents to a canvas, needs a headed browser). The
+            // real-GPU check runs headed on request, so the WASM build binds the same GPU the viewer capture did.
+            headless: !headed,
             provider: playwright({
               launchOptions: {
                 ...(executablePath ? { executablePath } : { channel: 'chromium' }),
                 args: [
                   '--enable-unsafe-webgpu',
                   ...(webGpuProfile === 'software' ? ['--use-webgpu-adapter=swiftshader'] : []),
+                  ...(headed ? ['--ignore-gpu-blocklist'] : []),
                 ],
               },
             }),

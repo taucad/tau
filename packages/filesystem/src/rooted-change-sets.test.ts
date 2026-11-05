@@ -73,7 +73,7 @@ describe('rooted change-set watches (D6)', () => {
     }
   });
 
-  it('masks a composed view\'s change sets like its per-path watch', async () => {
+  it("masks a composed view's change sets like its per-path watch", async () => {
     const context = await projectContext();
     const rooted = context.service.createRootedFileSystem(`/projects/${projectId}`);
     const view = composeView({ filesystem: rooted }, { consumer: 'agent', policy: tauPathPolicy });
@@ -93,6 +93,36 @@ describe('rooted change-set watches (D6)', () => {
       expect(sets).toHaveLength(1);
       expect(sets[0]!.entries.map((entry) => entry.path)).toEqual(['visible.ts']);
       expect(sets[0]!.touchedDirectories).not.toContain('.git');
+    } finally {
+      stop();
+      context.service.dispose();
+    }
+  });
+
+  it('lifts a reset of a hidden directory to the nearest directory the view shows', async () => {
+    const context = await projectContext();
+    const rooted = context.service.createRootedFileSystem(`/projects/${projectId}`);
+    let deliver: ((set: ChangeSet) => void) | undefined;
+    const base: typeof rooted = Object.assign(Object.create(rooted) as typeof rooted, {
+      watchChangeSets: (_request: unknown, handler: (set: ChangeSet) => void) => {
+        deliver = handler;
+        return () => undefined;
+      },
+    });
+    const view = composeView({ filesystem: base }, { consumer: 'agent', policy: tauPathPolicy });
+    const sets: ChangeSet[] = [];
+    const stop = view.watchChangeSets!({ paths: [''], recursive: true }, (set) => {
+      sets.push(set);
+    });
+    try {
+      const empty = { entries: [], touchedDirectories: [] };
+      deliver!({ generation: 1, ...empty, reset: { prefix: '.git/objects/ab', reason: 'observer-uncertain' } });
+      deliver!({ generation: 2, ...empty, reset: { prefix: 'src/lib', reason: 'overflow' } });
+
+      expect(sets.map(({ reset }) => reset)).toEqual([
+        { prefix: '', reason: 'observer-uncertain' },
+        { prefix: 'src/lib', reason: 'overflow' },
+      ]);
     } finally {
       stop();
       context.service.dispose();

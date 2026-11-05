@@ -336,10 +336,21 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     return from ? { op: 'deleted', path: entry.oldPath, kind: entry.kind } : undefined;
   };
 
+  /** The nearest ancestor-or-self of `path` this view shows, so a reset never names a hidden directory. */
+  const visibleAncestor = (path: string): string => {
+    let current = path;
+    while (current !== '' && current !== '/' && hidden(current)) {
+      const separator = current.lastIndexOf('/');
+      current = separator > 0 ? current.slice(0, separator) : current.startsWith('/') ? '/' : '';
+    }
+    return current;
+  };
+
   /** A change set with every hidden fact removed; `undefined` when nothing visible is left. */
   const visibleSet = (set: ChangeSet): ChangeSet | undefined => {
     if (set.reset !== undefined) {
-      return set;
+      const prefix = visibleAncestor(set.reset.prefix);
+      return prefix === set.reset.prefix ? set : { ...set, reset: { ...set.reset, prefix } };
     }
     const entries = set.entries.flatMap((entry) => visibleEntry(entry) ?? []);
     if (entries.length === 0) {

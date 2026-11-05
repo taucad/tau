@@ -377,7 +377,18 @@ export class MutationPipeline {
   private readonly _treeIndexes: TreeIndexes;
   /** Convenience entries this task is coalescing into one changeset, per origin (D22). */
   private readonly _pending = new Map<string, PendingChangeset>();
-  /** The highest fencing token applied per record-log path (D23); a lower one is a stale writer. */
+  /**
+   * The highest fencing token applied per record-log path (D23); a lower one is a stale writer.
+   *
+   * Limits: the map lives in this authority's memory only. It is not
+   * persisted, so a restarted authority (a reload, a new worker) forgets every
+   * token and accepts the first token it sees per path again; it is not shared
+   * between authorities, so two tabs each with their own authority do not see
+   * each other's tokens. Across both, the expected-length check still refuses
+   * an append that would interleave, since it reads the file itself. Entries are
+   * never evicted: one number per log path fenced in this authority's lifetime,
+   * which is one per chat segment opened, not per append.
+   */
   private readonly _appendFences = new Map<string, number>();
 
   /**

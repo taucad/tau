@@ -261,7 +261,7 @@ describe('headless capture adapter', () => {
         width: 1600,
         height: 1600,
         lineWidth: Math.hypot(1600, 1600) / 960,
-        lineColor: '#868686',
+        lineColor: '#000000',
         lines: false,
       },
     });
@@ -282,7 +282,7 @@ describe('headless capture adapter', () => {
         width: 2400,
         height: 1350,
         lineWidth: Math.hypot(2400, 1350) / 960,
-        lineColor: '#868686',
+        lineColor: '#000000',
         toneMapping: 'neutral',
         ao: { intensity: 0.75, distanceFalloff: 1, samples: 16, resolutionScale: 0.5 },
         lighting: {

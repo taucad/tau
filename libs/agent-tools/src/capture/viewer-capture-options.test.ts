@@ -11,7 +11,7 @@ describe('buildViewerCaptureImageOptions', () => {
   it('should reproduce the dark-scheme viewer at the 768×576 reference frame', () => {
     expect(buildViewerCaptureImageOptions({ width: 768, height: 576, colorScheme: 'dark' })).toStrictEqual({
       lineWidth: 1,
-      lineColor: '#868686',
+      lineColor: '#000000',
       ao: {
         radiusPixels: 960 * 0.01,
         intensity: 0.75,

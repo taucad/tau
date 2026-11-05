@@ -257,7 +257,7 @@ describe('PartThumbnailService', () => {
         height: 1536,
         quality: 0.95,
         lineWidth: 6,
-        lineColor: '#868686',
+        lineColor: '#000000',
         toneMapping: 'neutral',
         views: [
           {

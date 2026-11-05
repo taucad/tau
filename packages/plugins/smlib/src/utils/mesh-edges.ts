@@ -30,9 +30,10 @@ export type BoundarySource = {
  *
  * A triangle edge is on a B-rep edge where the triangles either side of it belong to different
  * faces, or where only one triangle uses it (the border of a sheet). Those segments are chained
- * between B-rep vertices and branch points, and each chain is given to the B-rep edge nearest an
- * interior point of it. A chain farther than the tolerance from every edge (a misclassified
- * triangle) is left out.
+ * between B-rep vertices and branch points. A chain is given to the one B-rep edge that joins the
+ * same two vertices; where several do (two arcs between one pair of vertices) or its ends are not
+ * vertices, to the edge nearest an interior point of it. Most chains so cost no kernel call. A chain
+ * farther than the tolerance from every edge (a misclassified triangle) is left out.
  *
  * @param source - The mesh, its triangles' faces, the body's edges and vertices, and the chord tolerance.
  * @returns The polylines found for each edge id; an edge the mesh does not bound has none.
@@ -49,51 +50,76 @@ export function meshBoundaryPolylines(source: BoundarySource): Map<number, numbe
     }
   }
   const reach = Math.max(tolerance * 1e-2, 1e-6);
-  for (const point of nearestBoundaryPoints(points, [...adjacency.keys()], { vertices, reach })) {
-    stops.add(point);
+  const vertexAt = vertexLocator(vertices, reach);
+  const pointVertex = new Map<number, number>();
+  for (const point of adjacency.keys()) {
+    const vertex = vertexAt(points[point * 3]!, points[point * 3 + 1]!, points[point * 3 + 2]!);
+    if (vertex >= 0) {
+      stops.add(point);
+      pointVertex.set(point, vertex);
+    }
   }
 
   const result = new Map<number, number[][][]>();
   if (adjacency.size === 0 || edges.length === 0) {
     return result;
   }
-  const margin = 2 * tolerance + 1e-6;
-  const boxes = edges.map((edge) => {
-    const box = edge.bbox();
-    return {
-      low: box.min.toArray().map((value) => value - margin),
-      high: box.max.toArray().map((value) => value + margin),
-    };
-  });
-  const position = (point: number): number[] => [points[point * 3]!, points[point * 3 + 1]!, points[point * 3 + 2]!];
-  const assign = (chain: number[]): void => {
-    if (chain.length < 2) {
-      return;
+  const endsKey = (a: number, b: number): string => (a < b ? `${a}:${b}` : `${b}:${a}`);
+  const byEnds = new Map<string, number[]>();
+  for (const [edgeId, edge] of edges.entries()) {
+    const ends = edgeEnds(edge).map(([x, y, z]) => vertexAt(x!, y!, z!));
+    if (ends.length === 2 && ends[0]! >= 0 && ends[1]! >= 0) {
+      const key = endsKey(ends[0]!, ends[1]!);
+      byEnds.set(key, [...(byEnds.get(key) ?? []), edgeId]);
     }
+  }
+  const margin = 2 * tolerance + 1e-6;
+  const boxes = new Map<number, { low: number[]; high: number[] }>();
+  const boxOf = (edgeId: number): { low: number[]; high: number[] } => {
+    let box = boxes.get(edgeId);
+    if (!box) {
+      const { min, max } = edges[edgeId]!.bbox();
+      box = { low: min.toArray().map((value) => value - margin), high: max.toArray().map((value) => value + margin) };
+      boxes.set(edgeId, box);
+    }
+    return box;
+  };
+  const position = (point: number): number[] => [points[point * 3]!, points[point * 3 + 1]!, points[point * 3 + 2]!];
+  const nearestEdge = (chain: number[], candidates: readonly number[]): number => {
     const middle = Math.floor(chain.length / 2);
     const probe =
       chain.length > 2
         ? position(chain[middle]!)
         : position(chain[0]!).map((value, axis) => (value + position(chain[1]!)[axis]!) / 2);
     let best = -1;
-    let nearest = Number.POSITIVE_INFINITY;
-    for (const [edgeId, edge] of edges.entries()) {
-      const { low, high } = boxes[edgeId]!;
-      if (!probe.every((value, axis) => value >= low[axis]! && value <= high[axis]!)) {
-        continue;
-      }
-      const distance = edge.distanceTo(probe);
-      if (distance < nearest) {
-        nearest = distance;
-        best = edgeId;
+    let nearest = margin;
+    for (const edgeId of candidates) {
+      const { low, high } = boxOf(edgeId);
+      if (probe.every((value, axis) => value >= low[axis]! && value <= high[axis]!)) {
+        const distance = edges[edgeId]!.distanceTo(probe);
+        if (distance <= nearest) {
+          nearest = distance;
+          best = edgeId;
+        }
       }
     }
-    if (best < 0 || nearest > margin) {
+    return best;
+  };
+  const everyEdge = edges.map((_, edgeId) => edgeId);
+  const assign = (chain: number[]): void => {
+    if (chain.length < 2) {
       return;
     }
-    const polylines = result.get(best) ?? [];
+    const first = pointVertex.get(chain[0]!);
+    const last = pointVertex.get(chain.at(-1)!);
+    const joining = first === undefined || last === undefined ? [] : (byEnds.get(endsKey(first, last)) ?? []);
+    const edgeId = joining.length === 1 ? joining[0]! : nearestEdge(chain, joining.length > 1 ? joining : everyEdge);
+    if (edgeId < 0) {
+      return;
+    }
+    const polylines = result.get(edgeId) ?? [];
     polylines.push(chain.map((point) => position(point)));
-    result.set(best, polylines);
+    result.set(edgeId, polylines);
   };
 
   const visited = new Set<number>();
@@ -188,29 +214,34 @@ function weld(mesh: BoundaryMesh): { points: number[]; corners: Uint32Array } {
  * @returns The boundary points and their neighbours, in mesh order.
  */
 function boundaryAdjacency(corners: Uint32Array, owners: ArrayLike<number>, pointCount: number): Map<number, number[]> {
-  type Use = { a: number; b: number; owner: number; count: number; boundary: boolean };
-  const uses = new Map<number, Use>();
-  for (let triangle = 0; triangle < corners.length / 3; triangle++) {
-    const owner = owners[triangle]!;
-    for (const [from, to] of [
-      [0, 1],
-      [1, 2],
-      [2, 0],
-    ] as const) {
-      const a = corners[triangle * 3 + from]!;
-      const b = corners[triangle * 3 + to]!;
-      if (a === b) {
-        continue;
-      }
-      const key = a < b ? a * pointCount + b : b * pointCount + a;
-      const use = uses.get(key);
-      if (use === undefined) {
-        uses.set(key, { a: Math.min(a, b), b: Math.max(a, b), owner, count: 1, boundary: false });
-      } else {
-        use.count += 1;
-        use.boundary ||= use.owner !== owner;
-      }
+  // One slot per distinct segment, in typed arrays: a mesh has about three segments per two triangles.
+  const slots = new Map<number, number>();
+  const capacity = corners.length;
+  const ends = new Uint32Array(capacity * 2);
+  const firstOwner = new Float64Array(capacity);
+  const uses = new Uint32Array(capacity);
+  const mixed = new Uint8Array(capacity);
+  for (let corner = 0; corner < corners.length; corner++) {
+    const owner = owners[Math.floor(corner / 3)]!;
+    const a = corners[corner]!;
+    const b = corners[corner % 3 === 2 ? corner - 2 : corner + 1]!;
+    if (a === b) {
+      continue;
     }
+    const low = Math.min(a, b);
+    const high = Math.max(a, b);
+    const key = low * pointCount + high;
+    let slot = slots.get(key);
+    if (slot === undefined) {
+      slot = slots.size;
+      slots.set(key, slot);
+      ends[slot * 2] = low;
+      ends[slot * 2 + 1] = high;
+      firstOwner[slot] = owner;
+    } else if (firstOwner[slot] !== owner) {
+      mixed[slot] = 1;
+    }
+    uses[slot]! += 1;
   }
   const adjacency = new Map<number, number[]>();
   const link = (from: number, to: number): void => {
@@ -221,61 +252,59 @@ function boundaryAdjacency(corners: Uint32Array, owners: ArrayLike<number>, poin
       adjacency.set(from, [to]);
     }
   };
-  for (const { a, b, count, boundary } of uses.values()) {
-    if (boundary || count === 1) {
-      link(a, b);
-      link(b, a);
+  for (let slot = 0; slot < slots.size; slot++) {
+    if (mixed[slot] === 1 || uses[slot] === 1) {
+      link(ends[slot * 2]!, ends[slot * 2 + 1]!);
+      link(ends[slot * 2 + 1]!, ends[slot * 2]!);
     }
   }
   return adjacency;
 }
 
 /**
- * The boundary point at each B-rep vertex, where one edge's samples end and the next one's begin.
- * @param points - Welded positions.
- * @param boundary - The boundary points.
- * @param near - The body's vertices, and how far a sample may sit from its vertex.
- * @returns The boundary point nearest each vertex, within reach.
+ * Where an edge starts and ends.
+ * @param edge - The edge.
+ * @returns Its two end points, or none when the kernel cannot give them.
  */
-function nearestBoundaryPoints(
-  points: readonly number[],
-  boundary: readonly number[],
-  near: { vertices: readonly SmlibModule.Vertex[]; reach: number },
-): number[] {
-  const { vertices, reach } = near;
-  if (vertices.length === 0 || boundary.length === 0) {
+function edgeEnds(edge: SmlibModule.Edge): number[][] {
+  try {
+    return [edge.start.toArray(), edge.end.toArray()];
+  } catch {
     return [];
   }
-  const cellKey = (x: number, y: number, z: number): string =>
-    `${Math.floor(x / reach)},${Math.floor(y / reach)},${Math.floor(z / reach)}`;
+}
+
+/**
+ * Find a B-rep vertex by position: a grid of the vertices, searched in the 27 cells around a point.
+ * @param vertices - The body's vertices.
+ * @param reach - How far a point may sit from its vertex.
+ * @returns A lookup from a position to the index of the vertex within reach of it, or -1.
+ */
+function vertexLocator(
+  vertices: readonly SmlibModule.Vertex[],
+  reach: number,
+): (x: number, y: number, z: number) => number {
+  const cell = (value: number): number => Math.floor(value / reach);
   const grid = new Map<string, number[]>();
-  for (const point of boundary) {
-    const key = cellKey(points[point * 3]!, points[point * 3 + 1]!, points[point * 3 + 2]!);
-    grid.set(key, [...(grid.get(key) ?? []), point]);
+  const positions = vertices.map((vertex) => [vertex.x, vertex.y, vertex.z]);
+  for (const [index, [x, y, z]] of positions.entries()) {
+    const key = `${cell(x!)},${cell(y!)},${cell(z!)}`;
+    grid.set(key, [...(grid.get(key) ?? []), index]);
   }
   const offsets = [-1, 0, 1].flatMap((dx) => [-1, 0, 1].flatMap((dy) => [-1, 0, 1].map((dz) => [dx, dy, dz])));
-  const found: number[] = [];
-  for (const vertex of vertices) {
-    const at = [vertex.x, vertex.y, vertex.z];
-    const candidates = offsets.flatMap(
-      ([dx, dy, dz]) => grid.get(cellKey(at[0]! + dx! * reach, at[1]! + dy! * reach, at[2]! + dz! * reach)) ?? [],
-    );
+  return (x, y, z) => {
     let best = -1;
     let nearest = reach;
-    for (const point of candidates) {
-      const distance = Math.hypot(
-        points[point * 3]! - at[0]!,
-        points[point * 3 + 1]! - at[1]!,
-        points[point * 3 + 2]! - at[2]!,
-      );
-      if (distance <= nearest) {
-        nearest = distance;
-        best = point;
+    for (const [dx, dy, dz] of offsets) {
+      for (const index of grid.get(`${cell(x) + dx!},${cell(y) + dy!},${cell(z) + dz!}`) ?? []) {
+        const [vx, vy, vz] = positions[index]!;
+        const distance = Math.hypot(vx! - x, vy! - y, vz! - z);
+        if (distance <= nearest) {
+          nearest = distance;
+          best = index;
+        }
       }
     }
-    if (best >= 0) {
-      found.push(best);
-    }
-  }
-  return found;
+    return best;
+  };
 }

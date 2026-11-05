@@ -1030,6 +1030,22 @@
       "owner": "revisions memory"
     },
     {
+      "id": "M13",
+      "bound": "compute worker heartbeat: while calls are held, ping on an interval and take a worker silent for the whole window as gone",
+      "site": "packages/revisions/src/compute-worker/supervisor.ts",
+      "token": "beat ??= setInterval",
+      "class": "Liveness",
+      "owner": "revisions compute worker"
+    },
+    {
+      "id": "M14",
+      "bound": "read-through miss batching: one macrotask yield gathers a turn's misses into one Range request",
+      "site": "packages/revisions/src/object-store/object-store.ts",
+      "token": "setTimeout(resolve, 0)",
+      "class": "Debounce",
+      "owner": "revisions memory"
+    },
+    {
       "id": "CLI-AUTH-HTTP",
       "bound": "15-second HTTP deadline for CLI authentication requests, combined with caller cancellation",
       "site": "packages/cli/src/auth.ts",

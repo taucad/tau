@@ -16,6 +16,9 @@ import { lineAlphabet } from '@tscircuit/alphabet';
 import type { CrossSection, ManifoldToplevel, Vec2 } from '@tscircuit/manifold-2d';
 import { allExtensions } from '@taucad/geometry-core';
 
+import type { Rgb } from '#board-colors.js';
+import { boardColorsOf, lighten } from '#board-colors.js';
+
 // =============================================================================
 // Style
 // =============================================================================
@@ -29,68 +32,19 @@ export type BoardPresentationOptions = {
   finish?: BoardFinish;
 };
 
-type Rgb = readonly [number, number, number];
-
-const solderMaskPresets: Record<string, Rgb> = {
-  green: [0.03, 0.27, 0.12],
-  red: [0.55, 0.05, 0.05],
-  blue: [0.03, 0.12, 0.42],
-  purple: [0.27, 0.07, 0.42],
-  black: [0.035, 0.035, 0.04],
-  white: [0.9, 0.9, 0.88],
-  yellow: [0.85, 0.7, 0.05],
-};
-
-const silkscreenPresets: Record<string, Rgb> = {
-  white: [0.93, 0.93, 0.9],
-  black: [0.04, 0.04, 0.04],
-  yellow: [0.92, 0.82, 0.2],
-};
-
 const finishColors: Record<BoardFinish, { color: Rgb; roughness: number }> = {
   enig: { color: [0.98, 0.78, 0.42], roughness: 0.24 },
   hasl: { color: [0.86, 0.87, 0.88], roughness: 0.3 },
   bare: { color: [0.85, 0.47, 0.32], roughness: 0.3 },
 };
 
-/** sRGB (0–1) to linear, as glTF base colours are linear. */
-const toLinear = (value: number): number => (value <= 0.040_45 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+/** Converts sRGB (0–1) to linear, as glTF base colours are linear. */
+const toLinear = (value: number): number => (value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
 const linear = (rgb: Rgb): [number, number, number, number] => [
   toLinear(rgb[0]),
   toLinear(rgb[1]),
   toLinear(rgb[2]),
   1,
-];
-
-const parseCssColor = (value: unknown, presets: Record<string, Rgb>): Rgb | undefined => {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const key = value.trim().toLowerCase();
-  const preset = presets[key];
-  if (preset) {
-    return preset;
-  }
-  const hex = /^#([\da-f]{6})$/u.exec(key)?.[1];
-  if (hex) {
-    return [
-      Number.parseInt(hex.slice(0, 2), 16) / 255,
-      Number.parseInt(hex.slice(2, 4), 16) / 255,
-      Number.parseInt(hex.slice(4, 6), 16) / 255,
-    ];
-  }
-  const rgb = /^rgba?\(([^)]+)\)$/u.exec(key)?.[1];
-  if (rgb) {
-    const [r = 0, g = 0, b = 0] = rgb.split(',').map((part) => Number.parseFloat(part) / 255);
-    return [r, g, b];
-  }
-  return undefined;
-};
-
-const lighten = (rgb: Rgb, amount: number): Rgb => [
-  rgb[0] + (1 - rgb[0]) * amount,
-  rgb[1] + (1 - rgb[1]) * amount,
-  rgb[2] + (1 - rgb[2]) * amount,
 ];
 
 // =============================================================================
@@ -130,7 +84,7 @@ const pointsOf = (value: unknown): Point[] =>
     : [];
 
 const layersOf = (element: Element): Side[] => {
-  const layers = element['layers'];
+  const { layers } = element;
   if (Array.isArray(layers)) {
     return (['top', 'bottom'] as const).filter((side) => layers.includes(side));
   }
@@ -144,6 +98,7 @@ const layersOf = (element: Element): Side[] => {
 type Shapes = {
   readonly m: ManifoldToplevel;
   circle: (x: number, y: number, radius: number) => CrossSection;
+  // oxlint-disable-next-line eslint/max-params -- a rectangle's centre, size, rotation and corner radius, as Manifold takes them.
   rect: (x: number, y: number, width: number, height: number, rotation?: number, radius?: number) => CrossSection;
   polygon: (points: Point[]) => CrossSection | undefined;
   stroke: (points: Point[], width: number) => CrossSection | undefined;
@@ -151,9 +106,8 @@ type Shapes = {
 };
 
 const createShapes = (m: ManifoldToplevel): Shapes => {
-  const { CrossSection: crossSection } = m;
   const empty = (): CrossSection =>
-    new crossSection(
+    new m.CrossSection(
       [
         [
           [0, 0],
@@ -164,19 +118,23 @@ const createShapes = (m: ManifoldToplevel): Shapes => {
       'Positive',
     );
   const circle = (x: number, y: number, radius: number): CrossSection =>
-    crossSection.circle(Math.max(radius, 1e-4), circleSegments).translate([x, y]);
+    m.CrossSection.circle(Math.max(radius, 1e-4), circleSegments).translate([x, y]);
+  // oxlint-disable-next-line eslint/max-params -- matches `Shapes.rect`.
   const rect = (x: number, y: number, width: number, height: number, rotation = 0, radius = 0): CrossSection => {
     const r = Math.max(0, Math.min(radius, width / 2, height / 2));
     const core =
       r > 0
-        ? crossSection
-            .square([Math.max(width - 2 * r, 1e-4), Math.max(height - 2 * r, 1e-4)], true)
-            .offset(r, 'Round', 2, circleSegments)
-        : crossSection.square([Math.max(width, 1e-4), Math.max(height, 1e-4)], true);
+        ? m.CrossSection.square([Math.max(width - 2 * r, 1e-4), Math.max(height - 2 * r, 1e-4)], true).offset(
+            r,
+            'Round',
+            2,
+            circleSegments,
+          )
+        : m.CrossSection.square([Math.max(width, 1e-4), Math.max(height, 1e-4)], true);
     return core.rotate(rotation).translate([x, y]);
   };
   const polygon = (points: Point[]): CrossSection | undefined =>
-    points.length < 3 ? undefined : new crossSection([points.map((point): Vec2 => [point.x, point.y])], 'Positive');
+    points.length < 3 ? undefined : new m.CrossSection([points.map((point): Vec2 => [point.x, point.y])], 'Positive');
   const stroke = (points: Point[], width: number): CrossSection | undefined => {
     if (points.length === 0 || width <= 0) {
       return undefined;
@@ -189,11 +147,11 @@ const createShapes = (m: ManifoldToplevel): Shapes => {
     for (let index = 1; index < points.length; index++) {
       const a = points[index - 1]!;
       const b = points[index]!;
-      segments.push(crossSection.hull([circle(a.x, a.y, radius), circle(b.x, b.y, radius)]));
+      segments.push(m.CrossSection.hull([circle(a.x, a.y, radius), circle(b.x, b.y, radius)]));
     }
-    return crossSection.union(segments);
+    return m.CrossSection.union(segments);
   };
-  const union = (parts: CrossSection[]): CrossSection => (parts.length === 0 ? empty() : crossSection.union(parts));
+  const union = (parts: CrossSection[]): CrossSection => (parts.length === 0 ? empty() : m.CrossSection.union(parts));
   return { m, circle, rect, polygon, stroke, union };
 };
 
@@ -321,7 +279,7 @@ const alphabetBounds = (() => {
   return { width: maxX, height: maxY - minY };
 })();
 
-const textSegments = (element: Element): { segments: [Point, Point][]; strokeWidth: number } => {
+const textSegments = (element: Element): { segments: Array<[Point, Point]>; strokeWidth: number } => {
   const text = typeof element['text'] === 'string' ? element['text'] : '';
   const fontSize = numberOf(element, 'font_size', 1);
   const scale = (fontSize * (2 / 3)) / alphabetBounds.height;
@@ -330,8 +288,8 @@ const textSegments = (element: Element): { segments: [Point, Point][]; strokeWid
   const space = advance * 0.6;
   const lineHeight = scale * alphabetBounds.height * 1.1;
   const lines = text.split('\n');
-  const raw: [Point, Point][] = [];
-  lines.forEach((line, lineIndex) => {
+  const raw: Array<[Point, Point]> = [];
+  for (const [lineIndex, line] of lines.entries()) {
     let width = 0;
     for (const char of line) {
       width += char === ' ' ? space : advance;
@@ -352,7 +310,7 @@ const textSegments = (element: Element): { segments: [Point, Point][]; strokeWid
       }
       cursor += advance;
     }
-  });
+  }
   if (raw.length === 0) {
     return { segments: [], strokeWidth: 0 };
   }
@@ -379,10 +337,7 @@ const textSegments = (element: Element): { segments: [Point, Point][]; strokeWid
     const ly = point.y - anchorY;
     return { x: anchor.x + lx * cos - ly * sin, y: anchor.y + lx * sin + ly * cos };
   };
-  return {
-    segments: raw.map(([a, b]) => [place(a), place(b)]),
-    strokeWidth: Math.max(fontSize * 0.1, 0.1),
-  };
+  return { segments: raw.map(([a, b]) => [place(a), place(b)]), strokeWidth: Math.max(fontSize * 0.1, 0.1) };
 };
 
 const collectRegions = (shapes: Shapes, elements: Element[], board: Element): BoardRegions => {
@@ -473,33 +428,43 @@ const collectRegions = (shapes: Shapes, elements: Element[], board: Element): Bo
       }
       case 'pcb_copper_pour': {
         const [side = 'top'] = layersOf(element);
-        if (element['shape'] === 'brep') {
-          const brep = element['brep_shape'] as {
-            outer_ring?: { vertices?: unknown };
-            inner_rings?: { vertices?: unknown }[];
-          };
-          const outer = shapes.polygon(pointsOf(brep.outer_ring?.vertices));
-          if (outer) {
-            const inner = (brep.inner_rings ?? [])
-              .map((ring) => shapes.polygon(pointsOf(ring.vertices)))
-              .filter((ring) => ring !== undefined);
-            push(side, 'copper', inner.length > 0 ? outer.subtract(shapes.union(inner)) : outer);
+        switch (element['shape']) {
+          case 'brep': {
+            const brep = element['brep_shape'] as {
+              outer_ring?: { vertices?: unknown };
+              inner_rings?: Array<{ vertices?: unknown }>;
+            };
+            const outer = shapes.polygon(pointsOf(brep.outer_ring?.vertices));
+            if (outer) {
+              const inner = (brep.inner_rings ?? [])
+                .map((ring) => shapes.polygon(pointsOf(ring.vertices)))
+                .filter((ring) => ring !== undefined);
+              push(side, 'copper', inner.length > 0 ? outer.subtract(shapes.union(inner)) : outer);
+            }
+            break;
           }
-        } else if (element['shape'] === 'polygon') {
-          push(side, 'copper', shapes.polygon(pointsOf(element['points'])));
-        } else if (element['shape'] === 'rect') {
-          const center = (element['center'] ?? { x: 0, y: 0 }) as Point;
-          push(
-            side,
-            'copper',
-            shapes.rect(
-              center.x,
-              center.y,
-              numberOf(element, 'width'),
-              numberOf(element, 'height'),
-              numberOf(element, 'rotation'),
-            ),
-          );
+          case 'polygon': {
+            push(side, 'copper', shapes.polygon(pointsOf(element['points'])));
+            break;
+          }
+          case 'rect': {
+            const center = (element['center'] ?? { x: 0, y: 0 }) as Point;
+            push(
+              side,
+              'copper',
+              shapes.rect(
+                center.x,
+                center.y,
+                numberOf(element, 'width'),
+                numberOf(element, 'height'),
+                numberOf(element, 'rotation'),
+              ),
+            );
+            break;
+          }
+          default: {
+            break;
+          }
         }
         break;
       }
@@ -578,17 +543,7 @@ const collectRegions = (shapes: Shapes, elements: Element[], board: Element): Bo
       0,
       numberOf(board, 'border_radius'),
     );
-  const maskColor =
-    parseCssColor(board['top_solder_mask_color'] ?? board['solder_mask_color'], solderMaskPresets) ??
-    solderMaskPresets['green']!;
-  const bottomMaskColor =
-    parseCssColor(board['bottom_solder_mask_color'] ?? board['solder_mask_color'], solderMaskPresets) ?? maskColor;
-  const defaultSilk =
-    maskColor[0] + maskColor[1] + maskColor[2] > 2 ? silkscreenPresets['black']! : silkscreenPresets['white']!;
-  const silkColor =
-    parseCssColor(board['top_silkscreen_color'] ?? board['silkscreen_color'], silkscreenPresets) ?? defaultSilk;
-  const bottomSilkColor =
-    parseCssColor(board['bottom_silkscreen_color'] ?? board['silkscreen_color'], silkscreenPresets) ?? silkColor;
+  const { maskColor, bottomMaskColor, silkColor, bottomSilkColor } = boardColorsOf(board);
   return {
     outline,
     thickness: numberOf(board, 'thickness', 1.6),
@@ -624,6 +579,7 @@ const createMaterials = (
     (extension) => extension.EXTENSION_NAME === 'KHR_materials_clearcoat',
   ) as (new (document: Document) => Extension) | undefined;
   const clearcoat = clearcoatExtension ? document.createExtension(clearcoatExtension) : undefined;
+  // oxlint-disable-next-line eslint/max-params -- a material's PBR factors, read as one row per layer below.
   const make = (name: string, rgb: Rgb, roughness: number, metallic = 0, coat = false): Material => {
     const material = document
       .createMaterial(name)
@@ -666,6 +622,7 @@ const createMaterials = (
 };
 
 /** Extrude a region between two board heights and append it to `mesh` as one flat-shaded primitive. */
+// oxlint-disable-next-line eslint/max-params -- one slab is a region, a height span and a material, read as a row per layer.
 const addSlab = (
   document: Document,
   node: Node,
@@ -689,13 +646,13 @@ const addSlab = (
   const positions = new Float32Array(triangleCount * 9);
   const normals = new Float32Array(triangleCount * 9);
   for (let tri = 0; tri < triangleCount; tri++) {
-    const corners: [number, number, number][] = [];
+    const corners: Array<[number, number, number]> = [];
     for (let corner = 0; corner < 3; corner++) {
       const vertex = triVerts[tri * 3 + corner]!;
       const px = vertProperties[vertex * numProp]!;
       const py = vertProperties[vertex * numProp + 1]!;
       const pz = vertProperties[vertex * numProp + 2]!;
-      // pcb (x, y, z) to the converter's scene (-x, z, y): a proper rotation, so winding holds.
+      // PCB (x, y, z) to the converter's scene (-x, z, y): a proper rotation, so winding holds.
       corners.push([-px, pz, py]);
     }
     const [a, b, c] = corners as [[number, number, number], [number, number, number], [number, number, number]];
@@ -748,7 +705,7 @@ const addSlab = (
  */
 export const buildPresentationBoard = async (
   document: Document,
-  circuitJson: readonly { type: string }[],
+  circuitJson: ReadonlyArray<{ type: string }>,
   options: BoardPresentationOptions = {},
 ): Promise<Node | undefined> => {
   const elements = circuitJson as Element[];

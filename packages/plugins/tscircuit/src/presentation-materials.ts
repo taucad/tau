@@ -12,7 +12,7 @@ import type { Material } from '@gltf-transform/core';
 
 type Rgb = readonly [number, number, number];
 
-const toLinear = (value: number): number => (value <= 0.040_45 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+const toLinear = (value: number): number => (value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
 
 type Finish = { color: Rgb; metallic: number; roughness: number };
 
@@ -33,6 +33,10 @@ export const classifyComponentColor = ([r, g, b]: Rgb): Finish => {
   // Near-white is paint or ink (diode bands, markings).
   if (saturation < 0.05 && luminance >= 0.95) {
     return { color: [0.92, 0.92, 0.9], metallic: 0, roughness: 0.55 };
+  }
+  // Dark, warm brown is KiCad's MLCC body: present it as fired ceramic.
+  if (luminance < 0.3 && r > 0.08 && r > g * 1.5 && g >= b) {
+    return { color: [0.71, 0.56, 0.42], metallic: 0, roughness: 0.6 };
   }
   // Near-black is moulded epoxy or black plastic.
   if (luminance < 0.4 && saturation < 0.1) {

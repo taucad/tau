@@ -501,7 +501,7 @@ describe('TscircuitKernel', () => {
         'main.tsx': `
           export default () => (
             <board width="20mm" height="20mm">
-              <chip name="U1" footprint="kicad:Package_SO:SOIC-8_3.9x4.9mm_P1.27mm" />
+              <chip name="U1" footprint="kicad:Package_SO:SOIC-14_3.9x8.7mm_P1.27mm" />
             </board>
           );
         `,
@@ -515,12 +515,97 @@ describe('TscircuitKernel', () => {
         expect.objectContaining({
           code: 'RUNTIME',
           severity: 'warning',
-          message: expect.stringContaining('kicad'),
+          message: expect.stringContaining("not in Tau's local KiCad pack"),
           details: expect.objectContaining({ producer: 'tscircuit' }),
         }),
       );
       /* oxlint-enable @typescript-eslint/no-unsafe-assignment */
       expect(result.success && result.issues.some((issue) => issue.severity === 'error')).toBe(false);
+    });
+
+    it('resolves a kicad: footprint and its real 3D model from the local pack without the network', async () => {
+      const client = createClient({
+        'main.tsx': `
+          export default () => (
+            <board width="20mm" height="20mm">
+              <chip name="U1" footprint="kicad:Package_SO/SOIC-8_3.9x4.9mm_P1.27mm" />
+            </board>
+          );
+        `,
+      });
+
+      const result = await render(client, 'main.tsx');
+      const glb = expectGlb(result);
+      expect(
+        result.success &&
+          result.issues.filter((issue) => issue.message.includes('KiCad') || issue.message.includes('Network')),
+      ).toEqual([]);
+      const circuitJson = await readSettledCircuitJson(client);
+      expect(circuitJson.filter((element) => element.type === 'pcb_smtpad')).toHaveLength(8);
+      // The handle keeps tscircuit's canonical model URL; only the render swaps in the pack's GLB.
+      expect(circuitJson.find((element) => element.type === 'cad_component')).toMatchObject({
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- circuit JSON field name.
+        model_step_url: 'https://kicad-mod-cache.tscircuit.com/Package_SO/SOIC-8_3.9x4.9mm_P1.27mm.step',
+      });
+      const io = await createNodeIo();
+      const document = await io.readBinary(glb);
+      const body = document
+        .getRoot()
+        .listNodes()
+        .find((node) => node.getName() === 'U1');
+      expect(body?.getMesh()?.listPrimitives().length).toBeGreaterThan(1);
+    });
+
+    it('fetches only tscircuit part hosts when the parts option is online', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const pack = await readFile(
+        new URL('assets/kicad/Package_SO_SOIC-8_3.9x4.9mm_P1.27mm.circuit.json', import.meta.url),
+        'utf8',
+      );
+      const online = vi.fn(async (input: string | URL | Request) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        if (url === 'https://kicad-mod-cache.tscircuit.com/Package_SO/SOIC-14_3.9x8.7mm_P1.27mm.circuit.json') {
+          return new Response(pack, { headers: { 'content-type': 'application/json' } });
+        }
+        throw new Error(`unexpected request ${url}`);
+      });
+      vi.stubGlobal('fetch', online);
+      const blocked = 'https://example.invalid/part.glb';
+      const runtime = defineRuntime({
+        plugins: [middleware()],
+        kernels: [tscircuitKernel({ parts: 'online' })],
+        bundlers: [esbuildBundler()],
+      });
+      const client = createTestRuntimeClient({
+        runtime,
+        files: {
+          'main.tsx': `
+            export default () => (
+              <board width="20mm" height="20mm">
+                <chip name="U1" footprint="kicad:Package_SO/SOIC-14_3.9x8.7mm_P1.27mm" pcbX={-4} />
+                <chip name="U2" footprint="soic8" cadModel={{ glbUrl: '${blocked}' }} pcbX={5} />
+              </board>
+            );
+          `,
+        },
+      });
+      clients.add(client);
+      const document = client.open({ source: { path: 'main.tsx' }, watch: false });
+      documents.add(document);
+      const view = document.view('board');
+      const outcome = await view.rendering();
+      view.close();
+      vi.stubGlobal('fetch', fetchGuard);
+
+      expect(outcome.superseded).toBe(false);
+      const result = outcome.superseded ? undefined : outcome.rendering;
+      expect(online).toHaveBeenCalledWith(
+        'https://kicad-mod-cache.tscircuit.com/Package_SO/SOIC-14_3.9x8.7mm_P1.27mm.circuit.json',
+        undefined,
+      );
+      expect(result?.success && result.issues).toContainEqual(expectNetworkWarning(blocked));
+      // The footprint the online resolver fetched placed its pads.
+      expect(result?.success && result.issues.some((issue) => issue.message.includes('SOIC-14'))).toBe(false);
     });
 
     it('should not fetch an http footprint: the render completes with a warning naming the URL', async () => {
@@ -654,10 +739,10 @@ describe('TscircuitKernel', () => {
       expect(svg).toContain('class="tscircuit-schematic"');
       expect(svg).toContain('sch-component');
       expect(svg).toContain('sch-trace');
-      expect(svg).toContain('fill: rgb(0, 105, 0)');
-      // WCAG contrast of the net-label text colour against white paper.
-      const channel = 105 / 255;
-      const luminance = 0.7152 * ((channel + 0.055) / 1.055) ** 2.4;
+      // The light theme's text colour, and its WCAG contrast against white paper.
+      expect(svg).toContain('.text { fill: rgb(88, 98, 114); }');
+      const linear = (channel: number) => ((channel / 255 + 0.055) / 1.055) ** 2.4;
+      const luminance = 0.2126 * linear(88) + 0.7152 * linear(98) + 0.0722 * linear(114);
       expect(1.05 / (luminance + 0.05)).toBeGreaterThan(4.5);
       expect(/^<svg [^>]*width="[\d.]+" height="[\d.]+"/.exec(svg)).not.toBeNull();
     }, 20_000);
@@ -671,11 +756,30 @@ describe('TscircuitKernel', () => {
       expect(svg).toMatch(/^<svg [^>]*viewBox="0 0 \d+(?:\.\d+)? \d+(?:\.\d+)?"/);
       expect(svg).toContain('data-type="pcb_background"');
       expect(svg).toContain('pcb-pad');
-      expect(svg).toContain('pcb-trace');
+      // The fabrication palette covers traces with solder mask.
+      expect(svg).toContain('pcb-soldermask');
       expect(/^<svg [^>]*width="[\d.]+" height="[\d.]+"/.exec(svg)).not.toBeNull();
       const circuitJson = await readSettledCircuitJson(client);
       const runtime = createMockKernelRuntime();
       const context = await definition.initialize({}, runtime);
+      const engineering = await definition.render!(
+        { view: 'pcb', handle: { circuitJson, sheets: new Map() }, options: { palette: 'engineering' } },
+        runtime,
+        context,
+      );
+      expect(engineering.content).toContain('pcb-trace');
+      expect(engineering.content).not.toContain('pcb-soldermask');
+      const classic = await definition.render!(
+        {
+          view: 'schematic',
+          handle: { circuitJson, sheets: new Map() },
+          instance: undefined,
+          options: { theme: 'engineering' },
+        },
+        runtime,
+        context,
+      );
+      expect(classic.content).toContain('fill: rgb(0, 105, 0)');
       const pinSvg = await definition.render!(
         { view: 'pcb', handle: { circuitJson, sheets: new Map() }, options: { pinNumbers: true } },
         runtime,
@@ -732,9 +836,7 @@ describe('TscircuitKernel', () => {
 
   describe('kernel selection', () => {
     it('should route a .tsx file without any import by extension', async () => {
-      const client = createClient({
-        'board.tsx': 'export default () => <board width="10mm" height="10mm" />;',
-      });
+      const client = createClient({ 'board.tsx': 'export default () => <board width="10mm" height="10mm" />;' });
 
       expectGlb(await render(client, 'board.tsx'));
     });
@@ -932,9 +1034,7 @@ describe('TscircuitKernel', () => {
       const context = await definition.initialize({}, runtime);
       const circuitJson = [{ type: 'source_project_metadata', name: 'snapshot' }];
       const nativeHandle = definition.deserializeHandle!(
-        {
-          serialized: definition.serializeHandle!({ handle: { circuitJson, sheets: new Map() } }, runtime, context),
-        },
+        { serialized: definition.serializeHandle!({ handle: { circuitJson, sheets: new Map() } }, runtime, context) },
         runtime,
         context,
       );

@@ -368,6 +368,7 @@ describe('createViewerFileDataSource', () => {
     expect(searchFiles).toHaveBeenCalledExactlyOnceWith('touch-parameters', {
       maxResults: 100,
       includeDirectories: false,
+      caller: 'quick-open',
     });
     expect(listDirectory).not.toHaveBeenCalled();
   });

@@ -357,15 +357,16 @@ export class FileTreeService {
   private readonly paths: WorkspacePathResolver;
   private readonly visibility: VisibilityProvider;
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
-  /** The interactive search waiting out its debounce window, and every caller it will answer. */
-  private pendingSearch:
-    | {
-        timer: ReturnType<typeof setTimeout>;
-        query: string;
-        options: { maxResults?: number; includeDirectories?: boolean } | undefined;
-        waiters: Array<{ resolve(entries: FileStatEntry[]): void; reject(error: unknown): void }>;
-      }
-    | undefined;
+  /** Each search window waiting out its debounce, by caller, and every call it will answer. */
+  private readonly pendingSearches = new Map<
+    string,
+    {
+      timer: ReturnType<typeof setTimeout>;
+      query: string;
+      options: { maxResults?: number; includeDirectories?: boolean } | undefined;
+      waiters: Array<{ resolve(entries: FileStatEntry[]): void; reject(error: unknown): void }>;
+    }
+  >();
   /* Every directory a mutation touched in this window. A re-read lists one
    * directory, so collapsing two to their common ancestor re-read neither. */
   private readonly pendingRefreshPaths = new Set<string>();
@@ -759,29 +760,35 @@ export class FileTreeService {
   }
 
   /**
-   * Search as a person types (D18): calls inside one debounce window collapse
-   * into a single index query for the latest query, and every caller in the
-   * window is answered with its result, so a burst of keystrokes costs the
-   * worker one walk. The query may be a substring or a glob such as `*.ts`,
-   * where `**` spans directories.
+   * Search as a person types (D18): one caller's calls inside one debounce
+   * window collapse into a single index query for its latest query, and each
+   * of those calls is answered with that result, so a burst of keystrokes
+   * costs the worker one walk. Each caller has its own window: `caller`
+   * names it, and without one the result bound and directory flag do, so two
+   * pickers searching at once never answer each other's queries. The query
+   * may be a substring or a glob such as `*.ts`, where `**` spans directories.
    *
    * @param query - Substring or glob, as typed.
-   * @param options - Result bound and whether directories are included.
-   * @returns The latest query's matches.
+   * @param options - Result bound, whether directories are included, and the caller's window.
+   * @returns The caller's latest query's matches.
    */
   public async searchFilesDebounced(
     query: string,
-    options?: { maxResults?: number; includeDirectories?: boolean },
+    options?: { maxResults?: number; includeDirectories?: boolean; caller?: string },
   ): Promise<FileStatEntry[]> {
+    const { caller, ...searchOptions } = options ?? {};
+    const window =
+      caller ?? JSON.stringify([searchOptions.maxResults ?? null, searchOptions.includeDirectories ?? null]);
     const { promise, resolve, reject } = Promise.withResolvers<FileStatEntry[]>();
-    const waiters = this.pendingSearch?.waiters ?? [];
-    if (this.pendingSearch !== undefined) {
-      clearTimeout(this.pendingSearch.timer);
+    const open = this.pendingSearches.get(window);
+    const waiters = open?.waiters ?? [];
+    if (open !== undefined) {
+      clearTimeout(open.timer);
     }
     waiters.push({ resolve, reject });
     const run = async (): Promise<void> => {
-      const pending = this.pendingSearch;
-      this.pendingSearch = undefined;
+      const pending = this.pendingSearches.get(window);
+      this.pendingSearches.delete(window);
       if (pending === undefined) {
         return;
       }
@@ -796,15 +803,15 @@ export class FileTreeService {
         }
       }
     };
-    this.pendingSearch = {
+    this.pendingSearches.set(window, {
       timer: setTimeout(() => {
         // async-iife: bootstrap
         void run();
       }, searchDebounce),
       query,
-      options,
+      options: options === undefined ? undefined : searchOptions,
       waiters,
-    };
+    });
     return promise;
   }
 
@@ -1074,13 +1081,13 @@ export class FileTreeService {
   public dispose(): void {
     this.disposed = true;
     this.pendingRefreshPaths.clear();
-    if (this.pendingSearch !== undefined) {
-      clearTimeout(this.pendingSearch.timer);
-      for (const waiter of this.pendingSearch.waiters) {
+    for (const pending of this.pendingSearches.values()) {
+      clearTimeout(pending.timer);
+      for (const waiter of pending.waiters) {
         waiter.resolve([]);
       }
-      this.pendingSearch = undefined;
     }
+    this.pendingSearches.clear();
     this.closedSignal.resolve();
     const observations = [...this.listingObservations.values()];
     for (const reference of observations) {

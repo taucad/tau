@@ -340,7 +340,11 @@ export function createViewerFileDataSource(
       if (!tree || !capabilities) {
         return [];
       }
-      const entries = await tree.searchFilesDebounced(query, { maxResults: 100, includeDirectories: false });
+      const entries = await tree.searchFilesDebounced(query, {
+        maxResults: 100,
+        includeDirectories: false,
+        caller: 'quick-open',
+      });
       if (entries.length === 100) {
         throw new Error('Refine your search or browse folders to see supported files.');
       }

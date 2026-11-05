@@ -505,6 +505,29 @@ describe('FileTreeService rooted search and external polling', () => {
     }
   });
 
+  it("gives each caller its own search window, so one picker never answers with another picker's query (D18)", async () => {
+    vi.useFakeTimers();
+    try {
+      const { tree, proxy, disposeChannel } = createTreeHarness();
+      vi.mocked(proxy.searchFiles).mockImplementation(async (_root, query) => [
+        { path: query, name: query, type: 'file', size: 1, mtimeMs: 1, contentKind: 'text' },
+      ]);
+
+      const mention = tree.searchFilesDebounced('mai', { maxResults: 20, caller: 'mention' });
+      const quickOpen = tree.searchFilesDebounced('read', { maxResults: 20, caller: 'quick-open' });
+      const unnamed = tree.searchFilesDebounced('dir', { includeDirectories: true });
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(proxy.searchFiles).toHaveBeenCalledTimes(3);
+      expect(proxy.searchFiles).toHaveBeenCalledWith('/projects/abc', 'mai', { maxResults: 20 });
+      const answers = await Promise.all([mention, quickOpen, unnamed]);
+      expect(answers.map((entries) => entries.map(({ path }) => path))).toEqual([['mai'], ['read'], ['dir']]);
+      disposeChannel();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('serializes polls and keeps one visibility subscription across interval changes', async () => {
     vi.useFakeTimers();
     let visible = true;

@@ -2,9 +2,9 @@ import { joinRelativePath } from '@taucad/utils/path';
 
 /** The listing calls a sync host asks of a rooted filesystem; the kind-carrying ones are optional. */
 type DirectoryListingSource = {
+  readdirEntries?: ((path: string) => Promise<ReadonlyArray<{ name: string; kind: 'file' | 'dir' }>>) | undefined;
   readdir(path: string): Promise<string[]>;
   stat(path: string): Promise<{ type: 'file' | 'dir' }>;
-  readdirEntries?: ((path: string) => Promise<ReadonlyArray<{ name: string; kind: 'file' | 'dir' }>>) | undefined;
 };
 
 /**

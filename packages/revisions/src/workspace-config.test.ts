@@ -131,7 +131,6 @@ describe('generated ignore file', () => {
 !/.tau/skills
 !/.tau/AGENTS.md
 **/.tau/binding.json
-**/.tau-staging
 **/.jj
 **/.git
 **/.tau-staging

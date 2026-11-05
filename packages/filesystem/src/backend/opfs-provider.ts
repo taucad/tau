@@ -53,6 +53,42 @@ const writeAll = (handle: SyncAccessHandle, bytes: Uint8Array<ArrayBuffer>, offs
   }
 };
 
+/** Batch writes at or above this size stage through a sync handle and move into place (I1). */
+export const opfsLargeWriteBytes = 8 * 1024 * 1024;
+
+/** The root directory large writes stage in; dot-named, so never a project directory. */
+export const opfsStagingDirectory = '.tau-staging';
+
+/** Web Lock a realm holds while its staging directory may hold bytes in flight. */
+const stagingOwnerLockPrefix = 'tau-fs-staging-owner:';
+
+/** This realm's staging owner, one per worker: every provider in it shares the lock. */
+const stagingOwnerId = randomUuid();
+let stagingOwnerHeld: Promise<void> | undefined;
+
+/**
+ * Hold this realm's staging-owner lock for the realm's lifetime, so a sibling
+ * sweeping stale staging directories can tell a live writer from a dead one.
+ *
+ * @returns Resolves once the lock is held, or at once without Web Locks.
+ */
+const holdStagingOwner = async (): Promise<void> => {
+  if (typeof navigator === 'undefined' || !('locks' in navigator)) {
+    return;
+  }
+  stagingOwnerHeld ??= new Promise<void>((resolve) => {
+    void navigator.locks.request(`${stagingOwnerLockPrefix}${stagingOwnerId}`, { mode: 'exclusive' }, async () => {
+      resolve();
+      await new Promise<never>(() => {
+        // Held until the realm ends.
+      });
+    });
+  });
+  await stagingOwnerHeld;
+};
+
+const readChunkBytes = 4 * 1024 * 1024;
+
 /** Filesystem provider backed by the origin-private filesystem. @public */
 export class OPFSProvider extends FileSystemAccessProvider {
   /**
@@ -99,6 +135,64 @@ export class OPFSProvider extends FileSystemAccessProvider {
     this.capabilities.durability = (await this._supportsSyncAccess()) ? 'exclusive-append' : 'stream-append';
     this._initialized = true;
     await super.refresh();
+    await holdStagingOwner();
+    await this._sweepStaging();
+  }
+
+  /**
+   * Stage a large batch write through a sync access handle and move it over
+   * the target natively, so the target holds its old bytes or its new ones and
+   * never a torn file (I1). A crash leaves only the staged file, which the next
+   * {@link initialize} in any realm removes once its owner's lock is gone.
+   * Smaller writes take the writable stream's atomic swap.
+   *
+   * @param fileHandle - Handle for the target.
+   * @param data - The bytes, in hand or staged.
+   * @param destination - The target's directory and name.
+   */
+  protected override async _writeBatchData(
+    fileHandle: FileSystemFileHandle,
+    data: Uint8Array<ArrayBuffer> | Blob,
+    destination: Readonly<{ directory: FileSystemDirectoryHandle; name: string }>,
+  ): Promise<void> {
+    const size = data instanceof Blob ? data.size : data.byteLength;
+    if (size < opfsLargeWriteBytes || this.capabilities.durability !== 'exclusive-append') {
+      await super._writeBatchData(fileHandle, data, destination);
+      return;
+    }
+    const staging = await (
+      await this._rootHandle.getDirectoryHandle(opfsStagingDirectory, { create: true })
+    ).getDirectoryHandle(stagingOwnerId, { create: true });
+    const stagedName = randomUuid();
+    const staged = (await staging.getFileHandle(stagedName, { create: true })) as SyncAccessCapableFileHandle &
+      MovableFileHandle;
+    if (typeof staged.move !== 'function' || typeof staged.createSyncAccessHandle !== 'function') {
+      await staging.removeEntry(stagedName);
+      await super._writeBatchData(fileHandle, data, destination);
+      return;
+    }
+    try {
+      const handle = await staged.createSyncAccessHandle();
+      try {
+        if (data instanceof Blob) {
+          for (let offset = 0; offset < size; offset += readChunkBytes) {
+            // oxlint-disable-next-line no-await-in-loop -- one bounded chunk in memory at a time.
+            const chunk = new Uint8Array(await data.slice(offset, offset + readChunkBytes).arrayBuffer());
+            writeAll(handle, chunk, offset);
+          }
+        } else {
+          writeAll(handle, data, 0);
+        }
+        handle.truncate(size);
+        handle.flush();
+      } finally {
+        handle.close();
+      }
+      await staged.move(destination.directory, destination.name);
+    } catch (error) {
+      await staging.removeEntry(stagedName).catch(() => undefined);
+      throw error;
+    }
   }
 
   /** Revoke the acquired OPFS root until the next successful initialize. */
@@ -250,6 +344,37 @@ export class OPFSProvider extends FileSystemAccessProvider {
           ? this._errno('EBUSY', 'resource busy or locked', from)
           : undefined;
     return mapped === undefined ? error : Object.assign(mapped, { cause: error });
+  }
+
+  /**
+   * Remove staging directories whose owner realm is gone: a large write that
+   * never reached its move (I1). An owner whose lock is still held is writing.
+   */
+  private async _sweepStaging(): Promise<void> {
+    if (typeof navigator === 'undefined' || !('locks' in navigator)) {
+      return;
+    }
+    let staging: FileSystemDirectoryHandle;
+    try {
+      staging = await this._rootHandle.getDirectoryHandle(opfsStagingDirectory);
+    } catch {
+      return;
+    }
+    const snapshot = await navigator.locks.query();
+    const live = new Set(
+      (snapshot.held ?? []).flatMap(({ name }) =>
+        name?.startsWith(stagingOwnerLockPrefix) === true ? [name.slice(stagingOwnerLockPrefix.length)] : [],
+      ),
+    );
+    const owners: string[] = [];
+    for await (const name of (staging as FileSystemDirectoryHandle & { keys(): AsyncIterable<string> }).keys()) {
+      owners.push(name);
+    }
+    await Promise.all(
+      owners
+        .filter((owner) => owner !== stagingOwnerId && !live.has(owner))
+        .map(async (owner) => staging.removeEntry(owner, { recursive: true }).catch(() => undefined)),
+    );
   }
 
   private async _supportsSyncAccess(): Promise<boolean> {

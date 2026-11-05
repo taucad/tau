@@ -6,6 +6,8 @@
  */
 
 import type { FileSystemProvider, FileStatOptions, FileStat, HeadFileStat, ProviderCapabilities } from '#types.js';
+import type { BatchEntry, BatchOptions, BatchReceipt } from '#changeset.js';
+import { applyBatchWithPrimitives } from '#backend/batch.js';
 import { assertRootedPath } from '@taucad/utils/path';
 
 /**
@@ -110,6 +112,18 @@ export abstract class AbstractFileSystemProvider implements FileSystemProvider {
    * @returns `true` when {@link stat} succeeds for `path`, `false` for a
    * recognized absence or non-directory ancestor.
    */
+  /**
+   * Apply one batch through this provider's primitives (charter D2). A
+   * provider with a native batch overrides it.
+   *
+   * @param entries - One phase's entries for this provider, in provider paths.
+   * @param options - The changeset's abort signal.
+   * @returns One receipt per entry, in entry order.
+   */
+  public async applyBatch(entries: readonly BatchEntry[], options?: BatchOptions): Promise<BatchReceipt[]> {
+    return applyBatchWithPrimitives(this, entries, options);
+  }
+
   public async exists(path: string): Promise<boolean> {
     this._assertRootedPath(path);
     try {

@@ -18,6 +18,9 @@ import type {
   ProviderCapabilities,
 } from '#types.js';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
+import type { BatchEntry, BatchOptions, BatchReceipt } from '#changeset.js';
+import { isRefusal } from '#changeset.js';
+import { applyEntryWithPrimitives, runBatch } from '#backend/batch.js';
 import { mapConcurrent, statConcurrency } from '#concurrency.js';
 import { fileStatFromFile, headFileStatFromFile, headSniffByteLength } from '#content-metadata.js';
 import { workerTimings } from '#worker-timings.js';
@@ -459,6 +462,49 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
   }
 
   /**
+   * Apply one batch natively (charter D2, I1, Rule 34).
+   *
+   * Writes share one batch-scoped memo of the directories they land in, so a
+   * thousand files under forty directories make forty directory lookups, and
+   * eight run at once. Each write commits through a writable stream, which the
+   * platform swaps into place atomically on close: a crash leaves the old bytes
+   * or the new ones, never a torn file. Every other entry takes the provider's
+   * own primitives — native recursive removal and native move.
+   *
+   * @param entries - One phase's entries for this provider, in provider paths.
+   * @param options - The changeset's abort signal.
+   * @returns One receipt per entry, in entry order.
+   */
+  public override async applyBatch(entries: readonly BatchEntry[], options?: BatchOptions): Promise<BatchReceipt[]> {
+    this._assertReady();
+    const directories = new Map<string, Promise<FileSystemDirectoryHandle>>();
+    const openForWrite = async (path: string): Promise<FileSystemDirectoryHandle> => {
+      if (path === '') {
+        return this._rootHandle;
+      }
+      let pending = directories.get(path);
+      if (pending === undefined) {
+        const separator = path.lastIndexOf('/');
+        const parent = separator === -1 ? '' : path.slice(0, separator);
+        const name = path.slice(separator + 1);
+        pending = (async () => {
+          const handle = await openForWrite(parent);
+          try {
+            return await handle.getDirectoryHandle(name, { create: true });
+          } catch (error) {
+            throw hasDomName(error, 'TypeMismatchError') ? this._enotdir(path) : error;
+          }
+        })();
+        directories.set(path, pending);
+      }
+      return pending;
+    };
+    return runBatch(entries, options, async (entry) =>
+      entry.op === 'write' ? this._applyBatchWrite(entry, openForWrite) : applyEntryWithPrimitives(this, entry),
+    );
+  }
+
+  /**
    * Observe this root through the platform's `FileSystemObserver`.
    *
    * The API is not universally available and `observe()` can be refused for a
@@ -622,6 +668,35 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     try {
       writable = await fileHandle.createWritable();
       await writable.write(bytes);
+      await writable.close();
+    } catch (error) {
+      try {
+        await writable?.abort(error);
+      } catch {
+        // Preserve the write/close failure that caused the abort.
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Commit one batch write's bytes to its file handle. The writable stream
+   * writes a swap file and moves it over the target on close, so the
+   * replacement is atomic (I1).
+   *
+   * @param fileHandle - Handle for the target, created if it was absent.
+   * @param data - The bytes, in hand or staged.
+   * @param destination - The target's directory and name, for a provider that stages and moves.
+   */
+  protected async _writeBatchData(
+    fileHandle: FileSystemFileHandle,
+    data: Uint8Array<ArrayBuffer> | Blob,
+    _destination: Readonly<{ directory: FileSystemDirectoryHandle; name: string }>,
+  ): Promise<void> {
+    let writable: FileSystemWritableFileStream | undefined;
+    try {
+      writable = await fileHandle.createWritable();
+      await writable.write(data);
       await writable.close();
     } catch (error) {
       try {
@@ -907,6 +982,53 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       } catch {
         break;
       }
+    }
+  }
+
+  /**
+   * One batch write: the parent from the batch's memo, one handle lookup that
+   * creates the file when absent, then the bytes.
+   *
+   * @param entry - The write entry.
+   * @param openForWrite - The batch's directory memo, creating missing parents.
+   * @returns Its receipt; never rejects.
+   */
+  private async _applyBatchWrite(
+    entry: Extract<BatchEntry, { op: 'write' }>,
+    openForWrite: (path: string) => Promise<FileSystemDirectoryHandle>,
+  ): Promise<BatchReceipt> {
+    let began = false;
+    try {
+      const segments = this._splitPath(entry.path);
+      const name = segments.pop();
+      if (name === undefined) {
+        return { outcome: 'failed', error: this._eisdir(entry.path) };
+      }
+      const directory = await openForWrite(segments.join('/'));
+      if (entry.create === true) {
+        try {
+          await directory.getFileHandle(name);
+          return { outcome: 'failed', error: this._eexist(entry.path) };
+        } catch (error) {
+          if (hasDomName(error, 'TypeMismatchError')) {
+            return { outcome: 'failed', error: this._eexist(entry.path) };
+          }
+          if (!hasDomName(error, 'NotFoundError')) {
+            throw error;
+          }
+        }
+      }
+      let fileHandle: FileSystemFileHandle;
+      try {
+        fileHandle = await directory.getFileHandle(name, { create: true });
+      } catch (error) {
+        throw hasDomName(error, 'TypeMismatchError') ? this._eisdir(entry.path) : error;
+      }
+      began = true;
+      await this._writeBatchData(fileHandle, entry.data, { directory, name });
+      return { outcome: 'applied', kind: 'file', ...(entry.create === true ? { created: true } : {}) };
+    } catch (error) {
+      return !began || isRefusal(error) ? { outcome: 'failed', error } : { outcome: 'uncertain', error };
     }
   }
 

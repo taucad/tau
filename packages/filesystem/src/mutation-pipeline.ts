@@ -37,15 +37,23 @@ import {
 import type { SharedPool } from '@taucad/memory';
 import type {
   ChangeEvent,
+  ChangeSetEvent,
   DirectoryEntry,
   FileSystemProvider,
   MkdirOptions,
+  PathChangeEvent,
   WorkspaceMutationContext,
 } from '#types.js';
 import type { MountResolution, MountTable } from '#mount-table.js';
 import type { ChangeEventBus } from '#change-event-bus.js';
-import type { ResourceQueue } from '#resource-queue.js';
-import type { CrossTabCoordinator, PhysicalAuthority } from '#cross-tab-coordinator.js';
+import type { ResourceQueue, ResourceQueueClaim } from '#resource-queue.js';
+import type {
+  ChangeNotification,
+  CrossTabCoordinator,
+  LockClaim,
+  PhysicalAuthority,
+} from '#cross-tab-coordinator.js';
+import { normalizeLockClaims } from '#cross-tab-coordinator.js';
 import type { TreeIndexes } from '#tree-index.js';
 import type { WalkOptions } from '#content-ops/walk.js';
 import { MissingWorkspaceHandleError, WorkspaceMutationError } from '#workspace-errors.js';
@@ -53,7 +61,24 @@ import { getFileContentMetadata } from '#content-metadata.js';
 import { readDirectoryEntries } from '#backend/directory-entries.js';
 import { tagEventAuthorities, tagEventOrigin } from '#event-origin-registry.js';
 import { parseRoute } from '#project-routes.js';
-import { mapConcurrent } from '#concurrency.js';
+import { applyBatchWithPrimitives, mapRolling } from '#backend/batch.js';
+import type {
+  BatchEntry,
+  BatchReceipt,
+  ChangesetEntry,
+  ChangesetEntryReceipt,
+  ChangesetReceipt,
+} from '#changeset.js';
+import {
+  changesetReceipt,
+  inHandBytes,
+  isBoundedChangeset,
+  maximumChangesetBytes,
+  maximumChangesetEntries,
+  splitChangeset,
+} from '#changeset.js';
+import { PhaseAdmission } from '#changeset-admission.js';
+import type { Occupancy } from '#changeset-admission.js';
 
 const maximumCheckedWritePreconditions = 32;
 const maximumCheckedWriteBytes = 8 * 1024 * 1024;
@@ -61,33 +86,164 @@ const maximumCheckedWriteBytes = 8 * 1024 * 1024;
 const asBytes = (value: Uint8Array<ArrayBuffer> | string): Uint8Array<ArrayBuffer> =>
   typeof value === 'string' ? new TextEncoder().encode(value) : new Uint8Array(value);
 
-/** Deepest path every given path lies at or inside, by segment. */
-const commonAncestorPath = (paths: readonly string[]): string => {
-  let segments = paths[0]!.split('/');
-  for (const path of paths.slice(1)) {
-    const other = path.split('/');
-    let shared = 0;
-    while (shared < segments.length && shared < other.length && segments[shared] === other[shared]) {
-      shared += 1;
-    }
-    segments = segments.slice(0, shared);
+/**
+ * One changeset entry, spelled in logical paths, with the mounts its paths
+ * resolved to: `resolution` for `path` (a move's `from`), `targetResolution`
+ * for a move's `to`.
+ *
+ * @public
+ */
+export type ResolvedChangesetEntry = Readonly<{
+  entry: ChangesetEntry;
+  resolution: MountResolution;
+  targetResolution?: MountResolution;
+}>;
+
+/** A changeset whose entries are resolved. @public */
+export type ResolvedChangeset = Readonly<{
+  entries: readonly ResolvedChangesetEntry[];
+  lifecycle?: boolean;
+  signal?: AbortSignal;
+}>;
+
+/** One admitted entry: its logical paths, its resolutions and its provider batch entry. */
+type PreparedEntry = Readonly<{
+  entry: ChangesetEntry;
+  phase: number;
+  path: string;
+  target?: string;
+  resolution: MountResolution;
+  targetResolution?: MountResolution;
+  batch: BatchEntry;
+  /** The bytes a write or append carries, when they are in hand. */
+  bytes?: Uint8Array<ArrayBuffer>;
+}>;
+
+/** One change event and the resolved paths that attribute it. @public */
+export type AttributedChangeEvent = Readonly<{
+  event: PathChangeEvent;
+  operations: ReadonlyArray<{ path: string; resolution: MountResolution }>;
+  globallyVisible?: boolean;
+}>;
+
+/** Per-provider identity, so admission and batching never confuse two providers' identical paths. */
+const providerSpaces = new WeakMap<FileSystemProvider, string>();
+let nextProviderSpace = 0;
+const providerSpace = (provider: FileSystemProvider): string => {
+  let space = providerSpaces.get(provider);
+  if (space === undefined) {
+    nextProviderSpace += 1;
+    space = String(nextProviderSpace);
+    providerSpaces.set(provider, space);
   }
-  return segments.join('/');
+  return space;
+};
+
+const errnoError = (code: string, message: string): Error => Object.assign(new Error(`${code}: ${message}`), { code });
+
+const abortError = (signal: AbortSignal | undefined): unknown =>
+  signal?.reason ?? new DOMException('The operation was aborted.', 'AbortError');
+
+const toQueueClaims = (claims: readonly LockClaim[]): ResourceQueueClaim[] =>
+  claims.map(({ token, shared }) => (shared === true ? { key: token, shared } : { key: token }));
+
+const isStreamData = (data: unknown): data is ReadableStream<Uint8Array<ArrayBuffer>> =>
+  typeof ReadableStream !== 'undefined' && data instanceof ReadableStream;
+
+/**
+ * The provider batch entry one changeset entry becomes.
+ *
+ * @param entry - The changeset entry, its write data already in hand or staged.
+ * @param resolution - Where its path (a move's `from`) resolved.
+ * @param targetResolution - Where a move's `to` resolved.
+ * @returns The batch entry, in provider paths.
+ */
+const toBatchEntry = (
+  entry: ChangesetEntry,
+  resolution: MountResolution,
+  targetResolution: MountResolution | undefined,
+): BatchEntry => {
+  switch (entry.op) {
+    case 'write': {
+      const { data } = entry;
+      if (isStreamData(data)) {
+        throw new TypeError('A streamed write must be staged before it is batched.');
+      }
+      return {
+        op: 'write',
+        path: resolution.path,
+        data: typeof data === 'string' ? asBytes(data) : data,
+        ...(entry.mode === undefined ? {} : { mode: entry.mode }),
+        ...(entry.create === undefined ? {} : { create: entry.create }),
+      };
+    }
+    case 'append': {
+      return {
+        op: 'append',
+        path: resolution.path,
+        data: asBytes(entry.data),
+        ...(entry.fenced === undefined ? {} : { fenced: entry.fenced }),
+      };
+    }
+    case 'delete': {
+      return {
+        op: 'delete',
+        path: resolution.path,
+        ...(entry.kind === undefined ? {} : { kind: entry.kind }),
+        ...(entry.recursive === undefined ? {} : { recursive: entry.recursive }),
+      };
+    }
+    case 'move': {
+      if (targetResolution === undefined) {
+        throw new TypeError(`Move to '${entry.to}' has no resolved target.`);
+      }
+      return {
+        op: 'move',
+        from: resolution.path,
+        to: targetResolution.path,
+        ...(entry.replace === undefined ? {} : { replace: entry.replace }),
+      };
+    }
+    case 'mkdir': {
+      return {
+        op: 'mkdir',
+        path: resolution.path,
+        ...(entry.recursive === undefined ? {} : { recursive: entry.recursive }),
+      };
+    }
+  }
 };
 
 /**
- * Writes one batch may have in flight.
+ * The footprint one prepared entry leaves on its provider paths.
  *
- * A provider that coalesces writes into its own batched commit takes the whole
- * batch at once — that is what lets IndexedDB drain a bulk import in one native
- * transaction. Any other provider takes them one at a time, as the per-file
- * lock sets used to make it do: a handle per file in flight is how a thousand
- * of them exhaust a descriptor limit.
+ * @param prepared - The entry.
+ * @returns Its occupancies.
  */
-const batchWriteConcurrency = (ownedFiles: ReadonlyArray<{ resolution: Pick<MountResolution, 'provider'> }>): number =>
-  ownedFiles.every(({ resolution }) => resolution.provider.capabilities.coalescesWrites === true)
-    ? ownedFiles.length
-    : 1;
+const occupancyOf = (prepared: Pick<PreparedEntry, 'batch' | 'resolution' | 'targetResolution'>): Occupancy[] => {
+  const { batch, resolution, targetResolution } = prepared;
+  const space = providerSpace(resolution.provider);
+  switch (batch.op) {
+    case 'write': {
+      return [{ space, path: batch.path, kind: 'write' }];
+    }
+    case 'append': {
+      return [{ space, path: batch.path, kind: 'append' }];
+    }
+    case 'mkdir': {
+      return [{ space, path: batch.path, kind: batch.recursive === true ? 'mkdir' : 'write' }];
+    }
+    case 'delete': {
+      return [{ space, path: batch.path, kind: 'destructive' }];
+    }
+    case 'move': {
+      return [
+        { space, path: batch.from, kind: 'destructive' },
+        { space: providerSpace((targetResolution ?? resolution).provider), path: batch.to, kind: 'destructive' },
+      ];
+    }
+  }
+};
 
 const bytesEqual = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
   left.byteLength === right.byteLength && left.every((value, index) => value === right[index]);
@@ -297,6 +453,16 @@ export class MutationPipeline {
    * construction (`setFilePool`) and stays owned by the composition root.
    */
   private readonly _filePool: () => SharedPool | undefined;
+  /** Convenience entries this task is coalescing into one changeset, per origin (D22). */
+  private readonly _pending = new Map<
+    string,
+    {
+      entries: ResolvedChangesetEntry[];
+      waiters: Array<PromiseWithResolvers<ChangesetEntryReceipt>>;
+      admission: PhaseAdmission;
+      context: WorkspaceMutationContext | undefined;
+    }
+  >();
 
   /**
    * Create the pipeline over the authority's own collaborators.
@@ -320,51 +486,209 @@ export class MutationPipeline {
   }
 
   /**
-   * Move many paths sequentially and report every completed and failed edit.
-   * Completed edits are never rolled back over newer peer data.
+   * Apply one changeset: the one mutation primitive (charter D2, D3, I1, I4).
+   *
+   * Every entry is admitted before the first I/O; streamed bytes are staged
+   * before any lock is requested; one lock set covers every path (ancestors
+   * shared, written paths exclusive, the project token exclusive only for a
+   * lifecycle changeset); each phase goes to its providers' batches, a later
+   * phase only after every entry of the earlier one applied; every entry's
+   * outcome is reported; and the whole changeset publishes one change event and
+   * one cross-tab notice.
+   *
+   * @param changeset - Resolved entries, the lifecycle fence and an abort signal.
+   * @param context - Optional mutation source metadata for change-bus subscribers.
+   * @returns Every entry's outcome.
+   */
+  public async apply(changeset: ResolvedChangeset, context?: WorkspaceMutationContext): Promise<ChangesetReceipt> {
+    const { entries, signal } = changeset;
+    if (entries.length === 0) {
+      return changesetReceipt([]);
+    }
+    if (!isBoundedChangeset(entries.map(({ entry }) => entry))) {
+      throw errnoError(
+        'EINVAL',
+        `a changeset holds at most ${String(maximumChangesetEntries)} entries and ${String(maximumChangesetBytes)} bytes; split it with splitChangeset`,
+      );
+    }
+    signal?.throwIfAborted();
+    const staged = entries.some(({ entry }) => entry.op === 'write' && isStreamData(entry.data))
+      ? await this._stageStreams(entries)
+      : entries;
+    const prepared = this._admit(staged);
+    const claims = this.lockClaims(
+      prepared.flatMap(({ path, target, resolution, targetResolution }) => [
+        { path, resolution },
+        ...(target === undefined ? [] : [{ path: target, resolution: targetResolution ?? resolution }]),
+      ]),
+      { lifecycle: changeset.lifecycle === true },
+    );
+    return this._withClaims(claims, async () => this._applyLocked(prepared, signal, context));
+  }
+
+  /**
+   * Queue one convenience entry into the changeset its caller's task is
+   * building (D22): entries issued in one task coalesce into one changeset,
+   * flushed on the next microtask, when the bound is reached, or when an entry
+   * would race one already pending.
+   *
+   * @param resolved - The entry and its resolutions.
+   * @param context - Optional mutation source metadata; entries coalesce only with the same origin.
+   * @returns The entry's receipt and the provider's own receipt for it.
+   */
+  public async enqueue(
+    resolved: ResolvedChangesetEntry,
+    context?: WorkspaceMutationContext,
+  ): Promise<ChangesetEntryReceipt> {
+    const origin = context?.originClientId ?? '';
+    const prepared = this._prepare(resolved);
+    const occupancy = occupancyOf(prepared);
+    let pending = this._pending.get(origin);
+    if (
+      pending !== undefined &&
+      (pending.admission.conflict(occupancy) !== undefined ||
+        !isBoundedChangeset([...pending.entries.map(({ entry }) => entry), resolved.entry]))
+    ) {
+      this._flush(origin);
+      pending = undefined;
+    }
+    if (pending === undefined) {
+      pending = { entries: [], waiters: [], admission: new PhaseAdmission(), context };
+      this._pending.set(origin, pending);
+      const scheduled = pending;
+      queueMicrotask(() => {
+        if (this._pending.get(origin) === scheduled) {
+          this._flush(origin);
+        }
+      });
+    }
+    pending.admission.admit(occupancy);
+    pending.entries.push(resolved);
+    const waiter = Promise.withResolvers<ChangesetEntryReceipt>();
+    pending.waiters.push(waiter);
+    return waiter.promise;
+  }
+
+  /**
+   * Run one provider batch outside the pipeline's locks, in bounded chunks —
+   * for a caller that already holds a lifecycle fence over the whole subtree
+   * and publishes its own invalidation (a pending project commit).
+   *
+   * @param provider - The provider.
+   * @param entries - Entries in provider paths, in order; each chunk is one batch.
+   * @returns One receipt per entry.
+   */
+  public async applyUnlocked(provider: FileSystemProvider, entries: readonly BatchEntry[]): Promise<BatchReceipt[]> {
+    const receipts: BatchReceipt[] = [];
+    let start = 0;
+    while (start < entries.length) {
+      let end = start + 1;
+      let bytes = inHandBytes(entries[start]!);
+      while (
+        end < entries.length &&
+        end - start < maximumChangesetEntries &&
+        bytes + inHandBytes(entries[end]!) <= maximumChangesetBytes
+      ) {
+        bytes += inHandBytes(entries[end]!);
+        end += 1;
+      }
+      const chunk = entries.slice(start, end);
+      // oxlint-disable-next-line no-await-in-loop -- each bounded chunk is one batch, in order.
+      receipts.push(...(await (provider.applyBatch?.(chunk) ?? applyBatchWithPrimitives(provider, chunk))));
+      start = end;
+    }
+    return receipts;
+  }
+
+  /**
+   * Move many paths and report every completed and failed edit. Independent
+   * edits share one changeset; an edit that depends on an earlier one (its
+   * source is an earlier target) starts the next. Completed edits are never
+   * rolled back over newer peer data.
    *
    * @param edits - Resolved source → target pairs.
    * @param context - Optional mutation source metadata for change-bus subscribers.
-   * @returns The {@link BulkMoveResult} describing successes + the failure (if any).
+   * @returns The {@link BulkMoveResult} describing successes + the failures.
    */
   public async bulkMove(
     edits: readonly ResolvedMoveEdit[],
     context?: WorkspaceMutationContext,
   ): Promise<BulkMoveResult> {
-    if (edits.length === 0) {
-      return { moved: [], failed: [] };
+    const moved: Array<{ edit: BulkMoveEdit; stat: FileStat }> = [];
+    const failed: Array<{ edit: BulkMoveEdit; error: WorkspaceMutationError }> = [];
+    const chunks: ResolvedMoveEdit[][] = [];
+    let current: ResolvedMoveEdit[] = [];
+    let admission = new PhaseAdmission();
+    for (const edit of edits) {
+      const occupancy = occupancyOf({
+        resolution: edit.sourceResolution,
+        targetResolution: edit.targetResolution,
+        batch: { op: 'move', from: edit.sourceResolution.path, to: edit.targetResolution.path },
+      });
+      if (current.length >= maximumChangesetEntries || admission.conflict(occupancy) !== undefined) {
+        chunks.push(current);
+        current = [];
+        admission = new PhaseAdmission();
+      }
+      admission.admit(occupancy);
+      current.push(edit);
     }
-
-    const operations = edits.flatMap(({ source, target, sourceResolution, targetResolution }) => [
-      { path: source, resolution: sourceResolution },
-      { path: target, resolution: targetResolution },
-    ]);
-    const locks = this.batchLockPaths(operations);
-    return this._crossTabCoordinator.withLocks(locks, async () =>
-      this._resourceQueue.queueForMany(locks, async () => {
-        await this.refreshMutationProviders(operations.map(({ resolution }) => resolution));
-        const completed: Array<{ edit: BulkMoveEdit; stat: FileStat }> = [];
-        const failed: Array<{ edit: BulkMoveEdit; error: WorkspaceMutationError }> = [];
-        for (const resolved of edits) {
-          try {
-            // oxlint-disable-next-line no-await-in-loop -- Result order and dependent edits require sequential moves.
-            const stat = await this.moveResolvedUnlocked({ ...resolved, context });
-            completed.push({ edit: resolved.edit, stat });
-          } catch (error) {
-            failed.push({
-              edit: resolved.edit,
-              error: causeToMutationError(error, resolved.edit.source, resolved.edit.target),
-            });
-          }
+    if (current.length > 0) {
+      chunks.push(current);
+    }
+    for (const chunk of chunks) {
+      let receipt: ChangesetReceipt;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- a dependent edit's chunk follows the one it depends on.
+        receipt = await this.apply(
+          {
+            entries: chunk.map(({ source, target, sourceResolution, targetResolution }) => ({
+              entry: { op: 'move', from: source, to: target },
+              resolution: sourceResolution,
+              targetResolution,
+            })),
+          },
+          context,
+        );
+      } catch (error) {
+        failed.push(
+          ...chunk.map(({ edit }) => ({ edit, error: causeToMutationError(error, edit.source, edit.target) })),
+        );
+        continue;
+      }
+      const applied = chunk.filter((_, index) => receipt.entries[index]!.outcome === 'applied');
+      for (const [index, { edit }] of chunk.entries()) {
+        const entry = receipt.entries[index]!;
+        if (entry.outcome !== 'applied') {
+          failed.push({ edit, error: causeToMutationError(entry.error, edit.source, edit.target) });
         }
-        return { moved: completed, failed };
-      }),
-    );
+      }
+      // oxlint-disable-next-line no-await-in-loop -- each chunk's stats follow its own apply.
+      const stats = await mapRolling(applied, 8, async ({ targetResolution }) =>
+        targetResolution.provider.stat(targetResolution.path).then(
+          (stat) => stat,
+          () => undefined,
+        ),
+      );
+      for (const [index, { edit }] of applied.entries()) {
+        const stat = stats[index];
+        if (stat === undefined) {
+          failed.push({
+            edit,
+            error: causeToMutationError(errnoError('ENOENT', `moved target vanished '${edit.target}'`), edit.source, edit.target),
+          });
+        } else {
+          moved.push({ edit, stat });
+        }
+      }
+    }
+    return { moved, failed };
   }
 
   /**
-   * Recursively copy one resolved subtree onto another as a single batch: one
-   * lock set, one `directoryCopied` summary, targeted invalidation (Rule 5a).
+   * Recursively copy one resolved subtree onto another: the source is read
+   * once, then the copy lands as bounded changesets — one lock set and one
+   * change event each — followed by one `directoryCopied` summary (Rule 5a).
    *
    * @param operands - Both resolved endpoints, the caller's own entry filter, and the mutation context.
    * @returns Resolves when the copy completes.
@@ -378,101 +702,53 @@ export class MutationPipeline {
     admits?: WalkOptions['admits'];
     context?: WorkspaceMutationContext;
   }): Promise<void> {
-    const {
-      source,
-      target: destination,
-      sourceResolution,
-      targetResolution: destinationResolution,
-      admits,
-      context,
-    } = operands;
-    const lockPaths = this.mutationLockPaths([
-      { path: source, resolution: sourceResolution },
-      { path: destination, resolution: destinationResolution },
-    ]);
-    let mutationBegan = false;
-    return this._crossTabCoordinator.withLocks(lockPaths, async () =>
-      this._resourceQueue.queueForMany(lockPaths, async () => {
-        try {
-          await this.refreshMutationProviders([sourceResolution, destinationResolution]);
-          this._assertNoDescendantMounts(source, 'copy');
-          this._assertNoDescendantMounts(destination, 'copy');
-          const snapshot = await this.directoryContents(sourceResolution.provider, sourceResolution.path, {
-            admits,
-          });
-          const destinationEntries = ['', ...snapshot.directories].map((relativePath) => {
-            const path = relativePath === '' ? destination : joinPath(destination, relativePath);
-            const resolvedPath =
-              relativePath === ''
-                ? destinationResolution.path
-                : joinRelativePath(destinationResolution.path, relativePath);
-            return { path, resolution: { ...destinationResolution, path: resolvedPath } };
-          });
-          for (const { path, resolution } of destinationEntries) {
-            // oxlint-disable-next-line no-await-in-loop -- Preserve source directory order so parents exist before children.
-            const existed = await resolution.provider.exists(resolution.path);
-            mutationBegan = true;
-            // oxlint-disable-next-line no-await-in-loop -- Preserve source directory order so parents exist before children.
-            await resolution.provider.mkdir(resolution.path, { recursive: true });
-            if (!existed) {
-              if (this.isCurrentResolution(path, resolution)) {
-                this._treeIndexes.addDirectory(path);
-              }
-              this.emitChangeEvent({ type: 'directoryCreated', path, backend: resolution.backend }, context, {
-                operations: [{ path, resolution }],
-              });
-            }
-          }
-          const destinationFiles = Object.entries(snapshot.files).map(([relativePath, content]) => {
-            const path = joinPath(destination, relativePath);
-            const resolvedPath = joinRelativePath(destinationResolution.path, relativePath);
-            return { path, content, resolution: { ...destinationResolution, path: resolvedPath } };
-          });
-          for (const { path, content, resolution } of destinationFiles) {
-            mutationBegan = true;
-            // oxlint-disable-next-line no-await-in-loop -- Preserve deterministic local write ordering.
-            await this.writeFileUnlocked({ path, resolution, data: content, context });
-          }
-          this.emitChangeEvent(
-            {
-              type: 'directoryCopied',
-              sourcePath: source,
-              targetPath: destination,
-              backend: destinationResolution.backend,
-            },
-            context,
-            { operations: [{ path: destination, resolution: destinationResolution }] },
-          );
-          this._crossTabCoordinator.notifyDirectoryChange(destination, this.physicalAuthority(destinationResolution));
-        } catch (error) {
-          if (mutationBegan) {
-            const globallyVisible = this.isCurrentResolution(destination, destinationResolution);
-            if (globallyVisible) {
-              this._filePool()?.clear();
-              this._treeIndexes.evict(destination);
-            }
-            this.emitChangeEvent({ type: 'backendChanged', backend: destinationResolution.backend }, context, {
-              operations: [{ path: destination, resolution: destinationResolution }],
-              globallyVisible,
-            });
-            this._crossTabCoordinator.notifyDirectoryChange(destination, this.physicalAuthority(destinationResolution));
-          }
-          throw error;
-        }
+    const { source, target: destination, sourceResolution, targetResolution, admits, context } = operands;
+    this._assertNoDescendantMounts(source, 'copy');
+    this._assertNoDescendantMounts(destination, 'copy');
+    const snapshot = await this._withClaims(
+      this.lockClaims([{ path: source, resolution: sourceResolution }]),
+      async () => {
+        await this._refreshScoped([sourceResolution]);
+        return this.directoryContents(sourceResolution.provider, sourceResolution.path, { admits });
+      },
+    );
+    const at = (relativePath: string): { path: string; resolution: MountResolution } => ({
+      path: relativePath === '' ? destination : joinPath(destination, relativePath),
+      resolution: {
+        ...targetResolution,
+        path: relativePath === '' ? targetResolution.path : joinRelativePath(targetResolution.path, relativePath),
+      },
+    });
+    const entries: ResolvedChangesetEntry[] = [
+      ...['', ...snapshot.directories].map((relativePath) => {
+        const { path, resolution } = at(relativePath);
+        return { entry: { op: 'mkdir', path, recursive: true } as const, resolution };
       }),
+      ...Object.entries(snapshot.files).map(([relativePath, data]) => {
+        const { path, resolution } = at(relativePath);
+        return { entry: { op: 'write', path, data } as const, resolution };
+      }),
+    ];
+    const byEntry = new Map(entries.map((resolved) => [resolved.entry, resolved]));
+    for (const changeset of splitChangeset(entries.map(({ entry }) => entry))) {
+      // oxlint-disable-next-line no-await-in-loop -- bounded changesets land in order.
+      const receipt = await this.apply({ entries: changeset.map((entry) => byEntry.get(entry)!) }, context);
+      const failure = receipt.entries.find(({ outcome }) => outcome !== 'applied');
+      if (failure !== undefined) {
+        throw failure.error instanceof Error ? failure.error : errnoError('EIO', `copy to '${destination}' failed`);
+      }
+    }
+    this.emitChangeEvent(
+      { type: 'directoryCopied', sourcePath: source, targetPath: destination, backend: targetResolution.backend },
+      context,
+      { operations: [{ path: destination, resolution: targetResolution }] },
     );
   }
 
   /**
-   * Write many already-resolved files as one batch: every write settles, then
-   * the rejected paths alone lose their derivatives (Rule 5a).
-   *
-   * The batch holds one lock set and one queue entry covering every path, so a
-   * provider that coalesces writes commits the whole batch natively (Rule 34)
-   * instead of once per file. Nothing else about the contract moves: each path
-   * keeps its own commit, cache and index bookkeeping, its own `fileWritten`
-   * and its own cross-tab notification, and a partial failure still leaves the
-   * settled writes durable while only the rejected paths lose derivatives.
+   * Write many already-resolved files as bounded changesets: every write
+   * settles, the rejected paths alone lose their derivatives, and the first
+   * failure is rethrown (Rule 5a).
    *
    * @param ownedFiles - Resolved targets whose bytes the caller already owns.
    * @param context - Optional mutation source metadata for change-bus subscribers.
@@ -486,71 +762,27 @@ export class MutationPipeline {
     }>,
     context?: WorkspaceMutationContext,
   ): Promise<void> {
-    if (ownedFiles.length === 0) {
-      return;
+    const entries: ResolvedChangesetEntry[] = ownedFiles.map(({ path, resolution, content }) => ({
+      entry: { op: 'write', path, data: content },
+      resolution,
+    }));
+    const byEntry = new Map(entries.map((resolved) => [resolved.entry, resolved]));
+    let firstFailure: unknown;
+    let failed = false;
+    for (const changeset of splitChangeset(entries.map(({ entry }) => entry))) {
+      // oxlint-disable-next-line no-await-in-loop -- bounded changesets land in order.
+      const receipt = await this.apply({ entries: changeset.map((entry) => byEntry.get(entry)!) }, context);
+      const failure = receipt.entries.find(({ outcome }) => outcome !== 'applied');
+      if (failure !== undefined && !failed) {
+        failed = true;
+        firstFailure = failure.error;
+      }
     }
-    const operations = ownedFiles.map(({ path, resolution }) => ({ path, resolution }));
-    const locks = this.batchLockPaths(operations);
-    const results = await this._crossTabCoordinator.withLocks(locks, async () =>
-      this._resourceQueue.queueForMany(locks, async () => {
-        await this.refreshMutationProviders(operations.map(({ resolution }) => resolution));
-        const settled = await mapConcurrent(
-          ownedFiles,
-          batchWriteConcurrency(ownedFiles),
-          async ({ path, resolution, content }): Promise<PromiseSettledResult<void>> => {
-            try {
-              await this.writeFileUnlocked({ path, resolution, data: content, context });
-              return { status: 'fulfilled', value: undefined };
-            } catch (error) {
-              return { status: 'rejected', reason: error };
-            }
-          },
-        );
-        for (const [index, result] of settled.entries()) {
-          if (result.status === 'fulfilled') {
-            const { path, resolution } = operations[index]!;
-            this._crossTabCoordinator.notifyMutation({
-              type: 'write',
-              path,
-              authority: this.physicalAuthority(resolution),
-            });
-          }
-        }
-        return settled;
-      }),
-    );
-    const firstFailure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
-    if (firstFailure !== undefined) {
-      // Every settled write already recorded itself; only the rejected paths hold
-      // untrustworthy derivatives, so the batch's successes keep their cached state.
-      for (const [index, result] of results.entries()) {
-        if (result.status === 'rejected') {
-          const { path } = ownedFiles[index]!;
-          this._filePool()?.invalidate(path);
-          this._treeIndexes.removeFile(path);
-        }
+    if (failed) {
+      if (firstFailure instanceof Error) {
+        throw firstFailure;
       }
-      const operationsByBackend = Map.groupBy(operations, ({ resolution }) => resolution.backend);
-      for (const [backend, operations] of operationsByBackend) {
-        this.emitChangeEvent({ type: 'backendChanged', backend }, context, {
-          operations,
-          globallyVisible: operations.some(({ path, resolution }) => this.isCurrentResolution(path, resolution)),
-        });
-      }
-      const notifiedParents = new Set<string>();
-      for (const { path, resolution } of ownedFiles) {
-        const parent = parentDirectory(path);
-        const authority = this.physicalAuthority(resolution);
-        const key = `${authority.storageRootKey}\0${authority.providerBasePath}\0${parent}`;
-        if (!notifiedParents.has(key)) {
-          notifiedParents.add(key);
-          this._crossTabCoordinator.notifyDirectoryChange(parent, authority);
-        }
-      }
-      if (firstFailure.reason instanceof Error) {
-        throw firstFailure.reason;
-      }
-      throw new Error('Batch write failed with a non-Error rejection.', { cause: firstFailure.reason });
+      throw new Error('Batch write failed with a non-Error rejection.', { cause: firstFailure });
     }
   }
 
@@ -578,25 +810,63 @@ export class MutationPipeline {
       globallyVisible?: boolean;
     },
   ): void {
-    if (context?.originClientId !== undefined) {
-      tagEventOrigin(event, context.originClientId);
-    }
-    if (attribution !== undefined) {
-      const authorities = [
-        ...new Set(
-          attribution.operations.flatMap(({ resolution }) =>
-            resolution.entry === undefined ? [] : [resolution.entry],
-          ),
-        ),
-      ];
-      if (authorities.length > 0) {
-        const globallyVisible =
-          attribution.globallyVisible ??
-          attribution.operations.every(({ path, resolution }) => this.isCurrentResolution(path, resolution));
-        tagEventAuthorities(event, authorities, globallyVisible);
-      }
-    }
+    this._tagEvent(event, context, attribution);
     this._eventBus.emit(event);
+  }
+
+  /**
+   * Publish one changeset's facts as one bus event (I4): a single fact as
+   * itself, more as one `changeSet` envelope in entry order. Each fact carries
+   * its own origin and authority tags, so a subscriber that expands the
+   * envelope filters every fact as it would have filtered it alone.
+   *
+   * @param events - The facts and the resolved paths that attribute each.
+   * @param context - Optional mutation source metadata.
+   */
+  public emitChangeEvents(events: readonly AttributedChangeEvent[], context?: WorkspaceMutationContext): void {
+    const [only] = events;
+    if (only === undefined) {
+      return;
+    }
+    if (events.length === 1) {
+      this.emitChangeEvent(
+        only.event,
+        context,
+        only.operations.length === 0
+          ? undefined
+          : {
+              operations: only.operations,
+              ...(only.globallyVisible === undefined ? {} : { globallyVisible: only.globallyVisible }),
+            },
+      );
+      return;
+    }
+    const authorities = new Set<WeakKey>();
+    let globallyVisible = false;
+    for (const { event, operations, globallyVisible: visible } of events) {
+      this._tagEvent(
+        event,
+        context,
+        operations.length === 0
+          ? undefined
+          : { operations, ...(visible === undefined ? {} : { globallyVisible: visible }) },
+      );
+      for (const { resolution } of operations) {
+        if (resolution.entry !== undefined) {
+          authorities.add(resolution.entry);
+        }
+      }
+      globallyVisible ||=
+        visible ?? operations.every(({ path, resolution }) => this.isCurrentResolution(path, resolution));
+    }
+    const envelope: ChangeSetEvent = { type: 'changeSet', entries: events.map(({ event }) => event) };
+    if (context?.originClientId !== undefined) {
+      tagEventOrigin(envelope, context.originClientId);
+    }
+    if (authorities.size > 0) {
+      tagEventAuthorities(envelope, [...authorities], globallyVisible);
+    }
+    this._eventBus.emit(envelope);
   }
 
   public async writeFileResolved({
@@ -610,16 +880,7 @@ export class MutationPipeline {
     data: Uint8Array<ArrayBuffer> | string;
     context?: WorkspaceMutationContext;
   }): Promise<void> {
-    const locks = this.mutationLockPaths([{ path, resolution }]);
-    return this._crossTabCoordinator.withMutationLocks(
-      locks,
-      { type: 'write', path, authority: this.physicalAuthority(resolution) },
-      async () =>
-        this._resourceQueue.queueForMany(locks, async () => {
-          await this.refreshMutationProviders([resolution]);
-          await this.writeFileUnlocked({ path, resolution, data, context });
-        }),
-    );
+    await this._settle(this.enqueue({ entry: { op: 'write', path, data }, resolution }, context));
   }
 
   public async writeFileCheckedResolved({
@@ -700,10 +961,10 @@ export class MutationPipeline {
       { path, resolution },
       ...ownedPreconditions.map(({ path, resolution }) => ({ path, resolution })),
     ];
-    const locks = this.mutationLockPaths(operations);
+    const locks = this.lockClaims(operations);
     const run = async (): Promise<CheckedFileWriteResult> =>
-      this._resourceQueue.queueForMany(locks, async () => {
-        await this.refreshMutationProviders(operations.map(({ resolution }) => resolution));
+      this._resourceQueue.queueForClaims(toQueueClaims(locks), async () => {
+        await this._refreshScoped(operations.map(({ resolution }) => resolution));
         if (signal?.aborted) {
           throw checkedWriteFailure(
             'known-not-applied',
@@ -867,10 +1128,10 @@ export class MutationPipeline {
       { path, resolution },
       ...ownedPreconditions.map(({ path, resolution }) => ({ path, resolution })),
     ];
-    const locks = this.mutationLockPaths(operations);
+    const locks = this.lockClaims(operations);
     const run = async (): Promise<CheckedFileWriteResult> =>
-      this._resourceQueue.queueForMany(locks, async () => {
-        await this.refreshMutationProviders(operations.map(({ resolution }) => resolution));
+      this._resourceQueue.queueForClaims(toQueueClaims(locks), async () => {
+        await this._refreshScoped(operations.map(({ resolution }) => resolution));
         if (signal?.aborted) {
           throw checkedWriteFailure(
             'known-not-applied',
@@ -968,34 +1229,7 @@ export class MutationPipeline {
     data: Uint8Array<ArrayBuffer> | string;
     context?: WorkspaceMutationContext;
   }): Promise<void> {
-    const locks = this.mutationLockPaths([{ path, resolution }]);
-    return this._crossTabCoordinator.withMutationLocks(
-      locks,
-      { type: 'write', path, authority: this.physicalAuthority(resolution) },
-      async () =>
-        this._resourceQueue.queueForMany(locks, async () => {
-          await this.refreshMutationProviders([resolution]);
-          await this._appendFileUnlocked({ path, resolution, data, context });
-        }),
-    );
-  }
-
-  public async writeFileUnlocked({
-    path,
-    resolution,
-    data,
-    context,
-  }: {
-    path: string;
-    resolution: MountResolution;
-    data: Uint8Array<ArrayBuffer> | string;
-    context?: WorkspaceMutationContext;
-  }): Promise<void> {
-    const { provider, path: resolvedPath } = resolution;
-    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
-    await provider.writeFile(resolvedPath, bytes);
-
-    this._recordCompletedWrite({ path, resolution, bytes, context });
+    await this._settle(this.enqueue({ entry: { op: 'append', path, data }, resolution }, context));
   }
 
   public async moveResolved({
@@ -1011,126 +1245,13 @@ export class MutationPipeline {
     targetResolution: MountResolution;
     context?: WorkspaceMutationContext;
   }): Promise<FileStat> {
-    const lockPaths = this.mutationLockPaths([
-      { path: source, resolution: sourceResolution },
-      { path: target, resolution: targetResolution },
-    ]);
-    return this._crossTabCoordinator.withLocks(lockPaths, async () =>
-      this._resourceQueue.queueForMany(lockPaths, async () => {
-        await this.refreshMutationProviders([sourceResolution, targetResolution]);
-        return this.moveResolvedUnlocked({ source, target, sourceResolution, targetResolution, context });
-      }),
-    );
-  }
-
-  /** Run one move while the caller already owns its complete lock set. */
-  public async moveResolvedUnlocked({
-    source,
-    target,
-    sourceResolution,
-    targetResolution,
-    context,
-  }: {
-    source: string;
-    target: string;
-    sourceResolution: MountResolution;
-    targetResolution: MountResolution;
-    context?: WorkspaceMutationContext;
-  }): Promise<FileStat> {
-    let mutationBegan = false;
-    let incompleteCrossProviderDirectoryCopy = false;
-    try {
-      this._assertNoDescendantMounts(source, 'move');
-      this._assertNoDescendantMounts(target, 'move');
-      const sourceStat = await sourceResolution.provider.stat(sourceResolution.path);
-      const targetExists = await targetResolution.provider.exists(targetResolution.path);
-      if (targetExists) {
-        const error = new Error(`EEXIST: target already exists '${target}'`);
-        (error as NodeJS.ErrnoException).code = 'EEXIST';
-        throw error;
-      }
-
-      mutationBegan = true;
-      if (sourceResolution.provider === targetResolution.provider) {
-        await sourceResolution.provider.rename(sourceResolution.path, targetResolution.path);
-      } else if (sourceStat.type === 'dir') {
-        incompleteCrossProviderDirectoryCopy = true;
-        await this._copyDirectoryAcrossProviders(
-          sourceResolution.provider,
-          sourceResolution.path,
-          targetResolution.provider,
-          targetResolution.path,
-        );
-        incompleteCrossProviderDirectoryCopy = false;
-        await this.removeRecursive(sourceResolution.provider, sourceResolution.path);
-      } else {
-        const data = await sourceResolution.provider.readFile(sourceResolution.path);
-        await targetResolution.provider.writeFile(targetResolution.path, data);
-        await sourceResolution.provider.unlink(sourceResolution.path);
-      }
-
-      const sourceIsCurrent = this.isCurrentResolution(source, sourceResolution);
-      const targetIsCurrent = this.isCurrentResolution(target, targetResolution);
-      if (sourceIsCurrent && targetIsCurrent) {
-        this._filePool()?.invalidate(source);
-        this._filePool()?.invalidate(target);
-        this._treeIndexes.rename(source, target);
-      } else if (sourceIsCurrent || targetIsCurrent) {
-        this._filePool()?.clear();
-        this._treeIndexes.evict(source);
-        this._treeIndexes.evict(target);
-      }
-
-      const resultingStat = await targetResolution.provider.stat(targetResolution.path);
-      this.emitChangeEvent(
-        sourceStat.type === 'dir'
-          ? {
-              type: 'directoryRenamed',
-              oldPath: source,
-              newPath: target,
-              backend: sourceResolution.backend,
-            }
-          : {
-              type: 'fileRenamed',
-              oldPath: source,
-              newPath: target,
-              backend: sourceResolution.backend,
-            },
+    await this._settle(
+      this.enqueue(
+        { entry: { op: 'move', from: source, to: target }, resolution: sourceResolution, targetResolution },
         context,
-        {
-          operations: [
-            { path: source, resolution: sourceResolution },
-            { path: target, resolution: targetResolution },
-          ],
-        },
-      );
-      this._notifyMoveParents({ source, target, sourceResolution, targetResolution });
-
-      return resultingStat;
-    } catch (error) {
-      if (incompleteCrossProviderDirectoryCopy && (await targetResolution.provider.exists(targetResolution.path))) {
-        await this.removeRecursive(targetResolution.provider, targetResolution.path);
-      }
-      if (mutationBegan) {
-        const operations = [
-          { path: source, resolution: sourceResolution },
-          { path: target, resolution: targetResolution },
-        ];
-        const globallyVisible = operations.some((operation) =>
-          this.isCurrentResolution(operation.path, operation.resolution),
-        );
-        if (globallyVisible) {
-          this._filePool()?.clear();
-          this._treeIndexes.evict(source);
-          this._treeIndexes.evict(target);
-        }
-        for (const backend of new Set([sourceResolution.backend, targetResolution.backend])) {
-          this.emitChangeEvent({ type: 'backendChanged', backend }, context, { operations, globallyVisible });
-        }
-        this._notifyMoveParents({ source, target, sourceResolution, targetResolution });
-      }
-      throw error;
-    }
+      ),
+    );
+    return targetResolution.provider.stat(targetResolution.path);
   }
 
   public async mkdirResolved({
@@ -1144,42 +1265,11 @@ export class MutationPipeline {
     options?: MkdirOptions;
     context?: WorkspaceMutationContext;
   }): Promise<void> {
-    const locks = this.mutationLockPaths([{ path, resolution }]);
-    return this._crossTabCoordinator.withLocks(locks, async () =>
-      this._resourceQueue.queueForMany(locks, async () => {
-        const { provider, path: resolvedPath, backend: resolvedBackend } = resolution;
-        await this.refreshMutationProviders([resolution]);
-        const alreadyExisted = options?.recursive === true && (await provider.exists(resolvedPath));
-        try {
-          await provider.mkdir(resolvedPath, options?.recursive ? { recursive: true } : undefined);
-        } catch (error) {
-          if (options?.recursive === true) {
-            this._handlePartialMutationFailure(path, resolution, context);
-          }
-          throw error;
-        }
-        if (alreadyExisted) {
-          return;
-        }
-
-        if (this.isCurrentResolution(path, resolution)) {
-          this._treeIndexes.addDirectory(path);
-        }
-        this.emitChangeEvent(
-          {
-            type: 'directoryCreated',
-            path,
-            backend: resolvedBackend,
-          },
-          context,
-          { operations: [{ path, resolution }] },
-        );
-        this._crossTabCoordinator.notifyMutation({
-          type: 'mkdir',
-          path,
-          authority: this.physicalAuthority(resolution),
-        });
-      }),
+    await this._settle(
+      this.enqueue(
+        { entry: { op: 'mkdir', path, ...(options?.recursive === true ? { recursive: true } : {}) }, resolution },
+        context,
+      ),
     );
   }
 
@@ -1192,31 +1282,7 @@ export class MutationPipeline {
     resolution: MountResolution;
     context?: WorkspaceMutationContext;
   }): Promise<void> {
-    const locks = this.mutationLockPaths([{ path, resolution }]);
-    return this._crossTabCoordinator.withMutationLocks(
-      locks,
-      { type: 'delete', path, authority: this.physicalAuthority(resolution) },
-      async () =>
-        this._resourceQueue.queueForMany(locks, async () => {
-          const { provider, path: resolvedPath, backend: resolvedBackend } = resolution;
-          await this.refreshMutationProviders([resolution]);
-          await provider.unlink(resolvedPath);
-
-          if (this.isCurrentResolution(path, resolution)) {
-            this._filePool()?.invalidate(path);
-            this._treeIndexes.removeFile(path);
-          }
-          this.emitChangeEvent(
-            {
-              type: 'fileDeleted',
-              path,
-              backend: resolvedBackend,
-            },
-            context,
-            { operations: [{ path, resolution }] },
-          );
-        }),
-    );
+    await this._settle(this.enqueue({ entry: { op: 'delete', path, kind: 'file' }, resolution }, context));
   }
 
   public async rmdirResolved({
@@ -1230,67 +1296,62 @@ export class MutationPipeline {
     options?: { recursive?: boolean };
     context?: WorkspaceMutationContext;
   }): Promise<void> {
-    const locks = this.mutationLockPaths([{ path, resolution }]);
-    return this._crossTabCoordinator.withMutationLocks(
-      locks,
-      { type: 'rmdir', path, authority: this.physicalAuthority(resolution) },
-      async () =>
-        this._resourceQueue.queueForMany(locks, async () => {
-          const { provider, path: resolvedPath, backend: resolvedBackend } = resolution;
-          await this.refreshMutationProviders([resolution]);
-
-          if (options?.recursive === true) {
-            this._assertNoDescendantMounts(path, 'recursive remove');
-            try {
-              await this.rmdirRecursive(provider, resolvedPath);
-            } catch (error) {
-              this._handlePartialMutationFailure(path, resolution, context);
-              throw error;
-            }
-          } else {
-            await provider.rmdir(resolvedPath);
-          }
-
-          if (this.isCurrentResolution(path, resolution)) {
-            this._treeIndexes.removeDirectory(path);
-          }
-          this.emitChangeEvent(
-            {
-              type: 'directoryDeleted',
-              path,
-              backend: resolvedBackend,
-            },
-            context,
-            { operations: [{ path, resolution }] },
-          );
-        }),
+    await this._settle(
+      this.enqueue(
+        {
+          entry: { op: 'delete', path, kind: 'dir', ...(options?.recursive === true ? { recursive: true } : {}) },
+          resolution,
+        },
+        context,
+      ),
     );
   }
 
-  public mutationLockPaths(operations: ReadonlyArray<{ path: string; resolution: MountResolution }>): string[] {
-    const locks = new Set<string>();
-    const addAuthorityHierarchy = (path: string, boundary: string, format: (value: string) => string): void => {
+  /**
+   * The locks a mutation over `operations` holds (D3): for each path its
+   * logical hierarchy up to its mount prefix and its physical hierarchy up to
+   * its provider base path, the path itself exclusive and every ancestor
+   * shared, plus the owning project's token — shared, or exclusive for a
+   * lifecycle changeset.
+   *
+   * @param operations - Every resolved path the mutation touches.
+   * @param options - `lifecycle` takes the project token exclusively.
+   * @returns The lock claims, one per token, exclusive winning.
+   */
+  public lockClaims(
+    operations: ReadonlyArray<{ path: string; resolution: MountResolution }>,
+    options?: Readonly<{ lifecycle?: boolean }>,
+  ): LockClaim[] {
+    const claims: LockClaim[] = [];
+    const claim = (token: string, shared: boolean): void => {
+      claims.push(shared ? { token, shared } : { token });
+    };
+    const addAuthorityHierarchy = (path: string, boundary: string): void => {
       let current = resolveAuthorityPath(path);
       const root = resolveAuthorityPath(boundary);
       if (current !== root && !current.startsWith(`${root === '/' ? '' : root}/`)) {
         throw new Error(`Mutation path '${current}' is outside its authority root '${root}'.`);
       }
+      let shared = false;
       while (current !== '/') {
-        locks.add(format(current));
+        claim(current, shared);
+        shared = true;
         if (current === root) {
           return;
         }
         current = parentDirectory(current);
       }
     };
-    const addRootedHierarchy = (path: string, boundary: string, format: (value: string) => string): void => {
+    const addRootedHierarchy = (path: string, boundary: string, storageRootKey: string): void => {
       let current = assertRootedPath(path);
       const root = assertRootedPath(boundary);
       if (current !== root && !(root === '' ? current !== '' : current.startsWith(`${root}/`))) {
         throw new Error(`Mutation path '${current}' is outside its authority root '${root}'.`);
       }
+      let shared = false;
       for (;;) {
-        locks.add(format(current));
+        claim(`${storageRootKey}:${current}`, shared);
+        shared = true;
         if (current === root) {
           return;
         }
@@ -1301,50 +1362,17 @@ export class MutationPipeline {
 
     for (const { path, resolution } of operations) {
       const normalized = resolveAuthorityPath(path);
-      addAuthorityHierarchy(normalized, resolution.entry?.prefix ?? normalized, (value) => value);
+      addAuthorityHierarchy(normalized, resolution.entry?.prefix ?? normalized);
       const projectId = this._projectLockOwner(normalized, resolution);
       if (projectId !== undefined) {
-        locks.add(`project:${projectId}`);
+        claim(`project:${projectId}`, options?.lifecycle !== true);
       }
       const { entry } = resolution;
       if (entry?.storageRootKey !== undefined) {
-        addRootedHierarchy(resolution.path, entry.providerBasePath, (value) => `${entry.storageRootKey}:${value}`);
+        addRootedHierarchy(resolution.path, entry.providerBasePath, entry.storageRootKey);
       }
     }
-    return [...locks];
-  }
-
-  /**
-   * The locks one batch holds: per mount, the hierarchy of the deepest path
-   * that every operation in it lies at or inside.
-   *
-   * Exclusion is what a per-file set gave. Every mutation's own set carries its
-   * ancestors up to its mount prefix and its storage root's own token, so a peer
-   * writing any path inside the batch still conflicts on the tokens held here —
-   * while a thousand-file batch requests a handful of locks instead of nesting
-   * one `navigator.locks` request per file (the recursion in
-   * {@link withCrossTabLocks}, which a bulk import overflowed).
-   *
-   * @param operations - Every resolved path the batch writes.
-   * @returns Lock tokens covering the whole batch.
-   */
-  public batchLockPaths(operations: ReadonlyArray<{ path: string; resolution: MountResolution }>): string[] {
-    const byMount = Map.groupBy(operations, ({ resolution }) => resolution.entry);
-    return [
-      ...new Set(
-        [...byMount.values()].flatMap((group) =>
-          this.mutationLockPaths([
-            {
-              path: commonAncestorPath(group.map(({ path }) => path)) || '/',
-              resolution: {
-                ...group[0]!.resolution,
-                path: commonAncestorPath(group.map(({ resolution }) => resolution.path)),
-              },
-            },
-          ]),
-        ),
-      ),
-    ];
+    return normalizeLockClaims(claims);
   }
 
   public physicalAuthority(resolution: MountResolution): PhysicalAuthority {
@@ -1357,16 +1385,473 @@ export class MutationPipeline {
     };
   }
 
-  public async refreshMutationProviders(resolutions: readonly MountResolution[]): Promise<void> {
-    const providers = new Set(resolutions.map(({ provider }) => provider));
-    /* Not cache hygiene: this runs *before* the write, inside the mutation lock,
-     * so a peer tab's committed write is part of what admits ours (the EISDIR and
-     * EEXIST rows in `workspace-file-service-cross-tab.test.ts`). Every provider
-     * that implements `refresh` is one whose projections another writer of the
-     * same bytes can stale, so there is nobody here to skip. The cost — DirectIDB
-     * re-reads its whole key index — is a case for refreshing the mutation's own
-     * key range, which needs its own pin. */
-    await Promise.all([...providers].map(async (provider) => provider.refresh?.()));
+  /**
+   * Hold `claims` across tabs and in this realm's queue while `operation` runs.
+   *
+   * @param claims - Normalized lock claims.
+   * @param operation - The work.
+   * @returns Its result.
+   */
+  private async _withClaims<T>(claims: readonly LockClaim[], operation: () => Promise<T>): Promise<T> {
+    return this._crossTabCoordinator.withLocks(claims, async () =>
+      this._resourceQueue.queueForClaims(toQueueClaims(claims), operation),
+    );
+  }
+
+  /**
+   * Re-read what each provider projects for the paths a mutation touches,
+   * inside its locks: a peer tab's committed write is part of what admits ours
+   * (the EISDIR and EEXIST rows in `workspace-file-service-cross-tab.test.ts`).
+   * One refresh per provider, scoped to the mutation's own paths — never the
+   * whole provider.
+   *
+   * @param resolutions - Every resolution the mutation touches.
+   */
+  private async _refreshScoped(resolutions: readonly MountResolution[]): Promise<void> {
+    const byProvider = Map.groupBy(resolutions, ({ provider }) => provider);
+    await Promise.all(
+      [...byProvider].map(async ([provider, group]) =>
+        provider.refresh?.([...new Set(group.map(({ path }) => path))]),
+      ),
+    );
+  }
+
+  /**
+   * Resolve a convenience's receipt into its result: applied resolves, any
+   * other outcome rejects with the provider's own error.
+   *
+   * @param pending - The entry's queued receipt.
+   */
+  private async _settle(pending: Promise<ChangesetEntryReceipt>): Promise<void> {
+    const receipt = await pending;
+    if (receipt.outcome === 'applied') {
+      return;
+    }
+    throw receipt.error instanceof Error
+      ? receipt.error
+      : new Error(`Mutation ${receipt.outcome}.`, { cause: receipt.error });
+  }
+
+  /**
+   * Start the pending changeset for one origin now.
+   *
+   * @param origin - The coalescing key.
+   */
+  private _flush(origin: string): void {
+    const pending = this._pending.get(origin);
+    if (pending === undefined) {
+      return;
+    }
+    this._pending.delete(origin);
+    const { entries, waiters, context } = pending;
+    this.apply({ entries }, context).then(
+      (receipt) => {
+        for (const [index, waiter] of waiters.entries()) {
+          waiter.resolve(receipt.entries[index]!);
+        }
+      },
+      (error: unknown) => {
+        for (const waiter of waiters) {
+          waiter.reject(error);
+        }
+      },
+    );
+  }
+
+  /**
+   * Resolve one entry's write data and batch entry.
+   *
+   * @param resolved - The entry and its resolutions.
+   * @returns The prepared entry.
+   */
+  private _prepare(resolved: ResolvedChangesetEntry): PreparedEntry {
+    const { entry, resolution, targetResolution } = resolved;
+    const batch = toBatchEntry(entry, resolution, targetResolution);
+    const bytes =
+      (batch.op === 'write' || batch.op === 'append') && batch.data instanceof Uint8Array ? batch.data : undefined;
+    return {
+      entry,
+      phase: entry.phase ?? 0,
+      path: entry.op === 'move' ? entry.from : entry.path,
+      ...(entry.op === 'move' ? { target: entry.to } : {}),
+      resolution,
+      ...(targetResolution === undefined ? {} : { targetResolution }),
+      batch,
+      ...(bytes === undefined ? {} : { bytes }),
+    };
+  }
+
+  /**
+   * Admit every entry before the first I/O: no two entries of one phase race
+   * (one path twice, or one inside another's subtree), and no removal or move
+   * crosses a mount boundary.
+   *
+   * @param entries - The resolved entries, streams staged.
+   * @returns The prepared entries.
+   */
+  private _admit(entries: readonly ResolvedChangesetEntry[]): PreparedEntry[] {
+    const phases = new Map<number, PhaseAdmission>();
+    return entries.map((resolved) => {
+      const prepared = this._prepare(resolved);
+      let admission = phases.get(prepared.phase);
+      if (admission === undefined) {
+        admission = new PhaseAdmission();
+        phases.set(prepared.phase, admission);
+      }
+      const occupancy = occupancyOf(prepared);
+      const conflict = admission.conflict(occupancy);
+      if (conflict !== undefined) {
+        throw errnoError('EINVAL', `changeset entries of one phase overlap at '${conflict}'`);
+      }
+      admission.admit(occupancy);
+      if (prepared.batch.op === 'delete' && prepared.batch.kind !== 'file') {
+        this._assertNoDescendantMounts(prepared.path, 'recursive remove');
+      }
+      if (prepared.batch.op === 'move') {
+        this._assertNoDescendantMounts(prepared.path, 'move');
+        this._assertNoDescendantMounts(prepared.target!, 'move');
+      }
+      return prepared;
+    });
+  }
+
+  /**
+   * Stage every streamed write into a `Blob` before any lock is requested (I11).
+   *
+   * @param entries - The resolved entries.
+   * @returns The same entries, streams replaced by their staged bytes.
+   */
+  private async _stageStreams(entries: readonly ResolvedChangesetEntry[]): Promise<ResolvedChangesetEntry[]> {
+    return Promise.all(
+      entries.map(async (resolved) => {
+        const { entry } = resolved;
+        if (entry.op !== 'write' || !isStreamData(entry.data)) {
+          return resolved;
+        }
+        return { ...resolved, entry: { ...entry, data: await new Response(entry.data).blob() } };
+      }),
+    );
+  }
+
+  /**
+   * The body of {@link apply} once its locks are held.
+   *
+   * @param prepared - Admitted entries.
+   * @param signal - Abort stops later phases.
+   * @param context - Optional mutation source metadata.
+   * @returns Every entry's outcome.
+   */
+  private async _applyLocked(
+    prepared: readonly PreparedEntry[],
+    signal: AbortSignal | undefined,
+    context: WorkspaceMutationContext | undefined,
+  ): Promise<ChangesetReceipt> {
+    const receipts = Array.from<ChangesetEntryReceipt>({ length: prepared.length });
+    const batches = Array.from<BatchReceipt | undefined>({ length: prepared.length });
+    let refreshFailure: unknown;
+    try {
+      await this._refreshScoped(
+        prepared.flatMap(({ resolution, targetResolution }) =>
+          targetResolution === undefined ? [resolution] : [resolution, targetResolution],
+        ),
+      );
+    } catch (error) {
+      refreshFailure = error;
+    }
+    let halted = refreshFailure !== undefined;
+    for (const phase of [...new Set(prepared.map((entry) => entry.phase))].sort()) {
+      const indexes = prepared.flatMap((entry, index) => (entry.phase === phase ? [index] : []));
+      if (halted || signal?.aborted === true) {
+        const error = refreshFailure ?? (signal?.aborted === true ? abortError(signal) : undefined);
+        for (const index of indexes) {
+          receipts[index] = { index, outcome: 'skipped', ...(error === undefined ? {} : { error }) };
+        }
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- a later phase starts only once the earlier one is durable.
+      await this._runPhase(prepared, indexes, signal, receipts, batches);
+      halted = indexes.some((index) => receipts[index]!.outcome !== 'applied');
+    }
+    this._recordChangeset(prepared, receipts, batches, context);
+    return changesetReceipt(receipts);
+  }
+
+  /**
+   * Run one phase: each provider's entries as one batch, the providers side by
+   * side; a move between two providers as a copy and a removal.
+   *
+   * @param prepared - Every admitted entry.
+   * @param indexes - This phase's entries.
+   * @param signal - The changeset's abort signal.
+   * @param receipts - Filled with each entry's receipt.
+   * @param batches - Filled with each entry's provider receipt.
+   */
+  // oxlint-disable-next-line max-params -- the phase runner fills the caller's two receipt arrays in place.
+  private async _runPhase(
+    prepared: readonly PreparedEntry[],
+    indexes: readonly number[],
+    signal: AbortSignal | undefined,
+    receipts: ChangesetEntryReceipt[],
+    batches: Array<BatchReceipt | undefined>,
+  ): Promise<void> {
+    const settle = (index: number, result: BatchReceipt): void => {
+      batches[index] = result;
+      receipts[index] = {
+        index,
+        outcome: result.outcome,
+        ...(result.error === undefined ? {} : { error: result.error }),
+        ...(result.kind === undefined ? {} : { kind: result.kind }),
+      };
+    };
+    const isCrossProvider = (index: number): boolean => {
+      const { batch, resolution, targetResolution } = prepared[index]!;
+      return batch.op === 'move' && targetResolution !== undefined && targetResolution.provider !== resolution.provider;
+    };
+    const byProvider = Map.groupBy(
+      indexes.filter((index) => !isCrossProvider(index)),
+      (index) => prepared[index]!.resolution.provider,
+    );
+    const options = signal === undefined ? undefined : { signal };
+    await Promise.all([
+      ...[...byProvider].map(async ([provider, group]) => {
+        const entries = group.map((index) => prepared[index]!.batch);
+        let results: BatchReceipt[];
+        try {
+          results = await (provider.applyBatch?.(entries, options) ??
+            applyBatchWithPrimitives(provider, entries, options));
+        } catch (error) {
+          results = entries.map(() => ({ outcome: 'uncertain', error }));
+        }
+        for (const [position, index] of group.entries()) {
+          settle(index, results[position] ?? { outcome: 'uncertain', error: new Error('Provider batch lost a receipt.') });
+        }
+      }),
+      ...indexes.filter((index) => isCrossProvider(index)).map(async (index) => {
+        settle(index, await this._moveAcrossProviders(prepared[index]!));
+      }),
+    ]);
+  }
+
+  /**
+   * Move one path between two providers: copy, then remove the source. A
+   * directory copy that fails is removed again; anything after the copy began
+   * is uncertain.
+   *
+   * @param prepared - The move entry.
+   * @returns Its receipt; never rejects.
+   */
+  private async _moveAcrossProviders(prepared: PreparedEntry): Promise<BatchReceipt> {
+    const { resolution: sourceResolution } = prepared;
+    const target = prepared.targetResolution!;
+    let began = false;
+    let incompleteDirectoryCopy = false;
+    try {
+      const sourceStat = await sourceResolution.provider.stat(sourceResolution.path);
+      if (await target.provider.exists(target.path)) {
+        return { outcome: 'failed', error: errnoError('EEXIST', `target already exists '${prepared.target!}'`) };
+      }
+      began = true;
+      if (sourceStat.type === 'dir') {
+        incompleteDirectoryCopy = true;
+        await this._copyDirectoryAcrossProviders(
+          sourceResolution.provider,
+          sourceResolution.path,
+          target.provider,
+          target.path,
+        );
+        incompleteDirectoryCopy = false;
+        await this.removeRecursive(sourceResolution.provider, sourceResolution.path);
+      } else {
+        const data = await sourceResolution.provider.readFile(sourceResolution.path);
+        await target.provider.writeFile(target.path, data);
+        await sourceResolution.provider.unlink(sourceResolution.path);
+      }
+      return { outcome: 'applied', kind: sourceStat.type };
+    } catch (error) {
+      if (incompleteDirectoryCopy) {
+        try {
+          if (await target.provider.exists(target.path)) {
+            await this.removeRecursive(target.provider, target.path);
+          }
+        } catch {
+          // The receipt below is already uncertain.
+        }
+      }
+      return began ? { outcome: 'uncertain', error } : { outcome: 'failed', error };
+    }
+  }
+
+  /**
+   * Record what one changeset did: the derivatives each applied entry
+   * changes, one bus event and one cross-tab notice (I4). An uncertain entry
+   * turns the event into one scoped `backendChanged` per backend instead of
+   * exact facts — never both.
+   *
+   * @param prepared - Every admitted entry.
+   * @param receipts - Every entry's receipt.
+   * @param batches - Every entry's provider receipt.
+   * @param context - Optional mutation source metadata.
+   */
+  // oxlint-disable-next-line max-params -- the recorder reads the three parallel arrays one apply produced.
+  private _recordChangeset(
+    prepared: readonly PreparedEntry[],
+    receipts: readonly ChangesetEntryReceipt[],
+    batches: ReadonlyArray<BatchReceipt | undefined>,
+    context: WorkspaceMutationContext | undefined,
+  ): void {
+    const events: AttributedChangeEvent[] = [];
+    const notices: ChangeNotification[] = [];
+    const notify = (type: ChangeNotification['type'], path: string, resolution: MountResolution): void => {
+      if (resolution.entry?.storageRootKey !== undefined) {
+        notices.push({ type, path, authority: this.physicalAuthority(resolution) });
+      }
+    };
+    const uncertain: PreparedEntry[] = [];
+    for (const [index, entry] of prepared.entries()) {
+      const { outcome, kind } = receipts[index]!;
+      if (outcome === 'uncertain') {
+        uncertain.push(entry);
+        continue;
+      }
+      if (outcome !== 'applied') {
+        continue;
+      }
+      const { batch, path, resolution } = entry;
+      const { backend } = resolution;
+      const current = this.isCurrentResolution(path, resolution);
+      const operations = [{ path, resolution }];
+      switch (batch.op) {
+        case 'write':
+        case 'append': {
+          if (current) {
+            this._filePool()?.invalidate(path);
+            if (batch.op === 'write' && entry.bytes !== undefined) {
+              this._treeIndexes.addFile(path, { size: entry.bytes.byteLength, ...getFileContentMetadata(entry.bytes) });
+            } else if (batch.op === 'write') {
+              this._treeIndexes.evict(path);
+            } else {
+              this._treeIndexes.removeFile(path);
+            }
+          }
+          if (resolution.entry !== undefined) {
+            events.push({ event: { type: 'fileWritten', path, backend }, operations });
+          }
+          notify('write', path, resolution);
+          break;
+        }
+        case 'mkdir': {
+          if (batches[index]?.created === false) {
+            break;
+          }
+          if (current) {
+            this._treeIndexes.addDirectory(path);
+          }
+          events.push({ event: { type: 'directoryCreated', path, backend }, operations });
+          notify('mkdir', path, resolution);
+          break;
+        }
+        case 'delete': {
+          if (kind === 'dir') {
+            if (current) {
+              if (batch.recursive === true) {
+                this._filePool()?.clear();
+              }
+              this._treeIndexes.removeDirectory(path);
+            }
+            events.push({ event: { type: 'directoryDeleted', path, backend }, operations });
+            notify('rmdir', path, resolution);
+          } else {
+            if (current) {
+              this._filePool()?.invalidate(path);
+              this._treeIndexes.removeFile(path);
+            }
+            events.push({ event: { type: 'fileDeleted', path, backend }, operations });
+            notify('delete', path, resolution);
+          }
+          break;
+        }
+        case 'move': {
+          const target = entry.target!;
+          const targetResolution = entry.targetResolution ?? resolution;
+          const targetIsCurrent = this.isCurrentResolution(target, targetResolution);
+          if (current && targetIsCurrent) {
+            this._filePool()?.invalidate(path);
+            this._filePool()?.invalidate(target);
+            this._treeIndexes.rename(path, target);
+          } else if (current || targetIsCurrent) {
+            this._filePool()?.clear();
+            this._treeIndexes.evict(path);
+            this._treeIndexes.evict(target);
+          }
+          events.push({
+            event:
+              kind === 'dir'
+                ? { type: 'directoryRenamed', oldPath: path, newPath: target, backend }
+                : { type: 'fileRenamed', oldPath: path, newPath: target, backend },
+            operations: [...operations, { path: target, resolution: targetResolution }],
+          });
+          notify(kind === 'dir' ? 'rmdir' : 'delete', path, resolution);
+          notify(kind === 'dir' ? 'directory-change' : 'write', target, targetResolution);
+          break;
+        }
+      }
+    }
+    if (uncertain.length > 0) {
+      const touched = uncertain.flatMap(({ path, resolution, target, targetResolution }) => [
+        { path, resolution },
+        ...(target === undefined ? [] : [{ path: target, resolution: targetResolution ?? resolution }]),
+      ]);
+      const globallyVisible = touched.some(({ path, resolution }) => this.isCurrentResolution(path, resolution));
+      if (globallyVisible) {
+        this._filePool()?.clear();
+      }
+      for (const { path, resolution } of touched) {
+        this._treeIndexes.evict(path);
+        notify('directory-change', parentDirectory(path), resolution);
+      }
+      events.length = 0;
+      const all = prepared.map(({ path, resolution }) => ({ path, resolution }));
+      for (const [backend, group] of Map.groupBy(all, ({ resolution }) => resolution.backend)) {
+        events.push({ event: { type: 'backendChanged', backend }, operations: group, globallyVisible });
+      }
+    }
+    this.emitChangeEvents(events, context);
+    this._crossTabCoordinator.notifyChanges(notices);
+  }
+
+  /**
+   * Tag one event with its origin and the authorities that attribute it.
+   *
+   * @param event - The event.
+   * @param context - Optional mutation source metadata.
+   * @param attribution - The resolved paths behind it.
+   */
+  private _tagEvent(
+    event: ChangeEvent,
+    context?: WorkspaceMutationContext,
+    attribution?: {
+      operations: ReadonlyArray<{ path: string; resolution: MountResolution }>;
+      globallyVisible?: boolean;
+    },
+  ): void {
+    if (context?.originClientId !== undefined) {
+      tagEventOrigin(event, context.originClientId);
+    }
+    if (attribution !== undefined) {
+      const authorities = [
+        ...new Set(
+          attribution.operations.flatMap(({ resolution }) =>
+            resolution.entry === undefined ? [] : [resolution.entry],
+          ),
+        ),
+      ];
+      if (authorities.length > 0) {
+        const globallyVisible =
+          attribution.globallyVisible ??
+          attribution.operations.every(({ path, resolution }) => this.isCurrentResolution(path, resolution));
+        tagEventAuthorities(event, authorities, globallyVisible);
+      }
+    }
   }
 
   public async rmdirRecursive(provider: FileSystemProvider, directoryPath: string): Promise<void> {
@@ -1441,67 +1926,6 @@ export class MutationPipeline {
 
     await collect(path, path);
     return { files, directories };
-  }
-
-  private _notifyMoveParents(options: {
-    source: string;
-    target: string;
-    sourceResolution: MountResolution;
-    targetResolution: MountResolution;
-  }): void {
-    const { source, target, sourceResolution, targetResolution } = options;
-    const notifications = [
-      { path: parentDirectory(source), authority: this.physicalAuthority(sourceResolution) },
-      { path: parentDirectory(target), authority: this.physicalAuthority(targetResolution) },
-    ];
-    const delivered = new Set<string>();
-    for (const { path, authority } of notifications) {
-      const key = `${authority.storageRootKey}\0${authority.providerBasePath}\0${path}`;
-      if (!delivered.has(key)) {
-        delivered.add(key);
-        this._crossTabCoordinator.notifyDirectoryChange(path, authority);
-      }
-    }
-  }
-
-  private async _appendFileUnlocked({
-    path,
-    resolution,
-    data,
-    context,
-  }: {
-    path: string;
-    resolution: MountResolution;
-    data: Uint8Array<ArrayBuffer> | string;
-    context?: WorkspaceMutationContext;
-  }): Promise<void> {
-    const { provider, path: resolvedPath, backend } = resolution;
-    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
-    if (provider.appendFile === undefined) {
-      let existing: Uint8Array<ArrayBuffer>;
-      try {
-        existing = await provider.readFile(resolvedPath);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-          throw error;
-        }
-        existing = new Uint8Array();
-      }
-      const combined = new Uint8Array(existing.byteLength + bytes.byteLength);
-      combined.set(existing);
-      combined.set(bytes, existing.byteLength);
-      await provider.writeFile(resolvedPath, combined);
-    } else {
-      await provider.appendFile(resolvedPath, bytes);
-    }
-
-    if (this.isCurrentResolution(path, resolution)) {
-      this._filePool()?.invalidate(path);
-      this._treeIndexes.removeFile(path);
-    }
-    if (resolution.entry !== undefined) {
-      this.emitChangeEvent({ type: 'fileWritten', path, backend }, context, { operations: [{ path, resolution }] });
-    }
   }
 
   private _recordCompletedWrite({
@@ -1585,29 +2009,6 @@ export class MutationPipeline {
       if (normalized === '/' || mount.prefix.startsWith(prefix)) {
         throw new Error(`[WorkspaceFileService] ${operation} would cross mount boundary at '${mount.prefix}'.`);
       }
-    }
-  }
-
-  private _handlePartialMutationFailure(
-    path: string,
-    resolution: MountResolution,
-    context?: WorkspaceMutationContext,
-  ): void {
-    // oxlint-disable-next-line capitalized-comments -- Ponytail debt markers intentionally use the lowercase `ponytail:` tag.
-    // ponytail: the pool takes a full drop, not the path-scoped one `writeFiles`
-    // uses. Both callers are half-finished *recursive* directory mutations, so
-    // everything under `path` is untrustworthy and SharedPool cannot drop a
-    // subtree. Scope it once SharedPool grows a prefix invalidation.
-    this._filePool()?.clear();
-    this._treeIndexes.evict(path);
-    const logicalRoot = resolution.entry?.prefix ?? path;
-    const rootResolution =
-      resolution.entry === undefined ? resolution : { ...resolution, path: resolution.entry.providerBasePath };
-    this.emitChangeEvent({ type: 'backendChanged', backend: resolution.backend }, context, {
-      operations: [{ path: logicalRoot, resolution: rootResolution }],
-    });
-    if (resolution.entry !== undefined) {
-      this._crossTabCoordinator.notifyDirectoryChange(logicalRoot, this.physicalAuthority(resolution));
     }
   }
 

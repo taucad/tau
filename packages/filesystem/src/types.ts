@@ -9,6 +9,7 @@
  * - FileTreeNode: tree representation for /files route
  */
 
+import type { BatchEntry, BatchOptions, BatchReceipt } from '#changeset.js';
 import type {
   CheckedFileWrite,
   CheckedFileWriteResult,
@@ -193,6 +194,14 @@ export type FileSystemProvider = {
    * bodies; without it, callers read and digest the bodies themselves.
    */
   hashFiles?(paths: readonly string[]): Promise<Record<string, string>>;
+  /**
+   * Apply one changeset phase's entries for this provider, reporting each
+   * entry's outcome truthfully (charter D2). Entries name no path twice except
+   * appends, which run in entry order, and none lies inside another's subtree.
+   * Never rejects for an entry's own failure. A provider without it is driven
+   * through its primitives.
+   */
+  applyBatch?(entries: readonly BatchEntry[], options?: BatchOptions): Promise<BatchReceipt[]>;
   /** Optional readdir carrying entry kinds. When present, tree walks skip the stat-per-child. */
   readdirEntries?(path: string): Promise<DirectoryEntry[]>;
   /**

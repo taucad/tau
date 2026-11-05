@@ -7,7 +7,8 @@
 
 import { Topic } from '@taucad/events';
 import type { ChangeEventBus } from '#change-event-bus.js';
-import type { ChangeEvent, WatchRequest, WatchEvent } from '#types.js';
+import type { ChangeEvent, PathChangeEvent, WatchRequest, WatchEvent } from '#types.js';
+import { changeEventEntries } from '#changeset.js';
 import { EventCoalescer } from '#event-coalescer.js';
 import { getEventAuthorities, getEventOrigin, isEventGloballyVisible, tagEventOrigin } from '#event-origin-registry.js';
 import { canonicalizePath, parentDirectory } from '@taucad/utils/path';
@@ -249,7 +250,10 @@ export class WatchRegistry {
         },
       );
       const unsubscribeFromBus = this._eventBus.subscribe((event) => {
-        this._filterAndEnqueue(subscription!, event, coalescer);
+        /* A changeset arrives as one envelope; each fact carries its own tags. */
+        for (const fact of changeEventEntries(event)) {
+          this._filterAndEnqueue(subscription!, fact, coalescer);
+        }
       });
       subscription = {
         request: snapshot,
@@ -332,7 +336,7 @@ export class WatchRegistry {
    * @param event - Change event from the bus.
    * @param coalescer - Event coalescer to enqueue into.
    */
-  private _filterAndEnqueue(subscription: WatchSubscription, event: ChangeEvent, coalescer: EventCoalescer): void {
+  private _filterAndEnqueue(subscription: WatchSubscription, event: PathChangeEvent, coalescer: EventCoalescer): void {
     if (subscription.authority === undefined) {
       if (!isEventGloballyVisible(event)) {
         return;

@@ -347,6 +347,8 @@ const mergedReset = (sets: readonly ChangeSet[], maxEntries: number): ChangeSetR
 
 /**
  * Collapse exact entries per path, keeping moves in place, and count the writes each surviving path absorbed.
+ * A deleted directory is never folded into what follows it at that path: a recreate after it would otherwise
+ * hide that the old directory's descendants are gone, so the delete stays and the create comes after it.
  *
  * @param sets - Exact change sets in delivery order.
  * @returns The surviving entries and the segments with more than one write.
@@ -367,7 +369,8 @@ const foldEntries = (sets: readonly ChangeSet[]): { entries: ChangeSetEntry[]; s
       }
       const slot = slotByPath.get(entry.path);
       const previous = slot === undefined ? undefined : merged[slot];
-      if (slot !== undefined) {
+      const replacedDirectory = previous?.op === 'deleted' && previous.kind === 'dir';
+      if (slot !== undefined && !replacedDirectory) {
         merged[slot] = undefined;
       }
       if (entry.op === 'written') {

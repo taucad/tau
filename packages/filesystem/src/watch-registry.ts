@@ -18,7 +18,7 @@
  */
 
 import { Topic } from '@taucad/events';
-import { toChangeSet } from '#change-event-bus.js';
+import { mergeResets, toChangeSet } from '#change-event-bus.js';
 import type { ChangeEventBus, ChangeSet, ChangeSetReset, ChangeSetResetReason } from '#change-event-bus.js';
 import type { ChangeEvent, PathChangeEvent, WatchRequest, WatchEvent } from '#types.js';
 import { changeEventEntries } from '#changeset.js';
@@ -625,7 +625,8 @@ export class WatchRegistry {
         if (admission.verdict === 'match' || admission.summary) {
           subscription.facts.push(fact);
         } else {
-          subscription.reset = { prefix: admission.prefix, reason: admission.reason };
+          /* Two replaced ancestors in one changeset: one reset that covers both, never the later alone. */
+          subscription.reset = mergeResets(subscription.reset, { prefix: admission.prefix, reason: admission.reason });
         }
         reached.add(subscription);
       }

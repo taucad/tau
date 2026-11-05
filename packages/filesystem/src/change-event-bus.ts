@@ -151,6 +151,21 @@ const entryOrReset = (fact: PathChangeEvent): ChangeSetEntry | ChangeSetReset =>
 const isReset = (value: ChangeSetEntry | ChangeSetReset): value is ChangeSetReset => 'prefix' in value;
 
 /**
+ * One reset that covers two: their common ancestor, and `topology` when either is one.
+ *
+ * @param earlier - The reset already held, if any.
+ * @param later - The reset to fold in.
+ * @returns A reset at or above both prefixes.
+ */
+export const mergeResets = (earlier: ChangeSetReset | undefined, later: ChangeSetReset): ChangeSetReset =>
+  earlier === undefined
+    ? later
+    : {
+        prefix: commonAncestor(earlier.prefix, later.prefix),
+        reason: earlier.reason === 'topology' || later.reason === 'topology' ? 'topology' : later.reason,
+      };
+
+/**
  * The sorted, distinct parents of every path an entry names.
  *
  * @param entries - Exact entries.
@@ -246,13 +261,7 @@ export const toChangeSet = (
   for (const fact of facts) {
     const converted = entryOrReset(fact);
     if (isReset(converted)) {
-      reset =
-        reset === undefined
-          ? converted
-          : {
-              prefix: commonAncestor(reset.prefix, converted.prefix),
-              reason: reset.reason === 'topology' || converted.reason === 'topology' ? 'topology' : converted.reason,
-            };
+      reset = mergeResets(reset, converted);
     } else {
       entries.push(converted);
     }

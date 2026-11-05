@@ -184,6 +184,23 @@ describe('mergeChangeSets', () => {
     ]);
   });
 
+  it('keeps a directory delete ahead of its recreate, so the old descendants are known gone', () => {
+    const merged = mergeChangeSets([
+      set(1, [{ op: 'deleted', path: '/p/src', kind: 'dir' }]),
+      set(2, [
+        { op: 'created', path: '/p/src', kind: 'dir' },
+        { op: 'created', path: '/p/src/new.ts', kind: 'file' },
+      ]),
+    ]);
+
+    expect(merged?.reset).toBeUndefined();
+    expect(merged?.entries).toEqual([
+      { op: 'deleted', path: '/p/src', kind: 'dir' },
+      { op: 'created', path: '/p/src', kind: 'dir' },
+      { op: 'created', path: '/p/src/new.ts', kind: 'file' },
+    ]);
+  });
+
   it('turns any reset into a reset of everything merged', () => {
     const merged = mergeChangeSets([
       set(1, [{ op: 'written', path: '/p/a/x', kind: 'file' }]),
@@ -327,6 +344,23 @@ describe('WatchRegistry change-set watches', () => {
 
     expect(handler).toHaveBeenCalledWith(
       expect.objectContaining({ entries: [], reset: { prefix: '/p/src', reason: 'topology' } }),
+    );
+  });
+
+  it('resets the common ancestor when one changeset replaces two watched ancestors', () => {
+    const handler = vi.fn();
+    registry.watchChangeSets({ paths: ['/p/a/lib', '/p/b/lib'], recursive: true }, handler);
+
+    bus.emit(
+      envelope([
+        { type: 'directoryDeleted', path: '/p/a', backend },
+        { type: 'directoryDeleted', path: '/p/b', backend },
+      ]),
+    );
+
+    expect(handler).toHaveBeenCalledOnce();
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({ entries: [], reset: { prefix: '/p', reason: 'topology' } }),
     );
   });
 

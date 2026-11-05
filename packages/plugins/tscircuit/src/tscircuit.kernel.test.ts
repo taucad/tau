@@ -501,7 +501,7 @@ describe('TscircuitKernel', () => {
         'main.tsx': `
           export default () => (
             <board width="20mm" height="20mm">
-              <chip name="U1" footprint="kicad:Package_SO:SOIC-14_3.9x8.7mm_P1.27mm" />
+              <chip name="U1" footprint="kicad:Package_SO:SOIC-20W_7.5x12.8mm_P1.27mm" />
             </board>
           );
         `,
@@ -564,7 +564,7 @@ describe('TscircuitKernel', () => {
       );
       const online = vi.fn(async (input: string | URL | Request) => {
         const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-        if (url === 'https://kicad-mod-cache.tscircuit.com/Package_SO/SOIC-14_3.9x8.7mm_P1.27mm.circuit.json') {
+        if (url === 'https://kicad-mod-cache.tscircuit.com/Package_SO/SOIC-20W_7.5x12.8mm_P1.27mm.circuit.json') {
           return new Response(pack, { headers: { 'content-type': 'application/json' } });
         }
         throw new Error(`unexpected request ${url}`);
@@ -582,7 +582,7 @@ describe('TscircuitKernel', () => {
           'main.tsx': `
             export default () => (
               <board width="20mm" height="20mm">
-                <chip name="U1" footprint="kicad:Package_SO/SOIC-14_3.9x8.7mm_P1.27mm" pcbX={-4} />
+                <chip name="U1" footprint="kicad:Package_SO/SOIC-20W_7.5x12.8mm_P1.27mm" pcbX={-4} />
                 <chip name="U2" footprint="soic8" cadModel={{ glbUrl: '${blocked}' }} pcbX={5} />
               </board>
             );
@@ -600,12 +600,12 @@ describe('TscircuitKernel', () => {
       expect(outcome.superseded).toBe(false);
       const result = outcome.superseded ? undefined : outcome.rendering;
       expect(online).toHaveBeenCalledWith(
-        'https://kicad-mod-cache.tscircuit.com/Package_SO/SOIC-14_3.9x8.7mm_P1.27mm.circuit.json',
+        'https://kicad-mod-cache.tscircuit.com/Package_SO/SOIC-20W_7.5x12.8mm_P1.27mm.circuit.json',
         undefined,
       );
       expect(result?.success && result.issues).toContainEqual(expectNetworkWarning(blocked));
       // The footprint the online resolver fetched placed its pads.
-      expect(result?.success && result.issues.some((issue) => issue.message.includes('SOIC-14'))).toBe(false);
+      expect(result?.success && result.issues.some((issue) => issue.message.includes('SOIC-20W'))).toBe(false);
     });
 
     it('should not fetch an http footprint: the render completes with a warning naming the URL', async () => {
@@ -726,6 +726,34 @@ describe('TscircuitKernel', () => {
       const root = document.getRoot();
       expect(root.listNodes().some((node) => node.getName() === 'pcb')).toBe(true);
       expect(root.listMaterials().some((material) => material.getName().includes('mask'))).toBe(true);
+    });
+
+    it('should render the technical board untextured when the kernel option asks for it', async () => {
+      const client = createClient({ 'main.tsx': fixtureBoard });
+      expectGlb(await render(client, 'main.tsx'));
+      const circuitJson = await readSettledCircuitJson(client);
+      const runtime = createMockKernelRuntime();
+      const handle = { circuitJson, sheets: new Map() };
+      const technical = await definition.render!(
+        { view: 'board', handle, options: {} },
+        runtime,
+        await definition.initialize({ boardStyle: 'technical' }, runtime),
+      );
+      const io = await createNodeIo();
+      const technicalDocument = await io.readBinary(technical.content as Uint8Array<ArrayBuffer>);
+      const root = technicalDocument.getRoot();
+      expect(root.listNodes().some((node) => node.getName() === 'pcb')).toBe(false);
+      // No raster board texture on either path: the slab is a plain material.
+      expect(root.listTextures()).toHaveLength(0);
+      // A view option still overrides the kernel default.
+      const presentation = await definition.render!(
+        { view: 'board', handle, options: { style: 'presentation' } },
+        runtime,
+        await definition.initialize({ boardStyle: 'technical' }, runtime),
+      );
+      const presentedDocument = await io.readBinary(presentation.content as Uint8Array<ArrayBuffer>);
+      const presented = presentedDocument.getRoot();
+      expect(presented.listNodes().some((node) => node.getName() === 'pcb')).toBe(true);
     });
 
     it('should render the schematic output as an SVG with a viewBox and schematic elements', async () => {

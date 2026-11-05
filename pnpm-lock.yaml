@@ -5263,9 +5263,6 @@ importers:
       '@gltf-transform/core':
         specifier: 'catalog:'
         version: 4.5.1
-      '@resvg/resvg-wasm':
-        specifier: 2.6.2
-        version: 2.6.2
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../../core/geometry

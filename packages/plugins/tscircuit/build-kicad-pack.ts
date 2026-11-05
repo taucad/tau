@@ -1,7 +1,7 @@
 /**
  * Builds Tau's local KiCad model pack: `node build-kicad-pack.ts` from this directory.
  *
- * For each entry of `src/kicad-pack.ts` it downloads the footprint as circuit JSON and its STEP
+ * For each entry of `src/engine/kicad-catalog.ts` it downloads the footprint as circuit JSON and its STEP
  * model from kicad-mod-cache.tscircuit.com (a mirror of the official KiCad footprint and
  * kicad-packages3D libraries), tessellates the STEP with occt-import-js, and writes one GLB per
  * model into `src/assets/kicad/`. GLBs keep KiCad's native frame (Z-up millimetres, footprint
@@ -22,7 +22,8 @@ import { dedup, flatten, join, weld } from '@gltf-transform/functions';
 import occtImportJs from 'occt-import-js';
 import type { OcctImportJs, RgbColor } from 'occt-import-js';
 
-import { kicadFootprintCacheUrl, kicadPack } from '#kicad-pack.js';
+import { kicadCatalog as kicadPack } from '#engine/kicad-catalog.js';
+import { kicadFootprintCacheUrl } from '#kicad-pack.js';
 
 const fetchOk = async (url: string): Promise<Response> => {
   const response = await fetch(url);

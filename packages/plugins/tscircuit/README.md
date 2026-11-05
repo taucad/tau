@@ -53,10 +53,13 @@ const outcome = await pcb.rendering();
 ```
 
 Rendering is offline by default: local autorouter, no parts engine. `fetch` is disabled while the board
-evaluates and while the GLB is built, and each attempted URL becomes a `warning` issue naming it. Common
-`kicad:` footprints, such as `kicad:Package_SO/SOIC-8_3.9x4.9mm_P1.27mm`, still render with real KiCad
-footprints and 3D bodies from Tau's bundled KiCad pack; other `kicad:` names and `jlcpcb:` references produce
-a `warning` and an unplaced part. Set the kernel option `parts: 'online'` to let `kicad:` footprints and
+evaluates and while the GLB is built, and each attempted URL becomes a `warning` issue naming it. Tau's
+bundled KiCad pack (about a hundred footprints: passives, LEDs, diodes, SOT/TO packages, SOIC, TSSOP, QFN,
+QFP and DIP ICs, headers, connectors, crystals, switches and modules) gives common parts real 3D bodies
+offline: plain footprint strings such as `0603`, `soic8`, `sot23`, `qfn32` or `pinrow4` use the matching
+KiCad model, and `kicad:` footprints in the pack, such as `kicad:Package_SO/SOIC-8_3.9x4.9mm_P1.27mm`, load
+their KiCad footprint and model. Other `kicad:` names and `jlcpcb:` references produce a `warning` and an
+unplaced part. Set the kernel option `parts: 'online'` to let `kicad:` footprints and
 their models load from tscircuit's part hosts (`*.tscircuit.com`, https only); every other URL stays blocked.
 
 The `schematic` view takes a `theme` option (`light` by default, `dark`, or `engineering` for KiCad's
@@ -67,6 +70,9 @@ An authored schematic sheet with a unique name keeps its selection across reorde
 ambiguous sheets receive evaluation-local IDs and titles marked “current evaluation”; their choices expire on the next evaluation. Parts outside
 all sheets produce a warning naming the parts. SVG output is fitted in pixels and carries no
 physical units. The GLB builds the board from its copper, finish, solder mask and silkscreen layer geometry.
+The kernel option `boardStyle` picks the default 3D look, `presentation` (the default) or `technical` (a plain
+slab with feature edges), and the `board` view and export take a `style` option that overrides it. Neither
+style rasterizes a board texture.
 
 Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, or your own host. See
 [`@taucad/runtime`](https://www.npmjs.com/package/@taucad/runtime) for the client lifecycle.

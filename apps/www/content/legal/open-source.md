@@ -911,7 +911,6 @@ The circuit kernel bundles the following components. Their full license texts ac
 | @flatten-js/core | 1.6.14 | MIT |
 | @jscad/modeling | 2.13.0 | MIT |
 | @lume/kiwi | 0.4.4 | BSD-3-Clause |
-| @resvg/resvg-wasm | 2.6.2 | MPL-2.0 |
 | @thednp/dommatrix | 3.1.2 | MIT |
 | @tscircuit/alphabet | 0.0.25 | MIT |
 | @tscircuit/alphabet | 0.0.26 | MIT |

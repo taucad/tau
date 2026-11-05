@@ -171,13 +171,21 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
    * cap. A listing past the cap shows the size alone; a single stat counts.
    */
   const factsOf = async (
-    files: ReadonlyArray<Readonly<{ path: string; contentKind?: string; lineCount?: number }>>,
+    files: ReadonlyArray<
+      Readonly<{ path: string; size: number; mtimeMs: number; contentKind?: string; lineCount?: number }>
+    >,
     byteCap?: number,
   ): Promise<ReadonlyMap<string, ContentFacts>> => {
-    const unknown = files
-      .filter((file) => file.contentKind === undefined || (file.contentKind === 'text' && file.lineCount === undefined))
-      .map((file) => file.path);
-    return unknown.length === 0 ? new Map() : provider.facts(unknown, { lineCount: true, byteCap });
+    const unknown = files.filter(
+      (file) => file.contentKind === undefined || (file.contentKind === 'text' && file.lineCount === undefined),
+    );
+    /* The listing's own size and mtime let facts an earlier read measured be checked as current without a stat. */
+    return unknown.length === 0
+      ? new Map()
+      : provider.facts(
+          unknown.map((file) => file.path),
+          { lineCount: true, byteCap, listed: unknown.map(({ size, mtimeMs }) => ({ size, mtimeMs })) },
+        );
   };
   const stat = async (path: string): Promise<RpcFileStat> => {
     const target = assertRootedPath(path);

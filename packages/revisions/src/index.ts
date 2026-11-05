@@ -130,6 +130,7 @@ export {
   remoteOf,
   remoteTrackingRef,
   remoteTransportError,
+  tauCatalogueUrl,
   tauRemoteName,
   tauRemoteUrl,
 } from '#remotes.js';

@@ -888,7 +888,7 @@ describe.runIf(gitToolchainOnPath)('an object-by-object import of a long, wide h
 });
 
 describe.runIf(gitToolchainOnPath)('a remote no catalogue serves', () => {
-  it('reads an answer past the ceiling whole', async () => {
+  it('reads an answer past the ceiling whole, and so does a port whose catalogue does not answer', async () => {
     const own = await host();
     const root = await mkdtemp(join(tmpdir(), 'tau-w5-plain-'));
     const remote = await startGitHttpBackend({ root });
@@ -905,6 +905,20 @@ describe.runIf(gitToolchainOnPath)('a remote no catalogue serves', () => {
       await port.setRemote({ name: 'origin', url: remote.url });
       await port.fetch({ remote: 'origin', refs: ['refs/heads/main'] });
       expect(await port.readRef('refs/remotes/origin/main')).toBe(own.git('rev-parse', 'refs/heads/main'));
+
+      /* A catalogue that is configured but does not answer (not deployed yet): the answer is read whole after all. */
+      const unanswered = serve(own, { catalogueStatus: 404 });
+      const configured = createIsomorphicGitRevisionPort({
+        filesystem: await createMemoryProvider(),
+        http: createRevisionHttpClient(),
+        catalogue: { url: () => catalogueUrl, fetch: unanswered.fetch },
+      });
+      await configured.init({ author: { name: 'Tau', email: 'tau@example.com' } });
+      await configured.setRemote({ name: 'origin', url: remote.url });
+      await configured.fetch({ remote: 'origin', refs: ['refs/heads/main'] });
+      expect(await configured.readRef('refs/remotes/origin/main')).toBe(own.git('rev-parse', 'refs/heads/main'));
+      /* Asked twice: once for the cold open, once past the ceiling. */
+      expect(unanswered.catalogueQueries).toHaveLength(2);
     } finally {
       await remote.close();
       await rm(root, { recursive: true, force: true });

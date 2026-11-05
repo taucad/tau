@@ -2228,13 +2228,14 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           body,
           ...(ceiling === undefined ? {} : { maximumBytes: ceiling }),
         }).catch(async (error: unknown) => {
-          if (
-            error instanceof PackCeilingError &&
-            (await importFromCatalogue({ url, families: coldFamilies, signal: input.signal, wants }))
-          ) {
+          if (!(error instanceof PackCeilingError)) {
+            return refused(error);
+          }
+          if (await importFromCatalogue({ url, families: coldFamilies, signal: input.signal, wants })) {
             return undefined;
           }
-          return refused(error);
+          /* A catalogue that does not answer (not deployed, a lapsed link) costs one more request, never the fetch. */
+          return postService(http, { url, service: 'git-upload-pack', body }).catch(refused);
         });
         const pack = (() => {
           try {

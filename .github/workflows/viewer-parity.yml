@@ -4,16 +4,27 @@ name: Viewer parity
 # nanoraster capture, from the options Tau sends for the viewer's camera, is within 1% mean absolute RGB difference of
 # the production viewer's frame, with ambient occlusion on and off, on software GPUs.
 #
+# 0. `fixtures`: generates the tau-examples fixture GLBs from source (libs/tau-examples/scripts/export-parity-fixtures.mts,
+#    fixtures/viewer-parity/fixtures.json names them) once per run; the GLBs are not committed. Every later job
+#    downloads these same files, so the viewer and nanoraster always draw identical bytes; some exports are not
+#    byte-deterministic between runs (replicad/bottle), so nothing pins their bytes. The cache key is the hash of the
+#    fixtures' example sources, the exporter, the manifest and the lockfile.
 # 1. `viewer` (four shards): the production viewer in headed Chromium under Xvfb on SwiftShader WebGPU. Headless
 #    Chromium loses the SwiftShader WebGPU device on its first present and the viewer falls back to WebGL2; the capture
-#    refuses such a frame. The software-adapter AO gate is the harness's one bypass (I2), named in the test.
-# 2. `gate`: nanoraster's native addon on lavapipe (Mesa's Vulkan CPU driver) renders each fixture at the captured
-#    camera and the gate compares (`tau-examples:test:viewer-parity`). Desktop, the CLI and the MCP host ship this
-#    native build; the web app ships nanoraster's WASM build in a worker, which this workflow does not render yet.
+#    refuses such a frame. The software-adapter AO gate is the harness's one bypass (I2), named in the test. Each frame
+#    is written twice: with the canvas's own alpha (the coverage) and as the page shows it, the canvas's premultiplied
+#    bytes composited on #242424, which is what the gate compares against.
+# 2. `gate` (`tau-examples:test:viewer-parity`): both nanoraster builds Tau ships render each fixture at the captured
+#    camera, and the gate scores each against the viewer. The WASM build, which the web app's image worker runs, renders
+#    first in headless Chromium on SwiftShader WebGPU through nanoraster's universal entry, as the worker's bundle
+#    resolves it (nanoraster never presents a frame, so headless keeps the device). The native addon, which desktop,
+#    the CLI and the MCP host run, renders on lavapipe (Mesa's Vulkan CPU driver). The two builds render alike on one
+#    adapter; the gate reports any gap between them above 0.05 points, which here is lavapipe against SwiftShader.
 #
 # Until Tau's catalog moves to nanoraster 0.9.0 the gate renders with the program branch built at
 # NANORASTER_PARITY_REF. At that bump (charter W8, resume P5) delete NANORASTER_PARITY_REF, the `Build nanoraster`
-# steps and TAU_PARITY_NANORASTER below: the gate then loads the installed package and refuses one older than 0.9.0.
+# steps and TAU_PARITY_NANORASTER below: the gate then loads the installed package, both its Node and its universal
+# entry, and refuses one older than 0.9.0.
 
 on:
   pull_request:
@@ -22,11 +33,13 @@ on:
       - '.github/actions/setup-nx/**'
       - 'pnpm-workspace.yaml'
       - 'packages/viewer/src/**'
+      - 'packages/runtime-testing/src/browser/three-renderer-output*'
       - 'packages/plugins/image/src/**'
       - 'libs/types/src/constants/viewer-render-profile*'
       - 'libs/agent-tools/src/capture/viewer-capture-options*'
       - 'libs/tau-examples/fixtures/viewer-parity/**'
       - 'libs/tau-examples/scripts/viewer-parity*'
+      - 'libs/tau-examples/scripts/export-parity-fixtures.mts'
       - 'libs/tau-examples/vitest.viewer-parity.config.ts'
   push:
     branches: [main]
@@ -34,11 +47,14 @@ on:
       - '.github/workflows/viewer-parity.yml'
       - 'pnpm-workspace.yaml'
       - 'packages/viewer/src/**'
+      - 'packages/runtime-testing/src/browser/three-renderer-output*'
       - 'packages/plugins/image/src/**'
       - 'libs/types/src/constants/viewer-render-profile*'
       - 'libs/agent-tools/src/capture/viewer-capture-options*'
       - 'libs/tau-examples/fixtures/viewer-parity/**'
       - 'libs/tau-examples/scripts/viewer-parity*'
+      - 'libs/tau-examples/scripts/export-parity-fixtures.mts'
+      - 'libs/tau-examples/vitest.viewer-parity.config.ts'
   workflow_dispatch:
     inputs:
       nanoraster-ref:
@@ -60,14 +76,63 @@ defaults:
 env:
   NX_DAEMON: 'false'
   NX_NO_CLOUD: 'true'
-  # The nanoraster program branch (claude/nanoraster-ambient-occlusion-32nhl5, nanoraster#130) with W1-W4.
-  NANORASTER_PARITY_REF: 2b47c470981093dd6b6ca80d603f3a385b7ecf9b
+  # The nanoraster program branch (claude/nanoraster-ambient-occlusion-32nhl5, nanoraster#130) with W1-W4 and the
+  # viewer's analytic edges and FXAA.
+  NANORASTER_PARITY_REF: 288603285952fcbfc52ae60e19ef0ba16cce254c
+  PARITY_FIXTURES_OUT: out/test-results/viewer-parity/fixtures
   PARITY_VIEWER_OUT: out/test-results/viewer-parity/viewer
   PARITY_OUT: out/test-results/viewer-parity/nanoraster
 
 jobs:
+  fixtures:
+    name: Fixture GLBs from tau-examples
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+      - name: Hash the fixtures' example sources
+        id: sources
+        run: |
+          # Every file of each manifest example (`<kernel>/<example>`) but its generated thumbnail, then the exporter,
+          # the manifest and the lockfile.
+          {
+            jq -r '.fixtures[].source | select(test("^[a-z0-9-]+/[a-z0-9-]+$"))' \
+              libs/tau-examples/fixtures/viewer-parity/fixtures.json |
+              while read -r example; do
+                find "libs/tau-examples/src/kernels/$example" -type f ! -name thumbnail.webp
+              done
+            echo libs/tau-examples/scripts/export-parity-fixtures.mts
+            echo libs/tau-examples/fixtures/viewer-parity/fixtures.json
+            echo pnpm-lock.yaml
+          } | LC_ALL=C sort | xargs sha256sum > "$RUNNER_TEMP/parity-fixture-sources.txt"
+          echo "hash=$(sha256sum "$RUNNER_TEMP/parity-fixture-sources.txt" | cut -c1-64)" >> "$GITHUB_OUTPUT"
+      - name: Restore the fixture GLBs
+        id: cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ${{ env.PARITY_FIXTURES_OUT }}
+          key: viewer-parity-fixtures-${{ steps.sources.outputs.hash }}
+      - name: Generate the fixture GLBs
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: pnpm exec tsx libs/tau-examples/scripts/export-parity-fixtures.mts --out="$PARITY_FIXTURES_OUT"
+      - name: Upload the fixture GLBs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: viewer-parity-fixtures
+          path: ${{ env.PARITY_FIXTURES_OUT }}
+          if-no-files-found: error
+          retention-days: 14
+
   viewer:
     name: Viewer references (${{ matrix.shard }}/4)
+    needs: fixtures
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     strategy:
@@ -83,6 +148,11 @@ jobs:
         uses: ./.github/actions/setup-nx
         with:
           save-pnpm-store: 'false'
+      - name: Download the fixture GLBs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: viewer-parity-fixtures
+          path: ${{ env.PARITY_FIXTURES_OUT }}
       - name: Install Chromium and Xvfb
         run: |
           pnpm exec playwright install --with-deps chromium
@@ -103,8 +173,8 @@ jobs:
           retention-days: 14
 
   gate:
-    name: Parity gate (nanoraster native, lavapipe)
-    needs: viewer
+    name: Parity gate (nanoraster native on lavapipe, WASM on SwiftShader)
+    needs: [fixtures, viewer]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
@@ -118,11 +188,17 @@ jobs:
         uses: ./.github/actions/setup-nx
         with:
           save-pnpm-store: 'false'
-      - name: Install lavapipe
+      - name: Download the fixture GLBs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: viewer-parity-fixtures
+          path: ${{ env.PARITY_FIXTURES_OUT }}
+      - name: Install lavapipe and Chromium
         run: |
           sudo apt-get update
           sudo apt-get install -y mesa-vulkan-drivers
           echo 'VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json' >> "$GITHUB_ENV"
+          pnpm exec playwright install --with-deps chromium
       # Build nanoraster: remove at the 0.9.0 catalog bump (see the header).
       - name: Build nanoraster (check out)
         run: |
@@ -138,17 +214,24 @@ jobs:
         with:
           path: |
             ~/.cargo/registry
+            ~/.cargo/bin/wasm-pack
             ${{ runner.temp }}/nanoraster/rust/target
-          key: viewer-parity-nanoraster-${{ env.NANORASTER_COMMIT }}
+          key: viewer-parity-nanoraster-wasm-${{ env.NANORASTER_COMMIT }}
           restore-keys: viewer-parity-nanoraster-
-      - name: Build nanoraster (native addon)
+      - name: Build nanoraster (native addon and WASM)
         working-directory: ${{ runner.temp }}/nanoraster
         env:
           CARGO_BUILD_JOBS: '2'
+          # nanoraster's own CI builds its WASM with this wasm-pack.
+          WASM_PACK_VERSION: 0.15.0
         run: |
           rustup toolchain install
+          if ! wasm-pack --version 2>/dev/null | grep -qxF "wasm-pack $WASM_PACK_VERSION"; then
+            cargo install wasm-pack --version "$WASM_PACK_VERSION" --locked --force
+          fi
           pnpm install --frozen-lockfile
           pnpm run build:napi
+          pnpm run build:wasm
       - name: Download the viewer references
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -156,6 +239,8 @@ jobs:
           path: ${{ env.PARITY_VIEWER_OUT }}
           merge-multiple: true
       - name: Run the parity gate
+        env:
+          TAU_E2E_WEBGPU_PROFILE: software
         run: pnpm nx run tau-examples:test:viewer-parity
       - name: Summarize
         if: always()
@@ -165,9 +250,11 @@ jobs:
             {
               echo "### Viewer parity against nanoraster ${NANORASTER_COMMIT:-installed}"
               echo
-              echo '| Fixture | AO on | AO off | AO correlation | Result |'
-              echo '| --- | --- | --- | --- | --- |'
-              jq -r '.results[] | "| \(.fixture) | \(.aoOn.percent * 1000 | round / 1000)% | \(.aoOff.percent * 1000 | round / 1000)% | \(.aoCorrelation // "n/a" | tostring | .[0:5]) | \(if .pass then "pass" elif .knownFailure then "known failure" else "FAIL" end) |"' "$results"
+              jq -r '"Native: \(.adapters.native.name // "unknown"). WASM: \(.adapters.wasm.name // "unknown") in \(.browser // "unknown")."' "$results"
+              echo
+              echo '| Fixture | Native AO on | Native AO off | WASM AO on | WASM AO off | Gap (points) | Result |'
+              echo '| --- | --- | --- | --- | --- | --- | --- |'
+              jq -r 'def pct: . * 1000 | round / 1000 | tostring + "%"; def gap: ([.aoOn, .aoOff] | map(if . < 0 then -. else . end) | max * 1000 | round / 1000); .results[] | "| \(.fixture) | \(.native.aoOn.percent | pct) | \(.native.aoOff.percent | pct) | \(.wasm.aoOn.percent | pct) | \(.wasm.aoOff.percent | pct) | \(.backendGapPoints | gap) | \(if .native.pass and .wasm.pass then "pass" elif .knownFailure then "known failure" else "FAIL" end) |"' "$results"
               echo
               jq -r '.summary' "$results"
             } >> "$GITHUB_STEP_SUMMARY"

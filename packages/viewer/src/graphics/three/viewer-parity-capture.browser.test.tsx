@@ -2,7 +2,7 @@ import '#test/browser.css';
 /*
  * Viewer parity capture (charter `nanoraster-viewer-parity-charter`, W6, metric D2): mounts the production CadViewer
  * (dark scheme, grid, axes and gizmo off, 768x576) for each parity fixture, settles it, and writes its frame (PNG, the
- * canvas's own alpha), camera, adapter and backend. `libs/tau-examples` renders nanoraster at the same camera and
+ * canvas's own alpha), the frame as the page composites it on `#242424`, camera, adapter and backend. `libs/tau-examples` renders nanoraster at the same camera and
  * compares (`pnpm nx run tau-examples:test:viewer-parity`). Configured by viewer-parity-capture.vitest.browser.config.ts.
  */
 import { cleanup, render } from '@testing-library/react';
@@ -19,6 +19,7 @@ import {
   captureRendererOutput,
   disposeRendererOutput,
   installRendererOutput,
+  premultipliedRendererOutput,
 } from '@taucad/runtime-testing/browser/three-renderer-output';
 import { CadViewer } from '#cad/cad-viewer.jsx';
 import { GraphicsProvider } from '#hooks/use-graphics.jsx';
@@ -114,6 +115,8 @@ const settleInvalidations = 20;
 /** Milliseconds between settle invalidations. */
 const settleInterval = 250;
 const captureSamples = 4;
+/** The dark-scheme page behind the viewer canvas (D2), one channel of `#242424`. */
+const pageBackgroundChannel = 0x24;
 
 const sleep = async (milliseconds: number): Promise<void> => {
   await new Promise<void>((resolve) => {
@@ -128,6 +131,30 @@ const readFixture = async (path: string): Promise<Uint8Array<ArrayBuffer>> => {
     throw new Error(`Cannot read parity fixture ${path}: HTTP ${response.status}`);
   }
   return new Uint8Array(await response.arrayBuffer());
+};
+
+/**
+ * The frame as the page shows it: the canvas's premultiplied bytes blended source-over onto the page background in the
+ * encoded domain, as the compositor does, `min(255, c + b·(255 − a)/255)`. Flattening the straight-alpha PNG instead
+ * darkens antialiased silhouettes, whose encoded colour can exceed their alpha and clamp when un-premultiplied.
+ */
+const compositeOnPage = (premultiplied: Uint8ClampedArray): Uint8ClampedArray => {
+  const composited = new Uint8ClampedArray(premultiplied.length);
+  for (let index = 0; index < premultiplied.length; index += 4) {
+    const uncovered = (255 - premultiplied[index + 3]!) / 255;
+    for (let channel = 0; channel < 3; channel++) {
+      composited[index + channel] = Math.round(premultiplied[index + channel]! + pageBackgroundChannel * uncovered);
+    }
+    composited[index + 3] = 255;
+  }
+  return composited;
+};
+
+/** A PNG of packed RGBA rows. */
+const encodePng = async (pixels: Uint8ClampedArray, size: Vector2): Promise<Blob> => {
+  const canvas = new OffscreenCanvas(size.x, size.y);
+  canvas.getContext('2d')?.putImageData(new ImageData(new Uint8ClampedArray(pixels), size.x, size.y), 0, 0);
+  return canvas.convertToBlob({ type: 'image/png' });
 };
 
 /** Base64 of a blob, for `commands.writeFile`. */
@@ -247,11 +274,18 @@ it.each(cases)('should capture the viewer frame of %s on %s with ao=%s', async (
   }
   const size = renderer.getDrawingBufferSize(new Vector2());
   expect([size.x, size.y]).toEqual([width, height]);
-  const canvas = new OffscreenCanvas(size.x, size.y);
-  canvas.getContext('2d')?.putImageData(new ImageData(new Uint8ClampedArray(pixels), size.x, size.y), 0, 0);
-  const blob = await canvas.convertToBlob({ type: 'image/png' });
+  const premultiplied = premultipliedRendererOutput(pixels);
+  if (!premultiplied) {
+    throw new Error('The renderer capture kept no premultiplied bytes');
+  }
   const stem = `${config.outDir}/${name}/viewer.${backend}.${ao ? 'ao-on' : 'ao-off'}`;
-  await commands.writeFile(`${stem}.png`, await blobToBase64(blob), 'base64');
+  // The straight-alpha frame keeps the canvas's coverage; the composite is what the page shows on `#242424`.
+  await commands.writeFile(`${stem}.png`, await blobToBase64(await encodePng(pixels, size)), 'base64');
+  await commands.writeFile(
+    `${stem}.composited.png`,
+    await blobToBase64(await encodePng(compositeOnPage(premultiplied), size)),
+    'base64',
+  );
   const camera = getGraphicsCameraState(actor);
   const info = backendInfo.device?.adapterInfo;
   const { gl } = backendInfo;
@@ -269,6 +303,7 @@ it.each(cases)('should capture the viewer frame of %s on %s with ao=%s', async (
         ao,
         camera,
         size: [size.x, size.y],
+        composited: `viewer.${backend}.${ao ? 'ao-on' : 'ao-off'}.composited.png`,
         devicePixelRatio: globalThis.devicePixelRatio,
         coarsePointer: globalThis.matchMedia('(pointer: coarse)').matches,
         settings: defaultPostProcessingSettings,

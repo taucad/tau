@@ -1,40 +1,44 @@
 /**
- * Exports the viewer parity fixture GLBs (Tau Brain `research/nanoraster-viewer-parity-charter.md`, W6, D3) from
+ * Generates the viewer parity fixture GLBs (Tau Brain `research/nanoraster-viewer-parity-charter.md`, W6, D3) from
  * tau-examples with the same evaluation and GLB export as the checked-in thumbnails (scripts/render-thumbnail.ts:
  * `document.export('glb', { content: { includeEdges: true } })`, PicoVoxel on its exact lane), one fresh runtime client
- * per example, each in its own process.
+ * per example, each in its own process. The GLBs are not committed: each parity run generates them once and feeds the
+ * same files to the viewer capture and to nanoraster, which is what makes the comparison fair. Some exports are not
+ * byte-deterministic (replicad/bottle differs in bytes, not pixels, between runs), so nothing pins their bytes.
  *
  * Usage (from the repository root):
  *   pnpm exec tsx libs/tau-examples/scripts/export-parity-fixtures.mts [--out=<dir>] [--only=<kernel>/<example>,...]
+ *     [--force]
  *
- * Without `--out` it regenerates the pinned fixtures in libs/tau-examples/fixtures/viewer-parity and rewrites their
- * `sha256` in fixtures.json; without `--only` it exports every tau-examples fixture the manifest lists. With `--out`
- * it writes <out>/<kernel>.<example>.glb and <out>/fixtures.json ({ name, glb, kernel, example, bytes, sha256 }).
- * Exports are not all byte-deterministic (replicad/bottle differed in bytes, not pixels, between two runs), so the
- * gate pins bytes instead of regenerating them.
+ * Writes <out>/<kernel>.<example>.glb (default out: out/test-results/viewer-parity/fixtures, the paths
+ * fixtures/viewer-parity/fixtures.json names) for every tau-examples fixture the manifest lists, or the `--only` ones,
+ * and <out>/exported.json ({ name, glb, kernel, example, bytes, sha256, sourceSha256 }) as a record. A fixture whose
+ * GLB exists and whose example source hash (every file in its example directory but the thumbnail) is unchanged is
+ * kept unless `--force` is given.
  */
 
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 delete process.env['NO_COLOR'];
 
 const rootDirectory = join(dirname(fileURLToPath(import.meta.url)), '..');
 const kernelsDirectory = join(rootDirectory, 'src', 'kernels');
-const pinnedDirectory = join(rootDirectory, 'fixtures', 'viewer-parity');
-const manifestPath = join(pinnedDirectory, 'fixtures.json');
+const manifestPath = join(rootDirectory, 'fixtures', 'viewer-parity', 'fixtures.json');
+const defaultOut = join(rootDirectory, '..', '..', 'out', 'test-results', 'viewer-parity', 'fixtures');
 const argument = (name: string): string | undefined =>
   process.argv.find((value) => value.startsWith(`--${name}=`))?.slice(name.length + 3);
 
-type ParityManifest = { fixtures: Array<{ name: string; source: string; sha256: string }> };
+type ParityManifest = { fixtures: Array<{ name: string; source: string }> };
 const readManifest = (): ParityManifest => JSON.parse(readFileSync(manifestPath, 'utf8')) as ParityManifest;
 const isExampleSource = (source: string): boolean => /^[\da-z-]+\/[\da-z-]+$/.test(source);
 
-const customOut = argument('out');
-const out = customOut ?? pinnedDirectory;
+// Absolute: each example exports in a child process whose working directory is libs/tau-examples.
+const out = resolve(argument('out') ?? defaultOut);
+const force = process.argv.includes('--force');
 const only = (argument('only') ?? '').split(',').filter(Boolean);
 const keys =
   only.length > 0
@@ -49,6 +53,21 @@ type ManifestEntry = { kernel: string; name: string; mainFile?: string };
 const entries = JSON.parse(readFileSync(join(rootDirectory, 'src', 'manifest.json'), 'utf8')) as ManifestEntry[];
 const fileFor = (key: string): string => join(out, `${key.replace('/', '.')}.glb`);
 const digest = (bytes: Uint8Array<ArrayBuffer>): string => createHash('sha256').update(bytes).digest('hex');
+const sourceHashFor = (key: string): string => join(out, `${key.replace('/', '.')}.source.sha256`);
+
+/** SHA-256 over the example directory's files (path and bytes, sorted), without its generated thumbnail. */
+const exampleSourceHash = (key: string): string => {
+  const directory = join(kernelsDirectory, key);
+  const files = readdirSync(directory, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name !== 'thumbnail.webp')
+    .map((entry) => join(entry.parentPath, entry.name))
+    .sort();
+  const hash = createHash('sha256');
+  for (const file of files) {
+    hash.update(relative(directory, file)).update('\0').update(readFileSync(file)).update('\0');
+  }
+  return hash.digest('hex');
+};
 
 const exportOne = async (key: string): Promise<void> => {
   const { asKnownArtifact } = await import('@taucad/runtime');
@@ -107,39 +126,42 @@ const exportOne = async (key: string): Promise<void> => {
 const exportAll = (): void => {
   const failures: string[] = [];
   for (const key of keys) {
+    const sourceHash = exampleSourceHash(key);
+    if (
+      !force &&
+      existsSync(fileFor(key)) &&
+      existsSync(sourceHashFor(key)) &&
+      readFileSync(sourceHashFor(key), 'utf8').trim() === sourceHash
+    ) {
+      console.log(`${key}: source unchanged, keeping ${fileFor(key)}`);
+      continue;
+    }
     const child = spawnSync(
       process.execPath,
       ['--import', 'tsx', fileURLToPath(import.meta.url), '--isolated', `--out=${out}`, `--only=${key}`],
       { cwd: rootDirectory, stdio: 'inherit' },
     );
-    if (child.status !== 0) {
+    if (child.status === 0) {
+      writeFileSync(sourceHashFor(key), `${sourceHash}\n`);
+    } else {
       failures.push(`${key}: ${child.signal ?? child.status}`);
     }
   }
   const exported = keys.filter((key) => existsSync(fileFor(key)));
-  if (customOut === undefined) {
-    const manifest = readManifest();
-    for (const fixture of manifest.fixtures) {
-      if (exported.includes(fixture.source)) {
-        fixture.sha256 = digest(readFileSync(fileFor(fixture.source)));
-      }
-    }
-    writeFileSync(manifestPath, `${JSON.stringify(manifest, undefined, 2)}\n`);
-  } else {
-    const listing = exported.map((key) => {
-      const bytes = readFileSync(fileFor(key));
-      const [kernel, example] = key.split('/');
-      return {
-        name: key.replace('/', '.'),
-        glb: fileFor(key),
-        kernel,
-        example,
-        bytes: bytes.byteLength,
-        sha256: digest(bytes),
-      };
-    });
-    writeFileSync(join(out, 'fixtures.json'), `${JSON.stringify(listing, undefined, 2)}\n`);
-  }
+  const listing = exported.map((key) => {
+    const bytes = readFileSync(fileFor(key));
+    const [kernel, example] = key.split('/');
+    return {
+      name: key.replace('/', '.'),
+      glb: fileFor(key),
+      kernel,
+      example,
+      bytes: bytes.byteLength,
+      sha256: digest(bytes),
+      sourceSha256: existsSync(sourceHashFor(key)) ? readFileSync(sourceHashFor(key), 'utf8').trim() : undefined,
+    };
+  });
+  writeFileSync(join(out, 'exported.json'), `${JSON.stringify(listing, undefined, 2)}\n`);
   console.log(`Exported ${exported.length}/${keys.length} fixtures to ${out}`);
   if (failures.length > 0) {
     console.error(`Failed:\n${failures.join('\n')}`);

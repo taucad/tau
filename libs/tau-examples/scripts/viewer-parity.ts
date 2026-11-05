@@ -1,7 +1,7 @@
 /**
  * Viewer parity gate helpers (Tau Brain `research/nanoraster-viewer-parity-charter.md`, W6, metric D2): the fixture
- * manifest, the image options Tau's editor capture sends for a viewer camera, the nanoraster module under test, and
- * the mean absolute RGB difference over model pixels.
+ * manifest, the viewer references, the nanoraster builds under test, and the mean absolute RGB difference over model
+ * pixels. Node only; the options and render call both builds share are in `viewer-parity-render.ts`.
  */
 
 import { createHash } from 'node:crypto';
@@ -10,18 +10,16 @@ import { createRequire } from 'node:module';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
-import { buildViewerCaptureImageOptions } from '@taucad/agent-tools/capture';
-import { imageEdgeSchemas, toNanorasterCamera } from '@taucad/image';
+import { viewerParityReferenceName } from '#scripts/viewer-parity-files.js';
+import type { ViewerParityBackend } from '#scripts/viewer-parity-files.js';
+import type { ViewerParityCameraState, ViewerParityNanorasterModule } from '#scripts/viewer-parity-render.js';
 
 /** D2: every fixture under this mean absolute RGB difference, percent of full scale. */
 export const viewerParityThresholdPercent = 1;
-/** The parity frame: the viewer's reference viewport in CSS pixels at pixel ratio 1. */
-export const viewerParitySize = { width: 768, height: 576 } as const;
+/** Native and WASM D2 further apart than this, in percentage points, is reported as a backend difference. */
+export const viewerParityBackendTolerancePoints = 0.05;
 /** The dark-scheme capture background, `#242424`, one channel. */
 const backgroundChannel = 0x24;
-const captureBackground = '#242424';
-/** Tau's root frame, as every capture sends it. */
-const tauWorld = { up: '+z', forward: '-y', unit: 'meter' } as const;
 /** Viewer coverage above this alpha is a model pixel. */
 const coverageAlpha = 8;
 /** Rendered pixels further than this (sum of channel distances) from the background are model pixels. */
@@ -42,8 +40,6 @@ export type ViewerParityFixture = Readonly<{
   class: string;
   /** Why the fixture is in the set (D3). */
   rationale: string;
-  /** SHA-256 of the pinned GLB bytes. */
-  sha256: string;
   /** Set while the fixture is known to fail D2: the reason and its owner. The gate then expects it to fail. */
   knownFailure?: string;
 }>;
@@ -51,13 +47,15 @@ export type ViewerParityFixture = Readonly<{
 /** The parity fixture manifest. @public */
 export type ViewerParityManifest = Readonly<{ fixtures: readonly ViewerParityFixture[] }>;
 
-/** The viewer camera a reference was captured with: Tau's renderer-neutral camera state. */
-export type ViewerParityCameraState = Parameters<typeof toNanorasterCamera>[0]['cameraState'];
-
 /** A viewer reference written by `packages/viewer` `viewer-parity-capture.browser.test.tsx`. @public */
 export type ViewerParityReference = Readonly<{
-  /** The captured frame, a PNG with the canvas's own alpha. */
+  /** The captured frame, a PNG with the canvas's own alpha: the viewer's coverage. */
   png: string;
+  /**
+   * The frame as the page shows it, an opaque PNG: the canvas's premultiplied bytes composited on `#242424`. The gate
+   * compares against this, not the straight-alpha frame flattened, whose antialiased silhouettes clamp dark.
+   */
+  composited: string;
   camera: ViewerParityCameraState;
   size: readonly [number, number];
   isWebGPUBackend: boolean;
@@ -104,61 +102,31 @@ export const readViewerParityReference = (
   name: string,
   ao: boolean,
 ): ViewerParityReference | undefined => {
-  const stem = join(viewerDirectory, name, `viewer.webgpu.${ao ? 'ao-on' : 'ao-off'}`);
-  if (!existsSync(`${stem}.png`) || !existsSync(`${stem}.json`)) {
+  const json = join(viewerDirectory, name, viewerParityReferenceName(ao));
+  const png = json.replace(/\.json$/u, '.png');
+  if (!existsSync(png) || !existsSync(json)) {
     return undefined;
   }
-  const meta = JSON.parse(readFileSync(`${stem}.json`, 'utf8')) as Omit<ViewerParityReference, 'png'>;
-  return { ...meta, png: `${stem}.png` };
+  const meta = JSON.parse(readFileSync(json, 'utf8')) as Omit<ViewerParityReference, 'png'>;
+  if (typeof meta.composited !== 'string' || !existsSync(join(dirname(json), meta.composited))) {
+    throw new Error(
+      `${json} names no page composite; recapture the viewer references with viewer:capture:viewer-parity`,
+    );
+  }
+  return { ...meta, png, composited: join(dirname(json), meta.composited) };
 };
-
-/**
- * The image export options Tau's editor capture sends for a viewer camera at the parity frame
- * (`apps/ui/app/services/headless-capture.ts`): the viewer render profile through `buildViewerCaptureImageOptions`,
- * the dark-scheme background, Tau's world, and the viewer camera through `toNanorasterCamera`, validated by the image
- * transcoder's own schema. With `ao: false` only the AO intensity changes, to 0: the AO-off diagnostic split.
- *
- * @param input - The viewer camera and whether ambient occlusion is on.
- * @param input.camera - The viewer camera state of the reference frame.
- * @param input.ao - Whether ambient occlusion is on.
- * @returns The validated single-image options, exactly as the transcoder receives them.
- */
-export type ViewerParityImageOptions = ReturnType<typeof imageEdgeSchemas.png.parse>;
-
-export const buildViewerParityImageOptions = ({
-  camera,
-  ao,
-}: {
-  camera: ViewerParityCameraState;
-  ao: boolean;
-}): ViewerParityImageOptions => {
-  const look = buildViewerCaptureImageOptions({ ...viewerParitySize, colorScheme: 'dark' });
-  return imageEdgeSchemas.png.parse({
-    mode: 'single',
-    ...viewerParitySize,
-    ...look,
-    ao: ao ? look.ao : { ...look.ao, intensity: 0 },
-    background: captureBackground,
-    world: tauWorld,
-    camera: toNanorasterCamera({ cameraState: camera }),
-  });
-};
-
-/**
- * The part of nanoraster's module the gate calls. Structural, because tau-examples reaches nanoraster only through
- * `@taucad/image` and the module under test may be a checkout of a newer version than the installed types.
- */
-export type ViewerParityNanorasterModule = Readonly<{
-  renderImages: (
-    glb: Uint8Array<ArrayBuffer>,
-    options: Readonly<Record<string, unknown>>,
-  ) => Promise<ReadonlyArray<{ readonly file: { readonly bytes: Uint8Array<ArrayBuffer> } }>>;
-  describeAdapter: () => Promise<unknown>;
-}>;
 
 /** The nanoraster module under test and where it came from. @public */
 export type ViewerParityRenderer = Readonly<{
   module: ViewerParityNanorasterModule;
+  /** `package nanoraster@<version>` or `checkout <path>`. */
+  source: string;
+}>;
+
+/** Where one nanoraster build's entry point is. @public */
+export type ViewerParityNanorasterEntry = Readonly<{
+  /** Absolute path of the entry module. */
+  entry: string;
   /** `package nanoraster@<version>` or `checkout <path>`. */
   source: string;
 }>;
@@ -174,9 +142,64 @@ const declaresParityOptions = (version: string): boolean => {
 };
 
 /**
- * Load the nanoraster under test. `TAU_PARITY_NANORASTER` names a nanoraster checkout with a built native addon
- * (`pnpm run build:napi`): the program branch until its release. Without it the package `@taucad/image` installs is
- * used, which must be the parity release (0.9.0) or later; an older one cannot accept the viewer-parity options.
+ * Locate the nanoraster under test for one build. `TAU_PARITY_NANORASTER` names a nanoraster checkout, the program
+ * branch until its release, built with `pnpm run build:napi` (native) and `pnpm run build:wasm` (WASM). Without it the
+ * package `@taucad/image` installs is used, which must be the parity release (0.9.0) or later; an older one cannot
+ * accept the viewer-parity options.
+ *
+ * The native build is the Node entry (`index.node`), which installs the addon. The WASM build is the universal entry
+ * (`index`), the one a browser bundle such as the web app's image worker resolves: it has no addon and renders through
+ * the WASM artifact on the page's WebGPU.
+ *
+ * @param input - The checkout, the Tau checkout and the build.
+ * @param input.checkout - `TAU_PARITY_NANORASTER`, if set.
+ * @param input.workspaceRoot - The Tau checkout.
+ * @param input.backend - The nanoraster build.
+ * @returns The entry module and its source.
+ */
+export const resolveViewerParityNanorasterEntry = ({
+  checkout,
+  workspaceRoot,
+  backend,
+}: Readonly<{
+  checkout: string | undefined;
+  workspaceRoot: string;
+  backend: ViewerParityBackend;
+}>): ViewerParityNanorasterEntry => {
+  if (checkout) {
+    const root = resolve(checkout);
+    const built = join(
+      root,
+      'src',
+      backend === 'native' ? join('native', 'index.js') : join('wasm', 'render_wasm_bg.wasm'),
+    );
+    if (!existsSync(built)) {
+      throw new Error(
+        `TAU_PARITY_NANORASTER has no ${backend} build: ${built} does not exist; run \`pnpm run build:${backend === 'native' ? 'napi' : 'wasm'}\` there`,
+      );
+    }
+    return {
+      entry: join(root, 'src', backend === 'native' ? 'index.node.ts' : 'index.ts'),
+      source: `checkout ${root}`,
+    };
+  }
+  // `require.resolve('nanoraster')` returns the CommonJS stub that throws; locate the ESM builds by path.
+  const requireFromImage = createRequire(join(workspaceRoot, 'packages', 'plugins', 'image', 'package.json'));
+  const packageJsonPath = requireFromImage.resolve('nanoraster/package.json');
+  const { version } = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as { version: string };
+  if (!declaresParityOptions(version)) {
+    throw new Error(
+      `The installed nanoraster ${version} predates the viewer-parity options (0.9.0); set TAU_PARITY_NANORASTER to a nanoraster checkout built with \`pnpm run build:napi\` and \`pnpm run build:wasm\``,
+    );
+  }
+  return {
+    entry: join(dirname(packageJsonPath), 'dist', backend === 'native' ? 'index.node.mjs' : 'index.mjs'),
+    source: `package nanoraster@${version}`,
+  };
+};
+
+/**
+ * Load nanoraster's native build for the Node gate.
  *
  * @param checkout - `TAU_PARITY_NANORASTER`, if set.
  * @param workspaceRoot - The Tau checkout.
@@ -186,60 +209,12 @@ export const loadViewerParityRenderer = async (
   checkout: string | undefined,
   workspaceRoot: string,
 ): Promise<ViewerParityRenderer> => {
-  if (checkout) {
-    const entry = join(resolve(checkout), 'src', 'index.node.ts');
-    if (!existsSync(entry)) {
-      throw new Error(`TAU_PARITY_NANORASTER is not a nanoraster checkout: ${entry} does not exist`);
-    }
-    const module = (await import(pathToFileURL(entry).href)) as ViewerParityNanorasterModule;
-    return { module, source: `checkout ${resolve(checkout)}` };
-  }
-  // `require.resolve('nanoraster')` returns the CommonJS stub that throws; load the Node ESM build by path.
-  const requireFromImage = createRequire(join(workspaceRoot, 'packages', 'plugins', 'image', 'package.json'));
-  const packageJsonPath = requireFromImage.resolve('nanoraster/package.json');
-  const { version } = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as { version: string };
-  if (!declaresParityOptions(version)) {
-    throw new Error(
-      `The installed nanoraster ${version} predates the viewer-parity options (0.9.0); set TAU_PARITY_NANORASTER to a nanoraster checkout built with \`pnpm run build:napi\``,
-    );
-  }
-  const module = (await import(
-    pathToFileURL(join(dirname(packageJsonPath), 'dist', 'index.node.mjs')).href
-  )) as ViewerParityNanorasterModule;
-  return { module, source: `package nanoraster@${version}` };
+  const { entry, source } = resolveViewerParityNanorasterEntry({ checkout, workspaceRoot, backend: 'native' });
+  const module = (await import(pathToFileURL(entry).href)) as ViewerParityNanorasterModule;
+  return { module, source };
 };
 
-/**
- * Render the options as the image transcoder does for a single image (`image.transcoder.ts`), with every
- * viewer-parity option passed through: the transcoder withholds them only while the installed nanoraster predates
- * them.
- *
- * @param renderer - The nanoraster module.
- * @param glb - The fixture bytes.
- * @param options - Options from {@link buildViewerParityImageOptions}.
- * @returns The PNG bytes.
- */
-export const renderViewerParityImage = async (
-  renderer: ViewerParityNanorasterModule,
-  glb: Uint8Array<ArrayBuffer>,
-  options: ViewerParityImageOptions,
-): Promise<Uint8Array<ArrayBuffer>> => {
-  if (options.mode !== 'single') {
-    throw new TypeError('Viewer parity renders single images');
-  }
-  const { mode: _mode, camera, label, sections: _sections, ...renderOptions } = options;
-  const [image] = await renderer.renderImages(glb, {
-    format: 'png',
-    ...renderOptions,
-    views: [{ id: 'single', camera, label }],
-  });
-  if (!image) {
-    throw new Error('nanoraster returned no image');
-  }
-  return image.file.bytes;
-};
-
-/** Raw RGB of an image flattened on the capture background. */
+/** Raw RGB of an image flattened on the capture background; an opaque image (a page composite) passes unchanged. */
 export const flattenedRgb = async (image: string | Uint8Array<ArrayBuffer>): Promise<ArrayLike<number>> =>
   sharp(image)
     .flatten({ background: { r: backgroundChannel, g: backgroundChannel, b: backgroundChannel } })

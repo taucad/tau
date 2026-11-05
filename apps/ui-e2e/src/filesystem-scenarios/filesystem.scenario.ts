@@ -317,6 +317,16 @@ describe(`filesystem scenarios (${profileName} profile)`, { concurrent: false },
       storage: 'OPFS in a persistent (disk-backed) browser profile',
     };
     await clearScenarioDirectories();
+    /* One unmeasured save-during-apply first, so no measured sample pays the cold start (module loads, first OPFS
+     * and lock use); the gates stay as they are (I8). */
+    const warmUp = newProject('warm-up');
+    const worker = await openWorker('warm-up', [warmUp]);
+    try {
+      await runOn(worker, { runner: 'materialize-with-save', project: warmUp });
+    } finally {
+      worker.terminate();
+    }
+    await clearScenarioDirectories();
   });
 
   test('I1: createWritable never exposes a partial file when its writer is killed', async () => {

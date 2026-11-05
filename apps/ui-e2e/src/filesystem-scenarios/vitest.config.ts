@@ -78,8 +78,12 @@ for (const engine of engines) {
 export default defineConfig({
   root: import.meta.dirname,
   server: { fs: { allow: [workspaceRoot] } },
-  /* Pre-bundle what the workers import so a cold dev server does not reload a worker mid-load (as the main config does). */
+  /* Pre-bundle what the workers import so a cold dev server does not reload a worker mid-load (as the main config
+   * does). The scanner starts from the test files only and never follows `new Worker(new URL(...))`, so the workers
+   * are entries too: what they reach through linked packages is found before the first load, not during it, where
+   * the reload skewed the first measured sample. */
   optimizeDeps: {
+    entries: [`${import.meta.dirname}/scenario.worker.ts`, `${import.meta.dirname}/atomicity.worker.ts`],
     include: [
       '@cfworker/json-schema',
       '@opentelemetry/api',

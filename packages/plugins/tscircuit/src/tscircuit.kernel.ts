@@ -13,10 +13,12 @@
 
 import { Primitive, WebIO } from '@gltf-transform/core';
 import { allExtensions, detectEdges, normalizeGltfGeometryNames } from '@taucad/geometry-core';
-import type { Document, Root } from '@gltf-transform/core';
+import type { Document, Material, Node, Root, Scene } from '@gltf-transform/core';
 import type { AnyCircuitElement } from 'circuit-json';
 import type { ComponentType } from 'react';
 import { z } from 'zod';
+
+import type { BoardPresentationOptions } from '#board-geometry.js';
 
 import type { KernelIssue } from '@taucad/runtime/types';
 import { cadEdgeOverlayMaterialDefaults, createExportFile } from '@taucad/runtime/types';
@@ -70,11 +72,35 @@ const zUpRotation: [number, number, number, number] = [Math.SQRT1_2, 0, 0, Math.
 export const tscircuitDetectPattern =
   /import\s+.*from\s+["'](tscircuit|@tscircuit\/core)["']|require\s*\(\s*["'](tscircuit|@tscircuit\/core)["']\s*\)/;
 
-const pcbViewOptionsSchema = z.object({ pinNumbers: z.boolean().optional().meta({ title: 'Pin numbers' }) });
+const pcbViewOptionsSchema = z.object({
+  pinNumbers: z.boolean().optional().meta({ title: 'Pin numbers' }),
+  palette: z
+    .enum(['fabrication', 'engineering'])
+    .optional()
+    .meta({
+      title: 'Palette',
+      description: 'Fabrication preview (mask, finish, silkscreen) or engineering layer colours.',
+    }),
+});
+
+/** The board view's look: a layered presentation board by default, or the converter's technical slab. */
+const boardViewOptionsSchema = z.object({
+  style: z
+    .enum(['presentation', 'technical'])
+    .optional()
+    .meta({
+      title: 'Style',
+      description:
+        'Presentation builds real copper, mask and silkscreen layers; technical shows the textured slab with edges.',
+    }),
+  finish: z.enum(['enig', 'hasl', 'bare']).optional().meta({ title: 'Pad finish' }),
+});
+
+type BoardViewOptions = z.output<typeof boardViewOptionsSchema>;
 
 /** Per-format export option schemas: GLB shares the runtime's glTF convention; the text formats take none. @public */
 const tscircuitExportSchemas = {
-  board: gltfExportConventionSchema,
+  board: gltfExportConventionSchema.extend(boardViewOptionsSchema.shape),
   bom: z.object({}),
   netlist: z.object({}),
   circuit: z.object({}),
@@ -351,16 +377,95 @@ const addFeatureEdges = (document: Document, root: Root): void => {
   }
 };
 
+const boundsOf = (node: Node): { min: number[]; max: number[] } | undefined => {
+  const mesh = node.getMesh();
+  if (!mesh) {
+    return undefined;
+  }
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  for (const primitive of mesh.listPrimitives()) {
+    const position = primitive.getAttribute('POSITION');
+    if (!position) {
+      continue;
+    }
+    const lo = position.getMin([]);
+    const hi = position.getMax([]);
+    for (let axis = 0; axis < 3; axis++) {
+      min[axis] = Math.min(min[axis]!, lo[axis]!);
+      max[axis] = Math.max(max[axis]!, hi[axis]!);
+    }
+  }
+  return { min, max };
+};
+
+// Swap the converter's untextured board slab for the layered presentation board, and give the
+// component bodies presentation materials. The slab is the root mesh spanning a board's outline
+// and thickness (the converter names it generically, so it is matched by size, not name).
+const presentBoard = async (
+  document: Document,
+  scene: Scene | undefined,
+  circuitJson: CircuitElement[],
+  options: BoardPresentationOptions,
+): Promise<void> => {
+  const { buildPresentationBoard } = await import('#board-geometry.js');
+  const { applyPresentationMaterial } = await import('#presentation-materials.js');
+  const boards = circuitJson.filter((element) => element.type === 'pcb_board') as Array<
+    CircuitElement & { width?: number; height?: number; thickness?: number }
+  >;
+  const isBoardSlab = (node: Node): boolean => {
+    const bounds = boundsOf(node);
+    if (!bounds) {
+      return false;
+    }
+    const size = bounds.max.map((value, axis) => value - bounds.min[axis]!);
+    return boards.some(
+      (board) =>
+        Math.abs((size[0] ?? 0) - (board.width ?? Number.NaN)) < 0.5 &&
+        Math.abs((size[2] ?? 0) - (board.height ?? Number.NaN)) < 0.5 &&
+        Math.abs((size[1] ?? 0) - (board.thickness ?? 1.6)) < 0.2,
+    );
+  };
+  const slabMaterials = new Set<Material>();
+  for (const node of scene?.listChildren() ?? []) {
+    if (isBoardSlab(node)) {
+      for (const primitive of node.getMesh()?.listPrimitives() ?? []) {
+        const material = primitive.getMaterial();
+        if (material) {
+          slabMaterials.add(material);
+        }
+      }
+      node.dispose();
+    }
+  }
+  for (const material of slabMaterials) {
+    material.dispose();
+  }
+  for (const material of document.getRoot().listMaterials()) {
+    applyPresentationMaterial(material);
+  }
+  const board = await buildPresentationBoard(document, circuitJson, options);
+  if (board && scene) {
+    scene.addChild(board);
+  }
+};
+
 // Re-parent the converter's Y-up millimetre scene under one node carrying the requested convention.
 const applyGlbConvention = async (
   glb: Uint8Array<ArrayBuffer>,
   { coordinateSystem, unit }: GlbConvention,
+  circuitJson: CircuitElement[],
+  { style = 'presentation', finish }: BoardViewOptions,
 ): Promise<Uint8Array<ArrayBuffer>> => {
   const io = new WebIO().registerExtensions(allExtensions);
   const document = await io.readBinary(glb);
   const root = document.getRoot();
-  addFeatureEdges(document, root);
   const scene = root.getDefaultScene() ?? root.listScenes()[0];
+  if (style === 'presentation') {
+    await presentBoard(document, scene, circuitJson, { finish });
+  } else {
+    addFeatureEdges(document, root);
+  }
   if (!scene) {
     return glb;
   }
@@ -394,15 +499,21 @@ const applyGlbConvention = async (
 const circuitJsonToGlb = async (
   circuitJson: CircuitElement[],
   convention: GlbConvention,
+  options: BoardViewOptions = {},
 ): Promise<{ content: Uint8Array<ArrayBuffer>; issues: KernelIssue[] }> => {
   const { convertCircuitJsonToGltf } = await import('#engine/gltf.js');
-  // The converter's browser worker path uses resvg-wasm for board layers.
+  const presentation = (options.style ?? 'presentation') === 'presentation';
+  // Presentation builds the board from layer geometry, so the converter skips its raster texture.
+  // The technical path keeps the converter's textured board (resvg-wasm in the browser worker).
   const { value: content, issues } = await withOfflineFetch(async () => {
-    const glb = await convertCircuitJsonToGltf(asCircuitJson(circuitJson), { format: 'glb' });
+    const glb = await convertCircuitJsonToGltf(asCircuitJson(circuitJson), {
+      format: 'glb',
+      ...(presentation ? { boardTextureResolution: 0 } : {}),
+    });
     if (!(glb instanceof ArrayBuffer)) {
       throw new TypeError('circuit-json-to-gltf did not return binary GLB bytes.');
     }
-    return applyGlbConvention(new Uint8Array(glb), convention);
+    return applyGlbConvention(new Uint8Array(glb), convention, circuitJson, options);
   });
   return { content, issues };
 };
@@ -464,7 +575,7 @@ export const tscircuitKernel = defineKernel({
   name: 'TscircuitKernel',
   version: '1.1.0',
   views: {
-    board: { title: '3D board', mimeType: 'model/gltf-binary' },
+    board: { title: '3D board', mimeType: 'model/gltf-binary', optionsSchema: boardViewOptionsSchema },
     schematic: { title: 'Schematic', mimeType: 'image/svg+xml', instances: true },
     pcb: { title: 'PCB', mimeType: 'image/svg+xml', optionsSchema: pcbViewOptionsSchema },
   },
@@ -672,7 +783,7 @@ export const tscircuitKernel = defineKernel({
         };
       }
       case 'board': {
-        const { content, issues } = await circuitJsonToGlb(circuitJson, displayGlbConvention);
+        const { content, issues } = await circuitJsonToGlb(circuitJson, displayGlbConvention, request.options);
         return { content, issues };
       }
     }
@@ -717,7 +828,12 @@ export const tscircuitKernel = defineKernel({
     const issues = collectCircuitIssues(circuitJson);
     switch (exportId) {
       case 'board': {
-        const { content, issues: glbIssues } = await circuitJsonToGlb(circuitJson, options);
+        const { coordinateSystem, unit, style, finish } = options;
+        const { content, issues: glbIssues } = await circuitJsonToGlb(
+          circuitJson,
+          { coordinateSystem, unit },
+          { style, finish },
+        );
         return { files: [createExportFile('glb', 'model.glb', content)], issues: [...issues, ...glbIssues] };
       }
       case 'bom': {

@@ -4,6 +4,7 @@ import type { ChatSnapshot } from '@taucad/chat';
 import type { WorkbenchEntries, WorkbenchNode, WorkbenchTab, WorkbenchView } from '@taucad/workbench';
 import type { FileEntry } from '@taucad/types';
 import { cadReferenceFromGeometryComponent, maxCadReferences } from '@taucad/chat/references';
+import { maxSnapshotFileTreeEntries } from '@taucad/chat';
 import type { CadReference } from '@taucad/chat/references';
 import { buildGeometryComponentReference } from '@taucad/viewer/graphics/metadata/geometry-component-reference';
 import type {
@@ -143,7 +144,37 @@ export const projectFileTree = (entries: Iterable<FileEntry>): NonNullable<ChatS
       return item.lineCount === undefined
         ? { path: item.path, name, type: 'file', size: item.size }
         : { path: item.path, name, type: 'file', size: item.size, contentKind: 'text', lineCount: item.lineCount };
-    });
+    })
+    .sort(byDepthThenPath);
+
+const depthOf = (path: string): number => path.split('/').length;
+/* Shallowest first, then by path in code-unit order: the same tree always yields the same snapshot. */
+function byDepthThenPath(left: { path: string }, right: { path: string }): number {
+  const depth = depthOf(left.path) - depthOf(right.path);
+  if (depth !== 0) {
+    return depth;
+  }
+  return left.path < right.path ? -1 : left.path > right.path ? 1 : 0;
+}
+
+/**
+ * The snapshot's bounded file tree (D18): {@link projectFileTree}'s rows cut
+ * at {@link maxSnapshotFileTreeEntries}, with how many the cut left out.
+ *
+ * @param entries - The file tree's rows.
+ * @returns The listed rows, and the count omitted when the bound cut any.
+ */
+export const boundedProjectFileTree = (
+  entries: Iterable<FileEntry>,
+): Pick<ChatSnapshot, 'fileTree' | 'fileTreeOmitted'> & { fileTree: NonNullable<ChatSnapshot['fileTree']> } => {
+  const rows = projectFileTree(entries);
+  return rows.length <= maxSnapshotFileTreeEntries
+    ? { fileTree: rows }
+    : {
+        fileTree: rows.slice(0, maxSnapshotFileTreeEntries),
+        fileTreeOmitted: rows.length - maxSnapshotFileTreeEntries,
+      };
+};
 
 export function useChatSnapshot(): ChatSnapshot | undefined {
   const projectContext = useProject({ enableNoContext: true });
@@ -158,21 +189,33 @@ export function useChatSnapshot(): ChatSnapshot | undefined {
   const editorRef = projectContext?.editorRef;
   const { treeService } = useFileManager();
 
-  const [fileTree, setFileTree] = useState<NonNullable<ChatSnapshot['fileTree']> | undefined>();
+  const [bounded, setBounded] = useState<ReturnType<typeof boundedProjectFileTree> | undefined>();
+  const fileTree = bounded?.fileTree;
 
   useEffect(() => {
     if (!treeService) {
       return;
     }
 
+    /* One rebuild per frame however many change sets land in it. */
+    let frame: number | undefined;
     const sync = (): void => {
-      setFileTree(projectFileTree(treeService.getTreeSnapshot().values()));
+      frame = undefined;
+      setBounded(boundedProjectFileTree(treeService.getTreeSnapshot().values()));
+    };
+    const schedule = (): void => {
+      frame ??= requestAnimationFrame(sync);
     };
 
     sync();
-    const unsubscribe = treeService.subscribeTree(sync);
+    const unsubscribe = treeService.subscribeTree(schedule);
 
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+      if (frame !== undefined) {
+        cancelAnimationFrame(frame);
+      }
+    };
   }, [treeService]);
 
   const editorState = useSelector(
@@ -233,8 +276,11 @@ export function useChatSnapshot(): ChatSnapshot | undefined {
           };
     };
 
-    if (includeFileSystem && fileTree) {
-      snapshot.fileTree = fileTree;
+    if (includeFileSystem && bounded) {
+      snapshot.fileTree = bounded.fileTree;
+      if (bounded.fileTreeOmitted !== undefined) {
+        snapshot.fileTreeOmitted = bounded.fileTreeOmitted;
+      }
     }
 
     if (includeActiveFile && editorState.activeFilePath) {
@@ -269,6 +315,7 @@ export function useChatSnapshot(): ChatSnapshot | undefined {
     return snapshot;
   }, [
     includeFileSystem,
+    bounded,
     fileTree,
     includeActiveFile,
     editorState.activeFilePath,

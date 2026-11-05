@@ -598,6 +598,44 @@ jobs:
           TAU_BENCHMARK_GATE: '1'
         run: pnpm nx run-many -t compare-benchmarks -- --compare="${RUNNER_TEMP}/baseline" --compare="${RUNNER_TEMP}/current"
 
+  # T11 runtime span and operation-facts overhead (Runtime Observability), in the lean harness: plain
+  # `node` on the compiled runtime build, never Vitest or a TypeScript loader. It runs the accepted
+  # settings (102,500 spans per round, 15 rounds, 5 runs per sample) and enforces both gates: the
+  # span path's A/A-corrected relative bounds and the facts p95 bounds. A mis-measured reference arm
+  # and the absolute ceilings block in any mode. Gated with the performance job on the same runner
+  # class; the pre-enable calibration (at least 60 samples per shape) is
+  # `runtime-observability-calibration.yml`.
+  observability-bench:
+    needs: [plan]
+    name: Runtime observability overhead gates
+    if: >-
+      !cancelled() && needs.plan.result == 'success' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name == 'pull_request' && vars.TAU_BENCHMARK_RUNNER_ENABLED == 'true')
+    runs-on: [self-hosted, tau-benchmark]
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: Enforce the span-path and operation-facts gates
+        env:
+          TAU_SPAN_BENCH_GATE: enforce
+          TAU_FACTS_BENCH_GATE: enforce
+        run: pnpm nx run-many -t observability-bench --parallel=1 -- --mode=full --out="${RUNNER_TEMP}/observability-bench"
+
+      - name: Upload the bench reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: runtime-observability-bench
+          path: ${{ runner.temp }}/observability-bench/
+          if-no-files-found: warn
+          retention-days: 30
+
   # API Docker smoke test — catches Dockerfile regressions (multi-stage build,
   # `--parents` package-json copy, pnpm install filter, runtime user, etc.)
   # before they reach Fly.io. Boots the built image with placeholder env

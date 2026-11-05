@@ -1,0 +1,52 @@
+name: Runtime observability calibration
+
+# T11 pre-enable calibration (Runtime Observability): collects at least 60 samples per shape of the
+# span-path and operation-facts gates' statistics on the runner class that enforces them, in the
+# lean harness (plain `node` on the compiled runtime build). The JSON reports carry per-sample
+# distributions and the runner's environment; they confirm or tighten a bound and are never a
+# reason to raise one. The gates stay advisory here: only a mis-measured reference arm and the
+# absolute ceilings fail the run, and the reports upload either way.
+on:
+  workflow_dispatch:
+    inputs:
+      samples:
+        description: Samples per shape (at least 60)
+        required: false
+        default: '60'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
+
+jobs:
+  calibrate:
+    name: Calibrate the observability overhead gates
+    if: vars.TAU_BENCHMARK_RUNNER_ENABLED == 'true'
+    runs-on: [self-hosted, tau-benchmark]
+    timeout-minutes: 240
+    permissions: # Required for nrwl/nx-set-shas (in setup-nx) to read workflow runs
+      actions: 'read'
+      contents: 'read'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: Collect the calibration samples
+        env:
+          SAMPLES: ${{ inputs.samples }}
+        run: pnpm nx run-many -t observability-bench --parallel=1 -- --mode=calibrate --samples="${SAMPLES}" --out="${RUNNER_TEMP}/observability-calibration"
+
+      - name: Upload the calibration reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: runtime-observability-calibration
+          path: ${{ runner.temp }}/observability-calibration/
+          if-no-files-found: warn
+          retention-days: 90

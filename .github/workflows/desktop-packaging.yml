@@ -77,6 +77,12 @@ jobs:
         run: |
           export PATH="/c/Program Files/7-Zip:$PATH"
           TAU_WINDOWS_DISPOSABLE_HOST=1 pnpm nx run desktop:test-windows-package
+      # The DMG window layout is built by hash-pinned dmgbuild wheels installed with uv.
+      - name: Install uv for the DMG layout builder
+        if: runner.os == 'macOS'
+        run: |
+          command -v uv || pipx install uv
+          uv --version
       - name: Mac DMG exact app contents and trust refusal
         if: runner.os == 'macOS'
         run: pnpm nx run desktop:test-macos-dmg
@@ -131,3 +137,26 @@ jobs:
         shell: bash
         run: |
           echo 'Assembly checks do not produce release-trust, installed A-to-B, VM or public-promotion receipts.' >> "$GITHUB_STEP_SUMMARY"
+
+  # Review evidence only: how the install window looks on current macOS. Never signs and gates nothing
+  # beyond the DMG still building and mounting.
+  dmg-window-preview:
+    name: DMG window preview (macos-26)
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./.github/actions/setup-nx
+      - name: Install uv for the DMG layout builder
+        run: |
+          command -v uv || pipx install uv
+          uv --version
+      - name: Build an unsigned preview DMG and capture its Finder window
+        run: node --import @oxc-node/core/register apps/desktop/scripts/macos-dmg-preview.mts out/dmg-preview
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: dmg-window-preview
+          path: out/dmg-preview/*.png
+          retention-days: 14
+          if-no-files-found: warn

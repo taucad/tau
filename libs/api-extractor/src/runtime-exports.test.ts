@@ -49,6 +49,11 @@ describe('@taucad/api-extractor runtime subpaths', () => {
         '@taucad/picovoxel',
         '@classcad/smlibwasm',
         '@taucad/smlib',
+        'react',
+        'csstype',
+        '@tscircuit/props',
+        '@tscircuit/core',
+        'tscircuit',
       ].sort(),
     );
 

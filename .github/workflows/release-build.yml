@@ -180,10 +180,26 @@ jobs:
           wait-minutes: '180'
           github-token: ${{ github.token }}
 
+      # The API's `test` target needs Postgres, Redis and MinIO; CI's
+      # "API tests (Postgres + MinIO)" job starts them the same way. Without
+      # them every repository-store suite fails on ECONNREFUSED :9000.
+      - name: Start Postgres + Redis + MinIO for the API suites
+        if: needs.resolve.outputs.project == 'api'
+        run: |
+          set -euo pipefail
+          cp apps/api/.env.example apps/api/.env
+          docker compose -f infra/docker-compose.yml up -d postgres redis minio minio-bootstrap
+          bash infra/docker-compose.test.sh
+          BILLING_DATABASE_URL=postgresql://dev_user:dev_password@localhost:5432/tau_dev pnpm nx run-many -t db-migrate --projects tag:scope:api
+
       - name: Lint, typecheck, test and build the release
         env:
           PROJECT: ${{ needs.resolve.outputs.project }}
-        run: pnpm nx run-many -t lint typecheck test build --projects="$PROJECT" --parallel=2
+        run: |
+          set -euo pipefail
+          # Named here, as in CI's API job, so the suites' database is stated where they run.
+          if [ "$PROJECT" = api ]; then export DATABASE_URL=postgresql://dev_user:dev_password@localhost:5432/tau_dev; fi
+          pnpm nx run-many -t lint typecheck test build --projects="$PROJECT" --parallel=2
 
   # OCCT (LGPL-2.1 with the Open CASCADE exception) is compiled into the GeoSpec
   # engine that the UI serves as Wasm and the desktop app bundles, so each UI

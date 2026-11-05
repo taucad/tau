@@ -374,8 +374,10 @@ const walkBound = 0.1;
 /** Characters of canonical form one structured leaf may take before it is counted as `unknown`. */
 const canonicalBudget = 256;
 
+/** What the parameter walk reads of a manifest. */
+type ParameterFactsManifest = Pick<ParameterManifest, 'bindings' | 'defaults'>;
 type Template = Readonly<{ parts: readonly string[]; binding: ParameterBinding; wildcard: boolean }>;
-const templatesByManifest = new WeakMap<ParameterManifest, readonly Template[]>();
+const templatesByManifest = new WeakMap<ParameterFactsManifest, readonly Template[]>();
 
 const parsePointer = (pointer: string): string[] | undefined => {
   if (!pointer.startsWith('/')) {
@@ -388,7 +390,7 @@ const parsePointer = (pointer: string): string[] | undefined => {
   return parts.map((part) => part.replaceAll('~1', '/').replaceAll('~0', '~'));
 };
 
-const templatesOf = (manifest: ParameterManifest): readonly Template[] => {
+const templatesOf = (manifest: ParameterFactsManifest): readonly Template[] => {
   const cached = templatesByManifest.get(manifest);
   if (cached !== undefined) {
     return cached;
@@ -418,24 +420,165 @@ const childOf = (value: unknown, part: string): unknown => {
   return Object.hasOwn(value, part) ? (value as Record<string, unknown>)[part] : undefined;
 };
 
-/** Receives one (default, resolved) leaf pair; returns `false` to stop the walk. */
-type LeafVisitor = (fallback: unknown, value: unknown) => boolean;
+/**
+ * Whether a value has a canonical form (JSON with sorted keys) within the leaf budget. The form is never built: every
+ * primitive costs the length of its JSON text, an array one character more than its item count and an object key four
+ * more than its length.
+ *
+ * @param value - A leaf's default or resolved value.
+ * @param walk - The characters `left`, decremented by the cost.
+ * @returns `false` when the value holds something that is not JSON or its cost passes the budget.
+ */
+const fits = (value: unknown, walk: { left: number }): boolean => {
+  switch (typeof value) {
+    case 'number': {
+      // `JSON.stringify` writes a finite number as `String` does, `-0` as `0`, and any other number as `null`.
+      walk.left -= Number.isFinite(value) ? String(value).length : 4;
+      break;
+    }
+    case 'boolean': {
+      walk.left -= value ? 4 : 5;
+      break;
+    }
+    case 'string': {
+      walk.left -= JSON.stringify(value).length;
+      break;
+    }
+    case 'object': {
+      if (value === null) {
+        walk.left -= 4;
+      } else if (Array.isArray(value)) {
+        for (const item of value as unknown[]) {
+          if (!fits(item, walk)) {
+            return false;
+          }
+        }
+        walk.left -= value.length + 1;
+      } else {
+        for (const key of Object.keys(value)) {
+          if (!fits((value as Record<string, unknown>)[key], walk)) {
+            return false;
+          }
+          walk.left -= key.length + 4;
+        }
+      }
+      break;
+    }
+    default: {
+      return false;
+    }
+  }
+  return walk.left >= 0;
+};
 
 /**
- * A walker over the (default, resolved) leaf pairs one binding template names, descending both values in lockstep. No
- * pointer string is built. A wildcard descends the longer of the two arrays, so a leaf the user added or removed counts
- * once.
+ * Whether a value writes JSON `null`: `null` itself or a number that is not finite.
  *
- * @param parts - The template's parsed parts.
- * @param visit - Receives each concrete leaf present on either side.
- * @returns A descent from one part with the default and resolved value there; it returns `false` once the visitor
- *   stopped the walk.
+ * @param value - A JSON value.
+ * @returns Whether it does.
  */
-const leafWalker = (
-  parts: readonly string[],
-  visit: LeafVisitor,
-): ((index: number, fallback: unknown, value: unknown) => boolean) => {
-  const descend = (index: number, fallback: unknown, value: unknown): boolean => {
+const writesNull = (value: unknown): boolean =>
+  value === null || (typeof value === 'number' && !Number.isFinite(value));
+
+/**
+ * Whether two values that both {@link fits | fit} have the same canonical form, compared without building it: equal
+ * primitives write the same text and distinct ones only `null`, arrays match item by item, and objects match on their
+ * own enumerable keys in any order.
+ *
+ * @param left - A JSON value.
+ * @param right - A JSON value.
+ * @returns Whether their canonical forms are equal.
+ */
+const sameCanonical = (left: unknown, right: unknown): boolean => {
+  if (left === right) {
+    return true;
+  }
+  if (typeof left !== 'object' || left === null || typeof right !== 'object' || right === null) {
+    return writesNull(left) && writesNull(right);
+  }
+  if (Array.isArray(left) || Array.isArray(right)) {
+    const items = left as unknown[];
+    const others = right as unknown[];
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      items.length === others.length &&
+      items.every((item, index) => sameCanonical(item, others[index]))
+    );
+  }
+  const keys = Object.keys(left);
+  return (
+    keys.length === Object.keys(right).length &&
+    keys.every(
+      (key) =>
+        Object.prototype.propertyIsEnumerable.call(right, key) &&
+        sameCanonical((left as Record<string, unknown>)[key], (right as Record<string, unknown>)[key]),
+    )
+  );
+};
+
+/**
+ * One walk over a manifest's leaves: its tally, the features its bindings and leaves use, its deadline, the template
+ * being walked and the canonical-form budget left for the value being measured. One object per walk, so the walk
+ * allocates no closure per template.
+ */
+class ParameterWalk {
+  public declared = 0;
+  public modified = 0;
+  public unknown = 0;
+  public truncated = false;
+  public readonly features = new Set<RuntimeParameterFeature>();
+  /** The parts of the template being walked. */
+  public parts: readonly string[] = [];
+  /** Characters of canonical form left for the value being measured. */
+  public left = 0;
+  readonly #deadline = performance.now() + walkBound;
+
+  /**
+   * Count one (default, resolved) leaf pair. Two primitives are compared directly; a structured leaf through its
+   * canonical form, and one too large to compare is counted as `unknown`.
+   *
+   * @param fallback - The default.
+   * @param value - The resolved value.
+   * @returns `false` once the walk must stop.
+   */
+  public visit(fallback: unknown, value: unknown): boolean {
+    if (this.declared >= leafLimit || (this.declared % 64 === 63 && performance.now() > this.#deadline)) {
+      this.truncated = true;
+      return false;
+    }
+    this.declared++;
+    if (value === fallback) {
+      return true;
+    }
+    if ((typeof value !== 'object' || value === null) && (typeof fallback !== 'object' || fallback === null)) {
+      this.modified++;
+      return true;
+    }
+    this.features.add('structured');
+    this.left = canonicalBudget;
+    const valueFits = fits(value, this);
+    this.left = canonicalBudget;
+    if (!valueFits || !fits(fallback, this)) {
+      this.unknown++;
+    } else if (!sameCanonical(value, fallback)) {
+      this.modified++;
+    }
+    return true;
+  }
+
+  /**
+   * Visit the (default, resolved) leaf pairs the template names from one part on, descending both values in lockstep.
+   * No pointer string is built. A wildcard descends the longer of the two arrays, so a leaf the user added or removed
+   * counts once.
+   *
+   * @param index - The part to descend from.
+   * @param fallback - The default value there.
+   * @param value - The resolved value there.
+   * @returns `false` once the walk stopped.
+   */
+  public descend(index: number, fallback: unknown, value: unknown): boolean {
+    const { parts } = this;
     let left = fallback;
     let right = value;
     let at = index;
@@ -448,62 +591,22 @@ const leafWalker = (
       at++;
     }
     if (at === parts.length) {
-      return visit(left, right);
+      return this.visit(left, right);
     }
     const leftItems = Array.isArray(left) ? (left as unknown[]) : undefined;
     const rightItems = Array.isArray(right) ? (right as unknown[]) : undefined;
     const length = Math.max(leftItems?.length ?? 0, rightItems?.length ?? 0);
+    const last = at === parts.length - 1;
     for (let item = 0; item < length; item++) {
       const leftItem = leftItems?.[item];
       const rightItem = rightItems?.[item];
-      const going = at === parts.length - 1 ? visit(leftItem, rightItem) : descend(at + 1, leftItem, rightItem);
-      if (!going) {
+      if (!(last ? this.visit(leftItem, rightItem) : this.descend(at + 1, leftItem, rightItem))) {
         return false;
       }
     }
     return true;
-  };
-  return descend;
-};
-
-/**
- * Canonical JSON with sorted keys, abandoned once it passes the budget.
- *
- * @param value - A JSON value.
- * @param budget - Characters left; decremented as the form is built.
- * @returns The canonical form, or `undefined` once the budget is exhausted or the value is not JSON.
- */
-const canonicalBounded = (value: unknown, budget: { left: number }): string | undefined => {
-  if (value === null || typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') {
-    const text = typeof value === 'number' && Object.is(value, -0) ? '0' : JSON.stringify(value);
-    budget.left -= text.length;
-    return budget.left < 0 ? undefined : text;
   }
-  if (typeof value !== 'object') {
-    return undefined;
-  }
-  const items: string[] = [];
-  if (Array.isArray(value)) {
-    for (const item of value as unknown[]) {
-      const text = canonicalBounded(item, budget);
-      if (text === undefined) {
-        return undefined;
-      }
-      items.push(text);
-    }
-    budget.left -= items.length + 1;
-    return budget.left < 0 ? undefined : `[${items.join(',')}]`;
-  }
-  for (const key of Object.keys(value).sort()) {
-    const text = canonicalBounded((value as Record<string, unknown>)[key], budget);
-    if (text === undefined) {
-      return undefined;
-    }
-    budget.left -= key.length + 4;
-    items.push(`${JSON.stringify(key)}:${text}`);
-  }
-  return budget.left < 0 ? undefined : `{${items.join(',')}}`;
-};
+}
 
 /**
  * Count a manifest's concrete parameter leaves and how many differ from their default after resolution, with the
@@ -518,39 +621,11 @@ const canonicalBounded = (value: unknown, budget: { left: number }): string | un
  * @returns Counts only: no names, values or types.
  */
 export const parameterFacts = (
-  manifest: ParameterManifest,
+  manifest: ParameterFactsManifest,
   resolved: Readonly<Record<string, unknown>>,
 ): NonNullable<WorkerOperationFacts['parameters']> => {
-  const deadline = performance.now() + walkBound;
-  const budget = { left: 0 };
-  const features = new Set<RuntimeParameterFeature>();
-  // One mutable tally: the visitor writes it, so no flow narrowing hides its updates from the return.
-  const tally = { declared: 0, modified: 0, unknown: 0, truncated: false };
-  const visit: LeafVisitor = (fallback, value) => {
-    if (tally.declared >= leafLimit || (tally.declared % 64 === 63 && performance.now() > deadline)) {
-      tally.truncated = true;
-      return false;
-    }
-    tally.declared++;
-    if (value === fallback) {
-      return true;
-    }
-    if ((typeof value !== 'object' || value === null) && (typeof fallback !== 'object' || fallback === null)) {
-      tally.modified++;
-      return true;
-    }
-    features.add('structured');
-    budget.left = canonicalBudget;
-    const left = canonicalBounded(value, budget);
-    budget.left = canonicalBudget;
-    const right = canonicalBounded(fallback, budget);
-    if (left === undefined || right === undefined) {
-      tally.unknown++;
-    } else if (left !== right) {
-      tally.modified++;
-    }
-    return true;
-  };
+  const walk = new ParameterWalk();
+  const { features } = walk;
   for (const { parts, binding, wildcard } of templatesOf(manifest)) {
     if (binding.unit !== undefined) {
       features.add('units');
@@ -561,15 +636,16 @@ export const parameterFacts = (
     if (wildcard) {
       features.add('array');
     }
-    if (!leafWalker(parts, visit)(0, manifest.defaults, resolved)) {
+    walk.parts = parts;
+    if (!walk.descend(0, manifest.defaults, resolved)) {
       break;
     }
   }
   return {
-    declared: tally.declared,
-    modified: tally.modified,
-    ...(tally.unknown > 0 ? { unknown: tally.unknown } : {}),
-    ...(tally.truncated ? { truncated: true } : {}),
+    declared: walk.declared,
+    modified: walk.modified,
+    ...(walk.unknown > 0 ? { unknown: walk.unknown } : {}),
+    ...(walk.truncated ? { truncated: true } : {}),
     ...(features.size > 0 ? { features: [...features] } : {}),
   };
 };

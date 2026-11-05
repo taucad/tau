@@ -213,6 +213,60 @@ describe('createNodeHostTelemetry', () => {
     expect(observe).toHaveBeenLastCalledWith('off');
   });
 
+  it('D-T12-1: should send nothing and print no notice when a set TAU_AUTH_TOKEN resolves signed-out', async () => {
+    const { telemetry, fetch, firstRunNotice } = harness(
+      { env: { TAU_AUTH_TOKEN: 'expired' } },
+      { kind: 'signed-out' },
+    );
+    const handlers: Array<(value: RuntimeObservationInput) => void> = [];
+    const client: NodeObservedClient = {
+      observe: vi.fn(),
+      on: ((event: string, handler: (value: RuntimeObservationInput) => void) => {
+        if (event === 'operation') {
+          handlers.push(handler);
+        }
+        return () => undefined;
+      }) as NodeObservedClient['on'],
+    };
+
+    telemetry.observe(client, 'host');
+    for (const handler of handlers) {
+      handler(observation());
+    }
+    await vi.advanceTimersByTimeAsync(reporterBounds.interval * 2);
+
+    expect(firstRunNotice).not.toHaveBeenCalled();
+    expect(fetch.mock.calls.some(([url]) => urlOf(url).endsWith('/v1/telemetry/ingest'))).toBe(false);
+    expect(fetch.mock.calls.some(([url]) => urlOf(url).endsWith('/v1/telemetry/policy'))).toBe(false);
+    expect(client.observe).not.toHaveBeenCalledWith('facts');
+  });
+
+  it('D-T12-1: should ask a signed-in client for facts once its token resolves, and report with the bearer', async () => {
+    const { telemetry, posts, firstRunNotice } = harness({ env: { TAU_AUTH_TOKEN: 'valid' } }, signedIn);
+    const observe = vi.fn();
+    const handlers: Array<(value: RuntimeObservationInput) => void> = [];
+    const client: NodeObservedClient = {
+      observe,
+      on: ((event: string, handler: (value: RuntimeObservationInput) => void) => {
+        if (event === 'operation') {
+          handlers.push(handler);
+        }
+        return () => undefined;
+      }) as NodeObservedClient['on'],
+    };
+
+    telemetry.observe(client, 'host');
+    expect(firstRunNotice).not.toHaveBeenCalled();
+    for (const handler of handlers) {
+      handler(observation());
+    }
+    await vi.advanceTimersByTimeAsync(reporterBounds.interval);
+
+    expect(firstRunNotice).toHaveBeenCalledTimes(1);
+    expect(observe).toHaveBeenCalledWith('facts');
+    expect(posts()[0]?.headers?.['authorization']).toBe('Bearer secret-token');
+  });
+
   it('should read the renderer consent on desktop: denied denies', () => {
     const { telemetry } = harness({ route: 'desktop', cloudBuild: true, rendererConsent: () => 'denied' });
 

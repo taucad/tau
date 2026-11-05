@@ -4,6 +4,7 @@ import { mock } from 'vitest-mock-extended';
 import type { RevisionStatusProjection } from '@taucad/revisions';
 import {
   modelAvailability,
+  pendingOpenReadiness,
   pendingPathSet,
   projectAvailability,
   readyFor,
@@ -135,5 +136,20 @@ describe('opened large-object paths', () => {
     renderHook(() => useOpenedLargeObjectPending('main.scad'));
     renderHook(() => useLargeObjectPending('models/a.step'));
     expect(send).not.toHaveBeenCalled();
+  });
+});
+
+/* S20: a tab waiting on another tab's cold open shows what the opener announced, never its own empty reading. */
+describe('readiness while a cold open is owed', () => {
+  const none = mock<RevisionStatusProjection['remote']>({ kind: 'none', phase: 'none' });
+  const tau = mock<RevisionStatusProjection['remote']>({ kind: 'tau', phase: 'connected' });
+  it('follows the opener until this tab’s own root is connected', () => {
+    expect(pendingOpenReadiness(undefined, undefined)).toBe('connected');
+    expect(pendingOpenReadiness({ readiness: 'filled', remote: none }, undefined)).toBe('connected');
+    expect(pendingOpenReadiness({ readiness: 'filled', remote: none }, 'treeReady')).toBe('treeReady');
+  });
+  it('takes its own reading once its root is connected', () => {
+    expect(pendingOpenReadiness({ readiness: 'materialized', remote: tau }, 'treeReady')).toBe('materialized');
+    expect(pendingOpenReadiness({ readiness: undefined, remote: tau }, 'treeReady')).toBe('treeReady');
   });
 });

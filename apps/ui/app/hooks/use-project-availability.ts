@@ -1,9 +1,10 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import type { LargeObjectsFacet, ProjectReadiness, RevisionStatusProjection } from '@taucad/revisions';
 import { reachesReadiness } from '@taucad/revisions';
 import { useProject } from '#hooks/use-project.js';
 import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { canOpenCloudProject, useTauCloudIntent } from '#hooks/use-cloud-projects.js';
+import { followCloudOpen } from '#lib/cloud-open-lock.js';
 
 /** First-open readiness comes from the durable gesture and the worker's acknowledged checkout. */
 export type ProjectAvailability =
@@ -173,9 +174,45 @@ export function readyFor(surface: ReadinessSurface, readiness: ProjectReadiness 
   return reachesReadiness(readiness, surfaceReadiness[surface]);
 }
 
+/**
+ * Readiness while a Tau Cloud project's first open is owed (S20).
+ *
+ * A tab whose own root has not connected yet knows nothing of the tree: what
+ * it can say is what the tab holding the open announced, or `connected`. Once
+ * its own root is connected, its own reading is the truth.
+ *
+ * @param own - This tab's projection.
+ * @param followed - The last state the opener announced, if any.
+ * @returns The readiness to show.
+ */
+export function pendingOpenReadiness(
+  own: Pick<RevisionStatusProjection, 'readiness' | 'remote'> | undefined,
+  followed: ProjectReadiness | undefined,
+): ProjectReadiness {
+  if (own?.readiness !== undefined && own.remote.kind !== 'none') {
+    return own.readiness;
+  }
+  return followed ?? 'connected';
+}
+
 /** The selected checkout's readiness, as its host settled it; `undefined` until published. */
 export function useProjectReadiness(): ProjectReadiness | undefined {
-  return useRevisionStatus()?.readiness;
+  const { projectId } = useProject();
+  const pending = useTauCloudIntent(projectId) === 'open';
+  const status = useRevisionStatus();
+  const [followed, setFollowed] = useState<Readonly<{ projectId: string; readiness: ProjectReadiness }>>();
+  useEffect(
+    () =>
+      pending
+        ? followCloudOpen(projectId, (readiness) => {
+            setFollowed({ projectId, readiness });
+          })
+        : undefined,
+    [pending, projectId],
+  );
+  return pending
+    ? pendingOpenReadiness(status, followed?.projectId === projectId ? followed.readiness : undefined)
+    : status?.readiness;
 }
 
 /** {@link readyFor} over the published readiness. */

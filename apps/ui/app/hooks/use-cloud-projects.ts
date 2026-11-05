@@ -23,6 +23,8 @@ import { useCommercialFeatures } from '#cloud/commercial-features.js';
 import { getRevisionSessionUser, useRevisionSessionUser } from '#lib/revision-actor.js';
 import { KeyedMutex } from '#db/keyed-mutex.js';
 import { recordApiRequestId } from '#lib/api-request-id.js';
+import { holdCloudOpen } from '#lib/cloud-open-lock.js';
+import { peekRevisionClient } from '#services/revision-client-registry.js';
 
 /** What this account may do with a project on Tau Cloud (D27). @public */
 export type ProjectRole = 'owner' | 'write' | 'read';
@@ -741,13 +743,24 @@ export const useTauCloudIntentConnection = ({
           const connectActiveProject = async (): Promise<void> => {
             try {
               await assertCloudProjectActive(projectId);
-              if (
+              const owed = (): boolean =>
                 getRevisionSessionUser()?.id === account &&
                 tauCloudIntent.get(projectId) === 'open' &&
-                canOpenCloudProject(projectId)
-              ) {
-                await connectRemote('tau');
+                canOpenCloudProject(projectId);
+              const client = peekRevisionClient(projectId);
+              if (client === undefined) {
+                if (owed()) {
+                  await connectRemote('tau');
+                }
+                return;
               }
+              /* S20: one cold open per device. A second tab waits here and finds the open done. */
+              await holdCloudOpen({
+                projectId,
+                owed,
+                connect: async () => connectRemote('tau'),
+                source: client,
+              });
             } catch (error) {
               if (
                 error instanceof CloudProjectUnavailableError &&

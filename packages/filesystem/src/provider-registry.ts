@@ -242,10 +242,10 @@ export class ProviderRegistry {
           throw new MissingWorkspaceHandleError({ workspaceId: scope.workspaceId });
         }
         // The stored handle's id keys the root's create records (I1). A root
-        // without one keeps none and its creates take the writable's swap.
+        // without one keeps none, so its creates are staged as siblings and moved.
         const storageRootKey = this.resolveStorageRootKey(scope);
         const provider = new FileSystemAccessProvider(scope.directoryHandle, {
-          ...(scope.workspaceId === '' ? {} : { uncommitted: { root: storageRootKey } }),
+          ...(scope.workspaceId === '' ? { stageCreates: true } : { uncommitted: { root: storageRootKey } }),
           onRecovered: (paths) => {
             this._recovered(storageRootKey, paths);
           },

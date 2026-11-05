@@ -32,7 +32,12 @@ export type UncommittedRecord = Readonly<{
   root: string;
   owner: string;
   changesetId: string;
-  /** When the record was kept (`Date.now()`), after every entry's file was created. */
+  /**
+   * When the record was last put (`Date.now()`). The record is rewritten as a
+   * batch's creates are checked, and each entry's file is made after the put
+   * that added it, so a crashed create's empty file was last modified within
+   * {@link uncommittedModifiedSlackMilliseconds} of this time.
+   */
   recordedAt: number;
   entries: readonly UncommittedEntry[];
 }>;
@@ -44,8 +49,13 @@ export type UncommittedChangesetStore = Readonly<{
   list: (root: string) => Promise<UncommittedRecord[]>;
 }>;
 
-/** A crashed create's file was created before its record was kept; this covers clock granularity. */
-export const uncommittedModifiedSlackMilliseconds = 2000;
+/**
+ * How far a crashed create's empty file may be last modified from its
+ * record's `recordedAt`, either side: it covers the time from a put to the
+ * last file it covers being made, and clock granularity. A file outside the
+ * window, such as one copied in with an old time, is never removed.
+ */
+export const uncommittedModifiedSlackMilliseconds = 60_000;
 
 const storeName = 'changesets';
 
@@ -132,7 +142,7 @@ const deleteAttempts = 3;
  *
  * @param store - The store.
  * @param record - The record.
- * @throws When every attempt failed: a record left behind must never go unnoticed.
+ * @throws When every attempt failed; the caller logs and counts it (`uncommitted.deleteFailed`).
  * @public
  */
 export const deleteUncommittedRecord = async (

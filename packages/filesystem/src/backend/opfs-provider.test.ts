@@ -491,7 +491,7 @@ describe('OPFS uncommitted create changesets', () => {
     expect(calls).toEqual([]);
   });
 
-  it('should rewrite one record in place, making each file only after the put that covers it', async () => {
+  it('should rewrite one record in place, up to eight creates a put, making each file only after its put', async () => {
     const { writes } = stubRoot();
     const { store: inner, records } = memoryStore();
     const puts: Array<Readonly<{ id: string; paths: string[]; writes: number }>> = [];
@@ -525,6 +525,8 @@ describe('OPFS uncommitted create changesets', () => {
     expect(receipts.every(({ outcome }) => outcome === 'applied')).toBe(true);
     expect(new Set(puts.map(({ id }) => id)).size).toBe(1);
     expect(puts.at(-1)?.paths.toSorted()).toEqual(paths.toSorted());
+    // Groups of 1, 2, 4, then up to 8: 20 creates take five puts.
+    expect(puts.map(({ paths: covered }) => covered.length)).toEqual([1, 3, 7, 15, 20]);
     for (const [index, put] of puts.entries()) {
       const previous = puts[index - 1]?.paths ?? [];
       // The record only grows, and no write has begun on a path the puts so far did not cover.
@@ -596,8 +598,8 @@ describe('OPFS uncommitted create changesets', () => {
           { path: 'src/emptied.ts', size: 5 },
           { path: 'src/never-started.ts', size: 7 },
         ],
-        // Older than the slack: `emptied.ts` was modified after the record was kept.
-        Date.now() - 60_000,
+        // Beyond the slack: `emptied.ts` was modified long after the record was kept.
+        Date.now() - 10 * 60_000,
       ),
     ]);
     const onRecovered = vi.fn();
@@ -607,6 +609,21 @@ describe('OPFS uncommitted create changesets', () => {
 
     await expect(provider.readFile('src/landed.ts', 'utf8')).resolves.toBe('done');
     await expect(provider.readFile('src/emptied.ts', 'utf8')).resolves.toBe('');
+    expect(onRecovered).not.toHaveBeenCalled();
+    expect(records.size).toBe(0);
+  });
+
+  it('should keep an empty file copied in with a time long before the record', async () => {
+    const { root } = stubRoot();
+    const copied = await root.getFileHandle('synced.ts', { create: true });
+    // A sync tool keeps the source's time: far before the crashed batch's record.
+    (copied as unknown as { _entry: { lastModified: number } })._entry.lastModified = Date.now() - 24 * 3_600_000;
+    const { store, records } = memoryStore([deadRecord([{ path: 'synced.ts', size: 8 }])]);
+    const onRecovered = vi.fn();
+
+    await new OPFSProvider({ uncommitted: store, onRecovered }).initialize();
+
+    await expect(root.getFileHandle('synced.ts')).resolves.toBeDefined();
     expect(onRecovered).not.toHaveBeenCalled();
     expect(records.size).toBe(0);
   });
@@ -670,8 +687,9 @@ describe('OPFS uncommitted create changesets', () => {
     await expect(provider.exists('new.ts')).resolves.toBe(false);
   });
 
-  it('should raise a record that cannot be deleted after retries', async () => {
+  it('should log a record it cannot delete after retries and still return the receipts', async () => {
     stubRoot();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const { store: inner, calls } = memoryStore();
     const store: UncommittedChangesetStore = {
       ...inner,
@@ -683,9 +701,11 @@ describe('OPFS uncommitted create changesets', () => {
     const provider = new OPFSProvider({ uncommitted: store });
     await provider.initialize();
 
-    await expect(
-      provider.applyBatch([{ op: 'write', path: 'new.ts', data: bytes('new'), create: true }]),
-    ).rejects.toThrow(/could not be deleted/);
+    const receipts = await provider.applyBatch([{ op: 'write', path: 'new.ts', data: bytes('new'), create: true }]);
+
+    expect(receipts).toEqual([{ outcome: 'applied', kind: 'file', created: true }]);
     expect(calls.filter((call) => call === 'delete')).toHaveLength(3);
+    expect(logged).toHaveBeenCalledOnce();
+    logged.mockRestore();
   });
 });

@@ -57,7 +57,8 @@ export type WorkerTimingSpan = (typeof workerTimingSpans)[number];
  * - `changesets`: changesets the authority applied under their lock set (one per `apply`, D2).
  * - `uncommitted.verified` / `uncommitted.removed`: recorded creates an initialise checked after their
  *   realm died, and those it removed as the empty file a crashed create left (I1).
- * - `uncommitted.puts`: puts of a batch's create record, group-committed as its creates land (I1).
+ * - `uncommitted.puts`: puts of a batch's create record, each covering up to eight creates (I1).
+ * - `uncommitted.deleteFailed`: settled or checked records whose delete failed after retries; left behind, harmless.
  *
  * @public
  */
@@ -71,6 +72,7 @@ export const workerTimingCounters = [
   'uncommitted.verified',
   'uncommitted.removed',
   'uncommitted.puts',
+  'uncommitted.deleteFailed',
 ] as const;
 
 /** One counter's name. @public */

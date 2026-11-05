@@ -1003,6 +1003,30 @@ describe('FileSystemAccessProvider', () => {
       expect(records.size).toBe(0);
     });
 
+    it('should stage a create through a temporary sibling on a root that keeps no record', async () => {
+      const root = createMockRootHandle();
+      await root.getFileHandle('taken.ts', { create: true });
+      const picked = new FileSystemAccessProvider(root as unknown as FileSystemDirectoryHandle, { stageCreates: true });
+      const writes = vi.spyOn(
+        picked as unknown as { _writeBatchData: (handle: { name: string }) => Promise<void> },
+        '_writeBatchData',
+      );
+
+      const receipts = await picked.applyBatch([
+        { op: 'write', path: 'dir/new.ts', data: bytes('new'), create: true },
+        { op: 'write', path: 'taken.ts', data: bytes('mine'), create: true },
+      ]);
+
+      expect(receipts.map(({ outcome }) => outcome)).toEqual(['applied', 'failed']);
+      // The bytes went to a sibling the revisions sweep recognises, never to the path itself.
+      const written = writes.mock.calls.map(([handle]) => handle.name);
+      expect(written).toHaveLength(1);
+      expect(written[0]).toMatch(/^\.new\.ts\.tau-staged\.[\da-f-]{36}\.tmp$/u);
+      await expect(picked.readFile('dir/new.ts', 'utf8')).resolves.toBe('new');
+      await expect(picked.readdir('dir')).resolves.toEqual(['new.ts']);
+      await expect(picked.readFile('taken.ts', 'utf8')).resolves.toBe('');
+    });
+
     it('should refuse a create it cannot stage when the record cannot be kept, leaving no file', async () => {
       stubLocks();
       const root = createMockRootHandle();

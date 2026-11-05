@@ -298,10 +298,13 @@ describe('ProviderRegistry', () => {
       expect(provider.recoverUncommitted).toHaveBeenCalledOnce();
     });
 
-    it('should keep no records for a picked root without a workspace id', async () => {
-      const provider = (await registry.getProvider(webaccessScope(''))) as RecoveringProvider;
+    it('should stage the creates of a picked root without a workspace id, keeping no records', async () => {
+      const provider = (await registry.getProvider(webaccessScope(''))) as RecoveringProvider & {
+        options: { stageCreates?: boolean };
+      };
 
       expect(provider.options.uncommitted).toBeUndefined();
+      expect(provider.options.stageCreates).toBe(true);
     });
 
     it('should deliver a recovery that ran before the listener was set, then later ones at once', async () => {

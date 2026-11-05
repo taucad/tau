@@ -10,13 +10,16 @@ import { postService } from '#adapter-transport/adapter-transport.js';
 import { createInlineCompute } from '#compute-worker/compute-worker.js';
 import type { ComputeWorker } from '#compute-worker/compute-worker.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
+import { createRevisionHttpClient } from '#http-client.js';
 import type { RevisionHttpClient } from '#http-client.js';
+import { revisionId } from '#algorithms/index.js';
 import { coldOpenFromCatalogue, parseHeadListing } from '#object-store/cold-open.js';
 import type { CatalogueFamily } from '#object-store/cold-open.js';
 import { createObjectStore, gitFilesOf, PackCeilingError } from '#object-store/object-store.js';
 import type { ObjectStore } from '#object-store/object-store.js';
 import { coalesceRanges, maximumRangeBytes } from '#object-store/remote-pack.js';
 import { readPackIndex } from '#pack-reader/pack-index.js';
+import { startGitHttpBackend } from '#test/git-http-backend.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
 import { profileChainDepth } from '#test/chain-depth-profile.js';
 
@@ -102,13 +105,18 @@ describe('postService', () => {
 });
 
 /* A hosted repository: a pack, its index and a head listing, behind a fake API and files host. */
-type Hosted = Readonly<{
-  directory: string;
-  git: (...args: string[]) => string;
+type Hosted = {
+  readonly directory: string;
+  readonly git: (...args: string[]) => string;
+  readonly write: (path: string, content: string | Uint8Array<ArrayBuffer>) => Promise<void>;
+  /* Repack and serve what the repository now holds. */
+  readonly publish: () => Promise<void>;
   pack: Uint8Array<ArrayBuffer>;
   index: Uint8Array<ArrayBuffer>;
   packName: string;
   main: string;
+  listing: Uint8Array<ArrayBuffer>;
+} & Readonly<{
   parent: string;
   tag: string;
   tagged: string;
@@ -117,7 +125,6 @@ type Hosted = Readonly<{
   /* Objects only the ops or chat refs reach. */
   opsOnly: readonly string[];
   chatOnly: readonly string[];
-  listing: Uint8Array<ArrayBuffer>;
 }>;
 
 type Served = Readonly<{
@@ -178,32 +185,40 @@ const host = async (): Promise<Hosted> => {
   const chat = unrelated('chat');
   git('update-ref', 'refs/tau/ops/session', ops);
   git('update-ref', 'refs/tau/chats/c1', chat);
-  git('repack', '-adfq');
-  const packDirectory = join(directory, '.git', 'objects', 'pack');
-  const packFiles = await readdir(packDirectory);
-  const packFile = packFiles.find((name) => name.endsWith('.pack'))!;
-  const pack = new Uint8Array(await readFile(join(packDirectory, packFile)));
-  const index = new Uint8Array(await readFile(join(packDirectory, packFile.replace(/\.pack$/u, '.idx'))));
-  const checksum = Buffer.from(pack.subarray(-20)).toString('hex');
   const only = (ref: string): string[] =>
     lines(git('rev-list', '--objects', ref, '--not', 'refs/heads/main', 'refs/tags/v1')).map(
       (line) => line.split(' ')[0]!,
     );
-  const listed = lines(git('ls-tree', '-r', '-l', main)).map((line) => {
-    const [meta = '', path = ''] = line.split('\t');
-    const [mode = '', , oid = '', size = ''] = meta.split(/\s+/u);
-    return `${mode}\t${oid}\t${size}\t\t\t${path}`;
-  });
-  const listing = new Uint8Array(
-    gzipSync(`${[`tau-head-listing\t1\t${main}\t${git('rev-parse', `${main}^{tree}`)}`, ...listed].join('\n')}\n`),
-  );
-  return {
+  const empty = new Uint8Array(0);
+  const hosted: Hosted = {
     directory,
     git,
-    pack,
-    index,
-    packName: `pack-${checksum}-${nonce}`,
+    write: async (path, content) => {
+      await mkdir(join(directory, path, '..'), { recursive: true });
+      await writeFile(join(directory, path), content);
+    },
+    publish: async () => {
+      git('repack', '-adfq');
+      const packDirectory = join(directory, '.git', 'objects', 'pack');
+      const packFiles = await readdir(packDirectory);
+      const packFile = packFiles.find((name) => name.endsWith('.pack'))!;
+      hosted.pack = new Uint8Array(await readFile(join(packDirectory, packFile)));
+      hosted.index = new Uint8Array(await readFile(join(packDirectory, packFile.replace(/\.pack$/u, '.idx'))));
+      hosted.packName = `pack-${Buffer.from(hosted.pack.subarray(-20)).toString('hex')}-${nonce}`;
+      hosted.main = git('rev-parse', 'refs/heads/main');
+      const listed = lines(git('ls-tree', '-r', '-l', hosted.main)).map((line) => {
+        const [meta = '', path = ''] = line.split('\t');
+        const [mode = '', , oid = '', size = ''] = meta.split(/\s+/u);
+        return `${mode}\t${oid}\t${size}\t\t\t${path}`;
+      });
+      const header = `tau-head-listing\t1\t${hosted.main}\t${git('rev-parse', `${hosted.main}^{tree}`)}`;
+      hosted.listing = new Uint8Array(gzipSync(`${[header, ...listed].join('\n')}\n`));
+    },
+    pack: empty,
+    index: empty,
+    packName: '',
     main,
+    listing: empty,
     parent,
     tag,
     tagged,
@@ -211,8 +226,9 @@ const host = async (): Promise<Hosted> => {
     chat,
     opsOnly: only('refs/tau/ops/session'),
     chatOnly: only('refs/tau/chats/c1'),
-    listing,
   };
+  await hosted.publish();
+  return hosted;
 };
 
 const familyReferences = (hosted: Hosted): Record<CatalogueFamily, ReadonlyArray<Record<string, string>>> => ({
@@ -221,19 +237,41 @@ const familyReferences = (hosted: Hosted): Record<CatalogueFamily, ReadonlyArray
   chats: [{ ref: 'refs/tau/chats/c1', oid: hosted.chat }],
 });
 
+/* What the fake hosts do differently from the real ones. */
+type Behaviour = Readonly<{
+  catalogueStatus?: number;
+  /* A files host that answers a Range read with the whole pack. */
+  ignoreRange?: boolean;
+  /* No head listing in the catalogue. */
+  listings?: false;
+  /* The commit the catalogue says its listing lists. */
+  listingCommit?: string;
+  expiresInSeconds?: number;
+}>;
+
+/* The files Worker's own rule for a pack GET: one Range, shorter than the pack and at most 64 MiB, or 416. */
+const packRangeRefused = (range: string | undefined, size: number): [number, number] | undefined => {
+  const match = /^bytes=(\d+)-(\d+)$/u.exec(range ?? '');
+  if (match === null) {
+    return undefined;
+  }
+  const start = Number(match[1]);
+  const end = Math.min(Number(match[2]) + 1, size);
+  const length = end - start;
+  return length > maximumRangeBytes || length >= size || length <= 0 ? undefined : [start, end];
+};
+
 /* The API's catalogue and the files host, as the fetches the client makes. */
-const serve = (
-  hosted: Hosted,
-  behaviour: Readonly<{ catalogueStatus?: number; ignoreRange?: boolean }> = {},
-): Served => {
+const serve = (hosted: Hosted, behaviour: Behaviour = {}): Served => {
   const catalogueQueries: string[] = [];
   const ranges: Array<readonly [number, number]> = [];
   let wholePackReads = 0;
-  const packHref = `${filesOrigin}/packs/${hosted.packName}.pack`;
-  const indexHref = `${filesOrigin}/packs/${hosted.packName}.idx`;
-  const listingHref = `${filesOrigin}/listings/${hosted.main}.tsv.gz`;
   const fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+    const packHref = `${filesOrigin}/packs/${hosted.packName}.pack`;
+    const indexHref = `${filesOrigin}/packs/${hosted.packName}.idx`;
+    const listingCommit = behaviour.listingCommit ?? hosted.main;
+    const listingHref = `${filesOrigin}/listings/${listingCommit}.tsv.gz`;
     if (url.href.startsWith(catalogueUrl)) {
       catalogueQueries.push(url.search);
       if (behaviour.catalogueStatus !== undefined) {
@@ -245,7 +283,10 @@ const serve = (
         format: 1,
         generation: 1,
         refs: listed,
-        listings: [{ commit: hosted.main, href: listingHref, bytes: hosted.listing.byteLength }],
+        listings:
+          behaviour.listings === false
+            ? []
+            : [{ commit: listingCommit, href: listingHref, bytes: hosted.listing.byteLength }],
         packs: [
           {
             key: `packs/${hosted.packName}.pack`,
@@ -255,7 +296,7 @@ const serve = (
           },
         ],
         complete: true,
-        expiresAt: Math.floor(Date.now() / 1000) + 900,
+        expiresAt: Math.floor(Date.now() / 1000) + (behaviour.expiresInSeconds ?? 900),
       });
     }
     if (url.href === indexHref) {
@@ -265,16 +306,18 @@ const serve = (
       return new Response(hosted.listing, { status: 200 });
     }
     if (url.href === packHref) {
-      const range = new Headers(init?.headers).get('range');
-      const match = /^bytes=(\d+)-(\d+)$/u.exec(range ?? '');
-      if (match === null || behaviour.ignoreRange === true) {
+      const allowed = packRangeRefused(new Headers(init?.headers).get('range') ?? undefined, hosted.pack.byteLength);
+      if (allowed === undefined) {
+        /* What the S1 gate counts: any ask for the whole pack, refused as the Worker refuses it. */
+        wholePackReads += 1;
+        return new Response('range', { status: 416 });
+      }
+      if (behaviour.ignoreRange === true) {
         wholePackReads += 1;
         return new Response(hosted.pack, { status: 200 });
       }
-      const start = Number(match[1]);
-      const end = Number(match[2]) + 1;
-      ranges.push([start, end]);
-      return new Response(hosted.pack.slice(start, end), { status: 206 });
+      ranges.push(allowed);
+      return new Response(hosted.pack.slice(...allowed), { status: 206 });
     }
     return new Response('Not Found', { status: 404 });
   };
@@ -458,6 +501,55 @@ describe.runIf(gitToolchainOnPath)('the cold open from a hosted catalogue (D8)',
     expect(await port.readRef('refs/remotes/origin/main')).toBe(hosted.main);
   });
 
+  it('sizes each object from the index when a head has no listing, so a batch never holds the repository', async () => {
+    const compute = countingCompute();
+    const store = await emptyStore(compute, 'unlisted');
+    const served = serve(hosted, { listings: false });
+    const opened = await coldOpenFromCatalogue({ catalogueUrl, fetch: served.fetch, store, compute, batchBytes: 1 });
+    expect(opened?.report.listingReads).toBe(0);
+    /* One byte per batch: every object is known to be bigger, so each is a batch, and a pack, of its own. */
+    expect(opened!.report.packsWritten).toBe(opened!.report.imported);
+    const blob = hosted.git('rev-parse', `${hosted.main}:parts/deep/c.scad`);
+    expect(await store.has(blob)).toBe(true);
+  });
+
+  it('bounds a batch by object count too', async () => {
+    const compute = countingCompute();
+    const store = await emptyStore(compute, 'counted');
+    const served = serve(hosted, { listings: false });
+    const opened = await coldOpenFromCatalogue({ catalogueUrl, fetch: served.fetch, store, compute, batchObjects: 2 });
+    expect(opened!.report.packsWritten).toBeGreaterThanOrEqual(Math.ceil(opened!.report.imported / 2));
+  });
+
+  it('refuses a listing that lists another commit than the catalogue names', async () => {
+    const compute = countingCompute();
+    const store = await emptyStore(compute, 'mislisted');
+    const served = serve(hosted, { listingCommit: hosted.parent });
+    expect(await coldOpenFromCatalogue({ catalogueUrl, fetch: served.fetch, store, compute })).toBeUndefined();
+  });
+
+  it('records the cold commits as the shallow boundary, and a walk stops there once the links lapse', async () => {
+    const served = serve(hosted, { expiresInSeconds: -1 });
+    const filesystem = await createMemoryProvider();
+    const port = createIsomorphicGitRevisionPort({
+      filesystem,
+      http: {
+        request: async () => {
+          throw new Error('No smart HTTP on a cold open.');
+        },
+      },
+      catalogue: { url: () => catalogueUrl, fetch: served.fetch },
+    });
+    await port.init({ author: { name: 'Tau', email: 'tau@example.com' } });
+    await port.setRemote({ name: 'origin', url: 'https://api.test/git/project-1.git' });
+    await port.fetch({ remote: 'origin', refs: ['refs/heads/main', 'refs/tags/v1'] });
+    const shallow = await filesystem.readFile('.git/shallow', 'utf8');
+    expect(lines(String(shallow))).toEqual([hosted.main, hosted.tagged].toSorted());
+    const log = await port.log({ heads: [revisionId(hosted.main)] });
+    expect(log.map((entry) => entry.id)).toEqual([hosted.main]);
+    expect(served.wholePackReads()).toBe(0);
+  });
+
   it('profiles chain depth as git verify-pack counts it', async () => {
     const packDirectory = join(hosted.directory, '.git', 'objects', 'pack');
     const packFiles = await readdir(packDirectory);
@@ -476,4 +568,104 @@ describe.runIf(gitToolchainOnPath)('the cold open from a hosted catalogue (D8)',
     expect(profile.maximum).toBeGreaterThan(0);
     expect(profile.whole).toBe(verified.filter((fields) => fields.length < 7).length);
   });
+});
+
+/* Records each request body, so a test can read what a fetch asked the remote. */
+const recording = (inner: RevisionHttpClient, bodies: string[]): RevisionHttpClient => ({
+  request: async (request) => {
+    if (request.body === undefined) {
+      return inner.request(request);
+    }
+    const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+    for await (const chunk of request.body) {
+      chunks.push(chunk as Uint8Array<ArrayBuffer>);
+    }
+    bodies.push(Buffer.concat(chunks).toString('latin1'));
+    return inner.request({
+      ...request,
+      body: (async function* replay(): AsyncGenerator<Uint8Array<ArrayBuffer>> {
+        yield* chunks;
+      })() as typeof request.body,
+    });
+  },
+});
+
+/* Past the pack ceiling: random, so it compresses to more than 64 MiB on its own. */
+const largeBytes = 65 * 1024 * 1024;
+
+describe.runIf(gitToolchainOnPath)('after a cold open, over smart HTTP and past the ceiling', () => {
+  let hosted: Hosted;
+  let root: string;
+  let remote: Awaited<ReturnType<typeof startGitHttpBackend>>;
+  const pushed = (): void => {
+    hosted.git('push', '-q', '--force', remote.repositoryPath, 'refs/heads/main:refs/heads/main');
+  };
+  const commit = async (path: string, content: string | Uint8Array<ArrayBuffer>, message: string): Promise<string> => {
+    await hosted.write(path, content);
+    hosted.git('add', '-A');
+    hosted.git('commit', '-q', '-m', message);
+    return hosted.git('rev-parse', 'refs/heads/main');
+  };
+
+  beforeAll(async () => {
+    hosted = await host();
+    root = await mkdtemp(join(tmpdir(), 'tau-w5-remote-'));
+    remote = await startGitHttpBackend({ root });
+    pushed();
+  }, 120_000);
+
+  afterAll(async () => {
+    await remote.close();
+    await rm(root, { recursive: true, force: true });
+    await rm(hosted.directory, { recursive: true, force: true });
+  });
+
+  it('tells the remote where a cold history stops, and takes a pack past the ceiling object by object', async () => {
+    const served = serve(hosted);
+    const bodies: string[] = [];
+    const port = createIsomorphicGitRevisionPort({
+      filesystem: await createMemoryProvider(),
+      http: recording(createRevisionHttpClient(), bodies),
+      catalogue: { url: () => catalogueUrl, fetch: served.fetch },
+    });
+    await port.init({ author: { name: 'Tau', email: 'tau@example.com' } });
+    await port.setRemote({ name: 'origin', url: remote.url });
+    await port.fetch({ remote: 'origin', refs: ['refs/heads/main'] });
+    const cold = hosted.main;
+    expect(bodies).toEqual([]);
+
+    /* A small fetch over smart HTTP: the shallow boundary goes with it. */
+    const small = await commit('notes.txt', 'one\n', 'Small');
+    pushed();
+    await hosted.publish();
+    await port.fetch({ remote: 'origin', refs: ['refs/heads/main'] });
+    expect(bodies.some((body) => body.includes(`shallow ${cold}`))).toBe(true);
+    expect(await port.readRef('refs/remotes/origin/main')).toBe(small);
+
+    /* Past the ceiling: two commits, one with a large object, taken from the catalogue with their history. */
+    const large = await commit('large.bin', new Uint8Array(randomBytes(largeBytes)), 'Large');
+    const tip = await commit('notes.txt', 'two\n', 'Tip');
+    pushed();
+    await hosted.publish();
+    const rangesBefore = served.ranges.length;
+    await port.fetch({ remote: 'origin', refs: ['refs/heads/main'] });
+    expect(await port.readRef('refs/remotes/origin/main')).toBe(tip);
+    const log = await port.log({ heads: [revisionId(tip)] });
+    expect(log.map((entry) => entry.id)).toEqual([tip, large, small, cold]);
+    const largeRanges = served.ranges.slice(rangesBefore);
+    expect(largeRanges.every(([start, end]) => end - start <= maximumRangeBytes)).toBe(true);
+    expect(largeRanges.some(([start, end]) => end - start === maximumRangeBytes)).toBe(true);
+    expect(served.wholePackReads()).toBe(0);
+  }, 240_000);
+
+  it('reads an answer past the ceiling whole where no catalogue serves the remote', async () => {
+    const port = createIsomorphicGitRevisionPort({
+      filesystem: await createMemoryProvider(),
+      http: createRevisionHttpClient(),
+    });
+    await port.init({ author: { name: 'Tau', email: 'tau@example.com' } });
+    await port.setRemote({ name: 'origin', url: remote.url });
+    await port.fetch({ remote: 'origin', refs: ['refs/heads/main'] });
+    expect(await port.readRef('refs/remotes/origin/main')).toBe(hosted.git('rev-parse', 'refs/heads/main'));
+  }, 240_000);
 });

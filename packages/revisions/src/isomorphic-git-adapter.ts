@@ -65,8 +65,8 @@ import {
 import { createInlineCompute } from '#compute-worker/compute-worker.js';
 import type { ComputeWorker } from '#compute-worker/compute-worker.js';
 import { createObjectStore, gitFilesOf, isMissing, PackCeilingError } from '#object-store/object-store.js';
-import { coldOpenFromCatalogue } from '#object-store/cold-open.js';
-import type { CatalogueFamily, ColdOpenReport } from '#object-store/cold-open.js';
+import { coldOpenFromCatalogue, importReachableFromCatalogue } from '#object-store/cold-open.js';
+import type { CatalogueFamily, ColdOpenOptions, ColdOpenReport } from '#object-store/cold-open.js';
 import type { GitFiles, ObjectStore } from '#object-store/object-store.js';
 import { readTreeEntries, writeTreeObject } from '#object-store/tree-codec.js';
 import type { TreeCodecEntry } from '#object-store/tree-codec.js';
@@ -517,7 +517,13 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
 
   const commitOf = async (id: RevisionId): Promise<DecodedCommit | undefined> => {
     const body = await readRaw(id);
-    return body === undefined ? undefined : decodeCommit(body);
+    if (body === undefined) {
+      return undefined;
+    }
+    const decoded = decodeCommit(body);
+    const shallow = await readShallow();
+    /* A commit on the shallow boundary is read as git reads it: without the parents this store lacks. */
+    return shallow.has(id) ? { ...decoded, parents: [] } : decoded;
   };
 
   const requireCommit = async (id: RevisionId): Promise<DecodedCommit> => {
@@ -679,40 +685,101 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
   /* Whether the store already holds an object, packed or loose. */
   const holds = async (oid: string): Promise<boolean> => objects.has(oid);
   /*
-   * Fill the store from the hosted catalogue: the refs it brought, or
-   * `undefined` to go over smart HTTP. With `wants`, it took only when the
-   * store then holds every one of them.
+   * The store's shallow boundary, in git's own `shallow` file: commits held
+   * without their parents, which every walk here reads as having none — so
+   * the store never claims a history it does not hold, and a fetch tells the
+   * remote where its history stops.
    */
-  async function openFromCatalogue(
+  const shallowFile = `${gitdir}/shallow`;
+  let shallowCommits: Promise<ReadonlySet<string>> | undefined;
+  const readShallow = async (): Promise<ReadonlySet<string>> => {
+    shallowCommits ??= (async (): Promise<ReadonlySet<string>> => {
+      if (!(await gitFiles.exists(shallowFile))) {
+        return new Set();
+      }
+      const text = await gitFiles.readFile(shallowFile, 'utf8');
+      return new Set(text.split('\n').filter((line) => line !== ''));
+    })();
+    return shallowCommits;
+  };
+  const addShallow = async (commits: readonly string[]): Promise<void> => {
+    const held = await readShallow();
+    const next = new Set([...held, ...commits]);
+    const partial = `${shallowFile}.${randomUuid()}.partial`;
+    await gitFiles.writeFile(partial, `${[...next].toSorted().join('\n')}\n`);
+    await gitFiles.rename(partial, shallowFile);
+    shallowCommits = Promise.resolve(next);
+  };
+
+  /* How this port reaches the catalogue for a remote's URL, or `undefined` where it has none. */
+  const catalogueFor = (
     request: Readonly<{
       url: string;
       families: readonly CatalogueFamily[] | undefined;
       signal: AbortSignal | undefined;
-      wants?: readonly string[];
     }>,
-  ): Promise<Map<string, string> | undefined> {
-    const { url, families, signal, wants } = request;
+  ): (ColdOpenOptions & Readonly<{ access: CatalogueAccess }>) | undefined => {
     const access = options.catalogue;
-    const catalogueUrl = access?.url(url);
+    const catalogueUrl = access?.url(request.url);
     if (access === undefined || catalogueUrl === undefined) {
       return undefined;
     }
-    const opened = await coldOpenFromCatalogue({
+    return {
+      access,
       catalogueUrl,
-      families: families ?? ['heads', 'tags'],
+      families: request.families ?? ['heads', 'tags'],
       fetch: access.fetch ?? globalThis.fetch.bind(globalThis),
       ...(access.filesFetch === undefined ? {} : { filesFetch: access.filesFetch }),
       store: objects,
       compute,
-      ...(signal === undefined ? {} : { signal }),
-    });
+      ...(request.signal === undefined ? {} : { signal: request.signal }),
+    };
+  };
+
+  /*
+   * Fill an empty store from the hosted catalogue: the refs it brought, with
+   * their commits recorded as the shallow boundary, or `undefined` to go over
+   * smart HTTP.
+   */
+  const openFromCatalogue = async (
+    request: Readonly<{
+      url: string;
+      families: readonly CatalogueFamily[] | undefined;
+      signal: AbortSignal | undefined;
+    }>,
+  ): Promise<Map<string, string> | undefined> => {
+    const reach = catalogueFor(request);
+    const opened = reach === undefined ? undefined : await coldOpenFromCatalogue(reach);
     if (opened === undefined) {
       return undefined;
     }
-    access.onColdOpen?.(opened.report);
-    const held = await Promise.all((wants ?? []).map(async (oid) => holds(oid)));
-    return held.every(Boolean) ? new Map(opened.refs) : undefined;
-  }
+    await addShallow(opened.shallow);
+    reach?.access.onColdOpen?.(opened.report);
+    return new Map(opened.refs);
+  };
+
+  /*
+   * Take `wants` from the catalogue object by object, with the history down
+   * to what the store holds: whether the store then holds every one of them.
+   */
+  const importFromCatalogue = async (
+    request: Readonly<{
+      url: string;
+      families: readonly CatalogueFamily[] | undefined;
+      signal: AbortSignal | undefined;
+      wants: readonly string[];
+    }>,
+  ): Promise<boolean> => {
+    const reach = catalogueFor(request);
+    const report =
+      reach === undefined ? undefined : await importReachableFromCatalogue({ ...reach, wants: request.wants });
+    if (report === undefined) {
+      return false;
+    }
+    reach?.access.onColdOpen?.(report);
+    const held = await Promise.all(request.wants.map(async (oid) => holds(oid)));
+    return held.every(Boolean);
+  };
 
   /*
    * Store one tree object and whatever under it the store lacks, children
@@ -2082,22 +2149,30 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         advertisement ??= await advertise();
         const { capabilities: offered } = advertisement;
         const capabilities = ['side-band-64k', 'ofs-delta'].filter((capability) => capability in offered);
+        /* A shallow store says where its history stops, so the remote sends what lies past it rather than assume it. */
+        const shallow = 'shallow' in offered ? await readShallow() : new Set<string>();
         const body = concatBytes(
           ...wants.map((oid, index) => pktLine(`want ${oid}${index === 0 ? ` ${capabilities.join(' ')}` : ''}\n`)),
+          ...[...shallow].map((oid) => pktLine(`shallow ${oid}\n`)),
           pktEncoder.encode('0000'),
           ...[...haves].map((oid) => pktLine(`have ${oid}\n`)),
           pktLine('done\n'),
         );
-        /* Read as it streams and stopped at the ceiling: past it the objects come one by one from the catalogue. */
+        /*
+         * Where a catalogue serves this remote, the answer is read as it
+         * streams and stopped at the ceiling, and past it the objects come one
+         * by one from the catalogue. Anywhere else it is read whole, as before.
+         */
+        const ceiling = options.catalogue?.url(url) === undefined ? undefined : uploadPackCeilingBytes;
         const answered = await postService(http, {
           url,
           service: 'git-upload-pack',
           body,
-          maximumBytes: uploadPackCeilingBytes,
+          ...(ceiling === undefined ? {} : { maximumBytes: ceiling }),
         }).catch(async (error: unknown) => {
           if (
             error instanceof PackCeilingError &&
-            (await openFromCatalogue({ url, families: coldFamilies, signal: input.signal, wants }))
+            (await importFromCatalogue({ url, families: coldFamilies, signal: input.signal, wants }))
           ) {
             return undefined;
           }

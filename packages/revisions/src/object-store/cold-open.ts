@@ -10,8 +10,9 @@
  * 3. Each head's commit, its trees level by level, and the blobs its listing
  *    names are read in coalesced waves and kept in local packs of at most the
  *    repack ceiling, indexed from what was written: no `indexPack`.
- * 4. Older history stays on the server: the store reads it through by Range
- *    while the catalogue's links last, and a later fetch brings what is new.
+ * 4. Older history stays on the server: the heads' commits are the store's
+ *    shallow boundary, the store reads history through by Range while the
+ *    catalogue's links last, and a later fetch brings what is new.
  *
  * Anything that is not a whole, current catalogue — a 404 where the hosted
  * store is not served this way, an incomplete catalogue, a link that fails —
@@ -118,6 +119,12 @@ export type ColdOpenReport = Readonly<{
 export type ColdOpenResult = Readonly<{
   refs: ReadonlyMap<string, string>;
   listings: readonly HeadListing[];
+  /**
+   * The commits brought without their history: the store's shallow
+   * boundary, which the caller records so that the store never claims a
+   * history it does not hold.
+   */
+  shallow: readonly string[];
   report: ColdOpenReport;
 }>;
 
@@ -133,8 +140,10 @@ export type ColdOpenOptions = Readonly<{
   filesFetch?: typeof globalThis.fetch;
   store: ObjectStore;
   compute: ComputeWorker;
-  /** Blob bytes read per wave; 16 MiB by default. */
+  /** Object bytes read per wave; 16 MiB by default. */
   batchBytes?: number;
+  /** Objects read per wave, whatever their size; 2048 by default. */
+  batchObjects?: number;
   signal?: AbortSignal;
 }>;
 
@@ -172,26 +181,44 @@ const sourceOver = (packs: readonly RemotePack[]): ObjectSource =>
     },
   });
 
+const textDecoder = new TextDecoder();
+
 /* The tree under a commit's body. */
-const treeOf = (commit: StoredObject | undefined): string | undefined =>
-  commit === undefined ? undefined : /^tree ([\da-f]{40})$/mu.exec(new TextDecoder().decode(commit.data))?.[1];
+const treeOf = (commit: StoredObject): string | undefined =>
+  /^tree ([\da-f]{40})$/mu.exec(textDecoder.decode(commit.data))?.[1];
 
-/* Blob sizes the listings name, by id. */
-const listedBlobSizes = (listings: readonly HeadListing[]): Map<string, number> =>
-  new Map(
-    listings.flatMap((listing) =>
-      listing.entries.flatMap((entry) => (entry.size === undefined ? [] : [[entry.oid, entry.size] as const])),
-    ),
-  );
+/* The parents a commit's header names. */
+const parentsOf = (commit: StoredObject): string[] => {
+  const [header = ''] = textDecoder.decode(commit.data).split('\n\n', 1);
+  return [...header.matchAll(/^parent ([\da-f]{40})$/gmu)].map((match) => match[1]!);
+};
 
-/* Ids in batches of at most `batchBytes` by their known size; an unknown size counts as none. */
-const batchesOf = (oids: readonly string[], sizes: ReadonlyMap<string, number>, batchBytes: number): string[][] => {
+/* The object a tag's body names. */
+const taggedOf = (tag: StoredObject): string | undefined =>
+  /^object ([\da-f]{40})$/mu.exec(textDecoder.decode(tag.data))?.[1];
+
+/* A tree's entries, from bytes already read. */
+const entriesOf = async (
+  oid: string,
+  tree: StoredObject,
+): Promise<ReadonlyArray<Readonly<{ type: string; oid: string }>>> =>
+  (await readTreeEntries({ read: async () => tree }, oid)) ?? [];
+
+/*
+ * Ids in batches of at most `batchBytes` by their known size and at most
+ * `batchObjects` ids: a size nothing knows still counts against the second.
+ */
+const batchesOf = (
+  oids: readonly string[],
+  sizeOf: (oid: string) => number,
+  limits: Readonly<{ batchBytes: number; batchObjects: number }>,
+): string[][] => {
   const batches: string[][] = [];
   let bytes = 0;
   for (const oid of oids) {
-    const size = sizes.get(oid) ?? 0;
+    const size = sizeOf(oid);
     const last = batches.at(-1);
-    if (last === undefined || bytes + size > batchBytes) {
+    if (last === undefined || bytes + size > limits.batchBytes || last.length >= limits.batchObjects) {
       batches.push([oid]);
       bytes = size;
     } else {
@@ -202,71 +229,122 @@ const batchesOf = (oids: readonly string[], sizes: ReadonlyMap<string, number>, 
   return batches;
 };
 
-/* What the import needs: the refs, the listings, a reader that refuses a miss, and where to keep what it read. */
-type HeadImport = Readonly<{
-  references: Catalogue['refs'];
-  listings: readonly HeadListing[];
+/* How an import reads, keeps and bounds what it reads. */
+type Importer = Readonly<{
+  store: ObjectStore;
+  /* Reads every one of `oids`, or throws. */
   readAll: (oids: readonly string[]) => Promise<Map<string, StoredObject>>;
   keep: (objects: ReadonlyMap<string, StoredObject>) => Promise<void>;
-  batchBytes: number;
+  sizeOf: (oid: string) => number;
+  limits: Readonly<{ batchBytes: number; batchObjects: number }>;
 }>;
 
-/*
- * The tips (each ref's object and the commit a tag peels to), then the trees
- * of every branch-like tip a level at a time, then the blobs: the listings'
- * where every walked tip has one, else the trees' as well. Each read is kept
- * before the next, so memory holds one level or one batch.
- */
-const importHeads = async ({ references, listings, readAll, keep, batchBytes }: HeadImport): Promise<void> => {
-  const tips = [
-    ...new Set(references.flatMap((entry) => [entry.oid, ...(entry.peeled === undefined ? [] : [entry.peeled])])),
-  ];
-  const tipObjects = await readAll(tips);
-  await keep(tipObjects);
-  const walked = references.filter((entry) => !entry.ref.startsWith(familyPrefixes.tags)).map((entry) => entry.oid);
-  const listed = new Set(listings.map((listing) => listing.commit));
-  const unlisted = walked.some((commit) => !listed.has(commit));
-  const blobSizes = listedBlobSizes(listings);
-  const walkedBlobs = new Set<string>();
-  const seenTrees = new Set<string>();
-  let level = [...new Set(walked.flatMap((commit) => treeOf(tipObjects.get(commit)) ?? []))];
-  while (level.length > 0) {
-    // oxlint-disable-next-line no-await-in-loop -- a level's subtrees are known only once the level is read.
-    const trees = await readAll(level);
-    // oxlint-disable-next-line no-await-in-loop -- kept before the next level is read.
-    await keep(trees);
-    for (const oid of level) {
-      seenTrees.add(oid);
-    }
-    const next = new Set<string>();
-    const held = { read: async (oid: string) => trees.get(oid) };
-    // oxlint-disable-next-line no-await-in-loop -- the level is already held: this only decodes it.
-    const decoded = await Promise.all([...trees.keys()].map(async (oid) => readTreeEntries(held, oid)));
-    for (const entries of decoded) {
-      for (const entry of entries ?? []) {
-        if (entry.type === 'tree' && !seenTrees.has(entry.oid)) {
-          next.add(entry.oid);
-        } else if (entry.type === 'blob' && unlisted) {
-          walkedBlobs.add(entry.oid);
-        }
-      }
-    }
-    level = [...next];
-  }
-  for (const batch of batchesOf([...new Set([...blobSizes.keys(), ...walkedBlobs])], blobSizes, batchBytes)) {
+/* Read `oids` a bounded batch at a time, keep each batch, and hand it on before the next is read. */
+const inBatches = async (
+  oids: readonly string[],
+  importer: Importer,
+  each: (objects: ReadonlyMap<string, StoredObject>) => Promise<void> = async () => undefined,
+): Promise<void> => {
+  for (const batch of batchesOf(oids, importer.sizeOf, importer.limits)) {
     // oxlint-disable-next-line no-await-in-loop -- one batch held at a time.
-    await keep(await readAll(batch));
+    const objects = await importer.readAll(batch);
+    // oxlint-disable-next-line no-await-in-loop -- kept before the next batch is read.
+    await importer.keep(objects);
+    // oxlint-disable-next-line no-await-in-loop -- handed on before the next batch is read.
+    await each(objects);
   }
 };
 
-/**
- * Open a project's heads from its catalogue.
- *
- * @param options - Where the catalogue is, the store to fill and its compute.
- * @returns The refs it brought and what it cost, or `undefined` to fetch over smart HTTP instead.
+/* The ids of `oids` the store does not hold yet. */
+const unheld = async (store: ObjectStore, oids: Iterable<string>): Promise<string[]> => {
+  const unique = [...new Set(oids)];
+  const held = await Promise.all(unique.map(async (oid) => store.has(oid)));
+  return unique.filter((_oid, at) => !held[at]);
+};
+
+/*
+ * The trees under `roots` a level at a time, each level in bounded batches,
+ * and then the blobs. A tree the store already holds is not walked: a tree
+ * is kept only after the level above it and every blob after every tree, so
+ * a held tree's subtree is held or is in this walk.
  */
-export const coldOpenFromCatalogue = async (options: ColdOpenOptions): Promise<ColdOpenResult | undefined> => {
-  const { store, compute, signal } = options;
+const importTrees = async (
+  roots: Iterable<string>,
+  importer: Importer,
+  blobs: Readonly<{ walked: boolean; listed: readonly string[] }>,
+): Promise<void> => {
+  const seen = new Set<string>();
+  const walkedBlobs = new Set<string>();
+  let level = await unheld(importer.store, roots);
+  while (level.length > 0) {
+    const next: string[] = [];
+    for (const oid of level) {
+      seen.add(oid);
+    }
+    // oxlint-disable-next-line no-await-in-loop -- a level's subtrees are known only once the level is read.
+    await inBatches(level, importer, async (trees) => {
+      const decoded = await Promise.all([...trees].map(async ([oid, tree]) => entriesOf(oid, tree)));
+      for (const entry of decoded.flat()) {
+        if (entry.type === 'tree' && !seen.has(entry.oid)) {
+          seen.add(entry.oid);
+          next.push(entry.oid);
+        } else if (entry.type === 'blob' && blobs.walked) {
+          walkedBlobs.add(entry.oid);
+        }
+      }
+    });
+    // oxlint-disable-next-line no-await-in-loop -- the next level is what this one named and the store lacks.
+    level = await unheld(importer.store, next);
+  }
+  await inBatches(await unheld(importer.store, [...blobs.listed, ...walkedBlobs]), importer);
+};
+
+/*
+ * The tips (each ref's object and the commit a tag peels to), then the trees
+ * of every branch-like tip, then the blobs: the listings' where every walked
+ * tip has one, else the trees' as well. Answers the commits brought without
+ * their history.
+ */
+const importHeads = async (
+  references: Catalogue['refs'],
+  listings: readonly HeadListing[],
+  importer: Importer,
+): Promise<string[]> => {
+  const tips = references.flatMap((entry) => [entry.oid, ...(entry.peeled === undefined ? [] : [entry.peeled])]);
+  const tipObjects = new Map<string, StoredObject>();
+  await inBatches([...new Set(tips)], importer, async (objects) => {
+    for (const [oid, object] of objects) {
+      tipObjects.set(oid, object);
+    }
+  });
+  const walked = references.filter((entry) => !entry.ref.startsWith(familyPrefixes.tags)).map((entry) => entry.oid);
+  const listed = new Set(listings.map((listing) => listing.commit));
+  const roots = walked.flatMap((commit) => {
+    const object = tipObjects.get(commit);
+    return object?.type === 'commit' ? (treeOf(object) ?? []) : [];
+  });
+  await importTrees(roots, importer, {
+    walked: walked.some((commit) => !listed.has(commit)),
+    listed: listings.flatMap((listing) =>
+      listing.entries.filter((entry) => entry.size !== undefined).map((entry) => entry.oid),
+    ),
+  });
+  return [...tipObjects].filter(([, object]) => object.type === 'commit').map(([oid]) => oid);
+};
+
+/* A catalogue opened: its refs in the asked-for families, its packs by Range and its listings. */
+type OpenedCatalogue = Readonly<{
+  catalogue: Catalogue;
+  references: Catalogue['refs'];
+  packs: readonly RemotePack[];
+  listings: readonly HeadListing[];
+  indexReads: number;
+  listingReads: number;
+}>;
+
+/* Read the catalogue, each pack's index and each listing; `undefined` for anything not whole and current. */
+const openCatalogue = async (options: ColdOpenOptions): Promise<OpenedCatalogue | undefined> => {
+  const { compute, signal } = options;
   const filesFetch = options.filesFetch ?? options.fetch;
   const families = options.families ?? ['heads', 'tags'];
   const answered = await options.fetch(`${options.catalogueUrl}?refs=${families.join(',')}`, {
@@ -298,10 +376,8 @@ export const coldOpenFromCatalogue = async (options: ColdOpenOptions): Promise<C
   };
   let indexReads = 0;
   let listingReads = 0;
-  let packs: RemotePack[];
-  let listings: HeadListing[];
-  try {
-    [packs, listings] = await Promise.all([
+  return attempted(signal, async () => {
+    const [packs, listings] = await Promise.all([
       Promise.all(
         catalogue.packs.map(async (pack) => {
           indexReads += 1;
@@ -321,43 +397,100 @@ export const coldOpenFromCatalogue = async (options: ColdOpenOptions): Promise<C
           const text = await new Response(
             new Blob([gzipped]).stream().pipeThrough(new DecompressionStream('gzip')),
           ).text();
-          return parseHeadListing(text);
+          const parsed = parseHeadListing(text);
+          if (parsed.commit !== listing.commit) {
+            throw new TypeError(`The listing for ${listing.commit} lists ${parsed.commit}.`);
+          }
+          return parsed;
         }),
       ),
     ]);
+    return { catalogue, references, packs, listings, indexReads, listingReads };
+  });
+};
+
+/* What reads the opened catalogue's packs into the store, and what that cost. */
+const importerOver = (
+  opened: OpenedCatalogue,
+  options: ColdOpenOptions,
+): Readonly<{ importer: Importer; source: ObjectSource; report: () => ColdOpenReport }> => {
+  const { packs, listings } = opened;
+  const source = sourceOver(packs);
+  const listedSizes = new Map(
+    listings.flatMap((listing) =>
+      listing.entries.flatMap((entry) => (entry.size === undefined ? [] : [[entry.oid, entry.size] as const])),
+    ),
+  );
+  let imported = 0;
+  let packsWritten = 0;
+  const importer: Importer = {
+    store: options.store,
+    readAll: async (oids) => {
+      const found = await source.readMany(oids);
+      const missing = oids.filter((oid) => !found.has(oid));
+      if (missing.length > 0) {
+        throw new TypeError(`The catalogue's packs do not hold ${missing.slice(0, 3).join(', ')}.`);
+      }
+      return found;
+    },
+    keep: async (objects) => {
+      const written = await options.store.importObjects([...objects].map(([oid, object]) => ({ oid, ...object })));
+      packsWritten += written.length;
+      imported += objects.size;
+    },
+    /* The listing's size where it names one, else the stored entry's (a delta's own, not its target's). */
+    sizeOf: (oid) => listedSizes.get(oid) ?? Math.max(0, ...packs.map((pack) => pack.entryBytes(oid) ?? 0)),
+    limits: { batchBytes: options.batchBytes ?? 16 * 1024 * 1024, batchObjects: options.batchObjects ?? 2048 },
+  };
+  const report = (): ColdOpenReport => {
+    const ranges: RemotePackCounters = { rangeRequests: 0, bytesFetched: 0, waves: 0 };
+    for (const pack of packs) {
+      ranges.rangeRequests += pack.counters.rangeRequests;
+      ranges.bytesFetched += pack.counters.bytesFetched;
+      ranges.waves += pack.counters.waves;
+    }
+    const { indexReads, listingReads } = opened;
+    return { catalogueReads: 1, indexReads, listingReads, imported, packsWritten, ranges };
+  };
+  return { importer, source, report };
+};
+
+/* Run a step, answering `undefined` for its failure unless the caller aborted. */
+async function attempted<Result>(
+  signal: AbortSignal | undefined,
+  run: () => Promise<Result>,
+): Promise<Result | undefined> {
+  try {
+    return await run();
   } catch (error) {
     if (signal?.aborted === true) {
       throw error;
     }
     return undefined;
   }
-  const source = sourceOver(packs);
-  let imported = 0;
-  let packsWritten = 0;
-  const keep = async (objects: ReadonlyMap<string, StoredObject>): Promise<void> => {
-    const written = await store.importObjects([...objects].map(([oid, object]) => ({ oid, ...object })));
-    packsWritten += written.length;
-    imported += objects.size;
-  };
-  const readAll = async (oids: readonly string[]): Promise<Map<string, StoredObject>> => {
-    const found = await source.readMany(oids);
-    const missing = oids.filter((oid) => !found.has(oid));
-    if (missing.length > 0) {
-      throw new TypeError(`The catalogue's packs do not hold ${missing.slice(0, 3).join(', ')}.`);
-    }
-    return found;
-  };
-  try {
-    await importHeads({ references, listings, readAll, keep, batchBytes: options.batchBytes ?? 16 * 1024 * 1024 });
-  } catch (error) {
-    if (signal?.aborted === true) {
-      throw error;
-    }
+}
+
+/**
+ * Open a project's heads from its catalogue.
+ *
+ * @param options - Where the catalogue is, the store to fill and its compute.
+ * @returns The refs it brought, its shallow boundary and what it cost, or `undefined` to fetch over smart HTTP instead.
+ */
+export const coldOpenFromCatalogue = async (options: ColdOpenOptions): Promise<ColdOpenResult | undefined> => {
+  const opened = await openCatalogue(options);
+  if (opened === undefined) {
+    return undefined;
+  }
+  const { importer, source, report } = importerOver(opened, options);
+  const shallow = await attempted(options.signal, async () =>
+    importHeads(opened.references, opened.listings, importer),
+  );
+  if (shallow === undefined) {
     return undefined;
   }
   /* History stays on the server, read through while the links last. */
-  const linksExpireAt = catalogue.expiresAt * 1000;
-  store.attachSource({
+  const linksExpireAt = opened.catalogue.expiresAt * 1000;
+  options.store.attachSource({
     readMany: async (oids) => {
       if (Date.now() >= linksExpireAt) {
         return new Map();
@@ -370,15 +503,74 @@ export const coldOpenFromCatalogue = async (options: ColdOpenOptions): Promise<C
       }
     },
   });
-  const ranges: RemotePackCounters = { rangeRequests: 0, bytesFetched: 0, waves: 0 };
-  for (const pack of packs) {
-    ranges.rangeRequests += pack.counters.rangeRequests;
-    ranges.bytesFetched += pack.counters.bytesFetched;
-    ranges.waves += pack.counters.waves;
-  }
   return {
-    refs: new Map(references.map((entry) => [entry.ref, entry.oid])),
-    listings,
-    report: { catalogueReads: 1, indexReads, listingReads, imported, packsWritten, ranges },
+    refs: new Map(opened.references.map((entry) => [entry.ref, entry.oid])),
+    listings: opened.listings,
+    shallow,
+    report: report(),
   };
+};
+
+/**
+ * Import from the catalogue every object `wants` reach that the store lacks,
+ * object by object (`rev-list --objects <wants> --not <held>`): what a fetch
+ * takes when `upload-pack` answers past the pack ceiling. History is walked
+ * down to the commits the store already holds, so nothing is left shallow.
+ *
+ * @param options - Where the catalogue is, the store to fill, and the objects wanted.
+ * @returns What it cost, or `undefined` when the catalogue cannot serve it.
+ */
+export const importReachableFromCatalogue = async (
+  options: ColdOpenOptions & Readonly<{ wants: readonly string[] }>,
+): Promise<ColdOpenReport | undefined> => {
+  const opened = await openCatalogue(options);
+  if (opened === undefined) {
+    return undefined;
+  }
+  const { importer, report } = importerOver(opened, options);
+  const { store } = options;
+  const took = await attempted(options.signal, async () => {
+    const seen = new Set<string>();
+    const roots: string[] = [];
+    let frontier = await unheld(store, options.wants);
+    while (frontier.length > 0) {
+      for (const oid of frontier) {
+        seen.add(oid);
+      }
+      const next: string[] = [];
+      // oxlint-disable-next-line no-await-in-loop -- a generation's parents are known only once it is read.
+      await inBatches(frontier, importer, async (objects) => {
+        for (const [oid, object] of objects) {
+          switch (object.type) {
+            case 'commit': {
+              roots.push(...[treeOf(object) ?? []].flat());
+              next.push(...parentsOf(object));
+              break;
+            }
+            case 'tag': {
+              next.push(...[taggedOf(object) ?? []].flat());
+              break;
+            }
+            case 'tree': {
+              /* A tag of a tree: kept already, so its entries are walked in its place. */
+              // oxlint-disable-next-line no-await-in-loop -- rare, and one tree.
+              const entries = await entriesOf(oid, object);
+              roots.push(...entries.flatMap((entry) => (entry.type === 'tree' ? [entry.oid] : [])));
+              break;
+            }
+            default:
+            /* A tagged blob is kept already, and names nothing. */
+          }
+        }
+      });
+      // oxlint-disable-next-line no-await-in-loop -- the walk stops at what the store holds.
+      frontier = await unheld(
+        store,
+        next.filter((oid) => !seen.has(oid)),
+      );
+    }
+    await importTrees(roots, importer, { walked: true, listed: [] });
+    return true;
+  });
+  return took === undefined ? undefined : report();
 };

@@ -65,7 +65,7 @@ export type ChangeEventStat = {
 };
 
 /**
- * Discriminated union of filesystem change events emitted by the event bus.
+ * One exact filesystem change fact.
  *
  * Per `docs/research/editor-filesystem-surface-audit.md` R2, file and
  * directory operations are emitted under distinct discriminators so
@@ -74,7 +74,7 @@ export type ChangeEventStat = {
  *
  * @public
  */
-export type ChangeEvent =
+export type PathChangeEvent =
   | { type: 'fileWritten'; path: string; backend: FileSystemBackend; target?: ChangeEventStat }
   | { type: 'fileDeleted'; path: string; backend: FileSystemBackend }
   | { type: 'fileRenamed'; oldPath: string; newPath: string; backend: FileSystemBackend; target?: ChangeEventStat }
@@ -91,6 +91,29 @@ export type ChangeEvent =
     }
   | { type: 'directoryChanged'; path: string; backend: FileSystemBackend }
   | { type: 'backendChanged'; backend: FileSystemBackend };
+
+/**
+ * Every fact one changeset committed, delivered as one event (charter D2, I4).
+ *
+ * A changeset of one entry is delivered as that entry's own event; a larger one
+ * arrives once as this envelope, in entry order, so a subscriber does one unit
+ * of work per changeset instead of one per path. A transport that fans events
+ * out to other realms expands it at its edge.
+ *
+ * @public
+ */
+export type ChangeSetEvent = {
+  type: 'changeSet';
+  entries: readonly PathChangeEvent[];
+};
+
+/**
+ * Discriminated union of filesystem change events emitted by the event bus:
+ * one exact path fact, or one changeset's facts together.
+ *
+ * @public
+ */
+export type ChangeEvent = PathChangeEvent | ChangeSetEvent;
 
 /**
  * File Status in the filesystem

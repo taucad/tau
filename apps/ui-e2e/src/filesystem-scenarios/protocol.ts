@@ -48,7 +48,10 @@ export type RunnerName =
   | 'agent-write'
   | 'grep-glob'
   | 'grep-with-save-and-reads'
-  | 'stat-probes';
+  | 'stat-probes'
+  | 'replace-seed'
+  | 'replace-killable'
+  | 'replace-recover';
 
 /** The figures a second authority's read probe gathered. */
 export type ProbeReport = Readonly<{
@@ -69,3 +72,6 @@ export type WorkerResponse =
 
 /** The posted once a worker can take commands. */
 export const scenarioWorkerReady = 'filesystem-scenario-worker-ready';
+
+/** Posted by `replace-killable` once its apply has completed the operations it was asked to reach. */
+export const scenarioCrashPoint = 'filesystem-scenario-crash-point';

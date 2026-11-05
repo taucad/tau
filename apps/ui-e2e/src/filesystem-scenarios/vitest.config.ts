@@ -11,7 +11,9 @@ import type { BrowserInstanceOption } from 'vitest/node';
  *
  * `TAU_FS_SCENARIO_PROFILE` picks the fixture (`small`, CI's default, or `full`,
  * the STO-25 shape); `TAU_FS_SCENARIO_RUNS` the samples per scenario;
- * `TAU_FS_SCENARIO_RECORD=true` rewrites the baseline beside this file.
+ * `TAU_FS_SCENARIO_RECORD=true` rewrites the baseline beside this file, keeping
+ * the better of the recorded and observed known-red values (count gates never
+ * loosen); `force` records the observed values as they are.
  * `TAU_E2E_CHROMIUM_EXECUTABLE` points at another installed Chromium when the
  * pinned Playwright's own is absent.
  *
@@ -27,6 +29,10 @@ const runsSetting = process.env['TAU_FS_SCENARIO_RUNS'] ?? (profile === 'full' ?
 const runs = Number(runsSetting);
 if (!/^\d+$/u.test(runsSetting) || !Number.isSafeInteger(runs) || runs < 1) {
   throw new Error(`TAU_FS_SCENARIO_RUNS must be a whole number of at least 1; got ${runsSetting}.`);
+}
+const recordSetting = process.env['TAU_FS_SCENARIO_RECORD'] ?? 'false';
+if (recordSetting !== 'true' && recordSetting !== 'false' && recordSetting !== 'force') {
+  throw new Error(`TAU_FS_SCENARIO_RECORD must be true, false or force; got ${recordSetting}.`);
 }
 const head = (() => {
   try {
@@ -72,8 +78,12 @@ for (const engine of engines) {
 export default defineConfig({
   root: import.meta.dirname,
   server: { fs: { allow: [workspaceRoot] } },
-  /* Pre-bundle what the workers import so a cold dev server does not reload a worker mid-load (as the main config does). */
+  /* Pre-bundle what the workers import so a cold dev server does not reload a worker mid-load (as the main config
+   * does). The scanner starts from the test files only and never follows `new Worker(new URL(...))`, so the workers
+   * are entries too: what they reach through linked packages is found before the first load, not during it, where
+   * the reload skewed the first measured sample. */
   optimizeDeps: {
+    entries: [`${import.meta.dirname}/scenario.worker.ts`, `${import.meta.dirname}/atomicity.worker.ts`],
     include: [
       '@cfworker/json-schema',
       '@opentelemetry/api',
@@ -100,7 +110,7 @@ export default defineConfig({
     provide: {
       filesystemScenarioProfile: profile,
       filesystemScenarioRuns: runs,
-      filesystemScenarioRecord: process.env['TAU_FS_SCENARIO_RECORD'] === 'true',
+      filesystemScenarioRecord: recordSetting === 'force' ? 'force' : recordSetting === 'true',
       filesystemScenarioHead: head,
       filesystemScenarioOutput: resolve(workspaceRoot, 'out/test-results/filesystem-scenarios'),
     },

@@ -1792,18 +1792,26 @@ describe.runIf(enabled)('shell qualification', () => {
           pid: z.number().int().positive(),
           exitCode: z.literal(0),
           baselineRssBytes: z.number().int().positive(),
+          readyRssBytes: z.number().int().positive(),
           peakRssBytes: z.number().int().positive(),
         })
         .parse(JSON.parse(readFileSync(join(receipts, receiptFiles[0]!), 'utf8')));
       expect(receiptFiles[0]).toBe(`${String(resource.pid)}.json`);
       expect(resource.pid).not.toBe(process.pid);
-      expect(resource.peakRssBytes).toBeGreaterThanOrEqual(resource.baselineRssBytes);
+      expect(resource.peakRssBytes).toBeGreaterThanOrEqual(resource.readyRssBytes);
       expect(hostSamples).toBeGreaterThan(0);
       expect(samples).toBeGreaterThan(0);
       expect(malformedSamples).toBe(0);
       expect(commandId).toBe('shell:run-s01:s01-flood');
       expect([...queues.values()].map((queue) => queue.stream).toSorted()).toEqual(['stderr', 'stdout']);
-      const supervisorGrowth = resource.peakRssBytes - resource.baselineRssBytes;
+      /*
+       * The supervisor never carries the streams: it answers once and then holds the sandbox. Its growth is judged
+       * from its ready reply, so loading and initializing the sandbox runtime (25-38 MiB on the hosted runners,
+       * independent of the workload) is reported but not charged to the streams. The lifetime high-water still
+       * includes any start-up transient above the ready RSS, so this growth is an upper bound.
+       */
+      const supervisorStartup = resource.readyRssBytes - resource.baselineRssBytes;
+      const supervisorGrowth = resource.peakRssBytes - resource.readyRssBytes;
       // 128 MiB budget for sampled host growth plus supervisor OS high-water growth; host sampling may miss transients.
       const memoryBudget = 128 * 1024 * 1024;
       // 8 MiB per queue is a fixed byte budget independent of the 512 MiB workload, alongside the 64-chunk cap.
@@ -1815,6 +1823,8 @@ describe.runIf(enabled)('shell qualification', () => {
         hostRssSamples: hostSamples,
         supervisorPid: resource.pid,
         supervisorBaselineRssBytes: resource.baselineRssBytes,
+        supervisorReadyRssBytes: resource.readyRssBytes,
+        supervisorStartupRssBytes: supervisorStartup,
         supervisorPeakRssBytes: resource.peakRssBytes,
         supervisorRssGrowthBytes: supervisorGrowth,
         sampledHostPlusSupervisorGrowthBytes: growth + supervisorGrowth,

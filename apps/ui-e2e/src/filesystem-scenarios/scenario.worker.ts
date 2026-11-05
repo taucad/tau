@@ -27,7 +27,7 @@ import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { handleGlobSearch, handleGrep } from '@taucad/chat/rpc';
 import type { RpcFileSystem } from '@taucad/chat/rpc';
 import { createProviderRpcFileSystem } from '@taucad/agent-tools/registry';
-import { createApplyTreeEffects } from '@taucad/revisions/apply-tree';
+import { createApplyTreeEffects, sweepTemporarySiblings } from '@taucad/revisions/apply-tree';
 import { captureRevisionTree, createCaptureMemo, ImmutableRevisionTree } from '@taucad/revisions/algorithms';
 import type { Checkout } from '@taucad/revisions';
 import { projectToManifest, serializeProjectManifest } from '@taucad/project-core';
@@ -35,7 +35,7 @@ import { randomUuid } from '@taucad/utils/id';
 import { installScenarioCounters } from '#filesystem-scenarios/counters.js';
 import { checkoutBytes, fixtureBytes, fixtureMarker, planFixture } from '#filesystem-scenarios/fixture.js';
 import type { FixtureEntry, FixturePlan } from '#filesystem-scenarios/fixture.js';
-import { scenarioWorkerReady } from '#filesystem-scenarios/protocol.js';
+import { scenarioCrashPoint, scenarioWorkerReady } from '#filesystem-scenarios/protocol.js';
 import type {
   ProbeReport,
   RunnerName,
@@ -160,7 +160,7 @@ const percentile = (values: readonly number[], fraction: number): number => {
  * @param projectId - Its project.
  * @returns `materialize(entries)`, which writes the tree over an empty checkout.
  */
-const checkoutApply = (live: RootedFileSystem, projectId: string) => {
+const checkoutMaterializer = (live: RootedFileSystem, projectId: string) => {
   const memo = createCaptureMemo();
   const exclude = (path: string): boolean => !tauPathPolicy.classify(path).versioned;
   const capture = async (_place: Checkout, modeBasis?: ImmutableRevisionTree): Promise<ImmutableRevisionTree> => {
@@ -206,11 +206,62 @@ const checkoutApply = (live: RootedFileSystem, projectId: string) => {
     branch: 'main',
     baseRevisionId: undefined,
   };
-  return async (entries: readonly FixtureEntry[]): Promise<number> => {
-    const target = new ImmutableRevisionTree(entries.map((entry) => [entry.path, checkoutBytes(entry), '100644']));
-    const { paths } = await materializeTree(place, target, { before: new ImmutableRevisionTree([]) });
+  return async (target: ImmutableRevisionTree, before: ImmutableRevisionTree): Promise<number> => {
+    const { paths } = await materializeTree(place, target, { before });
     return paths.length;
   };
+};
+
+/** {@link checkoutMaterializer} over an empty checkout, writing the fixture's tree. */
+const checkoutApply = (live: RootedFileSystem, projectId: string) => {
+  const materialize = checkoutMaterializer(live, projectId);
+  return async (entries: readonly FixtureEntry[]): Promise<number> =>
+    materialize(
+      new ImmutableRevisionTree(entries.map((entry) => [entry.path, checkoutBytes(entry), '100644'])),
+      new ImmutableRevisionTree([]),
+    );
+};
+
+/* The I1 replacement probe: a tree of files the apply replaces, each version recognisable. */
+const replaceFiles = 48;
+const replaceFileBytes = 256 * 1024;
+const replacePath = (index: number): string => `replace/file-${String(index).padStart(3, '0')}.txt`;
+const replaceBytes = (index: number, version: 'old' | 'new'): Uint8Array<ArrayBuffer> => {
+  const bytes = new Uint8Array(replaceFileBytes).fill(version === 'old' ? 0x6f : 0x6e);
+  bytes.set(textEncoder.encode(`${replacePath(index)} ${version}\n`));
+  return bytes;
+};
+const replaceTree = (version: 'old' | 'new'): ImmutableRevisionTree =>
+  new ImmutableRevisionTree(
+    Array.from({ length: replaceFiles }, (_, index) => [replacePath(index), replaceBytes(index, version), '100644']),
+  );
+const sameBytes = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
+  left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
+
+/**
+ * Files left in the OPFS staging directory (the provider's `opfsStagingDirectory`)
+ * after this realm's open swept the owners that are gone.
+ *
+ * @returns How many staged files remain, in every owner's directory.
+ */
+const stagedFiles = async (): Promise<number> => {
+  const root = await navigator.storage.getDirectory();
+  let staging: FileSystemDirectoryHandle;
+  try {
+    staging = await root.getDirectoryHandle('.tau-staging');
+  } catch {
+    return 0;
+  }
+  type Listable = FileSystemDirectoryHandle & { values(): AsyncIterable<FileSystemHandle> };
+  let count = 0;
+  for await (const owner of (staging as Listable).values()) {
+    if (owner.kind === 'directory') {
+      for await (const _file of (owner as Listable).values()) {
+        count += 1;
+      }
+    }
+  }
+  return count;
 };
 
 const assertMaterialized = async (live: RootedFileSystem, entries: readonly FixtureEntry[]): Promise<void> => {
@@ -412,12 +463,18 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
         const saveEnd = performance.now();
         await applying;
         const firstWrite = counters.traced().find((write) => write.name === 's17-save.ts');
+        /* When the save's whole lock set was held. */
+        const ownLock = counters.tracedLocks().find((grant) => grant.name === 's17-save.ts');
         return {
           saveLatency: saveEnd - saveStart,
           saveStartDelay: firstWrite === undefined ? saveEnd - saveStart : firstWrite.startedAt - saveStart,
           saveIssuedDuringApply: issuedDuringApply,
-          /* Apply writes and renames that completed while the save waited for its first byte. */
-          applyOperationsBeforeSave:
+          /* Apply writes and renames that completed while the save acquired its lock set: a
+           * save that waited on a token the apply holds exclusively would count the rest of a changeset. */
+          applyOperationsBeforeSave: ownLock === undefined ? Number.NaN : ownLock.operationsBefore - operationsAtCall,
+          saveLockWait: ownLock === undefined ? Number.NaN : ownLock.startedAt - saveStart,
+          /* Reported, not gated: what completed before the save's first byte, which OPFS contention also moves. */
+          applyOperationsBeforeSaveByte:
             firstWrite === undefined ? Number.NaN : firstWrite.operationsBefore - operationsAtCall,
         };
       });
@@ -532,6 +589,82 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
           readP95: percentile(reads.latencies, 0.95),
           reads: reads.reads,
         };
+      });
+    }
+    case 'replace-seed': {
+      /* I1: the old tree the killable apply replaces. */
+      return measure(async () => ({
+        files: await checkoutMaterializer(live, projectId)(replaceTree('old'), new ImmutableRevisionTree([])),
+      }));
+    }
+    case 'replace-killable': {
+      /* I1: replace every file through stage + move aside + publish, and say when
+       * `killAfter` mutations have completed so the page can kill this worker there.
+       * With no `killAfter` it runs to the end and reports how many there were.
+       * With `create` set it writes the new tree over an empty checkout instead:
+       * the create changesets alone. */
+      const killAfter = parameters['killAfter'] ?? Number.POSITIVE_INFINITY;
+      const from = parameters['create'] === 1 ? new ImmutableRevisionTree([]) : replaceTree('old');
+      const materialize = checkoutMaterializer(live, projectId);
+      const operations = (): number => {
+        const counts = counters.read();
+        return counts.writes + counts.renames + counts.removes;
+      };
+      return measure(async () => {
+        const start = operations();
+        const progress = { done: false, signalled: false };
+        const watching = (async () => {
+          while (!progress.done) {
+            if (!progress.signalled && operations() - start >= killAfter) {
+              progress.signalled = true;
+              self.postMessage(scenarioCrashPoint);
+            }
+            // oxlint-disable-next-line no-await-in-loop -- polled between the apply's own tasks.
+            await quiet(0);
+          }
+        })();
+        try {
+          await materialize(replaceTree('new'), from);
+        } finally {
+          progress.done = true;
+          await watching;
+        }
+        return { operations: operations() - start };
+      });
+    }
+    case 'replace-recover': {
+      /* I1: what an open after the kill does first, then what every path holds. */
+      return measure(async () => {
+        await sweepTemporarySiblings(live, (path) => tauPathPolicy.classify(path).versioned);
+        /* The open already verified the creates a killed realm recorded and removed the short ones. */
+        const totals = productionCounterTotals();
+        const outcome = {
+          old: 0,
+          new: 0,
+          missing: 0,
+          partial: 0,
+          litter: 0,
+          staged: 0,
+          verified: totals['uncommitted.verified'] ?? 0,
+          removed: totals['uncommitted.removed'] ?? 0,
+        };
+        for (let index = 0; index < replaceFiles; index += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- one read per file, in order.
+          const bytes = await live.readFile(replacePath(index)).catch(() => undefined);
+          if (bytes === undefined) {
+            outcome.missing += 1;
+          } else if (sameBytes(bytes, replaceBytes(index, 'old'))) {
+            outcome.old += 1;
+          } else if (sameBytes(bytes, replaceBytes(index, 'new'))) {
+            outcome.new += 1;
+          } else {
+            outcome.partial += 1;
+          }
+        }
+        const names = await live.readdir('replace').catch(() => []);
+        outcome.litter = names.filter((name) => name.includes('.tau-')).length;
+        outcome.staged = await stagedFiles();
+        return outcome;
       });
     }
     case 'stat-probes': {

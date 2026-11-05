@@ -7,6 +7,7 @@ import {
   toMechanismKernelIssue,
   transformNormalArray,
   transformVectorArrayChecked,
+  isClosedTriangleMesh,
   writeGlb,
   writeGltfJson,
 } from '@taucad/geometry-core';
@@ -264,11 +265,10 @@ const buildNode = (shape: PicovoxelShapeSnapshot, options: GeometryOutputTransfo
         indices: mapped?.indices ?? shape.triangles,
         ...(mapped ? { texCoords: [mapped.texCoords], tangents } : {}),
         material: material ?? {
-          // Double-sided, like jscad and replicad (D30 check): the section view rejects a cap whose cut
-          // leaves unresolved edges (one-voxel lattice walls are non-manifold), and hides caps while a
-          // drag recomputes them. Back faces then shade the cut instead of leaving a see-through hole.
-          // Back-face culling would pay off only at >=5M triangles, which needs a real-GPU benchmark first.
-          doubleSided: true,
+          // A closed solid draws one side: no back face of it shows from outside (see isClosedTriangleMesh).
+          // Anything else, such as non-manifold one-voxel lattice walls, stays double-sided, so the section
+          // view's uncapped cuts shade back faces instead of leaving a see-through hole.
+          doubleSided: !isClosedTriangleMesh([{ positions: shape.vertices, indices: shape.triangles }]),
           pbrMetallicRoughness: {
             baseColorFactor: [...cadMaterialDefaults.baseColorFactor],
             metallicFactor: cadMaterialDefaults.metalnessFactor,

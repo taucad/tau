@@ -96,7 +96,7 @@ describe('image transcoder', () => {
 
   describe('initialize', () => {
     it('should version renderer output for export cache invalidation', () => {
-      expect(imageDefinition.version).toBe('14.0.0');
+      expect(imageDefinition.version).toBe('16.0.0');
     });
 
     it('should load the renderer and describe its adapter once during initialize', () => {
@@ -505,6 +505,52 @@ describe('image transcoder', () => {
       expect(renderImages.mock.calls[0]?.[1]).not.toHaveProperty('mode');
       expect(renderImages.mock.calls[0]?.[1]).not.toHaveProperty('includeAxes');
       expect(renderImages.mock.calls[0]?.[1]).not.toHaveProperty('includeScale');
+    });
+
+    it('should pass the viewer-parity options to the renderer unchanged', async () => {
+      const file = {
+        name: 'render.png',
+        bytes: new Uint8Array([1]),
+        mimeType: 'image/png',
+        width: 768,
+        height: 432,
+      } as const;
+      renderImages.mockResolvedValue(timedImages([{ id: 'single', file }]));
+      const ao = {
+        radiusPixels: 9.6,
+        intensity: 0.75,
+        distanceFalloff: 1,
+        thicknessRatio: 1 / 0.09,
+        denoiseDepthTolerance: 0.1,
+        samples: 16,
+        resolutionScale: 0.5,
+      };
+      const lighting = {
+        lights: [],
+        headlamp: { intensity: 1.5, rightOffset: 2, upOffset: 2 },
+        ambient: 0.0366,
+        environment: { intensity: 1 },
+        space: 'view',
+        exposure: 1,
+      } as const;
+
+      const result = await imageDefinition.transcode(
+        {
+          from: 'glb',
+          to: 'png',
+          files: [glbFile()],
+          options: imageEdgeSchemas.png.parse({ lineColor: '#868686', toneMapping: 'neutral', ao, lighting }),
+        },
+        runtime,
+        context,
+      );
+
+      expect(result.success).toBe(true);
+      expect(renderImages).toHaveBeenCalledWith(
+        expect.any(Uint8Array),
+        expect.objectContaining({ lineColor: '#868686', toneMapping: 'neutral', ao, lighting }),
+      );
+      expect(runtime.logger.warn).not.toHaveBeenCalled();
     });
 
     it('should default JPEG to an opaque white background so the encoder never sees alpha', async () => {

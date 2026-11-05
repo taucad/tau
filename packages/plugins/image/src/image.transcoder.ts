@@ -147,7 +147,11 @@ export const imageTranscoder = defineTranscoder({
   // 13.0.0 = nanoraster 0.7: sections are never refused; open cut outlines are drawn in red.
   // 13.0.1 = nanoraster 0.7.1: hidden edges ending on a face boundary no longer show past it.
   // 14.0.0 = nanoraster 0.8: ambient occlusion is on unless `ao.intensity` is 0.
-  version: '14.0.0',
+  // 15.0.0 = viewer render profile: Tau captures pass the viewer's lights, AO and one-CSS-pixel edges; nanoraster 0.8
+  //          renders them without the options it predates.
+  // 16.0.0 = nanoraster 0.9: `lineColor`, `toneMapping`, the GTAO controls, `lighting.headlamp` and the environment
+  //          object reach the backend.
+  version: '16.0.0',
   edges,
 
   async initialize() {

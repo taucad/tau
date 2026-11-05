@@ -9,6 +9,7 @@ import {
   transformNormalArray,
   transformVertexArray,
   srgbTupleToLinear,
+  isClosedTriangleMesh,
   writeGlb,
 } from '@taucad/geometry-core';
 import type { GeometryOutputTransformOptions, GlbInput, GlbNode, GlbPrimitive } from '@taucad/geometry-core';
@@ -307,7 +308,8 @@ function buildNodeFromJscadPart(
     normals: normalsArray,
     indices: indicesArray,
     material: {
-      doubleSided: true,
+      // A closed solid draws one side: no back face of it shows from outside (see isClosedTriangleMesh).
+      doubleSided: linearBaseColor[3] < 1 || !isClosedTriangleMesh([{ positions, indices: indicesArray }]),
       pbrMetallicRoughness: {
         baseColorFactor: linearBaseColor,
         metallicFactor: cadMaterialDefaults.metalnessFactor,

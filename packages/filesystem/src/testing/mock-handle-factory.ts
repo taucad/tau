@@ -341,6 +341,12 @@ class MockDirectoryHandle {
     }
   }
 
+  public async *keys(): AsyncGenerator<string> {
+    for (const name of this._children.keys()) {
+      yield name;
+    }
+  }
+
   public async isSameEntry(other: FileSystemHandle): Promise<boolean> {
     return other instanceof MockDirectoryHandle && other._identity === this._identity;
   }

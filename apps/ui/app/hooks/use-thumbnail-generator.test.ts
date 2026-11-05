@@ -168,7 +168,27 @@ describe('useThumbnailGenerator', () => {
         mode: 'single',
         width: 1536,
         height: 1152,
-        lineWidth: 6,
+        // The dark-scheme viewer at twice the 768×576 reference frame.
+        lineWidth: 2,
+        lineColor: '#868686',
+        ao: {
+          radiusPixels: 960 * 0.01 * 2,
+          intensity: 0.75,
+          distanceFalloff: 1,
+          thicknessRatio: 1 / 0.09,
+          denoiseDepthTolerance: 0.1,
+          samples: 16,
+          resolutionScale: 0.5,
+        },
+        toneMapping: 'neutral',
+        lighting: {
+          headlamp: { intensity: 1.5, rightOffset: 2, upOffset: 2 },
+          lights: [],
+          ambient: (0.1 * 1 * 1.15) / Math.PI,
+          environment: { intensity: 1 },
+          space: 'view',
+          exposure: 1,
+        },
         camera: {
           framing: 'bounds',
           direction: [0.6123724357, -0.6123724357, 0.5],
@@ -177,7 +197,6 @@ describe('useThumbnailGenerator', () => {
           projection: { kind: 'perspective', verticalFieldOfView: 45 },
         },
         quality: 0.95,
-        ao: {},
       },
     });
     const job = exportImage.mock.calls[0]![0];
@@ -283,7 +302,7 @@ describe('useThumbnailGenerator', () => {
     expect(event?.type).toBe('settled');
     if (event?.type === 'settled') {
       expect(event.hash).toBe(
-        'proj_aaaaaaaaaaaaaaaaaaaaa:src/main.ts:geometry-hash:webp:q0.95:1536x1152:m0.1:lw6:camera-bounds-v1:edges:studio-v5',
+        'proj_aaaaaaaaaaaaaaaaaaaaa:src/main.ts:geometry-hash:webp:q0.95:1536x1152:m0.1:lw2:camera-bounds-v1:edges:viewer-profile-v2',
       );
     }
   });

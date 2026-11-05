@@ -79,8 +79,8 @@ const uncappedLoops: SectionLoopCapSource = { matrix: new THREE.Matrix4(), bySlo
  * - `per-loop`: anything else (an open or non-manifold surface, or one shown in part), capped from the closed loops a
  *   slice of its shown triangles finds on each face, counted even-odd, with its open chains outlined and its back faces
  *   shown.
- * - `pending`: its census has not landed; it is cut and outlined but not capped until it does, and its back faces are
- *   not shown.
+ * - `pending`: its census has not landed; it is cut and outlined but not capped until it does, with its back faces
+ *   shown, so a one-sided closed solid shades its cut instead of opening a hole into the background.
  */
 export type SectionCapGrade = 'exact' | 'per-loop' | 'pending';
 
@@ -299,9 +299,10 @@ export function SectionContourFills({
       }
       const perLoop = records.filter(({ grade }) => grade === 'per-loop');
       loopCaps.retain(new Set(perLoop.map(({ key }) => key)));
-      // Only per-loop sources: a pending source is usually graded exact a moment later, and switching its materials
-      // there and back would rebuild their programs twice for nothing.
-      backFaces.show(cutSet.pieces.length > 0 ? perLoop.flatMap(({ meshes }) => meshes) : []);
+      // Uncapped sources show their insides: per-loop ones where their loops leave the cut open, pending ones until
+      // their census lands. Closed solids draw one side, so a pending one would otherwise show a hole while it waits.
+      const uncapped = records.filter(({ grade }) => grade !== 'exact');
+      backFaces.show(cutSet.pieces.length > 0 ? uncapped.flatMap(({ meshes }) => meshes) : []);
       root.userData['sectionCapCompleteness'] = {
         status: 'complete',
         admittedSourceCount: records.length,

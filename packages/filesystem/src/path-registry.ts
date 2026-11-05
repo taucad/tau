@@ -162,6 +162,20 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     match: 'segment',
     directory: true,
   },
+  /* The OPFS provider's staging directory: bytes a large write or a create is
+   * still writing, moved into place once whole and swept at the next open when
+   * their writer is gone (I1). It sits at the storage root; like every row
+   * above it matches by segment, so no depth ever shows it. */
+  {
+    prefix: '.tau-staging',
+    class: 'control-plane',
+    versioned: false,
+    agentAccess: 'hidden',
+    watch: 'none',
+    anchored: false,
+    match: 'segment',
+    directory: true,
+  },
 
   /* Generated from the registry itself on every host, so versioning them would
    * put tooling output into revisions. `.gitignore` and `.gitattributes` are

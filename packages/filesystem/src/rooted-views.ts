@@ -48,7 +48,8 @@ import type { MountResolution, MountTable } from '#mount-table.js';
 import type { TreeIndex, TreeIndexAdmits, TreeSearchOptions } from '#tree-index.js';
 import type { WalkOptions } from '#content-ops/walk.js';
 import { causeToMutationError, preflightCreate, preflightDelete, preflightMove } from '#mutation-pipeline.js';
-import type { BulkMoveEdit, BulkMoveResult, MutationPipeline } from '#mutation-pipeline.js';
+import type { BulkMoveEdit, BulkMoveResult, MutationPipeline, ResolvedChangesetEntry } from '#mutation-pipeline.js';
+import type { Changeset, ChangesetReceipt } from '#changeset.js';
 import type { WatchRegistry } from '#watch-registry.js';
 import { RootedFileSystemError, WorkspaceMutationError } from '#workspace-errors.js';
 import { bufferToStream, validateFileReadStreamOptions } from '#backend/stream-utils.js';
@@ -73,6 +74,12 @@ const largeObjectPathPattern = /^\.git\/lfs\/objects\/([\da-f]{2})\/([\da-f]{2})
  * @public
  */
 export type RootedPorcelain = {
+  /**
+   * Apply one changeset of this root's paths: every entry admitted before the
+   * first I/O, one lock set, phases in order, every entry's outcome reported,
+   * one change event and one cross-tab notice (charter D2).
+   */
+  apply(changeset: Changeset): Promise<ChangesetReceipt>;
   /** Recursively copy one subtree of this root onto another. */
   copyTree(source: string, target: string, options?: { admits?: WalkOptions['admits'] }): Promise<void>;
   /** Copy one file of this root to a new path. */
@@ -463,6 +470,30 @@ export class RootedViews {
       }
       return { moved: result.moved, failed: edits.flatMap((edit) => failures.get(edit) ?? []) };
     };
+    const apply = async (changeset: Changeset): Promise<ChangesetReceipt> =>
+      this._pipeline.apply(
+        {
+          entries: changeset.entries.map((entry): ResolvedChangesetEntry => {
+            if (entry.op === 'move') {
+              const from = resolveLocal(entry.from);
+              const to = resolveLocal(entry.to);
+              assertMutableRoot(from.localPath);
+              assertMutableRoot(to.localPath);
+              return {
+                entry: { ...entry, from: from.authorityPath, to: to.authorityPath },
+                resolution: from.resolution,
+                targetResolution: to.resolution,
+              };
+            }
+            const at = resolveLocal(entry.path);
+            assertMutableRoot(at.localPath);
+            return { entry: { ...entry, path: at.authorityPath }, resolution: at.resolution };
+          }),
+          ...(changeset.lifecycle === undefined ? {} : { lifecycle: changeset.lifecycle }),
+          ...(changeset.signal === undefined ? {} : { signal: changeset.signal }),
+        },
+        mutationContext,
+      );
     const writeFiles = async (files: Record<string, { content: Uint8Array<ArrayBuffer> | string }>): Promise<void> => {
       await this._pipeline.writeFiles(
         Object.entries(files).map(([path, file]) => {
@@ -698,6 +729,7 @@ export class RootedViews {
       copyTree,
       duplicate,
       move,
+      apply,
       bulkMove,
       writeFiles,
       canMove,

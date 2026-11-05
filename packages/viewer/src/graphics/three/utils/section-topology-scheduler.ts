@@ -11,39 +11,42 @@ export type SectionTopologyScheduler = Readonly<{
   stats: () => Readonly<{ started: number; discarded: number }>;
 }>;
 
-/** Runs one topology generation while retaining only the newest queued successor. @internal */
+/**
+ * Runs one topology generation while retaining only the newest queued successor. `dispose` discards the running and
+ * queued jobs; a later submit starts afresh, as the topology worker client does after `release`, so a viewer that
+ * React remounts (StrictMode runs every effect's cleanup once) keeps building caps.
+ * @internal
+ * @returns The scheduler.
+ */
 export const createSectionTopologyScheduler = (): SectionTopologyScheduler => {
   type Pending = SectionTopologyJob & {
     resolve: (outcome: SectionTopologyJobOutcome) => void;
   };
   let active: Pending | undefined;
   let pending: Pending | undefined;
-  let disposed = false;
+  // Bumped by each dispose; a job that started before it is discarded.
+  let epoch = 0;
   let started = 0;
   let discarded = 0;
 
   const start = async (job: Pending): Promise<void> => {
     active = job;
     started += 1;
+    const startedIn = epoch;
     try {
       await job.run();
-      const stale = disposed || (pending !== undefined && pending.generation > job.generation);
+      const stale = startedIn !== epoch || (pending !== undefined && pending.generation > job.generation);
       discarded += stale ? 1 : 0;
       job.resolve(stale ? 'discarded' : 'completed');
     } catch {
-      job.resolve(disposed ? 'discarded' : 'failed');
+      job.resolve(startedIn === epoch ? 'failed' : 'discarded');
     } finally {
       active = undefined;
       const next = pending;
       pending = undefined;
       if (next) {
-        if (disposed) {
-          discarded += 1;
-          next.resolve('discarded');
-        } else {
-          // async-iife: continue the serialized queue without blocking this completed job.
-          void start(next);
-        }
+        // async-iife: continue the serialized queue without blocking this completed job.
+        void start(next);
       }
     }
   };
@@ -52,11 +55,6 @@ export const createSectionTopologyScheduler = (): SectionTopologyScheduler => {
     submit: async (job) =>
       new Promise<SectionTopologyJobOutcome>((resolve) => {
         const request = { ...job, resolve };
-        if (disposed) {
-          discarded += 1;
-          resolve('discarded');
-          return;
-        }
         if (!active) {
           // async-iife: begin the scheduler's owned asynchronous job.
           void start(request);
@@ -69,10 +67,7 @@ export const createSectionTopologyScheduler = (): SectionTopologyScheduler => {
         pending = request;
       }),
     dispose() {
-      if (disposed) {
-        return;
-      }
-      disposed = true;
+      epoch += 1;
       if (pending) {
         discarded += 1;
         pending.resolve('discarded');

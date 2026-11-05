@@ -16,6 +16,8 @@ export type {
   PathPolicy,
   PathWatchPlane,
   ChangeEvent,
+  ChangeSetEvent,
+  PathChangeEvent,
   MkdirOptions,
   WorkspaceMutationContext,
   FileTreeNode,
@@ -24,6 +26,29 @@ export type {
   WatchEvent,
 } from '#types.js';
 export type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
+export {
+  maximumChangesetBytes,
+  maximumChangesetEntries,
+  changeEventEntries,
+  changesetReceipt,
+  inHandBytes,
+  isBoundedChangeset,
+  isRefusal,
+  splitChangeset,
+} from '#changeset.js';
+export { applyChangesetToProvider } from '#changeset-provider.js';
+export type {
+  BatchEntry,
+  BatchOptions,
+  BatchReceipt,
+  Changeset,
+  ChangesetEntry,
+  ChangesetEntryOutcome,
+  ChangesetEntryReceipt,
+  ChangesetPhase,
+  ChangesetReceipt,
+  ChangesetWriteData,
+} from '#changeset.js';
 
 export { WorkspaceFileService } from '#workspace-file-service.js';
 export { pendingProjectCommitInputSchema } from '#project-directories.js';

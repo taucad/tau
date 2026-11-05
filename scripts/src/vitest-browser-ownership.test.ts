@@ -221,6 +221,8 @@ describe('Vitest Browser test-runner ownership', () => {
     // The clean-host Mac acceptance workflow installs the Chromium its browser download uses.
     // The PicoGK browser archive workflow installs the one engine each parity leg measures the browser
     // runtime in, which Browser Mode cannot host.
+    // The viewer parity workflow installs the Chromium its viewer-reference capture runs in (Vitest Browser Mode), and
+    // its real-GPU check installs the same Chromium on the operator's Mac.
     expect(installFiles.sort()).toEqual(
       [
         '.agents/skills/create-repo/templates/ci.yml',
@@ -235,10 +237,12 @@ describe('Vitest Browser test-runner ownership', () => {
         '.github/workflows/spike-s31.yml',
         '.github/workflows/spike-s32.yml',
         '.github/workflows/ui-asset-integrity.yml',
+        '.github/workflows/viewer-parity.yml',
         'scripts/spikes/native-deps/linux/s31/run.ts',
         'apps/docs/project.json',
         'apps/ui/scripts/check-asset-integrity.mts',
         'apps/www/README.md',
+        'libs/tau-examples/scripts/viewer-parity-hardware.sh',
       ].sort(),
     );
   });
@@ -284,6 +288,13 @@ describe('Vitest Browser test-runner ownership', () => {
   });
 
   it('launches every Vitest Playwright Chromium instance through managed full Chromium', () => {
+    // Headed on request: SwiftShader WebGPU presents only in headed Chromium (under Xvfb in CI). Headless loses the
+    // device on its first present and the viewer falls back to WebGL2, which the parity capture refuses. The parity
+    // gate's WASM pass runs headed only in the real-GPU check on macOS, beside the headed viewer capture.
+    const headedConfigs = new Set([
+      'libs/tau-examples/vitest.viewer-parity.config.ts',
+      'packages/viewer/src/graphics/three/viewer-parity-capture.vitest.browser.config.ts',
+    ]);
     const configs = vitestPlaywrightConfigs();
     expect(configs.map(([path]) => path).sort()).toEqual(
       [
@@ -308,6 +319,7 @@ describe('Vitest Browser test-runner ownership', () => {
         'apps/ui/app/workers/agent-host.vitest.browser.config.ts',
         'apps/ui/chat-revision-marker.vitest.browser.config.ts',
         'libs/agent-observability/vitest.browser.config.ts',
+        'libs/tau-examples/vitest.viewer-parity.config.ts',
         'packages/agent-host/vitest.browser.config.ts',
         'packages/core/bundler/vitest.browser.config.ts',
         'packages/plugins/openrscad/e2e/vitest.config.ts',
@@ -317,6 +329,7 @@ describe('Vitest Browser test-runner ownership', () => {
         'packages/ui/vitest.browser.config.ts',
         'packages/viewer/src/graphics/svg/svg-viewer.vitest.browser.config.ts',
         'packages/viewer/src/graphics/three/utils/gltf-batches.vitest.browser.config.ts',
+        'packages/viewer/src/graphics/three/viewer-parity-capture.vitest.browser.config.ts',
         'packages/viewer/src/graphics/three/viewer-resize.vitest.browser.config.ts',
       ].sort(),
     );
@@ -329,7 +342,7 @@ describe('Vitest Browser test-runner ownership', () => {
         chromiumInstances,
       );
       expect(source, `${path} must keep headless ownership at the Vitest Browser level`).toMatch(
-        /browser:\s*\{[\s\S]*?headless:\s*true/u,
+        headedConfigs.has(path) ? /browser:\s*\{[\s\S]*?headless:/u : /browser:\s*\{[\s\S]*?headless:\s*true/u,
       );
       expect(source, `${path} must not use ambient branded Chrome`).not.toMatch(/channel:\s*['"]chrome['"]/u);
       expect(source, `${path} must not put headless inside Playwright launchOptions`).not.toMatch(

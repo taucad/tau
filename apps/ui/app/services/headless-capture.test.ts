@@ -14,6 +14,7 @@ import {
   captureSettledCadImages,
 } from '#services/headless-capture.js';
 import type { HeadlessImageJob } from '#services/headless-image.service.js';
+import { buildViewerCaptureImageOptions } from '@taucad/agent-tools/capture';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
 import { getGraphicsCameraState } from '@taucad/viewer/services/graphics-camera-registry';
 import { recordHeadlessImageTiming } from '#services/headless-image-debug.js';
@@ -153,7 +154,7 @@ describe('headless capture adapter', () => {
     expect(job.exportOptions).toMatchObject({
       width: 2400,
       height: 1350,
-      lineWidth: 3,
+      ...buildViewerCaptureImageOptions({ width: 2400, height: 1350, colorScheme: 'dark' }),
       camera: {
         framing: 'fixed',
         position: [8, -6, 4],
@@ -224,7 +225,7 @@ describe('headless capture adapter', () => {
         mode: 'batch',
         width: 1600,
         height: 1600,
-        lineWidth: 3,
+        ...buildViewerCaptureImageOptions({ width: 1600, height: 1600, colorScheme: 'dark' }),
         background: '#242424',
         axes: true,
         scaleBar: true,
@@ -246,7 +247,7 @@ describe('headless capture adapter', () => {
     expect(batchOptions.views.map(({ label }) => label)).toEqual(canonicalCaptureViews.map(({ label }) => label));
   });
 
-  it('keeps agent edge intent with the shared three-pixel line policy', async () => {
+  it('should keep agent edge intent with the viewer edge policy', async () => {
     const exportImage = vi.fn<ExportImage>(async (_job) => [webp(1600, 1600)]);
 
     await captureSettledCadImages({
@@ -256,11 +257,17 @@ describe('headless capture adapter', () => {
     });
 
     expect(exportImage.mock.calls[0]![0]).toMatchObject({
-      exportOptions: { width: 1600, height: 1600, lineWidth: 3, lines: false },
+      exportOptions: {
+        width: 1600,
+        height: 1600,
+        lineWidth: Math.hypot(1600, 1600) / 960,
+        lineColor: '#868686',
+        lines: false,
+      },
     });
   });
 
-  it('keeps the three-pixel edge recipe explicit for utility captures', async () => {
+  it('should pass the dark-scheme viewer look explicitly for utility captures', async () => {
     const exportImage = vi.fn<ExportImage>(async (_job) => [png(2400, 1350)]);
 
     await captureSettledCadImages({
@@ -271,7 +278,20 @@ describe('headless capture adapter', () => {
     });
 
     expect(exportImage.mock.calls[0]![0]).toMatchObject({
-      exportOptions: { width: 2400, height: 1350, lineWidth: 3 },
+      exportOptions: {
+        width: 2400,
+        height: 1350,
+        lineWidth: Math.hypot(2400, 1350) / 960,
+        lineColor: '#868686',
+        toneMapping: 'neutral',
+        ao: { intensity: 0.75, distanceFalloff: 1, samples: 16, resolutionScale: 0.5 },
+        lighting: {
+          headlamp: { intensity: 1.5, rightOffset: 2, upOffset: 2 },
+          lights: [],
+          environment: { intensity: 1 },
+          space: 'view',
+        },
+      },
     });
   });
 

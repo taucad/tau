@@ -12,7 +12,7 @@ import {
 import { safeDispose } from '@taucad/utils/dispose';
 import { wrapMessagePort } from '@taucad/rpc';
 import type { MessagePortLike } from '@taucad/rpc';
-import type { ChangeEvent } from '@taucad/types';
+import type { ChangeEvent, PathChangeEvent } from '@taucad/types';
 import type { ComposedViewConsumer } from '@taucad/filesystem/composed-view';
 import type {
   FileStat,
@@ -196,10 +196,10 @@ const visibleRelativeToRoot = (
  * watch reports it (`WorkspaceFileService.createRootedFileSystem`).
  */
 const scopeEventToRoot = (
-  event: ChangeEvent,
+  event: PathChangeEvent,
   root: string,
   hidden?: (relativePath: string) => boolean,
-): ChangeEvent | undefined => {
+): PathChangeEvent | undefined => {
   if (event.type === 'backendChanged') {
     return event;
   }
@@ -730,7 +730,7 @@ export type MutationMethodNameInternal = MutationMethodName;
  * @public
  */
 export type ChangeEventCoalescer = {
-  push(event: ChangeEvent): void;
+  push(event: PathChangeEvent): void;
   dispose(): void;
 };
 
@@ -742,11 +742,11 @@ export type ChangeEventCoalescer = {
  * @public
  */
 export type CoalescerFactory = (
-  deliver: (events: ChangeEvent[]) => void,
+  deliver: (events: PathChangeEvent[]) => void,
   /** Coalescing window. Milliseconds. */
   coalescingWindow: number,
   /** Report discarded events so the bridge can replace them with loss signals. */
-  onOverflow: (events: readonly ChangeEvent[]) => void,
+  onOverflow: (events: readonly PathChangeEvent[]) => void,
 ) => ChangeEventCoalescer;
 
 /**
@@ -970,8 +970,8 @@ function exposeFileSystemHandlers(
    * whether the mask applies, so K ports on one root derive it once between them
    * instead of K times (event-fanout policy).
    */
-  const scopedByRoot = new Map<string, ChangeEvent | undefined>();
-  const deliverToHandles = (events: ChangeEvent[]): void => {
+  const scopedByRoot = new Map<string, PathChangeEvent | undefined>();
+  const deliverToHandles = (events: PathChangeEvent[]): void => {
     for (const event of events) {
       const originClientId = getEventOrigin(event);
       hiddenByPath.clear();
@@ -1023,15 +1023,23 @@ function exposeFileSystemHandlers(
     );
   }
 
+  /* One bus event per changeset (D2): a change set's facts are tagged one by
+   * one, so each is filtered and delivered as itself — bridge clients keep
+   * receiving path facts. */
   const unsubscribeEventBus = options?.changeEventBus?.subscribe((event) => {
     const changeEvent = event as ChangeEvent;
-    if (!isEventGloballyVisible(changeEvent)) {
+    const facts = (changeEvent.type === 'changeSet' ? changeEvent.entries : [changeEvent]).filter((fact) =>
+      isEventGloballyVisible(fact),
+    );
+    if (facts.length === 0) {
       return;
     }
     if (coalescer) {
-      coalescer.push(changeEvent);
+      for (const fact of facts) {
+        coalescer.push(fact);
+      }
     } else {
-      deliverToHandles([changeEvent]);
+      deliverToHandles(facts);
     }
   });
 

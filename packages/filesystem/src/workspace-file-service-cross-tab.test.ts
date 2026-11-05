@@ -244,9 +244,15 @@ describe('WorkspaceFileService cross-tab authority delivery', () => {
     const sender = new BroadcastChannel('tau-fs-changes');
     try {
       sender.postMessage({
-        type: 'write',
-        path: '/foreign.txt',
-        authority: { storageRootKey: 'indexeddb:not-owned', providerBasePath: '' },
+        tabId: crypto.randomUUID(),
+        seq: 1,
+        changes: [
+          {
+            type: 'write',
+            path: '/foreign.txt',
+            authority: { storageRootKey: 'indexeddb:not-owned', providerBasePath: '' },
+          },
+        ],
       });
       await new Promise((resolve) => {
         setTimeout(resolve, 20);
@@ -254,6 +260,43 @@ describe('WorkspaceFileService cross-tab authority delivery', () => {
 
       expect(getProvider).not.toHaveBeenCalled();
       expect(rawEvents).toEqual([]);
+    } finally {
+      sender.close();
+      stop();
+    }
+  });
+
+  it('resets every owned storage root after a lost notice, even one carrying only a revoked project', async () => {
+    const reader = await createAuthority(`gap-remote-${databaseSequence++}`);
+    const refresh = vi.spyOn(reader.provider, 'refresh');
+    const rawEvents: ChangeEvent[] = [];
+    const stop = reader.eventBus.subscribe((event) => rawEvents.push(event));
+    const sender = new BroadcastChannel('tau-fs-changes');
+    const tabId = crypto.randomUUID();
+    const elsewhere = { storageRootKey: 'indexeddb:not-owned', providerBasePath: 'projects/gone' };
+    try {
+      sender.postMessage({
+        tabId,
+        seq: 1,
+        changes: [{ type: 'project-unavailable', path: '/gone', authority: elsewhere }],
+      });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+      expect(refresh).not.toHaveBeenCalled();
+      expect(rawEvents).toEqual([]);
+
+      /* Notice 2 never arrives; notice 3 names nothing this authority owns. */
+      sender.postMessage({
+        tabId,
+        seq: 3,
+        changes: [{ type: 'project-unavailable', path: '/gone', authority: elsewhere }],
+      });
+
+      await vi.waitFor(() => {
+        expect(rawEvents).toEqual([{ type: 'backendChanged', backend: 'indexeddb' }]);
+      });
+      expect(refresh).toHaveBeenCalledWith();
     } finally {
       sender.close();
       stop();

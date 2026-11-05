@@ -6,6 +6,8 @@ const resolved: Promise<void> = Promise.resolve();
 export type ResourceQueueClaim = Readonly<{
   key: string;
   descendantPrefix?: string;
+  /** A shared claim conflicts only with exclusive claims, as a Web Lock's `shared` mode does (D3). */
+  shared?: boolean;
 }>;
 
 type QueuedClaims = Readonly<{
@@ -18,7 +20,11 @@ const covers = (claim: ResourceQueueClaim, key: string): boolean =>
 
 const conflicts = (left: readonly ResourceQueueClaim[], right: readonly ResourceQueueClaim[]): boolean =>
   left.some((leftClaim) =>
-    right.some((rightClaim) => covers(leftClaim, rightClaim.key) || covers(rightClaim, leftClaim.key)),
+    right.some(
+      (rightClaim) =>
+        (leftClaim.shared !== true || rightClaim.shared !== true) &&
+        (covers(leftClaim, rightClaim.key) || covers(rightClaim, leftClaim.key)),
+    ),
   );
 
 /**
@@ -72,9 +78,10 @@ export class ResourceQueue {
     operation: () => Promise<T>,
     options?: Readonly<{ signal?: AbortSignal }>,
   ): Promise<T> {
-    const ownedClaims = claims.map(({ key, descendantPrefix }) => ({
+    const ownedClaims = claims.map(({ key, descendantPrefix, shared }) => ({
       key,
       ...(descendantPrefix === undefined ? {} : { descendantPrefix }),
+      ...(shared === true ? { shared } : {}),
     }));
     this._totalDepth += 1;
     const settled = Promise.withResolvers<void>();

@@ -1,3 +1,6 @@
+import { resolveViewerAoRadiusCssPixels, viewerRenderProfile } from '@taucad/types/constants/viewer-render-profile';
+import type { ViewerToneMapping } from '@taucad/types/constants/viewer-render-profile';
+
 /**
  * Diagnostic controls shared by the production viewport and calibration captures.
  *
@@ -25,26 +28,27 @@ export type PostProcessingSettings = Readonly<{
   /** AO-only encodes the visibility factor as sRGB, bypassing exposure and tone mapping. */
   displayMode: 'combined' | 'ao' | 'no-ao';
   /** Final display transform; exposure is controlled by the renderer separately. */
-  toneMapping: 'aces' | 'neutral' | 'linear' | 'none';
+  toneMapping: ViewerToneMapping;
 }>;
 
 /**
- * Production defaults; calibration changes never replace authored material factors.
+ * Production defaults; calibration changes never replace authored material factors. The GTAO, radius and tone-mapping
+ * values come from the viewer render profile that captures also read.
  *
  * @public
  */
 export const defaultPostProcessingSettings: PostProcessingSettings = {
   aoEnabled: true,
-  radiusCssPixels: 'viewport',
+  radiusCssPixels: viewerRenderProfile.ambientOcclusion.radiusCssPixels,
   aoCompositeStage: 'display',
   intensity: 3,
-  gtaoIntensity: 0.75,
+  gtaoIntensity: viewerRenderProfile.ambientOcclusion.intensity,
   distanceFalloff: 0.2,
-  gtaoDistanceFalloff: 1,
+  gtaoDistanceFalloff: viewerRenderProfile.ambientOcclusion.distanceFalloff,
   webglHalfResolution: false,
   webglDenoiseRadiusCssPixels: 3,
   displayMode: 'combined',
-  toneMapping: 'neutral',
+  toneMapping: viewerRenderProfile.toneMapping,
 };
 
 /**
@@ -55,7 +59,4 @@ export const defaultPostProcessingSettings: PostProcessingSettings = {
 export const resolveAoRadiusCssPixels = (
   radius: PostProcessingSettings['radiusCssPixels'],
   viewport: { readonly width: number; readonly height: number; readonly dpr: number },
-): number =>
-  // Onshape's half-size AO target uses max(1% of its diagonal, 2 texels).
-  // Converting back to full-resolution CSS pixels gives this four-device-pixel floor.
-  radius === 'viewport' ? Math.max(Math.hypot(viewport.width, viewport.height) * 0.01, 4 / viewport.dpr) : radius;
+): number => resolveViewerAoRadiusCssPixels(radius, viewport);

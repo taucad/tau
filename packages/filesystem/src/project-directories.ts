@@ -57,6 +57,7 @@ import type {
 import { assertRootedPath, isSafeRelativePath, joinRelativePath } from '@taucad/utils/path';
 import type { SharedPool } from '@taucad/memory';
 import type { FileSystemProvider, WorkspaceMutationContext } from '#types.js';
+import type { BatchEntry } from '#changeset.js';
 import type {
   CommitPendingProjectDirectoryInput,
   CommitPendingProjectDirectoryResult,
@@ -575,7 +576,7 @@ export class ProjectDirectories {
     const locks = [`project:${projectId}`, physicalLock];
     return this._crossTabCoordinator.withLocks(locks, async () =>
       this._resourceQueue.queueForMany(locks, async () => {
-        await provider.refresh?.();
+        await provider.refresh?.([path]);
         if (!(await provider.exists(path))) {
           return { status: 'absent' };
         }
@@ -623,13 +624,16 @@ export class ProjectDirectories {
    * project directory. The manifest is the commit marker and is always
    * written last.
    *
+   * The commit publishes no bus event — the route is not mounted until the
+   * caller configures it — so a mutation origin has nothing to tag.
+   *
    * @param input - Owned journal snapshot and exact target locator.
-   * @param context - Optional mutation origin metadata.
+   * @param _context - Mutation origin metadata, which the unmounted commit does not publish.
    * @returns Replay-safe commit outcome.
    */
   public async commitPendingProjectDirectory(
     input: CommitPendingProjectDirectoryInput,
-    context?: WorkspaceMutationContext,
+    _context?: WorkspaceMutationContext,
   ): Promise<CommitPendingProjectDirectoryResult> {
     const { path, files, manifest, scope, storageRootKey, projectId } = this._validatePendingProjectCommit(input);
     const provider = await this._registry.getProvider(scope);
@@ -641,7 +645,7 @@ export class ProjectDirectories {
       this._resourceQueue.queueForMany(locks, async () => {
         let mutationBegan = false;
         try {
-          await provider.refresh?.();
+          await provider.refresh?.([path]);
           if (await provider.exists(path)) {
             const targetStat = await provider.stat(path);
             if (targetStat.type !== 'dir') {
@@ -696,28 +700,24 @@ export class ProjectDirectories {
             throw new Error(`Pending project identity could not be established: ${JSON.stringify(identity)}`);
           }
 
-          for (const [relativePath, descriptor] of files) {
-            const logicalPath = `${logicalRoot}/${relativePath}`;
-            const providerPath = `${path}/${relativePath}`;
-            // oxlint-disable-next-line no-await-in-loop -- deterministic manifest-last transaction
-            await this._pipeline.writeFileUnlocked({
-              path: logicalPath,
-              resolution: { provider, path: providerPath, backend: scope.backend },
-              data: descriptor.content,
-              context,
-            });
-            if (descriptor.mode !== undefined) {
-              // oxlint-disable-next-line no-await-in-loop -- mode belongs to the file just written.
-              await provider.setFileMode?.(providerPath, descriptor.mode);
+          /* The payload lands in bounded batches, then the manifest — the commit
+           * marker — alone, after every payload byte applied (D2 phases). */
+          const commitPhase = async (entries: readonly BatchEntry[]): Promise<void> => {
+            const receipts = await this._pipeline.applyUnlocked(provider, entries);
+            const failure = receipts.find(({ outcome }) => outcome !== 'applied');
+            if (failure !== undefined) {
+              throw failure.error instanceof Error ? failure.error : new Error('Pending project commit failed.');
             }
-          }
-
-          await this._pipeline.writeFileUnlocked({
-            path: `${logicalRoot}/tau.json`,
-            resolution: { provider, path: `${path}/tau.json`, backend: scope.backend },
-            data: manifest,
-            context,
-          });
+          };
+          await commitPhase(
+            files.map(([relativePath, descriptor]) => ({
+              op: 'write',
+              path: `${path}/${relativePath}`,
+              data: descriptor.content,
+              ...(descriptor.mode === undefined ? {} : { mode: descriptor.mode }),
+            })),
+          );
+          await commitPhase([{ op: 'write', path: `${path}/tau.json`, data: manifest }]);
           const committed = parseProjectManifestBytes(await provider.readFile(`${path}/tau.json`));
           const committedIdentity = await this._readIdentity({ provider, directory: path, scope, storageRootKey });
           if (!committed.success || committedIdentity?.projectId !== projectId) {
@@ -1147,23 +1147,21 @@ export class ProjectDirectories {
 
   private async _clearProjectDirectoryContents(provider: FileSystemProvider, directoryPath: string): Promise<void> {
     const stateDirectory = joinRelativePath(directoryPath, '.tau');
-    const entries = await provider.readdir(directoryPath);
-    for (const entry of entries) {
-      const canonicalName = entry.toLowerCase();
-      if (canonicalName === 'tau.json' || canonicalName === '.tau') {
-        continue;
+    const removal = async (entries: readonly string[], parent: string, kept: ReadonlySet<string>): Promise<void> => {
+      const receipts = await this._pipeline.applyUnlocked(
+        provider,
+        entries
+          .filter((entry) => !kept.has(entry.toLowerCase()))
+          .map((entry) => ({ op: 'delete', path: joinRelativePath(parent, entry), recursive: true })),
+      );
+      const failure = receipts.find(({ outcome }) => outcome !== 'applied');
+      if (failure !== undefined) {
+        throw failure.error instanceof Error ? failure.error : new Error('Project directory removal failed.');
       }
-      // oxlint-disable-next-line no-await-in-loop -- Preserve both identity markers until every sibling is gone.
-      await this._pipeline.removeRecursive(provider, joinRelativePath(directoryPath, entry));
-    }
-    const stateEntries = await provider.readdir(stateDirectory);
-    for (const entry of stateEntries) {
-      if (entry.toLowerCase() === 'project.json') {
-        continue;
-      }
-      // oxlint-disable-next-line no-await-in-loop -- Preserve identity while removing sibling records.
-      await this._pipeline.removeRecursive(provider, joinRelativePath(stateDirectory, entry));
-    }
+    };
+    /* Both identity markers stay until every sibling is gone: two batches, the state directory's last. */
+    await removal(await provider.readdir(directoryPath), directoryPath, new Set(['tau.json', '.tau']));
+    await removal(await provider.readdir(stateDirectory), stateDirectory, new Set(['project.json']));
   }
 
   private async _deleteProjectDirectory(input: {

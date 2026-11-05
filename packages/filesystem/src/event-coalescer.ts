@@ -16,7 +16,7 @@
  */
 
 import { copyEventAuthorities, getEventOrigin, tagEventOrigin } from '#event-origin-registry.js';
-import type { ChangeEvent } from '#types.js';
+import type { PathChangeEvent } from '#types.js';
 
 /**
  * Configuration for {@link EventCoalescer}.
@@ -33,14 +33,14 @@ export type CoalescerOptions = {
   /** Maximum queue depth before emitting overflow. Default: 10,000. */
   maxQueueDepth?: number;
   /** Called with every event discarded when queue depth is exceeded. */
-  onOverflow?: (events: readonly ChangeEvent[]) => void;
+  onOverflow?: (events: readonly PathChangeEvent[]) => void;
 };
 
 /** Milliseconds. */
 const defaultCoalescingWindow = 50;
 const defaultMaxQueueDepth = 10_000;
 
-function mergeOrigins(history: ChangeEvent[]): string | undefined {
+function mergeOrigins(history: PathChangeEvent[]): string | undefined {
   let sawDefined = false;
   let sawUndefined = false;
   let singleDefined: string | undefined;
@@ -66,7 +66,7 @@ function mergeOrigins(history: ChangeEvent[]): string | undefined {
   return undefined;
 }
 
-function collapsePathHistory(history: ChangeEvent[]): ChangeEvent | undefined {
+function collapsePathHistory(history: PathChangeEvent[]): PathChangeEvent | undefined {
   if (history.length === 0) {
     return undefined;
   }
@@ -76,7 +76,7 @@ function collapsePathHistory(history: ChangeEvent[]): ChangeEvent | undefined {
 
   const last = history.at(-1)!;
   const origin = mergeOrigins(history);
-  const survivor: ChangeEvent = { ...last };
+  const survivor: PathChangeEvent = { ...last };
   copyEventAuthorities(last, survivor);
   if (origin !== undefined) {
     tagEventOrigin(survivor, origin);
@@ -85,7 +85,7 @@ function collapsePathHistory(history: ChangeEvent[]): ChangeEvent | undefined {
 }
 
 /**
- * Buffers {@link ChangeEvent}s within a time window and applies coalescing
+ * Buffers {@link PathChangeEvent}s within a time window and applies coalescing
  * rules (cancel-out, collapse, dedup) before delivering the batch.
  * @public
  */
@@ -94,9 +94,9 @@ export class EventCoalescer {
   private readonly _coalescingWindow: number;
   private readonly _leadingEdge: boolean;
   private readonly _maxQueueDepth: number;
-  private readonly _onOverflow?: (events: readonly ChangeEvent[]) => void;
-  private readonly _deliverCallback: (events: ChangeEvent[]) => void;
-  private _pending: ChangeEvent[] = [];
+  private readonly _onOverflow?: (events: readonly PathChangeEvent[]) => void;
+  private readonly _deliverCallback: (events: PathChangeEvent[]) => void;
+  private _pending: PathChangeEvent[] = [];
   private _timer: ReturnType<typeof setTimeout> | undefined;
 
   /**
@@ -105,7 +105,7 @@ export class EventCoalescer {
    * @param deliverCallback - Called with the coalesced batch when the window expires.
    * @param options - Timing and overflow configuration.
    */
-  public constructor(deliverCallback: (events: ChangeEvent[]) => void, options?: CoalescerOptions) {
+  public constructor(deliverCallback: (events: PathChangeEvent[]) => void, options?: CoalescerOptions) {
     this._deliverCallback = deliverCallback;
     this._coalescingWindow = options?.coalescingWindow ?? defaultCoalescingWindow;
     this._leadingEdge = options?.leadingEdge ?? false;
@@ -118,7 +118,7 @@ export class EventCoalescer {
    *
    * @param event - Change event to queue. Origin may be set via {@link tagEventOrigin} before push.
    */
-  public push(event: ChangeEvent): void {
+  public push(event: PathChangeEvent): void {
     if (this._pending.length >= this._maxQueueDepth) {
       const discarded = [...this._pending, event];
       this._pending = [];
@@ -198,14 +198,14 @@ export class EventCoalescer {
  * @returns Coalesced event array.
  * @public
  */
-export function coalesceChangeEvents(events: ChangeEvent[]): ChangeEvent[] {
+export function coalesceChangeEvents(events: PathChangeEvent[]): PathChangeEvent[] {
   if (events.length <= 1) {
     return events;
   }
 
-  const indexedEvents: Array<{ index: number; event: ChangeEvent }> = [];
+  const indexedEvents: Array<{ index: number; event: PathChangeEvent }> = [];
   const renamedFromPaths = new Set<string>();
-  const pathHistory = new Map<string, Array<{ index: number; event: ChangeEvent }>>();
+  const pathHistory = new Map<string, Array<{ index: number; event: PathChangeEvent }>>();
 
   for (const [index, event] of events.entries()) {
     if (event.type === 'directoryChanged') {
@@ -246,7 +246,7 @@ export function coalesceChangeEvents(events: ChangeEvent[]): ChangeEvent[] {
   return indexedEvents.toSorted((left, right) => left.index - right.index).map(({ event }) => event);
 }
 
-function getEventPath(event: ChangeEvent): string | undefined {
+function getEventPath(event: PathChangeEvent): string | undefined {
   switch (event.type) {
     case 'fileWritten':
     case 'fileDeleted':

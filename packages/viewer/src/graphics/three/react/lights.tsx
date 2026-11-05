@@ -17,6 +17,7 @@ import { CubeRenderTarget, PMREMGenerator as WebGpuPmremGenerator } from 'three/
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { createPortal, useThree, useFrame } from '@react-three/fiber';
 import { Environment, Lightformer } from '@react-three/drei';
+import { viewerRenderProfile } from '@taucad/types/constants/viewer-render-profile';
 import {
   applyLightingForCamera,
   ambientBaseIntensity,
@@ -35,24 +36,22 @@ import { useViewerEnvironment } from '#environment/viewer-environment.jsx';
 type UpDirection = 'x' | 'y' | 'z';
 
 /**
- * Environment cubemap resolution (px). Higher = sharper specular reflections.
+ * Environment cubemap resolution (px), from the viewer render profile. Higher = sharper specular reflections.
  *
  * The filtered output is `3·r × 4·r` RGBA16F (24 MiB at 512, 6 MiB at 256) and the source cube
  * adds 12 MiB at 512, so a coarse-pointer device captures at 256: studio reflections are soft.
- */
-const envResolution = 512;
-const coarsePointerEnvResolution = 256;
-/**
+ *
  * A software rasterizer filters the environment on the CPU: at 512 its blur passes hold every core for about thirty
  * seconds before the first frame shows, and at 256 still for several. Reflections there are soft; the stage is usable.
  */
-const softwareRasterizerEnvResolution = 64;
+const {
+  default: envResolution,
+  coarsePointer: coarsePointerEnvResolution,
+  softwareRasterizer: softwareRasterizerEnvResolution,
+} = viewerRenderProfile.lighting.environmentResolution;
 
-/** Broad, low-energy panels keep metallic and back-facing surfaces readable. */
-const studioLeftFillIntensity = 1.2;
-const studioTopIntensity = 0.25;
-const studioGroundIntensity = 1.5;
-const studioBackFillIntensity = 8;
+/** Studio card placement, as multiples of the scene radius; broad, low-energy fills keep metallic and back-facing surfaces readable. */
+const { keyPosition: studioKeyPosition, fills: studioFills } = viewerRenderProfile.lighting.studio;
 
 type LightsProperties = {
   readonly settings?: Partial<StudioLightingSettings>;
@@ -179,36 +178,27 @@ export function Lights({
           <Lightformer
             form='rect'
             intensity={lighting.backgroundIntensity + lighting.keyIntensity}
-            position={[clampedSceneRadius, clampedSceneRadius, clampedSceneRadius]}
+            position={[
+              clampedSceneRadius * studioKeyPosition[0],
+              clampedSceneRadius * studioKeyPosition[1],
+              clampedSceneRadius * studioKeyPosition[2],
+            ]}
             scale={[clampedSceneRadius * lighting.keySize, clampedSceneRadius * lighting.keySize, 1]}
           />
-          <Lightformer
-            form='rect'
-            intensity={lighting.backgroundIntensity + studioLeftFillIntensity * lighting.fillIntensity}
-            position={[-clampedSceneRadius * 3, clampedSceneRadius, clampedSceneRadius * 0.5]}
-            rotation={[Math.PI / 8, Math.PI / 3, 0]}
-            scale={[clampedSceneRadius * 4, clampedSceneRadius * 4, 1]}
-          />
-          <Lightformer
-            form='rect'
-            intensity={lighting.backgroundIntensity + studioTopIntensity * lighting.fillIntensity}
-            position={[0, clampedSceneRadius * 3, 0]}
-            rotation={[Math.PI / 2, 0, 0]}
-            scale={[clampedSceneRadius * 3, clampedSceneRadius * 3, 1]}
-          />
-          <Lightformer
-            form='rect'
-            intensity={lighting.backgroundIntensity + studioGroundIntensity * lighting.fillIntensity}
-            position={[clampedSceneRadius * 2, -clampedSceneRadius * 3, 0]}
-            rotation={[-Math.PI / 2, 0, 0]}
-            scale={[clampedSceneRadius * 6, clampedSceneRadius * 6, 1]}
-          />
-          <Lightformer
-            form='rect'
-            intensity={lighting.backgroundIntensity + studioBackFillIntensity * lighting.fillIntensity}
-            position={[clampedSceneRadius * 2, -clampedSceneRadius * 3, clampedSceneRadius * 4]}
-            scale={[clampedSceneRadius * 2, clampedSceneRadius * 2, 1]}
-          />
+          {studioFills.map((card) => (
+            <Lightformer
+              key={card.position.join(',')}
+              form='rect'
+              intensity={lighting.backgroundIntensity + card.intensity * lighting.fillIntensity}
+              position={[
+                clampedSceneRadius * card.position[0],
+                clampedSceneRadius * card.position[1],
+                clampedSceneRadius * card.position[2],
+              ]}
+              {...('rotation' in card ? { rotation: [card.rotation[0], card.rotation[1], card.rotation[2]] } : {})}
+              scale={[clampedSceneRadius * card.size, clampedSceneRadius * card.size, 1]}
+            />
+          ))}
         </>
       </OwnedLightingEnvironment>
     ),

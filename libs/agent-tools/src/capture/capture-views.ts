@@ -15,6 +15,7 @@ import { cameraPresetOrientations } from '@taucad/workbench';
 import type { cameraPresets } from '@taucad/workbench';
 
 import type { WorkbenchCaptureCamera, WorkbenchCapturePlane } from '#capture/capture-workbench-view.js';
+import { buildViewerCaptureImageOptions } from '#capture/viewer-capture-options.js';
 
 type OrthographicPreset = Exclude<(typeof cameraPresets)[number], 'isometric'>;
 
@@ -103,12 +104,14 @@ const sectionPlanes = (section: ScreenshotSection) => {
 
 const buildOptions = (options: CaptureExportOptionsInput) => {
   const { workbench } = options;
+  // The agent sees the dark-scheme viewer on its background.
+  const look = buildViewerCaptureImageOptions({ width: options.size, height: options.size, colorScheme: 'dark' });
   if (workbench !== undefined) {
     const lines = options.includeEdges ?? workbench.display.lines;
     return {
       width: options.size,
       height: options.size,
-      lineWidth: 3,
+      ...look,
       background: '#242424',
       ...(workbench.display.surfaces ? {} : { surfaces: false }),
       ...(lines ? {} : { lines: false }),
@@ -133,7 +136,7 @@ const buildOptions = (options: CaptureExportOptionsInput) => {
   const common = {
     width: options.size,
     height: options.size,
-    lineWidth: 3,
+    ...look,
     background: '#242424',
     ...((options.includeEdges ?? true) ? {} : { lines: false }),
     world: { up: '+z', forward: '-y', unit: 'meter' },

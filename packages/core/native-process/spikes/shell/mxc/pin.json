@@ -1,0 +1,35 @@
+{
+  "lane": "spike-w2-win-mxc",
+  "spec": {
+    "doc": "research/artifacts/desktop-bash-terminal/runs/2026-10-23-cloud/Q1/2/ratification.md",
+    "section": "RQ5",
+    "brainCommit": "96d2e015",
+    "upstreamRepo": "github.com/microsoft/mxc",
+    "upstreamRevisionPrefix": "b2112016",
+    "note": "The ratification pins the upstream microsoft/mxc source at revision b2112016… The shipped artifact Tau actually consumes is the published Node/TypeScript SDK below; provision.mts resolves and records the on-disk native wxc-exec digest, which is the digest that binds this receipt."
+  },
+  "nodeSdk": {
+    "name": "@microsoft/mxc-sdk",
+    "version": "1.0.1",
+    "registry": "https://registry.npmjs.org",
+    "tarball": "https://registry.npmjs.org/@microsoft/mxc-sdk/-/mxc-sdk-1.0.1.tgz",
+    "integrity": "sha512-2cP925G5+lQyKzjBVha8uNtVd7XESgDBtgi1yCYYSo9M3xiFyZWtCO4SWPGTk509rdI6nqjyGcZxvEP3t6l8Hg==",
+    "shasum": "f1a4859f7810b34f01a238c98166012a5d63a3fb",
+    "unpackedSize": 107993729,
+    "license": "MIT",
+    "publishers": ["microsoft1es", "microsoft-oss-releases"],
+    "engines": { "node": ">=24.0.0" },
+    "runtimeDeps": { "koffi": "^3.2.1", "semver": "^7.7.4", "node-pty": "^1.1.0" },
+    "entry": "@microsoft/mxc-sdk/v1",
+    "verifiedFromLinux": {
+      "tarballShasumRecomputed": "f1a4859f7810b34f01a238c98166012a5d63a3fb",
+      "matchesRegistryShasum": true,
+      "date": "2026-10-23"
+    }
+  },
+  "target": {
+    "backend": "processcontainer",
+    "runner": "windows-2025",
+    "os": "Windows Server 2025 (build ~26100, 24H2-equivalent)"
+  }
+}

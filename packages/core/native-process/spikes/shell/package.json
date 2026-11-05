@@ -1,0 +1,10 @@
+{
+  "name": "@taucad/shell-spike",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Dev-only S0-S2 desktop Bash feasibility spike harness; not part of the workspace build.",
+  "type": "module",
+  "dependencies": {
+    "node-pty": "1.1.0"
+  }
+}

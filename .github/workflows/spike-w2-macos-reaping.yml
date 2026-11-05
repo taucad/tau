@@ -1,0 +1,206 @@
+# Spike W2 (desktop Bash/Terminal blueprint): macOS session-escaping descendant reaping (I7/D26).
+#
+# W1 found that on macOS the spike supervisor cancels a timed-out command by signalling the POSIX
+# process GROUP (`kill(-pid, TERM/KILL)`); a descendant that calls setsid escapes the group and keeps
+# writing, so `s1.descendant-reaped` FAILS on macos-26 (arm64) and macos-26-intel. Windows reaps the
+# whole tree with a Job object; macOS has no PID namespace. This workflow runs a STANDALONE reaping
+# probe (packages/core/native-process/spikes/shell/reaping) that prototypes and COMPARES candidate
+# cancel strategies on a real macOS host — it does NOT modify supervisor.mts or any W1 harness file.
+#
+# Strategies × adversaries, each verified ONLY by an external sentinel canary (never an error string):
+#   strategies: group (W1 baseline control) · walk (stop-the-world ppid tree walk, B) · asid (A)
+#   adversaries: setsid (session escape) · daemonize (double-fork, reparents to launchd) · sigterm-ignore
+# Strategy (A) needs two tiny native helpers; clang ships on the macOS runners and compiles them in
+# the job. Strategy (A) fails CLOSED: if a non-elevated process cannot set/enumerate the audit session
+# asid on the host, the probe records a documented blocker receipt — never a vacuous pass.
+#
+# Discipline (matches spike-w1-shell.yml): noncacheable (proves the live host), no skip, no
+# unsupported-platform success; every workload runs as the ordinary runner user (NEVER sudo); the
+# canary is synthetic. A missing receipt fails the upload.
+name: Spike W2 (macOS descendant reaping)
+
+# Dispatch only. A pull_request `paths` filter matches the whole PR diff, so while this spike's files
+# sit in a shared feature branch every push by any session (mostly Windows work) re-fired this
+# workflow; with the per-commit group below that piled ~25 runs onto the scarce macOS runners and
+# starved the run that mattered. Dispatch it explicitly when the reaping probe changes.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+# Per-commit group, non-cancelling: the macOS runners take minutes to start, and a branch-wide group
+# + cancel-in-progress cancelled slow jobs before they could run (observed: three runs cancelled
+# < 2 min in). Keying the group to the commit SHA and never cancelling lets each dispatched run
+# complete; the live-host proof still never cache-hits.
+concurrency:
+  group: spike-w2-macos-reaping-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  reaping:
+    name: Reaping (${{ matrix.row }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - row: MAC-A
+            runs-on: macos-26
+          - row: MAC-X
+            runs-on: macos-26-intel
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '24.20.0'
+
+      # Native helpers for strategy (A). clang is preinstalled on the macOS runners. A compile
+      # failure does NOT fail the job: the probe then records strategy (A) as a documented blocker
+      # (helpers absent) while strategy (B)/control still produce evidence. The compile output is
+      # surfaced so a build problem is never silent, and the probe's preflight goes RED if the
+      # helpers did not build — there is no vacuous green.
+      - name: Compile audit-session helpers (clang; no elevation)
+        id: compile
+        shell: bash
+        run: |
+          set +e
+          clang --version | tee "$RUNNER_TEMP/clang.txt"
+          dir="packages/core/native-process/spikes/shell/reaping"
+          bin="$RUNNER_TEMP/reap-bin"
+          mkdir -p "$bin"
+          echo "TAU_REAP_BIN=$bin" >> "$GITHUB_ENV"
+          echo "## Reaping helper build (${{ matrix.row }})" >> "$GITHUB_STEP_SUMMARY"
+          clang -O2 -Wall -Wextra -o "$bin/tau-setasid" "$dir/tau-setasid.c" -lbsm 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          s1=${PIPESTATUS[0]}
+          clang -O2 -Wall -Wextra -o "$bin/tau-asid-enum" "$dir/tau-asid-enum.c" -lbsm 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          s2=${PIPESTATUS[0]}
+          # Candidate (a) responsibility tracking + candidate (b) kqueue tracking. The responsibility
+          # SPIs (responsibility_spawnattrs_setdisclaim / responsibility_get_pid_responsible_for_pid)
+          # are weak-imported from libSystem, so no extra -l is needed and a missing symbol does not
+          # fail the link — the probe then records candidate (a) as a documented blocker. A compile
+          # failure is likewise non-fatal: candidates.mts marks the affected candidate blocked.
+          clang -O2 -Wall -Wextra -o "$bin/tau-spawn-disclaim" "$dir/tau-spawn-disclaim.c" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          s3=${PIPESTATUS[0]}
+          clang -O2 -Wall -Wextra -o "$bin/tau-resp-enum" "$dir/tau-resp-enum.c" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          s4=${PIPESTATUS[0]}
+          clang -O2 -Wall -Wextra -o "$bin/tau-kqtrack" "$dir/tau-kqtrack.c" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          s5=${PIPESTATUS[0]}
+          # Candidate (c) sandbox-membership enumeration. sandbox_check is SPI, weak-imported from
+          # libSystem, so no extra -l is needed and a missing symbol does not fail the link —
+          # sandbox.mts then records candidate (c) blocked (spi-unavailable). A compile failure is
+          # likewise non-fatal.
+          clang -O2 -Wall -Wextra -o "$bin/tau-sbenum" "$dir/tau-sbenum.c" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          s6=${PIPESTATUS[0]}
+          echo "tau-setasid exit=$s1 ; tau-asid-enum exit=$s2 ; tau-spawn-disclaim exit=$s3 ; tau-resp-enum exit=$s4 ; tau-kqtrack exit=$s5 ; tau-sbenum exit=$s6"
+          ls -l "$bin" || true
+
+      - name: Run reaping probe (strategies × adversaries, external canary)
+        shell: bash
+        env:
+          TAU_SPIKE_ROW: ${{ matrix.row }}
+          TAU_SPIKE_OUT: ${{ runner.temp }}/reaping-spike
+        run: |
+          set -o pipefail
+          # Fail loudly if the runner is ever elevated (the workload must never run as root).
+          if [ "$(id -u)" = "0" ]; then echo "refusing to run elevated"; exit 1; fi
+          node packages/core/native-process/spikes/shell/reaping/probe.mts 2>&1 | tee "$RUNNER_TEMP/probe.log"
+
+      # Two further bounded candidates (responsibility tracking; continuous kqueue tracking), tested
+      # against all four adversaries (adds double-fork: reparented-but-root-alive). Writes receipts of
+      # the same shape into the same evidence directory, so the summary renders one combined matrix.
+      - name: Run reaping candidates (a) responsibility + (b) kqueue tracking
+        shell: bash
+        env:
+          TAU_SPIKE_ROW: ${{ matrix.row }}
+          TAU_SPIKE_OUT: ${{ runner.temp }}/reaping-spike
+        run: |
+          set -o pipefail
+          if [ "$(id -u)" = "0" ]; then echo "refusing to run elevated"; exit 1; fi
+          node packages/core/native-process/spikes/shell/reaping/candidates.mts 2>&1 | tee "$RUNNER_TEMP/candidates.log"
+
+      # Candidate (c): sandbox-membership enumeration. Each session's shell runs inside a per-session
+      # Seatbelt profile (session.sb) carrying a unique marker rule; at cancel tau-sbenum asks
+      # sandbox_check which pids are in our session and the driver reaps them, re-enumerating until
+      # empty. Tested against all four adversaries plus a concurrent second session that must survive.
+      # Writes sbmember.<adversary>.json into the same evidence directory for the combined matrix.
+      # Step-level bound: a hung step must never eat the whole job (the 30-min job timeout cancels
+      # every remaining step, including the receipt upload). On a step timeout the always() steps
+      # below still run and upload whatever receipts exist.
+      - name: Run reaping candidate (c) sandbox membership
+        timeout-minutes: 10
+        shell: bash
+        env:
+          TAU_SPIKE_ROW: ${{ matrix.row }}
+          TAU_SPIKE_OUT: ${{ runner.temp }}/reaping-spike
+        run: |
+          set -o pipefail
+          if [ "$(id -u)" = "0" ]; then echo "refusing to run elevated"; exit 1; fi
+          node packages/core/native-process/spikes/shell/reaping/sandbox.mts 2>&1 | tee "$RUNNER_TEMP/sandbox.log"
+
+      # S2 runs under the sandbox runtime (SRT) Seatbelt path W1 proved for S0/S1, so it needs the
+      # workspace dependencies (@anthropic-ai/sandbox-runtime), installed exactly as W1 does.
+      - name: Install workspace dependencies for the S2 receipt (as W1)
+        if: ${{ !cancelled() }}
+        timeout-minutes: 15
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      # node-pty for the S2 interactive-PTY receipt (clang/python preinstalled on the macOS runners).
+      # npm can drop the exec bit on node-pty's prebuilt spawn-helper, which makes every spawn fail
+      # with "posix_spawnp failed." (run 40028379646): restore it and verify it, by name.
+      - name: Install node-pty for the S2 PTY receipt
+        if: ${{ !cancelled() }}
+        timeout-minutes: 8
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --prefix packages/core/native-process/spikes/shell --no-audit --no-fund
+          pty=packages/core/native-process/spikes/shell/node_modules/node-pty
+          found=0
+          for helper in "$pty"/prebuilds/darwin-*/spawn-helper "$pty"/build/Release/spawn-helper; do
+            [ -f "$helper" ] || continue
+            chmod +x "$helper"
+            test -x "$helper"
+            ls -l "$helper"
+            found=1
+          done
+          [ "$found" = 1 ] || { echo "node-pty spawn-helper not found"; exit 1; }
+
+      # S2 (orchestrator rule, macOS): a real PTY running an interactive Bash INSIDE the SRT Seatbelt
+      # containment (W1 shell grant) — containment live, isatty, programmatic resize, Ctrl-C (status
+      # 130), Ctrl-Z/fg job control, UTF-8 round-trip, and a double-forked descendant reparented to
+      # launchd still refused outside its grant; each pass/fail with captured evidence in s2.json.
+      - name: Run S2 interactive PTY inside the Seatbelt containment
+        if: ${{ !cancelled() }}
+        timeout-minutes: 6
+        shell: bash
+        env:
+          TAU_SPIKE_ROW: ${{ matrix.row }}
+          TAU_SPIKE_OUT: ${{ runner.temp }}/reaping-spike
+        run: |
+          set -o pipefail
+          if [ "$(id -u)" = "0" ]; then echo "refusing to run elevated"; exit 1; fi
+          node packages/core/native-process/spikes/shell/reaping/s2-pty.mts 2>&1 | tee "$RUNNER_TEMP/s2-pty.log"
+
+      - name: Summarize
+        if: always()
+        shell: bash
+        env:
+          TAU_SPIKE_OUT: ${{ runner.temp }}/reaping-spike
+        run: node packages/core/native-process/spikes/shell/reaping/summarize.mts >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload receipts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: reaping-spike-${{ matrix.row }}
+          path: ${{ runner.temp }}/reaping-spike/
+          if-no-files-found: error
+          retention-days: 14

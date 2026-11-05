@@ -1,0 +1,10 @@
+{
+  "name": "@taucad/shell-spike-mxc",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Dev-only W2 Windows MXC processcontainer S1 isolation spike harness; not part of the workspace build.",
+  "type": "module",
+  "dependencies": {
+    "@microsoft/mxc-sdk": "1.0.1"
+  }
+}

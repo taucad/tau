@@ -1,0 +1,221 @@
+# Spike W2 (desktop Bash/Terminal blueprint, ratification §RQ5): the Windows MXC processcontainer
+# S0-S2 containment receipts, collected on a matrix of two hosted runners.
+#
+#   PRIMARY  windows-11-arm  real Windows 11 Enterprise, build 10.0.26200 (25H2), arm64. This is the
+#            S0-S2 lane: it runs the FULL receipt set as a NON-ADMIN local user the job creates on the
+#            runner (never elevated) — MXC probe (PSEC / PSE_SUPPORT_FS_DENY / ConPTY), the two-
+#            concurrent-container isolation + proxy + reaping receipt, D14 ShellIdentity on both
+#            resolution branches, and the capability-SID fallback where MXC is absent. arch=arm64 is
+#            recorded in every receipt (laneIdentity.os.arch). HONEST SCOPE: an arm64 PSEC receipt
+#            does NOT close the x64 or consumer-SKU rows — the x64 package is qualified separately (W8).
+#   SECONDARY windows-2025   hosted Server 2025 (~build 26100 / 24H2-equivalent, x64). PSEC is absent
+#            here, so its MXC probe is a typed-unavailable RED by design; it still yields the hosted
+#            D14 ShellIdentity / grammar / PTY receipts. Kept unchanged from the original lane.
+#
+# The ratified Windows ShellProvider target is Microsoft MXC (Microsoft eXecution Containers)
+# `processcontainer` over the Windows process security environment (PSEC). This lane pins the MXC
+# Node SDK (@microsoft/mxc-sdk, see mxc/pin.json; the SDK and Node both ship win-arm64 builds, so the
+# arm64 row runs native, never emulated), provisions it, probes the host capabilities, and collects
+# the core deliverable: a two-concurrent-container isolation receipt in which every allow/deny is
+# decided by an EXTERNAL out-of-container observer (a file digest the harness placed, or a
+# credential-authenticated loopback listener's own request log), never a trusted in-container error.
+#
+# Evidence discipline (mirrors spike-w1): a preflight sentinel proves the probe really ran inside a
+# container; an unavailable prerequisite is a TYPED state and a failed row, never a skip and never an
+# unsupported-platform green. Where the MXC probe fails on a row, the job instead proves the
+# capability-SID fallback (a WRITE_RESTRICTED token with per-session random S-1-5-21 restricting SIDs
+# plus Tau ALLOW-write / deny-read ACEs) — so the row is still a real receipt, never a vacuous pass.
+#
+# One dispatch runs both rows (matrix, fail-fast off). The Win11-consumer x64 MXC confirmation rides
+# the separate parked Win11 Eval VM lane; the mxc/ scripts are standalone so they are reusable there.
+# Noncacheable by intent: this proves the live hosts.
+name: Spike W2 (Windows MXC processcontainer isolation)
+
+# workflow_dispatch ONLY (no pull_request): a PR push must not cancel an in-flight run and lose the
+# hosted D14 ShellIdentity / grammar / PTY receipts. Ref-keyed concurrency, cancel-in-progress false.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+concurrency:
+  group: spike-w2-win-mxc-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+# TAU_SPIKE_OUT is not set here: the `runner` context is unavailable in workflow-level env, so the
+# harness defaults its output directory to $RUNNER_TEMP/mxc-spike (see mxc/mxc-lib.mts outDir),
+# which is exactly the path the upload step collects.
+env:
+  MXC_DIR: packages/core/native-process/spikes/shell/mxc
+
+jobs:
+  win-mxc:
+    # Matrix os dimension: one dispatch runs both rows. fail-fast off so the PRIMARY arm64 lane
+    # completes and uploads even if the SECONDARY x64 lane fails (or vice versa). runner.arch selects
+    # the per-row path below: the x64 row keeps the original steps verbatim; the arm64 row runs the
+    # full set through run-nonadmin.ps1 as a created non-admin user.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-11-arm, windows-2025]
+    name: Windows MXC containment (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 55
+    steps:
+      - name: Preserve source bytes on Windows
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # The pinned MXC SDK requires Node >= 24. setup-node fetches the win-arm64 build on the arm row.
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '24.20.0'
+
+      # Install the pinned SDK (mxc/package.json pins @microsoft/mxc-sdk 1.0.1; npm verifies the
+      # registry integrity on fetch; it also brings node-pty, used by the PTY row). Non-fatal: the
+      # provision/probe steps record the SDK-absent typed state.
+      # Every step below is continue-on-error so that ALL receipts are produced and uploaded; the
+      # final Summarize step is the single gate (it exits nonzero if any receipt is not pass), so the
+      # row stays RED while PSEC is absent — that red is the intended evidence.
+      - name: Install pinned MXC Node SDK
+        id: install
+        continue-on-error: true
+        shell: bash
+        run: npm install --prefix "$MXC_DIR" --no-audit --no-fund
+
+      # bash: provision does not exercise the SDK's getPlatformSupport/probe whoami path, so it is
+      # unaffected by the Git-bash whoami shadow. Its user-SID record uses .NET WindowsIdentity.
+      # ---- SECONDARY (windows-2025, x64): the original steps, unchanged, run as the runner. ----
+      - name: Provision + record (pin, licence, digest, OS build)
+        id: provision
+        if: matrix.os == 'windows-2025'
+        continue-on-error: true
+        shell: bash
+        run: node "$MXC_DIR/provision.mts"
+
+      # D14 ShellIdentity (the primary hosted-collectable receipt): resolve the Windows shell at the
+      # fixed paths for BOTH branches (pwsh 7 present, and 5.1 with pwsh 7 hidden) and record kind +
+      # version + digest + launch argv. pwsh host so System32 whoami.exe wins.
+      - name: D14 ShellIdentity (pwsh7 + forced-5.1 branches)
+        id: shellid
+        if: matrix.os == 'windows-2025'
+        continue-on-error: true
+        shell: pwsh
+        run: node "$env:MXC_DIR/shell-identity.mts"
+
+      # T02-pwsh grammar cases against the resolved shell (containment cases stay language-neutral).
+      - name: T02-pwsh grammar
+        id: grammar
+        if: matrix.os == 'windows-2025'
+        continue-on-error: true
+        shell: pwsh
+        run: node "$env:MXC_DIR/grammar.mts"
+
+      # PTY row: interactive PowerShell over a ConPTY terminal (the D14 Terminal-pane argv).
+      # Step-level timeout backstop: if the ConPTY teardown ever hangs despite the in-process
+      # watchdog + hardExit, the STEP fails (gate red, artifacts still upload) instead of the whole
+      # job being cancelled at the job timeout with nothing.
+      - name: PTY (ConPTY + interactive PowerShell)
+        id: pty
+        if: matrix.os == 'windows-2025'
+        continue-on-error: true
+        timeout-minutes: 8
+        shell: pwsh
+        run: node "$env:MXC_DIR/pty.mts"
+
+      # Capability probe: PSEC create/close (external preflight sentinel), PSE_SUPPORT_FS_DENY, ConPTY,
+      # isolation tier, OS build. The preflight sentinel now OMITS runtimeConfig.networkProxy when no
+      # proxy is needed (mxc-lib.mts fix), so a present base-container API is actually exercised rather
+      # than failing on a "relative URL without a base" config parse. The probe conclusion is generated
+      # from the structured facts (receipt-integrity), so it can never mislabel a live-exercise failure
+      # as E_NOTIMPL.
+      - name: Capability probe (PSEC / PSE_SUPPORT_FS_DENY / ConPTY)
+        id: probe
+        if: matrix.os == 'windows-2025'
+        continue-on-error: true
+        shell: pwsh
+        run: node "$env:MXC_DIR/probe.mts"
+
+      # Core deliverable, taken only where the MXC probe passed (a PSEC-capable Windows build): two
+      # concurrent containers, external canaries for read/write/HOME/temp/approved-folder, proxy
+      # cross-use and the D14 PowerShell descendant-reaping case. Skipped on hosted (PSEC absent).
+      - name: Two-concurrent-container isolation receipt
+        id: isolation
+        if: matrix.os == 'windows-2025' && steps.probe.outcome == 'success'
+        continue-on-error: true
+        shell: pwsh
+        run: node "$env:MXC_DIR/isolation.mts"
+
+      # ---- PRIMARY (windows-11-arm, arm64): the FULL S0-S2 receipt set, run as a created non-admin
+      # local user (never elevated). run-nonadmin.ps1 creates the user, proves it is not an
+      # administrator, then runs provision / D14 ShellIdentity (both branches) / grammar / pty / probe
+      # as that user, and then the two-container isolation receipt when the MXC probe passes (PSEC
+      # present) or the capability-SID fallback when MXC is absent. arch=arm64 is in every receipt.
+      # continue-on-error so Summarize remains the single gate; the launcher only surfaces its own
+      # infrastructure failure (recorded as a typed non-pass receipt). ---------------------------------
+      # Step-level timeout backstop, well under the job timeout: the per-child run-as timeouts
+      # inside run-nonadmin.ps1 bound the worst case to ~22 min, so 28 leaves room for the always-run
+      # Summarize + Upload to still land the artifact even if this block is force-ended.
+      - name: Full S0-S2 receipts as a non-admin user (arm64)
+        id: nonadmin
+        if: matrix.os == 'windows-11-arm'
+        continue-on-error: true
+        timeout-minutes: 28
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File "$env:MXC_DIR/run-nonadmin.ps1"
+
+      # ---- Corrected Codex-ELEVATED containment fallback + WIN-ARM S2-in-token PTY + isolation_session
+      # (added W2, both rows). These run in the ADMIN phase (GitHub steps are elevated), which is
+      # exactly the ratified model: the orchestrator provisions the NON-ADMIN sandbox user(s) with
+      # elevation, and the sandboxed WORKLOAD (write-restricted children, the S2 ConPTY, the
+      # isolation_session agent users) runs NON-elevated. On arm64 the corrected fallback.ps1 (MODE A)
+      # overwrites the MODE B fallback.receipt.json produced non-elevated inside run-nonadmin.ps1 with
+      # the authoritative two-account proof. continue-on-error so Summarize stays the single gate; each
+      # writes a typed, fail-closed receipt.
+      - name: Provision sandbox users (elevated admin phase)
+        id: sandbox_provision
+        continue-on-error: true
+        shell: pwsh
+        env:
+          MXC_SANDBOX_PROVISION_OUT: ${{ runner.temp }}/mxc-spike/sandbox-provision.receipt.json
+        run: pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File "$env:MXC_DIR/provision-sandbox-users.ps1"
+
+      - name: Corrected restricted-token fallback (write isolation + cross-read denial + S2-in-token PTY)
+        id: fallback_corrected
+        continue-on-error: true
+        timeout-minutes: 15
+        shell: pwsh
+        env:
+          MXC_FALLBACK_OUT: ${{ runner.temp }}/mxc-spike/fallback.receipt.json
+        run: pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File "$env:MXC_DIR/fallback.ps1"
+
+      # isolation_session (PSEC-independent per-session agent-user backend): two concurrent sessions,
+      # distinct agent-user SIDs, external-canary read/write isolation. Fail-closed if the backend or
+      # request shape is unavailable.
+      - name: isolation_session two-session proof
+        id: isolation_session
+        continue-on-error: true
+        timeout-minutes: 12
+        shell: pwsh
+        run: node "$env:MXC_DIR/isolation-session.mts"
+
+      # Single gate: prints the summary AND exits nonzero if any produced receipt is not pass OR fails
+      # receipt integrity (prose disagreeing with structured facts). Collects every receipt regardless
+      # of earlier failures.
+      - name: Summarize + gate
+        if: always()
+        shell: bash
+        run: node "$MXC_DIR/summarize.mts" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload receipts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mxc-spike-${{ matrix.os }}
+          path: ${{ runner.temp }}/mxc-spike/
+          if-no-files-found: error
+          retention-days: 14

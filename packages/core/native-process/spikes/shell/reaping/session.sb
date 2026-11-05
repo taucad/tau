@@ -1,0 +1,63 @@
+;; Per-session Seatbelt profile for the macOS reaping spike, CANDIDATE (c) (sandbox-membership).
+;;
+;; The driver (sandbox.mts) launches each session's shell as:
+;;   sandbox-exec -f session.sb -D MARKER=<marker> -D WORKDIR=<sentinelDir> -D SCRIPTDIR=<spikeDir> \
+;;                /bin/bash adversaries.sh <adversary> <sentinel>
+;; Every descendant the shell forks INHERITS this profile and cannot leave it, however it reparents
+;; (launchd, double-fork, setsid). That inheritance is the whole point: it makes `sandbox_check`
+;; (tau-sbenum) a reliable membership oracle that does not depend on the process tree.
+;;
+;; Stance: `deny default`, then re-allow exactly what bash+perl+sleep need to run and append to the
+;; external canary, plus ONE unique marker rule:
+;;   (allow file-read* (literal (param "MARKER")))
+;; The marker is a per-session UUID path handed in by -D, allowed ONLY as a literal and NOT inside any
+;; allowed subpath, so another session's profile (which allows only ITS marker) denies this one's.
+;; tau-sbenum's control path (a path at the filesystem root, in no allow rule) is denied by `deny
+;; default` here but permitted for any UNSANDBOXED pid — that is how the membership oracle rejects the
+;; unsandboxed world. No secret is ever named; MARKER/WORKDIR/SCRIPTDIR are synthetic per-run paths.
+;;
+;; Every operation token below is a real Seatbelt operation; a single unknown token would make
+;; sandbox-exec reject the whole profile and the launch would never run.
+(version 1)
+
+(deny default)
+
+;; Process creation, inspection and signalling for the adversary tree (fork / exec / setsid /
+;; double-fork). process-info* covers the code-signature / pid-info reads the loader makes on exec.
+(allow process-fork)
+(allow process-exec*)
+(allow process-info*)
+(allow signal (target self))
+
+;; Loading and executing the system toolchain (dyld, bash, perl, sleep). file-map-executable is a
+;; distinct operation under `deny default`, so mapping dylibs must be allowed explicitly or images
+;; will not load. file-ioctl covers the terminal/dev ioctls bash issues on startup.
+(allow file-map-executable)
+(allow file-read-metadata)
+(allow file-ioctl)
+(allow file-read*
+  (subpath "/usr")
+  (subpath "/bin")
+  (subpath "/sbin")
+  (subpath "/System")
+  (subpath "/Library")
+  (subpath "/private/var/db/dyld")
+  (subpath "/private/var/db/timezone")
+  (subpath "/private/var/select")
+  (subpath "/private/etc")
+  (subpath "/dev")
+  (subpath (param "WORKDIR"))
+  (subpath (param "SCRIPTDIR"))
+  (literal (param "MARKER")))
+
+;; Writing the external canary (sentinel lives under WORKDIR) and the usual device sinks.
+(allow file-write*
+  (subpath (param "WORKDIR"))
+  (literal "/dev/null")
+  (literal "/dev/dtracehelper")
+  (subpath "/dev"))
+
+;; Runtime plumbing bash/perl touch on launch; none of it widens the marker or control rules.
+(allow sysctl-read)
+(allow mach-lookup)
+(allow ipc-posix-shm*)

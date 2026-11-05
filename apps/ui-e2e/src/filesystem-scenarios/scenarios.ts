@@ -176,7 +176,7 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
     id: 'S5',
     title: 'Warm open to render',
     model:
-      'A fresh authority over the populated project (a reload): one statTree listing, then one exact stat per file as the per-file status compare. The revisions capture memo is not modelled.',
+      "A fresh authority over the populated project (a reload): the file tree's statTree loads the root's persisted Project Index and runs its one head-metadata compare. The revisions capture memo is not modelled.",
     times: [{ metric: 'duration', limit: 2000, description: '≤ 2 s' }],
     gates: [
       {
@@ -202,12 +202,7 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
         metric: 'metadataRequests',
         comparison: 'at-most',
         limit: 1,
-        description: '1 head-metadata compare of N entries',
-        qualifier: {
-          kind: 'model-bound',
-          reason:
-            "The runner's compare is its own loop of one stat per entry, so the count is fixed by the model; it becomes real when W3's Project Index gives warm open a production compare to drive.",
-        },
+        description: '1 head-metadata compare of N entries (production index.compare)',
       },
     ],
   },

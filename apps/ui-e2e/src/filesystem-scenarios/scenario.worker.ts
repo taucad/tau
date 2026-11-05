@@ -424,6 +424,24 @@ const stopProbe = async (): Promise<ProbeReport> => {
   };
 };
 
+/* The Project Index probes' own paths (W3). */
+const indexTabPath = 'w3-tab-write.txt';
+const indexExternalPath = 'w3-external-edit.txt';
+
+/** A project's directory on OPFS, as the provider lays it out under the origin root. */
+const projectDirectory = async (projectId: string): Promise<FileSystemDirectoryHandle> => {
+  const project = projects.get(projectId);
+  if (project === undefined) {
+    throw new Error(`Unknown project ${projectId}.`);
+  }
+  let directory = await navigator.storage.getDirectory();
+  for (const segment of project.providerBasePath.split('/').filter(Boolean)) {
+    // oxlint-disable-next-line no-await-in-loop -- one level at a time.
+    directory = await directory.getDirectoryHandle(segment);
+  }
+  return directory;
+};
+
 const run = async (runner: RunnerName, projectId: string, parameters: Readonly<Record<string, number>>) => {
   const live = rootedFor(projectId);
   const { entries } = fixturePlan();
@@ -483,20 +501,73 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
       return measured;
     }
     case 'warm-open': {
-      /* S5 on a fresh authority: one tree listing as the file tree asks for it,
-       * then one exact stat per file — the per-file metadata compare a status
-       * check makes at HEAD. */
+      /* S5 on a fresh authority, as production opens it: the file tree's
+       * listing loads the root's persisted Project Index and runs its one
+       * head-metadata compare against the provider. The compare count is
+       * production's own `index.compare` counter. */
       return measure(async () => {
-        let metadataRequests = 0;
+        const before = productionCounterTotals()['index.compare'] ?? 0;
         const listing = await live.statTree?.('');
-        metadataRequests += 1;
-        const files = entries.length;
-        for (const entry of entries) {
-          // oxlint-disable-next-line no-await-in-loop -- the compare stats each entry in order.
-          await live.stat(entry.path);
-          metadataRequests += 1;
+        const metadataRequests = (productionCounterTotals()['index.compare'] ?? 0) - before;
+        return { listed: listing?.length ?? 0, files: entries.length, metadataRequests };
+      });
+    }
+    case 'index-open': {
+      /* The Project Index across reloads (D5): a compare of a cold root is its
+       * open, so this reports what the load's compare found against the stored
+       * snapshot; the listing then comes from the warm index. */
+      return measure(async () => {
+        const compared = await live.compareIndex?.();
+        const listing = (await live.statTree?.('')) ?? [];
+        const external = listing.find((row) => row.path === indexExternalPath);
+        return {
+          listed: listing.length,
+          mismatched: compared?.mismatched.length ?? 0,
+          externalMismatched: compared?.mismatched.includes(indexExternalPath) === true ? 1 : 0,
+          externalSize: external?.size ?? -1,
+          tabWriteListed: listing.some((row) => row.path === indexTabPath) ? 1 : 0,
+        };
+      });
+    }
+    case 'index-write': {
+      /* One write through this authority: its tab's change notice and its index entry. */
+      return measure(async () => {
+        await live.writeFile(indexTabPath, textEncoder.encode('written by one tab\n'));
+      });
+    }
+    case 'external-edit': {
+      /* An edit no authority sees: straight to OPFS, no notice, no index entry. */
+      return measure(async () => {
+        const directory = await projectDirectory(projectId);
+        const file = await directory.getFileHandle(indexExternalPath, { create: true });
+        const writable = await file.createWritable();
+        await writable.write(new Uint8Array(parameters['bytes'] ?? 1).fill(0x78));
+        await writable.close();
+      });
+    }
+    case 'index-snapshot': {
+      /* The stored snapshot as a next load would read it. */
+      return measure(async (): Promise<Readonly<Record<string, number>>> => {
+        try {
+          const project = await projectDirectory(projectId);
+          const directory = await project.getDirectoryHandle('.tau-index');
+          const handle = await directory.getFileHandle('snapshot.json');
+          const snapshot = await handle.getFile();
+          const stored = JSON.parse(await snapshot.text()) as {
+            vector: { seqByTab: Record<string, number> };
+            rescan: boolean;
+            entries: ReadonlyArray<readonly [string, ...unknown[]]>;
+          };
+          return {
+            present: 1,
+            tabs: Object.keys(stored.vector.seqByTab).length,
+            rescan: stored.rescan ? 1 : 0,
+            entries: stored.entries.length,
+            tabWriteStored: stored.entries.some(([path]) => path === indexTabPath) ? 1 : 0,
+          };
+        } catch {
+          return { present: 0 };
         }
-        return { listed: listing?.length ?? 0, files, metadataRequests };
       });
     }
     case 'import': {

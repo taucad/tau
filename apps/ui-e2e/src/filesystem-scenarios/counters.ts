@@ -46,6 +46,14 @@ export type ScenarioCounts = {
   /** Blob/File content reads and their bytes, plus sync-handle reads. */
   blobReads: number;
   bytesRead: number;
+  /**
+   * Bytes of the Project Index's own snapshot (`.tau-index/snapshot.json`),
+   * kept apart from `bytesRead`: loading the index is not a read of the
+   * project's content (I3), but it is reported, never hidden.
+   */
+  indexBytesRead: number;
+  /** Durable writes of that snapshot, kept apart from `writes` the same way. */
+  indexWrites: number;
   /** `crypto.subtle.digest` calls and bytes. */
   digests: number;
   bytesHashed: number;
@@ -73,6 +81,8 @@ const emptyCounts = (): ScenarioCounts => ({
   handleLookups: 0,
   blobReads: 0,
   bytesRead: 0,
+  indexBytesRead: 0,
+  indexWrites: 0,
   digests: 0,
   bytesHashed: 0,
   broadcastPosts: 0,
@@ -151,6 +161,23 @@ export const installScenarioCounters = (): ScenarioCounters => {
   let tracedNames = new Set<string>();
   let tracedWrites: TracedWrite[] = [];
   let tracedLocks: TracedWrite[] = [];
+  /* The Project Index's snapshot file name; a fixture never names a file so. */
+  const indexSnapshotName = 'snapshot.json';
+  const countWrite = (name: string): void => {
+    if (name === indexSnapshotName) {
+      counts.indexWrites += 1;
+      return;
+    }
+    counts.writes += 1;
+  };
+  const countRead = (name: string | undefined, bytes: number): void => {
+    if (name === indexSnapshotName) {
+      counts.indexBytesRead += bytes;
+      return;
+    }
+    counts.blobReads += 1;
+    counts.bytesRead += bytes;
+  };
   const noteWriteStart = (name: string): void => {
     if (tracedNames.has(name) && !tracedWrites.some((write) => write.name === name)) {
       tracedWrites.push({ name, startedAt: performance.now(), operationsBefore: counts.writes + counts.renames });
@@ -214,7 +241,8 @@ export const installScenarioCounters = (): ScenarioCounters => {
   const { createWritable } = fileHandle;
   fileHandle.createWritable = async function (this: FileSystemFileHandle, ...parameters) {
     counts.writableOpens += 1;
-    noteWriteStart(this.name);
+    const { name } = this;
+    noteWriteStart(name);
     const stream = await createWritable.apply(this, parameters);
     const write = stream.write.bind(stream);
     const close = stream.close.bind(stream);
@@ -231,7 +259,7 @@ export const installScenarioCounters = (): ScenarioCounters => {
     stream.close = async () => {
       await close();
       counts.writableCommits += 1;
-      counts.writes += 1;
+      countWrite(name);
     };
     return stream;
   };
@@ -247,8 +275,7 @@ export const installScenarioCounters = (): ScenarioCounters => {
       let wrote = false;
       handle.read = (buffer, options) => {
         const bytes = read(buffer, options);
-        counts.blobReads += 1;
-        counts.bytesRead += bytes;
+        countRead(name, bytes);
         return bytes;
       };
       handle.write = (buffer, options) => {
@@ -264,7 +291,7 @@ export const installScenarioCounters = (): ScenarioCounters => {
         close();
         if (wrote) {
           counts.syncHandleWriteSessions += 1;
-          counts.writes += 1;
+          countWrite(name);
         }
       };
       return handle;
@@ -311,29 +338,26 @@ export const installScenarioCounters = (): ScenarioCounters => {
 
   /* Content reads. `slice()` makes a Blob whose reads are counted here too. */
   const blob = Blob.prototype;
+  const nameOf = (value: Blob): string | undefined => (value instanceof File ? value.name : undefined);
   const { arrayBuffer } = blob;
   blob.arrayBuffer = async function (this: Blob) {
     const result = await arrayBuffer.call(this);
-    counts.blobReads += 1;
-    counts.bytesRead += result.byteLength;
+    countRead(nameOf(this), result.byteLength);
     return result;
   };
   const { text } = blob;
   blob.text = async function (this: Blob) {
-    counts.blobReads += 1;
-    counts.bytesRead += this.size;
+    countRead(nameOf(this), this.size);
     return text.call(this);
   };
   const { bytes } = blob;
   blob.bytes = async function (this: Blob) {
-    counts.blobReads += 1;
-    counts.bytesRead += this.size;
+    countRead(nameOf(this), this.size);
     return bytes.call(this);
   };
   const { stream } = blob;
   blob.stream = function (this: Blob) {
-    counts.blobReads += 1;
-    counts.bytesRead += this.size;
+    countRead(nameOf(this), this.size);
     return stream.call(this);
   };
 

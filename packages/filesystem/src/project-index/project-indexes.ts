@@ -138,7 +138,8 @@ export class ProjectIndexes {
   /**
    * Per cold root, the facts of bytes a whole read already held (D4): what a
    * later listing asks of a root nobody opened an index for, answered without
-   * reading again. Every hook that feeds an index forgets what it touches.
+   * reading again while the file's size and mtime show it unchanged since the
+   * read began. No write hook needs to forget them: a write changes the mtime.
    */
   private readonly _readFacts = new Map<string, Map<string, ReadFacts>>();
 
@@ -478,7 +479,6 @@ export class ProjectIndexes {
    * @param written - Size and the facts of the written bytes.
    */
   public addFile(absolutePath: string, written: Readonly<{ size: number; facts?: ContentFacts }>): void {
-    this._forget(absolutePath);
     const observedAt = Date.now();
     this._apply(absolutePath, (index, relative) => {
       index.recordFile(relative, { ...written, observedAt });
@@ -491,7 +491,6 @@ export class ProjectIndexes {
    * @param absolutePath - Absolute directory path.
    */
   public addDirectory(absolutePath: string): void {
-    this._forget(absolutePath);
     this._apply(absolutePath, (index, relative) => {
       index.recordDirectory(relative);
     });
@@ -503,7 +502,6 @@ export class ProjectIndexes {
    * @param absolutePath - Absolute file path.
    */
   public removeFile(absolutePath: string): void {
-    this._forget(absolutePath);
     this._apply(absolutePath, (index, relative) => {
       index.remove(relative);
     });
@@ -525,8 +523,6 @@ export class ProjectIndexes {
    * @param to - Absolute target path.
    */
   public rename(from: string, to: string): void {
-    this._forget(from);
-    this._forget(to);
     const source = normalizePath(from);
     const target = normalizePath(to);
     for (const [root, state] of this._states) {
@@ -554,7 +550,6 @@ export class ProjectIndexes {
    * @param absolutePath - Absolute path whose state is unknown.
    */
   public invalidate(absolutePath: string): void {
-    this._forget(absolutePath);
     const normalized = normalizePath(absolutePath);
     for (const [root, state] of this._states) {
       const relative = this._inside(root, normalized);
@@ -667,20 +662,12 @@ export class ProjectIndexes {
     memo.set(path, read);
   }
 
-  /** Forget what reads measured at or under `absolutePath`, and every cold root under it. */
+  /** Drop the read facts of every cold root a topology change at `absolutePath` covers or contains. */
   private _forget(absolutePath: string): void {
     const changed = normalizePath(absolutePath);
-    for (const [root, memo] of this._readFacts) {
-      const relative = relativeTo(root, changed);
-      if (relative === '' || relativeTo(changed, root) !== undefined) {
+    for (const root of this._readFacts.keys()) {
+      if (relativeTo(root, changed) !== undefined || relativeTo(changed, root) !== undefined) {
         this._readFacts.delete(root);
-      } else if (relative !== undefined) {
-        memo.delete(relative);
-        for (const path of memo.keys()) {
-          if (path.startsWith(`${relative}/`)) {
-            memo.delete(path);
-          }
-        }
       }
     }
   }

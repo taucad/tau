@@ -57,11 +57,12 @@ export const maxSnapshotFileTreeEntries = 500;
  */
 export const snapshotSchema = z.object({
   /**
-   * The project's files, shallowest first and then by path, bounded at
-   * {@link maxSnapshotFileTreeEntries} so a large project costs the turn a fixed
-   * amount of context (D18).
+   * The project's files, shallowest first and then by path. The producer bounds
+   * it at {@link maxSnapshotFileTreeEntries} so a large project costs the turn a
+   * fixed amount of context (D18); the schema does not, so a client from before
+   * the bound, which sends every file, is still accepted rather than refused.
    */
-  fileTree: z.array(fileTreeEntrySchema).max(maxSnapshotFileTreeEntries).optional(),
+  fileTree: z.array(fileTreeEntrySchema).optional(),
   /** How many files the bound left out of `fileTree`; absent when it lists them all. */
   fileTreeOmitted: z.number().int().positive().optional(),
   /** The file currently being rendered by the CAD engine */

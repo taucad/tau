@@ -78,6 +78,42 @@ export type TreeNode =
     };
 
 /**
+ * How a search query matches a path: a substring, or a glob when it holds `*` or `?` (D18).
+ *
+ * @param query - The query as typed.
+ * @returns A case-insensitive matcher over an entry's relative path and name.
+ */
+const searchMatcher = (query: string): ((path: string, name: string) => boolean) => {
+  const lower = query.toLowerCase();
+  if (!/[*?]/u.test(lower)) {
+    return (path) => path.toLowerCase().includes(lower);
+  }
+  let source = '';
+  for (let index = 0; index < lower.length; index++) {
+    const character = lower[index]!;
+    if (character === '*' && lower[index + 1] === '*') {
+      if (lower[index + 2] === '/') {
+        source += '(?:.*/)?';
+        index += 2;
+      } else {
+        source += '.*';
+        index++;
+      }
+    } else if (character === '*') {
+      source += '[^/]*';
+    } else if (character === '?') {
+      source += '[^/]';
+    } else {
+      source += String.raw`\^$.*+?()[]{}|`.includes(character) ? `\\${character}` : character;
+    }
+  }
+  const pattern = new RegExp(`^${source}$`, 'u');
+  return lower.includes('/')
+    ? (path) => pattern.test(path.toLowerCase())
+    : (_path, name) => pattern.test(name.toLowerCase());
+};
+
+/**
  * In-memory file tree for O(1) metadata queries.
  *
  * Replaces recursive `readdir` + `stat` calls (which each create an IDB transaction)
@@ -324,22 +360,24 @@ export class TreeIndex {
   }
 
   /**
-   * Search for files (and optionally directories) whose paths contain the query substring.
-   * Case-insensitive. Returns up to `maxResults` matches. Runs entirely in-memory.
+   * Search for files (and optionally directories) whose paths contain the query substring,
+   * or, when the query holds a glob character (`*`, `?`), whose path matches it as a glob (D18):
+   * `**` spans directories, `*` and `?` stay inside one segment, and a pattern without a `/`
+   * matches the entry's name. Case-insensitive. Returns up to `maxResults` matches. Runs
+   * entirely in-memory.
    *
-   * @param query - Substring to match against relative file paths.
+   * @param query - Substring or glob to match against relative file paths.
    * @param options - Search options: `maxResults` (default 100), `includeDirectories` (default false).
    * @returns Matching entries with paths relative to the tree root.
    */
   public searchFiles(query: string, options?: TreeSearchOptions): FileStatEntry[] {
     const maxResults = options?.maxResults ?? defaultSearchMaxResults;
     const includeDirectories = options?.includeDirectories ?? false;
-    const lowerQuery = query.toLowerCase();
     const results: FileStatEntry[] = [];
     this._searchRecursive({
       node: this._root,
       prefix: '',
-      lowerQuery,
+      matches: searchMatcher(query),
       includeDirectories,
       maxResults,
       results,
@@ -385,13 +423,13 @@ export class TreeIndex {
   private _searchRecursive(options: {
     node: TreeNode;
     prefix: string;
-    lowerQuery: string;
+    matches: (path: string, name: string) => boolean;
     includeDirectories: boolean;
     maxResults: number;
     results: FileStatEntry[];
     admits?: TreeIndexAdmits;
   }): void {
-    const { node, prefix, lowerQuery, includeDirectories, maxResults, results, admits } = options;
+    const { node, prefix, matches, includeDirectories, maxResults, results, admits } = options;
     if (!node.children || results.length >= maxResults) {
       return;
     }
@@ -404,7 +442,7 @@ export class TreeIndex {
         continue;
       }
       if (child.type === 'file') {
-        if (path.toLowerCase().includes(lowerQuery)) {
+        if (matches(path, name)) {
           results.push({
             path,
             name,
@@ -415,13 +453,13 @@ export class TreeIndex {
           });
         }
       } else {
-        if (includeDirectories && path.toLowerCase().includes(lowerQuery)) {
+        if (includeDirectories && matches(path, name)) {
           results.push({ path, name, type: 'dir', size: 0, mtimeMs: child.mtimeMs });
         }
         this._searchRecursive({
           node: child,
           prefix: path,
-          lowerQuery,
+          matches,
           includeDirectories,
           maxResults,
           results,

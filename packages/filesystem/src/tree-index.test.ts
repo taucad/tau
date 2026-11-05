@@ -284,6 +284,15 @@ describe('TreeIndex', () => {
       expect(results).toEqual([]);
     });
 
+    it('should match a glob query against names, or against paths when it names a directory (D18)', () => {
+      const paths = (query: string): string[] => tree.searchFiles(query).map(({ path }) => path);
+
+      expect(paths('*.MD')).toEqual(['README.md', 'docs/guide.md']);
+      expect(paths('src/**/*.ts')).toEqual(['src/main.ts', 'src/utils/helper.ts', 'src/utils/math.ts']);
+      expect(paths('src/*.ts')).toEqual(['src/main.ts']);
+      expect(paths('m?th.ts')).toEqual(['src/utils/math.ts']);
+    });
+
     it('should match on full path, not just basename', () => {
       const results = tree.searchFiles('src/utils');
       expect(results.length).toBeGreaterThanOrEqual(2);

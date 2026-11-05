@@ -288,7 +288,7 @@ export function useChatEditor({
         actionItems: actionItemsRef.current,
       });
     }
-    const fileEntries = await service.searchFiles(query, { maxResults: 20 });
+    const fileEntries = await service.searchFilesDebounced(query, { maxResults: 20 });
     return buildContextItemsFromSearch({
       fileEntries,
       chats: chatsRef.current,

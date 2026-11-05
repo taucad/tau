@@ -3,7 +3,7 @@ import { mock } from 'vitest-mock-extended';
 import { FileTreeService } from '#file-tree-service.js';
 import type { ExternalPollTelemetry } from '#file-tree-service.js';
 import type { FileTreeNode, HeadFileStat, WatchEvent } from '@taucad/filesystem';
-import type { ChangeEvent, FileEntry, FileProvenance, FileStat } from '@taucad/types';
+import type { ChangeEvent, FileEntry, FileProvenance, FileStat, FileStatEntry } from '@taucad/types';
 import { WorkerChangeChannel } from '#worker-change-channel.js';
 import type { WorkerChangeChannelTransport } from '#worker-change-channel.js';
 import { DirectoryListingErrorCode, DirectoryListingFailedError } from '#directory-listing.js';
@@ -478,6 +478,31 @@ describe('FileTreeService rooted search and external polling', () => {
     expect(proxy.searchFiles).toHaveBeenNthCalledWith(1, '/projects/abc', 'first', undefined);
     expect(proxy.searchFiles).toHaveBeenNthCalledWith(2, '/projects/def', 'second', { maxResults: 2 });
     disposeChannel();
+  });
+
+  it('collapses a burst of keystrokes into one index query for the latest query (D18)', async () => {
+    vi.useFakeTimers();
+    try {
+      const { tree, proxy, disposeChannel } = createTreeHarness();
+      const hit: FileStatEntry = {
+        path: 'src/main.ts',
+        name: 'main.ts',
+        type: 'file',
+        size: 1,
+        mtimeMs: 1,
+        contentKind: 'binary',
+      };
+      vi.mocked(proxy.searchFiles).mockResolvedValue([hit]);
+
+      const typed = ['m', 'ma', 'mai', '*.ts'].map(async (query) => tree.searchFilesDebounced(query));
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(proxy.searchFiles).toHaveBeenCalledExactlyOnceWith('/projects/abc', '*.ts', undefined);
+      await expect(Promise.all(typed)).resolves.toEqual([[hit], [hit], [hit], [hit]]);
+      disposeChannel();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('serializes polls and keeps one visibility subscription across interval changes', async () => {

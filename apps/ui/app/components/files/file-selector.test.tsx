@@ -456,12 +456,12 @@ describe('FileSelector search recovery', () => {
 
   it('should route context search errors and Retry through the search owner', async () => {
     const searchFiles = vi
-      .fn<FileTreeService['searchFiles']>()
+      .fn<FileTreeService['searchFilesDebounced']>()
       .mockRejectedValueOnce(new Error('Search unavailable'))
       .mockResolvedValue([]);
     const treeService = mock<FileTreeService>({
       observeDirectory: observeListing(async () => []),
-      searchFiles,
+      searchFilesDebounced: searchFiles,
     });
     vi.mocked(useOptionalFileManager).mockReturnValue(
       mock<NonNullable<ReturnType<typeof useOptionalFileManager>>>({ treeService }),

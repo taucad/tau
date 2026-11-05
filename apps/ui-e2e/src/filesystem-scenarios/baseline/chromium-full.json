@@ -1,7 +1,7 @@
 {
   "harness": "filesystem-scenarios",
-  "head": "0a259ef3b59e",
-  "recordedAt": "2026-11-05T07:13:16.670Z",
+  "head": "4d8dced4294a",
+  "recordedAt": "2026-11-05T11:06:24.211Z",
   "profile": {
     "fixture": {
       "name": "full",
@@ -50,14 +50,14 @@
       "writer": "applyTree replace (stage, move aside, publish)",
       "killedAt": "9 of 192 mutations",
       "result": "old 48, new 0, missing 0, partial 0",
-      "residue": ["4 short creates removed on open"]
+      "residue": ["8 short creates removed on open"]
     },
     {
       "engine": "chromium",
       "writer": "applyTree replace (stage, move aside, publish)",
       "killedAt": "38 of 192 mutations",
       "result": "old 48, new 0, missing 0, partial 0",
-      "residue": ["4 short creates removed on open"]
+      "residue": ["8 short creates removed on open"]
     },
     {
       "engine": "chromium",
@@ -98,50 +98,50 @@
       "engine": "chromium",
       "writer": "applyTree create (final-path write, recorded size)",
       "killedAt": "2 of 48 mutations",
-      "result": "old 0, new 6, missing 42, partial 0",
-      "residue": ["3 short creates removed on open"]
-    },
-    {
-      "engine": "chromium",
-      "writer": "applyTree create (final-path write, recorded size)",
-      "killedAt": "9 of 48 mutations",
-      "result": "old 0, new 11, missing 37, partial 0",
-      "residue": ["5 short creates removed on open"]
-    },
-    {
-      "engine": "chromium",
-      "writer": "applyTree create (final-path write, recorded size)",
-      "killedAt": "16 of 48 mutations",
-      "result": "old 0, new 16, missing 32, partial 0",
-      "residue": ["8 short creates removed on open"]
-    },
-    {
-      "engine": "chromium",
-      "writer": "applyTree create (final-path write, recorded size)",
-      "killedAt": "24 of 48 mutations",
-      "result": "old 0, new 25, missing 23, partial 0",
+      "result": "old 0, new 3, missing 45, partial 0",
       "residue": ["7 short creates removed on open"]
     },
     {
       "engine": "chromium",
       "writer": "applyTree create (final-path write, recorded size)",
-      "killedAt": "31 of 48 mutations",
-      "result": "old 0, new 35, missing 13, partial 0",
+      "killedAt": "9 of 48 mutations",
+      "result": "old 0, new 13, missing 35, partial 0",
+      "residue": ["6 short creates removed on open"]
+    },
+    {
+      "engine": "chromium",
+      "writer": "applyTree create (final-path write, recorded size)",
+      "killedAt": "16 of 48 mutations",
+      "result": "old 0, new 22, missing 26, partial 0",
+      "residue": ["2 short creates removed on open"]
+    },
+    {
+      "engine": "chromium",
+      "writer": "applyTree create (final-path write, recorded size)",
+      "killedAt": "24 of 48 mutations",
+      "result": "old 0, new 27, missing 21, partial 0",
       "residue": ["5 short creates removed on open"]
     },
     {
       "engine": "chromium",
       "writer": "applyTree create (final-path write, recorded size)",
+      "killedAt": "31 of 48 mutations",
+      "result": "old 0, new 33, missing 15, partial 0",
+      "residue": ["6 short creates removed on open"]
+    },
+    {
+      "engine": "chromium",
+      "writer": "applyTree create (final-path write, recorded size)",
       "killedAt": "38 of 48 mutations",
-      "result": "old 0, new 40, missing 8, partial 0",
-      "residue": ["4 short creates removed on open"]
+      "result": "old 0, new 38, missing 10, partial 0",
+      "residue": ["8 short creates removed on open"]
     },
     {
       "engine": "chromium",
       "writer": "applyTree create (final-path write, recorded size)",
       "killedAt": "45 of 48 mutations",
-      "result": "old 0, new 48, missing 0, partial 0",
-      "residue": []
+      "result": "old 0, new 47, missing 1, partial 0",
+      "residue": ["1 short creates removed on open"]
     }
   ],
   "rows": [
@@ -277,11 +277,11 @@
       },
       "samples": [
         {
-          "duration": 27302.300000000745,
+          "duration": 11607.19999999553,
           "lockRequests": 6736,
           "lockChains": 8,
-          "lockWait": 1629.5000000298023,
-          "lockWaitMax": 13.300000000745058,
+          "lockWait": 998.7999999299645,
+          "lockWaitMax": 4.600000001490116,
           "writableOpens": 2000,
           "writableCommits": 2000,
           "syncHandleOpens": 0,
@@ -291,7 +291,7 @@
           "renames": 0,
           "removes": 0,
           "getFileCalls": 4000,
-          "handleLookups": 10042,
+          "handleLookups": 8703,
           "blobReads": 5499,
           "bytesRead": 105755398,
           "digests": 0,
@@ -318,16 +318,16 @@
         "changesetBound": 8,
         "changesets": 8,
         "digests": 0,
-        "duration": 27302.300000000745,
+        "duration": 11607.19999999553,
         "files": 2000,
         "getFileCalls": 4000,
-        "handleLookups": 10042,
+        "handleLookups": 8703,
         "lockChains": 8,
         "lockRequests": 6736,
         "lockSets": 8,
         "lockTokens": 6736,
-        "lockWait": 1629.5000000298023,
-        "lockWaitMax": 13.300000000745058,
+        "lockWait": 998.7999999299645,
+        "lockWaitMax": 4.600000001490116,
         "mainThreadLongTasks": 0,
         "networkRequests": 0,
         "portPosts": 0,
@@ -342,9 +342,9 @@
       "times": [
         {
           "metric": "duration",
-          "value": 27302.300000000745,
+          "value": 11607.19999999553,
           "limit": 15000,
-          "met": false
+          "met": true
         }
       ],
       "gates": [
@@ -395,7 +395,7 @@
         }
       ],
       "spans": {
-        "durationMilliseconds": 27473,
+        "durationMilliseconds": 11758.89999999851,
         "spans": {
           "queue.wait": {
             "count": 8,
@@ -404,31 +404,35 @@
           },
           "queue.held": {
             "count": 8,
-            "totalMilliseconds": 8631,
-            "maxMilliseconds": 1562
+            "totalMilliseconds": 3565,
+            "maxMilliseconds": 536
           },
           "apply.hold": {
             "count": 1,
-            "totalMilliseconds": 26393,
-            "maxMilliseconds": 26393
+            "totalMilliseconds": 10788,
+            "maxMilliseconds": 10788
           }
         },
         "counters": {
           "locks.set": {
             "total": 8,
-            "peakPerSecond": 1
+            "peakPerSecond": 2
           },
           "locks.token": {
             "total": 6736,
-            "peakPerSecond": 991
+            "peakPerSecond": 1876
           },
           "changesets": {
             "total": 8,
-            "peakPerSecond": 1
+            "peakPerSecond": 2
+          },
+          "uncommitted.puts": {
+            "total": 274,
+            "peakPerSecond": 59
           },
           "listing.bytes": {
             "total": 52493955,
-            "peakPerSecond": 7349794
+            "peakPerSecond": 18836095
           }
         },
         "gauges": {}
@@ -524,7 +528,7 @@
       },
       "samples": [
         {
-          "duration": 25989.60000000149,
+          "duration": 10236.09999999404,
           "lockRequests": 0,
           "lockChains": 0,
           "lockWait": 0,
@@ -566,7 +570,7 @@
         "changesetBound": 8,
         "changesets": 0,
         "digests": 0,
-        "duration": 25989.60000000149,
+        "duration": 10236.09999999404,
         "files": 2000,
         "getFileCalls": 4000,
         "handleLookups": 3339,
@@ -591,7 +595,7 @@
       "times": [
         {
           "metric": "duration",
-          "value": 25989.60000000149,
+          "value": 10236.09999999404,
           "limit": 2000,
           "met": false
         }
@@ -634,12 +638,12 @@
         }
       ],
       "spans": {
-        "durationMilliseconds": 26140.70000000298,
+        "durationMilliseconds": 10386.89999999851,
         "spans": {},
         "counters": {
           "listing.bytes": {
             "total": 52493955,
-            "peakPerSecond": 7414535
+            "peakPerSecond": 19571405
           }
         },
         "gauges": {}
@@ -669,11 +673,11 @@
       },
       "samples": [
         {
-          "duration": 12208.5,
+          "duration": 7284.89999999851,
           "lockRequests": 2,
           "lockChains": 1,
-          "lockWait": 2.400000002235174,
-          "lockWaitMax": 2,
+          "lockWait": 2.1999999955296516,
+          "lockWaitMax": 1.7999999970197678,
           "writableOpens": 1996,
           "writableCommits": 1996,
           "syncHandleOpens": 6,
@@ -683,7 +687,7 @@
           "renames": 5,
           "removes": 0,
           "getFileCalls": 2,
-          "handleLookups": 6762,
+          "handleLookups": 5424,
           "blobReads": 2,
           "bytesRead": 242,
           "digests": 0,
@@ -711,16 +715,16 @@
         "changesets": 0,
         "digests": 0,
         "durableWriteRatio": 1.000000461578369,
-        "duration": 12208.5,
+        "duration": 7284.89999999851,
         "getFileCalls": 2,
-        "handleLookups": 6762,
+        "handleLookups": 5424,
         "hashPasses": 0,
         "lockChains": 1,
         "lockRequests": 2,
         "lockSets": 2,
         "lockTokens": 2,
-        "lockWait": 2.400000002235174,
-        "lockWaitMax": 2,
+        "lockWait": 2.1999999955296516,
+        "lockWaitMax": 1.7999999970197678,
         "mainThreadLongTasks": 0,
         "networkRequests": 0,
         "payloadBytes": 524288000,
@@ -736,7 +740,7 @@
       "times": [
         {
           "metric": "duration",
-          "value": 12208.5,
+          "value": 7284.89999999851,
           "limit": 20000,
           "met": true
         }
@@ -762,7 +766,7 @@
         }
       ],
       "spans": {
-        "durationMilliseconds": 12361.599999997765,
+        "durationMilliseconds": 7435.69999999553,
         "spans": {
           "queue.wait": {
             "count": 1,
@@ -771,8 +775,8 @@
           },
           "queue.held": {
             "count": 1,
-            "totalMilliseconds": 11586,
-            "maxMilliseconds": 11586
+            "totalMilliseconds": 6809,
+            "maxMilliseconds": 6809
           }
         },
         "counters": {
@@ -812,11 +816,11 @@
       },
       "samples": [
         {
-          "duration": 33.69999999925494,
+          "duration": 16.700000002980232,
           "lockRequests": 7,
           "lockChains": 1,
-          "lockWait": 2.2000000029802322,
-          "lockWaitMax": 0.8000000007450581,
+          "lockWait": 1.7999999970197678,
+          "lockWaitMax": 0.6999999955296516,
           "writableOpens": 1,
           "writableCommits": 1,
           "syncHandleOpens": 0,
@@ -851,15 +855,15 @@
         "bytesWritten": 1048576,
         "changesets": 1,
         "digests": 0,
-        "duration": 33.69999999925494,
+        "duration": 16.700000002980232,
         "getFileCalls": 0,
         "handleLookups": 3,
         "lockChains": 1,
         "lockRequests": 7,
         "lockSets": 1,
         "lockTokens": 7,
-        "lockWait": 2.2000000029802322,
-        "lockWaitMax": 0.8000000007450581,
+        "lockWait": 1.7999999970197678,
+        "lockWaitMax": 0.6999999955296516,
         "networkRequests": 0,
         "portPosts": 0,
         "removes": 0,
@@ -875,7 +879,7 @@
       "times": [
         {
           "metric": "duration",
-          "value": 33.69999999925494,
+          "value": 16.700000002980232,
           "limit": 100,
           "met": true
         }
@@ -910,30 +914,30 @@
         }
       ],
       "spans": {
-        "durationMilliseconds": 185.90000000223517,
+        "durationMilliseconds": 168,
         "spans": {
           "queue.wait": {
-            "count": 2,
+            "count": 1,
             "totalMilliseconds": 0,
             "maxMilliseconds": 0
           },
           "queue.held": {
-            "count": 2,
-            "totalMilliseconds": 40,
-            "maxMilliseconds": 23
+            "count": 1,
+            "totalMilliseconds": 12,
+            "maxMilliseconds": 12
           }
         },
         "counters": {
           "locks.set": {
-            "total": 2,
+            "total": 1,
             "peakPerSecond": 1
           },
           "locks.token": {
-            "total": 14,
+            "total": 7,
             "peakPerSecond": 7
           },
           "changesets": {
-            "total": 2,
+            "total": 1,
             "peakPerSecond": 1
           }
         },
@@ -964,11 +968,11 @@
       },
       "samples": [
         {
-          "duration": 180.39999999850988,
+          "duration": 102.20000000298023,
           "lockRequests": 107,
           "lockChains": 1,
-          "lockWait": 21.600000008940697,
-          "lockWaitMax": 1.4000000022351742,
+          "lockWait": 24.099999994039536,
+          "lockWaitMax": 3.2999999970197678,
           "writableOpens": 50,
           "writableCommits": 50,
           "syncHandleOpens": 0,
@@ -978,7 +982,7 @@
           "renames": 0,
           "removes": 0,
           "getFileCalls": 0,
-          "handleLookups": 105,
+          "handleLookups": 103,
           "blobReads": 0,
           "bytesRead": 0,
           "digests": 0,
@@ -1002,15 +1006,15 @@
         "bytesWritten": 102400,
         "changesets": 1,
         "digests": 0,
-        "duration": 180.39999999850988,
+        "duration": 102.20000000298023,
         "getFileCalls": 0,
-        "handleLookups": 105,
+        "handleLookups": 103,
         "lockChains": 1,
         "lockRequests": 107,
         "lockSets": 1,
         "lockTokens": 107,
-        "lockWait": 21.600000008940697,
-        "lockWaitMax": 1.4000000022351742,
+        "lockWait": 24.099999994039536,
+        "lockWaitMax": 3.2999999970197678,
         "networkRequests": 0,
         "portPosts": 0,
         "removes": 0,
@@ -1025,7 +1029,7 @@
       "times": [
         {
           "metric": "duration",
-          "value": 180.39999999850988,
+          "value": 102.20000000298023,
           "limit": 500,
           "met": true
         }
@@ -1051,17 +1055,17 @@
         }
       ],
       "spans": {
-        "durationMilliseconds": 331,
+        "durationMilliseconds": 252.70000000298023,
         "spans": {
           "queue.wait": {
             "count": 52,
-            "totalMilliseconds": 207,
-            "maxMilliseconds": 5
+            "totalMilliseconds": 144,
+            "maxMilliseconds": 3
           },
           "queue.held": {
             "count": 52,
-            "totalMilliseconds": 8871,
-            "maxMilliseconds": 177
+            "totalMilliseconds": 4973,
+            "maxMilliseconds": 100
           }
         },
         "counters": {
@@ -1255,7 +1259,7 @@
       },
       "samples": [
         {
-          "duration": 28786.199999999255,
+          "duration": 13388.69999999553,
           "lockRequests": 0,
           "lockChains": 0,
           "lockWait": 0,
@@ -1281,8 +1285,8 @@
           "lockTokens": 0,
           "changesets": 0,
           "networkRequests": 0,
-          "grepDuration": 17947.10000000149,
-          "globDuration": 10836.199999999255,
+          "grepDuration": 7990.70000000298,
+          "globDuration": 5396.29999999702,
           "binaryBytesRead": 471859200,
           "textBytesRead": 52428987,
           "walkCalls": 2680,
@@ -1300,10 +1304,10 @@
         "bytesWritten": 0,
         "changesets": 0,
         "digests": 0,
-        "duration": 28786.199999999255,
+        "duration": 13388.69999999553,
         "getFileCalls": 6005,
-        "globDuration": 10836.199999999255,
-        "grepDuration": 17947.10000000149,
+        "globDuration": 5396.29999999702,
+        "grepDuration": 7990.70000000298,
         "handleLookups": 3341,
         "lockChains": 0,
         "lockRequests": 0,
@@ -1326,13 +1330,13 @@
       "times": [
         {
           "metric": "grepDuration",
-          "value": 17947.10000000149,
+          "value": 7990.70000000298,
           "limit": 2000,
           "met": false
         },
         {
           "metric": "globDuration",
-          "value": 10836.199999999255,
+          "value": 5396.29999999702,
           "limit": 200,
           "met": false
         }
@@ -1358,12 +1362,12 @@
         }
       ],
       "spans": {
-        "durationMilliseconds": 28937.5,
+        "durationMilliseconds": 13540.10000000149,
         "spans": {},
         "counters": {
           "listing.bytes": {
             "total": 126581024,
-            "peakPerSecond": 8907444
+            "peakPerSecond": 14089091
           }
         },
         "gauges": {}
@@ -1393,7 +1397,7 @@
       },
       "samples": [
         {
-          "duration": 4225,
+          "duration": 2674.60000000149,
           "lockRequests": 0,
           "lockChains": 0,
           "lockWait": 0,
@@ -1432,7 +1436,7 @@
         "bytesWritten": 0,
         "changesets": 0,
         "digests": 0,
-        "duration": 4225,
+        "duration": 2674.60000000149,
         "getFileCalls": 500,
         "handleLookups": 2500,
         "hits": 500,
@@ -1456,7 +1460,7 @@
       "times": [
         {
           "metric": "duration",
-          "value": 4225,
+          "value": 2674.60000000149,
           "limit": 300,
           "met": false
         }
@@ -1473,9 +1477,14 @@
         }
       ],
       "spans": {
-        "durationMilliseconds": 4375.60000000149,
+        "durationMilliseconds": 2825.10000000149,
         "spans": {},
-        "counters": {},
+        "counters": {
+          "listing.bytes": {
+            "total": 4971001,
+            "peakPerSecond": 4971001
+          }
+        },
         "gauges": {}
       }
     },
@@ -1569,11 +1578,11 @@
       },
       "samples": [
         {
-          "duration": 15986.699999999255,
+          "duration": 11363.60000000149,
           "lockRequests": 6736,
           "lockChains": 8,
-          "lockWait": 1175.2000000178814,
-          "lockWaitMax": 22.399999998509884,
+          "lockWait": 1139.0999999940395,
+          "lockWaitMax": 41.600000001490116,
           "writableOpens": 2000,
           "writableCommits": 2000,
           "syncHandleOpens": 0,
@@ -1583,7 +1592,7 @@
           "renames": 0,
           "removes": 0,
           "getFileCalls": 4000,
-          "handleLookups": 10042,
+          "handleLookups": 8703,
           "blobReads": 5499,
           "bytesRead": 105755398,
           "digests": 0,
@@ -1597,8 +1606,8 @@
           "networkRequests": 0,
           "files": 2000,
           "changesetBound": 8,
-          "secondTabReads": 187,
-          "readP95": 36.599999997764826,
+          "secondTabReads": 140,
+          "readP95": 25.899999998509884,
           "invalidationsReceived": 8,
           "secondTabBusEvents": 8
         }
@@ -1613,24 +1622,24 @@
         "changesetBound": 8,
         "changesets": 8,
         "digests": 0,
-        "duration": 15986.699999999255,
+        "duration": 11363.60000000149,
         "files": 2000,
         "getFileCalls": 4000,
-        "handleLookups": 10042,
+        "handleLookups": 8703,
         "invalidationsReceived": 8,
         "lockChains": 8,
         "lockRequests": 6736,
         "lockSets": 8,
         "lockTokens": 6736,
-        "lockWait": 1175.2000000178814,
-        "lockWaitMax": 22.399999998509884,
+        "lockWait": 1139.0999999940395,
+        "lockWaitMax": 41.600000001490116,
         "networkRequests": 0,
         "portPosts": 0,
-        "readP95": 36.599999997764826,
+        "readP95": 25.899999998509884,
         "removes": 0,
         "renames": 0,
         "secondTabBusEvents": 8,
-        "secondTabReads": 187,
+        "secondTabReads": 140,
         "syncHandleOpens": 0,
         "syncHandleWriteSessions": 0,
         "writableCommits": 2000,
@@ -1640,7 +1649,7 @@
       "times": [
         {
           "metric": "readP95",
-          "value": 36.599999997764826,
+          "value": 25.899999998509884,
           "limit": 200,
           "met": true
         }
@@ -1657,7 +1666,7 @@
         }
       ],
       "spans": {
-        "durationMilliseconds": 16137.89999999851,
+        "durationMilliseconds": 11517.19999999553,
         "spans": {
           "queue.wait": {
             "count": 8,
@@ -1666,13 +1675,13 @@
           },
           "queue.held": {
             "count": 8,
-            "totalMilliseconds": 3889,
-            "maxMilliseconds": 614
+            "totalMilliseconds": 3207,
+            "maxMilliseconds": 459
           },
           "apply.hold": {
             "count": 1,
-            "totalMilliseconds": 15100,
-            "maxMilliseconds": 15100
+            "totalMilliseconds": 10627,
+            "maxMilliseconds": 10627
           }
         },
         "counters": {
@@ -1688,9 +1697,13 @@
             "total": 8,
             "peakPerSecond": 2
           },
+          "uncommitted.puts": {
+            "total": 274,
+            "peakPerSecond": 64
+          },
           "listing.bytes": {
             "total": 52493955,
-            "peakPerSecond": 13305123
+            "peakPerSecond": 19284437
           }
         },
         "gauges": {}
@@ -1720,11 +1733,11 @@
       },
       "samples": [
         {
-          "duration": 20196.400000002235,
+          "duration": 13236.30000000447,
           "lockRequests": 6743,
           "lockChains": 9,
-          "lockWait": 1456.500000026077,
-          "lockWaitMax": 11.5,
+          "lockWait": 934.1999999657273,
+          "lockWaitMax": 6,
           "writableOpens": 2001,
           "writableCommits": 2001,
           "syncHandleOpens": 0,
@@ -1734,7 +1747,7 @@
           "renames": 0,
           "removes": 0,
           "getFileCalls": 4002,
-          "handleLookups": 10049,
+          "handleLookups": 8709,
           "blobReads": 5502,
           "bytesRead": 107853062,
           "digests": 0,
@@ -1746,18 +1759,18 @@
           "lockTokens": 6743,
           "changesets": 9,
           "networkRequests": 0,
-          "saveLatency": 92.5,
-          "saveStartDelay": 29.300000000745058,
+          "saveLatency": 48.80000000447035,
+          "saveStartDelay": 18.200000002980232,
           "saveIssuedDuringApply": 1,
           "applyOperationsBeforeSave": 1,
-          "saveLockWait": 9.600000001490116,
-          "applyOperationsBeforeSaveByte": 7,
-          "saveWait": 29.300000000745058
+          "saveLockWait": 7,
+          "applyOperationsBeforeSaveByte": 2,
+          "saveWait": 18.200000002980232
         }
       ],
       "metrics": {
         "applyOperationsBeforeSave": 1,
-        "applyOperationsBeforeSaveByte": 7,
+        "applyOperationsBeforeSaveByte": 2,
         "blobReads": 5502,
         "broadcastPosts": 9,
         "busEvents": 9,
@@ -1766,24 +1779,24 @@
         "bytesWritten": 53542531,
         "changesets": 9,
         "digests": 0,
-        "duration": 20196.400000002235,
+        "duration": 13236.30000000447,
         "getFileCalls": 4002,
-        "handleLookups": 10049,
+        "handleLookups": 8709,
         "lockChains": 9,
         "lockRequests": 6743,
         "lockSets": 9,
         "lockTokens": 6743,
-        "lockWait": 1456.500000026077,
-        "lockWaitMax": 11.5,
+        "lockWait": 934.1999999657273,
+        "lockWaitMax": 6,
         "networkRequests": 0,
         "portPosts": 0,
         "removes": 0,
         "renames": 0,
         "saveIssuedDuringApply": 1,
-        "saveLatency": 92.5,
-        "saveLockWait": 9.600000001490116,
-        "saveStartDelay": 29.300000000745058,
-        "saveWait": 29.300000000745058,
+        "saveLatency": 48.80000000447035,
+        "saveLockWait": 7,
+        "saveStartDelay": 18.200000002980232,
+        "saveWait": 18.200000002980232,
         "syncHandleOpens": 0,
         "syncHandleWriteSessions": 0,
         "writableCommits": 2001,
@@ -1793,7 +1806,7 @@
       "times": [
         {
           "metric": "saveLatency",
-          "value": 92.5,
+          "value": 48.80000000447035,
           "limit": 250,
           "met": true
         }
@@ -1810,7 +1823,7 @@
         }
       ],
       "spans": {
-        "durationMilliseconds": 20347.5,
+        "durationMilliseconds": 13388.10000000149,
         "spans": {
           "queue.wait": {
             "count": 9,
@@ -1819,13 +1832,13 @@
           },
           "queue.held": {
             "count": 9,
-            "totalMilliseconds": 7251,
-            "maxMilliseconds": 1160
+            "totalMilliseconds": 3974,
+            "maxMilliseconds": 612
           },
           "apply.hold": {
             "count": 1,
-            "totalMilliseconds": 19255,
-            "maxMilliseconds": 19255
+            "totalMilliseconds": 12461,
+            "maxMilliseconds": 12461
           }
         },
         "counters": {
@@ -1835,15 +1848,19 @@
           },
           "locks.token": {
             "total": 6743,
-            "peakPerSecond": 991
+            "peakPerSecond": 1846
           },
           "changesets": {
             "total": 9,
             "peakPerSecond": 2
           },
+          "uncommitted.puts": {
+            "total": 274,
+            "peakPerSecond": 61
+          },
           "listing.bytes": {
             "total": 53542531,
-            "peakPerSecond": 11206034
+            "peakPerSecond": 11934635
           }
         },
         "gauges": {}
@@ -1915,11 +1932,11 @@
       },
       "samples": [
         {
-          "duration": 24515.79999999702,
+          "duration": 14755,
           "lockRequests": 7,
           "lockChains": 1,
-          "lockWait": 7.49999999627471,
-          "lockWaitMax": 2.599999997764826,
+          "lockWait": 2.9999999925494194,
+          "lockWaitMax": 1,
           "writableOpens": 1,
           "writableCommits": 1,
           "syncHandleOpens": 0,
@@ -1928,10 +1945,10 @@
           "bytesWritten": 1048576,
           "renames": 0,
           "removes": 0,
-          "getFileCalls": 7016,
-          "handleLookups": 3014,
-          "blobReads": 10644,
-          "bytesRead": 674003371,
+          "getFileCalls": 6784,
+          "handleLookups": 2782,
+          "blobReads": 10296,
+          "bytesRead": 669770995,
           "digests": 0,
           "bytesHashed": 0,
           "broadcastPosts": 1,
@@ -1941,40 +1958,40 @@
           "lockTokens": 7,
           "changesets": 1,
           "networkRequests": 0,
-          "grepDuration": 14428.699999999255,
+          "grepDuration": 8166.69999999553,
           "authorityReads": 2002,
-          "saveLatency": 36.30000000074506,
-          "readP95": 41,
-          "reads": 504
+          "saveLatency": 31.700000002980232,
+          "readP95": 24.399999998509884,
+          "reads": 388
         }
       ],
       "metrics": {
         "authorityReads": 2002,
-        "blobReads": 10644,
+        "blobReads": 10296,
         "broadcastPosts": 1,
         "busEvents": 1,
         "bytesHashed": 0,
-        "bytesRead": 674003371,
+        "bytesRead": 669770995,
         "bytesWritten": 1048576,
         "changesets": 1,
         "digests": 0,
-        "duration": 24515.79999999702,
-        "getFileCalls": 7016,
-        "grepDuration": 14428.699999999255,
-        "handleLookups": 3014,
+        "duration": 14755,
+        "getFileCalls": 6784,
+        "grepDuration": 8166.69999999553,
+        "handleLookups": 2782,
         "lockChains": 1,
         "lockRequests": 7,
         "lockSets": 1,
         "lockTokens": 7,
-        "lockWait": 7.49999999627471,
-        "lockWaitMax": 2.599999997764826,
+        "lockWait": 2.9999999925494194,
+        "lockWaitMax": 1,
         "networkRequests": 0,
         "portPosts": 0,
-        "readP95": 41,
-        "reads": 504,
+        "readP95": 24.399999998509884,
+        "reads": 388,
         "removes": 0,
         "renames": 0,
-        "saveLatency": 36.30000000074506,
+        "saveLatency": 31.700000002980232,
         "syncHandleOpens": 0,
         "syncHandleWriteSessions": 0,
         "writableCommits": 1,
@@ -1984,13 +2001,13 @@
       "times": [
         {
           "metric": "saveLatency",
-          "value": 36.30000000074506,
+          "value": 31.700000002980232,
           "limit": 100,
           "met": true
         },
         {
           "metric": "readP95",
-          "value": 41,
+          "value": 24.399999998509884,
           "limit": 200,
           "met": true
         }
@@ -2011,7 +2028,7 @@
         }
       ],
       "spans": {
-        "durationMilliseconds": 24683.89999999851,
+        "durationMilliseconds": 14905.80000000447,
         "spans": {
           "queue.wait": {
             "count": 1,
@@ -2020,14 +2037,14 @@
           },
           "queue.held": {
             "count": 1,
-            "totalMilliseconds": 23,
-            "maxMilliseconds": 23
+            "totalMilliseconds": 17,
+            "maxMilliseconds": 17
           }
         },
         "counters": {
           "listing.bytes": {
             "total": 128678176,
-            "peakPerSecond": 8520643
+            "peakPerSecond": 14599716
           },
           "locks.set": {
             "total": 1,

@@ -31,5 +31,9 @@ export const shareOrigin = (): string =>
  */
 export const authReturnOrigin = (): string => {
   const origin = isDesktopTarget() ? undefined : pageOrigin();
-  return origin?.startsWith('http') ? origin : new URL(ENV.TAU_FRONTEND_URL).origin;
+  if (origin?.startsWith('http')) {
+    return origin;
+  }
+  // The desktop SPA prerender runs without a frontend URL; pass it through as before rather than throw.
+  return URL.canParse(ENV.TAU_FRONTEND_URL) ? new URL(ENV.TAU_FRONTEND_URL).origin : ENV.TAU_FRONTEND_URL;
 };

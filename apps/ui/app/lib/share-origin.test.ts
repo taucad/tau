@@ -50,4 +50,15 @@ describe('authReturnOrigin', () => {
 
     expect(authReturnOrigin()).toBe('https://tau.new');
   });
+
+  it('should pass an unparseable frontend URL through on a server render instead of throwing', () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    globalThis.window.ENV = {
+      ...clientEnvironment,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names.
+      TAU_FRONTEND_URL: '',
+    };
+
+    expect(authReturnOrigin()).toBe('');
+  });
 });

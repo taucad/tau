@@ -13,7 +13,7 @@ import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { createRevisionHttpClient } from '#http-client.js';
 import type { RevisionHttpClient } from '#http-client.js';
 import { revisionId } from '#algorithms/index.js';
-import { coldOpenFromCatalogue, parseHeadListing } from '#object-store/cold-open.js';
+import { coldOpenFromCatalogue, importReachableFromCatalogue, parseHeadListing } from '#object-store/cold-open.js';
 import type { CatalogueFamily } from '#object-store/cold-open.js';
 import { createObjectStore, gitFilesOf, PackCeilingError } from '#object-store/object-store.js';
 import type { ObjectStore } from '#object-store/object-store.js';
@@ -22,6 +22,7 @@ import { readPackIndex } from '#pack-reader/pack-index.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
 import { profileChainDepth } from '#test/chain-depth-profile.js';
+import { mergeBaseHeads, mergeBaseOf } from '#revision-log-order.js';
 
 const catalogueUrl = 'https://api.test/v1/projects/project-1/git/catalogue';
 const filesOrigin = 'https://files.test/v1/git/owner-1/project-1';
@@ -548,6 +549,36 @@ describe.runIf(gitToolchainOnPath)('the cold open from a hosted catalogue (D8)',
     const log = await port.log({ heads: [revisionId(hosted.main)] });
     expect(log.map((entry) => entry.id)).toEqual([hosted.main]);
     expect(served.wholePackReads()).toBe(0);
+    /* Only the walks stop at the boundary: a revision read keeps its real parents (conflict terms, undo restore). */
+    const record = await port.readRevision(revisionId(hosted.main));
+    expect(record?.parents).toEqual([hosted.parent]);
+  });
+
+  it('never counts a read-through object as held, so an import walks a tree it only read through', async () => {
+    const compute = countingCompute();
+    const store = await emptyStore(compute, 'through');
+    await coldOpenFromCatalogue({ catalogueUrl, fetch: serve(hosted).fetch, store, compute });
+    /* Viewing an old revision reads its commit and tree through, but not every blob under it. */
+    const oldTree = hosted.git('rev-parse', `${hosted.parent}^{tree}`);
+    const [viewedCommit, viewedTree] = await Promise.all([store.read(hosted.parent), store.read(oldTree)]);
+    expect(viewedCommit?.type).toBe('commit');
+    expect(viewedTree?.type).toBe('tree');
+    expect(await store.has(oldTree)).toBe(false);
+    /* A new commit that shares that tree, taken object by object as a fetch past the ceiling takes it. */
+    const reused = hosted.git('commit-tree', oldTree, '-p', hosted.main, '-m', 'Back to the old tree');
+    hosted.git('update-ref', 'refs/heads/reuse', reused);
+    await hosted.publish();
+    const report = await importReachableFromCatalogue({
+      catalogueUrl,
+      fetch: serve(hosted, { expiresInSeconds: -1 }).fetch,
+      store,
+      compute,
+      wants: [reused],
+    });
+    expect(report).toBeDefined();
+    const blobs = lines(hosted.git('ls-tree', '-r', oldTree)).map((line) => line.split(/\s+/u)[2]!);
+    const held = await Promise.all([oldTree, ...blobs].map(async (oid) => store.has(oid)));
+    expect(held.every(Boolean)).toBe(true);
   });
 
   it('profiles chain depth as git verify-pack counts it', async () => {
@@ -657,15 +688,87 @@ describe.runIf(gitToolchainOnPath)('after a cold open, over smart HTTP and past 
     expect(largeRanges.some(([start, end]) => end - start === maximumRangeBytes)).toBe(true);
     expect(served.wholePackReads()).toBe(0);
   }, 240_000);
+});
 
-  it('reads an answer past the ceiling whole where no catalogue serves the remote', async () => {
-    const port = createIsomorphicGitRevisionPort({
-      filesystem: await createMemoryProvider(),
-      http: createRevisionHttpClient(),
-    });
-    await port.init({ author: { name: 'Tau', email: 'tau@example.com' } });
-    await port.setRemote({ name: 'origin', url: remote.url });
-    await port.fetch({ remote: 'origin', refs: ['refs/heads/main'] });
-    expect(await port.readRef('refs/remotes/origin/main')).toBe(hosted.git('rev-parse', 'refs/heads/main'));
+describe.runIf(gitToolchainOnPath)('a remote no catalogue serves', () => {
+  it('reads an answer past the ceiling whole', async () => {
+    const own = await host();
+    const root = await mkdtemp(join(tmpdir(), 'tau-w5-plain-'));
+    const remote = await startGitHttpBackend({ root });
+    try {
+      await own.write('large.bin', new Uint8Array(randomBytes(largeBytes)));
+      own.git('add', '-A');
+      own.git('commit', '-q', '-m', 'Large');
+      own.git('push', '-q', '--force', remote.repositoryPath, 'refs/heads/main:refs/heads/main');
+      const port = createIsomorphicGitRevisionPort({
+        filesystem: await createMemoryProvider(),
+        http: createRevisionHttpClient(),
+      });
+      await port.init({ author: { name: 'Tau', email: 'tau@example.com' } });
+      await port.setRemote({ name: 'origin', url: remote.url });
+      await port.fetch({ remote: 'origin', refs: ['refs/heads/main'] });
+      expect(await port.readRef('refs/remotes/origin/main')).toBe(own.git('rev-parse', 'refs/heads/main'));
+    } finally {
+      await remote.close();
+      await rm(root, { recursive: true, force: true });
+      await rm(own.directory, { recursive: true, force: true });
+    }
   }, 240_000);
+});
+
+describe.runIf(gitToolchainOnPath)('a shallow boundary whose history arrives', () => {
+  it('drops the boundary once its parents are held, so divergence and the merge base reach below it', async () => {
+    const own = await host();
+    const root = await mkdtemp(join(tmpdir(), 'tau-w5-deepen-'));
+    const remote = await startGitHttpBackend({ root });
+    try {
+      /* A branch from the cold tip's parent: fetching it brings the history below the boundary. */
+      const fork = own.git('rev-parse', 'refs/heads/main~1');
+      own.git('branch', 'feature', fork);
+      own.git('checkout', '-q', 'feature');
+      await own.write('feature.scad', 'cylinder(1);\n');
+      own.git('add', '-A');
+      own.git('commit', '-q', '-m', 'Feature');
+      const feature = own.git('rev-parse', 'refs/heads/feature');
+      own.git('checkout', '-q', 'main');
+      own.git(
+        'push',
+        '-q',
+        '--force',
+        remote.repositoryPath,
+        'refs/heads/main:refs/heads/main',
+        'refs/heads/feature:refs/heads/feature',
+      );
+      await own.publish();
+      const filesystem = await createMemoryProvider();
+      const port = createIsomorphicGitRevisionPort({
+        filesystem,
+        http: createRevisionHttpClient(),
+        catalogue: { url: () => catalogueUrl, fetch: serve(own).fetch },
+      });
+      await port.init({ author: { name: 'Tau', email: 'tau@example.com' } });
+      await port.setRemote({ name: 'origin', url: remote.url });
+      await port.fetch({ remote: 'origin', refs: ['refs/heads/main'] });
+      /* The catalogue brings the tag too: its commit is a boundary as well. */
+      expect(lines(String(await filesystem.readFile('.git/shallow', 'utf8')))).toEqual(
+        [own.main, own.tagged].toSorted(),
+      );
+      /* Load this port's copy of the boundary, then let another tab add a commit to the file behind it. */
+      await port.log({ heads: [revisionId(own.main)] });
+      const elsewhere = 'f'.repeat(40);
+      await filesystem.writeFile('.git/shallow', `${own.main}\n${elsewhere}\n`);
+
+      await port.fetch({ remote: 'origin', refs: ['refs/heads/feature'] });
+      /* The cold tip's parent arrived: it is no longer shallow; the other tab's line is kept, read again under the lock. */
+      expect(lines(String(await filesystem.readFile('.git/shallow', 'utf8')))).toEqual([elsewhere]);
+      const main = revisionId(own.main);
+      const tip = revisionId(feature);
+      expect(await port.divergence({ head: main, base: tip })).toEqual({ ahead: 1, behind: 1 });
+      expect(mergeBaseOf(await port.log({ heads: mergeBaseHeads(main, tip) }), main, tip)).toBe(fork);
+    } finally {
+      await remote.close();
+      await rm(root, { recursive: true, force: true });
+      await rm(own.directory, { recursive: true, force: true });
+    }
+  }, 120_000);
 });

@@ -566,9 +566,33 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
   };
 
   /*
-   * Misses, read through and kept loose. A commit's tree and parents are what
-   * a walk reads next, so they come in a second request with it rather than
-   * one request each.
+   * Objects read through, held beside the store and never in it: `has`
+   * answers for the store's own files only, so an import that skips what the
+   * store holds never skips a tree whose blobs were not read. Bounded by
+   * bytes, oldest out first.
+   */
+  const readThroughBytes = 32 * 1024 * 1024;
+  const throughCache = new Map<string, StoredObject>();
+  let throughCacheBytes = 0;
+  const holdThrough = (oid: string, object: StoredObject): void => {
+    if (throughCache.has(oid) || object.data.byteLength > readThroughBytes) {
+      return;
+    }
+    throughCache.set(oid, object);
+    throughCacheBytes += object.data.byteLength;
+    for (const [oldest, held] of throughCache) {
+      if (throughCacheBytes <= readThroughBytes) {
+        break;
+      }
+      throughCache.delete(oldest);
+      throughCacheBytes -= held.data.byteLength;
+    }
+  };
+
+  /*
+   * Misses, read through and held beside the store. A commit's tree and
+   * parents are what a walk reads next, so they come in a second request
+   * with it rather than one request each.
    */
   const readMisses = async (oids: readonly string[]): Promise<Map<string, StoredObject>> => {
     const found = await fromSources(oids);
@@ -586,15 +610,18 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
     for (const [oid, object] of await fromSources(wanted.filter((_oid, at) => !held[at]))) {
       found.set(oid, object);
     }
-    await writeLoose([...found].map(([oid, object]) => ({ ...object, oid })));
+    for (const [oid, object] of found) {
+      holdThrough(oid, object);
+    }
     return found;
   };
 
   /* The misses of one turn, read through in one request: a log walks a generation's parents at once. */
   let pendingMisses: Readonly<{ oids: Set<string>; answer: Promise<Map<string, StoredObject>> }> | undefined;
   const readThrough = async (oid: string): Promise<StoredObject | undefined> => {
-    if (sources.length === 0) {
-      return undefined;
+    const cached = throughCache.get(oid);
+    if (cached !== undefined || sources.length === 0) {
+      return cached;
     }
     if (pendingMisses === undefined) {
       const oids = new Set<string>();

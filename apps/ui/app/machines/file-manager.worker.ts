@@ -19,6 +19,7 @@ import {
   createRevisionHttpClient,
   recordLastPush,
   sendKeepalivePush,
+  tauCatalogueUrl,
 } from '@taucad/revisions';
 import type { PushRecorder } from '@taucad/revisions';
 import { serveTurnPlacementChannel } from '@taucad/agent-host/channel-client';
@@ -475,6 +476,14 @@ const revisionRegistry = createWorkerRevisionRegistry({
       filesystem: fileService.createRootedFileSystem(`/projects/${projectId}`),
       checkouts: checkoutRoutes(projectId),
       compute: revisionCompute,
+      /*
+       * D8: a Tau project's first open reads its hosted catalogue (heads by
+       * listing, objects by Range through stored indexes) instead of one
+       * `upload-pack` of the whole history. The catalogue request carries the
+       * session cookie and the files links carry their own signature; where
+       * the catalogue does not answer, the open goes over smart HTTP as before.
+       */
+      catalogue: { url: (remoteUrl) => tauCatalogueUrl(credential()?.apiBaseUrl, remoteUrl) },
       /* The page's session is a cookie on the API's origin, so `include` is the
        * whole of "this browser is signed in" (I8, S24). The worker never holds
        * a token and never puts one in a URL. A *third-party* remote is reached

@@ -273,6 +273,8 @@ export type ComputeConnection = Readonly<{
   pending: () => number;
   /** When the worker was last heard from (a start, an answer, a pong), or a call was sent to an idle one. */
   heard: () => number;
+  /** Whether the worker has sent anything at all: one that has not may never have loaded. */
+  spoke: () => boolean;
   /** Ask the worker to answer, so a silent one can be told from a busy one. */
   ping: () => void;
   /** Fail every call this connection holds, and every call it is given afterwards. */
@@ -289,11 +291,13 @@ export type ComputeConnection = Readonly<{
 export const openComputeConnection = (port: ComputePort, now: () => number = Date.now): ComputeConnection => {
   let next = 0;
   let heard = now();
+  let spoke = false;
   let closed: ((method: ComputeMethod) => Error) | undefined;
   const waiting = new Map<number, Readonly<{ method: ComputeMethod; call: PromiseWithResolvers<unknown> }>>();
   port.addEventListener('message', (event) => {
     const { id, result, error, started, pong } = event.data as ComputeAnswer;
     heard = now();
+    spoke = true;
     if (started === true || pong === true) {
       return;
     }
@@ -330,6 +334,7 @@ export const openComputeConnection = (port: ComputePort, now: () => number = Dat
     compute: Object.freeze(compute),
     pending: () => waiting.size,
     heard: () => heard,
+    spoke: () => spoke,
     ping: () => {
       port.postMessage({ id: -1, ping: true }, []);
     },

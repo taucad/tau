@@ -11,7 +11,10 @@
  * {@link SupervisorOptions.restartWindow} stop the restarts: later calls go to
  * the fallback when the host gave one, and otherwise fail typed
  * (`unavailable`), so a worker that cannot load is not respawned forever. A
- * `spawn` that throws counts as a crash. Pack indexing never runs on the
+ * `spawn` that throws counts as a crash. So does a worker that dies before it
+ * sent anything, which never loaded (a blocked `worker-src`, a missing chunk):
+ * its held calls go to the fallback when there is one, and fail `crashed` only
+ * without one. Pack indexing never runs on the
  * fallback: past the worker it fails typed rather than hold the authority's
  * thread for seconds.
  *
@@ -41,7 +44,7 @@ export type ComputeWorkerHandle = Readonly<{
  * @public
  */
 export type ComputeCrashReport = Readonly<{
-  /** Calls the dead worker held, each failed typed. */
+  /** Calls the dead worker held that failed typed; those of a worker that never loaded and went to the fallback are not counted. */
   failedCalls: number;
   /** Restarts inside the window so far, this one included. */
   restarts: number;
@@ -110,23 +113,32 @@ export const createSupervisedComputeWorker = (options: SupervisorOptions): Super
   /* Calls over the in-flight bound wait here, unsent: a queued call is not a silent worker's. */
   let inFlight = 0;
   const queued: Array<() => void> = [];
+  /* The failures of calls held by a worker that never loaded: the call sends them on to the fallback. */
+  const unloaded = new WeakSet<Error>();
 
   const stopBeat = (): void => {
     clearInterval(beat);
     beat = undefined;
   };
 
-  const stop = (failure: ComputeWorkerCrashedError['failure'], cause?: unknown): number => {
+  /* Answers how many held calls failed; with `reroute`, those the fallback may serve are marked for it instead. */
+  const stop = (failure: ComputeWorkerCrashedError['failure'], cause?: unknown, reroute = false): number => {
     const held = current;
     current = undefined;
     stopBeat();
     if (held === undefined) {
       return 0;
     }
-    const failedCalls = held.connection.pending();
-    held.connection.close(
-      (method) => new ComputeWorkerCrashedError(failure, method, cause === undefined ? undefined : { cause }),
-    );
+    let failedCalls = 0;
+    held.connection.close((method) => {
+      const error = new ComputeWorkerCrashedError(failure, method, cause === undefined ? undefined : { cause });
+      if (reroute && !workerOnly.has(method)) {
+        unloaded.add(error);
+      } else {
+        failedCalls += 1;
+      }
+      return error;
+    });
     held.handle.terminate();
     return failedCalls;
   };
@@ -144,7 +156,13 @@ export const createSupervisedComputeWorker = (options: SupervisorOptions): Super
       return;
     }
     counted();
-    const failedCalls = stop('crashed', cause);
+    /*
+     * A worker that dies before it sent anything — no start, no answer, no
+     * pong — never loaded (a blocked `worker-src`, a missing chunk, no nested
+     * module workers): its calls are not its fault, so they go to the
+     * fallback rather than fail. One that had spoken fails what it held.
+     */
+    const failedCalls = stop('crashed', cause, options.fallback !== undefined && !current.connection.spoke());
     options.onCrash?.({ failedCalls, restarts: restarts.length, abandoned });
   };
 
@@ -247,7 +265,15 @@ export const createSupervisedComputeWorker = (options: SupervisorOptions): Super
         if (current?.connection.compute === compute) {
           watch();
         }
-        return await (compute[method] as (...input: readonly unknown[]) => Promise<unknown>)(...args);
+        try {
+          return await (compute[method] as (...input: readonly unknown[]) => Promise<unknown>)(...args);
+        } catch (error) {
+          const { fallback } = options;
+          if (fallback === undefined || !(error instanceof Error) || !unloaded.has(error)) {
+            throw error;
+          }
+          return await (fallback[method] as (...input: readonly unknown[]) => Promise<unknown>)(...args);
+        }
       } finally {
         release();
       }

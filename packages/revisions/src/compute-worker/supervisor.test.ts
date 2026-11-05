@@ -148,10 +148,15 @@ describe('the supervised compute worker (W5)', () => {
   });
 
   it('stops restarting after the budget and sends calls to the fallback, or fails them typed without one', async () => {
+    /* A worker that loaded: it starts the call it is given, then dies before answering. */
     const spawnCrashing = (): FakeWorker => {
       const worker = fakeWorker();
-      queueMicrotask(() => {
-        worker.crash();
+      worker.hang();
+      worker.addEventListener('message', () => {
+        /* After the supervisor's own listener has heard the start. */
+        queueMicrotask(() => {
+          worker.crash();
+        });
       });
       return worker;
     };
@@ -165,6 +170,44 @@ describe('the supervised compute worker (W5)', () => {
       // oxlint-disable-next-line no-await-in-loop -- as above.
       await expect(without.sha1(body)).rejects.toBeInstanceOf(ComputeWorkerCrashedError);
     }
+    expect(withFallback.spawned()).toBe(3);
+    expect(await withFallback.sha1(body)).toBe(digestHex('sha1', body));
+    expect(withFallback.spawned()).toBe(3);
+    await expect(without.sha1(body)).rejects.toMatchObject({ failure: 'unavailable', method: 'sha1' });
+  });
+
+  it('sends the calls of a worker that dies before its first message to the fallback, or fails them without one', async () => {
+    /* A module worker that never loaded: a blocked `worker-src`, a missing chunk. It errors and says nothing. */
+    const spawnUnloadable = (): FakeWorker => {
+      const worker = fakeWorker();
+      worker.freeze();
+      queueMicrotask(() => {
+        worker.crash();
+      });
+      return worker;
+    };
+    const crashes: unknown[] = [];
+    const withFallback = createSupervisedComputeWorker({
+      spawn: spawnUnloadable,
+      maxRestarts: 2,
+      fallback: createInlineCompute(),
+      onCrash: (report) => crashes.push(report),
+    });
+    const without = createSupervisedComputeWorker({ spawn: spawnUnloadable, maxRestarts: 2 });
+    const body = encoder.encode('sphere(1);\n');
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      /* Every call is answered inline, never failed as crashed. */
+      // oxlint-disable-next-line no-await-in-loop -- each call loses its own worker in turn.
+      expect(await withFallback.sha1(body)).toBe(digestHex('sha1', body));
+      // oxlint-disable-next-line no-await-in-loop -- as above.
+      await expect(without.sha1(body)).rejects.toMatchObject({ failure: 'crashed', method: 'sha1' });
+    }
+    /* Each load failure still counts as a crash, so the restarts stop at the budget. */
+    expect(crashes).toEqual([
+      { failedCalls: 0, restarts: 1, abandoned: false },
+      { failedCalls: 0, restarts: 2, abandoned: false },
+      { failedCalls: 0, restarts: 3, abandoned: true },
+    ]);
     expect(withFallback.spawned()).toBe(3);
     expect(await withFallback.sha1(body)).toBe(digestHex('sha1', body));
     expect(withFallback.spawned()).toBe(3);

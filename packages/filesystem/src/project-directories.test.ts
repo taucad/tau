@@ -478,14 +478,20 @@ describe('WorkspaceFileService', () => {
       const sender = new BroadcastChannel('tau-fs-changes');
 
       try {
-        sender.postMessage({ tabId: crypto.randomUUID(), seq: 1, changes: [{
-          type: 'directory-change',
-          path: '/',
-          authority: {
-            storageRootKey: providerRegistry.resolveStorageRootKey({ backend: 'indexeddb' }),
-            providerBasePath: '',
-          },
-        }] });
+        sender.postMessage({
+          tabId: crypto.randomUUID(),
+          seq: 1,
+          changes: [
+            {
+              type: 'directory-change',
+              path: '/',
+              authority: {
+                storageRootKey: providerRegistry.resolveStorageRootKey({ backend: 'indexeddb' }),
+                providerBasePath: '',
+              },
+            },
+          ],
+        });
         await waitFor(() => refresh.mock.calls.length > 0);
         refresh.mockClear();
 
@@ -514,14 +520,20 @@ describe('WorkspaceFileService', () => {
       const sender = new BroadcastChannel('tau-fs-changes');
 
       try {
-        sender.postMessage({ tabId: crypto.randomUUID(), seq: 1, changes: [{
-          type: 'directory-change',
-          path: '/unrelated',
-          authority: {
-            storageRootKey: providerRegistry.resolveStorageRootKey({ backend: 'indexeddb' }),
-            providerBasePath: 'different-project',
-          },
-        }] });
+        sender.postMessage({
+          tabId: crypto.randomUUID(),
+          seq: 1,
+          changes: [
+            {
+              type: 'directory-change',
+              path: '/unrelated',
+              authority: {
+                storageRootKey: providerRegistry.resolveStorageRootKey({ backend: 'indexeddb' }),
+                providerBasePath: 'different-project',
+              },
+            },
+          ],
+        });
         await new Promise((resolve) => {
           setTimeout(resolve, 20);
         });

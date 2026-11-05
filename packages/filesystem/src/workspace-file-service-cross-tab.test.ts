@@ -243,11 +243,17 @@ describe('WorkspaceFileService cross-tab authority delivery', () => {
     const stop = reader.eventBus.subscribe((event) => rawEvents.push(event));
     const sender = new BroadcastChannel('tau-fs-changes');
     try {
-      sender.postMessage({ tabId: crypto.randomUUID(), seq: 1, changes: [{
-        type: 'write',
-        path: '/foreign.txt',
-        authority: { storageRootKey: 'indexeddb:not-owned', providerBasePath: '' },
-      }] });
+      sender.postMessage({
+        tabId: crypto.randomUUID(),
+        seq: 1,
+        changes: [
+          {
+            type: 'write',
+            path: '/foreign.txt',
+            authority: { storageRootKey: 'indexeddb:not-owned', providerBasePath: '' },
+          },
+        ],
+      });
       await new Promise((resolve) => {
         setTimeout(resolve, 20);
       });

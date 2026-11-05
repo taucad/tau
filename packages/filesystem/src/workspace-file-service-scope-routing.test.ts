@@ -242,27 +242,39 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
     const sender = new BroadcastChannel('tau-fs-changes');
 
     try {
-      sender.postMessage({ tabId: crypto.randomUUID(), seq: 1, changes: [{
-        type: 'project-unavailable',
-        path: `/projects/${alphaProjectId}`,
-        authority: {
-          storageRootKey: 'memory:authority-a',
-          providerBasePath: alphaProjectId,
-        },
-      }] });
+      sender.postMessage({
+        tabId: crypto.randomUUID(),
+        seq: 1,
+        changes: [
+          {
+            type: 'project-unavailable',
+            path: `/projects/${alphaProjectId}`,
+            authority: {
+              storageRootKey: 'memory:authority-a',
+              providerBasePath: alphaProjectId,
+            },
+          },
+        ],
+      });
       await new Promise((resolve) => {
         setTimeout(resolve, 20);
       });
       await expect(service.readFile(`/projects/${alphaProjectId}/current.txt`, 'utf8')).resolves.toBe('authority b');
 
-      sender.postMessage({ tabId: crypto.randomUUID(), seq: 1, changes: [{
-        type: 'project-unavailable',
-        path: `/projects/${alphaProjectId}`,
-        authority: {
-          storageRootKey: 'memory:authority-b',
-          providerBasePath: alphaProjectId,
-        },
-      }] });
+      sender.postMessage({
+        tabId: crypto.randomUUID(),
+        seq: 1,
+        changes: [
+          {
+            type: 'project-unavailable',
+            path: `/projects/${alphaProjectId}`,
+            authority: {
+              storageRootKey: 'memory:authority-b',
+              providerBasePath: alphaProjectId,
+            },
+          },
+        ],
+      });
       await vi.waitFor(async () => {
         await expect(service.readFile(`/projects/${alphaProjectId}/current.txt`)).rejects.toMatchObject({
           code: 'UNBOUND_PROJECT_ROUTE',

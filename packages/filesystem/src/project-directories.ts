@@ -717,9 +717,7 @@ export class ProjectDirectories {
               ...(descriptor.mode === undefined ? {} : { mode: descriptor.mode }),
             })),
           );
-          await commitPhase([
-            { op: 'write', path: `${path}/tau.json`, data: manifest },
-          ]);
+          await commitPhase([{ op: 'write', path: `${path}/tau.json`, data: manifest }]);
           const committed = parseProjectManifestBytes(await provider.readFile(`${path}/tau.json`));
           const committedIdentity = await this._readIdentity({ provider, directory: path, scope, storageRootKey });
           if (!committed.success || committedIdentity?.projectId !== projectId) {

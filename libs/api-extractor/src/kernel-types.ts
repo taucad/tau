@@ -4,6 +4,7 @@ import jscadRaw from '#generated/jscad/jscad-modeling.bundled.json?raw';
 import manifoldRaw from '#generated/manifold/manifold.bundled.json?raw';
 import picovoxelRaw from '#generated/picovoxel/picovoxel.bundled.json?raw';
 import smlibRaw from '#generated/smlib/smlib.bundled.json?raw';
+import tscircuitRaw from '#generated/tscircuit/tscircuit.bundled.json?raw';
 import type { BundledTypesPackageMap } from '#bundled-types.types.js';
 
 /** Map of module specifier to raw `.d.ts` content. @public */
@@ -47,6 +48,11 @@ export const manifoldTypes: KernelTypesMap = parseTypesMap(manifoldRaw);
 export const picovoxelTypes: BundledTypesPackageMap = parsePackageMap(picovoxelRaw);
 /** The `@classcad/smlibwasm` declarations with their relative topology, and Tau's `@taucad/smlib/model` types. @public */
 export const smlibTypes: BundledTypesPackageMap = parsePackageMap(smlibRaw);
+/**
+ * The tscircuit JSX surface: flattened `@tscircuit/props` and `@tscircuit/core`, the `tscircuit`
+ * alias, and the React declarations whose `react/jsx-runtime` TSX resolves. @public
+ */
+export const tscircuitTypes: BundledTypesPackageMap = parsePackageMap(tscircuitRaw);
 
 /** All kernel declarations projected as root packages with relative declaration files. @public */
 export const kernelTypePackageMaps: readonly BundledTypesPackageMap[] = [
@@ -56,4 +62,5 @@ export const kernelTypePackageMaps: readonly BundledTypesPackageMap[] = [
   projectPackageTypes('manifold-3d', manifoldTypes),
   picovoxelTypes,
   smlibTypes,
+  tscircuitTypes,
 ];

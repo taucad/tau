@@ -44,6 +44,11 @@ type MaterializeTreeOptions<Result> = Readonly<{
 /**
  * Build the apply/recover/materialize trio over one project's checkout seams.
  *
+ * Exported at `@taucad/revisions/apply-tree` so the filesystem scenario
+ * harness (charter W0, S3/S16/S17) drives this exact apply protocol on real
+ * OPFS rather than a copy of it; `createRevisionActors` is its production caller.
+ *
+ * @public
  * @param dependencies - Every value the group reads from the actor closure:
  *   how to open a checkout, how to capture one, the fence, the checkout's
  *   tree-id reader, and the temporary-sibling pair an apply stages through.

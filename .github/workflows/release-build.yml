@@ -180,10 +180,31 @@ jobs:
           wait-minutes: '180'
           github-token: ${{ github.token }}
 
+      # The API's `test` target needs Postgres, Redis and MinIO; CI's
+      # "API tests (Postgres + MinIO)" job starts them the same way. Without
+      # them every repository-store suite fails on ECONNREFUSED :9000.
+      - name: Start Postgres + Redis + MinIO for the API suites
+        if: needs.resolve.outputs.project == 'api'
+        run: |
+          set -euo pipefail
+          cp apps/api/.env.example apps/api/.env
+          docker compose -f infra/docker-compose.yml up -d postgres redis minio minio-bootstrap
+          bash infra/docker-compose.test.sh
+          BILLING_DATABASE_URL=postgresql://dev_user:dev_password@localhost:5432/tau_dev pnpm nx run-many -t db-migrate --projects tag:scope:api
+
       - name: Lint, typecheck, test and build the release
         env:
           PROJECT: ${{ needs.resolve.outputs.project }}
-        run: pnpm nx run-many -t lint typecheck test build --projects="$PROJECT" --parallel=2
+          # The UI build validates these, as in CI; the deploys set their own.
+          TAU_API_URL: http://localhost:4000
+          TAU_WEBSOCKET_URL: ws://localhost:4001
+          TAU_FRONTEND_URL: http://localhost:3000
+        run: |
+          set -euo pipefail
+          # Named here, as in CI's API job, so the suites' database is stated where they run.
+          if [ "$PROJECT" = api ]; then export DATABASE_URL=postgresql://dev_user:dev_password@localhost:5432/tau_dev; fi
+          # One task at a time with full output, as CI's lanes run them.
+          pnpm nx run-many -t lint typecheck test build --projects="$PROJECT" --parallel=1 --outputStyle=static
 
   # OCCT (LGPL-2.1 with the Open CASCADE exception) is compiled into the GeoSpec
   # engine that the UI serves as Wasm and the desktop app bundles, so each UI
@@ -1374,6 +1395,33 @@ jobs:
     with:
       environment: production
       app: api
+    secrets: inherit
+
+  # tau-mirror and tau-maintenance run the API image, so they ship with each API
+  # release, after the API's release command has migrated the database and
+  # created their logins. One at a time: maintenance must stay a singleton.
+  production-mirror:
+    needs: [production-api]
+    name: Production mirror
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: production
+      app: mirror
+    secrets: inherit
+
+  production-maintenance:
+    needs: [production-mirror]
+    name: Production maintenance
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: production
+      app: maintenance
     secrets: inherit
 
   # The UI serves OCCT compiled into the GeoSpec engine, so it ships only once

@@ -24,6 +24,8 @@ import { preparePicogkBrowserRuntime } from '#picogk-browser-runtime.js';
 let generation = 0;
 let state = 'new';
 let recycleHeapBytes = defaultPicogkRecycleHeapBytes;
+/** Concurrent compiler-reference downloads while initializing. */
+const referenceDownloadLanes = 8;
 /** @type {BrowserRuntime} */
 let runtime;
 /** @type {import('./picogk-browser-runtime.ts').PicogkBrowserRuntimeLoader | undefined} */
@@ -92,6 +94,24 @@ const writeFile = (path, bytes) => {
   runtime.Module.FS.writeFile(path, bytes);
 };
 
+/** Download, verify and admit one compiler reference to MEMFS.
+ * @param {{ path: string; url: string; sha256: string; name: string }} reference - Validated reference.
+ */
+const stageReference = async (reference) => {
+  const response = await fetch(reference.url);
+  if (!response.ok) {
+    throw new Error(`PicoGK reference download failed: ${response.status}.`);
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('');
+  if (digest !== reference.sha256) {
+    throw new Error(`PicoGK reference integrity mismatch: ${reference.name}.`);
+  }
+  writeFile(reference.path, bytes);
+};
+
 /** Remove only the disposable worker mirror, without following authored links.
  * @param {string} root - Worker-owned absolute directory.
  */
@@ -145,7 +165,8 @@ const initialize = async (message) => {
       await import(runtimeLoader.bootstrapUrl)
     );
   runtime = await module.dotnet.withResourceLoader(runtimeLoader.loadResource).create();
-  const references = [];
+  /** @type {Array<{ path: string; url: string; sha256: string; name: string }>} */
+  const pending = [];
   const paths = new Set();
   for (const reference of /** @type {import('./picogk-browser-session.ts').PicogkBrowserAssets['references']} */ (
     assets.references
@@ -155,23 +176,29 @@ const initialize = async (message) => {
       throw new Error('Invalid PicoGK compiler reference.');
     }
     paths.add(path);
-    // oxlint-disable-next-line no-await-in-loop -- Bound peak reference memory while staging the compiler.
-    const response = await fetch(reference.url);
-    if (!response.ok) {
-      throw new Error(`PicoGK reference download failed: ${response.status}.`);
-    }
-    // oxlint-disable-next-line no-await-in-loop -- Consume each download before requesting the next.
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    // oxlint-disable-next-line no-await-in-loop -- Verify each reference before admitting it to MEMFS.
-    const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (byte) =>
-      byte.toString(16).padStart(2, '0'),
-    ).join('');
-    if (digest !== reference.sha256.toLowerCase()) {
-      throw new Error(`PicoGK reference integrity mismatch: ${reference.path}.`);
-    }
-    writeFile(path, bytes);
-    references.push(path);
+    pending.push({ path, url: reference.url, sha256: reference.sha256.toLowerCase(), name: reference.path });
   }
+  const references = pending.map(({ path }) => path);
+  // A few downloads in flight hide per-request latency (178 serial requests cost ~55 s at 300 ms RTT),
+  // while peak staging memory stays bounded by the lane count rather than the whole reference set.
+  const queue = pending.values();
+  const stop = { requested: false };
+  const stageReferences = async () => {
+    for (const reference of queue) {
+      if (stop.requested) {
+        return;
+      }
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- Each lane consumes one download before requesting the next.
+        await stageReference(reference);
+      } catch (error) {
+        // Initialization has failed; the other lanes stop requesting more references.
+        stop.requested = true;
+        throw error;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(referenceDownloadLanes, pending.length) }, stageReferences));
   for (const file of /** @type {import('./picogk-browser-session.ts').PicogkBrowserSnapshot['files']} */ (
     snapshot.files
   )) {

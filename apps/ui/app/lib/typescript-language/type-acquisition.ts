@@ -20,6 +20,11 @@ type AcquisitionOptions = Readonly<{
   dependencyReader?: DependencyReader;
   dynamicTypes: boolean;
   readProjectFile?: ProjectReader;
+  /**
+   * Packages a document needs without naming them in an import, such as the JSX runtime and
+   * intrinsic elements a `.tsx` file compiles against.
+   */
+  implicitPackages?: (uri: string) => readonly string[];
   onError?: (error: Error) => void;
 }>;
 
@@ -154,14 +159,14 @@ export class TypeAcquisitionController {
     }
     const timer = setTimeout(() => {
       this.timers.delete(document);
-      void this.runScan(document.text);
+      void this.runScan(document.text, document.uri);
     }, scanDelay);
     this.timers.set(document, timer);
   }
 
-  private async runScan(text: string): Promise<void> {
+  private async runScan(text: string, uri?: string): Promise<void> {
     try {
-      await this.scan(text);
+      await this.scan(text, uri);
     } catch (error) {
       this.report(error);
     }
@@ -171,12 +176,17 @@ export class TypeAcquisitionController {
     return this.options.client.request({ kind: 'declarationImports', text });
   }
 
-  private async scan(text: string): Promise<void> {
+  private async scan(text: string, uri?: string): Promise<void> {
     if (this.isDisposed()) {
       return;
     }
+    await this.mountImplicit(uri);
     const imports = await this.imports(text);
     for (const entry of imports) {
+      // A `/// <reference path>` names a sibling file (`@types/react`'s `global.d.ts`), never a package.
+      if (entry.reference === 'path') {
+        continue;
+      }
       const specifier =
         entry.reference === 'types' ? `@types/${entry.name.replace('@', '').replace('/', '__')}` : entry.name;
       if (!specifier) {
@@ -202,6 +212,16 @@ export class TypeAcquisitionController {
           version: cdn?.version,
         });
       }
+    }
+  }
+
+  /** Implicit packages come from the mounted bundle only: a CDN copy of an unbundled package is far larger. */
+  private async mountImplicit(uri: string | undefined): Promise<void> {
+    if (uri === undefined) {
+      return;
+    }
+    for (const packageName of this.options.implicitPackages?.(uri) ?? []) {
+      await this.tryMountedTypes(packageName);
     }
   }
 
@@ -410,7 +430,7 @@ export class TypeAcquisitionController {
         void this.runScan(text);
       }
       for (const document of this.subscriptions.keys()) {
-        void this.runScan(document.text);
+        void this.runScan(document.text, document.uri);
       }
     }, retryDelay);
   }

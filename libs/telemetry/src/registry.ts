@@ -561,6 +561,18 @@ export const TauMetrics = {
   }),
 
   /**
+   * Share of the Redis memory limit in use (`used_memory / maxmemory` from `INFO memory`). The
+   * production instance runs without eviction, so at 1 Redis refuses writes; unrecorded when the
+   * server reports no limit.
+   */
+  redisMemoryUtilization: defineGauge({
+    name: 'redis.memory.utilization',
+    unit: '1',
+    description: 'Fraction of the Redis memory limit in use (used_memory / maxmemory)',
+    attributes: z.object({}),
+  }),
+
+  /**
    * Down readiness indicators by indicator. A down indicator is the probe working (a Machine
    * fault drains the Machine; a shared dependency stays ready and is degraded), so it is counted
    * here and logged as a warning rather than reported as an application error; one increment per

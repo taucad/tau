@@ -445,8 +445,13 @@ export const runtimeVocabulary = {
   demandKind: closed(['measured', 'estimated', 'unknown']),
 } as const;
 
-/** Client releases: a short SHA (UI) or a semver (desktop, CLI, daemon image). @public */
-export const releasePattern = /^[\da-f]{7,12}$|^\d+\.\d+\.\d+$/u;
+/**
+ * Client releases: a short SHA (UI) or a semver (desktop, CLI, daemon image), with an optional prerelease such as
+ * the CLI's `0.1.0-beta.9`. A prerelease is at most four dot-separated lowercase alphanumeric identifiers, so the
+ * value stays a bounded label; a release outside the admitted set still records as `_OTHER`.
+ * @public
+ */
+export const releasePattern = /^[\da-f]{7,12}$|^\d+\.\d+\.\d+(?:-[\da-z]{1,16}(?:\.[\da-z]{1,16}){0,3})?$/u;
 /** At most this many admitted releases keep their own label; older or unknown releases record as `_OTHER`. @public */
 export const admittedReleaseLimit = 32;
 

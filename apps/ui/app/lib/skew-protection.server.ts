@@ -8,8 +8,8 @@
  * the token as a cookie on every document, so each later request from that page carries it.
  * Netlify drops the signal on document navigations, so a new page always loads the live deploy.
  *
- * Off unless `TAU_SKEW_PROTECTION=true` and Netlify provides `NETLIFY_SKEW_PROTECTION_TOKEN`
- * (production context only; alias deploys, previews, local and `tau serve` have none or ignore it).
+ * On wherever Netlify provides `NETLIFY_SKEW_PROTECTION_TOKEN`; local, desktop and `tau serve`
+ * have none, and Netlify ignores the cookie outside production deploys (the staging alias, previews).
  * Caveat: a cookie is shared by every tab, so a newer tab's document re-pins older tabs to the
  * newer deploy. That is never worse than without protection (every request then goes to the live
  * deploy, as today), but only the most recently loaded build is fully protected.
@@ -22,11 +22,11 @@ export const skewProtectionCookieName = 'tau_skew';
  * The `Set-Cookie` value pinning this document's later requests to the deploy that rendered it.
  *
  * @param env - The runtime environment.
- * @returns The header value, or `undefined` while skew protection is off.
+ * @returns The header value, or `undefined` without a token.
  */
 export const skewProtectionCookie = (env: Readonly<Record<string, string | undefined>>): string | undefined => {
   const token = env['NETLIFY_SKEW_PROTECTION_TOKEN'];
-  if (env['TAU_SKEW_PROTECTION'] !== 'true' || token === undefined || token === '') {
+  if (token === undefined || token === '') {
     return undefined;
   }
   return `${skewProtectionCookieName}=${encodeURIComponent(token)}; Path=/; Secure; HttpOnly; SameSite=Lax`;

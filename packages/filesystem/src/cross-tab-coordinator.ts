@@ -10,6 +10,7 @@
 import { z } from 'zod';
 import { assertRootedPath, resolveAuthorityPath } from '@taucad/utils/path';
 import { projectRoute } from '#project-routes.js';
+import { workerTimings } from '#worker-timings.js';
 
 const lockPrefix = 'tau-fs-write:';
 const channelName = 'tau-fs-changes';
@@ -59,6 +60,8 @@ export const withCrossTabLocks = async <T>(paths: readonly string[], operation: 
     return operation();
   }
   const sortedPaths = [...new Set(paths)].sort();
+  workerTimings.count('locks.set');
+  workerTimings.count('locks.token', sortedPaths.length);
   const acquire = async (index: number): Promise<T> => {
     const path = sortedPaths[index];
     if (path === undefined) {

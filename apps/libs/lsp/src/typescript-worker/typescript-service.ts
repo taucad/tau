@@ -70,6 +70,8 @@ export const defaultTypeScriptCompilerOptions: ts.CompilerOptions = {
   allowJs: true,
   allowNonTsExtensions: true,
   allowSyntheticDefaultImports: true,
+  // The tscircuit kernel evaluates TSX with `React` as a global, so a module may name it without importing it.
+  allowUmdGlobalAccess: true,
   checkJs: true,
   esModuleInterop: true,
   experimentalDecorators: true,

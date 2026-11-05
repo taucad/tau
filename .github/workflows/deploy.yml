@@ -261,6 +261,53 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets[steps.targets.outputs.token_secret] }}
 
+      # `flyctl deploy` updates each Machine where it already runs, so changing
+      # `primary_region` moves nothing by itself. Clone every Machine that runs
+      # outside the config's primary region into it, wait for a started clone to
+      # report started, then destroy the original. No prod app mounts a volume,
+      # so a clone carries the whole Machine (docs/research/prod-us-west-region-blueprint.md,
+      # finding 3). A clone takes the app's current secrets version. Ids and
+      # regions only; nothing here prints a secret.
+      - name: Move ${{ inputs.app }} Machines into the primary region
+        if: steps.superseded.outputs.superseded != 'true'
+        env:
+          FLY_API_TOKEN: ${{ secrets[steps.targets.outputs.token_secret] }}
+          FLY_APP: ${{ steps.targets.outputs.fly_app }}
+          CONFIG_FILE: ${{ steps.targets.outputs.config_file }}
+        run: |
+          set -euo pipefail
+          primary="$(sed -n "s/^primary_region = '\([a-z]*\)'$/\1/p" "$CONFIG_FILE")"
+          [ -n "$primary" ] || { echo "::error::${CONFIG_FILE} has no primary_region"; exit 1; }
+          flyctl machines list --app "$FLY_APP" --json > "$RUNNER_TEMP/machines.json"
+          strays="$(jq -r --arg r "$primary" '.[] | select(.region != $r and .state != "destroyed" and .state != "destroying") | .id' "$RUNNER_TEMP/machines.json")"
+          if [ -z "$strays" ]; then
+            echo "Every ${FLY_APP} Machine runs in ${primary}"
+            exit 0
+          fi
+          for id in $strays; do
+            from="$(jq -r --arg id "$id" '.[] | select(.id == $id) | .region' "$RUNNER_TEMP/machines.json")"
+            state="$(jq -r --arg id "$id" '.[] | select(.id == $id) | .state' "$RUNNER_TEMP/machines.json")"
+            before="$(flyctl machines list --app "$FLY_APP" --json | jq -r '.[].id' | sort)"
+            echo "Cloning ${id} (${from}, ${state}) into ${primary}"
+            flyctl machine clone "$id" --app "$FLY_APP" --region "$primary"
+            clone="$(comm -13 <(printf '%s\n' "$before") <(flyctl machines list --app "$FLY_APP" --json | jq -r '.[].id' | sort) | head -n 1)"
+            [ -n "$clone" ] || { echo "::error::No clone of ${id} appeared in ${primary}"; exit 1; }
+            if [ "$state" = "started" ]; then
+              for _ in $(seq 1 30); do
+                now="$(flyctl machines list --app "$FLY_APP" --json | jq -r --arg id "$clone" '.[] | select(.id == $id) | .state')"
+                [ "$now" = "started" ] && break
+                sleep 5
+              done
+              [ "$now" = "started" ] || { echo "::error::Clone ${clone} of ${id} is ${now}, not started; ${id} kept"; exit 1; }
+            elif [ "$state" = "stopped" ] || [ "$state" = "suspended" ]; then
+              flyctl machine stop "$clone" --app "$FLY_APP" || true
+            fi
+            echo "Destroying ${id} in ${from}; ${clone} replaces it in ${primary}"
+            flyctl machine destroy "$id" --app "$FLY_APP" --force
+          done
+          left="$(flyctl machines list --app "$FLY_APP" --json | jq -r --arg r "$primary" '[.[] | select(.region != $r and .state != "destroyed")] | length')"
+          [ "$left" = 0 ] || { echo "::error::${left} ${FLY_APP} Machine(s) still outside ${primary}"; exit 1; }
+
       # A private app's Machine that crash-looped to Fly's restart limit stays
       # stopped, and `flyctl deploy` updates a stopped Machine without starting it.
       # Start it so the check below sees the new image run, not the old failure.

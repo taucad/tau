@@ -4,7 +4,7 @@
 #
 
 app = 'tau-api'
-primary_region = 'syd'
+primary_region = 'sjc'
 kill_signal = 'SIGTERM'
 # 120 s, not Fly's 5 s default nor the 30 s it was: the API drains in-flight model
 # steps before it stops (`app/lifecycle/graceful-shutdown.ts`, `shutdownPhases`), and a

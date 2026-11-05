@@ -755,6 +755,25 @@ describe('a pack whose index is whole but whose bytes are not (W2 PR review)', (
     },
   );
 
+  it('heals a pack refused for a bad index when the same pack arrives again under the same name and size', async () => {
+    const { provider, corrupted, corruptBytes, inCorrupt } = await seeded();
+    const indexPath = `.git/objects/pack/${corrupted}.idx`;
+    const whole = await provider.readFile(indexPath);
+    const flipped = new Uint8Array(whole);
+    flipped[8 + 256 * 4 + 5] = 255 - flipped[8 + 256 * 4 + 5]!;
+    await provider.writeFile(indexPath, flipped);
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const store = storeOver(rangedFiles(provider), { name: 'heal-index' });
+    await expect(store.has(inCorrupt[0]!)).resolves.toBe(false);
+
+    await expect(store.addPack(new Uint8Array(corruptBytes))).resolves.toBe(corrupted);
+
+    expect(await provider.readFile(indexPath)).toStrictEqual(whole);
+    await expect(store.read(inCorrupt[0]!)).resolves.toStrictEqual({ type: 'blob', data: encoder.encode('a\n') });
+    const fresh = storeOver(rangedFiles(provider), { name: 'healed-index' });
+    await expect(fresh.read(inCorrupt[1]!)).resolves.toStrictEqual({ type: 'blob', data: encoder.encode('b\n') });
+  });
+
   it('repacks around a pack it finds corrupt, folding the rest and retiring nothing of it', async () => {
     const { provider, corrupted, inOther, loose } = await seeded();
     await damage(provider, corrupted, 'entry');

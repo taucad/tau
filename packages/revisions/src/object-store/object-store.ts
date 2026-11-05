@@ -322,18 +322,20 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
     });
   };
   let listing: Promise<PackReader[]> | undefined;
-  /* Bad indexes by path, size, time and trailer, and packs whose bytes failed a read, each warned of once. */
-  const refusedPacks = new Set<string>();
-  /* Packs whose bytes failed a read: left out of every listing until a pack lands under the name again. */
+  /*
+   * Packs refused for a bad index or dropped for bad bytes, by pack path:
+   * warned of once, left out of every listing, and written over when a fetch
+   * lands a pack under the name again, whatever its size.
+   */
   const droppedPacks = new Set<string>();
-  /* Rethrow what is not an integrity failure; warn once of what is. */
-  const leaveUnread = (refused: Set<string>, key: string, error: unknown): void => {
+  /* Rethrow what is not an integrity failure; record and warn once of what is. */
+  const leaveUnread = (path: string, error: unknown): void => {
     if (!isIntegrityFailure(error)) {
       throw error;
     }
-    if (!refused.has(key)) {
-      refused.add(key);
-      console.warn(`[revisions] The pack ${key.split('\0')[0]!} is left unread: ${(error as Error).message}`);
+    if (!droppedPacks.has(path)) {
+      droppedPacks.add(path);
+      console.warn(`[revisions] The pack ${path} is left unread: ${(error as Error).message}`);
     }
   };
   /*
@@ -345,7 +347,7 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
    * is the caller's.
    */
   const dropPack = (pack: PackReader, error: unknown): void => {
-    leaveUnread(droppedPacks, pack.path, error);
+    leaveUnread(pack.path, error);
     packs = (packs ?? []).filter((held) => held.path !== pack.path);
     dropWhole(pack.path);
   };
@@ -383,7 +385,7 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
       }
       return openPack(base, stored, packSize);
     } catch (error) {
-      leaveUnread(refusedPacks, key, error);
+      leaveUnread(`${packDirectory}/${base}.pack`, error);
       return undefined;
     }
   };

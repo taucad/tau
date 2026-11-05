@@ -56,7 +56,11 @@ async function renderProject(projectDirectory: string, entryPath: string): Promi
   const bytesBefore = existsSync(target) ? statSync(target).size : undefined;
   const client = await createWorkspaceRuntimeClient(projectDirectory);
   try {
-    const [bytes] = await renderThumbnails(client, { label: slug, sourcePath: entryPath, displayWidths: [cardDisplayWidth] });
+    const [bytes] = await renderThumbnails(client, {
+      label: slug,
+      sourcePath: entryPath,
+      displayWidths: [cardDisplayWidth],
+    });
     const { width, height } = await sharp(Buffer.from(bytes!)).metadata();
     if (width !== thumbnailOptions.width || height !== thumbnailOptions.height) {
       throw new Error(`Rendered ${width}×${height}, expected ${thumbnailOptions.width}×${thumbnailOptions.height}`);

@@ -504,7 +504,7 @@ const withPackModels = async (circuitJson: CircuitElement[]): Promise<CircuitEle
       return body
         ? { ...element, model_glb_url: genericBodyUrl(body), model_origin_position: { x: 0, y: 0, z: 0 } }
         : element;
-      /* eslint-enable @typescript-eslint/naming-convention */
+      /* eslint-enable @typescript-eslint/naming-convention -- end of circuit JSON field names. */
     }
     const rest = Object.fromEntries(
       Object.entries(element).filter(([key]) => key !== 'model_step_url' && key !== 'model_wrl_url'),

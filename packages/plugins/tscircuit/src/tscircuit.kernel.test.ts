@@ -584,12 +584,13 @@ describe('TscircuitKernel', () => {
       const circuitJson = await readSettledCircuitJson(client);
       // The handle is tscircuit's own: L1 has no model and the others keep their footprinter strings.
       const cad = circuitJson.filter((element) => element.type === 'cad_component');
-      expect(cad.map((element) => Reflect.get(element, 'footprinter_string'))).toEqual([
+      expect(cad.map((element): unknown => Reflect.get(element, 'footprinter_string'))).toEqual([
         undefined,
         '0603_color(green)',
         'pinrow2_p5.08mm_id1.3mm_od2.4mm',
       ]);
-      const document = await (await createNodeIo()).readBinary(glb);
+      const io = await createNodeIo();
+      const document = await io.readBinary(glb);
       const nodes = new Map(
         document
           .getRoot()

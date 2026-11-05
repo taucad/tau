@@ -96,7 +96,7 @@ describe('buildPresentationBoard', () => {
 
   it.each([
     { fontSize: 1, glyph: 0.72 },
-    // tscircuit's reference designators: no fixed minimum line, so small labels keep their counters open.
+    // Reference designators (tscircuit's 0.4 mm): no fixed minimum line, so small labels keep their counters open.
     { fontSize: 0.4, glyph: 0.288 },
   ])(
     'draws $fontSize mm silkscreen text at the PCB view size with a line 1/7 of its height',

@@ -31,7 +31,7 @@ type Point = { x: number; y: number };
 
 const genericPrefix = `${packModelScheme}generic/`;
 
-/** sRGB base colours the presentation materials classify as the kind's finish. */
+/** Base colours (sRGB) the presentation materials classify as the kind's finish. */
 const kindColors: Readonly<Record<GenericBodyKind, readonly [number, number, number]>> = {
   moulded: [0.17, 0.17, 0.18],
   package: [0.09, 0.09, 0.1],
@@ -83,7 +83,9 @@ const pointOf = (value: unknown): Point | undefined => {
   return isNumber(x) && isNumber(y) ? { x, y } : undefined;
 };
 
-const rectCorners = (center: Point, width: number, height: number, degrees = 0): Point[] => {
+type Rect = { readonly center: Point; readonly width: number; readonly height: number; readonly degrees?: number };
+
+const rectCorners = ({ center, width, height, degrees = 0 }: Rect): Point[] => {
   const angle = (degrees * Math.PI) / 180;
   const [cos, sin] = [Math.cos(angle), Math.sin(angle)];
   return [
@@ -108,13 +110,15 @@ const outlineOf = (element: Element): Point[] => {
     return [];
   }
   const rotation = isNumber(element['ccw_rotation']) ? element['ccw_rotation'] : 0;
-  const width = [element['width'], element['outer_width'], element['outer_diameter']].find(isNumber);
-  const height = [element['height'], element['outer_height'], element['outer_diameter']].find(isNumber);
-  if (width !== undefined && height !== undefined) {
-    return rectCorners(center, width, height, rotation);
+  const width = [element['width'], element['outer_width'], element['outer_diameter']].find((value) => isNumber(value));
+  const height = [element['height'], element['outer_height'], element['outer_diameter']].find((value) =>
+    isNumber(value),
+  );
+  if (isNumber(width) && isNumber(height)) {
+    return rectCorners({ center, width, height, degrees: rotation });
   }
-  const radius = element['radius'];
-  return isNumber(radius) ? rectCorners(center, radius * 2, radius * 2) : [];
+  const { radius } = element;
+  return isNumber(radius) ? rectCorners({ center, width: radius * 2, height: radius * 2 }) : [];
 };
 
 /** Courtyards are drawn a little outside the body (IPC-7351's 0.25 mm courtyard excess). */
@@ -143,10 +147,12 @@ export const genericBodyOf = (
     return undefined;
   }
   const own = circuitJson.filter((element) => element['pcb_component_id'] === pcbComponentId);
-  const courtyard = own.filter((element) => element.type.startsWith('pcb_courtyard')).flatMap(outlineOf);
+  const courtyard = own
+    .filter((element) => element.type.startsWith('pcb_courtyard'))
+    .flatMap((element) => outlineOf(element));
   const pads = own
     .filter((element) => element.type === 'pcb_smtpad' || element.type === 'pcb_plated_hole')
-    .flatMap(outlineOf);
+    .flatMap((element) => outlineOf(element));
   const points = courtyard.length > 0 ? courtyard : pads;
   if (points.length === 0) {
     return undefined;
@@ -198,8 +204,12 @@ export const parseGenericBodyUrl = (url: string): GenericBody | undefined => {
   }
   const [, kindName = '', ...sizes] = match;
   const kind = genericBodyKinds.find((candidate) => candidate === kindName);
-  const [width = 0, depth = 0, height = 0, x = 0, y = 0] = sizes.map(Number);
-  if (!kind || ![width, depth, height, x, y].every(Number.isFinite) || Math.min(width, depth, height) <= 0) {
+  const [width = 0, depth = 0, height = 0, x = 0, y = 0] = sizes.map((size) => Number.parseFloat(size));
+  if (
+    !kind ||
+    ![width, depth, height, x, y].every((value) => Number.isFinite(value)) ||
+    Math.min(width, depth, height) <= 0
+  ) {
     return undefined;
   }
   return { kind, width, depth, height, x, y };

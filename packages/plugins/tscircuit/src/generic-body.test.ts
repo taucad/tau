@@ -8,7 +8,8 @@ import type { GenericBody } from '#generic-body.js';
 type Element = { type: string } & Record<string, unknown>;
 
 /** An inline-footprint power inductor as core writes it: two 2 x 3.2 mm pads 6 mm apart in an 8 mm courtyard. */
-const inductor = (rotation = 0, center = { x: 7, y: 7 }): Element[] => {
+const inductor = (rotation = 0): Element[] => {
+  const center = { x: 7, y: 7 };
   const turn = (x: number, y: number) => {
     const angle = (rotation * Math.PI) / 180;
     return {

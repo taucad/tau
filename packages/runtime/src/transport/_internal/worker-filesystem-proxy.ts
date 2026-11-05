@@ -6,6 +6,10 @@ import type { MessagePortLike } from '@taucad/rpc';
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 
 /**
+ * The worker-facing filesystem over a filesystem bridge port: rooted reads and
+ * writes, and watches carried in the change-set form (D6).
+ *
+ * @public
  */
 export type WorkerFileSystemProxy = RuntimeFileSystemBase & {
   watchReady?(
@@ -21,6 +25,8 @@ export type WorkerFileSystemProxy = RuntimeFileSystemBase & {
  * @param source - Either a raw structured-clone `MessagePortLike` (worker
  * topologies) or an already-wired {@link FileSystemBridge} whose `port` is any
  * {@link Port} — a socket, for instance.
+ * @returns The filesystem, once the bridge hello says the host is ready.
+ * @public
  */
 export const createWorkerFileSystemProxy = async (
   source: MessagePortLike | FileSystemBridge,

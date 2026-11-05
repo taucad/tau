@@ -1,4 +1,5 @@
-import type { FileStatOptions } from '@taucad/filesystem';
+import { watchByChangeSets } from '@taucad/filesystem';
+import type { ChangeSetWatchSource, FileStatOptions } from '@taucad/filesystem';
 import { EventLogError } from '#log/event-log-error.js';
 import { createEventLogAppender } from '#log/event-log-appender.js';
 import type { EventLogAppender, EventLogStorage } from '#log/event-log-appender.js';
@@ -437,6 +438,60 @@ export type BrowserChatStoreOptions = Readonly<{
 }>;
 
 const logName = 'events.jsonl';
+
+/** The observation {@link BrowserChatStoreOptions.observeLog} takes. @public */
+export type RootedLogObserver = NonNullable<BrowserChatStoreOptions['observeLog']>;
+
+/**
+ * Observe chat logs on a rooted project filesystem in the change-set form
+ * (D6, D23): a peer's append storm on a log arrives once per committed
+ * changeset, not once per append, and a source that refuses the form with
+ * `ENOTSUP` falls back to its per-path watch. The observation resolves once
+ * the authority acknowledges it, reports a closed or failed watch through
+ * `onError`, and releases on abort.
+ *
+ * @param projectRoot - The rooted project filesystem (a bridge proxy or a rooted view).
+ * @returns The `observeLog` for {@link createBrowserChatStore}.
+ * @public
+ */
+export const createRootedLogObserver =
+  (projectRoot: ChangeSetWatchSource): RootedLogObserver =>
+  async ({ path, signal, onChange, onError }) => {
+    let released = false;
+    const subscription = watchByChangeSets(projectRoot, { paths: [path] }, onChange);
+    const release = (): void => {
+      if (!released) {
+        released = true;
+        signal.removeEventListener('abort', release);
+        subscription.unsubscribe();
+      }
+    };
+    signal.addEventListener('abort', release, { once: true });
+    // async-iife: bootstrap
+    // The observation owns its closure monitor until release; stale callbacks are fenced.
+    void (async () => {
+      try {
+        await subscription.closed;
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- Release may run while the observation closure is awaited.
+        if (!released && !signal.aborted) {
+          onError(new Error(`Chat log observation closed for ${path}.`));
+        }
+      } catch (error) {
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- Release may run while the observation closure is awaited.
+        if (!released && !signal.aborted) {
+          onError(error);
+        }
+      }
+    })();
+    try {
+      await subscription.ready;
+      signal.throwIfAborted();
+      return release;
+    } catch (error) {
+      release();
+      throw error;
+    }
+  };
 
 /**
  * Chat logs for one project in a browser worker. A read never creates the chat, takes a lock or keeps a handle

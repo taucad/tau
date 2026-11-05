@@ -5,7 +5,7 @@ import { recordChannelDiagnostic } from '#db/channel-diagnostics.js';
  * the origin's tabs by M2 inside the browser chat store; nothing here elects, forwards or tails.
  */
 
-import { ResourceQueue, watchByChangeSets } from '@taucad/filesystem';
+import { ResourceQueue } from '@taucad/filesystem';
 import type { FileSystemProvider } from '@taucad/filesystem';
 import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { toRpcError } from '@taucad/chat/rpc';
@@ -38,7 +38,7 @@ import { connectTurnPlacementChannel } from '@taucad/agent-host/channel-client';
 import type { TurnPlacementChannel, TurnPlacementToolPort } from '@taucad/agent-host/channel-client';
 import { createAgentLauncher, serveAgentChannel } from '@taucad/agent-host/launcher';
 import type { AgentLauncher, AgentLauncherOptions } from '@taucad/agent-host/launcher';
-import { createBrowserChatStore } from '@taucad/agent-host/browser';
+import { createBrowserChatStore, createRootedLogObserver } from '@taucad/agent-host/browser';
 import type { BrowserChatStoreOptions } from '@taucad/agent-host/browser';
 import { createConfiguredGatewayModelTransport } from '#cloud/gateway-model-transport.js';
 import { createDefaultKernelOptions } from '#constants/kernel-worker.constants.js';
@@ -814,43 +814,8 @@ const composeProjectHost = async (
               durability,
             }
           : { kind: 'opfs', directory: opfs },
-      observeLog: async ({ path, signal, onChange, onError }) => {
-        let released = false;
-        /* A peer's append storm on this log arrives once per committed changeset (D6, D23). */
-        const subscription = watchByChangeSets(projectRoot, { paths: [path] }, onChange);
-        const release = (): void => {
-          if (!released) {
-            released = true;
-            signal.removeEventListener('abort', release);
-            subscription.unsubscribe();
-          }
-        };
-        signal.addEventListener('abort', release, { once: true });
-        // async-iife: bootstrap
-        // The observation owns its closure monitor until release; stale callbacks are fenced.
-        void (async () => {
-          try {
-            await subscription.closed;
-            // oxlint-disable-next-line typescript/no-unnecessary-condition -- Release may run while the observation closure is awaited.
-            if (!released && !signal.aborted) {
-              onError(new Error(`Chat log observation closed for ${path}.`));
-            }
-          } catch (error) {
-            // oxlint-disable-next-line typescript/no-unnecessary-condition -- Release may run while the observation closure is awaited.
-            if (!released && !signal.aborted) {
-              onError(error);
-            }
-          }
-        })();
-        try {
-          await subscription.ready;
-          signal.throwIfAborted();
-          return release;
-        } catch (error) {
-          release();
-          throw error;
-        }
-      },
+      /* A peer's append storm on this log arrives once per committed changeset (D6, D23). */
+      observeLog: createRootedLogObserver(projectRoot),
       visibility: worker.visibility,
     }),
     modelTransport: createConfiguredGatewayModelTransport(gatewayOptions),

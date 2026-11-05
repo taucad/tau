@@ -1001,6 +1001,7 @@ The circuit kernel bundles the following components. Their full license texts ac
 | three | 0.184.0 | MIT |
 | transformation-matrix | 2.16.1 | MIT |
 | transformation-matrix | 3.1.0 | MIT |
+| uint8array-extras | 1.6.0 | MIT |
 
 ## Desktop C# Runtime
 

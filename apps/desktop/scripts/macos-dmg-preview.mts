@@ -48,7 +48,8 @@ try {
     .split('\n')
     .map((row) => row.split('\t').map((field) => field.trim()))
     .find((fields) => fields.length >= 3 && fields[2]!.startsWith('/Volumes/'));
-  device = attached.trim().split(/\s+/u)[0];
+  // Checksum lines come first in hdiutil output; the image's whole-disk device is the first /dev/ row.
+  device = /^(\/dev\/disk\d+)\s/mu.exec(attached)?.[1];
   if (volumeRow === undefined) {
     throw new Error(`hdiutil attach reported no mount point:\n${attached}`);
   }

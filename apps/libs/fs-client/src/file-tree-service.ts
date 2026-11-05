@@ -7,16 +7,12 @@ import type {
   FileStat,
   FileTreeContentMetadata,
 } from '@taucad/types';
-import type { DirectoryStatRow, FileTreeNode } from '@taucad/filesystem';
+import type { ChangeSet, ChangeSetEntry, DirectoryStatRow, FileTreeNode } from '@taucad/filesystem';
 import { getFileContentMetadata } from '@taucad/filesystem';
 import { Topic } from '@taucad/events';
 import type { FileContentService, ContentChangeEvent } from '#file-content-service.js';
 import type { ComposedViewClient } from '#composed-view-client.js';
-import type {
-  WorkerChangeChannel,
-  WorkerRelativeDirectoryRenameEvent,
-  WorkerRelativeRenameEvent,
-} from '#worker-change-channel.js';
+import type { WorkerChangeChannel } from '#worker-change-channel.js';
 import type { WorkspacePathResolver } from '#workspace-path-resolver.js';
 import { WorkspacePathEscapeError } from '#workspace-path-resolver.js';
 import type { VisibilityProvider } from '#visibility-provider.js';
@@ -429,65 +425,8 @@ export class FileTreeService {
       }
     }
     this.unsubscribeChannel = [
-      init.channel.onFileWritten({
-        interestedIn: (relativePath) =>
-          this.isDirectoryResolvedKey(this.paths.parentOf(relativePath)) ||
-          this._inFlightDirectoryList.has(this.paths.parentOf(relativePath)),
-        handler: (event) => {
-          this.handleFileWrittenRelative(event.path);
-        },
-      }),
-      init.channel.onFileDeleted({
-        handler: (event) => {
-          this.handleFileDeletedRelative(event.path);
-        },
-      }),
-      init.channel.onFileRenamed({
-        interestedIn: (relativePath) =>
-          this.isDirectoryResolvedKey(this.paths.parentOf(relativePath)) ||
-          this._inFlightDirectoryList.has(this.paths.parentOf(relativePath)),
-        handler: (event) => {
-          this.handleFileRenamedRelative(event);
-        },
-      }),
-      init.channel.onDirectoryChanged({
-        interestedIn: (relativeDirectory) =>
-          this.isDirectoryResolvedKey(relativeDirectory) || this._inFlightDirectoryList.has(relativeDirectory),
-        handler: (event) => {
-          this.handleDirectoryChangedRelative(event.path);
-        },
-      }),
-      init.channel.onDirectoryCreated({
-        handler: (event) => {
-          this.handleDirectoryCreatedRelative(event.path);
-        },
-      }),
-      init.channel.onDirectoryDeleted({
-        handler: (event) => {
-          this.handleDirectoryDeletedRelative(event.path);
-        },
-      }),
-      init.channel.onDirectoryRenamed({
-        handler: (event) => {
-          this.handleDirectoryRenamedRelative(event);
-        },
-      }),
-      init.channel.onFileCopied({
-        handler: ({ targetPath }) => {
-          this.invalidatePendingDirectory(this.paths.parentOf(targetPath));
-          this.refreshResolvedParent(targetPath);
-        },
-      }),
-      init.channel.onDirectoryCopied({
-        handler: ({ targetPath }) => {
-          this.invalidatePendingDirectory(this.paths.parentOf(targetPath));
-          for (const key of this._inFlightDirectoryList.keys()) {
-            if (key === targetPath || key.startsWith(`${targetPath}/`)) {
-              this.invalidatePendingDirectory(key);
-            }
-          }
-          this.refreshResolvedParent(targetPath);
-        },
+      init.channel.onChangeSet((set) => {
+        this.handleChangeSet(set);
       }),
       init.channel.onBackendChanged(() => {
         for (const key of this._inFlightDirectoryList.keys()) {
@@ -885,22 +824,7 @@ export class FileTreeService {
    * @param path - Directory to re-read once the window closes.
    */
   public scheduleRefresh(path: string): void {
-    if (this.disposed) {
-      return;
-    }
-    this.pendingRefreshPaths.add(path);
-
-    if (this.refreshTimer !== undefined) {
-      clearTimeout(this.refreshTimer);
-      this.refreshTimer = undefined;
-    }
-    if (this.refreshPauses > 0) {
-      return;
-    }
-
-    this.refreshTimer = setTimeout(() => {
-      this.drainPendingRefreshes();
-    }, this.refreshDebounce);
+    this.scheduleRefreshes([path]);
   }
 
   /**
@@ -1233,6 +1157,37 @@ export class FileTreeService {
 
   // === Private: Worker Event Handlers (workspace-relative paths) ===
 
+  /**
+   * Collect several directories for one debounced re-read window, resetting
+   * the timer once rather than once per directory.
+   * @param paths - Directories to re-read once the window closes.
+   */
+  private scheduleRefreshes(paths: Iterable<string>): void {
+    if (this.disposed) {
+      return;
+    }
+    let added = false;
+    for (const path of paths) {
+      this.pendingRefreshPaths.add(path);
+      added = true;
+    }
+    if (!added) {
+      return;
+    }
+
+    if (this.refreshTimer !== undefined) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = undefined;
+    }
+    if (this.refreshPauses > 0) {
+      return;
+    }
+
+    this.refreshTimer = setTimeout(() => {
+      this.drainPendingRefreshes();
+    }, this.refreshDebounce);
+  }
+
   /*
    * Re-read up to {@link refreshesPerTask} collected directories, once each,
    * and leave the rest to the next task; a hold taken meanwhile keeps them.
@@ -1271,20 +1226,66 @@ export class FileTreeService {
     }
   }
 
-  private handleFileWrittenRelative(relativePath: string): void {
-    this.invalidatePendingDirectory(this.paths.parentOf(relativePath));
-    const parentPath = this.paths.parentOf(relativePath);
-    if (
-      this.isDirectoryResolvedKey(parentPath) &&
-      (this.listingObservations.get(parentPath)?.deref()?.activeLeaseCount ?? 0) === 0
-    ) {
-      this.scheduleRefresh(parentPath);
+  /*
+   * One delivered change set (charter D6): the work is per touched directory,
+   * not per path. A fifty-file write into one directory invalidates and
+   * re-reads that directory once; only structural entries (deletions,
+   * directory creations, moves) patch the tree one by one, in commit order,
+   * so a delete followed by a move onto the same name lands as the move.
+   * A scoped reset re-reads every resolved directory at or below its prefix;
+   * a topology reset is the backend swap `onBackendChanged` resyncs.
+   */
+  private handleChangeSet(set: ChangeSet): void {
+    if (this.disposed) {
+      return;
     }
+    if (set.reset !== undefined) {
+      if (set.reset.reason !== 'topology') {
+        this.handleResetRelative(set.reset.prefix);
+      }
+      return;
+    }
+    for (const entry of set.entries) {
+      this.applyStructuralEntry(entry);
+    }
+    const refreshes: string[] = [];
+    for (const directory of set.touchedDirectories) {
+      this.invalidatePendingDirectory(directory);
+      if (this.isRefreshableDirectory(directory)) {
+        refreshes.push(directory);
+      }
+    }
+    this.scheduleRefreshes(refreshes);
   }
 
-  private handleFileDeletedRelative(relativePath: string): void {
-    this.invalidatePendingDirectory(this.paths.parentOf(relativePath));
-    this.optimisticDelete(relativePath);
+  private applyStructuralEntry(entry: ChangeSetEntry): void {
+    switch (entry.op) {
+      case 'written': {
+        return;
+      }
+      case 'created': {
+        if (entry.kind === 'dir') {
+          this.invalidatePendingSubtree(entry.path);
+          this.handleDirectoryCreatedRelative(entry.path);
+        }
+        return;
+      }
+      case 'deleted': {
+        if (entry.kind === 'dir') {
+          this.dropSubtree(entry.path);
+        } else {
+          this.optimisticDelete(entry.path);
+        }
+        return;
+      }
+      case 'moved': {
+        if (entry.kind === 'dir') {
+          this.handleDirectoryRenamedRelative({ oldPath: entry.oldPath, newPath: entry.path });
+        } else {
+          this.applyFileMove(entry.oldPath, entry.path);
+        }
+      }
+    }
   }
 
   /*
@@ -1292,51 +1293,44 @@ export class FileTreeService {
    * makes it true (Rule 7). A rename from a name the tree never listed — a
    * staged copy swapped into place — patches nothing, and a listing taken
    * mid-swap can land after the patch, so only a re-read that starts after
-   * the event settles the directory.
+   * the event settles the directory. An apply's staged or backup sibling
+   * never enters the tree: renaming a row to or from one would drop the real
+   * name until the re-read lands, so only the parent re-reads settle it.
    */
-  private handleFileRenamedRelative(event: WorkerRelativeRenameEvent): void {
-    for (const path of [event.oldPath, event.newPath]) {
-      if (path !== undefined) {
-        this.invalidatePendingDirectory(this.paths.parentOf(path));
+  private applyFileMove(oldPath: string | undefined, newPath: string): void {
+    const touchesSibling = [oldPath, newPath].some((path) => path !== undefined && isTauTemporarySiblingPath(path));
+    if (touchesSibling || oldPath === undefined) {
+      return;
+    }
+    this.optimisticRename(oldPath, newPath);
+  }
+
+  private handleResetRelative(prefix: string): void {
+    this.invalidatePendingSubtree(prefix);
+    const refreshes: string[] = [];
+    if (this.isRefreshableDirectory(prefix)) {
+      refreshes.push(prefix);
+    }
+    for (const key of this._tree.descendantKeys(prefix)) {
+      if (this.isRefreshableDirectory(key)) {
+        refreshes.push(key);
       }
     }
-    const oldRelative = event.oldPath;
-    const newRelative = event.newPath;
-    /* An apply's staged or backup sibling never enters the tree: renaming a
-     * row to or from one would drop the real name until the re-read lands, so
-     * only the parent re-reads below settle it. */
-    const touchesSibling = [oldRelative, newRelative].some(
-      (path) => path !== undefined && isTauTemporarySiblingPath(path),
+    this.scheduleRefreshes(refreshes);
+  }
+
+  /* A resolved directory no leased observation re-reads by itself. */
+  private isRefreshableDirectory(key: string): boolean {
+    return (
+      this.isDirectoryResolvedKey(key) && (this.listingObservations.get(key)?.deref()?.activeLeaseCount ?? 0) === 0
     );
-    if (!touchesSibling && oldRelative !== undefined && newRelative !== undefined) {
-      this.optimisticRename(oldRelative, newRelative);
-    } else if (!touchesSibling && oldRelative !== undefined) {
-      this.optimisticDelete(oldRelative);
-    }
-    for (const path of [oldRelative, newRelative]) {
-      if (path !== undefined) {
-        this.refreshResolvedParent(path);
+  }
+
+  private invalidatePendingSubtree(relativePath: string): void {
+    for (const key of this._inFlightDirectoryList.keys()) {
+      if (key === relativePath || key.startsWith(`${relativePath}/`) || relativePath === '') {
+        this.invalidatePendingDirectory(key);
       }
-    }
-  }
-
-  private refreshResolvedParent(relativePath: string): void {
-    const parentPath = this.paths.parentOf(relativePath);
-    if (
-      this.isDirectoryResolvedKey(parentPath) &&
-      (this.listingObservations.get(parentPath)?.deref()?.activeLeaseCount ?? 0) === 0
-    ) {
-      this.scheduleRefresh(parentPath);
-    }
-  }
-
-  private handleDirectoryChangedRelative(relativePath: string): void {
-    this.invalidatePendingDirectory(relativePath);
-    if (
-      this.isDirectoryResolvedKey(relativePath) &&
-      (this.listingObservations.get(relativePath)?.deref()?.activeLeaseCount ?? 0) === 0
-    ) {
-      this.scheduleRefresh(relativePath);
     }
   }
 
@@ -1365,7 +1359,7 @@ export class FileTreeService {
     this.dropSubtree(relativePath);
   }
 
-  private handleDirectoryRenamedRelative(event: WorkerRelativeDirectoryRenameEvent): void {
+  private handleDirectoryRenamedRelative(event: Readonly<{ oldPath?: string; newPath?: string }>): void {
     const { oldPath, newPath } = event;
     if (oldPath !== undefined && newPath !== undefined) {
       this.renameSubtree(oldPath, newPath);
@@ -1381,11 +1375,7 @@ export class FileTreeService {
   }
 
   private dropSubtree(relativePath: string): void {
-    for (const key of this._inFlightDirectoryList.keys()) {
-      if (key === relativePath || key.startsWith(`${relativePath}/`) || relativePath === '') {
-        this.invalidatePendingDirectory(key);
-      }
-    }
+    this.invalidatePendingSubtree(relativePath);
     this.invalidatePendingDirectory(this.paths.parentOf(relativePath));
     const doomed = [
       ...(this._tree.has(relativePath) ? [relativePath] : []),

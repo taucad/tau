@@ -3,7 +3,7 @@ import { mock } from 'vitest-mock-extended';
 import { FileTreeService } from '#file-tree-service.js';
 import type { ExternalPollTelemetry } from '#file-tree-service.js';
 import type { FileTreeNode, HeadFileStat, WatchEvent } from '@taucad/filesystem';
-import type { ChangeEvent, FileEntry, FileProvenance, FileStat, FileStatEntry } from '@taucad/types';
+import type { ChangeEvent, FileEntry, FileProvenance, FileStat, FileStatEntry, PathChangeEvent } from '@taucad/types';
 import { WorkerChangeChannel } from '#worker-change-channel.js';
 import type { WorkerChangeChannelTransport } from '#worker-change-channel.js';
 import { DirectoryListingErrorCode, DirectoryListingFailedError } from '#directory-listing.js';
@@ -2283,6 +2283,50 @@ describe('directory-scoped tree work', () => {
     expect(snapshot.get('e8/f3.ts')?.path).toBe('e8/f3.ts');
     expect([...snapshot.keys()].filter((key) => key.startsWith('e8/'))).toHaveLength(filesPerDirectory);
     disposeChannel();
+  });
+
+  it('re-reads each touched directory once for a fifty-file change set and patches only its structural entries', async () => {
+    vi.useFakeTimers();
+    try {
+      const { tree, proxy, emitFileChanged, disposeChannel } = createTreeHarness({ initialEntries: projectEntries() });
+      vi.mocked(proxy.readDirectory).mockResolvedValue(
+        Array.from({ length: filesPerDirectory }, (_, file) => textNode(`f${String(file)}.ts`)),
+      );
+      await tree.listDirectory('d3');
+      await tree.listDirectory('d4');
+      vi.mocked(proxy.readDirectory).mockClear();
+      const scheduleRefresh = vi.spyOn(tree, 'scheduleRefresh');
+      const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+      emitFileChanged({
+        type: 'changeSet',
+        entries: [
+          ...Array.from(
+            { length: 50 },
+            (_, file): PathChangeEvent => ({
+              type: 'fileWritten',
+              path: `d3/agent-${String(file)}.ts`,
+              backend: 'indexeddb',
+            }),
+          ),
+          { type: 'fileDeleted', path: 'd4/f0.ts', backend: 'indexeddb' },
+        ],
+      });
+
+      expect(tree.getTreeSnapshot().has('d4/f0.ts')).toBe(false);
+      expect(scheduleRefresh).not.toHaveBeenCalled();
+      expect(setTimeoutSpy).toHaveBeenCalledOnce();
+      await vi.runAllTimersAsync();
+      expect(
+        vi
+          .mocked(proxy.readDirectory)
+          .mock.calls.map(([path]) => path)
+          .toSorted(),
+      ).toEqual([`${workspaceRoot}/d3`, `${workspaceRoot}/d4`]);
+      tree.dispose();
+      disposeChannel();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps a subtree reachable through an ancestor the tree has not listed', () => {

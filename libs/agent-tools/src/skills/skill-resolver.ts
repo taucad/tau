@@ -16,6 +16,7 @@
 
 import type { ResolveSkillRpcResult, SkillMetadata } from '@taucad/chat';
 import { rpcClientErrorCode } from '@taucad/chat/schemas/rpc';
+import type { FileProvenance } from '@taucad/types';
 import { getErrno } from '@taucad/utils/error';
 
 import {
@@ -36,6 +37,15 @@ const promptSkillLimit = 80;
 export type SkillResolverDirectoryEntry = {
   readonly name: string;
   readonly isFolder?: boolean;
+  /**
+   * What a composed view says about the entry; absent on a raw listing.
+   *
+   * A row served by the system-skill overlay is not a workspace skill: discovery
+   * skips it and takes that skill from {@link SkillResolverDependencies.systemSkills}
+   * instead, so listing never reads overlay bytes. Project rows, including ones
+   * that override a bundle, stay workspace skills.
+   */
+  readonly provenance?: FileProvenance;
 };
 
 /**
@@ -237,8 +247,10 @@ async function discoverFilesystemSkills(
       blocked: getErrno(error) === 'ENOTDIR',
     };
   }
-  const occupiedNames = new Set(entries.map(({ name }) => name));
-  const skillFiles = entries
+  // Overlay rows are the compiled system layer seen through a composed view, not workspace skills.
+  const projectEntries = entries.filter((entry) => entry.provenance?.source !== 'system-skills');
+  const occupiedNames = new Set(projectEntries.map(({ name }) => name));
+  const skillFiles = projectEntries
     .filter((entry) => entry.isFolder)
     .map((entry) => ({
       baseDirectory: `${directory}/${entry.name}`,

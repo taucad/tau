@@ -277,6 +277,55 @@ it('mounts an ephemeral preview before opening its rooted bridge', async () => {
   }
 });
 
+/*
+ * Invariant I1 on the page: the file manager composes the system skills overlay
+ * for the user alone. Its `'agent'` connections are the editor's executors of
+ * project code, which never see `.agents/skills`; the agent's tools open
+ * `'working-copy'` and compose the overlay themselves in the agent host.
+ */
+it('composes the system skills overlay for user connections and never for agent connections', async () => {
+  const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+  const { systemSkillBundles } = await import('@taucad/skills/resources');
+  const rootDirectory = `/previews/${crypto.randomUUID()}`;
+  const actor = createActor(fileManagerMachine, {
+    input: { initialBackend: 'memory', rootDirectory, shouldInitializeOnStart: true },
+  });
+  actor.start();
+
+  try {
+    const ready = await waitFor(actor, (snapshot) => snapshot.matches('ready') || snapshot.matches('error'));
+    expect(ready.context.error).toBeUndefined();
+    const open = ready.context.openFileSystemBridge;
+    if (open === undefined) {
+      throw new Error('The rooted filesystem bridge opener was not published.');
+    }
+    await ready.context.viewClient?.writeFile(`${rootDirectory}/main.ts`, 'preview');
+
+    const agent = createFileSystemBridgeProxy(open(rootDirectory, 'agent'));
+    try {
+      await agent.ready;
+      await expect(agent.readFile('main.ts', 'utf8')).resolves.toBe('preview');
+      await expect(agent.exists('.agents/skills')).resolves.toBe(false);
+      await expect(agent.readdir('')).resolves.not.toContain('.agents');
+    } finally {
+      agent.dispose();
+    }
+
+    const user = createFileSystemBridgeProxy(open(rootDirectory, 'user'));
+    try {
+      await user.ready;
+      await expect(user.exists('.agents/skills')).resolves.toBe(true);
+      await expect(user.readdir('.agents/skills')).resolves.toEqual(
+        expect.arrayContaining(systemSkillBundles.map(({ slug }) => slug)),
+      );
+    } finally {
+      user.dispose();
+    }
+  } finally {
+    actor.stop();
+  }
+});
+
 it('registers a project persisted after worker boot before opening its rooted bridge', async () => {
   const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
   const projectId = `proj_${crypto.randomUUID().replaceAll('-', '').slice(0, 21)}`;

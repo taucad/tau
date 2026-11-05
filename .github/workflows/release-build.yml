@@ -1397,6 +1397,33 @@ jobs:
       app: api
     secrets: inherit
 
+  # tau-mirror and tau-maintenance run the API image, so they ship with each API
+  # release, after the API's release command has migrated the database and
+  # created their logins. One at a time: maintenance must stay a singleton.
+  production-mirror:
+    needs: [production-api]
+    name: Production mirror
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: production
+      app: mirror
+    secrets: inherit
+
+  production-maintenance:
+    needs: [production-mirror]
+    name: Production maintenance
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: production
+      app: maintenance
+    secrets: inherit
+
   # The UI serves OCCT compiled into the GeoSpec engine, so it ships only once
   # `source-kit` has attached that engine's source and relink kit.
   production-ui:

@@ -327,7 +327,7 @@ export class PartThumbnailService {
   }
 
   private identity(hash: string, part: PartThumbnailRequest): string {
-    return `${part.visualKey ?? hash}:${JSON.stringify(part.primitives)}:part-webp-${previewSize}-q${previewQuality}-viewer-profile-v1`;
+    return `${part.visualKey ?? hash}:${JSON.stringify(part.primitives)}:part-webp-${previewSize}-q${previewQuality}-viewer-profile-v2`;
   }
 
   private validateRequest(source: PartThumbnailSource, parts: readonly PartThumbnailRequest[]): Set<string> {

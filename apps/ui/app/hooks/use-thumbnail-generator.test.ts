@@ -170,7 +170,7 @@ describe('useThumbnailGenerator', () => {
         height: 1152,
         // The dark-scheme viewer at twice the 768×576 reference frame.
         lineWidth: 2,
-        lineColor: '#868686',
+        lineColor: '#000000',
         ao: {
           radiusPixels: 960 * 0.01 * 2,
           intensity: 0.75,
@@ -302,7 +302,7 @@ describe('useThumbnailGenerator', () => {
     expect(event?.type).toBe('settled');
     if (event?.type === 'settled') {
       expect(event.hash).toBe(
-        'proj_aaaaaaaaaaaaaaaaaaaaa:src/main.ts:geometry-hash:webp:q0.95:1536x1152:m0.1:lw2:camera-bounds-v1:edges:viewer-profile-v2',
+        'proj_aaaaaaaaaaaaaaaaaaaaa:src/main.ts:geometry-hash:webp:q0.95:1536x1152:m0.1:lw2:camera-bounds-v1:edges:viewer-profile-v3',
       );
     }
   });

@@ -1806,7 +1806,7 @@ describe.runIf(enabled)('shell qualification', () => {
       expect([...queues.values()].map((queue) => queue.stream).toSorted()).toEqual(['stderr', 'stdout']);
       /*
        * The supervisor never carries the streams: it answers once and then holds the sandbox. Its growth is judged
-       * from its ready reply, so loading and initializing the sandbox runtime (about 50-65 MiB on every hosted runner,
+       * from its ready reply, so loading and initializing the sandbox runtime (25-38 MiB on the hosted runners,
        * independent of the workload) is reported but not charged to the streams. The lifetime high-water still
        * includes any start-up transient above the ready RSS, so this growth is an upper bound.
        */

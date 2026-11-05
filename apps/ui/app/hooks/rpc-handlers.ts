@@ -66,9 +66,11 @@ import {
   factsConcurrency,
   fileMetadataFields,
   getFileContentMetadata,
+  headSniffByteLength,
   lineCountByteCap,
   mapConcurrent,
   ResourceQueue,
+  seemsBinary,
 } from '@taucad/filesystem';
 import { z } from 'zod';
 import {
@@ -246,6 +248,14 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
     },
     async readFile(path: string): Promise<string> {
       const data = await fileManager.readFile(path);
+      /* A stat past the line-count cap carries no kind (no ranged read crosses
+       * this client's bridge), so the 512 B head of the bytes read here is what
+       * keeps a text read of a binary refused (D4). */
+      if (seemsBinary(data.subarray(0, headSniffByteLength))) {
+        throw Object.assign(new Error(`File is binary (${data.byteLength} bytes) and cannot be read as text.`), {
+          code: rpcClientErrorCode.ioError,
+        });
+      }
       try {
         // eslint-disable-next-line @typescript-eslint/naming-convention -- `ignoreBOM` is the native TextDecoder option name.
         return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(data);

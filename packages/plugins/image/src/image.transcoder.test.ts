@@ -96,7 +96,7 @@ describe('image transcoder', () => {
 
   describe('initialize', () => {
     it('should version renderer output for export cache invalidation', () => {
-      expect(imageDefinition.version).toBe('15.0.0');
+      expect(imageDefinition.version).toBe('16.0.0');
     });
 
     it('should load the renderer and describe its adapter once during initialize', () => {
@@ -507,7 +507,7 @@ describe('image transcoder', () => {
       expect(renderImages.mock.calls[0]?.[1]).not.toHaveProperty('includeScale');
     });
 
-    it('should render without the viewer-parity options the installed nanoraster predates, and say so', async () => {
+    it('should pass the viewer-parity options to the renderer unchanged', async () => {
       const file = {
         name: 'render.png',
         bytes: new Uint8Array([1]),
@@ -516,30 +516,41 @@ describe('image transcoder', () => {
         height: 432,
       } as const;
       renderImages.mockResolvedValue(timedImages([{ id: 'single', file }]));
+      const ao = {
+        radiusPixels: 9.6,
+        intensity: 0.75,
+        distanceFalloff: 1,
+        thicknessRatio: 1 / 0.09,
+        denoiseDepthTolerance: 0.1,
+        samples: 16,
+        resolutionScale: 0.5,
+      };
+      const lighting = {
+        lights: [],
+        headlamp: { intensity: 1.5, rightOffset: 2, upOffset: 2 },
+        ambient: 0.0366,
+        environment: { intensity: 1 },
+        space: 'view',
+        exposure: 1,
+      } as const;
 
       const result = await imageDefinition.transcode(
         {
           from: 'glb',
           to: 'png',
           files: [glbFile()],
-          options: imageEdgeSchemas.png.parse({
-            lineColor: '#868686',
-            toneMapping: 'neutral',
-            ao: { radiusPixels: 9.6, intensity: 0.75, distanceFalloff: 1, samples: 16, resolutionScale: 0.5 },
-          }),
+          options: imageEdgeSchemas.png.parse({ lineColor: '#868686', toneMapping: 'neutral', ao, lighting }),
         },
         runtime,
         context,
       );
 
       expect(result.success).toBe(true);
-      const renderOptions = renderImages.mock.calls[0]?.[1];
-      expect(renderOptions).not.toHaveProperty('lineColor');
-      expect(renderOptions).not.toHaveProperty('toneMapping');
-      expect(renderOptions?.ao).toStrictEqual({ radiusPixels: 9.6, intensity: 0.75, distanceFalloff: 1 });
-      expect(runtime.logger.warn).toHaveBeenCalledWith(
-        'The installed nanoraster predates lineColor, toneMapping, ao.samples, ao.resolutionScale; rendering without them',
+      expect(renderImages).toHaveBeenCalledWith(
+        expect.any(Uint8Array),
+        expect.objectContaining({ lineColor: '#868686', toneMapping: 'neutral', ao, lighting }),
       );
+      expect(runtime.logger.warn).not.toHaveBeenCalled();
     });
 
     it('should default JPEG to an opaque white background so the encoder never sees alpha', async () => {

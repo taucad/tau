@@ -1,6 +1,6 @@
 [
   {
-    "name": "total (ESM JS) — measured 11.01 kB brotli on 2026-11-04 (viewer-parity image options and their backend gate)",
+    "name": "total (ESM JS) — measured 11.07 kB brotli on 2026-11-05 (viewer-parity image options passed straight to nanoraster 0.9)",
     "path": "dist/**/*.mjs",
     "limit": "12 kB"
   },

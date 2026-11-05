@@ -8,15 +8,19 @@ import {
   renderImageAmbientRange,
   renderImageBackgroundPattern,
   renderImageDimensionRange,
+  renderImageEnvironmentIntensityRange,
   renderImageExposureRange,
   renderImageLabelMaxLength,
   renderImageLabelPattern,
+  renderImageLightCardIntensityRange,
   renderImageLightColorRange,
   renderImageLineWidthRange,
   renderImageMarginRange,
+  renderImageMaxLightCards,
   renderImageMaxLights,
   renderImageMaxSections,
   renderImageQualityRange,
+  renderImageRigExtentRange,
   renderImageVerticalFieldOfViewRange,
   renderImageViewIdPattern,
   renderImageZoomRange,
@@ -75,24 +79,23 @@ const lightColorSchema = z.tuple([
   finiteNumber.min(renderImageLightColorRange[0]).max(renderImageLightColorRange[1]),
 ]);
 // The viewer-parity rig of nanoraster (Tau charter W1): a camera-relative headlamp and an environment with an intensity and
-// optional light cards, bounded as nanoraster bounds them (`renderImageRigExtentRange`,
-// `renderImageEnvironmentIntensityRange`, `renderImageLightCardIntensityRange`, `renderImageMaxLightCards`). The
-// installed nanoraster predates those exports, so they are literals until the catalog moves to the release that
-// declares them. Each field is required: a caller states every value rather than inheriting nanoraster's default
-// (charter D4). The transcoder rewrites them for a backend that predates them (`viewer-profile-options.ts`).
-const rigExtentRange = [-64, 64] as const;
-const environmentIntensityRange = [0, 16] as const;
-const lightCardIntensityRange = [0, 4096] as const;
-const maxLightCards = 16;
-const rigExtentSchema = finiteNumber.min(rigExtentRange[0]).max(rigExtentRange[1]);
+// optional light cards, bounded as nanoraster bounds them. Each field is required: a caller states every value rather
+// than inheriting nanoraster's default (charter D4).
+const rigExtentSchema = finiteNumber.min(renderImageRigExtentRange[0]).max(renderImageRigExtentRange[1]);
 const headlampSchema = z
   .object({
     intensity: ratio()
       .min(renderImageLightColorRange[0])
       .max(renderImageLightColorRange[1])
       .describe('White linear radiance; 0 switches the headlamp off'),
-    rightOffset: ratio().min(rigExtentRange[0]).max(rigExtentRange[1]).describe('Camera-right offset in scene radii'),
-    upOffset: ratio().min(rigExtentRange[0]).max(rigExtentRange[1]).describe('Camera-up offset in scene radii'),
+    rightOffset: ratio()
+      .min(renderImageRigExtentRange[0])
+      .max(renderImageRigExtentRange[1])
+      .describe('Camera-right offset in scene radii'),
+    upOffset: ratio()
+      .min(renderImageRigExtentRange[0])
+      .max(renderImageRigExtentRange[1])
+      .describe('Camera-up offset in scene radii'),
   })
   .strict()
   .describe('Camera-relative key light aimed two scene radii ahead of the camera: view direction [right, up, 2]');
@@ -103,11 +106,11 @@ const lightCardSchema = z
       .refine((value) => Math.hypot(...value) >= minimumVectorLength, 'Light card must not sit at the scene center')
       .describe('View-space card center in scene radii'),
     size: z
-      .tuple([positiveNumber.max(rigExtentRange[1]), positiveNumber.max(rigExtentRange[1])])
+      .tuple([positiveNumber.max(renderImageRigExtentRange[1]), positiveNumber.max(renderImageRigExtentRange[1])])
       .describe('Card width and height in scene radii'),
     intensity: ratio()
-      .min(lightCardIntensityRange[0])
-      .max(lightCardIntensityRange[1])
+      .min(renderImageLightCardIntensityRange[0])
+      .max(renderImageLightCardIntensityRange[1])
       .describe("Linear radiance of the card's white face"),
     rotation: cameraVectorSchema
       .optional()
@@ -119,12 +122,12 @@ const environmentSchema = z.union([
   z
     .object({
       intensity: ratio()
-        .min(environmentIntensityRange[0])
-        .max(environmentIntensityRange[1])
+        .min(renderImageEnvironmentIntensityRange[0])
+        .max(renderImageEnvironmentIntensityRange[1])
         .describe('Multiplier on environment radiance'),
       cards: z
         .array(lightCardSchema)
-        .max(maxLightCards)
+        .max(renderImageMaxLightCards)
         .optional()
         .describe('Rectangular emitters to prefilter the environment from, over black; omitted keeps the neutral room'),
     })
@@ -168,8 +171,7 @@ const lightingSchema = z.union([
     .meta({ title: 'Directional lights' }),
 ]);
 // `thicknessRatio`, `denoiseDepthTolerance`, `samples` and `resolutionScale` are nanoraster's viewer-parity GTAO
-// controls (Tau charter W2), bounded as nanoraster bounds them; the transcoder withholds them from a backend that
-// predates them.
+// controls (Tau charter W2), bounded as nanoraster bounds them.
 const aoSchema = z
   .object({
     radiusPixels: pixels().min(1).max(128).optional(),

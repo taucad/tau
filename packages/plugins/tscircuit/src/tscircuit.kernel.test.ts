@@ -630,7 +630,7 @@ describe('TscircuitKernel', () => {
       expect(extent.height).toBeLessThan(0.01);
     });
 
-    it('should retain board textures and add feature-edge line primitives', async () => {
+    it('should render the presentation board as layer geometry by default', async () => {
       const client = createClient({ 'main.tsx': fixtureBoard });
 
       const glb = expectGlb(await render(client, 'main.tsx'));
@@ -639,13 +639,8 @@ describe('TscircuitKernel', () => {
       const io = await createNodeIo();
       const document = await io.readBinary(glb);
       const root = document.getRoot();
-      expect(root.listTextures().length).toBeGreaterThan(0);
-      expect(
-        root
-          .listMeshes()
-          .flatMap((mesh) => mesh.listPrimitives())
-          .filter((primitive) => primitive.getMode() === 1).length,
-      ).toBeGreaterThan(0);
+      expect(root.listNodes().some((node) => node.getName() === 'pcb')).toBe(true);
+      expect(root.listMaterials().some((material) => material.getName().includes('mask'))).toBe(true);
     });
 
     it('should render the schematic output as an SVG with a viewBox and schematic elements', async () => {

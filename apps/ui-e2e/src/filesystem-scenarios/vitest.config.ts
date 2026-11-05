@@ -3,6 +3,7 @@ import process from 'node:process';
 import { resolve } from 'node:path';
 import { defineConfig } from 'vitest/config';
 import { playwright } from '@vitest/browser-playwright';
+import type { BrowserInstanceOption } from 'vitest/node';
 
 /**
  * The filesystem scenario harness (charter W0): the S1–S20 runners on real
@@ -39,6 +40,31 @@ for (const engine of engines) {
   }
 }
 
+function profileDirectory(engine: string): string {
+  return resolve(workspaceRoot, `node_modules/.cache/tau-filesystem-scenarios/${engine}-profile`);
+}
+
+const instances: BrowserInstanceOption[] = [];
+if (engines.includes('chromium')) {
+  instances.push({
+    browser: 'chromium',
+    name: 'chromium',
+    provider: playwright({
+      persistentContext: profileDirectory('chromium'),
+      launchOptions: { channel: 'chromium', ...(executablePath === undefined ? {} : { executablePath }) },
+    }),
+  });
+}
+for (const engine of engines) {
+  if (engine === 'firefox' || engine === 'webkit') {
+    instances.push({
+      browser: engine,
+      name: engine,
+      provider: playwright({ persistentContext: profileDirectory(engine) }),
+    });
+  }
+}
+
 export default defineConfig({
   root: import.meta.dirname,
   server: { fs: { allow: [workspaceRoot] } },
@@ -64,16 +90,10 @@ export default defineConfig({
     browser: {
       enabled: true,
       headless: true,
+      // Artifact requirement: the harness writes its timing and count rows and, when recording, the committed baseline.
       api: { allowWrite: true },
       screenshotFailures: false,
-      instances: engines.map((engine) => ({
-        browser: engine as 'chromium' | 'firefox' | 'webkit',
-        name: engine,
-        provider: playwright({
-          persistentContext: resolve(workspaceRoot, `node_modules/.cache/tau-filesystem-scenarios/${engine}-profile`),
-          launchOptions: engine === 'chromium' && executablePath !== undefined ? { executablePath } : {},
-        }),
-      })),
+      instances,
     },
   },
 });

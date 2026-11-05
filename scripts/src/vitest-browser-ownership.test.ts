@@ -251,6 +251,7 @@ describe('Vitest Browser test-runner ownership', () => {
     expect(allowWriteFiles.map(([path]) => path).sort()).toEqual(
       [
         'apps/react-e2e/vitest.config.ts',
+        'apps/ui-e2e/src/filesystem-scenarios/vitest.config.ts',
         'apps/ui-e2e/vitest.config.ts',
         'packages/plugins/rolldown/vitest.browser.benchmark.config.ts',
       ].sort(),
@@ -286,6 +287,7 @@ describe('Vitest Browser test-runner ownership', () => {
         'apps/libs/lsp/src/typescript-worker/vitest.browser.config.ts',
         'apps/react-e2e/vitest.bundlers.config.ts',
         'apps/react-e2e/vitest.config.ts',
+        'apps/ui-e2e/src/filesystem-scenarios/vitest.config.ts',
         'apps/ui-e2e/vitest.config.ts',
         'apps/ui/app/components/chat/chat-message-queue.vitest.browser.config.ts',
         'apps/ui/app/components/chat/chat-textarea.vitest.browser.config.ts',

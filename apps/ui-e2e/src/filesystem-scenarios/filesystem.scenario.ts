@@ -218,6 +218,7 @@ const flatten = (measurement: WorkerMeasurement): Record<string, number> => {
     /* Project Index opens from a stored snapshot and from a full scan (production's own counters). */
     indexLoads: measurement.productionCounters['index.load'] ?? 0,
     indexScans: measurement.productionCounters['index.scan'] ?? 0,
+    indexCompares: measurement.productionCounters['index.compare'] ?? 0,
     networkRequests,
     ...Object.fromEntries(Object.entries(network).map(([kind, value]) => [`network.${kind}`, value])),
     ...measurement.extra,

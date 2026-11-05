@@ -198,6 +198,13 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
         description: '0 blob reads for the status compare (bytes read)',
       },
       {
+        id: 'S5.index-compares',
+        metric: 'indexCompares',
+        comparison: 'equals',
+        limit: 1,
+        description: "1 head-metadata compare of the root's Project Index per warm open (production `index.compare`)",
+      },
+      {
         id: 'S5.compares',
         metric: 'metadataRequests',
         comparison: 'at-most',

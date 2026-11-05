@@ -2,6 +2,7 @@ import type { ListDirectoryRpcInput, ListDirectoryRpcResult } from '#schemas/rpc
 import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { toRpcError } from '#rpc/rpc-error.js';
 import { assertRootedPath } from '@taucad/utils/path';
+import { listedFileMetadataFields } from '#rpc/listed-file-metadata.js';
 
 type ListDirectoryEntry = Extract<ListDirectoryRpcResult, { success: true }>['entries'][number];
 
@@ -26,9 +27,7 @@ export async function handleListDirectory(
         name: entry.name,
         type: 'file',
         size: entry.size,
-        ...(entry.contentKind === 'text'
-          ? { contentKind: 'text', lineCount: entry.lineCount }
-          : { contentKind: 'binary' }),
+        ...listedFileMetadataFields(entry),
         ...(entry.modifiedAt ? { modifiedAt: entry.modifiedAt } : {}),
       };
     });

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { binaryFileContentMetadataSchema, textFileContentMetadataSchema } from '#schemas/file-metadata.schema.js';
+import { binaryFileContentMetadataSchema, listedTextFileContentMetadataSchema } from '#schemas/file-metadata.schema.js';
 import { rootedPathSchema } from '#schemas/rooted-path.schema.js';
 
 /** @public */
@@ -19,11 +19,14 @@ export const directoryEntrySchema = z.union([
   }),
   baseDirectoryEntrySchema.extend({
     type: z.literal('file').describe('This entry is a file.'),
-    ...textFileContentMetadataSchema.shape,
+    ...listedTextFileContentMetadataSchema.shape,
   }),
   baseDirectoryEntrySchema.extend({
     type: z.literal('file').describe('This entry is a file.'),
     ...binaryFileContentMetadataSchema.shape,
+  }),
+  baseDirectoryEntrySchema.extend({
+    type: z.literal('file').describe('This entry is a file whose kind was not measured while listing.'),
   }),
 ]);
 

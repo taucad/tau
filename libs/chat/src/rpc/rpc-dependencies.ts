@@ -34,6 +34,7 @@ import type {
   ExportFile,
   FileContentMetadata,
   FileProvenance,
+  StatContentMetadata,
 } from '@taucad/types';
 import type { KernelIssue } from '@taucad/runtime';
 import type { WorkbenchView } from '@taucad/workbench';
@@ -53,7 +54,9 @@ export type RpcInvocationContext = Readonly<{
 export type RpcProgressReport = Readonly<{ progress: number; total?: number; message?: string }>;
 /**
  * One direct child returned by {@link RpcFileSystem.readdir}.
- * `name` is a basename, never a path.
+ * `name` is a basename, never a path. A file carries its kind, and a text
+ * file its exact line count, where a listing could measure them within its
+ * byte cap (charter D4, EQ15); otherwise its size alone.
  *
  * @public
  */
@@ -75,7 +78,7 @@ export type RpcDirectoryEntry =
       modifiedAt?: string;
       /** What the composed view says about this entry. */
       provenance?: FileProvenance;
-    } & FileContentMetadata);
+    } & StatContentMetadata);
 
 /**
  * Abstract filesystem for RPC handlers.

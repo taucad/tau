@@ -16,7 +16,7 @@ import { MemoryProvider } from '@taucad/filesystem/backend';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { connectComputeWorker, createInlineCompute, serveComputeWorker } from '#compute-worker/compute-worker.js';
 import type { ComputePort, ComputeWorker } from '#compute-worker/compute-worker.js';
-import { digestHex } from '#object-hash.js';
+import { digest, digestHex } from '#object-hash.js';
 import { createObjectStore, gitFilesOf } from '#object-store/object-store.js';
 import type { GitFiles, ObjectStore, RepackOptions } from '#object-store/object-store.js';
 import { buildPack } from '#object-store/pack-writer.js';
@@ -645,5 +645,95 @@ describe('pack index checks (W2 re-review 5)', () => {
     await provider.writeFile(packIndex, stored);
     await open('third');
     expect(indexHashes).toBe(2);
+  });
+});
+
+describe('a pack whose index is whole but whose bytes are not (W2 PR review)', () => {
+  /* Two packs as fetches bring them, and one loose object: what each store below starts from. */
+  const seeded = async (): Promise<
+    Readonly<{ provider: MemoryProvider; corrupted: string; inCorrupt: string[]; inOther: string; loose: string }>
+  > => {
+    const provider = memory();
+    const writer = storeOver(rangedFiles(provider));
+    const fetch = async (texts: readonly string[]): Promise<Readonly<{ name: string; oids: string[] }>> => {
+      const objects = texts.map((text): Blob => ({ type: 'blob', data: encoder.encode(text) }));
+      const oids = objects.map(({ type, data }) => oidOf(type, data));
+      const built = await buildPack(
+        objects.map((object, index) => ({ oid: oids[index]!, ...object })),
+        createInlineCompute(),
+      );
+      return { name: await writer.addPack(built.pack), oids };
+    };
+    const corrupt = await fetch(['a\n', 'b\n']);
+    const other = await fetch(['c\n']);
+    const [loose] = await writer.writeLoose([{ type: 'blob', data: encoder.encode('unrelated\n') }]);
+    return { provider, corrupted: corrupt.name, inCorrupt: corrupt.oids, inOther: other.oids[0]!, loose: loose! };
+  };
+
+  /* Damage a pack's bytes and leave its index valid: its last trailer byte, or an entry re-signed so only it is wrong. */
+  const damage = async (provider: MemoryProvider, name: string, where: 'trailer' | 'entry'): Promise<void> => {
+    const packPath = `.git/objects/pack/${name}.pack`;
+    const pack = new Uint8Array(await provider.readFile(packPath));
+    if (where === 'trailer') {
+      pack[pack.byteLength - 1] = 255 - pack[pack.byteLength - 1]!;
+      await provider.writeFile(packPath, pack);
+      return;
+    }
+    /* The first entry's zlib stream, two bytes past its header, then the pack and index signed again. */
+    pack[14] = 255 - pack[14]!;
+    const trailer = digest('sha1', pack.subarray(0, pack.byteLength - 20));
+    pack.set(trailer, pack.byteLength - 20);
+    await provider.writeFile(packPath, pack);
+    const indexPath = `.git/objects/pack/${name}.idx`;
+    const stored = new Uint8Array(await provider.readFile(indexPath));
+    stored.set(trailer, stored.byteLength - 40);
+    stored.set(digest('sha1', stored.subarray(0, stored.byteLength - 20)), stored.byteLength - 20);
+    await provider.writeFile(indexPath, stored);
+  };
+
+  it.each(['trailer', 'entry'] as const)(
+    'drops the pack on its first bad read (%s), so other objects read and its own are fetched again',
+    async (where) => {
+      const { provider, corrupted, inCorrupt, inOther, loose } = await seeded();
+      await damage(provider, corrupted, where);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const store = storeOver(rangedFiles(provider), { name: `bytes-${where}` });
+      await expect(store.has(inCorrupt[0]!)).resolves.toBe(true);
+
+      await expect(store.read(loose)).resolves.toStrictEqual({ type: 'blob', data: encoder.encode('unrelated\n') });
+      await expect(store.read(inOther)).resolves.toStrictEqual({ type: 'blob', data: encoder.encode('c\n') });
+      await expect(store.read(inCorrupt[0]!)).resolves.toBeUndefined();
+
+      /* No longer held, so a fetch wants them again and a write lands them. */
+      await expect(store.has(inCorrupt[0]!)).resolves.toBe(false);
+      await expect(store.has(inCorrupt[1]!)).resolves.toBe(false);
+      await expect(store.has(inOther)).resolves.toBe(true);
+      await expect(store.writeLoose([{ type: 'blob', data: encoder.encode('a\n') }])).resolves.toStrictEqual([
+        inCorrupt[0],
+      ]);
+      await expect(store.read(inCorrupt[0]!)).resolves.toStrictEqual({ type: 'blob', data: encoder.encode('a\n') });
+      const dropped = warn.mock.calls.filter(([message]) =>
+        String(message).includes(`${corrupted}.pack is left unread`),
+      );
+      expect(dropped).toHaveLength(1);
+    },
+  );
+
+  it('repacks around a pack it finds corrupt, folding the rest and retiring nothing of it', async () => {
+    const { provider, corrupted, inOther, loose } = await seeded();
+    await damage(provider, corrupted, 'entry');
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const store = storeOver(rangedFiles(provider), { name: 'bytes-repack' });
+
+    expect(await store.repack(true)).toBe(true);
+
+    const record = JSON.parse(await provider.readFile('.git/objects/tau-retired.json', 'utf8')) as {
+      retired: Array<{ path: string }>;
+    };
+    const retired = record.retired.map((entry) => entry.path);
+    expect(retired.some((path) => path.includes(corrupted))).toBe(false);
+    expect(retired).toContain(`.git/objects/${loose.slice(0, 2)}/${loose.slice(2)}`);
+    await expect(store.read(inOther)).resolves.toStrictEqual({ type: 'blob', data: encoder.encode('c\n') });
+    await expect(store.read(loose)).resolves.toStrictEqual({ type: 'blob', data: encoder.encode('unrelated\n') });
   });
 });

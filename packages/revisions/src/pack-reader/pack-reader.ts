@@ -287,7 +287,13 @@ export const createPackReader = (options: PackReaderOptions): PackReader => {
     compressed: Uint8Array<ArrayBuffer>,
     declared: number,
   ): Promise<Uint8Array<ArrayBuffer>> => {
-    const inflated = await compute.inflate(compressed);
+    let inflated: Uint8Array<ArrayBuffer>;
+    try {
+      inflated = await compute.inflate(compressed);
+    } catch (error) {
+      /* Bytes that are not a zlib stream are a corrupt entry, wherever the compute ran. */
+      throw new TypeError(`A pack entry in ${path} does not inflate.`, { cause: error });
+    }
     if (inflated.byteLength !== declared) {
       throw new TypeError(`A pack entry in ${path} inflates to a size other than the one it declares.`);
     }
@@ -349,7 +355,12 @@ export const createPackReader = (options: PackReaderOptions): PackReader => {
       throw new TypeError(`A pack entry has an unknown type ${String(kind)}.`);
     }
     if (base === undefined) {
-      throw new TypeError('A delta names a base this store does not hold.');
+      /*
+       * Not a TypeError: the pack is whole, the store is missing a base (a
+       * thin pack before its bases arrive). The store drops packs only for
+       * TypeErrors, which mean the pack's own bytes are wrong.
+       */
+      throw new Error('A delta names a base this store does not hold.');
     }
     return { type: base.type, data: applyDelta(await inflateExactly(entry.subarray(at), declared), base.data) };
   };

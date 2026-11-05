@@ -322,7 +322,33 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
     });
   };
   let listing: Promise<PackReader[]> | undefined;
+  /* Bad indexes by path, size, time and trailer, and packs whose bytes failed a read, each warned of once. */
   const refusedPacks = new Set<string>();
+  /* Packs whose bytes failed a read: left out of every listing until a pack lands under the name again. */
+  const droppedPacks = new Set<string>();
+  /* Rethrow what is not an integrity failure; warn once of what is. */
+  const leaveUnread = (refused: Set<string>, key: string, error: unknown): void => {
+    if (!isIntegrityFailure(error)) {
+      throw error;
+    }
+    if (!refused.has(key)) {
+      refused.add(key);
+      console.warn(`[revisions] The pack ${key.split('\0')[0]!} is left unread: ${(error as Error).message}`);
+    }
+  };
+  /*
+   * A pack whose index checked out but whose bytes do not (its trailer, an
+   * entry that does not inflate or inflates to the wrong size, a delta that
+   * cannot apply, an object that hashes to another id) is dropped as a bad
+   * index is: warned of once, closed, and no longer held — so `has` answers
+   * false for its objects and a fetch brings them again. Any other failure
+   * is the caller's.
+   */
+  const dropPack = (pack: PackReader, error: unknown): void => {
+    leaveUnread(droppedPacks, pack.path, error);
+    packs = (packs ?? []).filter((held) => held.path !== pack.path);
+    dropWhole(pack.path);
+  };
   /*
    * One pack's tables, or `undefined` when it was retired between the listing
    * and the read, or fails its own checks. A corrupt pack is left out of the
@@ -355,17 +381,9 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
         await checkPackIndexChecksum(stored, compute.sha1);
         rememberChecked(key);
       }
-      const opened = openPack(base, stored, packSize);
-      refusedPacks.delete(key);
-      return opened;
+      return openPack(base, stored, packSize);
     } catch (error) {
-      if (!isIntegrityFailure(error)) {
-        throw error;
-      }
-      if (!refusedPacks.has(key)) {
-        refusedPacks.add(key);
-        console.warn(`[revisions] The pack ${base} is left unread: ${(error as Error).message}`);
-      }
+      leaveUnread(refusedPacks, key, error);
       return undefined;
     }
   };
@@ -385,7 +403,9 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
         const held = new Map((packs ?? []).map((pack, order) => [pack.path, { pack, order }]));
         const bases = names.flatMap((name) => {
           const named = packIndexName.exec(name);
-          return named === null ? [] : [`pack-${named[1]!}`];
+          return named === null || droppedPacks.has(`${packDirectory}/pack-${named[1]!}.pack`)
+            ? []
+            : [`pack-${named[1]!}`];
         });
         const opened = await Promise.all(
           bases.map(async (base) => held.get(`${packDirectory}/${base}.pack`)?.pack ?? loadPack(base)),
@@ -393,7 +413,8 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
         const order = (pack: PackReader): number => held.get(pack.path)?.order ?? -1;
         /* Packs this store already knew keep their order; new ones go first. */
         const listed = opened
-          .filter((pack): pack is PackReader => pack !== undefined)
+          /* A pack dropped while this listing ran stays out. */
+          .filter((pack): pack is PackReader => pack !== undefined && !droppedPacks.has(pack.path))
           .toSorted((left, right) => order(left) - order(right));
         packs = listed;
         return listed;
@@ -433,8 +454,14 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
   /* One pass over the packs this store knows, then the loose file. */
   const readOnce = async (oid: string, depth: number): Promise<StoredObject | undefined> => {
     for (const pack of await knownPacks()) {
-      // oxlint-disable-next-line no-await-in-loop -- the first pack that holds it answers; most reads ask one.
-      const found = await pack.read(oid, depth);
+      let found: StoredObject | undefined;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- the first pack that holds it answers; most reads ask one.
+        found = await pack.read(oid, depth);
+      } catch (error) {
+        dropPack(pack, error);
+        continue;
+      }
       if (found !== undefined) {
         return found;
       }
@@ -563,6 +590,7 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
     await landAddressed(`${packDirectory}/${base}.pack`, pack);
     await landAddressed(`${packDirectory}/${base}.idx`, packIndex);
     const opened = openPack(base, packIndex, pack.byteLength);
+    droppedPacks.delete(opened.path);
     const known = packs ?? (await listPacks());
     packs = [opened, ...known.filter((held) => held.path !== opened.path)];
     return base;
@@ -718,6 +746,48 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
     return true;
   };
 
+  /*
+   * Fold one pack whole into the builder: `folded`, or `full` when it would
+   * pass the bound, or `corrupt` when its bytes fail a check — then it is
+   * dropped, not folded or retired, and the repack goes on without it. A pack
+   * that is not folded leaves the builder, the budget and `included` as they
+   * were: a pack is retired whole or not at all.
+   */
+  const foldPack = async (
+    into: Readonly<{ builder: PackBuilder; budget: { left: number } }>,
+    pack: PackReader,
+    included: Set<string>,
+  ): Promise<'folded' | 'full' | 'corrupt'> => {
+    const mark = { count: into.builder.count(), left: into.budget.left };
+    const added: string[] = [];
+    let outcome: 'folded' | 'full' | 'corrupt' = 'folded';
+    try {
+      for (const [oid] of pack.index.entries()) {
+        if (included.has(oid)) {
+          continue;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- one object resident at a time beside the compressed pack.
+        if (!(await foldObject(into, oid, await pack.readForCopy(oid)))) {
+          outcome = 'full';
+          break;
+        }
+        included.add(oid);
+        added.push(oid);
+      }
+    } catch (error) {
+      dropPack(pack, error);
+      outcome = 'corrupt';
+    }
+    if (outcome !== 'folded') {
+      into.builder.truncate(mark.count);
+      into.budget.left = mark.left;
+      for (const oid of added) {
+        included.delete(oid);
+      }
+    }
+    return outcome;
+  };
+
   /**
    * Fold loose objects and small packs into one pack, under the exclusive
    * fence; another tab already repacking means this one does nothing.
@@ -769,30 +839,14 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
       const chosen: PackReader[] = [];
       const sizeOf = (pack: PackReader): number => packSizes.get(pack.path) ?? 0;
       for (const pack of foldPacks.toSorted((left, right) => sizeOf(left) - sizeOf(right))) {
-        const mark = { count: builder.count(), left: budget.left };
-        const added: string[] = [];
-        let fits = true;
-        for (const [oid] of pack.index.entries()) {
-          if (!included.has(oid)) {
-            // oxlint-disable-next-line no-await-in-loop -- one object resident at a time beside the compressed pack.
-            fits = await foldObject(into, oid, await pack.readForCopy(oid));
-            if (!fits) {
-              break;
-            }
-            included.add(oid);
-            added.push(oid);
-          }
-        }
-        if (!fits) {
-          /* A pack is retired whole or not at all: what it added is dropped, and the rest wait. */
-          builder.truncate(mark.count);
-          budget.left = mark.left;
-          for (const oid of added) {
-            included.delete(oid);
-          }
+        // oxlint-disable-next-line no-await-in-loop -- one pack after another, under one byte bound.
+        const outcome = await foldPack(into, pack, included);
+        if (outcome === 'full') {
           break;
         }
-        chosen.push(pack);
+        if (outcome === 'folded') {
+          chosen.push(pack);
+        }
       }
       const folded: string[] = [];
       for (const oid of loose) {

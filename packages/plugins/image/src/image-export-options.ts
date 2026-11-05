@@ -8,15 +8,19 @@ import {
   renderImageAmbientRange,
   renderImageBackgroundPattern,
   renderImageDimensionRange,
+  renderImageEnvironmentIntensityRange,
   renderImageExposureRange,
   renderImageLabelMaxLength,
   renderImageLabelPattern,
+  renderImageLightCardIntensityRange,
   renderImageLightColorRange,
   renderImageLineWidthRange,
   renderImageMarginRange,
+  renderImageMaxLightCards,
   renderImageMaxLights,
   renderImageMaxSections,
   renderImageQualityRange,
+  renderImageRigExtentRange,
   renderImageVerticalFieldOfViewRange,
   renderImageViewIdPattern,
   renderImageZoomRange,
@@ -74,6 +78,61 @@ const lightColorSchema = z.tuple([
   finiteNumber.min(renderImageLightColorRange[0]).max(renderImageLightColorRange[1]),
   finiteNumber.min(renderImageLightColorRange[0]).max(renderImageLightColorRange[1]),
 ]);
+// The viewer-parity rig of nanoraster (Tau charter W1): a camera-relative headlamp and an environment with an intensity and
+// optional light cards, bounded as nanoraster bounds them. Each field is required: a caller states every value rather
+// than inheriting nanoraster's default (charter D4).
+const rigExtentSchema = finiteNumber.min(renderImageRigExtentRange[0]).max(renderImageRigExtentRange[1]);
+const headlampSchema = z
+  .object({
+    intensity: ratio()
+      .min(renderImageLightColorRange[0])
+      .max(renderImageLightColorRange[1])
+      .describe('White linear radiance; 0 switches the headlamp off'),
+    rightOffset: ratio()
+      .min(renderImageRigExtentRange[0])
+      .max(renderImageRigExtentRange[1])
+      .describe('Camera-right offset in scene radii'),
+    upOffset: ratio()
+      .min(renderImageRigExtentRange[0])
+      .max(renderImageRigExtentRange[1])
+      .describe('Camera-up offset in scene radii'),
+  })
+  .strict()
+  .describe('Camera-relative key light aimed two scene radii ahead of the camera: view direction [right, up, 2]');
+const lightCardSchema = z
+  .object({
+    position: z
+      .tuple([rigExtentSchema, rigExtentSchema, rigExtentSchema])
+      .refine((value) => Math.hypot(...value) >= minimumVectorLength, 'Light card must not sit at the scene center')
+      .describe('View-space card center in scene radii'),
+    size: z
+      .tuple([positiveNumber.max(renderImageRigExtentRange[1]), positiveNumber.max(renderImageRigExtentRange[1])])
+      .describe('Card width and height in scene radii'),
+    intensity: ratio()
+      .min(renderImageLightCardIntensityRange[0])
+      .max(renderImageLightCardIntensityRange[1])
+      .describe("Linear radiance of the card's white face"),
+    rotation: cameraVectorSchema
+      .optional()
+      .describe('Euler XYZ rotation in radians; omitted faces the card toward the scene center'),
+  })
+  .strict();
+const environmentSchema = z.union([
+  z.enum(['studio', 'none']),
+  z
+    .object({
+      intensity: ratio()
+        .min(renderImageEnvironmentIntensityRange[0])
+        .max(renderImageEnvironmentIntensityRange[1])
+        .describe('Multiplier on environment radiance'),
+      cards: z
+        .array(lightCardSchema)
+        .max(renderImageMaxLightCards)
+        .optional()
+        .describe('Rectangular emitters to prefilter the environment from, over black; omitted keeps the neutral room'),
+    })
+    .strict(),
+]);
 const lightingSchema = z.union([
   z.literal('studio').meta({ title: 'Studio' }),
   z
@@ -91,21 +150,52 @@ const lightingSchema = z.union([
             .strict(),
         )
         .max(renderImageMaxLights),
+      headlamp: headlampSchema.optional(),
       ambient: ratio().min(renderImageAmbientRange[0]).max(renderImageAmbientRange[1]).optional(),
-      environment: z.enum(['studio', 'none']).optional(),
+      environment: environmentSchema.optional(),
       space: z.enum(['view', 'world']).optional(),
       exposure: ratio().min(renderImageExposureRange[0]).max(renderImageExposureRange[1]).optional(),
     })
     .strict()
+    .superRefine((rig, context) => {
+      // A lit headlamp takes one of the rig's light slots, as nanoraster counts it.
+      const capacity = renderImageMaxLights - (rig.headlamp && rig.headlamp.intensity > 0 ? 1 : 0);
+      if (rig.lights.length > capacity) {
+        context.addIssue({
+          code: 'custom',
+          path: ['lights'],
+          message: `At most ${capacity} lights beside the headlamp`,
+        });
+      }
+    })
     .meta({ title: 'Directional lights' }),
 ]);
+// `thicknessRatio`, `denoiseDepthTolerance`, `samples` and `resolutionScale` are nanoraster's viewer-parity GTAO
+// controls (Tau charter W2), bounded as nanoraster bounds them.
 const aoSchema = z
   .object({
     radiusPixels: pixels().min(1).max(128).optional(),
     intensity: ratio().min(0).max(8).optional(),
     distanceFalloff: ratio().min(0.01).max(1).optional(),
+    thicknessRatio: ratio()
+      .min(0.1)
+      .max(100)
+      .optional()
+      .describe('GTAO depth acceptance as a multiple of the world-space sampling radius'),
+    denoiseDepthTolerance: ratio()
+      .min(0.01)
+      .max(10)
+      .optional()
+      .describe('Denoise and upsample plane-distance tolerance as a fraction of the sampling radius'),
+    samples: z.number().int().min(1).max(64).optional().describe('Horizon samples per pixel'),
+    resolutionScale: ratio()
+      .min(0.25)
+      .max(1)
+      .optional()
+      .describe('Estimate and denoise resolution as a fraction of the output size'),
   })
   .strict();
+const toneMappingSchema = z.enum(['neutral', 'aces', 'linear', 'none']);
 const defaultImageLighting = {
   lights: [
     { direction: [1, 1, 1], color: [2.5, 2.5, 2.5] },
@@ -281,10 +371,14 @@ const baseImageShape = {
     .describe('Include a physical scale bar at the fitted centre or fixed camera target plane'),
   lighting: lightingSchema
     .default(defaultImageLighting)
-    .describe('Studio lighting or an explicit directional-light rig'),
+    .describe('Studio lighting or an explicit rig of directional lights, headlamp, ambient and environment'),
   ao: aoSchema
     .optional()
     .describe('Screen-space ambient occlusion for opaque contact shadows; on by default, intensity 0 disables it'),
+  lineColor: hexColor.optional().describe('sRGB #RRGGBB or #RRGGBBAA colour replacing every authored line colour'),
+  toneMapping: toneMappingSchema
+    .optional()
+    .describe('Display transform after exposure: Khronos PBR Neutral, ACES Filmic, linear or none'),
 } as const;
 
 const validateAnnotatedDimensions = (

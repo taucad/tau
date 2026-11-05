@@ -6,6 +6,7 @@
  */
 
 import * as THREE from 'three';
+import { viewerRenderProfile } from '@taucad/types/constants/viewer-render-profile';
 
 /** Output buffer for camera world rotation — reused by every `applyLightingForCamera` call. */
 const scratchCameraWorldQuaternionForLighting = new THREE.Quaternion();
@@ -14,25 +15,28 @@ const scratchCameraUp = new THREE.Vector3();
 const scratchCameraForward = new THREE.Vector3();
 
 // ── Lighting constants ─────────────────────────────────────────────────────
+// Values come from the viewer render profile, which headless captures also read.
+
+const { lighting: profileLighting } = viewerRenderProfile;
 /**
  * Low diffuse fill; metallic readability comes from the room environment.
  *
  * @public
  */
-export const ambientBaseIntensity = 0.1;
+export const ambientBaseIntensity = profileLighting.ambientIntensity;
 
 /**
  * Camera-relative diffuse key, calibrated with Neutral tone mapping at exposure 1.
  * @public
  */
-export const headlampBaseIntensity = 1.5;
+export const headlampBaseIntensity = profileLighting.headlamp.intensity;
 
 /**
  * Environment reflections supplement the directional key without washing out
  * the surface gradient. Projection changes preserve the same light energy.
  * @public
  */
-export const environmentBaseIntensity = 1;
+export const environmentBaseIntensity = profileLighting.environmentIntensity;
 
 /**
  * Explicit studio controls; material roughness and metalness remain authored properties.
@@ -58,15 +62,15 @@ export type StudioLightingSettings = {
  * @public
  */
 export const defaultStudioLighting: StudioLightingSettings = {
-  environment: 'room',
+  environment: profileLighting.environment,
   ambientIntensity: ambientBaseIntensity,
   headlampIntensity: headlampBaseIntensity,
   environmentIntensity: environmentBaseIntensity,
-  keyIntensity: 64,
-  keySize: 1.2,
-  fillIntensity: 1,
-  backgroundIntensity: 0,
-  exposure: 1,
+  keyIntensity: profileLighting.studio.keyIntensity,
+  keySize: profileLighting.studio.keySize,
+  fillIntensity: profileLighting.studio.fillIntensity,
+  backgroundIntensity: profileLighting.studio.backgroundIntensity,
+  exposure: viewerRenderProfile.exposure,
 };
 
 // ── Dark-mode theme constants ──────────────────────────────────────────────
@@ -76,14 +80,14 @@ export const defaultStudioLighting: StudioLightingSettings = {
  *
  * @public
  */
-export const darkModeIntensityScale = 1;
+export const darkModeIntensityScale = viewerRenderProfile.colorSchemes.dark.lightIntensityScale;
 
 /**
  * Ambient floor boost in dark mode to prevent shadows from becoming unreadably dark.
  *
  * @public
  */
-export const darkModeAmbientBoost = 1.15;
+export const darkModeAmbientBoost = viewerRenderProfile.colorSchemes.dark.ambientBoost;
 
 // ── Headlamp configuration ─────────────────────────────────────────────────
 
@@ -109,10 +113,10 @@ export type HeadlampConfig = {
  * @public
  */
 export const defaultHeadlampConfig: HeadlampConfig = {
-  rightOffset: 2,
-  upOffset: 2,
-  targetRightSkew: 0,
-  targetUpSkew: 0,
+  rightOffset: profileLighting.headlamp.rightOffset,
+  upOffset: profileLighting.headlamp.upOffset,
+  targetRightSkew: profileLighting.headlamp.targetRightSkew,
+  targetUpSkew: profileLighting.headlamp.targetUpSkew,
 };
 
 // ── Combined config for applyLightingForCamera ─────────────────────────────
@@ -232,7 +236,7 @@ function writeHeadlampTransform(
 
   // Target: forward of camera with skew offsets
   targetPosition.copy(cameraPosition);
-  targetPosition.addScaledVector(cameraForward, sceneRadius * 2);
+  targetPosition.addScaledVector(cameraForward, sceneRadius * profileLighting.headlamp.targetDistance);
   targetPosition.addScaledVector(cameraRight, -sceneRadius * config.targetRightSkew);
   targetPosition.addScaledVector(cameraUp, -sceneRadius * config.targetUpSkew);
 }

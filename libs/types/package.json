@@ -15,6 +15,7 @@
     ".": "./src/types/index.ts",
     "./constants": "./src/constants/index.ts",
     "./constants/id": "./src/constants/id.constants.ts",
+    "./constants/viewer-render-profile": "./src/constants/viewer-render-profile.constants.ts",
     "./browser": "./src/browser.ts",
     "./desktop-native-kernels": "./src/desktop-native-kernels.ts",
     "./desktop-terminal": "./src/desktop-terminal.ts",

@@ -293,6 +293,67 @@ describe('imageEdgeSchemas', () => {
       expect(imageEdgeSchemas.png.safeParse({ lighting: { lights: [], exposure: 17 } }).success).toBe(false);
     });
 
+    it("should accept nanoraster's headlamp and environment object with every value stated", () => {
+      const lighting = {
+        headlamp: { intensity: 1.5, rightOffset: 2, upOffset: 2 },
+        lights: [],
+        ambient: 0.036,
+        environment: { intensity: 1 },
+        space: 'view',
+        exposure: 1,
+      } as const;
+      expect(imageEdgeSchemas.png.parse({ lighting }).lighting).toStrictEqual(lighting);
+      const cards = {
+        intensity: 0.5,
+        cards: [
+          { position: [1, 1, 1], size: [1.2, 1.2], intensity: 64 },
+          { position: [-3, 1, 0.5], size: [4, 4], intensity: 1.2, rotation: [Math.PI / 8, Math.PI / 3, 0] },
+        ],
+      } as const;
+      expect(imageEdgeSchemas.webp.parse({ lighting: { lights: [], environment: cards } }).lighting).toStrictEqual({
+        lights: [],
+        environment: cards,
+      });
+      expect(
+        imageEdgeSchemas.png.parse({ lighting: { lights: [], environment: { intensity: 0, cards: [] } } }).lighting,
+      ).toStrictEqual({ lights: [], environment: { intensity: 0, cards: [] } });
+    });
+
+    it('should reject a headlamp or environment that leaves a value to nanoraster or exceeds its bounds', () => {
+      const card = { position: [0, 0, 2], size: [1, 1], intensity: 1 } as const;
+      for (const invalid of [
+        { lights: [], headlamp: {} },
+        { lights: [], headlamp: { intensity: 1.5, rightOffset: 2 } },
+        { lights: [], headlamp: { intensity: 33, rightOffset: 2, upOffset: 2 } },
+        { lights: [], headlamp: { intensity: 1.5, rightOffset: 65, upOffset: 2 } },
+        { lights: [], headlamp: { intensity: 1.5, rightOffset: 2, upOffset: 2, color: [1, 1, 1] } },
+        { lights: [], environment: {} },
+        { lights: [], environment: { cards: [card] } },
+        { lights: [], environment: { intensity: 17 } },
+        { lights: [], environment: { intensity: 1, cards: Array.from({ length: 17 }, () => card) } },
+        { lights: [], environment: { intensity: 1, cards: [{ ...card, position: [0, 0, 0] }] } },
+        { lights: [], environment: { intensity: 1, cards: [{ ...card, position: [0, 0, 65] }] } },
+        { lights: [], environment: { intensity: 1, cards: [{ ...card, size: [0, 1] }] } },
+        { lights: [], environment: { intensity: 1, cards: [{ ...card, intensity: 4097 }] } },
+        { lights: [], environment: { intensity: 1, cards: [{ ...card, form: 'circle' }] } },
+        { lights: [], environment: 'room' },
+      ]) {
+        expect(imageEdgeSchemas.png.safeParse({ lighting: invalid }).success, JSON.stringify(invalid)).toBe(false);
+      }
+    });
+
+    it('should count a lit headlamp against the light limit as nanoraster does', () => {
+      const light = { direction: [0, 0, 1], color: [1, 1, 1] } as const;
+      const headlamp = { intensity: 1.5, rightOffset: 2, upOffset: 2 } as const;
+      const lights = (count: number) => Array.from({ length: count }, () => light);
+      expect(imageEdgeSchemas.png.safeParse({ lighting: { lights: lights(7), headlamp } }).success).toBe(true);
+      expect(imageEdgeSchemas.png.safeParse({ lighting: { lights: lights(8), headlamp } }).success).toBe(false);
+      expect(
+        imageEdgeSchemas.png.safeParse({ lighting: { lights: lights(8), headlamp: { ...headlamp, intensity: 0 } } })
+          .success,
+      ).toBe(true);
+    });
+
     it('should accept and bound ambient occlusion without changing the default', () => {
       expect(imageEdgeSchemas.webp.parse({}).ao).toBeUndefined();
       expect(imageEdgeSchemas.webp.parse({ ao: {} }).ao).toEqual({});
@@ -302,6 +363,46 @@ describe('imageEdgeSchemas', () => {
       expect(imageEdgeSchemas.webp.safeParse({ ao: { intensity: 9 } }).success).toBe(false);
       expect(imageEdgeSchemas.webp.safeParse({ ao: { distanceFalloff: 0 } }).success).toBe(false);
       expect(imageEdgeSchemas.webp.safeParse({ ao: { other: 1 } }).success).toBe(false);
+    });
+
+    it('should accept and bound the viewer GTAO controls', () => {
+      const ao = {
+        radiusPixels: 9.6,
+        intensity: 0.75,
+        distanceFalloff: 1,
+        thicknessRatio: 1 / 0.09,
+        denoiseDepthTolerance: 0.1,
+        samples: 16,
+        resolutionScale: 0.5,
+      };
+      expect(imageEdgeSchemas.png.parse({ ao }).ao).toEqual(ao);
+      for (const invalid of [
+        { thicknessRatio: 0.09 },
+        { thicknessRatio: 101 },
+        { denoiseDepthTolerance: 0.009 },
+        { denoiseDepthTolerance: 10.5 },
+        { samples: 0 },
+        { samples: 8.5 },
+        { samples: 65 },
+        { resolutionScale: 0.2 },
+        { resolutionScale: 1.5 },
+      ]) {
+        expect(imageEdgeSchemas.png.safeParse({ ao: invalid }).success).toBe(false);
+      }
+    });
+
+    it('should accept a line colour and a tone-mapping operator without defaulting either', () => {
+      expect(imageEdgeSchemas.webp.parse({})).not.toHaveProperty('lineColor');
+      expect(imageEdgeSchemas.webp.parse({})).not.toHaveProperty('toneMapping');
+      expect(imageEdgeSchemas.webp.parse({ lineColor: '#868686', toneMapping: 'neutral' })).toMatchObject({
+        lineColor: '#868686',
+        toneMapping: 'neutral',
+      });
+      for (const toneMapping of ['aces', 'linear', 'none'] as const) {
+        expect(imageEdgeSchemas.jpeg.parse({ toneMapping }).toneMapping).toBe(toneMapping);
+      }
+      expect(imageEdgeSchemas.png.safeParse({ lineColor: 'grey' }).success).toBe(false);
+      expect(imageEdgeSchemas.png.safeParse({ toneMapping: 'filmic' }).success).toBe(false);
     });
 
     it('should treat a supported label as its own switch and reject unsupported characters', () => {

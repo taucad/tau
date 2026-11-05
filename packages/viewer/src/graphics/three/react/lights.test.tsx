@@ -102,8 +102,22 @@ vi.mock('@react-three/drei', () => ({
     }, [children, source]);
     return <div data-testid='environment'>{children}</div>;
   },
-  Lightformer: ({ intensity }: { readonly intensity: number }) => (
-    <div data-testid='lightformer' data-intensity={intensity} />
+  Lightformer: ({
+    intensity,
+    position,
+    rotation,
+    scale,
+  }: {
+    readonly intensity: number;
+    readonly position: readonly number[];
+    readonly rotation?: readonly number[];
+    readonly scale: readonly number[];
+  }) => (
+    <div
+      data-testid='lightformer'
+      data-intensity={intensity}
+      data-placement={JSON.stringify({ position, rotation, scale })}
+    />
   ),
 }));
 
@@ -414,6 +428,26 @@ describe('Lights', () => {
     render(<Lights settings={{ environment: 'studio', backgroundIntensity: floor }} />);
     const cards = screen.getAllByTestId('lightformer');
     expect(cards.map((card) => Number(card.dataset['intensity']))).toEqual(intensities);
+  });
+
+  it('should place the studio cards where the viewer has always placed them', () => {
+    const radius = 3;
+    render(<Lights sceneRadius={radius} settings={{ environment: 'studio' }} />);
+    const placements = screen
+      .getAllByTestId('lightformer')
+      .map((card): unknown => JSON.parse(card.dataset['placement'] ?? 'null'));
+    // The literal placement before the render profile owned it (charter invariant I1: viewer pixels do not change).
+    expect(placements).toStrictEqual([
+      { position: [radius, radius, radius], scale: [radius * 1.2, radius * 1.2, 1] },
+      {
+        position: [-radius * 3, radius, radius * 0.5],
+        rotation: [Math.PI / 8, Math.PI / 3, 0],
+        scale: [radius * 4, radius * 4, 1],
+      },
+      { position: [0, radius * 3, 0], rotation: [Math.PI / 2, 0, 0], scale: [radius * 3, radius * 3, 1] },
+      { position: [radius * 2, -radius * 3, 0], rotation: [-Math.PI / 2, 0, 0], scale: [radius * 6, radius * 6, 1] },
+      { position: [radius * 2, -radius * 3, radius * 4], scale: [radius * 2, radius * 2, 1] },
+    ]);
   });
 
   it('should preserve configurable panel contrast above the studio radiance floor', () => {

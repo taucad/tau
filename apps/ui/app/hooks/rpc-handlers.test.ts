@@ -16,6 +16,7 @@ import type { RpcHandlerDependencies, RpcCallInput } from '#hooks/rpc-handlers.j
 import { omittedSectionCutsNotice } from '#services/headless-capture.js';
 import type { SectionCut } from '@taucad/viewer/graphics/section-cuts';
 import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
+import { buildViewerCaptureImageOptions } from '@taucad/agent-tools/capture';
 
 type RpcDependencies = ChatRpc.RpcDependencies;
 type RpcFileSystem = ChatRpc.RpcFileSystem;
@@ -1339,7 +1340,7 @@ describe('rpc-handlers', () => {
             mode: 'single',
             width: 1600,
             height: 1600,
-            lineWidth: 3,
+            ...buildViewerCaptureImageOptions({ width: 1600, height: 1600, colorScheme: 'dark' }),
             background: '#242424',
             camera: {
               framing: 'bounds',
@@ -1478,7 +1479,7 @@ describe('rpc-handlers', () => {
             mode: 'batch',
             width: 1600,
             height: 1600,
-            lineWidth: 3,
+            ...buildViewerCaptureImageOptions({ width: 1600, height: 1600, colorScheme: 'dark' }),
             background: '#242424',
             axes: true,
             scaleBar: true,

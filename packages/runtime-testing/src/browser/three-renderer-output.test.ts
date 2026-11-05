@@ -9,6 +9,7 @@ import {
   createRendererOutputCanvas,
   disposeRendererOutput,
   installRendererOutput,
+  premultipliedRendererOutput,
 } from '#browser/three-renderer-output.js';
 
 const renderers: Array<WebGPURenderer | WebGLRenderer> = [];
@@ -209,6 +210,19 @@ describe('fixture renderer output', () => {
         11, 22, 33, 255, 44, 55, 66, 255, 77, 88, 99, 255, 12, 24, 36, 255, 48, 60, 72, 255, 84, 96, 108, 255,
       ]),
     );
+  });
+
+  it('should keep the premultiplied bytes an edge pixel clamps away when un-premultiplied', async () => {
+    const renderer = createFixture();
+    renderer.setPixelRatio(1);
+    renderer.setSize(2, 1);
+    // Three premultiplies before it encodes, so an encoded edge colour (200) can exceed its alpha (128).
+    renderer.readRenderTargetPixelsAsync = vi.fn(async () => new Uint8Array([200, 100, 64, 128, 30, 40, 50, 255]));
+    installRendererOutput(renderer, 'software');
+    const pixels = await captureRendererOutput(renderer);
+    expect(pixels).toEqual(new Uint8ClampedArray([255, 199, 128, 128, 30, 40, 50, 255]));
+    expect(premultipliedRendererOutput(pixels)).toEqual(new Uint8ClampedArray([200, 100, 64, 128, 30, 40, 50, 255]));
+    expect(premultipliedRendererOutput(new Uint8ClampedArray(8))).toBeUndefined();
   });
 
   it.each([

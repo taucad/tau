@@ -6,16 +6,20 @@ import {
   describeCaptureSection,
   resolveCaptureSectionKeep,
 } from '#capture/capture-views.js';
+import { buildViewerCaptureImageOptions } from '#capture/viewer-capture-options.js';
 
 /* The literals the three call sites carried before this module existed
  * (`apps/ui/app/workers/agent-host.impl.ts`, `packages/host/src/agent-tools.ts`,
- * `apps/ui/app/services/retained-workspace-rpc-handler.ts`). A capture is only
- * host-neutral if the recipe is byte-identical, so the previous literals are
- * pinned here rather than described. */
+ * `apps/ui/app/services/retained-workspace-rpc-handler.ts`), with the viewer's
+ * dark-scheme look (`buildViewerCaptureImageOptions`) in place of their edge
+ * width. A capture is only host-neutral if the recipe is byte-identical, so the
+ * values are pinned here rather than described. */
+const viewerLookAt1600 = buildViewerCaptureImageOptions({ width: 1600, height: 1600, colorScheme: 'dark' });
+
 const previousCommon = {
   width: 1600,
   height: 1600,
-  lineWidth: 3,
+  ...viewerLookAt1600,
   background: '#242424',
   world: { up: '+z', forward: '-y', unit: 'meter' },
   axes: true,
@@ -60,11 +64,11 @@ const previousSingle = {
 };
 
 describe('buildCaptureExportOptions', () => {
-  it('reproduces the previous multi-angle literal exactly', () => {
+  it('should build the multi-angle recipe with the viewer look', () => {
     expect(buildCaptureExportOptions({ mode: 'multi_angle', size: 1600 })).toStrictEqual(previousMultiAngle);
   });
 
-  it('reproduces the previous single-view literal exactly', () => {
+  it('should build the single-view recipe with the viewer look', () => {
     expect(buildCaptureExportOptions({ mode: 'single', size: 1600 })).toStrictEqual(previousSingle);
   });
 

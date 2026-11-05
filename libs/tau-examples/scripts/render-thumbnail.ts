@@ -5,6 +5,7 @@
 
 import sharp from 'sharp';
 import { asKnownArtifact } from '@taucad/runtime';
+import { buildViewerCaptureImageOptions } from '@taucad/agent-tools/capture';
 import type { createExampleRuntimeClient, createWorkspaceRuntimeClient } from '#scripts/runtime.js';
 
 /* The example or the workspace runtime client: they differ only in the kernels they list. */
@@ -15,6 +16,8 @@ export const thumbnailOptions = { width: 1536, height: 1152 } as const;
 /** WebP quality for every generated thumbnail. */
 export const thumbnailQuality = 0.95;
 const thumbnailMargin = 0.1;
+/** The dark-scheme viewer at the thumbnail's pixel ratio: edge colour, ambient occlusion, tone mapping and lights. */
+const thumbnailLook = buildViewerCaptureImageOptions({ ...thumbnailOptions, colorScheme: 'dark' });
 
 export const isWebp = (bytes: Uint8Array<ArrayBuffer>): boolean =>
   bytes.byteLength >= 12 &&
@@ -41,7 +44,9 @@ const renderSvgThumbnail = async (svg: string): Promise<Uint8Array<ArrayBuffer>>
 };
 
 /**
- * Evaluate `sourcePath` and render one WebP per requested edge width, in order.
+ * Evaluate `sourcePath` and render one WebP per requested edge width, in order. Each edge width is in output pixels
+ * and replaces the viewer's own (`thumbnailLook.lineWidth`), so a card shown at another size keeps its line weight;
+ * every other look value is the viewer's.
  * Throws with the project label on any evaluation, render or export failure.
  */
 export async function renderThumbnails(
@@ -101,6 +106,7 @@ export async function renderThumbnails(
         options: {
           mode: 'single',
           ...thumbnailOptions,
+          ...thumbnailLook,
           lineWidth,
           camera: {
             framing: 'bounds',
@@ -110,7 +116,6 @@ export async function renderThumbnails(
             projection: { kind: 'perspective', verticalFieldOfView: 45 },
           },
           quality: thumbnailQuality,
-          ao: {},
         },
       });
       if (!result.success) {

@@ -2,13 +2,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fc from 'fast-check';
 import { EventCoalescer, coalesceChangeEvents } from '#event-coalescer.js';
 import { getEventOrigin, tagEventOrigin } from '#event-origin-registry.js';
-import type { ChangeEvent } from '#types.js';
+import type { PathChangeEvent } from '#types.js';
 
 const testBackend = 'memory';
 
-const written = (path: string): ChangeEvent => ({ type: 'fileWritten', path, backend: testBackend });
-const deleted = (path: string): ChangeEvent => ({ type: 'fileDeleted', path, backend: testBackend });
-const renamed = (oldPath: string, newPath: string): ChangeEvent => ({
+const written = (path: string): PathChangeEvent => ({ type: 'fileWritten', path, backend: testBackend });
+const deleted = (path: string): PathChangeEvent => ({ type: 'fileDeleted', path, backend: testBackend });
+const renamed = (oldPath: string, newPath: string): PathChangeEvent => ({
   type: 'fileRenamed',
   oldPath,
   newPath,
@@ -125,14 +125,14 @@ describe('coalesceChangeEvents (pure)', () => {
   });
 
   it('should pass through backendChanged events', () => {
-    const backendEvent: ChangeEvent = { type: 'backendChanged', backend: testBackend };
+    const backendEvent: PathChangeEvent = { type: 'backendChanged', backend: testBackend };
     const result = coalesceChangeEvents([backendEvent, written('/a.txt')]);
     expect(result).toHaveLength(2);
     expect(result[0]).toEqual(backendEvent);
   });
 
   it('places a collapsed path fact at its final causal position', () => {
-    const backendEvent: ChangeEvent = { type: 'backendChanged', backend: testBackend };
+    const backendEvent: PathChangeEvent = { type: 'backendChanged', backend: testBackend };
 
     expect(coalesceChangeEvents([written('/a.txt'), backendEvent, deleted('/a.txt')])).toEqual([
       backendEvent,
@@ -141,7 +141,7 @@ describe('coalesceChangeEvents (pure)', () => {
   });
 
   it('never collapses away a directory summary reset', () => {
-    const summary: ChangeEvent = { type: 'directoryChanged', path: '/src', backend: testBackend };
+    const summary: PathChangeEvent = { type: 'directoryChanged', path: '/src', backend: testBackend };
 
     expect(coalesceChangeEvents([written('/src'), summary, written('/src')])).toEqual([summary, written('/src')]);
   });
@@ -239,7 +239,7 @@ describe('EventCoalescer (timed)', () => {
 
     vi.advanceTimersByTime(50);
     expect(deliver).toHaveBeenCalledTimes(1);
-    const batch = deliver.mock.calls[0]![0] as ChangeEvent[];
+    const batch = deliver.mock.calls[0]![0] as PathChangeEvent[];
     expect(batch).toEqual([written('/a.txt')]);
     expect(getEventOrigin(batch[0]!)).toBeUndefined();
 
@@ -255,7 +255,7 @@ describe('EventCoalescer (timed)', () => {
 
     vi.advanceTimersByTime(50);
     expect(deliver).toHaveBeenCalledTimes(1);
-    const batch = deliver.mock.calls[0]![0] as ChangeEvent[];
+    const batch = deliver.mock.calls[0]![0] as PathChangeEvent[];
     expect(batch).toEqual([written('/a.txt')]);
     expect(getEventOrigin(batch[0]!)).toBeUndefined();
 
@@ -269,7 +269,7 @@ describe('EventCoalescer (timed)', () => {
     tagEventOrigin(writtenEvent, 'port_a');
     coalescer.push(writtenEvent);
     vi.advanceTimersByTime(50);
-    const batch = deliver.mock.calls[0]![0] as ChangeEvent[];
+    const batch = deliver.mock.calls[0]![0] as PathChangeEvent[];
     expect(batch).toEqual([writtenEvent]);
     expect(getEventOrigin(batch[0]!)).toBe('port_a');
     coalescer.dispose();
@@ -424,7 +424,7 @@ describe('EventCoalescer (timed)', () => {
     });
 
     it('should deliver a burst of ten writes within 50 ms in at most two batches', () => {
-      const deliver = vi.fn<(events: ChangeEvent[]) => void>();
+      const deliver = vi.fn<(events: PathChangeEvent[]) => void>();
       const coalescer = new EventCoalescer(deliver, { coalescingWindow: 75, leadingEdge: true });
       const paths = Array.from({ length: 10 }, (_, index) => `/burst/${index}.txt`);
 
@@ -441,7 +441,7 @@ describe('EventCoalescer (timed)', () => {
     });
 
     it('should batch events pushed in the same tick and coalesce events a delivery causes into the window', () => {
-      const batches: ChangeEvent[][] = [];
+      const batches: PathChangeEvent[][] = [];
       const coalescer = new EventCoalescer(
         (events) => {
           batches.push(events);

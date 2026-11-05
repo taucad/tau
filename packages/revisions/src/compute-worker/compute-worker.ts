@@ -6,8 +6,8 @@
  * back; the authority does every read and write. Today the authority runs the
  * work in its own realm ({@link createInlineCompute}); a host that gives the
  * store a dedicated worker passes {@link connectComputeWorker} over a port that
- * worker serves with {@link serveComputeWorker} — one seam, with the buffers
- * transferred, never copied.
+ * worker serves with {@link serveComputeWorker} — one seam. Each request
+ * transfers a copy of the caller's bytes, and each answer is transferred back.
  *
  * @module
  */
@@ -183,8 +183,9 @@ export const serveComputeWorker = (port: ComputePort, compute: ComputeWorker = c
 };
 
 /**
- * The store's half of the seam: each call's input buffer is transferred to
- * the worker and its answer transferred back.
+ * The store's half of the seam: a copy of each call's input is transferred to
+ * the worker, so the caller's buffer is never detached, and the answer is
+ * transferred back.
  *
  * @param port - A port a {@link serveComputeWorker} serves.
  * @returns The compute contract over that port.
@@ -211,9 +212,9 @@ export const connectComputeWorker = (port: ComputePort): ComputeWorker => {
     next += 1;
     const call = Promise.withResolvers<Uint8Array<ArrayBuffer> | string>();
     waiting.set(id, call);
-    /* The caller hands its buffer over: a view of a larger one is copied out first. */
-    const owned =
-      bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ? bytes : new Uint8Array(bytes);
+    /* A copy is transferred: the caller keeps its own bytes, whole and usable (a pack
+     * writer reads an object again after deflating it, a loose writer hashes then deflates). */
+    const owned = new Uint8Array(bytes);
     port.postMessage({ id, method, bytes: owned } satisfies ComputeRequest, [owned.buffer]);
     return (await call.promise) as Result;
   };

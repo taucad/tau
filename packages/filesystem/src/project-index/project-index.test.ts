@@ -5,6 +5,7 @@ import * as fc from 'fast-check';
 import { sha256Bytes } from '@taucad/utils/hash';
 import type { FileStatEntry } from '@taucad/types';
 import { directoryConcurrency } from '#concurrency.js';
+import { lineCountByteCap } from '#content-metadata.js';
 import { MemoryProvider } from '#backend/memory-provider.js';
 import type { ProviderRegistry } from '#provider-registry.js';
 import type { FileSystemProvider } from '#types.js';
@@ -474,11 +475,97 @@ describe('ProjectIndexes', () => {
     expect(reads()).toBe(0);
   });
 
+  /* W3 a3: a whole read already holds a file's facts, so no listing pays for them again. */
+  it('should answer a cold root from its reads without opening, scanning or reading again', async () => {
+    const { provider, reads } = await durableRoot();
+    await provider.writeFile('project/a.ts', 'a\nb\nc');
+    await provider.writeFile('project/b.bin', Uint8Array.from([0, 1, 2]));
+    const indexes = indexesOver(provider);
+    const listings = vi.spyOn(provider, 'readdirWithStats');
+
+    indexes.recordRead('/p', 'a.ts', await provider.readFile('project/a.ts'));
+    indexes.recordRead('/p', 'b.bin', await provider.readFile('project/b.bin'));
+    const before = reads();
+    const facts = await indexes.facts('/p', ['a.ts', 'b.bin'], { lineCount: true, byteCap: lineCountByteCap });
+
+    expect([...facts]).toEqual([
+      ['a.ts', { contentKind: 'text', lineCount: 3 }],
+      ['b.bin', { contentKind: 'binary' }],
+    ]);
+    expect(reads()).toBe(before);
+    expect(listings).not.toHaveBeenCalled();
+    expect(indexes.get('/p')).toBeUndefined();
+  });
+
+  it('should forget a cold read once the path is written or invalidated', async () => {
+    const { provider, reads } = await durableRoot();
+    await provider.writeFile('project/a.ts', 'a');
+    const indexes = indexesOver(provider);
+    indexes.recordRead('/p', 'a.ts', await provider.readFile('project/a.ts'));
+
+    await provider.writeFile('project/a.ts', 'a\nb');
+    indexes.addFile('/p/a.ts', { size: 3 });
+    const written = await indexes.facts('/p', ['a.ts'], { lineCount: true });
+    await provider.writeFile('project/a.ts', 'a\nb\nc');
+    indexes.invalidate('/p/a.ts');
+    const before = reads();
+    const invalidated = await indexes.facts('/p', ['a.ts'], { lineCount: true });
+
+    expect(written.get('a.ts')).toEqual({ contentKind: 'text', lineCount: 2 });
+    expect(invalidated.get('a.ts')).toEqual({ contentKind: 'text', lineCount: 3 });
+    expect(reads()).toBe(before + 1);
+  });
+
+  it('should record a warm index entry from a whole read at its own metadata', async () => {
+    const { provider, reads } = await durableRoot();
+    await provider.writeFile('project/a.ts', 'a\nb');
+    const indexes = indexesOver(provider);
+    const index = await indexes.ready('/p');
+
+    indexes.recordRead('/p', 'a.ts', await provider.readFile('project/a.ts'));
+    const before = reads();
+    const facts = await indexes.facts('/p', ['a.ts'], { lineCount: true });
+
+    expect(facts.get('a.ts')).toEqual({ contentKind: 'text', lineCount: 2 });
+    expect(index.entry('a.ts')?.factsAt).toMatchObject({ size: 3, mtimeMs: index.entry('a.ts')?.mtimeMs });
+    expect(reads()).toBe(before);
+  });
+
+  /* W3 a3: no caller waits behind a snapshot write another holder has started. */
+  it('should defer a persist whose lock another holder has instead of waiting for it', async () => {
+    const { provider } = await durableRoot();
+    await provider.writeFile('project/a.ts', 'a');
+    const indexes = indexesOver(provider);
+    await indexes.ready('/p');
+    let release = (): void => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let granted = (): void => undefined;
+    const holding = new Promise<void>((resolve) => {
+      granted = resolve;
+    });
+    const holder = navigator.locks.request('tau-index:test:project', async () => {
+      granted();
+      await held;
+    });
+    await holding;
+
+    const result = await indexes.persist('/p');
+    release();
+    await holder;
+
+    expect(result).toBe('busy');
+    expect(await indexes.persist('/p')).toBe('written');
+  });
+
   it('should survive a reload and detect an external edit by its compare', async () => {
     const { provider, reads } = await durableRoot();
     await provider.writeFile('project/kept.ts', 'kept');
     await provider.writeFile('project/edited.ts', 'before');
     const first = indexesOver(provider);
+    /* Facts never open a cold root's index: the reload this test needs starts from an open one. */
+    await first.ready('/p');
     await first.facts('/p', ['kept.ts', 'edited.ts']);
     expect(await first.persist('/p')).toBe('written');
     await provider.writeFile('project/edited.ts', 'after!!');

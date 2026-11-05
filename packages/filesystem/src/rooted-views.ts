@@ -229,6 +229,7 @@ export class RootedViews {
     if (captured === undefined) {
       throw new RootedFileSystemError('ROOT_UNAVAILABLE');
     }
+    const projectIndexes = this._projectIndexes;
 
     const assertCurrent = (): void => {
       if (this._mountTable.getExactMount(root) !== captured) {
@@ -283,10 +284,14 @@ export class RootedViews {
     function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
     function readFile(path: string, encoding: 'utf8'): Promise<string>;
     async function readFile(path: string, encoding?: 'utf8'): Promise<string | Uint8Array<ArrayBuffer>> {
-      const { resolution } = resolveLocal(path);
-      return encoding === 'utf8'
-        ? resolution.provider.readFile(resolution.path, 'utf8')
-        : resolution.provider.readFile(resolution.path);
+      const { resolution, localPath } = resolveLocal(path);
+      if (encoding === 'utf8') {
+        return resolution.provider.readFile(resolution.path, 'utf8');
+      }
+      const bytes = await resolution.provider.readFile(resolution.path);
+      /* A whole read already holds every fact a listing asks for (D4): keep them. */
+      projectIndexes.recordRead(root, localPath, bytes);
+      return bytes;
     }
 
     /* One provider call for the whole set: a remote provider digests beside its

@@ -81,6 +81,13 @@ const blobOidOf = async (bytes: Uint8Array<ArrayBuffer>): Promise<string> => {
   return toHex(await crypto.subtle.digest('SHA-1', framed));
 };
 
+/** Most read facts one cold root keeps before it starts over. */
+const readFactsCapacity = 50_000;
+
+/** Unknown, or text whose line count was not measured. */
+const lacksCount = (facts: ContentFacts | undefined): boolean =>
+  facts === undefined || (facts.contentKind === 'text' && facts.lineCount === undefined);
+
 /** `relative` of `absolute` under `root`, or `undefined` when outside it. */
 const relativeTo = (root: string, absolute: string): string | undefined => {
   if (absolute === root) {
@@ -114,6 +121,12 @@ export class ProjectIndexes {
   private readonly _options: ProjectIndexesOptions;
   /** Notices from sibling tabs, joined into every root's vector. */
   private readonly _remoteSeen: Record<string, number> = {};
+  /**
+   * Per cold root, the facts of bytes a whole read already held (D4): what a
+   * later listing asks of a root nobody opened an index for, answered without
+   * reading again. Every hook that feeds an index forgets what it touches.
+   */
+  private readonly _readFacts = new Map<string, Map<string, Readonly<{ facts: ContentFacts; size: number }>>>();
 
   /**
    * @param options - Mount boundaries, provider resolution, path policy and tab identity.
@@ -230,11 +243,14 @@ export class ProjectIndexes {
     options?: IndexFactsOptions,
   ): Promise<ReadonlyMap<string, ContentFacts>> {
     const key = normalizePath(root);
-    const index = await this.ready(key);
-    const resolution = this._resolve(key);
     const digests = options?.digests ?? [];
     const lineCount = options?.lineCount === true;
     const byteCap = options?.byteCap ?? Number.POSITIVE_INFINITY;
+    if (digests.length === 0 && this.get(key) === undefined) {
+      return this._coldFacts(key, paths, { lineCount, byteCap, signal: options?.signal });
+    }
+    const index = await this.ready(key);
+    const resolution = this._resolve(key);
     const trustworthy = resolution.persist !== undefined;
     const answers = (path: string, known: ContentFacts | undefined): known is ContentFacts => {
       if (known === undefined || !digests.every((digest) => known[digest] !== undefined)) {
@@ -289,13 +305,54 @@ export class ProjectIndexes {
   }
 
   /**
+   * Record the facts of a whole file a rooted read just returned (D4): its
+   * kind from the first 512 bytes and its line count, both from those same
+   * bytes, so no listing reads the file again. A warm index takes them at the
+   * entry's metadata when the sizes agree; a cold root keeps them until a
+   * mutation or an external fact touches the path.
+   *
+   * @param root - Absolute root.
+   * @param path - Root-relative file path.
+   * @param bytes - The whole file, as just read.
+   */
+  public recordRead(root: string, path: string, bytes: Uint8Array<ArrayBuffer>): void {
+    const key = normalizePath(root);
+    if (path === '' || this._excluded(path)) {
+      return;
+    }
+    const observedAt = Date.now();
+    const state = this._states.get(key);
+    if (state !== undefined) {
+      const entry = state.index.isComplete ? state.index.entry(path) : undefined;
+      /* A write still waiting for the provider's own mtime keeps the facts it wrote. */
+      const pendingWrite = entry?.factsAt !== undefined && entry.factsAt.mtimeMs === undefined;
+      if (
+        entry?.kind === 'file' &&
+        entry.size === bytes.byteLength &&
+        !pendingWrite &&
+        lacksCount(state.index.factsFor(path))
+      ) {
+        state.index.recordFacts(path, getFileContentMetadata(bytes), {
+          size: entry.size,
+          mtimeMs: entry.mtimeMs,
+          observedAt,
+        });
+        this._schedulePersist(key);
+      }
+      return;
+    }
+    this._remember(key, path, { facts: getFileContentMetadata(bytes), size: bytes.byteLength });
+  }
+
+  /**
    * Write one root's snapshot now, under its index lock and CAS (D5).
    *
    * @param root - Absolute root.
-   * @returns `'written'`, `'stale'` when a newer snapshot is stored, or
-   *   `'skipped'` when the root keeps none or is not open.
+   * @returns `'written'`, `'stale'` when a newer snapshot is stored,
+   *   `'skipped'` when the root keeps none or is not open, or `'busy'` when
+   *   another holder has the lock: a later write is scheduled, never waited for.
    */
-  public async persist(root: string): Promise<'written' | 'stale' | 'skipped'> {
+  public async persist(root: string): Promise<'written' | 'stale' | 'skipped' | 'busy'> {
     const key = normalizePath(root);
     const state = this._states.get(key);
     if (state === undefined || !state.index.isComplete) {
@@ -320,7 +377,7 @@ export class ProjectIndexes {
     if (state.index.entry(container) === undefined) {
       state.index.recordDirectory(container);
     }
-    return writeIndexSnapshot({
+    const written = await writeIndexSnapshot({
       provider: resolution.provider,
       providerRoot: resolution.path,
       lockName: resolution.persist.lockName,
@@ -331,6 +388,10 @@ export class ProjectIndexes {
         entries: state.index.toSnapshot(),
       }),
     });
+    if (written === 'busy') {
+      this._schedulePersist(key);
+    }
+    return written;
   }
 
   /**
@@ -400,6 +461,7 @@ export class ProjectIndexes {
    * @param written - Size and the facts of the written bytes.
    */
   public addFile(absolutePath: string, written: Readonly<{ size: number; facts?: ContentFacts }>): void {
+    this._forget(absolutePath);
     const observedAt = Date.now();
     this._apply(absolutePath, (index, relative) => {
       index.recordFile(relative, { ...written, observedAt });
@@ -412,6 +474,7 @@ export class ProjectIndexes {
    * @param absolutePath - Absolute directory path.
    */
   public addDirectory(absolutePath: string): void {
+    this._forget(absolutePath);
     this._apply(absolutePath, (index, relative) => {
       index.recordDirectory(relative);
     });
@@ -423,6 +486,7 @@ export class ProjectIndexes {
    * @param absolutePath - Absolute file path.
    */
   public removeFile(absolutePath: string): void {
+    this._forget(absolutePath);
     this._apply(absolutePath, (index, relative) => {
       index.remove(relative);
     });
@@ -444,6 +508,8 @@ export class ProjectIndexes {
    * @param to - Absolute target path.
    */
   public rename(from: string, to: string): void {
+    this._forget(from);
+    this._forget(to);
     const source = normalizePath(from);
     const target = normalizePath(to);
     for (const [root, state] of this._states) {
@@ -471,6 +537,7 @@ export class ProjectIndexes {
    * @param absolutePath - Absolute path whose state is unknown.
    */
   public invalidate(absolutePath: string): void {
+    this._forget(absolutePath);
     const normalized = normalizePath(absolutePath);
     for (const [root, state] of this._states) {
       const relative = this._inside(root, normalized);
@@ -496,6 +563,7 @@ export class ProjectIndexes {
    * @param absolutePath - The mount prefix that changed.
    */
   public evict(absolutePath: string): void {
+    this._forget(absolutePath);
     const changed = normalizePath(absolutePath);
     for (const [root, state] of this._states) {
       if (relativeTo(changed, root) !== undefined || relativeTo(root, changed) !== undefined) {
@@ -507,13 +575,88 @@ export class ProjectIndexes {
 
   /** Drop every index: disposal, or a reset fact that may have moved the whole tree. */
   public clear(): void {
+    this._readFacts.clear();
     for (const state of this._states.values()) {
       clearTimeout(state.persistTimer);
     }
     this._states.clear();
   }
 
+  /**
+   * Facts on a root with no warm index (D4): what its reads already measured,
+   * and the rest measured now. Opening the index would hold the listing for a
+   * full scan, so this neither waits for one nor starts one.
+   */
+  private async _coldFacts(
+    root: string,
+    paths: readonly string[],
+    options: Readonly<{ lineCount: boolean; byteCap: number; signal: AbortSignal | undefined }>,
+  ): Promise<ReadonlyMap<string, ContentFacts>> {
+    const resolution = this._resolve(root);
+    const memo = this._readFacts.get(root);
+    const answered = await mapConcurrent(paths, factsConcurrency, async (path) => {
+      options.signal?.throwIfAborted();
+      const read = memo?.get(path);
+      if (read !== undefined && (!options.lineCount || !lacksCount(read.facts) || read.size > options.byteCap)) {
+        return read.facts;
+      }
+      const providerPath = joinRelativePath(resolution.path, path);
+      const stat = await resolution.provider.stat(providerPath).catch(() => undefined);
+      if (stat?.type !== 'file') {
+        return undefined;
+      }
+      const facts = await this._measure(resolution.provider, { path: providerPath, size: stat.size }, options);
+      if (facts !== undefined) {
+        this._remember(root, path, { facts, size: stat.size });
+      }
+      return facts;
+    });
+    return new Map(
+      paths.flatMap((path, at) => {
+        const facts = answered[at];
+        return facts === undefined ? [] : [[path, facts] as const];
+      }),
+    );
+  }
+
+  /** Keep what a cold root's read or measurement found, unless other programs edit that root. */
+  private _remember(root: string, path: string, read: Readonly<{ facts: ContentFacts; size: number }>): void {
+    const { resolve } = this._options;
+    if (resolve === undefined || resolve(root).provider.capabilities.externallyEdited === true) {
+      /* Nothing tells a cold root of another program's edit: measure again each time. */
+      return;
+    }
+    let memo = this._readFacts.get(root);
+    if (memo === undefined) {
+      memo = new Map();
+      this._readFacts.set(root, memo);
+    }
+    if (memo.size >= readFactsCapacity) {
+      memo.clear();
+    }
+    memo.set(path, read);
+  }
+
+  /** Forget what reads measured at or under `absolutePath`, and every cold root under it. */
+  private _forget(absolutePath: string): void {
+    const changed = normalizePath(absolutePath);
+    for (const [root, memo] of this._readFacts) {
+      const relative = relativeTo(root, changed);
+      if (relative === '' || relativeTo(changed, root) !== undefined) {
+        this._readFacts.delete(root);
+      } else if (relative !== undefined) {
+        memo.delete(relative);
+        for (const path of memo.keys()) {
+          if (path.startsWith(`${relative}/`)) {
+            memo.delete(path);
+          }
+        }
+      }
+    }
+  }
+
   private async _open(root: string): Promise<ProjectIndex> {
+    this._readFacts.delete(root);
     const resolution = this._resolve(root);
     const snapshot =
       resolution.persist === undefined ? undefined : await readIndexSnapshot(resolution.provider, resolution.path);

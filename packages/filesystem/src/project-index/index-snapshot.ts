@@ -200,13 +200,19 @@ export const readIndexSnapshot = async (
   }
 };
 
-/** Run under the root's exclusive index lock; directly where Web Locks are absent. */
-const withIndexLock = async <T>(name: string, operation: () => Promise<T>): Promise<T> => {
+/**
+ * Run under the root's exclusive index lock when it is free, directly where
+ * Web Locks are absent; `'busy'` without running when another holder has it,
+ * so no caller ever waits behind a snapshot write.
+ */
+const withIndexLock = async <T>(name: string, operation: () => Promise<T>): Promise<T | 'busy'> => {
   const locks = (globalThis as { navigator?: { locks?: LockManager } }).navigator?.locks;
   if (locks === undefined) {
     return operation();
   }
-  return locks.request(name, { mode: 'exclusive' }, operation) as Promise<T>;
+  return locks.request(name, { mode: 'exclusive', ifAvailable: true }, async (lock) =>
+    lock === null ? 'busy' : operation(),
+  ) as Promise<T | 'busy'>;
 };
 
 /**
@@ -214,10 +220,11 @@ const withIndexLock = async <T>(name: string, operation: () => Promise<T>): Prom
  *
  * `ahead` or `equal` writes; `behind` does not (`'stale'`): another tab already
  * stored a newer snapshot. `incomparable` stores the joined vector marked
- * `rescan`, so neither writer's partial view is trusted at the next load.
+ * `rescan`, so neither writer's partial view is trusted at the next load. A
+ * lock another holder has is never waited for (`'busy'`): the caller retries later.
  *
  * @param options - The provider and root, the lock name, and the snapshot to store.
- * @returns `'written'` or `'stale'`.
+ * @returns `'written'`, `'stale'` or `'busy'`.
  * @internal
  */
 export const writeIndexSnapshot = async (options: {
@@ -225,7 +232,7 @@ export const writeIndexSnapshot = async (options: {
   providerRoot: string;
   lockName: string;
   snapshot: () => IndexSnapshot;
-}): Promise<'written' | 'stale'> => {
+}): Promise<'written' | 'stale' | 'busy'> => {
   const { provider, providerRoot, lockName } = options;
   return withIndexLock(lockName, async () => {
     const stored = await readIndexSnapshot(provider, providerRoot);

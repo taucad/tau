@@ -2347,7 +2347,9 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       }
       const provider = await root(id);
       await Promise.all(tree.entries().map(async (entry) => provider.writeFile(entry.path, entry.content)));
-      await filesystem.writeFile(
+      /* The registry is the store's own record: written off the pipeline, like every byte of `.git` (I6). */
+      await gitFiles.mkdir(checkoutsDirectory, { recursive: true });
+      await gitFiles.writeFile(
         `${checkoutsDirectory}/${id}.json`,
         `${JSON.stringify({ version: 1, id, branch: input.branch })}\n`,
       );
@@ -2378,7 +2380,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       // The files go before the record: a crash between the two leaves a route
       // that is empty, never one that is unregistered and still full.
       await clearProvider(await root(id));
-      await filesystem.unlink(`${checkoutsDirectory}/${id}.json`);
+      await gitFiles.unlink(`${checkoutsDirectory}/${id}.json`);
     },
   });
 

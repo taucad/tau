@@ -5,16 +5,28 @@
  *   writers are never called, a packed object costs one table lookup and one
  *   range read, and no pack is read whole.
  * - `.git/**` never enters the mutation pipeline: a store driven through a
- *   rooted view raises no change event and takes no pipeline claim for it.
+ *   rooted view, and the device's own records beside it (the sync queue, the
+ *   record devices, the removed checkouts), raise no change event and take no
+ *   pipeline claim for it.
  */
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { MemoryProvider } from '@taucad/filesystem/backend';
+import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import type { FileReadStreamOptions } from '@taucad/filesystem';
 import type * as IsomorphicGit from 'isomorphic-git';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { waitFor } from 'xstate';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import type { ObjectStore } from '#object-store/object-store.js';
+import { createOpsLog } from '#ops-ref.js';
+import { createProjectRevisionsActor } from '#revision-effects.js';
+import type { RevisionFileSystem } from '#revision-effects.js';
+import type { Checkout } from '#revision-port.js';
+import { createSyncQueue } from '#sync-queue.js';
 
 /* Every library object reader and writer, recorded: none may be reached. */
 const libraryObjectCalls = vi.hoisted((): string[] => []);
@@ -132,7 +144,7 @@ describe('reading revisions through the object store (W2)', () => {
     expect(libraryObjectCalls).toStrictEqual([]);
   });
 
-  it('keeps every byte of the store off the mutation pipeline: no change event and no claim for .git', async () => {
+  it('keeps every byte of .git off the mutation pipeline: no change event and no claim for it', async () => {
     const providerRegistry = new ProviderRegistry({ databasePrefix: 'w2-object-store-gate' });
     const scope = { backend: 'memory', storageRootKey: 'memory:w2-object-store-gate' } as const;
     const mountTable = new MountTable();
@@ -165,9 +177,19 @@ describe('reading revisions through the object store (W2)', () => {
       }) as (typeof resourceQueue)[typeof method]);
     }
     const rooted = service.createRootedFileSystem('/');
+    /* Linked checkouts live outside the project, one directory each (revisions policy rule 3). */
+    const linkedRoot = await mkdtemp(join(tmpdir(), 'tau-w2-gate-checkouts-'));
+    cleanups.push(() => {
+      void rm(linkedRoot, { recursive: true, force: true });
+    });
+    const linkedFilesystem = async (id: string): Promise<RevisionFileSystem> => {
+      await mkdir(join(linkedRoot, id), { recursive: true });
+      return new NodeFsProvider(join(linkedRoot, id));
+    };
     let store: ObjectStore | undefined;
     const port = createIsomorphicGitRevisionPort({
       filesystem: rooted,
+      checkouts: { projectId: 'project-1', root: linkedFilesystem },
       onObjectStore: (opened) => {
         store = opened;
       },
@@ -194,11 +216,63 @@ describe('reading revisions through the object store (W2)', () => {
     await port.readTree(revisionId(second.commitId));
     await port.log();
 
+    /* The sync queue: enqueued, then replaced whole. */
+    const records = async (): Promise<RevisionFileSystem> => rooted;
+    const queue = createSyncQueue({ recordsFileSystem: records });
+    const owed = { ref: 'refs/heads/main', expected: undefined, reason: 'Offline.', recordedAt: 1 } as const;
+    await queue.writePendingQueue({ version: 1, entries: [owed] });
+    await queue.writePendingQueue({ version: 1, entries: [owed, { ...owed, ref: 'refs/heads/feature' }] });
+    const queued = await queue.readPendingQueue();
+    expect(queued.entries).toHaveLength(2);
+
+    /* The operation log: its ref, and the record devices minted, then rewritten by a retirement. */
+    const ops = createOpsLog({ port, recordsFileSystem: records, now: () => 2, actorId: 'tau-host' });
+    await ops.append(undefined, {
+      v: 1,
+      ref: 'refs/heads/main',
+      to: second.commitId,
+      kind: 'save',
+      actor: 'tau-host',
+      at: 1,
+    });
+    const retired = await ops.deviceFor(undefined);
+    const current = await ops.retire(retired);
+    expect(current).not.toBe(retired);
+    expect(await ops.currentDevices()).toStrictEqual(new Set([current]));
+
+    /* The removed checkouts: a branch opened, discarded (recorded) and opened again (forgotten). */
+    await port.updateRef({ name: 'feature', expectedHead: undefined, head: revisionId(first.commitId) });
+    const revisions = createProjectRevisionsActor({
+      port,
+      projectId: 'project-1',
+      filesystem: async (checkout: Checkout): Promise<RevisionFileSystem> =>
+        checkout.kind === 'live' ? rooted : linkedFilesystem(checkout.id),
+    });
+    revisions.actor.start();
+    const checkoutsOf = () => revisions.actor.getSnapshot().context.checkouts;
+    const featureOpen = () => checkoutsOf().some((checkout) => checkout.branch === 'feature');
+    await waitFor(revisions.actor, (snapshot) => snapshot.context.registrySettled);
+    revisions.actor.send({ type: 'addCheckout', requestId: 'open-feature', branch: 'feature', from: '' });
+    await waitFor(revisions.actor, featureOpen);
+    const opened = checkoutsOf().find((checkout) => checkout.branch === 'feature')!.id;
+    revisions.actor.send({ type: 'removeCheckout', requestId: 'close-feature', id: opened });
+    await waitFor(revisions.actor, () => !featureOpen());
+    expect(await rooted.privateStore!.readFile('.git/tau-removed-checkouts.json', 'utf8')).toBe(
+      `${JSON.stringify([opened])}\n`,
+    );
+    revisions.actor.send({ type: 'addCheckout', requestId: 'reopen-feature', branch: 'feature', from: '' });
+    await waitFor(revisions.actor, featureOpen);
+    revisions.actor.stop();
+    await revisions.settled();
+    expect(await rooted.privateStore!.readFile('.git/tau-removed-checkouts.json', 'utf8')).toBe('[]\n');
+
     /* The worktree's generated ignore and attributes files are project files and do raise events. */
     expect(events).toBeGreaterThan(0);
     expect(gitEvents).toStrictEqual([]);
     expect(gitClaims).toStrictEqual([]);
     expect(await rooted.privateStore!.exists('.git/HEAD')).toBe(true);
+    expect(await rooted.privateStore!.exists('.git/sync-pending')).toBe(true);
+    expect(await rooted.privateStore!.exists('.git/ops-devices.json')).toBe(true);
     expect(await port.readRef('main')).toBe(second.commitId);
   });
 });

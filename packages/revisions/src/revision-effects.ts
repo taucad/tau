@@ -131,6 +131,7 @@ import type {
 import type { RemoteStorage } from '#remote.types.js';
 import { isHostLocalRef, remoteKindOf, remoteOf, remoteTrackingRef, tauRemoteName } from '#remotes.js';
 import type { RevisionStreamMove } from '#revision-stream.js';
+import { controlPlaneFiles, writeControlRecord } from '#control-plane-records.js';
 import { createSyncQueue } from '#sync-queue.js';
 import { createOpsLog, opsRefName, opsRefPrefix, undoCandidates } from '#ops-ref.js';
 import { restoreMachine } from '#restore.machine.js';
@@ -2057,7 +2058,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * checkout's id open its branch again, or wait on it, instead of refusing it for good.
    */
   const readRemovedCheckouts = async (): Promise<ReadonlySet<string>> => {
-    const records = await recordsFileSystem();
+    const records = controlPlaneFiles(await recordsFileSystem());
     if (!(await records.exists(removedCheckoutsPath))) {
       return new Set();
     }
@@ -2092,9 +2093,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     } else {
       ids.delete(id);
     }
-    const records = await recordsFileSystem();
-    await records.writeFile(`${removedCheckoutsPath}.writing`, `${JSON.stringify([...ids])}\n`);
-    await records.rename(`${removedCheckoutsPath}.writing`, removedCheckoutsPath);
+    await writeControlRecord(
+      controlPlaneFiles(await recordsFileSystem()),
+      removedCheckoutsPath,
+      `${JSON.stringify([...ids])}\n`,
+    );
   };
   const noteRemovedCheckout = async (id: string, removed: boolean): Promise<void> => {
     const prior = removedWrites;

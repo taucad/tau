@@ -5,6 +5,7 @@
  * the records filesystem and the single-writer chain it owns itself.
  */
 import type { SyncQueueEntry, SyncQueueRecord } from '#sync.types.js';
+import { controlPlaneFiles, writeControlRecord } from '#control-plane-records.js';
 import type { RevisionFileSystem } from '#revision-effects.types.js';
 
 /**
@@ -44,7 +45,7 @@ export const createSyncQueue = (
    * unreadable queue must never be able to stop the scheduler that reads it.
    */
   const readPendingQueue = async (): Promise<SyncQueueRecord> => {
-    const records = await recordsFileSystem();
+    const records = controlPlaneFiles(await recordsFileSystem());
     try {
       const stored: unknown = JSON.parse(await records.readFile(syncQueuePath, 'utf8'));
       const entries: unknown = (stored as { entries?: unknown }).entries;
@@ -74,18 +75,13 @@ export const createSyncQueue = (
         /* One write's failure belongs to the caller that made it; the next
          * settle still has to record what is owed. */
       }
-      const records = await recordsFileSystem();
-      const body = `${JSON.stringify(record, undefined, 2)}\n`;
-      try {
-        /* Atomic where the filesystem has a rename: a reader never sees half a
-         * record, even if the host dies mid-write. */
-        await records.writeFile(`${syncQueuePath}.writing`, body);
-        await records.rename(`${syncQueuePath}.writing`, syncQueuePath);
-      } catch {
-        /* A backend without an atomic rename still has to record what is owed;
-         * the lenient reader is what covers the torn read that is then possible. */
-        await records.writeFile(syncQueuePath, body);
-      }
+      /* Atomic: a reader never sees half a record, even if the host dies
+       * mid-write; the lenient reader covers a provider that cannot promise it. */
+      await writeControlRecord(
+        controlPlaneFiles(await recordsFileSystem()),
+        syncQueuePath,
+        `${JSON.stringify(record, undefined, 2)}\n`,
+      );
     })();
     queueWrite = write;
     await write;

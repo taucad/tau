@@ -2,6 +2,24 @@
   "description": "Count gates red at HEAD (W0 baseline). A gate leaves this list in the change that turns it green and never re-enters it (I8: count gates never loosen). atHead holds the value recorded at HEAD per engine and fixture profile (key engine-profile); a known-red gate fails if it moves further from its limit than that. Record mode (TAU_FS_SCENARIO_RECORD=true) rewrites atHead for the engine and profile it ran, keeping the better of the recorded and observed value (an equals gate only moving toward its limit); TAU_FS_SCENARIO_RECORD=force records the observed value as it is. Model-bound gates are not listed: the harness reports them without asserting.",
   "gates": [
     {
+      "id": "S3.renames",
+      "limit": 0,
+      "note": "Re-entered in W1 review (I1 over I8): a create that wrote its final path directly left an empty file when its worker was killed, so OPFS now stages each create under .tau-staging and publishes it with one native move. The gate returns to green with the charter's apply journal, which lets a create write in place and verify on the next open.",
+      "atHead": {
+        "chromium-full": 2000,
+        "chromium-small": 100
+      }
+    },
+    {
+      "id": "S17.lock-wait",
+      "limit": 8,
+      "note": "Re-entered in W1 review with S3.renames, for the same cause: every create the apply has in flight is now a staged write and its native move, so the writes already in flight when the save is issued complete as two primitives each (8 in flight count about 16). The save's lock set still waits on no token it does not share. Leaves with S3.renames when the apply journal lets a create write in place. The value is noisy: 0, 14, 16 and 18 were observed across five runs, so atHead holds the worst seen per profile, and a run that lands at 0 reports the gate green.",
+      "atHead": {
+        "chromium-full": 16,
+        "chromium-small": 18
+      }
+    },
+    {
       "id": "S5.blob-reads",
       "limit": 0,
       "atHead": {

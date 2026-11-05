@@ -238,6 +238,32 @@ const replaceTree = (version: 'old' | 'new'): ImmutableRevisionTree =>
 const sameBytes = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
   left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
 
+/**
+ * Files left in the OPFS staging directory (the provider's `opfsStagingDirectory`)
+ * after this realm's open swept the owners that are gone.
+ *
+ * @returns How many staged files remain, in every owner's directory.
+ */
+const stagedFiles = async (): Promise<number> => {
+  const root = await navigator.storage.getDirectory();
+  let staging: FileSystemDirectoryHandle;
+  try {
+    staging = await root.getDirectoryHandle('.tau-staging');
+  } catch {
+    return 0;
+  }
+  type Listable = FileSystemDirectoryHandle & { values(): AsyncIterable<FileSystemHandle> };
+  let count = 0;
+  for await (const owner of (staging as Listable).values()) {
+    if (owner.kind === 'directory') {
+      for await (const _file of (owner as Listable).values()) {
+        count += 1;
+      }
+    }
+  }
+  return count;
+};
+
 const assertMaterialized = async (live: RootedFileSystem, entries: readonly FixtureEntry[]): Promise<void> => {
   const samples = [entries[0], entries[Math.floor(entries.length / 2)], entries.at(-1)];
   for (const entry of samples) {
@@ -574,8 +600,11 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
     case 'replace-killable': {
       /* I1: replace every file through stage + move aside + publish, and say when
        * `killAfter` mutations have completed so the page can kill this worker there.
-       * With no `killAfter` it runs to the end and reports how many there were. */
+       * With no `killAfter` it runs to the end and reports how many there were.
+       * With `create` set it writes the new tree over an empty checkout instead:
+       * the create changesets alone. */
       const killAfter = parameters['killAfter'] ?? Number.POSITIVE_INFINITY;
+      const from = parameters['create'] === 1 ? new ImmutableRevisionTree([]) : replaceTree('old');
       const materialize = checkoutMaterializer(live, projectId);
       const operations = (): number => {
         const counts = counters.read();
@@ -595,7 +624,7 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
           }
         })();
         try {
-          await materialize(replaceTree('new'), replaceTree('old'));
+          await materialize(replaceTree('new'), from);
         } finally {
           progress.done = true;
           await watching;
@@ -607,7 +636,7 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
       /* I1: what an open after the kill does first, then what every path holds. */
       return measure(async () => {
         await sweepTemporarySiblings(live, (path) => tauPathPolicy.classify(path).versioned);
-        const outcome = { old: 0, new: 0, missing: 0, partial: 0, litter: 0 };
+        const outcome = { old: 0, new: 0, missing: 0, partial: 0, litter: 0, staged: 0 };
         for (let index = 0; index < replaceFiles; index += 1) {
           // oxlint-disable-next-line no-await-in-loop -- one read per file, in order.
           const bytes = await live.readFile(replacePath(index)).catch(() => undefined);
@@ -621,8 +650,9 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
             outcome.partial += 1;
           }
         }
-        const names = await live.readdir('replace');
+        const names = await live.readdir('replace').catch(() => []);
         outcome.litter = names.filter((name) => name.includes('.tau-')).length;
+        outcome.staged = await stagedFiles();
         return outcome;
       });
     }

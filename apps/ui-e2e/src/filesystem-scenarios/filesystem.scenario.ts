@@ -579,31 +579,52 @@ describe(`filesystem scenarios (${profileName} profile)`, { concurrent: false },
     }
   });
 
-  test('I1: a replacement killed at any step of stage, move aside and publish leaves old or new bytes', async () => {
+  /**
+   * Kill an apply at seven points spread across its mutations, then open the
+   * project in a fresh worker, recover it as an open does, and read every path.
+   *
+   * @param label - Names the projects and workers.
+   * @param create - Write the new tree over an empty checkout instead of the old tree.
+   * @returns One outcome per kill point.
+   */
+  const killApplyAcrossItsMutations = async (
+    label: string,
+    create: boolean,
+  ): Promise<Array<Record<string, number>>> => {
+    const parameters: Readonly<Record<string, number>> = create ? { create: 1 } : {};
+    const seed = async (worker: ScenarioWorker, project: ScenarioProject): Promise<void> => {
+      if (!create) {
+        await runOn(worker, { runner: 'replace-seed', project });
+      }
+    };
     /* A clean run says how many mutations the apply makes, so the kills can spread across all of them. */
-    const calibration = newProject('i1-calibrate');
-    const calibrating = await openWorker('i1-calibrate', [calibration]);
+    const calibration = newProject(`${label}-calibrate`);
+    const calibrating = await openWorker(`${label}-calibrate`, [calibration]);
     let total: number;
     try {
-      await runOn(calibrating, { runner: 'replace-seed', project: calibration });
-      const clean = await runOn(calibrating, { runner: 'replace-killable', project: calibration });
+      await seed(calibrating, calibration);
+      const clean = await runOn(calibrating, { runner: 'replace-killable', project: calibration, parameters });
       total = clean.extra['operations'] ?? 0;
     } finally {
       calibrating.terminate();
     }
-    expect(total).toBeGreaterThan(100);
+    expect(total).toBeGreaterThan(40);
     const outcomes: Array<Record<string, number>> = [];
     for (const fraction of [0.05, 0.2, 0.35, 0.5, 0.65, 0.8, 0.95]) {
       const killAfter = Math.max(1, Math.floor(fraction * total));
-      const project = newProject(`i1-${String(killAfter)}`);
+      const project = newProject(`${label}-${String(killAfter)}`);
       // oxlint-disable-next-line no-await-in-loop -- one project per kill point, in order.
-      const applying = await openWorker(`i1-apply-${String(killAfter)}`, [project]);
+      const applying = await openWorker(`${label}-apply-${String(killAfter)}`, [project]);
       // oxlint-disable-next-line no-await-in-loop -- as above.
-      await runOn(applying, { runner: 'replace-seed', project });
+      await seed(applying, project);
       /* Never settles once the worker is killed; the race below only reads it if the apply ends first. */
       const finished = (async (): Promise<'finished' | 'failed'> => {
         try {
-          await runOn(applying, { runner: 'replace-killable', project, parameters: { killAfter } });
+          await runOn(applying, {
+            runner: 'replace-killable',
+            project,
+            parameters: { ...parameters, killAfter },
+          });
           return 'finished';
         } catch {
           return 'failed';
@@ -624,7 +645,7 @@ describe(`filesystem scenarios (${profileName} profile)`, { concurrent: false },
         setTimeout(resolve, 300);
       });
       // oxlint-disable-next-line no-await-in-loop -- a fresh process opens the same files.
-      const reopened = await openWorker(`i1-recover-${String(killAfter)}`, [project]);
+      const reopened = await openWorker(`${label}-recover-${String(killAfter)}`, [project]);
       try {
         // oxlint-disable-next-line no-await-in-loop -- recover, then read every path back.
         const recovered = await runOn(reopened, { runner: 'replace-recover', project });
@@ -633,22 +654,48 @@ describe(`filesystem scenarios (${profileName} profile)`, { concurrent: false },
         reopened.terminate();
       }
     }
+    return outcomes;
+  };
+
+  const recordAtomicity = (writer: string, outcomes: ReadonlyArray<Record<string, number>>): void => {
     atomicity = [
       ...atomicity,
       ...outcomes.map((outcome) => ({
         engine: server.browser,
-        writer: 'applyTree replace (stage, move aside, publish)',
+        writer,
         killedAt: `${String(outcome['killAfter'])} of ${String(outcome['total'])} mutations`,
         result: `old ${String(outcome['old'])}, new ${String(outcome['new'])}, missing ${String(outcome['missing'])}, partial ${String(outcome['partial'])}`,
-        residue: outcome['litter'] === 0 ? [] : [`${String(outcome['litter'])} temporary siblings`],
+        residue: [
+          ...(outcome['litter'] === 0 ? [] : [`${String(outcome['litter'])} temporary siblings`]),
+          ...(outcome['staged'] === 0 ? [] : [`${String(outcome['staged'])} staged files`]),
+        ],
       })),
     ];
+  };
+
+  test('I1: a replacement killed at any step of stage, move aside and publish leaves old or new bytes', async () => {
+    const outcomes = await killApplyAcrossItsMutations('i1', false);
+    recordAtomicity('applyTree replace (stage, move aside, publish)', outcomes);
     for (const outcome of outcomes) {
       expect(outcome['killed'], JSON.stringify(outcome)).toBe(1);
       expect(outcome['missing'], JSON.stringify(outcome)).toBe(0);
       expect(outcome['partial'], JSON.stringify(outcome)).toBe(0);
       expect(outcome['litter'], JSON.stringify(outcome)).toBe(0);
+      expect(outcome['staged'], JSON.stringify(outcome)).toBe(0);
       expect((outcome['old'] ?? 0) + (outcome['new'] ?? 0), JSON.stringify(outcome)).toBe(48);
+    }
+  });
+
+  test('I1: a create killed at any step of its changeset leaves each path absent or new, never empty', async () => {
+    const outcomes = await killApplyAcrossItsMutations('i1-create', true);
+    recordAtomicity('applyTree create (staged create, publish)', outcomes);
+    for (const outcome of outcomes) {
+      expect(outcome['killed'], JSON.stringify(outcome)).toBe(1);
+      expect(outcome['old'], JSON.stringify(outcome)).toBe(0);
+      expect(outcome['partial'], JSON.stringify(outcome)).toBe(0);
+      expect(outcome['litter'], JSON.stringify(outcome)).toBe(0);
+      expect(outcome['staged'], JSON.stringify(outcome)).toBe(0);
+      expect((outcome['missing'] ?? 0) + (outcome['new'] ?? 0), JSON.stringify(outcome)).toBe(48);
     }
   });
 

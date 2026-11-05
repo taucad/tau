@@ -21,13 +21,17 @@ import { ComputeWorkerCrashedError } from '#compute-worker/errors.js';
 import type { ComputeMethod } from '#compute-worker/errors.js';
 
 /** The part of a `Worker` the supervisor uses. */
-export type ComputeWorkerHandle = ComputePort &
-  Readonly<{
-    addEventListener: (type: 'message' | 'error' | 'messageerror', listener: (event: Event) => void) => void;
-    terminate: () => void;
-  }>;
+export type ComputeWorkerHandle = Readonly<{
+  postMessage: ComputePort['postMessage'];
+  addEventListener: (type: 'message' | 'error' | 'messageerror', listener: (event: Event) => void) => void;
+  terminate: () => void;
+}>;
 
-/** What the supervisor is told when a worker dies. */
+/**
+ * What the supervisor is told when a worker dies.
+ *
+ * @public
+ */
 export type ComputeCrashReport = Readonly<{
   /** Calls the dead worker held, each failed typed. */
   failedCalls: number;
@@ -73,6 +77,7 @@ export type SupervisedComputeWorker = ComputeWorker &
  *
  * @param options - How to spawn it, and when to give up.
  * @returns The compute contract, served by a worker that is restarted when it dies.
+ * @public
  */
 export const createSupervisedComputeWorker = (options: SupervisorOptions): SupervisedComputeWorker => {
   const maxRestarts = options.maxRestarts ?? 3;
@@ -116,10 +121,17 @@ export const createSupervisedComputeWorker = (options: SupervisorOptions): Super
     if (current === undefined) {
       const handle = options.spawn();
       spawned += 1;
-      const connection = openComputeConnection(handle);
+      const connection = openComputeConnection({
+        postMessage: (message, transfer) => {
+          handle.postMessage(message, transfer);
+        },
+        addEventListener: (type, listener) => {
+          handle.addEventListener(type, listener as (event: Event) => void);
+        },
+      });
       handle.addEventListener('error', (event) => {
         /* An uncaught error ends the worker for good: what it held never answers. */
-        event.preventDefault?.();
+        event.preventDefault();
         died(handle, (event as ErrorEvent).error ?? (event as ErrorEvent).message);
       });
       handle.addEventListener('messageerror', (event) => {

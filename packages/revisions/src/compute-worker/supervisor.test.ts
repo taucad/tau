@@ -3,12 +3,8 @@ import { MessageChannel } from 'node:worker_threads';
 import type { Transferable as NodeTransferable } from 'node:worker_threads';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  ComputeWorkerCrashedError,
-  createInlineCompute,
-  isComputeWorkerFailure,
-  serveComputeWorker,
-} from '#compute-worker/compute-worker.js';
+import { createInlineCompute, serveComputeWorker } from '#compute-worker/compute-worker.js';
+import { ComputeWorkerCrashedError, isComputeWorkerFailure } from '#compute-worker/errors.js';
 import type { ComputePort, ComputeWorker } from '#compute-worker/compute-worker.js';
 import { createSupervisedComputeWorker } from '#compute-worker/supervisor.js';
 import type { ComputeWorkerHandle } from '#compute-worker/supervisor.js';
@@ -59,7 +55,9 @@ const fakeWorker = (crashOn?: string, compute: ComputeWorker = createInlineCompu
           crashNow();
         }
         if (hung) {
-          return new Promise(() => undefined);
+          return new Promise(() => {
+            /* A hung worker never answers. */
+          });
         }
         return (work as (...input: readonly unknown[]) => Promise<unknown>)(...args);
       },
@@ -175,9 +173,9 @@ describe('the supervised compute worker (W5)', () => {
       workers.length = 0;
       const pending = supervised.inflate(new Uint8Array([1, 2, 3]));
       workers[0]?.hang();
-      const settled = pending.catch((error: unknown) => error);
+      const failed = expect(pending).rejects.toBeInstanceOf(ComputeWorkerCrashedError);
       await vi.advanceTimersByTimeAsync(1001);
-      expect(await settled).toBeInstanceOf(ComputeWorkerCrashedError);
+      await failed;
       expect(workers[0]?.terminated()).toBe(true);
     } finally {
       vi.useRealTimers();
@@ -241,10 +239,10 @@ describe('the compute contract', () => {
 
   it('decodes a zip archive, checking each CRC, and refuses an unsafe path', async () => {
     const zip = (
-      entries: ReadonlyArray<{ name: string; data: Uint8Array; method: 0 | 8 }>,
+      entries: ReadonlyArray<{ name: string; data: Uint8Array<ArrayBuffer>; method: 0 | 8 }>,
     ): Uint8Array<ArrayBuffer> => {
-      const parts: Uint8Array[] = [];
-      const directory: Uint8Array[] = [];
+      const parts: Array<Uint8Array<ArrayBuffer>> = [];
+      const directory: Array<Uint8Array<ArrayBuffer>> = [];
       let offset = 0;
       for (const entry of entries) {
         const name = encoder.encode(entry.name);
@@ -302,7 +300,7 @@ describe('the compute contract', () => {
       TypeError,
     );
     const corrupt = new Uint8Array(archive);
-    corrupt[52] = corrupt[52]! ^ 0xff;
+    corrupt[52] = 255 - corrupt[52]!;
     await expect(compute.unzip(corrupt)).rejects.toBeInstanceOf(TypeError);
     await expect(
       compute.unzip(archive, { maxEntries: 1, maxEntryBytes: 1_000_000, maxTotalBytes: 1_000_000 }),
@@ -323,7 +321,9 @@ describe('the compute contract', () => {
       ],
       truncated: false,
     });
-    expect((await compute.grep(files, { source: 'box', ignoreCase: true }, { maxMatches: 2 })).truncated).toBe(true);
-    expect((await compute.grep(files, { source: 'box(', literal: true })).matches).toHaveLength(1);
+    const bounded = await compute.grep(files, { source: 'box', ignoreCase: true }, { maxMatches: 2 });
+    expect(bounded.truncated).toBe(true);
+    const literal = await compute.grep(files, { source: 'box(', literal: true });
+    expect(literal.matches).toHaveLength(1);
   });
 });

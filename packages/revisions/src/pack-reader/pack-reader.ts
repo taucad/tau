@@ -15,8 +15,6 @@ import { isComputeWorkerFailure } from '#compute-worker/errors.js';
 import type { ComputeWorker } from '#compute-worker/compute-worker.js';
 import type { PackIndex } from '#pack-reader/pack-index.js';
 
-export { applyDelta } from '#pack-reader/delta.js';
-
 /** The four object kinds a store holds. */
 export type GitObjectKind = 'commit' | 'tree' | 'blob' | 'tag';
 

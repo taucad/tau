@@ -41,7 +41,8 @@ const binaryProbeBytes = 8000;
 export const grep = (files: readonly GrepFile[], pattern: GrepPattern, options: GrepOptions = {}): GrepResult => {
   const maxMatches = options.maxMatches ?? 1000;
   const maxLineLength = options.maxLineLength ?? 500;
-  const source = pattern.literal === true ? pattern.source.replaceAll(/[$()*+.?[\\\]^{|}]/gu, '\\$&') : pattern.source;
+  const source =
+    pattern.literal === true ? pattern.source.replaceAll(/[$()*+.?[\\\]^{|}]/gu, String.raw`\$&`) : pattern.source;
   const expression = new RegExp(source, pattern.ignoreCase === true ? 'iu' : 'u');
   const decoder = new TextDecoder('utf-8', { fatal: false });
   const matches: GrepMatch[] = [];

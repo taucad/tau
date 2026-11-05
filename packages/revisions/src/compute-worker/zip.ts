@@ -51,10 +51,10 @@ const crcTable = ((): Uint32Array => {
 /**
  * CRC-32 (IEEE), as zip records it.
  *
- * @param bytes - The bytes.
+ * @param bytes - The bytes to check.
  * @returns The checksum, unsigned.
  */
-export const crc32 = (bytes: Uint8Array): number => {
+export const crc32 = (bytes: Uint8Array<ArrayBuffer>): number => {
   let crc = 0xff_ff_ff_ff;
   for (const byte of bytes) {
     crc = crcTable[(crc ^ byte) & 0xff]! ^ (crc >>> 8);
@@ -75,6 +75,70 @@ const safePath = (name: string): boolean =>
   !/^[A-Za-z]:/u.test(name) &&
   name.split('/').every((segment) => segment !== '..');
 
+const viewOf = (bytes: Uint8Array<ArrayBuffer>): DataView =>
+  new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+
+/** One central directory record, as {@link unzip} reads it. */
+type DirectoryRecord = Readonly<{
+  path: string;
+  flags: number;
+  method: number;
+  crc: number;
+  compressedSize: number;
+  size: number;
+  local: number;
+  /** Where the next record starts. */
+  next: number;
+}>;
+
+/* The central directory record at `at`, or `undefined` when none starts there. */
+const directoryRecordAt = (
+  archive: Uint8Array<ArrayBuffer>,
+  at: number,
+  decoder: TextDecoder,
+): DirectoryRecord | undefined => {
+  const view = viewOf(archive);
+  if (at + 46 > archive.byteLength || view.getUint32(at, true) !== directoryHeader) {
+    return undefined;
+  }
+  const nameLength = view.getUint16(at + 28, true);
+  return {
+    path: decoder.decode(archive.subarray(at + 46, at + 46 + nameLength)),
+    flags: view.getUint16(at + 8, true),
+    method: view.getUint16(at + 10, true),
+    crc: view.getUint32(at + 16, true),
+    compressedSize: view.getUint32(at + 20, true),
+    size: view.getUint32(at + 24, true),
+    local: view.getUint32(at + 42, true),
+    next: at + 46 + nameLength + view.getUint16(at + 30, true) + view.getUint16(at + 32, true),
+  };
+};
+
+/* The stored bytes of the entry a record names, or `undefined` when its local header or bytes are missing. */
+const storedBytesOf = (
+  archive: Uint8Array<ArrayBuffer>,
+  record: DirectoryRecord,
+): Uint8Array<ArrayBuffer> | undefined => {
+  const view = viewOf(archive);
+  const { local, compressedSize } = record;
+  if (local + 30 > archive.byteLength || view.getUint32(local, true) !== localHeader) {
+    return undefined;
+  }
+  const start = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true);
+  return start + compressedSize > archive.byteLength ? undefined : archive.subarray(start, start + compressedSize);
+};
+
+/* Where the central directory ends, or -1. */
+const endOfDirectoryIn = (archive: Uint8Array<ArrayBuffer>): number => {
+  const view = viewOf(archive);
+  for (let at = archive.byteLength - 22; at >= Math.max(0, archive.byteLength - 22 - 0xff_ff); at -= 1) {
+    if (view.getUint32(at, true) === endOfDirectory) {
+      return at;
+    }
+  }
+  return -1;
+};
+
 /**
  * Every file of one zip archive.
  *
@@ -87,17 +151,11 @@ export const unzip = async (
   archive: Uint8Array<ArrayBuffer>,
   limits: ZipLimits = defaultZipLimits,
 ): Promise<ZipEntry[]> => {
-  const view = new DataView(archive.buffer, archive.byteOffset, archive.byteLength);
+  const view = viewOf(archive);
   const fail = (why: string): never => {
     throw new TypeError(`The archive ${why}.`);
   };
-  let end = -1;
-  for (let at = archive.byteLength - 22; at >= Math.max(0, archive.byteLength - 22 - 0xff_ff); at -= 1) {
-    if (view.getUint32(at, true) === endOfDirectory) {
-      end = at;
-      break;
-    }
-  }
+  const end = endOfDirectoryIn(archive);
   if (end === -1) {
     fail('has no central directory');
   }
@@ -111,19 +169,12 @@ export const unzip = async (
   let total = 0;
   let at = directoryOffset;
   for (let index = 0; index < count; index += 1) {
-    if (at + 46 > archive.byteLength || view.getUint32(at, true) !== directoryHeader) {
-      fail('has a central directory that is cut short');
+    const record = directoryRecordAt(archive, at, decoder);
+    if (record === undefined) {
+      return fail('has a central directory that is cut short');
     }
-    const flags = view.getUint16(at + 8, true);
-    const method = view.getUint16(at + 10, true);
-    const crc = view.getUint32(at + 16, true);
-    const compressedSize = view.getUint32(at + 20, true);
-    const size = view.getUint32(at + 24, true);
-    const nameLength = view.getUint16(at + 28, true);
-    const skip = nameLength + view.getUint16(at + 30, true) + view.getUint16(at + 32, true);
-    const local = view.getUint32(at + 42, true);
-    const path = decoder.decode(archive.subarray(at + 46, at + 46 + nameLength));
-    at += 46 + skip;
+    const { path, flags, method, crc, size } = record;
+    at = record.next;
     if (path.endsWith('/')) {
       continue;
     }
@@ -137,18 +188,11 @@ export const unzip = async (
     if (entries.length >= limits.maxEntries || size > limits.maxEntryBytes || total > limits.maxTotalBytes) {
       fail('is past its limits');
     }
-    if (local + 30 > archive.byteLength || view.getUint32(local, true) !== localHeader) {
-      fail(`entry ${path} has no local header`);
-    }
-    const start = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true);
-    if (start + compressedSize > archive.byteLength) {
-      fail(`entry ${path} is cut short`);
-    }
-    const stored = archive.subarray(start, start + compressedSize);
+    const stored = storedBytesOf(archive, record) ?? fail(`entry ${path} has no local header or is cut short`);
     let data: Uint8Array<ArrayBuffer>;
     try {
       // oxlint-disable-next-line no-await-in-loop -- one entry inflated at a time, so the limits bound what is held.
-      data = method === 0 ? stored.slice() : await inflateRaw(stored);
+      data = method === 0 ? new Uint8Array(stored) : await inflateRaw(stored);
     } catch (error) {
       throw new TypeError(`The archive entry ${path} does not inflate.`, { cause: error });
     }

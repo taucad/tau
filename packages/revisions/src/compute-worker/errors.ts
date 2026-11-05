@@ -6,7 +6,11 @@
  * @module
  */
 
-/** The work a compute worker answers, by name (the keys of `ComputeWorker`). */
+/**
+ * The work a compute worker answers, by name (the keys of `ComputeWorker`).
+ *
+ * @public
+ */
 export type ComputeMethod = 'inflate' | 'deflate' | 'sha1' | 'sha256' | 'indexPack' | 'resolveDelta' | 'unzip' | 'grep';
 
 /** Why a call to a compute worker failed without the work itself refusing. */
@@ -16,6 +20,7 @@ export type ComputeWorkerFailure = 'crashed' | 'unavailable';
  * A compute call that failed because its worker died, or because the
  * supervisor stopped restarting it. Never a `TypeError`: the bytes were not
  * judged, so nothing is dropped as corrupt because of it.
+ * @public
  */
 export class ComputeWorkerCrashedError extends Error {
   public override readonly name = 'ComputeWorkerCrashedError';
@@ -27,6 +32,8 @@ export class ComputeWorkerCrashedError extends Error {
   public readonly method: ComputeMethod;
 
   /**
+   * Name the call that failed, and why.
+   *
    * @param failure - Why the call failed.
    * @param method - The call that failed.
    * @param options - The worker's own error event, when it gave one.
@@ -48,6 +55,7 @@ export class ComputeWorkerCrashedError extends Error {
  *
  * @param error - Anything a compute call rejected with.
  * @returns `true` for a crash or an unavailable worker.
+ * @public
  */
 export const isComputeWorkerFailure = (error: unknown): error is ComputeWorkerCrashedError =>
   error instanceof ComputeWorkerCrashedError;

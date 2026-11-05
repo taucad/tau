@@ -29,7 +29,11 @@ import { bytesToHex, digest } from '#object-hash.js';
 import type { ComputeMethod } from '#compute-worker/errors.js';
 import { applyDelta } from '#pack-reader/delta.js';
 
-/** The CPU work the object store, the importer and search hand off. Every call is pure: bytes in, bytes out. */
+/**
+ * The CPU work the object store, the importer and search hand off. Every call is pure: bytes in, bytes out.
+ *
+ * @public
+ */
 export type ComputeWorker = Readonly<{
   /** Inflate one object's zlib stream. */
   inflate: (compressed: Uint8Array<ArrayBuffer>) => Promise<Uint8Array<ArrayBuffer>>;
@@ -60,9 +64,6 @@ export type ComputeWorker = Readonly<{
   /** Each line of these files that matches (`grep.ts`). */
   grep: (files: readonly GrepFile[], pattern: GrepPattern, options?: GrepOptions) => Promise<GrepResult>;
 }>;
-
-/** The work a compute worker answers, by name. */
-export type { ComputeMethod } from '#compute-worker/errors.js';
 
 const drain = async (stream: ReadableStream<Uint8Array<ArrayBuffer>>): Promise<Uint8Array<ArrayBuffer>> =>
   new Uint8Array(await new Response(stream).arrayBuffer());
@@ -138,6 +139,7 @@ const memoryFiles = (pack: Uint8Array<ArrayBuffer>) => {
  * The compute contract run in the caller's own realm.
  *
  * @returns A compute worker that needs no worker.
+ * @public
  */
 export const createInlineCompute = (): ComputeWorker => {
   const inflate = async (compressed: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> =>
@@ -174,7 +176,7 @@ export const createInlineCompute = (): ComputeWorker => {
 };
 
 /** The names of the contract, in one place for both halves of the seam. */
-export const computeMethods: readonly (keyof ComputeWorker & ComputeMethod)[] = [
+export const computeMethods: ReadonlyArray<keyof ComputeWorker & ComputeMethod> = [
   'inflate',
   'deflate',
   'sha1',
@@ -195,7 +197,11 @@ export type ComputeAnswer = Readonly<{
   error?: Readonly<{ name: string; message: string }>;
 }>;
 
-/** The one side of a message channel the compute seam needs. */
+/**
+ * The one side of a message channel the compute seam needs.
+ *
+ * @public
+ */
 export type ComputePort = Readonly<{
   postMessage: (message: unknown, transfer: Transferable[]) => void;
   addEventListener: (type: 'message', listener: (event: MessageEvent) => void) => void;
@@ -210,7 +216,7 @@ const transferablesOf = (value: unknown): Transferable[] => {
   if (Array.isArray(value)) {
     return value.flatMap((entry: unknown) =>
       entry !== null && typeof entry === 'object' && (entry as { data?: unknown }).data instanceof Uint8Array
-        ? [(entry as { data: Uint8Array }).data.buffer]
+        ? [(entry as { data: Uint8Array<ArrayBuffer> }).data.buffer]
         : [],
     );
   }
@@ -222,6 +228,7 @@ const transferablesOf = (value: unknown): Transferable[] => {
  *
  * @param port - The port the store's authority holds the other end of (a worker's own global scope).
  * @param compute - The work itself; inline by default.
+ * @public
  */
 export const serveComputeWorker = (port: ComputePort, compute: ComputeWorker = createInlineCompute()): void => {
   port.addEventListener('message', (event) => {
@@ -319,5 +326,3 @@ export const openComputeConnection = (port: ComputePort): ComputeConnection => {
  * @returns The compute contract over that port.
  */
 export const connectComputeWorker = (port: ComputePort): ComputeWorker => openComputeConnection(port).compute;
-
-export { ComputeWorkerCrashedError, isComputeWorkerFailure } from '#compute-worker/errors.js';

@@ -1,0 +1,5 @@
+---
+filesystem: minor
+---
+
+`@taucad/filesystem` delivers change sets (charter D6). `WatchRegistry.watchChangeSets(request, handler)` hands a subscriber one `ChangeSet {generation, origin?, backend?, entries, touchedDirectories, segments?, reset?}` per committed changeset that reaches its paths: exact `created`/`written`/`deleted`/`moved` entries with the sorted directories whose listings they changed, or, when a fact summarises, an explicit reset of the common ancestor (`overflow`, `observer-uncertain`, `topology`, `sequence-gap` or `permission-lost`) and no entries. `coalesce: 'frame'` merges every changeset one animation frame commits into one delivery, and repeated writes to one path in that window — a record log's appends — become one entry named in `segments` with its write count. The registry now holds one bus listener and matches events to watches with a prefix trie of their paths, so a fact costs its path depth rather than one check per watch; per-path `watch` keeps its events and its coalescing window. `ChangeEventBus.generation` counts emits, and `emitResetAll` takes the reset reason.

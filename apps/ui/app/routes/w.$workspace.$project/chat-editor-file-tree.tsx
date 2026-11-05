@@ -1688,7 +1688,16 @@ export const ChatEditorFileTree = memo(function ({
 
   /* A long expanded listing renders a viewport of rows, not one per entry (D18). */
   const rowItems = tree.getItems().filter((item) => item.getId() !== rootId);
-  const rowWindow = useRowWindow(treeContainer, rowItems.length);
+  /* Rows that render outside the window: the focused row (focus and the arrow keys must survive a scroll), the row
+   * being renamed, and a folder holding an inline new-file or new-folder input (a11y, D18). */
+  const { renamingItem } = tree.getState();
+  const pinnedRowIds = new Set<string>(
+    [focusedItem, renamingItem, pendingFolder?.parentPath, pendingFile?.parentPath].filter(
+      (id): id is string => typeof id === 'string',
+    ),
+  );
+  const pinnedRows = rowItems.flatMap((item, index) => (pinnedRowIds.has(item.getId()) ? [index] : []));
+  const rowWindow = useRowWindow(treeContainer, rowItems.length, pinnedRows);
   const openFilePaths = useMemo(() => new Set(openFiles.map((file) => file.path)), [openFiles]);
   useEffect(() => {
     scrollToRowRef.current = (itemId) => {
@@ -2005,12 +2014,22 @@ export const ChatEditorFileTree = memo(function ({
                   // Root-level file case is handled by highlightAllItems above
                 }
 
+                /* Row height is measured from the first plain row: one with an inline input beneath it is taller. */
+                let measuring = true;
                 return (
                   <>
-                    {rowWindow.topSpace > 0 ? (
-                      <div aria-hidden='true' data-row-window-space style={{ height: rowWindow.topSpace }} />
-                    ) : null}
-                    {rowItems.slice(rowWindow.start, rowWindow.end).map((item, offset) => {
+                    {rowWindow.slots.map((slot) => {
+                      if (slot.kind === 'space') {
+                        return (
+                          <div
+                            key={`space-${String(slot.from)}`}
+                            aria-hidden='true'
+                            data-row-window-space
+                            style={{ height: slot.height }}
+                          />
+                        );
+                      }
+                      const item = rowItems[slot.index]!;
                       const itemId = item.getId();
                       const itemLevel = item.getItemMeta().level;
 
@@ -2023,8 +2042,17 @@ export const ChatEditorFileTree = memo(function ({
                         (dragTargetFolderPath !== undefined &&
                           (itemId === dragTargetFolderPath || itemId.startsWith(`${dragTargetFolderPath}/`)));
 
+                      const plain =
+                        pendingFolder?.parentPath !== itemId &&
+                        pendingFile?.parentPath !== itemId &&
+                        !item.isRenaming();
+                      const measures = measuring && plain;
+                      if (measures) {
+                        measuring = false;
+                      }
+
                       return (
-                        <div key={itemId} ref={offset === 0 ? rowWindow.measureRow : undefined}>
+                        <div key={itemId} ref={measures ? rowWindow.measureRow : undefined}>
                           <TreeItem
                             item={item}
                             presentation={presentationFor(itemId)}
@@ -2090,9 +2118,6 @@ export const ChatEditorFileTree = memo(function ({
                         </div>
                       );
                     })}
-                    {rowWindow.bottomSpace > 0 ? (
-                      <div aria-hidden='true' data-row-window-space style={{ height: rowWindow.bottomSpace }} />
-                    ) : null}
 
                     {/* Root item as spacer to capture empty space drops */}
                     <div

@@ -51,6 +51,20 @@ describe('useRowWindow', () => {
     expect(result.current).toMatchObject({ start: 4980, end: 5030, topSpace: 4980 * 28 });
   });
 
+  it('renders a pinned row outside the window, with spaces that keep every row at its offset', () => {
+    const { container } = scrollingList();
+    const { result } = renderHook(() => useRowWindow(container, 10_000, [9000]));
+
+    expect(result.current.slots.filter((slot) => slot.kind === 'row').map((slot) => slot.index)).toEqual([
+      ...Array.from({ length: 50 }, (_, index) => index),
+      9000,
+    ]);
+    expect(result.current.slots.filter((slot) => slot.kind === 'space')).toEqual([
+      { kind: 'space', from: 50, height: (9000 - 50) * 28 },
+      { kind: 'space', from: 9001, height: (10_000 - 9001) * 28 },
+    ]);
+  });
+
   it('scrolls a row outside the window into it', () => {
     const { parent, container } = scrollingList();
     const { result } = renderHook(() => useRowWindow(container, 10_000));

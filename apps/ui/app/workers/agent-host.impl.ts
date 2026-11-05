@@ -802,7 +802,7 @@ const composeProjectHost = async (
                 appendFile: async (path, bytes) => projectRoot.appendFile(path, bytes),
                 unlink: async (path) => projectRoot.unlink(path),
                 // The durable rooted bridge owns canonical metadata; log allocation only needs size.
-                stat: async (path, options) => projectRoot.stat(path, options),
+                stat: async (path) => projectRoot.stat(path),
                 // The chat's `events/` directory: the other devices' segments the model's history merges in (XD1).
                 readdir: async (path) => projectRoot.readdir(path),
               },

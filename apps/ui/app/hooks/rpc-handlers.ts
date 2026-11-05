@@ -40,7 +40,6 @@ import type {
 import type {
   CheckedFileWrite,
   CheckedFileWriteResult,
-  FileContentMetadata,
   FileStat,
   FileWritePrecondition,
   StatContentMetadata,

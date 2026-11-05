@@ -14,9 +14,12 @@
  */
 import {
   ChangeEventBus,
+  headSniffByteLength,
+  lineCountByteCap,
   MountTable,
   ProviderRegistry,
   ResourceQueue,
+  seemsBinary,
   WorkspaceFileService,
   workerTimings,
 } from '@taucad/filesystem';
@@ -338,10 +341,17 @@ const grepAndGlob = async (
     textBytesRead: number;
     walkCalls: number;
     authorityReads: number;
+    listingBytesRead: number;
+    listingByteCeiling: number;
   }>
 > => {
   const tally: AgentTally = { readdirCalls: 0, reads: 0, binaryBytesRead: 0, textBytesRead: 0 };
   const fileSystem = agentFileSystem(live, tally);
+  const listingBytes = (): number => {
+    const totals = productionCounterTotals();
+    return (totals['index.facts.bytes'] ?? 0) + (totals['view.facts.bytes'] ?? 0);
+  };
+  const listingBefore = listingBytes();
   const grepStart = performance.now();
   const grep = await handleGrep({ pattern: fixtureMarker, path: '' }, fileSystem);
   const grepDuration = performance.now() - grepStart;
@@ -354,6 +364,28 @@ const grepAndGlob = async (
   if (!glob.success) {
     throw new Error(`glob failed: ${JSON.stringify(glob)}`);
   }
+  /* What the listings' content facts may read (D4): each file's head, and a
+   * file whose head reads as text, within the line-count cap, once more in
+   * full. Every file of the project counts, the manifest the import added
+   * included; a path the fixture does not name is taken as text. A fixture
+   * binary is seeded noise, so its head is judged as production judges it:
+   * the import wrote revision 0, whose first bytes do not depend on the size. */
+  const binaryByHead = new Set(
+    fixturePlan()
+      .entries.filter(
+        (entry) =>
+          entry.kind === 'binary' &&
+          seemsBinary(fixtureBytes({ ...entry, size: Math.min(entry.size, headSniffByteLength) })),
+      )
+      .map((entry) => entry.path),
+  );
+  const listingByteCeiling = ((await live.statTree?.('')) ?? []).reduce(
+    (total, row) =>
+      total +
+      Math.min(row.size, headSniffByteLength) +
+      (!binaryByHead.has(row.path) && row.size > headSniffByteLength && row.size <= lineCountByteCap ? row.size : 0),
+    0,
+  );
   return {
     grepDuration,
     globDuration,
@@ -361,6 +393,8 @@ const grepAndGlob = async (
     textBytesRead: tally.textBytesRead,
     walkCalls: tally.readdirCalls,
     authorityReads: tally.reads,
+    listingBytesRead: listingBytes() - listingBefore,
+    listingByteCeiling,
   };
 };
 
@@ -501,14 +535,18 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
       return measured;
     }
     case 'warm-open': {
-      /* S5 on a fresh authority, as production opens it: the file tree's
-       * listing loads the root's persisted Project Index and runs its one
-       * head-metadata compare against the provider. The compare count is
-       * production's own `index.compare` counter. */
+      /* S5 on a fresh authority: the file tree's listing loads the root's
+       * persisted Project Index and runs its one head-metadata compare, then one
+       * exact stat per file stands in for the per-file metadata compare a status
+       * check still makes at HEAD until W6 drives status from the index. */
       return measure(async () => {
-        const before = productionCounterTotals()['index.compare'] ?? 0;
         const listing = await live.statTree?.('');
-        const metadataRequests = (productionCounterTotals()['index.compare'] ?? 0) - before;
+        let metadataRequests = 1;
+        for (const entry of entries) {
+          // oxlint-disable-next-line no-await-in-loop -- the stand-in stats each entry in order.
+          await live.stat(entry.path);
+          metadataRequests += 1;
+        }
         return { listed: listing?.length ?? 0, files: entries.length, metadataRequests };
       });
     }
@@ -550,7 +588,8 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
       return measure(async (): Promise<Readonly<Record<string, number>>> => {
         try {
           const project = await projectDirectory(projectId);
-          const directory = await project.getDirectoryHandle('.tau-index');
+          const tau = await project.getDirectoryHandle('.tau');
+          const directory = await tau.getDirectoryHandle('index');
           const handle = await directory.getFileHandle('snapshot.json');
           const snapshot = await handle.getFile();
           const stored = JSON.parse(await snapshot.text()) as {

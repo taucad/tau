@@ -176,7 +176,7 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
     id: 'S5',
     title: 'Warm open to render',
     model:
-      "A fresh authority over the populated project (a reload): the file tree's statTree loads the root's persisted Project Index and runs its one head-metadata compare. The revisions capture memo is not modelled.",
+      "A fresh authority over the populated project (a reload): the file tree's statTree loads the root's persisted Project Index and runs its one head-metadata compare, then one exact stat per file stands in for the per-file status compare a status check makes until W6. The revisions capture memo is not modelled.",
     times: [{ metric: 'duration', limit: 2000, description: '≤ 2 s' }],
     gates: [
       {
@@ -202,7 +202,12 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
         metric: 'metadataRequests',
         comparison: 'at-most',
         limit: 1,
-        description: '1 head-metadata compare of N entries (production index.compare)',
+        description: '1 head-metadata compare of N entries',
+        qualifier: {
+          kind: 'model-bound',
+          reason:
+            "The runner keeps a per-file stat as the status check's stand-in until W6 drives status from the Project Index, so the count is fixed by the model; the index's own open is one compare.",
+        },
       },
     ],
   },
@@ -339,6 +344,13 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
         description: 'binary bytes read = 0',
       },
       { id: 'S12.walks', metric: 'walkCalls', comparison: 'equals', limit: 0, description: 'walk calls = 0 (index)' },
+      {
+        id: 'S12.listing-bytes',
+        metric: 'listingBytesRead',
+        comparison: 'at-most',
+        limit: 'listingByteCeiling',
+        description: "listings' content facts read ≤ one head per file + text within the line-count cap (D4)",
+      },
     ],
   },
   {

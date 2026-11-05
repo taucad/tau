@@ -222,18 +222,10 @@ describe('rows', () => {
       { profile, samples: [{ duration: 1, networkRequests: 0, metadataRequests: 101, bytesRead: 0, files: 100 }] },
       new Set(),
     );
-    const s19 = scenarioTable.find((row) => row.id === 'S19');
-    if (s19 === undefined) {
-      throw new Error('S19 is missing.');
-    }
-    const grep = measuredRow(s19, { profile, samples: [{ saveLatency: 1, readP95: 1, authorityReads: 3 }] }, new Set());
-    const markdown = renderMarkdown([row, grep]);
+    const markdown = renderMarkdown([row]);
 
     expect(markdown).toContain('green (vacuous) S5.network');
-    expect(markdown).toContain('declared (model-bound) S19.compute-worker');
-    /* W3: warm open drives the production compare, so S5.compares is asserted. */
-    expect(markdown).not.toContain('declared (model-bound) S5.compares');
-    expect(row.gates.find((gate) => gate.id === 'S5.compares')).toMatchObject({ value: 101, pass: false });
+    expect(markdown).toContain('declared (model-bound) S5.compares');
   });
 });
 

@@ -25,6 +25,7 @@
  * @module
  */
 
+import { fileMetadataFields, getFileContentMetadata, lineCountByteCap } from '@taucad/filesystem';
 import type { ContentFacts, DirectoryStatRow, ResourceQueue } from '@taucad/filesystem';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
 import type { CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
@@ -165,16 +166,18 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
   };
   /*
    * A stat or listing carries content facts only when the view already knows
-   * them (I3); the model still sees a line count for every text file, so the
-   * missing ones are asked for in one call. W9 caps this by bytes (EQ15).
+   * them (I3), so the missing ones are asked for in one call (D4, EQ15): the
+   * kind from each file's head, a line count only for text within the byte
+   * cap. A listing past the cap shows the size alone; a single stat counts.
    */
   const factsOf = async (
     files: ReadonlyArray<Readonly<{ path: string; contentKind?: string; lineCount?: number }>>,
+    byteCap?: number,
   ): Promise<ReadonlyMap<string, ContentFacts>> => {
     const unknown = files
       .filter((file) => file.contentKind === undefined || (file.contentKind === 'text' && file.lineCount === undefined))
       .map((file) => file.path);
-    return unknown.length === 0 ? new Map() : provider.facts(unknown);
+    return unknown.length === 0 ? new Map() : provider.facts(unknown, { lineCount: true, byteCap });
   };
   const stat = async (path: string): Promise<RpcFileStat> => {
     const target = assertRootedPath(path);
@@ -186,14 +189,19 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
     }
     const facts = await factsOf([{ ...value, path: target }]);
     const known = facts.get(target) ?? value;
-    return known.contentKind === 'text' && known.lineCount !== undefined
+    /* A stat asks with no cap, so only a view that cannot answer facts leaves a gap; one read fills it. */
+    const measured =
+      known.contentKind === 'binary' || (known.contentKind === 'text' && known.lineCount !== undefined)
+        ? known
+        : getFileContentMetadata(await bytes(target));
+    return measured.contentKind === 'text' && measured.lineCount !== undefined
       ? {
           size: value.size,
           isDirectory: false,
           createdAt: date,
           modifiedAt: date,
           contentKind: 'text',
-          lineCount: known.lineCount,
+          lineCount: measured.lineCount,
           provenance,
         }
       : {
@@ -263,14 +271,11 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
         ...(provenance ? { provenance } : {}),
       };
     }
-    const known = facts ?? row;
     return {
       name,
       type: 'file',
       size: row.size,
-      ...(known.contentKind === 'text' && known.lineCount !== undefined
-        ? { contentKind: 'text', lineCount: known.lineCount }
-        : { contentKind: 'binary' }),
+      ...fileMetadataFields(facts ?? row),
       ...(modifiedAt ? { modifiedAt } : {}),
       ...(provenance ? { provenance } : {}),
     };
@@ -409,6 +414,7 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
       const pathOf = (name: string): string => (directory === '' ? name : `${directory}/${name}`);
       const facts = await factsOf(
         rows.flatMap((row) => (row.type === 'file' ? [{ ...row, path: pathOf(row.name) }] : [])),
+        lineCountByteCap,
       );
       return rows.map((row) => directoryEntry(row, facts.get(pathOf(row.name))));
     },

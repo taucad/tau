@@ -73,7 +73,7 @@ const killable = (filesystem: RevisionFileSystem) => {
 };
 
 /* One project on disk, its root reading and writing through `view`. */
-const project = async (raw: NodeFsProvider, view: RevisionFileSystem): Promise<RevisionActors> => {
+const project = async (view: RevisionFileSystem): Promise<RevisionActors> => {
   const port = createIsomorphicGitRevisionPort({ filesystem: view });
   return createRevisionActors({ port, projectId: 'project-1', filesystem: async () => view });
 };
@@ -114,7 +114,7 @@ const whole = async (raw: NodeFsProvider): Promise<'file' | 'pointer'> => {
 describe('adopting a large file (D9)', () => {
   it('stores the object, verifies it, and leaves only the pointer in the checkout', async () => {
     const raw = await authored();
-    const actors = await project(raw, raw);
+    const actors = await project(raw);
     expect(await actors.adoptLargeObjects(undefined)).toStrictEqual({ adopted: ['models/part.step'], left: [] });
     expect(await whole(raw)).toBe('pointer');
     expect(decoder.decode(await raw.readFile('main.scad'))).toBe('import("models/part.step");\n');
@@ -129,7 +129,7 @@ describe('adopting a large file (D9)', () => {
     const raw = await authored();
     await raw.writeFile('notes.txt', 'x'.repeat(2 * 1024 * 1024));
     await raw.writeFile('models/other.step', pointerBytes);
-    const actors = await project(raw, raw);
+    const actors = await project(raw);
     expect(await actors.adoptLargeObjects(undefined)).toStrictEqual({ adopted: ['models/part.step'], left: [] });
     expect(decoder.decode(await raw.readFile('notes.txt'))).toHaveLength(2 * 1024 * 1024);
     expect(await raw.readFile('models/other.step')).toStrictEqual(pointerBytes);
@@ -165,7 +165,7 @@ const adoptionKilledAt = async (
 ): Promise<Readonly<{ finished: boolean; outcome: 'file' | 'pointer' }>> => {
   const raw = await authored();
   const disk = killable(raw);
-  const actors = await project(raw, disk.view);
+  const actors = await project(disk.view);
   await quiet(actors);
   disk.arm(killAt);
   const finished = await actors.adoptLargeObjects(undefined).then(
@@ -177,7 +177,7 @@ const adoptionKilledAt = async (
   await sweepTemporarySiblings(raw, (path) => path !== '.git' && !path.startsWith('.git/'));
   const outcome = await whole(raw);
   if (!finished) {
-    const restarted = await project(raw, raw);
+    const restarted = await project(raw);
     await restarted.adoptLargeObjects(undefined);
     expect(await whole(raw)).toBe('pointer');
     await restarted.settled();

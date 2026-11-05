@@ -182,6 +182,13 @@ const isAuthorityFenceRefusal = (error: unknown): boolean => {
  * @internal
  */
 export type EventLogStorage = {
+  /**
+   * Whether `append` fences at the authority (D23). Then `exclusive` is not the authority's lock, so another
+   * writer may append between this append and a rollback, and a failed append whose outcome is unknown (a bridge
+   * timeout after the authority committed) is never rolled back: the truncate would delete this writer's line and
+   * the other writer's. The handle is poisoned instead, and a reopen reads what the log really holds.
+   */
+  readonly fencesAppends?: boolean;
   read(): Promise<Uint8Array<ArrayBuffer>>;
   /**
    * Append `bytes`. `expectedLength` is the length the appender checked inside `exclusive`; a port that can fence
@@ -873,6 +880,16 @@ export const createEventLogAppender = async (
         if (isAuthorityFenceRefusal(appendError)) {
           fenced = true;
           throw fencedError();
+        }
+        /* A fencing port's append may have committed before it failed, and `exclusive` does not keep another
+         * writer out of the authority, so the bytes past `byteLength` may not all be this append's. */
+        if (storage.fencesAppends === true) {
+          poisoned = true;
+          throw new EventLogError(
+            'LOG_POISONED',
+            'The event-log append failed with an unknown outcome; nothing was rolled back. Reopen the log to read what it holds.',
+            { cause: appendError },
+          );
         }
         // Safe: no other writer can append inside this section, so the bytes past `byteLength` are this append's.
         try {

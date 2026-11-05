@@ -298,6 +298,7 @@ const openProviderWriter = async (
       fileSystem.appendFileFenced === undefined || expectedLength === undefined
         ? appendFile.call(fileSystem, filePath, bytes)
         : fileSystem.appendFileFenced(filePath, bytes, { expectedLength }),
+    fencesAppends: fileSystem.appendFileFenced !== undefined,
     truncate: async (size) => {
       if (!(await fileSystem.exists(filePath))) {
         if (size === 0) {

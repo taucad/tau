@@ -834,7 +834,7 @@ export class MutationPipeline {
       }
       const resolution = this._mountTable.resolve(path);
       this._filePool()?.invalidate(path);
-      this._treeIndexes.removeFile(path);
+      this._projectIndexes.removeFile(path);
       events.push({
         event: { type: 'fileDeleted', path, backend: resolution.backend },
         operations: [{ path, resolution }],
@@ -843,7 +843,7 @@ export class MutationPipeline {
     }
     if (unrouted) {
       this._filePool()?.clear();
-      this._treeIndexes.clear();
+      this._projectIndexes.invalidate('/');
       events.push({ event: { type: 'backendChanged', backend }, operations: [] });
       notices.push({ type: 'directory-change', path: '/', authority: { storageRootKey, providerBasePath: '' } });
     }

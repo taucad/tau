@@ -142,18 +142,6 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     match: 'segment',
     directory: false,
   },
-  /* The import staging directory (I9): a reserved dot path, never discovered,
-   * indexed or versioned — at any depth. */
-  {
-    prefix: '.tau-staging',
-    class: 'control-plane',
-    versioned: false,
-    agentAccess: 'hidden',
-    watch: 'none',
-    anchored: false,
-    match: 'segment',
-    directory: true,
-  },
   {
     prefix: '.jj',
     class: 'control-plane',

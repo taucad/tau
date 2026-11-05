@@ -184,7 +184,7 @@ export class RemoteChanges {
       ...facts.map(({ authority }) => this._backendForPhysicalAuthority(authority)),
     ]);
     this._filePool()?.clear();
-    this._treeIndexes.clear();
+    this._projectIndexes.invalidate('/');
     if (backends.size === 0) {
       this._watchRegistry.emitResetAll();
     }

@@ -346,11 +346,10 @@ describe('path registry', () => {
 
   /* Ruling D29: one repository name on every host. `.tau/revisions` was the
    * browser's second name for the same directory; nothing but the `.git` row may
-   * claim the control plane now, beside import staging (I9). */
+   * claim the control plane now. */
   it('names the repository once, at .git', () => {
     expect(pathRegistry.filter((row) => row.class === 'control-plane').map((row) => row.prefix)).toStrictEqual([
       '.tau/binding.json',
-      '.tau-staging',
       '.jj',
       '.git',
       '.tau-staging',

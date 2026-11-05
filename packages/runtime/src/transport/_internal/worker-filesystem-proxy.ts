@@ -1,4 +1,4 @@
-import { RootedFileSystemError } from '@taucad/filesystem';
+import { RootedFileSystemError, watchByChangeSets } from '@taucad/filesystem';
 import type { WatchEvent, WatchRequest } from '@taucad/filesystem';
 import { createFileSystemBridgeProxy, createTransferredFileSystemBridgeProxy } from '@taucad/fs-bridge';
 import type { FileSystemBridge } from '@taucad/fs-bridge';
@@ -59,8 +59,24 @@ export const createWorkerFileSystemProxy = async (
     lstat: bridge.lstat.bind(bridge),
   };
   if (watchable) {
-    fileSystem.watch = bridge.watch;
-    fileSystem.watchReady = bridge.watchReady;
+    /* Both forms ride the authority's change-set watch (charter D6): a fifty-file
+     * turn reaches a kernel's dependency watch as one frame, expanded here into
+     * its per-path events; a host with no change-set watch answers the per-path
+     * form instead. */
+    fileSystem.watchReady = (request, handler) => watchByChangeSets(bridge, request, handler);
+    fileSystem.watch = (request, handler) => {
+      const watch = watchByChangeSets(bridge, request, handler);
+      const observeReady = async (): Promise<void> => {
+        try {
+          await watch.ready;
+        } catch {
+          /* The synchronous form cannot observe a registration failure. */
+        }
+      };
+      // async-iife: bootstrap
+      void observeReady();
+      return watch.unsubscribe;
+    };
   }
   /* A host that predates `hashFiles` does not advertise it; revalidation then reads bodies. */
   if (hello.hashable === true) {

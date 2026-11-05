@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Mock } from 'vitest';
+import type { ChangeSet, ChangeSetEntry } from '@taucad/filesystem';
 import type { WorkerChangeChannelTransport } from '#worker-change-channel.js';
 import { WorkerChangeChannel } from '#worker-change-channel.js';
 
@@ -199,6 +200,39 @@ describe('acknowledged observation watches', () => {
     expect(watch.ready).toBe(ready.promise);
     expect(watch.closed).toBe(closed.promise);
     expect(watchReady).toHaveBeenCalledWith({ paths: ['settings.json'] }, handler);
+    watch.dispose();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    channel.dispose();
+  });
+
+  it('registers the change-set form when the transport offers it, never a per-path wire watch (D6, S8)', async () => {
+    const unsubscribe = vi.fn();
+    let deliver: ((set: ChangeSet) => void) | undefined;
+    const watchReady = vi.fn();
+    const watchChangeSets = vi.fn((_request: unknown, handler: (set: ChangeSet) => void) => {
+      deliver = handler;
+      return { ready: Promise.resolve(), closed: Promise.withResolvers<void>().promise, unsubscribe };
+    });
+    const channel = new WorkerChangeChannel({
+      transport: { listen: vi.fn().mockReturnValue(vi.fn()), watchReady, watchChangeSets },
+    });
+    const handler = vi.fn();
+    const watch = channel.watchReady({ paths: ['src'], recursive: false }, handler);
+    await watch.ready;
+
+    deliver!({
+      generation: 3,
+      entries: Array.from(
+        { length: 50 },
+        (_, index): ChangeSetEntry => ({ op: 'written', path: `src/file-${String(index)}.ts`, kind: 'file' }),
+      ),
+      touchedDirectories: ['src'],
+    });
+
+    expect(watchReady).not.toHaveBeenCalled();
+    expect(watchChangeSets).toHaveBeenCalledOnce();
+    expect(handler).toHaveBeenCalledTimes(50);
+    expect(handler).toHaveBeenLastCalledWith({ type: 'change', path: 'src/file-49.ts' });
     watch.dispose();
     expect(unsubscribe).toHaveBeenCalledOnce();
     channel.dispose();

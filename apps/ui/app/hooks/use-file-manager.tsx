@@ -1058,9 +1058,11 @@ function FileManagerProviderCore({
           await whenServicesReady();
           abort.signal.throwIfAborted();
           const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+          const { watchByChangeSets } = await import('@taucad/filesystem');
           abort.signal.throwIfAborted();
           const proxy = createFileSystemBridgeProxy((bridgeOpener ?? openRootedFileSystemBridge)(root, 'working-copy'));
-          let watch = proxy.watchReady({ paths: [path], ...options }, listener);
+          /* A chat's append storm reaches this watch once per committed changeset (D6, D23). */
+          let watch = watchByChangeSets(proxy, { paths: [path], ...options }, listener);
           disposeConnection = () => {
             if (!disposedConnection) {
               disposedConnection = true;

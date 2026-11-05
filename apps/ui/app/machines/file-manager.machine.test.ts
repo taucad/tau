@@ -25,6 +25,7 @@ vi.mock('#environment.config.js', async (importOriginal) => {
 });
 type AuthorityWatch = ReturnType<FsBridge.FileSystemBridgeRootedProxy['watchReady']>;
 let mockAuthorityWatch: FsBridge.FileSystemBridgeRootedProxy['watchReady'] | undefined;
+let mockAuthorityChangeSets: FsBridge.FileSystemBridgeRootedProxy['watchChangeSets'] | undefined;
 
 const workerTestState = vi.hoisted(() => {
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- recursive type cannot be expressed inline
@@ -116,6 +117,9 @@ vi.mock('@taucad/fs-bridge', () => ({
       get watchReady() {
         return mockAuthorityWatch;
       },
+      get watchChangeSets() {
+        return mockAuthorityChangeSets;
+      },
       ready: Promise.resolve(),
       hello: { payload: { state: mockViewHelloState } },
       pollExternalChanges: vi.fn(async () => undefined),
@@ -186,6 +190,7 @@ describe('fileManagerMachine', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuthorityWatch = undefined;
+    mockAuthorityChangeSets = undefined;
     diagnosticEnvironment.enabled = false;
     workerTestState.instances.length = 0;
     workerTestState.rootedProxyDisposals.length = 0;
@@ -2139,6 +2144,33 @@ describe('fileManagerMachine', () => {
         expect(source.unsubscribe).toHaveBeenCalledOnce();
       } finally {
         held.resolve();
+        actor.stop();
+      }
+    });
+
+    it('registers the change-set form when the view offers it, through the same diagnostic wrapper (D6)', async () => {
+      diagnosticEnvironment.enabled = true;
+      const perPath = authority();
+      const unsubscribe = vi.fn();
+      const sets: AuthorityWatch = {
+        ready: Promise.resolve(),
+        closed: Promise.withResolvers<void>().promise,
+        unsubscribe,
+      };
+      const acquireSets = vi.fn<FsBridge.FileSystemBridgeRootedProxy['watchChangeSets']>(() => sets);
+      mockAuthorityChangeSets = acquireSets;
+      const wrapViewWatch = vi.fn((_root: string, _request: unknown, watch: AuthorityWatch) => watch);
+      vi.stubGlobal('__tauE2eObservationWatch', { wrapViewWatch });
+      const { actor, channel } = await open();
+      try {
+        const watch = channel.watchReady({ paths: ['main.ts'] }, vi.fn());
+        await watch.ready;
+        expect(acquireSets).toHaveBeenCalledWith({ paths: ['main.ts'] }, expect.any(Function));
+        expect(perPath.acquire).not.toHaveBeenCalledWith({ paths: ['main.ts'] }, expect.anything());
+        expect(wrapViewWatch).toHaveBeenCalledWith('/projects/proj-a', { paths: ['main.ts'] }, sets);
+        watch.dispose();
+        expect(unsubscribe).toHaveBeenCalledOnce();
+      } finally {
         actor.stop();
       }
     });

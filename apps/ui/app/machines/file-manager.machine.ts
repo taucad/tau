@@ -559,33 +559,42 @@ const initializeServicesActor = fromSafeAsync<
   signal.addEventListener('abort', disposeOnAbort, { once: true });
 
   try {
+    type AuthorityWatch = ReturnType<typeof viewProxy.watchReady>;
+    /* An opt-in e2e diagnostic may wrap each actual registration, in either form. */
+    const diagnose = (request: Parameters<typeof viewProxy.watchReady>[0], watch: AuthorityWatch): AuthorityWatch => {
+      if (!ENV.TAU_DEBUG) {
+        return watch;
+      }
+      const fixture = (
+        globalThis as typeof globalThis & {
+          __tauE2eObservationWatch?: {
+            wrapViewWatch?(
+              root: string,
+              request: Parameters<typeof viewProxy.watchReady>[0],
+              watch: AuthorityWatch,
+            ): AuthorityWatch;
+          };
+        }
+      ).__tauE2eObservationWatch;
+      try {
+        return fixture?.wrapViewWatch?.(context.rootDirectory, request, watch) ?? watch;
+      } catch (error) {
+        watch.unsubscribe();
+        throw error;
+      }
+    };
     const initializedChangeChannel = new WorkerChangeChannel({
       transport: {
         listen: viewProxy.listen,
         closed: viewProxy.closed,
-        watchReady: (request, handler) => {
-          const watch = viewProxy.watchReady(request, handler);
-          if (!ENV.TAU_DEBUG) {
-            return watch;
-          }
-          const fixture = (
-            globalThis as typeof globalThis & {
-              __tauE2eObservationWatch?: {
-                wrapViewWatch?(
-                  root: string,
-                  request: Parameters<typeof viewProxy.watchReady>[0],
-                  watch: ReturnType<typeof viewProxy.watchReady>,
-                ): ReturnType<typeof viewProxy.watchReady>;
-              };
+        /* One wire frame per committed changeset for every watch the tree and
+         * the open documents register (charter D6, S8). */
+        ...(typeof viewProxy.watchChangeSets === 'function'
+          ? {
+              watchChangeSets: (request, handler) => diagnose(request, viewProxy.watchChangeSets(request, handler)),
             }
-          ).__tauE2eObservationWatch;
-          try {
-            return fixture?.wrapViewWatch?.(context.rootDirectory, request, watch) ?? watch;
-          } catch (error) {
-            watch.unsubscribe();
-            throw error;
-          }
-        },
+          : {}),
+        watchReady: (request, handler) => diagnose(request, viewProxy.watchReady(request, handler)),
       },
     });
     workerChangeChannel = initializedChangeChannel;

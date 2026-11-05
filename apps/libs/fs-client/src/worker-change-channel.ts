@@ -1,6 +1,6 @@
 import { Topic } from '@taucad/events';
-import { toChangeSet } from '@taucad/filesystem';
-import type { ChangeSet, WatchRequest, WatchEvent } from '@taucad/filesystem';
+import { toChangeSet, watchByChangeSets } from '@taucad/filesystem';
+import type { ChangeSet, ChangeSetWatchRequest, WatchRequest, WatchEvent } from '@taucad/filesystem';
 import type { ObservationWatch } from '#observation-service.js';
 import type { ChangeEvent, FileSystemBackend, PathChangeEvent } from '@taucad/types';
 
@@ -16,6 +16,16 @@ export type WorkerChangeChannelTransport = {
   watchReady?: (
     request: WatchRequest,
     handler: (event: WatchEvent) => void,
+  ) => { ready: Promise<void>; closed: Promise<void>; unsubscribe(): void };
+  /**
+   * The authority's change-set form of a watch (charter D6): one frame per
+   * committed changeset. When present, every watch this channel registers uses
+   * it, so a fifty-file turn crosses the wire once per watch rather than once
+   * per path; `ready` rejecting with `ENOTSUP` falls back to `watchReady`.
+   */
+  watchChangeSets?: (
+    request: ChangeSetWatchRequest,
+    handler: (set: ChangeSet) => void,
   ) => { ready: Promise<void>; closed: Promise<void>; unsubscribe(): void };
   closed?: Promise<void>;
 };
@@ -457,6 +467,10 @@ export class WorkerChangeChannel {
    * @returns Actual registration acknowledgement and closure.
    */
   public watchReady(request: WatchRequest, handler: (event: WatchEvent) => void): ObservationWatch {
+    if (this.transport.watchChangeSets) {
+      const watch = watchByChangeSets(this.transport, request, handler);
+      return { ready: watch.ready, closed: watch.closed, dispose: watch.unsubscribe };
+    }
     if (this.transport.watchReady) {
       const watch = this.transport.watchReady(request, handler);
       return { ready: watch.ready, closed: watch.closed, dispose: watch.unsubscribe };

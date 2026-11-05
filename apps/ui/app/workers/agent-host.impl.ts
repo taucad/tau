@@ -81,6 +81,7 @@ type ProjectFileSystemBridge = Pick<
   | 'rename'
   | 'exists'
   | 'watchReady'
+  | 'watchChangeSets'
   | 'hello'
   | 'dispose'
 >;
@@ -815,7 +816,9 @@ const composeProjectHost = async (
           : { kind: 'opfs', directory: opfs },
       observeLog: async ({ path, signal, onChange, onError }) => {
         let released = false;
-        const subscription = projectRoot.watchReady({ paths: [path] }, onChange);
+        const { watchByChangeSets } = await import('@taucad/filesystem');
+        /* A peer's append storm on this log arrives once per committed changeset (D6, D23). */
+        const subscription = watchByChangeSets(projectRoot, { paths: [path] }, onChange);
         const release = (): void => {
           if (!released) {
             released = true;

@@ -182,9 +182,10 @@ describe('useThumbnailGenerator', () => {
         },
         toneMapping: 'neutral',
         lighting: {
-          lights: [{ direction: [2, 2, 2], color: [1.5, 1.5, 1.5] }],
+          headlamp: { intensity: 1.5, rightOffset: 2, upOffset: 2 },
+          lights: [],
           ambient: (0.1 * 1 * 1.15) / Math.PI,
-          environment: 'studio',
+          environment: { intensity: 1 },
           space: 'view',
           exposure: 1,
         },

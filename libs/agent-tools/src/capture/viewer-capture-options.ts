@@ -45,16 +45,29 @@ export type ViewerCaptureImageOptions = {
   };
   toneMapping: ViewerToneMapping;
   lighting: {
-    lights: [{ direction: [number, number, number]; color: [number, number, number] }];
+    /** The viewer's camera-relative headlamp. */
+    headlamp: { intensity: number; rightOffset: number; upOffset: number };
+    /** Directional lights beside the headlamp: none. */
+    lights: Array<{ direction: [number, number, number]; color: [number, number, number] }>;
     ambient: number;
-    environment: 'studio';
+    /** The viewer's environment at its intensity; no cards is nanoraster's neutral room. */
+    environment: { intensity: number };
     space: 'view';
     exposure: number;
   };
 };
 
-/** The nanoraster environment for each viewer environment it reproduces. */
-const nanorasterEnvironments = { room: 'studio' } as const;
+/**
+ * The nanoraster environment for each viewer environment it reproduces. Three.js's neutral `RoomEnvironment` is
+ * nanoraster's card-less environment, the room its `'studio'` name also selects; only the object form carries the
+ * intensity, so captures send that.
+ */
+const nanorasterEnvironments = {
+  room: (intensity: number): ViewerCaptureImageOptions['lighting']['environment'] => ({ intensity }),
+} as const;
+
+/** The renderer aims its headlamp this many scene radii ahead of the camera: view direction `[right, up, 2]`. */
+const nanorasterHeadlampAimRadii = 2;
 
 const toSrgbHex = (color: number): string => `#${color.toString(16).padStart(6, '0')}`;
 
@@ -73,10 +86,10 @@ export const resolveViewerCapturePixelRatio = (size: Readonly<{ width: number; h
  * Image export options that reproduce the viewer's edges, ambient occlusion, tone mapping and lighting for one
  * output size and colour scheme.
  *
- * Lighting maps the viewer's Three.js rig onto nanoraster's: the headlamp becomes one view-space directional light
- * along the headlamp's offset from its target; the ambient intensity is divided by π (nanoraster multiplies the
- * diffuse colour directly, Three.js through the Lambert BRDF); the viewer's neutral `RoomEnvironment` is nanoraster's
- * `'studio'` environment, captured from it.
+ * Lighting maps the viewer's Three.js rig onto nanoraster's, every value explicit: the headlamp keeps its intensity
+ * and its view direction (its offset from its target, rescaled to nanoraster's fixed two-radius aim); no other
+ * directional light; the ambient intensity is divided by π (nanoraster multiplies the diffuse colour directly,
+ * Three.js through the Lambert BRDF); the viewer's neutral `RoomEnvironment` at the viewer's environment intensity.
  *
  * @param input - Output size and colour scheme.
  * @returns Options to spread into a raster image export.
@@ -104,7 +117,10 @@ export const buildViewerCaptureImageOptions = ({
     dpr: pixelRatio,
   });
   const { headlamp } = lighting;
-  const headlampRadiance = headlamp.intensity * scheme.lightIntensityScale;
+  // The viewer aims its headlamp `targetDistance` radii ahead, skewed; nanoraster at a fixed two radii. Scaling the
+  // offsets keeps the view direction [right + rightSkew, up + upSkew, targetDistance] (view space: +x right, +y up,
+  // +z toward the viewer).
+  const aim = nanorasterHeadlampAimRadii / headlamp.targetDistance;
   return {
     lineWidth: edges.lineWidthCssPixels * pixelRatio,
     lineColor: toSrgbHex(scheme.edgeColor),
@@ -119,19 +135,16 @@ export const buildViewerCaptureImageOptions = ({
     },
     toneMapping,
     lighting: {
-      lights: [
-        {
-          // View space: +x right, +y up, +z toward the viewer, which is opposite the camera's forward direction.
-          direction: [
-            headlamp.rightOffset + headlamp.targetRightSkew,
-            headlamp.upOffset + headlamp.targetUpSkew,
-            headlamp.targetDistance,
-          ],
-          color: [headlampRadiance, headlampRadiance, headlampRadiance],
-        },
-      ],
+      headlamp: {
+        intensity: headlamp.intensity * scheme.lightIntensityScale,
+        rightOffset: (headlamp.rightOffset + headlamp.targetRightSkew) * aim,
+        upOffset: (headlamp.upOffset + headlamp.targetUpSkew) * aim,
+      },
+      lights: [],
       ambient: (lighting.ambientIntensity * scheme.lightIntensityScale * scheme.ambientBoost) / Math.PI,
-      environment: nanorasterEnvironments[lighting.environment],
+      environment: nanorasterEnvironments[lighting.environment](
+        lighting.environmentIntensity * scheme.lightIntensityScale,
+      ),
       space: 'view',
       exposure,
     },

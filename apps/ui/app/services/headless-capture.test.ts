@@ -285,7 +285,12 @@ describe('headless capture adapter', () => {
         lineColor: '#868686',
         toneMapping: 'neutral',
         ao: { intensity: 0.75, distanceFalloff: 1, samples: 16, resolutionScale: 0.5 },
-        lighting: { lights: [{ direction: [2, 2, 2], color: [1.5, 1.5, 1.5] }], environment: 'studio', space: 'view' },
+        lighting: {
+          headlamp: { intensity: 1.5, rightOffset: 2, upOffset: 2 },
+          lights: [],
+          environment: { intensity: 1 },
+          space: 'view',
+        },
       },
     });
   });

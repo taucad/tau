@@ -23,10 +23,13 @@ describe('buildViewerCaptureImageOptions', () => {
       },
       toneMapping: 'neutral',
       lighting: {
-        lights: [{ direction: [2, 2, 2], color: [1.5, 1.5, 1.5] }],
+        // `defaultHeadlampConfig`: 1.5, two radii right and up of the camera, aimed two radii ahead.
+        headlamp: { intensity: 1.5, rightOffset: 2, upOffset: 2 },
+        lights: [],
         // Three.js ambient 0.1 with the dark boost 1.15, over π for nanoraster's direct diffuse multiplier.
         ambient: (0.1 * 1 * 1.15) / Math.PI,
-        environment: 'studio',
+        // The viewer's `RoomEnvironment` at intensity 1: nanoraster's card-less environment.
+        environment: { intensity: 1 },
         space: 'view',
         exposure: 1,
       },
@@ -49,18 +52,36 @@ describe('buildViewerCaptureImageOptions', () => {
     expect(light.lighting.ambient).toBe(0.1 / Math.PI);
   });
 
-  it('should only rely on the environment intensity nanoraster draws its studio at', () => {
-    // The nanoraster 0.8 lighting rig has no environment intensity; its studio environment is drawn at 1.
-    for (const scheme of Object.values(viewerRenderProfile.colorSchemes)) {
-      expect(viewerRenderProfile.lighting.environmentIntensity * scheme.lightIntensityScale).toBe(1);
+  it('should send the viewer environment intensity and headlamp of each scheme explicitly', () => {
+    for (const colorScheme of ['light', 'dark'] as const) {
+      const { lighting } = buildViewerCaptureImageOptions({ width: 768, height: 576, colorScheme });
+      const scale = viewerRenderProfile.colorSchemes[colorScheme].lightIntensityScale;
+      expect(lighting.environment).toStrictEqual({
+        intensity: viewerRenderProfile.lighting.environmentIntensity * scale,
+      });
+      expect(lighting.headlamp.intensity).toBe(viewerRenderProfile.lighting.headlamp.intensity * scale);
     }
   });
 
-  it('should return fresh arrays so a caller can serialize or edit its options', () => {
+  it("should keep the headlamp's view direction when mapping it onto nanoraster's two-radius aim", () => {
+    const { headlamp } = viewerRenderProfile.lighting;
+    const { lighting } = buildViewerCaptureImageOptions({ width: 768, height: 576, colorScheme: 'dark' });
+    const viewer = [
+      headlamp.rightOffset + headlamp.targetRightSkew,
+      headlamp.upOffset + headlamp.targetUpSkew,
+      headlamp.targetDistance,
+    ];
+    const nanoraster = [lighting.headlamp.rightOffset, lighting.headlamp.upOffset, 2];
+    const unit = (vector: readonly number[]) => vector.map((axis) => axis / Math.hypot(...vector));
+    expect(unit(nanoraster)).toStrictEqual(unit(viewer));
+  });
+
+  it('should return fresh objects so a caller can serialize or edit its options', () => {
     const first = buildViewerCaptureImageOptions({ width: 768, height: 576, colorScheme: 'dark' });
     const second = buildViewerCaptureImageOptions({ width: 768, height: 576, colorScheme: 'dark' });
     expect(first.lighting.lights).not.toBe(second.lighting.lights);
-    expect(first.lighting.lights[0].direction).not.toBe(second.lighting.lights[0].direction);
+    expect(first.lighting.headlamp).not.toBe(second.lighting.headlamp);
+    expect(first.lighting.environment).not.toBe(second.lighting.environment);
   });
 });
 

@@ -872,6 +872,8 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       },
       { timeout: 10_000 },
     );
+    /* D10: every authored file is here, the large object is not. */
+    expect(second.frames.findLast((frame) => frame.type === 'status')?.status.readiness).toBe('materialized');
     expect(await project.readFile('models/part.step')).toStrictEqual(bytes);
 
     await project.writeFile(objectFile, part);
@@ -885,6 +887,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       { timeout: 10_000 },
     );
     expect(await project.readFile('models/part.step', 'utf8')).toBe(part);
+    expect(second.frames.findLast((frame) => frame.type === 'status')?.status.readiness).toBe('filled');
     /* The fill's flush wrote the file without holding the page's file tree. */
     expect(
       second.frames

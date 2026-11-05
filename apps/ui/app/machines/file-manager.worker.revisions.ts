@@ -47,6 +47,7 @@ import type {
   IsomorphicGitCheckoutOptions,
   KeepalivePushOutcome,
   LargeObjectsReport,
+  ProjectReadinessReading,
   PublishDraft,
   RevisionDiffEntry,
   RevisionDivergence,
@@ -66,8 +67,10 @@ import {
   readRemoteStorageOverHttp,
   readRevisionDiff,
   readRevisionLog,
+  readinessOf,
   registerProjectFailureMessage,
   registerProjectOverHttp,
+  settleReadiness,
   tauRemoteUrl,
   watchRevisionStream,
 } from '@taucad/revisions';
@@ -714,6 +717,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   const toasts = new Topic<RevisionToast>({ name: 'WorkerProjectRevisionToasts' });
   /* Each checkout's large-object fill, as the effects last told it; the selected one rides the projection. */
   const largeObjects = new Map<string, LargeObjectsReport>();
+  /* Checkouts whose fill has given its word; until then an absent facet is silence, not "filled" (D10). */
+  const largeObjectsTold = new Set<string>();
   /* Each checkout's running fill: when it began and how many objects it fetches, for its timing line at the end. */
   const fillWindows = new Map<string, Readonly<{ startedAt: number; objects: number }>>();
   const timeFill = (report: LargeObjectsReport): void => {
@@ -844,6 +849,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     /* Files open before their large objects arrive (the operator's "open the UI, model waits"): the page's viewer waits on this. */
     onLargeObjects: (report) => {
       timeFill(report);
+      largeObjectsTold.add(report.checkoutId);
       if (report.facet === undefined) {
         largeObjects.delete(report.checkoutId);
       } else {
@@ -890,15 +896,22 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     },
   });
 
+  /* The last readiness reading: settled here, where the fill and the apply bracket are merged (D10, I7). */
+  let readiness: ProjectReadinessReading | undefined;
   const statusOf = (snapshot: ReturnType<typeof actor.getSnapshot>): RevisionStatusProjection => {
     const status = selectRevisionStatus(snapshot);
     const facet = status.checkoutId === undefined ? undefined : largeObjects.get(status.checkoutId)?.facet;
     const applyingRoots = [...applying.keys()].toSorted();
-    return {
+    const merged = {
       ...status,
       ...(facet === undefined ? {} : { largeObjects: facet }),
       ...(applyingRoots.length === 0 ? {} : { applyingRoots }),
     };
+    readiness = settleReadiness(
+      readiness,
+      readinessOf(merged, status.checkoutId !== undefined && largeObjectsTold.has(status.checkoutId)),
+    );
+    return { ...merged, readiness: readiness.state };
   };
   let published: RevisionStatusProjection = statusOf(actor.getSnapshot());
   const republish = (): void => {

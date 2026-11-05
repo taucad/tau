@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RevisionStatusProjection } from '@taucad/revisions';
-import { modelAvailability, pendingPathSet, projectAvailability } from '#hooks/use-project-availability.js';
+import {
+  modelAvailability,
+  pendingPathSet,
+  projectAvailability,
+  readyFor,
+  surfaceReadiness,
+} from '#hooks/use-project-availability.js';
 
 vi.mock('#hooks/use-project.js', () => ({ useProject: vi.fn() }));
 vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: vi.fn() }));
@@ -76,5 +82,29 @@ describe('pending large-object paths', () => {
     expect(set.has('main.scad')).toBe(false);
     expect(pendingPathSet(paths)).toBe(set);
     expect(pendingPathSet([...paths])).not.toBe(set);
+  });
+});
+
+/* D10: the editor, tree and viewer open early; search, export, LSP and a cut wait for every file; a render for every object. */
+describe('surface readiness', () => {
+  it('opens the tree at treeReady and the editor and viewer at entryReady', () => {
+    expect(readyFor('tree', 'treeReady')).toBe(true);
+    expect(readyFor('editor', 'treeReady')).toBe(false);
+    expect(readyFor('editor', 'entryReady')).toBe(true);
+    expect(readyFor('viewer', 'entryReady')).toBe(true);
+  });
+  it('holds search, export, the LSP workspace and a cut until every authored file is a file', () => {
+    for (const surface of ['search', 'export', 'lsp', 'cut'] as const) {
+      expect(surfaceReadiness[surface]).toBe('materialized');
+      expect(readyFor(surface, 'entryReady')).toBe(false);
+      expect(readyFor(surface, 'materialized')).toBe(true);
+    }
+  });
+  it('holds a model render until every large object is here', () => {
+    expect(readyFor('model', 'materialized')).toBe(false);
+    expect(readyFor('model', 'filled')).toBe(true);
+  });
+  it('serves nothing from an unknown state', () => {
+    expect(readyFor('tree', undefined)).toBe(false);
   });
 });

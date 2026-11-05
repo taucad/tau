@@ -1,4 +1,5 @@
-import type { LargeObjectsFacet, RevisionStatusProjection } from '@taucad/revisions';
+import type { LargeObjectsFacet, ProjectReadiness, RevisionStatusProjection } from '@taucad/revisions';
+import { reachesReadiness } from '@taucad/revisions';
 import { useProject } from '#hooks/use-project.js';
 import { useRevisionStatus } from '#hooks/use-revision-status.js';
 import { canOpenCloudProject, useTauCloudIntent } from '#hooks/use-cloud-projects.js';
@@ -118,4 +119,46 @@ export function pendingPathSet(paths: readonly string[]): ReadonlySet<string> {
 /** The large-object facet itself, for the one surface that draws its progress. */
 export function useLargeObjects(): LargeObjectsFacet | undefined {
   return useRevisionStatus()?.largeObjects;
+}
+
+/**
+ * The surfaces that wait on readiness, and the state each opens at (D10).
+ *
+ * The tree opens once the tree is known; the editor and viewer once the entry
+ * closure is readable; search, export, the LSP workspace and a revision cut
+ * need every authored file; a model render needs every large object.
+ */
+export type ReadinessSurface = 'tree' | 'editor' | 'viewer' | 'search' | 'export' | 'lsp' | 'cut' | 'model';
+
+/** {@link ReadinessSurface} to the readiness state it needs. */
+export const surfaceReadiness: Readonly<Record<ReadinessSurface, ProjectReadiness>> = {
+  tree: 'treeReady',
+  editor: 'entryReady',
+  viewer: 'entryReady',
+  search: 'materialized',
+  export: 'materialized',
+  lsp: 'materialized',
+  cut: 'materialized',
+  model: 'filled',
+};
+
+/**
+ * Whether a surface may open on what the project has published.
+ *
+ * @param surface - The surface asking.
+ * @param readiness - The published readiness; `undefined` is unknown and serves nothing (I7).
+ * @returns `true` once the project has reached the state the surface needs.
+ */
+export function readyFor(surface: ReadinessSurface, readiness: ProjectReadiness | undefined): boolean {
+  return reachesReadiness(readiness, surfaceReadiness[surface]);
+}
+
+/** The selected checkout's readiness, as its host settled it; `undefined` until published. */
+export function useProjectReadiness(): ProjectReadiness | undefined {
+  return useRevisionStatus()?.readiness;
+}
+
+/** {@link readyFor} over the published readiness. */
+export function useReadyFor(surface: ReadinessSurface): boolean {
+  return readyFor(surface, useProjectReadiness());
 }

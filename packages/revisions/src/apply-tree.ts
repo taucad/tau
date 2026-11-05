@@ -390,10 +390,11 @@ export const createApplyTreeEffects = (
         signal?.throwIfAborted();
 
         /* A path the checkout did not hold has nothing to move aside or verify:
-         * it is one `create` write with its mode, refused if anything took it
-         * since the capture, and no checkout sibling. The provider publishes a
-         * create whole (OPFS stages it under `.tau-staging` and moves it in),
-         * so a killed apply leaves the path absent or new, never empty (I1). */
+         * it is one `create` write with its mode at its final path, refused if
+         * anything took it since the capture — no sibling, no rename (C8). The
+         * provider records each create's size until the changeset settles, and
+         * the next open removes a file a killed apply left short, so the path
+         * reads absent and is written again (I1). */
         const created = changedFiles.filter(([path]) => !liveFiles.has(path));
         raiseRefusal(
           await applyChangesets(

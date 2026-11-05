@@ -117,7 +117,7 @@ When listing a single directory, `readdir` + parallel `Promise.all(stat(...))` i
 
 **Backend performance context:** IndexedDB transaction creation has fixed overhead (~0.1–0.3ms each) regardless of payload size. Parallelizing stat calls within a directory lets the browser pipeline IDB transactions instead of sequentially awaiting each one.
 
-**For metadata-only queries (tree display, file counts):** Prefer the root's `TreeIndex` over provider stat calls. See Rule 33.
+**For metadata-only queries (tree display, file counts):** Prefer the root's Project Index over provider stat calls. See Rule 33.
 
 ### Rule 3: Read caching expectations
 
@@ -475,25 +475,32 @@ await Promise.race([authorityMutation(), rejectAfter(30_000)]);
 
 ## Provider Performance Rules
 
-### Rule 33: In-memory file tree for metadata queries
+### Rule 33: The Project Index answers metadata, and metadata never reads content
 
-The rooted `statTree` and `search` and related metadata queries must be served from a `TreeIndex`, not per-path provider stat/readdir calls. Backend metadata calls pay per-operation IndexedDB transaction overhead (~0.1–0.3ms each); for 6265 files this accumulates to seconds.
+The rooted `statTree` and `search` and related metadata queries must be served from the root's `ProjectIndex`, not per-path provider stat/readdir calls. Backend metadata calls pay per-operation overhead (an IndexedDB transaction, an OPFS `getFile()`); for 6,265 files this accumulates to seconds.
 
-`TreeIndexes` holds one `TreeIndex` per root, seeded from the provider's hydrated path index (`DirectIdbProvider._paths`) and maintained incrementally on writes (not rebuilt). An index answers only within its own mount; a topology change clears all of them.
+**Metadata never reads content (I3).** A provider's `stat`, `readdirWithStats` and `exists` answer kind, size and mtime only. `contentKind` and `lineCount` ride along only when already known — recorded on the write path or by an explicit `facts(paths, { byteCap })` request, which reads within its cap and caches by `(size, mtimeMs)` (D4). Nothing sniffs, slices or counts lines to answer a stat. A consumer that must show a line count (the agent's RPC filesystem) asks `facts` for the files that lack one.
+
+`ProjectIndexes` holds one `ProjectIndex` per root (D5):
+
+- **Persistent.** A root on a persistent provider whose mtime is trustworthy (`ProviderCapabilities.trustworthyMtime`) keeps its snapshot in `<root>/.tau-index/snapshot.json`. A provider without a trustworthy mtime opts out and scans. `.tau-index` and `.tau-staging` are reserved control-plane paths (I9): never discovered, listed, watched or versioned, applied at scan time.
+- **Validated.** A load is not trusted until a full head-metadata compare has run: at load, after a cross-tab sequence gap, and on demand (`compareIndex`, `compareIndexes`). Facts survive a compare only while `(size, mtimeMs)` is unchanged, and are trusted only once measured more than the 2 s timestamp granularity after the mtime (the racy rule, I5).
+- **Merged, never discarded.** A scan that overlaps mutations keeps what the mutations recorded; an external fact marks its path unknown and the next query re-observes that path alone.
+- **Stored under CAS.** The snapshot is written under the root's `tau-index:` Web Lock and only when the writer's cross-tab vector has seen everything the stored one has; a tab that is behind never overwrites a newer snapshot, and two incomparable tabs store a snapshot that forces a rescan. Before storing, the index re-observes what the notices it claims left unknown.
 
 ```typescript
-// CORRECT: Metadata from the root's in-memory index (O(1))
-const stat = treeIndex.stat(path);
-const entries = treeIndex.readdir(path);
+// CORRECT: metadata from the root's index; facts on request, within a cap
+const rows = await rooted.statTree('');
+const facts = await rooted.facts(['src/main.ts'], { byteCap: 1 << 20 });
 
-// INCORRECT: Metadata via provider (1 IDB transaction per call)
-const stat = await provider.stat(path);
-const entries = await provider.readdir(path);
+// INCORRECT: a stat that reads the file to classify it or count its lines
+const bytes = await provider.readFile(path);
+const stat = { ...(await provider.stat(path)), ...getFileContentMetadata(bytes) };
 ```
 
 ### Rule 34: Bulk writes use provider-native batching
 
-For bulk writes (GitHub import, ZIP upload), the canonical `writeFiles` path may let the IndexedDB provider drain admitted writes in as few native transactions as possible — per-transaction overhead dominates at thousands of files. Do not expose a second provider `bulkImport` mutation path. After commit, update the provider path index and the affected `TreeIndex` before the next read; after uncertain failure, refresh before serving metadata.
+For bulk writes (GitHub import, ZIP upload), the canonical `writeFiles` path may let the IndexedDB provider drain admitted writes in as few native transactions as possible — per-transaction overhead dominates at thousands of files. Do not expose a second provider `bulkImport` mutation path. After commit, update the provider path index and the affected Project Index before the next read; after uncertain failure, refresh before serving metadata.
 
 ### Rule 35: Provider hydration awareness
 
@@ -512,14 +519,16 @@ Count-based tests are hard gates. The two in-memory tree-index timings take the 
 | Full-tree walks per turn settlement                                 | ≤ 2                                         | 2 for settlement; 3 for the whole turn, 4 including cut                                            | `packages/revisions/src/apply-tree.test.ts` — `should walk the tree twice to settle a turn, and stage its writes as one batch`                                                                              |
 | File reads for a cut over an unchanged tree                         | 0                                           | 0, from 4                                                                                          | `packages/revisions/src/apply-tree.test.ts` — `should read no file bytes for a cut over a tree nothing has touched`                                                                                         |
 | `stat`-class calls per directory during index build                 | ≤ 1 per directory                           | 11 calls for 11 directories across every provider                                                  | `packages/filesystem/src/backend/provider-tree-conformance.test.ts` — `should build an index with one stat-class call per directory`                                                                        |
-| Index rebuilds caused by an unrelated mount                         | 0                                           | 0                                                                                                  | `packages/filesystem/src/tree-index.test.ts` — `should leave a warm sibling index warm when an unrelated prefix is mounted`                                                                                 |
+| Index rebuilds caused by an unrelated mount                         | 0                                           | 0                                                                                                  | `packages/filesystem/src/project-index/project-index.test.ts` — `should leave a warm sibling index warm when an unrelated prefix is mounted`                                                                |
 | `classify` calls for a 10,000-row composed listing                  | ≤ 1 per row plus the root                   | 10,001                                                                                             | `packages/filesystem/src/composed-view.test.ts` — `should classify each row of a wide listing once`                                                                                                         |
 | DirectIDB transactions per 1,000-file `writeFiles` batch            | 1                                           | 1, from 1,000                                                                                      | `packages/filesystem/src/mutation-pipeline.test.ts` — `should commit a thousand-file batch in one IndexedDB transaction`                                                                                    |
 | Live bridge ports per project session                               | ≤ 5                                         | approximately 7–9 by static opener count                                                           | **Not enforced:** no runtime port-count measurement exists; transferred worker ports cannot share a main-thread proxy                                                                                       |
 | Native Git processes per 50-row history page / 4,000-file tree read | ≤ 5 / ≤ 3, with tree-read concurrency ≤ 16  | ≤ 5 / ≤ 3                                                                                          | `packages/revisions/src/native-git-latency.test.ts` — `B5: a 50-row history page over 200 revisions costs a handful of processes`; `B6: reading a 4,000-file tree costs three processes and never fans out` |
 | Warm save, 100 files plus 5 MiB                                     | ≤ 100 ms                                    | 339–350 ms quiet baseline; not remeasured after capture memoization                                | **Budget not enforced:** `apps/ui-e2e/src/revision-latency.spec.ts` — `records how long *Saved* takes after Mod+S in a project with bulk in it (B1)` enforces only a 3,000 ms regression ceiling            |
 | History open at depth                                               | ≤ 50 ms                                     | 138 ms quiet baseline                                                                              | **Budget not enforced:** `apps/ui-e2e/src/revision-latency.spec.ts` — `records how long the History region takes to open at depth (B4)` enforces only an 800 ms regression ceiling                          |
-| Bare `getDirectoryStat` over 6,265 files                            | < 20 ms                                     | < 20 ms, best of five                                                                              | `packages/filesystem/src/tree-index.test.ts` — `should handle getDirectoryStat for 6000+ entries under 20ms`                                                                                                |
-| Warm `statTree` over 6,265 files through rooted authority           | < 10 ms                                     | < 10 ms, best of five                                                                              | `packages/filesystem/src/tree-index.test.ts` — `should answer a warm statTree over 6,265 files inside its 10 ms budget`                                                                                     |
+| Bare index `statTree` over 6,265 files                              | < 20 ms                                     | < 20 ms, best of five                                                                              | `packages/filesystem/src/project-index/project-index.test.ts` — `should stat a 6,265-file tree under 20 ms`                                                                                                 |
+| Warm `statTree` over 6,265 files through rooted authority           | < 10 ms                                     | < 10 ms, best of five                                                                              | `packages/filesystem/src/project-index/project-index.test.ts` — `should answer a warm statTree over 6,265 files inside its 10 ms budget`                                                                    |
+| Content bytes read by stat, list and exists (S5, S13)               | 0                                           | 0 on both harness profiles, from 106.5 MB (S5 full) and 18.4 MB (S13 full)                         | `apps/ui-e2e/src/filesystem-scenarios` — count gates `S5.blob-reads`, `S13.metadata-bytes`                                                                                                                  |
+| Head-metadata compares per warm open (S5)                           | 1                                           | 1; S5 full 0.6–0.9 s, from 10.8 s                                                                  | `apps/ui-e2e/src/filesystem-scenarios` — count gate `S5.compares` (production `index.compare` counter)                                                                                                      |
 | Bulk import of 6,265 files                                          | < 5 s in browser                            | 1.1–1.9 s under `fake-indexeddb`, from 27.9 s per-file                                             | **Not enforced:** the transaction-count gate above enforces batching, but no browser timing gate exists                                                                                                     |
 | Archive resident input bytes                                        | one file at a time; default ceiling 256 MiB | one file at a time; an oversized file is refused from its declared size, before its bytes are read | `packages/filesystem/src/content-ops/index.test.ts` — `should refuse an oversized file before reading its bytes`                                                                                            |

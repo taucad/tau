@@ -184,7 +184,7 @@ const expectEveryObject = async (store: ObjectStore, expected: readonly NativeOb
   }
 };
 
-describe.runIf(gitToolchainOnPath)('a repack git verifies (W2 review p2)', () => {
+describe.runIf(gitToolchainOnPath)('a repack git verifies (W2 review p2)', { timeout: 30_000 }, () => {
   it.each(computes)('folds a pack of deep offset deltas git wrote, through %s', async (_, makeCompute) => {
     const root = await history();
     git(root, ['repack', '-adf', '-q', '--window=10', '--depth=50']);
@@ -518,5 +518,132 @@ describe('repack decisions', () => {
     await reader.read(oids[1]!);
 
     expect(reader.counters.wholePackLoads).toBe(2);
+  });
+});
+
+describe('a corrupt pack (W2 re-review 2)', () => {
+  it('is left out with one warning, while loose and other objects read and writes land', async () => {
+    const provider = memory();
+    const writer = storeOver(gitFilesOf(provider, '.git'));
+    /* A pack as a fetch brings it: its objects are nowhere else. */
+    const fetched = ['a\n', 'b\n'].map((text): Blob => ({ type: 'blob', data: encoder.encode(text) }));
+    const packed = fetched.map(({ type, data }) => oidOf(type, data));
+    const built = await buildPack(
+      fetched.map((object, index) => ({ oid: packed[index]!, ...object })),
+      createInlineCompute(),
+    );
+    await writer.addPack(built.pack);
+    await expect(writer.read(packed[0]!)).resolves.toStrictEqual(fetched[0]);
+    const [unrelated] = await writer.writeLoose([{ type: 'blob', data: encoder.encode('unrelated\n') }]);
+    const listed = await provider.readdir('.git/objects/pack');
+    const packIndex = `.git/objects/pack/${listed.find((name) => name.endsWith('.idx'))!}`;
+    const flipped = new Uint8Array(await provider.readFile(packIndex));
+    flipped[8 + 256 * 4 + 5] = 255 - flipped[8 + 256 * 4 + 5]!;
+    await provider.writeFile(packIndex, flipped);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const store = storeOver(gitFilesOf(provider, '.git'), { name: 'corrupt' });
+
+    await expect(store.read(unrelated!)).resolves.toStrictEqual({
+      type: 'blob',
+      data: encoder.encode('unrelated\n'),
+    });
+    await expect(store.has(unrelated!)).resolves.toBe(true);
+    /* The corrupt pack's objects are simply not held, so a fetch that brings them again lands them. */
+    await expect(store.read(packed[0]!)).resolves.toBeUndefined();
+    await expect(store.has(packed[1]!)).resolves.toBe(false);
+    const [fresh] = await store.writeLoose([{ type: 'blob', data: encoder.encode('fresh\n') }]);
+    await expect(store.read(fresh!)).resolves.toStrictEqual({ type: 'blob', data: encoder.encode('fresh\n') });
+    await expect(store.writeLoose([{ type: 'blob', data: encoder.encode('a\n') }])).resolves.toStrictEqual([packed[0]]);
+    await expect(store.read(packed[0]!)).resolves.toStrictEqual({ type: 'blob', data: encoder.encode('a\n') });
+
+    const warned = warn.mock.calls.filter(([message]) => String(message).includes('left unread'));
+    expect(warned).toHaveLength(1);
+    expect(String(warned[0]![0])).toMatch(/checksum/u);
+  });
+});
+
+describe('a repack and a loose object larger than its bound (W2 re-review 3)', () => {
+  it('passes over the large object and still folds the small ones after it', async () => {
+    const provider = memory();
+    const store = storeOver(rangedFiles(provider), { repack: { maxPackBytes: 3000 } });
+    const large = noise(99, 5000);
+    const small = Array.from({ length: 6 }, (_, index) => noise(index + 1, 300));
+    const [largeOid] = await store.writeLoose([{ type: 'blob', data: large }]);
+    await store.writeLoose(small.map((data) => ({ type: 'blob', data })));
+
+    expect(await store.repack(true)).toBe(true);
+
+    const listed = await provider.readdir('.git/objects/pack');
+    const packIndex = listed.find((name) => name.endsWith('.idx'));
+    const folded = readPackIndex(await provider.readFile(`.git/objects/pack/${packIndex!}`));
+    expect(folded.count).toBe(6);
+    expect(folded.offsetOf(largeOid!)).toBeUndefined();
+    await expect(store.read(largeOid!)).resolves.toStrictEqual({ type: 'blob', data: large });
+  });
+});
+
+describe('a loose object that is missing for a moment (W2 re-review 4)', () => {
+  it('is read again once before the store answers that it does not hold it', async () => {
+    const provider = memory();
+    const writer = storeOver(gitFilesOf(provider, '.git'));
+    const [oid] = await writer.writeLoose([{ type: 'blob', data: encoder.encode('briefly gone\n') }]);
+    const files = gitFilesOf(provider, '.git');
+    let misses = 0;
+    const flickering: GitFiles = {
+      ...files,
+      readFile: (async (path: string, encoding?: 'utf8') => {
+        if (path.endsWith(oid!.slice(2)) && misses === 0) {
+          misses += 1;
+          throw Object.assign(new Error('gone for a moment'), { code: 'ENOENT' });
+        }
+        return encoding === 'utf8' ? files.readFile(path, 'utf8') : files.readFile(path);
+      }) as GitFiles['readFile'],
+    };
+
+    await expect(storeOver(flickering, { name: 'flicker' }).read(oid!)).resolves.toStrictEqual({
+      type: 'blob',
+      data: encoder.encode('briefly gone\n'),
+    });
+    expect(misses).toBe(1);
+  });
+});
+
+describe('pack index checks (W2 re-review 5)', () => {
+  it('hashes an index once per path, size and time in this document, on the compute worker', async () => {
+    const provider = memory();
+    const writer = storeOver(gitFilesOf(provider, '.git'));
+    const [oid] = await writer.writeLoose([{ type: 'blob', data: encoder.encode('indexed\n') }]);
+    await writer.repack(true);
+    const listed = await provider.readdir('.git/objects/pack');
+    const packIndex = `.git/objects/pack/${listed.find((name) => name.endsWith('.idx'))!}`;
+    const stored = await provider.readFile(packIndex);
+    const inline = createInlineCompute();
+    let indexHashes = 0;
+    const counting: ComputeWorker = {
+      ...inline,
+      sha1: async (bytes) => {
+        if (bytes.byteLength === stored.byteLength - 20) {
+          indexHashes += 1;
+        }
+        return inline.sha1(bytes);
+      },
+    };
+    const open = async (name: string): Promise<void> => {
+      const store = storeOver(gitFilesOf(provider, '.git'), { compute: counting, name });
+      await expect(store.read(oid!)).resolves.toStrictEqual({ type: 'blob', data: encoder.encode('indexed\n') });
+    };
+
+    await open('first');
+    await open('second');
+    expect(indexHashes).toBe(1);
+
+    /* The same bytes written again are a new file: checked afresh. */
+    await new Promise((resolve) => {
+      setTimeout(resolve, 5);
+    });
+    await provider.writeFile(packIndex, stored);
+    await open('third');
+    expect(indexHashes).toBe(2);
   });
 });

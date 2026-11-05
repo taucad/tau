@@ -131,7 +131,7 @@ import type {
 import type { RemoteStorage } from '#remote.types.js';
 import { isHostLocalRef, remoteKindOf, remoteOf, remoteTrackingRef, tauRemoteName } from '#remotes.js';
 import type { RevisionStreamMove } from '#revision-stream.js';
-import { controlPlaneFiles, readControlRecord, writeControlRecord } from '#control-plane-records.js';
+import { controlPlaneFiles, jsonRecord, readControlRecord, writeControlRecord } from '#control-plane-records.js';
 import { createSyncQueue } from '#sync-queue.js';
 import { createOpsLog, opsRefName, opsRefPrefix, undoCandidates } from '#ops-ref.js';
 import { restoreMachine } from '#restore.machine.js';
@@ -2057,9 +2057,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * (`.corrupt-<time>`, never written over), reported, and read as none: losing a removal marker only lets that
    * checkout's id open its branch again, or wait on it, instead of refusing it for good.
    */
+  const wholeRemovedCheckouts = jsonRecord(
+    (value) => Array.isArray(value) && value.every((id) => typeof id === 'string'),
+  );
   const readRemovedCheckouts = async (): Promise<ReadonlySet<string>> => {
     const records = controlPlaneFiles(await recordsFileSystem());
-    const text = await readControlRecord(records, removedCheckoutsPath);
+    const text = await readControlRecord(records, removedCheckoutsPath, { accepts: wholeRemovedCheckouts });
     if (text === undefined) {
       return new Set();
     }

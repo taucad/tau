@@ -74,15 +74,41 @@ const compareAt = (table: Uint8Array<ArrayBuffer>, at: number, oid: Uint8Array<A
 };
 
 /**
- * Read a version-2 `.idx` into its lookup tables, checking it whole first: its
- * SHA-1 trailer, its size against its own object count, a fanout that never
- * decreases, ids in strictly ascending order and every large offset in range.
+ * Check an `.idx` against its own SHA-1 trailer, hashed by the caller's
+ * compute (a worker, off the main thread) rather than here.
  *
  * @param stored - The whole index file.
+ * @param sha1 - The hash to check it with.
+ * @throws TypeError when the index does not match its own checksum.
+ */
+export const checkPackIndexChecksum = async (
+  stored: Uint8Array<ArrayBuffer>,
+  sha1: (bytes: Uint8Array<ArrayBuffer>) => Promise<string>,
+): Promise<void> => {
+  const ownTrailer = stored.byteLength - trailerBytes;
+  if (ownTrailer < 0 || (await sha1(stored.subarray(0, ownTrailer))) !== hexOf(stored, ownTrailer, trailerBytes)) {
+    throw new TypeError('A pack index does not match its own checksum.');
+  }
+};
+
+/** How {@link readPackIndex} reads. */
+export type PackIndexReading = Readonly<{
+  /** The caller already checked the SHA-1 trailer ({@link checkPackIndexChecksum}): it is not hashed again. */
+  checksumChecked?: boolean;
+}>;
+
+/**
+ * Read a version-2 `.idx` into its lookup tables, checking it whole first: its
+ * SHA-1 trailer (unless the caller checked it), its size against its own
+ * object count, a fanout that never decreases, ids in strictly ascending order
+ * and every large offset in range.
+ *
+ * @param stored - The whole index file.
+ * @param reading - Whether the checksum is already checked.
  * @returns The tables.
  * @throws TypeError when the bytes are not a whole, consistent version-2 index.
  */
-export const readPackIndex = (stored: Uint8Array<ArrayBuffer>): PackIndex => {
+export const readPackIndex = (stored: Uint8Array<ArrayBuffer>, reading: PackIndexReading = {}): PackIndex => {
   const view = new DataView(stored.buffer, stored.byteOffset, stored.byteLength);
   if (stored.byteLength < headerBytes + fanoutBytes + 2 * trailerBytes || view.getUint32(0) !== indexMagic) {
     throw new TypeError('Not a version 2 pack index.');
@@ -91,7 +117,10 @@ export const readPackIndex = (stored: Uint8Array<ArrayBuffer>): PackIndex => {
     throw new TypeError('Only version 2 pack indexes are read.');
   }
   const ownTrailer = stored.byteLength - trailerBytes;
-  if (bytesToHex(digest('sha1', stored.subarray(0, ownTrailer))) !== hexOf(stored, ownTrailer, trailerBytes)) {
+  if (
+    reading.checksumChecked !== true &&
+    bytesToHex(digest('sha1', stored.subarray(0, ownTrailer))) !== hexOf(stored, ownTrailer, trailerBytes)
+  ) {
     throw new TypeError('A pack index does not match its own checksum.');
   }
   const fanout = new Uint32Array(256);

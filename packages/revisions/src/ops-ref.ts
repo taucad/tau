@@ -25,7 +25,7 @@ import { randomUuid } from '@taucad/utils/id';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { CheckoutCutTrigger } from '#checkout.machine.js';
 import type { RevisionActor, RevisionProvenance, RevisionUserActor } from '#revision-authority.js';
-import { controlPlaneFiles, readControlRecord, writeControlRecord } from '#control-plane-records.js';
+import { controlPlaneFiles, jsonRecord, readControlRecord, writeControlRecord } from '#control-plane-records.js';
 import type { RevisionFileSystem } from '#revision-effects.types.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { RevisionPort } from '#revision-port.js';
@@ -260,8 +260,11 @@ export const createOpsLog = (
 
   /* Only a missing file is an empty one: a file this host cannot read or parse
    * is refused, never replaced — replacing it would orphan every log it names. */
+  const wholeDevices = jsonRecord((value) => typeof value === 'object' && value !== null && !Array.isArray(value));
   const readDevices = async (): Promise<RecordDevices> => {
-    const text = await readControlRecord(controlPlaneFiles(await recordsFileSystem()), recordDevicesPath);
+    const text = await readControlRecord(controlPlaneFiles(await recordsFileSystem()), recordDevicesPath, {
+      accepts: wholeDevices,
+    });
     if (text === undefined) {
       return { current: new Map(), retired: new Set() };
     }

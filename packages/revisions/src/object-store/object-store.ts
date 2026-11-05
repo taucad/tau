@@ -22,9 +22,10 @@ import type { FileSystemProvider, PrivateStore } from '@taucad/filesystem';
 import { ResourceQueue } from '@taucad/filesystem';
 import { randomUuid } from '@taucad/utils/id';
 import type { ComputeWorker } from '#compute-worker/compute-worker.js';
-import { readControlRecord, writeControlRecord } from '#control-plane-records.js';
-import { readPackIndex } from '#pack-reader/pack-index.js';
+import { jsonRecord, readControlRecord, writeControlRecord } from '#control-plane-records.js';
+import { checkPackIndexChecksum, readPackIndex } from '#pack-reader/pack-index.js';
 import { createBaseCache, createPackReader, emptyReadCounters } from '#pack-reader/pack-reader.js';
+import { bytesToHex } from '#object-hash.js';
 import type {
   CopiedObject,
   GitObjectKind,
@@ -46,6 +47,25 @@ export type GitFiles = PrivateStore;
  * @param gitdir - The store's directory; only `.git` has a private store.
  * @returns Where the store's bytes are read and written.
  */
+/*
+ * The pack indexes this document has checked against their own SHA-1, by
+ * path, size, modification time and trailer: a store opened again over the
+ * same packs does not hash them again (W2 re-review 5). Only a check that
+ * passed is kept, so a re-fetched index is checked afresh.
+ */
+const checkedIndexes = new Set<string>();
+const checkedIndexesHeld = 1024;
+const rememberChecked = (key: string): void => {
+  checkedIndexes.add(key);
+  if (checkedIndexes.size > checkedIndexesHeld) {
+    const [oldest] = checkedIndexes;
+    checkedIndexes.delete(oldest!);
+  }
+};
+
+/* A pack that fails its own checks: the tables or the bytes are not what a whole pack is. */
+const isIntegrityFailure = (error: unknown): boolean => error instanceof TypeError || error instanceof RangeError;
+
 export const gitFilesOf = (
   filesystem: FileSystemProvider & { readonly privateStore?: PrivateStore },
   gitdir: string,
@@ -292,7 +312,8 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
     return createPackReader({
       path,
       size,
-      index: readPackIndex(stored),
+      /* Checked against its trailer before it is opened, or written by this store. */
+      index: readPackIndex(stored, { checksumChecked: true }),
       readRange,
       compute,
       cache,
@@ -301,19 +322,51 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
     });
   };
   let listing: Promise<PackReader[]> | undefined;
-  /* One pack's tables, or `undefined` when it was retired between the listing and the read. */
+  const refusedPacks = new Set<string>();
+  /*
+   * One pack's tables, or `undefined` when it was retired between the listing
+   * and the read, or fails its own checks. A corrupt pack is left out of the
+   * listing with a warning rather than failing every read: the other packs
+   * and the loose objects still answer, and writes still land, so a fetch
+   * that brings the objects again heals the store (W2 re-review 2).
+   */
   const loadPack = async (base: string): Promise<PackReader | undefined> => {
+    const indexPath = `${packDirectory}/${base}.idx`;
+    let stored: Uint8Array<ArrayBuffer>;
+    let indexStat: Readonly<{ size: number; mtimeMs: number }>;
+    let packSize: number;
     try {
-      const [stored, stat] = await Promise.all([
-        files.readFile(`${packDirectory}/${base}.idx`),
+      const [readIndex, statIndex, statPack] = await Promise.all([
+        files.readFile(indexPath),
+        files.stat(indexPath),
         files.stat(`${packDirectory}/${base}.pack`),
       ]);
-      return openPack(base, stored, stat.size);
+      [stored, indexStat, packSize] = [readIndex, statIndex, statPack.size];
     } catch (error) {
       if (isMissing(error)) {
         return undefined;
       }
       throw error;
+    }
+    const trailer = stored.byteLength >= 20 ? bytesToHex(stored.subarray(stored.byteLength - 20)) : '';
+    const key = [indexPath, indexStat.size, indexStat.mtimeMs, trailer].join('\0');
+    try {
+      if (!checkedIndexes.has(key)) {
+        await checkPackIndexChecksum(stored, compute.sha1);
+        rememberChecked(key);
+      }
+      const opened = openPack(base, stored, packSize);
+      refusedPacks.delete(key);
+      return opened;
+    } catch (error) {
+      if (!isIntegrityFailure(error)) {
+        throw error;
+      }
+      if (!refusedPacks.has(key)) {
+        refusedPacks.add(key);
+        console.warn(`[revisions] The pack ${base} is left unread: ${(error as Error).message}`);
+      }
+      return undefined;
     }
   };
   /* Every `.idx` in the pack directory, as tables; a pack already open is kept. */
@@ -550,9 +603,14 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
     return built.pack;
   };
 
+  const wholeRetired = jsonRecord(
+    (value) => typeof value === 'object' && value !== null && Array.isArray((value as { retired?: unknown }).retired),
+  );
   const readRetired = async (): Promise<RetiredRecord> => {
     try {
-      const stored = JSON.parse((await readControlRecord(files, retiredPath)) ?? '{}') as Partial<RetiredRecord>;
+      const stored = JSON.parse(
+        (await readControlRecord(files, retiredPath, { accepts: wholeRetired })) ?? '{}',
+      ) as Partial<RetiredRecord>;
       return Array.isArray(stored.retired) ? { version: 1, retired: stored.retired } : { version: 1, retired: [] };
     } catch {
       return { version: 1, retired: [] };
@@ -665,8 +723,9 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
    * fence; another tab already repacking means this one does nothing.
    *
    * The pack holds at most {@link RepackOptions.maxPackBytes} of resolved
-   * objects: packs are taken smallest first, each whole or not at all, then
-   * loose objects, until the next would pass the bound. Every object is read
+   * objects: packs are taken smallest first, each whole or not at all, until
+   * the next would pass the bound; then every loose object that still fits,
+   * passing over one too large for what is left. Every object is read
    * and hashed before it is written; one that cannot be read or does not
    * hash to its id aborts the repack, which then writes and retires nothing.
    *
@@ -734,11 +793,12 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
       }
       const folded: string[] = [];
       for (const oid of loose) {
-        if (!included.has(oid)) {
-          // oxlint-disable-next-line no-await-in-loop -- one object resident at a time beside the compressed pack.
-          if (!(await foldObject(into, oid, await readLoose(oid)))) {
-            break;
-          }
+        if (budget.left === 0) {
+          break;
+        }
+        /* One loose object larger than what is left stays loose; smaller ones after it still fold (W2 re-review 3). */
+        // oxlint-disable-next-line no-await-in-loop -- one object resident at a time beside the compressed pack.
+        if (!included.has(oid) && (await foldObject(into, oid, await readLoose(oid)))) {
           included.add(oid);
           folded.push(oid);
         }

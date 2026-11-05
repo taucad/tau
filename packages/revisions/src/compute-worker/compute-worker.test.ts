@@ -73,7 +73,7 @@ const verifiedByGit = async (provider: MemoryProvider): Promise<string> => {
   return root;
 };
 
-describe.runIf(gitToolchainOnPath)('packs written through the compute seam', () => {
+describe.runIf(gitToolchainOnPath)('packs written through the compute seam', { timeout: 30_000 }, () => {
   /*
    * W2 review p3: the seam transferred the caller's own buffer, so a pack
    * writer that deflated an object and then read it again found it detached

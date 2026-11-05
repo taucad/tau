@@ -5,7 +5,7 @@
  * the records filesystem and the single-writer chain it owns itself.
  */
 import type { SyncQueueEntry, SyncQueueRecord } from '#sync.types.js';
-import { controlPlaneFiles, readControlRecord, writeControlRecord } from '#control-plane-records.js';
+import { controlPlaneFiles, jsonRecord, readControlRecord, writeControlRecord } from '#control-plane-records.js';
 import type { RevisionFileSystem } from '#revision-effects.types.js';
 
 /**
@@ -44,10 +44,17 @@ export const createSyncQueue = (
    * Read leniently: a half-written or foreign record holds nothing, and an
    * unreadable queue must never be able to stop the scheduler that reads it.
    */
+  /* A queue record whole enough to answer from a writer's sibling: an object with its list of entries. */
+  const wholeQueue = jsonRecord(
+    (value) => typeof value === 'object' && value !== null && Array.isArray((value as { entries?: unknown }).entries),
+  );
+
   const readPendingQueue = async (): Promise<SyncQueueRecord> => {
     const records = controlPlaneFiles(await recordsFileSystem());
     try {
-      const stored: unknown = JSON.parse((await readControlRecord(records, syncQueuePath)) ?? '{}');
+      const stored: unknown = JSON.parse(
+        (await readControlRecord(records, syncQueuePath, { accepts: wholeQueue })) ?? '{}',
+      );
       const entries: unknown = (stored as { entries?: unknown }).entries;
       return { version: 1, entries: Array.isArray(entries) ? entries.filter((entry) => isQueueEntry(entry)) : [] };
     } catch {

@@ -273,7 +273,13 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
 
     secret: configService.get('AUTH_SECRET', { infer: true }),
     baseURL,
-    trustedOrigins: [configService.get('TAU_FRONTEND_URL', { infer: true })],
+    // The same web origins CORS admits (`main.ts`), so a configured extra host such as the
+    // site's netlify.app address can sign in and be named as a callback, not only TAU_FRONTEND_URL.
+    // The desktop origin stays CORS-only (ruling D7).
+    trustedOrigins: [
+      configService.get('TAU_FRONTEND_URL', { infer: true }),
+      ...configService.get('ADDITIONAL_CORS_ORIGINS', { infer: true }),
+    ],
 
     emailAndPassword: {
       ...staticAuthConfig.emailAndPassword,

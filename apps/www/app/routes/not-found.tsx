@@ -1,5 +1,5 @@
 import { SiteLink } from '#www/site-link.js';
-import { appOrigin } from '#www/environment.js';
+import { appHref } from '#www/environment.js';
 import { out, intro } from '#www/page-components.js';
 import { MarketingPage } from '#app/marketing-page.js';
 import { loader as loadMarketingPage } from '#app/route-loader.server.js';
@@ -16,7 +16,7 @@ export const content = (): React.JSX.Element => (
           <SiteLink className='button primary' href='/'>
             Go to the homepage
           </SiteLink>
-          <SiteLink className='text-link' href={`${appOrigin}/projects`}>
+          <SiteLink className='text-link' href={appHref('/projects')} isAppLink>
             Open projects {out}
           </SiteLink>
         </div>

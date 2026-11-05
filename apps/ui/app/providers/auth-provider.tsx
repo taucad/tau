@@ -6,13 +6,13 @@ import type { AuthProviderProps } from '@better-auth-ui/react';
 import '#utils/auth-plugin.js';
 import { AuthProvider } from '#components/auth/auth-provider.js';
 import { authClient } from '#lib/auth-client.js';
-import { ENV } from '#environment.config.js';
 import { apiKeyPlugin } from '#utils/api-key-plugin.js';
 import { magicLinkPlugin } from '#utils/magic-link-plugin.js';
 import { useCloudFinancialPurge } from '#cloud/financial-purge.js';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { hasWebsitePreference, setEntryPreference } from '#lib/entry-preference.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { authReturnOrigin } from '#lib/share-origin.js';
 
 /**
  * The auth surface Electron's preload exposes to the renderer (batch A, item
@@ -295,7 +295,7 @@ export function AuthConfigProvider({ children }: { readonly children: React.Reac
       plugins={[magicLinkPlugin(), apiKeyPlugin()]}
       socialProviders={['github', 'google']}
       redirectTo='/'
-      baseURL={ENV.TAU_FRONTEND_URL}
+      baseURL={authReturnOrigin()}
     >
       <DesktopAuthBridge />
       <AnonymousSessionPurge />

@@ -363,6 +363,13 @@ exposeFileSystem(withPendingGauge(workspaceBridgeService(fileService)), {
    * gets the checkout itself, because the host's own capture, apply and language
    * planes must read the working copy and never the overlays composed above it
    * (V6). A connection that names neither never reaches here (CI2).
+   *
+   * Only `'user'` composes the system skills overlay. The page's `'agent'`
+   * connections are executors of project code — the editor's kernel runtime
+   * (`cad.machine.ts`) and the file manager's runtime bridge
+   * (`use-file-manager.tsx`) — and an executor never sees `.agents/skills`
+   * (I1). The agent's tools open `'working-copy'` and compose their own overlay
+   * above it, as `agent-host.impl.ts` does.
    */
   // oxlint-disable-next-line max-params -- RootedFileSystemHandlerFactory's own arity.
   handlerForRoot: (root, context, consumer, policy) => {
@@ -370,7 +377,7 @@ exposeFileSystem(withPendingGauge(workspaceBridgeService(fileService)), {
     /* A skill bundle belongs to a checkout, not to the dependency mount: the
      * mount is opened as its own root since W11, and composing the overlay there
      * would grow an `.agents` row inside `node_modules`. */
-    const overlays = root === dependencyMountRoot ? [] : [systemSkillsOverlay()];
+    const overlays = consumer === 'user' && root !== dependencyMountRoot ? [systemSkillsOverlay()] : [];
     const view = consumer === 'working-copy' ? filesystem : composeView({ filesystem }, { consumer, overlays, policy });
     /*
      * The read content operations run here, over the view the connection asked

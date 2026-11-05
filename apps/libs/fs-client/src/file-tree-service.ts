@@ -1588,6 +1588,7 @@ export class FileTreeService {
         isFolder: true,
         size: entry.size,
         mtimeMs: entry.mtimeMs,
+        ...(entry.provenance === undefined ? {} : { provenance: entry.provenance }),
       };
     }
     return {
@@ -1597,6 +1598,7 @@ export class FileTreeService {
       size: entry.size,
       mtimeMs: entry.mtimeMs,
       ...fileMetadataFields(entry),
+      ...(entry.provenance === undefined ? {} : { provenance: entry.provenance }),
     };
   }
 

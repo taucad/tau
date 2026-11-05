@@ -5,6 +5,7 @@
  */
 import { readFile } from 'node:fs/promises';
 
+import { buildViewerCaptureImageOptions } from '@taucad/agent-tools/capture';
 import type { RuntimeClient } from '@taucad/runtime';
 import type { TauMcpViewerFailure } from '@taucad/mcp';
 import { z } from 'zod';
@@ -99,6 +100,7 @@ export const createMcpViewerPartThumbnails =
       return failure('RESULT_TOO_LARGE', 'The shown model is too large to render part thumbnails from.');
     }
     const size = request.size ?? partThumbnailSizeLimit;
+    const look = buildViewerCaptureImageOptions({ width: size, height: size, colorScheme: 'dark', displayWidth: 512 });
     const runtime = await runtimeFor(root);
     const result = await runtime.transcode({
       from: 'glb',
@@ -109,8 +111,10 @@ export const createMcpViewerPartThumbnails =
         width: size,
         height: size,
         quality: 0.95,
-        /* The Tau app's line weight: 2 px at 512. */
-        lineWidth: Math.max(1, Math.round((size / 512) * 2)),
+        /* The Tau app's part-preview look: the viewer's, with the card edge weight at a 512 px display width. */
+        ...look,
+        /* Whole output pixels, at least one, so a small thumbnail keeps a visible edge (0.25 px at size 64 otherwise). */
+        lineWidth: Math.max(1, Math.round(look.lineWidth)),
         views: request.parts.map((part, index) => ({
           id: `part-${String(index)}`,
           visiblePrimitives: part.primitives.map((primitive) => ({ ...primitive })),

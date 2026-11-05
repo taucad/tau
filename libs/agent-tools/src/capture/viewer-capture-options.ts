@@ -26,11 +26,16 @@ export type ViewerCaptureImageOptionsInput = Readonly<{
   height: number;
   /** The viewer colour scheme to reproduce. Captures use `'dark'`, the parity reference. */
   colorScheme: ViewerColorScheme;
+  /**
+   * Width in CSS pixels the image is shown at, for a thumbnail card. When set, edges take the card line weight
+   * (`edges.cardLineWidthCssPixels`) at `width / displayWidth` output pixels per CSS pixel instead of the viewer's.
+   */
+  displayWidth?: number;
 }>;
 
 /** The look-defining image export options of a capture. @public */
 export type ViewerCaptureImageOptions = {
-  /** Edge width in output pixels: the viewer's CSS-pixel width at the capture's pixel ratio. */
+  /** Edge width in output pixels: the viewer's CSS-pixel width at the capture's pixel ratio, or a card's. */
   lineWidth: number;
   /** The colour scheme's edge colour, sRGB `#RRGGBB`. */
   lineColor: string;
@@ -102,11 +107,20 @@ export const resolveViewerCapturePixelRatio = (size: Readonly<{ width: number; h
  * const look = buildViewerCaptureImageOptions({ width: 1536, height: 1152, colorScheme: 'dark' });
  * // look.lineWidth === 2, look.lineColor === '#868686'
  * ```
+ *
+ * @example <caption>A 1536 px card thumbnail shown at 512 px</caption>
+ * ```typescript
+ * import { buildViewerCaptureImageOptions } from '@taucad/agent-tools/capture';
+ *
+ * const card = buildViewerCaptureImageOptions({ width: 1536, height: 1536, colorScheme: 'dark', displayWidth: 512 });
+ * // card.lineWidth === 6
+ * ```
  */
 export const buildViewerCaptureImageOptions = ({
   width,
   height,
   colorScheme,
+  displayWidth,
 }: ViewerCaptureImageOptionsInput): ViewerCaptureImageOptions => {
   const { ambientOcclusion, lighting, edges, toneMapping, exposure } = viewerRenderProfile;
   const scheme = viewerRenderProfile.colorSchemes[colorScheme];
@@ -122,7 +136,10 @@ export const buildViewerCaptureImageOptions = ({
   // +z toward the viewer).
   const aim = nanorasterHeadlampAimRadii / headlamp.targetDistance;
   return {
-    lineWidth: edges.lineWidthCssPixels * pixelRatio,
+    lineWidth:
+      displayWidth === undefined
+        ? edges.lineWidthCssPixels * pixelRatio
+        : edges.cardLineWidthCssPixels * (width / displayWidth),
     lineColor: toSrgbHex(scheme.edgeColor),
     ao: {
       radiusPixels: radiusCssPixels * pixelRatio,

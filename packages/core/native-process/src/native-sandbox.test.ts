@@ -7,7 +7,12 @@ import type { getDefaultWritePaths } from '@anthropic-ai/sandbox-runtime';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { launchInNativeSandbox, NativeRuntimeUnavailableError, nativeSandboxPolicy } from '#index.js';
-import { sandboxRuntimeJavaAgent, sandboxRuntimeSeccomp } from '#native-sandbox.js';
+import {
+  nativeSandboxBwrap,
+  nativeSandboxBwrapVariable,
+  sandboxRuntimeJavaAgent,
+  sandboxRuntimeSeccomp,
+} from '#native-sandbox.js';
 
 /** A fresh module registry per file keeps the launcher's one-time initialization observable. */
 const sandbox = vi.hoisted(() => ({
@@ -62,6 +67,7 @@ afterEach(() => {
   sandbox.wrapped = undefined;
   sandbox.wrap.mockClear();
   Object.defineProperty(process, 'platform', platformDescriptor);
+  vi.unstubAllEnvs();
 });
 
 describe('launchInNativeSandbox', () => {
@@ -165,6 +171,25 @@ describe('the link refusal every launch carries', () => {
     );
   });
 
+  it('should start the bubblewrap the environment names on Linux, and refuse a vector that starts any other', async () => {
+    // Stock Ubuntu 26.04 strips the nested-userns capabilities `apply-seccomp` needs from `/usr/bin/bwrap`, so a
+    // packaged app runs every worker through its own AppArmor-profiled copy (qualification 41865985263 ubuntu2604-*).
+    asPlatform('linux');
+    const owned = '/opt/tau-staging/sandbox/bwrap';
+    vi.stubEnv(nativeSandboxBwrapVariable, owned);
+    sandbox.wrapped = (command) => `${owned} --unshare-net -- /bin/sh -c ${shellQuote(command)}`;
+    const vector = await launchInNativeSandbox(launch);
+    const wrapped = vector.at(2);
+    expect(wrapped).toMatch(/^\/opt\/tau-staging\/sandbox\/bwrap --seccomp 3 --unshare-net -- \/bin\/sh -c '/u);
+    const policy = sandbox.wrap.mock.calls.at(-1)![2] as { bwrapPath?: string };
+    expect(policy.bwrapPath).toBe(owned);
+
+    sandbox.wrapped = (command) => `bwrap --unshare-net -- /bin/sh -c ${shellQuote(command)}`;
+    await expect(launchInNativeSandbox(launch)).rejects.toThrow(
+      /the sandbox runtime did not start bwrap, so links cannot be refused/u,
+    );
+  });
+
   it('should append the Seatbelt rules inside the one profile on macOS, past every quote it holds', async () => {
     asPlatform('darwin');
     const profile = '(version 1)\n(deny default)\n(allow file-read* (subpath "/Users/o\'brien"))';
@@ -179,6 +204,29 @@ describe('the link refusal every launch carries', () => {
 
     sandbox.wrapped = (command) => `/bin/sh -c ${shellQuote(command)}`;
     await expect(launchInNativeSandbox(launch)).rejects.toThrow(/did not pass one Seatbelt profile/u);
+  });
+});
+
+describe('nativeSandboxBwrap', () => {
+  it('should name the configured bubblewrap on Linux only, and refuse a path it cannot splice unquoted', () => {
+    const owned = { [nativeSandboxBwrapVariable]: '/opt/tau-staging-appimage/sandbox/bwrap' };
+    expect(nativeSandboxBwrap(owned, 'linux')).toBe('/opt/tau-staging-appimage/sandbox/bwrap');
+    expect(nativeSandboxBwrap(owned, 'darwin')).toBeUndefined();
+    expect(nativeSandboxBwrap({}, 'linux')).toBeUndefined();
+    expect(nativeSandboxBwrap({ [nativeSandboxBwrapVariable]: '' }, 'linux')).toBeUndefined();
+    for (const path of ['bwrap', '/opt/x y/bwrap', '/opt/$(id)/bwrap', '/opt/../usr/bin/bwrap']) {
+      expect(() => nativeSandboxBwrap({ [nativeSandboxBwrapVariable]: path }, 'linux')).toThrow(
+        NativeRuntimeUnavailableError,
+      );
+    }
+  });
+
+  it('should carry the configured bubblewrap in the profile on Linux, and leave the runtime default otherwise', () => {
+    Object.defineProperty(process, 'platform', { ...platformDescriptor, value: 'linux' });
+    expect(nativeSandboxPolicy(launch)).not.toHaveProperty('bwrapPath');
+    vi.stubEnv(nativeSandboxBwrapVariable, '/opt/tau/sandbox/bwrap');
+    expect(nativeSandboxPolicy(launch).bwrapPath).toBe('/opt/tau/sandbox/bwrap');
+    expect(nativeSandboxPolicy().bwrapPath).toBe('/opt/tau/sandbox/bwrap');
   });
 });
 

@@ -63,6 +63,8 @@ export type WorkerTimingSpan = (typeof workerTimingSpans)[number];
  *   realm died, and those it removed as the empty file a crashed create left (I1).
  * - `uncommitted.puts`: puts of a batch's create record, each covering up to eight creates (I1).
  * - `uncommitted.deleteFailed`: settled or checked records whose delete failed after retries; left behind, harmless.
+ * - `overlay.read` / `overlay.fetch`: system skill resource reads, and those that reached the network rather than
+ *   the realm's resource cache, so `overlay.fetch / overlay.read` is the miss rate.
  *
  * @public
  */
@@ -81,6 +83,8 @@ export const workerTimingCounters = [
   'uncommitted.removed',
   'uncommitted.puts',
   'uncommitted.deleteFailed',
+  'overlay.read',
+  'overlay.fetch',
 ] as const;
 
 /** One counter's name. @public */

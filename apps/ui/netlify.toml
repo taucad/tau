@@ -181,6 +181,14 @@ for = "/assets/*"
 Cache-Control = "public, max-age=31536000, immutable"
 Netlify-CDN-Cache-Control = "public, durable, max-age=31536000"
 
+# PicoGK browser runtime, emitted under its receipt digest
+# (picogk-browser/<sha256>/), so every path is immutable like /assets/*.
+[[headers]]
+for = "/picogk-browser/*"
+[headers.values]
+Cache-Control = "public, max-age=31536000, immutable"
+Netlify-CDN-Cache-Control = "public, durable, max-age=31536000"
+
 [[headers]]
 for = "/fonts/*"
 [headers.values]

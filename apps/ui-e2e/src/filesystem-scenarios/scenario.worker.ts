@@ -712,6 +712,8 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
         await live.writeFile('src/s19-save.ts', saveText(saveSize, 19));
         const saveLatency = performance.now() - saveStart;
         const grep = await grepping;
+        /* Info only, never gated: how many reads the grep window itself held. */
+        const readsDuringGrep = probeReads();
         /* A p95 over a dozen reads is the slowest one: the viewer keeps reading
          * until the sample holds enough reads for the percentile to be one. */
         while (probeReads() < s19MinimumReads) {
@@ -724,7 +726,9 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
           authorityReads: grep.authorityReads,
           saveLatency,
           readP95: percentile(reads.latencies, 0.95),
+          readMax: Math.max(0, ...reads.latencies),
           reads: reads.reads,
+          readsDuringGrep,
         };
       });
     }

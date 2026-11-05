@@ -33,7 +33,7 @@ import type {
   PackReader,
   StoredObject,
 } from '#pack-reader/pack-reader.js';
-import { createPackBuilder, indexBuiltPack } from '#object-store/pack-writer.js';
+import { buildPack, createPackBuilder, indexBuiltPack } from '#object-store/pack-writer.js';
 import type { PackBuilder } from '#object-store/pack-writer.js';
 
 /** The files a Git store lives in: a rooted view's private store, or a provider's own primitives. */
@@ -168,6 +168,40 @@ const defaultRepack: RepackOptions = {
   maxPackBytes: 64 * 1024 * 1024,
 };
 
+/**
+ * A pack past the ceiling the compute worker indexes (charter D7): it is not
+ * a judgement on its bytes, so nothing is dropped for it. A fetch that meets
+ * it takes the objects one by one instead ({@link ObjectStore.importObjects}).
+ *
+ * @public
+ */
+export class PackCeilingError extends Error {
+  public override readonly name = 'PackCeilingError';
+
+  /** The pack's size, or the bytes read before the ceiling was passed. */
+  public readonly bytes: number;
+
+  /** The ceiling. */
+  public readonly ceiling: number;
+
+  /**
+   * Name the pack's size and the ceiling it passed.
+   *
+   * @param bytes - The pack's size, or the bytes read so far.
+   * @param ceiling - The ceiling.
+   */
+  public constructor(bytes: number, ceiling: number) {
+    super(`A pack of ${String(bytes)} bytes passes the ${String(ceiling)}-byte ceiling a pack is indexed under.`);
+    this.bytes = bytes;
+    this.ceiling = ceiling;
+  }
+}
+
+/** Objects read from somewhere other than this store's own files: a pack on the server, by Range. */
+export type ObjectSource = Readonly<{
+  readMany: (oids: Iterable<string>) => Promise<Map<string, StoredObject>>;
+}>;
+
 /** What a store is made of. */
 export type ObjectStoreOptions = Readonly<{
   files: GitFiles;
@@ -181,6 +215,8 @@ export type ObjectStoreOptions = Readonly<{
   repack?: Partial<RepackOptions>;
   /** The clock retention is measured on. */
   now?: () => number;
+  /** The largest pack {@link ObjectStore.addPack} indexes; the repack ceiling by default. Bytes. */
+  packCeilingBytes?: number;
 }>;
 
 /** One object to store loose: its id when the caller already computed it, else this store hashes it. */
@@ -200,6 +236,22 @@ export type ObjectStore = Readonly<{
   addPack: (pack: Uint8Array<ArrayBuffer>) => Promise<string>;
   /** One undeltified pack of these objects, for a push. */
   packObjects: (oids: readonly string[]) => Promise<Uint8Array<ArrayBuffer>>;
+  /**
+   * Keep objects read elsewhere — a pack on the server — in packs of at most
+   * the repack ceiling, indexed from what was written, never by `indexPack`.
+   * Objects already held are skipped. Answers the packs written.
+   */
+  importObjects: (objects: Iterable<Readonly<{ oid: string } & StoredObject>>) => Promise<string[]>;
+  /**
+   * Read through to a source for an object this store lacks, keeping each one
+   * it answers loose. For a store a cold open filled with only its heads.
+   */
+  attachSource: (source: ObjectSource) => void;
+  /**
+   * One object's body as a stream: a whole packed entry inflates as it is
+   * read, so only its deflated bytes are held; anything else is read first.
+   */
+  openBlob: (oid: string) => Promise<ReadableStream<Uint8Array<ArrayBuffer>> | undefined>;
   /** Fold loose objects and small packs under the fence; `force` ignores the thresholds. Answers whether it wrote a pack. */
   repack: (force?: boolean) => Promise<boolean>;
   /** Repack when this store's own loose writes, or its packs, have reached their bound. */
@@ -246,6 +298,8 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
   const { files, gitdir, compute, fenceName } = options;
   const now = options.now ?? Date.now;
   const bounds: RepackOptions = { ...defaultRepack, ...options.repack };
+  const packCeiling = options.packCeilingBytes ?? bounds.maxPackBytes;
+  const sources: ObjectSource[] = [];
   const counters = emptyReadCounters();
   const cache = createBaseCache(options.cacheBytes ?? 32 * 1024 * 1024);
   const packDirectory = `${gitdir}/objects/pack`;
@@ -486,7 +540,21 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
     }
     /* Another writer — a fetch or a repack in another tab — may have packed it since this store last listed. */
     await listPacks();
-    return readOnce(oid, depth);
+    return (await readOnce(oid, depth)) ?? readThrough(oid);
+  };
+
+  /* An object no local file holds, from the first attached source that has it, kept loose. */
+  const readThrough = async (oid: string): Promise<StoredObject | undefined> => {
+    for (const source of sources) {
+      // oxlint-disable-next-line no-await-in-loop -- the first source that holds it answers.
+      const found = (await source.readMany([oid])).get(oid);
+      if (found !== undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- kept before it is answered, so the next read is local.
+        await writeLoose([{ ...found, oid }]);
+        return found;
+      }
+    }
+    return undefined;
   };
 
   /**
@@ -610,9 +678,73 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
    * @returns The pack's name.
    */
   const addPack = async (pack: Uint8Array<ArrayBuffer>): Promise<string> => {
+    if (pack.byteLength > packCeiling) {
+      throw new PackCeilingError(pack.byteLength, packCeiling);
+    }
     const checksum = [...pack.subarray(-20)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
     const packIndex = await compute.indexPack(pack);
     return publishPack(pack, packIndex, checksum);
+  };
+
+  const importObjects = async (objects: Iterable<Readonly<{ oid: string } & StoredObject>>): Promise<string[]> => {
+    const names: string[] = [];
+    let batch: Array<Readonly<{ oid: string } & StoredObject>> = [];
+    let bytes = 0;
+    const flush = async (): Promise<void> => {
+      if (batch.length > 0) {
+        const built = await buildPack(batch, compute);
+        names.push(await publishPack(built.pack, await indexBuiltPack(built, compute), built.checksum));
+      }
+      batch = [];
+      bytes = 0;
+    };
+    for (const object of objects) {
+      // oxlint-disable-next-line no-await-in-loop -- held objects are skipped one lookup at a time.
+      if (!(await has(object.oid))) {
+        if (bytes > 0 && bytes + object.data.byteLength > bounds.maxPackBytes) {
+          // oxlint-disable-next-line no-await-in-loop -- one bounded pack written before the next is filled.
+          await flush();
+        }
+        batch.push(object);
+        bytes += object.data.byteLength;
+      }
+    }
+    await flush();
+    return names;
+  };
+
+  const openBlob = async (oid: string): Promise<ReadableStream<Uint8Array<ArrayBuffer>> | undefined> => {
+    for (const pack of await knownPacks()) {
+      // oxlint-disable-next-line no-await-in-loop -- the first pack that holds it answers.
+      const entry = await pack.wholeEntry(oid).catch(() => undefined);
+      if (entry !== undefined) {
+        let seen = 0;
+        const counted = new TransformStream<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>({
+          transform: (chunk, controller) => {
+            seen += chunk.byteLength;
+            controller.enqueue(chunk);
+          },
+          flush: (controller) => {
+            if (seen !== entry.size) {
+              controller.error(new TypeError(`The object ${oid} inflates to a size other than the one it declares.`));
+            }
+          },
+        });
+        return new Blob([entry.compressed])
+          .stream()
+          .pipeThrough(
+            new DecompressionStream('deflate') as unknown as TransformStream<
+              Uint8Array<ArrayBuffer>,
+              Uint8Array<ArrayBuffer>
+            >,
+          )
+          .pipeThrough(counted);
+      }
+    }
+    const object = await read(oid);
+    return object === undefined
+      ? undefined
+      : (new Blob([object.data]).stream() as ReadableStream<Uint8Array<ArrayBuffer>>);
   };
 
   /**
@@ -900,6 +1032,11 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
     has,
     writeLoose,
     addPack,
+    importObjects,
+    attachSource: (source: ObjectSource) => {
+      sources.push(source);
+    },
+    openBlob,
     packObjects,
     repack,
     repackIfDue: async (): Promise<boolean> => {

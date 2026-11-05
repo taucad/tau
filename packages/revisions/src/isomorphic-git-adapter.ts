@@ -64,7 +64,9 @@ import {
 } from '#adapter-transport/adapter-transport.js';
 import { createInlineCompute } from '#compute-worker/compute-worker.js';
 import type { ComputeWorker } from '#compute-worker/compute-worker.js';
-import { createObjectStore, gitFilesOf, isMissing } from '#object-store/object-store.js';
+import { createObjectStore, gitFilesOf, isMissing, PackCeilingError } from '#object-store/object-store.js';
+import { coldOpenFromCatalogue } from '#object-store/cold-open.js';
+import type { CatalogueFamily, ColdOpenReport } from '#object-store/cold-open.js';
 import type { GitFiles, ObjectStore } from '#object-store/object-store.js';
 import { readTreeEntries, writeTreeObject } from '#object-store/tree-codec.js';
 import type { TreeCodecEntry } from '#object-store/tree-codec.js';
@@ -204,6 +206,31 @@ export type IsomorphicGitRevisionPortOptions = Readonly<{
    * from the remote: the open's hydrate, made visible to the host's telemetry.
    */
   onLfsFetch?: (report: LfsFetchReport) => void;
+  /**
+   * The hosted store's catalogue (charter D8). Supplied, a fetch into a store
+   * that holds no refs yet, for refs all in the catalogue's families, reads
+   * the heads by Range through each pack's stored index instead of
+   * `upload-pack`; and a fetch whose `upload-pack` answer passes the pack
+   * ceiling takes its objects that way instead. Without a catalogue (a 404, an
+   * incomplete one) the fetch goes over smart HTTP as before.
+   */
+  catalogue?: CatalogueAccess;
+}>;
+
+/**
+ * How a port reaches a hosted store's catalogue.
+ *
+ * @public
+ */
+export type CatalogueAccess = Readonly<{
+  /** The catalogue's URL for a remote's URL, or `undefined` where that remote has none. */
+  url: (remoteUrl: string) => string | undefined;
+  /** The API's fetch, which carries the session; the platform's by default. */
+  fetch?: typeof globalThis.fetch;
+  /** The files host's fetch, which carries no credential; {@link CatalogueAccess.fetch} by default. */
+  filesFetch?: typeof globalThis.fetch;
+  /** Told what each cold open cost. */
+  onColdOpen?: (report: ColdOpenReport) => void;
 }>;
 
 /**
@@ -407,6 +434,22 @@ const fileSystemShim = (provider: GitFiles) => {
  * await port.init({ author: { name: 'Tau', email: 'tau@example.com' } });
  * ```
  */
+/** The families a set of refs falls in, or `undefined` when one is outside them all (ops, a remote's own). */
+const catalogueFamiliesOf = (references: readonly string[]): CatalogueFamily[] | undefined => {
+  const families = new Set<CatalogueFamily>(['heads', 'tags']);
+  for (const ref of references) {
+    if (ref.startsWith('refs/tau/chats/')) {
+      families.add('chats');
+    } else if (!ref.startsWith('refs/heads/') && !ref.startsWith('refs/tags/')) {
+      return undefined;
+    }
+  }
+  return [...families];
+};
+
+/** The largest `upload-pack` answer a fetch reads: the pack ceiling and its framing. Bytes. */
+const uploadPackCeilingBytes = 64 * 1024 * 1024 + 64 * 1024;
+
 export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPortOptions): RevisionPort => {
   const { filesystem, checkouts } = options;
   const gitdir = options.gitDirectory ?? defaultGitDirectory;
@@ -417,10 +460,11 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
   /* Every byte under the store's directory, off the mutation pipeline (I6). */
   const gitFiles = gitFilesOf(filesystem, gitdir);
   const fs = fileSystemShim(gitFiles);
+  const compute = options.compute ?? createInlineCompute();
   const objects = createObjectStore({
     files: gitFiles,
     gitdir,
-    compute: options.compute ?? createInlineCompute(),
+    compute,
     fenceName: `${filesystem.id}:${gitdir}`,
   });
   options.onObjectStore?.(objects);
@@ -634,6 +678,38 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
   const treeIds = createTreeIdMemo();
   /* Whether the store already holds an object, packed or loose. */
   const holds = async (oid: string): Promise<boolean> => objects.has(oid);
+  /*
+   * Fill the store from the hosted catalogue: the refs it brought, or
+   * `undefined` to go over smart HTTP. With `wants`, it took only when the
+   * store then holds every one of them.
+   */
+  async function openFromCatalogue(
+    url: string,
+    families: readonly CatalogueFamily[] | undefined,
+    signal: AbortSignal | undefined,
+    wants?: readonly string[],
+  ): Promise<Map<string, string> | undefined> {
+    const access = options.catalogue;
+    const catalogueUrl = access?.url(url);
+    if (access === undefined || catalogueUrl === undefined) {
+      return undefined;
+    }
+    const opened = await coldOpenFromCatalogue({
+      catalogueUrl,
+      families: families ?? ['heads', 'tags'],
+      fetch: access.fetch ?? globalThis.fetch.bind(globalThis),
+      ...(access.filesFetch === undefined ? {} : { filesFetch: access.filesFetch }),
+      store: objects,
+      compute,
+      ...(signal === undefined ? {} : { signal }),
+    });
+    if (opened === undefined) {
+      return undefined;
+    }
+    access.onColdOpen?.(opened.report);
+    const held = await Promise.all((wants ?? []).map(async (oid) => holds(oid)));
+    return held.every(Boolean) ? new Map(opened.refs) : undefined;
+  }
 
   /*
    * Store one tree object and whatever under it the store lacks, children
@@ -1945,11 +2021,19 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
        * listing's, when the caller hands back one this port answered for the
        * same address (R6). */
       const listed = input.advertised === undefined ? undefined : listedAdvertisements.get(input.advertised);
-      const advertisement =
+      const advertise = async (): Promise<Awaited<ReturnType<typeof getRemoteInfo2>>> =>
         listed?.url === url && listed.advertisement.protocolVersion === 1
           ? listed.advertisement
-          : await getRemoteInfo2({ http, url, forPush: false, protocolVersion: 1 }).catch(refused);
-      const advertised = new Map((advertisement.refs ?? []).map((reference) => [reference.ref, reference.oid]));
+          : getRemoteInfo2({ http, url, forPush: false, protocolVersion: 1 }).catch(refused);
+      /* A store with no refs yet opens from the catalogue, when every asked-for ref is in its families (D8). */
+      const coldFamilies = input.refs === undefined ? undefined : catalogueFamiliesOf(input.refs);
+      const cold =
+        coldFamilies !== undefined && (await listRefs({ fs, gitdir, filepath: 'refs' })).length === 0
+          ? await openFromCatalogue(url, coldFamilies, input.signal)
+          : undefined;
+      let advertisement = cold === undefined ? await advertise() : undefined;
+      const advertised =
+        cold ?? new Map((advertisement?.refs ?? []).map((reference) => [reference.ref, reference.oid]));
       const wanted = (input.refs ?? [...advertised.keys()].filter((ref) => ref.startsWith('refs/'))).filter((ref) => {
         if (input.refs !== undefined) {
           guardRef(ref, 'ref');
@@ -1985,25 +2069,42 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       );
       const wants = [...new Set(missing.filter((oid) => oid !== undefined))];
       if (wants.length > 0) {
-        const capabilities = ['side-band-64k', 'ofs-delta'].filter(
-          (capability) => capability in advertisement.capabilities,
-        );
+        advertisement ??= await advertise();
+        const { capabilities: offered } = advertisement;
+        const capabilities = ['side-band-64k', 'ofs-delta'].filter((capability) => capability in offered);
         const body = concatBytes(
           ...wants.map((oid, index) => pktLine(`want ${oid}${index === 0 ? ` ${capabilities.join(' ')}` : ''}\n`)),
           pktEncoder.encode('0000'),
           ...[...haves].map((oid) => pktLine(`have ${oid}\n`)),
           pktLine('done\n'),
         );
-        const answered = await postService(http, { url, service: 'git-upload-pack', body }).catch(refused);
+        /* Read as it streams and stopped at the ceiling: past it the objects come one by one from the catalogue. */
+        const answered = await postService(http, {
+          url,
+          service: 'git-upload-pack',
+          body,
+          maximumBytes: uploadPackCeilingBytes,
+        }).catch(async (error: unknown) => {
+          if (error instanceof PackCeilingError && (await openFromCatalogue(url, coldFamilies, input.signal, wants))) {
+            return undefined;
+          }
+          return refused(error);
+        });
         const pack = (() => {
           try {
-            return readUploadPackPack(answered, capabilities.includes('side-band-64k'));
+            return answered === undefined
+              ? undefined
+              : readUploadPackPack(answered, capabilities.includes('side-band-64k'));
           } catch (error) {
             return refused(error);
           }
         })();
         /* A pack with no objects has nothing to index. */
-        if (pack.byteLength > 32 && new DataView(pack.buffer, pack.byteOffset + 8, 4).getUint32(0) > 0) {
+        if (
+          pack !== undefined &&
+          pack.byteLength > 32 &&
+          new DataView(pack.buffer, pack.byteOffset + 8, 4).getUint32(0) > 0
+        ) {
           await objects.addPack(pack);
           await objects.repackIfDue();
         }

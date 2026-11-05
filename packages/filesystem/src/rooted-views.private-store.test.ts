@@ -65,6 +65,19 @@ describe('rooted privateStore', () => {
       { position: 12, length: 10 },
     ]);
     expect(readFile).not.toHaveBeenCalled();
+
+    /* A range that is not two whole, non-negative numbers never reaches the provider. */
+    for (const [offset, length] of [
+      [-1, 4],
+      [0, -1],
+      [1.5, 2],
+      [0, Number.NaN],
+      [Number.POSITIVE_INFINITY, 1],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- each refusal checked in turn.
+      await expect(store.readRange!(pack, offset, length)).rejects.toThrow(RangeError);
+    }
+    expect(ranges).toHaveLength(2);
   });
 
   it('should offer no range read over a provider that cannot stream ranges', async () => {

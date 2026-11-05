@@ -599,6 +599,11 @@ export class RootedViews {
       return options === undefined ? target.provider.stat(target.path) : target.provider.stat(target.path, options);
     }) as PrivateStore['stat'];
     const readPrivateRange = async (path: string, offset: number, length: number): Promise<Uint8Array<ArrayBuffer>> => {
+      if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < 0 || length < 0) {
+        throw new RangeError(
+          `A private range read needs a whole offset and length, not ${String(offset)} and ${String(length)}.`,
+        );
+      }
       const target = resolvePrivate(path);
       const reader = target.provider.readFileStream!(target.path, { position: offset, length }).getReader();
       const chunks: Array<Uint8Array<ArrayBuffer>> = [];

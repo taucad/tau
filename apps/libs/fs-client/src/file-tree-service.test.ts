@@ -2195,3 +2195,95 @@ describe('refresh pause during a revision apply', () => {
     }
   });
 });
+
+/*
+ * Tree work per change set is O(touched directories) (charter D18, W8): a
+ * listing merge, a subtree drop and a subtree rename read the directory's own
+ * children and subtree through the child index, never every key of the tree.
+ */
+describe('directory-scoped tree work', () => {
+  const directories = 100;
+  const filesPerDirectory = 20;
+  const projectEntries = (): FileEntry[] =>
+    Array.from({ length: directories }, (_, directory) => [
+      directoryEntry(`d${String(directory)}`),
+      ...Array.from({ length: filesPerDirectory }, (_, file) => textEntry(`d${String(directory)}/f${String(file)}.ts`)),
+    ]).flat();
+
+  /** Counts whole-map iterations of any map at least as large as the tree. */
+  const countTreeScans = (threshold: number): { scans: () => number; restore: () => void } => {
+    const spies = [
+      vi.spyOn(Map.prototype, 'keys'),
+      vi.spyOn(Map.prototype, 'entries'),
+      vi.spyOn(Map.prototype, 'values'),
+      vi.spyOn(Map.prototype, 'forEach'),
+      vi.spyOn(Map.prototype, Symbol.iterator),
+    ];
+    return {
+      scans: () =>
+        spies
+          .flatMap((spy) => spy.mock.contexts)
+          .filter((context) => (context as Map<unknown, unknown>).size >= threshold).length,
+      restore: () => {
+        for (const spy of spies) {
+          spy.mockRestore();
+        }
+      },
+    };
+  };
+
+  it('merges one listing, drops one subtree and renames one subtree without scanning the tree', async () => {
+    const { tree, proxy, disposeChannel } = createTreeHarness({ initialEntries: projectEntries() });
+    const emit = connectContentService(tree);
+    vi.mocked(proxy.readDirectory).mockResolvedValue([
+      ...Array.from({ length: filesPerDirectory - 1 }, (_, file) => textNode(`f${String(file + 1)}.ts`)),
+      textNode('added.ts'),
+    ]);
+    const counter = countTreeScans(directories * filesPerDirectory);
+    try {
+      const listed = await tree.listDirectory('d5');
+      emit({ type: 'directoryDeleted', path: 'd7' });
+      emit({ type: 'directoryRenamed', oldPath: 'd8', newPath: 'e8' });
+      expect(listed.map((entry) => entry.name)).toContain('added.ts');
+      expect(counter.scans()).toBe(0);
+    } finally {
+      counter.restore();
+    }
+
+    const snapshot = tree.getTreeSnapshot();
+    expect(snapshot.has('d5/f0.ts')).toBe(false);
+    expect(snapshot.has('d5/added.ts')).toBe(true);
+    expect([...snapshot.keys()].filter((key) => key === 'd7' || key.startsWith('d7/'))).toEqual([]);
+    expect(snapshot.has('d8/f3.ts')).toBe(false);
+    expect(snapshot.get('e8/f3.ts')?.path).toBe('e8/f3.ts');
+    expect([...snapshot.keys()].filter((key) => key.startsWith('e8/'))).toHaveLength(filesPerDirectory);
+    disposeChannel();
+  });
+
+  it('keeps a subtree reachable through an ancestor the tree has not listed', () => {
+    const { tree, disposeChannel } = createTreeHarness({
+      initialEntries: [textEntry('top.ts'), textEntry('a/b/deep.ts')],
+    });
+    const emit = connectContentService(tree);
+
+    emit({ type: 'directoryDeleted', path: 'a' });
+
+    expect(tree.getTreeSnapshot().has('a/b/deep.ts')).toBe(false);
+    expect(tree.getTreeSnapshot().has('top.ts')).toBe(true);
+    disposeChannel();
+  });
+
+  it('copies the child index with the tree, so a handed-out snapshot never changes', () => {
+    const { tree, disposeChannel } = createTreeHarness({
+      initialEntries: [directoryEntry('a'), textEntry('a/one.ts'), textEntry('a/two.ts')],
+    });
+    const emit = connectContentService(tree);
+    const before = tree.getTreeSnapshot();
+
+    emit({ type: 'directoryDeleted', path: 'a' });
+
+    expect(before.has('a/one.ts')).toBe(true);
+    expect(tree.getTreeSnapshot().has('a/one.ts')).toBe(false);
+    disposeChannel();
+  });
+});

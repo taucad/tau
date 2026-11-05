@@ -156,6 +156,141 @@ export type FileItem = {
   size: number;
 } & FileTreeContentMetadata;
 
+/**
+ * The tree key of a key's directory: `''` for a top-level key, `undefined` for the root itself.
+ *
+ * @param key - A root-relative tree key.
+ * @returns Its parent's key.
+ */
+const parentKeyOf = (key: string): string | undefined => {
+  const trimmed = key.endsWith('/') ? key.slice(0, -1) : key;
+  if (trimmed === '') {
+    return undefined;
+  }
+  const slash = trimmed.lastIndexOf('/');
+  return slash === -1 ? '' : trimmed.slice(0, slash);
+};
+
+const directoryKeyOf = (key: string): string => (key.endsWith('/') ? key.slice(0, -1) : key);
+
+/**
+ * The tree's path map with a per-directory child index (charter D18).
+ *
+ * Every listing merge, level read, subtree drop and subtree rename is work on
+ * one directory, so it reads that directory's children (or its subtree)
+ * instead of scanning every key: tree work per change set is O(touched
+ * directories × their children), not O(touched directories × N). It is still
+ * the `Map` readers receive; its iteration order is the map's own.
+ */
+class DirectoryIndexedTree extends Map<string, FileEntry> {
+  readonly #children = new Map<string, Set<string>>();
+
+  public constructor(source?: DirectoryIndexedTree) {
+    /* Populate after `super()`: a `Map` constructor's own `set` calls would run before the index exists. */
+    super();
+    if (source !== undefined) {
+      for (const [key, entry] of source) {
+        super.set(key, entry);
+      }
+      for (const [directory, children] of source.#children) {
+        this.#children.set(directory, new Set(children));
+      }
+    }
+  }
+
+  public override set(key: string, value: FileEntry): this {
+    if (!this.has(key)) {
+      this.#link(key);
+    }
+    return super.set(key, value);
+  }
+
+  public override delete(key: string): boolean {
+    if (!super.delete(key)) {
+      return false;
+    }
+    this.#unlink(key);
+    return true;
+  }
+
+  public override clear(): void {
+    super.clear();
+    this.#children.clear();
+  }
+
+  /**
+   * The keys directly inside a directory, as a copy the caller may mutate the tree under.
+   *
+   * @param directory - A directory key (`''` for the root).
+   * @returns Its child keys that are in the tree.
+   */
+  public childKeys(directory: string): string[] {
+    return [...(this.#children.get(directoryKeyOf(directory)) ?? [])].filter((key) => this.has(key));
+  }
+
+  /**
+   * Every key strictly below a directory, as a copy.
+   *
+   * @param directory - A directory key (`''` for the root: every key but `''`).
+   * @returns The subtree's keys that are in the tree.
+   */
+  public descendantKeys(directory: string): string[] {
+    const out: string[] = [];
+    const pending = [directoryKeyOf(directory)];
+    while (pending.length > 0) {
+      const children = this.#children.get(pending.pop()!);
+      if (children === undefined) {
+        continue;
+      }
+      for (const child of children) {
+        if (this.has(child)) {
+          out.push(child);
+        }
+        pending.push(child);
+      }
+    }
+    return out;
+  }
+
+  /*
+   * A key is linked under its parent, and every ancestor under its own, even
+   * when the ancestor has no entry yet (an optimistic add into an unlisted
+   * directory), so a subtree read finds every key a prefix scan would.
+   */
+  #link(key: string): void {
+    let child = key;
+    let parent = parentKeyOf(child);
+    while (parent !== undefined) {
+      let children = this.#children.get(parent);
+      if (children === undefined) {
+        children = new Set();
+        this.#children.set(parent, children);
+      }
+      if (children.has(child)) {
+        return;
+      }
+      children.add(child);
+      child = parent;
+      parent = parentKeyOf(child);
+    }
+  }
+
+  /* Unlink a key no longer in the tree, and each ancestor left with neither an entry nor children. */
+  #unlink(key: string): void {
+    let child = key;
+    while (!this.has(child) && (this.#children.get(child)?.size ?? 0) === 0) {
+      this.#children.delete(child);
+      const parent = parentKeyOf(child);
+      if (parent === undefined) {
+        return;
+      }
+      const siblings = this.#children.get(parent);
+      siblings?.delete(child);
+      child = parent;
+    }
+  }
+}
+
 type FileTreeServiceInit = {
   proxy: ComposedViewClient;
   paths: WorkspacePathResolver;
@@ -210,7 +345,7 @@ export class FileTreeService {
       this.listingObservations.delete(path);
     }
   });
-  private _tree: Map<string, FileEntry>;
+  private _tree: DirectoryIndexedTree;
   /*
    * Whether `_tree` has been handed to a reader. A handed-out snapshot is never
    * mutated: the next change copies it once, and every further change before
@@ -264,7 +399,7 @@ export class FileTreeService {
     this.visibility = init.visibility;
     this.refreshDebounce = init.refreshDebounce ?? defaultRefreshDebounce;
     this.onExternalPollTelemetry = init.onExternalPollTelemetry;
-    this._tree = new Map();
+    this._tree = new DirectoryIndexedTree();
     if (init.initialEntries) {
       for (const entry of init.initialEntries) {
         this._tree.set(entry.path, entry);
@@ -910,7 +1045,7 @@ export class FileTreeService {
     this.nativelyObserved = false;
     this.reschedulePoll?.();
 
-    const newTree = new Map<string, FileEntry>();
+    const newTree = new DirectoryIndexedTree();
     if (initialEntries) {
       for (const entry of initialEntries) {
         newTree.set(entry.path, entry);
@@ -1183,8 +1318,10 @@ export class FileTreeService {
       }
     }
     this.invalidatePendingDirectory(this.paths.parentOf(relativePath));
-    const prefix = relativePath === '' ? '' : relativePath.endsWith('/') ? relativePath : `${relativePath}/`;
-    const doomed = [...this._tree.keys()].filter((key) => key === relativePath || key.startsWith(prefix));
+    const doomed = [
+      ...(this._tree.has(relativePath) ? [relativePath] : []),
+      ...this._tree.descendantKeys(relativePath),
+    ];
     if (doomed.length > 0) {
       const newTree = this.draftTree();
       for (const key of doomed) {
@@ -1206,7 +1343,10 @@ export class FileTreeService {
     const oldPrefix = oldPath === '' ? '' : oldPath.endsWith('/') ? oldPath : `${oldPath}/`;
     const newPrefix = newPath === '' ? '' : newPath.endsWith('/') ? newPath : `${newPath}/`;
     const ownEntry = this._tree.get(oldPath);
-    const moved = [...this._tree.entries()].filter(([key]) => key.startsWith(oldPrefix));
+    const moved = this._tree
+      .descendantKeys(oldPath)
+      .filter((key) => key.startsWith(oldPrefix))
+      .map((key) => [key, this._tree.get(key)!] as const);
     if (ownEntry === undefined && moved.length === 0) {
       return;
     }
@@ -1236,9 +1376,9 @@ export class FileTreeService {
    * otherwise one copy of it that becomes current.
    * @returns The map a change may mutate.
    */
-  private draftTree(): Map<string, FileEntry> {
+  private draftTree(): DirectoryIndexedTree {
     if (this._treeHandedOut) {
-      this._tree = new Map(this._tree);
+      this._tree = new DirectoryIndexedTree(this._tree);
       this._treeHandedOut = false;
     }
     return this._tree;
@@ -1563,18 +1703,10 @@ export class FileTreeService {
   }
 
   private entriesAtDirectoryLevel(directoryKey: string): ListedDirectoryEntry[] {
-    const prefix = directoryKey === '' ? '' : directoryKey.endsWith('/') ? directoryKey : `${directoryKey}/`;
-    const out: ListedDirectoryEntry[] = [];
-    for (const [entryPath, entry] of this._tree) {
-      if (prefix === '') {
-        if (entryPath !== '' && !entryPath.includes('/')) {
-          out.push(this.toListedDirectoryEntry(entryPath, entry));
-        }
-      } else if (entryPath.startsWith(prefix) && !entryPath.slice(prefix.length).includes('/')) {
-        out.push(this.toListedDirectoryEntry(entryPath, entry));
-      }
-    }
-    return out.sort((a, b) => a.name.localeCompare(b.name));
+    return this._tree
+      .childKeys(directoryKey)
+      .map((entryPath) => this.toListedDirectoryEntry(entryPath, this._tree.get(entryPath)!))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   private toListedDirectoryEntry(path: string, entry: FileEntry): ListedDirectoryEntry {
@@ -1641,27 +1773,15 @@ export class FileTreeService {
     const newTree = this.draftTree();
     const prefix = directoryKey === '' ? '' : directoryKey.endsWith('/') ? directoryKey : `${directoryKey}/`;
 
-    const existingChildKeys = new Set<string>();
-    for (const key of newTree.keys()) {
-      if (prefix === '') {
-        if (!key.includes('/') && key !== '') {
-          existingChildKeys.add(key);
-        }
-      } else if (key.startsWith(prefix) && !key.slice(prefix.length).includes('/')) {
-        existingChildKeys.add(key);
-      }
-    }
-
+    /* Only this directory's children and the subtrees of the ones that went: O(children), not O(tree). */
     const diskNames = new Set(entries.map((node) => node.name));
-    for (const key of existingChildKeys) {
+    for (const key of newTree.childKeys(directoryKey)) {
       const name = prefix === '' ? key : key.slice(prefix.length);
       if (!diskNames.has(name)) {
+        const descendants = newTree.descendantKeys(key);
         newTree.delete(key);
-        const subtreePrefix = `${key}/`;
-        for (const descendant of newTree.keys()) {
-          if (descendant.startsWith(subtreePrefix)) {
-            newTree.delete(descendant);
-          }
+        for (const descendant of descendants) {
+          newTree.delete(descendant);
         }
       }
     }

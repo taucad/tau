@@ -4,10 +4,11 @@
  * A new file is written straight to its final path. Creating its handle makes
  * an empty file there before the writable opens, so a realm killed in between
  * leaves an empty file where the apply meant to put bytes. A batch therefore
- * records, once it has created the handles and before any writable opens,
- * exactly the paths it created that were missing — never a path it was
- * refused — with their expected size and the time; it deletes the record once
- * the batch settles. The next initialise of the root undoes only that crash
+ * records each create whose path it found missing under the path's exclusive
+ * lock — never a path it was refused — with its expected size and the time,
+ * and makes the file only once that record is kept, so no crash leaves an
+ * empty file that no record names; it deletes the record once the batch
+ * settles. The next initialise of the root undoes only that crash
  * shape: under the path's exclusive lock, a recorded file whose owner realm is
  * gone is removed when it is empty, was expected to hold bytes, and has not
  * been modified since the record was kept. Anything else — a file edited after

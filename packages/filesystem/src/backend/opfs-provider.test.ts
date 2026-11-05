@@ -478,13 +478,62 @@ describe('OPFS uncommitted create changesets', () => {
     const receipts = await provider.applyBatch([
       { op: 'write', path: 'dir/new.ts', data: bytes('new'), create: true },
       { op: 'write', path: 'taken.ts', data: bytes('mine'), create: true },
-      { op: 'write', path: 'other.ts', data: bytes('replace') },
     ]);
 
-    expect(receipts.map(({ outcome }) => outcome)).toEqual(['applied', 'failed', 'applied']);
+    expect(receipts.map(({ outcome }) => outcome)).toEqual(['applied', 'failed']);
     expect(calls).toEqual(['writes before put 0', 'put dir/new.ts:3', 'delete']);
     expect(records.size).toBe(0);
     await expect(provider.readFile('taken.ts', 'utf8')).resolves.toBe('');
+    calls.length = 0;
+
+    await provider.applyBatch([{ op: 'write', path: 'other.ts', data: bytes('replace') }]);
+
+    expect(calls).toEqual([]);
+  });
+
+  it('should rewrite one record in place, making each file only after the put that covers it', async () => {
+    const { writes } = stubRoot();
+    const { store: inner, records } = memoryStore();
+    const puts: Array<Readonly<{ id: string; paths: string[]; writes: number }>> = [];
+    const createdBeforeTheirPut: string[] = [];
+    const late: { provider?: OPFSProvider } = {};
+    const store: UncommittedChangesetStore = {
+      ...inner,
+      put: async (record) => {
+        const paths = record.entries.map(({ path }) => path);
+        const added = paths.slice(puts.at(-1)?.paths.length ?? 0);
+        puts.push({ id: record.changesetId, paths, writes: writes.length });
+        for (const path of added) {
+          // oxlint-disable-next-line no-await-in-loop -- checked one at a time, before the put lands.
+          if ((await late.provider?.exists(path)) === true) {
+            createdBeforeTheirPut.push(path);
+          }
+        }
+        await inner.put(record);
+      },
+    };
+    const provider = new OPFSProvider({ uncommitted: store });
+    late.provider = provider;
+    await provider.initialize();
+    writes.length = 0;
+    const paths = Array.from({ length: 20 }, (_, index) => `many/${String(index)}.ts`);
+
+    const receipts = await provider.applyBatch(
+      paths.map((path) => ({ op: 'write', path, data: bytes(path), create: true }) as const),
+    );
+
+    expect(receipts.every(({ outcome }) => outcome === 'applied')).toBe(true);
+    expect(new Set(puts.map(({ id }) => id)).size).toBe(1);
+    expect(puts.at(-1)?.paths.toSorted()).toEqual(paths.toSorted());
+    for (const [index, put] of puts.entries()) {
+      const previous = puts[index - 1]?.paths ?? [];
+      // The record only grows, and no write has begun on a path the puts so far did not cover.
+      expect(put.paths.slice(0, previous.length)).toEqual(previous);
+      expect(put.writes).toBeLessThanOrEqual(previous.length);
+    }
+    // A crash before a put leaves no file at a path the record does not name.
+    expect(createdBeforeTheirPut).toEqual([]);
+    expect(records.size).toBe(0);
   });
 
   it('should keep the person’s file a refused create named when its realm dies before the record is deleted', async () => {

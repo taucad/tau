@@ -20,7 +20,7 @@ import type {
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
 import type { BatchEntry, BatchOptions, BatchReceipt } from '#changeset.js';
 import { isRefusal } from '#changeset.js';
-import { applyEntryWithPrimitives, batchConcurrency, mapRolling, runBatch } from '#backend/batch.js';
+import { applyEntryWithPrimitives, runBatch } from '#backend/batch.js';
 import { mapConcurrent, statConcurrency } from '#concurrency.js';
 import { fileStatFromFile, headFileStatFromFile, headSniffByteLength } from '#content-metadata.js';
 import { workerTimings } from '#worker-timings.js';
@@ -53,6 +53,81 @@ type OpenedFile = Readonly<{
   name: string;
   createdFile: boolean;
 }>;
+
+/** A batch's record of the paths it created, kept by group commit (I1, C8). */
+type CreateRecorder = Readonly<{
+  /** Resolves once a kept put covers the entry, or with the error that kept none. */
+  cover: (entry: UncommittedEntry) => Promise<Readonly<{ error: unknown }> | undefined>;
+  /** The last record a put kept, for the batch to delete once it settles. */
+  kept: () => UncommittedRecord | undefined;
+}>;
+
+/**
+ * One record per batch, rewritten in place as its creates proceed: an entry is
+ * added once its path is found missing under the batch's exclusive lock, and
+ * the next put covers every entry added since the last one. A create makes its
+ * file only once a put covers it, so no crash can leave an empty file at a path
+ * no record names, and it waits only for that put, so creates proceed one by
+ * one instead of all at once. One put is in flight at a time; after a put
+ * fails, every later create gets that error too.
+ *
+ * @param uncommitted - The root's store, key and owner.
+ * @param changesetId - The batch's record id.
+ * @returns The recorder.
+ */
+const createRecorder = (
+  uncommitted: Readonly<{ store: UncommittedChangesetStore; root: string; owner: string }>,
+  changesetId: string,
+): CreateRecorder => {
+  const entries: UncommittedEntry[] = [];
+  let waiting: Array<(result: Readonly<{ error: unknown }> | undefined) => void> = [];
+  let putting = false;
+  let kept: UncommittedRecord | undefined;
+  let failed: Readonly<{ error: unknown }> | undefined;
+  const flush = async (): Promise<void> => {
+    putting = true;
+    while (waiting.length > 0) {
+      const covered = waiting;
+      waiting = [];
+      const record: UncommittedRecord = {
+        root: uncommitted.root,
+        owner: uncommitted.owner,
+        changesetId,
+        // Each covered file is created after this put; recovery allows a slack past it.
+        recordedAt: Date.now(),
+        entries: [...entries],
+      };
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one put at a time; the next covers what arrived meanwhile.
+        await uncommitted.store.put(record);
+        kept = record;
+        workerTimings.count('uncommitted.puts');
+      } catch (error) {
+        failed = { error };
+      }
+      for (const resolve of [...covered, ...(failed === undefined ? [] : waiting.splice(0))]) {
+        resolve(failed);
+      }
+    }
+    putting = false;
+  };
+  return {
+    cover: async (entry) => {
+      if (failed !== undefined) {
+        return failed;
+      }
+      entries.push(entry);
+      const covered = new Promise<Readonly<{ error: unknown }> | undefined>((resolve) => {
+        waiting.push(resolve);
+      });
+      if (!putting) {
+        void flush();
+      }
+      return covered;
+    },
+    kept: () => kept,
+  };
+};
 
 /** How a {@link FileSystemAccessProvider} keeps its unsettled creates (I1, C8). @public */
 export type FileSystemAccessProviderOptions = Readonly<{
@@ -523,10 +598,12 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    * own primitives — native recursive removal and native move.
    *
    * A write that fails leaves no file it created behind. A root that keeps
-   * records opens every create's handle first, records the paths it created
-   * in one put, and only then opens their writables (I1, C8); if the record
-   * cannot be kept, those creates are staged and moved into place where the
-   * provider can, and refused where it cannot — never written unprotected.
+   * records adds each create whose path it found missing to the batch's
+   * record, and makes the file only once a put covers it (I1, C8); a taken
+   * path is refused and never recorded. Puts are group-committed, so creates do
+   * not wait for one another. A create whose record cannot be kept is staged
+   * and moved into place where the provider can, and refused where it cannot —
+   * never written unprotected.
    *
    * @param entries - One phase's entries for this provider, in provider paths.
    * @param options - The changeset's abort signal.
@@ -557,45 +634,33 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       }
       return pending;
     };
-    const creates = await this._openAndRecordCreates(entries, openForWrite);
+    const recorder = this._uncommitted === undefined ? undefined : createRecorder(this._uncommitted, randomUuid());
     const receipts = await runBatch(
       entries,
       async (entry) => {
         if (entry.op !== 'write') {
           return applyEntryWithPrimitives(this, entry);
         }
-        const opened = creates.opened.get(entry);
-        if (opened === undefined) {
+        if (recorder === undefined || entry.create !== true) {
           return this._applyBatchWrite(entry, openForWrite);
         }
-        if ('outcome' in opened) {
-          return opened;
-        }
-        return creates.unrecorded === undefined
-          ? this._writeOpenedFile(entry, opened)
-          : this._publishUnrecordedCreate(entry, opened, creates.unrecorded.error);
+        const opened = await this._openBatchFile(entry, openForWrite, async (destination) => {
+          const unrecorded = await recorder.cover({
+            path: entry.path,
+            size: entry.data instanceof Blob ? entry.data.size : entry.data.byteLength,
+          });
+          return unrecorded === undefined
+            ? undefined
+            : this._publishUnrecordedCreate(entry, destination, unrecorded.error);
+        });
+        return 'outcome' in opened ? opened : this._writeOpenedFile(entry, opened);
       },
       options,
     );
-    /* A create whose handle this batch made but whose bytes never began (an
-     * abort skipped it) leaves no empty file behind. */
-    await Promise.all(
-      entries.map(async (entry, index) => {
-        const opened = creates.opened.get(entry);
-        if (
-          entry.op === 'write' &&
-          opened !== undefined &&
-          !('outcome' in opened) &&
-          opened.createdFile &&
-          receipts[index]?.outcome === 'failed'
-        ) {
-          await this._removeEntry(entry.path, false).catch(() => undefined);
-        }
-      }),
-    );
-    if (creates.record !== undefined && this._uncommitted !== undefined) {
+    const kept = recorder?.kept();
+    if (kept !== undefined && this._uncommitted !== undefined) {
       /* Every writable of the batch has closed: the creates have settled. */
-      await deleteUncommittedRecord(this._uncommitted.store, creates.record);
+      await deleteUncommittedRecord(this._uncommitted.store, kept);
     }
     return receipts;
   }
@@ -1171,80 +1236,21 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
   }
 
   /**
-   * Open the handle of every create in a batch, then record the paths this
-   * batch created in one put, before any writable opens (I1, C8). A refused
-   * create (`EEXIST`) is never recorded.
-   *
-   * @param entries - The batch.
-   * @param openForWrite - The batch's directory memo.
-   * @returns Each create's opened handle or refusal, and the record kept, or the error that kept none.
-   */
-  private async _openAndRecordCreates(
-    entries: readonly BatchEntry[],
-    openForWrite: (path: string) => Promise<FileSystemDirectoryHandle>,
-  ): Promise<
-    Readonly<{
-      opened: ReadonlyMap<BatchEntry, OpenedFile | BatchReceipt>;
-      record?: UncommittedRecord;
-      unrecorded?: Readonly<{ error: unknown }>;
-    }>
-  > {
-    const opened = new Map<BatchEntry, OpenedFile | BatchReceipt>();
-    const uncommitted = this._uncommitted;
-    const creates = entries.filter((entry): entry is BatchWrite => entry.op === 'write' && entry.create === true);
-    if (uncommitted === undefined || creates.length === 0) {
-      return { opened };
-    }
-    const results = await mapRolling(creates, batchConcurrency, async (entry) =>
-      this._openBatchFile(entry, openForWrite),
-    );
-    const recorded: UncommittedEntry[] = [];
-    for (const [index, entry] of creates.entries()) {
-      const result = results[index]!;
-      opened.set(entry, result);
-      if (!('outcome' in result) && result.createdFile) {
-        recorded.push({ path: entry.path, size: entry.data instanceof Blob ? entry.data.size : entry.data.byteLength });
-      }
-    }
-    if (recorded.length === 0) {
-      return { opened };
-    }
-    const record: UncommittedRecord = {
-      root: uncommitted.root,
-      owner: uncommitted.owner,
-      changesetId: randomUuid(),
-      recordedAt: Date.now(),
-      entries: recorded,
-    };
-    try {
-      await uncommitted.store.put(record);
-    } catch (error) {
-      return { opened, unrecorded: { error } };
-    }
-    return { opened, record };
-  }
-
-  /**
-   * A create whose record could not be kept: remove the empty file its handle
-   * made, then publish the bytes staged and moved into place, or refuse it.
+   * A create whose record could not be kept, before its file exists: publish
+   * the bytes staged and moved into place, or refuse it.
    *
    * @param entry - The create.
-   * @param opened - Its handle, which this batch created.
+   * @param destination - Its directory and name; the file is not there yet.
    * @param recordError - Why the record could not be kept.
    * @returns Its receipt; never rejects.
    */
   private async _publishUnrecordedCreate(
     entry: BatchWrite,
-    opened: OpenedFile,
+    destination: Readonly<{ directory: FileSystemDirectoryHandle; name: string }>,
     recordError: unknown,
   ): Promise<BatchReceipt> {
     try {
-      await this._removeEntry(entry.path, false);
-    } catch (error) {
-      return { outcome: 'uncertain', error };
-    }
-    try {
-      if (await this._stageCreate(entry.data, { directory: opened.directory, name: opened.name })) {
+      if (await this._stageCreate(entry.data, destination)) {
         return { outcome: 'applied', kind: 'file', created: true };
       }
     } catch (error) {
@@ -1306,11 +1312,15 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    *
    * @param entry - The write.
    * @param openForWrite - The batch's directory memo.
-   * @returns The opened file, or the receipt that refused it; never rejects.
+   * @param beforeCreate - Runs once the path is found missing and before the file is made; a receipt it answers settles the entry instead.
+   * @returns The opened file, or the receipt that settled it; never rejects.
    */
   private async _openBatchFile(
     entry: BatchWrite,
     openForWrite: (path: string) => Promise<FileSystemDirectoryHandle>,
+    beforeCreate?: (
+      destination: Readonly<{ directory: FileSystemDirectoryHandle; name: string }>,
+    ) => Promise<BatchReceipt | undefined>,
   ): Promise<OpenedFile | BatchReceipt> {
     try {
       const segments = this._splitPath(entry.path);
@@ -1334,6 +1344,10 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
         if (!hasDomName(error, 'NotFoundError')) {
           throw error;
         }
+      }
+      const settled = await beforeCreate?.({ directory, name });
+      if (settled !== undefined) {
+        return settled;
       }
       try {
         const fileHandle = await directory.getFileHandle(name, { create: true });

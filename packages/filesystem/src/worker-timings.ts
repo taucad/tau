@@ -56,7 +56,8 @@ export type WorkerTimingSpan = (typeof workerTimingSpans)[number];
  * - `locks.token`: the tokens those sets named, so `locks.token / locks.set` is the mean set size.
  * - `changesets`: changesets the authority applied under their lock set (one per `apply`, D2).
  * - `uncommitted.verified` / `uncommitted.removed`: recorded creates an initialise checked after their
- *   realm died, and those it removed for not holding their recorded size or oid (I1).
+ *   realm died, and those it removed as the empty file a crashed create left (I1).
+ * - `uncommitted.puts`: puts of a batch's create record, group-committed as its creates land (I1).
  *
  * @public
  */
@@ -69,6 +70,7 @@ export const workerTimingCounters = [
   'changesets',
   'uncommitted.verified',
   'uncommitted.removed',
+  'uncommitted.puts',
 ] as const;
 
 /** One counter's name. @public */

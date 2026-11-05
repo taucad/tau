@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- OCCT's WASM API uses PascalCase methods. */
 import { Document, WebIO } from '@gltf-transform/core';
 import { cadMaterialDefaults } from '@taucad/runtime/types';
-import { createReverseCoordinateTransform, ImportLoader } from '@taucad/geometry-core';
+import { createReverseCoordinateTransform, ImportLoader, markClosedMeshesSingleSided } from '@taucad/geometry-core';
 import type { ImportFile } from '@taucad/geometry-core';
 
 type OcctOptions = {
@@ -147,6 +147,7 @@ export class OcctLoader extends ImportLoader<OcctImportResult, OcctOptions> {
     }
 
     await document.transform(createReverseCoordinateTransform());
+    markClosedMeshesSingleSided(document);
 
     const glb = await this.io.writeBinary(document);
     return glb;

@@ -7,6 +7,7 @@ import { Primitive } from '@gltf-transform/core';
 import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
 import {
   compactTriangleIndices,
+  isClosedTriangleMesh,
   formatComponentId,
   formatNamedComponentId,
   formatNodeSelector,
@@ -118,7 +119,7 @@ const scaleVolume = (material: GlbMaterial, transformOptions: GeometryOutputTran
   };
 };
 
-const legacyMaterial = (geometry: SmlibpyGeometry): GlbMaterial => {
+const legacyMaterial = (geometry: SmlibpyGeometry, closed: () => boolean): GlbMaterial => {
   const [red, green, blue, alpha] = cadMaterialDefaults.baseColorFactor;
   const baseColor: [number, number, number, number] =
     geometry.color === undefined
@@ -126,7 +127,8 @@ const legacyMaterial = (geometry: SmlibpyGeometry): GlbMaterial => {
       : srgbHexToLinearTuple(geometry.color, geometry.opacity ?? 1);
   const roughness = geometry.roughness ?? cadMaterialDefaults.roughnessFactor;
   return {
-    doubleSided: true,
+    // A closed solid draws one side: no back face of it shows from outside (see isClosedTriangleMesh).
+    doubleSided: baseColor[3] < 1 || !closed(),
     pbrMetallicRoughness: {
       baseColorFactor: baseColor,
       metallicFactor: geometry.metalness ?? cadMaterialDefaults.metalnessFactor,
@@ -210,7 +212,9 @@ const surfacePrimitive = (
           }
         : {}),
       material:
-        geometry.material === undefined ? legacyMaterial(geometry) : scaleVolume(geometry.material, transformOptions),
+        geometry.material === undefined
+          ? legacyMaterial(geometry, () => isClosedTriangleMesh([{ positions: vertices, indices: compacted.indices }]))
+          : scaleVolume(geometry.material, transformOptions),
     },
   };
 };

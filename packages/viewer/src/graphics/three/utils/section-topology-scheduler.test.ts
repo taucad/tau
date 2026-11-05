@@ -39,4 +39,25 @@ describe('section topology scheduler', () => {
     expect(await failed).toBe('failed');
     expect(await next).toBe('completed');
   });
+
+  it('discards the jobs a dispose catches and runs a later submit, as after a StrictMode remount', async () => {
+    let finishFirst: (() => void) | undefined;
+    const scheduler = createSectionTopologyScheduler();
+    const first = scheduler.submit({
+      generation: 1,
+      run: async () =>
+        new Promise<void>((resolve) => {
+          finishFirst = resolve;
+        }),
+    });
+    const queued = scheduler.submit({ generation: 2, run: async () => undefined });
+    scheduler.dispose();
+    expect(await queued).toBe('discarded');
+    finishFirst?.();
+    expect(await first).toBe('discarded');
+
+    const runLater = vi.fn(async () => undefined);
+    expect(await scheduler.submit({ generation: 3, run: runLater })).toBe('completed');
+    expect(runLater).toHaveBeenCalledTimes(1);
+  });
 });

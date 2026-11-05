@@ -142,6 +142,40 @@ it.each([
   }
 });
 
+it.each([
+  ['keep occlusion on a face seen head-on', [0, 0, 1], 0],
+  ['drop occlusion on a face seen edge-on', [1, 0, 0], 1],
+] as const)('should %s', async (_name, [nx, ny, nz], expected) => {
+  // GTAO reports a face seen edge-on as fully occluded; the upsample must not print that as a black rim.
+  const size = 64;
+  const renderer = await createRenderer('showcase', 'webgpu', document.createElement('canvas'));
+  const input = new DataTexture(new Uint8Array(size * size * 4), size, size);
+  input.needsUpdate = true;
+  const filter = createAoDenoise({
+    texture: texture(input),
+    depth: sample(() => float(0.5)),
+    normal: sample(() => vec4(nx, ny, nz, 1)),
+    camera: new PerspectiveCamera(),
+  });
+  const material = new NodeMaterial();
+  material.fragmentNode = vec4(vec3(filter.upsample(texture(input), screenUV)), 1);
+  const quad = new QuadMesh(material);
+  const target = new RenderTarget(size, size, { type: UnsignedByteType });
+  try {
+    renderer.setRenderTarget(target);
+    quad.render(renderer);
+    const pixels = (await renderer.readRenderTargetPixelsAsync(target, 0, 0, size, size)) as Uint8Array<ArrayBuffer>;
+    // The centre pixel's view ray is the camera axis, so the normal's facing is exact there.
+    expect(pixels[((size / 2) * size + size / 2) * 4]! / 255).toBeCloseTo(expected, 1);
+  } finally {
+    renderer.setRenderTarget(null);
+    target.dispose();
+    material.dispose();
+    input.dispose();
+    renderer.dispose();
+  }
+});
+
 it.each(['denoise', 'upsample', 'fxaa'] as const)(
   'should compile viewport %s with WebGL2 validation and an invalid-shader control',
   async (stage) => {

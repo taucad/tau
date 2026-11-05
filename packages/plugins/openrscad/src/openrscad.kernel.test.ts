@@ -536,17 +536,18 @@ translate([8, 0, 0]) color("blue", 0.5) cube(2);
         metallicFactor: 0.1,
         roughnessFactor: 0.6,
       },
+      // Opaque closed solids draw one side; the translucent one stays double-sided.
       {
         name: '#808080FF Material',
         alphaMode: 'OPAQUE',
-        doubleSided: true,
+        doubleSided: false,
         metallicFactor: 0.1,
         roughnessFactor: 0.6,
       },
       {
         name: '#FF0000FF Material',
         alphaMode: 'OPAQUE',
-        doubleSided: true,
+        doubleSided: false,
         metallicFactor: 0.1,
         roughnessFactor: 0.6,
       },

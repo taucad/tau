@@ -6,7 +6,12 @@ import type {
   Node as GltfTransformNode,
 } from '@gltf-transform/core';
 
-import { embedGltfResources, registerTauGltfExtensions, TauCadTopology } from '@taucad/geometry-core';
+import {
+  embedGltfResources,
+  markClosedMeshesSingleSided,
+  registerTauGltfExtensions,
+  TauCadTopology,
+} from '@taucad/geometry-core';
 import type {
   KittyCadBrepNode,
   KittyCadBrepRoot,
@@ -520,7 +525,8 @@ const applyTopologyExtras = (document: Document, topology: BuildTopologyResult):
 };
 
 /**
- * Preserve Zoo source topology and translate it into Tau render topology.
+ * Preserve Zoo source topology and translate it into Tau render topology, and draw closed solids one-sided
+ * (`markClosedMeshesSingleSided`).
  *
  * @public
  */
@@ -533,12 +539,21 @@ export async function enrichZooGltfTopology(
     options.format === 'glb'
       ? await io.readBinary(bytes)
       : await io.readJSON({ json: JSON.parse(new TextDecoder().decode(bytes)) as JSONDocument['json'], resources: {} });
+  const write = async (): Promise<Uint8Array<ArrayBuffer>> => {
+    if (options.format === 'glb') {
+      return io.writeBinary(document);
+    }
+    const result = await io.writeJSON(document);
+    const json = embedGltfResources(result.json as unknown as Record<string, unknown>, result.resources);
+    return new TextEncoder().encode(JSON.stringify(json, null, 2));
+  };
+  const marked = markClosedMeshesSingleSided(document);
 
   const root = document.getRoot();
   const brepRoot = root.getExtension<KittyCadBrepRoot>(kittyCadBoundaryRepresentationExtension);
   const brepPayload = brepRoot ? asKittyCadBrepPayload(brepRoot.getPayload()) : undefined;
   if (!brepPayload) {
-    return bytes;
+    return marked ? write() : bytes;
   }
 
   const solidNodesBySolidIndex = new Map<number, Array<{ nodeIndex: number; meshIndex: number | undefined }>>();
@@ -588,18 +603,11 @@ export async function enrichZooGltfTopology(
     solidNames,
   });
   if (!topology) {
-    return bytes;
+    return marked ? write() : bytes;
   }
 
   const tauTopology = document.createExtension(TauCadTopology);
   root.setExtension(tauCadTopologyExtension, tauTopology.createRoot().setPayload(topology.payload));
   applyTopologyExtras(document, topology);
-
-  if (options.format === 'glb') {
-    return io.writeBinary(document);
-  }
-
-  const result = await io.writeJSON(document);
-  const json = embedGltfResources(result.json as unknown as Record<string, unknown>, result.resources);
-  return new TextEncoder().encode(JSON.stringify(json, null, 2));
+  return write();
 }

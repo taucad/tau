@@ -14,7 +14,12 @@
  */
 
 import { Primitive, WebIO } from '@gltf-transform/core';
-import { allExtensions, detectEdges, normalizeGltfGeometryNames } from '@taucad/geometry-core';
+import {
+  allExtensions,
+  detectEdges,
+  markClosedMeshesSingleSided,
+  normalizeGltfGeometryNames,
+} from '@taucad/geometry-core';
 import type { Document, Material, Node, Root, Scene } from '@gltf-transform/core';
 import type { AnyCircuitElement } from 'circuit-json';
 import type { ComponentType } from 'react';
@@ -640,6 +645,8 @@ const applyGlbConvention = async (
   const io = new WebIO().registerExtensions(allExtensions);
   const document = await io.readBinary(glb);
   const root = document.getRoot();
+  // Converter part bodies only: the presentation board below is built afterwards.
+  markClosedMeshesSingleSided(document);
   const scene = root.getDefaultScene() ?? root.listScenes()[0];
   if (style === 'presentation') {
     await presentBoard(document, scene, { circuitJson, options: { finish } });

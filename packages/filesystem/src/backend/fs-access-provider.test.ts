@@ -771,8 +771,9 @@ describe('FileSystemAccessProvider', () => {
       const rows = await provider.readdirWithStats('');
       const stat = await provider.stat('large.txt');
 
-      expect(rows[0]).toEqual({ name: 'large.txt', type: 'file', size: 1028, mtimeMs: expect.any(Number) });
-      expect(stat).toEqual({ type: 'file', size: 1028, mtimeMs: expect.any(Number) });
+      /* Exactly kind, size and time: no content fact rides along. */
+      expect(rows[0]).toStrictEqual({ name: 'large.txt', type: 'file', size: 1028, mtimeMs: stat.mtimeMs });
+      expect(stat).toStrictEqual({ type: 'file', size: 1028, mtimeMs: rows[0]!.mtimeMs });
       expect(slice).not.toHaveBeenCalled();
       expect(arrayBuffer).not.toHaveBeenCalled();
     });

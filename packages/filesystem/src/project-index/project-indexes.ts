@@ -55,7 +55,7 @@ export type ProjectIndexesOptions = Readonly<{
 }>;
 
 /** A lazy facts request: what to measure beyond the classification. @public */
-export type IndexFactsOptions = ContentFactsOptions & Readonly<{ digests?: readonly ('sha256' | 'blobOid')[] }>;
+export type IndexFactsOptions = ContentFactsOptions & Readonly<{ digests?: ReadonlyArray<'sha256' | 'blobOid'> }>;
 
 const textEncoder = new TextEncoder();
 
@@ -214,11 +214,13 @@ export class ProjectIndexes {
     for (const path of paths) {
       options?.signal?.throwIfAborted();
       const known = index.factsFor(path);
-      if (known !== undefined && digests.every((digest) => known[digest] !== undefined)) {
-        if (digests.length === 0 || (trustworthy && index.trusted(path))) {
-          answered.set(path, known);
-          continue;
-        }
+      if (
+        known !== undefined &&
+        digests.every((digest) => known[digest] !== undefined) &&
+        (digests.length === 0 || (trustworthy && index.trusted(path)))
+      ) {
+        answered.set(path, known);
+        continue;
       }
       const entry = index.entry(path);
       if (entry?.kind === 'dir' || (entry !== undefined && entry.size > budget)) {
@@ -273,6 +275,13 @@ export class ProjectIndexes {
     if (resolution.persist === undefined) {
       return 'skipped';
     }
+    /* A snapshot claims every notice its vector names: re-observe what those
+     * notices left unknown first, so it never stores a view older than its vector. */
+    if (state.index.stalePaths.length > 0) {
+      await this._refreshStale(key, state.index);
+      clearTimeout(state.persistTimer);
+      state.persistTimer = undefined;
+    }
     return writeIndexSnapshot({
       provider: resolution.provider,
       providerRoot: resolution.path,
@@ -300,7 +309,7 @@ export class ProjectIndexes {
     for (const [tabId, seq] of Object.entries(this._remoteSeen)) {
       seqByTab[tabId] = Math.max(seqByTab[tabId] ?? 0, seq);
     }
-    if (tab !== undefined) {
+    if (tab !== undefined && tab.seq > 0) {
       seqByTab[tab.tabId] = Math.max(seqByTab[tab.tabId] ?? 0, tab.seq);
     }
     return { generation: state?.index.generation ?? 0, seqByTab };
@@ -402,14 +411,15 @@ export class ProjectIndexes {
     for (const [root, state] of this._states) {
       const relativeFrom = this._inside(root, source);
       const relativeTo = this._inside(root, target);
-      if (relativeFrom !== undefined && relativeTo !== undefined) {
-        state.index.move(relativeFrom, relativeTo);
-      } else if (relativeFrom !== undefined) {
-        state.index.remove(relativeFrom);
-      } else if (relativeTo !== undefined) {
-        state.index.invalidate(relativeTo);
-      } else {
+      if (relativeFrom === undefined && relativeTo === undefined) {
         continue;
+      }
+      if (relativeFrom === undefined) {
+        state.index.invalidate(relativeTo!);
+      } else if (relativeTo === undefined) {
+        state.index.remove(relativeFrom);
+      } else {
+        state.index.move(relativeFrom, relativeTo);
       }
       this._schedulePersist(root);
     }
@@ -526,7 +536,7 @@ export class ProjectIndexes {
       throw error;
     }
     workerTimings.count('index.compare', 1);
-    const result = index.completeObservation(start, prefix, rows, { complete: prefix === '' });
+    const result = index.completeObservation(start, prefix, rows);
     const state = this._states.get(root);
     if (state !== undefined && prefix === '') {
       state.lastCompare = result;
@@ -598,7 +608,7 @@ export class ProjectIndexes {
   }
 
   private _resolve(root: string): IndexRootResolution {
-    const resolve = this._options.resolve;
+    const { resolve } = this._options;
     if (resolve === undefined) {
       throw new Error('This index set was built without a provider resolver.');
     }
@@ -611,9 +621,13 @@ export class ProjectIndexes {
       return;
     }
     clearTimeout(state.persistTimer);
-    state.persistTimer = setTimeout(() => {
+    state.persistTimer = setTimeout(async () => {
       state.persistTimer = undefined;
-      void this.persist(root).catch(() => undefined);
+      try {
+        await this.persist(root);
+      } catch {
+        /* Best effort: the next change schedules another, and a load always compares. */
+      }
     }, this._options.persistDelayMilliseconds ?? 2000);
   }
 

@@ -642,13 +642,14 @@ describe('NodeFsProvider head listing', () => {
     const rows = await provider.readdirWithStats('');
     const stat = await provider.stat('large.txt');
 
-    expect(rows.find(({ name }) => name === 'large.txt')).toEqual({
+    /* Exactly kind, size and time: no content fact rides along. */
+    expect(rows.find(({ name }) => name === 'large.txt')).toStrictEqual({
       name: 'large.txt',
       type: 'file',
       size: 1028,
-      mtimeMs: expect.any(Number),
+      mtimeMs: stat.mtimeMs,
     });
-    expect(stat).toEqual({ type: 'file', size: 1028, mtimeMs: expect.any(Number) });
+    expect(stat).toStrictEqual({ type: 'file', size: 1028, mtimeMs: stat.mtimeMs });
     expect(fullRead).not.toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
   });

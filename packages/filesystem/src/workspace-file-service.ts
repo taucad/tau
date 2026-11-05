@@ -1577,7 +1577,7 @@ export class WorkspaceFileService {
     return {
       provider,
       path,
-      ...(persists ? { persist: { lockName: `tau-index:${entry.storageRootKey!}:${path}` } } : {}),
+      ...(persists ? { persist: { lockName: `tau-index:${entry.storageRootKey}:${path}` } } : {}),
     };
   }
 

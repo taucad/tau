@@ -690,9 +690,7 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
       }
     }
     let measured: ReadonlyMap<string, ContentFacts>;
-    if (base.facts !== undefined) {
-      measured = project.length === 0 ? new Map() : await base.facts(project, factsOptions);
-    } else {
+    if (base.facts === undefined) {
       const own = new Map<string, ContentFacts>();
       let budget = factsOptions?.byteCap ?? Number.POSITIVE_INFINITY;
       for (const target of project) {
@@ -707,6 +705,8 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
         own.set(target, getFileContentMetadata(bytes));
       }
       measured = own;
+    } else {
+      measured = project.length === 0 ? new Map() : await base.facts(project, factsOptions);
     }
     for (const [index, target] of targets.entries()) {
       const value = routes[index]!.kind === 'overlay' ? undefined : measured.get(target);

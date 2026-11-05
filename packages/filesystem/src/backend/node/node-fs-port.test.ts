@@ -195,8 +195,10 @@ describe('node filesystem client/host round trip', () => {
     const { root, provider } = connect();
     writeFileSync(join(root, 'large.txt'), `${'x'.repeat(1024)}\nend`);
     const rows = await provider.readdirWithStats('');
-    expect(rows).toEqual([{ name: 'large.txt', type: 'file', size: 1028, mtimeMs: expect.any(Number) }]);
-    expect(await provider.stat('large.txt')).toEqual({ type: 'file', size: 1028, mtimeMs: expect.any(Number) });
+    const stat = await provider.stat('large.txt');
+    /* Exactly kind, size and time: no content fact rides along. */
+    expect(rows).toStrictEqual([{ name: 'large.txt', type: 'file', size: 1028, mtimeMs: stat.mtimeMs }]);
+    expect(stat).toStrictEqual({ type: 'file', size: 1028, mtimeMs: rows[0]!.mtimeMs });
   });
 
   it('fences checked deletion across ports and reports conflict and unchanged accurately', async () => {

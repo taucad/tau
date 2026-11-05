@@ -141,22 +141,6 @@ const statFields = (facts: ContentFacts | undefined): StatContentMetadata => {
  * @public
  */
 export class ProjectIndex {
-  private _root: Node = directoryNode(0);
-  private _generation: number;
-  private _complete = false;
-  /** Paths a mutation touched, with its generation, kept while an observation is in flight. */
-  private readonly _touched = new Map<string, number>();
-  private _observing = 0;
-  /** Paths an external fact left unknown; the next refresh re-observes them. */
-  private readonly _stale = new Set<string>();
-
-  /**
-   * @param generation - The generation to continue from (a loaded snapshot's), `0` for a new root.
-   */
-  public constructor(generation = 0) {
-    this._generation = generation;
-  }
-
   /**
    * Rebuild an index from a persisted snapshot. It is not complete until a
    * compare has validated it against the provider.
@@ -175,6 +159,22 @@ export class ProjectIndex {
       index._place(path, node, false);
     }
     return index;
+  }
+
+  private readonly _root: Node = directoryNode(0);
+  private _generation: number;
+  private _complete = false;
+  /** Paths a mutation touched, with its generation, kept while an observation is in flight. */
+  private readonly _touched = new Map<string, number>();
+  private _observing = 0;
+  /** Paths an external fact left unknown; the next refresh re-observes them. */
+  private readonly _stale = new Set<string>();
+
+  /**
+   * @param generation - The generation to continue from (a loaded snapshot's), `0` for a new root.
+   */
+  public constructor(generation = 0) {
+    this._generation = generation;
   }
 
   /** Monotonic per root; bumped by every change the index records. */
@@ -457,21 +457,20 @@ export class ProjectIndex {
    *
    * @param start - What {@link ProjectIndex.beginObservation} returned.
    * @param prefix - The subtree the rows completely describe; `''` for the root.
-   * @param rows - Every entry under `prefix` the provider listed, head metadata only.
-   * @param options - `complete` when the rows cover the whole root.
+   * @param rows - Every entry under `prefix` the provider listed, head metadata
+   *   only; rows for `''` complete the index. `undefined` for a failed listing.
    * @returns What changed and what is racy.
    */
   public completeObservation(
     start: number,
     prefix: string,
     rows: readonly ObservedRow[] | undefined,
-    options?: { readonly complete?: boolean },
   ): IndexCompareResult {
     try {
       if (rows === undefined) {
         return { checked: 0, mismatched: [], racy: [] };
       }
-      return this._merge(start, prefix, rows, options?.complete === true);
+      return this._merge(start, prefix, rows);
     } finally {
       this._observing -= 1;
       if (this._observing === 0) {
@@ -600,17 +599,25 @@ export class ProjectIndex {
     return rows;
   }
 
-  private _merge(start: number, prefix: string, rows: readonly ObservedRow[], complete: boolean): IndexCompareResult {
+  private _merge(start: number, prefix: string, rows: readonly ObservedRow[]): IndexCompareResult {
     const touchedSince = (path: string): boolean => this._touchedSince(path, start);
     const mismatched: string[] = [];
     const racy: string[] = [];
     const listed = new Set(rows.map((row) => row.path));
     /* Indexed paths the provider no longer lists. */
-    for (const entry of [...this.walk(prefix)]) {
-      if (!listed.has(entry.path) && !touchedSince(entry.path) && this._resolve(segmentsOf(entry.path)) !== undefined) {
-        this._detach(entry.path);
+    const gone: string[] = [];
+    for (const entry of this.walk(prefix)) {
+      if (!listed.has(entry.path) && !touchedSince(entry.path)) {
+        gone.push(entry.path);
+      }
+    }
+    /* Detached after the walk, which a live detach would cut short; a gone
+     * directory takes its gone descendants with it. */
+    for (const path of gone) {
+      if (this._resolve(segmentsOf(path)) !== undefined) {
+        this._detach(path);
         this._generation += 1;
-        mismatched.push(entry.path);
+        mismatched.push(path);
       }
     }
     for (const row of rows) {
@@ -660,12 +667,12 @@ export class ProjectIndex {
     }
     /* The listing answered every unknown path under the prefix, except one a
      * mutation made unknown after the listing began. */
-    for (const stale of [...this._stale]) {
+    for (const stale of this._stale) {
       if (isUnder(stale, prefix) && !touchedSince(stale)) {
         this._stale.delete(stale);
       }
     }
-    if (complete && prefix === '') {
+    if (prefix === '') {
       this._complete = true;
     }
     return { checked: rows.length, mismatched, racy: racy.filter((path) => !mismatched.includes(path)) };
@@ -723,7 +730,7 @@ export class ProjectIndex {
   private _resolve(segments: readonly string[]): Node | undefined {
     let current: Node | undefined = this._root;
     for (const segment of segments) {
-      current = current?.children?.get(segment);
+      current = current.children?.get(segment);
       if (current === undefined) {
         return undefined;
       }

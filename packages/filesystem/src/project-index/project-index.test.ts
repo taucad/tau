@@ -16,12 +16,12 @@ import { tauPathPolicy } from '#path-registry.js';
 import type { WorkspaceFileService } from '#workspace-file-service.js';
 
 const file = (path: string, size: number, mtimeMs: number): ObservedRow => ({ path, kind: 'file', size, mtimeMs });
-const dir = (path: string): ObservedRow => ({ path, kind: 'dir', size: 0, mtimeMs: 0 });
+const directory = (path: string): ObservedRow => ({ path, kind: 'dir', size: 0, mtimeMs: 0 });
 
 /** An index after one complete observation of these rows. */
 const observed = (rows: readonly ObservedRow[]): ProjectIndex => {
   const index = new ProjectIndex();
-  index.completeObservation(index.beginObservation(), '', rows, { complete: true });
+  index.completeObservation(index.beginObservation(), '', rows);
   return index;
 };
 
@@ -33,12 +33,12 @@ describe('ProjectIndex', () => {
 
     beforeEach(() => {
       index = observed([
-        dir('src'),
+        directory('src'),
         file('src/main.ts', 100, 1000),
-        dir('src/utils'),
+        directory('src/utils'),
         file('src/utils/helper.ts', 50, 2000),
         file('README.md', 200, 3000),
-        dir('exports'),
+        directory('exports'),
       ]);
     });
 
@@ -143,7 +143,7 @@ describe('ProjectIndex', () => {
     });
 
     it('should move a directory with its contents', () => {
-      const index = observed([dir('a'), file('a/x.ts', 1, 1), dir('a/b'), file('a/b/y.ts', 2, 2)]);
+      const index = observed([directory('a'), file('a/x.ts', 1, 1), directory('a/b'), file('a/b/y.ts', 2, 2)]);
       index.move('a', 'z');
       expect(paths(index.statTree(''))).toEqual(['z/b/y.ts', 'z/x.ts']);
     });
@@ -160,17 +160,15 @@ describe('ProjectIndex', () => {
       const index = new ProjectIndex();
       const start = index.beginObservation();
       index.recordFile('written.ts', { size: 5 });
-      index.completeObservation(start, '', [file('scanned.ts', 1, 1)], { complete: true });
+      index.completeObservation(start, '', [file('scanned.ts', 1, 1)]);
       expect(paths(index.statTree(''))).toEqual(['scanned.ts', 'written.ts']);
     });
 
     it('should keep a removal recorded during a scan over what the scan listed', () => {
-      const index = observed([dir('src'), file('src/a.ts', 1, 1), file('b.ts', 1, 1)]);
+      const index = observed([directory('src'), file('src/a.ts', 1, 1), file('b.ts', 1, 1)]);
       const start = index.beginObservation();
       index.remove('src');
-      index.completeObservation(start, '', [dir('src'), file('src/a.ts', 1, 1), file('b.ts', 1, 1)], {
-        complete: true,
-      });
+      index.completeObservation(start, '', [directory('src'), file('src/a.ts', 1, 1), file('b.ts', 1, 1)]);
       expect(paths(index.statTree(''))).toEqual(['b.ts']);
     });
 
@@ -183,12 +181,11 @@ describe('ProjectIndex', () => {
       );
       index.recordFacts('same.ts', { contentKind: 'text', lineCount: 1 }, { size: 1, mtimeMs: 1, observedAt: 10_000 });
 
-      const result = index.completeObservation(
-        index.beginObservation(),
-        '',
-        [file('same.ts', 1, 1), file('edited.ts', 2, 9), file('new.ts', 4, 4)],
-        { complete: true },
-      );
+      const result = index.completeObservation(index.beginObservation(), '', [
+        file('same.ts', 1, 1),
+        file('edited.ts', 2, 9),
+        file('new.ts', 4, 4),
+      ]);
 
       expect(result.checked).toBe(3);
       expect([...result.mismatched].toSorted()).toEqual(['edited.ts', 'gone.ts', 'new.ts']);
@@ -201,9 +198,7 @@ describe('ProjectIndex', () => {
       index.recordFile('a.ts', { size: 3, facts: { contentKind: 'text', lineCount: 1 }, observedAt: 5000 });
       expect(index.factsFor('a.ts')).toEqual({ contentKind: 'text', lineCount: 1 });
 
-      const result = index.completeObservation(index.beginObservation(), '', [file('a.ts', 3, 4999)], {
-        complete: true,
-      });
+      const result = index.completeObservation(index.beginObservation(), '', [file('a.ts', 3, 4999)]);
 
       expect(result.mismatched).toEqual([]);
       expect(index.entry('a.ts')).toMatchObject({ mtimeMs: 4999, factsAt: { mtimeMs: 4999 } });
@@ -239,7 +234,7 @@ describe('ProjectIndex', () => {
     it('should stop answering facts once the size or mtime moves', () => {
       const index = observed([file('a.ts', 3, 1000)]);
       index.recordFacts('a.ts', { contentKind: 'binary' }, { size: 3, mtimeMs: 1000, observedAt: 99_999 });
-      index.completeObservation(index.beginObservation(), '', [file('a.ts', 3, 1001)], { complete: true });
+      index.completeObservation(index.beginObservation(), '', [file('a.ts', 3, 1001)]);
       expect(index.factsFor('a.ts')).toBeUndefined();
       expect(index.trusted('a.ts')).toBe(false);
     });
@@ -254,7 +249,7 @@ describe('ProjectIndex', () => {
 
   describe('snapshot', () => {
     it('should round-trip entries and trusted facts, and need a compare before it is complete', () => {
-      const index = observed([dir('src'), file('src/a.ts', 3, 1000), dir('empty')]);
+      const index = observed([directory('src'), file('src/a.ts', 3, 1000), directory('empty')]);
       index.recordFacts(
         'src/a.ts',
         { contentKind: 'text', lineCount: 2 },
@@ -279,11 +274,11 @@ describe('ProjectIndex', () => {
     it('should stat a 6,265-file tree under 20 ms', () => {
       const rows: ObservedRow[] = [];
       for (let i = 0; i < 6265; i++) {
-        const directory = `dir${Math.floor(i / 100)}`;
+        const folder = `dir${Math.floor(i / 100)}`;
         if (i % 100 === 0) {
-          rows.push(dir(directory));
+          rows.push(directory(folder));
         }
-        rows.push(file(`${directory}/file${i}.ts`, i, 1000));
+        rows.push(file(`${folder}/file${i}.ts`, i, 1000));
       }
       const index = observed(rows);
 
@@ -310,10 +305,8 @@ const durableRoot = async (): Promise<{ provider: MemoryProvider; reads: () => n
   };
 };
 
-const indexesOver = (
-  provider: FileSystemProvider,
-  tab: { tabId: string; seq: number } = { tabId: 'tab-a', seq: 0 },
-): ProjectIndexes =>
+const defaultTab = { tabId: 'tab-a', seq: 0 };
+const indexesOver = (provider: FileSystemProvider, tab: { tabId: string; seq: number } = defaultTab): ProjectIndexes =>
   new ProjectIndexes({
     resolve: () => ({ provider, path: 'project', persist: { lockName: 'tau-index:test:project' } }),
     policy: tauPathPolicy,
@@ -361,7 +354,8 @@ describe('ProjectIndexes', () => {
     await provider.writeFile('project/a.ts', 'a\nb\nc');
     indexes.addFile('/p/a.ts', { size: 5, facts: { contentKind: 'text', lineCount: 3 } });
 
-    expect((await indexes.facts('/p', ['a.ts'])).get('a.ts')).toEqual({ contentKind: 'text', lineCount: 3 });
+    const facts = await indexes.facts('/p', ['a.ts']);
+    expect(facts.get('a.ts')).toEqual({ contentKind: 'text', lineCount: 3 });
     expect(reads()).toBe(0);
   });
 
@@ -411,6 +405,24 @@ describe('ProjectIndexes', () => {
     /* Once B accounts for A's notice it is no longer behind. */
     b.noteNotice('tab-a', 1, false);
     expect(await b.persist('/p')).toBe('written');
+  });
+
+  it('should re-observe what a notice left unknown before storing a snapshot that claims it', async () => {
+    const { provider, reads } = await durableRoot();
+    await provider.writeFile('project/a.ts', 'a');
+    const indexes = indexesOver(provider);
+    await indexes.ready('/p');
+    /* Another tab's notice names b.ts: the index knows only that it is unknown. */
+    await provider.writeFile('project/b.ts', 'bb');
+    indexes.noteNotice('tab-b', 1, false);
+    indexes.invalidate('/p/b.ts');
+
+    expect(await indexes.persist('/p')).toBe('written');
+
+    const stored = await readIndexSnapshot(provider, 'project');
+    expect(stored?.vector.seqByTab).toMatchObject({ 'tab-b': 1 });
+    expect(stored?.entries.find(([path]) => path === 'b.ts')?.slice(0, 3)).toEqual(['b.ts', 'f', 2]);
+    expect(reads()).toBe(0);
   });
 
   it('should mark a snapshot from two incomparable tabs for a rescan', async () => {

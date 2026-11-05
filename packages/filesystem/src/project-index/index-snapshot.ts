@@ -143,11 +143,11 @@ export const parseIndexSnapshot = (text: string): IndexSnapshot | undefined => {
     !isRecord(vector) ||
     !isCount(vector['generation']) ||
     !isRecord(vector['seqByTab']) ||
-    !Object.values(vector['seqByTab']).every(isCount) ||
+    !Object.values(vector['seqByTab']).every((seq) => isCount(seq)) ||
     typeof rescan !== 'boolean' ||
     !isTime(writtenAt) ||
     !Array.isArray(entries) ||
-    !entries.every(isRow)
+    !entries.every((entry) => isRow(entry))
   ) {
     return undefined;
   }

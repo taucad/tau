@@ -17,7 +17,7 @@ Runtime supports Node.js, browser, memory, confined fs-compatible, and cross-wor
 
 <auto-type-table path='./props/filesystem.ts' name='FsLike' />
 
-Kernel I/O methods use the shared entry and event types: `FileEntry`, `FileStat`, `FileStatEntry`, `FileTreeEntry`, and `FileStatus` describe listings and stats; watch callbacks receive `ChangeEvent` values carrying a `ChangeEventStat`. `isRuntimeFileSystem` guards an opaque handle; `isNotFoundError` classifies read failures; `runtimeFileSystemSchema` is the Zod validator for the kernel-facing method surface.
+Kernel I/O methods use the shared entry and event types: `FileEntry`, `FileStat`, `FileStatEntry`, `FileTreeEntry`, and `FileStatus` describe listings and stats; watch callbacks receive `ChangeEvent` values (a `PathChangeEvent` or per-changeset `ChangeSetEvent`) carrying a `ChangeEventStat`. `isRuntimeFileSystem` guards an opaque handle; `isNotFoundError` classifies read failures; `runtimeFileSystemSchema` is the Zod validator for the kernel-facing method surface.
 
 ## Constructors
 

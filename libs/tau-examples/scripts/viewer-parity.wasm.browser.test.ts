@@ -19,15 +19,23 @@ import { buildViewerParityImageOptions, renderViewerParityImage } from '#scripts
 import type { ViewerParityCameraState, ViewerParityNanorasterModule } from '#scripts/viewer-parity-render.js';
 
 /** What the config hands the WASM pass. */
-type ViewerParityWasmConfig = Readonly<{
-  /** Absolute path of nanoraster's universal entry. */
-  entry: string;
-  /** `package nanoraster@<version>` or `checkout <path>`. */
-  source: string;
-  viewerDirectory: string;
-  outDirectory: string;
-  fixtures: ReadonlyArray<Readonly<{ name: string; glb: string }>>;
-}>;
+type ViewerParityWasmConfig = (
+  | Readonly<{
+      /** Absolute path of nanoraster's universal entry. */
+      entry: string;
+      /** `package nanoraster@<version>` or `checkout <path>`. */
+      source: string;
+    }>
+  | Readonly<{
+      /** Why the entry did not resolve. */
+      unavailable: string;
+    }>
+) &
+  Readonly<{
+    viewerDirectory: string;
+    outDirectory: string;
+    fixtures: ReadonlyArray<Readonly<{ name: string; glb: string }>>;
+  }>;
 
 declare module 'vitest' {
   // oxlint-disable-next-line typescript/consistent-type-definitions -- Vitest's ProvidedContext is an interface to merge.
@@ -37,6 +45,9 @@ declare module 'vitest' {
 }
 
 const config = inject('viewerParityWasm');
+if ('unavailable' in config) {
+  throw new Error(config.unavailable);
+}
 // Vite serves the entry and its imports from the file system, as it would bundle them for the image worker.
 const renderer = (await import(/* @vite-ignore */ `/@fs${config.entry}`)) as ViewerParityNanorasterModule;
 const adapter = await renderer.describeAdapter();

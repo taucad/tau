@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { playwright } from '@vitest/browser-playwright';
 import { tauRuntime } from '@taucad/runtime/vite';
 import { defineConfig } from 'vitest/config';
+import type { ViewerParityNanorasterEntry } from '#scripts/viewer-parity.js';
 import {
   readViewerParityManifest,
   resolveFixturePath,
@@ -36,11 +37,22 @@ const viewerDirectory = resolve(
   process.env['PARITY_VIEWER_OUT'] ?? 'out/test-results/viewer-parity/viewer',
 );
 const outDirectory = resolve(workspaceRoot, process.env['PARITY_OUT'] ?? 'out/test-results/viewer-parity/nanoraster');
-const wasm = resolveViewerParityNanorasterEntry({
-  checkout: process.env['TAU_PARITY_NANORASTER'],
-  workspaceRoot,
-  backend: 'wasm',
-});
+/*
+ * Tooling such as knip loads this config without a nanoraster build, so an entry that does not resolve fails the WASM
+ * pass when it runs, not the config.
+ */
+const resolveWasmEntry = (): ViewerParityNanorasterEntry | Readonly<{ unavailable: string }> => {
+  try {
+    return resolveViewerParityNanorasterEntry({
+      checkout: process.env['TAU_PARITY_NANORASTER'],
+      workspaceRoot,
+      backend: 'wasm',
+    });
+  } catch (error) {
+    return { unavailable: error instanceof Error ? error.message : String(error) };
+  }
+};
+const wasm = resolveWasmEntry();
 const executablePath = process.env['PARITY_CHROMIUM'];
 
 export default defineConfig({
@@ -56,7 +68,7 @@ export default defineConfig({
           fs: {
             allow: [
               workspaceRoot,
-              dirname(dirname(wasm.entry)),
+              ...('entry' in wasm ? [dirname(dirname(wasm.entry))] : []),
               viewerDirectory,
               outDirectory,
               ...new Set(fixtures.map((fixture) => dirname(fixture.glb))),

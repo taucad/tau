@@ -357,8 +357,9 @@ const importTrees = async (
 
 /*
  * The tips (each ref's object and the commit a tag peels to), read and
- * staged; then the trees of every branch-like tip; then the blobs: the
- * listings' where every walked tip has one, else the trees' as well. The tips are kept
+ * staged; then the trees of every tip commit — a branch's and the one a tag
+ * peels to alike — and every tip tree; then the blobs: the listings' where
+ * every walked commit has one, else the trees' as well. The tips are kept
  * last, after everything they name. Answers the commits brought without their
  * history.
  */
@@ -377,23 +378,29 @@ const importHeads = async (
   const staged: Staged = new Map();
   for (const [oid, object] of tipObjects) {
     const named = object.type === 'commit' ? treeOf(object) : object.type === 'tag' ? taggedOf(object) : undefined;
-    staged.set(oid, { object, names: named === undefined ? [] : [named] });
+    /* A tip tree is staged by the walk below, as a root. */
+    if (object.type !== 'tree') {
+      staged.set(oid, { object, names: named === undefined ? [] : [named] });
+    }
   }
-  const walked = references.filter((entry) => !entry.ref.startsWith(familyPrefixes.tags)).map((entry) => entry.oid);
+  /*
+   * Every tip commit is walked, a tag's peeled commit with a branch's: it is
+   * kept, advertised as a `have` and read once the links lapse, so its tree
+   * and blobs must be held with it.
+   */
+  const walked = [...tipObjects].filter(([, object]) => object.type === 'commit').map(([oid]) => oid);
+  const tipTrees = [...tipObjects].filter(([, object]) => object.type === 'tree').map(([oid]) => oid);
   const listed = new Set(listings.map((listing) => listing.commit));
-  const roots = walked.flatMap((commit) => {
-    const object = tipObjects.get(commit);
-    return object?.type === 'commit' ? (treeOf(object) ?? []) : [];
-  });
+  const roots = [...walked.flatMap((commit) => treeOf(tipObjects.get(commit)!) ?? []), ...tipTrees];
   await importTrees(roots, importer, {
-    walked: walked.some((commit) => !listed.has(commit)),
+    walked: tipTrees.length > 0 || walked.some((commit) => !listed.has(commit)),
     listed: listings.flatMap((listing) =>
       listing.entries.filter((entry) => entry.size !== undefined).map((entry) => entry.oid),
     ),
     staged,
   });
   await keepStaged(staged, importer);
-  return [...tipObjects].filter(([, object]) => object.type === 'commit').map(([oid]) => oid);
+  return walked;
 };
 
 /* A catalogue opened: its refs in the asked-for families, its packs by Range and its listings. */

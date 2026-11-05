@@ -662,6 +662,22 @@ describe.runIf(gitToolchainOnPath)('the cold open from a hosted catalogue (D8)',
     expect(await allHeld(store, [hosted.main, ...treeClosure(hosted.main)])).toEqual([]);
   });
 
+  it('keeps the whole tree of a commit a tag peels to, readable once the links lapse', async () => {
+    const compute = countingCompute();
+    const store = await emptyStore(compute, 'tagged');
+    const opened = await coldOpenFromCatalogue({
+      catalogueUrl,
+      fetch: serve(hosted, { expiresInSeconds: -1 }).fetch,
+      store,
+      compute,
+    });
+    expect(opened?.shallow).toContain(hosted.tagged);
+    expect(await allHeld(store, [hosted.tag, hosted.tagged, ...treeClosure(hosted.tagged)])).toEqual([]);
+    /* Read with the links lapsed: from the store's own packs. */
+    const tree = await store.read(hosted.git('rev-parse', `${hosted.tagged}^{tree}`));
+    expect(tree?.type).toBe('tree');
+  });
+
   it('profiles chain depth as git verify-pack counts it', async () => {
     const packDirectory = join(hosted.directory, '.git', 'objects', 'pack');
     const packFiles = await readdir(packDirectory);

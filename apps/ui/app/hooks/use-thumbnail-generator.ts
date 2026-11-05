@@ -249,7 +249,7 @@ export function useThumbnailGenerator(options?: { onStored?: (bytes: Uint8Array<
         clearThumbnail(event.rendering.evaluationId);
         return;
       }
-      const identity = `${projectId}:${mainEntryPath}:${event.rendering.hash}:webp:q${thumbnailQuality}:${thumbnailWidth}x${thumbnailHeight}:m0.1:lw${thumbnailLook.lineWidth}:camera-bounds-v1:edges:viewer-profile-v1`;
+      const identity = `${projectId}:${mainEntryPath}:${event.rendering.hash}:webp:q${thumbnailQuality}:${thumbnailWidth}x${thumbnailHeight}:m0.1:lw${thumbnailLook.lineWidth}:camera-bounds-v1:edges:viewer-profile-v2`;
       if (identityRef.current !== identity) {
         generationRef.current += 1;
         identityRef.current = identity;

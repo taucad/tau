@@ -302,7 +302,7 @@ describe('useThumbnailGenerator', () => {
     expect(event?.type).toBe('settled');
     if (event?.type === 'settled') {
       expect(event.hash).toBe(
-        'proj_aaaaaaaaaaaaaaaaaaaaa:src/main.ts:geometry-hash:webp:q0.95:1536x1152:m0.1:lw2:camera-bounds-v1:edges:viewer-profile-v1',
+        'proj_aaaaaaaaaaaaaaaaaaaaa:src/main.ts:geometry-hash:webp:q0.95:1536x1152:m0.1:lw2:camera-bounds-v1:edges:viewer-profile-v2',
       );
     }
   });

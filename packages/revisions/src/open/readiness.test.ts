@@ -77,7 +77,7 @@ describe('readinessOf', () => {
 
   it('is materialized while large objects are outstanding, and filled once none is', () => {
     expect(readinessOf(source({ largeObjects: facet })).state).toBe('materialized');
-    expect(readinessOf(source())).toEqual({ state: 'filled', tree: 'live:h1' });
+    expect(readinessOf(source())).toEqual({ state: 'filled', tree: 'live:h1:0' });
   });
 
   it('stops at materialized until the fill has given its word on the checkout', () => {
@@ -103,12 +103,20 @@ describe('settleReadiness', () => {
     expect(settleReadiness(filled, reapplying)).toBe(filled);
   });
 
-  it('withdraws filled when the fill names a pointer in the same tree, and nothing else', () => {
+  it('keeps filled when a pointer is named in the same tree: only a tree write re-enters (I7)', () => {
     const filled = readinessOf(source());
-    const pointer = readinessOf(source({ largeObjects: facet }));
-    expect(settleReadiness(filled, pointer)).toBe(pointer);
-    const materialized = readinessOf(source({ largeObjects: facet }));
-    expect(settleReadiness(materialized, readinessOf(source({ applyingRoots: ['/projects/p'] })))).toBe(materialized);
+    expect(settleReadiness(filled, readinessOf(source({ largeObjects: facet })))).toBe(filled);
+  });
+
+  it('announces a tree write as a new tree from its start, then follows that tree forward', () => {
+    const filled = readinessOf(source());
+    const writing = readinessOf(source({ applyingRoots: ['/projects/p'] }), false, 1);
+    expect(settleReadiness(filled, writing)).toEqual({ state: 'treeReady', tree: 'live:h1:1' });
+    const unspoken = readinessOf(source(), false, 1);
+    expect(settleReadiness(writing, unspoken)).toEqual({ state: 'materialized', tree: 'live:h1:1' });
+    const left = readinessOf(source({ largeObjects: facet }), true, 1);
+    expect(settleReadiness(unspoken, left)).toEqual({ state: 'materialized', tree: 'live:h1:1' });
+    expect(settleReadiness(left, readinessOf(source(), true, 1))).toEqual({ state: 'filled', tree: 'live:h1:1' });
   });
 
   it('moves forward within one tree', () => {
@@ -120,9 +128,9 @@ describe('settleReadiness', () => {
   it('re-enters at the new tree’s own state on a switch, restore or pull', () => {
     const filled = readinessOf(source());
     const pulled = readinessOf(source({ headRevisionId: 'h2', largeObjects: facet }));
-    expect(settleReadiness(filled, pulled)).toEqual({ state: 'materialized', tree: 'live:h2' });
+    expect(settleReadiness(filled, pulled)).toEqual({ state: 'materialized', tree: 'live:h2:0' });
     const switched = readinessOf(source({ checkoutId: 'other' }));
-    expect(settleReadiness(filled, switched).tree).toBe('other:h1');
+    expect(settleReadiness(filled, switched).tree).toBe('other:h1:0');
   });
 
   it('takes the first reading as it is', () => {

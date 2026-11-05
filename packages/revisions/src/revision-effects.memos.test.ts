@@ -22,6 +22,8 @@ type Counted = Readonly<{
   actors: RevisionActors;
   reads: string[];
   treeReads: string[];
+  /** The paths each tree read asked for; `undefined` for a whole tree. */
+  treePaths: Array<readonly string[] | undefined>;
   /** Holds the next read of `path`, once it has its bytes, until the returned release is called. */
   hold: (path: string) => Readonly<{ reached: Promise<void>; release: () => void }>;
 }>;
@@ -36,6 +38,7 @@ const fixture = async (files: Readonly<Record<string, string>>, completeChanges:
   }
   const reads: string[] = [];
   const treeReads: string[] = [];
+  const treePaths: Array<readonly string[] | undefined> = [];
   const holds = new Map<string, Readonly<{ reached: () => void; released: Promise<void> }>>();
   const counted = Object.assign(Object.create(filesystem) as RevisionFileSystem, {
     readFile: async (path: string, ...rest: readonly unknown[]): Promise<unknown> => {
@@ -55,9 +58,10 @@ const fixture = async (files: Readonly<Record<string, string>>, completeChanges:
   const inner = createIsomorphicGitRevisionPort({ filesystem });
   const port: RevisionPort = {
     ...inner,
-    readTree: async (id) => {
+    readTree: async (id, options) => {
       treeReads.push(String(id));
-      return inner.readTree(id);
+      treePaths.push(options?.paths);
+      return inner.readTree(id, options);
     },
   };
   await port.init({ author });
@@ -73,7 +77,7 @@ const fixture = async (files: Readonly<Record<string, string>>, completeChanges:
     holds.set(path, { reached: reached.resolve, released: released.promise });
     return { reached: reached.promise, release: released.resolve };
   };
-  return { filesystem, port, actors, reads, treeReads, hold };
+  return { filesystem, port, actors, reads, treeReads, treePaths, hold };
 };
 
 const asError = (failure: unknown): Error => (failure instanceof Error ? failure : new Error(String(failure)));
@@ -294,7 +298,7 @@ describe('the head a capture inherits modes from', () => {
 });
 
 describe('the restore plan (E5)', () => {
-  it('should read one tree, the target’s', async () => {
+  it('should read no tree: an oid diff from the head names what it removes (D10)', async () => {
     const counted = await fixture(files(20), true);
     const first = await mint(counted);
     await counted.filesystem.writeFile('added.txt', 'later\n');
@@ -306,7 +310,28 @@ describe('the restore plan (E5)', () => {
       { checkoutId: 'live', target: first },
     );
 
-    expect(counted.treeReads).toEqual([first]);
+    expect(counted.treeReads).toEqual([]);
     expect(plan).toMatchObject({ revisionNumber: 1, removedPathCount: 1, dirty: false });
+  });
+
+  it('should write a restore by oid diff: only the paths that differ are read from the store (D10, S11)', async () => {
+    const counted = await fixture(files(20), true);
+    const first = await mint(counted);
+    await counted.filesystem.writeFile('dir0/f0.txt', 'changed\n');
+    await counted.filesystem.writeFile('added.txt', 'later\n');
+    await mint(counted, first, ['dir0/f0.txt', 'added.txt']);
+
+    const plan = await run<{ planId: string }>(counted.actors.restore.computePlan, {
+      checkoutId: 'live',
+      target: first,
+    });
+    counted.treeReads.length = 0;
+    counted.treePaths.length = 0;
+    await run(counted.actors.restore.applyPlan, { checkoutId: 'live', planId: plan.planId });
+
+    expect(counted.treePaths).toEqual([['dir0/f0.txt']]);
+    expect(await counted.filesystem.readFile('dir0/f0.txt', 'utf8')).toBe('file 0\n');
+    expect(await counted.filesystem.exists('added.txt')).toBe(false);
+    expect(await counted.filesystem.readFile('dir9/f19.txt', 'utf8')).toBe('file 19\n');
   });
 });

@@ -1382,8 +1382,9 @@ describe('restore, through the machine that owns it', () => {
     });
     expect(tree.facts.filter((fact) => fact.type === 'checkoutChanged')).toEqual([]);
     expect(await filesystem.exists('extra.txt')).toBe(false);
+    /* A restore writes another revision's tree: a new tree for readiness (D10, I7). */
     expect(onApplyingTree).toHaveBeenCalledWith(expect.objectContaining({ id: 'live' }), ['extra.txt'], {
-      purpose: 'apply',
+      purpose: 'tree',
     });
     expect(release).toHaveBeenCalledOnce();
     tree.actor.stop();

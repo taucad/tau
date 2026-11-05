@@ -582,6 +582,32 @@ describe('large-object fill', () => {
     expect(harness.text('models/a.step')).toBe('solid a');
   });
 
+  it('answers a caller that names what it wrote every time, even when that is nothing (D10)', async () => {
+    const harness = setup();
+    await harness.fill.fill(place, head, new Map());
+    await harness.fill.fill(place, head, new Map());
+    expect(harness.reports.map((report) => report.facet)).toStrictEqual([undefined, undefined]);
+    expect(harness.readTree).not.toHaveBeenCalled();
+  });
+
+  it('forgets a checkout’s fill without a word when its tree is replaced (D10, I7)', async () => {
+    const harness = setup();
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.land('models/a.step');
+    const told = harness.reports.length;
+    harness.fill.forget(place.id);
+    await done;
+    expect(harness.signal()?.aborted).toBe(true);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10);
+    });
+    expect(harness.reports).toHaveLength(told);
+    expect(harness.fill.look(place.id, pointerOf('solid a').pointer.oid)).toBeUndefined();
+  });
+
   it('stops on close: the transfer is aborted, timers clear, and nothing more is written or told', async () => {
     const harness = setup();
     const done = harness.fill.fill(place, head);

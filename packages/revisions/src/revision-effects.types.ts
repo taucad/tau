@@ -74,8 +74,18 @@ export type TurnPlacement = Readonly<{ runId: string }> &
       }>
   );
 
-/** Why a tree is being materialized: an ordinary apply, or a large-object fill's flush. @public */
-export type ApplyingTreePurpose = 'apply' | 'fill';
+/**
+ * Why a tree is being materialized.
+ *
+ * - `apply` — an ordinary write into the checkout's current tree (a turn's settlement).
+ * - `tree` — another revision's tree replaces the checkout's (a restore, an undo,
+ *   a switch, a pull, a merge, a decision landing): the write announces a new
+ *   tree, and readiness re-enters at what that tree leaves it in (D10, I7).
+ * - `fill` — a large-object fill's flush.
+ *
+ * @public
+ */
+export type ApplyingTreePurpose = 'apply' | 'tree' | 'fill';
 
 /** Dependencies one project's actor set is built from. @public */
 export type RevisionActorsOptions = Readonly<{

@@ -38,6 +38,7 @@ import {
 } from '#algorithms/index.js';
 import type { CaptureMemo, RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import { createApplyTreeEffects, sweepTemporarySiblings as sweepApplyLitter } from '#apply-tree.js';
+import type { MaterializeTarget } from '#apply-tree.js';
 import { createLargeObjectFill, largeObjectPlaceholders } from '#large-object-fill.js';
 import { createContentReads } from '#open/content-reads.js';
 import { createLargeObjectAdoption } from '#large-object-adoption.js';
@@ -905,7 +906,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const plans = createHandles<{
     checkoutId: string;
     revisionId: string;
-    tree: ImmutableRevisionTree;
+    /** An undo's merged tree; a restore of a recorded revision is written by oid diff from the head instead (D10). */
+    tree?: ImmutableRevisionTree;
     /** The operation this plan reverses, when it is an undo (D15) or D2's *Undo restore*. */
     undoes?: string;
   }>('plan');
@@ -1486,7 +1488,13 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   } = createApplyTreeEffects({
     useFileSystem,
     capture,
-    onApplyingTree: options.onApplyingTree,
+    /* A write of another revision's tree ends the old tree's fill first, silently: the new tree's fill speaks next (D10, I7). */
+    onApplyingTree: (place, paths, bracket) => {
+      if (bracket?.purpose === 'tree') {
+        largeObjects.forget(place.id);
+      }
+      return options.onApplyingTree?.(place, paths, bracket);
+    },
     policy,
     withCheckoutFence,
     checkoutTreeId,
@@ -1515,6 +1523,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     },
   });
   const materializeTree: typeof applyMaterializedTree = async (place, target, materialization) => {
+    if (typeof target === 'function') {
+      const checked = async (before: ImmutableRevisionTree): Promise<ImmutableRevisionTree> => {
+        const built = await target(before);
+        validateLegacyProjectIdentity(built.get('tau.json'), options.projectId);
+        return built;
+      };
+      return applyMaterializedTree(place, checked, materialization);
+    }
     validateLegacyProjectIdentity(target.get('tau.json'), options.projectId);
     return applyMaterializedTree(place, target, materialization);
   };
@@ -1535,11 +1551,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const resumeTimers = new Set<ReturnType<typeof setTimeout>>();
   let fillsStopped = false;
   /*
-   * Off the caller's path: a resume starts a fill only where none runs, and a
-   * refill (`replace`) begins the running one again. No place is the project
-   * directory, found as the root starts.
+   * Off the caller's path: a resume starts a fill only where none runs. No
+   * place is the project directory, found as the root starts. A write of
+   * another revision's tree starts its own fill (`writeRevisionTree`).
    */
-  const fillLater = (place: Checkout | undefined, replace: boolean): void => {
+  const fillLater = (place: Checkout | undefined): void => {
     if (fillsStopped) {
       return;
     }
@@ -1556,7 +1572,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           const head = target === undefined ? undefined : await headOf(target);
           if (target !== undefined && head !== undefined && !fillsStopped) {
             resumedFills.add(target.id);
-            await largeObjects.resume(target, revisionId(head), replace);
+            await largeObjects.resume(target, revisionId(head));
           }
         } catch (error) {
           /* Unmarked, so the next capture or pull checks again. */
@@ -1570,17 +1586,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const resumeFill = (place: Checkout): void => {
     if (!resumedFills.has(place.id)) {
       resumedFills.add(place.id);
-      fillLater(place, false);
+      fillLater(place);
     }
-  };
-  /*
-   * After a write that replaced files wholesale (a restore, an undo, a branch
-   * switch, a merge), the running fill is begun again from what the checkout
-   * now holds and its head now is: placeholders it overwrote are dropped, and
-   * any it wrote are filled.
-   */
-  const refillAfter = (place: Checkout): void => {
-    fillLater(place, true);
   };
   /* A close: no fill starts again, and none is still writing when this resolves. */
   const stopFills = async (): Promise<void> => {
@@ -1592,7 +1599,101 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     await largeObjects.stop();
   };
   /* The project directory's own placeholders, checked as the root starts: a reload that never captures still resumes. */
-  fillLater(undefined, false);
+  fillLater(undefined);
+
+  /**
+   * The tree `to` names, as a checkout holding `from`'s tree comes to hold it
+   * (D10): only the paths an oid diff of the two says changed are read, their
+   * large objects from this store alone (a missing one stays its pointer, for
+   * the fill), and every other path keeps the bytes the checkout already has.
+   *
+   * @param from - The revision whose tree `before` is; each caller proves that under the fence.
+   * @param to - The revision whose tree is wanted.
+   * @param before - The checkout as captured under the fence.
+   * @returns The tree to write.
+   */
+  const treeFrom = async (
+    from: RevisionId,
+    to: RevisionId,
+    before: ImmutableRevisionTree,
+  ): Promise<ImmutableRevisionTree> => {
+    const changes = await port.diff({ from, to });
+    const touched = new Set(changes.map(({ path }) => path));
+    const changed = changes.filter(({ kind }) => kind !== 'deleted').map(({ path }) => path);
+    const read = changed.length === 0 ? undefined : await port.readTree(to, { largeObjects: 'local', paths: changed });
+    const kept = before
+      .entries()
+      .filter(({ path }) => !touched.has(path))
+      .map(({ path, content, mode }): RevisionTreeInput => [path, content, mode]);
+    const written = changed.map((path): RevisionTreeInput => {
+      const content = read?.get(path);
+      if (content === undefined) {
+        throw new RevisionPortError('UNKNOWN_REVISION', `The store holds no ${path} for ${to}.`);
+      }
+      return [path, content, read?.mode(path) ?? '100644'];
+    });
+    return new ImmutableRevisionTree([...kept, ...written]);
+  };
+
+  /**
+   * Put another revision's tree in a checkout: a restore, an undo, a switch, a
+   * pull, a merge or a decision landing (D10).
+   *
+   * The write is bracketed as `tree`, so the host announces a new tree before
+   * any state of it is read (I7), and the fill of that tree speaks next: the
+   * placeholders the write left, or its word that there are none. A write that
+   * failed after its tree was built is filled from what the checkout holds.
+   *
+   * @param place - The checkout.
+   * @param target - The tree, or how to build it from the capture.
+   * @param write - As {@link materializeTree} takes it, and `fillFrom`: the
+   *   revision whose tree names the large objects written, or the checkout's
+   *   head once the write is done when absent.
+   * @returns What {@link materializeTree} answered.
+   */
+  const writeRevisionTree = async <Result = void>(
+    place: Checkout,
+    target: MaterializeTarget,
+    write: Readonly<{
+      fillFrom?: RevisionId | undefined;
+      validate?: (before: ImmutableRevisionTree) => Promise<void>;
+      publish?: () => Promise<Result>;
+      signal?: AbortSignal;
+    }> = {},
+  ): Promise<Readonly<{ paths: readonly string[]; result: Result | undefined }>> => {
+    const { fillFrom, ...materialization } = write;
+    let written: ImmutableRevisionTree | undefined;
+    const built = async (before: ImmutableRevisionTree): Promise<ImmutableRevisionTree> => {
+      written = typeof target === 'function' ? await target(before) : target;
+      return written;
+    };
+    /* The written tree from `fillFrom`; after a failure, whatever the checkout holds from its head. */
+    const fillSoon = (tree: ImmutableRevisionTree | undefined): void => {
+      // async-iife: bootstrap -- a background fill; its failures are reported through `onLargeObjects`.
+      void (async (): Promise<void> => {
+        try {
+          const head = (tree === undefined ? undefined : fillFrom) ?? (await headOf(place));
+          if (head === undefined || fillsStopped) {
+            return;
+          }
+          resumedFills.add(place.id);
+          await largeObjects.fill(place, revisionId(head), largeObjectPlaceholders(tree ?? (await capture(place))));
+        } catch (error) {
+          console.warn('[revisions] large-object placeholders could not be checked', error);
+        }
+      })();
+    };
+    try {
+      const answer = await materializeTree(place, built, { ...materialization, purpose: 'tree' });
+      fillSoon(written);
+      return answer;
+    } catch (error) {
+      if (written !== undefined) {
+        fillSoon(undefined);
+      }
+      throw error;
+    }
+  };
 
   /* D9: reads that resolve a placeholder to its object, and `materialize` for a consumer that needs the file. */
   const contentReads = createContentReads({
@@ -2893,16 +2994,24 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
     const branch = `refs/heads/${input.branch}`;
     /* From this store alone: a large object not here yet is written as its
-     * pointer, and the fill below writes its bytes as they land. The pointer
-     * is what the store records either way, so the checkout is clean at once. */
-    const target = await port.readTree(head, { largeObjects: 'local' });
-    signal.throwIfAborted();
-    if (target === undefined) {
-      throw new RevisionPortError('UNKNOWN_REVISION', `The store holds no tree for ${head}.`);
-    }
+     * pointer, and the fill writes its bytes as they land. The pointer is
+     * what the store records either way, so the checkout is clean at once.
+     * Read whole only for an unborn line (the open); a pull reads by oid diff. */
+    let whole: ImmutableRevisionTree | undefined;
+    const wholeTree = async (): Promise<ImmutableRevisionTree> => {
+      whole ??= await port.readTree(head, { largeObjects: 'local', signal });
+      if (whole === undefined) {
+        throw new RevisionPortError('UNKNOWN_REVISION', `The store holds no tree for ${head}.`);
+      }
+      return whole;
+    };
     let expected: RevisionId | undefined;
+    /* `validate` proves the files are `expected`'s tree, so only what the oid diff to `head` names is read (D10). */
+    const target = async (before: ImmutableRevisionTree): Promise<ImmutableRevisionTree> =>
+      expected === undefined ? wholeTree() : treeFrom(expected, head, before);
     try {
-      await materializeTree(place, target, {
+      await writeRevisionTree(place, target, {
+        fillFrom: head,
         signal,
         validate: async (before) => {
           expected = await port.readRef(branch);
@@ -2918,7 +3027,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
            * a cloud open's placeholder manifest is not (e921b3d96). */
           const dirty =
             expectedTreeId === undefined
-              ? !holdsNoWorkBeforePull(before, target)
+              ? !holdsNoWorkBeforePull(before, await wholeTree())
               : expectedTreeId !== (await checkoutTreeId(place.id, before));
           const leases = await readLeases();
           const leased = leases.some((lease) => lease.checkoutId === place.id);
@@ -2963,11 +3072,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         throw error;
       }
       return held;
-    }
-    const placeholders = largeObjectPlaceholders(target);
-    if (placeholders.size > 0) {
-      resumedFills.add(place.id);
-      void largeObjects.fill(place, head, placeholders);
     }
     const treeId = await treeIdOf(head);
     if (treeId === undefined) {
@@ -3141,15 +3245,22 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       await publishMerge(input.into, expectedHead, head);
     };
     if (ours === undefined || base === ours) {
-      const fastForward = await port.readTree(theirs);
-      if (fastForward === undefined) {
-        throw new RevisionPortError('UNKNOWN_REVISION', `The store holds no tree for ${sourceLabel}.`);
-      }
-      await materializeTree(target, fastForward, {
+      /* `validateTarget` proves the files are `ours`, so only what the oid diff to `theirs` names is read (D10). */
+      const fastForward: MaterializeTarget =
+        ours === undefined
+          ? async () => {
+              const tree = await port.readTree(theirs, { largeObjects: 'local' });
+              if (tree === undefined) {
+                throw new RevisionPortError('UNKNOWN_REVISION', `The store holds no tree for ${sourceLabel}.`);
+              }
+              return tree;
+            }
+          : async (before) => treeFrom(ours, theirs, before);
+      await writeRevisionTree(target, fastForward, {
+        fillFrom: theirs,
         validate: validateTarget,
         publish: async () => landMerge(ours, theirs),
       });
-      refillAfter(target);
       return { status: 'merged', revisionId: theirs, checkoutId: target.id };
     }
 
@@ -3182,11 +3293,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       provenance: provenanceOf('merge', []),
       summary: Object.freeze({ generated: `Merged ${sourceLabel} into ${input.into}` }),
     });
-    await materializeTree(target, merged.tree, {
+    await writeRevisionTree(target, merged.tree, {
+      fillFrom: revisionId(receipt.commitId),
       validate: validateTarget,
       publish: async () => landMerge(ours, revisionId(receipt.commitId)),
     });
-    refillAfter(target);
     return { status: 'merged', revisionId: receipt.commitId, checkoutId: target.id };
   };
 
@@ -3813,8 +3924,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           if (target === undefined) {
             throw new RevisionPortError('UNKNOWN_REVISION', 'There is no revision to return these files to.');
           }
-          const tree = await port.readTree(revisionId(target));
-          if (tree === undefined) {
+          if ((await port.readRevision(revisionId(target))) === undefined) {
             throw new RevisionPortError('UNKNOWN_REVISION', `No recorded revision to restore: ${target}`);
           }
           /* E5: the memoised capture, not a fresh one. Step 1 already minted
@@ -3822,14 +3932,18 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
            * confirmation; what protects the bytes is `applyPlan`'s `validate`,
            * which proves the head again inside the fence before one is written. */
           const live = await capture(place);
-          const removed = live.entries().filter(({ path }) => !tree.has(path));
+          /* What the restore removes, by oid diff from the head the files equal (D10): no blob is read to count it. */
+          const changes = head === undefined ? [] : await port.diff({ from: revisionId(head), to: revisionId(target) });
+          const removed =
+            head === undefined
+              ? live.entries().map(({ path }) => path)
+              : changes.filter(({ kind }) => kind === 'deleted').map(({ path }) => path);
           const headTreeId = await treeIdOf(head);
           return {
             /* D2's undo also records which restore it undid, so *Undo* (D15) passes over both. */
             planId: plans.put(input.checkoutId, {
               checkoutId: input.checkoutId,
               revisionId: target,
-              tree,
               ...(input.firstParent === true ? { undoes: input.target } : {}),
             }),
             revisionId: target,
@@ -3849,7 +3963,23 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         async ({ input }) => {
           const plan = plans.take(input.planId);
           const place = await placeOf(plan.checkoutId);
-          await materializeTree(place, plan.tree, {
+          const changedMeanwhile = (): RevisionPortError =>
+            new RevisionPortError(
+              'CHECKOUT_CONFLICT',
+              'These files changed while the restore was being prepared. Try again.',
+            );
+          /* The head `validate` proved the files equal, which the oid diff starts from. */
+          let proven: string | undefined;
+          const target: MaterializeTarget =
+            plan.tree ??
+            (async (before) => {
+              if (proven === undefined) {
+                throw changedMeanwhile();
+              }
+              return treeFrom(revisionId(proven), revisionId(plan.revisionId), before);
+            });
+          await writeRevisionTree(place, target, {
+            fillFrom: plan.tree === undefined ? revisionId(plan.revisionId) : undefined,
             /*
              * A3: the pre-restore cut and this write are two fenced sections, so
              * the head is proven again inside this one — the files equal the
@@ -3858,12 +3988,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             validate: async (before) => {
               const head = await headOf(await placeOf(place.id));
               const headTreeId = await treeIdOf(head);
-              if (headTreeId !== (await checkoutTreeId(place.id, before))) {
-                throw new RevisionPortError(
-                  'CHECKOUT_CONFLICT',
-                  'These files changed while the restore was being prepared. Try again.',
-                );
+              if (headTreeId === undefined || headTreeId !== (await checkoutTreeId(place.id, before))) {
+                throw changedMeanwhile();
               }
+              proven = head;
               /* A turn another window or host started while the question was open:
                * refused in Switch's words, as A1's is, and before a byte is written
                * — the restore cut could not land on a leased checkout (M4). No port
@@ -3876,13 +4004,15 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               }
             },
           });
-          refillAfter(place);
           if (plan.undoes === undefined) {
             const treeId = await treeIdOf(plan.revisionId);
             return { revisionId: plan.revisionId, treeId: treeId ?? '' };
           }
           /* The next `restore` cut of exactly this tree is the undo (D15). */
-          const treeId = await checkoutTreeId(place.id, plan.tree);
+          const treeId =
+            plan.tree === undefined
+              ? ((await treeIdOf(plan.revisionId)) ?? '')
+              : await checkoutTreeId(place.id, plan.tree);
           pendingUndos.set(place.id, { treeId, undoes: plan.undoes });
           return { revisionId: plan.revisionId, treeId };
         },
@@ -4015,14 +4145,28 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         if (head === undefined) {
           throw new RevisionPortError('UNKNOWN_REVISION', `${input.branch} has no revision yet.`);
         }
-        const tree = await port.readTree(head);
-        if (tree === undefined) {
-          throw new RevisionPortError('UNKNOWN_REVISION', `The store holds no tree for ${input.branch}.`);
-        }
-        await materializeTree(place, tree, {
+        /*
+         * By oid diff from the checkout's head when the files are that head
+         * (D10); files the person agreed to replace are not, and until the
+         * index knows which paths those are, the branch's whole tree is read
+         * (its large objects from this store alone, for the fill).
+         */
+        const branchTree = async (before: ImmutableRevisionTree): Promise<ImmutableRevisionTree> => {
+          const current = await headOf(place);
+          const currentTreeId = await treeIdOf(current);
+          if (current !== undefined && currentTreeId === (await checkoutTreeId(place.id, before))) {
+            return treeFrom(revisionId(current), head, before);
+          }
+          const tree = await port.readTree(head, { largeObjects: 'local' });
+          if (tree === undefined) {
+            throw new RevisionPortError('UNKNOWN_REVISION', `The store holds no tree for ${input.branch}.`);
+          }
+          return tree;
+        };
+        await writeRevisionTree(place, branchTree, {
+          fillFrom: head,
           publish: place.kind === 'live' ? async () => port.setHead(input.branch) : undefined,
         });
-        refillAfter(place);
         return {
           checkoutId: place.id,
           revisionId: head,
@@ -4326,14 +4470,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             }
           };
           await refuseHeld(await captureFresh(place));
-          await materializeTree(place, tree, {
+          await writeRevisionTree(place, tree, {
+            fillFrom: revisionId(receipt.commitId),
             validate: refuseHeld,
             publish: async () => {
               await refuseHeld();
               await land();
             },
           });
-          refillAfter(place);
         }
         resolutions.delete(input.revisionId);
         return { revisionId: receipt.commitId, branch: perspective.line };

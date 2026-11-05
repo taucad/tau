@@ -85,9 +85,20 @@ type MaterializeTreeOptions<Result> = Readonly<{
   before?: ImmutableRevisionTree;
   validate?: (before: ImmutableRevisionTree) => Promise<void>;
   publish?: () => Promise<Result>;
-  /** What the host's `onApplyingTree` bracket is told this write is; `apply` unless a fill says otherwise. */
+  /** What the host's `onApplyingTree` bracket is told this write is; `apply` unless the caller says otherwise. */
   purpose?: ApplyingTreePurpose;
 }>;
+
+/**
+ * The tree a write must leave, or how to build it from the checkout as
+ * captured under the fence, once `validate` has passed: what lets a write of
+ * another revision read only the paths an oid diff says changed (D10).
+ *
+ * @public
+ */
+export type MaterializeTarget =
+  | ImmutableRevisionTree
+  | ((before: ImmutableRevisionTree) => Promise<ImmutableRevisionTree>);
 
 /**
  * Build the apply/recover/materialize trio over one project's checkout seams.
@@ -132,7 +143,7 @@ export const createApplyTreeEffects = (
   ) => Promise<Readonly<{ content: Uint8Array<ArrayBuffer>; mode: FileMode }> | undefined>;
   materializeTree: <Result = void>(
     place: Checkout,
-    target: ImmutableRevisionTree,
+    target: MaterializeTarget,
     materialization?: MaterializeTreeOptions<Result>,
   ) => Promise<Readonly<{ paths: readonly string[]; result: Result | undefined }>>;
 }> => {
@@ -573,20 +584,22 @@ export const createApplyTreeEffects = (
    * Apply bytes and their graph update as one checkout-owned recoverable operation.
    *
    * @param place - The checkout being written.
-   * @param target - The tree it must carry.
+   * @param wanted - The tree it must carry, or how to build it from the capture.
    * @param materialization - Cancellation, the caller's own capture, and the
    *   validation and graph update that bracket the write.
    * @returns The paths written and whatever `publish` answered.
    */
   const materializeTree = async <Result = void>(
     place: Checkout,
-    target: ImmutableRevisionTree,
+    wanted: MaterializeTarget,
     materialization: MaterializeTreeOptions<Result> = {},
   ): Promise<Readonly<{ paths: readonly string[]; result: Result | undefined }>> => {
     const materialize = async (
       before: ImmutableRevisionTree,
     ): Promise<Readonly<{ paths: readonly string[]; result: Result | undefined }>> => {
       await materialization.validate?.(before);
+      const target = typeof wanted === 'function' ? await wanted(before) : wanted;
+      materialization.signal?.throwIfAborted();
       const prepared = (await dependencies.prepareTarget?.(place, target, materialization.signal)) ?? {
         tree: target,
       };

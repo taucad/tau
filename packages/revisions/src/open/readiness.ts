@@ -72,11 +72,21 @@ export type ReadinessSource = Pick<
  * @param largeObjectsTold - Whether the fill has given its word on this checkout
  *   yet. Until it has, an absent facet is silence, not "nothing to fill", and the
  *   reading stops at `materialized`.
+ * @param treeWrites - How many writes of another revision's tree (purpose
+ *   `tree`) the host has seen begin on this checkout. Each one is a new tree,
+ *   announced as the write begins, before any state of it is read (I7).
  * @returns The state it shows, and the tree that state is about.
  * @public
  */
-export const readinessOf = (status: ReadinessSource, largeObjectsTold = true): ProjectReadinessReading => {
-  const tree = status.headRevisionId === undefined ? undefined : `${status.checkoutId ?? ''}:${status.headRevisionId}`;
+export const readinessOf = (
+  status: ReadinessSource,
+  largeObjectsTold = true,
+  treeWrites = 0,
+): ProjectReadinessReading => {
+  const tree =
+    status.headRevisionId === undefined && treeWrites === 0
+      ? undefined
+      : `${status.checkoutId ?? ''}:${status.headRevisionId ?? ''}:${String(treeWrites)}`;
   if (!status.registrySettled || status.checkoutRoot === undefined) {
     return { state: 'connected', tree };
   }
@@ -97,14 +107,13 @@ export const readinessOf = (status: ReadinessSource, largeObjectsTold = true): P
 /**
  * The next published reading: never earlier than the last one about the same tree.
  *
- * A new tree (restore, switch, pull, or the first head) re-enters at whatever
- * its own reading says; the announcement of the new tree comes with it, so no
- * state regresses about a tree it was already reported for (I7).
- *
- * One step back is taken, because I7 asks for truth first: `filled` gives way to
- * `materialized` when the fill names a pointer in the same tree, since a render
- * over that pointer would be partial geometry. The fill tells before it asks for
- * its first object, so this is a refill after a wholesale write, never the open.
+ * A new tree (a restore, switch, pull or merge write, or a new head)
+ * re-enters at whatever its own reading says; the announcement of the new tree
+ * comes with it, so no state regresses about a tree it was already reported
+ * for (I7). Within one tree nothing steps back: a write of another revision's
+ * tree is a new tree from the moment it begins, and the fill of the old one
+ * ends silently with it, so a pointer that write leaves is told about the new
+ * tree, never the old.
  *
  * @param previous - The last published reading, if any.
  * @param next - The reading the current projection gives.
@@ -115,9 +124,4 @@ export const settleReadiness = (
   previous: ProjectReadinessReading | undefined,
   next: ProjectReadinessReading,
 ): ProjectReadinessReading =>
-  previous === undefined ||
-  previous.tree !== next.tree ||
-  rank(next.state) >= rank(previous.state) ||
-  (previous.state === 'filled' && next.state === 'materialized')
-    ? next
-    : previous;
+  previous === undefined || previous.tree !== next.tree || rank(next.state) >= rank(previous.state) ? next : previous;

@@ -96,7 +96,8 @@ export const largeObjectPlaceholders = (tree: ImmutableRevisionTree): Map<string
  *   fence and materialization, and who is told about progress.
  * @returns `fill`, which starts (or restarts) one checkout's fill, `resume`,
  *   which starts one only when none is running (or restarts a running one),
- *   and `stop`, which ends every fill and resolves once none is writing.
+ *   `forget`, which ends one checkout's fill without a word, and `stop`, which
+ *   ends every fill and resolves once none is writing.
  */
 // oxlint-disable-next-line eslint/max-lines-per-function -- one closure over the fills' shared map and seams.
 export const createLargeObjectFill = (
@@ -118,6 +119,7 @@ export const createLargeObjectFill = (
 ): Readonly<{
   fill: (place: Checkout, head: RevisionId, placeholders?: ReadonlyMap<string, Placeholder>) => Promise<void>;
   resume: (place: Checkout, head: RevisionId, replace?: boolean) => Promise<void>;
+  forget: (checkoutId: string) => void;
   stop: () => Promise<void>;
   look: (checkoutId: string, oid: string) => LargeObjectLook | undefined;
   arrival: (checkoutId: string, oid: string, signal?: AbortSignal) => Promise<Uint8Array<ArrayBuffer> | undefined>;
@@ -505,6 +507,10 @@ export const createLargeObjectFill = (
   /**
    * Fill one checkout's placeholders from `head`'s objects.
    *
+   * A caller that names what it just wrote is always answered, even when that
+   * is nothing to fill: a host that forgot the checkout's fill at a tree write
+   * waits for this word on the new tree (D10).
+   *
    * @param place - The checkout.
    * @param head - The revision whose tree names the objects.
    * @param placeholders - What the caller just wrote; captured from the checkout when absent.
@@ -521,7 +527,7 @@ export const createLargeObjectFill = (
       retire(previous);
     }
     if (pending.size === 0) {
-      if (previous !== undefined || !told.has(place.id)) {
+      if (previous !== undefined || placeholders !== undefined || !told.has(place.id)) {
         told.add(place.id);
         report?.({ checkoutId: place.id, facet: undefined, retry: () => undefined, prioritize: () => undefined });
       }
@@ -661,7 +667,21 @@ export const createLargeObjectFill = (
     return 'idle';
   };
 
-  return { fill, resume, stop, look, arrival, written };
+  /**
+   * End one checkout's fill without telling anyone: its tree is being replaced,
+   * and the fill of the new tree speaks for the checkout next (D10, I7).
+   *
+   * @param checkoutId - The checkout.
+   */
+  const forget = (checkoutId: string): void => {
+    const current = fills.get(checkoutId);
+    if (current !== undefined) {
+      fills.delete(checkoutId);
+      retire(current);
+    }
+  };
+
+  return { fill, resume, forget, stop, look, arrival, written };
 };
 
 /** One large object as a running fill sees it. @public */

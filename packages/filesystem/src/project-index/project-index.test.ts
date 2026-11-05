@@ -358,9 +358,14 @@ describe('ProjectIndex', () => {
   });
 });
 
-/** A memory provider standing in for a durable root, with a count of content reads outside the index's own files. */
+/**
+ * A memory provider standing in for a durable root whose mtime follows its
+ * bytes (OPFS, a picked folder, a node checkout), with a count of content
+ * reads outside the index's own files.
+ */
 const durableRoot = async (): Promise<{ provider: MemoryProvider; reads: () => number }> => {
   const provider = new MemoryProvider();
+  Object.defineProperty(provider, 'capabilities', { value: { ...provider.capabilities, trustworthyMtime: true } });
   await provider.mkdir('project', { recursive: true });
   const readFile = vi.spyOn(provider, 'readFile');
   return {
@@ -626,6 +631,31 @@ describe('ProjectIndexes', () => {
       await indexes.ready('/p');
       const disk = await provider.stat('project/a.ts');
       expect(index.entry('a.ts')?.mtimeMs).toBe(disk.mtimeMs);
+    });
+
+    /* Review M4: a provider whose mtime stays 0 (direct IndexedDB) keys nothing on it. */
+    it('should keep no read facts where the provider does not declare a trustworthy mtime', async () => {
+      const provider = new MemoryProvider();
+      const stat = provider.stat.bind(provider);
+      vi.spyOn(provider, 'stat').mockImplementation(async (path) => ({
+        ...(await stat(path)),
+        mtimeMs: 0,
+      }));
+      await provider.writeFile('project/a.ts', 'abc\n');
+      const indexes = new ProjectIndexes({
+        resolve: () => ({ provider, path: 'project' }),
+        persistDelayMilliseconds: 60_000,
+      });
+      await record(indexes, provider, 'a.ts');
+      const first = await indexes.facts('/p', ['a.ts'], { lineCount: true });
+
+      await provider.writeFile('project/a.ts', 'a\nb\n');
+      indexes.addFile('/p/a.ts', { size: 4, facts: { contentKind: 'text', lineCount: 3 } });
+      const rewritten = await indexes.facts('/p', ['a.ts'], { lineCount: true });
+
+      expect(provider.capabilities.trustworthyMtime).toBeUndefined();
+      expect(first.get('a.ts')).toEqual({ contentKind: 'text', lineCount: 2 });
+      expect(rewritten.get('a.ts')).toEqual({ contentKind: 'text', lineCount: 3 });
     });
 
     it('should not record a warm read inside the racy window', async () => {

@@ -323,7 +323,8 @@ export class ProjectIndexes {
    * entry's metadata when the sizes agree, nothing left the path unknown, no
    * observation is in flight and the entry's mtime is past the racy window; a
    * cold root keeps them beside the size read, checked against the file's
-   * current size and mtime before they are used.
+   * current size and mtime before they are used. Both trust the mtime, so a
+   * provider that does not declare `trustworthyMtime` records nothing (M4).
    *
    * @param root - Absolute root.
    * @param path - Root-relative file path.
@@ -336,7 +337,7 @@ export class ProjectIndexes {
   ): void {
     const { bytes, observedAt } = read;
     const key = normalizePath(root);
-    if (path === '' || this._excluded(path)) {
+    if (path === '' || this._excluded(path) || !this._trustsMtime(key)) {
       return;
     }
     const state = this._states.get(key);
@@ -649,8 +650,15 @@ export class ProjectIndexes {
     );
   }
 
-  /** Keep what a cold root's read or measurement found, keyed by the size it read and when. */
+  /**
+   * Keep what a cold root's read or measurement found, keyed by the size it
+   * read and when. A provider whose mtime does not follow its bytes keeps
+   * nothing: a same-size rewrite would leave the key unchanged (M4).
+   */
   private _remember(root: string, path: string, read: ReadFacts): void {
+    if (!this._trustsMtime(root)) {
+      return;
+    }
     let memo = this._readFacts.get(root);
     if (memo === undefined) {
       memo = new Map();
@@ -855,6 +863,11 @@ export class ProjectIndexes {
       ...(options.digests.includes('blobOid') ? { blobOid: await blobOidOf(bytes) } : {}),
     };
     return [facts, bytes.byteLength === size];
+  }
+
+  /** Whether the root's provider changes `mtimeMs` whenever its bytes change, so read facts may be keyed on it. */
+  private _trustsMtime(root: string): boolean {
+    return this._options.resolve !== undefined && this._resolve(root).provider.capabilities.trustworthyMtime === true;
   }
 
   private _resolve(root: string): IndexRootResolution {

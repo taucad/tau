@@ -616,18 +616,11 @@ const boundsOf = (node: Node): { min: number[]; max: number[] } | undefined => {
   return { min, max };
 };
 
-// Swap the converter's untextured board slab for the layered presentation board, and give the
-// component bodies presentation materials. The slab is the root mesh spanning a board's outline
-// and thickness (the converter names it generically, so it is matched by size, not name).
-const presentBoard = async (
-  document: Document,
-  scene: Scene | undefined,
-  { circuitJson, options }: { circuitJson: CircuitElement[]; options: BoardPresentationOptions },
-): Promise<void> => {
-  const { buildPresentationBoard } = await import('#board-geometry.js');
-  const { applyPresentationMaterial } = await import('#presentation-materials.js');
+// The converter's board slab: the root mesh spanning a board's outline and thickness (the converter
+// names it generically, so it is matched by size, not name).
+const boardSlabTest = (circuitJson: CircuitElement[]): ((node: Node) => boolean) => {
   const boards = circuitJson.filter((element) => element.type === 'pcb_board');
-  const isBoardSlab = (node: Node): boolean => {
+  return (node) => {
     const bounds = boundsOf(node);
     if (!bounds) {
       return false;
@@ -640,6 +633,61 @@ const presentBoard = async (
         Math.abs((size[1] ?? 0) - (numberField(board, 'thickness') ?? 1.6)) < 0.2,
     );
   };
+};
+
+// Six times a primitive's signed volume: negative when its triangles wind inward.
+const signedVolumeOf = (primitive: Primitive): number => {
+  const position = primitive.getAttribute('POSITION');
+  const indices = primitive.getIndices();
+  if (!position || !indices) {
+    return 0;
+  }
+  let volume = 0;
+  for (let index = 0; index + 2 < indices.getCount(); index += 3) {
+    const [a = [], b = [], c = []] = [0, 1, 2].map((corner) =>
+      position.getElement(indices.getScalar(index + corner), []),
+    );
+    const [ax = 0, ay = 0, az = 0, bx = 0, by = 0, bz = 0, cx = 0, cy = 0, cz = 0] = [...a, ...b, ...c];
+    volume += ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx);
+  }
+  return volume;
+};
+
+// The converter winds its board slab inward (its normals point out). Drawn one-sided, the slab then
+// shows its far walls through the near ones, so the technical board turns it outward.
+const windBoardSlabOutward = (scene: Scene | undefined, circuitJson: CircuitElement[]): void => {
+  const isBoardSlab = boardSlabTest(circuitJson);
+  for (const node of scene?.listChildren() ?? []) {
+    if (!isBoardSlab(node)) {
+      continue;
+    }
+    for (const primitive of node.getMesh()?.listPrimitives() ?? []) {
+      const indices = primitive.getIndices();
+      if (primitive.getMode() !== Primitive.Mode['TRIANGLES'] || !indices || signedVolumeOf(primitive) >= 0) {
+        continue;
+      }
+      const array = indices.getArray();
+      if (!array) {
+        continue;
+      }
+      for (let index = 0; index + 2 < array.length; index += 3) {
+        [array[index + 1], array[index + 2]] = [array[index + 2]!, array[index + 1]!];
+      }
+      indices.setArray(array);
+    }
+  }
+};
+
+// Swap the converter's untextured board slab for the layered presentation board, and give the
+// component bodies presentation materials.
+const presentBoard = async (
+  document: Document,
+  scene: Scene | undefined,
+  { circuitJson, options }: { circuitJson: CircuitElement[]; options: BoardPresentationOptions },
+): Promise<void> => {
+  const { buildPresentationBoard } = await import('#board-geometry.js');
+  const { applyPresentationMaterial } = await import('#presentation-materials.js');
+  const isBoardSlab = boardSlabTest(circuitJson);
   const slabMaterials = new Set<Material>();
   for (const node of scene?.listChildren() ?? []) {
     if (isBoardSlab(node)) {
@@ -676,9 +724,12 @@ const applyGlbConvention = async (
   const io = new WebIO().registerExtensions(allExtensions);
   const document = await io.readBinary(glb);
   const root = document.getRoot();
-  // Converter part bodies only: the presentation board below is built afterwards.
-  markClosedMeshesSingleSided(document);
   const scene = root.getDefaultScene() ?? root.listScenes()[0];
+  if (style === 'technical') {
+    windBoardSlabOutward(scene, circuitJson);
+  }
+  // Converter part bodies and the technical slab: the presentation board below is built afterwards.
+  markClosedMeshesSingleSided(document);
   if (style === 'presentation') {
     await presentBoard(document, scene, { circuitJson, options: { finish } });
   } else {

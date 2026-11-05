@@ -809,6 +809,25 @@ describe('TscircuitKernel', () => {
       expect(root.listNodes().some((node) => node.getName() === 'pcb')).toBe(false);
       // No raster board texture on either path: the slab is a plain material.
       expect(root.listTextures()).toHaveLength(0);
+      // Every one-sided solid, the slab included, winds outward, or culling would show its far walls.
+      const oneSided = root
+        .listMeshes()
+        .flatMap((mesh) => mesh.listPrimitives())
+        .filter((primitive) => primitive.getMaterial()?.getDoubleSided() === false);
+      expect(oneSided.length).toBeGreaterThan(1);
+      for (const primitive of oneSided) {
+        const position = primitive.getAttribute('POSITION')!;
+        const indices = primitive.getIndices()!;
+        let volume = 0;
+        for (let index = 0; index < indices.getCount(); index += 3) {
+          const [a, b, c] = [0, 1, 2].map((corner) => position.getElement(indices.getScalar(index + corner), []));
+          volume +=
+            a![0]! * (b![1]! * c![2]! - b![2]! * c![1]!) -
+            a![1]! * (b![0]! * c![2]! - b![2]! * c![0]!) +
+            a![2]! * (b![0]! * c![1]! - b![1]! * c![0]!);
+        }
+        expect(volume).toBeGreaterThan(0);
+      }
       // A view option still overrides the kernel default.
       const presentation = await definition.render!(
         { view: 'board', handle, options: { style: 'presentation' } },

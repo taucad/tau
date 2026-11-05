@@ -16,16 +16,21 @@ describe('live view options', () => {
     setLiveViewOptions('pane-1', draft);
 
     // The record still holds the older options: the draft keeps leading, so the pane never steps back.
-    settleLiveViewOptions('pane-1', 'pcb', undefined);
-    settleLiveViewOptions('pane-1', 'pcb', { pinNumbers: false, palette: 'fabrication' });
+    settleLiveViewOptions('pane-1', draft, { viewId: 'pcb', options: {} });
+    settleLiveViewOptions('pane-1', draft, { viewId: 'pcb', options: { pinNumbers: false, palette: 'fabrication' } });
     expect(getLiveViewOptions('pane-1')).toBe(draft);
 
     // Another kernel view's record says nothing about this draft.
-    settleLiveViewOptions('pane-1', 'board', { pinNumbers: true, palette: 'fabrication' });
+    settleLiveViewOptions('pane-1', draft, { viewId: 'board', options: { pinNumbers: true, palette: 'fabrication' } });
+    expect(getLiveViewOptions('pane-1')).toBe(draft);
+
+    // A record matching an older draft leaves the newer draft leading.
+    const older = { viewId: 'pcb', options: { pinNumbers: true, palette: 'fabrication' } };
+    settleLiveViewOptions('pane-1', older, { viewId: 'pcb', options: { pinNumbers: true, palette: 'fabrication' } });
     expect(getLiveViewOptions('pane-1')).toBe(draft);
 
     // Key order is not a difference.
-    settleLiveViewOptions('pane-1', 'pcb', { palette: 'fabrication', pinNumbers: true });
+    settleLiveViewOptions('pane-1', draft, { viewId: 'pcb', options: { palette: 'fabrication', pinNumbers: true } });
     expect(getLiveViewOptions('pane-1')).toBeUndefined();
   });
 

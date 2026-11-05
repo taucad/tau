@@ -569,7 +569,9 @@ const ViewerContent = memo(function ({
   // The draft yields once the record the file watcher delivers holds the same options, so the pane never steps back.
   const savedOptions = selectedState?.options;
   useEffect(() => {
-    settleLiveViewOptions(viewId, offeredViewId, savedOptions);
+    if (liveOptions !== undefined && offeredViewId !== undefined) {
+      settleLiveViewOptions(viewId, liveOptions, { viewId: offeredViewId, options: savedOptions ?? {} });
+    }
   }, [viewId, offeredViewId, savedOptions, liveOptions]);
   const localInstance = useLocalInstanceChoice(viewId);
   const localForView = localInstance?.viewId === offeredViewId ? localInstance : undefined;

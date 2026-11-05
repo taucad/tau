@@ -40,18 +40,13 @@ export const setLiveViewOptions = (paneId: string, draft: LiveViewOptions | unde
 
 /**
  * Retire a pane's draft once its record holds the same options for the same kernel view, so the pane's options never
- * step back to an older record on the way.
+ * step back to an older record on the way. Only the draft the pane rendered is retired, never a newer one.
  */
-export const settleLiveViewOptions = (
-  paneId: string,
-  kernelViewId: string | undefined,
-  savedOptions: Record<string, unknown> | undefined,
-): void => {
-  const draft = drafts.get(paneId);
+export const settleLiveViewOptions = (paneId: string, draft: LiveViewOptions, record: LiveViewOptions): void => {
   if (
-    draft !== undefined &&
-    draft.viewId === kernelViewId &&
-    canonicalJson(draft.options) === canonicalJson(savedOptions ?? {})
+    drafts.get(paneId) === draft &&
+    draft.viewId === record.viewId &&
+    canonicalJson(draft.options) === canonicalJson(record.options)
   ) {
     setLiveViewOptions(paneId, undefined);
   }

@@ -169,6 +169,8 @@ export type WorkerRevisionCommand =
   | Readonly<{ command: 'syncNow' }>
   /* The viewer's *Try again* after a large-object transfer failed; the files are already open. */
   | Readonly<{ command: 'retryLargeObjects' }>
+  /* An opened file still holding its pointer: its object jumps the fill queue (D10). */
+  | Readonly<{ command: 'prioritizeLargeObjects'; paths: readonly string[] }>
   /**
    * Pull the remote now (XD3, round 18): another device's run on one of this project's chats has been quiet here a
    * while, and only pulls show whether it stayed quiet there. A question since round 27: answered `pulled`, with
@@ -1463,6 +1465,10 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         }
         case 'retryLargeObjects': {
           largeObjects.get(selectRevisionStatus(actor.getSnapshot()).checkoutId ?? '')?.retry();
+          return;
+        }
+        case 'prioritizeLargeObjects': {
+          largeObjects.get(selectRevisionStatus(actor.getSnapshot()).checkoutId ?? '')?.prioritize(command.paths);
           return;
         }
         case 'recordsChanged': {

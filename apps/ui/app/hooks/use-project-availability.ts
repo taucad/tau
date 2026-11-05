@@ -1,7 +1,8 @@
+import { useEffect } from 'react';
 import type { LargeObjectsFacet, ProjectReadiness, RevisionStatusProjection } from '@taucad/revisions';
 import { reachesReadiness } from '@taucad/revisions';
 import { useProject } from '#hooks/use-project.js';
-import { useRevisionStatus } from '#hooks/use-revision-status.js';
+import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { canOpenCloudProject, useTauCloudIntent } from '#hooks/use-cloud-projects.js';
 
 /** First-open readiness comes from the durable gesture and the worker's acknowledged checkout. */
@@ -96,6 +97,25 @@ export function useModelAvailability(): ModelAvailability {
 export function useLargeObjectPending(path: string | undefined): boolean {
   const paths = useRevisionStatus()?.largeObjects?.paths;
   return path !== undefined && paths !== undefined && pendingPathSet(paths).has(path);
+}
+
+/**
+ * {@link useLargeObjectPending} for a file someone has open: while it waits,
+ * its object jumps the fill queue (D10). A file-tree row asks the other one,
+ * so listing a folder never reorders the fill.
+ *
+ * @param path - The open file's checkout-relative path.
+ * @returns `true` until its bytes are written.
+ */
+export function useOpenedLargeObjectPending(path: string | undefined): boolean {
+  const pending = useLargeObjectPending(path);
+  const client = useRevisionClient();
+  useEffect(() => {
+    if (pending && path !== undefined) {
+      client?.send({ command: 'prioritizeLargeObjects', paths: [path] });
+    }
+  }, [client, pending, path]);
+  return pending;
 }
 
 /* One set per published facet, shared by every file-tree row that asks of it. */

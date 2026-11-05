@@ -1,3 +1,4 @@
+import { renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RevisionStatusProjection } from '@taucad/revisions';
@@ -7,10 +8,13 @@ import {
   projectAvailability,
   readyFor,
   surfaceReadiness,
+  useLargeObjectPending,
+  useOpenedLargeObjectPending,
 } from '#hooks/use-project-availability.js';
+import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
 
 vi.mock('#hooks/use-project.js', () => ({ useProject: vi.fn() }));
-vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: vi.fn() }));
+vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: vi.fn(), useRevisionClient: vi.fn() }));
 vi.mock('#hooks/use-cloud-projects.js', () => ({ useTauCloudIntent: vi.fn(), canOpenCloudProject: vi.fn() }));
 
 const status = (changes: Partial<RevisionStatusProjection['sync']> = {}): RevisionStatusProjection =>
@@ -106,5 +110,30 @@ describe('surface readiness', () => {
   });
   it('serves nothing from an unknown state', () => {
     expect(readyFor('tree', undefined)).toBe(false);
+  });
+});
+
+/* D10: an opened path jumps the fill queue; a file-tree row listing it does not. */
+describe('opened large-object paths', () => {
+  const pendingOn = (paths: readonly string[]): ReturnType<typeof vi.fn> => {
+    const send = vi.fn();
+    vi.mocked(useRevisionStatus).mockReturnValue({
+      ...status(),
+      largeObjects: { phase: 'fetching', paths, objects: 0, totalObjects: 1, bytes: 0, totalBytes: 1 },
+    });
+    vi.mocked(useRevisionClient).mockReturnValue(mock({ send }));
+    return send;
+  };
+  it('asks the worker to fetch an open file first while it waits', () => {
+    const send = pendingOn(['models/a.step']);
+    const { result } = renderHook(() => useOpenedLargeObjectPending('models/a.step'));
+    expect(result.current).toBe(true);
+    expect(send).toHaveBeenCalledExactlyOnceWith({ command: 'prioritizeLargeObjects', paths: ['models/a.step'] });
+  });
+  it('asks nothing for a file that is here, or for a row that only lists one', () => {
+    const send = pendingOn(['models/a.step']);
+    renderHook(() => useOpenedLargeObjectPending('main.scad'));
+    renderHook(() => useLargeObjectPending('models/a.step'));
+    expect(send).not.toHaveBeenCalled();
   });
 });

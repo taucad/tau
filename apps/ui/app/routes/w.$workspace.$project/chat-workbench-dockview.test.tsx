@@ -53,11 +53,17 @@ vi.mock('#components/code/code-editor-view.client.js', () => {
 });
 vi.mock('#lib/editor-syntax.js', () => ({ loadEditorSyntax: mockLoadEditorSyntax }));
 
-const largeObjectState = vi.hoisted(() => ({ pending: new Set<string>() }));
+const largeObjectState = vi.hoisted(() => ({ pending: new Set<string>(), opened: [] as string[] }));
 vi.mock('#hooks/use-project-availability.js', () => ({
   useProjectAvailability: () => 'ready',
   useModelAvailability: () => 'ready',
   useLargeObjectPending: (path: string | undefined) => path !== undefined && largeObjectState.pending.has(path),
+  useOpenedLargeObjectPending(path: string | undefined) {
+    if (path !== undefined) {
+      largeObjectState.opened.push(path);
+    }
+    return path !== undefined && largeObjectState.pending.has(path);
+  },
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-print.js', () => ({
@@ -810,6 +816,8 @@ describe('FileEditor routing', () => {
       expect(placeholder).toHaveTextContent('Downloading part.step');
       expect(screen.queryByTestId('viewer')).not.toBeInTheDocument();
       expect(screen.queryByText(/git-lfs/u)).not.toBeInTheDocument();
+      /* Open, so its object jumps the fill queue (D10). */
+      expect(largeObjectState.opened).toContain('models/part.step');
 
       largeObjectState.pending.delete('models/part.step');
       mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('solid part') });
@@ -819,6 +827,7 @@ describe('FileEditor routing', () => {
       expect(screen.getByTestId('viewer-content').textContent).toBe('solid part');
     } finally {
       largeObjectState.pending.clear();
+      largeObjectState.opened.length = 0;
     }
   });
 

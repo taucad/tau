@@ -198,64 +198,40 @@ const limitOf = (outcome: RuntimeOperationOutcome, issues: readonly KernelIssue[
     ? outcome.detail?.exceeded
     : readResourceLimit(issues.find((issue) => issue.code === 'RESOURCE_LIMIT')?.details);
 
-type Settled = Omit<RuntimeOperationObservation, 'worker' | 'facts'>;
-
 /**
- * Build the observation of a settled attempt, without its worker facts.
- *
- * @param attempt - The attempt.
- * @param reason - Why it settled.
- * @param at - How the client reached the worker, and the settle time.
- * @returns The observation, waiting for its facts status.
- * @internal
+ * An observation still waiting for its worker facts. Only the observer holds it, and {@link joinFacts} completes it
+ * once, just before it is emitted, so it is never copied.
  */
-export const observeAttempt = (
-  attempt: ObservedAttempt,
-  reason: SettleReason,
-  at: Readonly<{ transport: RuntimeTransport; now: number }>,
-): Settled => {
-  const { transport, now } = at;
-  const issues = reason.type === 'result' ? reason.result.issues : [];
-  const outcome = outcomeOf(reason);
-  return {
-    operationId: attempt.operationId,
-    operation: attempt.operation,
-    kernel: attempt.kernel,
-    outcome,
-    transport,
-    issues: [...new Set(issues.map((issue) => issue.code))],
-    ...adaptationsOf(issues),
-    limit: limitOf(outcome, issues),
-    format: attempt.format,
-    plugin: attempt.plugin,
-    ...(attempt.sourceFormat === undefined ? {} : { sourceFormat: attempt.sourceFormat }),
-    ...(attempt.entryFormat === undefined ? {} : { entryFormat: attempt.entryFormat }),
-    duration: Math.max(0, now - attempt.started),
-  };
-};
+type Settled = { -readonly [Key in keyof RuntimeOperationObservation]: RuntimeOperationObservation[Key] };
 
 /**
- * Join an observation with its trailing facts. The worker's transcoder wins over the client's own stamp: it ran.
+ * Join an observation with its trailing facts, completing it in place. The worker's transcoder wins over the client's
+ * own stamp: it ran.
  *
  * @param settled - The observation without facts.
  * @param facts - The worker's facts, when they arrived.
  * @param why - The status when they did not.
- * @returns The observation.
- * @internal
+ * @returns The completed observation.
  */
-export const joinFacts = (
+const joinFacts = (
   settled: Settled,
   facts: WorkerOperationFacts | undefined,
   why: Exclude<RuntimeFactsStatus, 'joined'>,
-): RuntimeOperationObservation =>
-  facts === undefined
-    ? { ...settled, worker: undefined, facts: why }
-    : {
-        ...settled,
-        ...(facts.plugin === undefined ? {} : { plugin: facts.plugin }),
-        worker: facts,
-        facts: 'joined',
-      };
+): RuntimeOperationObservation => {
+  if (facts === undefined) {
+    settled.facts = why;
+  } else {
+    if (facts.plugin !== undefined) {
+      settled.plugin = facts.plugin;
+    }
+    settled.worker = facts;
+    settled.facts = 'joined';
+  }
+  return settled;
+};
+
+/** An attempt waiting for its facts, and when it settled. */
+type Awaiting = Readonly<{ settled: Settled; at: number }>;
 
 const lateOutcomes: ReadonlySet<RuntimeOperationOutcome['type']> = new Set(['timed-out', 'cancelled', 'abandoned']);
 
@@ -268,7 +244,13 @@ export class ClientOperationObserver {
   #sent: RuntimeObservationMode = 'off';
   #workerObservation: readonly RuntimeObservationMode[] = [];
   #send: ((mode: RuntimeObservationMode) => void) | undefined;
-  readonly #awaiting = new Map<string, Readonly<{ settled: Settled; at: number }>>();
+  /**
+   * The oldest attempt waiting for facts, held outside {@link ClientOperationObserver.#awaiting} while no other attempt
+   * waits: with one operation in flight at a time, the common case, an attempt then costs no map insertion and deletion.
+   * Every attempt in the map settled after it.
+   */
+  #first: Awaiting | undefined;
+  readonly #awaiting = new Map<string, Awaiting>();
   readonly #early = new Map<string, Readonly<{ facts: WorkerOperationFacts; at: number }>>();
   readonly #settled = new Map<
     string,
@@ -405,9 +387,14 @@ export class ClientOperationObserver {
    * @param facts - Its facts.
    */
   public receiveFacts(operationId: string, facts: WorkerOperationFacts): void {
-    const waiting = this.#awaiting.get(operationId);
-    if (waiting !== undefined) {
+    let waiting = this.#first;
+    if (waiting?.settled.operationId === operationId) {
+      this.#first = undefined;
+    } else {
+      waiting = this.#awaiting.get(operationId);
       this.#awaiting.delete(operationId);
+    }
+    if (waiting !== undefined) {
       // The armed sweep is left to find nothing: re-arming per attempt would cost a timer per operation.
       this.#emit(joinFacts(waiting.settled, facts, 'missing-timeout'));
       return;
@@ -459,7 +446,8 @@ export class ClientOperationObserver {
   /** The worker is gone: every attempt still waiting for facts is emitted now, synchronously. */
   public workerGone(): void {
     this.#clearTimer();
-    const waiting = [...this.#awaiting.values()];
+    const waiting = [...(this.#first === undefined ? [] : [this.#first]), ...this.#awaiting.values()];
+    this.#first = undefined;
     this.#awaiting.clear();
     this.#early.clear();
     for (const { settled } of waiting) {
@@ -491,9 +479,48 @@ export class ClientOperationObserver {
     }
   }
 
+  /**
+   * Build the observation of a settled attempt; its worker facts and their status are filled in by {@link joinFacts}.
+   *
+   * @param attempt - The attempt.
+   * @param reason - Why it settled.
+   * @param now - The settle time.
+   * @returns The observation, waiting for its facts status.
+   */
+  #observe(attempt: ObservedAttempt, reason: SettleReason, now: number): Settled {
+    const issues = reason.type === 'result' ? reason.result.issues : [];
+    const outcome = outcomeOf(reason);
+    const { adaptations, adaptationsDropped } = adaptationsOf(issues);
+    // Assigned in the observation's key order rather than spread: one spread puts the whole literal on the slow path.
+    const settled: Partial<Settled> = {
+      operationId: attempt.operationId,
+      operation: attempt.operation,
+      kernel: attempt.kernel,
+      outcome,
+      transport: this.#transport,
+      issues: issues.length === 0 ? [] : [...new Set(issues.map((issue) => issue.code))],
+      adaptations,
+      adaptationsDropped,
+      limit: limitOf(outcome, issues),
+      format: attempt.format,
+      plugin: attempt.plugin,
+    };
+    if (attempt.sourceFormat !== undefined) {
+      settled.sourceFormat = attempt.sourceFormat;
+    }
+    if (attempt.entryFormat !== undefined) {
+      settled.entryFormat = attempt.entryFormat;
+    }
+    settled.duration = Math.max(0, now - attempt.started);
+    settled.worker = undefined;
+    settled.facts = 'none';
+    // Every key the type requires is assigned above.
+    return settled as Settled;
+  }
+
   #settle(attempt: ObservedAttempt, reason: SettleReason): void {
     const now = performance.now();
-    const settled = observeAttempt(attempt, reason, { transport: this.#transport, now });
+    const settled = this.#observe(attempt, reason, now);
     const { outcome } = settled;
     if (this.#late.size > 0 && lateOutcomes.has(outcome.type)) {
       this.#settled.set(attempt.operationId, {
@@ -525,10 +552,22 @@ export class ClientOperationObserver {
       this.#emit(joinFacts(settled, early.facts, 'missing-timeout'));
       return;
     }
-    this.#awaiting.set(attempt.operationId, { settled, at: now });
-    if (this.#awaiting.size > awaitingLimit) {
-      const [oldestId, oldest] = this.#awaiting.entries().next().value!;
-      this.#awaiting.delete(oldestId);
+    const waiting = { settled, at: now };
+    const first = this.#first;
+    if (first === undefined ? this.#awaiting.size === 0 : first.settled.operationId === attempt.operationId) {
+      this.#first = waiting;
+    } else {
+      this.#awaiting.set(attempt.operationId, waiting);
+    }
+    if ((this.#first === undefined ? 0 : 1) + this.#awaiting.size > awaitingLimit) {
+      let oldest = this.#first;
+      if (oldest === undefined) {
+        const [oldestId, entry] = this.#awaiting.entries().next().value!;
+        this.#awaiting.delete(oldestId);
+        oldest = entry;
+      } else {
+        this.#first = undefined;
+      }
       this.#emit(joinFacts(oldest.settled, undefined, 'missing-timeout'));
     }
     this.#arm();
@@ -551,6 +590,11 @@ export class ClientOperationObserver {
 
   #sweep(): void {
     const expired = performance.now() - joinWindow;
+    const first = this.#first;
+    if (first !== undefined && first.at <= expired) {
+      this.#first = undefined;
+      this.#emit(joinFacts(first.settled, undefined, 'missing-timeout'));
+    }
     for (const [operationId, waiting] of this.#awaiting) {
       if (waiting.at <= expired) {
         this.#awaiting.delete(operationId);
@@ -562,7 +606,7 @@ export class ClientOperationObserver {
         this.#early.delete(operationId);
       }
     }
-    if (this.#awaiting.size > 0 || this.#early.size > 0) {
+    if (this.#first !== undefined || this.#awaiting.size > 0 || this.#early.size > 0) {
       this.#arm();
     }
   }

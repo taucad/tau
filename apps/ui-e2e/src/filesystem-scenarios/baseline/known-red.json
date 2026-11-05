@@ -1,0 +1,70 @@
+{
+  "description": "Count gates red at HEAD (W0 baseline, Chromium, small and full profiles). A gate leaves this list in the change that turns it green and never re-enters it (I8: count gates never loosen). atHead is the small-profile value recorded at ffaf44beff71.",
+  "gates": [
+    {
+      "id": "S3.lock-sets",
+      "atHead": 2,
+      "limit": 1
+    },
+    {
+      "id": "S3.events",
+      "atHead": 200,
+      "limit": 1
+    },
+    {
+      "id": "S3.renames",
+      "atHead": 100,
+      "limit": 0
+    },
+    {
+      "id": "S5.blob-reads",
+      "atHead": 5326234,
+      "limit": 0
+    },
+    {
+      "id": "S5.compares",
+      "atHead": 101,
+      "limit": 1
+    },
+    {
+      "id": "S8.changesets",
+      "atHead": 50,
+      "limit": 1
+    },
+    {
+      "id": "S8.watch",
+      "atHead": 50,
+      "limit": 1
+    },
+    {
+      "id": "S12.binary-bytes",
+      "atHead": 23592960,
+      "limit": 0
+    },
+    {
+      "id": "S12.walks",
+      "atHead": 320,
+      "limit": 0
+    },
+    {
+      "id": "S13.metadata-bytes",
+      "atHead": 10096967,
+      "limit": 0
+    },
+    {
+      "id": "S16.invalidations",
+      "atHead": 200,
+      "limit": 1
+    },
+    {
+      "id": "S17.lock-wait",
+      "atHead": 483.6,
+      "limit": 50
+    },
+    {
+      "id": "S19.compute-worker",
+      "atHead": 102,
+      "limit": 0
+    }
+  ]
+}

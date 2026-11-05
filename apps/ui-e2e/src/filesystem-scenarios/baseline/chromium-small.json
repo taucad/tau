@@ -1,0 +1,2250 @@
+{
+  "harness": "filesystem-scenarios",
+  "head": "ffaf44beff71",
+  "recordedAt": "2026-11-05T01:54:13.096Z",
+  "profile": {
+    "fixture": {
+      "name": "small",
+      "seed": 25,
+      "scale": 0.05,
+      "files": 100,
+      "bytes": 26214400,
+      "revisions": 200
+    },
+    "browser": {
+      "engine": "chromium",
+      "version": "153.0.0.0"
+    },
+    "server": "none: local OPFS only (server-backed rows are pending)",
+    "network": "none: no request leaves the page (unthrottled)",
+    "storage": "OPFS in a persistent (disk-backed) browser profile"
+  },
+  "runs": 3,
+  "atomicity": [
+    {
+      "engine": "chromium",
+      "writer": "writable",
+      "killedAt": "mid-write",
+      "result": "old",
+      "size": 16777216,
+      "residue": []
+    },
+    {
+      "engine": "chromium",
+      "writer": "writable-close",
+      "killedAt": "closing",
+      "result": "new",
+      "size": 16777216,
+      "residue": []
+    },
+    {
+      "engine": "chromium",
+      "writer": "sync-handle",
+      "killedAt": "mid-write",
+      "result": "partial",
+      "size": 16777216,
+      "residue": []
+    }
+  ],
+  "rows": [
+    {
+      "id": "S1",
+      "title": "Cold open: tree visible",
+      "status": "pending",
+      "model": "Hosted cold open through the revisions host to treeReady.",
+      "pending": "Needs the local API with its object store and database (the api-e2e git tier: apps/api-e2e/src/git/global-setup.ts boots two APIs, two tau-storage workers, MinIO and PostgreSQL from Docker). This container has no Docker daemon, so the W0.1 harness registers the row and its gates without running them.",
+      "profile": {
+        "fixture": {
+          "name": "small",
+          "seed": 25,
+          "scale": 0.05,
+          "files": 100,
+          "bytes": 26214400,
+          "revisions": 200
+        },
+        "browser": {
+          "engine": "chromium",
+          "version": "153.0.0.0"
+        },
+        "server": "none: local OPFS only (server-backed rows are pending)",
+        "network": "none: no request leaves the page (unthrottled)",
+        "storage": "OPFS in a persistent (disk-backed) browser profile"
+      },
+      "samples": [],
+      "metrics": {},
+      "times": [
+        {
+          "metric": "duration",
+          "limit": 3000
+        }
+      ],
+      "gates": [
+        {
+          "id": "S1.blob-reads",
+          "metric": "blobReadsBeforeTree",
+          "limit": 0,
+          "pass": false,
+          "knownRed": false
+        },
+        {
+          "id": "S1.whole-packs",
+          "metric": "wholePacksBeforeTree",
+          "limit": 0,
+          "pass": false,
+          "knownRed": false
+        },
+        {
+          "id": "S1.upload-pack",
+          "metric": "uploadPackOnListing",
+          "limit": 0,
+          "pass": false,
+          "knownRed": false
+        }
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "Cold open: entry model rendered",
+      "status": "pending",
+      "model": "Hosted cold open to the entry model (closure ≤ 10 MB).",
+      "pending": "Needs the local API with its object store and database (the api-e2e git tier: apps/api-e2e/src/git/global-setup.ts boots two APIs, two tau-storage workers, MinIO and PostgreSQL from Docker). This container has no Docker daemon, so the W0.1 harness registers the row and its gates without running them.",
+      "profile": {
+        "fixture": {
+          "name": "small",
+          "seed": 25,
+          "scale": 0.05,
+          "files": 100,
+          "bytes": 26214400,
+          "revisions": 200
+        },
+        "browser": {
+          "engine": "chromium",
+          "version": "153.0.0.0"
+        },
+        "server": "none: local OPFS only (server-backed rows are pending)",
+        "network": "none: no request leaves the page (unthrottled)",
+        "storage": "OPFS in a persistent (disk-backed) browser profile"
+      },
+      "samples": [],
+      "metrics": {},
+      "times": [
+        {
+          "metric": "duration",
+          "limit": 5000
+        }
+      ],
+      "gates": [
+        {
+          "id": "S2.objects",
+          "metric": "objectsBeyondClosure",
+          "limit": 0,
+          "pass": false,
+          "knownRed": false
+        },
+        {
+          "id": "S2.lfs-batches",
+          "metric": "lfsBatchesBeyondCeiling",
+          "limit": 0,
+          "pass": false,
+          "knownRed": false
+        }
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "Cold open: all text materialised",
+      "status": "measured",
+      "model": "apply-tree.ts on an empty checkout: one writeFiles batch to tau-staged siblings, setFileMode per staged file, one bulkMove to the targets; text bytes plus LFS pointers for every binary. Git fetch, inflate and capture are not part of the window.",
+      "profile": {
+        "fixture": {
+          "name": "small",
+          "seed": 25,
+          "scale": 0.05,
+          "files": 100,
+          "bytes": 26214400,
+          "revisions": 200
+        },
+        "browser": {
+          "engine": "chromium",
+          "version": "153.0.0.0"
+        },
+        "server": "none: local OPFS only (server-backed rows are pending)",
+        "network": "none: no request leaves the page (unthrottled)",
+        "storage": "OPFS in a persistent (disk-backed) browser profile"
+      },
+      "samples": [
+        {
+          "duration": 1423.6999999999534,
+          "lockRequests": 6,
+          "lockSets": 2,
+          "lockWait": 2.6000000000931323,
+          "lockWaitMax": 1.1999999999534339,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 100,
+          "syncHandleWriteSessions": 100,
+          "writes": 100,
+          "bytesWritten": 2624717,
+          "renames": 100,
+          "removes": 0,
+          "getFileCalls": 200,
+          "handleLookups": 2084,
+          "blobReads": 350,
+          "bytesRead": 5326234,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 200,
+          "portPosts": 0,
+          "eventsPerPort": 200,
+          "networkRequests": 0,
+          "files": 100,
+          "mainThreadLongTasks": 0
+        },
+        {
+          "duration": 1339.8999999999069,
+          "lockRequests": 6,
+          "lockSets": 2,
+          "lockWait": 2.5,
+          "lockWaitMax": 1.0999999998603016,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 100,
+          "syncHandleWriteSessions": 100,
+          "writes": 100,
+          "bytesWritten": 2624717,
+          "renames": 100,
+          "removes": 0,
+          "getFileCalls": 200,
+          "handleLookups": 2084,
+          "blobReads": 350,
+          "bytesRead": 5326234,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 200,
+          "portPosts": 0,
+          "eventsPerPort": 200,
+          "networkRequests": 0,
+          "files": 100,
+          "mainThreadLongTasks": 0
+        },
+        {
+          "duration": 1514.6999999999534,
+          "lockRequests": 6,
+          "lockSets": 2,
+          "lockWait": 4.100000000093132,
+          "lockWaitMax": 2,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 100,
+          "syncHandleWriteSessions": 100,
+          "writes": 100,
+          "bytesWritten": 2624717,
+          "renames": 100,
+          "removes": 0,
+          "getFileCalls": 200,
+          "handleLookups": 2084,
+          "blobReads": 350,
+          "bytesRead": 5326234,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 200,
+          "portPosts": 0,
+          "eventsPerPort": 200,
+          "networkRequests": 0,
+          "files": 100,
+          "mainThreadLongTasks": 0
+        }
+      ],
+      "metrics": {
+        "blobReads": 350,
+        "broadcastPosts": 200,
+        "bytesHashed": 0,
+        "bytesRead": 5326234,
+        "bytesWritten": 2624717,
+        "digests": 0,
+        "duration": 1514.6999999999534,
+        "eventsPerPort": 200,
+        "files": 100,
+        "getFileCalls": 200,
+        "handleLookups": 2084,
+        "lockRequests": 6,
+        "lockSets": 2,
+        "lockWait": 4.100000000093132,
+        "lockWaitMax": 2,
+        "mainThreadLongTasks": 0,
+        "networkRequests": 0,
+        "portPosts": 0,
+        "removes": 0,
+        "renames": 100,
+        "syncHandleOpens": 100,
+        "syncHandleWriteSessions": 100,
+        "writableCommits": 0,
+        "writableOpens": 0,
+        "writes": 100
+      },
+      "times": [
+        {
+          "metric": "duration",
+          "value": 1514.6999999999534,
+          "limit": 15000,
+          "met": true
+        }
+      ],
+      "gates": [
+        {
+          "id": "S3.lock-sets",
+          "metric": "lockSets",
+          "value": 2,
+          "limit": 1,
+          "pass": false,
+          "knownRed": true
+        },
+        {
+          "id": "S3.events",
+          "metric": "eventsPerPort",
+          "value": 200,
+          "limit": 1,
+          "pass": false,
+          "knownRed": true
+        },
+        {
+          "id": "S3.writes",
+          "metric": "writes",
+          "value": 100,
+          "limit": 100,
+          "pass": true,
+          "knownRed": false
+        },
+        {
+          "id": "S3.renames",
+          "metric": "renames",
+          "value": 100,
+          "limit": 0,
+          "pass": false,
+          "knownRed": true
+        }
+      ],
+      "spans": {
+        "durationMilliseconds": 1665.3999999999069,
+        "spans": {},
+        "counters": {},
+        "gauges": {}
+      }
+    },
+    {
+      "id": "S4",
+      "title": "Cold open: LFS fill",
+      "status": "pending",
+      "model": "Large-object fill of the 450 MB from the hosted LFS store.",
+      "pending": "Needs the local API with its object store and database (the api-e2e git tier: apps/api-e2e/src/git/global-setup.ts boots two APIs, two tau-storage workers, MinIO and PostgreSQL from Docker). This container has no Docker daemon, so the W0.1 harness registers the row and its gates without running them.",
+      "profile": {
+        "fixture": {
+          "name": "small",
+          "seed": 25,
+          "scale": 0.05,
+          "files": 100,
+          "bytes": 26214400,
+          "revisions": 200
+        },
+        "browser": {
+          "engine": "chromium",
+          "version": "153.0.0.0"
+        },
+        "server": "none: local OPFS only (server-backed rows are pending)",
+        "network": "none: no request leaves the page (unthrottled)",
+        "storage": "OPFS in a persistent (disk-backed) browser profile"
+      },
+      "samples": [],
+      "metrics": {},
+      "times": [
+        {
+          "metric": "duration",
+          "limit": null
+        }
+      ],
+      "gates": [
+        {
+          "id": "S4.downloads",
+          "metric": "downloadPasses",
+          "limit": 1,
+          "pass": false,
+          "knownRed": false
+        },
+        {
+          "id": "S4.writes",
+          "metric": "writePasses",
+          "limit": 1,
+          "pass": false,
+          "knownRed": false
+        },
+        {
+          "id": "S4.hashes",
+          "metric": "hashPasses",
+          "limit": 1,
+          "pass": false,
+          "knownRed": false
+        },
+        {
+          "id": "S4.read-back",
+          "metric": "readBackPasses",
+          "limit": 1,
+          "pass": false,
+          "knownRed": false
+        }
+      ]
+    },
+    {
+      "id": "S5",
+      "title": "Warm open to render",
+      "status": "measured",
+      "model": "A fresh authority over the populated project (a reload): one statTree listing, then one exact stat per file as the per-file status compare. The revisions capture memo is not modelled.",
+      "profile": {
+        "fixture": {
+          "name": "small",
+          "seed": 25,
+          "scale": 0.05,
+          "files": 100,
+          "bytes": 26214400,
+          "revisions": 200
+        },
+        "browser": {
+          "engine": "chromium",
+          "version": "153.0.0.0"
+        },
+        "server": "none: local OPFS only (server-backed rows are pending)",
+        "network": "none: no request leaves the page (unthrottled)",
+        "storage": "OPFS in a persistent (disk-backed) browser profile"
+      },
+      "samples": [
+        {
+          "duration": 508.4000000001397,
+          "lockRequests": 0,
+          "lockSets": 0,
+          "lockWait": 0,
+          "lockWaitMax": 0,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 0,
+          "syncHandleWriteSessions": 0,
+          "writes": 0,
+          "bytesWritten": 0,
+          "renames": 0,
+          "removes": 0,
+          "getFileCalls": 200,
+          "handleLookups": 259,
+          "blobReads": 350,
+          "bytesRead": 5326234,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 0,
+          "portPosts": 0,
+          "eventsPerPort": 0,
+          "networkRequests": 0,
+          "listed": 100,
+          "files": 100,
+          "metadataRequests": 101
+        },
+        {
+          "duration": 461.80000000004657,
+          "lockRequests": 0,
+          "lockSets": 0,
+          "lockWait": 0,
+          "lockWaitMax": 0,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 0,
+          "syncHandleWriteSessions": 0,
+          "writes": 0,
+          "bytesWritten": 0,
+          "renames": 0,
+          "removes": 0,
+          "getFileCalls": 200,
+          "handleLookups": 259,
+          "blobReads": 350,
+          "bytesRead": 5326234,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 0,
+          "portPosts": 0,
+          "eventsPerPort": 0,
+          "networkRequests": 0,
+          "listed": 100,
+          "files": 100,
+          "metadataRequests": 101
+        },
+        {
+          "duration": 478.60000000009313,
+          "lockRequests": 0,
+          "lockSets": 0,
+          "lockWait": 0,
+          "lockWaitMax": 0,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 0,
+          "syncHandleWriteSessions": 0,
+          "writes": 0,
+          "bytesWritten": 0,
+          "renames": 0,
+          "removes": 0,
+          "getFileCalls": 200,
+          "handleLookups": 259,
+          "blobReads": 350,
+          "bytesRead": 5326234,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 0,
+          "portPosts": 0,
+          "eventsPerPort": 0,
+          "networkRequests": 0,
+          "listed": 100,
+          "files": 100,
+          "metadataRequests": 101
+        }
+      ],
+      "metrics": {
+        "blobReads": 350,
+        "broadcastPosts": 0,
+        "bytesHashed": 0,
+        "bytesRead": 5326234,
+        "bytesWritten": 0,
+        "digests": 0,
+        "duration": 508.4000000001397,
+        "eventsPerPort": 0,
+        "files": 100,
+        "getFileCalls": 200,
+        "handleLookups": 259,
+        "listed": 100,
+        "lockRequests": 0,
+        "lockSets": 0,
+        "lockWait": 0,
+        "lockWaitMax": 0,
+        "metadataRequests": 101,
+        "networkRequests": 0,
+        "portPosts": 0,
+        "removes": 0,
+        "renames": 0,
+        "syncHandleOpens": 0,
+        "syncHandleWriteSessions": 0,
+        "writableCommits": 0,
+        "writableOpens": 0,
+        "writes": 0
+      },
+      "times": [
+        {
+          "metric": "duration",
+          "value": 508.4000000001397,
+          "limit": 2000,
+          "met": true
+        }
+      ],
+      "gates": [
+        {
+          "id": "S5.network",
+          "metric": "networkRequests",
+          "value": 0,
+          "limit": 0,
+          "pass": true,
+          "knownRed": false
+        },
+        {
+          "id": "S5.blob-reads",
+          "metric": "bytesRead",
+          "value": 5326234,
+          "limit": 0,
+          "pass": false,
+          "knownRed": true
+        },
+        {
+          "id": "S5.compares",
+          "metric": "metadataRequests",
+          "value": 101,
+          "limit": 1,
+          "pass": false,
+          "knownRed": true
+        }
+      ],
+      "spans": {
+        "durationMilliseconds": 629.1000000000931,
+        "spans": {},
+        "counters": {
+          "listing.bytes": {
+            "total": 2624717,
+            "peakPerSecond": 2624717
+          }
+        },
+        "gauges": {}
+      }
+    },
+    {
+      "id": "S6",
+      "title": "Import 500 MB",
+      "status": "measured",
+      "model": "The import's durable step: commitPendingProjectDirectory with the whole payload (every text file and every binary's bytes). Archive decode and the IndexedDB journal are not modelled.",
+      "profile": {
+        "fixture": {
+          "name": "small",
+          "seed": 25,
+          "scale": 0.05,
+          "files": 100,
+          "bytes": 26214400,
+          "revisions": 200
+        },
+        "browser": {
+          "engine": "chromium",
+          "version": "153.0.0.0"
+        },
+        "server": "none: local OPFS only (server-backed rows are pending)",
+        "network": "none: no request leaves the page (unthrottled)",
+        "storage": "OPFS in a persistent (disk-backed) browser profile"
+      },
+      "samples": [
+        {
+          "duration": 574.5999999998603,
+          "lockRequests": 2,
+          "lockSets": 1,
+          "lockWait": 1.3999999999068677,
+          "lockWaitMax": 1.1999999999534339,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 102,
+          "syncHandleWriteSessions": 102,
+          "writes": 102,
+          "bytesWritten": 26214642,
+          "renames": 0,
+          "removes": 0,
+          "getFileCalls": 2,
+          "handleLookups": 759,
+          "blobReads": 2,
+          "bytesRead": 242,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 1,
+          "portPosts": 0,
+          "eventsPerPort": 0,
+          "networkRequests": 0,
+          "payloadBytes": 26214400,
+          "mainThreadLongTasks": 0,
+          "durableWriteRatio": 1.0000092315673828,
+          "hashPasses": 0
+        },
+        {
+          "duration": 572.4000000001397,
+          "lockRequests": 2,
+          "lockSets": 1,
+          "lockWait": 2,
+          "lockWaitMax": 1.4000000001396984,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 102,
+          "syncHandleWriteSessions": 102,
+          "writes": 102,
+          "bytesWritten": 26214642,
+          "renames": 0,
+          "removes": 0,
+          "getFileCalls": 2,
+          "handleLookups": 759,
+          "blobReads": 2,
+          "bytesRead": 242,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 1,
+          "portPosts": 0,
+          "eventsPerPort": 0,
+          "networkRequests": 0,
+          "payloadBytes": 26214400,
+          "mainThreadLongTasks": 0,
+          "durableWriteRatio": 1.0000092315673828,
+          "hashPasses": 0
+        },
+        {
+          "duration": 625.8999999999069,
+          "lockRequests": 2,
+          "lockSets": 1,
+          "lockWait": 1.7999999998137355,
+          "lockWaitMax": 1.3999999999068677,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 102,
+          "syncHandleWriteSessions": 102,
+          "writes": 102,
+          "bytesWritten": 26214642,
+          "renames": 0,
+          "removes": 0,
+          "getFileCalls": 2,
+          "handleLookups": 759,
+          "blobReads": 2,
+          "bytesRead": 242,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 1,
+          "portPosts": 0,
+          "eventsPerPort": 0,
+          "networkRequests": 0,
+          "payloadBytes": 26214400,
+          "mainThreadLongTasks": 0,
+          "durableWriteRatio": 1.0000092315673828,
+          "hashPasses": 0
+        }
+      ],
+      "metrics": {
+        "blobReads": 2,
+        "broadcastPosts": 1,
+        "bytesHashed": 0,
+        "bytesRead": 242,
+        "bytesWritten": 26214642,
+        "digests": 0,
+        "durableWriteRatio": 1.0000092315673828,
+        "duration": 625.8999999999069,
+        "eventsPerPort": 0,
+        "getFileCalls": 2,
+        "handleLookups": 759,
+        "hashPasses": 0,
+        "lockRequests": 2,
+        "lockSets": 1,
+        "lockWait": 2,
+        "lockWaitMax": 1.4000000001396984,
+        "mainThreadLongTasks": 0,
+        "networkRequests": 0,
+        "payloadBytes": 26214400,
+        "portPosts": 0,
+        "removes": 0,
+        "renames": 0,
+        "syncHandleOpens": 102,
+        "syncHandleWriteSessions": 102,
+        "writableCommits": 0,
+        "writableOpens": 0,
+        "writes": 102
+      },
+      "times": [
+        {
+          "metric": "duration",
+          "value": 625.8999999999069,
+          "limit": 20000,
+          "met": true
+        }
+      ],
+      "gates": [
+        {
+          "id": "S6.durable-writes",
+          "metric": "durableWriteRatio",
+          "value": 1.0000092315673828,
+          "limit": 1.01,
+          "pass": true,
+          "knownRed": false
+        },
+        {
+          "id": "S6.hash-passes",
+          "metric": "hashPasses",
+          "value": 0,
+          "limit": 1,
+          "pass": true,
+          "knownRed": false
+        }
+      ],
+      "spans": {
+        "durationMilliseconds": 776.6000000000931,
+        "spans": {},
+        "counters": {},
+        "gauges": {}
+      }
+    },
+    {
+      "id": "S7",
+      "title": "Save one 1 MB text file",
+      "status": "measured",
+      "model": "Rooted writeFile replacing an existing 1 MiB text file, as an editor flush does.",
+      "profile": {
+        "fixture": {
+          "name": "small",
+          "seed": 25,
+          "scale": 0.05,
+          "files": 100,
+          "bytes": 26214400,
+          "revisions": 200
+        },
+        "browser": {
+          "engine": "chromium",
+          "version": "153.0.0.0"
+        },
+        "server": "none: local OPFS only (server-backed rows are pending)",
+        "network": "none: no request leaves the page (unthrottled)",
+        "storage": "OPFS in a persistent (disk-backed) browser profile"
+      },
+      "samples": [
+        {
+          "duration": 29.9000000001397,
+          "lockRequests": 7,
+          "lockSets": 1,
+          "lockWait": 6.699999999953434,
+          "lockWaitMax": 3.1000000000931323,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 1,
+          "syncHandleWriteSessions": 1,
+          "writes": 1,
+          "bytesWritten": 1048576,
+          "renames": 0,
+          "removes": 0,
+          "getFileCalls": 0,
+          "handleLookups": 3,
+          "blobReads": 0,
+          "bytesRead": 0,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 1,
+          "portPosts": 0,
+          "eventsPerPort": 1,
+          "networkRequests": 0,
+          "savedBytes": 1048576,
+          "wholeFileCopies": 0
+        },
+        {
+          "duration": 13,
+          "lockRequests": 7,
+          "lockSets": 1,
+          "lockWait": 2.5,
+          "lockWaitMax": 1.3000000000465661,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 1,
+          "syncHandleWriteSessions": 1,
+          "writes": 1,
+          "bytesWritten": 1048576,
+          "renames": 0,
+          "removes": 0,
+          "getFileCalls": 0,
+          "handleLookups": 3,
+          "blobReads": 0,
+          "bytesRead": 0,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 1,
+          "portPosts": 0,
+          "eventsPerPort": 1,
+          "networkRequests": 0,
+          "savedBytes": 1048576,
+          "wholeFileCopies": 0
+        },
+        {
+          "duration": 12.799999999813735,
+          "lockRequests": 7,
+          "lockSets": 1,
+          "lockWait": 2.6000000000931323,
+          "lockWaitMax": 1.3000000000465661,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 1,
+          "syncHandleWriteSessions": 1,
+          "writes": 1,
+          "bytesWritten": 1048576,
+          "renames": 0,
+          "removes": 0,
+          "getFileCalls": 0,
+          "handleLookups": 3,
+          "blobReads": 0,
+          "bytesRead": 0,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 1,
+          "portPosts": 0,
+          "eventsPerPort": 1,
+          "networkRequests": 0,
+          "savedBytes": 1048576,
+          "wholeFileCopies": 0
+        }
+      ],
+      "metrics": {
+        "blobReads": 0,
+        "broadcastPosts": 1,
+        "bytesHashed": 0,
+        "bytesRead": 0,
+        "bytesWritten": 1048576,
+        "digests": 0,
+        "duration": 29.9000000001397,
+        "eventsPerPort": 1,
+        "getFileCalls": 0,
+        "handleLookups": 3,
+        "lockRequests": 7,
+        "lockSets": 1,
+        "lockWait": 6.699999999953434,
+        "lockWaitMax": 3.1000000000931323,
+        "networkRequests": 0,
+        "portPosts": 0,
+        "removes": 0,
+        "renames": 0,
+        "savedBytes": 1048576,
+        "syncHandleOpens": 1,
+        "syncHandleWriteSessions": 1,
+        "wholeFileCopies": 0,
+        "writableCommits": 0,
+        "writableOpens": 0,
+        "writes": 1
+      },
+      "times": [
+        {
+          "metric": "duration",
+          "value": 29.9000000001397,
+          "limit": 100,
+          "met": true
+        }
+      ],
+      "gates": [
+        {
+          "id": "S7.changesets",
+          "metric": "lockSets",
+          "value": 1,
+          "limit": 1,
+          "pass": true,
+          "knownRed": false
+        },
+        {
+          "id": "S7.events",
+          "metric": "eventsPerPort",
+          "value": 1,
+          "limit": 1,
+          "pass": true,
+          "knownRed": false
+        },
+        {
+          "id": "S7.copies",
+          "metric": "wholeFileCopies",
+          "value": 0,
+          "limit": 0,
+          "pass": true,
+          "knownRed": false
+        }
+      ],
+      "spans": {
+        "durationMilliseconds": 163.0999999998603,
+        "spans": {},
+        "counters": {},
+        "gauges": {}
+      }
+    },
+    {
+      "id": "S8",
+      "title": "Agent turn writing 50 files",
+      "status": "measured",
+      "model": "Fifty rooted writeFile calls in order, as the agent's write tool issues them; one recursive watch counts deliveries.",
+      "profile": {
+        "fixture": {
+          "name": "small",
+          "seed": 25,
+          "scale": 0.05,
+          "files": 100,
+          "bytes": 26214400,
+          "revisions": 200
+        },
+        "browser": {
+          "engine": "chromium",
+          "version": "153.0.0.0"
+        },
+        "server": "none: local OPFS only (server-backed rows are pending)",
+        "network": "none: no request leaves the page (unthrottled)",
+        "storage": "OPFS in a persistent (disk-backed) browser profile"
+      },
+      "samples": [
+        {
+          "duration": 262.0999999998603,
+          "lockRequests": 450,
+          "lockSets": 50,
+          "lockWait": 64.30000000004657,
+          "lockWaitMax": 0.8000000000465661,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 50,
+          "syncHandleWriteSessions": 50,
+          "writes": 50,
+          "bytesWritten": 102400,
+          "renames": 0,
+          "removes": 0,
+          "getFileCalls": 0,
+          "handleLookups": 252,
+          "blobReads": 0,
+          "bytesRead": 0,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 50,
+          "portPosts": 0,
+          "eventsPerPort": 50,
+          "networkRequests": 0,
+          "watchDeliveries": 50
+        },
+        {
+          "duration": 241.10000000009313,
+          "lockRequests": 450,
+          "lockSets": 50,
+          "lockWait": 61.09999999892898,
+          "lockWaitMax": 1.8000000000465661,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 50,
+          "syncHandleWriteSessions": 50,
+          "writes": 50,
+          "bytesWritten": 102400,
+          "renames": 0,
+          "removes": 0,
+          "getFileCalls": 0,
+          "handleLookups": 251,
+          "blobReads": 0,
+          "bytesRead": 0,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 50,
+          "portPosts": 0,
+          "eventsPerPort": 50,
+          "networkRequests": 0,
+          "watchDeliveries": 50
+        },
+        {
+          "duration": 257.29999999981374,
+          "lockRequests": 450,
+          "lockSets": 50,
+          "lockWait": 63.3000000002794,
+          "lockWaitMax": 1,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 50,
+          "syncHandleWriteSessions": 50,
+          "writes": 50,
+          "bytesWritten": 102400,
+          "renames": 0,
+          "removes": 0,
+          "getFileCalls": 0,
+          "handleLookups": 251,
+          "blobReads": 0,
+          "bytesRead": 0,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 50,
+          "portPosts": 0,
+          "eventsPerPort": 50,
+          "networkRequests": 0,
+          "watchDeliveries": 50
+        }
+      ],
+      "metrics": {
+        "blobReads": 0,
+        "broadcastPosts": 50,
+        "bytesHashed": 0,
+        "bytesRead": 0,
+        "bytesWritten": 102400,
+        "digests": 0,
+        "duration": 262.0999999998603,
+        "eventsPerPort": 50,
+        "getFileCalls": 0,
+        "handleLookups": 252,
+        "lockRequests": 450,
+        "lockSets": 50,
+        "lockWait": 64.30000000004657,
+        "lockWaitMax": 1.8000000000465661,
+        "networkRequests": 0,
+        "portPosts": 0,
+        "removes": 0,
+        "renames": 0,
+        "syncHandleOpens": 50,
+        "syncHandleWriteSessions": 50,
+        "watchDeliveries": 50,
+        "writableCommits": 0,
+        "writableOpens": 0,
+        "writes": 50
+      },
+      "times": [
+        {
+          "metric": "duration",
+          "value": 262.0999999998603,
+          "limit": 500,
+          "met": true
+        }
+      ],
+      "gates": [
+        {
+          "id": "S8.changesets",
+          "metric": "lockSets",
+          "value": 50,
+          "limit": 1,
+          "pass": false,
+          "knownRed": true
+        },
+        {
+          "id": "S8.watch",
+          "metric": "watchDeliveries",
+          "value": 50,
+          "limit": 1,
+          "pass": false,
+          "knownRed": true
+        }
+      ],
+      "spans": {
+        "durationMilliseconds": 407.5999999998603,
+        "spans": {},
+        "counters": {},
+        "gauges": {}
+      }
+    },
+    {
+      "id": "S9",
+      "title": "Push after one edit",
+      "status": "pending",
+      "model": "Push of one edited file to the warm hosted remote.",
+      "pending": "Needs the local API with its object store and database (the api-e2e git tier: apps/api-e2e/src/git/global-setup.ts boots two APIs, two tau-storage workers, MinIO and PostgreSQL from Docker). This container has no Docker daemon, so the W0.1 harness registers the row and its gates without running them.",
+      "profile": {
+        "fixture": {
+          "name": "small",
+          "seed": 25,
+          "scale": 0.05,
+          "files": 100,
+          "bytes": 26214400,
+          "revisions": 200
+        },
+        "browser": {
+          "engine": "chromium",
+          "version": "153.0.0.0"
+        },
+        "server": "none: local OPFS only (server-backed rows are pending)",
+        "network": "none: no request leaves the page (unthrottled)",
+        "storage": "OPFS in a persistent (disk-backed) browser profile"
+      },
+      "samples": [],
+      "metrics": {},
+      "times": [
+        {
+          "metric": "duration",
+          "limit": 3000
+        }
+      ],
+      "gates": [
+        {
+          "id": "S9.unchanged-blobs",
+          "metric": "unchangedBlobReads",
+          "limit": 0,
+          "pass": false,
+          "knownRed": false
+        },
+        {
+          "id": "S9.lfs-batch",
+          "metric": "lfsBatchOldOids",
+          "limit": 0,
+          "pass": false,
+          "knownRed": false
+        },
+        {
+          "id": "S9.info-refs",
+          "metric": "infoRefs",
+          "limit": 1,
+          "pass": false,
+          "knownRed": false
+        }
+      ]
+    },
+    {
+      "id": "S10",
+      "title": "Pull a one-file remote change",
+      "status": "pending",
+      "model": "Pull of one remote edit from the warm hosted remote.",
+      "pending": "Needs the local API with its object store and database (the api-e2e git tier: apps/api-e2e/src/git/global-setup.ts boots two APIs, two tau-storage workers, MinIO and PostgreSQL from Docker). This container has no Docker daemon, so the W0.1 harness registers the row and its gates without running them.",
+      "profile": {
+        "fixture": {
+          "name": "small",
+          "seed": 25,
+          "scale": 0.05,
+          "files": 100,
+          "bytes": 26214400,
+          "revisions": 200
+        },
+        "browser": {
+          "engine": "chromium",
+          "version": "153.0.0.0"
+        },
+        "server": "none: local OPFS only (server-backed rows are pending)",
+        "network": "none: no request leaves the page (unthrottled)",
+        "storage": "OPFS in a persistent (disk-backed) browser profile"
+      },
+      "samples": [],
+      "metrics": {},
+      "times": [
+        {
+          "metric": "duration",
+          "limit": 2000
+        }
+      ],
+      "gates": [
+        {
+          "id": "S10.files",
+          "metric": "filesTouched",
+          "limit": 1,
+          "pass": false,
+          "knownRed": false
+        },
+        {
+          "id": "S10.captures",
+          "metric": "captures",
+          "limit": 0,
+          "pass": false,
+          "knownRed": false
+        }
+      ]
+    },
+    {
+      "id": "S11",
+      "title": "Revision compare / switch",
+      "status": "pending",
+      "model": "Compare one file across two of the fixture's 200 revisions.",
+      "pending": "Needs a git object store holding the fixture's 200 revisions, built through the revision port; @taucad/revisions is not a dependency ui-e2e resolves, so wiring it is a follow-up (W0.2) rather than part of this harness.",
+      "profile": {
+        "fixture": {
+          "name": "small",
+          "seed": 25,
+          "scale": 0.05,
+          "files": 100,
+          "bytes": 26214400,
+          "revisions": 200
+        },
+        "browser": {
+          "engine": "chromium",
+          "version": "153.0.0.0"
+        },
+        "server": "none: local OPFS only (server-backed rows are pending)",
+        "network": "none: no request leaves the page (unthrottled)",
+        "storage": "OPFS in a persistent (disk-backed) browser profile"
+      },
+      "samples": [],
+      "metrics": {},
+      "times": [
+        {
+          "metric": "duration",
+          "limit": 1000
+        }
+      ],
+      "gates": [
+        {
+          "id": "S11.objects",
+          "metric": "objectsBeyondPaths",
+          "limit": 0,
+          "pass": false,
+          "knownRed": false
+        }
+      ]
+    },
+    {
+      "id": "S12",
+      "title": "Agent grep / glob over the project",
+      "status": "measured",
+      "model": "The chat RPC handlers handleGrep (fixture marker, whole project) and handleGlobSearch ('**/*.ts') over a composed agent view of the rooted project, mapped as agent-tools' provider filesystem maps it; runs on the authority's thread.",
+      "profile": {
+        "fixture": {
+          "name": "small",
+          "seed": 25,
+          "scale": 0.05,
+          "files": 100,
+          "bytes": 26214400,
+          "revisions": 200
+        },
+        "browser": {
+          "engine": "chromium",
+          "version": "153.0.0.0"
+        },
+        "server": "none: local OPFS only (server-backed rows are pending)",
+        "network": "none: no request leaves the page (unthrottled)",
+        "storage": "OPFS in a persistent (disk-backed) browser profile"
+      },
+      "samples": [
+        {
+          "duration": 1166.1000000000931,
+          "lockRequests": 0,
+          "lockSets": 0,
+          "lockWait": 0,
+          "lockWaitMax": 0,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 0,
+          "syncHandleWriteSessions": 0,
+          "writes": 0,
+          "bytesWritten": 0,
+          "renames": 0,
+          "removes": 0,
+          "getFileCalls": 305,
+          "handleLookups": 261,
+          "blobReads": 459,
+          "bytesRead": 32154027,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 0,
+          "portPosts": 0,
+          "eventsPerPort": 0,
+          "networkRequests": 0,
+          "grepDuration": 849.1000000000931,
+          "globDuration": 316.0999999998603,
+          "binaryBytesRead": 23592960,
+          "textBytesRead": 2621627,
+          "walkCalls": 320,
+          "authorityReads": 101
+        },
+        {
+          "duration": 1093.3000000000466,
+          "lockRequests": 0,
+          "lockSets": 0,
+          "lockWait": 0,
+          "lockWaitMax": 0,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 0,
+          "syncHandleWriteSessions": 0,
+          "writes": 0,
+          "bytesWritten": 0,
+          "renames": 0,
+          "removes": 0,
+          "getFileCalls": 305,
+          "handleLookups": 101,
+          "blobReads": 459,
+          "bytesRead": 32154027,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 0,
+          "portPosts": 0,
+          "eventsPerPort": 0,
+          "networkRequests": 0,
+          "grepDuration": 774.1000000000931,
+          "globDuration": 319.10000000009313,
+          "binaryBytesRead": 23592960,
+          "textBytesRead": 2621627,
+          "walkCalls": 320,
+          "authorityReads": 101
+        },
+        {
+          "duration": 1094.3000000000466,
+          "lockRequests": 0,
+          "lockSets": 0,
+          "lockWait": 0,
+          "lockWaitMax": 0,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 0,
+          "syncHandleWriteSessions": 0,
+          "writes": 0,
+          "bytesWritten": 0,
+          "renames": 0,
+          "removes": 0,
+          "getFileCalls": 305,
+          "handleLookups": 101,
+          "blobReads": 459,
+          "bytesRead": 32154027,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 0,
+          "portPosts": 0,
+          "eventsPerPort": 0,
+          "networkRequests": 0,
+          "grepDuration": 753.4000000001397,
+          "globDuration": 340.80000000004657,
+          "binaryBytesRead": 23592960,
+          "textBytesRead": 2621627,
+          "walkCalls": 320,
+          "authorityReads": 101
+        }
+      ],
+      "metrics": {
+        "authorityReads": 101,
+        "binaryBytesRead": 23592960,
+        "blobReads": 459,
+        "broadcastPosts": 0,
+        "bytesHashed": 0,
+        "bytesRead": 32154027,
+        "bytesWritten": 0,
+        "digests": 0,
+        "duration": 1166.1000000000931,
+        "eventsPerPort": 0,
+        "getFileCalls": 305,
+        "globDuration": 340.80000000004657,
+        "grepDuration": 849.1000000000931,
+        "handleLookups": 261,
+        "lockRequests": 0,
+        "lockSets": 0,
+        "lockWait": 0,
+        "lockWaitMax": 0,
+        "networkRequests": 0,
+        "portPosts": 0,
+        "removes": 0,
+        "renames": 0,
+        "syncHandleOpens": 0,
+        "syncHandleWriteSessions": 0,
+        "textBytesRead": 2621627,
+        "walkCalls": 320,
+        "writableCommits": 0,
+        "writableOpens": 0,
+        "writes": 0
+      },
+      "times": [
+        {
+          "metric": "grepDuration",
+          "value": 849.1000000000931,
+          "limit": 2000,
+          "met": true
+        },
+        {
+          "metric": "globDuration",
+          "value": 340.80000000004657,
+          "limit": 200,
+          "met": false
+        }
+      ],
+      "gates": [
+        {
+          "id": "S12.binary-bytes",
+          "metric": "binaryBytesRead",
+          "value": 23592960,
+          "limit": 0,
+          "pass": false,
+          "knownRed": true
+        },
+        {
+          "id": "S12.walks",
+          "metric": "walkCalls",
+          "value": 320,
+          "limit": 0,
+          "pass": false,
+          "knownRed": true
+        }
+      ],
+      "spans": {
+        "durationMilliseconds": 1244.6999999999534,
+        "spans": {},
+        "counters": {
+          "listing.bytes": {
+            "total": 5860592,
+            "peakPerSecond": 5364324
+          }
+        },
+        "gauges": {}
+      }
+    },
+    {
+      "id": "S13",
+      "title": "LSP module resolution, 3,000 probes",
+      "status": "measured",
+      "model": "1,000 specifiers × up to three candidates (.ts, .tsx, /index.ts): rooted exists, then stat on a hit.",
+      "profile": {
+        "fixture": {
+          "name": "small",
+          "seed": 25,
+          "scale": 0.05,
+          "files": 100,
+          "bytes": 26214400,
+          "revisions": 200
+        },
+        "browser": {
+          "engine": "chromium",
+          "version": "153.0.0.0"
+        },
+        "server": "none: local OPFS only (server-backed rows are pending)",
+        "network": "none: no request leaves the page (unthrottled)",
+        "storage": "OPFS in a persistent (disk-backed) browser profile"
+      },
+      "samples": [
+        {
+          "duration": 2138.6999999999534,
+          "lockRequests": 0,
+          "lockSets": 0,
+          "lockWait": 0,
+          "lockWaitMax": 0,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 0,
+          "syncHandleWriteSessions": 0,
+          "writes": 0,
+          "bytesWritten": 0,
+          "renames": 0,
+          "removes": 0,
+          "getFileCalls": 500,
+          "handleLookups": 2500,
+          "blobReads": 1000,
+          "bytesRead": 10096967,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 0,
+          "portPosts": 0,
+          "eventsPerPort": 0,
+          "networkRequests": 0,
+          "probes": 2000,
+          "hits": 500
+        },
+        {
+          "duration": 2230.8000000000466,
+          "lockRequests": 0,
+          "lockSets": 0,
+          "lockWait": 0,
+          "lockWaitMax": 0,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 0,
+          "syncHandleWriteSessions": 0,
+          "writes": 0,
+          "bytesWritten": 0,
+          "renames": 0,
+          "removes": 0,
+          "getFileCalls": 500,
+          "handleLookups": 2500,
+          "blobReads": 1000,
+          "bytesRead": 10096967,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 0,
+          "portPosts": 0,
+          "eventsPerPort": 0,
+          "networkRequests": 0,
+          "probes": 2000,
+          "hits": 500
+        },
+        {
+          "duration": 2156.3000000000466,
+          "lockRequests": 0,
+          "lockSets": 0,
+          "lockWait": 0,
+          "lockWaitMax": 0,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 0,
+          "syncHandleWriteSessions": 0,
+          "writes": 0,
+          "bytesWritten": 0,
+          "renames": 0,
+          "removes": 0,
+          "getFileCalls": 500,
+          "handleLookups": 2500,
+          "blobReads": 1000,
+          "bytesRead": 10096967,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 0,
+          "portPosts": 0,
+          "eventsPerPort": 0,
+          "networkRequests": 0,
+          "probes": 2000,
+          "hits": 500
+        }
+      ],
+      "metrics": {
+        "blobReads": 1000,
+        "broadcastPosts": 0,
+        "bytesHashed": 0,
+        "bytesRead": 10096967,
+        "bytesWritten": 0,
+        "digests": 0,
+        "duration": 2230.8000000000466,
+        "eventsPerPort": 0,
+        "getFileCalls": 500,
+        "handleLookups": 2500,
+        "hits": 500,
+        "lockRequests": 0,
+        "lockSets": 0,
+        "lockWait": 0,
+        "lockWaitMax": 0,
+        "networkRequests": 0,
+        "portPosts": 0,
+        "probes": 2000,
+        "removes": 0,
+        "renames": 0,
+        "syncHandleOpens": 0,
+        "syncHandleWriteSessions": 0,
+        "writableCommits": 0,
+        "writableOpens": 0,
+        "writes": 0
+      },
+      "times": [
+        {
+          "metric": "duration",
+          "value": 2230.8000000000466,
+          "limit": 300,
+          "met": false
+        }
+      ],
+      "gates": [
+        {
+          "id": "S13.metadata-bytes",
+          "metric": "bytesRead",
+          "value": 10096967,
+          "limit": 0,
+          "pass": false,
+          "knownRed": true
+        }
+      ],
+      "spans": {
+        "durationMilliseconds": 2306.600000000093,
+        "spans": {},
+        "counters": {
+          "listing.bytes": {
+            "total": 181076,
+            "peakPerSecond": 181076
+          }
+        },
+        "gauges": {}
+      }
+    },
+    {
+      "id": "S14",
+      "title": "Export 500 MB project zip",
+      "status": "pending",
+      "model": "content-ops archive of the whole project.",
+      "pending": "Owned by W12 (editor/export); not in the W0.1 runner set. The fixture and worker already support it.",
+      "profile": {
+        "fixture": {
+          "name": "small",
+          "seed": 25,
+          "scale": 0.05,
+          "files": 100,
+          "bytes": 26214400,
+          "revisions": 200
+        },
+        "browser": {
+          "engine": "chromium",
+          "version": "153.0.0.0"
+        },
+        "server": "none: local OPFS only (server-backed rows are pending)",
+        "network": "none: no request leaves the page (unthrottled)",
+        "storage": "OPFS in a persistent (disk-backed) browser profile"
+      },
+      "samples": [],
+      "metrics": {},
+      "times": [
+        {
+          "metric": "duration",
+          "limit": null
+        }
+      ],
+      "gates": []
+    },
+    {
+      "id": "S15",
+      "title": "Desktop cold open / save",
+      "status": "pending",
+      "model": "Desktop node provider and native git.",
+      "pending": "Needs the desktop harness (gate G-D, W11); this harness is browser-only.",
+      "profile": {
+        "fixture": {
+          "name": "small",
+          "seed": 25,
+          "scale": 0.05,
+          "files": 100,
+          "bytes": 26214400,
+          "revisions": 200
+        },
+        "browser": {
+          "engine": "chromium",
+          "version": "153.0.0.0"
+        },
+        "server": "none: local OPFS only (server-backed rows are pending)",
+        "network": "none: no request leaves the page (unthrottled)",
+        "storage": "OPFS in a persistent (disk-backed) browser profile"
+      },
+      "samples": [],
+      "metrics": {},
+      "times": [
+        {
+          "metric": "duration",
+          "limit": 30000
+        }
+      ],
+      "gates": []
+    },
+    {
+      "id": "S16",
+      "title": "Second tab during S3",
+      "status": "measured",
+      "model": "S3 in one authority worker while a second authority worker on the same project (a peer tab's file-manager worker, same origin) reads one file every 50 ms and counts the cross-tab invalidations it receives.",
+      "profile": {
+        "fixture": {
+          "name": "small",
+          "seed": 25,
+          "scale": 0.05,
+          "files": 100,
+          "bytes": 26214400,
+          "revisions": 200
+        },
+        "browser": {
+          "engine": "chromium",
+          "version": "153.0.0.0"
+        },
+        "server": "none: local OPFS only (server-backed rows are pending)",
+        "network": "none: no request leaves the page (unthrottled)",
+        "storage": "OPFS in a persistent (disk-backed) browser profile"
+      },
+      "samples": [
+        {
+          "duration": 1563.8000000000466,
+          "lockRequests": 6,
+          "lockSets": 2,
+          "lockWait": 9.099999999860302,
+          "lockWaitMax": 4.300000000046566,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 100,
+          "syncHandleWriteSessions": 100,
+          "writes": 100,
+          "bytesWritten": 2624717,
+          "renames": 100,
+          "removes": 0,
+          "getFileCalls": 200,
+          "handleLookups": 2084,
+          "blobReads": 350,
+          "bytesRead": 5326234,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 200,
+          "portPosts": 0,
+          "eventsPerPort": 200,
+          "networkRequests": 0,
+          "files": 100,
+          "secondTabReads": 20,
+          "readP95": 7,
+          "invalidationsReceived": 200,
+          "secondTabBusEvents": 200,
+          "invalidationsPerChangeset": 200
+        },
+        {
+          "duration": 1586.1999999999534,
+          "lockRequests": 6,
+          "lockSets": 2,
+          "lockWait": 5.000000000232831,
+          "lockWaitMax": 1.5999999998603016,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 100,
+          "syncHandleWriteSessions": 100,
+          "writes": 100,
+          "bytesWritten": 2624717,
+          "renames": 100,
+          "removes": 0,
+          "getFileCalls": 200,
+          "handleLookups": 2084,
+          "blobReads": 350,
+          "bytesRead": 5326234,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 200,
+          "portPosts": 0,
+          "eventsPerPort": 200,
+          "networkRequests": 0,
+          "files": 100,
+          "secondTabReads": 21,
+          "readP95": 8,
+          "invalidationsReceived": 200,
+          "secondTabBusEvents": 200,
+          "invalidationsPerChangeset": 200
+        },
+        {
+          "duration": 1534.1000000000931,
+          "lockRequests": 6,
+          "lockSets": 2,
+          "lockWait": 6.5,
+          "lockWaitMax": 4.300000000046566,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 100,
+          "syncHandleWriteSessions": 100,
+          "writes": 100,
+          "bytesWritten": 2624717,
+          "renames": 100,
+          "removes": 0,
+          "getFileCalls": 200,
+          "handleLookups": 2084,
+          "blobReads": 350,
+          "bytesRead": 5326234,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 200,
+          "portPosts": 0,
+          "eventsPerPort": 200,
+          "networkRequests": 0,
+          "files": 100,
+          "secondTabReads": 21,
+          "readP95": 6.800000000046566,
+          "invalidationsReceived": 200,
+          "secondTabBusEvents": 200,
+          "invalidationsPerChangeset": 200
+        }
+      ],
+      "metrics": {
+        "blobReads": 350,
+        "broadcastPosts": 200,
+        "bytesHashed": 0,
+        "bytesRead": 5326234,
+        "bytesWritten": 2624717,
+        "digests": 0,
+        "duration": 1586.1999999999534,
+        "eventsPerPort": 200,
+        "files": 100,
+        "getFileCalls": 200,
+        "handleLookups": 2084,
+        "invalidationsPerChangeset": 200,
+        "invalidationsReceived": 200,
+        "lockRequests": 6,
+        "lockSets": 2,
+        "lockWait": 9.099999999860302,
+        "lockWaitMax": 4.300000000046566,
+        "networkRequests": 0,
+        "portPosts": 0,
+        "readP95": 8,
+        "removes": 0,
+        "renames": 100,
+        "secondTabBusEvents": 200,
+        "secondTabReads": 21,
+        "syncHandleOpens": 100,
+        "syncHandleWriteSessions": 100,
+        "writableCommits": 0,
+        "writableOpens": 0,
+        "writes": 100
+      },
+      "times": [
+        {
+          "metric": "readP95",
+          "value": 8,
+          "limit": 200,
+          "met": true
+        }
+      ],
+      "gates": [
+        {
+          "id": "S16.invalidations",
+          "metric": "invalidationsPerChangeset",
+          "value": 200,
+          "limit": 1,
+          "pass": false,
+          "knownRed": true
+        }
+      ],
+      "spans": {
+        "durationMilliseconds": 1684.6000000000931,
+        "spans": {},
+        "counters": {},
+        "gauges": {}
+      }
+    },
+    {
+      "id": "S17",
+      "title": "Save during S3",
+      "status": "measured",
+      "model": "S3 while a 1 MiB rooted writeFile to a path the apply never touches is issued once the apply is writing.",
+      "profile": {
+        "fixture": {
+          "name": "small",
+          "seed": 25,
+          "scale": 0.05,
+          "files": 100,
+          "bytes": 26214400,
+          "revisions": 200
+        },
+        "browser": {
+          "engine": "chromium",
+          "version": "153.0.0.0"
+        },
+        "server": "none: local OPFS only (server-backed rows are pending)",
+        "network": "none: no request leaves the page (unthrottled)",
+        "storage": "OPFS in a persistent (disk-backed) browser profile"
+      },
+      "samples": [
+        {
+          "duration": 1579.6000000000931,
+          "lockRequests": 13,
+          "lockSets": 3,
+          "lockWait": 432.9000000001397,
+          "lockWaitMax": 421,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 101,
+          "syncHandleWriteSessions": 101,
+          "writes": 101,
+          "bytesWritten": 3673293,
+          "renames": 100,
+          "removes": 0,
+          "getFileCalls": 200,
+          "handleLookups": 2089,
+          "blobReads": 350,
+          "bytesRead": 5326234,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 201,
+          "portPosts": 0,
+          "eventsPerPort": 201,
+          "networkRequests": 0,
+          "saveLatency": 432.30000000004657,
+          "saveStartDelay": 428.39999999990687,
+          "saveOverlappedApply": 1,
+          "saveWait": 428.39999999990687
+        },
+        {
+          "duration": 1642.0999999998603,
+          "lockRequests": 13,
+          "lockSets": 3,
+          "lockWait": 467.20000000018626,
+          "lockWaitMax": 453,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 101,
+          "syncHandleWriteSessions": 101,
+          "writes": 101,
+          "bytesWritten": 3673293,
+          "renames": 100,
+          "removes": 0,
+          "getFileCalls": 200,
+          "handleLookups": 2089,
+          "blobReads": 350,
+          "bytesRead": 5326234,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 201,
+          "portPosts": 0,
+          "eventsPerPort": 201,
+          "networkRequests": 0,
+          "saveLatency": 465.20000000018626,
+          "saveStartDelay": 461.10000000009313,
+          "saveOverlappedApply": 1,
+          "saveWait": 461.10000000009313
+        },
+        {
+          "duration": 1603.8999999999069,
+          "lockRequests": 13,
+          "lockSets": 3,
+          "lockWait": 482.0999999998603,
+          "lockWaitMax": 469.10000000009313,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 101,
+          "syncHandleWriteSessions": 101,
+          "writes": 101,
+          "bytesWritten": 3673293,
+          "renames": 100,
+          "removes": 0,
+          "getFileCalls": 200,
+          "handleLookups": 2089,
+          "blobReads": 350,
+          "bytesRead": 5326234,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 201,
+          "portPosts": 0,
+          "eventsPerPort": 201,
+          "networkRequests": 0,
+          "saveLatency": 481.9000000001397,
+          "saveStartDelay": 477.80000000004657,
+          "saveOverlappedApply": 1,
+          "saveWait": 477.80000000004657
+        }
+      ],
+      "metrics": {
+        "blobReads": 350,
+        "broadcastPosts": 201,
+        "bytesHashed": 0,
+        "bytesRead": 5326234,
+        "bytesWritten": 3673293,
+        "digests": 0,
+        "duration": 1642.0999999998603,
+        "eventsPerPort": 201,
+        "getFileCalls": 200,
+        "handleLookups": 2089,
+        "lockRequests": 13,
+        "lockSets": 3,
+        "lockWait": 482.0999999998603,
+        "lockWaitMax": 469.10000000009313,
+        "networkRequests": 0,
+        "portPosts": 0,
+        "removes": 0,
+        "renames": 100,
+        "saveLatency": 481.9000000001397,
+        "saveOverlappedApply": 1,
+        "saveStartDelay": 477.80000000004657,
+        "saveWait": 477.80000000004657,
+        "syncHandleOpens": 101,
+        "syncHandleWriteSessions": 101,
+        "writableCommits": 0,
+        "writableOpens": 0,
+        "writes": 101
+      },
+      "times": [
+        {
+          "metric": "saveLatency",
+          "value": 481.9000000001397,
+          "limit": 250,
+          "met": false
+        }
+      ],
+      "gates": [
+        {
+          "id": "S17.lock-wait",
+          "metric": "saveWait",
+          "value": 477.80000000004657,
+          "limit": 50,
+          "pass": false,
+          "knownRed": true
+        }
+      ],
+      "spans": {
+        "durationMilliseconds": 1754.5,
+        "spans": {},
+        "counters": {},
+        "gauges": {}
+      }
+    },
+    {
+      "id": "S18",
+      "title": "Agent turn during S4",
+      "status": "pending",
+      "model": "S8 while the LFS fill runs.",
+      "pending": "Depends on S4. Needs the local API with its object store and database (the api-e2e git tier: apps/api-e2e/src/git/global-setup.ts boots two APIs, two tau-storage workers, MinIO and PostgreSQL from Docker). This container has no Docker daemon, so the W0.1 harness registers the row and its gates without running them.",
+      "profile": {
+        "fixture": {
+          "name": "small",
+          "seed": 25,
+          "scale": 0.05,
+          "files": 100,
+          "bytes": 26214400,
+          "revisions": 200
+        },
+        "browser": {
+          "engine": "chromium",
+          "version": "153.0.0.0"
+        },
+        "server": "none: local OPFS only (server-backed rows are pending)",
+        "network": "none: no request leaves the page (unthrottled)",
+        "storage": "OPFS in a persistent (disk-backed) browser profile"
+      },
+      "samples": [],
+      "metrics": {},
+      "times": [
+        {
+          "metric": "duration",
+          "limit": 600
+        }
+      ],
+      "gates": [
+        {
+          "id": "S18.fill-waits",
+          "metric": "lockWaitsOnFill",
+          "limit": 0,
+          "pass": false,
+          "knownRed": false
+        }
+      ]
+    },
+    {
+      "id": "S19",
+      "title": "Grep while saving and reading",
+      "status": "measured",
+      "model": "S12 grep while a 1 MiB save (S7) lands and a viewer reads one file every 20 ms, all on one authority.",
+      "profile": {
+        "fixture": {
+          "name": "small",
+          "seed": 25,
+          "scale": 0.05,
+          "files": 100,
+          "bytes": 26214400,
+          "revisions": 200
+        },
+        "browser": {
+          "engine": "chromium",
+          "version": "153.0.0.0"
+        },
+        "server": "none: local OPFS only (server-backed rows are pending)",
+        "network": "none: no request leaves the page (unthrottled)",
+        "storage": "OPFS in a persistent (disk-backed) browser profile"
+      },
+      "samples": [
+        {
+          "duration": 1371.6999999999534,
+          "lockRequests": 7,
+          "lockSets": 1,
+          "lockWait": 3.0999999998603016,
+          "lockWaitMax": 1.1000000000931323,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 1,
+          "syncHandleWriteSessions": 1,
+          "writes": 1,
+          "bytesWritten": 1048576,
+          "renames": 0,
+          "removes": 0,
+          "getFileCalls": 366,
+          "handleLookups": 324,
+          "blobReads": 551,
+          "bytesRead": 36297625,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 1,
+          "portPosts": 0,
+          "eventsPerPort": 1,
+          "networkRequests": 0,
+          "grepDuration": 834.5999999998603,
+          "authorityReads": 102,
+          "saveLatency": 29.899999999906868,
+          "readP95": 25.799999999813735,
+          "reads": 29
+        },
+        {
+          "duration": 1313.4000000001397,
+          "lockRequests": 7,
+          "lockSets": 1,
+          "lockWait": 2.9000000001396984,
+          "lockWaitMax": 0.8999999999068677,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 1,
+          "syncHandleWriteSessions": 1,
+          "writes": 1,
+          "bytesWritten": 1048576,
+          "renames": 0,
+          "removes": 0,
+          "getFileCalls": 364,
+          "handleLookups": 321,
+          "blobReads": 548,
+          "bytesRead": 36263251,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 1,
+          "portPosts": 0,
+          "eventsPerPort": 1,
+          "networkRequests": 0,
+          "grepDuration": 824.3000000000466,
+          "authorityReads": 102,
+          "saveLatency": 17.5999999998603,
+          "readP95": 8.600000000093132,
+          "reads": 28
+        },
+        {
+          "duration": 1409.6000000000931,
+          "lockRequests": 7,
+          "lockSets": 1,
+          "lockWait": 2.5,
+          "lockWaitMax": 0.6999999999534339,
+          "writableOpens": 0,
+          "writableCommits": 0,
+          "syncHandleOpens": 1,
+          "syncHandleWriteSessions": 1,
+          "writes": 1,
+          "bytesWritten": 1048576,
+          "renames": 0,
+          "removes": 0,
+          "getFileCalls": 368,
+          "handleLookups": 325,
+          "blobReads": 554,
+          "bytesRead": 36331999,
+          "digests": 0,
+          "bytesHashed": 0,
+          "broadcastPosts": 1,
+          "portPosts": 0,
+          "eventsPerPort": 1,
+          "networkRequests": 0,
+          "grepDuration": 873.8000000000466,
+          "authorityReads": 102,
+          "saveLatency": 15.5,
+          "readP95": 12.800000000046566,
+          "reads": 30
+        }
+      ],
+      "metrics": {
+        "authorityReads": 102,
+        "blobReads": 554,
+        "broadcastPosts": 1,
+        "bytesHashed": 0,
+        "bytesRead": 36331999,
+        "bytesWritten": 1048576,
+        "digests": 0,
+        "duration": 1409.6000000000931,
+        "eventsPerPort": 1,
+        "getFileCalls": 368,
+        "grepDuration": 873.8000000000466,
+        "handleLookups": 325,
+        "lockRequests": 7,
+        "lockSets": 1,
+        "lockWait": 3.0999999998603016,
+        "lockWaitMax": 1.1000000000931323,
+        "networkRequests": 0,
+        "portPosts": 0,
+        "readP95": 25.799999999813735,
+        "reads": 30,
+        "removes": 0,
+        "renames": 0,
+        "saveLatency": 29.899999999906868,
+        "syncHandleOpens": 1,
+        "syncHandleWriteSessions": 1,
+        "writableCommits": 0,
+        "writableOpens": 0,
+        "writes": 1
+      },
+      "times": [
+        {
+          "metric": "saveLatency",
+          "value": 29.899999999906868,
+          "limit": 100,
+          "met": true
+        },
+        {
+          "metric": "readP95",
+          "value": 25.799999999813735,
+          "limit": 200,
+          "met": true
+        }
+      ],
+      "gates": [
+        {
+          "id": "S19.compute-worker",
+          "metric": "authorityReads",
+          "value": 102,
+          "limit": 0,
+          "pass": false,
+          "knownRed": true
+        }
+      ],
+      "spans": {
+        "durationMilliseconds": 1559.8999999999069,
+        "spans": {},
+        "counters": {
+          "listing.bytes": {
+            "total": 11936616,
+            "peakPerSecond": 7553334
+          }
+        },
+        "gauges": {}
+      }
+    },
+    {
+      "id": "S20",
+      "title": "Two tabs cold-open one project",
+      "status": "pending",
+      "model": "Two tabs cold-opening one hosted project.",
+      "pending": "Needs the local API with its object store and database (the api-e2e git tier: apps/api-e2e/src/git/global-setup.ts boots two APIs, two tau-storage workers, MinIO and PostgreSQL from Docker). This container has no Docker daemon, so the W0.1 harness registers the row and its gates without running them.",
+      "profile": {
+        "fixture": {
+          "name": "small",
+          "seed": 25,
+          "scale": 0.05,
+          "files": 100,
+          "bytes": 26214400,
+          "revisions": 200
+        },
+        "browser": {
+          "engine": "chromium",
+          "version": "153.0.0.0"
+        },
+        "server": "none: local OPFS only (server-backed rows are pending)",
+        "network": "none: no request leaves the page (unthrottled)",
+        "storage": "OPFS in a persistent (disk-backed) browser profile"
+      },
+      "samples": [],
+      "metrics": {},
+      "times": [
+        {
+          "metric": "duration",
+          "limit": 3000
+        }
+      ],
+      "gates": [
+        {
+          "id": "S20.downloads",
+          "metric": "downloadsPerDevice",
+          "limit": 1,
+          "pass": false,
+          "knownRed": false
+        }
+      ]
+    }
+  ]
+}

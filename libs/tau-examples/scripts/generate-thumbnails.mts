@@ -14,7 +14,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { createExampleRuntimeClient, exampleKernelIds } from '#scripts/runtime.js';
-import { renderThumbnails } from '#scripts/render-thumbnail.js';
+import { cardDisplayWidth, featuredCardDisplayWidth, renderThumbnails } from '#scripts/render-thumbnail.js';
 
 // Nx sets FORCE_COLOR while some shells set NO_COLOR; runtime workers would
 // otherwise emit the same Node warning once for every plugin and example.
@@ -47,11 +47,10 @@ const only = new Set(
     .split(',')
     .filter(Boolean) ?? [],
 );
-// Edge widths are output pixels. A featured card is drawn at twice a card's size, so its
-// thumbnail halves the width to keep the same on-screen line weight.
+// A featured card is drawn at twice a card's size; its edges keep the same on-screen weight (6 and 3 output px).
 const variants = [
-  { file: 'thumbnail.webp', lineWidth: 6 },
-  { file: 'thumbnail-featured.webp', lineWidth: 3 },
+  { file: 'thumbnail.webp', displayWidth: cardDisplayWidth },
+  { file: 'thumbnail-featured.webp', displayWidth: featuredCardDisplayWidth },
 ] as const;
 
 const supportedKernels: ReadonlySet<string> = exampleKernelIds;
@@ -202,7 +201,7 @@ for (const entry of isolated ? renderable : []) {
     const images = await renderThumbnails(client, {
       label: key,
       sourcePath: picogkRoot ? entry.mainFile : `${key}/${entry.mainFile}`,
-      lineWidths: selected.map(({ lineWidth }) => lineWidth),
+      displayWidths: selected.map(({ displayWidth }) => displayWidth),
       isExactLane: entry.kernel === 'picovoxel',
     });
     for (const [index, { file }] of selected.entries()) {

@@ -29,7 +29,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { createWorkspaceRuntimeClient } from '#scripts/runtime.js';
-import { renderThumbnails, thumbnailOptions, thumbnailQuality } from '#scripts/render-thumbnail.js';
+import { cardDisplayWidth, renderThumbnails, thumbnailOptions, thumbnailQuality } from '#scripts/render-thumbnail.js';
 
 delete process.env['NO_COLOR'];
 
@@ -56,7 +56,7 @@ async function renderProject(projectDirectory: string, entryPath: string): Promi
   const bytesBefore = existsSync(target) ? statSync(target).size : undefined;
   const client = await createWorkspaceRuntimeClient(projectDirectory);
   try {
-    const [bytes] = await renderThumbnails(client, { label: slug, sourcePath: entryPath, lineWidths: [6] });
+    const [bytes] = await renderThumbnails(client, { label: slug, sourcePath: entryPath, displayWidths: [cardDisplayWidth] });
     const { width, height } = await sharp(Buffer.from(bytes!)).metadata();
     if (width !== thumbnailOptions.width || height !== thumbnailOptions.height) {
       throw new Error(`Rendered ${width}×${height}, expected ${thumbnailOptions.width}×${thumbnailOptions.height}`);

@@ -702,20 +702,37 @@ describe('TscircuitKernel', () => {
 
     it('should still render the board, with a warning, when the texture rasterizer cannot load', async () => {
       const client = createClient({ 'main.tsx': fixtureBoard });
+      // Earlier renders leave a loaded renderer on the realm; drop it so this render cannot rasterize.
+      const rendererSlotKey = Symbol.for('taucad.tscircuit.boardTextureRenderer');
+      const loadedRenderer: unknown = Reflect.get(globalThis, rendererSlotKey);
+      Reflect.deleteProperty(globalThis, rendererSlotKey);
       wasmCompile.fail = true;
 
       try {
         const result = expectGeometry(await render(client, 'main.tsx'));
 
-        expectGlb(result);
         expect(result.issues).toContainEqual(
           expect.objectContaining({
             severity: 'warning',
             message: expect.stringContaining('resvg WASM is unavailable') as string,
           }),
         );
+        const io = await createNodeIo();
+        const document = await io.readBinary(expectGlb(result));
+        const board = document
+          .getRoot()
+          .listNodes()
+          .find((node) => node.getName() === 'Box0');
+        expect(board?.getMesh()?.listPrimitives().length).toBeGreaterThan(0);
+        expect(
+          board
+            ?.getMesh()
+            ?.listPrimitives()
+            .filter((primitive) => primitive.getMaterial()?.getBaseColorTexture()),
+        ).toEqual([]);
       } finally {
         wasmCompile.fail = false;
+        Reflect.set(globalThis, rendererSlotKey, loadedRenderer);
       }
     });
 

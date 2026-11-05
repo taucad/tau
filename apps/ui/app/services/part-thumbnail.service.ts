@@ -2,6 +2,7 @@ import type { ExportFile } from '@taucad/types';
 import { Topic } from '@taucad/events';
 import type { HeadlessImageJob, HeadlessImageService } from '#services/headless-image.service.js';
 import type { PartThumbnailState } from '@taucad/viewer/cad/part-thumbnail-state';
+import { buildViewerCaptureImageOptions } from '@taucad/agent-tools/capture';
 
 type BatchPreviewOptions = Extract<
   Extract<HeadlessImageJob, { sourceFormat: 'glb'; format: 'webp' }>['exportOptions'],
@@ -38,8 +39,13 @@ const batchSize = 4;
 // One rendition serves the 80 px frames and the gallery: the agreed 1536 px long side on the parts' square frame.
 const previewSize = 1536;
 const previewQuality = 0.95;
-// Edges are output pixels; 6 px at 1536 keeps the reviewed line weight of 2 px at 512.
-const previewLineWidth = 6;
+// The viewer's look with the card edge weight, the gallery's 512 px display width (6 px edges at 1536).
+const previewLook = buildViewerCaptureImageOptions({
+  width: previewSize,
+  height: previewSize,
+  colorScheme: 'dark',
+  displayWidth: 512,
+});
 
 type Work = Readonly<{
   generation: number;
@@ -321,7 +327,7 @@ export class PartThumbnailService {
   }
 
   private identity(hash: string, part: PartThumbnailRequest): string {
-    return `${part.visualKey ?? hash}:${JSON.stringify(part.primitives)}:part-webp-${previewSize}-q${previewQuality}-v2`;
+    return `${part.visualKey ?? hash}:${JSON.stringify(part.primitives)}:part-webp-${previewSize}-q${previewQuality}-viewer-profile-v1`;
   }
 
   private validateRequest(source: PartThumbnailSource, parts: readonly PartThumbnailRequest[]): Set<string> {
@@ -408,7 +414,7 @@ export class PartThumbnailService {
               width: previewSize,
               height: previewSize,
               quality: previewQuality,
-              lineWidth: previewLineWidth,
+              ...previewLook,
               views,
             },
           });

@@ -42,6 +42,21 @@ describe('buildViewerCaptureImageOptions', () => {
     expect(thumbnail.ao.radiusPixels).toBeCloseTo(19.2, 12);
   });
 
+  it('should draw card edges at the card line weight for the width the card is shown at', () => {
+    const card = buildViewerCaptureImageOptions({ width: 1536, height: 1152, colorScheme: 'dark', displayWidth: 512 });
+    const featured = buildViewerCaptureImageOptions({
+      width: 1536,
+      height: 1152,
+      colorScheme: 'dark',
+      displayWidth: 1024,
+    });
+    const viewer = buildViewerCaptureImageOptions({ width: 1536, height: 1152, colorScheme: 'dark' });
+
+    expect(card.lineWidth).toBe(6);
+    expect(featured.lineWidth).toBe(3);
+    expect({ ...card, lineWidth: viewer.lineWidth }).toStrictEqual(viewer);
+  });
+
   it('should keep the AO radius at four output pixels or more on a small capture', () => {
     expect(buildViewerCaptureImageOptions({ width: 192, height: 144, colorScheme: 'dark' }).ao.radiusPixels).toBe(4);
   });

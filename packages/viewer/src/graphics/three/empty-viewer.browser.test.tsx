@@ -194,8 +194,11 @@ it.each([
   );
   try {
     const view = render(fixture());
+    // The canvas renders on demand, so an idle empty scene can stop after its first frames.
+    // Request each frame rather than relying on start-up invalidations to reach the count.
     await vi.waitFor(
       () => {
+        state?.invalidate();
         expect(frames).toBeGreaterThan(2);
       },
       { timeout: 45_000 },
@@ -281,6 +284,26 @@ it.each([
       expect(count, 'each world axis is visible before a model loads').toBeGreaterThan(50);
     }
     expect(difference(empty, noGrid), 'grid contributes visible pixels').toBeGreaterThan(100);
+    // The browser composites the canvas over the page background. Composite the strongest grid
+    // pixels the same way: a line must step as far from white as it does from the dark surface.
+    const background = (() => {
+      const swatch = document.createElement('canvas').getContext('2d')!;
+      swatch.fillStyle = getComputedStyle(document.querySelector('[aria-label="CAD canvas"]')!).backgroundColor;
+      swatch.fillRect(0, 0, 1, 1);
+      return swatch.getImageData(0, 0, 1, 1).data[0]!;
+    })();
+    const gridSteps: number[] = [];
+    for (let index = 0; index < empty.length; index += 4) {
+      const [red, green, blue, alpha] = [empty[index]!, empty[index + 1]!, empty[index + 2]!, empty[index + 3]!];
+      if (alpha === 0 || alpha === 255 || Math.max(red, green, blue) - Math.min(red, green, blue) > 3) {
+        continue;
+      }
+      const shown = (green * alpha + background * (255 - alpha)) / 255;
+      gridSteps.push(Math.abs(shown - background));
+    }
+    gridSteps.sort((left, right) => left - right);
+    const strongestGridStep = gridSteps[Math.floor(gridSteps.length * 0.99)] ?? 0;
+    expect(strongestGridStep, `grid lines stand out from the ${theme} background`).toBeGreaterThan(30);
     view.rerender(fixture(undefined, { grid: false, axes: false }));
     const noAxes = await capture();
     expect(difference(noGrid, noAxes), 'axes contribute visible pixels').toBeGreaterThan(50);

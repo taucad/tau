@@ -40,6 +40,8 @@ import type { CaptureMemo, RevisionId, RevisionTreeInput } from '#algorithms/ind
 import { createApplyTreeEffects, sweepTemporarySiblings as sweepApplyLitter } from '#apply-tree.js';
 import { createLargeObjectFill, largeObjectPlaceholders } from '#large-object-fill.js';
 import { createContentReads } from '#open/content-reads.js';
+import { createLargeObjectAdoption } from '#large-object-adoption.js';
+import type { LargeObjectAdoption } from '#large-object-adoption.js';
 import type { ContentReadOptions, ReadOutcome } from '#open/content-reads.js';
 import {
   prepareProjectManifest,
@@ -434,6 +436,14 @@ export type RevisionActors = Readonly<{
     paths: readonly string[],
     options?: Readonly<{ signal?: AbortSignal }>,
   ) => Promise<void>;
+  /**
+   * Store every large file the checkout's attributes track and holds whole,
+   * then leave only its pointer in the checkout (D9 adoption). Crash-safe: a
+   * kill at any step leaves the full file, or the pointer with the verified
+   * object. Nothing calls it on its own yet: a checkout of pointers needs the
+   * read-through of every consumer first.
+   */
+  adoptLargeObjects: (checkoutId: string | undefined) => Promise<LargeObjectAdoption>;
   /**
    * The record device this host's chat segments sync under (EQ10(a)), or `undefined` on a host that records no chats.
    *
@@ -1621,6 +1631,20 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     paths: readonly string[],
     materializeOptions?: Readonly<{ signal?: AbortSignal }>,
   ): Promise<void> => contentReads.materialize(await readPlaceOf(checkoutId), paths, materializeOptions);
+  /* D9: one copy of every large object; see `large-object-adoption.ts`. A port that cannot store one adopts nothing. */
+  const { storeLargeObject, readLargeObject } = port;
+  const adoption =
+    storeLargeObject === undefined || readLargeObject === undefined
+      ? undefined
+      : createLargeObjectAdoption({
+          capture: captureFresh,
+          withCheckoutFence,
+          materializeTree,
+          storeObject: async (pointer, content) => storeLargeObject.call(port, pointer, content),
+          readStoredObject: async (pointer) => readLargeObject.call(port, pointer),
+        });
+  const adoptLargeObjects = async (checkoutId: string | undefined): Promise<LargeObjectAdoption> =>
+    adoption === undefined ? { adopted: [], left: [] } : adoption.adopt(await readPlaceOf(checkoutId));
 
   /**
    * The project's *Sync chats* answer, read per push (D25, W17).
@@ -3408,6 +3432,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     readConflict,
     readContent,
     materialize,
+    adoptLargeObjects,
     chatDevice: async () => {
       const context = await chatContext();
       return context?.deviceId;
@@ -5527,6 +5552,8 @@ export type ProjectRevisions = Readonly<{
   readContent: RevisionActors['readContent'];
   /** See {@link RevisionActors.materialize}. */
   materialize: RevisionActors['materialize'];
+  /** See {@link RevisionActors.adoptLargeObjects}. */
+  adoptLargeObjects: RevisionActors['adoptLargeObjects'];
   /** The record device this host's chat segments sync under; see {@link RevisionActors.chatDevice}. */
   chatDevice: () => Promise<string | undefined>;
   /** Whether this host pulls the project's chats at all; see {@link RevisionActors.pullsChats}. */
@@ -5655,6 +5682,7 @@ export const createProjectRevisionsActor = (options: ProjectRevisionActorOptions
     readConflict: actors.readConflict,
     readContent: actors.readContent,
     materialize: actors.materialize,
+    adoptLargeObjects: actors.adoptLargeObjects,
     chatDevice: actors.chatDevice,
     pullsChats: actors.pullsChats,
   };

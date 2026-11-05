@@ -125,14 +125,6 @@ describe('readContent (D9)', () => {
     arrive(part);
     expect(await reading).toStrictEqual({ outcome: 'bytes', data: part });
   });
-
-  it('throws PendingError from readFile, with the path, object and reason', async () => {
-    const { reads } = setup();
-    const error = await reads.readFile(place, 'models/part.step').catch((error: unknown) => error);
-    expect(error).toBeInstanceOf(PendingError);
-    expect(error).toMatchObject({ code: 'PENDING', path: 'models/part.step', oid: pointer.oid, reason: 'not-fetched' });
-    await expect(reads.readFile(place, 'gone.scad')).rejects.toMatchObject({ code: 'ENOENT' });
-  });
 });
 
 describe('materialize (D9)', () => {

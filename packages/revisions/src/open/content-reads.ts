@@ -97,7 +97,6 @@ const isDirectory = (error: unknown): boolean => (error as { code?: unknown } | 
 /** The reads {@link createContentReads} builds. @public */
 export type ContentReads = Readonly<{
   readContent: (place: Checkout, path: string, options?: ContentReadOptions) => Promise<ReadOutcome>;
-  readFile: (place: Checkout, path: string, options?: ContentReadOptions) => Promise<Uint8Array<ArrayBuffer>>;
   materialize: (
     place: Checkout,
     paths: readonly string[],
@@ -180,35 +179,6 @@ export const createContentReads = (dependencies: ContentReadsDependencies): Cont
     return { ...pending, reason: reasonOf(fill.look(place.id, pointer.oid)) };
   };
 
-  /**
-   * {@link readContent} that throws {@link PendingError} instead of answering `pending`.
-   *
-   * @param place - The checkout.
-   * @param path - A checkout-relative path.
-   * @param options - How long to wait for an object a running fill is fetching.
-   * @returns The bytes.
-   */
-  const readFile = async (
-    place: Checkout,
-    path: string,
-    options: ContentReadOptions = {},
-  ): Promise<Uint8Array<ArrayBuffer>> => {
-    const read = await readContent(place, path, options);
-    switch (read.outcome) {
-      case 'bytes': {
-        return read.data;
-      }
-      case 'pending': {
-        throw new PendingError({ path, oid: read.oid, size: read.size, reason: read.reason });
-      }
-      default: {
-        throw Object.assign(new Error(`${path} is ${read.outcome === 'missing' ? 'missing' : 'a directory'}.`), {
-          code: read.outcome === 'missing' ? 'ENOENT' : 'EISDIR',
-        });
-      }
-    }
-  };
-
   /* The paths among `paths` that still hold a placeholder, with what it names. */
   const placeholders = async (
     place: Checkout,
@@ -265,5 +235,5 @@ export const createContentReads = (dependencies: ContentReadsDependencies): Cont
     }
   };
 
-  return { readContent, readFile, materialize };
+  return { readContent, materialize };
 };

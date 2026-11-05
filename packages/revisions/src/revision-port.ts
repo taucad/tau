@@ -580,6 +580,12 @@ export type RevisionPort = Readonly<{
    * may leave it out (D9).
    */
   readLargeObject?(pointer: Readonly<{ oid: string; size: number }>): Promise<Uint8Array<ArrayBuffer> | undefined>;
+  /**
+   * Put one large object in this store under its pointer: written to a
+   * `.partial` and renamed into place, so the store never names a torn object
+   * (D9 adoption). A repeat writes nothing. Optional, like `readLargeObject`.
+   */
+  storeLargeObject?(pointer: Readonly<{ oid: string; size: number }>, content: Uint8Array<ArrayBuffer>): Promise<void>;
   writeRevision(input: WriteRevisionInput): Promise<RevisionReceipt>;
   /** A branch by name, or any other ref spelled in full. */
   readRef(name: string): Promise<RevisionId | undefined>;

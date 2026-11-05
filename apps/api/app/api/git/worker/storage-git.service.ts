@@ -187,6 +187,8 @@ export class StorageGitService extends GitLeaseHost {
 
   /** The projects whose sweep is running (`sweepAfterReply`). */
   readonly #sweeping = new Set<string>();
+  /** The projects whose listings-only sweep, after a push that did not compact, is running. */
+  readonly #sweepingListings = new Set<string>();
 
   /**
    * Each project's deferred compactions on this worker (`compactAfterReply`):
@@ -808,9 +810,12 @@ export class StorageGitService extends GitLeaseHost {
   }
 
   /**
-   * Starts a compacting commit's sweep without the reply waiting on it (W13b),
-   * and posts the retired bytes it kept to the API (D18) once it has them. At
-   * most one runs per project on this worker.
+   * Starts a commit's sweep without the reply waiting on it (W13b). A
+   * compacting commit's sweep posts the retired bytes it kept to the API (D18)
+   * once it has them. Any other commit's sweep covers only the head listings
+   * (D8), and it is the only listing sweep a deferring push gets, since only
+   * the compacting sweep reads `retired/` and `packs/`. At most one of each
+   * kind runs per project on this worker.
    */
   private sweepAfterReply(
     grant: StorageGrant,
@@ -820,7 +825,24 @@ export class StorageGitService extends GitLeaseHost {
       readonly sweep: () => Promise<SweepOutcome | undefined>;
     },
   ): void {
-    if (!result.compacted || this.#sweeping.has(grant.project)) {
+    if (!result.compacted) {
+      if (this.#sweepingListings.has(grant.project)) {
+        return;
+      }
+      this.#sweepingListings.add(grant.project);
+      this.track(
+        (async (): Promise<void> => {
+          try {
+            /* The listings alone: it never rejects, and it keeps no bytes to report. */
+            await result.sweep();
+          } finally {
+            this.#sweepingListings.delete(grant.project);
+          }
+        })(),
+      );
+      return;
+    }
+    if (this.#sweeping.has(grant.project)) {
       return;
     }
     this.#sweeping.add(grant.project);

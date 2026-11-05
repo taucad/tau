@@ -522,10 +522,13 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
         ...(args.faults === undefined ? {} : { faults: args.faults }),
       });
       /*
-       * No listing sweep of its own: the pass over `retired/` above already
-       * reclaims every retired listing past the window, by its marker. An
-       * unmarked listing waits for the next push that does not compact, or
-       * the next deferred compaction, both of which run `sweepListings` (D8).
+       * No listing sweep here: this sweep lists only `retired/` and `packs/`,
+       * and neither holds a listing or its `retired-listings/` marker. The
+       * listings wait for the next push that does not compact, whose sweep
+       * the worker runs after its reply, or for the next deferred
+       * compaction's sweep. Both run `sweepListings` (D8). An inline
+       * compaction leaves at most the bound live, so the next deferring push
+       * does not compact inline.
        */
       return outcome;
     },

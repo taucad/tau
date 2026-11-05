@@ -271,7 +271,13 @@ export const createPackReader = (options: PackReaderOptions): PackReader => {
         throw new TypeError(`The pack ${path} does not end with the checksum its index records.`);
       }
     })();
-    await checked;
+    try {
+      await checked;
+    } catch (error) {
+      /* A failed check is not remembered: a read that failed on the way is asked again next time. */
+      checked = undefined;
+      throw error;
+    }
   };
 
   const inflateExactly = async (

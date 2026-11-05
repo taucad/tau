@@ -14,6 +14,8 @@
  */
 
 import type { ComputeWorker } from '#compute-worker/compute-worker.js';
+import { frameObject } from '#git-objects.js';
+import { concatBytes } from '#object-hash.js';
 import { checkPackIndexChecksum, readPackIndex } from '#pack-reader/pack-index.js';
 import type { PackIndex } from '#pack-reader/pack-index.js';
 import {
@@ -38,11 +40,21 @@ export type RemotePackCounters = {
   waves: number;
 };
 
+/** Range reads in flight at once, per pack. */
+const rangeStreams = 32;
+
 /** A pack on the server, read by Range through its index. */
 export type RemotePack = Readonly<{
   name: string;
   index: PackIndex;
   counters: Readonly<RemotePackCounters>;
+  /**
+   * An object's stored bytes, from the index alone: what a read of it fetches, before its base.
+   *
+   * @param oid - Lowercase hex object id.
+   * @returns Its entry's length, or `undefined` when this pack lacks it.
+   */
+  entryBytes: (oid: string) => number | undefined;
   /**
    * The objects of `oids` this pack holds, read in coalesced waves.
    *
@@ -77,10 +89,11 @@ export const maximumRangeBytes = 64 * 1024 * 1024;
 
 /**
  * Merge ranges that touch into one: contiguous only, never across a gap, and
- * never past {@link maximumRangeBytes}.
+ * never past {@link maximumRangeBytes}. A single range longer than that is
+ * cut into reads of at most that length.
  *
  * @param ranges - `[start, end)` pairs, in any order.
- * @returns The merged ranges, ascending.
+ * @returns The merged ranges, ascending, none longer than {@link maximumRangeBytes}.
  */
 export const coalesceRanges = (ranges: Iterable<readonly [number, number]>): Array<[number, number]> => {
   const merged: Array<[number, number]> = [];
@@ -89,10 +102,32 @@ export const coalesceRanges = (ranges: Iterable<readonly [number, number]>): Arr
     if (last !== undefined && start <= last[1] && Math.max(last[1], end) - last[0] <= maximumRangeBytes) {
       last[1] = Math.max(last[1], end);
     } else {
-      merged.push([start, end]);
+      for (let at = Math.max(start, last?.[1] ?? start); at < end; at += maximumRangeBytes) {
+        merged.push([at, Math.min(end, at + maximumRangeBytes)]);
+      }
     }
   }
   return merged;
+};
+
+/* Run each item through `run`, at most `limit` at once, answers in order. */
+const pooled = async <Item, Result>(
+  items: readonly Item[],
+  limit: number,
+  run: (item: Item) => Promise<Result>,
+): Promise<Result[]> => {
+  const results: Result[] = [];
+  let next = 0;
+  const lane = async (): Promise<void> => {
+    while (next < items.length) {
+      const at = next;
+      next += 1;
+      // oxlint-disable-next-line no-await-in-loop -- a lane takes the next item only when its last one landed.
+      results[at] = await run(items[at]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, lane));
+  return results;
 };
 
 /**
@@ -111,14 +146,41 @@ export const openRemotePack = async (options: RemotePackOptions): Promise<Remote
     throw new TypeError(`The index of ${name} is the index of another pack.`);
   }
   const counters: RemotePackCounters = { rangeRequests: 0, bytesFetched: 0, waves: 0 };
+  /* Held spans, ascending by start and never overlapping: each is whole entries, or one entry's cut. */
   const spans: Span[] = [];
-  const heldAt = (offset: number, length: number): Uint8Array<ArrayBuffer> | undefined => {
-    for (const span of spans) {
-      if (offset >= span.start && offset + length <= span.start + span.bytes.byteLength) {
-        return span.bytes.subarray(offset - span.start, offset - span.start + length);
+  /* The last span starting at or before `offset`, by binary search. */
+  const spanBefore = (offset: number): number => {
+    let low = 0;
+    let high = spans.length - 1;
+    let found = -1;
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2);
+      if (spans[middle]!.start <= offset) {
+        found = middle;
+        low = middle + 1;
+      } else {
+        high = middle - 1;
       }
     }
-    return undefined;
+    return found;
+  };
+  const heldAt = (offset: number, length: number): Uint8Array<ArrayBuffer> | undefined => {
+    let at = spanBefore(offset);
+    const end = offset + length;
+    const parts: Array<Uint8Array<ArrayBuffer>> = [];
+    let reached = offset;
+    while (reached < end) {
+      const span = spans[at];
+      const spanEnd = span === undefined ? 0 : span.start + span.bytes.byteLength;
+      if (span === undefined || span.start > reached || spanEnd <= reached) {
+        return undefined;
+      }
+      parts.push(span.bytes.subarray(reached - span.start, Math.min(spanEnd, end) - span.start));
+      reached = Math.min(spanEnd, end);
+      at += 1;
+    }
+    /* An entry cut across reads is stitched back; one inside a read is a view of it. */
+    return parts.length === 1 ? parts[0] : concatBytes(...parts);
   };
   const fetchSpan = async (start: number, end: number): Promise<Span> => {
     counters.rangeRequests += 1;
@@ -162,11 +224,15 @@ export const openRemotePack = async (options: RemotePackOptions): Promise<Remote
       const ranges: Array<[number, number]> = [...wave].map((offset) => [offset, index.endOf(offset, size)]);
       if (!trailerFetched) {
         ranges.push([size - trailerBytes, size]);
-        trailerFetched = true;
       }
       // oxlint-disable-next-line no-await-in-loop -- a wave's bases are known only once the wave has landed.
-      const fetched = await Promise.all(coalesceRanges(ranges).map(async ([start, end]) => fetchSpan(start, end)));
+      const fetched = await pooled(coalesceRanges(ranges), rangeStreams, async ([start, end]) => fetchSpan(start, end));
+      if (!trailerFetched) {
+        /* Only once it landed: a wave that failed asks for the trailer again. */
+        trailerFetched = true;
+      }
       spans.push(...fetched);
+      spans.sort((left, right) => left.start - right.start);
       const next = new Set<number>();
       for (const offset of wave) {
         const base = deltaBaseOf(heldAt(offset, index.endOf(offset, size) - offset)!, offset);
@@ -178,7 +244,16 @@ export const openRemotePack = async (options: RemotePackOptions): Promise<Remote
       wave = next;
     }
     try {
-      const read = await Promise.all(held.map(async (oid) => [oid, await reader.read(oid)] as const));
+      const read = await Promise.all(
+        held.map(async (oid) => {
+          const object = await reader.read(oid);
+          /* Each object is checked against its id: the index and the trailer vouch for the pack, not the transfer. */
+          if (object !== undefined && (await compute.sha1(frameObject(object.type, object.data))) !== oid) {
+            throw new TypeError(`A Range read of ${name} answered other bytes for ${oid}.`);
+          }
+          return [oid, object] as const;
+        }),
+      );
       return new Map(read.filter((entry): entry is readonly [string, StoredObject] => entry[1] !== undefined));
     } finally {
       /* What one call fetched is held only for that call. */
@@ -202,5 +277,10 @@ export const openRemotePack = async (options: RemotePackOptions): Promise<Remote
     return run;
   };
 
-  return Object.freeze({ name, index, counters, readMany: serialized });
+  const entryBytes = (oid: string): number | undefined => {
+    const offset = index.offsetOf(oid);
+    return offset === undefined ? undefined : index.endOf(offset, size) - offset;
+  };
+
+  return Object.freeze({ name, index, counters, entryBytes, readMany: serialized });
 };

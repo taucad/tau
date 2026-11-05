@@ -220,7 +220,7 @@ export type ObjectStoreOptions = Readonly<{
   repack?: Partial<RepackOptions>;
   /** The clock retention is measured on. */
   now?: () => number;
-  /** The largest pack {@link ObjectStore.addPack} indexes; the repack ceiling by default. Bytes. */
+  /** The largest pack {@link ObjectStore.addPack} indexes; none by default. Bytes. */
   packCeilingBytes?: number;
 }>;
 
@@ -303,7 +303,7 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
   const { files, gitdir, compute, fenceName } = options;
   const now = options.now ?? Date.now;
   const bounds: RepackOptions = { ...defaultRepack, ...options.repack };
-  const packCeiling = options.packCeilingBytes ?? bounds.maxPackBytes;
+  const packCeiling = options.packCeilingBytes ?? Number.POSITIVE_INFINITY;
   const sources: ObjectSource[] = [];
   const counters = emptyReadCounters();
   const cache = createBaseCache(options.cacheBytes ?? 32 * 1024 * 1024);
@@ -548,19 +548,68 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
     return (await readOnce(oid, depth)) ?? readThrough(oid);
   };
 
-  /* An object no local file holds, from the first attached source that has it, kept loose. */
-  const readThrough = async (oid: string): Promise<StoredObject | undefined> => {
+  /* Each of `oids` from the first attached source that holds it. */
+  const fromSources = async (oids: readonly string[]): Promise<Map<string, StoredObject>> => {
+    const found = new Map<string, StoredObject>();
+    let missing = oids;
     for (const source of sources) {
-      // oxlint-disable-next-line no-await-in-loop -- the first source that holds it answers.
-      const answered = await source.readMany([oid]);
-      const found = answered.get(oid);
-      if (found !== undefined) {
-        // oxlint-disable-next-line no-await-in-loop -- kept before it is answered, so the next read is local.
-        await writeLoose([{ ...found, oid }]);
-        return found;
+      if (missing.length === 0) {
+        break;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- a later source is asked only for what the earlier ones lack.
+      for (const [oid, object] of await source.readMany(missing)) {
+        found.set(oid, object);
+      }
+      missing = missing.filter((oid) => !found.has(oid));
+    }
+    return found;
+  };
+
+  /*
+   * Misses, read through and kept loose. A commit's tree and parents are what
+   * a walk reads next, so they come in a second request with it rather than
+   * one request each.
+   */
+  const readMisses = async (oids: readonly string[]): Promise<Map<string, StoredObject>> => {
+    const found = await fromSources(oids);
+    const following = new Set<string>();
+    for (const object of found.values()) {
+      if (object.type === 'commit') {
+        const [header = ''] = textDecoder.decode(object.data).split('\n\n', 1);
+        for (const match of header.matchAll(/^(?:tree|parent) ([\da-f]{40})$/gmu)) {
+          following.add(match[1]!);
+        }
       }
     }
-    return undefined;
+    const wanted = [...following].filter((oid) => !found.has(oid));
+    const held = await Promise.all(wanted.map(async (oid) => has(oid)));
+    for (const [oid, object] of await fromSources(wanted.filter((_oid, at) => !held[at]))) {
+      found.set(oid, object);
+    }
+    await writeLoose([...found].map(([oid, object]) => ({ ...object, oid })));
+    return found;
+  };
+
+  /* The misses of one turn, read through in one request: a log walks a generation's parents at once. */
+  let pendingMisses: Readonly<{ oids: Set<string>; answer: Promise<Map<string, StoredObject>> }> | undefined;
+  const readThrough = async (oid: string): Promise<StoredObject | undefined> => {
+    if (sources.length === 0) {
+      return undefined;
+    }
+    if (pendingMisses === undefined) {
+      const oids = new Set<string>();
+      const answer = (async (): Promise<Map<string, StoredObject>> => {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 0);
+        });
+        pendingMisses = undefined;
+        return readMisses([...oids]);
+      })();
+      pendingMisses = { oids, answer };
+    }
+    pendingMisses.oids.add(oid);
+    const answered = await pendingMisses.answer;
+    return answered.get(oid);
   };
 
   /**
@@ -722,12 +771,17 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
   const openBlob = async (oid: string): Promise<ReadableStream<Uint8Array<ArrayBuffer>> | undefined> => {
     for (const pack of await knownPacks()) {
       // oxlint-disable-next-line no-await-in-loop -- the first pack that holds it answers.
-      const entry = await pack.wholeEntry(oid).catch(() => undefined);
+      const entry = await pack.wholeEntry(oid);
       if (entry !== undefined) {
         let seen = 0;
         const counted = new TransformStream<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>({
           transform: (chunk, controller) => {
             seen += chunk.byteLength;
+            if (seen > entry.size) {
+              /* Past its declared size: stopped here, never inflated to the end. */
+              controller.error(new TypeError(`The object ${oid} inflates past the size it declares.`));
+              return;
+            }
             controller.enqueue(chunk);
           },
           flush: (controller) => {

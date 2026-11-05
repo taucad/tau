@@ -16,6 +16,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { FileEntry } from '@taucad/types';
 import type * as HighlightTextModule from '@taucad/ui/components/highlight-text';
 import { FileTreePanelBody } from '#routes/w.$workspace.$project/chat-file-tree.js';
+import { rowWindowThreshold } from '#routes/w.$workspace.$project/use-row-window.js';
 
 /** Row renders, counted where each file or folder row draws its name. */
 const renders = vi.hoisted(() => ({ row: 0 }));
@@ -185,5 +186,25 @@ describe('Files tree row renders', () => {
     });
 
     expect(renders.row).toBeGreaterThan(0);
+  });
+});
+
+describe('Files tree row window', () => {
+  it('should render a window of rows, not one per entry, for a long listing', () => {
+    store.snapshot = new Map(
+      Array.from({ length: 1000 }, (_, index) => file(`part-${String(index).padStart(4, '0')}.scad`)),
+    );
+    render(
+      <TooltipProvider>
+        <FileTreePanelBody />
+      </TooltipProvider>,
+    );
+
+    const rendered = screen.getAllByRole('treeitem');
+    expect(rendered.length).toBeGreaterThan(0);
+    expect(rendered.length).toBeLessThanOrEqual(rowWindowThreshold);
+    expect(screen.getByRole('treeitem', { name: 'part-0000.scad' })).toBeInTheDocument();
+    expect(screen.queryByRole('treeitem', { name: 'part-0999.scad' })).not.toBeInTheDocument();
+    expect(document.querySelectorAll('[data-row-window-space]')).toHaveLength(1);
   });
 });

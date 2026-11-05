@@ -76,9 +76,8 @@ defaults:
 env:
   NX_DAEMON: 'false'
   NX_NO_CLOUD: 'true'
-  # The nanoraster program branch (claude/nanoraster-ambient-occlusion-32nhl5, nanoraster#130) with W1-W4 and the
-  # viewer's analytic edges and FXAA.
-  NANORASTER_PARITY_REF: 288603285952fcbfc52ae60e19ef0ba16cce254c
+  # nanoraster main after the viewer-parity squash merge (nanoraster#130), before the 0.9.0 release.
+  NANORASTER_PARITY_REF: 291ac9106ded916af36c57237e1362c248d7960a
   PARITY_FIXTURES_OUT: out/test-results/viewer-parity/fixtures
   PARITY_VIEWER_OUT: out/test-results/viewer-parity/viewer
   PARITY_OUT: out/test-results/viewer-parity/nanoraster

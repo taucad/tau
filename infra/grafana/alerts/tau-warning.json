@@ -105,6 +105,40 @@
       }
     },
     {
+      "uid": "redis-memory-high",
+      "title": "P1: Redis Memory High",
+      "condition": "redis_memory_high",
+      "data": [
+        {
+          "refId": "redis_memory_high",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 600,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "max(redis_memory_utilization{app=~\".*\",service_name=\"tau-api\"}) > 0.7",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "redis_memory_high"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "10m",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/system/services/redis.md",
+        "summary": "Redis memory is above 70% of its limit for 10 minutes. The instance runs without eviction, so at 100% it refuses writes: pairing, GitHub connect, git leases and rate limits fail."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "redis"
+      }
+    },
+    {
       "uid": "gen-ai-prompt-cache-hit-rate-low",
       "title": "GenAiPromptCacheHitRateLow: Prompt cache hit rate below 40% (cost bleed)",
       "condition": "cache_hit_rate_low",

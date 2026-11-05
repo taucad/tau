@@ -139,6 +139,11 @@ export class MetricsService {
     description: TauMetrics.redisConnectionState.description,
   });
 
+  public readonly redisMemoryUtilization = this.apiMeter.createGauge(TauMetrics.redisMemoryUtilization.name, {
+    description: TauMetrics.redisMemoryUtilization.description,
+    unit: TauMetrics.redisMemoryUtilization.unit,
+  });
+
   public readonly healthReadinessFailures = this.apiMeter.createCounter(TauMetrics.healthReadinessFailures.name, {
     description: TauMetrics.healthReadinessFailures.description,
     unit: TauMetrics.healthReadinessFailures.unit,

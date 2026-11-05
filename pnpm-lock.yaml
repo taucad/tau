@@ -2912,9 +2912,6 @@ importers:
       '@taucad/picovoxel':
         specifier: workspace:*
         version: link:../../packages/plugins/picovoxel
-      '@taucad/planetary-gearbox':
-        specifier: workspace:*
-        version: link:../libs/planetary-gearbox
       '@taucad/react':
         specifier: workspace:*
         version: link:../../packages/react

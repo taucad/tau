@@ -37,6 +37,7 @@
     "./algorithms": "./src/algorithms/index.ts",
     "./node": "./src/node/index.ts",
     "./package.json": "./package.json",
+    "./apply-tree": "./src/apply-tree.ts",
     "./revision-effects": "./src/revision-effects.ts",
     "./project-revisions-machine": "./src/project-revisions.machine.ts",
     "./revision-projection": "./src/revision-projection.ts",
@@ -70,6 +71,11 @@
         "default": "./dist/node/index.mjs"
       },
       "./package.json": "./package.json",
+      "./apply-tree": {
+        "types": "./dist/apply-tree.d.mts",
+        "import": "./dist/apply-tree.mjs",
+        "default": "./dist/apply-tree.mjs"
+      },
       "./revision-effects": {
         "types": "./dist/revision-effects.d.mts",
         "import": "./dist/revision-effects.mjs",

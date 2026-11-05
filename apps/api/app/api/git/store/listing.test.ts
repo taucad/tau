@@ -9,15 +9,18 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   buildHeadListing,
   headListingMagic,
+  headListingMaximumBytes,
   listedHeadsOf,
+  listedHeadsPerPush,
   listingPuts,
   prepareListings,
+  retiredHeadsOf,
 } from '#api/git/store/listing.js';
-import { commitOfListingKey, listingKeyFor } from '#api/git/store/listing-key.js';
+import { commitOfListingKey, listingKeyFor, listingRetirementKeyFor } from '#api/git/store/listing-key.js';
 import { sweepListings } from '#api/git/store/sweep.js';
-import { retentionWindowMilliseconds } from '#api/git/store/limits.js';
+import { orphanThresholdMilliseconds, retentionWindowMilliseconds } from '#api/git/store/limits.js';
 import { succeedManifest } from '#api/git/store/manifest.js';
-import type { RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';
+import type { PutObjectOptions, RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import { createMemoryRepositoryStore } from '#testing/publication-lease.fixture.js';
 
@@ -192,20 +195,19 @@ describe('the listing sidecar on the commit path', () => {
     ).toEqual([b]);
   });
 
-  it('should write a listing once, and skip a key the store already holds', async () => {
+  it('should put a listing create-only, so a second push of the same tip writes nothing new', async () => {
     const store = createMemoryRepositoryStore();
-    const puts: string[] = [];
+    const options: PutObjectOptions[] = [];
     const counted: RepositoryStore = {
       ...store,
       putObject: async (...args) => {
-        puts.push(args[1]);
+        options.push(args[3]);
         return store.putObject(...args);
       },
     };
     const { signal } = new AbortController();
     const round = async (): Promise<void> => {
       const prepared = await prepareListings({
-        store: counted,
         locator,
         directory: repository.directory,
         commits: [repository.commit],
@@ -214,33 +216,71 @@ describe('the listing sidecar on the commit path', () => {
     };
     await round();
     await round();
-    expect(puts).toEqual([listingKeyFor(repository.commit)]);
+    expect(options.map((option) => option.createOnly)).toEqual([true, true]);
+    const keys: string[] = [];
+    for await (const stored of store.listObjects(locator, 'listings/')) {
+      keys.push(stored.key);
+    }
+    expect(keys).toEqual([listingKeyFor(repository.commit)]);
   });
 
   it('should not fail the push when a listing cannot be built or stored', async () => {
     const store = createMemoryRepositoryStore();
     const { signal } = new AbortController();
-    expect(
-      await prepareListings({ store, locator, directory: repository.directory, commits: ['f'.repeat(40)] }),
-    ).toEqual([]);
+    expect(await prepareListings({ locator, directory: repository.directory, commits: ['f'.repeat(40)] })).toEqual([]);
     const refusing: RepositoryStore = {
       ...store,
       putObject: async () => {
         throw new Error('storage refused');
       },
     };
-    const prepared = await prepareListings({
-      store: refusing,
-      locator,
-      directory: repository.directory,
-      commits: [repository.commit],
-    });
+    const prepared = await prepareListings({ locator, directory: repository.directory, commits: [repository.commit] });
     expect(prepared).toHaveLength(1);
     const [put] = listingPuts(refusing, locator, prepared);
     await expect(put?.(signal)).resolves.toBeUndefined();
   });
 
-  it('should sweep listings no ref names once the window has passed, and keep the rest', async () => {
+  it('should build nothing once the commit deadline is too near, and stop its git children at its own deadline', async () => {
+    expect(
+      await prepareListings({
+        locator,
+        directory: repository.directory,
+        commits: [repository.commit],
+        deadlineAt: Date.now() + 500,
+      }),
+    ).toEqual([]);
+    const aborted = AbortSignal.abort();
+    await expect(buildHeadListing(repository.directory, repository.commit, aborted)).rejects.toThrow();
+  });
+
+  it('should list the default branch first and at most a bounded number of heads per push', () => {
+    const tip = (digit: number): { oid: string } => ({ oid: String(digit % 10).repeat(40) });
+    const after: Record<string, { oid: string }> = Object.fromEntries([
+      ...Array.from(
+        { length: listedHeadsPerPush + 3 },
+        (_, index) => [`refs/heads/a-${String(index).padStart(2, '0')}`, tip(index + 1)] as const,
+      ),
+      ['refs/heads/main', { oid: 'c'.repeat(40) }] as const,
+    ]);
+    const listed = listedHeadsOf({}, after);
+    expect(listed).toHaveLength(listedHeadsPerPush);
+    expect(listed[0]).toBe('c'.repeat(40));
+  });
+
+  it('should name the tips a commit retires: branch tips no committed ref names any longer', () => {
+    const before = { 'refs/heads/main': { oid: '1'.repeat(40) }, 'refs/heads/topic': { oid: '2'.repeat(40) } };
+    const after = { 'refs/heads/main': { oid: '3'.repeat(40) }, 'refs/heads/copy': { oid: '2'.repeat(40) } };
+    expect(retiredHeadsOf(before, after)).toEqual(['1'.repeat(40)]);
+  });
+
+  it('should skip a listing past the size cap and log it, never failing the push', async () => {
+    expect(headListingMaximumBytes).toBe(4 * 1024 * 1024);
+    const commits = [repository.commit];
+    expect(await prepareListings({ locator, directory: repository.directory, commits, maximumBytes: 64 })).toEqual([]);
+    expect(await prepareListings({ locator, directory: repository.directory, commits })).toHaveLength(1);
+  });
+
+  it('should age a listing from its retirement marker, and an unmarked one as an orphan', async () => {
     const base = createMemoryRepositoryStore();
     const at = new Date('2026-11-05T00:00:00Z');
     const written = new Map<string, Date>();
@@ -253,19 +293,31 @@ describe('the listing sidecar on the commit path', () => {
       },
     };
     const body = new Uint8Array([1]);
-    const put = async (commit: string, when: Date): Promise<void> => {
-      written.set(listingKeyFor(commit), when);
-      await base.putObject(locator, listingKeyFor(commit), body, { contentLength: 1, sha256: '' });
+    const put = async (key: string, when: Date): Promise<void> => {
+      written.set(key, when);
+      await base.putObject(locator, key, body, { contentLength: 1, sha256: '' });
     };
-    const old = new Date(at.getTime() - retentionWindowMilliseconds - 1);
-    await put('1'.repeat(40), old);
-    await put('2'.repeat(40), old);
-    await put('3'.repeat(40), new Date(at.getTime() - 1000));
+    const long = new Date(at.getTime() - retentionWindowMilliseconds - 1);
+    const recent = new Date(at.getTime() - 1000);
+    const [retiredLong, retiredRecent, live, orphan, young] = ['1', '2', '3', '4', '5'].map((digit) =>
+      digit.repeat(40),
+    );
+    /* Written long ago, but retired only recently: kept, since a catalogue may still name it. */
+    await put(listingKeyFor(retiredRecent!), long);
+    await put(listingRetirementKeyFor(retiredRecent!, recent), recent);
+    /* Retired past the window: gone, with its marker. */
+    await put(listingKeyFor(retiredLong!), recent);
+    await put(listingRetirementKeyFor(retiredLong!, long), long);
+    await put(listingKeyFor(live!), long);
+    await put(listingKeyFor(orphan!), new Date(at.getTime() - orphanThresholdMilliseconds - 1));
+    await put(listingKeyFor(young!), recent);
     const committed = succeedManifest(
       undefined,
-      { refs: { 'refs/heads/main': { oid: '2'.repeat(40) } }, packs: [], committedBy: 'user_listing' },
+      { refs: { 'refs/heads/main': { oid: live! } }, packs: [], committedBy: 'user_listing' },
       at,
     );
-    expect(await sweepListings({ store, locator, committed, at })).toEqual([listingKeyFor('1'.repeat(40))]);
+    expect([...(await sweepListings({ store, locator, committed, at }))].toSorted()).toEqual(
+      [listingRetirementKeyFor(retiredLong!, long), listingKeyFor(retiredLong!), listingKeyFor(orphan!)].toSorted(),
+    );
   });
 });

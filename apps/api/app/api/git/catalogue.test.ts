@@ -121,6 +121,29 @@ describe('the catalogue', () => {
     ]);
   });
 
+  it('should leave out a pack past what a link can carry and say it is incomplete, never signing it', async () => {
+    const huge = {
+      ...manifest,
+      packs: manifest.packs.map((pack) => (pack.key === packB ? { ...pack, bytes: 2 ** 31 } : pack)),
+    };
+    const signed: string[] = [];
+    const catalogue = await buildCatalogue(huge, {
+      families: ['heads'],
+      sizes: new Map([
+        [indexKeyFor(packA), 1100],
+        [indexKeyFor(packB), 1200],
+      ]),
+      sign: async (key, bytes) => {
+        signed.push(key);
+        return signer(key, bytes);
+      },
+      expiresAt: 1,
+    });
+    expect(catalogue.complete).toBe(false);
+    expect(catalogue.packs.map((pack) => pack.key)).toEqual([packA]);
+    expect(signed.some((key) => key.startsWith(packB.slice(0, 20)))).toBe(false);
+  });
+
   it('should say it is incomplete when a live pack has no stored index or no link', async () => {
     const sizes = new Map([[indexKeyFor(packA), 1100]]);
     const missingIndex = await buildCatalogue(manifest, { families: ['heads'], sizes, sign: signer, expiresAt: 1 });
@@ -138,7 +161,7 @@ describe('the catalogue', () => {
     expect(unsigned.complete).toBe(false);
   });
 
-  it('should read the sizes from one listing of packs and one key listing per tip', async () => {
+  it('should read the sizes from one listing of packs and one of listings, keeping only the tips', async () => {
     const store = createMemoryRepositoryStore();
     const locator = repositoryLocator({ ownerId: 'user_owner', projectId: 'proj_cat' });
     const put = async (key: string, size: number): Promise<void> =>
@@ -150,10 +173,7 @@ describe('the catalogue', () => {
     const listed = vi.spyOn(store, 'listObjects');
     const sizes = await catalogueSizes(store, locator, [main]);
     expect(Object.fromEntries(sizes)).toEqual({ [indexKeyFor(packA)]: 11, [packA]: 40, [listingKeyFor(main)]: 3 });
-    expect(listed.mock.calls.map(([, prefix]) => prefix).toSorted()).toEqual([
-      'listings/' + main + '.tsv.gz',
-      'packs/',
-    ]);
+    expect(listed.mock.calls.map(([, prefix]) => prefix).toSorted()).toEqual(['listings/', 'packs/']);
   });
 });
 

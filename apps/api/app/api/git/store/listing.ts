@@ -2,9 +2,9 @@
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import { Logger } from '@nestjs/common';
-import { pointerSizeCeilingBytes, runGitWithInput } from '#api/git/lfs-references.js';
+import { pointerSizeCeilingBytes, runGit } from '#api/git/lfs-references.js';
 import type { Manifest } from '#api/git/store/manifest.js';
-import { commitOfListingKey, listingKeyFor } from '#api/git/store/listing-key.js';
+import { commitOfListingKey, listingKeyFor, listingRetirementKeyFor } from '#api/git/store/listing-key.js';
 import type { RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';
 
 /**
@@ -41,6 +41,20 @@ export const headListingFormat = 1;
 export const headListingMagic = 'tau-head-listing';
 
 const logger = new Logger('HeadListing');
+
+/** The largest listing stored, gzipped; past it the sidecar is skipped and the cold open falls back. Bytes. */
+export const headListingMaximumBytes = 4 * 1024 * 1024;
+
+/** Heads one push lists: the default branch first, then others by name. */
+export const listedHeadsPerPush = 8;
+
+/** Listings built at once. */
+export const listingConcurrency = 4;
+
+/** How long one push's listings may take, well inside the commit deadline. Milliseconds. */
+export const listingBuildMilliseconds = 30_000;
+
+const defaultBranches = ['refs/heads/main', 'refs/heads/master'];
 
 const pointerVersionLine = 'version https://git-lfs.github.com/spec/v1\n';
 const pointerFacts = /^oid sha256:(?<oid>[\da-f]{64})\nsize (?<size>0|[1-9]\d{0,15})\n/mu;
@@ -117,9 +131,12 @@ const pointerFields = (body: Uint8Array<ArrayBuffer> | undefined): string => {
 export const buildHeadListing = async (
   directory: string,
   commit: string,
+  signal?: AbortSignal,
 ): Promise<{ readonly bytes: Uint8Array<ArrayBuffer>; readonly entries: number }> => {
-  const tree = new TextDecoder().decode(await runGitWithInput(directory, ['rev-parse', `${commit}^{tree}`], '')).trim();
-  const entries = parseTree(await runGitWithInput(directory, ['ls-tree', '-r', '-l', '-z', '--full-tree', commit], ''));
+  const git = async (args: readonly string[], input = ''): Promise<Uint8Array<ArrayBuffer>> =>
+    runGit(directory, args, { input, ...(signal === undefined ? {} : { signal }) });
+  const tree = new TextDecoder().decode(await git(['rev-parse', `${commit}^{tree}`])).trim();
+  const entries = parseTree(await git(['ls-tree', '-r', '-l', '-z', '--full-tree', commit]));
   const candidates = entries.filter(
     (entry) => entry.type === 'blob' && Number(entry.size) <= pointerSizeCeilingBytes && entry.size !== '-',
   );
@@ -127,8 +144,7 @@ export const buildHeadListing = async (
     candidates.length === 0
       ? new Map<string, Uint8Array<ArrayBuffer>>()
       : batchByName(
-          await runGitWithInput(
-            directory,
+          await git(
             ['cat-file', '--batch', '--buffer'],
             `${[...new Set(candidates.map((entry) => entry.oid))].join('\n')}\n`,
           ),
@@ -147,23 +163,55 @@ export const buildHeadListing = async (
   };
 };
 
+/* The default branch first, then by name. */
+const headOrder = (left: string, right: string): number => {
+  const rank = (name: string): number => {
+    const at = defaultBranches.indexOf(name);
+    return at === -1 ? defaultBranches.length : at;
+  };
+  return rank(left) - rank(right) || (left < right ? -1 : left > right ? 1 : 0);
+};
+
 /**
- * The branch tips a commit's listings are written for: every `refs/heads/*`
- * the push created or moved. A branch the push did not touch keeps the
- * listing its last push wrote.
+ * The branch tips a commit's listings are written for: the `refs/heads/*`
+ * the push created or moved, the default branch first, at most
+ * {@link listedHeadsPerPush}. A branch the push did not touch keeps the
+ * listing its last push wrote; one past the bound has none, and its cold
+ * open walks its trees instead.
  *
  * @param before - The ref map the lease hydrated.
  * @param after - The ref map about to be committed.
- * @returns Distinct commit ids, in ref name order.
+ * @returns Distinct commit ids, the default branch's first.
  */
-export const listedHeadsOf = (before: Manifest['refs'], after: Manifest['refs']): string[] => [
-  ...new Set(
-    Object.entries(after)
-      .filter(([name, tip]) => name.startsWith('refs/heads/') && before[name]?.oid !== tip.oid)
-      .toSorted(([left], [right]) => (left < right ? -1 : 1))
-      .map(([, tip]) => tip.oid),
-  ),
-];
+export const listedHeadsOf = (before: Manifest['refs'], after: Manifest['refs']): string[] =>
+  [
+    ...new Set(
+      Object.entries(after)
+        .filter(([name, tip]) => name.startsWith('refs/heads/') && before[name]?.oid !== tip.oid)
+        .toSorted(([left], [right]) => headOrder(left, right))
+        .map(([, tip]) => tip.oid),
+    ),
+  ].slice(0, listedHeadsPerPush);
+
+/**
+ * The listings a commit retires: branch tips the hydrated refs named and the
+ * committed ones no longer name. Each gets a marker dated now, which the
+ * sweep ages it from.
+ *
+ * @param before - The ref map the lease hydrated.
+ * @param after - The ref map about to be committed.
+ * @returns Distinct commit ids.
+ */
+export const retiredHeadsOf = (before: Manifest['refs'], after: Manifest['refs']): string[] => {
+  const live = new Set(Object.values(after).map((tip) => tip.oid));
+  return [
+    ...new Set(
+      Object.entries(before)
+        .filter(([name, tip]) => name.startsWith('refs/heads/') && !live.has(tip.oid))
+        .map(([, tip]) => tip.oid),
+    ),
+  ];
+};
 
 /** One listing ready to store: its key, bytes and digest. */
 export type PreparedListing = {
@@ -177,39 +225,53 @@ const warnSkipped = (locator: RepositoryLocator, commit: string, error: unknown)
 };
 
 /**
- * Build each moved head's listing before the commit's put round, beside the
- * pack hashing. A listing already stored is not built again (the key is
- * content-addressed, and a store object is never overwritten, I3), and one
- * that cannot be built is logged and skipped: the push commits whatever
- * happens to its sidecar.
+ * Build each listed head's listing before the commit's put round, beside the
+ * pack hashing: {@link listingConcurrency} at a time, all under one abortable
+ * deadline of {@link listingBuildMilliseconds} (or less, when the commit's own
+ * deadline is nearer), which kills the git children it ends. A listing that
+ * cannot be built in time, or that passes {@link headListingMaximumBytes}, is
+ * logged and skipped: a listing never fails a push.
  *
- * @param args - The store, the repository, the lease directory and the commits to list.
+ * @param args - The repository, the lease directory, the commits and the commit's deadline.
  * @returns The listings to store; never rejects.
  */
 export const prepareListings = async (args: {
-  readonly store: RepositoryStore;
   readonly locator: RepositoryLocator;
   readonly directory: string;
   readonly commits: readonly string[];
+  readonly deadlineAt?: number;
+  /** The cap; {@link headListingMaximumBytes} by default. */
+  readonly maximumBytes?: number;
 }): Promise<PreparedListing[]> => {
-  const prepared = await Promise.all(
-    args.commits.map(async (commit): Promise<PreparedListing | undefined> => {
-      const key = listingKeyFor(commit);
+  const maximumBytes = args.maximumBytes ?? headListingMaximumBytes;
+  const budget = Math.min(listingBuildMilliseconds, (args.deadlineAt ?? Number.POSITIVE_INFINITY) - Date.now() - 1000);
+  if (args.commits.length === 0 || budget <= 0) {
+    return [];
+  }
+  const signal = AbortSignal.timeout(budget);
+  const prepared: PreparedListing[] = [];
+  const queue = [...args.commits];
+  const worker = async (): Promise<void> => {
+    for (let commit = queue.shift(); commit !== undefined; commit = queue.shift()) {
       try {
-        for await (const stored of args.store.listObjects(args.locator, key)) {
-          if (stored.key === key) {
-            return undefined;
-          }
+        // oxlint-disable-next-line no-await-in-loop -- each worker builds one listing at a time.
+        const { bytes } = await buildHeadListing(args.directory, commit, signal);
+        if (bytes.byteLength > maximumBytes) {
+          warnSkipped(args.locator, commit, `${String(bytes.byteLength)} bytes passes the listing cap`);
+          continue;
         }
-        const { bytes } = await buildHeadListing(args.directory, commit);
-        return { key, bytes, sha256: createHash('sha256').update(bytes).digest('base64') };
+        prepared.push({
+          key: listingKeyFor(commit),
+          bytes,
+          sha256: createHash('sha256').update(bytes).digest('base64'),
+        });
       } catch (error) {
         warnSkipped(args.locator, commit, error);
-        return undefined;
       }
-    }),
-  );
-  return prepared.filter((listing) => listing !== undefined);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(listingConcurrency, queue.length) }, worker));
+  return prepared;
 };
 
 /**
@@ -228,11 +290,12 @@ export const listingPuts = (
 ): Array<(signal: AbortSignal) => Promise<void>> =>
   prepared.map((listing) => async (signal: AbortSignal) => {
     try {
+      /* Create-only: the key is content-addressed, so one already there is this listing (I3). */
       await store.putObject(
         locator,
         listing.key,
         listing.bytes,
-        { contentLength: listing.bytes.byteLength, sha256: listing.sha256 },
+        { contentLength: listing.bytes.byteLength, sha256: listing.sha256, createOnly: true },
         signal,
       );
     } catch (error) {
@@ -240,5 +303,40 @@ export const listingPuts = (
         throw error;
       }
       warnSkipped(locator, commitOfListingKey(listing.key) ?? listing.key, error);
+    }
+  });
+
+/**
+ * The retirement markers of the listings a commit retires, for its put round,
+ * so a listing is aged from when its tip stopped being named. A marker that
+ * fails is logged, not thrown, unless the round was aborted by a sibling: a
+ * listing without one is aged as an orphan instead.
+ *
+ * @param args - The store, the repository, the retired tips and the commit's time.
+ * @returns One put per marker.
+ */
+export const listingRetirementPuts = (args: {
+  readonly store: RepositoryStore;
+  readonly locator: RepositoryLocator;
+  readonly commits: readonly string[];
+  readonly at: Date;
+}): Array<(signal: AbortSignal) => Promise<void>> =>
+  args.commits.map((commit) => async (signal: AbortSignal) => {
+    const empty = new Uint8Array(0);
+    try {
+      await args.store.putObject(
+        args.locator,
+        listingRetirementKeyFor(commit, args.at),
+        empty,
+        { contentLength: 0, sha256: createHash('sha256').update(empty).digest('base64') },
+        signal,
+      );
+    } catch (error) {
+      if (signal.aborted) {
+        throw error;
+      }
+      logger.warn(
+        `the listing retirement of ${commit.slice(0, 12)} in ${args.locator.projectId} was not marked: ${String(error)}`,
+      );
     }
   });

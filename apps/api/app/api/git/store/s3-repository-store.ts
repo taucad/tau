@@ -7,6 +7,7 @@ import { Injectable, Optional } from '@nestjs/common';
 import { concatUint8Arrays } from '#storage/concat-uint8-arrays.js';
 import { ObjectStorageService, isS3ObjectMissing } from '#storage/object-storage.service.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
+import { repositoryPrefix } from '#api/git/store/repository-key.js';
 import type {
   CommitToken,
   ManifestBytes,
@@ -33,22 +34,7 @@ import type {
 /** The single mutable key of a repository (D5). */
 const manifestKeyName = 'manifest.json';
 
-/** Everything for one repository lives under this prefix (D24). */
-const repositoryPrefix = (locator: RepositoryLocator): string => `${locator.ownerId}/repos/${locator.projectId}/`;
-
 const manifestKey = (locator: RepositoryLocator): string => `${repositoryPrefix(locator)}${manifestKeyName}`;
-
-/**
- * Where one repository-relative key is stored in the `tenants` namespace of
- * the private tier: the one other place this layout is read is the files
- * link signer, which the catalogue hands it to (D8).
- *
- * @param locator - The repository.
- * @param key - A key relative to it, such as `packs/<name>.idx`.
- * @returns The key below the `tenants/` namespace prefix.
- */
-export const repositoryObjectKey = (locator: RepositoryLocator, key: string): string =>
-  `${repositoryPrefix(locator)}${key}`;
 
 /** S3 and R2 both cap a single-part PUT at 5 GiB. */
 const defaultMaxObjectBytes = 5 * 1024 * 1024 * 1024;
@@ -269,6 +255,8 @@ export class S3RepositoryStore implements RepositoryStore {
       contentType: objectContentType,
       tier: 'private',
       checksumSha256: options.sha256,
+      /* A create-only put that loses to an object already there has nothing left to do. */
+      ...(options.createOnly === true ? { ifNoneMatch: '*' } : {}),
       ...(signal === undefined ? {} : { signal }),
     });
   }

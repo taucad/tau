@@ -24,7 +24,13 @@ import {
   repositoryByteCeiling,
   retentionWindowMilliseconds,
 } from '#api/git/store/limits.js';
-import { listedHeadsOf, listingPuts, prepareListings } from '#api/git/store/listing.js';
+import {
+  listedHeadsOf,
+  listingPuts,
+  listingRetirementPuts,
+  prepareListings,
+  retiredHeadsOf,
+} from '#api/git/store/listing.js';
 import { putRetirementMarker, sweepListings, sweepRepository } from '#api/git/store/sweep.js';
 import type { SweepOutcome } from '#api/git/store/sweep.js';
 import {
@@ -385,10 +391,10 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
       ),
       // The head listing of every branch this push moved (D8): derived and never rejecting.
       prepareListings({
-        store,
         locator: lease.locator,
         directory: lease.directory,
         commits: listedHeadsOf(lease.manifest?.refs ?? {}, references),
+        deadlineAt,
       }),
     ]),
   );
@@ -417,6 +423,12 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
         writeSpilledPushLog({ store, locator: lease.locator, base: lease.manifest, next, signal }),
       // In the same round, so the manifest that names a tip is never ahead of its listing.
       ...listingPuts(store, lease.locator, listings),
+      ...listingRetirementPuts({
+        store,
+        locator: lease.locator,
+        commits: retiredHeadsOf(lease.manifest?.refs ?? {}, references),
+        at,
+      }),
     ]),
   );
   await args.faults?.('after-pack-upload');
@@ -498,6 +510,8 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
         }),
     sweep: async () => {
       if (!compacted) {
+        /* Every push sweeps the listings: production defers compaction, and a listing is no pack (D8). */
+        await sweepListings({ store, locator: lease.locator, committed, at });
         return undefined;
       }
       const outcome = await sweepQuietly({
@@ -848,14 +862,17 @@ export const compactCommitted = async (
     outcome: 'committed',
     manifest: next,
     token,
-    sweep: async () =>
-      sweepQuietly({
+    sweep: async () => {
+      const outcome = await sweepQuietly({
         store,
         locator: lease.locator,
         committed: next,
         at,
         ...(args.faults === undefined ? {} : { faults: args.faults }),
-      }),
+      });
+      await sweepListings({ store, locator: lease.locator, committed: next, at });
+      return outcome;
+    },
   };
 };
 

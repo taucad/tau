@@ -1,3 +1,4 @@
+import { fileLinkRepositoryMaximumBytes } from '@taucad/file-links';
 import { listingKeyFor } from '#api/git/store/listing-key.js';
 import { indexKeyFor } from '#api/git/store/manifest.js';
 import type { Manifest } from '#api/git/store/manifest.js';
@@ -130,6 +131,10 @@ export const buildCatalogue = async (manifest: Manifest, sources: CatalogueSourc
       if (!pack.indexStored || indexBytes === undefined) {
         return undefined;
       }
+      /* A pack past what a link can carry is left out, and the catalogue says it is incomplete. */
+      if (pack.bytes > fileLinkRepositoryMaximumBytes || indexBytes > fileLinkRepositoryMaximumBytes) {
+        return undefined;
+      }
       const [index, body] = await Promise.all([sources.sign(indexKey, indexBytes), sources.sign(pack.key, pack.bytes)]);
       return index === undefined || body === undefined
         ? undefined
@@ -168,11 +173,15 @@ export const catalogueSizes = async (
   heads: readonly string[],
 ): Promise<ReadonlyMap<string, number>> => {
   const sizes = new Map<string, number>();
+  const listed = new Set(heads.map((commit) => listingKeyFor(commit)));
   const collect = async (prefix: string): Promise<void> => {
     for await (const stored of store.listObjects(locator, prefix)) {
-      sizes.set(stored.key, stored.bytes);
+      if (prefix !== 'listings/' || listed.has(stored.key)) {
+        sizes.set(stored.key, stored.bytes);
+      }
     }
   };
-  await Promise.all([collect('packs/'), ...heads.map(async (commit) => collect(listingKeyFor(commit)))]);
+  /* One LIST per prefix, however many heads: the listings are few and small. */
+  await Promise.all([collect('packs/'), ...(heads.length === 0 ? [] : [collect('listings/')])]);
   return sizes;
 };

@@ -42,13 +42,29 @@ export const runGitWithInput = async (
   cwd: string,
   args: readonly string[],
   input: string,
+): Promise<Uint8Array<ArrayBuffer>> => runGit(cwd, args, { input });
+
+/**
+ * As {@link runGitWithInput}, with a signal that kills the child when it aborts.
+ *
+ * @param cwd - The repository directory.
+ * @param args - git's arguments.
+ * @param options - What goes to the child's stdin, and the signal that ends it.
+ * @returns The child's stdout.
+ */
+export const runGit = async (
+  cwd: string,
+  args: readonly string[],
+  options: { readonly input: string; readonly signal?: AbortSignal },
 ): Promise<Uint8Array<ArrayBuffer>> =>
   new Promise<Uint8Array<ArrayBuffer>>((resolve, reject) => {
+    const { input } = options;
     const child = spawn('git', [...args], {
       cwd,
       env: gitChildEnvironment(cwd),
       timeout: gitCommandTimeoutMilliseconds,
       killSignal: 'SIGKILL',
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
     const output: Array<Uint8Array<ArrayBuffer>> = [];
     const errors: Array<Uint8Array<ArrayBuffer>> = [];

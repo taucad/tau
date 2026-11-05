@@ -99,6 +99,11 @@ export type PutObjectOptions = {
   readonly contentLength: number;
   /** Base64 SHA-256 of the body, matching the driver's multipart checksum encoding. */
   readonly sha256: string;
+  /**
+   * Write only when the key is absent (`If-None-Match: *`); an object already
+   * there is success and is left as it is. Single-part bodies only.
+   */
+  readonly createOnly?: boolean;
 };
 
 /*

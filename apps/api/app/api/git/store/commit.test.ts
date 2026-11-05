@@ -344,8 +344,8 @@ describe('commitLease', () => {
         .slice(0, manifestAt)
         .filter((event) => event.kind === 'put-end' && event.key.startsWith('retired/'));
       expect(markers).toHaveLength(2);
-      /* Two markers, the new pack, its index and the head listing: one round, not five. */
-      expect(tally.mostInFlight).toBe(5);
+      /* Two markers, the new pack, its index, the head listing and the old tip's listing marker: one round, not six. */
+      expect(tally.mostInFlight).toBe(6);
       const committed = await readBack(store, locator);
       expect(committed?.packs).toHaveLength(2);
       /* The kept pack stays under the key an earlier generation stored; everything else is this commit's. */
@@ -370,8 +370,8 @@ describe('commitLease', () => {
       expect(committed?.earlierPushes).toMatch(/^pushes\//u);
       const manifestAt = manifestWriteAt(events);
       expect(putEndedBefore(events, committed?.earlierPushes ?? '', manifestAt)).toBe(true);
-      /* The segment, the new pack, its index and the head listing. */
-      expect(tally.mostInFlight).toBe(4);
+      /* The segment, the new pack, its index, the head listing and the old tip's listing marker. */
+      expect(tally.mostInFlight).toBe(5);
     }, 60_000);
 
     it('should send a small lease file as the bytes it hashed rather than reading the file again', async () => {
@@ -495,8 +495,8 @@ describe('commitLease', () => {
       expect(tally.manifestWrites).toBe(0);
       expect(await readBack(store, locator)).toStrictEqual(before);
       const uploaded = events.flatMap((event) => (event.kind === 'put-end' ? [event.key] : []));
-      /* The pack, its index and the new tip's head listing: derived, and swept with the tip it lists. */
-      expect(uploaded).toHaveLength(3);
+      /* The pack, its index, the new tip's head listing and the old tip's listing marker: derived, and swept. */
+      expect(uploaded).toHaveLength(4);
       const named = new Set(keysNamedBy(before));
       expect(uploaded.filter((key) => named.has(key))).toStrictEqual([]);
     }, 60_000);
@@ -754,6 +754,55 @@ describe('commitLease', () => {
       expect(swept?.retainedBytes).toBeGreaterThan(0);
       const named = keysNamedBy(await readBack(store, locator));
       for (const key of named) {
+        // oxlint-disable-next-line no-await-in-loop -- one read per named key
+        await expect(store.getObject(locator, key)).resolves.toBeDefined();
+      }
+    }, 60_000);
+
+    it('should mark the retired tip and sweep listings after a deferred push and after its compaction', async () => {
+      const { store: journaled } = journaledStore({ putMilliseconds: 1 });
+      const listed: string[] = [];
+      const store: RepositoryStore = {
+        ...journaled,
+        listObjects: (where, prefix) => {
+          listed.push(prefix);
+          return journaled.listObjects(where, prefix);
+        },
+      };
+      const locator = newLocator();
+      const client = newClient();
+      await pushRevisions({ store, locator, client, count: 3 });
+      const before = await readBack(store, locator);
+      const retiredTip = before?.refs['refs/heads/main']?.oid;
+      const { lease, outcome } = await pushKeepingLease({
+        store,
+        locator,
+        client: client.directory,
+        overrides: { packBound: 2, deferCompaction: true },
+      });
+      if (!outcome.committed || outcome.compaction === undefined) {
+        throw new Error('the push owed no compaction');
+      }
+      const markers: string[] = [];
+      for await (const stored of store.listObjects(locator, 'retired-listings/')) {
+        markers.push(stored.key);
+      }
+      expect(markers.some((key) => key.endsWith(`-${retiredTip ?? ''}`))).toBe(true);
+
+      listed.length = 0;
+      await outcome.sweep();
+      /* Production defers compaction: the push's own sweep still sweeps the listings. */
+      expect(listed).toEqual(expect.arrayContaining(['retired-listings/', 'listings/']));
+
+      const compacted = await outcome.compaction();
+      await lease.dispose();
+      if (compacted.outcome !== 'committed') {
+        throw new Error(`the compaction ended ${compacted.outcome}`);
+      }
+      listed.length = 0;
+      await compacted.sweep();
+      expect(listed).toEqual(expect.arrayContaining(['packs/', 'retired-listings/', 'listings/']));
+      for (const key of keysNamedBy(await readBack(store, locator))) {
         // oxlint-disable-next-line no-await-in-loop -- one read per named key
         await expect(store.getObject(locator, key)).resolves.toBeDefined();
       }

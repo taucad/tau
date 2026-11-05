@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { Logger } from '@nestjs/common';
 import { orphanThresholdMilliseconds, retentionWindowMilliseconds } from '#api/git/store/limits.js';
-import { commitOfListingKey } from '#api/git/store/listing-key.js';
+import { commitOfListingKey, listingRetirementOf } from '#api/git/store/listing-key.js';
 import type { Manifest } from '#api/git/store/manifest.js';
 import type { RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';
 import type { FaultInjector } from '#api/git/store/fault-points.js';
@@ -156,13 +156,16 @@ export type SweepOutcome = { readonly deleted: readonly string[]; readonly retai
 const listingLogger = new Logger('HeadListing');
 
 /**
- * Remove the listings of commits no ref of `committed` names any longer,
- * once the retention window has passed since they were written, so a client
- * that read a catalogue minutes ago still finds the listing it was handed.
- * Never rejects: a listing left behind is a few kilobytes, swept next time.
+ * Remove the listings of commits no ref of `committed` names, aged as packs
+ * are: from the retirement marker the commit that dropped the tip wrote, past
+ * the retention window, so a client that read a catalogue a while ago still
+ * finds the listing it was handed; a listing with no marker (a push that lost
+ * its race, or one from before markers) from when it was written, past the
+ * orphan threshold. Expired markers go too. Never rejects: what is left is a
+ * few kilobytes, swept next time.
  *
  * @param args - The store, the repository, the manifest just committed and the time.
- * @returns The listing keys deleted.
+ * @returns The keys deleted.
  */
 export const sweepListings = async (args: {
   readonly store: RepositoryStore;
@@ -170,15 +173,31 @@ export const sweepListings = async (args: {
   readonly committed: Manifest;
   readonly at: Date;
 }): Promise<readonly string[]> => {
+  const now = args.at.getTime();
   const live = new Set(Object.values(args.committed.refs).map((tip) => tip.oid));
-  const doomed: string[] = [];
   try {
+    const retiredAt = new Map<string, number>();
+    const doomed: string[] = [];
+    for await (const stored of args.store.listObjects(args.locator, 'retired-listings/')) {
+      const marker = listingRetirementOf(stored.key);
+      if (marker !== undefined) {
+        retiredAt.set(marker.commit, Math.max(retiredAt.get(marker.commit) ?? 0, marker.at));
+        if (now - marker.at > retentionWindowMilliseconds) {
+          doomed.push(stored.key);
+        }
+      }
+    }
     for await (const stored of args.store.listObjects(args.locator, 'listings/')) {
       const commit = commitOfListingKey(stored.key);
-      const old =
-        stored.modifiedAt !== undefined &&
-        args.at.getTime() - stored.modifiedAt.getTime() > retentionWindowMilliseconds;
-      if (commit !== undefined && !live.has(commit) && old) {
+      if (commit === undefined || live.has(commit)) {
+        continue;
+      }
+      const retired = retiredAt.get(commit);
+      const due =
+        retired === undefined
+          ? stored.modifiedAt !== undefined && now - stored.modifiedAt.getTime() > orphanThresholdMilliseconds
+          : now - retired > retentionWindowMilliseconds;
+      if (due) {
         doomed.push(stored.key);
       }
     }

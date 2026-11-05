@@ -20,7 +20,7 @@ import { factsConcurrency, getFileContentMetadata, measureContentFacts } from '#
 import { directoryConcurrency, mapConcurrent, statConcurrency } from '#concurrency.js';
 import { workerTimings } from '#worker-timings.js';
 import type { ContentFacts, ContentFactsOptions, FileStatEntry, FileSystemProvider, PathPolicy } from '#types.js';
-import { ProjectIndex } from '#project-index/project-index.js';
+import { ProjectIndex, timestampGranularityMilliseconds } from '#project-index/project-index.js';
 import type { IndexAdmits, IndexCompareResult, IndexEntryKind, ObservedRow } from '#project-index/project-index.js';
 import { projectIndexDirectory, readIndexSnapshot, writeIndexSnapshot } from '#project-index/index-snapshot.js';
 import type { IndexVector } from '#project-index/index-snapshot.js';
@@ -84,6 +84,20 @@ const blobOidOf = async (bytes: Uint8Array<ArrayBuffer>): Promise<string> => {
 /** Most read facts one cold root keeps before it starts over. */
 const readFactsCapacity = 50_000;
 
+/** Facts a cold root's read measured, the size it read, and when the read began. */
+type ReadFacts = Readonly<{ facts: ContentFacts; size: number; observedAt: number }>;
+
+/**
+ * True when a read still describes the file whose head metadata is `current`:
+ * the same size, and the mtime old enough (the racy rule, I5) that no write the
+ * read could have missed shares it — a write during or after the read leaves a
+ * newer mtime, whether or not any hook saw it.
+ */
+const readStillHolds = (
+  read: Readonly<{ size: number; observedAt: number }>,
+  current: Readonly<{ size: number; mtimeMs: number }>,
+): boolean => read.size === current.size && read.observedAt - current.mtimeMs > timestampGranularityMilliseconds;
+
 /** Unknown, or text whose line count was not measured. */
 const lacksCount = (facts: ContentFacts | undefined): boolean =>
   facts === undefined || (facts.contentKind === 'text' && facts.lineCount === undefined);
@@ -126,7 +140,7 @@ export class ProjectIndexes {
    * later listing asks of a root nobody opened an index for, answered without
    * reading again. Every hook that feeds an index forgets what it touches.
    */
-  private readonly _readFacts = new Map<string, Map<string, Readonly<{ facts: ContentFacts; size: number }>>>();
+  private readonly _readFacts = new Map<string, Map<string, ReadFacts>>();
 
   /**
    * @param options - Mount boundaries, provider resolution, path policy and tab identity.
@@ -197,26 +211,23 @@ export class ProjectIndexes {
   }
 
   /**
-   * Compare every warm root (a webaccess tab regaining visibility).
+   * Compare the warm roots other programs edit (`externallyEdited`): one, or
+   * every one when `root` is omitted — a poll, a tab regaining visibility. A
+   * root only Tau writes (OPFS, IndexedDB) learns every change from its own
+   * hooks and cross-tab notices, so a poll never compares it.
    *
-   * @returns Once each warm root is compared.
+   * @param root - Optional absolute root.
+   * @returns Once each such warm root is compared; at once for a cold one.
    */
-  public async compareAll(): Promise<void> {
+  public async compareExternallyEdited(root?: string): Promise<void> {
+    const roots = root === undefined ? [...this._states.keys()] : [normalizePath(root)];
     await Promise.all(
-      [...this._states.keys()].filter((root) => this.get(root) !== undefined).map(async (root) => this.compare(root)),
+      roots
+        .filter(
+          (key) => this.get(key) !== undefined && this._resolve(key).provider.capabilities.externallyEdited === true,
+        )
+        .map(async (key) => this.compare(key)),
     );
-  }
-
-  /**
-   * Compare one root if it is warm; a cold root opens with its own compare.
-   *
-   * @param root - Absolute root.
-   * @returns Once compared, or at once for a cold root.
-   */
-  public async compareWarm(root: string): Promise<void> {
-    if (this.get(root) !== undefined) {
-      await this.compare(root);
-    }
   }
 
   /**
@@ -247,7 +258,7 @@ export class ProjectIndexes {
     const lineCount = options?.lineCount === true;
     const byteCap = options?.byteCap ?? Number.POSITIVE_INFINITY;
     if (digests.length === 0 && this.get(key) === undefined) {
-      return this._coldFacts(key, paths, { lineCount, byteCap, signal: options?.signal });
+      return this._coldFacts(key, paths, { lineCount, byteCap, signal: options?.signal, listed: options?.listed });
     }
     const index = await this.ready(key);
     const resolution = this._resolve(key);
@@ -308,28 +319,34 @@ export class ProjectIndexes {
    * Record the facts of a whole file a rooted read just returned (D4): its
    * kind from the first 512 bytes and its line count, both from those same
    * bytes, so no listing reads the file again. A warm index takes them at the
-   * entry's metadata when the sizes agree; a cold root keeps them until a
-   * mutation or an external fact touches the path.
+   * entry's metadata when the sizes agree, nothing left the path unknown, no
+   * observation is in flight and the entry's mtime is past the racy window; a
+   * cold root keeps them beside the size read, checked against the file's
+   * current size and mtime before they are used.
    *
    * @param root - Absolute root.
    * @param path - Root-relative file path.
-   * @param bytes - The whole file, as just read.
+   * @param read - The whole file as just read, and a clock reading taken before the read began.
    */
-  public recordRead(root: string, path: string, bytes: Uint8Array<ArrayBuffer>): void {
+  public recordRead(
+    root: string,
+    path: string,
+    read: Readonly<{ bytes: Uint8Array<ArrayBuffer>; observedAt: number }>,
+  ): void {
+    const { bytes, observedAt } = read;
     const key = normalizePath(root);
     if (path === '' || this._excluded(path)) {
       return;
     }
-    const observedAt = Date.now();
     const state = this._states.get(key);
     if (state !== undefined) {
-      const entry = state.index.isComplete ? state.index.entry(path) : undefined;
+      const entry = state.index.settled(path) ? state.index.entry(path) : undefined;
       /* A write still waiting for the provider's own mtime keeps the facts it wrote. */
       const pendingWrite = entry?.factsAt !== undefined && entry.factsAt.mtimeMs === undefined;
       if (
         entry?.kind === 'file' &&
-        entry.size === bytes.byteLength &&
         !pendingWrite &&
+        readStillHolds({ size: bytes.byteLength, observedAt }, entry) &&
         lacksCount(state.index.factsFor(path))
       ) {
         state.index.recordFacts(path, getFileContentMetadata(bytes), {
@@ -341,7 +358,7 @@ export class ProjectIndexes {
       }
       return;
     }
-    this._remember(key, path, { facts: getFileContentMetadata(bytes), size: bytes.byteLength });
+    this._remember(key, path, { facts: getFileContentMetadata(bytes), size: bytes.byteLength, observedAt });
   }
 
   /**
@@ -584,30 +601,48 @@ export class ProjectIndexes {
 
   /**
    * Facts on a root with no warm index (D4): what its reads already measured,
-   * and the rest measured now. Opening the index would hold the listing for a
-   * full scan, so this neither waits for one nor starts one.
+   * where the file's current size and mtime — the caller's listing, or one
+   * head stat — show it unchanged since, and the rest measured now. Opening
+   * the index would hold the listing for a full scan, so this neither waits
+   * for one nor starts one.
    */
   private async _coldFacts(
     root: string,
     paths: readonly string[],
-    options: Readonly<{ lineCount: boolean; byteCap: number; signal: AbortSignal | undefined }>,
+    options: Readonly<{
+      lineCount: boolean;
+      byteCap: number;
+      signal: AbortSignal | undefined;
+      listed: ContentFactsOptions['listed'];
+    }>,
   ): Promise<ReadonlyMap<string, ContentFacts>> {
     const resolution = this._resolve(root);
     const memo = this._readFacts.get(root);
-    const answered = await mapConcurrent(paths, factsConcurrency, async (path) => {
+    const requests = paths.map((path, at) => ({ path, listed: options.listed?.[at] }));
+    const answered = await mapConcurrent(requests, factsConcurrency, async ({ path, listed }) => {
       options.signal?.throwIfAborted();
-      const read = memo?.get(path);
-      if (read !== undefined && (!options.lineCount || !lacksCount(read.facts) || read.size > options.byteCap)) {
-        return read.facts;
-      }
       const providerPath = joinRelativePath(resolution.path, path);
-      const stat = await resolution.provider.stat(providerPath).catch(() => undefined);
-      if (stat?.type !== 'file') {
+      const observedAt = Date.now();
+      const current =
+        listed ??
+        (await resolution.provider.stat(providerPath).then(
+          (stat) => (stat.type === 'file' ? stat : undefined),
+          () => undefined,
+        ));
+      if (current === undefined) {
         return undefined;
       }
-      const facts = await this._measure(resolution.provider, { path: providerPath, size: stat.size }, options);
+      const read = memo?.get(path);
+      if (
+        read !== undefined &&
+        readStillHolds(read, current) &&
+        (!options.lineCount || !lacksCount(read.facts) || read.size > options.byteCap)
+      ) {
+        return read.facts;
+      }
+      const facts = await this._measure(resolution.provider, { path: providerPath, size: current.size }, options);
       if (facts !== undefined) {
-        this._remember(root, path, { facts, size: stat.size });
+        this._remember(root, path, { facts, size: current.size, observedAt });
       }
       return facts;
     });
@@ -619,13 +654,8 @@ export class ProjectIndexes {
     );
   }
 
-  /** Keep what a cold root's read or measurement found, unless other programs edit that root. */
-  private _remember(root: string, path: string, read: Readonly<{ facts: ContentFacts; size: number }>): void {
-    const { resolve } = this._options;
-    if (resolve === undefined || resolve(root).provider.capabilities.externallyEdited === true) {
-      /* Nothing tells a cold root of another program's edit: measure again each time. */
-      return;
-    }
+  /** Keep what a cold root's read or measurement found, keyed by the size it read and when. */
+  private _remember(root: string, path: string, read: ReadFacts): void {
     let memo = this._readFacts.get(root);
     if (memo === undefined) {
       memo = new Map();

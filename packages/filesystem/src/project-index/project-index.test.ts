@@ -1,6 +1,6 @@
 // oxlint-disable-next-line import/no-unassigned-import -- Side-effect import to polyfill IndexedDB for tests
 import 'fake-indexeddb/auto';
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import * as fc from 'fast-check';
 import { sha256Bytes } from '@taucad/utils/hash';
 import type { FileStatEntry } from '@taucad/types';
@@ -399,10 +399,14 @@ describe('ProjectIndexes', () => {
     await provider.writeFile('project/small.ts', 'one\ntwo');
     await provider.writeFile('project/large.ts', 'x'.repeat(600));
     const indexes = indexesOver(provider);
+    /* A measurement inside the racy window is never reused; these files are older than that. */
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.now() + timestampGranularityMilliseconds + 1000);
 
     /* No ranged read: a file past both the head and the cap costs a whole read to classify, so it is left out. */
     const first = await indexes.facts('/p', ['small.ts', 'large.ts', 'missing.ts'], { lineCount: true, byteCap: 50 });
     const second = await indexes.facts('/p', ['small.ts'], { lineCount: true });
+    vi.useRealTimers();
 
     expect([...first]).toEqual([['small.ts', { contentKind: 'text', lineCount: 2 }]]);
     expect(second.get('small.ts')).toEqual({ contentKind: 'text', lineCount: 2 });
@@ -476,59 +480,185 @@ describe('ProjectIndexes', () => {
   });
 
   /* W3 a3: a whole read already holds a file's facts, so no listing pays for them again. */
-  it('should answer a cold root from its reads without opening, scanning or reading again', async () => {
-    const { provider, reads } = await durableRoot();
-    await provider.writeFile('project/a.ts', 'a\nb\nc');
-    await provider.writeFile('project/b.bin', Uint8Array.from([0, 1, 2]));
-    const indexes = indexesOver(provider);
-    const listings = vi.spyOn(provider, 'readdirWithStats');
+  describe('facts a whole read measured', () => {
+    /* Files written now are inside the racy window; a read past it is the honest case. */
+    const pastRacyWindow = (): void => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(Date.now() + timestampGranularityMilliseconds + 1000);
+    };
+    const readNow = async (
+      provider: MemoryProvider,
+      path: string,
+    ): Promise<{ bytes: Uint8Array<ArrayBuffer>; observedAt: number }> => {
+      const observedAt = Date.now();
+      return { bytes: await provider.readFile(`project/${path}`), observedAt };
+    };
+    const record = async (indexes: ProjectIndexes, provider: MemoryProvider, path: string): Promise<void> => {
+      indexes.recordRead('/p', path, await readNow(provider, path));
+    };
 
-    indexes.recordRead('/p', 'a.ts', await provider.readFile('project/a.ts'));
-    indexes.recordRead('/p', 'b.bin', await provider.readFile('project/b.bin'));
-    const before = reads();
-    const facts = await indexes.facts('/p', ['a.ts', 'b.bin'], { lineCount: true, byteCap: lineCountByteCap });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
 
-    expect([...facts]).toEqual([
-      ['a.ts', { contentKind: 'text', lineCount: 3 }],
-      ['b.bin', { contentKind: 'binary' }],
-    ]);
-    expect(reads()).toBe(before);
-    expect(listings).not.toHaveBeenCalled();
-    expect(indexes.get('/p')).toBeUndefined();
+    it('should answer a cold root from its reads without opening, scanning or reading again', async () => {
+      const { provider, reads } = await durableRoot();
+      await provider.writeFile('project/a.ts', 'a\nb\nc');
+      await provider.writeFile('project/b.bin', Uint8Array.from([0, 1, 2]));
+      const indexes = indexesOver(provider);
+      const listings = vi.spyOn(provider, 'readdirWithStats');
+      pastRacyWindow();
+
+      await record(indexes, provider, 'a.ts');
+      await record(indexes, provider, 'b.bin');
+      const before = reads();
+      const facts = await indexes.facts('/p', ['a.ts', 'b.bin'], { lineCount: true, byteCap: lineCountByteCap });
+
+      expect([...facts]).toEqual([
+        ['a.ts', { contentKind: 'text', lineCount: 3 }],
+        ['b.bin', { contentKind: 'binary' }],
+      ]);
+      expect(reads()).toBe(before);
+      expect(listings).not.toHaveBeenCalled();
+      expect(indexes.get('/p')).toBeUndefined();
+    });
+
+    it('should check a cold read against the metadata the caller listed instead of a stat', async () => {
+      const { provider, reads } = await durableRoot();
+      await provider.writeFile('project/a.ts', 'a\nb');
+      const indexes = indexesOver(provider);
+      const listed = await provider.stat('project/a.ts');
+      pastRacyWindow();
+      await record(indexes, provider, 'a.ts');
+      const stats = vi.spyOn(provider, 'stat');
+      const before = reads();
+
+      const facts = await indexes.facts('/p', ['a.ts'], { lineCount: true, listed: [listed] });
+
+      expect(facts.get('a.ts')).toEqual({ contentKind: 'text', lineCount: 2 });
+      expect(stats).not.toHaveBeenCalled();
+      expect(reads()).toBe(before);
+    });
+
+    /* Review M1: a read in flight while a write commits resolves after the write's hook. */
+    it('should never serve a cold read a write overtook, whichever order its hook ran in', async () => {
+      const { provider } = await durableRoot();
+      await provider.writeFile('project/a.ts', 'one');
+      const indexes = indexesOver(provider);
+      pastRacyWindow();
+      const overtaken = await readNow(provider, 'a.ts');
+      await provider.writeFile('project/a.ts', 'one\ntwo\nthree');
+      indexes.addFile('/p/a.ts', { size: 13, facts: { contentKind: 'text', lineCount: 3 } });
+      indexes.recordRead('/p', 'a.ts', overtaken);
+
+      const facts = await indexes.facts('/p', ['a.ts'], { lineCount: true });
+
+      expect(facts.get('a.ts')).toEqual({ contentKind: 'text', lineCount: 3 });
+    });
+
+    /* Review M2: a rewrite no hook reports still leaves its size or mtime behind. */
+    it('should notice a rewrite that reached no hook by its size and mtime', async () => {
+      const { provider } = await durableRoot();
+      await provider.writeFile('project/a.ts', 'one');
+      await provider.writeFile('project/b.ts', '\u0000\u0001binary now, and longer');
+      const indexes = indexesOver(provider);
+      pastRacyWindow();
+      await record(indexes, provider, 'a.ts');
+      await record(indexes, provider, 'b.ts');
+      await provider.writeFile('project/a.ts', 'two');
+      await provider.writeFile('project/b.ts', 'text again');
+
+      const facts = await indexes.facts('/p', ['a.ts', 'b.ts'], { lineCount: true });
+
+      expect(facts.get('a.ts')).toEqual({ contentKind: 'text', lineCount: 1 });
+      expect(facts.get('b.ts')).toEqual({ contentKind: 'text', lineCount: 1 });
+    });
+
+    it('should forget a cold read once the path is written or invalidated', async () => {
+      const { provider, reads } = await durableRoot();
+      await provider.writeFile('project/a.ts', 'a');
+      const indexes = indexesOver(provider);
+      pastRacyWindow();
+      await record(indexes, provider, 'a.ts');
+
+      await provider.writeFile('project/a.ts', 'a\nb');
+      indexes.addFile('/p/a.ts', { size: 3 });
+      const written = await indexes.facts('/p', ['a.ts'], { lineCount: true });
+      await provider.writeFile('project/a.ts', 'a\nb\nc');
+      indexes.invalidate('/p/a.ts');
+      const before = reads();
+      const invalidated = await indexes.facts('/p', ['a.ts'], { lineCount: true });
+
+      expect(written.get('a.ts')).toEqual({ contentKind: 'text', lineCount: 2 });
+      expect(invalidated.get('a.ts')).toEqual({ contentKind: 'text', lineCount: 3 });
+      expect(reads()).toBe(before + 1);
+    });
+
+    it('should record a warm index entry from a whole read at its own metadata', async () => {
+      const { provider, reads } = await durableRoot();
+      await provider.writeFile('project/a.ts', 'a\nb');
+      const indexes = indexesOver(provider);
+      const index = await indexes.ready('/p');
+      pastRacyWindow();
+
+      await record(indexes, provider, 'a.ts');
+      const before = reads();
+      const facts = await indexes.facts('/p', ['a.ts'], { lineCount: true });
+
+      expect(facts.get('a.ts')).toEqual({ contentKind: 'text', lineCount: 2 });
+      expect(index.entry('a.ts')?.factsAt).toMatchObject({ size: 3, mtimeMs: index.entry('a.ts')?.mtimeMs });
+      expect(reads()).toBe(before);
+    });
+
+    /* Review M3: a read of a path another tab's notice left unknown must not settle it at the old metadata. */
+    it('should leave a warm path an external fact left unknown for its own re-observation', async () => {
+      const { provider } = await durableRoot();
+      await provider.writeFile('project/a.ts', 'abc');
+      const indexes = indexesOver(provider);
+      const index = await indexes.ready('/p');
+      pastRacyWindow();
+      await provider.writeFile('project/a.ts', 'a\nc');
+      indexes.invalidate('/p/a.ts');
+
+      await record(indexes, provider, 'a.ts');
+
+      expect(index.stalePaths).toEqual(['a.ts']);
+      await indexes.ready('/p');
+      const disk = await provider.stat('project/a.ts');
+      expect(index.entry('a.ts')?.mtimeMs).toBe(disk.mtimeMs);
+    });
+
+    it('should not record a warm read inside the racy window', async () => {
+      const { provider } = await durableRoot();
+      await provider.writeFile('project/a.ts', 'a\nb');
+      const indexes = indexesOver(provider);
+      const index = await indexes.ready('/p');
+
+      await record(indexes, provider, 'a.ts');
+
+      expect(index.factsFor('a.ts')).toBeUndefined();
+    });
   });
 
-  it('should forget a cold read once the path is written or invalidated', async () => {
-    const { provider, reads } = await durableRoot();
-    await provider.writeFile('project/a.ts', 'a');
-    const indexes = indexesOver(provider);
-    indexes.recordRead('/p', 'a.ts', await provider.readFile('project/a.ts'));
+  /* W3 a4: a root only Tau writes learns every change from its hooks; a poll compares only what others edit. */
+  it('should compare on a poll only the warm roots other programs edit', async () => {
+    const { provider: tauOnly } = await durableRoot();
+    const { provider: picked } = await durableRoot();
+    Object.defineProperty(picked, 'capabilities', { value: { ...picked.capabilities, externallyEdited: true } });
+    const indexes = new ProjectIndexes({
+      resolve: (root) => ({ provider: root === '/picked' ? picked : tauOnly, path: 'project' }),
+      persistDelayMilliseconds: 60_000,
+    });
+    await indexes.ready('/opfs');
+    await indexes.ready('/picked');
+    const tauListings = vi.spyOn(tauOnly, 'readdirWithStats');
+    const pickedListings = vi.spyOn(picked, 'readdirWithStats');
 
-    await provider.writeFile('project/a.ts', 'a\nb');
-    indexes.addFile('/p/a.ts', { size: 3 });
-    const written = await indexes.facts('/p', ['a.ts'], { lineCount: true });
-    await provider.writeFile('project/a.ts', 'a\nb\nc');
-    indexes.invalidate('/p/a.ts');
-    const before = reads();
-    const invalidated = await indexes.facts('/p', ['a.ts'], { lineCount: true });
+    await indexes.compareExternallyEdited();
+    await indexes.compareExternallyEdited('/opfs');
 
-    expect(written.get('a.ts')).toEqual({ contentKind: 'text', lineCount: 2 });
-    expect(invalidated.get('a.ts')).toEqual({ contentKind: 'text', lineCount: 3 });
-    expect(reads()).toBe(before + 1);
-  });
-
-  it('should record a warm index entry from a whole read at its own metadata', async () => {
-    const { provider, reads } = await durableRoot();
-    await provider.writeFile('project/a.ts', 'a\nb');
-    const indexes = indexesOver(provider);
-    const index = await indexes.ready('/p');
-
-    indexes.recordRead('/p', 'a.ts', await provider.readFile('project/a.ts'));
-    const before = reads();
-    const facts = await indexes.facts('/p', ['a.ts'], { lineCount: true });
-
-    expect(facts.get('a.ts')).toEqual({ contentKind: 'text', lineCount: 2 });
-    expect(index.entry('a.ts')?.factsAt).toMatchObject({ size: 3, mtimeMs: index.entry('a.ts')?.mtimeMs });
-    expect(reads()).toBe(before);
+    expect(tauListings).not.toHaveBeenCalled();
+    expect(pickedListings).toHaveBeenCalled();
   });
 
   /* W3 a3: no caller waits behind a snapshot write another holder has started. */

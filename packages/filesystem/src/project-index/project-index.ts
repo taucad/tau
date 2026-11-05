@@ -576,6 +576,18 @@ export class ProjectIndex {
   }
 
   /**
+   * True when facts a read measured may key on this entry's metadata: no
+   * observation is in flight and no external fact left the path unknown, so
+   * the entry is the freshest account of the file there is.
+   *
+   * @param path - Root-relative file path.
+   * @returns Whether a read may record facts here.
+   */
+  public settled(path: string): boolean {
+    return this._complete && this._observing === 0 && !this._isStale(path);
+  }
+
+  /**
    * Record facts measured from bytes just read, at the metadata a head stat
    * reported before the read. The entry takes that metadata too: it is the
    * freshest observation of the path.

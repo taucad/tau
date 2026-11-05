@@ -288,9 +288,10 @@ export class RootedViews {
       if (encoding === 'utf8') {
         return resolution.provider.readFile(resolution.path, 'utf8');
       }
+      const observedAt = Date.now();
       const bytes = await resolution.provider.readFile(resolution.path);
       /* A whole read already holds every fact a listing asks for (D4): keep them. */
-      projectIndexes.recordRead(root, localPath, bytes);
+      projectIndexes.recordRead(root, localPath, { bytes, observedAt });
       return bytes;
     }
 

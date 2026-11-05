@@ -1030,7 +1030,7 @@ export class WorkspaceFileService {
   /**
    * Safety-reconcile one routed project, or every configured webaccess root when
    * omitted, then run the head-metadata compare of the warm Project Indexes it
-   * covers (D5): that project's, or every one.
+   * covers whose roots other programs edit (D5): that project's, or every one.
    *
    * @param root - Optional routed project root.
    * @returns `true` when every root this call covered is under live `FileSystemObserver`
@@ -1039,9 +1039,9 @@ export class WorkspaceFileService {
   public async pollExternalChanges(root?: string): Promise<boolean> {
     const nativelyObserved = await this._externalChanges.poll(root);
     /* The same moments — a poll, a tab regaining visibility — compare the warm
-     * Project Indexes they cover (D5), so digests the index offers a cut were
-     * validated against the provider since the last edit outside the browser. */
-    await (root === undefined ? this._projectIndexes.compareAll() : this._projectIndexes.compareWarm(root));
+     * Project Indexes of the roots other programs edit (D5); a root only Tau
+     * writes learns every change from its own hooks and is never compared here. */
+    await this._projectIndexes.compareExternallyEdited(root);
     return nativelyObserved;
   }
 

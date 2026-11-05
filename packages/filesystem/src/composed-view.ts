@@ -676,6 +676,7 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     const routes = await Promise.all(targets.map(async (target) => routeFor(target)));
     const answered = new Map<string, ContentFacts>();
     const project: string[] = [];
+    const projectListed: Array<Readonly<{ size: number; mtimeMs: number }> | undefined> = [];
     for (const [index, target] of targets.entries()) {
       const route = routes[index]!;
       if (route.kind === 'overlay') {
@@ -690,6 +691,7 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
         }
       } else {
         project.push(target);
+        projectListed.push(factsOptions?.listed?.[index]);
       }
     }
     let measured: ReadonlyMap<string, ContentFacts>;
@@ -712,7 +714,13 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
       });
       measured = new Map(project.flatMap((target, at) => (own[at] === undefined ? [] : [[target, own[at]] as const])));
     } else {
-      measured = project.length === 0 ? new Map() : await base.facts(project, factsOptions);
+      measured =
+        project.length === 0
+          ? new Map()
+          : await base.facts(project, {
+              ...factsOptions,
+              ...(factsOptions?.listed === undefined ? {} : { listed: projectListed }),
+            });
     }
     for (const [index, target] of targets.entries()) {
       const value = routes[index]!.kind === 'overlay' ? undefined : measured.get(target);

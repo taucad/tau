@@ -99,6 +99,12 @@ export type ContentFactsOptions = Readonly<{
    * cap. A larger file answers its kind and nothing else (D4).
    */
   byteCap?: number;
+  /**
+   * The head metadata the caller already listed, one per requested path in
+   * request order (`undefined` where it has none): what lets facts measured
+   * from an earlier read be checked as current without another stat.
+   */
+  listed?: ReadonlyArray<Readonly<{ size: number; mtimeMs: number }> | undefined>;
   signal?: AbortSignal;
 }>;
 

@@ -108,6 +108,37 @@ import type {
   WorkspaceConnectionState,
 } from '#hooks/workspace-connection.machine.js';
 
+/*
+ * Discovery and chat membership watch only their kinds (charter D18): the
+ * manifest kind is a configured root's non-dot top-level directories and every
+ * `tau.json` outside a dot directory; the chat-metadata kind is a project's
+ * directory, its `.tau/chats` rows and their `chat.json`. The authority filters
+ * by these globs before delivery, so an agent turn's or a chat log's writes
+ * never reach either watch: the two app-lifetime watches of every path under
+ * `''` are gone.
+ */
+const dotSegmentExcludes = ['.*', '.*/**', '**/.*', '**/.*/**'];
+/** The manifest-kind watch: what can change the discovered project list. @public */
+export const manifestWatchRequest = {
+  paths: [''],
+  recursive: true,
+  includes: ['*', '**/tau.json'],
+  excludes: dotSegmentExcludes,
+};
+/** The chat-metadata-kind watch: what can change a project's chat membership. @public */
+export const chatMetadataWatchRequest = {
+  paths: [''],
+  recursive: true,
+  includes: [
+    '*',
+    'projects/*',
+    'projects/*/.tau',
+    'projects/*/.tau/chats',
+    'projects/*/.tau/chats/*',
+    'projects/*/.tau/chats/*/chat.json',
+  ],
+};
+
 /** A stored draft attachment, as the startup message references it. */
 export type InitialMessageAttachment = Omit<StoredAttachmentRef, 'byteLength'>;
 
@@ -871,7 +902,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         discoveryDirty = true;
       },
       watch: (invalidate, reset) =>
-        channel.watchReady({ paths: [''], recursive: true }, (event) => {
+        channel.watchReady(manifestWatchRequest, (event) => {
           if (event.type === 'reset') {
             reset();
             return;
@@ -1080,7 +1111,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
             invalidate();
           }
         };
-        const home = channel.watchReady({ paths: [''], recursive: true }, onEvent);
+        const home = channel.watchReady(chatMetadataWatchRequest, onEvent);
         let listing = queryClient.getQueryData<ProjectListing>(['projects']);
         const synchronize = (): void => {
           const next = queryClient.getQueryData<ProjectListing>(['projects']);

@@ -190,6 +190,14 @@ export const createApplyTreeEffects = (
       if (entries.length === 0) {
         continue;
       }
+      /* An abort between changesets skips the rest rather than throwing, so a
+       * caller still holds a receipt per entry and can undo what landed. */
+      if (signal?.aborted === true) {
+        receipts.push(
+          ...entries.map((_, index): ChangesetEntryReceipt => ({ index, outcome: 'skipped', error: signal.reason })),
+        );
+        continue;
+      }
       const changeset = { entries, ...(signal === undefined ? {} : { signal }) };
       // oxlint-disable-next-line no-await-in-loop -- bounded changesets land in order so a save can interleave (D2).
       const receipt = await (live.apply === undefined
@@ -382,8 +390,10 @@ export const createApplyTreeEffects = (
         signal?.throwIfAborted();
 
         /* A path the checkout did not hold has nothing to move aside or verify:
-         * its final path is written directly with its mode, refused if anything
-         * took it since the capture (`create`) — no staged sibling, no rename. */
+         * it is one `create` write with its mode, refused if anything took it
+         * since the capture, and no checkout sibling. The provider publishes a
+         * create whole (OPFS stages it under `.tau-staging` and moves it in),
+         * so a killed apply leaves the path absent or new, never empty (I1). */
         const created = changedFiles.filter(([path]) => !liveFiles.has(path));
         raiseRefusal(
           await applyChangesets(

@@ -639,6 +639,36 @@ describe('a large apply', () => {
     expect(await filesOf(context.tree)).toEqual(['main.ts']);
   });
 
+  it('should put back the files an aborted removal already moved aside, and skip the rest', async () => {
+    const files = Object.fromEntries(
+      Array.from({ length: 300 }, (_, index) => [`gone/file-${String(index).padStart(3, '0')}.ts`, 'old\n']),
+    );
+    const context = await project({ ...files, 'kept.ts': 'kept\n' });
+    const controller = new AbortController();
+    const reason = new Error('the apply was cancelled');
+    /* The first changeset of moves aside lands whole; the abort arrives before the second. */
+    const checkout: RevisionFileSystem = Object.assign(Object.create(context.checkout) as RevisionFileSystem, {
+      applyBatch: async (entries: readonly BatchEntry[], batchOptions?: BatchOptions): Promise<BatchReceipt[]> => {
+        const receipts = await context.checkout.applyBatch!(entries, batchOptions);
+        if (entries.some((entry) => entry.op === 'move' && entry.to.includes('.tau-backup.'))) {
+          controller.abort(reason);
+        }
+        return receipts;
+      },
+    });
+    const before = new ImmutableRevisionTree([...Object.entries(files), ['kept.ts', 'kept\n']]);
+    const target = new ImmutableRevisionTree([['kept.ts', 'kept\n']]);
+
+    await expect(
+      materializer(checkout)(liveCheckout, target, { before, signal: controller.signal }),
+    ).rejects.toBeDefined();
+
+    const found = await filesOf(context.tree);
+    expect(litterIn(found)).toEqual([]);
+    expect(found).toHaveLength(301);
+    await expect(context.tree.readFile('gone/file-000.ts', 'utf8')).resolves.toBe('old\n');
+  });
+
   it('should keep an executable mode on a new file it writes in place', async () => {
     const context = await project({});
     const target = new ImmutableRevisionTree([

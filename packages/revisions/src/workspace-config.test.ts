@@ -133,6 +133,7 @@ describe('generated ignore file', () => {
 **/.tau/binding.json
 **/.jj
 **/.git
+**/.tau-staging
 /.tau/types/
 /.tau/tsconfig.generated.json
 /.tau/lockfile.json

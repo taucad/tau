@@ -2,12 +2,13 @@
  * A control-plane record is replaced whole on a provider that will not rename
  * over a file (OPFS, the File System Access provider, the memory provider):
  * a host that dies at any step leaves a record a reader reads as the old text
- * or the new one (W2 review 5), and a reader racing a live writer never takes
- * its sibling from it (W2 re-review 1).
+ * or the new one (W2 review 5). A reader never moves a sibling, and a writer
+ * overtaken by a newer write leaves that write standing (W2 re-reviews 1, G1
+ * and G2).
  */
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { afterEach, describe, expect, it } from 'vitest';
-import { controlRecordGrace, jsonRecord, readControlRecord, writeControlRecord } from '#control-plane-records.js';
+import { jsonRecord, readControlRecord, writeControlRecord } from '#control-plane-records.js';
 import type { ControlPlaneFiles, ControlRecordReading } from '#control-plane-records.js';
 
 const providers: MemoryProvider[] = [];
@@ -21,11 +22,7 @@ afterEach(() => {
 const path = '.git/sync-pending';
 
 /* A record is whole when it ends its line, as every record here does. */
-const wholeLine = (text: string): boolean => text.endsWith('\n');
-/* A reader now. */
-const now: ControlRecordReading = { accepts: wholeLine };
-/* A reader long after every writer has stopped. */
-const later: ControlRecordReading = { accepts: wholeLine, now: () => Date.now() + controlRecordGrace * 5 };
+const reading: ControlRecordReading = { accepts: (text) => text.endsWith('\n') };
 
 const memory = async (): Promise<MemoryProvider> => {
   const provider = new MemoryProvider();
@@ -42,6 +39,22 @@ const filesOf = (provider: MemoryProvider): ControlPlaneFiles => ({
   readdir: async (target) => provider.readdir(target),
   stat: provider.stat.bind(provider) as ControlPlaneFiles['stat'],
 });
+
+/* The node provider's way: a rename replaces whatever is at its target. */
+const renamingOver = (provider: MemoryProvider): ControlPlaneFiles => ({
+  ...filesOf(provider),
+  rename: async (from, to) => {
+    await provider.stat(from);
+    await provider.unlink(to).catch(() => undefined);
+    await provider.rename(from, to);
+  },
+});
+
+const pause = async (): Promise<void> => {
+  await new Promise((resolve) => {
+    setTimeout(resolve, 5);
+  });
+};
 
 /*
  * The provider as a host that dies at its `stop`-th call: that call and every
@@ -70,17 +83,17 @@ const dying = (provider: MemoryProvider, stop: number): ControlPlaneFiles => {
 };
 
 /* The provider with a peer that reads the record as each `.writing` sibling is written, before its rename. */
-const racedBy = (provider: MemoryProvider, reading: ControlRecordReading, seen: Array<string | undefined>) => {
+const racedBy = (provider: MemoryProvider, seen: Array<string | undefined>): ControlPlaneFiles => {
   const files = filesOf(provider);
   return {
     ...files,
-    writeFile: async (target: string, data: string | Uint8Array<ArrayBuffer>) => {
+    writeFile: async (target, data) => {
       await files.writeFile(target, data);
       if (target.endsWith('.writing')) {
         seen.push(await readControlRecord(files, path, reading));
       }
     },
-  } satisfies ControlPlaneFiles;
+  };
 };
 
 describe('control-plane records', () => {
@@ -91,133 +104,175 @@ describe('control-plane records', () => {
     await expect(provider.rename('.git/a', '.git/b')).rejects.toMatchObject({ code: 'EEXIST' });
   });
 
-  /* Write the temporary sibling, try the rename, unlink the record, rename into place: four steps. */
-  it.each([1, 2, 3, 4, 5])('reads the old record or the new one when the host dies at step %i', async (stop) => {
+  /* Write the sibling, date it, try the rename, unlink the record, rename into place, sweep: six steps. */
+  it.each([1, 2, 3, 4, 5, 6, 7])('reads the old record or the new one when the host dies at step %i', async (stop) => {
     const provider = await memory();
     const files = filesOf(provider);
     await writeControlRecord(files, path, 'old\n');
 
     await writeControlRecord(dying(provider, stop), path, 'new\n').catch(() => undefined);
 
-    /* Straight away the stopped writer's whole sibling answers; it is promoted only once its grace is over. */
-    const read = await readControlRecord(files, path, now);
-    expect(read).toBe(stop >= 4 ? 'new\n' : 'old\n');
-    await expect(readControlRecord(files, path, later)).resolves.toBe(read);
-    /* Once read late, the record is in place and no leftover sibling stands beside a missing record. */
-    expect(await provider.readFile(path, 'utf8')).toBe(read);
+    /* A writer that got as far as unlinking the record is answered from its whole sibling. */
+    const read = await readControlRecord(files, path, reading);
+    expect(read).toBe(stop >= 5 ? 'new\n' : 'old\n');
+    await expect(readControlRecord(files, path, reading)).resolves.toBe(read);
+
+    /* The next writer to land clears whatever the stopped one left. */
+    await writeControlRecord(files, path, 'next\n');
+    expect(await provider.readdir('.git')).toStrictEqual(['sync-pending']);
+    expect(await provider.readFile(path, 'utf8')).toBe('next\n');
   });
 
   it('answers a first write from its sibling to a reader between the write and the rename, and lands it', async () => {
     const provider = await memory();
     const seen: Array<string | undefined> = [];
 
-    await writeControlRecord(racedBy(provider, now, seen), path, 'first\n');
+    await writeControlRecord(racedBy(provider, seen), path, 'first\n');
 
     expect(seen).toStrictEqual(['first\n']);
     expect(await provider.readFile(path, 'utf8')).toBe('first\n');
     expect(await provider.readdir('.git')).toStrictEqual(['sync-pending']);
   });
 
-  it('keeps the write when a reader promotes its sibling before its own rename', async () => {
+  it('never moves a stopped writer’s sibling over a record a live writer lands meanwhile (G1)', async () => {
     const provider = await memory();
-    const seen: Array<string | undefined> = [];
-
-    /* A reader whose clock says the sibling's writer stopped long ago takes it; the writer's rename finds it gone. */
-    await writeControlRecord(racedBy(provider, later, seen), path, 'first\n');
-
-    expect(seen).toStrictEqual(['first\n']);
-    expect(await provider.readFile(path, 'utf8')).toBe('first\n');
-    expect(await provider.readdir('.git')).toStrictEqual(['sync-pending']);
-  });
-
-  it('writes again when the record a reader promoted is not its own', async () => {
-    const provider = await memory();
-    const files = filesOf(provider);
-    let raced = false;
+    const files = renamingOver(provider);
+    await provider.writeFile(`${path}.old.writing`, 'old\n');
+    await pause();
     const racing: ControlPlaneFiles = {
       ...files,
+      readdir: async (target) => {
+        const listed = await files.readdir(target);
+        await writeControlRecord(files, path, 'new\n');
+        return listed;
+      },
+    };
+
+    const answered = await readControlRecord(racing, path, reading);
+
+    expect(['old\n', 'new\n']).toContain(answered);
+    expect(await provider.readFile(path, 'utf8')).toBe('new\n');
+    expect(await provider.readdir('.git')).toStrictEqual(['sync-pending']);
+  });
+
+  it('leaves a newer writer’s record standing when a stalled writer’s sibling is gone (G2)', async () => {
+    const provider = await memory();
+    const files = filesOf(provider);
+    const seen: Array<string | undefined> = [];
+    let stalled = false;
+    const older: ControlPlaneFiles = {
+      ...files,
       rename: async (from, to) => {
-        if (!raced) {
-          raced = true;
-          /* Another writer's text lands, and this writer's sibling is gone. */
-          await files.unlink(from);
-          await files.writeFile(to, 'theirs\n');
+        if (!stalled && from.endsWith('.writing')) {
+          stalled = true;
+          /* Frozen past any grace: a reader finds its sibling, and a newer writer lands and clears it. */
+          seen.push(await readControlRecord(files, path, reading));
+          await pause();
+          await writeControlRecord(files, path, 'newer\n');
         }
         await files.rename(from, to);
       },
     };
 
-    await writeControlRecord(racing, path, 'mine\n');
+    await writeControlRecord(older, path, 'older\n');
+
+    expect(seen).toStrictEqual(['older\n']);
+    expect(await provider.readFile(path, 'utf8')).toBe('newer\n');
+    expect(await provider.readdir('.git')).toStrictEqual(['sync-pending']);
+  });
+
+  it('leaves a newer writer’s record standing when it lands between the unlink and the rename (G2)', async () => {
+    const provider = await memory();
+    const files = filesOf(provider);
+    await writeControlRecord(files, path, 'first\n');
+    let raced = false;
+    const older: ControlPlaneFiles = {
+      ...files,
+      unlink: async (target) => {
+        await files.unlink(target);
+        if (!raced && target === path) {
+          raced = true;
+          await writeControlRecord(files, path, 'newer\n');
+        }
+      },
+    };
+
+    await writeControlRecord(older, path, 'older\n');
+
+    expect(await provider.readFile(path, 'utf8')).toBe('newer\n');
+    expect(await provider.readdir('.git')).toStrictEqual(['sync-pending']);
+  });
+
+  it('writes again only when its sibling is gone and no record stands', async () => {
+    const provider = await memory();
+    const files = filesOf(provider);
+    let lost = false;
+    const losing: ControlPlaneFiles = {
+      ...files,
+      rename: async (from, to) => {
+        if (!lost) {
+          lost = true;
+          await files.unlink(from);
+        }
+        await files.rename(from, to);
+      },
+    };
+
+    await writeControlRecord(losing, path, 'mine\n');
 
     expect(await provider.readFile(path, 'utf8')).toBe('mine\n');
     expect(await provider.readdir('.git')).toStrictEqual(['sync-pending']);
   });
 
-  it('never promotes or answers a half-written sibling, however old', async () => {
+  it('never answers a half-written sibling, and moves none', async () => {
     const provider = await memory();
     const files = filesOf(provider);
-    const reading: ControlRecordReading = {
+    const devices: ControlRecordReading = {
       accepts: jsonRecord((value) => typeof value === 'object' && value !== null),
-      now: later.now,
     };
     await provider.writeFile('.git/ops-devices.json.one.writing', '{"version":1,"devi');
 
-    await expect(readControlRecord(files, '.git/ops-devices.json', reading)).resolves.toBeUndefined();
-    expect(await provider.readdir('.git')).toStrictEqual(['ops-devices.json.one.writing']);
+    await expect(readControlRecord(files, '.git/ops-devices.json', devices)).resolves.toBeUndefined();
 
-    /* A whole sibling older than a torn one is the one answered and promoted. */
+    /* A whole sibling older than a torn one is the one answered. */
     await provider.unlink('.git/ops-devices.json.one.writing');
     await provider.writeFile('.git/ops-devices.json.zero.writing', '{"version":1,"devices":{}}\n');
-    await new Promise((resolve) => {
-      setTimeout(resolve, 5);
-    });
+    await pause();
     await provider.writeFile('.git/ops-devices.json.one.writing', '{"version":1,"devi');
-    await expect(readControlRecord(files, '.git/ops-devices.json', reading)).resolves.toBe(
+    await expect(readControlRecord(files, '.git/ops-devices.json', devices)).resolves.toBe(
       '{"version":1,"devices":{}}\n',
     );
-    expect(await provider.readFile('.git/ops-devices.json', 'utf8')).toBe('{"version":1,"devices":{}}\n');
+    const left = await provider.readdir('.git');
+    expect(left.toSorted()).toStrictEqual(['ops-devices.json.one.writing', 'ops-devices.json.zero.writing']);
   });
 
-  it('leaves a sibling within its grace where it is', async () => {
+  it('answers the newest whole sibling of a missing record, and the next write removes them all', async () => {
     const provider = await memory();
     const files = filesOf(provider);
-    await provider.writeFile(`${path}.live.writing`, 'pending\n');
-
-    await expect(readControlRecord(files, path, now)).resolves.toBe('pending\n');
-    expect(await provider.readdir('.git')).toStrictEqual(['sync-pending.live.writing']);
-  });
-
-  it('promotes the newest whole sibling of a missing record and removes the older ones', async () => {
-    const provider = await memory();
     await provider.writeFile(`${path}.one.writing`, 'older\n');
-    await new Promise((resolve) => {
-      setTimeout(resolve, 5);
-    });
+    await pause();
     await provider.writeFile(`${path}.two.writing`, 'newer\n');
 
-    await expect(readControlRecord(filesOf(provider), path, later)).resolves.toBe('newer\n');
-    const left = await provider.readdir('.git');
-    expect(left.toSorted()).toStrictEqual(['sync-pending']);
+    await expect(readControlRecord(files, path, reading)).resolves.toBe('newer\n');
+    expect(await provider.readdir('.git')).toHaveLength(2);
+
+    await pause();
+    await writeControlRecord(files, path, 'latest\n');
+    expect(await provider.readdir('.git')).toStrictEqual(['sync-pending']);
   });
 
   it('answers undefined when there is no record and no sibling', async () => {
     const provider = await memory();
-    await expect(readControlRecord(filesOf(provider), path, now)).resolves.toBeUndefined();
-    await expect(readControlRecord(filesOf(provider), '.git/missing/record', now)).resolves.toBeUndefined();
+    await expect(readControlRecord(filesOf(provider), path, reading)).resolves.toBeUndefined();
+    await expect(readControlRecord(filesOf(provider), '.git/missing/record', reading)).resolves.toBeUndefined();
   });
 
   it('replaces a record on a provider that renames over a file, leaving no sibling', async () => {
     const provider = await memory();
-    const renamingOver: ControlPlaneFiles = {
-      ...filesOf(provider),
-      rename: async (from, to) => {
-        await provider.unlink(to).catch(() => undefined);
-        await provider.rename(from, to);
-      },
-    };
-    await writeControlRecord(renamingOver, path, 'one\n');
-    await writeControlRecord(renamingOver, path, 'two\n');
-    await expect(readControlRecord(renamingOver, path, now)).resolves.toBe('two\n');
+    const files = renamingOver(provider);
+    await writeControlRecord(files, path, 'one\n');
+    await writeControlRecord(files, path, 'two\n');
+    await expect(readControlRecord(files, path, reading)).resolves.toBe('two\n');
     expect(await provider.readdir('.git')).toStrictEqual(['sync-pending']);
   });
 });

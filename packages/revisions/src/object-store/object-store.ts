@@ -747,7 +747,10 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
       const live = listedPacks.filter((pack) => !retiredPaths.has(pack.path));
       const listedLoose = await listLoose();
       await sweepLeftovers(listedLoose.partials);
-      const loose = listedLoose.oids.filter((oid) => !retiredPaths.has(loosePath(oid)));
+      /* By id, not by listing order: the same objects fold into the same pack, under the same name, on any host. */
+      const loose = listedLoose.oids
+        .filter((oid) => !retiredPaths.has(loosePath(oid)))
+        .toSorted((left, right) => (left < right ? -1 : 1));
       const foldPacks = live.length > bounds.maxPacks || force ? live : [];
       /* Decided: whatever happens below, the writes and packs counted so far start no other repack. */
       looseWrites = 0;

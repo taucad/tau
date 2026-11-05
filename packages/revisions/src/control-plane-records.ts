@@ -43,17 +43,48 @@ const splitPath = (path: string): readonly [directory: string, name: string] => 
 
 const isExisting = (error: unknown): boolean => (error as { code?: unknown } | undefined)?.code === 'EEXIST';
 
-/** How long a `.writing` sibling is left to its writer before a reader may promote it. */
-export const controlRecordGrace = 2000;
+type Sibling = Readonly<{ path: string; at: number }>;
 
-/* Rename the sibling into place: true when it landed, false when another hand moved it or the record. */
-const landRecord = async (files: ControlPlaneFiles, writing: string, path: string): Promise<boolean> => {
+/* When a file was last written, or `undefined` when it is not there. */
+const modifiedAt = async (files: ControlPlaneFiles, path: string): Promise<number | undefined> => {
+  try {
+    const stat = await files.stat(path);
+    return stat.mtimeMs;
+  } catch (error) {
+    ignoreMissing(error);
+    return undefined;
+  }
+};
+
+/* The `.writing` siblings of a record, with their modification times. */
+const siblingsOf = async (files: ControlPlaneFiles, path: string): Promise<Sibling[]> => {
+  const [directory, name] = splitPath(path);
+  const listed = await files.readdir(directory).catch((error: unknown) => {
+    ignoreMissing(error);
+    return [] as string[];
+  });
+  return Promise.all(
+    listed
+      .filter((entry) => entry.startsWith(`${name}.`) && entry.endsWith('.writing'))
+      .map(async (entry): Promise<Sibling> => {
+        const stat = await files.stat(`${directory}/${entry}`).catch(() => undefined);
+        return { path: `${directory}/${entry}`, at: stat?.mtimeMs ?? 0 };
+      }),
+  );
+};
+
+/*
+ * Rename the sibling into place. `landed` when it is the record now;
+ * `overtaken` when another hand moved it or another writer landed first —
+ * either way a record stands that is this text or newer.
+ */
+const landRecord = async (files: ControlPlaneFiles, writing: string, path: string): Promise<'landed' | 'overtaken'> => {
   try {
     await files.rename(writing, path);
-    return true;
+    return 'landed';
   } catch (error) {
     if (isMissing(error)) {
-      return false;
+      return 'overtaken';
     }
     if (!isExisting(error)) {
       throw error;
@@ -62,15 +93,26 @@ const landRecord = async (files: ControlPlaneFiles, writing: string, path: strin
   await files.unlink(path).catch(ignoreMissing);
   try {
     await files.rename(writing, path);
-    return true;
+    return 'landed';
   } catch (error) {
     if (!isMissing(error) && !isExisting(error)) {
       throw error;
     }
-    /* Another writer landed between the unlink and the rename: this sibling is not needed. */
+    /* Another writer landed between the unlink and the rename: its record stands, and this sibling is not needed. */
     await files.unlink(writing).catch(() => undefined);
-    return false;
+    return 'overtaken';
   }
+};
+
+/*
+ * Remove the siblings written no later than the one that just landed: their
+ * writers stopped, or lost to it. A sibling written after it belongs to a
+ * newer writer still on its way, and is left to land.
+ */
+const sweepSiblings = async (files: ControlPlaneFiles, path: string, landedAt: number): Promise<void> => {
+  const siblings = await siblingsOf(files, path);
+  const stale = siblings.filter((sibling) => sibling.at <= landedAt);
+  await Promise.all(stale.map(async (sibling) => files.unlink(sibling.path).catch(() => undefined)));
 };
 
 /**
@@ -81,13 +123,14 @@ const landRecord = async (files: ControlPlaneFiles, writing: string, path: strin
  * not rename over a file (the browser providers) refuses with `EEXIST`; the
  * record is unlinked and the sibling renamed into its place. A host that dies
  * between the two leaves no record and one whole sibling, which
- * {@link readControlRecord} promotes once its writer has had
- * {@link controlRecordGrace} to finish. Whichever step a writer stops at, a
+ * {@link readControlRecord} answers from. Whichever step a writer stops at, a
  * reader sees the old text or the new one, never part of either.
  *
- * A rename that finds its sibling gone (`ENOENT`) lost it to a reader that
- * promoted it, so the write may have landed: the record is read back, and
- * written again only when it is not this text.
+ * A writer that lands removes the siblings written no later than its own, so a
+ * stopped writer's sibling lasts only until the next write. A rename that
+ * finds its sibling gone (`ENOENT`) or loses to another writer (`EEXIST`
+ * after the unlink) was overtaken by a newer write, which stands: the writer
+ * writes again only when no record is there at all.
  *
  * @param files - Where the record lives.
  * @param path - The record's path, under `.git`.
@@ -99,27 +142,27 @@ export const writeControlRecord = async (files: ControlPlaneFiles, path: string,
     // oxlint-disable-next-line no-await-in-loop -- one attempt after another.
     await files.writeFile(writing, body);
     // oxlint-disable-next-line no-await-in-loop -- one attempt after another.
-    if (await landRecord(files, writing, path)) {
+    const writtenAt = await modifiedAt(files, writing);
+    // oxlint-disable-next-line no-await-in-loop -- one attempt after another.
+    if ((await landRecord(files, writing, path)) === 'landed') {
+      if (writtenAt !== undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- the one sweep, once landed.
+        await sweepSiblings(files, path, writtenAt);
+      }
       return;
     }
     // oxlint-disable-next-line no-await-in-loop -- one attempt after another.
-    const landed = await files.readFile(path, 'utf8').catch((error: unknown) => {
-      ignoreMissing(error);
-      return undefined;
-    });
-    if (landed === body) {
+    if ((await modifiedAt(files, path)) !== undefined) {
       return;
     }
   }
-  throw new Error(`The control record ${path} was replaced by another writer on every attempt.`);
+  throw new Error(`The control record ${path} could not be put in place.`);
 };
 
 /** How {@link readControlRecord} tells a whole record from a torn one. */
 export type ControlRecordReading = Readonly<{
-  /** Whether a text is a whole record: only a sibling that is one is answered or promoted. */
+  /** Whether a text is a whole record: only a sibling that is one is answered. */
   accepts: (text: string) => boolean;
-  /** The clock sibling ages are measured on. */
-  now?: () => number;
 }>;
 
 /**
@@ -138,31 +181,14 @@ export const jsonRecord =
     }
   };
 
-type Sibling = Readonly<{ path: string; at: number }>;
-
-/* Promote a stopped writer's sibling and remove the siblings older than it. */
-const promote = async (
-  files: ControlPlaneFiles,
-  sibling: string,
-  into: Readonly<{ path: string; older: readonly Sibling[] }>,
-): Promise<void> => {
-  try {
-    await files.rename(sibling, into.path);
-  } catch {
-    /* Another reader or a writer put a record in place first: it answers next time. */
-  }
-  await Promise.all(into.older.map(async (stale) => files.unlink(stale.path).catch(() => undefined)));
-};
-
 /**
  * Read one record, or `undefined` when there is none.
  *
  * A missing record is answered from the newest `.writing` sibling the caller
- * accepts as whole: a writer between writing it and renaming it into place is
- * about to land that text. A sibling older than {@link controlRecordGrace} is
- * one whose writer stopped, and is promoted to the record; the siblings older
- * than it are removed. A sibling still within its grace is never moved, so a
- * writer that is still writing never loses its sibling.
+ * accepts as whole: its writer is about to land that text, or stopped between
+ * unlinking the record and renaming it into place. A reader never moves or
+ * removes a sibling — a live writer may still be renaming it, and a newer
+ * record may land meanwhile — so the next writer that lands clears them.
  *
  * @param files - Where the record lives.
  * @param path - The record's path, under `.git`.
@@ -174,36 +200,27 @@ export const readControlRecord = async (
   path: string,
   reading: ControlRecordReading,
 ): Promise<string | undefined> => {
-  try {
-    return await files.readFile(path, 'utf8');
-  } catch (error) {
-    ignoreMissing(error);
+  const readRecord = async (): Promise<string | undefined> => {
+    try {
+      return await files.readFile(path, 'utf8');
+    } catch (error) {
+      ignoreMissing(error);
+      return undefined;
+    }
+  };
+  const record = await readRecord();
+  if (record !== undefined) {
+    return record;
   }
-  const [directory, name] = splitPath(path);
-  const listed = await files.readdir(directory).catch((error: unknown) => {
-    ignoreMissing(error);
-    return [] as string[];
-  });
-  const siblings = listed.filter((entry) => entry.startsWith(`${name}.`) && entry.endsWith('.writing'));
-  const dated = await Promise.all(
-    siblings.map(async (entry): Promise<Sibling> => {
-      const stat = await files.stat(`${directory}/${entry}`).catch(() => undefined);
-      return { path: `${directory}/${entry}`, at: stat?.mtimeMs ?? 0 };
-    }),
-  );
-  const newestFirst = dated.toSorted((left, right) => right.at - left.at || (left.path < right.path ? 1 : -1));
-  const settled = (reading.now ?? Date.now)() - controlRecordGrace;
-  for (const [position, sibling] of newestFirst.entries()) {
+  const siblings = await siblingsOf(files, path);
+  const newestFirst = siblings.toSorted((left, right) => right.at - left.at || (left.path < right.path ? 1 : -1));
+  for (const sibling of newestFirst) {
     // oxlint-disable-next-line no-await-in-loop -- newest first, until one is whole.
     const text = await files.readFile(sibling.path, 'utf8').catch(() => undefined);
-    if (text === undefined || !reading.accepts(text)) {
-      continue;
+    if (text !== undefined && reading.accepts(text)) {
+      return text;
     }
-    if (sibling.at <= settled) {
-      // oxlint-disable-next-line no-await-in-loop -- the one promotion.
-      await promote(files, sibling.path, { path, older: newestFirst.slice(position + 1) });
-    }
-    return text;
   }
-  return undefined;
+  /* A writer may have landed while the siblings were read, and swept them. */
+  return readRecord();
 };

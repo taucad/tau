@@ -12,6 +12,8 @@ import {
   getViewPosition,
   textureSize,
   convert,
+  mix,
+  smoothstep,
 } from 'three/tsl';
 import type { sample } from 'three/tsl';
 import type { Node } from 'three/webgpu';
@@ -47,6 +49,9 @@ export function createAoDenoise({
   const step = uniform(new Vector2());
   // Visibility difference at which a tap stops counting toward its neighbourhood.
   const outlierRange = float(0.25);
+  // |N·V| below which AO fades out (about 1.7° to 7° from edge-on).
+  const grazingFadeStart = float(0.03);
+  const grazingFadeEnd = float(0.12);
   const depthPhi = uniform(1);
   const inverseProjection = uniform(camera.projectionMatrixInverse);
   // One fixed grid avoids adding a second stochastic pattern to a demand frame.
@@ -185,7 +190,15 @@ export function createAoDenoise({
             weightSum.addAssign(weight);
           }
         }
-        result.assign(select<'float'>(weightSum.greaterThan(0), sum.div(max(weightSum, 0.0001)), nearest));
+        // GTAO's horizon search is undefined for a face seen edge-on: its samples land on the body below and
+        // report full occlusion, which prints as black dashes along one-pixel rims. Fade AO out there; the ray
+        // between two depths on this pixel works for either projection.
+        const ray = getViewPosition(uv, float(0.75), inverseProjection)
+          .sub(getViewPosition(uv, float(0.25), inverseProjection))
+          .normalize();
+        const facing = abs(dot(centerNormal, ray));
+        const filteredVisibility = select<'float'>(weightSum.greaterThan(0), sum.div(max(weightSum, 0.0001)), nearest);
+        result.assign(mix(float(1), filteredVisibility, smoothstep(grazingFadeStart, grazingFadeEnd, facing)));
       });
       return result;
     })();

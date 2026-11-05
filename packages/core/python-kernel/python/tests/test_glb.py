@@ -156,6 +156,39 @@ class GlbTest(unittest.TestCase):
             self.assertNotIn("images", reparsed)
             self.assertNotIn("name", reparsed["materials"][reparsed["meshes"][0]["primitives"][0]["material"]])
 
+    def test_closed_mesh_needs_a_welded_outward_two_manifold(self) -> None:
+        cube = [0.0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1]
+        faces = [0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7]
+        inverted = [index for corner in range(0, len(faces), 3) for index in (faces[corner], faces[corner + 2], faces[corner + 1])]
+        # The same cube as triangle soup, with a -0 corner, welds back into one surface.
+        soup = [-0.0 if value == 0 else value for index in faces for value in cube[index * 3 : index * 3 + 3]]
+        self.assertTrue(glb.is_closed_mesh(cube, faces))
+        self.assertTrue(glb.is_closed_mesh(soup, list(range(len(faces)))))
+        self.assertTrue(glb.is_closed_mesh(cube, [*faces, 0, 0, 1]))
+        self.assertFalse(glb.is_closed_mesh(cube, []))
+        self.assertFalse(glb.is_closed_mesh(cube, [0, 1]))
+        self.assertFalse(glb.is_closed_mesh([math.nan, *cube[1:]], faces))
+        self.assertFalse(glb.is_closed_mesh(cube, [0, 0, 1]))
+        self.assertFalse(glb.is_closed_mesh(cube, faces[6:]))
+        self.assertFalse(glb.is_closed_mesh(cube, [*faces, *faces[:3]]))
+        self.assertFalse(glb.is_closed_mesh(cube, inverted))
+
+    def test_closed_opaque_surfaces_draw_one_side(self) -> None:
+        cube = [0.0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1]
+        faces = [0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7]
+        sides = {}
+        for opacity in (1.0, 0.5):
+            data = {**mesh(lines=False), "positions": cube, "normals": [0.0] * len(cube), "indices": faces}
+            data["faceGroups"] = [{"start": 0, "count": len(faces), "faceId": 1}]
+            data["color"] = (0.5, 0.5, 0.5, opacity)
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "model.glb"
+                glb.write_glb(path, [component()], {"component:node-0": data}, generator="test")
+                payload = path.read_bytes()
+            (json_length,) = struct.unpack_from("<I", payload, 12)
+            sides[opacity] = json.loads(payload[20 : 20 + json_length])["materials"][0]["doubleSided"]
+        self.assertEqual(sides, {1.0: False, 0.5: True})
+
     def test_validator_rejects_each_container_boundary(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "model.glb"

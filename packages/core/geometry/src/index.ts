@@ -63,6 +63,12 @@ export {
 export type { GlbInput, GlbManifoldTopology, GlbMaterial, GlbNode, GlbPrimitive } from '#utils/glb-writer.js';
 export type { GlbImage, GlbResources } from '#utils/glb-material.js';
 export { validateGlbMaterial, validateGlbResources } from '#utils/glb-material.js';
+export {
+  isClosedTriangleMesh,
+  markClosedGlbMeshesSingleSided,
+  markClosedMeshesSingleSided,
+} from '#utils/closed-mesh.js';
+export type { TriangleMeshPart } from '#utils/closed-mesh.js';
 
 // Names
 export {

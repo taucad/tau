@@ -23,7 +23,12 @@ import type {
   File3dmObject,
 } from 'rhino3dm';
 import { cadMaterialDefaults } from '@taucad/runtime/types';
-import { allExtensions, createReverseCoordinateTransform, ImportLoader } from '@taucad/geometry-core';
+import {
+  allExtensions,
+  createReverseCoordinateTransform,
+  ImportLoader,
+  markClosedMeshesSingleSided,
+} from '@taucad/geometry-core';
 import type { ImportFile } from '@taucad/geometry-core';
 
 // Type for rhino3dm geometry JSON structure
@@ -160,6 +165,7 @@ export class ThreeDmLoader extends ImportLoader<Document> {
     const io = new WebIO().registerExtensions(allExtensions);
 
     await document.transform(createReverseCoordinateTransform());
+    markClosedMeshesSingleSided(document);
 
     const glb = await io.writeBinary(document);
     return glb;

@@ -12,6 +12,7 @@ import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
 import {
   compactTriangleIndices,
   formatPrimitiveSelector,
+  markClosedMeshesSingleSided,
   normalizeGltfGeometryNames,
   srgbHexToLinearTuple,
   transformVertexArray,
@@ -182,6 +183,7 @@ const tagGlbMeshAndNodesFromShapeEntries = async (
       node.setName(meshName);
     }
   }
+  markClosedMeshesSingleSided(document);
   appendEdgeLines(document, entries, options);
   return io.writeBinary(document);
 };

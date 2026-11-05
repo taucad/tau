@@ -4923,6 +4923,9 @@ importers:
 
   packages/plugins/openrscad:
     dependencies:
+      '@taucad/geometry-core':
+        specifier: workspace:*
+        version: link:../../core/geometry
       '@taulabs/openrscad-engine':
         specifier: 'catalog:'
         version: 0.11.0-beta.4

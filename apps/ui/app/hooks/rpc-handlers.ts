@@ -35,6 +35,7 @@ import type {
   RpcGeoSpecClient,
   RpcGraphicsExportModelResult,
   RpcDirectoryEntry,
+  RpcReaddirOptions,
 } from '@taucad/chat/rpc';
 import type {
   CheckedFileWrite,
@@ -299,7 +300,7 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
     async deleteFile(path: string): Promise<void> {
       await mutationQueue.queueFor(path, async () => fileManager.deleteFile(path, { source: 'machine' }));
     },
-    async readdir(path: string): Promise<RpcDirectoryEntry[]> {
+    async readdir(path: string, options?: RpcReaddirOptions): Promise<RpcDirectoryEntry[]> {
       const { treeService } = await fileManager.whenServicesReady();
       try {
         const entries = await treeService.listDirectoryExact(path);
@@ -320,7 +321,10 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
                 : {}),
             };
           }
-          const facts = await listedFactsOf(path === '' ? entry.name : `${path}/${entry.name}`, entry);
+          const facts =
+            options?.contentFacts === false
+              ? fileMetadataFields(entry)
+              : await listedFactsOf(path === '' ? entry.name : `${path}/${entry.name}`, entry);
           return { ...common, type: 'file', ...facts };
         });
       } catch (error) {

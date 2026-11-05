@@ -10,9 +10,9 @@
  */
 
 import type { Resvg as ResvgType } from '@resvg/resvg-wasm';
-// oxlint-disable-next-line import/extensions, import/no-unassigned-import -- Pinned converter chunk; see the declaration.
-import { tscircuit_font_default as tscircuitFontBase64 } from 'circuit-json-to-gltf/dist/chunk-W5ZY3YD5.js';
 import { base64ToUint8Array, uint8ArrayToBase64 } from 'uint8array-extras';
+// oxlint-disable-next-line eslint/no-restricted-imports -- `#*.js` in `imports` captures `.mjs` and maps it to `.ts`.
+import { tscircuitFontBase64 } from './converter-font.mjs';
 
 type Renderer = { readonly resvgConstructor: typeof ResvgType; readonly font: Uint8Array<ArrayBuffer> };
 type RendererSlot = { renderer?: Promise<Renderer> };

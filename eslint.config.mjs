@@ -431,6 +431,7 @@ const config = [
             'apps/api/vitest.config.ts',
             'packages/runtime/src/nextjs/package-assets-loader.mjs',
             'packages/plugins/picogk/dotnet/Tau.PicoGK.Parity/main.mjs',
+            'packages/plugins/tscircuit/src/engine/converter-font.mjs',
           ],
         },
         tsconfigRootDir: import.meta.dirname,

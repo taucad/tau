@@ -21,6 +21,7 @@ import { z } from 'zod';
 import type { KernelIssue } from '@taucad/runtime/types';
 import { cadEdgeOverlayMaterialDefaults, createExportFile } from '@taucad/runtime/types';
 import {
+  compileWasmStreaming,
   createFrameClassifier,
   createKernelError,
   createKernelParameterDeclaration,
@@ -51,6 +52,9 @@ import {
 const corePackage = { name: '@tscircuit/core', version: '0.0.1844' } as const;
 const propsPackage = { name: '@tscircuit/props', version: '0.0.646' } as const;
 const reactPackage = { name: 'react', version: '19.3.1' } as const;
+
+/** The board-layer rasterizer's WASM (`#engine/svg-to-png.js`). */
+const resvgWasmUrl = new URL(import.meta.resolve('@resvg/resvg-wasm/index_bg.wasm')).href;
 
 /** `circuit-json-to-gltf` writes Y-up millimetres; Tau's GLB space is Y-up metres. */
 const millimetersToMeters = 0.001;
@@ -244,8 +248,21 @@ const collectCircuitIssues = (circuitJson: CircuitElement[]): KernelIssue[] => {
 const activeUrlSinks = new Set<Set<string>>();
 let replacedFetch: typeof globalThis.fetch | undefined;
 
-const offlineFetch: typeof globalThis.fetch = async (input) => {
+const absoluteUrl = (url: string): string => {
+  try {
+    return new URL(url, (globalThis as { location?: { href: string } }).location?.href).href;
+  } catch {
+    return url;
+  }
+};
+
+const offlineFetch: typeof globalThis.fetch = async (input, init) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  // The kernel's own rasterizer WASM is a package asset, not a board resource. Another document's render can hold the
+  // trap while this one compiles it, so it passes through rather than relying on load order.
+  if (replacedFetch && absoluteUrl(url) === absoluteUrl(resvgWasmUrl)) {
+    return replacedFetch(input, init);
+  }
   for (const sink of activeUrlSinks) {
     sink.add(url);
   }
@@ -395,8 +412,13 @@ const circuitJsonToGlb = async (
   circuitJson: CircuitElement[],
   convention: GlbConvention,
 ): Promise<{ content: Uint8Array<ArrayBuffer>; issues: KernelIssue[] }> => {
-  const { convertCircuitJsonToGltf } = await import('#engine/gltf.js');
-  // The converter's browser worker path uses resvg-wasm for board layers.
+  const [{ convertCircuitJsonToGltf }, { loadBoardTextureRenderer }] = await Promise.all([
+    import('#engine/gltf.js'),
+    import('#engine/svg-to-png.js'),
+  ]);
+  // Board layers rasterize through `svg-to-png.ts`, which must be ready before conversion: the converter catches a
+  // rasterizer failure and silently draws an untextured board.
+  await loadBoardTextureRenderer(await compileWasmStreaming(resvgWasmUrl));
   const { value: content, issues } = await withOfflineFetch(async () => {
     const glb = await convertCircuitJsonToGltf(asCircuitJson(circuitJson), { format: 'glb' });
     if (!(glb instanceof ArrayBuffer)) {
@@ -462,7 +484,7 @@ export const tscircuitKernel = defineKernel({
     flatbush: { name: 'flatbush', version: '4.6.2' },
   },
   name: 'TscircuitKernel',
-  version: '1.1.0',
+  version: '1.1.1',
   views: {
     board: { title: '3D board', mimeType: 'model/gltf-binary' },
     schematic: { title: 'Schematic', mimeType: 'image/svg+xml', instances: true },

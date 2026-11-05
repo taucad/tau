@@ -66,6 +66,14 @@ const fixtureSheets = `
 // Test utilities
 // =============================================================================
 
+// The kernel worker has no native resvg binding; board layers must rasterize through `svg-to-png.ts` instead.
+vi.mock('@resvg/resvg-js', () => ({
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- The binding's export name.
+  Resvg: vi.fn(() => {
+    throw new Error('native resvg is unavailable in the kernel worker');
+  }),
+}));
+
 const fetchGuard = vi.fn((): never => {
   throw new Error('network access is not allowed during a tscircuit render');
 });
@@ -646,6 +654,35 @@ describe('TscircuitKernel', () => {
           .flatMap((mesh) => mesh.listPrimitives())
           .filter((primitive) => primitive.getMode() === 1).length,
       ).toBeGreaterThan(0);
+    });
+
+    it('should draw both board faces from layer textures without the native rasterizer or a fetch', async () => {
+      const client = createClient({ 'main.tsx': fixtureBoard });
+
+      const result = expectGeometry(await render(client, 'main.tsx'));
+
+      expect(result.issues.filter((issue) => isRecordObject(issue.details) && 'url' in issue.details)).toEqual([]);
+      const glb = expectGlb(result);
+      const io = await createNodeIo();
+      const document = await io.readBinary(glb);
+      const board = document
+        .getRoot()
+        .listNodes()
+        .find((node) => node.getName() === 'Box0');
+      const faces = board
+        ?.getMesh()
+        ?.listPrimitives()
+        .map((primitive) => primitive.getMaterial())
+        .filter((material) => material?.getBaseColorTexture());
+      // Without layer textures the converter emits one flat, single-sided board whose winding faces inwards.
+      expect(faces?.map((material) => material?.getName())).toEqual([
+        expect.stringMatching(/^TopMaterial_/u),
+        expect.stringMatching(/^BottomMaterial_/u),
+      ]);
+      for (const material of faces ?? []) {
+        expect(material?.getBaseColorTexture()?.getMimeType()).toBe('image/png');
+        expect(material?.getBaseColorTexture()?.getSize()?.[0]).toBe(1024);
+      }
     });
 
     it('should render the schematic output as an SVG with a viewBox and schematic elements', async () => {

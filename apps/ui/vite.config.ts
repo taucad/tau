@@ -100,18 +100,49 @@ const uiOptimizeDepsOptions = {
 } as const satisfies UserConfig['optimizeDeps'];
 
 /**
- * Module aliases shared with `desktop/vite.config.ts`.
+ * The worker-safe board-layer rasterizer of `@taucad/tscircuit`, from source.
  *
- * `@resvg/resvg-js`: `@taucad/tscircuit` (composed into the runtime worker)
- * depends on `circuit-json-to-gltf`, whose `svg-to-png` chunk statically imports
- * this native `.node` binding; the kernel never reaches it
- * (`boardTextureResolution: 0`) but the dependency optimizer and the production
- * bundle fail on the binary. See `app/lib/browser-stubs/resvg-js.ts` and the
- * tscircuit EDA kernel charter (T8).
+ * Resolved through the package manifest rather than a package export: only builds that compose the kernel from
+ * source need it, and the published engine already carries the same redirect (`tsdown.engine.ts`).
+ */
+const tscircuitBoardTexture = path.join(
+  path.dirname(fileURLToPath(import.meta.resolve('@taucad/tscircuit/package.json'))),
+  'src/engine/svg-to-png.ts',
+);
+/** The converter's hashed `svg-to-png` chunk specifiers, exact to the names no other dependency imports. */
+const tscircuitTextureChunk = /^\.\/svg-to-png-(?:browser-)?[\dA-Z]+\.js$/u;
+
+/**
+ * Module aliases shared with `desktop/vite.config.ts` and `serve/vite.config.ts`.
+ *
+ * `./svg-to-png-*.js`: `@taucad/tscircuit` (composed into the runtime worker) depends on
+ * `circuit-json-to-gltf`, which rasterizes board layers through one of two hashed
+ * chunks. In the worker it picks the native one (`@resvg/resvg-js`), which cannot
+ * run there, and the converter then silently draws an untextured board. Both
+ * chunks resolve to the kernel's own resvg-wasm rasterizer instead; see
+ * `packages/plugins/tscircuit/src/engine/svg-to-png.ts`. The pattern is exact to
+ * the converter's chunk names, which no other dependency imports.
+ *
+ * `@resvg/resvg-js`: a throwing stand-in for the native binding, kept so that a
+ * converter bump which renames its chunks fails loudly at the binding instead of
+ * failing the bundle on the `.node` file. See `app/lib/browser-stubs/resvg-js.ts`.
  */
 export const uiResolveAlias = [
+  { find: tscircuitTextureChunk, replacement: tscircuitBoardTexture },
   { find: '@resvg/resvg-js', replacement: path.resolve(__dirname, 'app/lib/browser-stubs/resvg-js.ts') },
 ] as const satisfies NonNullable<UserConfig['resolve']>['alias'];
+
+/**
+ * The `uiResolveAlias` board-texture redirect for the dependency optimizer, which pre-bundles
+ * `circuit-json-to-gltf` without the alias. The optimized copy of the rasterizer shares the
+ * kernel's loaded WASM through `globalThis`; see `svg-to-png.ts`.
+ */
+export const tscircuitBoardTextureOptimizerPlugin = {
+  name: 'tau-tscircuit-board-texture',
+  resolveId(id: string): string | undefined {
+    return tscircuitTextureChunk.test(id) ? tscircuitBoardTexture : undefined;
+  },
+};
 
 type UiSourceAliasPluginOptions = {
   readonly emitModuleGraph?: boolean;
@@ -603,7 +634,10 @@ export default defineConfig(({ command, mode }) => {
       ],
     },
     ssr: uiSsrOptions,
-    optimizeDeps: { exclude: [...uiOptimizeDepsOptions.exclude] },
+    optimizeDeps: {
+      exclude: [...uiOptimizeDepsOptions.exclude],
+      rolldownOptions: { plugins: [tscircuitBoardTextureOptimizerPlugin] },
+    },
 
     server: {
       port: 3000,

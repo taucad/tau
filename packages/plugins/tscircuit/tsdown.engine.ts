@@ -5,11 +5,11 @@ import { defineConfig } from 'tsdown';
 import type { Plugin } from 'rolldown';
 
 const require = createRequire(import.meta.url);
-// These chunk names belong to pinned circuit-json-to-gltf 0.0.123; refresh both on a catalog bump.
 const converterRoot = require.resolve('circuit-json-to-gltf');
-const browserTexture = require.resolve('circuit-json-to-gltf/dist/svg-to-png-browser-MXUWCXAZ.js');
+// The converter's `svg-to-png` chunks, both replaced by the worker-safe rasterizer (see `svg-to-png.ts`).
+const nativeTexture = /^\.\/svg-to-png-(?:browser-)?[\dA-Z]+\.js$/u;
+const boardTexture = new URL('src/engine/svg-to-png.ts', import.meta.url).pathname;
 const wasmPath = require.resolve('@resvg/resvg-wasm/index_bg.wasm');
-const wasmBase64 = readFileSync(wasmPath).toString('base64');
 const nativeStub = new URL('src/engine/native-stub.ts', import.meta.url).pathname;
 // Licence texts the published packages omit, copied from each upstream repository's default branch
 // on 2026-10-02 into `licenses/`. Packages still missing text are DEFERRED, not blocking: every one
@@ -147,46 +147,14 @@ const engineRules: Plugin = {
       if (/^(?:@resvg\/resvg-js|occt-import-js)(?:\/|$)/u.test(id)) {
         return nativeStub;
       }
-      if (/^\.\/svg-to-png-[\w]+\.js$/u.test(id) && importer === converterRoot) {
-        return browserTexture;
+      if (nativeTexture.test(id) && importer === converterRoot) {
+        return boardTexture;
       }
       if (id === 'zod' && importer?.includes('/node_modules/')) {
         return this.resolve('zod/v3', import.meta.filename, { skipSelf: true });
       }
       return undefined;
     },
-  },
-  load(id) {
-    if (id !== browserTexture) {
-      return undefined;
-    }
-    return `import { Resvg, initWasm } from '@resvg/resvg-wasm';
-import { tscircuit_font_default as font } from './chunk-W5ZY3YD5.js';
-let ready;
-export async function svgToPngDataUrl(svg, options = {}) {
-  ready ??= initWasm(Uint8Array.fromBase64('${wasmBase64}')).catch((error) => {
-    if (!String(error).includes('Already initialized')) throw error;
-  });
-  await ready;
-  const resvg = new Resvg(svg, {
-    background: options.background,
-    font: { loadSystemFonts: false, fontBuffers: [Uint8Array.fromBase64(font)], defaultFontFamily: 'TscircuitAlphabet' },
-    fitTo: options.width ? { mode: 'width', value: options.width } : options.height ? { mode: 'height', value: options.height } : undefined,
-  });
-  try {
-    const rendered = resvg.render();
-    try {
-      const image = rendered.asPng();
-      let binary = '';
-      for (const byte of image) binary += String.fromCharCode(byte);
-      return 'data:image/png;base64,' + btoa(binary);
-    } finally {
-      rendered.free();
-    }
-  } finally {
-    resvg.free();
-  }
-}`;
   },
   generateBundle() {
     const roots = new Set<string>();
@@ -196,7 +164,7 @@ export async function svgToPngDataUrl(svg, options = {}) {
         roots.add(root);
       }
     }
-    // The WASM bytes are embedded in the lazy texture chunk, while its JS wrapper stays external.
+    // The WASM stays in the external `@resvg/resvg-wasm`, which `svg-to-png.ts` resolves at runtime.
     roots.add(dirname(wasmPath));
     writeLicenses(roots);
   },
@@ -206,6 +174,7 @@ export default defineConfig({
   entry: {
     core: 'src/engine/core.ts',
     gltf: 'src/engine/gltf.ts',
+    'svg-to-png': 'src/engine/svg-to-png.ts',
     svg: 'src/engine/svg.ts',
     bom: 'src/engine/bom.ts',
     netlist: 'src/engine/netlist.ts',

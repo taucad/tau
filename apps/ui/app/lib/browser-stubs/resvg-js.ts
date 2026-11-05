@@ -1,13 +1,12 @@
 /**
  * Browser stand-in for `@resvg/resvg-js` (a native `.node` binding).
  *
- * `circuit-json-to-gltf@0.0.123` (tscircuit EDA kernel charter, T8) statically
- * imports the native binding from the `svg-to-png` chunk it loads whenever
- * `document` is undefined, i.e. inside the kernel worker. The kernel renders with
- * `boardTextureResolution: 0`, so that chunk never executes, but the bundler
- * cannot know that and fails on the `.node` file. `vite.config.ts` aliases the
- * package here so the reference resolves to a module that throws only if it is
- * ever actually reached.
+ * `circuit-json-to-gltf@0.0.123` (tscircuit EDA kernel charter, T8) imports the
+ * native binding from the `svg-to-png` chunk it picks whenever `document` is
+ * undefined, i.e. inside the kernel worker. `vite.config.ts` redirects that chunk
+ * to the kernel's resvg-wasm rasterizer, so nothing should reach this module; it
+ * stays so that a converter bump which renames the chunk fails at the binding
+ * rather than failing the bundle on the `.node` file.
  */
 
 /** Throws on construction: the browser bundle never rasterizes SVG through native resvg. */

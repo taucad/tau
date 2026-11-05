@@ -5404,6 +5404,9 @@ importers:
       tsdown:
         specifier: 'catalog:'
         version: 0.22.14(@arethetypeswrong/core@0.18.5)(@typescript/native-preview@7.0.0-dev.20260223.1)(oxc-resolver@11.24.2)(publint@0.3.25)(tsx@4.23.15)(typescript@5.9.3)
+      uint8array-extras:
+        specifier: 'catalog:'
+        version: 1.6.0
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)

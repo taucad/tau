@@ -12,8 +12,15 @@ import { base64Loader } from '@taucad/vite/base64-loader';
  * and a `.ts` specifier needs `allowImportingTsExtensions`. Sharing the web
  * plugin beats duplicating 40 lines that would then drift.
  */
-// oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- see above.
-import { createUiReactCompilerPlugin, createUiSourceAliasPlugin, uiResolveAlias, uiSsrOptions } from '../vite.config';
+/* oxlint-disable eslint/no-restricted-imports, import/extensions -- see above. */
+import {
+  createUiReactCompilerPlugin,
+  createUiSourceAliasPlugin,
+  tscircuitBoardTextureOptimizerPlugin,
+  uiResolveAlias,
+  uiSsrOptions,
+} from '../vite.config';
+/* oxlint-enable eslint/no-restricted-imports, import/extensions */
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- config-load seam is outside the app alias root.
 import { resolveTauCloudBuildEnabled, resolveTauTelemetryHostCloud } from '../build-environment';
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- Shared config-load asset gate.
@@ -92,7 +99,10 @@ export default defineConfig({
   resolve: { alias: [...uiResolveAlias] },
   ssr: uiSsrOptions,
   // Mirrors `uiOptimizeDepsOptions` in the web config: smlibwasm resolves its WASM from import.meta.url.
-  optimizeDeps: { exclude: ['@classcad/smlibwasm'] },
+  optimizeDeps: {
+    exclude: ['@classcad/smlibwasm'],
+    rolldownOptions: { plugins: [tscircuitBoardTextureOptimizerPlugin] },
+  },
   server: {
     // 3000 is the web dev server; 3001 keeps both runnable side by side.
     port: 3001,

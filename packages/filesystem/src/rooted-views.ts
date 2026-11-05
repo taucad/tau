@@ -31,7 +31,6 @@ import type {
   FileStat,
   FileStatEntry,
 } from '@taucad/types';
-import { randomUuid } from '@taucad/utils/id';
 import { assertRootedPath, joinRelativePath, resolveAuthorityPath } from '@taucad/utils/path';
 import type {
   FileStatOptions,
@@ -56,8 +55,35 @@ import { bufferToStream, validateFileReadStreamOptions } from '#backend/stream-u
 import { getEventOrigin } from '#event-origin-registry.js';
 import { headFileStatFromStat } from '#content-metadata.js';
 
-/** A Git LFS object's place in a checkout: `.git/lfs/objects/<xx>/<yy>/<oid>`, the oid 64 lowercase hex. */
-const largeObjectPathPattern = /^\.git\/lfs\/objects\/([\da-f]{2})\/([\da-f]{2})\/([\da-f]{64})$/u;
+/** The control plane a rooted view serves outside the mutation pipeline. */
+const privateStoreDirectory = '.git';
+
+/**
+ * A Git store's control plane, served by a rooted view outside the mutation
+ * pipeline (see {@link RootedPorcelain.privateStore}).
+ *
+ * The provider's own primitives, confined to `.git/**`, plus a range read
+ * where the provider streams ranges, so a pack is read one object at a time
+ * and never as a whole.
+ *
+ * @public
+ */
+export type PrivateStore = Pick<
+  FileSystemProvider,
+  'readFile' | 'writeFile' | 'readdir' | 'stat' | 'exists' | 'mkdir' | 'unlink' | 'rmdir' | 'rename'
+> & {
+  /**
+   * Bytes `[offset, offset + length)` of one file, clamped to its end: a
+   * non-exclusive slice of the file. Present only where the provider streams
+   * ranges; a store without it reads a pack whole.
+   *
+   * @param path - The file, under `.git`.
+   * @param offset - First byte.
+   * @param length - Bytes wanted.
+   * @returns The bytes read.
+   */
+  readRange?(path: string, offset: number, length: number): Promise<Uint8Array<ArrayBuffer>>;
+};
 
 /**
  * The mutating porcelain a rooted view serves (charter D4).
@@ -74,6 +100,22 @@ const largeObjectPathPattern = /^\.git\/lfs\/objects\/([\da-f]{2})\/([\da-f]{2})
  * @public
  */
 export type RootedPorcelain = {
+  /**
+   * This root's Git control plane — `.git` and everything under it — straight
+   * on the captured provider, outside the mutation pipeline (charter D7, I6).
+   *
+   * No resource-queue or cross-tab claim, no change event, no index entry and
+   * no content metadata: objects, packs, refs and the store's own records are
+   * not project files, nothing watches, captures or indexes them, and taking
+   * the project's claims for them serialized every object write behind every
+   * checkout write. The store's writer keeps its own discipline — content is
+   * addressed by its hash and lands by rename, refs move by compare-and-set
+   * under the revision lock, a repack takes its own fence.
+   *
+   * Every path must be `.git` or lie under it; any other is refused with a
+   * `TypeError` before provider I/O.
+   */
+  readonly privateStore: PrivateStore;
   /**
    * Apply one changeset of this root's paths: every entry admitted before the
    * first I/O, one lock set, phases in order, every entry's outcome reported,
@@ -94,28 +136,6 @@ export type RootedPorcelain = {
   canRename(source: string, newName: string): Promise<true | WorkspaceMutationError>;
   canCreate(path: string, kind: 'file' | 'directory'): Promise<true | WorkspaceMutationError>;
   canDelete(path: string): Promise<true | WorkspaceMutationError>;
-  /**
-   * Store one Git LFS object, at this root's `.git/lfs/objects/<xx>/<yy>/<oid>`,
-   * straight on this root's provider, if it is not already there whole.
-   *
-   * Outside the mutation pipeline on purpose: no resource-queue or cross-tab
-   * claim, no change event, no index entry. A large object lands here once per
-   * download, and taking the project's claims for it serialized every download
-   * behind every checkout write (the cold open's ~1 object per second). Safe
-   * because the content is addressed by its own hash: it is written beside its
-   * name and renamed into place, so no reader sees a partial file, and two
-   * writers of one name write the same bytes — whichever loses the rename
-   * finds the other's file and leaves it. A file already there at the content's
-   * size is kept; one at another size (a write a crash cut short) is replaced,
-   * after a second look just before its removal, so a whole copy another tab
-   * stored meanwhile is left alone. Nothing watches, captures or indexes a Git
-   * store's large objects.
-   *
-   * @param path - The object's path in this root; any other path is refused.
-   * @param content - The object's bytes; their length is the object's size.
-   * @returns `'stored'` when this call wrote it, `'present'` when it was already there.
-   */
-  storePrivateObject(path: string, content: Uint8Array<ArrayBuffer>): Promise<'stored' | 'present'>;
 };
 
 /**
@@ -560,59 +580,83 @@ export class RootedViews {
       const { resolution } = resolveLocal(path);
       return resolution.provider.exists(resolution.path);
     };
-    const storePrivateObject = async (
-      path: string,
-      content: Uint8Array<ArrayBuffer>,
-    ): Promise<'stored' | 'present'> => {
+    /* Resolved and confined: the control plane only, never a project file. */
+    const resolvePrivate = (path: string): Readonly<{ provider: FileSystemProvider; path: string }> => {
       const { localPath, resolution } = resolveLocal(path);
-      const named = largeObjectPathPattern.exec(localPath);
-      if (named?.[3]?.startsWith(`${named[1]!}${named[2]!}`) !== true) {
-        throw new TypeError(`Only a Git LFS object is stored outside the mutation pipeline: ${localPath}`);
+      if (localPath !== privateStoreDirectory && !localPath.startsWith(`${privateStoreDirectory}/`)) {
+        throw new TypeError(`Only the Git control plane is stored outside the mutation pipeline: ${localPath}`);
       }
-      const { provider, path: target } = resolution;
-      /* The size of the file at the object's name, or `undefined` when there is none. */
-      const sizeHere = async (): Promise<number | undefined> => {
-        if (!(await provider.exists(target))) {
-          return undefined;
-        }
-        try {
-          const stat = await provider.stat(target, { content: 'head' });
-          return stat.size;
-        } catch {
-          /* Gone between the two looks. */
-          return undefined;
-        }
-      };
-      if ((await sizeHere()) === content.byteLength) {
-        return 'present';
+      return { provider: resolution.provider, path: resolution.path };
+    };
+    const readPrivateFile = (async (path: string, encoding?: 'utf8') => {
+      const target = resolvePrivate(path);
+      return encoding === 'utf8'
+        ? target.provider.readFile(target.path, 'utf8')
+        : target.provider.readFile(target.path);
+    }) as PrivateStore['readFile'];
+    const statPrivate = (async (path: string, options?: FileStatOptions) => {
+      const target = resolvePrivate(path);
+      return options === undefined ? target.provider.stat(target.path) : target.provider.stat(target.path, options);
+    }) as PrivateStore['stat'];
+    const readPrivateRange = async (path: string, offset: number, length: number): Promise<Uint8Array<ArrayBuffer>> => {
+      if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < 0 || length < 0) {
+        throw new RangeError(
+          `A private range read needs a whole offset and length, not ${String(offset)} and ${String(length)}.`,
+        );
       }
-      await provider.mkdir(target.slice(0, target.lastIndexOf('/')), { recursive: true });
-      const partial = `${target}.${randomUuid()}.partial`;
-      await provider.writeFile(partial, content);
-      const discardPartial = async (): Promise<void> => {
-        await provider.unlink(partial).catch(() => undefined);
-      };
-      /* Looked at again just before anything is removed: another tab may have stored it whole meanwhile. */
-      const here = await sizeHere();
-      if (here === content.byteLength) {
-        await discardPartial();
-        return 'present';
+      const target = resolvePrivate(path);
+      const reader = target.provider.readFileStream!(target.path, { position: offset, length }).getReader();
+      const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+      let size = 0;
+      // oxlint-disable-next-line no-await-in-loop -- a stream is read one chunk after another.
+      for (let read = await reader.read(); !read.done; read = await reader.read()) {
+        chunks.push(read.value);
+        size += read.value.byteLength;
       }
-      if (here !== undefined) {
-        /* A copy cut short; not every provider's rename replaces. */
-        await provider.unlink(target).catch(() => undefined);
+      if (chunks.length === 1) {
+        return chunks[0]!;
       }
-      try {
-        await provider.rename(partial, target);
-      } catch (error) {
-        await discardPartial();
-        if ((await sizeHere()) === content.byteLength) {
-          return 'present';
-        }
-        throw error;
+      const joined = new Uint8Array(size);
+      let at = 0;
+      for (const chunk of chunks) {
+        joined.set(chunk, at);
+        at += chunk.byteLength;
       }
-      assertCurrent();
-      return 'stored';
+      return joined;
+    };
+    const privateStore: PrivateStore = {
+      readFile: readPrivateFile,
+      ...(captured.provider.readFileStream === undefined ? {} : { readRange: readPrivateRange }),
+      writeFile: async (path, data) => {
+        const target = resolvePrivate(path);
+        await target.provider.writeFile(target.path, data);
+      },
+      readdir: async (path) => {
+        const target = resolvePrivate(path);
+        return target.provider.readdir(target.path);
+      },
+      stat: statPrivate,
+      exists: async (path) => {
+        const target = resolvePrivate(path);
+        return target.provider.exists(target.path);
+      },
+      mkdir: async (path, options) => {
+        const target = resolvePrivate(path);
+        await target.provider.mkdir(target.path, options);
+      },
+      unlink: async (path) => {
+        const target = resolvePrivate(path);
+        await target.provider.unlink(target.path);
+      },
+      rmdir: async (path) => {
+        const target = resolvePrivate(path);
+        await target.provider.rmdir(target.path);
+      },
+      rename: async (from, to) => {
+        const source = resolvePrivate(from);
+        const destination = resolvePrivate(to);
+        await source.provider.rename(source.path, destination.path);
+      },
     };
     const lstat = async (path: string): Promise<FileStat> => {
       const { resolution } = resolveLocal(path);
@@ -736,7 +780,7 @@ export class RootedViews {
       canRename,
       canCreate,
       canDelete,
-      storePrivateObject,
+      privateStore,
     };
   }
 }

@@ -17,35 +17,24 @@
  */
 
 import {
-  Errors,
   addRemote,
   deleteRef,
   deleteRemote,
   getConfigAll,
   getRemoteInfo2,
-  indexPack,
   init,
-  isDescendent,
   listRefs,
   listRemotes,
   listServerRefs,
-  packObjects,
-  readBlob,
-  readObject,
-  readTree,
   resolveRef,
   setConfig,
   version,
-  writeBlob,
-  writeObject,
   writeRef,
-  writeTree,
 } from 'isomorphic-git';
-import type { TreeEntry } from 'isomorphic-git';
 import { ResourceQueue, workerTimings } from '@taucad/filesystem';
 import { randomUuid } from '@taucad/utils/id';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
-import type { FileMode, FileSystemProvider, RootedPorcelain } from '@taucad/filesystem';
+import type { FileMode, FileSystemProvider, PrivateStore } from '@taucad/filesystem';
 import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import type { RevisionProvenance } from '#revision-authority.js';
 import { decodeCommit, decodeTag, encodeCommit, encodeTag } from '#git-objects.js';
@@ -66,6 +55,19 @@ import {
 } from '#revision-headers.js';
 import type { RevisionTrailer } from '#revision-headers.js';
 import { walkRevisionLog } from '#revision-log-order.js';
+import {
+  pktEncoder,
+  pktLine,
+  postService,
+  readUploadPackPack,
+  receivePack,
+} from '#adapter-transport/adapter-transport.js';
+import { createInlineCompute } from '#compute-worker/compute-worker.js';
+import type { ComputeWorker } from '#compute-worker/compute-worker.js';
+import { createObjectStore, gitFilesOf, isMissing } from '#object-store/object-store.js';
+import type { GitFiles, ObjectStore } from '#object-store/object-store.js';
+import { readTreeEntries, writeTreeObject } from '#object-store/tree-codec.js';
+import type { TreeCodecEntry } from '#object-store/tree-codec.js';
 import { RevisionPortError } from '#revision-port.js';
 import { assertMaterializableRevisionTree } from '#portable-tree.js';
 import { cleanLargeObjects, lfsObjectPath, readLfsPointer } from '#lfs.js';
@@ -168,16 +170,28 @@ export type IsomorphicGitCheckoutOptions = Readonly<{
 /** Configuration for one provider-backed Git repository. @public */
 export type IsomorphicGitRevisionPortOptions = Readonly<{
   /**
-   * The project's files. A rooted view's `storePrivateObject` is used, when it
-   * has one, to store large objects outside the mutation pipeline's claims.
+   * The project's files. A rooted view's `privateStore` carries every byte of
+   * the `.git` store — objects, packs, refs, records — outside the mutation
+   * pipeline (I6); a bare provider is used as it is.
    */
-  filesystem: FileSystemProvider & Partial<Pick<RootedPorcelain, 'storePrivateObject'>>;
+  filesystem: FileSystemProvider & { readonly privateStore?: PrivateStore };
   /** Control plane location. Defaults to `.git`, the one repository name on every host (D29). */
   gitDirectory?: string;
   /** Recorded object format. `isomorphic-git` writes SHA-1 only. */
   objectFormat?: ObjectFormat;
   /** Supplied, the port advertises and implements the `checkouts` capability. */
   checkouts?: IsomorphicGitCheckoutOptions;
+  /**
+   * The object store's CPU work — inflate, deflate, SHA-1, pack indexing. A
+   * host with a compute worker passes its connection; by default the work runs
+   * in this realm.
+   */
+  compute?: ComputeWorker;
+  /**
+   * Told about the object store this port opened, for gates that count what
+   * its reads cost.
+   */
+  onObjectStore?: (store: ObjectStore) => void;
   /**
    * Supplied, the port has a transport and an LFS client (S24, S49).
    *
@@ -235,16 +249,10 @@ const dominantTransport = (counts: ReadonlyMap<LfsTransport, number>): Readonly<
 
 const defaultGitDirectory = '.git';
 
-/**
- * How long the object cache outlives its last read.
- * Milliseconds.
- */
-const objectCacheIdle = 2000;
 const defaultBranch = 'main';
 const branchRefPrefix = 'refs/heads';
 const tagRefPrefix = 'refs/tags';
 const symbolicRefPrefix = 'ref: ';
-const directoryMode = '040000';
 const liveCheckoutId = 'live';
 /** Shared across every store in this document: one ref, one writer at a time. */
 const refQueue = new ResourceQueue();
@@ -252,204 +260,11 @@ const refQueue = new ResourceQueue();
 const frozenChange = (path: string, kind: RevisionDiffEntry['kind']): RevisionDiffEntry =>
   Object.freeze({ path, kind });
 
-const pktEncoder = new TextEncoder();
-const pktDecoder = new TextDecoder();
-
-/**
- * One pkt-line: four hex digits of length, then the payload.
- *
- * @param payload - The line's text.
- * @returns The encoded line.
- */
-const pktLine = (payload: string): Uint8Array<ArrayBuffer> => {
-  const bytes = pktEncoder.encode(payload);
-  return concatBytes(pktEncoder.encode((bytes.byteLength + 4).toString(16).padStart(4, '0')), bytes);
-};
-
-/**
- * The payloads of a pkt-line stream, flushes dropped.
- *
- * @param bytes - The whole stream.
- * @returns Each line's payload, in order.
- */
-const pktPayloads = (bytes: Uint8Array<ArrayBuffer>): Array<Uint8Array<ArrayBuffer>> => {
-  const payloads: Array<Uint8Array<ArrayBuffer>> = [];
-  let offset = 0;
-  while (offset + 4 <= bytes.byteLength) {
-    const length = Number.parseInt(pktDecoder.decode(bytes.subarray(offset, offset + 4)), 16);
-    if (Number.isNaN(length)) {
-      throw new TypeError('The remote answered with something that is not git’s pkt-line protocol.');
-    }
-    if (length < 4) {
-      offset += 4;
-      continue;
-    }
-    payloads.push(bytes.subarray(offset + 4, offset + length));
-    offset += length;
-  }
-  return payloads;
-};
-
-/** What one `receive-pack` answered: its per-ref report and its sideband. */
-type ReceivePackReport = Readonly<{
-  /** `ok`/`ng` per remote ref name; an `ng` carries the remote's reason. */
-  refs: ReadonlyMap<string, Readonly<{ ok: boolean; reason: string }>>;
-  /** The server's `remote:` lines, which is where a hook says *why*. */
-  said: readonly string[];
-}>;
-
-/**
- * Split a `side-band-64k` stream into its data and what the server said.
- *
- * @param body - The sideband pkt-lines.
- * @returns Channel 1's bytes and channel 2's lines; channel 3 is thrown.
- */
-const demuxSideband = (
-  body: Uint8Array<ArrayBuffer>,
-): Readonly<{ data: Uint8Array<ArrayBuffer>; said: readonly string[] }> => {
-  const data: Array<Uint8Array<ArrayBuffer>> = [];
-  const said: string[] = [];
-  for (const payload of pktPayloads(body)) {
-    switch (payload[0]) {
-      case 1: {
-        data.push(payload.subarray(1));
-        break;
-      }
-      case 2: {
-        said.push(...pktDecoder.decode(payload.subarray(1)).split(/\r?\n|\r/u));
-        break;
-      }
-      case 3: {
-        throw new Error(pktDecoder.decode(payload.subarray(1)));
-      }
-      default: {
-        break;
-      }
-    }
-  }
-  return Object.freeze({
-    data: concatBytes(...data),
-    said: said.map((line) => line.trim()).filter((line) => line !== ''),
-  });
-};
-
-/**
- * Read a `receive-pack` result: sideband-demuxed when asked for, then the
- * `report-status` lines.
- *
- * @param body - The whole response body.
- * @param sideband - Whether the request asked for `side-band-64k`.
- * @returns The per-ref report and what the server said.
- */
-const readReceivePackReport = (body: Uint8Array<ArrayBuffer>, sideband: boolean): ReceivePackReport => {
-  const { data: status, said } = sideband ? demuxSideband(body) : { data: body, said: [] };
-  const references = new Map<string, { ok: boolean; reason: string }>();
-  for (const payload of pktPayloads(status)) {
-    const line = pktDecoder.decode(payload).replace(/\n$/u, '');
-    const [kind, name = '', ...reason] = line.split(' ');
-    if (kind === 'ok' || kind === 'ng') {
-      references.set(name, { ok: kind === 'ok', reason: reason.join(' ') });
-    }
-  }
-  return Object.freeze({ refs: references, said });
-};
-
-/**
- * The pack an `upload-pack` answered: past its `ACK`/`NAK` lines, and
- * sideband-demuxed when asked for.
- *
- * @param body - The whole response body.
- * @param sideband - Whether the request asked for `side-band-64k`.
- * @returns The packfile's bytes.
- */
-const readUploadPackPack = (body: Uint8Array<ArrayBuffer>, sideband: boolean): Uint8Array<ArrayBuffer> => {
-  let offset = 0;
-  while (offset + 4 <= body.byteLength) {
-    const length = Number.parseInt(pktDecoder.decode(body.subarray(offset, offset + 4)), 16);
-    if (length === 0) {
-      offset += 4;
-      continue;
-    }
-    /* A raw pack starts `PACK`, a sideband line with its channel byte: either
-     * ends the negotiation's text lines. */
-    if (
-      Number.isNaN(length) ||
-      !/^(?:ACK|NAK|shallow|unshallow)\b/u.test(pktDecoder.decode(body.subarray(offset + 4, offset + length)))
-    ) {
-      break;
-    }
-    offset += length;
-  }
-  const rest = body.subarray(offset);
-  return sideband ? demuxSideband(rest).data : rest;
-};
-
 /** One ref this push sends: its local name, the remote's name, old and new. */
 type PushCommand = Readonly<{ name: string; remoteName: string; old: string | undefined; head: string }>;
 
 const refused = (name: string, reason: string): RevisionPushRefResult =>
   Object.freeze({ name, status: 'rejected', head: undefined, reason });
-
-/**
- * One smart-HTTP `POST` to a git service, answered as its body.
- *
- * A status other than 200 is thrown as the library's own `HttpError` *with*
- * the body, so the classifier reads the remote's code and sentence (N1).
- *
- * @param http - The client this request goes through.
- * @param request - The remote's URL, the service and the request body.
- * @returns The whole response body.
- */
-const postService = async (
-  http: RevisionHttpClient,
-  {
-    url,
-    service,
-    body,
-  }: Readonly<{ url: string; service: 'git-receive-pack' | 'git-upload-pack'; body: Uint8Array<ArrayBuffer> }>,
-): Promise<Uint8Array<ArrayBuffer>> => {
-  const response = await http.request({
-    method: 'POST',
-    url: `${url}/${service}`,
-    headers: {
-      'content-type': `application/x-${service}-request`,
-      accept: `application/x-${service}-result`,
-    },
-    body: (async function* once(): AsyncGenerator<Uint8Array<ArrayBuffer>> {
-      yield body;
-    })(),
-  });
-  const chunks: Array<Uint8Array<ArrayBuffer>> = [];
-  for await (const chunk of response.body) {
-    chunks.push(new Uint8Array(chunk));
-  }
-  const answered = concatBytes(...chunks);
-  if (response.statusCode !== 200) {
-    throw new Errors.HttpError(response.statusCode, response.statusMessage, pktDecoder.decode(answered));
-  }
-  return answered;
-};
-
-/**
- * One `receive-pack` request, answered as its per-ref report.
- *
- * @param http - The client this push goes through.
- * @param request - The remote's URL; the commands, a flush and the pack; and
- *   whether the commands asked for `side-band-64k`.
- * @returns The per-ref report.
- */
-const receivePack = async (
-  http: RevisionHttpClient,
-  { url, body, sideband }: Readonly<{ url: string; body: Uint8Array<ArrayBuffer>; sideband: boolean }>,
-): Promise<ReceivePackReport> => {
-  const report = readReceivePackReport(await postService(http, { url, service: 'git-receive-pack', body }), sideband);
-  /* No per-ref report means the remote never got as far as the refs, so it is
-   * not "the remote refused this ref" for any of them (seam 3 of 3, N1). */
-  if (report.refs.size === 0) {
-    throw new Error(report.said.join(' '));
-  }
-  return report;
-};
 
 /**
  * Whether `isomorphic-git` answered "no such ref or object"; nothing else uses
@@ -510,7 +325,9 @@ const clearProvider = async (provider: FileSystemProvider, path = ''): Promise<v
 };
 
 /**
- * The `fs` shim `isomorphic-git` binds, over one {@link FileSystemProvider}.
+ * The `fs` shim `isomorphic-git` binds for refs, config and `init`, over the
+ * store's {@link GitFiles}. No object is read or written through it: the
+ * object store does that.
  *
  * The library needs all ten of its commands present and errors that carry an
  * `errno` code; providers already throw those. `readlink` and `symlink` are the
@@ -518,10 +335,10 @@ const clearProvider = async (provider: FileSystemProvider, path = ''): Promise<v
  * them — no library index or working-tree command (Tau encodes the index
  * itself, `#git-index.js`) — so they refuse rather than lie.
  *
- * @param provider - The backing provider.
+ * @param provider - The store's files.
  * @returns A promise-shaped `FsClient`.
  */
-const fileSystemShim = (provider: FileSystemProvider) => {
+const fileSystemShim = (provider: GitFiles) => {
   /* Providers take canonical root-relative paths; the library composes its own
    * with `join`, which can leave a `.` or a doubled separator behind. */
   const at = (path: string): string =>
@@ -597,25 +414,17 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
   if (objectFormat !== 'sha1') {
     throw new RevisionPortError('UNSUPPORTED_OPERATION', 'isomorphic-git writes SHA-1 objects only.');
   }
-  const fs = fileSystemShim(filesystem);
+  /* Every byte under the store's directory, off the mutation pipeline (I6). */
+  const gitFiles = gitFilesOf(filesystem, gitdir);
+  const fs = fileSystemShim(gitFiles);
+  const objects = createObjectStore({
+    files: gitFiles,
+    gitdir,
+    compute: options.compute ?? createInlineCompute(),
+    fenceName: `${filesystem.id}:${gitdir}`,
+  });
+  options.onObjectStore?.(objects);
   const checkoutsDirectory = `${gitdir}/checkouts`;
-  /* D-UI-29: one object cache for a burst of reads. isomorphic-git keeps each
-   * parsed pack index and the pack's bytes in it; without one, every read of
-   * a packed object reloaded the pack and re-hashed it, and a tree walk did so
-   * once per entry, concurrently. The cache is dropped once reads go quiet, so
-   * the pack's bytes are not held for the session. */
-  let objectCacheValue: Record<string, unknown> | undefined;
-  let objectCacheExpiry: ReturnType<typeof setTimeout> | undefined;
-  const objectCache = (): Record<string, unknown> => {
-    objectCacheValue ??= {};
-    clearTimeout(objectCacheExpiry);
-    objectCacheExpiry = setTimeout(() => {
-      objectCacheValue = undefined;
-      objectCacheExpiry = undefined;
-    }, objectCacheIdle);
-    (objectCacheExpiry as { unref?: () => void }).unref?.();
-    return objectCacheValue;
-  };
   /* A branch name is spelled short and everything else is spelled in full: the
    * record set the design pushes lives outside `refs/heads` (`refs/tau/chats/*`,
    * W17), so a port that could only name branches could not address half of what
@@ -627,18 +436,39 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     oid: string,
     expected: 'commit' | 'tag' = 'commit',
   ): Promise<Uint8Array<ArrayBuffer> | undefined> => {
-    try {
-      /* eslint-disable-next-line @typescript-eslint/no-deprecated -- the typed
-       * readers drop Tau's `change-id` and `jj:*` headers; raw content is the
-       * only shape that carries them. */
-      const object = await readObject({ fs, cache: objectCache(), gitdir, oid, format: 'content' });
-      return object.format === 'content' && object.type === expected ? new Uint8Array(object.object) : undefined;
-    } catch (error) {
-      if (isNotFound(error)) {
-        return undefined;
-      }
-      throw error;
+    /* Raw bodies: the typed readers would drop Tau's `change-id` and `jj:*` headers. */
+    const object = await objects.read(oid);
+    return object?.type === expected ? object.data : undefined;
+  };
+
+  /**
+   * One tree object's entries, read through the object store.
+   *
+   * @param oid - The tree's id.
+   * @returns Its entries.
+   * @throws RevisionPortError when the store does not hold it.
+   */
+  const treeEntries = async (oid: string): Promise<readonly TreeCodecEntry[]> => {
+    const entries = await readTreeEntries(objects, oid);
+    if (entries === undefined) {
+      throw new RevisionPortError('ENGINE_FAILED', `The store does not hold the tree ${oid}.`);
     }
+    return entries;
+  };
+
+  /**
+   * One blob's bytes, read through the object store.
+   *
+   * @param oid - The blob's id.
+   * @returns Its bytes.
+   * @throws RevisionPortError when the store does not hold it.
+   */
+  const blobOf = async (oid: string): Promise<Uint8Array<ArrayBuffer>> => {
+    const object = await objects.read(oid);
+    if (object?.type !== 'blob') {
+      throw new RevisionPortError('ENGINE_FAILED', `The store does not hold the blob ${oid}.`);
+    }
+    return object.data;
   };
 
   const commitOf = async (id: RevisionId): Promise<DecodedCommit | undefined> => {
@@ -698,7 +528,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     prefix: string,
     into: Map<string, Readonly<{ oid: string; mode: string }>>,
   ): Promise<void> => {
-    const { tree } = await readTree({ fs, cache: objectCache(), gitdir, oid });
+    const tree = await treeEntries(oid);
     await Promise.all(
       tree.map(async (entry) => {
         const path = prefix === '' ? entry.path : `${prefix}/${entry.path}`;
@@ -737,7 +567,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       let tree = oid;
       for (const [index, segment] of segments.entries()) {
         // oxlint-disable-next-line no-await-in-loop -- each directory names the next one to read.
-        const { tree: entries } = await readTree({ fs, cache: objectCache(), gitdir, oid: tree });
+        const entries = await treeEntries(tree);
         const entry = entries.find((candidate) => candidate.path === segment);
         if (entry === undefined) {
           return undefined;
@@ -789,11 +619,11 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         const commit = head === undefined ? undefined : await requireCommit(head);
         const paths = commit === undefined ? [] : [...(await flatTree(commit.tree))];
         const lock = `${gitdir}/index.lock`;
-        if (await filesystem.exists(lock)) {
+        if (await gitFiles.exists(lock)) {
           return;
         }
-        await filesystem.writeFile(lock, encodeGitIndex(paths.map(([path, entry]) => ({ path, ...entry }))));
-        await filesystem.rename(lock, `${gitdir}/index`);
+        await gitFiles.writeFile(lock, encodeGitIndex(paths.map(([path, entry]) => ({ path, ...entry }))));
+        await gitFiles.rename(lock, `${gitdir}/index`);
       });
     } catch {
       // Advisory: the ref this follows has already moved (see above).
@@ -802,15 +632,8 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
 
   /* Ids of the trees this store writes, kept across mints (E3). */
   const treeIds = createTreeIdMemo();
-  /*
-   * Whether the store already holds an object, asked the way isomorphic-git's
-   * own loose writer asks before it writes one.
-   *
-   * ponytail: loose objects only — an object that arrived in a fetched pack is
-   * written again loose, which costs one write and stays correct.
-   */
-  const holds = async (oid: string): Promise<boolean> =>
-    filesystem.exists(`${gitdir}/objects/${oid.slice(0, 2)}/${oid.slice(2)}`);
+  /* Whether the store already holds an object, packed or loose. */
+  const holds = async (oid: string): Promise<boolean> => objects.has(oid);
 
   /*
    * Store one tree object and whatever under it the store lacks, children
@@ -822,24 +645,25 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     if (await holds(node.oid)) {
       return node.oid;
     }
-    const entries: TreeEntry[] = await Promise.all(
-      node.entries.map(async (entry): Promise<TreeEntry> => {
+    /* The memo already hashed every object it names: written under those ids, never hashed again (I2). */
+    await Promise.all(
+      node.entries.map(async (entry) => {
         if (entry.type === 'tree') {
-          return { mode: directoryMode, path: entry.name, oid: await writeTreeGraph(entry.tree), type: 'tree' };
+          await writeTreeGraph(entry.tree);
+        } else if (!(await holds(entry.oid))) {
+          await objects.writeLoose([{ type: 'blob', data: entry.content, oid: entry.oid }]);
         }
-        const oid = (await holds(entry.oid)) ? entry.oid : await writeBlob({ fs, gitdir, blob: entry.content });
-        return { mode: entry.mode, path: entry.name, oid, type: 'blob' };
       }),
     );
-    return writeTree({ fs, gitdir, tree: entries });
+    return writeTreeObject(objects, node);
   };
 
   const readCheckoutRecord = async (id: string): Promise<Checkout | undefined> => {
     const path = `${checkoutsDirectory}/${id}.json`;
-    if (checkouts === undefined || !(await filesystem.exists(path))) {
+    if (checkouts === undefined || !(await gitFiles.exists(path))) {
       return undefined;
     }
-    const stored: unknown = JSON.parse(await filesystem.readFile(path, 'utf8'));
+    const stored: unknown = JSON.parse(await gitFiles.readFile(path, 'utf8'));
     const record = stored as Readonly<{ id: string; branch: string }>;
     return Object.freeze({
       id: record.id,
@@ -855,7 +679,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
   };
 
   const listCheckoutRecords = async (): Promise<readonly Checkout[]> => {
-    const stored = (await filesystem.exists(checkoutsDirectory)) ? await filesystem.readdir(checkoutsDirectory) : [];
+    const stored = (await gitFiles.exists(checkoutsDirectory)) ? await gitFiles.readdir(checkoutsDirectory) : [];
     const ids = stored.filter((name) => name.endsWith('.json'));
     const linked = await Promise.all(ids.toSorted().map(async (name) => readCheckoutRecord(name.slice(0, -5))));
     return Object.freeze(linked.filter((checkout) => checkout !== undefined));
@@ -880,18 +704,41 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    */
   const readLocalLfsObject = async (pointer: LfsPointer): Promise<Uint8Array<ArrayBuffer> | undefined> => {
     const file = lfsObjectFile(pointer.oid);
-    if (!(await filesystem.exists(file))) {
+    if ((await lfsObjectSize(file)) !== pointer.size) {
       return undefined;
     }
-    const content = await filesystem.readFile(file);
+    const content = await gitFiles.readFile(file);
     return content.byteLength === pointer.size ? content : undefined;
+  };
+
+  /**
+   * The size of the file at one large object's name, or `undefined` when there is none.
+   *
+   * @param file - The object's path in the store.
+   * @returns Its size in bytes.
+   */
+  const lfsObjectSize = async (file: string): Promise<number | undefined> => {
+    try {
+      const stat = await gitFiles.stat(file);
+      return stat.size;
+    } catch (error) {
+      if (isMissing(error)) {
+        return undefined;
+      }
+      throw error;
+    }
   };
 
   /**
    * Put one large object in this store. Content-addressed, so a repeat writes nothing.
    *
-   * Written beside its name and renamed into place, so a write a close or a
-   * crash cut short never leaves a truncated object under the oid.
+   * Off the project's mutation claims, so a download never waits behind a
+   * checkout write. Written beside its name and renamed into place, so a write
+   * a close or a crash cut short never leaves a truncated object under the oid.
+   * A file already there at the content's size is kept; one at another size (a
+   * write cut short) is replaced, after a second look just before its removal,
+   * so a whole copy another tab stored meanwhile is left alone, and a writer
+   * that loses the rename to another keeps the other's whole copy.
    *
    * @param oid - The pointer's object id.
    * @param content - The object's real bytes.
@@ -900,26 +747,35 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
   const storeLfsObject = async (oid: string, content: Uint8Array<ArrayBuffer>): Promise<void> =>
     workerTimings.span('lfs.store', async () => storeLfsObjectBytes(oid, content));
   const storeLfsObjectBytes = async (oid: string, content: Uint8Array<ArrayBuffer>): Promise<void> => {
-    if ((await readLocalLfsObject({ oid, size: content.byteLength })) !== undefined) {
-      return;
-    }
     const file = lfsObjectFile(oid);
-    /* The private store takes only the checkout's own `.git` store; another repository location stays on the pipeline. */
-    if (filesystem.storePrivateObject !== undefined && gitdir === '.git') {
-      /* Off the project's mutation claims: a download no longer waits behind every checkout write.
-       * The store keeps a whole copy another tab wrote and replaces only one cut short. */
-      await filesystem.storePrivateObject(file, content);
+    const size = content.byteLength;
+    if ((await lfsObjectSize(file)) === size) {
       return;
     }
-    /* A copy cut short by an earlier write; not every provider's rename replaces. */
-    const truncated = await filesystem.exists(file);
-    await filesystem.mkdir(file.slice(0, file.lastIndexOf('/')), { recursive: true });
+    await gitFiles.mkdir(file.slice(0, file.lastIndexOf('/')), { recursive: true });
     const partial = `${file}.${randomUuid()}.partial`;
-    await filesystem.writeFile(partial, content);
-    if (truncated || (await filesystem.exists(file))) {
-      await filesystem.unlink(file);
+    await gitFiles.writeFile(partial, content);
+    const discardPartial = async (): Promise<void> => {
+      await gitFiles.unlink(partial).catch(() => undefined);
+    };
+    /* Looked at again just before anything is removed: another tab may have stored it whole meanwhile. */
+    const here = await lfsObjectSize(file);
+    if (here === size) {
+      await discardPartial();
+      return;
     }
-    await filesystem.rename(partial, file);
+    if (here !== undefined) {
+      /* A copy cut short; not every provider's rename replaces. */
+      await gitFiles.unlink(file).catch(() => undefined);
+    }
+    try {
+      await gitFiles.rename(partial, file);
+    } catch (error) {
+      await discardPartial();
+      if ((await lfsObjectSize(file)) !== size) {
+        throw error;
+      }
+    }
   };
 
   /**
@@ -1101,13 +957,13 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    */
   const localLfsObject = async (oid: string, path: string | undefined): Promise<Uint8Array<ArrayBuffer>> => {
     const file = lfsObjectFile(oid);
-    if (!(await filesystem.exists(file))) {
+    if (!(await gitFiles.exists(file))) {
       throw new RevisionPortError(
         'MISSING_LARGE_OBJECT',
         `${path ?? 'A large file'} is not on this device, and the remote does not have it either.`,
       );
     }
-    return filesystem.readFile(file);
+    return gitFiles.readFile(file);
   };
 
   /**
@@ -1199,8 +1055,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       // eslint-disable-next-line no-await-in-loop -- see above.
       await Promise.all(
         [...entries].map(async ([path, { oid }]) => {
-          const { blob } = await readBlob({ fs, cache: objectCache(), gitdir, oid });
-          const pointer = readLfsPointer(new Uint8Array(blob));
+          const pointer = readLfsPointer(await blobOf(oid));
           if (pointer !== undefined) {
             paths.set(pointer.oid, { path, size: pointer.size });
           }
@@ -1208,6 +1063,37 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       );
     }
     return paths;
+  };
+
+  /**
+   * Whether `ancestor` is reachable from `head` through commit parents.
+   *
+   * Breadth-first over the store's commits, each read once.
+   *
+   * @param head - The newer commit.
+   * @param ancestor - The commit it must descend from.
+   * @returns `true` when it does.
+   */
+  const descendsFrom = async (head: string, ancestor: string): Promise<boolean> => {
+    const seen = new Set<string>([head]);
+    let frontier = [head];
+    while (frontier.length > 0) {
+      // oxlint-disable-next-line no-await-in-loop -- one generation of parents at a time.
+      const commits = await Promise.all(frontier.map(async (oid) => requireCommit(revisionId(oid))));
+      frontier = [];
+      for (const commit of commits) {
+        for (const parent of commit.parents) {
+          if (parent === ancestor) {
+            return true;
+          }
+          if (!seen.has(parent)) {
+            seen.add(parent);
+            frontier.push(parent);
+          }
+        }
+      }
+    }
+    return false;
   };
 
   /**
@@ -1240,9 +1126,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     if ((ref.remoteName ?? ref.name).startsWith(`${tagRefPrefix}/`)) {
       return '[rejected] (already exists)';
     }
-    const forward = await isDescendent({ fs, cache: objectCache(), gitdir, oid: head, ancestor: old, depth: -1 }).catch(
-      () => false,
-    );
+    const forward = await descendsFrom(head, old).catch(() => false);
     return forward ? undefined : '[rejected] (non-fast-forward)';
   };
 
@@ -1307,9 +1191,9 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    */
   const missingObjects = async (tips: readonly string[], haves: ReadonlySet<string>): Promise<readonly string[]> => {
     const send = new Set<string>();
-    const entriesOf = async (oid: string): Promise<ReadonlyMap<string, TreeEntry>> => {
-      const { tree } = await readTree({ fs, cache: objectCache(), gitdir, oid });
-      return new Map(tree.map((entry) => [entry.path, entry]));
+    const entriesOf = async (oid: string): Promise<ReadonlyMap<string, TreeCodecEntry>> => {
+      const entries = await treeEntries(oid);
+      return new Map(entries.map((entry) => [entry.path, entry]));
     };
     const treeObjects = async (oid: string, base: string | undefined): Promise<void> => {
       if (oid === base || send.has(oid)) {
@@ -1635,7 +1519,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       /* Every project an older build recorded has no index at all, so this open
        * heals it. An existing index is left alone: in a repository Tau adopted
        * it may hold the person's own staged work. */
-      if (!(await filesystem.exists(`${gitdir}/index`))) {
+      if (!(await gitFiles.exists(`${gitdir}/index`))) {
         await syncLiveIndex();
       }
     },
@@ -1673,8 +1557,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       > = [];
       for (const [path, { oid, mode }] of paths) {
         // oxlint-disable-next-line no-await-in-loop -- resolve one file before reading the next; a pointer is a few bytes.
-        const { blob } = await readBlob({ fs, cache: objectCache(), gitdir, oid });
-        const content = new Uint8Array(blob);
+        const content = await blobOf(oid);
         read.push({ path, content, mode: mode as FileMode, pointer: readLfsPointer(content) });
       }
       const pointers = read.flatMap(({ pointer }) => (pointer === undefined ? [] : [pointer]));
@@ -1736,11 +1619,10 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           ? {}
           : { conflictedTrees: [...input.conflict.trees], conflictLabels: [...input.conflict.labels] }),
       });
-      /* eslint-disable-next-line @typescript-eslint/no-deprecated -- `writeCommit`
-       * takes a `CommitObject`, which has no field for `change-id`, `jj:trees` or
-       * `jj:conflict-labels`; the raw object is the only way to store them. */
-      const oid = await writeObject({ fs, gitdir, type: 'commit', format: 'content', object: commit.body });
-      return receiptOf(revisionId(oid), decodeCommit(commit.body));
+      /* Raw bytes from Tau's own codec: `change-id`, `jj:trees` and `jj:conflict-labels` have no library field. */
+      const [oid] = await objects.writeLoose([{ type: 'commit', data: commit.body, oid: commit.id }]);
+      await objects.repackIfDue();
+      return receiptOf(revisionId(oid!), decodeCommit(commit.body));
     },
 
     readRef: async (name: string): Promise<RevisionId | undefined> => {
@@ -1884,10 +1766,8 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           actor: input.actor,
         }),
       });
-      /* eslint-disable-next-line @typescript-eslint/no-deprecated -- `writeTag`
-       * re-serialises a `TagObject`, so the bytes stored would not be the bytes
-       * `encodeTag` hashed; the raw object keeps one encoder for both legs. */
-      const oid = await writeObject({ fs, gitdir, type: 'tag', format: 'content', object: object.body });
+      /* The bytes `encodeTag` hashed, stored as they are: one encoder for both legs. */
+      const [oid = object.id] = await objects.writeLoose([{ type: 'tag', data: object.body, oid: object.id }]);
       await withRefLock(`${filesystem.id}:${gitdir}:${tagRefPrefix}/${input.name}`, async () =>
         writeRef({ fs, gitdir, ref: `${tagRefPrefix}/${input.name}`, value: oid, force: true }),
       );
@@ -2124,10 +2004,8 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         })();
         /* A pack with no objects has nothing to index. */
         if (pack.byteLength > 32 && new DataView(pack.buffer, pack.byteOffset + 8, 4).getUint32(0) > 0) {
-          const name = `objects/pack/pack-${[...pack.subarray(-20)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}.pack`;
-          await filesystem.mkdir(`${gitdir}/objects/pack`, { recursive: true });
-          await filesystem.writeFile(`${gitdir}/${name}`, pack);
-          await indexPack({ fs, dir: gitdir, gitdir, filepath: name });
+          await objects.addPack(pack);
+          await objects.repackIfDue();
         }
       }
       /* Refs after objects: a tracking ref never names what this store lacks. */
@@ -2275,8 +2153,8 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           commands.map((command) => command.head),
           new Set(advertised.values()),
         );
-        const { packfile } = await packObjects({ fs, cache: objectCache(), gitdir, oids: [...oids] });
-        const body = concatBytes(...lines, pktEncoder.encode('0000'), packfile ?? new Uint8Array());
+        const packfile = await objects.packObjects(oids);
+        const body = concatBytes(...lines, pktEncoder.encode('0000'), packfile);
         /* Seam 3 of 3 (N1): the remote answering with a status — 401, `403
          * GIT_SYNC_NOT_ENTITLED`, 404, 413 — is the classifier's question, and
          * only a failure with no status at all is the offline window. */
@@ -2469,7 +2347,9 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       }
       const provider = await root(id);
       await Promise.all(tree.entries().map(async (entry) => provider.writeFile(entry.path, entry.content)));
-      await filesystem.writeFile(
+      /* The registry is the store's own record: written off the pipeline, like every byte of `.git` (I6). */
+      await gitFiles.mkdir(checkoutsDirectory, { recursive: true });
+      await gitFiles.writeFile(
         `${checkoutsDirectory}/${id}.json`,
         `${JSON.stringify({ version: 1, id, branch: input.branch })}\n`,
       );
@@ -2500,7 +2380,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       // The files go before the record: a crash between the two leaves a route
       // that is empty, never one that is unregistered and still full.
       await clearProvider(await root(id));
-      await filesystem.unlink(`${checkoutsDirectory}/${id}.json`);
+      await gitFiles.unlink(`${checkoutsDirectory}/${id}.json`);
     },
   });
 

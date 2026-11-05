@@ -1023,9 +1023,9 @@
     },
     {
       "id": "M12",
-      "bound": "isomorphic-git object cache idle expiry",
-      "site": "packages/revisions/src/isomorphic-git-adapter.ts",
-      "token": "objectCacheIdle",
+      "bound": "object store whole-pack cache idle expiry (wholePackIdle, 2 s)",
+      "site": "packages/revisions/src/object-store/object-store.ts",
+      "token": "touched.idle = setTimeout",
       "class": "Debounce",
       "owner": "revisions memory"
     },

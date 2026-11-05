@@ -2,35 +2,18 @@
  * B1's browser mint, counted: after a one-file edit the store writes that blob
  * and the tree objects on its path, never the project (W4, L4 mint 403 ms).
  *
- * The counters wrap isomorphic-git's own writers, so a write is counted
- * whether or not the loose object already existed — each one hashes and
- * deflates its object.
+ * Counted where the object store lands each loose object (its rename into
+ * place), and typed from the object's own bytes, so nothing the store wrote
+ * escapes the count.
  */
+import { inflateSync } from 'node:zlib';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { revisionId } from '@taucad/project-core/revision-id';
-import type * as isomorphicGit from 'isomorphic-git';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { captureRevisionTree } from '#algorithms/revision-capture.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { revisionTreeId } from '#git-tree-id.js';
-
-const writes = vi.hoisted(() => ({ blob: 0, tree: 0 }));
-
-vi.mock('isomorphic-git', async (importOriginal) => {
-  const original = await importOriginal<typeof isomorphicGit>();
-  return {
-    ...original,
-    writeBlob: async (...arguments_: Parameters<typeof original.writeBlob>) => {
-      writes.blob += 1;
-      return original.writeBlob(...arguments_);
-    },
-    writeTree: async (...arguments_: Parameters<typeof original.writeTree>) => {
-      writes.tree += 1;
-      return original.writeTree(...arguments_);
-    },
-  };
-});
 
 const providers: MemoryProvider[] = [];
 
@@ -61,8 +44,14 @@ describe('the browser mint after a one-file edit', () => {
     const base = await port.writeRevision({ parents: [], tree: first, provenance, summary: { generated: 'First' } });
     await checkout.writeFile(paths[421]!, moduleText(421, 1));
     const second = await captureRevisionTree(checkout, { changedSince: { tree: first, paths: [paths[421]!] } });
-    writes.blob = 0;
-    writes.tree = 0;
+    const landed: string[] = [];
+    const rename = store.rename.bind(store);
+    vi.spyOn(store, 'rename').mockImplementation(async (from, to) => {
+      await rename(from, to);
+      if (/^\.git\/objects\/[\da-f]{2}\/[\da-f]{38}$/u.test(to)) {
+        landed.push(to);
+      }
+    });
 
     const receipt = await port.writeRevision({
       parents: [revisionId(base.commitId)],
@@ -71,8 +60,16 @@ describe('the browser mint after a one-file edit', () => {
       summary: { generated: 'Second' },
     });
 
-    /* The edited blob, then `src/21`, `src` and the root. */
-    expect(writes).toEqual({ blob: 1, tree: 3 });
+    const writes = { blob: 0, tree: 0, commit: 0 };
+    for (const path of landed) {
+      // oxlint-disable-next-line no-await-in-loop -- a handful of small objects, read to learn their kind.
+      const framed = inflateSync(await store.readFile(path));
+      const type = framed.subarray(0, framed.indexOf(0x20)).toString('utf8') as keyof typeof writes;
+      writes[type] += 1;
+    }
+
+    /* The edited blob, then `src/21`, `src` and the root; and the commit. */
+    expect(writes).toEqual({ blob: 1, tree: 3, commit: 1 });
     const recordedId = revisionId(receipt.commitId);
     const full = await captureRevisionTree(checkout);
     const record = await port.readRevision(recordedId);

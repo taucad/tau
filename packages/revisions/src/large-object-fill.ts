@@ -122,6 +122,8 @@ export const createLargeObjectFill = (
   const flushBytes = dependencies.flushBytes ?? defaultFlushBytes;
   /* One fill per checkout; a newer one replaces it, and the older one's callbacks go quiet. */
   const fills = new Map<string, Fill>();
+  /* Checkouts this fill has given its word on, so a host never reads silence as "nothing to fill" (D10 `filled`). */
+  const told = new Set<string>();
   const isCurrent = (fill: Fill): boolean => fills.get(fill.place.id) === fill;
 
   /* A fill that is no longer current: its timers end and its transfers stop. */
@@ -155,6 +157,7 @@ export const createLargeObjectFill = (
       retire(fill);
       fill.landed.clear();
     }
+    told.add(fill.place.id);
     report?.({
       checkoutId: fill.place.id,
       facet: done ? undefined : facetOf(fill),
@@ -433,7 +436,8 @@ export const createLargeObjectFill = (
       retire(previous);
     }
     if (pending.size === 0) {
-      if (previous !== undefined) {
+      if (previous !== undefined || !told.has(place.id)) {
+        told.add(place.id);
         report?.({ checkoutId: place.id, facet: undefined, retry: () => undefined });
       }
       return;
@@ -460,6 +464,8 @@ export const createLargeObjectFill = (
       unflushedBytes: 0,
     };
     fills.set(place.id, next);
+    /* Told before the first object is asked for: a host never shows this checkout's tree as filled over its pointers. */
+    tell(next);
     next.running = run(next);
     await next.running;
   };

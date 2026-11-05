@@ -132,6 +132,34 @@ describe('large-object fill', () => {
     expect([...largeObjectPlaceholders(tree).keys()]).toStrictEqual(['models/a.step']);
   });
 
+  /* D10: a host reads `filled` only from the fill's word, never from its silence. */
+  it('tells its pointers before it asks for the first object', async () => {
+    const harness = setup();
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    expect(harness.reports[0]?.facet).toMatchObject({
+      phase: 'fetching',
+      paths: ['models/a.step', 'models/b.step'],
+      objects: 0,
+    });
+    harness.finish(harness.fullTree());
+    await done;
+    expect(harness.reports.at(-1)?.facet).toBeUndefined();
+  });
+
+  it('gives its word once on a checkout with nothing to fill', async () => {
+    const harness = setup();
+    harness.files.set('models/a.step', encoder.encode(parts['models/a.step']));
+    harness.files.set('models/b.step', encoder.encode(parts['models/b.step']));
+    await harness.fill.fill(place, head);
+    expect(harness.reports.map((report) => report.facet)).toStrictEqual([undefined]);
+    await harness.fill.resume(place, head);
+    expect(harness.reports).toHaveLength(1);
+    expect(harness.readTree).not.toHaveBeenCalled();
+  });
+
   it('writes each object as it lands, tells its progress, and reports done', async () => {
     const harness = setup();
     const done = harness.fill.fill(place, head);

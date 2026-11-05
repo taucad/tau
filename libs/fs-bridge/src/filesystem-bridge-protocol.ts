@@ -1,6 +1,9 @@
 import type {
   AppendFence,
   ChangeSet,
+  Changeset,
+  ChangesetEntry,
+  ChangesetReceipt,
   ChangeSetWatchRequest,
   ProviderCapabilities,
   FileSystemProvider,
@@ -19,7 +22,7 @@ import type {
   WorkspaceMutationError,
   WorkspaceScope,
 } from '@taucad/filesystem';
-import { pendingProjectCommitInputSchema } from '@taucad/filesystem';
+import { maximumChangesetEntries, pendingProjectCommitInputSchema } from '@taucad/filesystem';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
 import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
 import type {
@@ -69,7 +72,9 @@ const discriminatedResultUnion = <
  * wire v3's first slice (charter D14, W10): `readMany` and `readRange`, and
  * long calls — size-dependent calls that live while the authority heartbeats
  * instead of dying at 30 s, carry the caller's abort and report progress. No
- * shim for 8 (D20).
+ * shim for 8 (D20). The same version carries the second slice: `apply` (one
+ * changeset over the wire), `glob`, `grep` and `indexStats` — calls a v9 peer
+ * either serves or refuses, so the slices share one bump (D20).
  * @public
  */
 export const fileSystemBridgeProtocolVersion = 9;
@@ -119,6 +124,137 @@ export type ReadManyResult = ReadonlyMap<string, Uint8Array<ArrayBuffer> | 'miss
  * map does not survive every transport the bridge rides; rows do.
  */
 export type ReadManyWireRows = Array<[string, Uint8Array<ArrayBuffer> | 'missing']>;
+
+/**
+ * One changeset entry as the wire carries it: a write's bytes are in hand or a
+ * `Blob`. A caller's `ReadableStream` is staged into a `Blob` on the caller's
+ * side before the call, because a stream does not cross every transport the
+ * bridge rides (the pipeline stages streams before locking anyway, I11).
+ *
+ * @public
+ */
+export type FileSystemBridgeChangesetEntry =
+  | Exclude<ChangesetEntry, { readonly op: 'write' }>
+  | (Omit<Extract<ChangesetEntry, { readonly op: 'write' }>, 'data'> & {
+      readonly data: Uint8Array<ArrayBuffer> | Blob | string;
+    });
+
+/**
+ * A changeset as the wire carries it. Its `AbortSignal` rides the long call,
+ * not the arguments.
+ *
+ * @public
+ */
+export type FileSystemBridgeChangeset = Readonly<{
+  entries: readonly FileSystemBridgeChangesetEntry[];
+  lifecycle?: boolean;
+}>;
+
+/**
+ * Caller-side controls of `apply`: its abort, and who owns the bytes. An
+ * apply reports no progress: it lives on the authority's heartbeats.
+ *
+ * - `'copy'` (the default): every in-hand buffer is copied before it crosses,
+ *   so the caller's arrays stay usable.
+ * - `'owned'`: the caller hands its buffers over; a buffer an entry fills
+ *   whole is transferred, never copied, and is detached on return (I2). A view
+ *   over part of a larger buffer is still copied, so the rest of that buffer
+ *   is neither sent nor detached.
+ *
+ * @public
+ */
+export type ApplyOptions = { readonly signal?: AbortSignal; readonly transfer?: 'copy' | 'owned' };
+
+/**
+ * Caller-owned shape of a `glob`: where to start and how many rows. It matches
+ * the index's file rows; the index holds no directory rows. The view's mask is
+ * inherited, never re-declared.
+ *
+ * @public
+ */
+export type GlobOptions = {
+  /** Root-relative directory to match under; the whole root when absent. */
+  readonly path?: string;
+  readonly maxResults?: number;
+};
+
+/**
+ * Caller-owned shape of a `grep`.
+ *
+ * @public
+ */
+export type GrepOptions = {
+  /** Root-relative directory to search under; the whole root when absent. */
+  readonly path?: string;
+  /** Only files whose root-relative path matches this glob. */
+  readonly glob?: string;
+  /** Match case exactly; default `false`. */
+  readonly caseSensitive?: boolean;
+  /** Treat the pattern as literal text, not a regular expression. */
+  readonly fixedStrings?: boolean;
+  /** Most matches returned; default {@link defaultGrepResults}, at most {@link maxGrepResults}. */
+  readonly maxResults?: number;
+  /** Skip files larger than this many bytes; default {@link defaultGrepFileBytes}. */
+  readonly maxFileBytes?: number;
+  /** Lines of context on each side of a match, at most {@link maxGrepContext}. */
+  readonly context?: number;
+};
+
+/**
+ * One line a `grep` matched. `line` and `column` count from 1; `text` and the
+ * context lines are cut at {@link maxGrepLineCharacters}.
+ *
+ * @public
+ */
+export type GrepMatch = {
+  readonly path: string;
+  readonly line: number;
+  readonly column: number;
+  readonly text: string;
+  readonly before?: readonly string[];
+  readonly after?: readonly string[];
+};
+
+/**
+ * What a `grep` found, in the index's file order and line order.
+ *
+ * `filesSkipped` counts candidates not searched: binary, over `maxFileBytes`,
+ * or gone between the index and the read. `truncated` says `maxResults` cut
+ * the matches short.
+ *
+ * @public
+ */
+export type GrepResult = {
+  readonly matches: readonly GrepMatch[];
+  readonly filesSearched: number;
+  readonly filesSkipped: number;
+  readonly truncated: boolean;
+};
+
+/**
+ * Totals of one subtree's files, from the root's index (charter D3): no file
+ * is read.
+ *
+ * @public
+ */
+export type IndexStats = {
+  readonly files: number;
+  readonly bytes: number;
+  readonly textFiles: number;
+  readonly binaryFiles: number;
+  readonly lines: number;
+};
+
+/** Matches a `grep` returns when the caller names no cap. @public */
+export const defaultGrepResults = 250;
+/** Most matches one `grep` returns. @public */
+export const maxGrepResults = 5000;
+/** Largest file a `grep` reads when the caller names no cap. @public */
+export const defaultGrepFileBytes = 4 * 1024 * 1024;
+/** Most context lines on each side of a `grep` match. @public */
+export const maxGrepContext = 10;
+/** Characters of a matched or context line a `grep` returns. @public */
+export const maxGrepLineCharacters = 500;
 
 const unavailableCapabilities = null;
 
@@ -248,6 +384,15 @@ export type FileSystemBridgeRuntimeService = FileSystemProvider &
      */
     readMany?: (paths: readonly string[], options?: LongCall) => Promise<ReadManyWireRows>;
     readRange?: (path: string, offset: number, length: number) => Promise<Uint8Array<ArrayBuffer>>;
+    /*
+     * Pattern and content queries over the root's index (charter D14). A host
+     * whose index answers them supplies its own; the bridge otherwise derives
+     * all three from `statTree` (and `readFile` for `grep`) on the host's side
+     * of the wire, so the view's mask applies to every row.
+     */
+    glob?: (pattern: string, options?: GlobOptions & LongCall) => Promise<FileStatEntry[]>;
+    grep?: (pattern: string, options?: GrepOptions & LongCall) => Promise<GrepResult>;
+    indexStats?: (path: string, options?: LongCall) => Promise<IndexStats>;
     /*
      * The mutating porcelain is the rooted surface's too (charter D4): one batch
      * in the mutation pipeline, mask-checked by the composed view above it. A
@@ -382,6 +527,22 @@ export type FileSystemBridgeRootedCalls = MachineSettingsService &
      * {@link maxReadRangeBytes} per call.
      */
     readRange(path: string, offset: number, length: number): Promise<Uint8Array<ArrayBuffer>>;
+    /**
+     * Apply one changeset on the authority (charter D2, D14): every entry
+     * admitted before the first I/O, one lock set, every entry's outcome in the
+     * receipt. A long call: it lives while the authority applies it, so a
+     * transport deadline never reports a changeset failed that is still being
+     * applied (I10). An entry's `error` arrives as an `Error` carrying the
+     * provider's `code`. A connection whose view serves no changeset refuses
+     * with `ENOTSUP`.
+     */
+    apply(changeset: Changeset, options?: ApplyOptions): Promise<ChangesetReceipt>;
+    /** Index rows whose root-relative path matches a glob (`*.ts` matches at any depth). */
+    glob(pattern: string, options?: GlobOptions & LongCall): Promise<FileStatEntry[]>;
+    /** Lines of the root's text files that match a pattern; an invalid expression refuses with `EINVAL`. */
+    grep(pattern: string, options?: GrepOptions & LongCall): Promise<GrepResult>;
+    /** Totals of one subtree from the root's index. */
+    indexStats(path: string, options?: LongCall): Promise<IndexStats>;
   };
 
 /**
@@ -401,7 +562,9 @@ type FileSystemBridgeCallArgs<Name extends FileSystemBridgeCallName> = Name exte
   ? [path: string, options?: 'utf8' | { readonly encoding?: 'utf8' }]
   : Name extends 'readScopedFile'
     ? [path: string, options: { readonly encoding?: 'utf8'; readonly scope: WorkspaceScope }]
-    : Parameters<FileSystemBridgeService[Name]>;
+    : Name extends 'apply'
+      ? [changeset: FileSystemBridgeChangeset]
+      : Parameters<FileSystemBridgeService[Name]>;
 type FileSystemBridgeCallResult<Name extends FileSystemBridgeCallName> = Name extends 'readFile' | 'readScopedFile'
   ? string | Uint8Array<ArrayBuffer>
   : Name extends 'readMany'
@@ -906,6 +1069,103 @@ const searchOptionsSchema = z.looseObject({
   maxResults: z.number().optional(),
   includeDirectories: z.boolean().optional(),
 });
+const countSchema = z.number().int().nonnegative();
+const globOptionsSchema = z.looseObject({
+  path: rootedPathSchema.optional(),
+  maxResults: countSchema.optional(),
+});
+const grepOptionsSchema = z.looseObject({
+  path: rootedPathSchema.optional(),
+  glob: z.string().optional(),
+  caseSensitive: z.boolean().optional(),
+  fixedStrings: z.boolean().optional(),
+  maxResults: countSchema.max(maxGrepResults).optional(),
+  maxFileBytes: countSchema.optional(),
+  context: countSchema.max(maxGrepContext).optional(),
+});
+const grepResultSchema: z.ZodType<GrepResult> = z.looseObject({
+  matches: z.array(
+    z.looseObject({
+      path: z.string(),
+      line: z.number().int().positive(),
+      column: z.number().int().positive(),
+      text: z.string(),
+      before: z.array(z.string()).optional(),
+      after: z.array(z.string()).optional(),
+    }),
+  ),
+  filesSearched: countSchema,
+  filesSkipped: countSchema,
+  truncated: z.boolean(),
+});
+const indexStatsSchema: z.ZodType<IndexStats> = z.looseObject({
+  files: countSchema,
+  bytes: countSchema,
+  textFiles: countSchema,
+  binaryFiles: countSchema,
+  lines: countSchema,
+});
+const changesetPhaseSchema = z.union([z.literal(0), z.literal(1), z.literal(2)]).optional();
+const changesetEntrySchema: z.ZodType<FileSystemBridgeChangesetEntry> = z.discriminatedUnion('op', [
+  z.strictObject({
+    op: z.literal('write'),
+    path: z.string(),
+    data: z.union([z.string(), bytesSchema, z.instanceof(Blob)]),
+    mode: z.enum(['100644', '100755']).optional(),
+    create: z.boolean().optional(),
+    phase: changesetPhaseSchema,
+  }),
+  z.strictObject({
+    op: z.literal('append'),
+    path: z.string(),
+    data: writePayloadSchema,
+    fence: z.strictObject({ expectedLength: countSchema, token: z.number().int().optional() }).optional(),
+    phase: changesetPhaseSchema,
+  }),
+  z.strictObject({
+    op: z.literal('delete'),
+    path: z.string(),
+    kind: z.enum(['file', 'dir']).optional(),
+    recursive: z.boolean().optional(),
+    phase: changesetPhaseSchema,
+  }),
+  z.strictObject({
+    op: z.literal('move'),
+    from: z.string(),
+    to: z.string(),
+    replace: z.boolean().optional(),
+    phase: changesetPhaseSchema,
+  }),
+  z.strictObject({
+    op: z.literal('mkdir'),
+    path: z.string(),
+    recursive: z.boolean().optional(),
+    phase: changesetPhaseSchema,
+  }),
+]);
+const changesetSchema: z.ZodType<FileSystemBridgeChangeset> = z.strictObject({
+  entries: z.array(changesetEntrySchema).max(maximumChangesetEntries),
+  lifecycle: z.boolean().optional(),
+});
+/* An entry's error crosses as data — an `Error` survives structured clone but
+ * not every codec — and the client stands it back up as an `Error`. */
+const changesetEntryErrorSchema = z.looseObject({ name: z.string(), message: z.string(), code: z.string().optional() });
+const changesetReceiptSchema: z.ZodType<ChangesetReceipt> = z.looseObject({
+  entries: z.array(
+    z.looseObject({
+      index: countSchema,
+      outcome: z.enum(['applied', 'failed', 'uncertain', 'skipped']),
+      error: changesetEntryErrorSchema.optional(),
+      kind: z.enum(['file', 'dir']).optional(),
+      durability: durabilityClassSchema.optional(),
+    }),
+  ),
+  applied: countSchema,
+  failed: countSchema,
+  uncertain: countSchema,
+  skipped: countSchema,
+  state: z.enum(['applied', 'partially-applied', 'known-not-applied', 'potentially-applied']),
+});
 
 const machineSettingsTypeIdSchema = z.custom<MachineSettingsRecord['typeId']>(
   (value) =>
@@ -1104,6 +1364,10 @@ const callSchemas = {
     ]),
     result: bytesSchema,
   },
+  apply: { args: z.tuple([changesetSchema]), result: changesetReceiptSchema },
+  glob: { args: z.tuple([z.string(), globOptionsSchema.optional()]), result: fileStatEntriesSchema },
+  grep: { args: z.tuple([z.string(), grepOptionsSchema.optional()]), result: grepResultSchema },
+  indexStats: { args: z.tuple([rootedPathSchema]), result: indexStatsSchema },
 } satisfies FileSystemBridgeCallSchemas;
 
 const broadcastValidator = z.looseObject({ event: z.literal('fileChanged'), data: changeEventSchema });

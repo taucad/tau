@@ -37,6 +37,11 @@ export type {
 export {
   createFileSystemBridgeHello,
   fileSystemBridgeProtocolVersion,
+  defaultGrepFileBytes,
+  defaultGrepResults,
+  maxGrepContext,
+  maxGrepLineCharacters,
+  maxGrepResults,
   maxReadManyPaths,
   maxReadRangeBytes,
   fileSystemBridgeSchemas,
@@ -44,6 +49,9 @@ export {
 } from '#filesystem-bridge-protocol.js';
 
 export type {
+  ApplyOptions,
+  FileSystemBridgeChangeset,
+  FileSystemBridgeChangesetEntry,
   FileSystemBridgeHashFiles,
   FileSystemBridgeHello,
   FileSystemBridgeRootedCalls,
@@ -52,10 +60,19 @@ export type {
   FileSystemBridgeService,
   FileSystemBridgeUnrootedCalls,
   FileSystemBridgeWorkspaceService,
+  GlobOptions,
+  GrepMatch,
+  GrepOptions,
+  GrepResult,
+  IndexStats,
   LongCall,
   LongCallProgress,
   ReadManyResult,
 } from '#filesystem-bridge-protocol.js';
+
+export { defaultReadStreamChunkBytes } from '#filesystem-bridge-client-calls.js';
+
+export type { ReadStreamOptions } from '#filesystem-bridge-client-calls.js';
 
 export { observeFileSystemBridgeCrossings } from '#filesystem-bridge-crossings.js';
 

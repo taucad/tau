@@ -3559,6 +3559,9 @@ importers:
       '@taucad/utils':
         specifier: workspace:*
         version: link:../utils
+      minimatch:
+        specifier: ^10.2.5
+        version: 10.2.6
     devDependencies:
       zod:
         specifier: 'catalog:'

@@ -1,14 +1,28 @@
 /**
  * Calls the bridge answers on the host's side of the wire when the handler set
- * does not bring its own: `hashFiles`, `readMany` and `readRange`.
+ * does not bring its own: `hashFiles`, `readMany`, `readRange`, `glob`, `grep`
+ * and `indexStats` — and the wire form of `apply`'s receipt.
  *
  * Each is derived from the connection's own `readFile` (and `readFileStream`
- * for ranges), so the view's mask applies, and each answers where the bytes
- * live: one round trip, bodies only where the caller asked for bodies.
+ * for ranges, `statTree` for the index queries), so the view's mask applies,
+ * and each answers where the bytes live: one round trip, bodies only where the
+ * caller asked for bodies.
  */
+import type { Changeset, ChangesetReceipt } from '@taucad/filesystem';
 import type { BridgeServerLongCall, StringKeyedObject } from '@taucad/rpc/bridge';
+import type { FileStatEntry } from '@taucad/types';
 import { sha256Bytes } from '@taucad/utils/hash';
-import type { LongCall, ReadManyWireRows } from '#filesystem-bridge-protocol.js';
+import type {
+  FileSystemBridgeChangeset,
+  GlobOptions,
+  GrepMatch,
+  GrepOptions,
+  GrepResult,
+  IndexStats,
+  LongCall,
+  ReadManyWireRows,
+} from '#filesystem-bridge-protocol.js';
+import { defaultGrepFileBytes, defaultGrepResults, maxGrepLineCharacters } from '#filesystem-bridge-protocol.js';
 import { ownedForTransfer } from '#filesystem-bridge-crossings.js';
 
 /** Reads one `readMany` keeps in flight: enough to overlap I/O, few enough to bound open handles. */
@@ -18,6 +32,8 @@ const readManyConcurrency = 8;
 const progressInterval = 100;
 
 type ReadBytes = (path: string) => Promise<Uint8Array<ArrayBuffer>>;
+type StatTree = (path: string) => Promise<FileStatEntry[]>;
+type Apply = (changeset: Changeset) => Promise<ChangesetReceipt>;
 type ReadStream = (
   path: string,
   options: { readonly position: number; readonly length: number },
@@ -29,6 +45,14 @@ const isAbsence = (error: unknown): boolean => {
 };
 
 const abortError = (): DOMException => new DOMException('The operation was aborted.', 'AbortError');
+
+const throwIfAborted = (signal: AbortSignal | undefined): void => {
+  if (signal?.aborted) {
+    throw abortError();
+  }
+};
+
+const codedError = (message: string, code: string): Error => Object.assign(new Error(message), { code });
 
 /**
  * Run `work` once per item with bounded concurrency, stopping at the caller's
@@ -151,10 +175,229 @@ const hostReadRange =
   };
 
 /**
- * Serve `hashFiles`, `readMany` and `readRange` beside a handler set that reads
- * files, each only where the handlers do not bring their own. A set without
- * `readFile` is returned unchanged. Members stay bound to the original handler
- * set, so a class's private state survives.
+ * The index's file rows under `path`, each with its root-relative path: the
+ * index answers a subtree's rows relative to that subtree, and patterns match
+ * against the root-relative path.
+ */
+const rowsUnder = async (statTree: StatTree, path: string): Promise<FileStatEntry[]> => {
+  const rows = await statTree(path);
+  return path === '' ? rows : rows.map((row) => ({ ...row, path: `${path}/${row.path}` }));
+};
+
+type Matcher = (path: string) => boolean;
+
+/** A glob over root-relative paths: a pattern without `/` matches a basename at any depth. */
+const globMatcher = async (pattern: string): Promise<Matcher> => {
+  /* Loaded on first use, so a bridge that never globs never ships the matcher. */
+  const { minimatch } = await import('minimatch');
+  return (path) => minimatch(path, pattern, { matchBase: true, dot: true });
+};
+
+const hostGlob =
+  (statTree: StatTree) =>
+  async (pattern: string, options?: GlobOptions & LongCall): Promise<FileStatEntry[]> => {
+    throwIfAborted(options?.signal);
+    const [matches, rows] = await Promise.all([globMatcher(pattern), rowsUnder(statTree, options?.path ?? '')]);
+    throwIfAborted(options?.signal);
+    const limit = options?.maxResults ?? Number.POSITIVE_INFINITY;
+    const found: FileStatEntry[] = [];
+    for (const row of rows) {
+      if (found.length >= limit) {
+        break;
+      }
+      if (row.type === 'file' && matches(row.path)) {
+        found.push(row);
+      }
+    }
+    return found;
+  };
+
+const escapeRegExp = (text: string): string => text.replaceAll(/[$()*+.?[\\\]^{|}]/gu, String.raw`\$&`);
+
+/** The caller's pattern as an expression; one that does not compile refuses with `EINVAL`. */
+const grepExpression = (pattern: string, options: GrepOptions | undefined): RegExp => {
+  const source = options?.fixedStrings === true ? escapeRegExp(pattern) : pattern;
+  try {
+    return new RegExp(source, options?.caseSensitive === true ? 'u' : 'iu');
+  } catch (error) {
+    throw codedError(`Invalid grep pattern: ${error instanceof Error ? error.message : String(error)}`, 'EINVAL');
+  }
+};
+
+const clipLine = (line: string): string =>
+  line.length > maxGrepLineCharacters ? line.slice(0, maxGrepLineCharacters) : line;
+
+/** Every line of one file's text that the expression matches, with its context. */
+const matchLines = (
+  { path, text }: { readonly path: string; readonly text: string },
+  expression: RegExp,
+  context: number,
+): GrepMatch[] => {
+  const lines = text.split(/\r?\n/u);
+  const matches: GrepMatch[] = [];
+  for (const [index, line] of lines.entries()) {
+    const found = expression.exec(line);
+    if (found === null) {
+      continue;
+    }
+    matches.push({
+      path,
+      line: index + 1,
+      column: found.index + 1,
+      text: clipLine(line),
+      ...(context === 0
+        ? {}
+        : {
+            before: lines.slice(Math.max(0, index - context), index).map((row) => clipLine(row)),
+            after: lines.slice(index + 1, index + 1 + context).map((row) => clipLine(row)),
+          }),
+    });
+  }
+  return matches;
+};
+
+/** The files a `grep` reads, and how many index rows it passes over unread. */
+const grepCandidates = async (
+  statTree: StatTree,
+  options: GrepOptions | undefined,
+): Promise<{ candidates: FileStatEntry[]; skipped: number }> => {
+  const [rows, matches] = await Promise.all([
+    rowsUnder(statTree, options?.path ?? ''),
+    options?.glob === undefined ? undefined : globMatcher(options.glob),
+  ]);
+  const maxFileBytes = options?.maxFileBytes ?? defaultGrepFileBytes;
+  const candidates: FileStatEntry[] = [];
+  let skipped = 0;
+  for (const row of rows) {
+    if (row.type !== 'file' || (matches !== undefined && !matches(row.path))) {
+      continue;
+    }
+    if (row.contentKind === 'binary' || row.size > maxFileBytes) {
+      skipped += 1;
+    } else {
+      candidates.push(row);
+    }
+  }
+  return { candidates, skipped };
+};
+
+const hostGrep =
+  (statTree: StatTree, read: ReadBytes) =>
+  async (pattern: string, options?: GrepOptions & LongCall): Promise<GrepResult> => {
+    const expression = grepExpression(pattern, options);
+    throwIfAborted(options?.signal);
+    const { candidates, skipped } = await grepCandidates(statTree, options);
+    const limit = options?.maxResults ?? defaultGrepResults;
+    const context = options?.context ?? 0;
+    const decoder = new TextDecoder();
+    const perFile: Array<GrepMatch[] | undefined> = Array.from({ length: candidates.length });
+    let found = 0;
+    let gone = 0;
+    let unread = 0;
+    await forEachReported(candidates, options, async (row, index) => {
+      /* Lanes take files in index order, so once the finished files hold the
+       * cap, no file not yet started can reach the first `limit` matches. */
+      if (found >= limit) {
+        unread += 1;
+        return 0;
+      }
+      let data: Uint8Array<ArrayBuffer>;
+      try {
+        data = await read(row.path);
+      } catch (error) {
+        if (isAbsence(error)) {
+          gone += 1;
+          return 0;
+        }
+        throw error;
+      }
+      const matches = matchLines({ path: row.path, text: decoder.decode(data) }, expression, context);
+      perFile[index] = matches;
+      found += matches.length;
+      return data.byteLength;
+    });
+    const all = perFile.flatMap((matches) => matches ?? []);
+    return {
+      matches: all.slice(0, limit),
+      filesSearched: candidates.length - gone - unread,
+      filesSkipped: skipped + gone,
+      truncated: all.length > limit || (unread > 0 && all.length >= limit),
+    };
+  };
+
+const hostIndexStats =
+  (statTree: StatTree) =>
+  async (path: string, options?: LongCall): Promise<IndexStats> => {
+    throwIfAborted(options?.signal);
+    const rows = await statTree(path);
+    const stats = { files: 0, bytes: 0, textFiles: 0, binaryFiles: 0, lines: 0 };
+    for (const row of rows) {
+      if (row.type !== 'file') {
+        continue;
+      }
+      stats.files += 1;
+      stats.bytes += row.size;
+      if (row.contentKind === 'text') {
+        stats.textFiles += 1;
+        stats.lines += row.lineCount;
+      } else {
+        stats.binaryFiles += 1;
+      }
+    }
+    return stats;
+  };
+
+/** An entry's error as data the wire carries: name, message and the provider's code. */
+const entryErrorOnWire = (error: unknown): { name: string; message: string; code?: string } => {
+  const code = (error as { code?: unknown } | undefined)?.code;
+  return {
+    name: error instanceof Error ? error.name : 'Error',
+    message: error instanceof Error ? error.message : String(error),
+    ...(typeof code === 'string' ? { code } : {}),
+  };
+};
+
+const hostApply =
+  (apply: Apply) =>
+  async (changeset: FileSystemBridgeChangeset): Promise<ChangesetReceipt> => {
+    const receipt = await apply(changeset);
+    return {
+      ...receipt,
+      entries: receipt.entries.map((entry) =>
+        entry.error === undefined ? entry : { ...entry, error: entryErrorOnWire(entry.error) },
+      ),
+    };
+  };
+
+const refuseApply = async (): Promise<never> => {
+  throw codedError('This connection serves no changeset apply.', 'ENOTSUP');
+};
+
+/** The index queries a handler set answers itself or the bridge derives from its `statTree`. */
+const derivedIndexCalls = (
+  own: Partial<Record<string, unknown>>,
+  handlers: StringKeyedObject,
+  read: ReadBytes,
+): Record<string, unknown> => {
+  if (typeof own['statTree'] !== 'function') {
+    return {};
+  }
+  const statTree = (own['statTree'] as StatTree).bind(handlers);
+  return {
+    ...(typeof own['glob'] === 'function' ? {} : { glob: hostGlob(statTree) }),
+    ...(typeof own['grep'] === 'function' ? {} : { grep: hostGrep(statTree, read) }),
+    ...(typeof own['indexStats'] === 'function' ? {} : { indexStats: hostIndexStats(statTree) }),
+  };
+};
+
+/**
+ * Serve the derived calls beside a handler set that reads files, each only
+ * where the handlers do not bring their own: `hashFiles`, `readMany` and
+ * `readRange` from `readFile`; `glob`, `grep` and `indexStats` from
+ * `statTree`; and `apply` with its receipt's errors as wire data, or refused
+ * with `ENOTSUP` where the view serves no changeset. A set without `readFile`
+ * is returned unchanged. Members stay bound to the original handler set, so a
+ * class's private state survives.
  *
  * @param handlers - The handlers one connection is served.
  * @returns The same handlers, answering the derived calls.
@@ -171,10 +414,9 @@ export const withHostContentCalls = <Handlers extends StringKeyedObject>(handler
     ...(typeof own['hashFiles'] === 'function' ? {} : { hashFiles: hostHashFiles(read) }),
     ...(typeof own['readMany'] === 'function' ? {} : { readMany: hostReadMany(read) }),
     ...(typeof own['readRange'] === 'function' ? {} : { readRange: hostReadRange(read, stream) }),
+    ...derivedIndexCalls(own, handlers, read),
+    apply: typeof own['apply'] === 'function' ? hostApply((own['apply'] as Apply).bind(handlers)) : refuseApply,
   };
-  if (Object.keys(derived).length === 0) {
-    return handlers;
-  }
   return new Proxy(handlers, {
     get(target, property) {
       if (typeof property === 'string' && Object.hasOwn(derived, property)) {
@@ -196,11 +438,18 @@ export const withHostContentCalls = <Handlers extends StringKeyedObject>(handler
  * them: a domain handler's trailing slot may already mean something else, such
  * as the mutation context a port binds.
  */
-const longCallHandlerSlot: Readonly<Record<string, number>> = { hashFiles: 1, readMany: 1 };
+const longCallHandlerSlot: Readonly<Record<string, number>> = {
+  hashFiles: 1,
+  readMany: 1,
+  glob: 1,
+  grep: 1,
+  indexStats: 1,
+};
 
 /**
  * Hand a long call's abort signal and progress sink to the handlers that take
- * them, as their options argument.
+ * them, merged into their options argument. `apply` takes the signal on the
+ * changeset itself, where the pipeline reads it: abort stops later phases.
  *
  * @param method - The bridge method being served.
  * @param args - Its validated wire arguments.
@@ -208,6 +457,9 @@ const longCallHandlerSlot: Readonly<Record<string, number>> = { hashFiles: 1, re
  * @returns The arguments the handler is called with.
  */
 export const bindFileSystemLongCall = (method: string, args: unknown[], longCall: BridgeServerLongCall): unknown[] => {
+  if (method === 'apply') {
+    return [{ ...(args[0] as FileSystemBridgeChangeset), signal: longCall.signal }, ...args.slice(1)];
+  }
   const slot = longCallHandlerSlot[method];
   if (slot === undefined) {
     return args;
@@ -216,6 +468,7 @@ export const bindFileSystemLongCall = (method: string, args: unknown[], longCall
   while (bound.length < slot) {
     bound.push(undefined);
   }
-  bound.push(longCall);
+  const options = args[slot];
+  bound.push({ ...(options !== null && typeof options === 'object' ? options : {}), ...longCall });
   return bound;
 };

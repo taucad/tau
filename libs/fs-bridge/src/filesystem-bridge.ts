@@ -29,6 +29,7 @@ import type {
   WorkspaceMutationContext,
   WorkspaceMutationError,
   WorkspaceMutationErrorCode,
+  ChangesetReceipt,
 } from '@taucad/filesystem';
 import type { BridgeCallTimeout, BridgeServerHandle, Port, StringKeyedObject } from '@taucad/rpc/bridge';
 import { catchMessages, createBridgeCall, createBridgePort, createBridgeServer } from '@taucad/rpc/bridge';
@@ -54,6 +55,8 @@ import type {
 import { nextFileSystemBridgeConnectionId, timeFileSystemBridgeCall } from '#filesystem-bridge-slow-calls.js';
 import { bindFileSystemLongCall, withHostContentCalls } from '#filesystem-bridge-host-calls.js';
 import { recordFileSystemBridgeCrossing } from '#filesystem-bridge-crossings.js';
+import { prepareApplyCall, rangeStream, receiptFromWire } from '#filesystem-bridge-client-calls.js';
+import type { ReadStreamOptions } from '#filesystem-bridge-client-calls.js';
 
 /** @public */
 export const filesystemBridgeConnectMessageType = 'tau:filesystem-bridge:connect';
@@ -144,7 +147,15 @@ export type FileSystemBridgeWorkspaceProxy = FileSystemBridgeUnrootedCalls & Fil
  *
  * @public
  */
-export type FileSystemBridgeRootedProxy = FileSystemBridgeService & FileSystemBridgeProxyTransport;
+export type FileSystemBridgeRootedProxy = FileSystemBridgeService &
+  FileSystemBridgeProxyTransport & {
+    /**
+     * A file as a stream of `readRange` pages, pulled one page per read
+     * (charter D14). Pages are read as they are pulled, so the chunks are not
+     * a snapshot of one version of the file.
+     */
+    readStream(path: string, options?: ReadStreamOptions): ReadableStream<Uint8Array<ArrayBuffer>>;
+  };
 
 /**
  * Typed filesystem bridge proxy preserving class/interface-shaped service surfaces.
@@ -188,6 +199,12 @@ const longCalls: Readonly<Record<string, number | undefined>> = {
   contents: 1,
   copyTree: 2,
   duplicate: 2,
+  glob: 1,
+  grep: 1,
+  indexStats: 1,
+  /* Its controls ride `ApplyOptions` and the changeset's own signal;
+   * `prepareApplyCall` takes them out. */
+  apply: undefined,
   writeFiles: undefined,
   bulkMove: undefined,
   commitPendingProjectDirectory: undefined,
@@ -206,10 +223,9 @@ const splitLongCall = (method: string, args: readonly unknown[]): { args: unknow
   if (slot === undefined || bag === null || typeof bag !== 'object') {
     return { args: [...args] };
   }
+  /* Stripped even when absent: a call's options may be nothing but its
+   * controls, and an empty bag is not a wire argument the schema admits. */
   const { signal, onProgress, ...rest } = bag as LongCall & Record<string, unknown>;
-  if (signal === undefined && onProgress === undefined) {
-    return { args: [...args] };
-  }
   const wireArgs = [...args];
   wireArgs[slot] = Reflect.ownKeys(rest).length === 0 ? undefined : rest;
   while (wireArgs.length > 0 && wireArgs.at(-1) === undefined) {
@@ -1650,7 +1666,7 @@ export function createFileSystemBridgeProxy(
   let isDisposed = false;
 
   return new Proxy({} as FileSystemBridgeProxy, {
-    get(_target, property): unknown {
+    get(_target, property, receiver: FileSystemBridgeRootedProxy): unknown {
       if (property === 'dispose') {
         return (): void => {
           if (isDisposed) {
@@ -1690,6 +1706,10 @@ export function createFileSystemBridgeProxy(
       if (property === 'hello') {
         return hello;
       }
+      if (property === 'readStream') {
+        return (path: string, options?: ReadStreamOptions): ReadableStream<Uint8Array<ArrayBuffer>> =>
+          rangeStream(async (offset, length) => receiver.readRange(path, offset, length), options);
+      }
       /* `$$typeof` is React's element probe, read off props by its development render log. */
       if (property === 'then' || property === 'toJSON' || property === '$$typeof' || typeof property === 'symbol') {
         return undefined;
@@ -1711,12 +1731,15 @@ export function createFileSystemBridgeProxy(
           }
         }
         try {
-          const split = splitLongCall(property, args);
+          const split = property === 'apply' ? await prepareApplyCall(args) : splitLongCall(property, args);
           const result = await timeFileSystemBridgeCall(connectionId, property, async () =>
             call(property, split.args, split.longCall),
           );
           if (property === 'readMany') {
             return readManyResult(result as ReadManyWireRows);
+          }
+          if (property === 'apply') {
+            return receiptFromWire(result as ChangesetReceipt);
           }
           return result;
         } catch (error) {

@@ -184,7 +184,8 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
     if (value.type === 'dir') {
       return { size: value.size, isDirectory: true, createdAt: date, modifiedAt: date, provenance };
     }
-    const known = (await factsOf([{ ...value, path: target }])).get(target) ?? value;
+    const facts = await factsOf([{ ...value, path: target }]);
+    const known = facts.get(target) ?? value;
     return known.contentKind === 'text' && known.lineCount !== undefined
       ? {
           size: value.size,

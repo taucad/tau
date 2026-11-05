@@ -574,6 +574,12 @@ export type RevisionPort = Readonly<{
   readRevision(id: RevisionId): Promise<RevisionRecord | undefined>;
   /** The tree; a host without large objects, or with its own smudge, may ignore `options`. */
   readTree(id: RevisionId, options?: ReadTreeOptions): Promise<ImmutableRevisionTree | undefined>;
+  /**
+   * One large object from this store alone, or `undefined` when it is not
+   * here; nothing is fetched. A host whose checkouts never hold a placeholder
+   * may leave it out (D9).
+   */
+  readLargeObject?(pointer: Readonly<{ oid: string; size: number }>): Promise<Uint8Array<ArrayBuffer> | undefined>;
   writeRevision(input: WriteRevisionInput): Promise<RevisionReceipt>;
   /** A branch by name, or any other ref spelled in full. */
   readRef(name: string): Promise<RevisionId | undefined>;

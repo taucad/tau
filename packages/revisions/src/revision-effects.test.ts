@@ -4976,6 +4976,49 @@ describe('opening before large objects arrive', () => {
     expect(await project.filesystem.readFile('models/part.step', 'utf8')).toBe(project.part);
   }, 30_000);
 
+  /* D9: a placeholder reads as pending, never its pointer text; `materialize` makes it a file. */
+  it('reads a placeholder as pending until its object is here, and materializes it on request', async () => {
+    const project = await leftMidDownload();
+    await vi.waitFor(() => {
+      expect(project.reports.at(-1)?.facet).toMatchObject({ phase: 'fetching' });
+    });
+    expect(await project.actors.readContent(undefined, 'models/part.step')).toMatchObject({
+      outcome: 'pending',
+      reason: 'filling',
+    });
+    expect(await project.actors.readContent(undefined, 'main.scad')).toStrictEqual({
+      outcome: 'bytes',
+      data: new TextEncoder().encode('import("models/part.step");\n'),
+    });
+    const materializing = project.actors.materialize(undefined, ['models/part.step']);
+    project.land();
+    await materializing;
+    expect(await project.filesystem.readFile('models/part.step', 'utf8')).toBe(project.part);
+    expect(await project.actors.readContent(undefined, 'models/part.step')).toStrictEqual({
+      outcome: 'bytes',
+      data: new TextEncoder().encode(project.part),
+    });
+    await expect(project.actors.readContent('nowhere', 'main.scad')).rejects.toMatchObject({
+      code: 'CHECKOUT_CONFLICT',
+    });
+  }, 30_000);
+
+  it('reads a placeholder from the store when its object is here but not yet written', async () => {
+    const project = await leftMidDownload();
+    await vi.waitFor(() => {
+      expect(project.signals).toHaveLength(1);
+    });
+    const { pointer } = lfsPointerFor(new TextEncoder().encode(project.part));
+    await project.filesystem.writeFile(`.git/${lfsObjectPath(pointer.oid)}`, project.part);
+    expect(await project.actors.readContent(undefined, 'models/part.step')).toStrictEqual({
+      outcome: 'bytes',
+      data: new TextEncoder().encode(project.part),
+    });
+    /* Read, not written: the checkout still holds the pointer until the fill writes it. */
+    expect(await project.filesystem.readFile('models/part.step')).toStrictEqual(project.pointerBytes);
+    await project.actors.settled();
+  }, 30_000);
+
   it('stops the fill when the project closes, and writes nothing after', async () => {
     const project = await leftMidDownload();
     await vi.waitFor(() => {

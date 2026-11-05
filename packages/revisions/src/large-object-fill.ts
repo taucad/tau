@@ -39,6 +39,8 @@ type Fill = {
   readonly arrived: Set<string>;
   /** Objects an opened path names: fetched before the rest and written as soon as they land (D10). */
   readonly promoted: Set<string>;
+  /** Woken on every arrival, flush, report and end, so a read or `materialize` waiting on this fill re-checks (D9). */
+  readonly waiters: Set<() => void>;
   readonly totalObjects: number;
   readonly totalBytes: number;
   /** Stops the fill's transfers when the checkout closes or a newer fill replaces this one. */
@@ -117,6 +119,13 @@ export const createLargeObjectFill = (
   fill: (place: Checkout, head: RevisionId, placeholders?: ReadonlyMap<string, Placeholder>) => Promise<void>;
   resume: (place: Checkout, head: RevisionId, replace?: boolean) => Promise<void>;
   stop: () => Promise<void>;
+  look: (checkoutId: string, oid: string) => LargeObjectLook | undefined;
+  arrival: (checkoutId: string, oid: string, signal?: AbortSignal) => Promise<Uint8Array<ArrayBuffer> | undefined>;
+  written: (
+    checkoutId: string,
+    paths: readonly string[],
+    signal?: AbortSignal,
+  ) => Promise<'written' | 'failed' | 'idle'>;
 }> => {
   const { port, capture, withCheckoutFence, materializeTree, report } = dependencies;
   const flushMilliseconds = dependencies.flushMilliseconds ?? defaultFlushMilliseconds;
@@ -128,6 +137,13 @@ export const createLargeObjectFill = (
   const told = new Set<string>();
   const isCurrent = (fill: Fill): boolean => fills.get(fill.place.id) === fill;
 
+  const wake = (fill: Fill): void => {
+    /* A waiter that settles removes itself; a Set visits each remaining one once. */
+    for (const waiter of fill.waiters) {
+      waiter();
+    }
+  };
+
   /* A fill that is no longer current: its timers end and its transfers stop. */
   const retire = (fill: Fill): void => {
     clearTimeout(fill.flushTimer);
@@ -135,6 +151,35 @@ export const createLargeObjectFill = (
     fill.flushTimer = undefined;
     fill.reportTimer = undefined;
     fill.controller.abort();
+    wake(fill);
+  };
+
+  /*
+   * Wait until `check` holds, answering `true`; `false` once the fill fails or
+   * ends without it. An abort rejects with its reason.
+   */
+  const until = async (fill: Fill, check: () => boolean, signal?: AbortSignal): Promise<boolean> => {
+    signal?.throwIfAborted();
+    const settled = Promise.withResolvers<boolean>();
+    const onAbort = (): void => {
+      settled.reject(signal?.reason);
+    };
+    const waiter = (): void => {
+      if (check()) {
+        settled.resolve(true);
+      } else if (!isCurrent(fill) || fill.error !== undefined) {
+        settled.resolve(false);
+      }
+    };
+    fill.waiters.add(waiter);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    try {
+      waiter();
+      return await settled.promise;
+    } finally {
+      fill.waiters.delete(waiter);
+      signal?.removeEventListener('abort', onAbort);
+    }
   };
 
   const facetOf = (fill: Fill): LargeObjectsFacet => ({
@@ -172,6 +217,7 @@ export const createLargeObjectFill = (
         prioritize(fill, paths);
       },
     });
+    wake(fill);
   };
   /* An opened path jumps the queue: its object is asked for next, and written the moment it is here. */
   const prioritize = (fill: Fill, paths: readonly string[]): void => {
@@ -274,6 +320,7 @@ export const createLargeObjectFill = (
      * placeholder is gone or already real would otherwise stay counted, and every later arrival
      * would flush at once. */
     fill.unflushedBytes = unflushedOf(fill);
+    wake(fill);
     return more;
   };
 
@@ -392,6 +439,7 @@ export const createLargeObjectFill = (
     fill.bytes += content.byteLength;
     fill.unflushedBytes += content.byteLength;
     fill.landed.set(oid, content);
+    wake(fill);
   };
 
   /* The head's objects this fill still wants, found by what they hash to: a path's content is never trusted to be its old pointer's object. */
@@ -489,6 +537,7 @@ export const createLargeObjectFill = (
       arrived: new Set(),
       /* A refill keeps what open files asked for. */
       promoted: new Set([...(previous?.promoted ?? [])].filter((oid) => wanted.has(oid))),
+      waiters: new Set(),
       totalObjects: wanted.size,
       totalBytes: [...wanted.values()].reduce((sum, size) => sum + size, 0),
       controller: new AbortController(),
@@ -534,5 +583,90 @@ export const createLargeObjectFill = (
     await Promise.allSettled(stopped.flatMap(({ running, flushing }) => [running, flushing]));
   };
 
-  return { fill, resume, stop };
+  /**
+   * What this fill knows of one object on one checkout: whether it is still
+   * coming or failed, and its bytes when they have landed but are not written.
+   *
+   * @param checkoutId - The checkout.
+   * @param oid - The large object.
+   * @returns `undefined` when no fill on that checkout wants it.
+   */
+  const look = (checkoutId: string, oid: string): LargeObjectLook | undefined => {
+    const current = fills.get(checkoutId);
+    if (current === undefined || !current.wanted.has(oid)) {
+      return undefined;
+    }
+    const bytes = current.landed.get(oid);
+    return {
+      state: current.error === undefined ? 'filling' : 'failed',
+      ...(bytes === undefined ? {} : { bytes }),
+    };
+  };
+
+  /**
+   * The bytes of one object once this fill has them.
+   *
+   * @param checkoutId - The checkout.
+   * @param oid - The large object.
+   * @param signal - Stops waiting; the wait then rejects.
+   * @returns The bytes, or `undefined` when no fill wants it or the fill failed or ended first.
+   */
+  const arrival = async (
+    checkoutId: string,
+    oid: string,
+    signal?: AbortSignal,
+  ): Promise<Uint8Array<ArrayBuffer> | undefined> => {
+    const current = fills.get(checkoutId);
+    if (current === undefined || !current.wanted.has(oid)) {
+      return undefined;
+    }
+    let bytes: Uint8Array<ArrayBuffer> | undefined;
+    const found = await until(
+      current,
+      () => {
+        bytes = current.landed.get(oid);
+        return bytes !== undefined;
+      },
+      signal,
+    );
+    return found ? bytes : undefined;
+  };
+
+  /**
+   * Wait until these paths no longer hold a placeholder this fill tracks,
+   * promoting them first (D9 `materialize`). A fill replaced meanwhile is
+   * followed to its successor.
+   *
+   * @param checkoutId - The checkout.
+   * @param paths - Checkout-relative paths.
+   * @param signal - Stops waiting; the wait then rejects.
+   * @returns `written`; `failed` when the transfer failed first; `idle` when no fill runs on the checkout.
+   */
+  const written = async (
+    checkoutId: string,
+    paths: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<'written' | 'failed' | 'idle'> => {
+    for (let current = fills.get(checkoutId); current !== undefined; current = fills.get(checkoutId)) {
+      prioritize(current, paths);
+      const tracked = current;
+      // oxlint-disable-next-line no-await-in-loop -- a replaced fill is followed to its successor, one at a time.
+      if (await until(tracked, () => paths.every((path) => !tracked.pending.has(path)), signal)) {
+        return 'written';
+      }
+      if (isCurrent(tracked)) {
+        return 'failed';
+      }
+    }
+    return 'idle';
+  };
+
+  return { fill, resume, stop, look, arrival, written };
 };
+
+/** One large object as a running fill sees it. @public */
+export type LargeObjectLook = Readonly<{
+  state: 'filling' | 'failed';
+  /** Present once the object has landed and before it is written into the checkout. */
+  bytes?: Uint8Array<ArrayBuffer>;
+}>;

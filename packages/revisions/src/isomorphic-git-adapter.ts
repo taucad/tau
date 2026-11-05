@@ -1744,6 +1744,8 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       });
     },
 
+    readLargeObject: async (pointer) => readLocalLfsObject(pointer),
+
     readTree: async (id: RevisionId, readOptions?: ReadTreeOptions): Promise<ImmutableRevisionTree | undefined> => {
       const commit = await commitOf(id);
       if (commit === undefined) {

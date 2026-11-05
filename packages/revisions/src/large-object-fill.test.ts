@@ -208,6 +208,61 @@ describe('large-object fill', () => {
     await done;
   });
 
+  /* D9: what a read and `materialize` ask of a running fill. */
+  it('says what it knows of an object: coming, landed, or not its to fetch', async () => {
+    const harness = setup({ flushMilliseconds: 60_000 });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    const { oid } = pointerOf('solid a').pointer;
+    expect(harness.fill.look(place.id, oid)).toStrictEqual({ state: 'filling' });
+    expect(harness.fill.look(place.id, 'f'.repeat(64))).toBeUndefined();
+    expect(harness.fill.look('other', oid)).toBeUndefined();
+    const arriving = harness.fill.arrival(place.id, oid);
+    harness.land('models/a.step');
+    expect(decoder.decode(await arriving)).toBe('solid a');
+    expect(harness.fill.look(place.id, oid)).toStrictEqual({ state: 'filling', bytes: encoder.encode('solid a') });
+    harness.finish(harness.fullTree());
+    await done;
+    expect(harness.fill.look(place.id, oid)).toBeUndefined();
+    expect(await harness.fill.arrival(place.id, oid)).toBeUndefined();
+  });
+
+  it('answers `written` once the paths hold their bytes, promoting them first', async () => {
+    const harness = setup({ flushMilliseconds: 60_000 });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    const writing = harness.fill.written(place.id, ['models/b.step']);
+    expect([...(harness.readTree.mock.calls[0]?.[1]?.firstLargeObjects?.() ?? [])]).toStrictEqual([
+      pointerOf('solid bb').pointer.oid,
+    ]);
+    harness.land('models/b.step');
+    expect(await writing).toBe('written');
+    expect(harness.text('models/b.step')).toBe('solid bb');
+    harness.finish(harness.fullTree());
+    await done;
+    expect(await harness.fill.written(place.id, ['models/a.step'])).toBe('idle');
+  });
+
+  it('answers `failed` when the transfer fails first, and stops waiting on its signal', async () => {
+    const harness = setup();
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    const controller = new AbortController();
+    const aborted = harness.fill.written(place.id, ['models/a.step'], controller.signal);
+    controller.abort(new Error('closed'));
+    await expect(aborted).rejects.toThrow('closed');
+    const writing = harness.fill.written(place.id, ['models/a.step']);
+    harness.fail(new Error('offline'));
+    expect(await writing).toBe('failed');
+    await done;
+  });
+
   it('gives its word once on a checkout with nothing to fill', async () => {
     const harness = setup();
     harness.files.set('models/a.step', encoder.encode(parts['models/a.step']));

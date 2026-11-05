@@ -39,6 +39,8 @@ import {
 import type { CaptureMemo, RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import { createApplyTreeEffects, sweepTemporarySiblings as sweepApplyLitter } from '#apply-tree.js';
 import { createLargeObjectFill, largeObjectPlaceholders } from '#large-object-fill.js';
+import { createContentReads } from '#open/content-reads.js';
+import type { ContentReadOptions, ReadOutcome } from '#open/content-reads.js';
 import {
   prepareProjectManifest,
   validateLegacyProjectIdentity,
@@ -417,6 +419,21 @@ export type RevisionActors = Readonly<{
   recordEditorConflict: (input: EditorConflictInput) => Promise<EditorConflictOutcome>;
   /** Read one conflicted revision's files as text; see {@link RevisionConflictRead}. */
   readConflict: (revision: string) => Promise<RevisionConflictRead>;
+  /**
+   * Read one checkout file with its large-object placeholder resolved to the
+   * object when it is on this device; `pending`, never empty bytes, when it is
+   * not (D9). `checkoutId` absent reads the project directory.
+   */
+  readContent: (checkoutId: string | undefined, path: string, options?: ContentReadOptions) => Promise<ReadOutcome>;
+  /**
+   * Make these paths physical files, fetching their objects first (D9);
+   * rejects with a `PendingError` for a path whose object could not be fetched.
+   */
+  materialize: (
+    checkoutId: string | undefined,
+    paths: readonly string[],
+    options?: Readonly<{ signal?: AbortSignal }>,
+  ) => Promise<void>;
   /**
    * The record device this host's chat segments sync under (EQ10(a)), or `undefined` on a host that records no chats.
    *
@@ -1566,6 +1583,44 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   };
   /* The project directory's own placeholders, checked as the root starts: a reload that never captures still resumes. */
   fillLater(undefined, false);
+
+  /* D9: reads that resolve a placeholder to its object, and `materialize` for a consumer that needs the file. */
+  const contentReads = createContentReads({
+    useFileSystem,
+    readStoredObject: async (pointer) => port.readLargeObject?.(pointer),
+    fill: largeObjects,
+    startFill: async (place) => {
+      const head = await headOf(place);
+      if (head === undefined || fillsStopped) {
+        return;
+      }
+      resumedFills.add(place.id);
+      /* Given its placeholders, the fill is registered before this returns, so the caller's wait finds it. */
+      void largeObjects.fill(place, revisionId(head), largeObjectPlaceholders(await capture(place)));
+    },
+  });
+  /* A checkout by id; the project directory when none is named. */
+  const readPlaceOf = async (checkoutId: string | undefined): Promise<Checkout> => {
+    if (checkoutId !== undefined) {
+      return placeOf(checkoutId);
+    }
+    const places = await listPlaces();
+    const live = places.find((candidate) => candidate.kind === 'live');
+    if (live === undefined) {
+      throw new RevisionPortError('CHECKOUT_CONFLICT', 'Those files are not open in this project.');
+    }
+    return live;
+  };
+  const readContent = async (
+    checkoutId: string | undefined,
+    path: string,
+    readOptions?: ContentReadOptions,
+  ): Promise<ReadOutcome> => contentReads.readContent(await readPlaceOf(checkoutId), path, readOptions);
+  const materialize = async (
+    checkoutId: string | undefined,
+    paths: readonly string[],
+    materializeOptions?: Readonly<{ signal?: AbortSignal }>,
+  ): Promise<void> => contentReads.materialize(await readPlaceOf(checkoutId), paths, materializeOptions);
 
   /**
    * The project's *Sync chats* answer, read per push (D25, W17).
@@ -3351,6 +3406,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     release: releaseMark,
     recordEditorConflict,
     readConflict,
+    readContent,
+    materialize,
     chatDevice: async () => {
       const context = await chatContext();
       return context?.deviceId;
@@ -5466,6 +5523,10 @@ export type ProjectRevisions = Readonly<{
   recordEditorConflict: (input: EditorConflictInput) => Promise<EditorConflictOutcome>;
   /** Read one conflicted revision's files as text, for the agent's `revisions` tool. */
   readConflict: (revision: string) => Promise<RevisionConflictRead>;
+  /** See {@link RevisionActors.readContent}. */
+  readContent: RevisionActors['readContent'];
+  /** See {@link RevisionActors.materialize}. */
+  materialize: RevisionActors['materialize'];
   /** The record device this host's chat segments sync under; see {@link RevisionActors.chatDevice}. */
   chatDevice: () => Promise<string | undefined>;
   /** Whether this host pulls the project's chats at all; see {@link RevisionActors.pullsChats}. */
@@ -5592,6 +5653,8 @@ export const createProjectRevisionsActor = (options: ProjectRevisionActorOptions
     turns: actors.turns,
     recordEditorConflict,
     readConflict: actors.readConflict,
+    readContent: actors.readContent,
+    materialize: actors.materialize,
     chatDevice: actors.chatDevice,
     pullsChats: actors.pullsChats,
   };

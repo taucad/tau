@@ -42,8 +42,8 @@ describe('head-only directory metadata', () => {
 /* A literal, so a bump is a deliberate edit to this line and not a silent one:
  * every other assertion in the suite now reads the constant (G0-11). */
 describe('filesystem bridge protocol version', () => {
-  it('should be 5', () => {
-    expect(fileSystemBridgeProtocolVersion).toBe(6);
+  it('should be 8', () => {
+    expect(fileSystemBridgeProtocolVersion).toBe(8);
   });
 
   it('rejects a version 4 peer', () => {

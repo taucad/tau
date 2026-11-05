@@ -17,7 +17,6 @@ import {
   MountTable,
   ProviderRegistry,
   ResourceQueue,
-  WatchRegistry,
   WorkspaceFileService,
   workerTimings,
 } from '@taucad/filesystem';
@@ -53,8 +52,6 @@ let busEvents = 0;
 eventBus.subscribe(() => {
   busEvents += 1;
 });
-/* The authority's watch plane on the same bus, as `WorkspaceFileService` composes it (S8). */
-const watchPlane = new WatchRegistry(eventBus);
 /* Cross-tab invalidations this authority receives, on the channel the coordinator uses. */
 let invalidationsReceived = 0;
 const invalidations = new BroadcastChannel('tau-fs-changes');
@@ -549,15 +546,16 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
     case 'agent-write': {
       /* One agent turn: the model's fifty parallel write calls, dispatched
        * together through the host's RPC filesystem as one task issues them. */
-      /* The gate counts what the rooted watch's consumers receive. The
-       * authority's change-set plane is recorded beside it, for information. */
+      /* The gate counts what the rooted watch's consumers receive. The rooted
+       * change-set watch (D6) is recorded beside it, for information, until
+       * every rooted consumer receives change sets. */
       let deliveries = 0;
-      let planeChangeSets = 0;
+      let rootedChangeSets = 0;
       const stopPaths = live.watch({ paths: [''], recursive: true }, () => {
         deliveries += 1;
       });
-      const stopChangeSets = watchPlane.watchChangeSets({ paths: [`/projects/${projectId}`], recursive: true }, () => {
-        planeChangeSets += 1;
+      const stopChangeSets = live.watchChangeSets!({ paths: [''], recursive: true }, () => {
+        rootedChangeSets += 1;
       });
       const stop = (): void => {
         stopChangeSets();
@@ -579,7 +577,7 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
         await quiet(300);
         return {
           ...measured,
-          extra: { ...measured.extra, watchDeliveries: deliveries, planeChangeSetDeliveries: planeChangeSets },
+          extra: { ...measured.extra, watchDeliveries: deliveries, rootedChangeSetDeliveries: rootedChangeSets },
         };
       } finally {
         stop();

@@ -61,10 +61,13 @@ const discriminatedResultUnion = <
 /**
  * Current filesystem bridge protocol version.
  *
- * Version 6 adds authoritative stat head mode.
+ * Version 6 adds authoritative stat head mode. Version 8 delivers one
+ * `fileChanged` message per changeset per port: the fact itself, or every
+ * fact of the changeset as a `changeSet` envelope (charter D6). Version 7 is
+ * W3's; this one reconciles onto it.
  * @public
  */
-export const fileSystemBridgeProtocolVersion = 6;
+export const fileSystemBridgeProtocolVersion = 8;
 
 const unavailableCapabilities = null;
 
@@ -648,7 +651,7 @@ const copyChangeEventSchema = (type: 'fileCopied' | 'directoryCopied') =>
     backend: filesystemBackendSchema,
     target: changeEventStatSchema.optional(),
   });
-const changeEventSchema: z.ZodType<ChangeEvent> = z.discriminatedUnion('type', [
+const pathChangeEventBranches = [
   pathChangeEventSchema('fileWritten'),
   pathChangeEventSchema('fileDeleted'),
   renameChangeEventSchema('fileRenamed'),
@@ -659,6 +662,14 @@ const changeEventSchema: z.ZodType<ChangeEvent> = z.discriminatedUnion('type', [
   copyChangeEventSchema('directoryCopied'),
   pathChangeEventSchema('directoryChanged'),
   z.looseObject({ type: z.literal('backendChanged'), backend: filesystemBackendSchema }),
+] as const;
+/* One delivery carries one fact, or every fact of one changeset as a `changeSet` envelope (charter D6). */
+const changeEventSchema: z.ZodType<ChangeEvent> = z.discriminatedUnion('type', [
+  ...pathChangeEventBranches,
+  z.looseObject({
+    type: z.literal('changeSet'),
+    entries: z.array(z.discriminatedUnion('type', [...pathChangeEventBranches])),
+  }),
 ]);
 
 const fileTreeNodeSchema: z.ZodType<FileTreeNode> = z.custom<FileTreeNode>((value) => {

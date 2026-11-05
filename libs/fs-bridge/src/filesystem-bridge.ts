@@ -971,19 +971,34 @@ function exposeFileSystemHandlers(
    * instead of K times (event-fanout policy).
    */
   const scopedByRoot = new Map<string, PathChangeEvent | undefined>();
+  /*
+   * One message per port per delivery (charter D6): every fact a port may see
+   * from one changeset (or one coalescing window) travels together, as the
+   * fact itself when there is one and as a `changeSet` envelope otherwise, so
+   * a peer does one unit of work per changeset instead of one per path.
+   */
   const deliverToHandles = (events: PathChangeEvent[]): void => {
+    const perPort = new Map<MessagePort, PathChangeEvent[]>();
+    const factsFor = (port: MessagePort): PathChangeEvent[] => {
+      let facts = perPort.get(port);
+      if (facts === undefined) {
+        facts = [];
+        perPort.set(port, facts);
+      }
+      return facts;
+    };
     for (const event of events) {
       const originClientId = getEventOrigin(event);
       hiddenByPath.clear();
       scopedByRoot.clear();
-      for (const [recipientPort, handle] of serverHandles) {
+      for (const recipientPort of serverHandles.keys()) {
         const recipientPortId = portIds.get(recipientPort);
         if (originClientId !== undefined && recipientPortId !== undefined && originClientId === recipientPortId) {
           continue;
         }
         const scope = scopedPorts.get(recipientPort);
         if (scope === undefined) {
-          handle.emit('fileChanged', event);
+          factsFor(recipientPort).push(event);
           continue;
         }
         const masked = scope.consumer !== 'working-copy';
@@ -1000,9 +1015,13 @@ function exposeFileSystemHandlers(
         }
         const scoped = scopedByRoot.get(memoKey);
         if (scoped !== undefined) {
-          handle.emit('fileChanged', scoped);
+          factsFor(recipientPort).push(scoped);
         }
       }
+    }
+    for (const [recipientPort, facts] of perPort) {
+      const message: ChangeEvent = facts.length === 1 ? facts[0]! : { type: 'changeSet', entries: facts };
+      serverHandles.get(recipientPort)?.emit('fileChanged', message);
     }
   };
 
@@ -1024,8 +1043,8 @@ function exposeFileSystemHandlers(
   }
 
   /* One bus event per changeset (D2): a change set's facts are tagged one by
-   * one, so each is filtered and delivered as itself — bridge clients keep
-   * receiving path facts. */
+   * one, so each is filtered and scoped by itself, and a port receives the
+   * survivors together as one message (D6). */
   const unsubscribeEventBus = options?.changeEventBus?.subscribe((event) => {
     const changeEvent = event as ChangeEvent;
     const facts = (changeEvent.type === 'changeSet' ? changeEvent.entries : [changeEvent]).filter((fact) =>

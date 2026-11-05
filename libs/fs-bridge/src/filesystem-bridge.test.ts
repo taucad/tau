@@ -16,7 +16,7 @@ import {
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { WatchEvent, WatchRequest, WorkspaceScope } from '@taucad/filesystem';
-import type { ChangeEvent } from '@taucad/types';
+import type { ChangeEvent, PathChangeEvent } from '@taucad/types';
 import type { FileSystemBridgeHello, FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import {
   bindMutationContextForPort,
@@ -929,9 +929,15 @@ describe('exposeFileSystem coalesced delivery', () => {
     bus.emit(written('/b.txt'));
     bus.emit({ type: 'fileWritten', path: '/c.txt', backend: 'opfs' });
 
-    expect(emitSpy).toHaveBeenCalledTimes(2);
-    expect(emitSpy).toHaveBeenNthCalledWith(1, 'fileChanged', { type: 'backendChanged', backend: 'memory' });
-    expect(emitSpy).toHaveBeenNthCalledWith(2, 'fileChanged', { type: 'backendChanged', backend: 'opfs' });
+    /* One message per port per delivery (D6): both loss signals travel together. */
+    expect(emitSpy).toHaveBeenCalledOnce();
+    expect(emitSpy).toHaveBeenCalledWith('fileChanged', {
+      type: 'changeSet',
+      entries: [
+        { type: 'backendChanged', backend: 'memory' },
+        { type: 'backendChanged', backend: 'opfs' },
+      ],
+    });
 
     handle.cleanup();
     channel.port2.close();
@@ -990,12 +996,47 @@ describe('exposeFileSystem coalesced delivery', () => {
     bus.emit(written('/b.txt'));
     vi.advanceTimersByTime(100);
 
-    expect(emitSpy).toHaveBeenCalledTimes(2);
-    expect(emitSpy).toHaveBeenNthCalledWith(1, 'fileChanged', written('/a.txt'));
-    expect(emitSpy).toHaveBeenNthCalledWith(2, 'fileChanged', written('/b.txt'));
+    /* The window's facts arrive by its deadline as one message (D6). */
+    expect(emitSpy).toHaveBeenCalledOnce();
+    expect(emitSpy).toHaveBeenCalledWith('fileChanged', {
+      type: 'changeSet',
+      entries: [written('/a.txt'), written('/b.txt')],
+    });
 
     handle.cleanup();
     channel.port2.close();
+  });
+
+  it('should deliver a fifty-fact changeset to each port as one message (S8, D6)', () => {
+    const bus = new ChangeEventBus();
+    const handle = exposeFileSystem({}, { policy: tauPathPolicy, changeEventBus: bus });
+    const channels = [new MessageChannel(), new MessageChannel()];
+    for (const channel of channels) {
+      for (const handler of messageHandlers) {
+        handler(
+          new MessageEvent('message', {
+            data: { v: fileSystemBridgeProtocolVersion, type: filesystemBridgeConnectMessageType, port: channel.port1 },
+          }),
+        );
+      }
+    }
+    const spies = [...handle.serverHandles.values()].map((serverHandle) => vi.spyOn(serverHandle, 'emit'));
+    const facts = Array.from({ length: 50 }, (_, index) =>
+      written(`/agent/file-${String(index)}.ts`),
+    ) as PathChangeEvent[];
+
+    bus.emit({ type: 'changeSet', entries: facts });
+
+    expect(spies).toHaveLength(2);
+    for (const spy of spies) {
+      expect(spy).toHaveBeenCalledOnce();
+      expect(spy).toHaveBeenCalledWith('fileChanged', { type: 'changeSet', entries: facts });
+    }
+
+    handle.cleanup();
+    for (const channel of channels) {
+      channel.port2.close();
+    }
   });
 });
 

@@ -25,6 +25,61 @@ describe('WorkerChangeChannel', () => {
     expect(listen).toHaveBeenCalledWith('fileChanged', expect.any(Function));
   });
 
+  it('expands a changeset message into its facts and one change set (D6)', () => {
+    const listen = vi.fn().mockReturnValue(vi.fn());
+    const { channel, wire } = createTestChannel(listen);
+    const written = vi.fn();
+    const deleted = vi.fn();
+    const sets = vi.fn();
+    channel.onFileWritten({ handler: written });
+    channel.onFileDeleted({ handler: deleted });
+    channel.onChangeSet(sets);
+
+    wire({
+      type: 'changeSet',
+      entries: [
+        ...Array.from({ length: 49 }, (_, index) => ({
+          type: 'fileWritten',
+          path: `agent/file-${String(index)}.ts`,
+          backend: 'opfs',
+        })),
+        { type: 'fileDeleted', path: 'top.ts', backend: 'opfs' },
+      ],
+    });
+
+    expect(written).toHaveBeenCalledTimes(49);
+    expect(deleted).toHaveBeenCalledOnce();
+    expect(sets).toHaveBeenCalledOnce();
+    expect(sets).toHaveBeenCalledWith(
+      expect.objectContaining({ generation: 1, touchedDirectories: ['', 'agent'], backend: 'opfs' }),
+    );
+    expect(sets.mock.calls[0]![0].entries).toHaveLength(50);
+    channel.dispose();
+  });
+
+  it('ignores a changeset message carrying anything but path facts', () => {
+    const listen = vi.fn().mockReturnValue(vi.fn());
+    const { channel, wire } = createTestChannel(listen);
+    const sets = vi.fn();
+    channel.onChangeSet(sets);
+    wire({ type: 'changeSet', entries: [{ type: 'changeSet', entries: [] }] });
+    wire({ type: 'changeSet', entries: 'nope' });
+    expect(sets).not.toHaveBeenCalled();
+    channel.dispose();
+  });
+
+  it('reports a summary in the relative namespace as a reset of its prefix', () => {
+    const listen = vi.fn().mockReturnValue(vi.fn());
+    const { channel, wire } = createTestChannel(listen);
+    const sets = vi.fn();
+    channel.onChangeSet(sets);
+    wire({ type: 'backendChanged', backend: 'opfs' });
+    expect(sets).toHaveBeenCalledWith(
+      expect.objectContaining({ entries: [], reset: { prefix: '', reason: 'topology' } }),
+    );
+    channel.dispose();
+  });
+
   it('ignores a payload that is not a change event', () => {
     const listen = vi.fn().mockReturnValue(vi.fn());
     const { channel, wire } = createTestChannel(listen);

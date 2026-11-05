@@ -203,7 +203,8 @@ jobs:
           set -euo pipefail
           # Named here, as in CI's API job, so the suites' database is stated where they run.
           if [ "$PROJECT" = api ]; then export DATABASE_URL=postgresql://dev_user:dev_password@localhost:5432/tau_dev; fi
-          pnpm nx run-many -t lint typecheck test build --projects="$PROJECT" --parallel=2
+          # One task at a time with full output, as CI's lanes run them.
+          pnpm nx run-many -t lint typecheck test build --projects="$PROJECT" --parallel=1 --outputStyle=static
 
   # OCCT (LGPL-2.1 with the Open CASCADE exception) is compiled into the GeoSpec
   # engine that the UI serves as Wasm and the desktop app bundles, so each UI

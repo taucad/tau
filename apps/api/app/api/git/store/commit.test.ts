@@ -11,7 +11,8 @@ import { commitLease } from '#api/git/store/commit.js';
 import type { CommitPhase, CommitResult } from '#api/git/store/commit.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
 import { hydrateLease } from '#api/git/store/lease.js';
-import { listingKeyFor } from '#api/git/store/listing-key.js';
+import { listingKeyFor, listingRetirementKeyFor } from '#api/git/store/listing-key.js';
+import { retentionWindowMilliseconds } from '#api/git/store/limits.js';
 import type { RepositoryLease } from '#api/git/store/lease.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import {
@@ -757,6 +758,62 @@ describe('commitLease', () => {
         // oxlint-disable-next-line no-await-in-loop -- one read per named key
         await expect(store.getObject(locator, key)).resolves.toBeDefined();
       }
+    }, 60_000);
+
+    it('should leave the listings out of an inline compaction sweep, and sweep them on the next deferring push', async () => {
+      const { store: journaled } = journaledStore({ putMilliseconds: 1 });
+      const listed: string[] = [];
+      const store: RepositoryStore = {
+        ...journaled,
+        listObjects: (where, prefix) => {
+          listed.push(prefix);
+          return journaled.listObjects(where, prefix);
+        },
+      };
+      const locator = newLocator();
+      const client = newClient();
+      await pushRevisions({ store, locator, client, count: 5 });
+      /* A listing whose tip was retired past the window: due on the next listing sweep. */
+      const stale = 'f'.repeat(40);
+      const empty = new Uint8Array(0);
+      await store.putObject(locator, listingKeyFor(stale), new Uint8Array([1]), { contentLength: 1, sha256: '' });
+      await store.putObject(
+        locator,
+        listingRetirementKeyFor(stale, new Date(Date.now() - retentionWindowMilliseconds - 60_000)),
+        empty,
+        { contentLength: 0, sha256: '' },
+      );
+      const holdsStale = async (): Promise<boolean> => {
+        for await (const stored of journaled.listObjects(locator, 'listings/')) {
+          if (stored.key === listingKeyFor(stale)) {
+            return true;
+          }
+        }
+        return false;
+      };
+      /* Production's shape: every push defers, and compacts inline only past twice the bound. */
+      const overrides = { packBound: 2, deferCompaction: true, deferredPackLimit: 4 };
+
+      const inline = await pushAndCommit({ store, locator, client: client.directory, overrides });
+      if (!inline.committed || !inline.compacted) {
+        throw new Error('the push did not compact inline');
+      }
+      listed.length = 0;
+      await inline.sweep();
+      /* The measured sweep: `retired/` and `packs/`, nothing more. */
+      expect(listed).toStrictEqual(['retired/', 'packs/']);
+      expect(await holdsStale()).toBe(true);
+
+      /* An inline compaction leaves at most the bound live, so the next push defers and sweeps the listings. */
+      client.revise(100);
+      const { lease, outcome } = await pushKeepingLease({ store, locator, client: client.directory, overrides });
+      await lease.dispose();
+      expect(outcome).toMatchObject({ committed: true, compacted: false });
+      if (!outcome.committed) {
+        throw new Error('the push did not commit');
+      }
+      await outcome.sweep();
+      expect(await holdsStale()).toBe(false);
     }, 60_000);
 
     it('should mark the retired tip and sweep listings after a deferred push and after its compaction', async () => {

@@ -521,8 +521,12 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
         at,
         ...(args.faults === undefined ? {} : { faults: args.faults }),
       });
-      /* Listings of tips no ref names, past the window; never rejects (D8). */
-      await sweepListings({ store, locator: lease.locator, committed, at });
+      /*
+       * No listing sweep of its own: the pass over `retired/` above already
+       * reclaims every retired listing past the window, by its marker. An
+       * unmarked listing waits for the next push that does not compact, or
+       * the next deferred compaction, both of which run `sweepListings` (D8).
+       */
       return outcome;
     },
     moved: movedReferences(lease.manifest?.refs ?? {}, references),

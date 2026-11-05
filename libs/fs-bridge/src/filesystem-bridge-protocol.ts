@@ -40,7 +40,7 @@ import type {
 } from '@taucad/types';
 import { projectIdSchema, projectManifestSchema, projectManifestSchemaUrl } from '@taucad/types';
 import { filesystemBackends } from '@taucad/types/constants';
-import type { BridgeProtocolSchemas } from '@taucad/rpc/bridge';
+import type { BridgeLongCall, BridgeProgress, BridgeProtocolSchemas } from '@taucad/rpc/bridge';
 import type { WireValidator } from '@taucad/rpc';
 import { assertRootedPath } from '@taucad/utils/path';
 import { z } from 'zod';
@@ -65,10 +65,60 @@ const discriminatedResultUnion = <
  * Version 7 makes every stat metadata only: content facts ride along only when
  * already known (I3), and the head mode is gone. Version 8 delivers one
  * `fileChanged` message per changeset per port: the fact itself, or every
- * fact of the changeset as a `changeSet` envelope (charter D6).
+ * fact of the changeset as a `changeSet` envelope (charter D6). Version 9 is
+ * wire v3's first slice (charter D14, W10): `readMany` and `readRange`, and
+ * long calls — size-dependent calls that live while the authority heartbeats
+ * instead of dying at 30 s, carry the caller's abort and report progress. No
+ * shim for 8 (D20).
  * @public
  */
-export const fileSystemBridgeProtocolVersion = 8;
+export const fileSystemBridgeProtocolVersion = 9;
+
+/**
+ * Caller-side controls of a long bridge call (charter D14): an `AbortSignal`
+ * that cancels it on the authority, and a progress observer.
+ *
+ * @public
+ */
+export type LongCall = BridgeLongCall;
+
+/**
+ * One progress report of a long bridge call: `done` of `total` units (files),
+ * `bytes` of `totalBytes` content bytes.
+ *
+ * @public
+ */
+export type LongCallProgress = BridgeProgress;
+
+/**
+ * Most paths one `readMany` names, so one reply stays one bounded batch; a
+ * larger set is a sequence of calls.
+ *
+ * @public
+ */
+export const maxReadManyPaths = 4096;
+
+/**
+ * Most bytes one `readRange` returns: a page, not a whole large file. A larger
+ * read is a sequence of ranges.
+ *
+ * @public
+ */
+export const maxReadRangeBytes = 64 * 1024 * 1024;
+
+/**
+ * What `readMany` answers for each path: its bytes, or `'missing'` when nothing
+ * is there (the runtime's own word for absence, as in `hashFiles`).
+ *
+ * @public
+ */
+export type ReadManyResult = ReadonlyMap<string, Uint8Array<ArrayBuffer> | 'missing'>;
+
+/**
+ * `readMany`'s wire form: `[path, bytes | 'missing']` rows in request order. A
+ * map does not survive every transport the bridge rides; rows do.
+ */
+export type ReadManyWireRows = Array<[string, Uint8Array<ArrayBuffer> | 'missing']>;
 
 const unavailableCapabilities = null;
 
@@ -192,6 +242,13 @@ export type FileSystemBridgeRuntimeService = FileSystemProvider &
      */
     hashFiles?: FileSystemBridgeHashFiles;
     /*
+     * Wire v3 reads (charter D14). A host whose provider batches or seeks
+     * supplies its own; the bridge otherwise derives both from `readFile` (and
+     * `readFileStream` for ranges) on the host's side of the wire.
+     */
+    readMany?: (paths: readonly string[], options?: LongCall) => Promise<ReadManyWireRows>;
+    readRange?: (path: string, offset: number, length: number) => Promise<Uint8Array<ArrayBuffer>>;
+    /*
      * The mutating porcelain is the rooted surface's too (charter D4): one batch
      * in the mutation pipeline, mask-checked by the composed view above it. A
      * host that hands over a bare provider serves none of it, so every row is
@@ -234,7 +291,10 @@ export type SearchOptions = { readonly maxResults?: number; readonly includeDire
  *
  * @public
  */
-export type FileSystemBridgeHashFiles = (paths: readonly string[]) => Promise<Record<string, string>>;
+export type FileSystemBridgeHashFiles = (
+  paths: readonly string[],
+  options?: LongCall,
+) => Promise<Record<string, string>>;
 
 type FileSystemBridgeReadFile = {
   (path: string, options: 'utf8' | { readonly encoding: 'utf8' }): Promise<string>;
@@ -303,13 +363,25 @@ export type FileSystemBridgeRootedCalls = MachineSettingsService &
       path: string;
       preconditions: readonly FileWritePrecondition[];
     }): Promise<CheckedFileWriteResult>;
-    archive(path: string, options?: ArchiveOptions): Promise<Blob>;
-    contents(path: string, options?: ArchiveOptions): Promise<Record<string, Uint8Array<ArrayBuffer>>>;
-    search(query: string, options?: SearchOptions): Promise<FileStatEntry[]>;
-    statTree(path: string): Promise<FileStatEntry[]>;
-    copyTree(source: string, target: string): Promise<void>;
-    duplicate(source: string, target: string): Promise<void>;
-    hashFiles(paths: readonly string[]): Promise<Record<string, string>>;
+    archive(path: string, options?: ArchiveOptions & LongCall): Promise<Blob>;
+    contents(path: string, options?: ArchiveOptions & LongCall): Promise<Record<string, Uint8Array<ArrayBuffer>>>;
+    search(query: string, options?: SearchOptions & LongCall): Promise<FileStatEntry[]>;
+    statTree(path: string, options?: LongCall): Promise<FileStatEntry[]>;
+    copyTree(source: string, target: string, options?: LongCall): Promise<void>;
+    duplicate(source: string, target: string, options?: LongCall): Promise<void>;
+    hashFiles(paths: readonly string[], options?: LongCall): Promise<Record<string, string>>;
+    /**
+     * Read many files in one call (charter D14): each path's bytes, or
+     * `'missing'`. A long call: it lives while the authority works, reports
+     * progress per file and stops on the caller's abort. The bytes arrive
+     * transferred, never copied, on a transport that transfers (I2).
+     */
+    readMany(paths: readonly string[], options?: LongCall): Promise<ReadManyResult>;
+    /**
+     * Bytes `[offset, offset + length)` of one file, clamped to its end; at most
+     * {@link maxReadRangeBytes} per call.
+     */
+    readRange(path: string, offset: number, length: number): Promise<Uint8Array<ArrayBuffer>>;
   };
 
 /**
@@ -332,7 +404,9 @@ type FileSystemBridgeCallArgs<Name extends FileSystemBridgeCallName> = Name exte
     : Parameters<FileSystemBridgeService[Name]>;
 type FileSystemBridgeCallResult<Name extends FileSystemBridgeCallName> = Name extends 'readFile' | 'readScopedFile'
   ? string | Uint8Array<ArrayBuffer>
-  : Awaited<ReturnType<FileSystemBridgeService[Name]>>;
+  : Name extends 'readMany'
+    ? ReadManyWireRows
+    : Awaited<ReturnType<FileSystemBridgeService[Name]>>;
 
 type FileSystemBridgeCallSchemas = {
   readonly [Name in FileSystemBridgeCallName]: {
@@ -1018,6 +1092,18 @@ const callSchemas = {
   copyTree: { args: twoStringArgs, result: voidResult },
   duplicate: { args: twoStringArgs, result: voidResult },
   hashFiles: { args: z.tuple([z.array(rootedPathSchema)]), result: fileDigestsSchema },
+  readMany: {
+    args: z.tuple([z.array(rootedPathSchema).max(maxReadManyPaths)]),
+    result: z.array(z.tuple([z.string(), z.union([bytesSchema, z.literal('missing')])])),
+  },
+  readRange: {
+    args: z.tuple([
+      rootedPathSchema,
+      z.number().int().nonnegative(),
+      z.number().int().nonnegative().max(maxReadRangeBytes),
+    ]),
+    result: bytesSchema,
+  },
 } satisfies FileSystemBridgeCallSchemas;
 
 const broadcastValidator = z.looseObject({ event: z.literal('fileChanged'), data: changeEventSchema });

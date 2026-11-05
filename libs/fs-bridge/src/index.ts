@@ -37,6 +37,8 @@ export type {
 export {
   createFileSystemBridgeHello,
   fileSystemBridgeProtocolVersion,
+  maxReadManyPaths,
+  maxReadRangeBytes,
   fileSystemBridgeSchemas,
   FileSystemBridgeProtocolVersionError,
 } from '#filesystem-bridge-protocol.js';
@@ -50,7 +52,14 @@ export type {
   FileSystemBridgeService,
   FileSystemBridgeUnrootedCalls,
   FileSystemBridgeWorkspaceService,
+  LongCall,
+  LongCallProgress,
+  ReadManyResult,
 } from '#filesystem-bridge-protocol.js';
+
+export { observeFileSystemBridgeCrossings } from '#filesystem-bridge-crossings.js';
+
+export type { FileSystemBridgeCrossings, FileSystemBridgeCrossingsObserver } from '#filesystem-bridge-crossings.js';
 
 export { slowFileSystemBridgeCalls, slowFileSystemBridgeCallThreshold } from '#filesystem-bridge-slow-calls.js';
 

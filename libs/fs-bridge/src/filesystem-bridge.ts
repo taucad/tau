@@ -30,7 +30,7 @@ import type {
   WorkspaceMutationError,
   WorkspaceMutationErrorCode,
 } from '@taucad/filesystem';
-import type { BridgeServerHandle, Port, StringKeyedObject } from '@taucad/rpc/bridge';
+import type { BridgeCallTimeout, BridgeServerHandle, Port, StringKeyedObject } from '@taucad/rpc/bridge';
 import { catchMessages, createBridgeCall, createBridgePort, createBridgeServer } from '@taucad/rpc/bridge';
 import { z } from 'zod';
 import {
@@ -42,6 +42,9 @@ import {
 import type {
   FileSystemBridgeHello,
   FileSystemBridgeRuntimeService,
+  LongCall,
+  ReadManyResult,
+  ReadManyWireRows,
   FileSystemBridgeWatchFrame,
   FileSystemBridgeWatchRequest,
   FileSystemBridgeService,
@@ -49,7 +52,8 @@ import type {
   FileSystemBridgeWorkspaceService,
 } from '#filesystem-bridge-protocol.js';
 import { nextFileSystemBridgeConnectionId, timeFileSystemBridgeCall } from '#filesystem-bridge-slow-calls.js';
-import { sha256Bytes } from '@taucad/utils/hash';
+import { bindFileSystemLongCall, withHostContentCalls } from '#filesystem-bridge-host-calls.js';
+import { recordFileSystemBridgeCrossing } from '#filesystem-bridge-crossings.js';
 
 /** @public */
 export const filesystemBridgeConnectMessageType = 'tau:filesystem-bridge:connect';
@@ -161,16 +165,79 @@ const isFileSystemBridgeConnection = (
 const defaultUiCoalescingWindow = 500;
 
 /**
- * Milliseconds. A pending-project commit outlives the bridge's 30 s default
- * because it is the one call whose work scales with the project: it waits for
- * a cross-tab lock, recursively removes a half-written target, then writes
- * every file and the manifest one at a time before reading the manifest back.
- * On the slowest backend (Web Access, tens of milliseconds a file) five
- * minutes covers thousands of files — far past anything Tau creates, imports
- * or duplicates — so a real commit cannot reach it, while a peer that dies
- * mid-call now fails project creation instead of wedging it for the session.
+ * The long calls (charter D14, Rule 32): calls whose work grows with their
+ * input — files, bytes, entries — and so have no honest wall-clock deadline.
+ * Each runs under the `'liveness'` policy: it lives while the authority sends
+ * heartbeats or progress for it and fails `PEER_UNRESPONSIVE` only after a
+ * whole liveness window of silence, so a transport deadline never classifies
+ * a mutation as failed while the authority is still applying it (I10).
+ *
+ * The value is the index of the call's options argument that carries the
+ * caller's {@link LongCall} controls, or `undefined` for a call whose signature
+ * has no slot for them (it still gets the liveness policy). A pending-project
+ * commit is one: it waits for a cross-tab lock, removes a half-written target,
+ * then writes every file and the manifest, so it used to need its own
+ * five-minute deadline.
  */
-const pendingProjectCommitTimeout = 300_000;
+const longCalls: Readonly<Record<string, number | undefined>> = {
+  readMany: 1,
+  hashFiles: 1,
+  statTree: 1,
+  search: 1,
+  archive: 1,
+  contents: 1,
+  copyTree: 2,
+  duplicate: 2,
+  writeFiles: undefined,
+  bulkMove: undefined,
+  commitPendingProjectDirectory: undefined,
+  listProjectManifests: undefined,
+  getScopedZippedDirectory: undefined,
+};
+
+/**
+ * Take a long call's {@link LongCall} controls out of its options argument:
+ * an `AbortSignal` and a function cannot cross the wire, and the bridge
+ * carries both itself. Arguments of every other call pass through unchanged.
+ */
+const splitLongCall = (method: string, args: readonly unknown[]): { args: unknown[]; longCall?: LongCall } => {
+  const slot = longCalls[method];
+  const bag = slot === undefined ? undefined : args[slot];
+  if (slot === undefined || bag === null || typeof bag !== 'object') {
+    return { args: [...args] };
+  }
+  const { signal, onProgress, ...rest } = bag as LongCall & Record<string, unknown>;
+  if (signal === undefined && onProgress === undefined) {
+    return { args: [...args] };
+  }
+  const wireArgs = [...args];
+  wireArgs[slot] = Reflect.ownKeys(rest).length === 0 ? undefined : rest;
+  while (wireArgs.length > 0 && wireArgs.at(-1) === undefined) {
+    wireArgs.pop();
+  }
+  return {
+    args: wireArgs,
+    longCall: { ...(signal === undefined ? {} : { signal }), ...(onProgress === undefined ? {} : { onProgress }) },
+  };
+};
+
+/**
+ * One call's client deadline: none for checked writes, liveness for long calls,
+ * the ordinary deadline for the rest (Rule 32).
+ */
+const fileSystemCallTimeout = (method: string): BridgeCallTimeout | undefined =>
+  /* Checked writes are compare-and-swap: a late original and a replacement
+   * can never both apply, so they wait for the authority's terminal answer
+   * rather than report a timeout while it may still write (Rule 32).
+   * Connection loss still settles them as potentially applied. */
+  method === 'writeFileChecked' || method === 'deleteFileChecked'
+    ? 'none'
+    : Object.hasOwn(longCalls, method)
+      ? 'liveness'
+      : undefined;
+
+/** `readMany`'s wire rows as the map its callers hold. */
+const readManyResult = (rows: ReadManyWireRows): ReadManyResult => new Map(rows);
 
 /** One authority path in a scoped port's own namespace, or `undefined` when it is outside that root. */
 const relativeToRoot = (root: string, path: string): string | undefined => {
@@ -324,8 +391,48 @@ const cloneFileMapForTransfer = (value: unknown): Record<string, unknown> => {
   );
 };
 
+/** The bytes one write call carries, by path, for the I2 crossings ledger. Strings are not counted. */
+const writePayloads = (method: string, args: readonly unknown[]): Array<[string, number]> => {
+  const sized = (path: unknown, payload: unknown): Array<[string, number]> =>
+    typeof path === 'string' && (payload instanceof Uint8Array || payload instanceof ArrayBuffer)
+      ? [[path, payload.byteLength]]
+      : [];
+  const first = args[0];
+  if (method === 'writeFile' || method === 'appendFile' || method === 'appendFileFenced') {
+    return sized(first, args[1]);
+  }
+  if (method === 'writeFileChecked' && first !== null && typeof first === 'object') {
+    const input = first as { path?: unknown; data?: unknown };
+    return sized(input.path, input.data);
+  }
+  const files =
+    method === 'writeFiles'
+      ? first
+      : method === 'commitPendingProjectDirectory' && first !== null && typeof first === 'object'
+        ? (first as { files?: unknown }).files
+        : undefined;
+  if (files === null || typeof files !== 'object') {
+    return [];
+  }
+  return Object.entries(files).flatMap(([path, descriptor]) =>
+    descriptor !== null && typeof descriptor === 'object' && 'content' in descriptor
+      ? sized(path, (descriptor as { content: unknown }).content)
+      : [],
+  );
+};
+
+/** Record each path a write carries as one I2 crossing: a transfer when handed over, else a copy. */
+const recordWriteCrossings = (method: string, args: readonly unknown[], handedOver: boolean): void => {
+  const kind = handedOver ? 'transfer' : 'copy';
+  for (const [path, bytes] of writePayloads(method, args)) {
+    recordFileSystemBridgeCrossing(path, kind, bytes);
+  }
+};
+
 const cloneWriteArgsForTransfer = (method: string, args: unknown[]): unknown[] => {
-  if (handsOverBytes(args)) {
+  const handedOver = handsOverBytes(args);
+  recordWriteCrossings(method, args, handedOver);
+  if (handedOver) {
     /* The caller's own buffers ride the transfer list `wrapAsTransferables`
      * builds from these arguments, and are detached by the postMessage. */
     return args;
@@ -604,56 +711,6 @@ const withChangeSetWatch = <Handlers extends StringKeyedObject>(handlers: Handle
       /* A frozen member must be returned as itself (proxy invariant). */
       return typeof value === 'function' && !(descriptor?.configurable === false && descriptor.writable === false)
         ? (value as (...callArgs: unknown[]) => unknown).bind(target)
-        : value;
-    },
-  });
-};
-
-/**
- * Serve `hashFiles` beside a handler set that reads files, so every host the
- * bridge fronts digests where the bytes live: one round trip, no bodies.
- *
- * A handler that brings its own `hashFiles` keeps it. Otherwise each path is
- * read through the connection's own `readFile` (its view's mask included) and
- * digested with the SHA-256 the runtime computes; an absent path is
- * `'missing'`. Bytes stay the evidence, never a size or mtime stamp. Members
- * stay bound to the original handler set, so private state survives.
- *
- * @param handlers - The handlers one connection is served.
- * @returns The same handlers, answering `hashFiles` when they can read.
- */
-const withHostHashFiles = <Handlers extends StringKeyedObject>(handlers: Handlers): Handlers => {
-  const { hashFiles, readFile } = handlers as Partial<Record<string, unknown>>;
-  if (typeof hashFiles === 'function' || typeof readFile !== 'function') {
-    return handlers;
-  }
-  const read = readFile.bind(handlers) as (path: string) => Promise<Uint8Array<ArrayBuffer>>;
-  const hostHashFiles = async (paths: readonly string[]): Promise<Record<string, string>> =>
-    Object.fromEntries(
-      await Promise.all(
-        paths.map(async (path) => {
-          try {
-            return [path, await sha256Bytes(await read(path))] as const;
-          } catch (error) {
-            const code = (error as { code?: unknown } | undefined)?.code;
-            if (code === 'ENOENT' || code === 'ENOTDIR') {
-              return [path, 'missing'] as const;
-            }
-            throw error;
-          }
-        }),
-      ),
-    );
-  return new Proxy(handlers, {
-    get(target, property) {
-      if (property === 'hashFiles') {
-        return hostHashFiles;
-      }
-      const value: unknown = Reflect.get(target, property, target);
-      const descriptor = Reflect.getOwnPropertyDescriptor(target, property);
-      /* A frozen member must be returned as itself (proxy invariant). */
-      return typeof value === 'function' && !(descriptor?.configurable === false && descriptor.writable === false)
-        ? (value as (...args: unknown[]) => unknown).bind(target)
         : value;
     },
   });
@@ -1156,7 +1213,7 @@ function exposeFileSystemHandlers(
         return { portHandlers: createUnavailableHandlers(unavailableError), unavailableError };
       }
       scopedPorts.set(port, { root: rooted.data.root, consumer: rooted.data.consumer });
-      return { portHandlers: withChangeSetWatch(withHostHashFiles(serializeRootedResults(rootedHandlers))) };
+      return { portHandlers: withChangeSetWatch(withHostContentCalls(serializeRootedResults(rootedHandlers))) };
     } catch (error) {
       /* The refusal the hello states is the refusal the caller gets: a
        * `VirtualPathError` from a non-canonical root used to reach the client as
@@ -1262,6 +1319,7 @@ function exposeFileSystemHandlers(
     >(portHandlers, wrappedPort, {
       hello,
       protocolSchemas: fileSystemBridgeSchemas,
+      bindLongCall: bindFileSystemLongCall,
       onDisconnect() {
         disconnectPort();
       },
@@ -1497,6 +1555,7 @@ const runtimeFileSystemBridgeOptions = (handlers: FileSystemBridgeRuntimeService
     hashable: answersHashFiles(handlers),
   }),
   protocolSchemas: fileSystemBridgeSchemas,
+  bindLongCall: bindFileSystemLongCall,
 });
 
 /**
@@ -1511,7 +1570,7 @@ export function serveFileSystemBridgePort(
   handlers: FileSystemBridgeRuntimeService,
   port: Port<unknown>,
 ): BridgeServerHandle {
-  const served = withChangeSetWatch(withHostHashFiles(handlers));
+  const served = withChangeSetWatch(withHostContentCalls(handlers));
   return createBridgeServer(served, port, runtimeFileSystemBridgeOptions(served));
 }
 
@@ -1523,7 +1582,7 @@ export function serveFileSystemBridgePort(
  * @public
  */
 export function createFileSystemBridgePort(handlers: FileSystemBridgeRuntimeService): FileSystemBridgeConnection {
-  const served = withChangeSetWatch(withHostHashFiles(handlers));
+  const served = withChangeSetWatch(withHostContentCalls(handlers));
   const bridge = createBridgePort(served, runtimeFileSystemBridgeOptions(served));
   return {
     port: asFileSystemBridgePort(bridge.port),
@@ -1584,16 +1643,7 @@ export function createFileSystemBridgeProxy(
     FileSystemBridgeHello
   >(resolvedBridge.port, {
     prepareCallArgs: cloneWriteArgsForTransfer,
-    /* Checked writes are compare-and-swap: a late original and a replacement
-     * can never both apply, so they wait for the authority's terminal answer
-     * rather than report a timeout while it may still write (Rule 32).
-     * Connection loss still settles them as potentially applied. */
-    resolveCallTimeout: (method) =>
-      method === 'writeFileChecked' || method === 'deleteFileChecked'
-        ? 'none'
-        : method === 'commitPendingProjectDirectory'
-          ? pendingProjectCommitTimeout
-          : undefined,
+    resolveCallTimeout: fileSystemCallTimeout,
     protocolSchemas: fileSystemBridgeSchemas,
   });
   const connectionId = nextFileSystemBridgeConnectionId();
@@ -1661,7 +1711,14 @@ export function createFileSystemBridgeProxy(
           }
         }
         try {
-          return await timeFileSystemBridgeCall(connectionId, property, async () => call(property, args));
+          const split = splitLongCall(property, args);
+          const result = await timeFileSystemBridgeCall(connectionId, property, async () =>
+            call(property, split.args, split.longCall),
+          );
+          if (property === 'readMany') {
+            return readManyResult(result as ReadManyWireRows);
+          }
+          return result;
         } catch (error) {
           if (property === 'writeFileChecked' || property === 'deleteFileChecked') {
             throw classifyCheckedWriteFailure(error);

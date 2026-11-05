@@ -462,6 +462,8 @@ Keep the 30-second default for ordinary bridge calls. Two classes of mutation ma
 
 The cost of an opt-out is that a hung authority holds that resource's writes until it answers or the connection closes. Callers must surface the unconfirmed state while they wait, and bound their own close-time waits without reporting a mutation timeout. Do not add a generic “disable timeouts” option.
 
+A third class, **progress-bearing bulk calls** (charter D14), replaces the wall-clock timer with a liveness bound (`'liveness'`): calls whose work grows with their input, such as `readMany`, `hashFiles`, `writeFiles`, `bulkMove`, `copyTree`, `contents`, `archive`, `search`, `statTree` and `commitPendingProjectDirectory`. The authority's bridge server sends an `rp` heartbeat for every call still running (every 10 s), and the handler may send progress. The client fails the call `PEER_UNRESPONSIVE` only after 30 s without either. A transport deadline therefore never classifies a bulk mutation as failed while the authority is still applying it (I10). An authority that hangs or dies still fails the call within one window, or at once when its port closes. The list is `longCalls` in `filesystem-bridge.ts`. A long call whose signature has an options slot also takes the caller's `LongCall` (`signal`, `onProgress`), and the bridge carries both across the wire.
+
 CORRECT:
 
 ```typescript

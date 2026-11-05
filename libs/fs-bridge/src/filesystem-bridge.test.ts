@@ -79,13 +79,27 @@ it('carries metadata rows that hold only the facts already known (I3)', async ()
   }
 });
 
-/** A proxy over a bridge server that answers only `commitPendingProjectDirectory`. */
+/**
+ * A proxy over a bridge server that answers only `commitPendingProjectDirectory`.
+ * `silence` makes the server hang the way a wedged authority does: its port
+ * stays open and it sends nothing more, heartbeats included.
+ */
 function pendingCommitBridge(
   label: string,
   commitPendingProjectDirectory: (input: unknown) => Promise<unknown>,
-): { proxy: FileSystemBridgeProxy; close: () => void } {
+): { proxy: FileSystemBridgeProxy; close: () => void; silence: () => void } {
   const channel = new MessageChannel();
-  createBridgeServer({ commitPendingProjectDirectory }, fsBridgePort(channel.port1, `${label}-server`), {
+  const served = fsBridgePort(channel.port1, `${label}-server`);
+  let silent = false;
+  const serverPort: Port<unknown> = {
+    ...served,
+    postMessage(data, transfer) {
+      if (!silent) {
+        served.postMessage(data, transfer);
+      }
+    },
+  };
+  createBridgeServer({ commitPendingProjectDirectory }, serverPort, {
     hello: createFileSystemBridgeHello({
       state: 'ready',
       capabilities: { persistent: false, writable: true, quotaBased: false, durability: 'ephemeral' },
@@ -102,7 +116,13 @@ function pendingCommitBridge(
     channel.port1.close();
     vi.useRealTimers();
   };
-  return { proxy, close };
+  return {
+    proxy,
+    close,
+    silence() {
+      silent = true;
+    },
+  };
 }
 
 function firstFailedBulkMoveError(result: unknown): unknown {
@@ -752,10 +772,55 @@ describe('createFileSystemBridgeProxy', () => {
     }
   });
 
-  it('should time out a project commit that never answers', async () => {
+  /*
+   * A commit is a long call (W10, I10): no wall-clock deadline classifies it
+   * failed while the authority still works on it, however long that takes,
+   * and an authority that stops answering fails it after one liveness window.
+   */
+  it('should keep a commit pending while its authority heartbeats, past the old five-minute deadline', async () => {
     vi.useFakeTimers();
-    // `Promise.race([])` never settles: the peer accepted the call and died.
-    const { proxy, close } = pendingCommitBridge('fs-bridge-stalled-commit', async () => Promise.race<never>([]));
+    let resolveCommit!: () => void;
+    const commitGate = new Promise<void>((resolve) => {
+      resolveCommit = resolve;
+    });
+    const { proxy, close } = pendingCommitBridge('fs-bridge-long-commit', async () => {
+      await commitGate;
+      return { status: 'committed' };
+    });
+
+    try {
+      await proxy.ready;
+      let outcome: 'pending' | 'settled' = 'pending';
+      const pending = proxy.commitPendingProjectDirectory({
+        projectId: 'proj_ppppppppppppppppppppp',
+        providerBasePath: 'pending',
+        scope: { backend: 'indexeddb' },
+        files: { 'main.ts': { content: new Uint8Array([1, 2, 3]) } },
+        manifest: new Uint8Array([4, 5, 6]),
+      });
+      const observe = async (): Promise<void> => {
+        try {
+          await pending;
+        } finally {
+          outcome = 'settled';
+        }
+      };
+      void observe();
+      await vi.advanceTimersByTimeAsync(600_000);
+      expect(outcome).toBe('pending');
+      resolveCommit();
+      await expect(pending).resolves.toEqual({ status: 'committed' });
+    } finally {
+      close();
+    }
+  });
+
+  it('should fail a commit whose authority stops answering with PEER_UNRESPONSIVE', async () => {
+    vi.useFakeTimers();
+    // `Promise.race([])` never settles; `silence` then wedges the whole authority.
+    const { proxy, close, silence } = pendingCommitBridge('fs-bridge-stalled-commit', async () =>
+      Promise.race<never>([]),
+    );
 
     try {
       // `ready` first, or the channel's 30 s hello deadline closes it instead.
@@ -770,8 +835,10 @@ describe('createFileSystemBridgeProxy', () => {
 
       // Attached before the clock moves: an unhandled rejection inside
       // `advanceTimersByTimeAsync` fails the run.
-      const rejection = expect(pending).rejects.toThrow("Bridge call 'commitPendingProjectDirectory' timed out");
-      await vi.advanceTimersByTimeAsync(300_001);
+      const rejection = expect(pending).rejects.toMatchObject({ code: 'PEER_UNRESPONSIVE' });
+      await vi.advanceTimersByTimeAsync(45_000);
+      silence();
+      await vi.advanceTimersByTimeAsync(30_001);
       await rejection;
     } finally {
       close();

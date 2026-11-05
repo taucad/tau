@@ -248,6 +248,8 @@ type Behaviour = Readonly<{
   /* The commit the catalogue says its listing lists. */
   listingCommit?: string;
   expiresInSeconds?: number;
+  /* Pack byte extents a Range read may not touch: one that does is refused, as a lapsed link is. */
+  refuse?: ReadonlyArray<readonly [number, number]>;
 }>;
 
 /* The files Worker's own rule for a pack GET: one Range, shorter than the pack and at most 64 MiB, or 416. */
@@ -316,6 +318,9 @@ const serve = (hosted: Hosted, behaviour: Behaviour = {}): Served => {
       if (behaviour.ignoreRange === true) {
         wholePackReads += 1;
         return new Response(hosted.pack, { status: 200 });
+      }
+      if (behaviour.refuse?.some(([start, end]) => allowed[0] < end && start < allowed[1]) === true) {
+        return new Response('Forbidden', { status: 403 });
       }
       ranges.push(allowed);
       return new Response(hosted.pack.slice(...allowed), { status: 206 });
@@ -620,6 +625,43 @@ describe.runIf(gitToolchainOnPath)('the cold open from a hosted catalogue (D8)',
     expect(held.every(Boolean)).toBe(true);
   });
 
+  /* Every tree and blob under a commit, as git lists them. */
+  const treeClosure = (commit: string): string[] => [
+    hosted.git('rev-parse', `${commit}^{tree}`),
+    ...lines(hosted.git('ls-tree', '-r', '-t', commit)).map((line) => line.split(/\s+/u)[2]!),
+  ];
+  const allHeld = async (store: ObjectStore, oids: readonly string[]): Promise<string[]> => {
+    const held = await Promise.all(oids.map(async (oid) => store.has(oid)));
+    return oids.filter((_oid, at) => !held[at]);
+  };
+
+  it('keeps nothing a failed import names short of, so a retry brings every blob', async () => {
+    const compute = countingCompute();
+    const store = await emptyStore(compute, 'retry');
+    /* The trees and the tips read; a blob's Range read is refused part-way, as a lapsed link is. */
+    const blob = hosted.git('rev-parse', `${hosted.main}:parts/deep/c.scad`);
+    const failing = serve(hosted, { listings: false, refuse: extentsOf([blob]) });
+    expect(
+      await coldOpenFromCatalogue({ catalogueUrl, fetch: failing.fetch, store, compute, batchObjects: 1 }),
+    ).toBeUndefined();
+    /* No tree or commit held without what it names: a retry's walk never stops at one. */
+    const kept = await Promise.all(
+      [hosted.main, hosted.tag, hosted.tagged, hosted.git('rev-parse', `${hosted.main}^{tree}`)].map(async (oid) =>
+        store.has(oid),
+      ),
+    );
+    expect(kept).toEqual([false, false, false, false]);
+
+    const opened = await coldOpenFromCatalogue({
+      catalogueUrl,
+      fetch: serve(hosted, { listings: false }).fetch,
+      store,
+      compute,
+    });
+    expect(opened).toBeDefined();
+    expect(await allHeld(store, [hosted.main, ...treeClosure(hosted.main)])).toEqual([]);
+  });
+
   it('profiles chain depth as git verify-pack counts it', async () => {
     const packDirectory = join(hosted.directory, '.git', 'objects', 'pack');
     const packFiles = await readdir(packDirectory);
@@ -689,6 +731,43 @@ describe.runIf(gitToolchainOnPath)('after a cold open, over smart HTTP and past 
     await rm(root, { recursive: true, force: true });
     await rm(hosted.directory, { recursive: true, force: true });
   });
+
+  it('writes no tracking ref past a cold open that failed part-way: the fetch takes the tip whole', async () => {
+    /* The catalogue's tips and trees read, then a blob's Range read refused: the fetch goes on over smart HTTP. */
+    const blob = hosted.git('rev-parse', `${hosted.main}:parts/deep/c.scad`);
+    const index = readPackIndex(hosted.index);
+    const offset = index.offsetOf(blob)!;
+    const failing = serve(hosted, {
+      listings: false,
+      refuse: [[offset, index.endOf(offset, hosted.pack.byteLength)]],
+    });
+    const filesystem = await createMemoryProvider();
+    const bodies: string[] = [];
+    const port = createIsomorphicGitRevisionPort({
+      filesystem,
+      http: recording(createRevisionHttpClient(), bodies),
+      catalogue: { url: () => catalogueUrl, fetch: failing.fetch },
+    });
+    await port.init({ author: { name: 'Tau', email: 'tau@example.com' } });
+    await port.setRemote({ name: 'origin', url: remote.url });
+    await port.fetch({ remote: 'origin', refs: ['refs/heads/main'] });
+    /* The tip was not held, so it was wanted: never dropped for a commit kept without its tree. */
+    expect(bodies.some((body) => body.includes(`want ${hosted.main}`))).toBe(true);
+    expect(await port.readRef('refs/remotes/origin/main')).toBe(hosted.main);
+    const store = createObjectStore({
+      files: gitFilesOf(filesystem, '.git'),
+      gitdir: '.git',
+      compute: createInlineCompute(),
+      fenceName: 'cold-partial-check',
+    });
+    const closure = [
+      hosted.main,
+      hosted.git('rev-parse', `${hosted.main}^{tree}`),
+      ...lines(hosted.git('ls-tree', '-r', '-t', hosted.main)).map((line) => line.split(/\s+/u)[2]!),
+    ];
+    const held = await Promise.all(closure.map(async (oid) => store.has(oid)));
+    expect(closure.filter((_oid, at) => !held[at])).toEqual([]);
+  }, 120_000);
 
   it('tells the remote where a cold history stops, and takes a pack past the ceiling object by object', async () => {
     const served = serve(hosted);

@@ -239,19 +239,69 @@ type Importer = Readonly<{
   limits: Readonly<{ batchBytes: number; batchObjects: number }>;
 }>;
 
-/* Read `oids` a bounded batch at a time, keep each batch, and hand it on before the next is read. */
-const inBatches = async (
+/* Read `oids` a bounded batch at a time, and hand each batch on before the next is read. */
+const readBatches = async (
   oids: readonly string[],
   importer: Importer,
-  each: (objects: ReadonlyMap<string, StoredObject>) => Promise<void> = async () => undefined,
+  each: (objects: ReadonlyMap<string, StoredObject>) => Promise<void>,
 ): Promise<void> => {
   for (const batch of batchesOf(oids, importer.sizeOf, importer.limits)) {
     // oxlint-disable-next-line no-await-in-loop -- one batch held at a time.
     const objects = await importer.readAll(batch);
-    // oxlint-disable-next-line no-await-in-loop -- kept before the next batch is read.
-    await importer.keep(objects);
     // oxlint-disable-next-line no-await-in-loop -- handed on before the next batch is read.
     await each(objects);
+  }
+};
+
+/* Read `oids` a bounded batch at a time, and keep each batch before the next is read. */
+const keepBatches = async (oids: readonly string[], importer: Importer): Promise<void> => {
+  await readBatches(oids, importer, async (objects) => importer.keep(objects));
+};
+
+/*
+ * Objects read but not kept yet, each with the ids it names (a tree's
+ * subtrees, a commit's tree and parents, a tag's object). Blobs are kept as
+ * they are read; everything else waits here, so that nothing is kept before
+ * what it names: then a held tree or commit proves its closure is held, and a
+ * walk that stops at one — this import's retry, a fetch that drops a held tip
+ * from its wants — never stops short of a missing object.
+ */
+type Staged = Map<string, Readonly<{ object: StoredObject; names: readonly string[] }>>;
+
+/*
+ * The staged ids, each after the staged ones it names: depth first from each
+ * id not reached yet. Ids are hashes of what they name, so there is no cycle.
+ */
+const stagedOrder = (staged: Staged): string[] => {
+  const order: string[] = [];
+  const visited = new Set<string>();
+  const stack: Array<{ oid: string; next: number }> = [];
+  for (const root of staged.keys()) {
+    if (!visited.has(root)) {
+      visited.add(root);
+      stack.push({ oid: root, next: 0 });
+    }
+    while (stack.length > 0) {
+      const top = stack.at(-1)!;
+      const child = staged.get(top.oid)?.names[top.next];
+      top.next += 1;
+      if (child === undefined) {
+        stack.pop();
+        order.push(top.oid);
+      } else if (staged.has(child) && !visited.has(child)) {
+        visited.add(child);
+        stack.push({ oid: child, next: 0 });
+      }
+    }
+  }
+  return order;
+};
+
+/* Keep what was staged, everything an object names before the object, in bounded batches. */
+const keepStaged = async (staged: Staged, importer: Importer): Promise<void> => {
+  for (const batch of batchesOf(stagedOrder(staged), importer.sizeOf, importer.limits)) {
+    // oxlint-disable-next-line no-await-in-loop -- a batch is kept only after the batches it names.
+    await importer.keep(new Map(batch.map((oid) => [oid, staged.get(oid)!.object])));
   }
 };
 
@@ -263,15 +313,15 @@ const unheld = async (store: ObjectStore, oids: Iterable<string>): Promise<strin
 };
 
 /*
- * The trees under `roots` a level at a time, each level in bounded batches,
- * and then the blobs. A tree the store already holds is not walked: a tree
- * is kept only after the level above it and every blob after every tree, so
- * a held tree's subtree is held or is in this walk.
+ * The trees under `roots` a level at a time, each level read in bounded
+ * batches and staged, then the blobs, kept. A tree the store already holds is
+ * not walked: trees are kept only through {@link keepStaged}, after every blob
+ * and subtree they name, so a held tree's subtree is held.
  */
 const importTrees = async (
   roots: Iterable<string>,
   importer: Importer,
-  blobs: Readonly<{ walked: boolean; listed: readonly string[] }>,
+  walk: Readonly<{ walked: boolean; listed: readonly string[]; staged: Staged }>,
 ): Promise<void> => {
   const seen = new Set<string>();
   const walkedBlobs = new Set<string>();
@@ -282,28 +332,35 @@ const importTrees = async (
       seen.add(oid);
     }
     // oxlint-disable-next-line no-await-in-loop -- a level's subtrees are known only once the level is read.
-    await inBatches(level, importer, async (trees) => {
-      const decoded = await Promise.all([...trees].map(async ([oid, tree]) => entriesOf(oid, tree)));
-      for (const entry of decoded.flat()) {
-        if (entry.type === 'tree' && !seen.has(entry.oid)) {
-          seen.add(entry.oid);
-          next.push(entry.oid);
-        } else if (entry.type === 'blob' && blobs.walked) {
-          walkedBlobs.add(entry.oid);
-        }
-      }
+    await readBatches(level, importer, async (trees) => {
+      await Promise.all(
+        [...trees].map(async ([oid, tree]) => {
+          const entries = await entriesOf(oid, tree);
+          const subtrees = entries.filter((entry) => entry.type === 'tree').map((entry) => entry.oid);
+          walk.staged.set(oid, { object: tree, names: subtrees });
+          for (const entry of entries) {
+            if (entry.type === 'tree' && !seen.has(entry.oid)) {
+              seen.add(entry.oid);
+              next.push(entry.oid);
+            } else if (entry.type === 'blob' && walk.walked) {
+              walkedBlobs.add(entry.oid);
+            }
+          }
+        }),
+      );
     });
     // oxlint-disable-next-line no-await-in-loop -- the next level is what this one named and the store lacks.
     level = await unheld(importer.store, next);
   }
-  await inBatches(await unheld(importer.store, [...blobs.listed, ...walkedBlobs]), importer);
+  await keepBatches(await unheld(importer.store, [...walk.listed, ...walkedBlobs]), importer);
 };
 
 /*
- * The tips (each ref's object and the commit a tag peels to), then the trees
- * of every branch-like tip, then the blobs: the listings' where every walked
- * tip has one, else the trees' as well. Answers the commits brought without
- * their history.
+ * The tips (each ref's object and the commit a tag peels to), read and
+ * staged; then the trees of every branch-like tip; then the blobs: the
+ * listings' where every walked tip has one, else the trees' as well. The tips are kept
+ * last, after everything they name. Answers the commits brought without their
+ * history.
  */
 const importHeads = async (
   references: Catalogue['refs'],
@@ -312,11 +369,16 @@ const importHeads = async (
 ): Promise<string[]> => {
   const tips = references.flatMap((entry) => [entry.oid, ...(entry.peeled === undefined ? [] : [entry.peeled])]);
   const tipObjects = new Map<string, StoredObject>();
-  await inBatches([...new Set(tips)], importer, async (objects) => {
+  await readBatches([...new Set(tips)], importer, async (objects) => {
     for (const [oid, object] of objects) {
       tipObjects.set(oid, object);
     }
   });
+  const staged: Staged = new Map();
+  for (const [oid, object] of tipObjects) {
+    const named = object.type === 'commit' ? treeOf(object) : object.type === 'tag' ? taggedOf(object) : undefined;
+    staged.set(oid, { object, names: named === undefined ? [] : [named] });
+  }
   const walked = references.filter((entry) => !entry.ref.startsWith(familyPrefixes.tags)).map((entry) => entry.oid);
   const listed = new Set(listings.map((listing) => listing.commit));
   const roots = walked.flatMap((commit) => {
@@ -328,7 +390,9 @@ const importHeads = async (
     listed: listings.flatMap((listing) =>
       listing.entries.filter((entry) => entry.size !== undefined).map((entry) => entry.oid),
     ),
+    staged,
   });
+  await keepStaged(staged, importer);
   return [...tipObjects].filter(([, object]) => object.type === 'commit').map(([oid]) => oid);
 };
 
@@ -532,6 +596,8 @@ export const importReachableFromCatalogue = async (
   const took = await attempted(options.signal, async () => {
     const seen = new Set<string>();
     const roots: string[] = [];
+    /* Commits and tags wait until their trees, blobs and parents are kept: a held commit's closure is held. */
+    const staged: Staged = new Map();
     let frontier = await unheld(store, options.wants);
     while (frontier.length > 0) {
       for (const oid of frontier) {
@@ -539,27 +605,32 @@ export const importReachableFromCatalogue = async (
       }
       const next: string[] = [];
       // oxlint-disable-next-line no-await-in-loop -- a generation's parents are known only once it is read.
-      await inBatches(frontier, importer, async (objects) => {
+      await readBatches(frontier, importer, async (objects) => {
         for (const [oid, object] of objects) {
           switch (object.type) {
             case 'commit': {
-              roots.push(...[treeOf(object) ?? []].flat());
-              next.push(...parentsOf(object));
+              const tree = treeOf(object);
+              const parents = parentsOf(object);
+              roots.push(...[tree ?? []].flat());
+              next.push(...parents);
+              staged.set(oid, { object, names: [...[tree ?? []].flat(), ...parents] });
               break;
             }
             case 'tag': {
-              next.push(...[taggedOf(object) ?? []].flat());
+              const tagged = taggedOf(object);
+              next.push(...[tagged ?? []].flat());
+              staged.set(oid, { object, names: [tagged ?? []].flat() });
               break;
             }
             case 'tree': {
-              /* A tag of a tree: kept already, so its entries are walked in its place. */
-              // oxlint-disable-next-line no-await-in-loop -- rare, and one tree.
-              const entries = await entriesOf(oid, object);
-              roots.push(...entries.flatMap((entry) => (entry.type === 'tree' ? [entry.oid] : [])));
+              /* A tag of a tree: walked, and staged, as a root. */
+              roots.push(oid);
               break;
             }
-            default:
-            /* A tagged blob is kept already, and names nothing. */
+            default: {
+              /* A tagged blob names nothing. */
+              staged.set(oid, { object, names: [] });
+            }
           }
         }
       });
@@ -569,7 +640,8 @@ export const importReachableFromCatalogue = async (
         next.filter((oid) => !seen.has(oid)),
       );
     }
-    await importTrees(roots, importer, { walked: true, listed: [] });
+    await importTrees(roots, importer, { walked: true, listed: [], staged });
+    await keepStaged(staged, importer);
     return true;
   });
   return took === undefined ? undefined : report();

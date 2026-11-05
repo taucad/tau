@@ -5,6 +5,12 @@
     "fileCount": 4479,
     "byteLength": 191632814
   },
+  "darwin-x64": {
+    "closureIntegrity": "sha256-DnJEyyGM9YwckJsydQdNrXZ71gJIFHf/CvSYVe59IU0=",
+    "treeIntegrity": "sha256-F1il+YY6IgtDe3lu3Bek4LoCZ9eHrI+ziV0OSxeVUKg=",
+    "fileCount": 4479,
+    "byteLength": 213217603
+  },
   "linux-arm64-glibc": {
     "closureIntegrity": "sha256-IHBREjS34lxH5f2/j1dxjofAD+/K2CNK7mjRzBNVugE=",
     "treeIntegrity": "sha256-BP6jLpZp7eVUd6TwBn74ZPHGVD3UIvxaaRmVuAxMB8Y=",

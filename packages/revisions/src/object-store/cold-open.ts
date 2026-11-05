@@ -113,6 +113,8 @@ export type ColdOpenReport = Readonly<{
   packsWritten: number;
   /** Range reads of packs, summed over packs. */
   ranges: RemotePackCounters;
+  /** The most trees, commits and tags held with their bytes while they waited to be kept: at most one batch. */
+  staged: Readonly<{ objects: number; bytes: number }>;
 }>;
 
 /** A cold open that took: the refs it brought, and what it cost. */
@@ -229,6 +231,25 @@ const batchesOf = (
   return batches;
 };
 
+/*
+ * Objects read but not kept yet, each with the ids it names (a tree's
+ * subtrees, a commit's tree and parents, a tag's object). Blobs are kept as
+ * they are read; everything else waits here, so that nothing is kept before
+ * what it names: then a held tree or commit proves its closure is held, and a
+ * walk that stops at one — this import's retry, a fetch that drops a held tip
+ * from its wants — never stops short of a missing object.
+ *
+ * At most one batch's objects and bytes wait here with their bytes: past that
+ * bound an object waits by its id and what it names alone, and is read again
+ * when it is kept, so a walk of a long history holds its ids, as its `seen`
+ * set does, and never its bytes.
+ */
+type Stage = Readonly<{
+  entries: Map<string, { object: StoredObject | undefined; names: readonly string[] }>;
+  held: { objects: number; bytes: number };
+  peak: { objects: number; bytes: number };
+}>;
+
 /* How an import reads, keeps and bounds what it reads. */
 type Importer = Readonly<{
   store: ObjectStore;
@@ -237,7 +258,30 @@ type Importer = Readonly<{
   keep: (objects: ReadonlyMap<string, StoredObject>) => Promise<void>;
   sizeOf: (oid: string) => number;
   limits: Readonly<{ batchBytes: number; batchObjects: number }>;
+  stage: Stage;
 }>;
+
+/* Stage one object, with its bytes while they fit the bound and by its id past it. */
+const stageObject = (
+  importer: Importer,
+  oid: string,
+  staged: Readonly<{ object: StoredObject; names: readonly string[] }>,
+): void => {
+  const { stage, limits } = importer;
+  const { object, names } = staged;
+  if (stage.entries.has(oid)) {
+    return;
+  }
+  const bytes = object.data.byteLength;
+  const fits = stage.held.objects < limits.batchObjects && stage.held.bytes + bytes <= limits.batchBytes;
+  stage.entries.set(oid, { object: fits ? object : undefined, names });
+  if (fits) {
+    stage.held.objects += 1;
+    stage.held.bytes += bytes;
+    stage.peak.objects = Math.max(stage.peak.objects, stage.held.objects);
+    stage.peak.bytes = Math.max(stage.peak.bytes, stage.held.bytes);
+  }
+};
 
 /* Read `oids` a bounded batch at a time, and hand each batch on before the next is read. */
 const readBatches = async (
@@ -259,20 +303,10 @@ const keepBatches = async (oids: readonly string[], importer: Importer): Promise
 };
 
 /*
- * Objects read but not kept yet, each with the ids it names (a tree's
- * subtrees, a commit's tree and parents, a tag's object). Blobs are kept as
- * they are read; everything else waits here, so that nothing is kept before
- * what it names: then a held tree or commit proves its closure is held, and a
- * walk that stops at one — this import's retry, a fetch that drops a held tip
- * from its wants — never stops short of a missing object.
- */
-type Staged = Map<string, Readonly<{ object: StoredObject; names: readonly string[] }>>;
-
-/*
  * The staged ids, each after the staged ones it names: depth first from each
  * id not reached yet. Ids are hashes of what they name, so there is no cycle.
  */
-const stagedOrder = (staged: Staged): string[] => {
+const stagedOrder = (staged: Stage['entries']): string[] => {
   const order: string[] = [];
   const visited = new Set<string>();
   const stack: Array<{ oid: string; next: number }> = [];
@@ -297,11 +331,27 @@ const stagedOrder = (staged: Staged): string[] => {
   return order;
 };
 
-/* Keep what was staged, everything an object names before the object, in bounded batches. */
-const keepStaged = async (staged: Staged, importer: Importer): Promise<void> => {
-  for (const batch of batchesOf(stagedOrder(staged), importer.sizeOf, importer.limits)) {
+/*
+ * Keep what was staged, everything an object names before the object, in
+ * bounded batches; an object staged by its id alone is read again first.
+ */
+const keepStaged = async (importer: Importer): Promise<void> => {
+  const { entries, held } = importer.stage;
+  for (const batch of batchesOf(stagedOrder(entries), importer.sizeOf, importer.limits)) {
+    const unread = batch.filter((oid) => entries.get(oid)?.object === undefined);
+    // oxlint-disable-next-line no-await-in-loop -- one batch read again at a time.
+    const reread = unread.length === 0 ? new Map<string, StoredObject>() : await importer.readAll(unread);
+    const objects = new Map(batch.map((oid) => [oid, entries.get(oid)?.object ?? reread.get(oid)!]));
     // oxlint-disable-next-line no-await-in-loop -- a batch is kept only after the batches it names.
-    await importer.keep(new Map(batch.map((oid) => [oid, staged.get(oid)!.object])));
+    await importer.keep(objects);
+    for (const oid of batch) {
+      const entry = entries.get(oid)!;
+      if (entry.object !== undefined) {
+        held.objects -= 1;
+        held.bytes -= entry.object.data.byteLength;
+      }
+      entries.delete(oid);
+    }
   }
 };
 
@@ -321,7 +371,7 @@ const unheld = async (store: ObjectStore, oids: Iterable<string>): Promise<strin
 const importTrees = async (
   roots: Iterable<string>,
   importer: Importer,
-  walk: Readonly<{ walked: boolean; listed: readonly string[]; staged: Staged }>,
+  walk: Readonly<{ walked: boolean; listed: readonly string[] }>,
 ): Promise<void> => {
   const seen = new Set<string>();
   const walkedBlobs = new Set<string>();
@@ -337,7 +387,7 @@ const importTrees = async (
         [...trees].map(async ([oid, tree]) => {
           const entries = await entriesOf(oid, tree);
           const subtrees = entries.filter((entry) => entry.type === 'tree').map((entry) => entry.oid);
-          walk.staged.set(oid, { object: tree, names: subtrees });
+          stageObject(importer, oid, { object: tree, names: subtrees });
           for (const entry of entries) {
             if (entry.type === 'tree' && !seen.has(entry.oid)) {
               seen.add(entry.oid);
@@ -375,12 +425,11 @@ const importHeads = async (
       tipObjects.set(oid, object);
     }
   });
-  const staged: Staged = new Map();
   for (const [oid, object] of tipObjects) {
     const named = object.type === 'commit' ? treeOf(object) : object.type === 'tag' ? taggedOf(object) : undefined;
     /* A tip tree is staged by the walk below, as a root. */
     if (object.type !== 'tree') {
-      staged.set(oid, { object, names: named === undefined ? [] : [named] });
+      stageObject(importer, oid, { object, names: named === undefined ? [] : [named] });
     }
   }
   /*
@@ -397,9 +446,8 @@ const importHeads = async (
     listed: listings.flatMap((listing) =>
       listing.entries.filter((entry) => entry.size !== undefined).map((entry) => entry.oid),
     ),
-    staged,
   });
-  await keepStaged(staged, importer);
+  await keepStaged(importer);
   return walked;
 };
 
@@ -512,6 +560,7 @@ const importerOver = (
     /* The listing's size where it names one, else the stored entry's (a delta's own, not its target's). */
     sizeOf: (oid) => listedSizes.get(oid) ?? Math.max(0, ...packs.map((pack) => pack.entryBytes(oid) ?? 0)),
     limits: { batchBytes: options.batchBytes ?? 16 * 1024 * 1024, batchObjects: options.batchObjects ?? 2048 },
+    stage: { entries: new Map(), held: { objects: 0, bytes: 0 }, peak: { objects: 0, bytes: 0 } },
   };
   const report = (): ColdOpenReport => {
     const ranges: RemotePackCounters = { rangeRequests: 0, bytesFetched: 0, waves: 0 };
@@ -521,7 +570,8 @@ const importerOver = (
       ranges.waves += pack.counters.waves;
     }
     const { indexReads, listingReads } = opened;
-    return { catalogueReads: 1, indexReads, listingReads, imported, packsWritten, ranges };
+    const staged = { ...importer.stage.peak };
+    return { catalogueReads: 1, indexReads, listingReads, imported, packsWritten, ranges, staged };
   };
   return { importer, source, report };
 };
@@ -604,7 +654,6 @@ export const importReachableFromCatalogue = async (
     const seen = new Set<string>();
     const roots: string[] = [];
     /* Commits and tags wait until their trees, blobs and parents are kept: a held commit's closure is held. */
-    const staged: Staged = new Map();
     let frontier = await unheld(store, options.wants);
     while (frontier.length > 0) {
       for (const oid of frontier) {
@@ -620,13 +669,13 @@ export const importReachableFromCatalogue = async (
               const parents = parentsOf(object);
               roots.push(...[tree ?? []].flat());
               next.push(...parents);
-              staged.set(oid, { object, names: [...[tree ?? []].flat(), ...parents] });
+              stageObject(importer, oid, { object, names: [...[tree ?? []].flat(), ...parents] });
               break;
             }
             case 'tag': {
               const tagged = taggedOf(object);
               next.push(...[tagged ?? []].flat());
-              staged.set(oid, { object, names: [tagged ?? []].flat() });
+              stageObject(importer, oid, { object, names: [tagged ?? []].flat() });
               break;
             }
             case 'tree': {
@@ -636,7 +685,7 @@ export const importReachableFromCatalogue = async (
             }
             default: {
               /* A tagged blob names nothing. */
-              staged.set(oid, { object, names: [] });
+              stageObject(importer, oid, { object, names: [] });
             }
           }
         }
@@ -647,8 +696,8 @@ export const importReachableFromCatalogue = async (
         next.filter((oid) => !seen.has(oid)),
       );
     }
-    await importTrees(roots, importer, { walked: true, listed: [], staged });
-    await keepStaged(staged, importer);
+    await importTrees(roots, importer, { walked: true, listed: [] });
+    await keepStaged(importer);
     return true;
   });
   return took === undefined ? undefined : report();

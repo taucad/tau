@@ -824,6 +824,69 @@ describe.runIf(gitToolchainOnPath)('after a cold open, over smart HTTP and past 
   }, 240_000);
 });
 
+describe.runIf(gitToolchainOnPath)('an object-by-object import of a long, wide history', () => {
+  it('holds at most one batch of trees, commits and tags with their bytes, and keeps every object', async () => {
+    const own = await host();
+    try {
+      /* Thirty commits, each touching one file in one of twelve directories: many trees and commits to stage. */
+      for (let commit = 0; commit < 30; commit += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- each commit's file is written before it is made.
+        await own.write(`dir-${String(commit % 12)}/sub/part-${String(commit)}.scad`, `cube(${String(commit)});\n`);
+        own.git('add', '-A');
+        own.git('commit', '-q', '-m', `Wide ${String(commit)}`);
+      }
+      own.git('tag', '-a', 'v2', '-m', 'two');
+      await own.publish();
+      const tip = own.git('rev-parse', 'refs/heads/main');
+      const tag = own.git('rev-parse', 'refs/tags/v2');
+      const everything = lines(own.git('rev-list', '--objects', tag)).map((line) => line.split(' ')[0]!);
+      const staging = lines(own.git('rev-list', '--objects', '--no-object-names', '--filter=blob:none', tag));
+      const limits = { batchObjects: 8, batchBytes: 4096 };
+      expect(staging.length).toBeGreaterThan(limits.batchObjects * 4);
+
+      const compute = countingCompute();
+      const store = await emptyStore(compute, 'long-wide');
+      /* First, an import that fails part-way on a blob's Range read: no commit, tag or tree is kept short of its closure. */
+      const blob = own.git('rev-parse', `${tip}:dir-0/sub/part-0.scad`);
+      const index = readPackIndex(own.index);
+      const offset = index.offsetOf(blob)!;
+      const refused = serve(own, { listings: false, refuse: [[offset, index.endOf(offset, own.pack.byteLength)]] });
+      expect(
+        await importReachableFromCatalogue({
+          catalogueUrl,
+          fetch: refused.fetch,
+          store,
+          compute,
+          wants: [tag],
+          ...limits,
+        }),
+      ).toBeUndefined();
+      const keptEarly = await Promise.all(
+        [tag, tip, own.git('rev-parse', `${tip}^{tree}`)].map(async (oid) => store.has(oid)),
+      );
+      expect(keptEarly).toEqual([false, false, false]);
+
+      const report = await importReachableFromCatalogue({
+        catalogueUrl,
+        fetch: serve(own, { listings: false }).fetch,
+        store,
+        compute,
+        wants: [tag],
+        ...limits,
+      });
+      expect(report).toBeDefined();
+      expect(report!.staged.objects).toBeGreaterThan(0);
+      expect(report!.staged.objects).toBeLessThanOrEqual(limits.batchObjects);
+      expect(report!.staged.bytes).toBeLessThanOrEqual(limits.batchBytes);
+      const held = await Promise.all(everything.map(async (oid) => store.has(oid)));
+      expect(everything.filter((_oid, at) => !held[at])).toEqual([]);
+      expect(await store.has(tip)).toBe(true);
+    } finally {
+      await rm(own.directory, { recursive: true, force: true });
+    }
+  }, 120_000);
+});
+
 describe.runIf(gitToolchainOnPath)('a remote no catalogue serves', () => {
   it('reads an answer past the ceiling whole', async () => {
     const own = await host();

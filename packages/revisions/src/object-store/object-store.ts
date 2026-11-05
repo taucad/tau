@@ -248,8 +248,10 @@ export type ObjectStore = Readonly<{
    */
   importObjects: (objects: Iterable<Readonly<{ oid: string } & StoredObject>>) => Promise<string[]>;
   /**
-   * Read through to a source for an object this store lacks, keeping each one
-   * it answers loose. For a store a cold open filled with only its heads.
+   * Read through to a source for an object this store lacks. What it answers
+   * is held beside the store in a byte-bounded cache, never written into it:
+   * `has` stays false for it, so an import never skips a tree whose blobs
+   * were not read. For a store a cold open filled with only its heads.
    */
   attachSource: (source: ObjectSource) => void;
   /**

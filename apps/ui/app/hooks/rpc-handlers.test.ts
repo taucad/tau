@@ -1368,7 +1368,7 @@ describe('rpc-handlers', () => {
             mode: 'single',
             width: 1600,
             height: 1600,
-            ...buildViewerCaptureImageOptions({ width: 1600, height: 1600, colorScheme: 'dark' }),
+            ...buildViewerCaptureImageOptions({ width: 1600, height: 1600, colorScheme: 'light' }),
             background: '#242424',
             camera: {
               framing: 'bounds',
@@ -1507,7 +1507,7 @@ describe('rpc-handlers', () => {
             mode: 'batch',
             width: 1600,
             height: 1600,
-            ...buildViewerCaptureImageOptions({ width: 1600, height: 1600, colorScheme: 'dark' }),
+            ...buildViewerCaptureImageOptions({ width: 1600, height: 1600, colorScheme: 'light' }),
             background: '#242424',
             axes: true,
             scaleBar: true,

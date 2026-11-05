@@ -6,6 +6,9 @@
  *
  * Messages from the test thread:
  * - `{ type: 'serve', port, files }`: seed a memory provider and serve it on `port`;
+ * - `{ type: 'serve-rooted', port, files, consumer }`: seed a workspace's project
+ *   root and serve that root's view for `consumer` — the composition a real
+ *   authority performs — on `port`;
  * - `{ type: 'crossings' }`: answer the host side's I2 crossings since `serve`;
  * - `{ type: 'freeze', gate }`: block this thread until `gate[0]` is notified,
  *   the way a wedged authority stops answering without closing its ports.
@@ -16,10 +19,18 @@ import { MemoryProvider } from '@taucad/filesystem/backend';
 import { wrapMessagePort } from '@taucad/rpc';
 import type { MessagePortLike } from '@taucad/rpc';
 import { serveFileSystemBridgePort } from '#filesystem-bridge.js';
+import type { RootedBridgeConsumer } from '#filesystem-bridge.js';
 import { observeFileSystemBridgeCrossings } from '#filesystem-bridge-crossings.js';
 import type { FileSystemBridgeCrossingsObserver } from '#filesystem-bridge-crossings.js';
+import { rootedWorkspaceHandlers } from '#filesystem-bridge-rooted.test-fixture.js';
 
 type ServeMessage = { readonly type: 'serve'; readonly port: MessagePort; readonly files: Record<string, string> };
+type ServeRootedMessage = {
+  readonly type: 'serve-rooted';
+  readonly port: MessagePort;
+  readonly files: Record<string, string | Uint8Array<ArrayBuffer>>;
+  readonly consumer: RootedBridgeConsumer;
+};
 type CrossingsMessage = { readonly type: 'crossings' };
 type FreezeMessage = { readonly type: 'freeze'; readonly gate: Int32Array<SharedArrayBuffer> };
 
@@ -35,9 +46,22 @@ const serve = async ({ port, files }: ServeMessage): Promise<void> => {
   parentPort!.postMessage({ type: 'serving' });
 };
 
-parentPort!.on('message', (message: ServeMessage | CrossingsMessage | FreezeMessage) => {
+const serveRooted = async ({ port, files, consumer }: ServeRootedMessage): Promise<void> => {
+  const { handlers } = await rootedWorkspaceHandlers(files, consumer);
+  crossings = observeFileSystemBridgeCrossings();
+  const wrapped = wrapMessagePort<unknown>(port as unknown as MessagePortLike, { label: 'conformance-worker-rooted' });
+  wrapped.start?.();
+  serveFileSystemBridgePort(handlers, wrapped);
+  parentPort!.postMessage({ type: 'serving' });
+};
+
+parentPort!.on('message', (message: ServeMessage | ServeRootedMessage | CrossingsMessage | FreezeMessage) => {
   if (message.type === 'serve') {
     void serve(message);
+    return;
+  }
+  if (message.type === 'serve-rooted') {
+    void serveRooted(message);
     return;
   }
   if (message.type === 'crossings') {

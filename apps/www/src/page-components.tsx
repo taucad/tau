@@ -4,7 +4,7 @@ import { Button } from '@taucad/ui/components/button';
 import { SiteLink } from '#www/site-link.js';
 import { Badge } from '@taucad/ui/components/badge';
 import type { ReactNode } from 'react';
-import { appOrigin, docsOrigin } from '#www/environment.js';
+import { appHref, docsOrigin } from '#www/environment.js';
 import { ecosystem, exampleUrl, plans, principles, sourceUrl, storyChapters, useCases } from '#www/content.js';
 import { heroDrafting } from '#www/hero-view.js';
 import { diagrams } from '#www/principle-diagrams.js';
@@ -22,7 +22,8 @@ export const cta: (label?: string, path?: string, placement?: string) => ReactNo
 ) => (
   <SiteLink
     className='button primary'
-    href={path === '/download/' ? path : `${appOrigin}${path}`}
+    href={path === '/download/' ? path : appHref(path as `/${string}`)}
+    isAppLink={path !== '/download/'}
     data-event='cta'
     data-placement={placement}
     data-host-download={path === '/download/' ? 'page' : undefined}
@@ -463,7 +464,8 @@ export const planCards = (compact = false): React.JSX.Element => (
         ) : (
           <SiteLink
             className={`button${plan.id === 'pro' ? ' primary' : ''}`}
-            href={`${appOrigin}${plan.cta[1]}`}
+            href={appHref(plan.cta[1] as `/${string}`)}
+            isAppLink
             data-event='cta'
             data-placement={`pricing-${plan.id}`}
           >

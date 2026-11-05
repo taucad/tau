@@ -247,7 +247,7 @@ describe('marketing staging links before JavaScript', () => {
     '<script>const anchor = `<a href="https://downloads.tau.new/latest/Tau-macos-arm64.zip">Download</a>`;</script><script type="application/ld+json">{"url":"https://tau.new/download/"}</script>';
   const prompt = (site: string): string =>
     `<code id="agent-prompt-text">Install the Tau plugin from ${site}/llms.txt</code>`;
-  const html = `<link rel="canonical" href="https://tau.new/download/">${scripts}${prompt('https://tau.new')}${files.map((file) => `<a class="text-link" href="https://downloads.tau.new/latest/${file}" data-event="download">Download</a>`).join('')}`;
+  const html = `<link rel="canonical" href="https://tau.new/download/">${scripts}${prompt('https://tau.new')}${files.map((file) => `<a class="text-link" href="https://downloads.tau.new/latest/${file}" data-event="download">Download</a>`).join('')}<a href="https://docs.tau.new/">Docs</a><a class="text-link" href="https://docs.tau.new/editor/packages">Packages</a>`;
 
   it('should serve every archive link and the agent prompt from staging while preserving scripts and document policies', async () => {
     vi.stubGlobal('Netlify', { env: { get: () => origin } });
@@ -270,9 +270,11 @@ describe('marketing staging links before JavaScript', () => {
     );
     const response = await marketing(new Request('https://taucad.dev/download/'), { next: vi.fn() });
     const body = await response.text();
-    expect([...body.replace(scripts, '').matchAll(/<a[^>]+href="([^"]+)"/gu)].map((match) => match[1])).toEqual(
-      files.map((file) => `https://downloads.taucad.dev/latest/${file}`),
-    );
+    expect([...body.replace(scripts, '').matchAll(/<a[^>]+href="([^"]+)"/gu)].map((match) => match[1])).toEqual([
+      ...files.map((file) => `https://downloads.taucad.dev/latest/${file}`),
+      'https://docs.taucad.dev/',
+      'https://docs.taucad.dev/editor/packages',
+    ]);
     expect(body).toContain(scripts);
     expect(body).toContain(prompt('https://taucad.dev'));
     expect(body).toContain('<link rel="canonical" href="https://tau.new/download/">');

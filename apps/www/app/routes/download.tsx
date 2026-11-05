@@ -1,5 +1,5 @@
 import { SiteLink } from '#www/site-link.js';
-import { appOrigin } from '#www/environment.js';
+import { appHref } from '#www/environment.js';
 import { desktopDownloads, desktopDownloadHref, desktopFileLabel } from '#www/downloads.js';
 import { sourceUrl } from '#www/content.js';
 import { out, down, intro } from '#www/page-components.js';
@@ -96,7 +96,13 @@ export const content = (): React.JSX.Element => (
             ))}
           </div>
         </div>
-        <SiteLink className='text-link' href={`${appOrigin}/projects`} data-event='cta' data-placement='download-web'>
+        <SiteLink
+          className='text-link'
+          href={appHref('/projects')}
+          isAppLink
+          data-event='cta'
+          data-placement='download-web'
+        >
           Use Tau in your browser instead {out}
         </SiteLink>
       </article>

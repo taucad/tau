@@ -1,6 +1,40 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CrossTabCoordinator, withCrossTabLocks } from '#cross-tab-coordinator.js';
 
+it('should request each token once in its strongest mode, in sorted order', async () => {
+  const acquired: Array<[string, LockMode | undefined]> = [];
+  const request = vi.fn(async (name: string, options: LockOptions, run: () => Promise<unknown>) => {
+    acquired.push([name, options.mode]);
+    return run();
+  });
+  vi.stubGlobal('navigator', { locks: { request } });
+  try {
+    await withCrossTabLocks(
+      [{ token: '/b', shared: true }, { token: '/a', shared: true }, '/b', { token: '/c', shared: true }],
+      async () => undefined,
+    );
+    expect(acquired).toEqual([
+      ['tau-fs-write:/a', 'shared'],
+      ['tau-fs-write:/b', 'exclusive'],
+      ['tau-fs-write:/c', 'shared'],
+    ]);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it('should acquire a chain longer than a synchronous lock manager can nest', async () => {
+  const request = vi.fn(async (_name: string, _options: LockOptions, run: () => Promise<unknown>) => run());
+  vi.stubGlobal('navigator', { locks: { request } });
+  try {
+    const tokens = Array.from({ length: 5000 }, (_, index) => `/file-${String(index).padStart(5, '0')}`);
+    await expect(withCrossTabLocks(tokens, async () => 'held')).resolves.toBe('held');
+    expect(request).toHaveBeenCalledTimes(5000);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
 it('shares sorted unique lock tokens without creating a notification channel', async () => {
   const channel = vi.fn();
   const acquired: string[] = [];
@@ -59,7 +93,11 @@ describe('CrossTabCoordinator', () => {
         async () => undefined,
       );
 
-      await expect(received).resolves.toEqual({ type: 'write', path: '/remote.txt', authority });
+      await expect(received).resolves.toEqual({
+        tabId: expect.any(String),
+        seq: 1,
+        changes: [{ type: 'write', path: '/remote.txt', authority }],
+      });
     } finally {
       sibling.close();
     }
@@ -89,22 +127,66 @@ describe('CrossTabCoordinator', () => {
     coordinator.onRemoteChange((notification) => received.push(notification));
     const sibling = new BroadcastChannel('tau-fs-changes');
     try {
-      sibling.postMessage({
+      const change = {
         type: 'directory-change',
         path: '/projects/proj_aaaaaaaaaaaaaaaaaaaaa',
         authority: { storageRootKey: 'opfs:origin', providerBasePath: 'model' },
+      };
+      sibling.postMessage({ tabId: 'sibling', seq: 1, changes: [change] });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
       });
+
+      expect(received).toEqual([{ tabId: 'sibling', seq: 1, changes: [change] }]);
+    } finally {
+      sibling.close();
+    }
+  });
+
+  it('should publish every fact of one changeset as one notice with an increasing sequence', async () => {
+    const sibling = new BroadcastChannel('tau-fs-changes');
+    const received: unknown[] = [];
+    sibling.addEventListener('message', (event) => received.push(event.data));
+    try {
+      coordinator.notifyChanges([
+        { type: 'write', path: '/a.txt', authority },
+        { type: 'delete', path: '/b.txt', authority },
+      ]);
+      coordinator.notifyDirectoryChange('/c', authority);
       await new Promise((resolve) => {
         setTimeout(resolve, 20);
       });
 
       expect(received).toEqual([
         {
-          type: 'directory-change',
-          path: '/projects/proj_aaaaaaaaaaaaaaaaaaaaa',
-          authority: { storageRootKey: 'opfs:origin', providerBasePath: 'model' },
+          tabId: expect.any(String),
+          seq: 1,
+          changes: [
+            { type: 'write', path: '/a.txt', authority },
+            { type: 'delete', path: '/b.txt', authority },
+          ],
         },
+        { tabId: expect.any(String), seq: 2, changes: [{ type: 'directory-change', path: '/c', authority }] },
       ]);
+    } finally {
+      sibling.close();
+    }
+  });
+
+  it('should mark a notice that follows a lost one from the same tab', async () => {
+    const received: Array<{ gap?: boolean }> = [];
+    coordinator.onRemoteChange((notice) => received.push(notice));
+    const sibling = new BroadcastChannel('tau-fs-changes');
+    const changes = [{ type: 'write', path: '/a.txt', authority }];
+    try {
+      sibling.postMessage({ tabId: 'sibling', seq: 1, changes });
+      sibling.postMessage({ tabId: 'sibling', seq: 2, changes });
+      sibling.postMessage({ tabId: 'sibling', seq: 4, changes });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+
+      expect(received.map(({ gap }) => gap === true)).toEqual([false, false, true]);
     } finally {
       sibling.close();
     }
@@ -124,7 +206,7 @@ describe('CrossTabCoordinator', () => {
         { type: 'write', path: '/main.ts', authority: { ...authority, providerBasePath: '/rooted' } },
         { type: 'write', path: '/main.ts', authority: { ...authority, providerBasePath: 'src/../main' } },
       ]) {
-        sibling.postMessage(notification);
+        sibling.postMessage({ tabId: 'sibling', seq: 1, changes: [notification] });
       }
       await new Promise((resolve) => {
         setTimeout(resolve, 20);
@@ -132,7 +214,7 @@ describe('CrossTabCoordinator', () => {
 
       expect(received).toEqual([]);
       expect(diagnostic).toHaveBeenCalledTimes(6);
-      expect(diagnostic).toHaveBeenCalledWith('[CrossTabCoordinator] Dropped invalid change notification.');
+      expect(diagnostic).toHaveBeenCalledWith('[CrossTabCoordinator] Dropped invalid change notice.');
     } finally {
       sibling.close();
       diagnostic.mockRestore();

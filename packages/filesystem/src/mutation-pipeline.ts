@@ -1309,9 +1309,10 @@ export class MutationPipeline {
 
   /**
    * The locks a mutation over `operations` holds (D3): for each path its
-   * logical hierarchy up to its mount prefix and its physical hierarchy up to
-   * its provider base path, the path itself exclusive and every ancestor
-   * shared, plus the owning project's token — shared, or exclusive for a
+   * physical hierarchy up to its provider base path — the path exclusive,
+   * every ancestor shared — and its logical hierarchy up to its mount prefix,
+   * all shared (exclusive at the path only for a mount with no physical
+   * identity), plus the owning project's token: shared, or exclusive for a
    * lifecycle changeset.
    *
    * @param operations - Every resolved path the mutation touches.
@@ -1326,13 +1327,13 @@ export class MutationPipeline {
     const claim = (token: string, shared: boolean): void => {
       claims.push(shared ? { token, shared } : { token });
     };
-    const addAuthorityHierarchy = (path: string, boundary: string): void => {
+    const addAuthorityHierarchy = (path: string, boundary: string, exactShared: boolean): void => {
       let current = resolveAuthorityPath(path);
       const root = resolveAuthorityPath(boundary);
       if (current !== root && !current.startsWith(`${root === '/' ? '' : root}/`)) {
         throw new Error(`Mutation path '${current}' is outside its authority root '${root}'.`);
       }
-      let shared = false;
+      let shared = exactShared;
       while (current !== '/') {
         claim(current, shared);
         shared = true;
@@ -1362,7 +1363,15 @@ export class MutationPipeline {
 
     for (const { path, resolution } of operations) {
       const normalized = resolveAuthorityPath(path);
-      addAuthorityHierarchy(normalized, resolution.entry?.prefix ?? normalized);
+      /* The physical token excludes every alias of the bytes, so the logical
+       * path itself needs no exclusive token of its own when there is one; its
+       * logical ancestors are still held shared, so a holder of a route lock
+       * (a project route held exclusively) still fences the write. */
+      addAuthorityHierarchy(
+        normalized,
+        resolution.entry?.prefix ?? normalized,
+        resolution.entry?.storageRootKey !== undefined,
+      );
       const projectId = this._projectLockOwner(normalized, resolution);
       if (projectId !== undefined) {
         claim(`project:${projectId}`, options?.lifecycle !== true);
@@ -1802,12 +1811,33 @@ export class MutationPipeline {
         ...(target === undefined ? [] : [{ path: target, resolution: targetResolution ?? resolution }]),
       ]);
       const globallyVisible = touched.some(({ path, resolution }) => this.isCurrentResolution(path, resolution));
-      if (globallyVisible) {
-        this._filePool()?.clear();
+      /* A file entry that may have landed costs only its own derivatives
+       * (Rule 5a); a directory-shaped one, everything below it. */
+      for (const { batch, path, resolution } of uncertain) {
+        if (!this.isCurrentResolution(path, resolution)) {
+          continue;
+        }
+        if (batch.op === 'write' || batch.op === 'append' || (batch.op === 'delete' && batch.kind === 'file')) {
+          this._filePool()?.invalidate(path);
+          this._treeIndexes.removeFile(path);
+        } else {
+          this._filePool()?.clear();
+          this._treeIndexes.evict(path);
+        }
       }
-      for (const { path, resolution } of touched) {
-        this._treeIndexes.evict(path);
-        notify('directory-change', parentDirectory(path), resolution);
+      for (const { batch, target } of uncertain) {
+        if (batch.op === 'move' && target !== undefined) {
+          this._treeIndexes.evict(target);
+        }
+      }
+      /* A half-finished recursive mkdir or removal may have changed anything up
+       * to its mount root; any other entry, only its parent directory. */
+      for (const { batch, path, resolution, target, targetResolution } of uncertain) {
+        const recursive = (batch.op === 'mkdir' || batch.op === 'delete') && batch.recursive === true;
+        notify('directory-change', recursive ? (resolution.entry?.prefix ?? path) : parentDirectory(path), resolution);
+        if (target !== undefined) {
+          notify('directory-change', parentDirectory(target), targetResolution ?? resolution);
+        }
       }
       events.length = 0;
       const all = prepared.map(({ path, resolution }) => ({ path, resolution }));

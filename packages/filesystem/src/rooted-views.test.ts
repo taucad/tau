@@ -237,9 +237,9 @@ describe('rooted porcelain', () => {
     expect((refusal as WorkspaceMutationError).path).toBe('src/absent.ts');
   });
 
-  it('should acquire the mutation locks once for a whole batch', async () => {
+  it('should hold one lock set to read the source and one to land a bounded copy', async () => {
     const queue = new ResourceQueue();
-    const claim = vi.spyOn(queue, 'queueForMany');
+    const claim = vi.spyOn(queue, 'queueForClaims');
     const providerRegistry = new ProviderRegistry();
     const scope = { backend: 'memory', storageRootKey: 'memory:rooted-views-locks' } as const;
     const provider = await providerRegistry.getProvider(scope);
@@ -262,7 +262,7 @@ describe('rooted porcelain', () => {
 
     await rooted.copyTree!('', 'backup');
 
-    expect(claim).toHaveBeenCalledOnce();
+    expect(claim).toHaveBeenCalledTimes(2);
   });
 });
 

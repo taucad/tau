@@ -136,11 +136,11 @@ describe('MountEntry.kind', () => {
         providerBasePath: 'cube-design',
         kind: 'other',
       });
-      const queueForMany = vi.spyOn(resourceQueue, 'queueForMany');
+      const queueForClaims = vi.spyOn(resourceQueue, 'queueForClaims');
 
       await service.writeFile('/cube-design/main.ts', 'physical route');
 
-      expect(queueForMany.mock.calls.at(-1)?.[0].filter((lock) => lock.startsWith('project:'))).toEqual([]);
+      expect(queueForClaims.mock.calls.at(-1)?.[0].filter(({ key }) => key.startsWith('project:'))).toEqual([]);
     } finally {
       service.dispose();
     }

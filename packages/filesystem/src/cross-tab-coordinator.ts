@@ -123,18 +123,32 @@ export const withCrossTabLocks = async <T>(
   const sorted = normalizeLockClaims(paths);
   workerTimings.count('locks.set');
   workerTimings.count('locks.token', sorted.length);
-  const acquire = async (index: number): Promise<T> => {
+  /* Each request is issued from inside the previous one's callback. Chromium
+   * runs a granted callback as its own task; an implementation that runs it
+   * synchronously inside `request` (Node's) grows the stack per token, so
+   * every 64 synchronous links the chain yields once to unwind it. */
+  const acquire = async (index: number, synchronousLinks: number): Promise<T> => {
     const claim = sorted[index];
     if (claim === undefined) {
       return operation();
     }
-    return navigator.locks.request(
+    let requesting = true;
+    const granted = navigator.locks.request(
       `${lockPrefix}${claim.token}`,
       { mode: claim.shared === true ? 'shared' : 'exclusive' },
-      async () => acquire(index + 1),
+      async () => {
+        const links = requesting ? synchronousLinks + 1 : 0;
+        if (links >= 64) {
+          await Promise.resolve();
+          return acquire(index + 1, 0);
+        }
+        return acquire(index + 1, links);
+      },
     );
+    requesting = false;
+    return granted;
   };
-  return acquire(0);
+  return acquire(0, 0);
 };
 
 /** Acquire browser authority locks, refusing when the platform cannot provide exclusion. @internal */

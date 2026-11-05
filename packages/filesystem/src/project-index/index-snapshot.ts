@@ -1,7 +1,9 @@
 /**
- * The Project Index's persisted snapshot in `<root>/.tau-index/` (charter D5).
+ * The Project Index's persisted snapshot in `<root>/.tau/index/` (charter D5).
  *
- * A reserved dot path: never discovered, listed, watched or versioned (I9). The
+ * A member of Tau's own `.tau` directory that no registry row names, so every
+ * released client already treats it as unversioned and the generated ignore
+ * block's `/.tau/*` keeps it out of a checkout; the indexes never list it (I9). The
  * snapshot carries the cross-tab vector it was written at, and a writer replaces
  * it only under the root's index lock and only when its own vector has seen
  * everything the stored one has (a CAS), so a stale tab never overwrites a newer
@@ -14,8 +16,8 @@
 import type { ContentFacts, FileSystemProvider } from '#types.js';
 import type { FactsAt, SnapshotRow } from '#project-index/project-index.js';
 
-/** The reserved directory every indexed root keeps its snapshot in. @public */
-export const projectIndexDirectory = '.tau-index';
+/** The reserved directory, relative to its root, every indexed root keeps its snapshot in. @public */
+export const projectIndexDirectory = '.tau/index';
 
 /** The snapshot's file name inside {@link projectIndexDirectory}. */
 const snapshotFile = 'snapshot.json';

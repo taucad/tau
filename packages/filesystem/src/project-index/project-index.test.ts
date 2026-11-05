@@ -2,6 +2,7 @@
 import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import * as fc from 'fast-check';
+import { sha256Bytes } from '@taucad/utils/hash';
 import type { FileStatEntry } from '@taucad/types';
 import { directoryConcurrency } from '#concurrency.js';
 import { MemoryProvider } from '#backend/memory-provider.js';
@@ -18,9 +19,9 @@ import type { WorkspaceFileService } from '#workspace-file-service.js';
 const file = (path: string, size: number, mtimeMs: number): ObservedRow => ({ path, kind: 'file', size, mtimeMs });
 const directory = (path: string): ObservedRow => ({ path, kind: 'dir', size: 0, mtimeMs: 0 });
 
-/** An index after one complete observation of these rows. */
+/** An index of a provider whose mtime keys facts, after one complete observation of these rows. */
 const observed = (rows: readonly ObservedRow[]): ProjectIndex => {
-  const index = new ProjectIndex();
+  const index = new ProjectIndex({ trustworthyMtime: true });
   index.completeObservation(index.beginObservation(), '', rows);
   return index;
 };
@@ -153,6 +154,29 @@ describe('ProjectIndex', () => {
       index.move('unknown/a', 'known/a');
       expect(index.stalePaths).toEqual(['known/a']);
     });
+
+    it('should re-observe a rename target moved while an observation lists the source', () => {
+      const index = observed([directory('dir'), file('dir/x.ts', 4, 1000)]);
+      const start = index.beginObservation();
+      index.move('dir', 'moved');
+      index.completeObservation(start, '', [directory('dir'), file('dir/x.ts', 4, 1000)]);
+
+      expect(index.stalePaths).toEqual(['moved']);
+      expect(index.entry('moved/x.ts')).toBeDefined();
+      expect(index.entry('dir')).toBeUndefined();
+    });
+
+    it('should re-observe a rename target moved before the index is complete', () => {
+      const loaded = ProjectIndex.fromSnapshot(
+        [
+          ['dir', 'd', 0, 0],
+          ['dir/x.ts', 'f', 4, 1000],
+        ],
+        1,
+      );
+      loaded.move('dir', 'moved');
+      expect(loaded.stalePaths).toEqual(['moved']);
+    });
   });
 
   describe('observation merge (D5)', () => {
@@ -206,6 +230,45 @@ describe('ProjectIndex', () => {
       /* Measured within the timestamp granularity of the bytes' own mtime: racy (H12). */
       expect(result.racy).toEqual(['a.ts']);
       expect(index.trusted('a.ts')).toBe(false);
+    });
+
+    /* Review E4: a same-size rewrite after the write, before the next compare. */
+    it('should drop write-path facts when the provider mtime is newer than their measurement', () => {
+      const index = observed([]);
+      index.recordFile('a.ts', { size: 4, facts: { contentKind: 'text', lineCount: 1 }, observedAt: 1000 });
+
+      index.completeObservation(index.beginObservation(), '', [file('a.ts', 4, 5000)]);
+
+      expect(index.entry('a.ts')).toMatchObject({ mtimeMs: 5000 });
+      expect(index.factsFor('a.ts')).toBeUndefined();
+      expect(index.trusted('a.ts')).toBe(false);
+    });
+  });
+
+  describe('a provider whose mtime cannot key facts', () => {
+    /* Review E5: an mtime that never moves (0) cannot tell a same-size rewrite. */
+    it('should drop facts on an invalidation and its re-observation', () => {
+      const index = new ProjectIndex();
+      index.completeObservation(index.beginObservation(), '', [file('a.ts', 4, 0)]);
+      index.recordFacts('a.ts', { contentKind: 'text', lineCount: 1 }, { size: 4, mtimeMs: 0, observedAt: 10_000 });
+
+      index.invalidate('a.ts');
+      expect(index.factsFor('a.ts')).toBeUndefined();
+
+      index.recordFacts('a.ts', { contentKind: 'text', lineCount: 1 }, { size: 4, mtimeMs: 0, observedAt: 10_000 });
+      index.completePathObservation(index.beginObservation(), 'a.ts', file('a.ts', 4, 0));
+      expect(index.factsFor('a.ts')).toBeUndefined();
+      expect(index.trusted('a.ts')).toBe(false);
+    });
+
+    it('should drop facts on every whole-root re-observation', () => {
+      const index = new ProjectIndex();
+      index.completeObservation(index.beginObservation(), '', [file('a.ts', 4, 0)]);
+      index.recordFacts('a.ts', { contentKind: 'binary' }, { size: 4, mtimeMs: 0, observedAt: 10_000 });
+
+      index.completeObservation(index.beginObservation(), '', [file('a.ts', 4, 0)]);
+
+      expect(index.factsFor('a.ts')).toBeUndefined();
     });
   });
 
@@ -301,7 +364,7 @@ const durableRoot = async (): Promise<{ provider: MemoryProvider; reads: () => n
   const readFile = vi.spyOn(provider, 'readFile');
   return {
     provider,
-    reads: () => readFile.mock.calls.filter(([path]) => !String(path).includes('.tau-index')).length,
+    reads: () => readFile.mock.calls.filter(([path]) => !String(path).includes('.tau/index')).length,
   };
 };
 
@@ -319,7 +382,7 @@ describe('ProjectIndexes', () => {
     const { provider, reads } = await durableRoot();
     await provider.writeFile('project/src/a.ts', 'a\nb');
     await provider.writeFile('project/.jj/store', 'ref');
-    await provider.writeFile('project/.tau-index/junk', 'x');
+    await provider.writeFile('project/.tau/index/junk', 'x');
     const indexes = indexesOver(provider);
 
     const index = await indexes.ready('/p');
@@ -333,15 +396,67 @@ describe('ProjectIndexes', () => {
   it('should answer lazy facts once, within the byte cap, and cache them by (size, mtime)', async () => {
     const { provider, reads } = await durableRoot();
     await provider.writeFile('project/small.ts', 'one\ntwo');
-    await provider.writeFile('project/large.ts', 'x'.repeat(100));
+    await provider.writeFile('project/large.ts', 'x'.repeat(600));
     const indexes = indexesOver(provider);
 
-    const first = await indexes.facts('/p', ['small.ts', 'large.ts', 'missing.ts'], { byteCap: 50 });
-    const second = await indexes.facts('/p', ['small.ts']);
+    /* No ranged read: a file past both the head and the cap costs a whole read to classify, so it is left out. */
+    const first = await indexes.facts('/p', ['small.ts', 'large.ts', 'missing.ts'], { lineCount: true, byteCap: 50 });
+    const second = await indexes.facts('/p', ['small.ts'], { lineCount: true });
 
     expect([...first]).toEqual([['small.ts', { contentKind: 'text', lineCount: 2 }]]);
     expect(second.get('small.ts')).toEqual({ contentKind: 'text', lineCount: 2 });
     expect(reads()).toBe(1);
+  });
+
+  /* Review I8: a listing's facts never read a binary in full, nor a text file past the cap. */
+  it('should classify from the head and count lines only for text within the cap', async () => {
+    const { provider } = await durableRoot();
+    /* The prototype method: `durableRoot` already spies on the instance one. */
+    const head = MemoryProvider.prototype.readFile.bind(provider) as (path: string) => Promise<Uint8Array<ArrayBuffer>>;
+    let streamed = 0;
+    Object.assign(provider, {
+      readFileStream: (path: string, options?: { position?: number; length?: number }) =>
+        new ReadableStream<Uint8Array<ArrayBuffer>>({
+          async start(controller) {
+            const position = options?.position ?? 0;
+            const whole = await head(path);
+            const bytes = whole.slice(position, position + (options?.length ?? Number.MAX_SAFE_INTEGER));
+            streamed += bytes.byteLength;
+            controller.enqueue(bytes);
+            controller.close();
+          },
+        }),
+    });
+    const binary = new Uint8Array(4000);
+    binary.fill(7);
+    binary[3] = 0;
+    await provider.writeFile('project/model.bin', binary);
+    await provider.writeFile('project/large.ts', 'line\n'.repeat(800));
+    await provider.writeFile('project/medium.ts', 'line\n'.repeat(200));
+    const fullReads = vi.spyOn(provider, 'readFile');
+    const indexes = indexesOver(provider);
+
+    const kinds = await indexes.facts('/p', ['model.bin', 'large.ts', 'medium.ts']);
+    expect([...kinds]).toEqual([
+      ['model.bin', { contentKind: 'binary' }],
+      ['large.ts', { contentKind: 'text' }],
+      ['medium.ts', { contentKind: 'text' }],
+    ]);
+    expect(fullReads.mock.calls.filter(([path]) => !String(path).includes('.tau/index'))).toStrictEqual([]);
+    expect(streamed).toBe(3 * 512);
+
+    const counted = await indexes.facts('/p', ['model.bin', 'large.ts', 'medium.ts'], {
+      lineCount: true,
+      byteCap: 2000,
+    });
+    expect([...counted]).toEqual([
+      ['model.bin', { contentKind: 'binary' }],
+      ['large.ts', { contentKind: 'text' }],
+      ['medium.ts', { contentKind: 'text', lineCount: 201 }],
+    ]);
+    expect(fullReads.mock.calls.map(([path]) => String(path)).filter((path) => !path.includes('.tau/index'))).toEqual([
+      'project/medium.ts',
+    ]);
   });
 
   it('should record facts from the write path without a read', async () => {
@@ -440,7 +555,124 @@ describe('ProjectIndexes', () => {
     const loads = vi.spyOn(ProjectIndex, 'fromSnapshot');
     await indexesOver(provider, { tabId: 'tab-c', seq: 0 }).ready('/p');
     expect(loads).not.toHaveBeenCalled();
-    expect(snapshotPath('project')).toBe('project/.tau-index/snapshot.json');
+    expect(snapshotPath('project')).toBe('project/.tau/index/snapshot.json');
+  });
+
+  /* Review E1. */
+  it('should clear the rescan mark once a later tab has scanned and stored its view', async () => {
+    const { provider } = await durableRoot();
+    await provider.writeFile('project/a.ts', 'a');
+    const a = indexesOver(provider, { tabId: 'tab-a', seq: 1 });
+    const b = indexesOver(provider, { tabId: 'tab-b', seq: 1 });
+    await a.ready('/p');
+    await b.ready('/p');
+    await a.persist('/p');
+    await b.persist('/p');
+
+    const tabC = { tabId: 'tab-c', seq: 0 };
+    const c = indexesOver(provider, tabC);
+    await c.ready('/p');
+    expect(await c.persist('/p')).toBe('written');
+    expect(await readIndexSnapshot(provider, 'project')).toMatchObject({ rescan: false });
+
+    await provider.writeFile('project/b.ts', 'b');
+    c.addFile('/p/b.ts', { size: 1 });
+    tabC.seq = 1;
+    expect(await c.persist('/p')).toBe('written');
+
+    expect(await readIndexSnapshot(provider, 'project')).toMatchObject({
+      rescan: false,
+      vector: { seqByTab: { 'tab-a': 1, 'tab-b': 1, 'tab-c': 1 } },
+    });
+  });
+
+  /* Review E2. */
+  it('should re-observe a subtree renamed while the load compare lists it', async () => {
+    const { provider } = await durableRoot();
+    await provider.writeFile('project/dir/x.ts', 'one\n');
+    const first = indexesOver(provider);
+    await first.facts('/p', ['dir/x.ts'], { digests: ['sha256'] });
+    expect(await first.persist('/p')).toBe('written');
+    /* Edited while closed: same size, new mtime. */
+    await new Promise((resolve) => {
+      setTimeout(resolve, 5);
+    });
+    await provider.writeFile('project/dir/x.ts', 'two\n');
+
+    const second = indexesOver(provider, { tabId: 'tab-b', seq: 0 });
+    const listRoot = provider.readdirWithStats.bind(provider);
+    let renamed = false;
+    vi.spyOn(provider, 'readdirWithStats').mockImplementation(async (path: string) => {
+      const rows = await listRoot(path);
+      if (!renamed && path === 'project') {
+        renamed = true;
+        await provider.rename('project/dir', 'project/moved');
+        second.rename('/p/dir', '/p/moved');
+      }
+      return rows;
+    });
+
+    const index = await second.ready('/p');
+    const onDisk = await provider.stat('project/moved/x.ts');
+    const hashed = await second.facts('/p', ['moved/x.ts'], { digests: ['sha256'] });
+
+    expect(index.entry('moved/x.ts')?.mtimeMs).toBe(onDisk.mtimeMs);
+    expect(index.stalePaths).toStrictEqual([]);
+    expect(hashed.get('moved/x.ts')?.sha256).toBe(await sha256Bytes(new TextEncoder().encode('two\n')));
+  });
+
+  /* Review E3: what an observer reports after the index stores its own snapshot. */
+  it('should drop facts about its own snapshot instead of rewriting it', async () => {
+    const { provider } = await durableRoot();
+    await provider.writeFile('project/a.ts', 'a');
+    const indexes = new ProjectIndexes({
+      resolve: () => ({ provider, path: 'project', persist: { lockName: 'tau-index:test:project' } }),
+      policy: tauPathPolicy,
+      tab: () => defaultTab,
+      persistDelayMilliseconds: 10,
+    });
+    await indexes.ready('/p');
+    await vi.waitFor(async () => {
+      expect(await readIndexSnapshot(provider, 'project')).toBeDefined();
+    });
+    const writes = vi.spyOn(provider, 'writeFile');
+
+    for (let echo = 0; echo < 3; echo += 1) {
+      indexes.invalidate('/p/.tau/index/snapshot.json');
+      indexes.rename('/p/.tau/index/snapshot.json.tmp', '/p/.tau/index/snapshot.json');
+      // oxlint-disable-next-line no-await-in-loop -- each echo is answered before the next.
+      await indexes.ready('/p');
+      // oxlint-disable-next-line no-await-in-loop -- past the persist delay.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+    }
+
+    expect(writes).not.toHaveBeenCalled();
+  });
+
+  it('should not rewrite its snapshot when a re-observed path is unchanged', async () => {
+    const { provider } = await durableRoot();
+    await provider.writeFile('project/a.ts', 'a');
+    const indexes = new ProjectIndexes({
+      resolve: () => ({ provider, path: 'project', persist: { lockName: 'tau-index:test:project' } }),
+      policy: tauPathPolicy,
+      tab: () => defaultTab,
+      persistDelayMilliseconds: 10,
+    });
+    await indexes.ready('/p');
+    await vi.waitFor(async () => {
+      expect(await readIndexSnapshot(provider, 'project')).toBeDefined();
+    });
+    const writes = vi.spyOn(provider, 'writeFile');
+
+    indexes.invalidate('/p/a.ts');
+    await indexes.ready('/p');
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+
+    expect(writes).not.toHaveBeenCalled();
   });
 
   it('should compare in full after a sequence gap', async () => {

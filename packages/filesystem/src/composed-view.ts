@@ -48,7 +48,9 @@ import type {
   WatchRequest,
 } from '#types.js';
 import { bufferToStream } from '#backend/stream-utils.js';
-import { getFileContentMetadata } from '#content-metadata.js';
+import { factsConcurrency, measureContentFacts } from '#content-metadata.js';
+import { mapConcurrent } from '#concurrency.js';
+import { workerTimings } from '#worker-timings.js';
 import type { IndexAdmits, IndexSearchOptions } from '#project-index/project-index.js';
 import type { IndexFactsOptions } from '#project-index/project-indexes.js';
 import type { RootedPorcelain } from '#rooted-views.js';
@@ -173,7 +175,8 @@ export type ComposedView = Omit<FileSystemProvider, 'rmdir'> &
     readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>>;
     /**
      * Lazy content facts of visible files (D4): an overlay entry's from its
-     * declaration, a project file's from the base's index or one read within
+     * declaration, a project file's from the base's index or measured here — the
+     * kind from its first 512 bytes, a line count only for text within
      * `byteCap`. Masked like `readFile`; a missing path or directory is left out.
      */
     facts(paths: readonly string[], options?: IndexFactsOptions): Promise<ReadonlyMap<string, ContentFacts>>;
@@ -691,20 +694,23 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     }
     let measured: ReadonlyMap<string, ContentFacts>;
     if (base.facts === undefined) {
-      const own = new Map<string, ContentFacts>();
-      let budget = factsOptions?.byteCap ?? Number.POSITIVE_INFINITY;
-      for (const target of project) {
-        // oxlint-disable-next-line no-await-in-loop -- the byte cap is spent in request order.
+      const own = await mapConcurrent(project, factsConcurrency, async (target) => {
         const stat = await upperStat(target);
-        if (stat?.type !== 'file' || stat.size > budget) {
-          continue;
+        if (stat?.type !== 'file') {
+          return undefined;
         }
-        // oxlint-disable-next-line no-await-in-loop -- the byte cap is spent in request order.
-        const bytes = await base.readFile(target);
-        budget -= bytes.byteLength;
-        own.set(target, getFileContentMetadata(bytes));
-      }
-      measured = own;
+        const { facts: measuredFacts, bytesRead } = await measureContentFacts(
+          base,
+          { path: target, size: stat.size },
+          {
+            lineCount: factsOptions?.lineCount,
+            byteCap: factsOptions?.byteCap,
+          },
+        );
+        workerTimings.count('view.facts.bytes', bytesRead);
+        return measuredFacts;
+      });
+      measured = new Map(project.flatMap((target, at) => (own[at] === undefined ? [] : [[target, own[at]] as const])));
     } else {
       measured = project.length === 0 ? new Map() : await base.facts(project, factsOptions);
     }

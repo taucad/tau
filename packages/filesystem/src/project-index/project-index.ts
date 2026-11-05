@@ -15,7 +15,8 @@
  *   meanwhile wins over what the observation listed for that path, so a write
  *   during a scan neither loses the scan nor the write.
  * - **Facts carry their key.** Facts are answered only while the entry's
- *   `(size, mtimeMs)` still equals the one they were measured at.
+ *   `(size, mtimeMs)` still equals the one they were measured at. On a
+ *   provider whose mtime cannot key them, every re-observation drops them.
  * - **Trust has a racy guard.** An oid offered to a cut must come from facts
  *   measured more than {@link timestampGranularityMilliseconds} after the bytes'
  *   own modification time; a younger stat cannot prove the bytes it describes
@@ -52,6 +53,18 @@ export type IndexEntry = Readonly<{
   generation: number;
   facts?: ContentFacts;
   factsAt?: FactsAt;
+}>;
+
+/** Options for a {@link ProjectIndex}. @public */
+export type ProjectIndexOptions = Readonly<{
+  /** The generation to continue from (a loaded snapshot's); `0` for a new root. */
+  generation?: number;
+  /**
+   * Whether the provider's mtime changes with every content change, so
+   * `(size, mtimeMs)` can key facts. Unset, facts last only until the path is
+   * next observed or invalidated.
+   */
+  trustworthyMtime?: boolean;
 }>;
 
 /** One row an observation of the provider listed: head metadata only. @public */
@@ -143,14 +156,15 @@ const statFields = (facts: ContentFacts | undefined): StatContentMetadata => {
 export class ProjectIndex {
   /**
    * Rebuild an index from a persisted snapshot. It is not complete until a
-   * compare has validated it against the provider.
+   * compare has validated it against the provider. Only a root whose mtime can
+   * key facts keeps a snapshot, so the index trusts its provider's mtime.
    *
    * @param rows - Serialized entries.
    * @param generation - The snapshot's generation.
    * @returns The index.
    */
   public static fromSnapshot(rows: readonly SnapshotRow[], generation: number): ProjectIndex {
-    const index = new ProjectIndex(generation);
+    const index = new ProjectIndex({ generation, trustworthyMtime: true });
     for (const [path, kind, size, mtimeMs, facts, factsAt] of rows) {
       const node: Node =
         kind === 'd'
@@ -162,6 +176,7 @@ export class ProjectIndex {
   }
 
   private readonly _root: Node = directoryNode(0);
+  private readonly _trustworthyMtime: boolean;
   private _generation: number;
   private _complete = false;
   /** Paths a mutation touched, with its generation, kept while an observation is in flight. */
@@ -171,10 +186,11 @@ export class ProjectIndex {
   private readonly _stale = new Set<string>();
 
   /**
-   * @param generation - The generation to continue from (a loaded snapshot's), `0` for a new root.
+   * @param options - The generation to continue from, and whether the provider's mtime can key facts.
    */
-  public constructor(generation = 0) {
-    this._generation = generation;
+  public constructor(options: ProjectIndexOptions = {}) {
+    this._generation = options.generation ?? 0;
+    this._trustworthyMtime = options.trustworthyMtime === true;
   }
 
   /** Monotonic per root; bumped by every change the index records. */
@@ -402,7 +418,10 @@ export class ProjectIndex {
 
   /**
    * Record a rename. A source the index does not hold leaves the target
-   * unknown: it is marked stale and re-observed by the next refresh.
+   * unknown: it is marked stale and re-observed by the next refresh. So is a
+   * target moved while an observation is in flight, or before the index is
+   * complete: the source's metadata is then a listing taken before the move, or
+   * a snapshot no compare has validated yet.
    *
    * @param from - Root-relative source path.
    * @param to - Root-relative target path.
@@ -425,6 +444,9 @@ export class ProjectIndex {
     };
     renumber(node);
     this._place(to, node, true);
+    if (this._observing > 0 || !this._complete) {
+      this._stale.add(to);
+    }
   }
 
   /**
@@ -435,6 +457,9 @@ export class ProjectIndex {
    */
   public invalidate(path: string): void {
     this._stale.add(path);
+    if (!this._trustworthyMtime) {
+      this._dropFacts(this._resolve(segmentsOf(path)));
+    }
   }
 
   /**
@@ -502,6 +527,9 @@ export class ProjectIndex {
         return;
       }
       if (node?.kind === row.kind && (row.kind === 'dir' || (node.size === row.size && node.mtimeMs === row.mtimeMs))) {
+        if (!this._trustworthyMtime) {
+          this._dropFacts(node);
+        }
         return;
       }
       this._generation += 1;
@@ -635,7 +663,16 @@ export class ProjectIndex {
             delete node.pendingMtime;
             if (node.factsAt !== undefined) {
               node.factsAt = { ...node.factsAt, mtimeMs: row.mtimeMs };
+              /* Bytes modified after the writer measured them are not the
+               * bytes it measured: a same-size rewrite since. */
+              if (row.mtimeMs > node.factsAt.observedAt) {
+                this._dropFacts(node);
+              }
             }
+          }
+          if (!this._trustworthyMtime) {
+            this._dropFacts(node);
+            continue;
           }
           if (
             node.factsAt?.mtimeMs !== undefined &&
@@ -736,6 +773,18 @@ export class ProjectIndex {
       }
     }
     return current;
+  }
+
+  /** Forget the facts of a node and everything below it. */
+  private _dropFacts(node: Node | undefined): void {
+    if (node === undefined) {
+      return;
+    }
+    delete node.facts;
+    delete node.factsAt;
+    for (const child of node.children?.values() ?? []) {
+      this._dropFacts(child);
+    }
   }
 
   private _detach(path: string): void {

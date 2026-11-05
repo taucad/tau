@@ -8,7 +8,7 @@
 
 - `mutation-pipeline.ts` — every write: locks, commit, cache/index bookkeeping, events, batch semantics, move/copy/duplicate porcelain.
 - `rooted-views.ts` — one captured mount per view; confined, mask-checked reads, writes and porcelain; `ESTALE` after its mount goes.
-- `project-index/` — one `ProjectIndex` per root behind `ProjectIndexes`; persisted in `<root>/.tau-index` under a Web Lock with a CAS on the cross-tab vector, compared at load and after a sequence gap, merged with concurrent mutations; serves rooted `search`/`statTree`/`facts`/`hashFiles` with no provider walk. Topology changes evict only affected roots; path-less reset/dispose may clear all.
+- `project-index/` — one `ProjectIndex` per root behind `ProjectIndexes`; persisted in `<root>/.tau/index` under a Web Lock with a CAS on the cross-tab vector, compared at load and after a sequence gap, merged with concurrent mutations; serves rooted `search`/`statTree`/`facts`/`hashFiles` with no provider walk. Topology changes evict only affected roots; path-less reset/dispose may clear all.
 - `content-ops/` — `walk`, `contents`, `archive`: pure reads over the port at `@taucad/filesystem/content-ops`. The only place ZIP encoding lives.
 - `path-registry.ts` — owns `PathRegistry` rows and `tauPathPolicy`; the mechanism core accepts an injected `PathPolicy` and never imports this module.
 - `project-routes.ts` — the only speller of `/projects/<id>`, `/checkouts/<id>`, `/previews/<id>`, `/node_modules`; read `MountEntry.kind`, never `segments[1]`.

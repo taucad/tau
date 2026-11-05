@@ -346,16 +346,27 @@ describe('path registry', () => {
 
   /* Ruling D29: one repository name on every host. `.tau/revisions` was the
    * browser's second name for the same directory; nothing but the `.git` row may
-   * claim the control plane now, beside the Project Index's reserved paths (I9). */
+   * claim the control plane now, beside import staging (I9). */
   it('names the repository once, at .git', () => {
     expect(pathRegistry.filter((row) => row.class === 'control-plane').map((row) => row.prefix)).toStrictEqual([
       '.tau/binding.json',
-      '.tau-index',
       '.tau-staging',
       '.jj',
       '.git',
       '.tau-staging',
     ]);
+  });
+
+  /* D5: an agent that lists or greps the project never walks into the Project
+   * Index's snapshot, and no watcher echoes the index's own write. */
+  it('hides the project-root Project Index snapshot from agents and watchers, and only at the root', () => {
+    expect(classify('.tau/index/snapshot.json')).toStrictEqual({
+      class: 'cache',
+      versioned: false,
+      agentAccess: 'hidden',
+      watch: 'none',
+    });
+    expect(classify('src/.tau/index/snapshot.json')).toStrictEqual(unlistedPathClassification);
   });
 
   it('matches a nested node_modules but only a project-root exports', () => {

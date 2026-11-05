@@ -91,8 +91,9 @@ export type {
   IndexEntryKind,
   IndexSearchOptions,
   ObservedRow,
+  ProjectIndexOptions,
 } from '#project-index/project-index.js';
-export { reservedIndexPaths } from '#project-index/project-indexes.js';
+export { isReservedIndexPath, reservedIndexPaths } from '#project-index/project-indexes.js';
 export type { IndexFactsOptions } from '#project-index/project-indexes.js';
 export { projectIndexDirectory } from '#project-index/index-snapshot.js';
 export type { IndexVector } from '#project-index/index-snapshot.js';
@@ -124,15 +125,20 @@ export { WatchRegistry } from '#watch-registry.js';
 export type { WatchRegistryOptions } from '#watch-registry.js';
 export { streamChunkSize, bufferToStream } from '#backend/stream-utils.js';
 export { CrossTabCoordinator } from '#cross-tab-coordinator.js';
+export { mapConcurrent } from '#concurrency.js';
 export {
   countLineBytes,
   countTextLines,
+  factsConcurrency,
   fileMetadataFields,
   fileStatFromBytes,
   getFileContentMetadata,
   headSniffByteLength,
+  lineCountByteCap,
+  measureContentFacts,
   seemsBinary,
 } from '#content-metadata.js';
+export type { ContentFactsSource, MeasuredContentFacts } from '#content-metadata.js';
 
 export { MountTable } from '#mount-table.js';
 export type {

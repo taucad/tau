@@ -231,6 +231,7 @@ export class WorkspaceFileService {
       pipeline: this._pipeline,
       crossTabCoordinator: this._crossTabCoordinator,
       projectIndexes: this._projectIndexes,
+      policy: options.policy,
       filePool: () => this._filePool,
       disposeStorageRoot: (storageRootKey) => {
         this.disposeStorageRoot(storageRootKey);
@@ -372,17 +373,6 @@ export class WorkspaceFileService {
   public async stat(path: string): Promise<FileStat> {
     const { provider, path: resolvedPath } = this._resolveProvider(path);
     return provider.stat(resolvedPath);
-  }
-
-  /**
-   * Run the full head-metadata compare of every open Project Index (D5): what a
-   * tab regaining visibility asks, since a webaccess folder may have been edited
-   * outside the browser meanwhile. Reads no file content.
-   *
-   * @returns Once every open index is compared.
-   */
-  public async compareIndexes(): Promise<void> {
-    await this._projectIndexes.compareAll();
   }
 
   /**
@@ -1038,14 +1028,21 @@ export class WorkspaceFileService {
   }
 
   /**
-   * Safety-reconcile one routed project, or every configured webaccess root when omitted.
+   * Safety-reconcile one routed project, or every configured webaccess root when
+   * omitted, then run the head-metadata compare of the warm Project Indexes it
+   * covers (D5): that project's, or every one.
    *
    * @param root - Optional routed project root.
    * @returns `true` when every root this call covered is under live `FileSystemObserver`
    *          delivery, which lets the caller poll on a slow safety-net cadence instead.
    */
   public async pollExternalChanges(root?: string): Promise<boolean> {
-    return this._externalChanges.poll(root);
+    const nativelyObserved = await this._externalChanges.poll(root);
+    /* The same moments — a poll, a tab regaining visibility — compare the warm
+     * Project Indexes they cover (D5), so digests the index offers a cut were
+     * validated against the provider since the last edit outside the browser. */
+    await (root === undefined ? this._projectIndexes.compareAll() : this._projectIndexes.compareWarm(root));
+    return nativelyObserved;
   }
 
   // --- Backend management ---

@@ -6,7 +6,7 @@
  * mutation, external fact and topology change lands in every index whose root
  * contains the path with no mount boundary between them, and in none other.
  *
- * Opening a root loads its snapshot from `<root>/.tau-index/` and runs one
+ * Opening a root loads its snapshot from `<root>/.tau/index/` and runs one
  * head-metadata compare of the whole root — a listing per directory, no file
  * content (I3) — or, with no trustworthy snapshot, the same listing as a scan.
  * Either way the observation merges with every mutation recorded meanwhile.
@@ -16,7 +16,7 @@
 
 import { joinRelativePath, normalizePath } from '@taucad/utils/path';
 import { sha256Bytes } from '@taucad/utils/hash';
-import { getFileContentMetadata } from '#content-metadata.js';
+import { factsConcurrency, getFileContentMetadata, measureContentFacts } from '#content-metadata.js';
 import { directoryConcurrency, mapConcurrent, statConcurrency } from '#concurrency.js';
 import { workerTimings } from '#worker-timings.js';
 import type { ContentFacts, ContentFactsOptions, FileStatEntry, FileSystemProvider, PathPolicy } from '#types.js';
@@ -25,8 +25,18 @@ import type { IndexAdmits, IndexCompareResult, IndexEntryKind, ObservedRow } fro
 import { projectIndexDirectory, readIndexSnapshot, writeIndexSnapshot } from '#project-index/index-snapshot.js';
 import type { IndexVector } from '#project-index/index-snapshot.js';
 
-/** Reserved dot paths no index ever holds (I9): its own snapshot, and import staging. @public */
+/** Reserved root paths no index ever holds (I9): its own snapshot, and import staging. @public */
 export const reservedIndexPaths: readonly string[] = Object.freeze([projectIndexDirectory, '.tau-staging']);
+
+/**
+ * Whether a root-relative path is one of the {@link reservedIndexPaths} or lies under one.
+ *
+ * @param relative - Root-relative path.
+ * @returns Whether no index holds it.
+ * @public
+ */
+export const isReservedIndexPath = (relative: string): boolean =>
+  reservedIndexPaths.some((reserved) => relative === reserved || relative.startsWith(`${reserved}/`));
 
 /** How the indexes reach one root's bytes. @public */
 export type IndexRootResolution = Readonly<{
@@ -185,18 +195,34 @@ export class ProjectIndexes {
   }
 
   /**
-   * Lazy content facts (D4): answered from the index while they still describe
-   * the bytes, otherwise measured from one read, recorded and answered.
+   * Compare one root if it is warm; a cold root opens with its own compare.
    *
-   * A requested digest is answered from the index only when the entry is
-   * trusted (racy guard, I5); a provider without a trustworthy mtime always
-   * pays the read. Paths that would take the bytes read past `byteCap` are left
-   * out, as are directories and missing paths.
+   * @param root - Absolute root.
+   * @returns Once compared, or at once for a cold root.
+   */
+  public async compareWarm(root: string): Promise<void> {
+    if (this.get(root) !== undefined) {
+      await this.compare(root);
+    }
+  }
+
+  /**
+   * Lazy content facts (D4): answered from the index while they still describe
+   * the bytes, otherwise measured, recorded and answered — at most
+   * {@link factsConcurrency} files at a time.
+   *
+   * The kind comes from a file's first 512 bytes, so a binary is never read in
+   * full for it; a text file is read in full only for a requested line count
+   * and only within `byteCap`, and is otherwise answered as text with no count.
+   * A requested digest needs the whole file within `byteCap`, and is answered
+   * from the index only when the entry is trusted (racy guard, I5); a provider
+   * without a trustworthy mtime always pays the read. Directories, missing
+   * paths and files whose kind cannot be learned within the cap are left out.
    *
    * @param root - Absolute root.
    * @param paths - Root-relative file paths.
-   * @param options - Byte cap, digests wanted, cancellation.
-   * @returns Facts by path.
+   * @param options - Line counts, digests, the per-file byte cap, cancellation.
+   * @returns Facts by path, in request order.
    */
   public async facts(
     root: string,
@@ -207,53 +233,59 @@ export class ProjectIndexes {
     const index = await this.ready(key);
     const resolution = this._resolve(key);
     const digests = options?.digests ?? [];
+    const lineCount = options?.lineCount === true;
+    const byteCap = options?.byteCap ?? Number.POSITIVE_INFINITY;
     const trustworthy = resolution.persist !== undefined;
-    let budget = options?.byteCap ?? Number.POSITIVE_INFINITY;
-    const answered = new Map<string, ContentFacts>();
-    let recorded = false;
-    for (const path of paths) {
+    const answers = (path: string, known: ContentFacts | undefined): known is ContentFacts => {
+      if (known === undefined || !digests.every((digest) => known[digest] !== undefined)) {
+        return false;
+      }
+      if (digests.length > 0) {
+        return trustworthy && index.trusted(path);
+      }
+      return (
+        !lineCount ||
+        known.contentKind === 'binary' ||
+        known.lineCount !== undefined ||
+        (index.entry(path)?.size ?? 0) > byteCap
+      );
+    };
+    const answered = await mapConcurrent(paths, factsConcurrency, async (path) => {
       options?.signal?.throwIfAborted();
       const known = index.factsFor(path);
-      if (
-        known !== undefined &&
-        digests.every((digest) => known[digest] !== undefined) &&
-        (digests.length === 0 || (trustworthy && index.trusted(path)))
-      ) {
-        answered.set(path, known);
-        continue;
+      if (answers(path, known)) {
+        return { facts: known, recorded: false };
       }
       const entry = index.entry(path);
-      if (entry?.kind === 'dir' || (entry !== undefined && entry.size > budget)) {
-        continue;
+      if (entry?.kind === 'dir') {
+        return { facts: undefined, recorded: false };
       }
       const providerPath = joinRelativePath(resolution.path, path);
       const observedAt = Date.now();
-      // oxlint-disable-next-line no-await-in-loop -- the byte cap is spent in request order.
       const stat = await resolution.provider.stat(providerPath).catch(() => undefined);
-      if (stat?.type !== 'file' || stat.size > budget) {
-        continue;
+      if (stat?.type !== 'file') {
+        return { facts: undefined, recorded: false };
       }
-      // oxlint-disable-next-line no-await-in-loop -- the byte cap is spent in request order.
-      const bytes = await resolution.provider.readFile(providerPath);
-      budget -= bytes.byteLength;
-      workerTimings.count('index.facts.bytes', bytes.byteLength);
-      const facts: ContentFacts = {
-        ...getFileContentMetadata(bytes),
-        // oxlint-disable-next-line no-await-in-loop -- digests of the bytes just read.
-        ...(digests.includes('sha256') ? { sha256: await sha256Bytes(bytes) } : {}),
-        // oxlint-disable-next-line no-await-in-loop -- digests of the bytes just read.
-        ...(digests.includes('blobOid') ? { blobOid: await blobOidOf(bytes) } : {}),
-      };
-      answered.set(path, facts);
-      if (entry !== undefined && bytes.byteLength === stat.size) {
+      const file = { path: providerPath, size: stat.size };
+      const [facts, keyed] =
+        digests.length === 0
+          ? [await this._measure(resolution.provider, file, { lineCount, byteCap }), true]
+          : await this._digest(resolution.provider, file, { digests, byteCap });
+      const recorded = facts !== undefined && keyed && entry !== undefined;
+      if (recorded) {
         index.recordFacts(path, facts, { size: stat.size, mtimeMs: stat.mtimeMs, observedAt });
-        recorded = true;
       }
-    }
-    if (recorded) {
+      return { facts, recorded };
+    });
+    if (answered.some((answer) => answer.recorded)) {
       this._schedulePersist(key);
     }
-    return answered;
+    return new Map(
+      paths.flatMap((path, at) => {
+        const { facts } = answered[at] ?? {};
+        return facts === undefined ? [] : [[path, facts] as const];
+      }),
+    );
   }
 
   /**
@@ -281,6 +313,12 @@ export class ProjectIndexes {
       await this._refreshStale(key, state.index);
       clearTimeout(state.persistTimer);
       state.persistTimer = undefined;
+    }
+    /* Storing creates `.tau` when the root has none: hold it first, or the next
+     * compare finds it new and stores the snapshot again for it. */
+    const container = projectIndexDirectory.split('/', 1)[0]!;
+    if (state.index.entry(container) === undefined) {
+      state.index.recordDirectory(container);
     }
     return writeIndexSnapshot({
       provider: resolution.provider,
@@ -411,12 +449,13 @@ export class ProjectIndexes {
     for (const [root, state] of this._states) {
       const relativeFrom = this._inside(root, source);
       const relativeTo = this._inside(root, target);
-      if (relativeFrom === undefined && relativeTo === undefined) {
-        continue;
-      }
-      if (relativeFrom === undefined) {
-        state.index.invalidate(relativeTo!);
-      } else if (relativeTo === undefined) {
+      /* A side outside this root, or one no index holds, is not a move here. */
+      if (relativeFrom === undefined || this._excluded(relativeFrom)) {
+        if (relativeTo === undefined || this._excluded(relativeTo)) {
+          continue;
+        }
+        state.index.invalidate(relativeTo);
+      } else if (relativeTo === undefined || this._excluded(relativeTo)) {
         state.index.remove(relativeFrom);
       } else {
         state.index.move(relativeFrom, relativeTo);
@@ -436,7 +475,12 @@ export class ProjectIndexes {
     for (const [root, state] of this._states) {
       const relative = this._inside(root, normalized);
       if (relative !== undefined) {
-        state.index.invalidate(relative);
+        /* The index's own snapshot, staging, and what policy leaves unwatched
+         * are never held, so a fact about them changes nothing: dropping it is
+         * what stops the index's own write from echoing back as a rewrite. */
+        if (relative === '' || !this._excluded(relative)) {
+          state.index.invalidate(relative);
+        }
       } else if (relativeTo(normalized, root) !== undefined) {
         /* The fact names an ancestor of this root: all of it is unknown. */
         state.index.invalidate('');
@@ -474,8 +518,17 @@ export class ProjectIndexes {
     const snapshot =
       resolution.persist === undefined ? undefined : await readIndexSnapshot(resolution.provider, resolution.path);
     const usable = snapshot !== undefined && !snapshot.rescan;
-    const index = usable ? ProjectIndex.fromSnapshot(snapshot.entries, snapshot.vector.generation) : new ProjectIndex();
-    const state: RootState = { index, seen: usable ? { ...snapshot.vector.seqByTab } : {}, needsCompare: false };
+    const index = usable
+      ? ProjectIndex.fromSnapshot(snapshot.entries, snapshot.vector.generation)
+      : new ProjectIndex({
+          trustworthyMtime:
+            resolution.persist !== undefined || resolution.provider.capabilities.trustworthyMtime === true,
+        });
+    /* A rescan still accounts for every notice the stored vector names: the
+     * scan below observes the provider after all of them. Adopting the vector
+     * lets this tab's next snapshot replace the rescan mark instead of meeting
+     * it as incomparable forever. */
+    const state: RootState = { index, seen: { ...snapshot?.vector.seqByTab }, needsCompare: false };
     this._states.set(root, state);
     workerTimings.count(usable ? 'index.load' : 'index.scan', 1);
     await this._observe(root, index, '');
@@ -491,9 +544,13 @@ export class ProjectIndexes {
     return index;
   }
 
-  /** Re-observe the paths external facts left unknown, each as a scoped observation. */
+  /**
+   * Re-observe the paths external facts left unknown, each as a scoped
+   * observation; persist only when one changed the index.
+   */
   private async _refreshStale(root: string, index: ProjectIndex): Promise<void> {
     const resolution = this._resolve(root);
+    const { generation } = index;
     const stale = index.stalePaths.filter(
       (path, _, all) => !all.some((other) => other !== path && (other === '' || path.startsWith(`${other}/`))),
     );
@@ -518,7 +575,9 @@ export class ProjectIndexes {
         await this._observe(root, index, path);
       }
     }
-    this._schedulePersist(root);
+    if (index.generation !== generation) {
+      this._schedulePersist(root);
+    }
   }
 
   /**
@@ -600,11 +659,42 @@ export class ProjectIndexes {
 
   /** The path policy at scan time (I9): reserved index paths, then everything nothing watches. */
   private _excluded(relative: string): boolean {
-    const first = relative.split('/', 1)[0]!;
-    if (reservedIndexPaths.includes(first)) {
-      return true;
+    return isReservedIndexPath(relative) || this._options.policy?.classify(relative).watch === 'none';
+  }
+
+  /** Kind, and a line count when asked for, within the per-file cap. */
+  private async _measure(
+    provider: FileSystemProvider,
+    file: Readonly<{ path: string; size: number }>,
+    options: Readonly<{ lineCount: boolean; byteCap: number }>,
+  ): Promise<ContentFacts | undefined> {
+    const measured = await measureContentFacts(provider, file, options);
+    workerTimings.count('index.facts.bytes', measured.bytesRead);
+    return measured.facts;
+  }
+
+  /**
+   * Every fact of the whole file, digests included, when it fits the per-file
+   * cap; and whether the bytes read are the ones the stat described, so the
+   * facts may be recorded under its key.
+   */
+  private async _digest(
+    provider: FileSystemProvider,
+    file: Readonly<{ path: string; size: number }>,
+    options: Readonly<{ digests: ReadonlyArray<'sha256' | 'blobOid'>; byteCap: number }>,
+  ): Promise<readonly [ContentFacts | undefined, boolean]> {
+    const { path, size } = file;
+    if (size > options.byteCap) {
+      return [undefined, false];
     }
-    return this._options.policy?.classify(relative).watch === 'none';
+    const bytes = await provider.readFile(path);
+    workerTimings.count('index.facts.bytes', bytes.byteLength);
+    const facts: ContentFacts = {
+      ...getFileContentMetadata(bytes),
+      ...(options.digests.includes('sha256') ? { sha256: await sha256Bytes(bytes) } : {}),
+      ...(options.digests.includes('blobOid') ? { blobOid: await blobOidOf(bytes) } : {}),
+    };
+    return [facts, bytes.byteLength === size];
   }
 
   private _resolve(root: string): IndexRootResolution {

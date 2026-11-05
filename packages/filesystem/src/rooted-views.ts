@@ -291,18 +291,25 @@ export class RootedViews {
 
     /* One provider call for the whole set: a remote provider digests beside its
      * bytes. Without one, the root's index answers each trusted digest and
-     * reads, digests and records the rest (D5). */
+     * reads, digests and records the rest (D5) — except on a root other
+     * programs edit (a folder the user picked), which changes between polls:
+     * until a cut compares its index first (W3.2), it offers no hashFiles and
+     * the caller digests the bytes it reads. */
     const providerHashFiles = captured.provider.hashFiles?.bind(captured.provider);
-    const hashFiles =
-      providerHashFiles === undefined
-        ? async (paths: readonly string[]): Promise<Record<string, string>> => {
+    const indexHashFiles =
+      captured.provider.capabilities.externallyEdited === true
+        ? undefined
+        : async (paths: readonly string[]): Promise<Record<string, string>> => {
             const local = paths.map((path) => resolveLocal(path).localPath);
             const answered = await this._projectIndexes.facts(root, local, { digests: ['sha256'] });
             assertCurrent();
             return Object.fromEntries(
               paths.map((path, index) => [path, answered.get(local[index]!)?.sha256 ?? 'missing']),
             );
-          }
+          };
+    const hashFiles =
+      providerHashFiles === undefined
+        ? indexHashFiles
         : async (paths: readonly string[]): Promise<Record<string, string>> => {
             const providerPaths = paths.map((path) => resolveLocal(path).resolution.path);
             const digests = await providerHashFiles(providerPaths);
@@ -779,7 +786,7 @@ export class RootedViews {
       dispose() {
         // The provider and rooted view lifetime remain owned by WorkspaceFileService.
       },
-      hashFiles,
+      ...(hashFiles === undefined ? {} : { hashFiles }),
       readFile,
       readFileStream,
       writeFile,

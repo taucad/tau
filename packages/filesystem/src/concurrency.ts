@@ -30,6 +30,7 @@ export const directoryConcurrency = 16;
  * @param limit - Maximum number of concurrent calls.
  * @param map - Per-item work.
  * @returns One result per input, in input order.
+ * @public
  */
 export async function mapConcurrent<Item, Result>(
   items: readonly Item[],

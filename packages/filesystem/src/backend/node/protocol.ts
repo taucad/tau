@@ -17,10 +17,12 @@ import { streamChunkSize } from '#backend/stream-utils.js';
 
 /**
  * Wire version. Version 7 carries directory entry kinds without per-child stat
- * requests; version 8 adds `hashFiles`, digests computed beside the bytes.
+ * requests; version 8 adds `hashFiles`, digests computed beside the bytes;
+ * version 9 drops the head-only stat and listing modes, and a stat or listing
+ * row carries content facts only when already known (I3).
  * @public
  */
-export const nodeFsProtocolVersion = 8;
+export const nodeFsProtocolVersion = 9;
 
 /**
  * Most watch events one frame carries. The host sends what one native callback reported as one frame, so a bulk

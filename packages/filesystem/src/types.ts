@@ -90,9 +90,13 @@ export type ContentFacts = Readonly<{
 /** Options for a lazy {@link ContentFacts} request. @public */
 export type ContentFactsOptions = Readonly<{
   /**
-   * Most bytes the request may read in total. A path whose facts are unknown
-   * and would take the total past the cap is left out of the answer; omitted
-   * means no cap.
+   * Count the lines of text files. Without it a request learns the kind only,
+   * from each file's first 512 bytes.
+   */
+  lineCount?: boolean;
+  /**
+   * Largest file read in full, to count lines or digest it; omitted means no
+   * cap. A larger file answers its kind and nothing else (D4).
    */
   byteCap?: number;
   signal?: AbortSignal;
@@ -124,6 +128,12 @@ export type ProviderCapabilities = {
    * opts out: no snapshot is kept and every fact is re-read (closeout EQ7).
    */
   readonly trustworthyMtime?: boolean;
+  /**
+   * Whether programs other than Tau's authorities write this root (a folder
+   * the user picked, a checkout on disk), so an indexed digest must be
+   * compared against the provider before a cut trusts it (D5).
+   */
+  readonly externallyEdited?: boolean;
 };
 
 /**

@@ -161,6 +161,19 @@ export type EventLogAppender = {
 };
 
 /**
+ * Whether an append failed because the authority's fence refused it (D23), not because the write broke.
+ *
+ * @param error - What the port's append rejected with.
+ * @returns Whether the code is `EAPPENDSTALE` or `EFENCED`.
+ */
+const isAuthorityFenceRefusal = (error: unknown): boolean => {
+  if (error === null || typeof error !== 'object' || !('code' in error)) {
+    return false;
+  }
+  return error.code === 'EAPPENDSTALE' || error.code === 'EFENCED';
+};
+
+/**
  * Storage primitives used by environment-specific appenders.
  *
  * The fence is not the port's: the appender checks the log's length inside `exclusive`, so the port supplies only a
@@ -170,7 +183,13 @@ export type EventLogAppender = {
  */
 export type EventLogStorage = {
   read(): Promise<Uint8Array<ArrayBuffer>>;
-  append(bytes: Uint8Array<ArrayBuffer>): Promise<void>;
+  /**
+   * Append `bytes`. `expectedLength` is the length the appender checked inside `exclusive`; a port that can fence
+   * at the authority (D23) refuses with `EAPPENDSTALE` or `EFENCED`, writing nothing, when the log is no longer
+   * that length, which closes the window a lock that is not the authority's leaves open. A port that cannot fence
+   * ignores it.
+   */
+  append(bytes: Uint8Array<ArrayBuffer>, expectedLength?: number): Promise<void>;
   truncate(size: number): Promise<void>;
   close(): Promise<void>;
   /** Current byte length of the log. */
@@ -847,8 +866,14 @@ export const createEventLogAppender = async (
       }
       tornTail = undefined;
       try {
-        await storage.append(bytes);
+        await storage.append(bytes, byteLength);
       } catch (appendError) {
+        /* D23: the authority refused the append because another writer's bytes landed first. Nothing of this
+         * append was written, and everything past `byteLength` is that writer's, so a rollback would delete it. */
+        if (isAuthorityFenceRefusal(appendError)) {
+          fenced = true;
+          throw fencedError();
+        }
         // Safe: no other writer can append inside this section, so the bytes past `byteLength` are this append's.
         try {
           await storage.truncate(byteLength);

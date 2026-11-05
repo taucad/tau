@@ -60,6 +60,17 @@ export type ProviderEventLogOptions = {
     readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
     writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
     appendFile?(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
+    /**
+     * Append only while the file is still `fence.expectedLength` bytes, refusing with `EAPPENDSTALE` (or `EFENCED`)
+     * and writing nothing otherwise (D23). When present the log's appends use it, so the Web Lock is no longer the
+     * only thing between two writers: a writer in another browser profile, device or process is fenced by the
+     * authority itself.
+     */
+    appendFileFenced?(
+      path: string,
+      data: Uint8Array<ArrayBuffer> | string,
+      fence: { readonly expectedLength: number },
+    ): Promise<void>;
     unlink(path: string): Promise<void>;
     /** Current durable byte size; omission retains the full-read compatibility fallback. */
     stat?(path: string, options: FileStatOptions): Promise<{ readonly size: number; readonly mtimeMs?: number }>;
@@ -283,7 +294,10 @@ const openProviderWriter = async (
   };
   const storage: EventLogStorage = {
     read: readBytes,
-    append: async (bytes) => appendFile.call(fileSystem, filePath, bytes),
+    append: async (bytes, expectedLength) =>
+      fileSystem.appendFileFenced === undefined || expectedLength === undefined
+        ? appendFile.call(fileSystem, filePath, bytes)
+        : fileSystem.appendFileFenced(filePath, bytes, { expectedLength }),
     truncate: async (size) => {
       if (!(await fileSystem.exists(filePath))) {
         if (size === 0) {

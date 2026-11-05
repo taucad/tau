@@ -71,6 +71,7 @@ type ProjectFileSystemBridge = Pick<
   | 'writeFileChecked'
   | 'deleteFileChecked'
   | 'appendFile'
+  | 'appendFileFenced'
   | 'readdir'
   | 'stat'
   | 'lstat'
@@ -800,6 +801,9 @@ const composeProjectHost = async (
                 readFile: async (path) => projectRoot.readFile(path),
                 writeFile: async (path, bytes) => projectRoot.writeFile(path, bytes),
                 appendFile: async (path, bytes) => projectRoot.appendFile(path, bytes),
+                // The authority fences each append by the length the log last read (D23), so a writer this
+                // tab's Web Lock cannot see is refused instead of interleaved.
+                appendFileFenced: async (path, bytes, fence) => projectRoot.appendFileFenced(path, bytes, fence),
                 unlink: async (path) => projectRoot.unlink(path),
                 // The durable rooted bridge owns canonical metadata; log allocation only needs size.
                 stat: async (path, options) => projectRoot.stat(path, options),

@@ -13,7 +13,7 @@ import type { FileLinkVector } from '@taucad/file-links/vectors';
 import worker from '#files-worker.js';
 import { createFakeBucket } from '#testing/fake-bucket.js';
 import type { FakeBucket } from '#testing/fake-bucket.js';
-import { createFilesWorker } from '#worker.js';
+import { createFilesWorker, packRangeCeilingBytes } from '#worker.js';
 import type { FilesLogLine } from '#worker.js';
 import type { FilesEnvironment } from '#environment.js';
 import type { FileLinkLocation } from '@taucad/file-links';
@@ -472,6 +472,31 @@ describe('repository files (D8)', () => {
       expect(bucket.calls).toEqual([]);
     },
   );
+
+  it.each([
+    ['bytes=0-'],
+    [`bytes=-${String(packSize)}`],
+    ['bytes=0-999999999999'],
+    [`bytes=0-${String(packSize - 1)}`],
+  ])('should refuse a range that covers the whole pack (%s) with 416 before reading storage', async (range) => {
+    const url = await signedLink({ layout: 'repository', ownerId, projectId, kind: 'pack', name: pack }, packSize);
+    const response = await fetchAt(url, { headers: { Range: range } });
+    expect(response.status).toBe(416);
+    expect(response.headers.get('x-tau-files-error')).toBe('range');
+    expect(bucket.calls).toEqual([]);
+  });
+
+  it('should serve a pack range up to the segment ceiling and refuse one past it', async () => {
+    const size = packRangeCeilingBytes + 2048;
+    const url = await signedLink({ layout: 'repository', ownerId, projectId, kind: 'pack', name: pack }, size);
+    bucket.objects.set(repositoryKey(`packs/${pack}.pack`), new Uint8Array(size));
+    const past = await fetchAt(url, { headers: { Range: `bytes=12-${String(12 + packRangeCeilingBytes)}` } });
+    expect(past.status).toBe(416);
+    expect(bucket.calls).toEqual([]);
+    const at = await fetchAt(url, { headers: { Range: `bytes=12-${String(11 + packRangeCeilingBytes)}` } });
+    expect(at.status).toBe(206);
+    await at.body?.cancel();
+  });
 
   it('should answer a pack HEAD, which carries no body', async () => {
     const url = await signedLink({ layout: 'repository', ownerId, projectId, kind: 'pack', name: pack }, packSize);

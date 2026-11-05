@@ -21,6 +21,7 @@ import { allowedOrigins, applyCors, preflight } from '#cors.js';
 import { verifyKeys } from '#environment.js';
 import type { FilesEnvironment } from '#environment.js';
 import { resolveRange } from '#range.js';
+import type { RangeRequest } from '#range.js';
 import {
   jsonResponse,
   methodNotAllowedCode,
@@ -88,9 +89,25 @@ const logIdentity = (link: VerifiedFileLink): Pick<FilesLogLine, 'oid' | 'kind'>
   return { oid: hash.slice(0, 12), kind: location.kind };
 };
 
-/* A pack is read by ranges, never whole (D8); a HEAD carries no body and is answered. */
-const wholePackGet = (request: Request, link: VerifiedFileLink): boolean =>
-  request.method === 'GET' && link.location.layout === 'repository' && link.location.kind === 'pack';
+/** The longest range of a pack one request may read: the compute worker's segment ceiling (D7). Bytes. */
+export const packRangeCeilingBytes = 64 * 1024 * 1024;
+
+/*
+ * A pack is read by ranges, never whole (D8): a GET with no range, a range
+ * that covers the whole pack in any spelling (`bytes=0-`, `bytes=-<size>`,
+ * `bytes=0-<huge>`), or one longer than the segment ceiling is refused. A
+ * HEAD carries no body and is answered.
+ */
+const wholePackGet = (request: Request, link: VerifiedFileLink, range: RangeRequest): boolean => {
+  if (request.method !== 'GET' || link.location.layout !== 'repository' || link.location.kind !== 'pack') {
+    return false;
+  }
+  return (
+    range.kind !== 'partial' ||
+    range.length > packRangeCeilingBytes ||
+    (range.offset === 0 && range.length >= link.size)
+  );
+};
 
 const refuse = (reason: FilesErrorReason, link?: VerifiedFileLink): Outcome => ({
   parts: refusal(reason, link?.size),
@@ -113,7 +130,7 @@ const serve = async (request: Request, environment: FilesEnvironment, link: Veri
     return { parts: { status: 304, headers: notModifiedHeaders(oid), body: null }, link };
   }
   const range = resolveRange(request.headers.get('Range') ?? undefined, link.size);
-  if (range.kind === 'unsatisfiable' || (range.kind === 'full' && wholePackGet(request, link))) {
+  if (range.kind === 'unsatisfiable' || wholePackGet(request, link, range)) {
     return refuse('range', link);
   }
   const key = fileLinkObjectKey(link.location);

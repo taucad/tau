@@ -25,25 +25,27 @@ describe('void call results', () => {
   });
 });
 
-describe('head-only directory metadata', () => {
-  it('accepts the explicit mode and unknown text count while exact stat still requires a count', () => {
+describe('metadata-only stats (I3)', () => {
+  it('accepts a stat with no facts, with known facts, and refuses a malformed count', () => {
     const listing = fileSystemBridgeSchemas.calls.readdirWithStats;
-    const rows = [{ name: 'large.txt', type: 'file', size: 2048, mtimeMs: 1, contentKind: 'text' }];
-    expect(listing.args.safeParse(['', { content: 'head' }]).success).toBe(true);
+    const head = { name: 'large.txt', type: 'file', size: 2048, mtimeMs: 1 };
     expect(listing.args.safeParse(['']).success).toBe(true);
-    expect(listing.result.safeParse(rows).success).toBe(true);
-    expect(fileSystemBridgeSchemas.calls.stat.args.safeParse(['large.txt', { content: 'head' }]).success).toBe(true);
+    expect(listing.args.safeParse(['', { content: 'head' }]).success).toBe(false);
+    expect(listing.result.safeParse([head]).success).toBe(true);
+    expect(listing.result.safeParse([{ ...head, contentKind: 'text' }]).success).toBe(true);
+    expect(listing.result.safeParse([{ ...head, contentKind: 'text', lineCount: 3 }]).success).toBe(true);
+    expect(listing.result.safeParse([{ ...head, contentKind: 'binary', lineCount: 3 }]).success).toBe(false);
+    expect(listing.result.safeParse([{ ...head, lineCount: 3 }]).success).toBe(false);
     expect(fileSystemBridgeSchemas.calls.stat.args.safeParse(['large.txt']).success).toBe(true);
-    expect(fileSystemBridgeSchemas.calls.stat.result.safeParse(rows[0]).success).toBe(true);
-    expect(fileSystemBridgeSchemas.calls.lstat.result.safeParse(rows[0]).success).toBe(false);
+    expect(fileSystemBridgeSchemas.calls.stat.result.safeParse(head).success).toBe(true);
   });
 });
 
 /* A literal, so a bump is a deliberate edit to this line and not a silent one:
  * every other assertion in the suite now reads the constant (G0-11). */
 describe('filesystem bridge protocol version', () => {
-  it('should be 5', () => {
-    expect(fileSystemBridgeProtocolVersion).toBe(6);
+  it('should be 7', () => {
+    expect(fileSystemBridgeProtocolVersion).toBe(7);
   });
 
   it('rejects a version 4 peer', () => {

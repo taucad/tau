@@ -61,6 +61,23 @@ export { TreeIndex } from '#tree-index.js';
 export type { TreeIndexAdmits, TreeNode, TreeSearchOptions } from '#tree-index.js';
 export { ResourceQueue } from '#resource-queue.js';
 export type { ResourceQueueClaim } from '#resource-queue.js';
+export {
+  createWorkerTimings,
+  formatWorkerTimingSummary,
+  workerTimingCounters,
+  workerTimingGauges,
+  workerTimingSpans,
+  workerTimings,
+} from '#worker-timings.js';
+export type {
+  WorkerTimingCounter,
+  WorkerTimingCounterSummary,
+  WorkerTimingGauge,
+  WorkerTimingSpan,
+  WorkerTimingSpanSummary,
+  WorkerTimingSummary,
+  WorkerTimings,
+} from '#worker-timings.js';
 export { ChangeEventBus } from '#change-event-bus.js';
 export { EventCoalescer, coalesceChangeEvents } from '#event-coalescer.js';
 export type { CoalescerOptions } from '#event-coalescer.js';

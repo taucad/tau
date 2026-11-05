@@ -8,7 +8,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(190);
+    expect(metrics).toHaveLength(191);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -315,6 +315,24 @@ describe('TauMetrics', () => {
       expect(metric.attributes.safeParse({ 'agent.placement': 'desktop', source: 'local' }).success).toBe(true);
       expect(metric.attributes.safeParse({ 'agent.placement': 'desktop', source: 'proj_1' }).success).toBe(false);
     }
+  });
+
+  /* A hosted open's worker spans: a closed stage and a closed span name, never a path or id. */
+  it('should label worker span totals by stage and span name only', () => {
+    expect(TauMetrics.projectOpenSpanDuration).toMatchObject({ name: 'tau.project.open.span.duration', unit: 's' });
+    expect(
+      TauMetrics.projectOpenSpanDuration.attributes.safeParse({ stage: 'lfs_fetch', span: 'lfs.store' }).success,
+    ).toBe(true);
+    expect(
+      TauMetrics.projectOpenSpanDuration.attributes.safeParse({ stage: 'fully_fetched', span: 'records.project' })
+        .success,
+    ).toBe(true);
+    expect(
+      TauMetrics.projectOpenSpanDuration.attributes.safeParse({ stage: 'lfs_fetch', span: 'models/a.step' }).success,
+    ).toBe(false);
+    expect(TauMetrics.projectOpenSpanDuration.attributes.safeParse({ stage: 'open', span: 'lfs.store' }).success).toBe(
+      false,
+    );
   });
 
   /* STO-25: a hosted project's open, by phase and by whether it fetched from the network. */

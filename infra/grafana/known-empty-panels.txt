@@ -103,6 +103,7 @@ Runtime product insights › Viewer Context Loss per 1,000 First Frames
 Runtime product insights › Viewer First-Frame p95 by Size Class
 Runtime product insights › Jobs by Outcome (daily)
 Runtime product insights › GeoSpec Pass Rate
+Runtime product insights › GeoSpec Runs by Outcome (daily)
 Runtime product insights › Transcoder Usage (daily)
 Runtime product insights › Transcoder Failure Rate
 Runtime product insights › Job Usage by Provider (daily)
@@ -110,6 +111,7 @@ Runtime product insights › Jobs Entering Attention by Provider (daily)
 Runtime product insights › Middleware Usage
 Runtime product insights › Middleware Share of Joined Attempts
 Runtime product insights › Bundler Usage (daily)
+Runtime product insights › Machine Provider Usage (daily)
 Runtime product insights › Machine Operations by Provider and Kind
 Runtime product insights › Machine Actions by Family
 Runtime product insights › Machine Outcomes by Provider

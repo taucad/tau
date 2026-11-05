@@ -867,6 +867,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(await project.readFile('models/part.step')).toStrictEqual(bytes);
 
     await project.writeFile(objectFile, part);
+    const framesBeforeFill = second.frames.length;
     second.send({ command: 'retryLargeObjects' });
     await vi.waitFor(
       () => {
@@ -876,6 +877,13 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       { timeout: 10_000 },
     );
     expect(await project.readFile('models/part.step', 'utf8')).toBe(part);
+    /* The fill's flush wrote the file without holding the page's file tree. */
+    expect(
+      second.frames
+        .slice(framesBeforeFill)
+        .flatMap((frame) => (frame.type === 'status' ? [frame.status.applyingRoots] : []))
+        .filter((roots) => roots !== undefined),
+    ).toEqual([]);
   }, 30_000);
 
   it('should restore a recorded revision through the port commands', async () => {
@@ -967,6 +975,98 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(applying.at(-1)).toBeUndefined();
     expect(root.status().applyingRoots).toBeUndefined();
     expect(await project.readFile('main.scad', 'utf8')).toBe('cube(20);');
+  });
+
+  /*
+   * A restore's own writes would each raise a change, and each change re-enters
+   * the checkout's comparison: held while the apply writes, they reach the
+   * checkout as one change naming every path it wrote.
+   */
+  it("should raise one change for a restore's writes, naming every path, once the apply settles", async () => {
+    const fixture = harness(['alpha'], (port) => port, { observeFileEvents: true });
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    const paths = ['a.scad', 'b.scad', 'main.scad'];
+    for (const path of paths) {
+      // oxlint-disable-next-line no-await-in-loop -- fixture files, written in order.
+      await project.writeFile(path, 'cube(10);');
+    }
+    const alpha = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    const session = await root.placementSession();
+    await place(session, turnKey(1));
+    for (const path of paths) {
+      // oxlint-disable-next-line no-await-in-loop -- the turn's edits, in order.
+      await project.writeFile(path, 'cube(20);');
+    }
+    await finish(session, turnKey(1));
+    await turnFinalized(alpha, 'turn-1');
+    const head = alpha.frames.findLast((frame) => frame.type === 'status')?.status.headRevisionId;
+    expect(head).toBeDefined();
+    await settle(10);
+    for (const path of paths) {
+      // oxlint-disable-next-line no-await-in-loop -- the person's edits after the turn, in order.
+      await project.writeFile(path, 'cube(30);');
+    }
+    await settle(10);
+    const changes: string[][] = [];
+    root.subscribeEvents((event) => {
+      if (event.type === 'checkout.changed') {
+        changes.push([...event.paths]);
+      }
+    });
+    const before = await root.log();
+
+    alpha.send({ command: 'restore', revisionId: head! });
+    await vi.waitFor(
+      async () => {
+        expect(await root.log()).toHaveLength(before.length + 2);
+      },
+      { timeout: 10_000 },
+    );
+    await settle(10);
+
+    /* One change, carrying the apply's staged and backup siblings beside the paths it wrote. */
+    const raised = changes.filter((change) => change.some((path) => paths.includes(path)));
+    expect(raised).toHaveLength(1);
+    expect(raised[0]!.filter((path) => !/\.tau-(?:staged|backup)\./u.test(path))).toEqual(paths);
+    expect(await project.readFile('b.scad', 'utf8')).toBe('cube(20);');
+  });
+
+  /* The worker's own timing line: one `console.info` per apply, naming its spans and never a path. */
+  it('should log one worker timing line when a restore finishes writing the checkout', async () => {
+    const fixture = harness(['alpha']);
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    const session = await root.placementSession();
+    await place(session, turnKey(1));
+    await project.writeFile('main.scad', 'cube(20);');
+    await finish(session, turnKey(1));
+    await turnFinalized(alpha, 'turn-1');
+    const head = alpha.frames.findLast((frame) => frame.type === 'status')?.status.headRevisionId;
+    await settle(10);
+    await project.writeFile('main.scad', 'cube(30);');
+    const before = await root.log();
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    try {
+      alpha.send({ command: 'restore', revisionId: head! });
+      await vi.waitFor(
+        async () => {
+          expect(await root.log()).toHaveLength(before.length + 2);
+        },
+        { timeout: 10_000 },
+      );
+      await settle(10);
+
+      const lines = info.mock.calls.map(([line]) => String(line)).filter((line) => line.startsWith('[worker-timings]'));
+      expect(lines).toEqual([
+        expect.stringMatching(/^\[worker-timings\] apply of 1 paths took \d+\.\ds: .*apply\.hold \d+×/u),
+      ]);
+      expect(lines.join('\n')).not.toContain('main.scad');
+    } finally {
+      info.mockRestore();
+    }
   });
 
   /*

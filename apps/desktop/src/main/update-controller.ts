@@ -15,7 +15,8 @@ export type PlatformUpdateBackend = {
   check(): Promise<AvailableUpdate | undefined>;
   download(): Promise<void>;
   prepare(): Promise<PreparedDesktopInstallation>;
-  finish(): void;
+  /** Resolves once the restart is arranged; a rejection pauses the restart instead of quitting. */
+  finish(): void | Promise<void>;
 };
 export type PlatformUpdateOptions = DesktopUpdaterOptions & {
   /** Main confirms the renderer workspace and save handler have actually become ready. */
@@ -84,7 +85,7 @@ export const startPlatformUpdateController = (
         return;
       }
       publish('restarting', 'Reopening your workspace…');
-      backend.finish();
+      await backend.finish();
     } catch (error) {
       if (!prepared) {
         failed(error);

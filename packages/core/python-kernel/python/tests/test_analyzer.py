@@ -60,6 +60,19 @@ class AnalyzerTest(unittest.TestCase):
         issue = analyzer.AnalysisIssue("bad", "CODE", 3, 4)
         self.assertEqual(issue.as_dict("main.py")["location"]["startColumn"], 4)
 
+    def test_parameterless_params_declare_an_object_without_properties(self) -> None:
+        # The new-project template's `Params` has no fields. JSON Structure rejects `properties: {}`
+        # (INVALID_SCHEMA at /properties), so the declaration leaves the map out.
+        result = analyze_source(model("pass"))
+
+        self.assertEqual(result["defaultParameters"], {})
+        self.assertEqual(result["jsonSchema"], {"type": "object", "properties": {}, "additionalProperties": False})
+        declaration = result["declaration"]
+        self.assertNotIn("properties", declaration["schema"])
+        self.assertEqual((declaration["schema"]["type"], declaration["schema"]["additionalProperties"]), ("object", False))
+        self.assertEqual(declaration["defaults"], {})
+        self.assertNotIn("bindings", declaration)
+
     def test_native_unit_declaration_preserves_values_and_constraints(self) -> None:
         result = analyze_source(
             model(

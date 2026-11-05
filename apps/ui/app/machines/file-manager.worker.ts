@@ -33,6 +33,7 @@ import {
   ProviderRegistry,
   ResourceQueue,
   WorkspaceFileService,
+  workerTimings,
 } from '@taucad/filesystem';
 import type { MountEntry, WorkspaceScope } from '@taucad/filesystem';
 import type { MachineSettingsService } from '@taucad/types';
@@ -58,6 +59,7 @@ import { dependencyMountRoot } from '#lib/bundled-types-tree.constants.js';
 import { readBuildIdentity } from '#lib/build-identity.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { reportToApi } from '#runtime/observability/report-to-api.js';
+import { summarizeLast, withPendingGauge, workerSpanTotals } from '#lib/worker-timing-report.js';
 import { createProjectOpenTimer, markProjectOpen } from '#machines/project-open-timer.js';
 import type { ProjectOpenTimer } from '#machines/project-open-timer.js';
 import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
@@ -106,8 +108,12 @@ const providerRegistry = new ProviderRegistry({
     return port;
   },
 });
-const resourceQueue = new ResourceQueue();
+/* Each mutation's wait for its claims and its time holding them, for the open's worker timings. */
+const resourceQueue = new ResourceQueue({ timings: workerTimings });
 const eventBus = new ChangeEventBus();
+eventBus.subscribe(() => {
+  workerTimings.count('events.change');
+});
 const mountTable = new MountTable();
 
 /**
@@ -350,7 +356,7 @@ const settingsForRoot = (root: string, policy: typeof tauPathPolicy): MachineSet
   };
 };
 
-exposeFileSystem(workspaceBridgeService(fileService), {
+exposeFileSystem(withPendingGauge(workspaceBridgeService(fileService)), {
   /*
    * Every rooted connection names the surface it reads (architecture L4, W2):
    * `'user'` and `'agent'` get that consumer's composed view, `'working-copy'`
@@ -375,9 +381,11 @@ exposeFileSystem(workspaceBridgeService(fileService), {
      * batch and the view mask-checks before any provider I/O (D4).
      */
     const handlers = withReadContentOps(view, policy);
-    return root === dependencyMountRoot
-      ? withLazyBundledTypesReads(handlers)
-      : Object.assign(handlers, settingsForRoot(root, policy));
+    return withPendingGauge(
+      root === dependencyMountRoot
+        ? withLazyBundledTypesReads(handlers)
+        : Object.assign(handlers, settingsForRoot(root, policy)),
+    );
   },
   /* The same layout the views above enforce, so a masked connection is not told
    * about a path it may not read (CI1). */
@@ -441,7 +449,7 @@ const revisionRegistry = createWorkerRevisionRegistry({
           reportUrl: `${apiBaseUrl}/v1/telemetry/ingest`,
           name: 'observability.projectOpen',
           duration: durationMilliseconds,
-          detail,
+          detail: { ...detail, spans: workerSpanTotals(summarizeLast(durationMilliseconds)) },
         });
       },
     });
@@ -467,7 +475,7 @@ const revisionRegistry = createWorkerRevisionRegistry({
           reportUrl: `${apiBaseUrl}/v1/telemetry/ingest`,
           name: 'observability.lfsFetch',
           duration: durationMilliseconds,
-          detail: { ...detail, placement: 'browser' },
+          detail: { ...detail, placement: 'browser', spans: workerSpanTotals(summarizeLast(durationMilliseconds)) },
         });
       },
     });

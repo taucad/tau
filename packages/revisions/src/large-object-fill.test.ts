@@ -22,7 +22,7 @@ const parts = { 'models/a.step': 'solid a', 'models/b.step': 'solid bb' } as con
 const pointerOf = (content: string): ReturnType<typeof lfsPointerFor> => lfsPointerFor(encoder.encode(content));
 
 /* A checkout as a map of files, a fence that runs in turn, and a port whose transfer the test drives. */
-const setup = () => {
+const setup = (options: Readonly<{ flushBytes?: number; flushMilliseconds?: number }> = {}) => {
   const files = new Map<string, Uint8Array<ArrayBuffer>>([['main.scad', encoder.encode('import("models/a.step");')]]);
   for (const [path, content] of Object.entries(parts)) {
     files.set(path, pointerOf(content).bytes);
@@ -51,9 +51,23 @@ const setup = () => {
       ['main.scad', files.get('main.scad')!],
       ...Object.entries(parts).map(([path, content]) => [path, encoder.encode(content)] as const),
     ]);
-  const capture = async (): Promise<ImmutableRevisionTree> =>
-    new ImmutableRevisionTree([...files].map(([path, content]) => [path, content] as const));
-  const materializeTree = vi.fn(async (_place: Checkout, target: ImmutableRevisionTree) => {
+  let captures = 0;
+  const capture = async (): Promise<ImmutableRevisionTree> => {
+    captures += 1;
+    return new ImmutableRevisionTree([...files].map(([path, content]) => [path, content] as const));
+  };
+  /* A gate the test may close, so a materialization waits like a slow OPFS write; open by default. */
+  let gate: Promise<void> = Promise.resolve();
+  let writing = 0;
+  let mostWriting = 0;
+  const materializeTree = vi.fn(async (_place: Checkout, target: ImmutableRevisionTree, _materialization?: unknown) => {
+    writing += 1;
+    mostWriting = Math.max(mostWriting, writing);
+    try {
+      await gate;
+    } finally {
+      writing -= 1;
+    }
     if (conflicts > 0) {
       conflicts -= 1;
       throw new RevisionPortError('CHECKOUT_CONFLICT', 'These files changed while they were written.');
@@ -68,8 +82,9 @@ const setup = () => {
     withCheckoutFence: async (_id, operation) => operation(),
     materializeTree,
     report: (report) => reports.push(report),
-    flushMilliseconds: 1,
+    flushMilliseconds: options.flushMilliseconds ?? 1,
     reportMilliseconds: 1,
+    ...(options.flushBytes === undefined ? {} : { flushBytes: options.flushBytes }),
   });
   const land = (path: keyof typeof parts): void => {
     onLargeObject?.(pointerOf(parts[path]).pointer.oid, encoder.encode(parts[path]));
@@ -94,6 +109,17 @@ const setup = () => {
     conflictNext: (count: number) => {
       conflicts = count;
     },
+    holdWrites: (): (() => void) => {
+      const held = Promise.withResolvers<void>();
+      gate = held.promise;
+      return () => {
+        gate = Promise.resolve();
+        held.resolve();
+      };
+    },
+    mostWriting: () => mostWriting,
+    /** How many sweeps (one capture each) have run. */
+    captures: () => captures,
   };
 };
 
@@ -134,6 +160,110 @@ describe('large-object fill', () => {
     await done;
     expect(harness.text('models/b.step')).toBe('solid bb');
     expect(harness.text('main.scad')).toBe('import("models/a.step");');
+    expect(harness.reports.at(-1)?.facet).toBeUndefined();
+  });
+
+  it('writes at most one batch of bytes per flush, and the rest in the flush right after', async () => {
+    /* Each object is 7 or 8 bytes: a 10-byte batch holds one of them. */
+    const harness = setup({ flushBytes: 10, flushMilliseconds: 60_000 });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.land('models/a.step');
+    harness.land('models/b.step');
+    /* Two objects reach the batch: the flush starts without waiting out the minute-long timer. */
+    await vi.waitFor(() => {
+      expect(harness.text('models/a.step')).toBe('solid a');
+      expect(harness.text('models/b.step')).toBe('solid bb');
+    });
+    /* What each flush filled: the model paths that hold real bytes now and held a pointer before it. */
+    const filledSoFar = harness.materializeTree.mock.calls.map(([, target]) =>
+      target
+        .entries()
+        .filter(({ path, content }) => path.startsWith('models/') && !decoder.decode(content).startsWith('version '))
+        .map(({ path }) => path),
+    );
+    const written = filledSoFar.map((paths, index) =>
+      paths.filter((path) => !(filledSoFar[index - 1] ?? []).includes(path)),
+    );
+    expect(written).toStrictEqual([['models/a.step'], ['models/b.step']]);
+    harness.finish(harness.fullTree());
+    await done;
+    expect(harness.reports.at(-1)?.facet).toBeUndefined();
+  });
+
+  it('runs one timed flush at a time, flushing again after a slow one instead of queueing behind it', async () => {
+    const harness = setup();
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    const release = harness.holdWrites();
+    harness.land('models/a.step');
+    await vi.waitFor(() => {
+      expect(harness.materializeTree).toHaveBeenCalledTimes(1);
+    });
+    /* A fill's flush tells the host's bracket what it is, so the host need not hold a file tree for it. */
+    expect(harness.materializeTree.mock.calls[0]?.[2]).toMatchObject({ purpose: 'fill' });
+    /* Arrivals and timers while the first flush is still writing: each would have queued a flush of its own. */
+    const sweepsBefore = harness.captures();
+    for (let landing = 0; landing < 3; landing++) {
+      harness.land('models/b.step');
+      // oxlint-disable-next-line no-await-in-loop -- each landing outlasts the flush timer.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 10);
+      });
+    }
+    expect(harness.materializeTree).toHaveBeenCalledTimes(1);
+    release();
+    await vi.waitFor(() => {
+      expect(harness.text('models/b.step')).toBe('solid bb');
+    });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
+    });
+    /* One flush again after the slow one, not one per timer that fired behind it. */
+    expect(harness.captures() - sweepsBefore).toBe(1);
+    expect(harness.mostWriting()).toBe(1);
+    harness.finish(harness.fullTree());
+    await done;
+    expect(harness.reports.at(-1)?.facet).toBeUndefined();
+  });
+
+  /* An object whose placeholder is gone is owed to nobody: counted as unwritten, it made every flush start the next at once. */
+  it('stops counting an object whose placeholder is gone, rather than flushing again and again', async () => {
+    const harness = setup({ flushBytes: 7, flushMilliseconds: 60_000 });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.files.set('models/a.step', encoder.encode('solid mine'));
+    const sweepsBefore = harness.captures();
+    /* Seven bytes reach the batch, so one flush starts at once and finds nothing to fill. */
+    harness.land('models/a.step');
+    await vi.waitFor(() => {
+      expect(harness.captures()).toBeGreaterThan(sweepsBefore);
+    });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 30);
+    });
+    expect(harness.captures() - sweepsBefore).toBe(1);
+    expect(harness.materializeTree).not.toHaveBeenCalled();
+    /* The transfer tells of it again: owed to nobody, it waits for the timer instead of flushing at once. */
+    harness.land('models/a.step');
+    await new Promise((resolve) => {
+      setTimeout(resolve, 30);
+    });
+    expect(harness.captures() - sweepsBefore).toBe(1);
+
+    harness.land('models/b.step');
+    await vi.waitFor(() => {
+      expect(harness.text('models/b.step')).toBe('solid bb');
+    });
+    harness.finish(harness.fullTree());
+    await done;
+    expect(harness.text('models/a.step')).toBe('solid mine');
     expect(harness.reports.at(-1)?.facet).toBeUndefined();
   });
 

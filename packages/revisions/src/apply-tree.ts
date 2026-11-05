@@ -8,13 +8,19 @@
  * refuse (W8c).
  */
 import type { FileMode, PathPolicy } from '@taucad/filesystem';
+import { workerTimings } from '@taucad/filesystem';
 import { ImmutableRevisionTree } from '#algorithms/index.js';
 import type { RevisionTreeEntry, RevisionTreeInput } from '#algorithms/index.js';
 import { equalBytes } from '#object-hash.js';
 import { assertMaterializableRevisionTree } from '#portable-tree.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { Checkout } from '#revision-port.js';
-import type { RevisionActorsOptions, RevisionFileSystem, UseCheckoutFileSystem } from '#revision-effects.types.js';
+import type {
+  ApplyingTreePurpose,
+  RevisionActorsOptions,
+  RevisionFileSystem,
+  UseCheckoutFileSystem,
+} from '#revision-effects.types.js';
 
 /** Cancellation, the caller's own capture, and the brackets around one write. */
 type MaterializeTreeOptions<Result> = Readonly<{
@@ -31,6 +37,8 @@ type MaterializeTreeOptions<Result> = Readonly<{
   before?: ImmutableRevisionTree;
   validate?: (before: ImmutableRevisionTree) => Promise<void>;
   publish?: () => Promise<Result>;
+  /** What the host's `onApplyingTree` bracket is told this write is; `apply` unless a fill says otherwise. */
+  purpose?: ApplyingTreePurpose;
 }>;
 
 /**
@@ -276,10 +284,10 @@ export const createApplyTreeEffects = (
   const applyTree = async (
     place: Checkout,
     target: ImmutableRevisionTree,
-    applyOptions: Readonly<{ from: ImmutableRevisionTree; signal?: AbortSignal }>,
+    applyOptions: Readonly<{ from: ImmutableRevisionTree; signal?: AbortSignal; purpose?: ApplyingTreePurpose }>,
   ): Promise<readonly string[]> =>
     useFileSystem(place, async (live) => {
-      const { from, signal } = applyOptions;
+      const { from, signal, purpose = 'apply' } = applyOptions;
       signal?.throwIfAborted();
       assertMaterializableRevisionTree(target, policy);
       const liveFiles = new Map(from.entries().map((entry) => [entry.path, entry]));
@@ -292,7 +300,8 @@ export const createApplyTreeEffects = (
         return current === undefined || !equalBytes(current.content, entry.content) || current.mode !== entry.mode;
       });
       const writtenPaths = changedFiles.map(([path]) => path);
-      const release = onApplyingTree?.(place, [...removedPaths, ...writtenPaths].sort());
+      const release = onApplyingTree?.(place, [...removedPaths, ...writtenPaths].sort(), { purpose });
+      const heldAt = workerTimings.now();
       try {
         for (const path of removedPaths) {
           signal?.throwIfAborted();
@@ -426,6 +435,7 @@ export const createApplyTreeEffects = (
         }
         return [...removedPaths, ...writtenPaths].sort();
       } finally {
+        workerTimings.record('apply.hold', heldAt);
         release?.();
       }
     });
@@ -483,7 +493,11 @@ export const createApplyTreeEffects = (
         /* `applyTree` verifies the paths it wrote by re-reading them (C3); that
          * re-read is the settlement's second and last walk, so nothing here
          * captures the tree again to compare it a second time. */
-        const paths = await applyTree(place, prepared.tree, { from: before, signal: materialization.signal });
+        const paths = await applyTree(place, prepared.tree, {
+          from: before,
+          ...(materialization.signal === undefined ? {} : { signal: materialization.signal }),
+          ...(materialization.purpose === undefined ? {} : { purpose: materialization.purpose }),
+        });
         materialization.signal?.throwIfAborted();
         await prepared.verify?.();
         materialization.signal?.throwIfAborted();
@@ -493,7 +507,10 @@ export const createApplyTreeEffects = (
           const current = await capture(place, before);
           const recovery = recoveryTree(before, recoveryTarget, current);
           if ((await checkoutTreeId(place.id, current)) !== (await checkoutTreeId(place.id, recovery))) {
-            await applyTree(place, recovery, { from: current });
+            await applyTree(place, recovery, {
+              from: current,
+              ...(materialization.purpose === undefined ? {} : { purpose: materialization.purpose }),
+            });
           }
         } catch (recoveryError) {
           const reason = error instanceof Error ? error.message : String(error);

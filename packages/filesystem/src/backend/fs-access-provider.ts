@@ -19,7 +19,8 @@ import type {
 } from '#types.js';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
 import { mapConcurrent, statConcurrency } from '#concurrency.js';
-import { fileStatFromFile, headFileStatFromFile } from '#content-metadata.js';
+import { fileStatFromFile, headFileStatFromFile, headSniffByteLength } from '#content-metadata.js';
+import { workerTimings } from '#worker-timings.js';
 import { validateFileReadStreamOptions } from '#backend/stream-utils.js';
 
 const handleCacheMaxEntries = 10_000;
@@ -249,10 +250,15 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
         fileHandle: FileSystemFileHandle,
       ): Promise<{ name: string } & (FileStat | HeadFileStat)> => {
         const file = await fileHandle.getFile();
-        return {
-          name,
-          ...(await (options?.content === 'head' ? headFileStatFromFile(file) : fileStatFromFile(file))),
-        };
+        const stat = await (options?.content === 'head' ? headFileStatFromFile(file) : fileStatFromFile(file));
+        /* What describing the entry read: the sniff window, or the whole of a text file a line count needed. */
+        workerTimings.count(
+          'listing.bytes',
+          options?.content !== 'head' && stat.type === 'file' && stat.contentKind === 'text'
+            ? file.size
+            : Math.min(file.size, headSniffByteLength),
+        );
+        return { name, ...stat };
       };
       try {
         return await statOf(handle);

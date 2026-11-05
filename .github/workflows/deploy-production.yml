@@ -106,10 +106,11 @@ jobs:
             || { echo "::error::$RELEASE ($commit) is not on main"; exit 1; }
 
           # This release must have been verified. A release run's title is its
-          # tag; its newest run decides. Only the verify job counts: the run's
-          # own production deploy may have failed, which is what a redeploy
-          # is for.
-          run_id=$(gh run list --workflow release-build.yml --commit "$commit" --limit 50 \
+          # tag; its newest run decides, including a dispatched rebuild (which
+          # verifies the tag's checkout but records main's commit). Only the
+          # verify job counts: the run's own production deploy may have failed,
+          # which is what a redeploy is for.
+          run_id=$(gh run list --workflow release-build.yml --limit 200 \
             --json databaseId,displayTitle \
             | jq -r --arg tag "$RELEASE" '[.[] | select(.displayTitle == $tag)][0].databaseId // empty')
           verified=""

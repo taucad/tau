@@ -195,6 +195,10 @@ jobs:
       - name: Lint, typecheck, test and build the release
         env:
           PROJECT: ${{ needs.resolve.outputs.project }}
+          # The UI build validates these, as in CI; the deploys set their own.
+          TAU_API_URL: http://localhost:4000
+          TAU_WEBSOCKET_URL: ws://localhost:4001
+          TAU_FRONTEND_URL: http://localhost:3000
         run: |
           set -euo pipefail
           # Named here, as in CI's API job, so the suites' database is stated where they run.

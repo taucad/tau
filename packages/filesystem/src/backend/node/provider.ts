@@ -32,14 +32,11 @@ import { assertRootedPath, VirtualPathError } from '@taucad/utils/path';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
 import { mapConcurrent, statConcurrency } from '#concurrency.js';
 import type { NodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
-import { headSniffByteLength, seemsBinary, countLineBytes } from '#content-metadata.js';
 import type {
   DirectoryEntry,
   FileMode,
   FileReadStreamOptions,
-  FileStatOptions,
   FileStat,
-  HeadFileStat,
   PathAgentAccess,
   PathPolicy,
   ProviderCapabilities,
@@ -269,15 +266,12 @@ const nativeIgnores = (rootedPath: string, directory: string, excludes: readonly
  * @public
  */
 export class NodeFsProvider extends AbstractFileSystemProvider {
-  /** @returns `true` for the supported head listing mode. */
-  public get supportsHeadListing(): true {
-    return true;
-  }
   public readonly capabilities: ProviderCapabilities = {
     persistent: true,
     writable: true,
     quotaBased: false,
     durability: 'transactional-rewrite',
+    trustworthyMtime: true,
   };
 
   private readonly _base: string;
@@ -422,42 +416,22 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
    * @param path_ - Absolute directory path to enumerate.
    * @returns Each entry's name paired with its stat metadata.
    */
-  public readdirWithStats(path_: string): Promise<Array<{ name: string } & FileStat>>;
-  public readdirWithStats(
-    path_: string,
-    options: { readonly content: 'head' },
-  ): Promise<Array<{ name: string } & HeadFileStat>>;
-  public async readdirWithStats(
-    path_: string,
-    options?: { readonly content: 'head' },
-  ): Promise<Array<{ name: string } & (FileStat | HeadFileStat)>> {
+  public async readdirWithStats(path_: string): Promise<Array<{ name: string } & FileStat>> {
     const names = await this.readdir(path_);
     return mapConcurrent(names, statConcurrency, async (name) => ({
       name,
-      ...(options?.content === 'head'
-        ? await this._headStat(joinRooted(path_, name))
-        : await this.stat(joinRooted(path_, name))),
+      ...(await this.stat(joinRooted(path_, name))),
     }));
   }
 
-  public async stat(path_: string): Promise<FileStat>;
-  public async stat(path_: string, options: FileStatOptions): Promise<FileStat | HeadFileStat>;
-  public async stat(path_: string, options?: FileStatOptions): Promise<FileStat | HeadFileStat> {
-    if (options?.content === 'head') {
-      return this._headStat(path_);
-    }
+  /** Head metadata from `fs.stat` alone; no content is opened (I3). */
+  public async stat(path_: string): Promise<FileStat> {
     this._assertRootedPath(path_);
     const target = await this._resolve(path_);
     const stats = await fs.stat(target);
-    if (stats.isDirectory()) {
-      return { type: 'dir', size: stats.size, mtimeMs: stats.mtimeMs };
-    }
-    return {
-      type: 'file',
-      size: stats.size,
-      mtimeMs: stats.mtimeMs,
-      ...(await this._contentMetadata(target, stats.size)),
-    };
+    return stats.isDirectory()
+      ? { type: 'dir', size: stats.size, mtimeMs: stats.mtimeMs }
+      : { type: 'file', size: stats.size, mtimeMs: stats.mtimeMs };
   }
 
   public async getFileMode(path_: string): Promise<FileMode> {
@@ -965,58 +939,6 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       }
     } finally {
       await directory.close();
-    }
-  }
-
-  /** Sniff the head only; read in full solely to count lines of a text file. */
-  private async _contentMetadata(
-    absolute: string,
-    size: number,
-  ): Promise<{ contentKind: 'binary' } | { contentKind: 'text'; lineCount: number }> {
-    if (size === 0) {
-      return { contentKind: 'text', lineCount: 1 };
-    }
-    const handle = await fs.open(absolute, 'r');
-    try {
-      const head = new Uint8Array(Math.min(size, headSniffByteLength));
-      const { bytesRead } = await handle.read(head, 0, head.byteLength, 0);
-      const sniffed = head.subarray(0, bytesRead);
-      if (seemsBinary(sniffed)) {
-        return { contentKind: 'binary' };
-      }
-      const bytes = size <= headSniffByteLength ? sniffed : new Uint8Array(await fs.readFile(absolute));
-      return { contentKind: 'text', lineCount: countLineBytes(bytes) };
-    } finally {
-      await handle.close();
-    }
-  }
-
-  private async _headStat(path_: string): Promise<HeadFileStat> {
-    this._assertRootedPath(path_);
-    const target = await this._resolve(path_);
-    const stats = await fs.stat(target);
-    if (stats.isDirectory()) {
-      return { type: 'dir', size: stats.size, mtimeMs: stats.mtimeMs };
-    }
-    return {
-      type: 'file',
-      size: stats.size,
-      mtimeMs: stats.mtimeMs,
-      contentKind: await this._headContentKind(target, stats.size),
-    };
-  }
-
-  private async _headContentKind(absolute: string, size: number): Promise<'text' | 'binary'> {
-    if (size === 0) {
-      return 'text';
-    }
-    const handle = await fs.open(absolute, 'r');
-    try {
-      const head = new Uint8Array(Math.min(size, headSniffByteLength));
-      const { bytesRead } = await handle.read(head, 0, head.byteLength, 0);
-      return seemsBinary(head.subarray(0, bytesRead)) ? 'binary' : 'text';
-    } finally {
-      await handle.close();
     }
   }
 

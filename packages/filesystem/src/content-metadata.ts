@@ -1,5 +1,4 @@
-import type { FileContentMetadata, FileStat } from '@taucad/types';
-import type { HeadFileStat } from '#types.js';
+import type { FileContentMetadata, FileStat, StatContentMetadata } from '@taucad/types';
 
 /**
  * Number of leading bytes inspected by `seemsBinary`. Mirrors VS Code's
@@ -87,24 +86,36 @@ export function countLineBytes(bytes: Uint8Array<ArrayBuffer>): number {
 }
 
 /**
- * Rebuild content metadata as an exact discriminated shape.
+ * The content facts a stat may carry, keeping only what is known (I3).
  *
- * @param metadata - Existing file content metadata.
- * @returns A normalized text or binary metadata object.
+ * @param metadata - Facts as a stat, listing row or index entry holds them.
+ * @returns Text with its count when measured, binary, or nothing when unmeasured.
  * @public
  */
-export const fileMetadataFields = (metadata: FileContentMetadata): FileContentMetadata =>
-  metadata.contentKind === 'text' ? { contentKind: 'text', lineCount: metadata.lineCount } : { contentKind: 'binary' };
+export const fileMetadataFields = (metadata: StatContentMetadata): StatContentMetadata => {
+  if (metadata.contentKind === 'binary') {
+    return { contentKind: 'binary' };
+  }
+  if (metadata.contentKind === 'text') {
+    return metadata.lineCount === undefined
+      ? { contentKind: 'text' }
+      : { contentKind: 'text', lineCount: metadata.lineCount };
+  }
+  return {};
+};
 
 /**
  * Classify raw file bytes and compute exact text line count when applicable.
+ *
+ * For bytes already in hand: the write path, a lazy `facts` request, a
+ * read-back. Never called to answer a metadata request (I3).
  *
  * @param bytes - Raw file bytes.
  * @returns Binary metadata, or text metadata with exact line count.
  * @public
  */
 export function getFileContentMetadata(bytes: Uint8Array<ArrayBuffer>): FileContentMetadata {
-  if (seemsBinary(bytes.slice(0, headSniffByteLength))) {
+  if (seemsBinary(bytes.subarray(0, headSniffByteLength))) {
     return { contentKind: 'binary' };
   }
 
@@ -115,7 +126,8 @@ export function getFileContentMetadata(bytes: Uint8Array<ArrayBuffer>): FileCont
 }
 
 /**
- * Build a file stat from known bytes and modification time.
+ * Build a file stat from bytes already in hand (an in-memory filesystem's own
+ * store), so the facts are known without a read.
  *
  * @param bytes - Raw file bytes.
  * @param mtimeMs - Modification timestamp in milliseconds.
@@ -127,61 +139,6 @@ export function fileStatFromBytes(bytes: Uint8Array<ArrayBuffer>, mtimeMs: numbe
     type: 'file',
     size: bytes.byteLength,
     mtimeMs,
-    ...fileMetadataFields(getFileContentMetadata(bytes)),
-  };
-}
-
-/** Classify only the first 512 bytes; text line counts remain unknown. @public */
-export function headFileStatFromBytes(bytes: Uint8Array<ArrayBuffer>, mtimeMs: number): HeadFileStat {
-  return {
-    type: 'file',
-    size: bytes.byteLength,
-    mtimeMs,
-    contentKind: seemsBinary(bytes.subarray(0, headSniffByteLength)) ? 'binary' : 'text',
-  };
-}
-
-/** Drop an exact count when a provider already holds exact metadata. @public */
-export function headFileStatFromStat(stat: FileStat | HeadFileStat): HeadFileStat {
-  if (stat.type === 'dir') {
-    return stat;
-  }
-  const { type, size, mtimeMs, contentKind, provenance } = stat;
-  return { type, size, mtimeMs, contentKind, ...(provenance === undefined ? {} : { provenance }) };
-}
-
-/**
- * Build a file stat from a `File` handle without reading more content than the
- * classification needs: size and mtime come from the handle, the binary/text
- * decision from the leading {@link headSniffByteLength} bytes. Only text files
- * larger than the sniff window are read in full, and only to count lines.
- *
- * @param file - File object from `FileSystemFileHandle.getFile()`.
- * @returns File stat with content metadata.
- * @public
- */
-export async function fileStatFromFile(file: File): Promise<FileStat> {
-  const base = { type: 'file', size: file.size, mtimeMs: file.lastModified } as const;
-  if (file.size === 0) {
-    return { ...base, contentKind: 'text', lineCount: 1 };
-  }
-
-  const head = new Uint8Array(await file.slice(0, headSniffByteLength).arrayBuffer());
-  if (seemsBinary(head)) {
-    return { ...base, contentKind: 'binary' };
-  }
-
-  const bytes = file.size <= headSniffByteLength ? head : new Uint8Array(await file.arrayBuffer());
-  return { ...base, contentKind: 'text', lineCount: countLineBytes(bytes) };
-}
-
-/** Classify a browser File with a single bounded content read. @public */
-export async function headFileStatFromFile(file: File): Promise<HeadFileStat> {
-  const head = new Uint8Array(await file.slice(0, headSniffByteLength).arrayBuffer());
-  return {
-    type: 'file',
-    size: file.size,
-    mtimeMs: file.lastModified,
-    contentKind: seemsBinary(head) ? 'binary' : 'text',
+    ...getFileContentMetadata(bytes),
   };
 }

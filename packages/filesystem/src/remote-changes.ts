@@ -22,7 +22,7 @@ import type { ChangeNotice, ChangeNotification, PhysicalAuthority } from '#cross
 import type { MutationPipeline } from '#mutation-pipeline.js';
 import type { ProviderRegistry } from '#provider-registry.js';
 import type { ResolvedDiscoveryRoot } from '#project-directories.js';
-import type { TreeIndexes } from '#tree-index.js';
+import type { ProjectIndexes } from '#project-index/project-indexes.js';
 import type { WatchRegistry } from '#watch-registry.js';
 
 /**
@@ -62,7 +62,7 @@ export class RemoteChanges {
   private readonly _registry: ProviderRegistry;
   private readonly _mountTable: MountTable;
   private readonly _pipeline: MutationPipeline;
-  private readonly _treeIndexes: TreeIndexes;
+  private readonly _projectIndexes: ProjectIndexes;
   private readonly _watchRegistry: WatchRegistry;
   /** Read through a function: the writer-side pool arrives after construction. */
   private readonly _filePool: () => SharedPool | undefined;
@@ -80,7 +80,7 @@ export class RemoteChanges {
     registry: ProviderRegistry;
     mountTable: MountTable;
     pipeline: MutationPipeline;
-    treeIndexes: TreeIndexes;
+    projectIndexes: ProjectIndexes;
     watchRegistry: WatchRegistry;
     filePool: () => SharedPool | undefined;
     discoveryRoots: () => readonly ResolvedDiscoveryRoot[];
@@ -89,7 +89,7 @@ export class RemoteChanges {
     this._registry = options.registry;
     this._mountTable = options.mountTable;
     this._pipeline = options.pipeline;
-    this._treeIndexes = options.treeIndexes;
+    this._projectIndexes = options.projectIndexes;
     this._watchRegistry = options.watchRegistry;
     this._filePool = options.filePool;
     this._discoveryRoots = options.discoveryRoots;
@@ -124,6 +124,7 @@ export class RemoteChanges {
    * @param notice - Every fact one sibling changeset published.
    */
   private async _applyNotice(notice: ChangeNotice): Promise<void> {
+    this._projectIndexes.noteNotice(notice.tabId, notice.seq, notice.gap === true);
     const facts: Array<Exclude<ChangeNotification, { type: 'project-unavailable' }>> = [];
     for (const notification of notice.changes) {
       if (notification.type === 'project-unavailable') {
@@ -257,11 +258,8 @@ export class RemoteChanges {
       } else if (notification.type !== 'mkdir') {
         this._filePool()?.clear();
       }
-      if (isDiscoveryRootChange) {
-        this._treeIndexes.clear();
-      } else {
-        this._treeIndexes.evict(notification.path);
-      }
+      /* Scoped (D5): only the named path is unknown, re-observed at the next answer. */
+      this._projectIndexes.invalidate(isDiscoveryRootChange ? '/' : notification.path);
       const operations = resolution === undefined ? [] : [{ path: notification.path, resolution }];
       if (notification.type === 'directory-change') {
         events.push({ event: { type: 'directoryChanged', path: notification.path, backend }, operations });
@@ -334,7 +332,7 @@ export class RemoteChanges {
 
   private _handleRemoteFailure(notification: ChangeNotification, backend?: FileSystemBackend): void {
     this._filePool()?.clear();
-    this._treeIndexes.clear();
+    this._projectIndexes.invalidate('/');
     if (notification.type === 'project-unavailable') {
       this._watchRegistry.emitResetAll();
       return;

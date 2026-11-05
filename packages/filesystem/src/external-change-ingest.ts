@@ -25,7 +25,7 @@ import type { MountResolution, MountTable, StorageRootConfig, WorkspaceScope } f
 import type { ProviderRegistry } from '#provider-registry.js';
 import type { MutationPipeline } from '#mutation-pipeline.js';
 import type { CrossTabCoordinator } from '#cross-tab-coordinator.js';
-import type { TreeIndexes } from '#tree-index.js';
+import type { ProjectIndexes } from '#project-index/project-indexes.js';
 import { isNotFoundError } from '#workspace-errors.js';
 
 /** Concurrent `getFile()` calls per directory while walking an external snapshot. */
@@ -114,7 +114,7 @@ export class ExternalChangeIngest {
   private readonly _mountTable: MountTable;
   private readonly _pipeline: MutationPipeline;
   private readonly _crossTabCoordinator: CrossTabCoordinator;
-  private readonly _treeIndexes: TreeIndexes;
+  private readonly _projectIndexes: ProjectIndexes;
   /** Read through a function: the writer-side pool arrives after construction. */
   private readonly _filePool: () => SharedPool | undefined;
   /** Drops the registry's provider for a root whose physical identity changed. */
@@ -131,7 +131,7 @@ export class ExternalChangeIngest {
     mountTable: MountTable;
     pipeline: MutationPipeline;
     crossTabCoordinator: CrossTabCoordinator;
-    treeIndexes: TreeIndexes;
+    projectIndexes: ProjectIndexes;
     filePool: () => SharedPool | undefined;
     disposeStorageRoot: (storageRootKey: string) => void;
   }) {
@@ -139,7 +139,7 @@ export class ExternalChangeIngest {
     this._mountTable = options.mountTable;
     this._pipeline = options.pipeline;
     this._crossTabCoordinator = options.crossTabCoordinator;
-    this._treeIndexes = options.treeIndexes;
+    this._projectIndexes = options.projectIndexes;
     this._filePool = options.filePool;
     this._disposeStorageRoot = options.disposeStorageRoot;
   }
@@ -449,7 +449,7 @@ export class ExternalChangeIngest {
       const oldPhysicalPath = fact.from === undefined ? undefined : this._physicalPath(fact.from);
       const mappings = this._logicalMappingsForPhysicalPath(state, physicalPath);
       const knownKinds = new Map(
-        mappings.map(({ path, resolution }) => [resolution.entry, this._treeIndexes.statType(path)] as const),
+        mappings.map(({ path, resolution }) => [resolution.entry, this._projectIndexes.statType(path)] as const),
       );
       return { fact, physicalPath, oldPhysicalPath, mappings, knownKinds };
     });
@@ -718,18 +718,17 @@ export class ExternalChangeIngest {
   }): void {
     if (scoped === undefined) {
       this._filePool()?.clear();
-    } else {
-      for (const physicalPath of scoped.physicalPaths) {
-        for (const { path } of this._logicalMappingsForPhysicalPath(scoped.state, physicalPath)) {
-          this._filePool()?.invalidate(path);
-        }
+      /* A change that cannot be localized leaves every root unknown; each
+       * compares in full before its next answer (D5), facts kept where unchanged. */
+      this._projectIndexes.invalidate('/');
+      return;
+    }
+    for (const physicalPath of scoped.physicalPaths) {
+      for (const { path } of this._logicalMappingsForPhysicalPath(scoped.state, physicalPath)) {
+        this._filePool()?.invalidate(path);
+        this._projectIndexes.invalidate(path);
       }
     }
-    // oxlint-disable-next-line capitalized-comments -- Ponytail debt markers intentionally use the lowercase `ponytail:` tag.
-    // ponytail: the tree is dropped whole even for a localized change — TreeIndex
-    // cannot express "this subtree is unknown", and a scoped removal would publish a
-    // stale absence. Give it a subtree-invalidation state if the rebuild scan shows up hot.
-    this._treeIndexes.clear();
   }
 
   /**

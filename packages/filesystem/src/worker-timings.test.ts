@@ -83,11 +83,11 @@ describe('createWorkerTimings', () => {
     await timings.span('queue.wait', async () => {
       advance(1500);
     });
-    timings.count('listing.bytes', 2048);
+    timings.count('index.facts.bytes', 2048);
     timings.gauge('bridge.pending', 4);
 
     expect(formatWorkerTimingSummary('fill of 2 objects', timings.summarize(startedAt))).toBe(
-      '[worker-timings] fill of 2 objects took 1.5s: queue.wait 1× 1.5s max 1.5s; listing.bytes 2048 peak 2048/s; bridge.pending peak 4',
+      '[worker-timings] fill of 2 objects took 1.5s: queue.wait 1× 1.5s max 1.5s; index.facts.bytes 2048 peak 2048/s; bridge.pending peak 4',
     );
   });
 });

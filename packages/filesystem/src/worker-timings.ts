@@ -51,7 +51,10 @@ export type WorkerTimingSpan = (typeof workerTimingSpans)[number];
  *
  * - `events.change`: change events the worker's bus delivered.
  * - `revisions.changed`: `changed` events sent to a checkout machine.
- * - `listing.bytes`: file bytes a directory listing read to describe its entries.
+ * - `index.load`: Project Index roots opened from a persisted snapshot (D5).
+ * - `index.scan`: Project Index roots opened with no trustworthy snapshot.
+ * - `index.compare`: head-metadata observations of an index root or subtree (0 bytes read, I3).
+ * - `index.facts.bytes`: file bytes a lazy `facts` request read (D4).
  * - `locks.set`: ordered Web Lock sets a mutation acquired (one per `withCrossTabLocks` call).
  * - `locks.token`: the tokens those sets named, so `locks.token / locks.set` is the mean set size.
  * - `changesets`: changesets the authority applied under their lock set (one per `apply`, D2).
@@ -65,7 +68,10 @@ export type WorkerTimingSpan = (typeof workerTimingSpans)[number];
 export const workerTimingCounters = [
   'events.change',
   'revisions.changed',
-  'listing.bytes',
+  'index.load',
+  'index.scan',
+  'index.compare',
+  'index.facts.bytes',
   'locks.set',
   'locks.token',
   'changesets',

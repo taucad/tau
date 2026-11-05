@@ -190,6 +190,16 @@ export class CrossTabCoordinator {
     }
   }
 
+  /** This tab's identity in every notice it publishes. */
+  public get tabId(): string {
+    return this._tabId;
+  }
+
+  /** The sequence number of the latest notice this tab published (D5 vector). */
+  public get seq(): number {
+    return this._seq;
+  }
+
   /**
    * Run a mutation under sorted locks and publish only after success.
    *

@@ -142,6 +142,29 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     match: 'segment',
     directory: false,
   },
+  /* The Project Index's own snapshot and the import staging directory (I9):
+   * reserved dot paths, never discovered, indexed or versioned — at any depth,
+   * since a nested root keeps its own. */
+  {
+    prefix: '.tau-index',
+    class: 'control-plane',
+    versioned: false,
+    agentAccess: 'hidden',
+    watch: 'none',
+    anchored: false,
+    match: 'segment',
+    directory: true,
+  },
+  {
+    prefix: '.tau-staging',
+    class: 'control-plane',
+    versioned: false,
+    agentAccess: 'hidden',
+    watch: 'none',
+    anchored: false,
+    match: 'segment',
+    directory: true,
+  },
   {
     prefix: '.jj',
     class: 'control-plane',

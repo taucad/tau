@@ -177,10 +177,10 @@ describe('node filesystem client/host round trip', () => {
     }
   });
 
-  it('keeps exact and head wire validators distinct', () => {
-    const row = [{ name: 'file.txt', type: 'file', size: 1, mtimeMs: 0, contentKind: 'text' }];
-    expect(nodeFsResultSchemas.readdirWithStats.safeParse(row).success).toBe(false);
-    expect(nodeFsResultSchemas.readdirHeadWithStats.safeParse(row).success).toBe(true);
+  it('accepts head metadata rows at the wire boundary (I3)', () => {
+    const row = [{ name: 'file.txt', type: 'file', size: 1, mtimeMs: 0 }];
+    expect(nodeFsResultSchemas.readdirWithStats.safeParse(row).success).toBe(true);
+    expect(nodeFsResultSchemas.readdirWithStats.safeParse([{ name: 'file.txt', type: 'link' }]).success).toBe(false);
   });
 
   it('should reject malformed directory entry kinds at the wire boundary', () => {
@@ -191,18 +191,12 @@ describe('node filesystem client/host round trip', () => {
     ]);
   });
 
-  it('transports head-only metadata without weakening exact listing', async () => {
+  it('transports head metadata with no content facts (I3)', async () => {
     const { root, provider } = connect();
     writeFileSync(join(root, 'large.txt'), `${'x'.repeat(1024)}\nend`);
-    const head = await provider.readdirWithStats('', { content: 'head' });
-    const exact = await provider.readdirWithStats('');
-    expect(head).toMatchObject([{ name: 'large.txt', type: 'file', size: 1028, contentKind: 'text' }]);
-    expect(head[0]).not.toHaveProperty('lineCount');
-    expect(exact).toMatchObject([{ name: 'large.txt', type: 'file', size: 1028, contentKind: 'text', lineCount: 2 }]);
-    const headStat = await provider.stat('large.txt', { content: 'head' });
-    expect(headStat).toMatchObject({ size: 1028, contentKind: 'text' });
-    expect(headStat).not.toHaveProperty('lineCount');
-    expect(await provider.stat('large.txt')).toMatchObject({ lineCount: 2 });
+    const rows = await provider.readdirWithStats('');
+    expect(rows).toEqual([{ name: 'large.txt', type: 'file', size: 1028, mtimeMs: expect.any(Number) }]);
+    expect(await provider.stat('large.txt')).toEqual({ type: 'file', size: 1028, mtimeMs: expect.any(Number) });
   });
 
   it('fences checked deletion across ports and reports conflict and unchanged accurately', async () => {
@@ -245,7 +239,7 @@ describe('node filesystem client/host round trip', () => {
     const results = await Promise.all([first.deleteFileChecked(input), second.deleteFileChecked(input)]);
     expect(results.map(({ status }) => status).sort()).toEqual(['applied', 'conflict']);
     expect(existsSync(join(root, 'target.txt'))).toBe(false);
-    expect(await first.readdirWithStats('', { content: 'head' })).toEqual([]);
+    expect(await first.readdirWithStats('')).toEqual([]);
     expect(
       await first.deleteFileChecked({ path: 'target.txt', preconditions: [{ path: 'target.txt', expected: null }] }),
     ).toMatchObject({ status: 'unchanged' });
@@ -985,7 +979,6 @@ describe('node filesystem client/host round trip', () => {
     await expect(provider.stat('nested/file.txt')).resolves.toMatchObject({
       type: 'file',
       size: 5,
-      contentKind: 'text',
     });
   });
 

@@ -27,6 +27,7 @@ describe('FileSystemAccessProvider', () => {
         writable: true,
         quotaBased: false,
         durability: 'stream-append',
+        trustworthyMtime: true,
       });
     });
   });
@@ -710,10 +711,9 @@ describe('FileSystemAccessProvider', () => {
         type: 'file',
         size: 50_000_000,
         mtimeMs: 4242,
-        contentKind: 'binary',
       });
       expect(counters.fullReads).toBe(0);
-      expect(counters.sliceBytes).toBeLessThanOrEqual(512);
+      expect(counters.sliceBytes).toBe(0);
     });
 
     it('should list stats without reading contents and with bounded concurrency', async () => {
@@ -730,9 +730,9 @@ describe('FileSystemAccessProvider', () => {
         type: 'file',
         size: 50_000_000,
         mtimeMs: 4242,
-        contentKind: 'binary',
       });
       expect(counters.fullReads).toBe(0);
+      expect(counters.sliceBytes).toBe(0);
       expect(counters.maxInFlight).toBeGreaterThan(1);
       expect(counters.maxInFlight).toBeLessThanOrEqual(16);
     });
@@ -762,15 +762,19 @@ describe('FileSystemAccessProvider', () => {
   });
 
   describe('readdirWithStats', () => {
-    it('returns head-only text metadata after one bounded slice while exact stat still counts lines', async () => {
+    it('lists and stats head metadata without reading a byte of content (I3)', async () => {
       await provider.writeFile('large.txt', `${'a'.repeat(1024)}\nend`);
+      vi.restoreAllMocks();
       const slice = vi.spyOn(File.prototype, 'slice');
+      const arrayBuffer = vi.spyOn(File.prototype, 'arrayBuffer');
 
-      const rows = await provider.readdirWithStats('', { content: 'head' });
-      expect(rows[0]).toMatchObject({ name: 'large.txt', contentKind: 'text', size: 1028 });
-      expect(rows[0]).not.toHaveProperty('lineCount');
-      expect(slice.mock.calls).toEqual([[0, 512]]);
-      expect(await provider.stat('large.txt')).toMatchObject({ contentKind: 'text', lineCount: 2 });
+      const rows = await provider.readdirWithStats('');
+      const stat = await provider.stat('large.txt');
+
+      expect(rows[0]).toEqual({ name: 'large.txt', type: 'file', size: 1028, mtimeMs: expect.any(Number) });
+      expect(stat).toEqual({ type: 'file', size: 1028, mtimeMs: expect.any(Number) });
+      expect(slice).not.toHaveBeenCalled();
+      expect(arrayBuffer).not.toHaveBeenCalled();
     });
 
     it('should return entries with type and size in single pass', async () => {
@@ -822,23 +826,17 @@ describe('FileSystemAccessProvider', () => {
       const unreadable = (): DOMException =>
         new DOMException('The requested file could not be read.', 'NotReadableError');
 
-      it.each(['exact', 'head'])(
-        'should skip the vanished entry and list the rest for %s metadata',
-        async (content) => {
-          const staged = '.kept.ts.tau-staged.00000000-0000-4000-8000-000000000000.tmp';
-          await provider.writeFile('kept.ts', 'export {}');
-          await provider.writeFile(staged, 'staged');
-          interceptListing({ beforeStat: async () => rootHandle.removeEntry(staged) });
+      it('should skip the vanished entry and list the rest', async () => {
+        const staged = '.kept.ts.tau-staged.00000000-0000-4000-8000-000000000000.tmp';
+        await provider.writeFile('kept.ts', 'export {}');
+        await provider.writeFile(staged, 'staged');
+        interceptListing({ beforeStat: async () => rootHandle.removeEntry(staged) });
 
-          const rows =
-            content === 'head'
-              ? await provider.readdirWithStats('', { content: 'head' })
-              : await provider.readdirWithStats('');
+        const rows = await provider.readdirWithStats('');
 
-          expect(rows.map((row) => row.name)).toEqual(['kept.ts']);
-          expect(rows[0]).toMatchObject({ type: 'file', size: 9, contentKind: 'text' });
-        },
-      );
+        expect(rows.map((row) => row.name)).toEqual(['kept.ts']);
+        expect(rows[0]).toMatchObject({ type: 'file', size: 9 });
+      });
 
       it('should skip an entry whose File became unreadable because it was removed', async () => {
         await provider.writeFile('kept.ts', 'kept');

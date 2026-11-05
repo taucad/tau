@@ -12,7 +12,7 @@
 import { z } from 'zod';
 import type { CheckedFileWriteResult } from '@taucad/types';
 import { assertRootedPath } from '@taucad/utils/path';
-import type { FileMode, FileStat, HeadFileStat } from '#types.js';
+import type { FileMode, FileStat } from '#types.js';
 import { streamChunkSize } from '#backend/stream-utils.js';
 
 /**
@@ -154,9 +154,7 @@ export const nodeFsRequestSchema = z.discriminatedUnion('op', [
   z.object({ ...rooted, op: z.literal('readdir'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('readdirEntries'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('readdirWithStats'), path: z.string() }),
-  z.object({ ...rooted, op: z.literal('readdirHeadWithStats'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('stat'), path: z.string() }),
-  z.object({ ...rooted, op: z.literal('headStat'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('getFileMode'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('setFileMode'), path: z.string(), mode: z.enum(['100644', '100755']) }),
   z.object({ ...rooted, op: z.literal('mkdir'), path: z.string() }),
@@ -170,27 +168,12 @@ export const nodeFsRequestSchema = z.discriminatedUnion('op', [
 /** One request frame. @public */
 export type NodeFsRequest = z.infer<typeof nodeFsRequestSchema>;
 
+/* Head metadata (I3): a stat names kind, size and time, never content facts. */
 const fileStatSchema = z.union([
   z.object({ type: z.literal('dir'), size: z.number(), mtimeMs: z.number() }),
-  z.object({
-    type: z.literal('file'),
-    size: z.number(),
-    mtimeMs: z.number(),
-    contentKind: z.literal('binary'),
-  }),
-  z.object({
-    type: z.literal('file'),
-    size: z.number(),
-    mtimeMs: z.number(),
-    contentKind: z.literal('text'),
-    lineCount: z.number(),
-  }),
+  z.object({ type: z.literal('file'), size: z.number(), mtimeMs: z.number() }),
 ]) as z.ZodType<FileStat>;
 const fileModeSchema = z.enum(['100644', '100755']) as z.ZodType<FileMode>;
-const headFileStatSchema = z.union([
-  z.object({ type: z.literal('dir'), size: z.number(), mtimeMs: z.number() }),
-  z.object({ type: z.literal('file'), size: z.number(), mtimeMs: z.number(), contentKind: z.enum(['text', 'binary']) }),
-]) as z.ZodType<HeadFileStat>;
 
 const watchEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('change'), path: z.string(), kind: z.enum(['file', 'dir']) }),
@@ -236,9 +219,7 @@ export const nodeFsResultSchemas = {
   readdir: z.array(z.string()),
   readdirEntries: z.array(z.object({ name: z.string(), kind: z.enum(['file', 'dir']) })),
   readdirWithStats: z.array(z.object({ name: z.string() }).and(fileStatSchema)),
-  readdirHeadWithStats: z.array(z.object({ name: z.string() }).and(headFileStatSchema)),
   stat: fileStatSchema,
-  headStat: headFileStatSchema,
   getFileMode: fileModeSchema,
   setFileMode: z.undefined(),
   mkdir: z.undefined(),

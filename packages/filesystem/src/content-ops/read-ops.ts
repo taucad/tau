@@ -10,7 +10,7 @@
  * says; `versionedOnly` is the whole-project export's own choice.
  *
  * `search` and `statTree` are deliberately *not* here. They are not functions
- * of the port: they read the root's `TreeIndex`, which only the rooted
+ * of the port: they read the root's `ProjectIndex`, which only the rooted
  * filesystem owns, and they are masked by `composeView` itself — so they arrive
  * on the view already and this wrapper simply keeps them.
  *

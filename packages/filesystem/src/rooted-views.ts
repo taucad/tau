@@ -33,9 +33,9 @@ import type {
 } from '@taucad/types';
 import { assertRootedPath, joinRelativePath, resolveAuthorityPath } from '@taucad/utils/path';
 import type {
-  FileStatOptions,
-  HeadFileStat,
+  ContentFacts,
   DirectoryEntry,
+  DirectoryStatRow,
   FileReadStreamOptions,
   FileSystemProvider,
   MkdirOptions,
@@ -44,7 +44,8 @@ import type {
   WorkspaceMutationContext,
 } from '#types.js';
 import type { MountResolution, MountTable } from '#mount-table.js';
-import type { TreeIndex, TreeIndexAdmits, TreeSearchOptions } from '#tree-index.js';
+import type { ProjectIndexes, IndexFactsOptions } from '#project-index/project-indexes.js';
+import type { IndexAdmits, IndexCompareResult, IndexSearchOptions } from '#project-index/project-index.js';
 import type { WalkOptions } from '#content-ops/walk.js';
 import { causeToMutationError, preflightCreate, preflightDelete, preflightMove } from '#mutation-pipeline.js';
 import type { BulkMoveEdit, BulkMoveResult, MutationPipeline, ResolvedChangesetEntry } from '#mutation-pipeline.js';
@@ -53,7 +54,6 @@ import type { WatchRegistry } from '#watch-registry.js';
 import { RootedFileSystemError, WorkspaceMutationError } from '#workspace-errors.js';
 import { bufferToStream, validateFileReadStreamOptions } from '#backend/stream-utils.js';
 import { getEventOrigin } from '#event-origin-registry.js';
-import { headFileStatFromStat } from '#content-metadata.js';
 
 /** The control plane a rooted view serves outside the mutation pipeline. */
 const privateStoreDirectory = '.git';
@@ -171,9 +171,19 @@ export type RootedFileSystem = Omit<FileSystemProvider, 'writeFileChecked' | 'de
      * not the authority's own — a bridge client rooted at someone else's
      * checkout — holds no index and offers neither read.
      */
-    search?(query: string, options?: TreeSearchOptions): Promise<FileStatEntry[]>;
+    search?(query: string, options?: IndexSearchOptions): Promise<FileStatEntry[]>;
     /** Recursively stat one directory of this root from the same index. */
-    statTree?(path: string, options?: { admits?: TreeIndexAdmits }): Promise<FileStatEntry[]>;
+    statTree?(path: string, options?: { admits?: IndexAdmits }): Promise<FileStatEntry[]>;
+    /**
+     * Lazy content facts (D4): from the index while they still describe the
+     * bytes, otherwise measured from one read within `byteCap` and recorded.
+     */
+    facts?(paths: readonly string[], options?: IndexFactsOptions): Promise<ReadonlyMap<string, ContentFacts>>;
+    /**
+     * The full head-metadata compare of this root's index (D5): what a cut runs
+     * first, so every fact it trusts has passed the compare and the racy guard.
+     */
+    compareIndex?(): Promise<IndexCompareResult>;
   };
 
 /**
@@ -185,8 +195,8 @@ export class RootedViews {
   private readonly _mountTable: MountTable;
   private readonly _pipeline: MutationPipeline;
   private readonly _watchRegistry: WatchRegistry;
-  /** One root's warm index, built by the authority that owns the scan. */
-  private readonly _treeIndexFor: (root: string) => Promise<TreeIndex>;
+  /** Every root's Project Index, opened by the authority that owns its I/O. */
+  private readonly _projectIndexes: ProjectIndexes;
 
   /**
    * Create the rooted-view factory over the authority's own collaborators.
@@ -197,12 +207,12 @@ export class RootedViews {
     mountTable: MountTable;
     pipeline: MutationPipeline;
     watchRegistry: WatchRegistry;
-    treeIndexFor: (root: string) => Promise<TreeIndex>;
+    projectIndexes: ProjectIndexes;
   }) {
     this._mountTable = options.mountTable;
     this._pipeline = options.pipeline;
     this._watchRegistry = options.watchRegistry;
-    this._treeIndexFor = options.treeIndexFor;
+    this._projectIndexes = options.projectIndexes;
   }
 
   /**
@@ -279,11 +289,20 @@ export class RootedViews {
         : resolution.provider.readFile(resolution.path);
     }
 
-    /* One provider call for the whole set: a remote provider digests beside its bytes. */
+    /* One provider call for the whole set: a remote provider digests beside its
+     * bytes. Without one, the root's index answers each trusted digest and
+     * reads, digests and records the rest (D5). */
     const providerHashFiles = captured.provider.hashFiles?.bind(captured.provider);
     const hashFiles =
       providerHashFiles === undefined
-        ? undefined
+        ? async (paths: readonly string[]): Promise<Record<string, string>> => {
+            const local = paths.map((path) => resolveLocal(path).localPath);
+            const answered = await this._projectIndexes.facts(root, local, { digests: ['sha256'] });
+            assertCurrent();
+            return Object.fromEntries(
+              paths.map((path, index) => [path, answered.get(local[index]!)?.sha256 ?? 'missing']),
+            );
+          }
         : async (paths: readonly string[]): Promise<Record<string, string>> => {
             const providerPaths = paths.map((path) => resolveLocal(path).resolution.path);
             const digests = await providerHashFiles(providerPaths);
@@ -331,22 +350,15 @@ export class RootedViews {
       return resolution.provider.readdir(resolution.path);
     };
     const readdirWithStats = captured.provider.readdirWithStats
-      ? ((async (path: string, options?: { readonly content: 'head' }) => {
+      ? async (path: string): Promise<DirectoryStatRow[]> => {
           const { resolution } = resolveLocal(path);
-          if (options !== undefined) {
-            if (resolution.provider.supportsHeadListing !== true) {
-              throw Object.assign(new Error('Head-only directory metadata is unavailable.'), { code: 'ENOTSUP' });
-            }
-            const rows = await resolution.provider.readdirWithStats!(resolution.path, options);
-            return rows.map(({ name, ...stat }) => ({ name, ...headFileStatFromStat(stat) }));
-          }
           return resolution.provider.readdirWithStats!(resolution.path);
-        }) as NonNullable<FileSystemProvider['readdirWithStats']>)
+        }
       : undefined;
-    const stat = (async (path: string, options?: FileStatOptions): Promise<FileStat | HeadFileStat> => {
+    const stat = async (path: string): Promise<FileStat> => {
       const { resolution } = resolveLocal(path);
-      return options ? resolution.provider.stat(resolution.path, options) : resolution.provider.stat(resolution.path);
-    }) as FileSystemProvider['stat'];
+      return resolution.provider.stat(resolution.path);
+    };
     const readdirEntries = captured.provider.readdirEntries
       ? async (path: string): Promise<DirectoryEntry[]> => {
           const { resolution } = resolveLocal(path);
@@ -594,10 +606,10 @@ export class RootedViews {
         ? target.provider.readFile(target.path, 'utf8')
         : target.provider.readFile(target.path);
     }) as PrivateStore['readFile'];
-    const statPrivate = (async (path: string, options?: FileStatOptions) => {
+    const statPrivate: PrivateStore['stat'] = async (path: string) => {
       const target = resolvePrivate(path);
-      return options === undefined ? target.provider.stat(target.path) : target.provider.stat(target.path, options);
-    }) as PrivateStore['stat'];
+      return target.provider.stat(target.path);
+    };
     const readPrivateRange = async (path: string, offset: number, length: number): Promise<Uint8Array<ArrayBuffer>> => {
       if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < 0 || length < 0) {
         throw new RangeError(
@@ -662,17 +674,37 @@ export class RootedViews {
       const { resolution } = resolveLocal(path);
       return resolution.provider.lstat(resolution.path);
     };
-    const search = async (query: string, options?: TreeSearchOptions): Promise<FileStatEntry[]> => {
+    const search = async (query: string, options?: IndexSearchOptions): Promise<FileStatEntry[]> => {
       assertCurrent();
-      const index = await this._treeIndexFor(root);
+      const index = await this._projectIndexes.ready(root);
       assertCurrent();
-      return index.searchFiles(query, options);
+      return index.search(query, options);
     };
-    const statTree = async (path: string, options?: { admits?: TreeIndexAdmits }): Promise<FileStatEntry[]> => {
+    const statTree = async (path: string, options?: { admits?: IndexAdmits }): Promise<FileStatEntry[]> => {
       const { localPath } = resolveLocal(path);
-      const index = await this._treeIndexFor(root);
+      const index = await this._projectIndexes.ready(root);
       assertCurrent();
-      return index.getDirectoryStat(localPath, options);
+      return index.statTree(localPath, options);
+    };
+    const facts = async (
+      paths: readonly string[],
+      options?: IndexFactsOptions,
+    ): Promise<ReadonlyMap<string, ContentFacts>> => {
+      const local = paths.map((path) => resolveLocal(path).localPath);
+      const answered = await this._projectIndexes.facts(root, local, options);
+      assertCurrent();
+      return new Map(
+        paths.flatMap((path, index) => {
+          const value = answered.get(local[index]!);
+          return value === undefined ? [] : [[path, value] as const];
+        }),
+      );
+    };
+    const compareIndex = async (): Promise<IndexCompareResult> => {
+      assertCurrent();
+      const result = await this._projectIndexes.compare(root);
+      assertCurrent();
+      return result;
     };
     const watch = (request: WatchRequest, handler: (event: WatchEvent) => void): (() => void) => {
       assertCurrent();
@@ -744,11 +776,10 @@ export class RootedViews {
     return {
       id: 'workspace-root',
       capabilities: captured.provider.capabilities,
-      supportsHeadListing: captured.provider.supportsHeadListing,
       dispose() {
         // The provider and rooted view lifetime remain owned by WorkspaceFileService.
       },
-      ...(hashFiles === undefined ? {} : { hashFiles }),
+      hashFiles,
       readFile,
       readFileStream,
       writeFile,
@@ -770,6 +801,8 @@ export class RootedViews {
       watch,
       search,
       statTree,
+      facts,
+      compareIndex,
       copyTree,
       duplicate,
       move,

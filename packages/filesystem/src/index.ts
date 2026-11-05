@@ -5,9 +5,9 @@ export type {
   FileMode,
   FileStat,
   FileStatEntry,
-  HeadFileStat,
-  FileStatOptions,
   DirectoryStatRow,
+  ContentFacts,
+  ContentFactsOptions,
   FileSystemProvider,
   FileReadStreamOptions,
   PathAgentAccess,
@@ -60,7 +60,7 @@ export type {
   ProjectRootDiscoveryStatus,
   ResolvedDiscoveryRoot,
 } from '#project-directories.js';
-/* `ProjectDirectories`, `MutationPipeline`, `RootedViews` and `TreeIndex` are the composition root's
+/* `ProjectDirectories`, `MutationPipeline`, `RootedViews` and `ProjectIndexes` are the composition root's
  * own collaborators (D14): a consumer reaches them through
  * `WorkspaceFileService`, never by constructing one, so only the shapes they
  * hand back are exported. */
@@ -82,8 +82,21 @@ export {
 export type { CapacityDecision, CapacityDomain, CapacityMeasurement, CapacityRequest } from '#capacity-domain.js';
 
 export { BoundedFileCache } from '#bounded-file-cache.js';
-export { TreeIndex } from '#tree-index.js';
-export type { TreeIndexAdmits, TreeNode, TreeSearchOptions } from '#tree-index.js';
+export { ProjectIndex, timestampGranularityMilliseconds } from '#project-index/project-index.js';
+export type {
+  FactsAt,
+  IndexAdmits,
+  IndexCompareResult,
+  IndexEntry,
+  IndexEntryKind,
+  IndexSearchOptions,
+  ObservedRow,
+} from '#project-index/project-index.js';
+export { reservedIndexPaths } from '#project-index/project-indexes.js';
+export type { IndexFactsOptions } from '#project-index/project-indexes.js';
+export { projectIndexDirectory } from '#project-index/index-snapshot.js';
+export type { IndexVector } from '#project-index/index-snapshot.js';
+export type { IndexMirror, IndexMirrorChange } from '#project-index/index-mirror.js';
 export { ResourceQueue } from '#resource-queue.js';
 export type { ResourceQueueClaim } from '#resource-queue.js';
 export {
@@ -116,7 +129,6 @@ export {
   countTextLines,
   fileMetadataFields,
   fileStatFromBytes,
-  fileStatFromFile,
   getFileContentMetadata,
   headSniffByteLength,
   seemsBinary,

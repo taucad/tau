@@ -69,7 +69,7 @@ export class GitCatalogueController {
   @Get(':projectId/git/catalogue')
   public async catalogue(
     @Param('projectId') projectId: string,
-    @Query('refs') familiesQuery: string | undefined,
+    @Query('refs') familiesQuery: unknown,
     @User('id') userId: string,
     @Req() request: FastifyRequest,
     @Res({ passthrough: true }) reply: FastifyReply,

@@ -77,12 +77,17 @@ export type Catalogue = {
 /**
  * The families a `refs` query names.
  *
- * @param query - `heads,tags,chats` or any subset; absent for the default.
+ * @param query - `heads,tags,chats` or any subset; absent for the default. A
+ * repeated `refs` parameter arrives as an array and is refused like any other
+ * value that is not one string.
  * @returns The families, or `undefined` when the query names anything else.
  */
-export const parseCatalogueFamilies = (query: string | undefined): readonly CatalogueFamily[] | undefined => {
+export const parseCatalogueFamilies = (query: unknown): readonly CatalogueFamily[] | undefined => {
   if (query === undefined || query === '') {
     return defaultCatalogueFamilies;
+  }
+  if (typeof query !== 'string') {
+    return undefined;
   }
   const named = query.split(',');
   return named.every((family): family is CatalogueFamily => Object.hasOwn(catalogueFamilies, family))

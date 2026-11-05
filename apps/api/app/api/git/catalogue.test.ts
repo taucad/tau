@@ -91,6 +91,7 @@ describe('the catalogue', () => {
     expect(parseCatalogueFamilies('ops')).toBeUndefined();
     expect(parseCatalogueFamilies('heads,ops')).toBeUndefined();
     expect(parseCatalogueFamilies('remotes')).toBeUndefined();
+    expect(parseCatalogueFamilies(['heads', 'tags'])).toBeUndefined();
   });
 
   it('should link each live pack to its stored index and its body, sized as stored', async () => {
@@ -213,7 +214,7 @@ describe('GET /v1/projects/:projectId/git/catalogue', () => {
     fileLinks.sign.mockImplementation(async (request) => `https://files.test/${request.namespace}/${request.key}`);
     const controller = new GitCatalogueController(repositories, limiter, objectStorage, store, fileLinks);
     const reply = mock<FastifyReply>();
-    const request = { raw: { headers: {} } } as unknown as FastifyRequest;
+    const request = mock<FastifyRequest>();
     return { controller, reply, request, repositories, fileLinks };
   };
 
@@ -261,5 +262,13 @@ describe('GET /v1/projects/:projectId/git/catalogue', () => {
     ).rejects.toMatchObject({ status: 429 });
     expect(spent.reply.header).toHaveBeenCalledWith('retry-after', '9');
     expect(spent.repositories.authorize).not.toHaveBeenCalled();
+  });
+
+  it('should refuse a repeated refs parameter with 400 rather than throw on the array', async () => {
+    const repeated = await route();
+    await expect(
+      repeated.controller.catalogue('proj_cat', ['heads', 'tags'], 'user_owner', repeated.request, repeated.reply),
+    ).rejects.toMatchObject({ status: 400, response: { code: 'GIT_CATALOGUE_REFS_UNKNOWN' } });
+    expect(repeated.repositories.authorize).not.toHaveBeenCalled();
   });
 });

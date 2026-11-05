@@ -1805,6 +1805,23 @@
       "rules": {
         "tau-lint/xstate-owner-machine": ["error", { "pending": ["fromSafeAsync"] }]
       }
+    },
+    {
+      /*
+       * D22: a mutation convenience awaited in a loop is one changeset per
+       * iteration. Collect the entries and `apply` them as one changeset. The
+       * provider layer's own primitives and tests are exempt.
+       */
+      "files": ["packages/filesystem/src/**/*.ts", "libs/fs-bridge/src/**/*.ts"],
+      "rules": {
+        "tau-lint/no-awaited-mutation-in-loop": "error"
+      }
+    },
+    {
+      "files": ["packages/filesystem/src/backend/**", "**/*.test.ts", "**/*.bench.ts", "**/test-utils/**"],
+      "rules": {
+        "tau-lint/no-awaited-mutation-in-loop": "off"
+      }
     }
   ],
   "settings": {

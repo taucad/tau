@@ -8,6 +8,7 @@ import { ResourceQueue } from '#resource-queue.js';
 import { ChangeEventBus } from '#change-event-bus.js';
 import { getEventOrigin } from '#event-origin-registry.js';
 import { CrossTabCoordinator } from '#cross-tab-coordinator.js';
+import { changeEventEntries } from '#changeset.js';
 import type { ChangeEvent, FileSystemProvider } from '#types.js';
 
 async function createMountedWorkspaceFileService() {
@@ -408,7 +409,9 @@ describe('MountTable integration', () => {
         expect(await siblingService.exists('/projects/proj_A/B-main.ts')).toBe(false);
         expect(await siblingService.exists('/projects/proj_B/lib/util.ts')).toBe(false);
 
+        expect(events).toHaveLength(1);
         const writtenEvents = events
+          .flatMap((event) => changeEventEntries(event))
           .filter((event) => event.type === 'fileWritten')
           .map((event) => ({ path: event.path, backend: event.backend, origin: getEventOrigin(event) }))
           .sort((a, b) => a.path.localeCompare(b.path));

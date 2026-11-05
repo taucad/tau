@@ -2,11 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { WatchRegistry } from '#watch-registry.js';
 import { ChangeEventBus } from '#change-event-bus.js';
 import { EventCoalescer } from '#event-coalescer.js';
-import type { ChangeEvent, WatchEvent } from '#types.js';
+import type { PathChangeEvent, WatchEvent } from '#types.js';
 
 const testBackend = 'memory';
-const written = (path: string): ChangeEvent => ({ type: 'fileWritten', path, backend: testBackend });
-const deleted = (path: string): ChangeEvent => ({ type: 'fileDeleted', path, backend: testBackend });
+const written = (path: string): PathChangeEvent => ({ type: 'fileWritten', path, backend: testBackend });
+const deleted = (path: string): PathChangeEvent => ({ type: 'fileDeleted', path, backend: testBackend });
 
 describe('Watch edit storm (100+ rapid events)', () => {
   let bus: ChangeEventBus;
@@ -241,7 +241,7 @@ describe('Watch event latency measurement', () => {
 
   it('should batch multiple events within window into one delivery', () => {
     const coalescingWindow = 50;
-    const deliveries: ChangeEvent[][] = [];
+    const deliveries: PathChangeEvent[][] = [];
     const coalescer = new EventCoalescer((chunk) => deliveries.push([...chunk]), { coalescingWindow });
 
     const a = written('/a.ts');

@@ -11,11 +11,12 @@
  */
 import { afterAll, beforeAll, describe, expect, inject, test } from 'vitest';
 import { commands, server } from 'vitest/browser';
+import { maximumChangesetEntries } from '@taucad/filesystem';
 import knownRedList from '#filesystem-scenarios/baseline/known-red.json' with { type: 'json' };
 import { defaultFixtureSeed, fixtureProfiles, planFixture } from '#filesystem-scenarios/fixture.js';
 import type { FixturePlan } from '#filesystem-scenarios/fixture.js';
 import type { AtomicityProgress, AtomicityRequest, AtomicityWriter } from '#filesystem-scenarios/atomicity.worker.js';
-import { scenarioWorkerReady } from '#filesystem-scenarios/protocol.js';
+import { scenarioCrashPoint, scenarioWorkerReady } from '#filesystem-scenarios/protocol.js';
 import type {
   ProbeReport,
   RunnerName,
@@ -27,6 +28,7 @@ import type {
 import {
   measuredRow,
   pendingRow,
+  ratchetAtHead,
   renderMarkdown,
   scenarioTable,
   withinBaseline,
@@ -38,7 +40,8 @@ declare module 'vitest' {
   export interface ProvidedContext {
     filesystemScenarioProfile: 'small' | 'full';
     filesystemScenarioRuns: number;
-    filesystemScenarioRecord: boolean;
+    /** `true` records and keeps the better value at HEAD; `force` records what it observed. */
+    filesystemScenarioRecord: boolean | 'force';
     filesystemScenarioHead: string;
     filesystemScenarioOutput: string;
   }
@@ -51,7 +54,9 @@ const knownRedGates: readonly KnownRedGate[] = knownRedList.gates;
 const knownRed = new Set<string>(knownRedGates.map((gate) => gate.id));
 /** The known-red ratchet key: values at HEAD differ by engine and fixture profile. */
 const baselineKey = `${server.browser}-${profileName}`;
-const recording = inject('filesystemScenarioRecord');
+const recordSetting = inject('filesystemScenarioRecord');
+const recording = recordSetting !== false;
+const forcing = recordSetting === 'force';
 const fixture = { seed: defaultFixtureSeed, scale: fixtureProfiles[profileName].scale };
 /** Every OPFS directory this harness creates starts with this, so a run can clear the last one's. */
 const directoryPrefix = 'fsx-';
@@ -60,6 +65,8 @@ const directoryPrefix = 'fsx-';
 
 type ScenarioWorker = Readonly<{
   call: <Value>(command: WorkerCommand) => Promise<Value>;
+  /** Settles when the worker posts its crash point (the I1 replacement probe). */
+  crashPoint: Promise<void>;
   terminate: () => void;
 }>;
 
@@ -113,7 +120,12 @@ const spawn = async (name: string): Promise<ScenarioWorker> => {
   const worker = await startWorker(name);
   const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
   let sequence = 0;
-  worker.addEventListener('message', (event: MessageEvent<WorkerResponse>) => {
+  const crashPoint = Promise.withResolvers<void>();
+  worker.addEventListener('message', (event: MessageEvent<WorkerResponse | typeof scenarioCrashPoint>) => {
+    if (event.data === scenarioCrashPoint) {
+      crashPoint.resolve();
+      return;
+    }
     const entry = pending.get(event.data.id);
     if (entry === undefined) {
       return;
@@ -126,6 +138,7 @@ const spawn = async (name: string): Promise<ScenarioWorker> => {
     }
   });
   return {
+    crashPoint: crashPoint.promise,
     call: async <Value>(command: WorkerCommand): Promise<Value> =>
       new Promise<Value>((resolve, reject) => {
         sequence += 1;
@@ -194,9 +207,15 @@ const flatten = (measurement: WorkerMeasurement): Record<string, number> => {
     /* Lock sets and tokens come from production's own counters (cross-tab coordinator). */
     lockSets: measurement.productionCounters['locks.set'] ?? 0,
     lockTokens: measurement.productionCounters['locks.token'] ?? 0,
+    /* Changesets the authority applied under their lock set (production's own counter). */
+    changesets: measurement.productionCounters['changesets'] ?? 0,
     networkRequests,
     ...Object.fromEntries(Object.entries(network).map(([kind, value]) => [`network.${kind}`, value])),
     ...measurement.extra,
+    /* D2 bounds a changeset at 256 entries, so N files need at least ⌈N/256⌉ and an apply should take no more. */
+    ...(typeof measurement.extra['files'] === 'number'
+      ? { changesetBound: Math.ceil(measurement.extra['files'] / maximumChangesetEntries) }
+      : {}),
   };
 };
 
@@ -297,6 +316,16 @@ describe(`filesystem scenarios (${profileName} profile)`, { concurrent: false },
       network: 'none: no request leaves the page (unthrottled)',
       storage: 'OPFS in a persistent (disk-backed) browser profile',
     };
+    await clearScenarioDirectories();
+    /* One unmeasured save-during-apply first, so no measured sample pays the cold start (module loads, first OPFS
+     * and lock use); the gates stay as they are (I8). */
+    const warmUp = newProject('warm-up');
+    const worker = await openWorker('warm-up', [warmUp]);
+    try {
+      await runOn(worker, { runner: 'materialize-with-save', project: warmUp });
+    } finally {
+      worker.terminate();
+    }
     await clearScenarioDirectories();
   });
 
@@ -530,8 +559,6 @@ describe(`filesystem scenarios (${profileName} profile)`, { concurrent: false },
             readP95: percentile95(probe.latencies),
             invalidationsReceived: probe.invalidationsReceived,
             secondTabBusEvents: probe.busEvents,
-            /* The apply is one changeset. */
-            invalidationsPerChangeset: probe.invalidationsReceived,
           },
           spans: measured.spans,
         };
@@ -560,6 +587,136 @@ describe(`filesystem scenarios (${profileName} profile)`, { concurrent: false },
     for (const sample of row.samples) {
       expect(sample['saveIssuedDuringApply'], JSON.stringify(sample)).toBe(1);
     }
+  });
+
+  /**
+   * Kill an apply at seven points spread across its mutations, then open the
+   * project in a fresh worker, recover it as an open does, and read every path.
+   *
+   * @param label - Names the projects and workers.
+   * @param create - Write the new tree over an empty checkout instead of the old tree.
+   * @returns One outcome per kill point.
+   */
+  const killApplyAcrossItsMutations = async (
+    label: string,
+    create: boolean,
+  ): Promise<Array<Record<string, number>>> => {
+    const parameters: Readonly<Record<string, number>> = create ? { create: 1 } : {};
+    const seed = async (worker: ScenarioWorker, project: ScenarioProject): Promise<void> => {
+      if (!create) {
+        await runOn(worker, { runner: 'replace-seed', project });
+      }
+    };
+    /* A clean run says how many mutations the apply makes, so the kills can spread across all of them. */
+    const calibration = newProject(`${label}-calibrate`);
+    const calibrating = await openWorker(`${label}-calibrate`, [calibration]);
+    let total: number;
+    try {
+      await seed(calibrating, calibration);
+      const clean = await runOn(calibrating, { runner: 'replace-killable', project: calibration, parameters });
+      total = clean.extra['operations'] ?? 0;
+    } finally {
+      calibrating.terminate();
+    }
+    expect(total).toBeGreaterThan(40);
+    const outcomes: Array<Record<string, number>> = [];
+    for (const fraction of [0.05, 0.2, 0.35, 0.5, 0.65, 0.8, 0.95]) {
+      const killAfter = Math.max(1, Math.floor(fraction * total));
+      const project = newProject(`${label}-${String(killAfter)}`);
+      // oxlint-disable-next-line no-await-in-loop -- one project per kill point, in order.
+      const applying = await openWorker(`${label}-apply-${String(killAfter)}`, [project]);
+      // oxlint-disable-next-line no-await-in-loop -- as above.
+      await seed(applying, project);
+      /* Never settles once the worker is killed; the race below only reads it if the apply ends first. */
+      const finished = (async (): Promise<'finished' | 'failed'> => {
+        try {
+          await runOn(applying, {
+            runner: 'replace-killable',
+            project,
+            parameters: { ...parameters, killAfter },
+          });
+          return 'finished';
+        } catch {
+          return 'failed';
+        }
+      })();
+      // oxlint-disable-next-line no-await-in-loop -- the kill lands at the crash point.
+      const reached = await Promise.race([
+        (async (): Promise<'killed'> => {
+          await applying.crashPoint;
+          return 'killed';
+        })(),
+        finished,
+      ]);
+      applying.terminate();
+      /* The engine releases a killed worker's handles asynchronously. */
+      // oxlint-disable-next-line no-await-in-loop -- let storage settle the aborted writes.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 300);
+      });
+      // oxlint-disable-next-line no-await-in-loop -- a fresh process opens the same files.
+      const reopened = await openWorker(`${label}-recover-${String(killAfter)}`, [project]);
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- recover, then read every path back.
+        const recovered = await runOn(reopened, { runner: 'replace-recover', project });
+        outcomes.push({ killAfter, total, killed: reached === 'killed' ? 1 : 0, ...recovered.extra });
+      } finally {
+        reopened.terminate();
+      }
+    }
+    return outcomes;
+  };
+
+  const recordAtomicity = (writer: string, outcomes: ReadonlyArray<Record<string, number>>): void => {
+    atomicity = [
+      ...atomicity,
+      ...outcomes.map((outcome) => ({
+        engine: server.browser,
+        writer,
+        killedAt: `${String(outcome['killAfter'])} of ${String(outcome['total'])} mutations`,
+        result: `old ${String(outcome['old'])}, new ${String(outcome['new'])}, missing ${String(outcome['missing'])}, partial ${String(outcome['partial'])}`,
+        residue: [
+          ...(outcome['removed'] === 0 || outcome['removed'] === undefined
+            ? []
+            : [`${String(outcome['removed'])} short creates removed on open`]),
+          ...(outcome['litter'] === 0 ? [] : [`${String(outcome['litter'])} temporary siblings`]),
+          ...(outcome['staged'] === 0 ? [] : [`${String(outcome['staged'])} staged files`]),
+        ],
+      })),
+    ];
+  };
+
+  test('I1: a replacement killed at any step of stage, move aside and publish leaves old or new bytes', async () => {
+    const outcomes = await killApplyAcrossItsMutations('i1', false);
+    recordAtomicity('applyTree replace (stage, move aside, publish)', outcomes);
+    for (const outcome of outcomes) {
+      expect(outcome['killed'], JSON.stringify(outcome)).toBe(1);
+      expect(outcome['missing'], JSON.stringify(outcome)).toBe(0);
+      expect(outcome['partial'], JSON.stringify(outcome)).toBe(0);
+      expect(outcome['litter'], JSON.stringify(outcome)).toBe(0);
+      expect(outcome['staged'], JSON.stringify(outcome)).toBe(0);
+      expect((outcome['old'] ?? 0) + (outcome['new'] ?? 0), JSON.stringify(outcome)).toBe(48);
+    }
+  });
+
+  test('I1: a create killed at any step of its changeset reads back absent or new: the open removes what it left short', async () => {
+    const outcomes = await killApplyAcrossItsMutations('i1-create', true);
+    recordAtomicity('applyTree create (final-path write, recorded size)', outcomes);
+    for (const outcome of outcomes) {
+      expect(outcome['killed'], JSON.stringify(outcome)).toBe(1);
+      expect(outcome['old'], JSON.stringify(outcome)).toBe(0);
+      expect(outcome['partial'], JSON.stringify(outcome)).toBe(0);
+      expect(outcome['litter'], JSON.stringify(outcome)).toBe(0);
+      expect(outcome['staged'], JSON.stringify(outcome)).toBe(0);
+      expect((outcome['missing'] ?? 0) + (outcome['new'] ?? 0), JSON.stringify(outcome)).toBe(48);
+      /* Every create the record named was checked on the open (none when the kill landed before the first). */
+      expect(outcome['verified'] ?? 0, JSON.stringify(outcome)).toBeGreaterThanOrEqual(outcome['removed'] ?? 0);
+    }
+    /* A kill lands while a writable is open: the file it left empty was found and removed, not reported. */
+    expect(
+      outcomes.reduce((total, outcome) => total + (outcome['removed'] ?? 0), 0),
+      JSON.stringify(outcomes),
+    ).toBeGreaterThan(0);
   });
 
   test('pending scenarios are declared with their reason and gates', () => {
@@ -652,18 +809,32 @@ describe(`filesystem scenarios (${profileName} profile)`, { concurrent: false },
     const engine = server.browser;
     await commands.writeFile(`${output}/${engine}-${profileName}.json`, json);
     await commands.writeFile(`${output}/${engine}-${profileName}.md`, markdown);
-    if (inject('filesystemScenarioRecord')) {
+    if (recording) {
       await commands.writeFile(`baseline/${engine}-${profileName}.json`, json);
       await commands.writeFile(`baseline/${engine}-${profileName}.md`, markdown);
+      /* I8: a record run keeps the better of the recorded and observed value, so it never loosens a gate. */
+      const comparisonOf = new Map(
+        scenarioTable.flatMap((scenarioRow) => scenarioRow.gates.map((gate) => [gate.id, gate.comparison] as const)),
+      );
       const updated = {
         ...knownRedList,
         gates: knownRedGates.map((entry) => ({
           ...entry,
-          limit: observedAtHead.get(entry.id)?.limit ?? entry.limit,
+          limit: forcing ? (observedAtHead.get(entry.id)?.limit ?? entry.limit) : entry.limit,
           atHead: Object.fromEntries(
             Object.entries({
               ...entry.atHead,
-              [baselineKey]: observedAtHead.get(entry.id)?.value ?? entry.atHead[baselineKey],
+              [baselineKey]: ratchetAtHead(
+                {
+                  comparison: comparisonOf.get(entry.id) ?? 'at-most',
+                  limit: observedAtHead.get(entry.id)?.limit ?? entry.limit,
+                },
+                {
+                  recorded: entry.atHead[baselineKey],
+                  observed: observedAtHead.get(entry.id)?.value,
+                  force: forcing,
+                },
+              ),
             })
               .filter((pair): pair is [string, number] => pair[1] !== undefined)
               .sort(([left], [right]) => left.localeCompare(right)),

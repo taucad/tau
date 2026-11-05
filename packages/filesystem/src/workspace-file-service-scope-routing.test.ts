@@ -243,12 +243,18 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
 
     try {
       sender.postMessage({
-        type: 'project-unavailable',
-        path: `/projects/${alphaProjectId}`,
-        authority: {
-          storageRootKey: 'memory:authority-a',
-          providerBasePath: alphaProjectId,
-        },
+        tabId: crypto.randomUUID(),
+        seq: 1,
+        changes: [
+          {
+            type: 'project-unavailable',
+            path: `/projects/${alphaProjectId}`,
+            authority: {
+              storageRootKey: 'memory:authority-a',
+              providerBasePath: alphaProjectId,
+            },
+          },
+        ],
       });
       await new Promise((resolve) => {
         setTimeout(resolve, 20);
@@ -256,12 +262,18 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
       await expect(service.readFile(`/projects/${alphaProjectId}/current.txt`, 'utf8')).resolves.toBe('authority b');
 
       sender.postMessage({
-        type: 'project-unavailable',
-        path: `/projects/${alphaProjectId}`,
-        authority: {
-          storageRootKey: 'memory:authority-b',
-          providerBasePath: alphaProjectId,
-        },
+        tabId: crypto.randomUUID(),
+        seq: 1,
+        changes: [
+          {
+            type: 'project-unavailable',
+            path: `/projects/${alphaProjectId}`,
+            authority: {
+              storageRootKey: 'memory:authority-b',
+              providerBasePath: alphaProjectId,
+            },
+          },
+        ],
       });
       await vi.waitFor(async () => {
         await expect(service.readFile(`/projects/${alphaProjectId}/current.txt`)).rejects.toMatchObject({

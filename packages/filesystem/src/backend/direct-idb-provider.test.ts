@@ -1044,5 +1044,57 @@ describe('DirectIdbProvider', () => {
       await expect(provider.exists('target/deleted.txt')).resolves.toBe(false);
       peer.dispose();
     });
+
+    it('re-reads only the scoped prefixes a peer changed', async () => {
+      await provider.writeFile('scoped/kept.txt', 'kept');
+      await provider.writeFile('outside/kept.txt', 'kept');
+      const dbName = (provider as unknown as { _dbName: string })._dbName;
+      const peer = new DirectIdbProvider('unused');
+      (peer as unknown as { _dbName: string })._dbName = dbName;
+      await peer.initialize();
+      await peer.writeFile('scoped/added.txt', 'added');
+      await peer.unlink('scoped/kept.txt');
+      await peer.writeFile('outside/added.txt', 'added');
+
+      await provider.refresh(['scoped']);
+
+      await expect(provider.readdir('scoped')).resolves.toEqual(['added.txt']);
+      /* Outside the scope the projection is as it was until its own refresh. */
+      await expect(provider.readdir('outside')).resolves.toEqual(['kept.txt']);
+      await provider.refresh(['outside']);
+      await expect(provider.readdir('outside')).resolves.toEqual(['added.txt', 'kept.txt']);
+      peer.dispose();
+    });
+  });
+
+  describe('applyBatch', () => {
+    it('should apply a batch of writes, a move and a delete, each with its receipt', async () => {
+      await provider.writeFile('old.txt', 'old');
+      await provider.writeFile('gone.txt', 'gone');
+
+      const receipts = await provider.applyBatch([
+        { op: 'write', path: 'dir/a.txt', data: encoder.encode('a') },
+        { op: 'write', path: 'dir/b.txt', data: encoder.encode('b'), create: true },
+        { op: 'move', from: 'old.txt', to: 'new.txt' },
+        { op: 'delete', path: 'gone.txt', kind: 'file' },
+        { op: 'write', path: 'new-dir-taken.txt', data: encoder.encode('x') },
+      ]);
+
+      expect(receipts.map(({ outcome }) => outcome)).toEqual(['applied', 'applied', 'applied', 'applied', 'applied']);
+      await expect(provider.readFile('dir/b.txt', 'utf8')).resolves.toBe('b');
+      await expect(provider.readFile('new.txt', 'utf8')).resolves.toBe('old');
+      await expect(provider.exists('gone.txt')).resolves.toBe(false);
+    });
+
+    it('should refuse a create over an existing file and leave it as it was', async () => {
+      await provider.writeFile('taken.txt', 'mine');
+
+      const [receipt] = await provider.applyBatch([
+        { op: 'write', path: 'taken.txt', data: encoder.encode('theirs'), create: true },
+      ]);
+
+      expect(receipt).toMatchObject({ outcome: 'failed', error: { code: 'EEXIST' } });
+      await expect(provider.readFile('taken.txt', 'utf8')).resolves.toBe('mine');
+    });
   });
 });

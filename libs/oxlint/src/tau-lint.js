@@ -27,6 +27,7 @@ import { noBareRandomUuidRule } from './rules/no-bare-random-uuid.js';
 import { noDirectIndexeddbRule } from './rules/no-direct-indexeddb.js';
 import { noBareRpcErrorCodeRule } from './rules/no-bare-rpc-error-code.js';
 import { noHandrolledFanoutRule } from './rules/no-handrolled-fanout.js';
+import { noAwaitedMutationInLoopRule } from './rules/no-awaited-mutation-in-loop.js';
 import { noSceneOverrideMaterialRule } from './rules/no-scene-override-material.js';
 import { staticImportMetaUrlRule } from './rules/static-import-meta-url.js';
 import { requireUsingOnDisposableRule } from './rules/require-using-on-disposable.js';
@@ -73,6 +74,7 @@ const plugin = {
     'no-direct-indexeddb': noDirectIndexeddbRule,
     'no-bare-rpc-error-code': noBareRpcErrorCodeRule,
     'no-handrolled-fanout': noHandrolledFanoutRule,
+    'no-awaited-mutation-in-loop': noAwaitedMutationInLoopRule,
     'no-scene-override-material': noSceneOverrideMaterialRule,
     'static-import-meta-url': staticImportMetaUrlRule,
     'require-using-on-disposable': requireUsingOnDisposableRule,

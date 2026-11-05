@@ -46,6 +46,11 @@ export class ProviderRegistry {
   private _nodeFsChannel: Promise<NodeFsChannel> | undefined;
   /** The channel the memo above resolved to, so a stale close cannot evict a newer one. */
   private _liveNodeFsChannel: NodeFsChannel | undefined;
+  /** Told the provider paths a root's recovery removed (I1). */
+  private _recoveryListener: ((storageRootKey: string, providerPaths: readonly string[]) => void) | undefined;
+  /** Recoveries that finished before a listener was set. */
+  private readonly _pendingRecoveries: Array<Readonly<{ storageRootKey: string; providerPaths: readonly string[] }>> =
+    [];
 
   /**
    * Create a ProviderRegistry.
@@ -104,6 +109,29 @@ export class ProviderRegistry {
   }
 
   /**
+   * Set who is told the provider paths a root removed while it opened: the
+   * empty files of creates a crashed realm left (I1). Recoveries that ran
+   * before the listener was set are delivered to it at once.
+   *
+   * @param listener - Called with the storage-root key and the provider paths removed.
+   */
+  public setRecoveryListener(listener: (storageRootKey: string, providerPaths: readonly string[]) => void): void {
+    this._recoveryListener = listener;
+    for (const { storageRootKey, providerPaths } of this._pendingRecoveries.splice(0)) {
+      listener(storageRootKey, providerPaths);
+    }
+  }
+
+  /**
+   * Every storage root this registry owns a provider for, initialized or not.
+   *
+   * @returns The canonical storage-root keys.
+   */
+  public ownedStorageRootKeys(): string[] {
+    return [...this._providers.keys()];
+  }
+
+  /**
    * Dispose and remove cached standalone providers. When `workspaceId`
    * is supplied for the `webaccess` backend, only that workspace's
    * cached entry is dropped; otherwise every entry for the backend is
@@ -155,6 +183,14 @@ export class ProviderRegistry {
     return resolveStorageRootKey(scope, this._databasePrefix);
   }
 
+  private _recovered(storageRootKey: string, providerPaths: readonly string[]): void {
+    if (this._recoveryListener === undefined) {
+      this._pendingRecoveries.push({ storageRootKey, providerPaths });
+      return;
+    }
+    this._recoveryListener(storageRootKey, providerPaths);
+  }
+
   private async _openNodeFsChannel(createPort: () => Promise<NodeFsPort>): Promise<NodeFsChannel> {
     const channel = new NodeFsChannel(await createPort());
     this._liveNodeFsChannel = channel;
@@ -185,7 +221,13 @@ export class ProviderRegistry {
         return provider;
       }
       case 'opfs': {
-        const provider = new OPFSProvider();
+        const storageRootKey = this.resolveStorageRootKey(scope);
+        const provider = new OPFSProvider({
+          root: storageRootKey,
+          onRecovered: (paths) => {
+            this._recovered(storageRootKey, paths);
+          },
+        });
         await provider.initialize();
         return provider;
       }
@@ -199,7 +241,17 @@ export class ProviderRegistry {
         if (!scope.directoryHandle) {
           throw new MissingWorkspaceHandleError({ workspaceId: scope.workspaceId });
         }
-        return new FileSystemAccessProvider(scope.directoryHandle);
+        // The stored handle's id keys the root's create records (I1). A root
+        // without one keeps none, so its creates are staged as siblings and moved.
+        const storageRootKey = this.resolveStorageRootKey(scope);
+        const provider = new FileSystemAccessProvider(scope.directoryHandle, {
+          ...(scope.workspaceId === '' ? { stageCreates: true } : { uncommitted: { root: storageRootKey } }),
+          onRecovered: (paths) => {
+            this._recovered(storageRootKey, paths);
+          },
+        });
+        await provider.recoverUncommitted();
+        return provider;
       }
       case 'memory': {
         return new MemoryProvider();

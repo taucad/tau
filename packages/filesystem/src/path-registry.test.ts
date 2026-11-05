@@ -352,6 +352,7 @@ describe('path registry', () => {
       '.tau/binding.json',
       '.jj',
       '.git',
+      '.tau-staging',
     ]);
   });
 

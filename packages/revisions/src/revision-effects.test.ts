@@ -20,7 +20,7 @@ import { createActor, createMachine } from 'xstate';
 
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { captureRevisionTree, ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
-import type { FileStatEntry } from '@taucad/filesystem';
+import type { FileMode, FileStatEntry } from '@taucad/filesystem';
 import { classify, unlistedPathClassification } from '@taucad/filesystem/path-registry';
 
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
@@ -1073,7 +1073,12 @@ describe('settling a turn', () => {
     const swallowed = new Set(['notes.md']);
     const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' }, (real) =>
       Object.assign(Object.create(real) as RevisionFileSystem, {
-        rename: async (from: string, to: string) => (swallowed.has(to) ? undefined : real.rename(from, to)),
+        /* A new file is written at its final path in the apply's batch, which
+         * drives this surface's own primitives: the write is accepted and kept nowhere. */
+        writeFile: async (path: string, data: Parameters<RevisionFileSystem['writeFile']>[1]) =>
+          swallowed.has(path) ? undefined : real.writeFile(path, data),
+        setFileMode: async (path: string, mode: FileMode) =>
+          swallowed.has(path) ? undefined : real.setFileMode?.(path, mode),
       }),
     );
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });

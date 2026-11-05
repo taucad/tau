@@ -54,6 +54,11 @@ export type WorkerTimingSpan = (typeof workerTimingSpans)[number];
  * - `listing.bytes`: file bytes a directory listing read to describe its entries.
  * - `locks.set`: ordered Web Lock sets a mutation acquired (one per `withCrossTabLocks` call).
  * - `locks.token`: the tokens those sets named, so `locks.token / locks.set` is the mean set size.
+ * - `changesets`: changesets the authority applied under their lock set (one per `apply`, D2).
+ * - `uncommitted.verified` / `uncommitted.removed`: recorded creates an initialise checked after their
+ *   realm died, and those it removed as the empty file a crashed create left (I1).
+ * - `uncommitted.puts`: puts of a batch's create record, each covering up to eight creates (I1).
+ * - `uncommitted.deleteFailed`: settled or checked records whose delete failed after retries; left behind, harmless.
  *
  * @public
  */
@@ -63,6 +68,11 @@ export const workerTimingCounters = [
   'listing.bytes',
   'locks.set',
   'locks.token',
+  'changesets',
+  'uncommitted.verified',
+  'uncommitted.removed',
+  'uncommitted.puts',
+  'uncommitted.deleteFailed',
 ] as const;
 
 /** One counter's name. @public */

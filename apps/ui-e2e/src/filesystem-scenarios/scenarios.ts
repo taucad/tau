@@ -267,7 +267,7 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
     id: 'S8',
     title: 'Agent turn writing 50 files',
     model:
-      "One agent turn's fifty write tool calls dispatched together through agent-tools' createProviderRpcFileSystem over an agent-masked composed view, as the host issues a turn's parallel calls; one recursive watch counts deliveries.",
+      "One agent turn's fifty write tool calls dispatched together through agent-tools' createProviderRpcFileSystem over an agent-masked composed view, as the host issues a turn's parallel calls; one recursive change-set watch (D6) on the authority's watch plane counts deliveries, and the rooted per-path watch's deliveries are recorded beside it (`pathWatchDeliveries`).",
     times: [{ metric: 'duration', limit: 500, description: '≤ 500 ms to durable' }],
     gates: [
       { id: 'S8.changesets', metric: 'lockSets', comparison: 'at-most', limit: 1, description: '1 changeset' },

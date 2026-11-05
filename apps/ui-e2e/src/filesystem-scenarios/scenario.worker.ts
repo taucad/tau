@@ -17,6 +17,7 @@ import {
   MountTable,
   ProviderRegistry,
   ResourceQueue,
+  WatchRegistry,
   WorkspaceFileService,
   workerTimings,
 } from '@taucad/filesystem';
@@ -52,6 +53,8 @@ let busEvents = 0;
 eventBus.subscribe(() => {
   busEvents += 1;
 });
+/* The authority's watch plane on the same bus, as `WorkspaceFileService` composes it (S8). */
+const watchPlane = new WatchRegistry(eventBus);
 /* Cross-tab invalidations this authority receives, on the channel the coordinator uses. */
 let invalidationsReceived = 0;
 const invalidations = new BroadcastChannel('tau-fs-changes');
@@ -547,9 +550,20 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
       /* One agent turn: the model's fifty parallel write calls, dispatched
        * together through the host's RPC filesystem as one task issues them. */
       let deliveries = 0;
-      const stop = live.watch({ paths: [''], recursive: true }, () => {
+      let pathDeliveries = 0;
+      /* The change-set watch (D6) on the authority's watch plane is the gate;
+       * the rooted per-path watch, which consumers still hold until they move
+       * to change sets, is recorded beside it. */
+      const stopChangeSets = watchPlane.watchChangeSets({ paths: [`/projects/${projectId}`], recursive: true }, () => {
         deliveries += 1;
       });
+      const stopPaths = live.watch({ paths: [''], recursive: true }, () => {
+        pathDeliveries += 1;
+      });
+      const stop = (): void => {
+        stopChangeSets();
+        stopPaths();
+      };
       const turn = randomUuid().slice(0, 8);
       const tally: AgentTally = { readdirCalls: 0, reads: 0, binaryBytesRead: 0, textBytesRead: 0 };
       const fileSystem = agentFileSystem(live, tally);
@@ -564,7 +578,10 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
           return {};
         });
         await quiet(300);
-        return { ...measured, extra: { ...measured.extra, watchDeliveries: deliveries } };
+        return {
+          ...measured,
+          extra: { ...measured.extra, watchDeliveries: deliveries, pathWatchDeliveries: pathDeliveries },
+        };
       } finally {
         stop();
       }

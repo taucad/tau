@@ -1,9 +1,7 @@
 ---
-viewer: minor
 host: minor
 ---
 
-Characteristic edges are black in both colour schemes. The viewer render profile's dark scheme drew them neutral grey (`#868686`), and every capture that renders with the dark scheme copied that grey. Now the dark scheme also uses black (`0x000000`), so the dark-mode viewer and every capture draw the same black edges as the light-mode viewer.
+Captures render with the light scheme's look, so their characteristic edges are black. They used the dark scheme's look and drew its neutral grey (`#868686`) edges. The light scheme also has no dark-mode ambient boost (ambient 0.1 instead of 0.115, before nanoraster's division by π). The capture backgrounds and the dark-mode viewer are unchanged.
 
-- **`@taucad/viewer`**: `gltfEdgeColorDarkMode` is `0x000000`.
-- **`@taucad/host`**: the MCP viewer's part thumbnails (`app_part_thumbnails`) draw black edges.
+- **`@taucad/host`**: the MCP viewer's part thumbnails (`app_part_thumbnails`) and agent screenshots render with the light scheme's look and draw black edges.

@@ -168,7 +168,7 @@ describe('useThumbnailGenerator', () => {
         mode: 'single',
         width: 1536,
         height: 1152,
-        // The dark-scheme viewer at twice the 768×576 reference frame.
+        // The light-scheme viewer at twice the 768×576 reference frame: black edges, no dark ambient boost.
         lineWidth: 2,
         lineColor: '#000000',
         ao: {
@@ -184,7 +184,7 @@ describe('useThumbnailGenerator', () => {
         lighting: {
           headlamp: { intensity: 1.5, rightOffset: 2, upOffset: 2 },
           lights: [],
-          ambient: (0.1 * 1 * 1.15) / Math.PI,
+          ambient: (0.1 * 1 * 1) / Math.PI,
           environment: { intensity: 1 },
           space: 'view',
           exposure: 1,

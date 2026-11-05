@@ -56,6 +56,7 @@ describe('createMcpViewerPartThumbnails', () => {
         lineWidth: 1,
         lineColor: '#000000',
         toneMapping: 'neutral',
+        lighting: { ambient: 0.1 / Math.PI },
         views: [
           { id: 'part-0', visiblePrimitives: primitives, camera: { framing: 'fit', up: [0, 0, 1] } },
           { id: 'part-1', visiblePrimitives: primitives },

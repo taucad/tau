@@ -259,6 +259,7 @@ describe('PartThumbnailService', () => {
         lineWidth: 6,
         lineColor: '#000000',
         toneMapping: 'neutral',
+        lighting: { ambient: 0.1 / Math.PI },
         views: [
           {
             visiblePrimitives: [

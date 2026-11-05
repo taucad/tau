@@ -39,11 +39,12 @@ const batchSize = 4;
 // One rendition serves the 80 px frames and the gallery: the agreed 1536 px long side on the parts' square frame.
 const previewSize = 1536;
 const previewQuality = 0.95;
-// The viewer's look with the card edge weight, the gallery's 512 px display width (6 px edges at 1536).
+// The light-scheme viewer's look with the card edge weight, the gallery's 512 px display width (6 px edges at 1536).
+// Captures use the light scheme's look, chosen by the operator on 2026-11-05 for black edges.
 const previewLook = buildViewerCaptureImageOptions({
   width: previewSize,
   height: previewSize,
-  colorScheme: 'dark',
+  colorScheme: 'light',
   displayWidth: 512,
 });
 

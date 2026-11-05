@@ -342,7 +342,6 @@ const grepAndGlob = async (
     walkCalls: number;
     authorityReads: number;
     listingBytesRead: number;
-    listingByteCeiling: number;
   }>
 > => {
   const tally: AgentTally = { readdirCalls: 0, reads: 0, binaryBytesRead: 0, textBytesRead: 0 };
@@ -364,12 +363,28 @@ const grepAndGlob = async (
   if (!glob.success) {
     throw new Error(`glob failed: ${JSON.stringify(glob)}`);
   }
-  /* What the listings' content facts may read (D4): each file's head, and a
-   * file whose head reads as text, within the line-count cap, once more in
-   * full. Every file of the project counts, the manifest the import added
-   * included; a path the fixture does not name is taken as text. A fixture
-   * binary is seeded noise, so its head is judged as production judges it:
-   * the import wrote revision 0, whose first bytes do not depend on the size. */
+  return {
+    grepDuration,
+    globDuration,
+    binaryBytesRead: tally.binaryBytesRead,
+    textBytesRead: tally.textBytesRead,
+    walkCalls: tally.readdirCalls,
+    authorityReads: tally.reads,
+    listingBytesRead: listingBytes() - listingBefore,
+  };
+};
+
+/**
+ * What the listings' content facts may read (D4): each file's head, and a
+ * file whose head reads as text, within the line-count cap, once more in full.
+ * Every file of the project counts, the manifest the import added included; a
+ * path the fixture does not name is taken as text. A fixture binary is seeded
+ * noise, so its head is judged as production judges it: the import wrote
+ * revision 0, whose first bytes do not depend on the size. Taken after the
+ * measured window: its `statTree` opens the root's index, which the scenario
+ * itself never needs.
+ */
+const listingByteCeiling = async (live: RootedFileSystem): Promise<number> => {
   const binaryByHead = new Set(
     fixturePlan()
       .entries.filter(
@@ -379,23 +394,13 @@ const grepAndGlob = async (
       )
       .map((entry) => entry.path),
   );
-  const listingByteCeiling = ((await live.statTree?.('')) ?? []).reduce(
+  return ((await live.statTree?.('')) ?? []).reduce(
     (total, row) =>
       total +
       Math.min(row.size, headSniffByteLength) +
       (!binaryByHead.has(row.path) && row.size > headSniffByteLength && row.size <= lineCountByteCap ? row.size : 0),
     0,
   );
-  return {
-    grepDuration,
-    globDuration,
-    binaryBytesRead: tally.binaryBytesRead,
-    textBytesRead: tally.textBytesRead,
-    walkCalls: tally.readdirCalls,
-    authorityReads: tally.reads,
-    listingBytesRead: listingBytes() - listingBefore,
-    listingByteCeiling,
-  };
 };
 
 let probe:
@@ -540,14 +545,23 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
        * exact stat per file stands in for the per-file metadata compare a status
        * check still makes at HEAD until W6 drives status from the index. */
       return measure(async () => {
+        const listingStart = performance.now();
         const listing = await live.statTree?.('');
+        const statsStart = performance.now();
         let metadataRequests = 1;
         for (const entry of entries) {
           // oxlint-disable-next-line no-await-in-loop -- the stand-in stats each entry in order.
           await live.stat(entry.path);
           metadataRequests += 1;
         }
-        return { listed: listing?.length ?? 0, files: entries.length, metadataRequests };
+        /* Reported apart, so the stand-in's share is never mistaken for the index's (W3.2). */
+        return {
+          listed: listing?.length ?? 0,
+          files: entries.length,
+          metadataRequests,
+          indexOpenDuration: statsStart - listingStart,
+          statusStandInDuration: performance.now() - statsStart,
+        };
       });
     }
     case 'index-open': {
@@ -680,7 +694,8 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
       }
     }
     case 'grep-glob': {
-      return measure(async () => grepAndGlob(live));
+      const measured = await measure(async () => grepAndGlob(live));
+      return { ...measured, extra: { ...measured.extra, listingByteCeiling: await listingByteCeiling(live) } };
     }
     case 'grep-with-save-and-reads': {
       return measure(async () => {

@@ -8,7 +8,7 @@
 
 - `mutation-pipeline.ts` — every write: locks, commit, cache/index bookkeeping, events, batch semantics, move/copy/duplicate porcelain.
 - `rooted-views.ts` — one captured mount per view; confined, mask-checked reads, writes and porcelain; `ESTALE` after its mount goes.
-- `project-index/` — one `ProjectIndex` per root behind `ProjectIndexes`; persisted in `<root>/.tau/index` under a Web Lock with a CAS on the cross-tab vector, compared at load and after a sequence gap, merged with concurrent mutations; serves rooted `search`/`statTree`/`facts`/`hashFiles` with no provider walk. Topology changes evict only affected roots; path-less reset/dispose may clear all.
+- `project-index/` — one persisted, validated `ProjectIndex` per root; serves rooted `search`/`statTree`/`facts`/`hashFiles` with no provider walk.
 - `content-ops/` — `walk`, `contents`, `archive`: pure reads over the port at `@taucad/filesystem/content-ops`. The only place ZIP encoding lives.
 - `path-registry.ts` — owns `PathRegistry` rows and `tauPathPolicy`; the mechanism core accepts an injected `PathPolicy` and never imports this module.
 - `project-routes.ts` — the only speller of `/projects/<id>`, `/checkouts/<id>`, `/previews/<id>`, `/node_modules`; read `MountEntry.kind`, never `segments[1]`.
@@ -27,6 +27,6 @@ Revision algorithms are not here: `@taucad/revisions/algorithms`. Revision effec
 - Implement batch writes through the canonical per-resource mutation path. Completion requires durable provider commit, writer-side cache and tree updates, and exact-path event delivery.
 - Keep dependency-scoped kernel watches separate from coalesced directory-scoped UI observation. Preserve exact virtual paths; enter conservative resync only for explicit information-loss signals.
 - Normalize provider quirks at the provider boundary. `FileSystemAccessProvider` filters Chromium `.crswap` atomic-write artifacts before directory snapshots reach generic consumers.
-- Use `FileStat` from `@taucad/types` as the one stat result shape; provider adapters normalize their metadata into it. A stat or listing never reads content (I3): `contentKind`/`lineCount` appear only when already known, and `facts(paths, { byteCap })` is the one way to measure them.
+- Use `FileStat` from `@taucad/types` as the one stat result shape; provider adapters normalize their metadata into it. Stat and listings never read content; use `facts()`.
 
 Validate with `pnpm nx lint filesystem`, `pnpm nx test filesystem --watch=false`, `pnpm nx typecheck filesystem`, and `pnpm nx build filesystem`.

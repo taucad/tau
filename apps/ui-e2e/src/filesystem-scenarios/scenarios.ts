@@ -115,17 +115,25 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
     times: [{ metric: 'duration', limit: 15_000, description: '≤ 15 s' }],
     gates: [
       {
+        id: 'S3.changesets',
+        metric: 'changesets',
+        comparison: 'at-most',
+        limit: 'changesetBound',
+        description:
+          "changesets ≤ ⌈N/256⌉: the apply's bounded changesets (D2: ≤ 256 entries and ≤ 32 MiB each), counted by production",
+      },
+      {
         id: 'S3.lock-sets',
         metric: 'lockSets',
         comparison: 'at-most',
-        limit: 1,
-        description: '1 lock set per changeset (the apply is one changeset)',
+        limit: 'changesets',
+        description: '1 lock set per changeset',
       },
       {
         id: 'S3.events',
         metric: 'busEvents',
         comparison: 'at-most',
-        limit: 1,
+        limit: 'changesets',
         description:
           "1 event per changeset per port (counted at the authority's change bus, which every port fans out from)",
       },
@@ -380,10 +388,10 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
     gates: [
       {
         id: 'S16.invalidations',
-        metric: 'invalidationsPerChangeset',
+        metric: 'invalidationsReceived',
         comparison: 'at-most',
-        limit: 1,
-        description: '≤ 1 invalidation per changeset',
+        limit: 'changesets',
+        description: "≤ 1 invalidation per changeset (the second tab's notices against the first tab's changesets)",
       },
     ],
   },
@@ -400,7 +408,7 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
         comparison: 'at-most',
         limit: 8,
         description:
-          "the save's lock set waits only on tokens it shares (apply writes and renames completed between the save's call and its first byte; 8 allows the writes already in flight)",
+          "the save's lock set waits only on tokens it shares (apply writes and renames completed between the save's call and the grant of its whole lock set; 8 allows the writes already in flight)",
       },
     ],
   },
@@ -545,24 +553,63 @@ export const evaluateGate = (
   };
 };
 
+/** A gate's comparison and limit: what deciding "no worse" needs. */
+type GateBound = Readonly<{ comparison: CountGate['comparison']; limit: number }>;
+
+/**
+ * Whether `value` is no worse than `atHead` for a gate.
+ *
+ * @param gate - The gate's comparison and limit.
+ * @param value - The value now.
+ * @param atHead - The value recorded at HEAD.
+ * @returns For an at-most gate, `value ≤ atHead`; for an equals gate, `value`
+ *   lies between `atHead` and the limit (it moved only toward the limit, never
+ *   past it to the other side).
+ */
+const noWorse = ({ comparison, limit }: GateBound, value: number, atHead: number): boolean =>
+  comparison === 'equals'
+    ? value >= Math.min(atHead, limit) - Number.EPSILON && value <= Math.max(atHead, limit) + Number.EPSILON
+    : value <= atHead + Number.EPSILON;
+
 /**
  * Whether a known-red gate has held or improved on its value at HEAD.
  *
  * A known-red gate stays red until its work package lands, but it must not
  * regress: an at-most gate may not exceed its recorded value, and an equals
- * gate may not move further from its limit than it was.
+ * gate may move only toward its limit.
  *
  * @param gate - The evaluated gate.
  * @param atHead - The value recorded at HEAD for this engine and profile.
  * @returns True when the value is no worse than at HEAD.
  */
-export const withinBaseline = (gate: GateResult, atHead: number): boolean => {
-  if (gate.value === undefined) {
-    return false;
+export const withinBaseline = (gate: GateResult, atHead: number): boolean =>
+  gate.value !== undefined && noWorse(gate, gate.value, atHead);
+
+/**
+ * The value a record run keeps at HEAD for one known-red gate (I8: count gates
+ * never loosen). It keeps the better of the recorded and the observed value, so
+ * a noisy or regressed run cannot widen the ratchet; `force` takes the observed
+ * value as it is, for a deliberate re-baseline.
+ *
+ * @param gate - The gate's comparison and limit, as this run evaluated it.
+ * @param values - The value recorded at HEAD so far, this run's value, and whether to take it even when worse.
+ * @returns The value to record.
+ */
+export const ratchetAtHead = (
+  gate: GateBound,
+  {
+    recorded,
+    observed,
+    force,
+  }: Readonly<{ recorded: number | undefined; observed: number | undefined; force: boolean }>,
+): number | undefined => {
+  if (observed === undefined || Number.isNaN(observed)) {
+    return recorded;
   }
-  return gate.comparison === 'equals'
-    ? Math.abs(gate.value - gate.limit) <= Math.abs(atHead - gate.limit) + Number.EPSILON
-    : gate.value <= atHead + Number.EPSILON;
+  if (force || recorded === undefined) {
+    return observed;
+  }
+  return noWorse(gate, observed, recorded) ? observed : recorded;
 };
 
 /**

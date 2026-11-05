@@ -93,6 +93,12 @@ export type ScenarioCounters = Readonly<{
   trace: (names: readonly string[]) => void;
   /** The traced writes since the last reset. */
   traced: () => readonly TracedWrite[];
+  /**
+   * Lock sets that named a traced file, since the last reset: when the set's
+   * last token was granted (the whole set held), and the writes and renames
+   * completed before it.
+   */
+  tracedLocks: () => readonly TracedWrite[];
 }>;
 
 /**
@@ -144,6 +150,7 @@ export const installScenarioCounters = (): ScenarioCounters => {
   let counts = emptyCounts();
   let tracedNames = new Set<string>();
   let tracedWrites: TracedWrite[] = [];
+  let tracedLocks: TracedWrite[] = [];
   const noteWriteStart = (name: string): void => {
     if (tracedNames.has(name) && !tracedWrites.some((write) => write.name === name)) {
       tracedWrites.push({ name, startedAt: performance.now(), operationsBefore: counts.writes + counts.renames });
@@ -156,10 +163,21 @@ export const installScenarioCounters = (): ScenarioCounters => {
   const locks = navigator.locks as unknown as { request: LockRequest };
   const request = locks.request.bind(navigator.locks);
   let insideCallback = 0;
+  /* The chain whose callback is running, so a nested request joins it. */
+  let currentChain = 0;
+  let chains = 0;
+  /* Chains that named a traced file: the grant of their last link is when the whole set was held. */
+  const tracedChains = new Map<number, string>();
   locks.request = async (name, ...rest) => {
     counts.lockRequests += 1;
     if (insideCallback === 0) {
       counts.lockChains += 1;
+      chains += 1;
+    }
+    const chain = insideCallback === 0 ? chains : currentChain;
+    const tracedName = [...tracedNames].find((traceName) => name.endsWith(`/${traceName}`));
+    if (tracedName !== undefined) {
+      tracedChains.set(chain, tracedName);
     }
     const requestedAt = performance.now();
     const callbackIndex = rest.findIndex((value) => typeof value === 'function');
@@ -168,11 +186,22 @@ export const installScenarioCounters = (): ScenarioCounters => {
       const waited = performance.now() - requestedAt;
       counts.lockWait += waited;
       counts.lockWaitMax = Math.max(counts.lockWaitMax, waited);
+      const traced = tracedChains.get(chain);
+      if (traced !== undefined) {
+        /* Each later link replaces the record, so it ends at the set's last grant. */
+        tracedLocks = [
+          ...tracedLocks.filter((grant) => grant.name !== traced),
+          { name: traced, startedAt: performance.now(), operationsBefore: counts.writes + counts.renames },
+        ];
+      }
+      const previousChain = currentChain;
+      currentChain = chain;
       insideCallback += 1;
       try {
         return callback(lock);
       } finally {
         insideCallback -= 1;
+        currentChain = previousChain;
       }
     };
     const forwarded = [...rest];
@@ -342,13 +371,16 @@ export const installScenarioCounters = (): ScenarioCounters => {
     reset: () => {
       counts = emptyCounts();
       tracedWrites = [];
+      tracedLocks = [];
     },
     read: () => ({ ...counts, network: { ...counts.network } }),
     trace: (names: readonly string[]) => {
       tracedNames = new Set(names);
       tracedWrites = [];
+      tracedLocks = [];
     },
     traced: () => [...tracedWrites],
+    tracedLocks: () => [...tracedLocks],
   });
   return installed;
 };

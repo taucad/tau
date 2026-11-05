@@ -11,6 +11,7 @@ import {
   pendingRow,
   renderMarkdown,
   scenarioTable,
+  ratchetAtHead,
   withinBaseline,
 } from './scenarios.ts';
 /* oxlint-enable no-restricted-imports */
@@ -130,7 +131,7 @@ describe('withinBaseline', () => {
     expect(withinBaseline(evaluateGate(gate, { renames: 101 }, none), 100)).toBe(false);
   });
 
-  it('should hold an equals gate to its distance from the limit at HEAD', () => {
+  it('should let an equals gate move only toward its limit', () => {
     const gate = {
       id: 'S6.hash-passes',
       metric: 'hashPasses',
@@ -140,14 +141,39 @@ describe('withinBaseline', () => {
     } as const;
 
     expect(withinBaseline(evaluateGate(gate, { hashPasses: 0 }, none), 0)).toBe(true);
-    expect(withinBaseline(evaluateGate(gate, { hashPasses: 2 }, none), 0)).toBe(true);
-    expect(withinBaseline(evaluateGate(gate, { hashPasses: 3 }, none), 0)).toBe(false);
+    expect(withinBaseline(evaluateGate(gate, { hashPasses: 1 }, none), 0)).toBe(true);
+    /* As far from the limit as at HEAD, but past it: not movement toward it. */
+    expect(withinBaseline(evaluateGate(gate, { hashPasses: 2 }, none), 0)).toBe(false);
+    expect(withinBaseline(evaluateGate(gate, { hashPasses: 4 }, none), 5)).toBe(true);
+    expect(withinBaseline(evaluateGate(gate, { hashPasses: 6 }, none), 5)).toBe(false);
   });
 
   it('should fail a gate with no value', () => {
     const gate = { id: 'S3.renames', metric: 'renames', comparison: 'at-most', limit: 0, description: '' } as const;
 
     expect(withinBaseline(evaluateGate(gate, {}, none), 100)).toBe(false);
+  });
+});
+
+describe('ratchetAtHead', () => {
+  const atMost = { comparison: 'at-most', limit: 0 } as const;
+  const equals = { comparison: 'equals', limit: 1 } as const;
+
+  it('should keep the better of the recorded and observed value for an at-most gate', () => {
+    expect(ratchetAtHead(atMost, { recorded: 100, observed: 60, force: false })).toBe(60);
+    expect(ratchetAtHead(atMost, { recorded: 100, observed: 140, force: false })).toBe(100);
+  });
+
+  it('should accept an equals gate only moving toward its limit', () => {
+    expect(ratchetAtHead(equals, { recorded: 5, observed: 3, force: false })).toBe(3);
+    expect(ratchetAtHead(equals, { recorded: 5, observed: 7, force: false })).toBe(5);
+    expect(ratchetAtHead(equals, { recorded: 0, observed: 2, force: false })).toBe(0);
+  });
+
+  it('should take the observed value when forced, or when nothing was recorded', () => {
+    expect(ratchetAtHead(atMost, { recorded: 100, observed: 140, force: true })).toBe(140);
+    expect(ratchetAtHead(atMost, { recorded: undefined, observed: 140, force: false })).toBe(140);
+    expect(ratchetAtHead(atMost, { recorded: 100, observed: undefined, force: false })).toBe(100);
   });
 });
 

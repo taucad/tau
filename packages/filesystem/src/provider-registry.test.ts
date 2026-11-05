@@ -86,6 +86,11 @@ vi.mock('#backend/fs-access-provider.js', () => {
     public exists = vi.fn();
     public lstat = vi.fn();
     public dispose = vi.fn();
+    public recoverUncommitted = vi.fn(async () => []);
+    public readonly options: unknown;
+    public constructor(...parameters: unknown[]) {
+      [, this.options] = parameters;
+    }
   }
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Module export must match class name
   return { FileSystemAccessProvider: MockFileSystemAccessProvider };
@@ -277,6 +282,40 @@ describe('ProviderRegistry', () => {
         .getProvider({ backend: 'webaccess', workspaceId: 'wsp_oops' } as any)
         .catch((caughtError: unknown) => caughtError);
       expect(isMissingWorkspaceHandleError(error)).toBe(true);
+    });
+  });
+
+  describe('crash recovery', () => {
+    type RecoveringProvider = FileSystemProvider & {
+      options: { uncommitted?: { root: string }; onRecovered: (paths: readonly string[]) => void };
+      recoverUncommitted: ReturnType<typeof vi.fn>;
+    };
+
+    it('should record a picked root’s creates under its workspace key and recover it as it opens', async () => {
+      const provider = (await registry.getProvider(webaccessScope('wsp_local'))) as RecoveringProvider;
+
+      expect(provider.options.uncommitted).toEqual({ root: 'webaccess:wsp_local' });
+      expect(provider.recoverUncommitted).toHaveBeenCalledOnce();
+    });
+
+    it('should keep no records for a picked root without a workspace id', async () => {
+      const provider = (await registry.getProvider(webaccessScope(''))) as RecoveringProvider;
+
+      expect(provider.options.uncommitted).toBeUndefined();
+    });
+
+    it('should deliver a recovery that ran before the listener was set, then later ones at once', async () => {
+      const provider = (await registry.getProvider(webaccessScope('wsp_local'))) as RecoveringProvider;
+      provider.options.onRecovered(['a.ts']);
+      const listener = vi.fn();
+
+      registry.setRecoveryListener(listener);
+      provider.options.onRecovered(['b.ts']);
+
+      expect(listener.mock.calls).toEqual([
+        ['webaccess:wsp_local', ['a.ts']],
+        ['webaccess:wsp_local', ['b.ts']],
+      ]);
     });
   });
 

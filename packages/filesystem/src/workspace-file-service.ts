@@ -266,6 +266,12 @@ export class WorkspaceFileService {
     this._crossTabCoordinator.onRemoteChange((notification) => {
       this._remoteChanges.apply(notification);
     });
+    // A root that undid a crashed realm's creates as it opened publishes the
+    // removals like any other change (I1).
+    this._registry.setRecoveryListener((storageRootKey, providerPaths) => {
+      const backend: FileSystemBackend = storageRootKey.startsWith('webaccess:') ? 'webaccess' : 'opfs';
+      this._pipeline.publishRecoveredRemovals(storageRootKey, backend, providerPaths);
+    });
   }
 
   /**

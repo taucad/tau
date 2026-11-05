@@ -25,7 +25,7 @@
  * @module
  */
 
-import type { CheckedFileWriteResult, FileStat } from '@taucad/types';
+import type { CheckedFileWriteResult, FileStat, FileSystemBackend } from '@taucad/types';
 import {
   assertRootedPath,
   joinPath,
@@ -805,6 +805,50 @@ export class MutationPipeline {
       tagEventAuthorities(envelope, [...authorities], globallyVisible);
     }
     this._eventBus.emit(envelope);
+  }
+
+  /**
+   * Publish the files a storage root removed as it opened — the empty files of
+   * creates a crashed realm left (I1) — as one ordinary change: a
+   * `fileDeleted` per path a mount routes, one bus event and one cross-tab
+   * notice. A path no mount routes yet makes the root's projections reset
+   * instead, with one `backendChanged` and a root-wide notice.
+   *
+   * @param storageRootKey - The root that recovered.
+   * @param backend - Its backend, named by a reset when no mount routes a path.
+   * @param providerPaths - The provider paths it removed.
+   */
+  public publishRecoveredRemovals(
+    storageRootKey: string,
+    backend: FileSystemBackend,
+    providerPaths: readonly string[],
+  ): void {
+    const events: AttributedChangeEvent[] = [];
+    const notices: ChangeNotification[] = [];
+    let unrouted = false;
+    for (const providerPath of providerPaths) {
+      const path = this._logicalPathFor(storageRootKey, providerPath);
+      if (path === undefined) {
+        unrouted = true;
+        continue;
+      }
+      const resolution = this._mountTable.resolve(path);
+      this._filePool()?.invalidate(path);
+      this._treeIndexes.removeFile(path);
+      events.push({
+        event: { type: 'fileDeleted', path, backend: resolution.backend },
+        operations: [{ path, resolution }],
+      });
+      notices.push({ type: 'delete', path, authority: this.physicalAuthority(resolution) });
+    }
+    if (unrouted) {
+      this._filePool()?.clear();
+      this._treeIndexes.clear();
+      events.push({ event: { type: 'backendChanged', backend }, operations: [] });
+      notices.push({ type: 'directory-change', path: '/', authority: { storageRootKey, providerBasePath: '' } });
+    }
+    this.emitChangeEvents(events);
+    this._crossTabCoordinator.notifyChanges(notices);
   }
 
   public async writeFileResolved({
@@ -1726,6 +1770,44 @@ export class MutationPipeline {
       }
       return began ? { outcome: 'uncertain', error } : { outcome: 'failed', error };
     }
+  }
+
+  /**
+   * The logical path a mount routes to one provider path of a storage root,
+   * when the mount that routes it is the one that resolves it.
+   *
+   * @param storageRootKey - The storage root.
+   * @param providerPath - The provider path.
+   * @returns The logical path, or `undefined` when no current mount routes it.
+   */
+  private _logicalPathFor(storageRootKey: string, providerPath: string): string | undefined {
+    for (const entry of this._mountTable.listMounts()) {
+      if (entry.storageRootKey !== storageRootKey) {
+        continue;
+      }
+      const base = entry.providerBasePath;
+      const suffix =
+        base === ''
+          ? providerPath
+          : providerPath === base
+            ? ''
+            : providerPath.startsWith(`${base}/`)
+              ? providerPath.slice(base.length + 1)
+              : undefined;
+      if (suffix === undefined) {
+        continue;
+      }
+      const path = suffix === '' ? entry.prefix : entry.prefix === '/' ? `/${suffix}` : `${entry.prefix}/${suffix}`;
+      try {
+        const resolution = this._mountTable.resolve(path);
+        if (resolution.entry === entry && resolution.path === providerPath) {
+          return path;
+        }
+      } catch {
+        // Not routable: try the next mount.
+      }
+    }
+    return undefined;
   }
 
   /**

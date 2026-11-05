@@ -1,30 +1,38 @@
 /**
  * The record of a create changeset that has not settled yet (charter I1, C8).
  *
- * A new file is written straight to its final path, so a realm killed while
- * the write is open can leave that path empty or short. Before a batch's
- * creates write anything the provider records each path with its expected
- * size (and git blob oid where the caller knows one); once the batch settles it
- * deletes the record. The next initialise of the root verifies every entry of
- * a record whose owner realm is gone, by metadata alone, and removes a file
- * that does not match, so the path reads absent and the apply or large-object
- * fill writes it again.
+ * A new file is written straight to its final path. Creating its handle makes
+ * an empty file there before the writable opens, so a realm killed in between
+ * leaves an empty file where the apply meant to put bytes. A batch therefore
+ * records, once it has created the handles and before any writable opens,
+ * exactly the paths it created that were missing — never a path it was
+ * refused — with their expected size and the time; it deletes the record once
+ * the batch settles. The next initialise of the root undoes only that crash
+ * shape: under the path's exclusive lock, a recorded file whose owner realm is
+ * gone is removed when it is empty, was expected to hold bytes, and has not
+ * been modified since the record was kept. Anything else — a file edited after
+ * the crash, a person's file — is never touched.
  *
- * The record lives in IndexedDB, not in the root, so it costs the root no
- * write. W3's Project Index takes the record over; until then it is this
- * small store.
+ * The records live in the IndexedDB database `tau-fs-uncommitted`, not in the
+ * root, so they cost the root no write. W3's Project Index takes this database
+ * over: its index records the expected size and oid of the last uncommitted
+ * changeset, and this store goes away.
  *
  * @module
  */
 
-/** One path a create changeset writes, and what it must hold once written. @public */
-export type UncommittedEntry = Readonly<{ path: string; size: number; oid?: string }>;
+import { randomUuid } from '@taucad/utils/id';
+
+/** One path a create changeset created, and the size its bytes have. @public */
+export type UncommittedEntry = Readonly<{ path: string; size: number }>;
 
 /** One create changeset not yet settled, keyed by root, owner realm and changeset. @public */
 export type UncommittedRecord = Readonly<{
   root: string;
   owner: string;
   changesetId: string;
+  /** When the record was kept (`Date.now()`), after every entry's file was created. */
+  recordedAt: number;
   entries: readonly UncommittedEntry[];
 }>;
 
@@ -34,6 +42,9 @@ export type UncommittedChangesetStore = Readonly<{
   delete: (record: Pick<UncommittedRecord, 'root' | 'owner' | 'changesetId'>) => Promise<void>;
   list: (root: string) => Promise<UncommittedRecord[]>;
 }>;
+
+/** A crashed create's file was created before its record was kept; this covers clock granularity. */
+export const uncommittedModifiedSlackMilliseconds = 2000;
 
 const storeName = 'changesets';
 
@@ -61,7 +72,8 @@ const committed = async (transaction: IDBTransaction): Promise<void> =>
   });
 
 /**
- * The IndexedDB store, or `undefined` where the realm has no IndexedDB.
+ * The IndexedDB store (database `tau-fs-uncommitted`, which W3's Project Index
+ * takes over), or `undefined` where the realm has no IndexedDB.
  *
  * @param databaseName - The database to keep the records in.
  * @returns The store.
@@ -111,21 +123,79 @@ export const createIndexedDbUncommittedStore = (
   };
 };
 
-/** The largest file whose oid a verification hashes; a larger one is checked by size alone. */
-export const uncommittedOidLimitBytes = 1024 * 1024;
+/** Attempts a record delete gets before its failure is raised. */
+const deleteAttempts = 3;
 
 /**
- * The git blob oid (SHA-1 over `blob <size>\0` and the bytes) of `bytes`.
+ * Delete a record, retrying a failed delete, and raise the last failure.
  *
- * @param bytes - The file's bytes.
- * @returns The lowercase hex oid.
+ * @param store - The store.
+ * @param record - The record.
+ * @throws When every attempt failed: a record left behind must never go unnoticed.
  * @public
  */
-export const gitBlobOid = async (bytes: Uint8Array<ArrayBuffer>): Promise<string> => {
-  const header = new TextEncoder().encode(`blob ${String(bytes.byteLength)}\0`);
-  const framed = new Uint8Array(header.byteLength + bytes.byteLength);
-  framed.set(header);
-  framed.set(bytes, header.byteLength);
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-1', framed));
-  return [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+export const deleteUncommittedRecord = async (
+  store: UncommittedChangesetStore,
+  record: Pick<UncommittedRecord, 'root' | 'owner' | 'changesetId'>,
+): Promise<void> => {
+  let last: unknown;
+  for (let attempt = 0; attempt < deleteAttempts; attempt += 1) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- each attempt follows the one that failed.
+      await store.delete(record);
+      return;
+    } catch (error) {
+      last = error;
+    }
+  }
+  throw new Error(`The uncommitted-changeset record ${record.changesetId} of ${record.root} could not be deleted.`, {
+    cause: last,
+  });
+};
+
+/** Web Lock a realm holds for its lifetime, so a sibling can tell its records and staging from a dead realm's. */
+export const realmOwnerLockPrefix = 'tau-fs-staging-owner:';
+
+/** This realm's owner id, one per worker: every provider in it shares the lock. */
+export const realmOwnerId = randomUuid();
+let realmOwnerHeld: Promise<void> | undefined;
+
+/**
+ * Hold this realm's owner lock for the realm's lifetime.
+ *
+ * @returns Resolves once the lock is held, or at once without Web Locks.
+ * @public
+ */
+export const holdRealmOwner = async (): Promise<void> => {
+  if (typeof navigator === 'undefined' || !('locks' in navigator)) {
+    return;
+  }
+  realmOwnerHeld ??= new Promise<void>((resolve) => {
+    void navigator.locks.request(`${realmOwnerLockPrefix}${realmOwnerId}`, { mode: 'exclusive' }, async () => {
+      resolve();
+      await new Promise<never>(() => {
+        // Held until the realm ends.
+      });
+    });
+  });
+  await realmOwnerHeld;
+};
+
+/**
+ * The owner realms whose lock is held now. Read it after listing what they
+ * own: an owner takes its lock before it records or stages anything.
+ *
+ * @returns Their ids, or `undefined` without Web Locks, where no owner can be told dead.
+ * @public
+ */
+export const liveRealmOwners = async (): Promise<ReadonlySet<string> | undefined> => {
+  if (typeof navigator === 'undefined' || !('locks' in navigator)) {
+    return undefined;
+  }
+  const snapshot = await navigator.locks.query();
+  return new Set(
+    (snapshot.held ?? []).flatMap(({ name }) =>
+      name?.startsWith(realmOwnerLockPrefix) === true ? [name.slice(realmOwnerLockPrefix.length)] : [],
+    ),
+  );
 };

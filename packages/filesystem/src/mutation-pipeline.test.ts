@@ -1141,3 +1141,53 @@ describe('lockClaims', () => {
     ).toEqual([]);
   });
 });
+
+describe('recovered removals', () => {
+  /** What a root reports through its registry when it undid a crashed realm's creates as it opened. */
+  const recover = (registry: unknown, storageRootKey: string, providerPaths: readonly string[]): void => {
+    (registry as { _recovered: (key: string, paths: readonly string[]) => void })._recovered(
+      storageRootKey,
+      providerPaths,
+    );
+  };
+
+  it('should publish a removal a mount routes as a fileDeleted event and one delete notice', async () => {
+    const coordinator = new CrossTabCoordinator();
+    const notifyChanges = vi.spyOn(coordinator, 'notifyChanges');
+    const context = await createWorkspaceFileService({ crossTabCoordinator: coordinator });
+    const events: ChangeEvent[] = [];
+    context.eventBus.subscribe((event) => events.push(event));
+
+    try {
+      recover(context.providerRegistry, 'memory:0', ['src/torn.ts']);
+
+      expect(events).toMatchObject([{ type: 'fileDeleted', path: '/src/torn.ts', backend: 'memory' }]);
+      expect(notifyChanges).toHaveBeenCalledWith([
+        { type: 'delete', path: '/src/torn.ts', authority: { storageRootKey: 'memory:0', providerBasePath: '' } },
+      ]);
+    } finally {
+      context.service.dispose();
+      coordinator.dispose();
+    }
+  });
+
+  it('should reset a root no mount routes yet, once, with a root-wide notice', async () => {
+    const coordinator = new CrossTabCoordinator();
+    const notifyChanges = vi.spyOn(coordinator, 'notifyChanges');
+    const context = await createWorkspaceFileService({ crossTabCoordinator: coordinator });
+    const events: ChangeEvent[] = [];
+    context.eventBus.subscribe((event) => events.push(event));
+
+    try {
+      recover(context.providerRegistry, 'opfs:origin', ['a.ts', 'b.ts']);
+
+      expect(events).toMatchObject([{ type: 'backendChanged', backend: 'opfs' }]);
+      expect(notifyChanges).toHaveBeenCalledWith([
+        { type: 'directory-change', path: '/', authority: { storageRootKey: 'opfs:origin', providerBasePath: '' } },
+      ]);
+    } finally {
+      context.service.dispose();
+      coordinator.dispose();
+    }
+  });
+});

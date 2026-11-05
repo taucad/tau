@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { FileSystemAccessProvider } from '#backend/fs-access-provider.js';
 import { createMockRootHandle } from '#testing/mock-handle-factory.js';
+import type { UncommittedChangesetStore, UncommittedRecord } from '#backend/uncommitted-changesets.js';
 
 describe('FileSystemAccessProvider', () => {
   let provider: FileSystemAccessProvider;
@@ -904,7 +905,7 @@ describe('FileSystemAccessProvider', () => {
   });
 
   describe('applyBatch', () => {
-    it('should leave no file or parent a failed write created, and keep what landed', async () => {
+    it('should leave no file a failed write created, and keep what landed', async () => {
       await provider.writeFile('existing.txt', 'old');
       const writeError = new Error('the writable did not commit');
       const target = provider as unknown as { _writeBatchData: (handle: { name: string }) => Promise<void> };
@@ -924,9 +925,104 @@ describe('FileSystemAccessProvider', () => {
       ]);
 
       expect(receipts.map(({ outcome }) => outcome)).toEqual(['failed', 'applied', 'uncertain']);
-      await expect(provider.exists('fresh/deep')).resolves.toBe(false);
+      // Its parent stays: another changeset may hold that directory shared.
+      await expect(provider.exists('fresh/deep/new.txt')).resolves.toBe(false);
       await expect(provider.readFile('fresh/ok.txt', 'utf8')).resolves.toBe('ok');
       await expect(provider.readFile('existing.txt', 'utf8')).resolves.toBe('old');
+    });
+  });
+
+  describe('uncommitted creates of a user-picked root', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    const bytes = (value: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(value);
+
+    const memoryStore = (seed: readonly UncommittedRecord[] = []) => {
+      const records = new Map(seed.map((record) => [record.changesetId, record]));
+      const store: UncommittedChangesetStore = {
+        put: async (record) => {
+          records.set(record.changesetId, record);
+        },
+        delete: async ({ changesetId }) => {
+          records.delete(changesetId);
+        },
+        list: async (root) => [...records.values()].filter((record) => record.root === root),
+      };
+      return { store, records };
+    };
+
+    const stubLocks = (): void => {
+      vi.stubGlobal('navigator', {
+        locks: {
+          request: async <T>(_name: string, _options: unknown, callback: () => Promise<T>): Promise<T> => callback(),
+          query: async () => ({ held: [], pending: [] }),
+        },
+      });
+    };
+
+    it('should record its creates under the workspace key and undo a dead realm’s empty one as it opens', async () => {
+      stubLocks();
+      const root = createMockRootHandle();
+      await root.getFileHandle('torn.ts', { create: true });
+      const { store, records } = memoryStore([
+        {
+          root: 'webaccess:workspace-1',
+          owner: 'dead-owner',
+          changesetId: 'changeset-1',
+          recordedAt: Date.now(),
+          entries: [{ path: 'torn.ts', size: 4 }],
+        },
+      ]);
+      const onRecovered = vi.fn();
+      const picked = new FileSystemAccessProvider(root as unknown as FileSystemDirectoryHandle, {
+        uncommitted: { root: 'webaccess:workspace-1', store },
+        onRecovered,
+      });
+
+      await expect(picked.recoverUncommitted()).resolves.toEqual(['torn.ts']);
+
+      expect(onRecovered).toHaveBeenCalledWith(['torn.ts']);
+      expect(records.size).toBe(0);
+      const puts: UncommittedRecord[] = [];
+      const watched: UncommittedChangesetStore = {
+        ...store,
+        put: async (record) => {
+          puts.push(record);
+          await store.put(record);
+        },
+      };
+      const writer = new FileSystemAccessProvider(root as unknown as FileSystemDirectoryHandle, {
+        uncommitted: { root: 'webaccess:workspace-1', store: watched },
+      });
+      await writer.applyBatch([{ op: 'write', path: 'new.ts', data: bytes('new'), create: true }]);
+      expect(puts.map(({ root: key, entries }) => [key, entries])).toEqual([
+        ['webaccess:workspace-1', [{ path: 'new.ts', size: 3 }]],
+      ]);
+      expect(records.size).toBe(0);
+    });
+
+    it('should refuse a create it cannot stage when the record cannot be kept, leaving no file', async () => {
+      stubLocks();
+      const root = createMockRootHandle();
+      const { store: inner } = memoryStore();
+      const picked = new FileSystemAccessProvider(root as unknown as FileSystemDirectoryHandle, {
+        uncommitted: {
+          root: 'webaccess:workspace-1',
+          store: {
+            ...inner,
+            put: async () => {
+              throw new Error('quota');
+            },
+          },
+        },
+      });
+
+      const [receipt] = await picked.applyBatch([{ op: 'write', path: 'new.ts', data: bytes('new'), create: true }]);
+
+      expect(receipt?.outcome).toBe('failed');
+      await expect(picked.exists('new.ts')).resolves.toBe(false);
     });
   });
 });

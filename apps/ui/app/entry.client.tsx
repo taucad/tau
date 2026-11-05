@@ -7,6 +7,7 @@ import { hydrateRoot } from 'react-dom/client';
 import { observeLongAnimationFrames } from '@taucad/viewer/lib/renderer-telemetry';
 import { startErrorReporting } from '#lib/error-reporting.js';
 import { reactRootErrorHooks } from '#lib/react-root-errors.js';
+import { installStaleBuildNavigation } from '#lib/stale-build-navigation.js';
 import { installStaleBuildRecovery, recoverFromSdkLoadFailure } from '#lib/stale-build-recovery.js';
 
 /* D21: started before hydration and never stopped, so the frames that block the first paint are
@@ -18,6 +19,9 @@ void startErrorReporting(recoverFromSdkLoadFailure);
 
 // TAU-UI-6: a lazy chunk a deploy stopped serving reloads the page into the live build once.
 installStaleBuildRecovery();
+
+// TAU-UI-S: notice a deploy before the next click, and load in-app links as documents once one replaced this build.
+installStaleBuildNavigation();
 
 startTransition(() => {
   hydrateRoot(

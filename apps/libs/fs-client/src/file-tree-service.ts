@@ -89,6 +89,58 @@ type PollingTelemetryState = {
 
 const isFileTreeFileNode = (entry: FileTreeNode): entry is FileTreeFileNode => entry.children === undefined;
 
+/**
+ * A head listing knows a text file is text, not how many lines it has. The
+ * count the tree already holds stands while the file's size and time do: a
+ * re-list that dropped it would read as a change on every refresh, and the
+ * chat snapshot would lose the file's kind with it.
+ *
+ * @param current - The row the tree holds.
+ * @param listed - The row a listing just produced.
+ * @returns The listed row, with the held count when nothing says the file moved.
+ */
+const keepMeasuredLineCount = (current: CachedFileEntry, listed: CachedFileEntry): CachedFileEntry =>
+  listed.contentKind === 'text' &&
+  listed.lineCount === undefined &&
+  current.contentKind === 'text' &&
+  current.lineCount !== undefined &&
+  current.size === listed.size &&
+  current.mtimeMs === listed.mtimeMs &&
+  sameProvenance(current.provenance, listed.provenance)
+    ? { ...listed, lineCount: current.lineCount }
+    : listed;
+
+/**
+ * Directories re-read per task when collected re-reads drain. An apply's
+ * release can name hundreds at once, and each re-read that answers notifies
+ * the tree's subscribers: drained a task at a time, a page renders between
+ * them instead of nesting one update inside another's commit.
+ */
+const refreshesPerTask = 16;
+
+/**
+ * Tau's own revision staging and backup siblings (`.<name>.tau-staged.<id>.tmp`,
+ * `.<name>.tau-backup.<id>.tmp`). They exist only while an apply swaps a file
+ * into place, so a tree that listed them would flash rows the person never
+ * wrote, and re-list their directory for each. The id is always a UUID; this
+ * mirrors `parseTemporarySibling` in `@taucad/revisions`, which keeps it internal.
+ */
+const tauTemporarySiblingPattern =
+  /^\..+\.tau-(?:staged|backup)\.[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\.tmp$/u;
+
+/**
+ * Whether one path segment is an apply's staging or backup sibling.
+ *
+ * @param name - One path segment.
+ * @returns Whether the tree leaves it out.
+ * @public
+ */
+export const isTauTemporarySiblingName = (name: string): boolean => tauTemporarySiblingPattern.test(name);
+
+/* Whether a workspace path names an apply's sibling: its last segment is one. */
+const isTauTemporarySiblingPath = (path: string): boolean =>
+  isTauTemporarySiblingName(path.slice(path.lastIndexOf('/') + 1));
+
 const fileMetadataFields = (metadata: FileTreeContentMetadata): FileTreeContentMetadata =>
   metadata.contentKind === 'text'
     ? { contentKind: 'text', ...(metadata.lineCount === undefined ? {} : { lineCount: metadata.lineCount }) }
@@ -650,8 +702,7 @@ export class FileTreeService {
     }
 
     this.refreshTimer = setTimeout(() => {
-      this.refreshTimer = undefined;
-      this.flushPendingRefreshes();
+      this.drainPendingRefreshes();
     }, this.refreshDebounce);
   }
 
@@ -663,7 +714,9 @@ export class FileTreeService {
    * changing it — listing work that grows with the square of the file count
    * on a cold open. While held, events still patch the tree optimistically and
    * the directories they name collect; the last release re-reads each of them
-   * once. Holds nest, and a release is idempotent.
+   * once, from a later task and a few directories per task, never inside the
+   * caller's own call (which may be a React commit). Holds nest, and a release
+   * is idempotent.
    *
    * @returns The release for this hold.
    */
@@ -680,8 +733,13 @@ export class FileTreeService {
       }
       released = true;
       this.refreshPauses -= 1;
-      if (this.refreshPauses === 0) {
-        this.flushPendingRefreshes();
+      if (this.refreshPauses === 0 && !this.disposed && this.pendingRefreshPaths.size > 0) {
+        if (this.refreshTimer !== undefined) {
+          clearTimeout(this.refreshTimer);
+        }
+        this.refreshTimer = setTimeout(() => {
+          this.drainPendingRefreshes();
+        }, 0);
       }
     };
   }
@@ -971,14 +1029,34 @@ export class FileTreeService {
 
   // === Private: Worker Event Handlers (workspace-relative paths) ===
 
-  /** Re-read every directory collected since the last flush, once each. */
-  private flushPendingRefreshes(): void {
+  /*
+   * Re-read up to {@link refreshesPerTask} collected directories, once each,
+   * and leave the rest to the next task; a hold taken meanwhile keeps them.
+   */
+  private drainPendingRefreshes(): void {
+    this.refreshTimer = undefined;
     if (this.disposed) {
       this.pendingRefreshPaths.clear();
       return;
     }
-    const pendingPaths = [...this.pendingRefreshPaths];
-    this.pendingRefreshPaths.clear();
+    if (this.refreshPauses > 0) {
+      return;
+    }
+    const pendingPaths: string[] = [];
+    for (const pendingPath of this.pendingRefreshPaths) {
+      if (pendingPaths.length === refreshesPerTask) {
+        break;
+      }
+      pendingPaths.push(pendingPath);
+    }
+    for (const pendingPath of pendingPaths) {
+      this.pendingRefreshPaths.delete(pendingPath);
+    }
+    if (this.pendingRefreshPaths.size > 0) {
+      this.refreshTimer = setTimeout(() => {
+        this.drainPendingRefreshes();
+      }, 0);
+    }
     for (const pendingPath of pendingPaths) {
       const observation = this.listingObservations.get(pendingPath)?.deref();
       if (observation && observation.activeLeaseCount > 0) {
@@ -1020,9 +1098,15 @@ export class FileTreeService {
     }
     const oldRelative = event.oldPath;
     const newRelative = event.newPath;
-    if (oldRelative !== undefined && newRelative !== undefined) {
+    /* An apply's staged or backup sibling never enters the tree: renaming a
+     * row to or from one would drop the real name until the re-read lands, so
+     * only the parent re-reads below settle it. */
+    const touchesSibling = [oldRelative, newRelative].some(
+      (path) => path !== undefined && isTauTemporarySiblingPath(path),
+    );
+    if (!touchesSibling && oldRelative !== undefined && newRelative !== undefined) {
       this.optimisticRename(oldRelative, newRelative);
-    } else if (oldRelative !== undefined) {
+    } else if (!touchesSibling && oldRelative !== undefined) {
       this.optimisticDelete(oldRelative);
     }
     for (const path of [oldRelative, newRelative]) {
@@ -1180,6 +1264,10 @@ export class FileTreeService {
   private handleContentChange(event: ContentChangeEvent): void {
     switch (event.type) {
       case 'written': {
+        /* An apply's staged copy: its rename into place is the change the tree shows. */
+        if (isTauTemporarySiblingPath(event.path)) {
+          return;
+        }
         const metadata = { size: event.data.byteLength, ...getFileContentMetadata(event.data) };
         if (event.source === 'editor') {
           this.updateFileMetadata(event.path, metadata);
@@ -1190,7 +1278,7 @@ export class FileTreeService {
         break;
       }
       case 'deleted': {
-        if (event.source === 'editor') {
+        if (event.source === 'editor' || isTauTemporarySiblingPath(event.path)) {
           return;
         }
         this.optimisticDelete(event.path);
@@ -1198,6 +1286,11 @@ export class FileTreeService {
         break;
       }
       case 'renamed': {
+        /* Into or out of an apply's sibling: the listed file is replaced or removed, never renamed. */
+        if (isTauTemporarySiblingPath(event.oldPath) || isTauTemporarySiblingPath(event.newPath)) {
+          this.scheduleRefreshForParent(event.newPath);
+          break;
+        }
         this.optimisticRename(event.oldPath, event.newPath);
         this.scheduleRefreshForParent(event.oldPath);
         this.scheduleRefreshForParent(event.newPath);
@@ -1540,9 +1633,10 @@ export class FileTreeService {
    * direct children, adds new disk entries, preserves {@link FileEntry}
    * object identity when path + type are unchanged.
    * @param directoryKey - Workspace-relative directory (`''` for root).
-   * @param entries - Immediate child nodes from the worker.
+   * @param listed - Immediate child nodes from the worker; an apply's staging and backup siblings are left out.
    */
-  private mergeChildren(directoryKey: string, entries: FileTreeNode[]): void {
+  private mergeChildren(directoryKey: string, listed: FileTreeNode[]): void {
+    const entries = listed.filter((node) => !isTauTemporarySiblingName(node.name));
     this.directoryErrors.delete(directoryKey);
     const newTree = this.draftTree();
     const prefix = directoryKey === '' ? '' : directoryKey.endsWith('/') ? directoryKey : `${directoryKey}/`;
@@ -1582,8 +1676,9 @@ export class FileTreeService {
           continue;
         }
         if (existing.type === 'file') {
-          if (this.hasFileEntryChanged(existing, nextFile)) {
-            newTree.set(entryPath, { ...nextFile, isLoaded: existing.isLoaded });
+          const listed = keepMeasuredLineCount(existing, nextFile);
+          if (this.hasFileEntryChanged(existing, listed)) {
+            newTree.set(entryPath, { ...listed, isLoaded: existing.isLoaded });
           }
           continue;
         }

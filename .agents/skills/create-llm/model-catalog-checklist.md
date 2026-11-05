@@ -97,6 +97,7 @@ Every model row should explicitly address:
 - `configuration.streaming`.
 - Reasoning, thinking, temperature, or output config only when the transport forwards them.
 - `enabled: false` when public exposure is unsafe or intentionally staged.
+- `default: true` on exactly one enabled row: the model a new chat starts on when the person has not chosen one. The field is optional; the API throws if more than one row sets it, and the UI holds no default of its own.
 
 ## Description Rubric
 

@@ -460,6 +460,19 @@ describe('WorkspaceFileService', () => {
       expect(stat).not.toHaveBeenCalled();
     });
 
+    /* A tree row needs no line count, and counting one reads the whole file: a head listing reads none. */
+    it('should list a head-listing provider by head, with no line counts', async () => {
+      await service.writeFile('/heads/notes.txt', 'one\ntwo\nthree\n');
+      expect(rootProvider.supportsHeadListing).toBe(true);
+      const readdirWithStats = vi.spyOn(rootProvider, 'readdirWithStats');
+
+      const nodes = await service.readDirectory('/heads');
+
+      expect(readdirWithStats).toHaveBeenCalledWith(expect.stringMatching(/heads$/u), { content: 'head' });
+      expect(nodes).toEqual([expect.objectContaining({ name: 'notes.txt', contentKind: 'text', size: 14 })]);
+      expect(nodes[0]).not.toHaveProperty('lineCount');
+    });
+
     it('should return sorted tree nodes (folders first)', async () => {
       await service.mkdir('/tree/sub', { recursive: true });
       await service.writeFile('/tree/file.txt', 'x');

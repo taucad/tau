@@ -1,0 +1,100 @@
+diff --git a/dist/development/chunk-62JRHF6Z.mjs b/dist/development/chunk-62JRHF6Z.mjs
+index 43c3c5eae20fb44356130bd8b37ecc277ffdb62a..beb31790d80f829d58082bbc70cacd87ba80a009 100644
+--- a/dist/development/chunk-62JRHF6Z.mjs
++++ b/dist/development/chunk-62JRHF6Z.mjs
+@@ -8718,7 +8718,19 @@ async function loadRouteModule(route, routeModulesCache) {
+     import.meta.hot) {
+       throw error;
+     }
+-    window.location.reload();
++    // tau patch, temporary (TAU-UI-S; upstream wants it too: https://github.com/remix-run/remix/pull/8932).
++    // During a push navigation the URL still names the page being left, so
++    // reloading it drops the user back there: load the destination instead.
++    // Anything else (hydration, a non-GET submission) still reloads.
++    let tauRouter = window.__reactRouterDataRouter;
++    let tauNavigation = tauRouter && tauRouter.state.navigation;
++    let tauHref = tauNavigation && tauNavigation.location && (!tauNavigation.formMethod || tauNavigation.formMethod.toUpperCase() === "GET") ? tauRouter.createHref(tauNavigation.location) : void 0;
++    // A back/forward navigation has already moved the URL to the destination, so a reload is right there.
++    if (tauHref !== void 0 && tauHref !== window.location.pathname + window.location.search + window.location.hash) {
++      window.location.assign(tauHref);
++    } else {
++      window.location.reload();
++    }
+     return new Promise(() => {
+     });
+   }
+diff --git a/dist/development/chunk-HHGH3NKS.js b/dist/development/chunk-HHGH3NKS.js
+index 1d73113db1986be2ef9e4026e0ba5f73209542f8..a169d32eaefa794fb7de3815e7e43ac6cc677ae2 100644
+--- a/dist/development/chunk-HHGH3NKS.js
++++ b/dist/development/chunk-HHGH3NKS.js
+@@ -7863,7 +7863,19 @@ async function loadRouteModule(route, routeModulesCache) {
+     void 0) {
+       throw error;
+     }
+-    window.location.reload();
++    // tau patch, temporary (TAU-UI-S; upstream wants it too: https://github.com/remix-run/remix/pull/8932).
++    // During a push navigation the URL still names the page being left, so
++    // reloading it drops the user back there: load the destination instead.
++    // Anything else (hydration, a non-GET submission) still reloads.
++    let tauRouter = window.__reactRouterDataRouter;
++    let tauNavigation = tauRouter && tauRouter.state.navigation;
++    let tauHref = tauNavigation && tauNavigation.location && (!tauNavigation.formMethod || tauNavigation.formMethod.toUpperCase() === "GET") ? tauRouter.createHref(tauNavigation.location) : void 0;
++    // A back/forward navigation has already moved the URL to the destination, so a reload is right there.
++    if (tauHref !== void 0 && tauHref !== window.location.pathname + window.location.search + window.location.hash) {
++      window.location.assign(tauHref);
++    } else {
++      window.location.reload();
++    }
+     return new Promise(() => {
+     });
+   }
+diff --git a/dist/production/chunk-TP6EHSSF.js b/dist/production/chunk-TP6EHSSF.js
+index 31f84960fa1c21e8f0c1c4e6b144b81241ddc83c..b2a4980090fcaf46d5bf3628eb7913f31a9a2c2e 100644
+--- a/dist/production/chunk-TP6EHSSF.js
++++ b/dist/production/chunk-TP6EHSSF.js
+@@ -7863,7 +7863,19 @@ async function loadRouteModule(route, routeModulesCache) {
+     void 0) {
+       throw error;
+     }
+-    window.location.reload();
++    // tau patch, temporary (TAU-UI-S; upstream wants it too: https://github.com/remix-run/remix/pull/8932).
++    // During a push navigation the URL still names the page being left, so
++    // reloading it drops the user back there: load the destination instead.
++    // Anything else (hydration, a non-GET submission) still reloads.
++    let tauRouter = window.__reactRouterDataRouter;
++    let tauNavigation = tauRouter && tauRouter.state.navigation;
++    let tauHref = tauNavigation && tauNavigation.location && (!tauNavigation.formMethod || tauNavigation.formMethod.toUpperCase() === "GET") ? tauRouter.createHref(tauNavigation.location) : void 0;
++    // A back/forward navigation has already moved the URL to the destination, so a reload is right there.
++    if (tauHref !== void 0 && tauHref !== window.location.pathname + window.location.search + window.location.hash) {
++      window.location.assign(tauHref);
++    } else {
++      window.location.reload();
++    }
+     return new Promise(() => {
+     });
+   }
+diff --git a/dist/production/chunk-YBLPXYCV.mjs b/dist/production/chunk-YBLPXYCV.mjs
+index e9c83c3123c4ac53a21256629fd2b965aa8a2fd7..16597795e1ee035f1f2c26fe326a3b228b8bd707 100644
+--- a/dist/production/chunk-YBLPXYCV.mjs
++++ b/dist/production/chunk-YBLPXYCV.mjs
+@@ -8718,7 +8718,19 @@ async function loadRouteModule(route, routeModulesCache) {
+     import.meta.hot) {
+       throw error;
+     }
+-    window.location.reload();
++    // tau patch, temporary (TAU-UI-S; upstream wants it too: https://github.com/remix-run/remix/pull/8932).
++    // During a push navigation the URL still names the page being left, so
++    // reloading it drops the user back there: load the destination instead.
++    // Anything else (hydration, a non-GET submission) still reloads.
++    let tauRouter = window.__reactRouterDataRouter;
++    let tauNavigation = tauRouter && tauRouter.state.navigation;
++    let tauHref = tauNavigation && tauNavigation.location && (!tauNavigation.formMethod || tauNavigation.formMethod.toUpperCase() === "GET") ? tauRouter.createHref(tauNavigation.location) : void 0;
++    // A back/forward navigation has already moved the URL to the destination, so a reload is right there.
++    if (tauHref !== void 0 && tauHref !== window.location.pathname + window.location.search + window.location.hash) {
++      window.location.assign(tauHref);
++    } else {
++      window.location.reload();
++    }
+     return new Promise(() => {
+     });
+   }

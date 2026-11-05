@@ -1,6 +1,12 @@
 /* oxlint-disable new-cap -- NestJS decorators use PascalCase */
 import { Body, Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
-import { IngestEntryName, AttributeKey, knownAgentIds, runtimeEntryNames } from '@taucad/telemetry';
+import {
+  IngestEntryName,
+  AttributeKey,
+  knownAgentIds,
+  runtimeEntryNames,
+  workerTimingSpanNames,
+} from '@taucad/telemetry';
 import type { AgentTurnContext, ClientMetricEntry, IngestReceipt, TelemetryPolicyAnswer } from '@taucad/telemetry';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { AuthGuard } from '#auth/auth.guard.js';
@@ -278,7 +284,8 @@ export class TelemetryController {
   }
 
   private recordLfsFetch(entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.LFS_FETCH }>): void {
-    const { placement, networkObjects, networkBytes, localObjects, localBytes, transport } = entry.detail;
+    const { placement, networkObjects, networkBytes, localObjects, localBytes, transport, spans } = entry.detail;
+    this.recordWorkerSpans('lfs_fetch', spans);
     const attributes = { 'agent.placement': placement };
     this.metrics.syncClientLfsDuration.record(Math.min(entry.duration, maximumSyncAttemptMilliseconds) / 1000, {
       ...attributes,
@@ -298,8 +305,25 @@ export class TelemetryController {
     }
   }
 
+  /** Each worker span's total over one entry's window, as its own sample; a span that never ran mints nothing. */
+  private recordWorkerSpans(
+    stage: 'first_view' | 'fully_fetched' | 'lfs_fetch',
+    spans: Readonly<Partial<Record<(typeof workerTimingSpanNames)[number], number>>> | undefined,
+  ): void {
+    for (const span of workerTimingSpanNames) {
+      const milliseconds = spans?.[span];
+      if (milliseconds !== undefined) {
+        this.metrics.projectOpenSpanDuration.record(Math.min(milliseconds, maximumSyncAttemptMilliseconds) / 1000, {
+          stage,
+          span,
+        });
+      }
+    }
+  }
+
   private recordProjectOpen(entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.PROJECT_OPEN }>): void {
-    const { phase, cache, transport } = entry.detail;
+    const { phase, cache, transport, spans } = entry.detail;
+    this.recordWorkerSpans(phase, spans);
     /* An open waits on the same pull and transfers as a sync attempt, so the same hour bounds a skewed clock. */
     this.metrics.projectOpenDuration.record(Math.min(entry.duration, maximumSyncAttemptMilliseconds) / 1000, {
       phase,

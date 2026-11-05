@@ -11,7 +11,10 @@ import type { CadAgentExecution, TauAgentExecution } from '@taucad/chat';
 export type ModelCatalog =
   | Readonly<{ status: 'loading' }>
   | Readonly<{ status: 'unavailable' }>
-  | Readonly<{ status: 'loaded'; models: ReadonlyArray<Readonly<{ id: string; recommended?: boolean }>> }>;
+  | Readonly<{
+      status: 'loaded';
+      models: ReadonlyArray<Readonly<{ id: string; recommended?: boolean; default?: boolean }>>;
+    }>;
 
 /** Why a Tau model can or cannot start: the reason the picker shows and admission refuses with. */
 export type TauModelReadiness = 'ready' | 'checking' | 'catalog-unavailable' | 'not-offered';
@@ -43,11 +46,13 @@ export const tauModelReadiness = (modelId: string, catalog: ModelCatalog): TauMo
  * @returns The reason, or `undefined` while it can start or the catalog is still answering.
  */
 export const tauModelRefusal = (modelId: string, readiness: TauModelReadiness): string | undefined =>
-  readiness === 'not-offered'
-    ? `${modelId} is no longer offered. Pick a different model.`
-    : readiness === 'catalog-unavailable'
-      ? "Tau can't reach its model list, so it can't start a Tau model. Check your connection, or pick another agent."
-      : undefined;
+  readiness === 'not-offered' && modelId === ''
+    ? 'No Tau model is chosen yet. Pick a model.'
+    : readiness === 'not-offered'
+      ? `${modelId} is no longer offered. Pick a different model.`
+      : readiness === 'catalog-unavailable'
+        ? "Tau can't reach its model list, so it can't start a Tau model. Check your connection, or pick another agent."
+        : undefined;
 
 /**
  * The execution a new chat starts on: the last one used, of any kind.

@@ -10,7 +10,12 @@ import type { Environment } from '#config/environment.config.ts';
 import type { ModelFamily, ProviderId } from '#api/providers/provider.schema.js';
 import { ProviderService } from '#api/providers/provider.service.js';
 import type { Model, ModelProviderKind, ModelSupport } from '#api/models/model.schema.js';
-import { isModelListEntryEnabled, modelList, modelListEntryToModel } from '#api/models/model.constants.js';
+import {
+  assertSingleDefaultModel,
+  isModelListEntryEnabled,
+  modelList,
+  modelListEntryToModel,
+} from '#api/models/model.constants.js';
 import { Span } from '#telemetry/tracer.service.js';
 import {
   isFundedGatewayProviderId,
@@ -68,14 +73,15 @@ export class ModelService implements OnModuleInit {
     const ollamaEnabled = this.configService.get('OLLAMA_ENABLED', { infer: true });
     const tauCloudEnabled = this.configService.get('TAU_CLOUD_ENABLED', { infer: true });
     const ollamaModels = ollamaEnabled ? await this.getOllamaModels() : [];
-    const cloudEntries = Object.values(modelList)
-      .flatMap((modelsBySlug) => Object.values(modelsBySlug))
-      .filter(
-        (entry) =>
-          isGatewayProviderId(entry.provider.id) &&
-          (!tauCloudEnabled || isFundedGatewayProviderId(entry.provider.id)) &&
-          isGatewayProviderConfigured(this.configService, entry.provider.id),
-      );
+    const catalogEntries = Object.values(modelList).flatMap((modelsBySlug) => Object.values(modelsBySlug));
+    // Checked over the whole static catalog, not just this deployment's providers, so a second default fails everywhere.
+    assertSingleDefaultModel(catalogEntries);
+    const cloudEntries = catalogEntries.filter(
+      (entry) =>
+        isGatewayProviderId(entry.provider.id) &&
+        (!tauCloudEnabled || isFundedGatewayProviderId(entry.provider.id)) &&
+        isGatewayProviderConfigured(this.configService, entry.provider.id),
+    );
     const cloudModels = cloudEntries.map((entry) => modelListEntryToModel(entry));
     this.models = [...cloudModels, ...ollamaModels];
     const listedCloud = cloudEntries

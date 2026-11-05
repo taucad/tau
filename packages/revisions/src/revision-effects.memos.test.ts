@@ -236,6 +236,49 @@ describe('a cut on a complete change feed (E1)', () => {
   });
 });
 
+describe('a comparison a newer write made stale', () => {
+  /* `comparing` re-enters on every write, stopping its capture: the stale walk stops with it, rather than pile up. */
+  it('should stop reading files once its actor is stopped, and leave the next cut to read for itself', async () => {
+    const all = files(40);
+    const counted = await fixture(all, false);
+    await mint(counted);
+    for (const path of Object.keys(all)) {
+      // oxlint-disable-next-line no-await-in-loop -- fixture edits, written in order.
+      await counted.filesystem.writeFile(path, `edited ${path}\n`);
+    }
+
+    counted.reads.length = 0;
+    const held = counted.hold('dir0/f0.txt');
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- the actor logic is the machine's own; this drives it directly.
+    const comparing = createActor(counted.actors.checkout.captureTree as Parameters<typeof createActor>[0], {
+      input: { checkoutId: 'live', generation: 1 },
+    });
+    const outcome = Promise.withResolvers<string>();
+    comparing.subscribe({
+      next: ({ status }: Readonly<{ status: string }>) => {
+        if (status !== 'active') {
+          outcome.resolve(status);
+        }
+      },
+    });
+    comparing.start();
+    await held.reached;
+    comparing.stop();
+    held.release();
+    /* Let whatever the walk had already asked for settle. */
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
+    });
+    const readWhileStopping = counted.reads.length;
+
+    expect(readWhileStopping).toBeLessThan(Object.keys(all).length);
+    expect(await Promise.race([outcome.promise, Promise.resolve('stopped quietly')])).not.toBe('done');
+
+    const taken = await run<Cut>(counted.actors.checkout.cut, { checkoutId: 'live', trigger: 'save', generation: 1 });
+    expect(taken.treeId).toBe(await walkTreeId(counted.actors));
+  });
+});
+
 describe('the head a capture inherits modes from', () => {
   it('should read the head’s tree once per head, not once per capture', async () => {
     const counted = await fixture(files(20), false);

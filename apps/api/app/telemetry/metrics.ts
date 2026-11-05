@@ -139,6 +139,11 @@ export class MetricsService {
     description: TauMetrics.redisConnectionState.description,
   });
 
+  public readonly redisMemoryUtilization = this.apiMeter.createGauge(TauMetrics.redisMemoryUtilization.name, {
+    description: TauMetrics.redisMemoryUtilization.description,
+    unit: TauMetrics.redisMemoryUtilization.unit,
+  });
+
   public readonly healthReadinessFailures = this.apiMeter.createCounter(TauMetrics.healthReadinessFailures.name, {
     description: TauMetrics.healthReadinessFailures.description,
     unit: TauMetrics.healthReadinessFailures.unit,
@@ -653,6 +658,12 @@ export class MetricsService {
     description: TauMetrics.projectOpenDuration.description,
     unit: TauMetrics.projectOpenDuration.unit,
     advice: { explicitBucketBoundaries: [...TauMetrics.projectOpenDuration.buckets] },
+  });
+
+  public readonly projectOpenSpanDuration = this.clientMeter.createHistogram(TauMetrics.projectOpenSpanDuration.name, {
+    description: TauMetrics.projectOpenSpanDuration.description,
+    unit: TauMetrics.projectOpenSpanDuration.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.projectOpenSpanDuration.buckets] },
   });
 
   // --- Storage accounting scheduler (W14 OB3) ---

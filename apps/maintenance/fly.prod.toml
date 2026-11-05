@@ -19,7 +19,7 @@
 # TAU_S3_RESTORE_SECRET_ACCESS_KEY. No REDIS_URL: nothing here uses Redis.
 
 app = 'tau-maintenance'
-primary_region = 'syd'
+primary_region = 'sjc'
 kill_signal = 'SIGTERM'
 # The worker stops between passes on SIGTERM; the same window the API's group had.
 kill_timeout = '120s'

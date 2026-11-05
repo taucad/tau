@@ -348,6 +348,10 @@ describe('SectionContourFills', () => {
     expect(harness.drawn().get('TauSectionStencil:count-back')).toHaveLength(1);
     expect(harness.drawn().get('TauSectionStencil:count-parity')).toBeUndefined();
     expect(harness.drawn().get('TauSectionCapOutline')).toHaveLength(2);
+    // Until its census lands it shows its back faces, so a one-sided solid shades its cut rather than opening a hole.
+    expect((pending.children[0] as THREE.Mesh<THREE.BufferGeometry, THREE.Material>).material.side).toBe(
+      THREE.DoubleSide,
+    );
   });
 
   it('should grade a large standalone mesh again once its census lands, without the cut changing', async () => {

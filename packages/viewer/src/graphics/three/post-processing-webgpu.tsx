@@ -1,6 +1,7 @@
 import { Line2NodeMaterial } from '#graphics/three/materials/line2.material.js';
 import { createSurfaceReuse, primeTargetDepth } from '#graphics/three/surface-reuse.js';
 import { createViewportFxaa } from '#graphics/three/fxaa.js';
+import { encodeFrameOutput } from '#graphics/three/frame-output.js';
 import { scheduleCameraPreparation } from '#graphics/three/camera-preparation.js';
 import type { ReactNode } from 'react';
 import { useCallback, useLayoutEffect, useRef } from 'react';
@@ -190,7 +191,7 @@ const createLinearFrame = (renderer: WebGPURenderer, toneMapping: ToneMapping): 
   target.texture.name = 'Tau linear frame';
   target.depthTexture = new DepthTexture(1, 1, UnsignedInt248Type);
   target.depthTexture.format = DepthStencilFormat;
-  const finalOutput = createOutputQuad(renderOutput(texture(target.texture), NoToneMapping, renderer.outputColorSpace));
+  const finalOutput = createOutputQuad(encodeFrameOutput(texture(target.texture), renderer.outputColorSpace));
   finalOutput.name = 'Tau final output';
   const depthMaterial = new NodeMaterial();
   depthMaterial.colorWrite = false;
@@ -522,9 +523,8 @@ const createPipelineResources = ({
     });
     const reuseTarget = reuse.target;
     frame.target = reuseTarget;
-    (frame.output.material as NodeMaterial).fragmentNode = renderOutput(
+    (frame.output.material as NodeMaterial).fragmentNode = encodeFrameOutput(
       texture(reuseTarget.texture),
-      NoToneMapping,
       gpuRenderer.outputColorSpace,
     );
     const filtered = createOutputQuad(

@@ -55,6 +55,9 @@ vi.mock('#components/filesystem/workspace-selector.js', () => ({
   ),
 }));
 vi.mock('#hooks/use-kernel.js', () => ({ useKernel: () => ({ kernel: 'openscad', setKernel: vi.fn() }) }));
+vi.mock('#hooks/use-models.js', () => ({
+  useModels: () => ({ withCatalogDefaultModel: async (execution: unknown) => execution }),
+}));
 vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => ({ createProject: mockCreateProject }),
 }));

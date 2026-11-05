@@ -74,6 +74,9 @@ export type TurnPlacement = Readonly<{ runId: string }> &
       }>
   );
 
+/** Why a tree is being materialized: an ordinary apply, or a large-object fill's flush. @public */
+export type ApplyingTreePurpose = 'apply' | 'fill';
+
 /** Dependencies one project's actor set is built from. @public */
 export type RevisionActorsOptions = Readonly<{
   /** The content-addressed store every revision id comes from. */
@@ -144,8 +147,17 @@ export type RevisionActorsOptions = Readonly<{
   /**
    * Brackets tree materialization so a disk host can ignore its own watcher
    * events instead of reporting them as editor changes.
+   *
+   * `purpose` is `fill` for a large-object fill's flush, which replaces
+   * placeholders with their bytes in place, and `apply` (the default) for
+   * every other materialization: a host can hold a file tree's re-reads for
+   * an apply without holding them for every flush of a long fill.
    */
-  onApplyingTree?: (checkout: Checkout, paths: readonly string[]) => (() => void) | void;
+  onApplyingTree?: (
+    checkout: Checkout,
+    paths: readonly string[],
+    bracket?: Readonly<{ purpose: ApplyingTreePurpose }>,
+  ) => (() => void) | void;
   /**
    * Told how a checkout's large-object placeholders are being filled.
    *

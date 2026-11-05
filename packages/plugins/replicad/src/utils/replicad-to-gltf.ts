@@ -3,6 +3,7 @@ import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
 import { cadEdgeOverlayMaterialDefaults, cadMaterialDefaults, tauCadTopologyExtension } from '@taucad/runtime/types';
 import {
   compactTriangleIndices,
+  isClosedTriangleMesh,
   transformNormalArray,
   transformVertexArray,
   srgbHexToLinearTuple,
@@ -219,7 +220,8 @@ function buildNodeFromReplicadGeometry({
           }
         : {}),
       material: material ?? {
-        doubleSided: true,
+        // A closed solid draws one side: no back face of it shows from outside (see isClosedTriangleMesh).
+        doubleSided: baseColor[3] < 1 || !isClosedTriangleMesh([{ positions, indices }]),
         pbrMetallicRoughness: {
           baseColorFactor: baseColor,
           metallicFactor: geometry.metalness ?? cadMaterialDefaults.metalnessFactor,

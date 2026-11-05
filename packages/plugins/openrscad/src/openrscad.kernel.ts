@@ -8,6 +8,7 @@
 import type { ExportShape3DOutput, RenderOptions } from '@taulabs/openrscad-engine';
 import type * as OpenRscadModule from '@taulabs/openrscad-engine';
 import { z } from 'zod';
+import { markClosedGlbMeshesSingleSided } from '@taucad/geometry-core';
 import { createExportFile } from '@taucad/runtime/types';
 import type { JSONSchema7, JSONSchema7Definition } from '@taucad/runtime/types';
 
@@ -684,7 +685,7 @@ export const createOpenrscadKernel = ({
         logger.debug(result.echo);
       }
       const issues = collectIssues(result, bundle.source, normalizedEntryPath);
-      const preview = asBuffer(result.bytes);
+      const preview = await markClosedGlbMeshesSingleSided(asBuffer(result.bytes));
       const nativeHandle: OpenRscadNativeHandle = {
         previewGlb: preview,
         previewGlbTessellation: resolutionKey(scriptResolution),
@@ -755,7 +756,7 @@ export const createOpenrscadKernel = ({
           span.end();
         }
         return {
-          content: asBuffer(result.bytes),
+          content: await markClosedGlbMeshesSingleSided(asBuffer(result.bytes)),
           issues: collectIssues(result, nativeHandle.source, nativeHandle.entryPath),
           triangles: result.triangleCount,
           vertices: result.vertexCount,

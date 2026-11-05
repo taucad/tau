@@ -1377,7 +1377,9 @@ describe('restore, through the machine that owns it', () => {
     });
     expect(tree.facts.filter((fact) => fact.type === 'checkoutChanged')).toEqual([]);
     expect(await filesystem.exists('extra.txt')).toBe(false);
-    expect(onApplyingTree).toHaveBeenCalledWith(expect.objectContaining({ id: 'live' }), ['extra.txt']);
+    expect(onApplyingTree).toHaveBeenCalledWith(expect.objectContaining({ id: 'live' }), ['extra.txt'], {
+      purpose: 'apply',
+    });
     expect(release).toHaveBeenCalledOnce();
     tree.actor.stop();
   }, 30_000);

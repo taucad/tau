@@ -42,10 +42,10 @@ import {
   writeTree,
 } from 'isomorphic-git';
 import type { TreeEntry } from 'isomorphic-git';
-import { ResourceQueue } from '@taucad/filesystem';
+import { ResourceQueue, workerTimings } from '@taucad/filesystem';
 import { randomUuid } from '@taucad/utils/id';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
-import type { FileMode, FileSystemProvider } from '@taucad/filesystem';
+import type { FileMode, FileSystemProvider, RootedPorcelain } from '@taucad/filesystem';
 import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import type { RevisionProvenance } from '#revision-authority.js';
 import { decodeCommit, decodeTag, encodeCommit, encodeTag } from '#git-objects.js';
@@ -167,7 +167,11 @@ export type IsomorphicGitCheckoutOptions = Readonly<{
 
 /** Configuration for one provider-backed Git repository. @public */
 export type IsomorphicGitRevisionPortOptions = Readonly<{
-  filesystem: FileSystemProvider;
+  /**
+   * The project's files. A rooted view's `storePrivateObject` is used, when it
+   * has one, to store large objects outside the mutation pipeline's claims.
+   */
+  filesystem: FileSystemProvider & Partial<Pick<RootedPorcelain, 'storePrivateObject'>>;
   /** Control plane location. Defaults to `.git`, the one repository name on every host (D29). */
   gitDirectory?: string;
   /** Recorded object format. `isomorphic-git` writes SHA-1 only. */
@@ -891,17 +895,28 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    *
    * @param oid - The pointer's object id.
    * @param content - The object's real bytes.
+   * @returns Once the object is in the store.
    */
-  const storeLfsObject = async (oid: string, content: Uint8Array<ArrayBuffer>): Promise<void> => {
+  const storeLfsObject = async (oid: string, content: Uint8Array<ArrayBuffer>): Promise<void> =>
+    workerTimings.span('lfs.store', async () => storeLfsObjectBytes(oid, content));
+  const storeLfsObjectBytes = async (oid: string, content: Uint8Array<ArrayBuffer>): Promise<void> => {
     if ((await readLocalLfsObject({ oid, size: content.byteLength })) !== undefined) {
       return;
     }
     const file = lfsObjectFile(oid);
+    /* The private store takes only the checkout's own `.git` store; another repository location stays on the pipeline. */
+    if (filesystem.storePrivateObject !== undefined && gitdir === '.git') {
+      /* Off the project's mutation claims: a download no longer waits behind every checkout write.
+       * The store keeps a whole copy another tab wrote and replaces only one cut short. */
+      await filesystem.storePrivateObject(file, content);
+      return;
+    }
+    /* A copy cut short by an earlier write; not every provider's rename replaces. */
+    const truncated = await filesystem.exists(file);
     await filesystem.mkdir(file.slice(0, file.lastIndexOf('/')), { recursive: true });
     const partial = `${file}.${randomUuid()}.partial`;
     await filesystem.writeFile(partial, content);
-    /* A copy cut short by an earlier write; not every provider's rename replaces. */
-    if (await filesystem.exists(file)) {
+    if (truncated || (await filesystem.exists(file))) {
       await filesystem.unlink(file);
     }
     await filesystem.rename(partial, file);

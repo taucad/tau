@@ -7,8 +7,10 @@ import { renderToPipeableStream } from 'react-dom/server';
 import type { RenderToPipeableStreamOptions } from 'react-dom/server';
 import { ServerRouter } from 'react-router';
 import type { AppLoadContext, EntryContext, HandleErrorFunction } from 'react-router';
+import { cdnCacheControlResponseHeader } from '#constants/cache.constants.js';
 import { reportOnlyContentSecurityPolicy } from '#lib/content-security-policy.server.js';
 import { isCanonicalProductionUrl } from '#lib/canonical-url.js';
+import { skewProtectionCookie } from '#lib/skew-protection.server.js';
 import { createModulePreloadCap, criticalModuleHrefs, isNotFoundRender } from '#lib/module-preload-cap.js';
 import { claimSsrErrors, leafRouteId, queueSsrError, reportSsrError } from '#lib/sentry.server.js';
 
@@ -57,6 +59,13 @@ export default function handleRequest(
       'Cache-Control',
       new URL(request.url).pathname === '/' ? 'private, no-store' : 'private, no-cache',
     );
+  }
+  /* TAU-UI-S: pin this page's later chunk, `.data` and manifest requests to the deploy that rendered it
+   * (production only). Never on a document the CDN may store (`cdnBackedSsrRouteHeaders`): a stored
+   * `Set-Cookie` would be replayed to every visitor, or keep the response out of the cache. */
+  const skewCookie = responseHeaders.has(cdnCacheControlResponseHeader) ? undefined : skewProtectionCookie(process.env);
+  if (skewCookie !== undefined) {
+    responseHeaders.append('Set-Cookie', skewCookie);
   }
   /* OQ-P11: `Document-Policy: js-profiling` lets a developer take a real sampling profile of this
    * document from `Profiler`. It is off the production origin, where it would offer every visitor's

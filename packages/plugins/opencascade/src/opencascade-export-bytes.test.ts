@@ -68,7 +68,7 @@ describe('OpenCascade export bytes', { timeout: 60_000 }, () => {
   it('should keep a GLB export without includeEdges byte-identical', async () => {
     const files = await exportedFiles('glb', { tessellation });
     expect(files.map((file) => [file.name, sha256(file.bytes)])).toEqual([
-      ['model.glb', 'ca024aad5e402f9629360f01797847116c542ec587b8db9aaec87f8dc3d46210'],
+      ['model.glb', '6d361d532fdaebc4a7d556a6bf1370ff2cb5275f61b0b1625e254450e793d279'],
     ]);
   });
 
@@ -81,7 +81,7 @@ describe('OpenCascade export bytes', { timeout: 60_000 }, () => {
     }
     assertRenderingSuccess(outcome.rendering);
     expect(sha256(outcome.rendering.artifact.content as Uint8Array<ArrayBuffer>)).toBe(
-      'ca024aad5e402f9629360f01797847116c542ec587b8db9aaec87f8dc3d46210',
+      '6d361d532fdaebc4a7d556a6bf1370ff2cb5275f61b0b1625e254450e793d279',
     );
   });
 });

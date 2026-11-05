@@ -1,7 +1,7 @@
 [
   {
-    "name": "total (ESM JS) — measured 20755 bytes on 2026-10-15 including native mechanism intent validation; 545 bytes headroom",
+    "name": "total (ESM JS) — measured 22.35 kB on 2026-11-05 after closed-mesh detection (isClosedTriangleMesh, markClosed*MeshesSingleSided) for one-sided solids; 0.95 kB headroom",
     "path": "dist/**/*.mjs",
-    "limit": "21.3 kB"
+    "limit": "23.3 kB"
   }
 ]

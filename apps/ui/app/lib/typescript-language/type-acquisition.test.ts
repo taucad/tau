@@ -329,3 +329,40 @@ describe('declaration acquisition recovery and identity', () => {
     }
   });
 });
+
+describe('TypeAcquisitionController implicit packages', () => {
+  it('should mount a TSX document implicit packages from the dependency mount only', async () => {
+    vi.useFakeTimers();
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const files = new Map([['/node_modules/@tscircuit/core/index.d.ts', 'export declare const sel: unknown;']]);
+    const reader = {
+      readFile: vi.fn(async (path: string) => new TextEncoder().encode(files.get(path) ?? '{}')),
+      readdir: vi.fn(async (path: string) =>
+        [...files.keys()]
+          .filter((key) => key.slice(0, key.lastIndexOf('/')) === path)
+          .map((key) => key.slice(key.lastIndexOf('/') + 1)),
+      ),
+    };
+    const { controller, setExtraLib } = fixture({
+      dependencyReader: reader,
+      implicitPackages: (uri) => (uri.endsWith('.tsx') ? ['@tscircuit/core'] : []),
+    });
+    try {
+      controller.watch(new EditorDocument('helper.ts', 'export const x = 1;'));
+      await vi.advanceTimersByTimeAsync(500);
+      expect(setExtraLib).not.toHaveBeenCalled();
+      controller.watch(new EditorDocument('main.tsx', "export default () => <board width='10mm' />;"));
+      await vi.advanceTimersByTimeAsync(500);
+      expect(setExtraLib).toHaveBeenCalledWith(
+        'file:///node_modules/@tscircuit/core/index.d.ts',
+        'export declare const sel: unknown;',
+      );
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      controller.dispose();
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+});

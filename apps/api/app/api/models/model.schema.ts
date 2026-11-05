@@ -114,6 +114,10 @@ export const modelSchema = z.object({
     .boolean()
     .describe('Whether the model is shown in the compact Models list by default (vs hidden behind "View All Models")')
     .optional(),
+  default: z
+    .boolean()
+    .describe('Whether this is the model a new chat starts on. At most one listed model sets it; omitted means false')
+    .optional(),
   model: z.string().describe('The identifier of the model for the provider'),
   modifiedAt: z.string().describe('The modified at of the model').optional(),
   size: z.number().describe('The size of the model in bytes').optional(),

@@ -38,6 +38,8 @@ export {
 } from '#changeset.js';
 export { applyChangesetToProvider } from '#changeset-provider.js';
 export type {
+  AppendDurability,
+  AppendFence,
   BatchEntry,
   BatchOptions,
   BatchReceipt,

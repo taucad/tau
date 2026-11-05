@@ -376,6 +376,8 @@ export class MutationPipeline {
   private readonly _filePool: () => SharedPool | undefined;
   /** Convenience entries this task is coalescing into one changeset, per origin (D22). */
   private readonly _pending = new Map<string, PendingChangeset>();
+  /** The highest fencing token applied per record-log path (D23); a lower one is a stale writer. */
+  private readonly _appendFences = new Map<string, number>();
 
   /**
    * Create the pipeline over the authority's own collaborators.
@@ -1682,19 +1684,27 @@ export class MutationPipeline {
   ): Promise<void> {
     const settle = (index: number, result: BatchReceipt): void => {
       batches[index] = result;
+      const { batch, resolution } = prepared[index]!;
+      const durability =
+        batch.op === 'append' && result.outcome === 'applied' ? resolution.provider.capabilities.durability : undefined;
       receipts[index] = {
         index,
         outcome: result.outcome,
         ...(result.error === undefined ? {} : { error: result.error }),
         ...(result.kind === undefined ? {} : { kind: result.kind }),
+        ...(durability === undefined ? {} : { durability }),
       };
     };
+    const fenceRefusals = await this._checkAppendFences(prepared, indexes);
+    for (const [index, refusal] of fenceRefusals) {
+      settle(index, refusal);
+    }
     const isCrossProvider = (index: number): boolean => {
       const { batch, resolution, targetResolution } = prepared[index]!;
       return batch.op === 'move' && targetResolution !== undefined && targetResolution.provider !== resolution.provider;
     };
     const byProvider = Map.groupBy(
-      indexes.filter((index) => !isCrossProvider(index)),
+      indexes.filter((index) => !isCrossProvider(index) && !fenceRefusals.has(index)),
       (index) => prepared[index]!.resolution.provider,
     );
     const options = signal === undefined ? undefined : { signal };
@@ -1721,6 +1731,75 @@ export class MutationPipeline {
           settle(index, await this._moveAcrossProviders(prepared[index]!));
         }),
     ]);
+    for (const index of indexes) {
+      const { entry, path } = prepared[index]!;
+      if (entry.op === 'append' && entry.fence?.token !== undefined && receipts[index]!.outcome === 'applied') {
+        this._appendFences.set(path, Math.max(this._appendFences.get(path) ?? entry.fence.token, entry.fence.token));
+      }
+    }
+  }
+
+  /**
+   * Check every fenced append of one phase under the changeset's lock set (D23):
+   * the writer's token must not be older than one already applied to the
+   * path, and the file must still be the length the writer last knew. The
+   * check reads metadata only; the exclusive token on the path keeps it true
+   * until the append lands.
+   *
+   * @param prepared - Every admitted entry.
+   * @param indexes - This phase's entries.
+   * @returns A refusal per fenced append whose condition does not hold.
+   */
+  private async _checkAppendFences(
+    prepared: readonly PreparedEntry[],
+    indexes: readonly number[],
+  ): Promise<Map<number, BatchReceipt>> {
+    const refusals = new Map<number, BatchReceipt>();
+    await Promise.all(
+      indexes.map(async (index) => {
+        const { entry, path, resolution } = prepared[index]!;
+        if (entry.op !== 'append' || entry.fence === undefined) {
+          return;
+        }
+        const { expectedLength, token } = entry.fence;
+        const highest = this._appendFences.get(path);
+        if (token !== undefined && highest !== undefined && token < highest) {
+          refusals.set(index, {
+            outcome: 'failed',
+            error: Object.assign(
+              errnoError('EFENCED', `append to '${path}' from fence ${String(token)} after ${String(highest)}`),
+              {
+                token,
+                highest,
+              },
+            ),
+          });
+          return;
+        }
+        let actualLength: number;
+        try {
+          const stat = await resolution.provider.stat(resolution.path, { content: 'head' });
+          actualLength = stat.size;
+        } catch (error) {
+          const { code } = error as { code?: unknown };
+          if (code !== 'ENOENT' && code !== 'ENOTDIR') {
+            refusals.set(index, { outcome: 'failed', error });
+            return;
+          }
+          actualLength = 0;
+        }
+        if (actualLength !== expectedLength) {
+          refusals.set(index, {
+            outcome: 'failed',
+            error: Object.assign(
+              errnoError('EAPPENDSTALE', `'${path}' is ${String(actualLength)} bytes, not ${String(expectedLength)}`),
+              { expectedLength, actualLength },
+            ),
+          });
+        }
+      }),
+    );
+    return refusals;
   }
 
   /**

@@ -49,16 +49,20 @@ describe('the browser system skill overlay', () => {
     expect(fetchFromDisk).toHaveBeenCalledOnce();
     expect(fetchFromDisk).toHaveBeenCalledWith(resource.url);
     expect(first.byteLength).toBe(resource.byteLength);
-    expect(second).toBe(first);
-    expect(third).toBe(first);
+    expect(second).not.toBe(first);
+    expect(second).toStrictEqual(first);
+    /* Detaching one caller's buffer, as a transferred reply does, leaves the cache intact. */
+    structuredClone(first.buffer, { transfer: [first.buffer] });
+    expect(third.byteLength).toBe(resource.byteLength);
+    expect(new Uint8Array(await systemSkillsOverlay().read(path)).byteLength).toBe(resource.byteLength);
     const after = systemSkillResourceStats();
     expect({
       fetches: after.fetches - before.fetches,
       hits: after.hits - before.hits,
       bytes: after.bytes - before.bytes,
-    }).toStrictEqual({ fetches: 1, hits: 2, bytes: resource.byteLength });
+    }).toStrictEqual({ fetches: 1, hits: 3, bytes: resource.byteLength });
     expect(workerTimings.summarize(startedAt).counters).toMatchObject({
-      'overlay.read': { total: 3 },
+      'overlay.read': { total: 4 },
       'overlay.fetch': { total: 1 },
     });
   });

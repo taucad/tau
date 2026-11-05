@@ -35,7 +35,10 @@ const fetchResource: ReadSkillResource = async (resource) => {
   return new Uint8Array(await response.arrayBuffer());
 };
 
+/* Each caller gets its own copy: a bridge reply may transfer the buffer it is
+ * handed, which would detach the cached bytes for every later read. */
 const resources = createCachedSkillResourceReader(fetchResource, {
+  copy: true,
   onEvent: (event) => {
     if (event === 'read') {
       workerTimings.count('overlay.read');

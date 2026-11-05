@@ -7,6 +7,7 @@ import type { WorkspaceHarness } from '#testing/workspace-service-harness.js';
 import type { ChangesetEntry } from '#changeset.js';
 import type { ChangeEvent } from '#types.js';
 import type { RootedFileSystem } from '#rooted-views.js';
+import { workerTimings } from '#worker-timings.js';
 
 /** A rooted view's `apply`, which every authority view offers. */
 const applyOf = (rooted: RootedFileSystem): NonNullable<RootedFileSystem['apply']> => {
@@ -53,9 +54,11 @@ describe('apply', () => {
       }),
     );
 
+    const startedAt = workerTimings.now();
     const receipt = await applyOf(rooted)({ entries: [{ op: 'mkdir', path: 'src', recursive: true }, ...entries] });
 
     expect(receipt.state).toBe('applied');
+    expect(workerTimings.summarize(startedAt).counters['changesets']?.total).toBe(1);
     expect(queueForClaims).toHaveBeenCalledTimes(1);
     expect(events).toHaveLength(1);
     expect(changeEventEntries(events[0]!).filter(({ type }) => type === 'fileWritten')).toHaveLength(100);

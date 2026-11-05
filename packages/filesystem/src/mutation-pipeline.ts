@@ -74,6 +74,7 @@ import {
   toBatchEntry,
 } from '#changeset-provider.js';
 import type { Occupancy } from '#changeset-admission.js';
+import { workerTimings } from '#worker-timings.js';
 
 const maximumCheckedWritePreconditions = 32;
 const maximumCheckedWriteBytes = 8 * 1024 * 1024;
@@ -1475,6 +1476,7 @@ export class MutationPipeline {
     signal: AbortSignal | undefined,
     context: WorkspaceMutationContext | undefined,
   ): Promise<ChangesetReceipt> {
+    workerTimings.count('changesets');
     const receipts = Array.from<ChangesetEntryReceipt>({ length: prepared.length });
     const batches = Array.from<BatchReceipt | undefined>({ length: prepared.length });
     let refreshFailure: unknown;

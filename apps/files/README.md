@@ -6,15 +6,18 @@ The API stays the authority. Its LFS batch endpoint checks access as before and 
 
 ## Routes
 
-| Path                                          | Methods       | Answer                                                                            |
-| --------------------------------------------- | ------------- | --------------------------------------------------------------------------------- |
-| `/v1/lfs/<ownerId>/<projectId>/<oid>?n&x&k&s` | GET, HEAD     | Tenant object `tenants/<ownerId>/lfs/<projectId>/<oid>`                           |
-| `/v1/lfs-legacy/<projectId>/<oid>?n&x&k&s`    | GET, HEAD     | Legacy object `blobs/git-lfs/<projectId>/lfs/objects/<oid[0:2]>/<oid[2:4]>/<oid>` |
-| `/healthz`                                    | GET, HEAD     | `200 {"status":"ok","keys":<live key count>}`, unsigned                           |
-| any                                           | OPTIONS       | `204` preflight: `GET, HEAD`; `Range, If-None-Match`; max age 7200                |
-| any                                           | anything else | `405 {"code":"FILES_METHOD_NOT_ALLOWED"}`                                         |
+| Path                                                             | Methods                      | Answer                                                                                        |
+| ---------------------------------------------------------------- | ---------------------------- | --------------------------------------------------------------------------------------------- |
+| `/v1/lfs/<ownerId>/<projectId>/<oid>?n&x&k&s`                    | GET, HEAD                    | Tenant object `tenants/<ownerId>/lfs/<projectId>/<oid>`                                       |
+| `/v1/lfs-legacy/<projectId>/<oid>?n&x&k&s`                       | GET, HEAD                    | Legacy object `blobs/git-lfs/<projectId>/lfs/objects/<oid[0:2]>/<oid[2:4]>/<oid>`             |
+| `/v1/git/<ownerId>/<projectId>/packs/<name>.pack?n&x&k&s`        | GET (one `Range` only), HEAD | Live pack `tenants/<ownerId>/repos/<projectId>/packs/<name>.pack`, read by Range (charter D8) |
+| `/v1/git/<ownerId>/<projectId>/packs/<name>.idx?n&x&k&s`         | GET, HEAD                    | The pack's stored index (D33)                                                                 |
+| `/v1/git/<ownerId>/<projectId>/listings/<commit>.tsv.gz?n&x&k&s` | GET, HEAD                    | The head listing the API writes at push (D8)                                                  |
+| `/healthz`                                                       | GET, HEAD                    | `200 {"status":"ok","keys":<live key count>}`, unsigned                                       |
+| any                                                              | OPTIONS                      | `204` preflight: `GET, HEAD`; `Range, If-None-Match`; max age 7200                            |
+| any                                                              | anything else                | `405 {"code":"FILES_METHOD_NOT_ALLOWED"}`                                                     |
 
-No other bucket key has a path. Repository packs and publication manifests stay unreachable even with a valid signing key.
+No other bucket key has a path. A repository's manifest, retirement markers and push-log segments, and every publication manifest, stay unreachable even with a valid signing key. `<name>` is an upload's pack name, `pack-<git hash>-<16 hex nonce>`. A pack link's `n` may be up to 1,073,741,824 (the repository ceiling); an LFS link's stays at 104,857,600. A GET of a pack without one satisfiable `bytes=` range is refused with `416 range` before storage is read, so no client downloads a whole pack here; the ETag of a repository file is `"<kind>-<name>"`.
 
 Objects are served only on the Worker's own custom domain (`FILES_AUDIENCE`). The same link on any other host, `*.workers.dev` included, gets `400 malformed`.
 

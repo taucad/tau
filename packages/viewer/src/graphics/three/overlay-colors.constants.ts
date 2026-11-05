@@ -29,19 +29,19 @@
  * The viewport canvas is transparent over the page background. The frame output encodes
  * straight colour and premultiplies after (`encodeFrameOutput` in `post-processing-webgpu.tsx`),
  * so the browser composites the grid in gamma space on every backend. Over white (`#FFFFFF`)
- * at alpha 0.3 this reads ~`#D5D5D5`.
+ * at alpha 0.3 this reads ~`#EAEAEA`, a step of about 21 from white (operator review
+ * 2026-11-05: half the step of the earlier `#737373` tint, which read too strong).
  */
-export const infiniteGridColorLightMode = 0x73_73_73;
+export const infiniteGridColorLightMode = 0xb9_b9_b9;
 
 /**
  * Infinite grid line tint, **dark theme**. sRGB hex.
  *
- * Over the dark background (`#171717`) at alpha 0.3 this reads ~`#3E3E3E`, the contrast the
- * dark grid had before the frame output stopped gamma-encoding premultiplied colour
- * (operator review 2026-11-04: the dark grid reads well; keep it). Its step from the
- * background matches the light grid's step from white.
+ * Over the dark background (`#171717`) at alpha 0.3 this reads ~`#2A2A2A`, a step of about
+ * 20 from the background (operator review 2026-11-05: half the step of the earlier `#999999`
+ * tint). Its step from the background matches the light grid's step from white.
  */
-export const infiniteGridColorDarkMode = 0x99_99_99;
+export const infiniteGridColorDarkMode = 0x58_58_58;
 
 /** High-contrast grid tints and opacity. The stronger alpha keeps both WebGL's gamma blend and WebGPU's linear blend above 3:1. */
 export const infiniteGridColorHighContrastLightMode = 0x00_00_00;

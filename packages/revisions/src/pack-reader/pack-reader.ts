@@ -11,7 +11,7 @@
  */
 /* oxlint-disable no-bitwise -- pack and index records are bit fields. */
 
-import { isComputeWorkerFailure } from '#compute-worker/errors.js';
+import { CorruptBytesError } from '#compute-worker/errors.js';
 import type { ComputeWorker } from '#compute-worker/compute-worker.js';
 import type { PackIndex } from '#pack-reader/pack-index.js';
 
@@ -282,12 +282,11 @@ export const createPackReader = (options: PackReaderOptions): PackReader => {
     try {
       inflated = await compute.inflate(compressed);
     } catch (error) {
-      /* A worker that died judged nothing: the pack stays, and the caller sees the crash. */
-      if (isComputeWorkerFailure(error)) {
-        throw error;
+      /* Only a verdict on the bytes is a corrupt entry; a crash or a failed allocation judged nothing, and the pack stays. */
+      if (error instanceof CorruptBytesError) {
+        throw new TypeError(`A pack entry in ${path} does not inflate.`, { cause: error });
       }
-      /* Bytes that are not a zlib stream are a corrupt entry, wherever the compute ran. */
-      throw new TypeError(`A pack entry in ${path} does not inflate.`, { cause: error });
+      throw error;
     }
     if (inflated.byteLength !== declared) {
       throw new TypeError(`A pack entry in ${path} inflates to a size other than the one it declares.`);

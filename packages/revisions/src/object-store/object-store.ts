@@ -63,8 +63,13 @@ const rememberChecked = (key: string): void => {
   }
 };
 
-/* A pack that fails its own checks: the tables or the bytes are not what a whole pack is. */
-const isIntegrityFailure = (error: unknown): boolean => error instanceof TypeError || error instanceof RangeError;
+/*
+ * A pack that fails its own checks: the tables or the bytes are not what a
+ * whole pack is. Only a verdict on the bytes — a `TypeError` from the reader
+ * or a `CorruptBytesError` from the compute — counts; a `RangeError` (an
+ * allocation that failed) or a crash judged nothing, and the pack stays.
+ */
+const isIntegrityFailure = (error: unknown): boolean => error instanceof TypeError;
 
 export const gitFilesOf = (
   filesystem: FileSystemProvider & { readonly privateStore?: PrivateStore },

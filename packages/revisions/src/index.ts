@@ -11,7 +11,7 @@ export type { IsomorphicGitCheckoutOptions } from '#isomorphic-git-adapter.js';
 export { createRawObjectReader } from '#object-store/raw-object-reader.js';
 export { createInlineCompute, serveComputeWorker } from '#compute-worker/compute-worker.js';
 export type { ComputePort, ComputeWorker } from '#compute-worker/compute-worker.js';
-export { ComputeWorkerCrashedError, isComputeWorkerFailure } from '#compute-worker/errors.js';
+export { ComputeWorkerCrashedError } from '#compute-worker/errors.js';
 export type { ComputeMethod } from '#compute-worker/errors.js';
 export { createSupervisedComputeWorker } from '#compute-worker/supervisor.js';
 export type { ComputeCrashReport } from '#compute-worker/supervisor.js';

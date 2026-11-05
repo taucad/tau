@@ -10,7 +10,15 @@
  * {@link SupervisorOptions.maxRestarts} restarts inside
  * {@link SupervisorOptions.restartWindow} stop the restarts: later calls go to
  * the fallback when the host gave one, and otherwise fail typed
- * (`unavailable`), so a worker that cannot load is not respawned forever.
+ * (`unavailable`), so a worker that cannot load is not respawned forever. A
+ * `spawn` that throws counts as a crash. Pack indexing never runs on the
+ * fallback: past the worker it fails typed rather than hold the authority's
+ * thread for seconds.
+ *
+ * Liveness is a heartbeat, not a per-call timer: the worker acknowledges each
+ * call as it starts it and answers pings, and is taken for dead only after
+ * {@link SupervisorOptions.callDeadline} of silence while it holds calls. At
+ * most {@link SupervisorOptions.maxInFlight} calls are sent at once.
  *
  * @module
  */
@@ -52,11 +60,16 @@ export type SupervisorOptions = Readonly<{
   /** Where calls go once the supervisor gave up; without one they fail typed. */
   fallback?: ComputeWorker;
   /**
-   * How long one call may go unanswered before its worker is taken for dead
-   * (a platform kill can end a worker without an error event). Milliseconds;
-   * two minutes by default, far above a 64 MiB pack's indexing.
+   * How long a worker holding calls may stay silent — no call started, no
+   * answer, no pong — before it is taken for dead (a platform kill can end a
+   * worker without an error event). Milliseconds; two minutes by default, far
+   * above a 64 MiB pack's indexing. A queued or slow call alone never trips it.
    */
   callDeadline?: number;
+  /** How often a worker holding calls is pinged. Milliseconds; a quarter of the silence window, at most 5 s. */
+  heartbeat?: number;
+  /** Calls sent to the worker at once; the rest wait unsent. 4 by default. */
+  maxInFlight?: number;
   /** Told of each death, for telemetry. */
   onCrash?: (report: ComputeCrashReport) => void;
   /** The clock the window is measured on. */
@@ -72,6 +85,9 @@ export type SupervisedComputeWorker = ComputeWorker &
     terminate: () => void;
   }>;
 
+/** Work that never runs on the fallback: past the worker it fails typed rather than stall the authority's thread. */
+const workerOnly: ReadonlySet<ComputeMethod> = new Set(['indexPack']);
+
 /**
  * Supervise one compute worker.
  *
@@ -83,15 +99,27 @@ export const createSupervisedComputeWorker = (options: SupervisorOptions): Super
   const maxRestarts = options.maxRestarts ?? 3;
   const restartWindow = options.restartWindow ?? 60_000;
   const now = options.now ?? Date.now;
-  const callDeadline = options.callDeadline ?? 120_000;
+  const silence = options.callDeadline ?? 120_000;
+  const heartbeat = options.heartbeat ?? Math.max(1, Math.min(5000, Math.floor(silence / 4)));
+  const maxInFlight = options.maxInFlight ?? 4;
   let current: Readonly<{ handle: ComputeWorkerHandle; connection: ComputeConnection }> | undefined;
   let spawned = 0;
   let restarts: number[] = [];
   let abandoned = false;
+  let beat: ReturnType<typeof setInterval> | undefined;
+  /* Calls over the in-flight bound wait here, unsent: a queued call is not a silent worker's. */
+  let inFlight = 0;
+  const queued: Array<() => void> = [];
+
+  const stopBeat = (): void => {
+    clearInterval(beat);
+    beat = undefined;
+  };
 
   const stop = (failure: ComputeWorkerCrashedError['failure'], cause?: unknown): number => {
     const held = current;
     current = undefined;
+    stopBeat();
     if (held === undefined) {
       return 0;
     }
@@ -103,65 +131,125 @@ export const createSupervisedComputeWorker = (options: SupervisorOptions): Super
     return failedCalls;
   };
 
+  /* One more death in the window; past the budget the supervisor gives up. Answers whether it has. */
+  const counted = (): boolean => {
+    const at = now();
+    restarts = [...restarts.filter((time) => at - time < restartWindow), at];
+    abandoned = restarts.length > maxRestarts;
+    return abandoned;
+  };
+
   const died = (handle: ComputeWorkerHandle, cause: unknown): void => {
     if (current?.handle !== handle) {
       return;
     }
-    const at = now();
-    restarts = [...restarts.filter((time) => at - time < restartWindow), at];
-    abandoned = restarts.length > maxRestarts;
+    counted();
     const failedCalls = stop('crashed', cause);
     options.onCrash?.({ failedCalls, restarts: restarts.length, abandoned });
   };
 
-  const live = (): ComputeWorker | undefined => {
-    if (abandoned) {
-      return options.fallback;
+  /*
+   * While calls are held, ping the worker; a worker heard from by nothing — no
+   * start, no answer, no pong — for the silence window is gone (a platform
+   * kill can end one without an error event). A worker busy with one long
+   * call still answers the calls around it, so it is only taken for dead when
+   * the work itself has held its thread for the whole window.
+   */
+  const watch = (): void => {
+    beat ??= setInterval(() => {
+      const held = current;
+      if (held === undefined || held.connection.pending() === 0) {
+        stopBeat();
+        return;
+      }
+      if (now() - held.connection.heard() > silence) {
+        died(held.handle, new Error(`The compute worker was silent for ${String(silence)} ms.`));
+        return;
+      }
+      held.connection.ping();
+    }, heartbeat);
+    (beat as { unref?: () => void }).unref?.();
+  };
+
+  const live = (method: ComputeMethod): ComputeWorker | undefined => {
+    if (!abandoned && current === undefined) {
+      let handle: ComputeWorkerHandle | undefined;
+      try {
+        handle = options.spawn();
+      } catch (error) {
+        /* A worker that cannot start is a crash: counted, and past the budget the calls go to the fallback. */
+        const gaveUp = counted();
+        options.onCrash?.({ failedCalls: 0, restarts: restarts.length, abandoned: gaveUp });
+        if (!gaveUp) {
+          throw new ComputeWorkerCrashedError('crashed', method, { cause: error });
+        }
+      }
+      if (handle !== undefined) {
+        const started = handle;
+        spawned += 1;
+        const connection = openComputeConnection(
+          {
+            postMessage: (message, transfer) => {
+              started.postMessage(message, transfer);
+            },
+            addEventListener: (type, listener) => {
+              started.addEventListener(type, listener as (event: Event) => void);
+            },
+          },
+          now,
+        );
+        started.addEventListener('error', (event) => {
+          /* An uncaught error ends the worker for good: what it held never answers. */
+          event.preventDefault();
+          died(started, (event as ErrorEvent).error ?? (event as ErrorEvent).message);
+        });
+        started.addEventListener('messageerror', (event) => {
+          died(started, event);
+        });
+        current = { handle: started, connection };
+      }
     }
-    if (current === undefined) {
-      const handle = options.spawn();
-      spawned += 1;
-      const connection = openComputeConnection({
-        postMessage: (message, transfer) => {
-          handle.postMessage(message, transfer);
-        },
-        addEventListener: (type, listener) => {
-          handle.addEventListener(type, listener as (event: Event) => void);
-        },
-      });
-      handle.addEventListener('error', (event) => {
-        /* An uncaught error ends the worker for good: what it held never answers. */
-        event.preventDefault();
-        died(handle, (event as ErrorEvent).error ?? (event as ErrorEvent).message);
-      });
-      handle.addEventListener('messageerror', (event) => {
-        died(handle, event);
-      });
-      current = { handle, connection };
+    if (current !== undefined) {
+      return current.connection.compute;
     }
-    return current.connection.compute;
+    return workerOnly.has(method) ? undefined : options.fallback;
+  };
+
+  const slot = async (): Promise<void> => {
+    if (inFlight < maxInFlight) {
+      inFlight += 1;
+      return;
+    }
+    const { promise, resolve } = Promise.withResolvers<undefined>();
+    queued.push(() => {
+      resolve(undefined);
+    });
+    await promise;
+  };
+  const release = (): void => {
+    const next = queued.shift();
+    if (next === undefined) {
+      inFlight -= 1;
+    } else {
+      next();
+    }
   };
 
   const call =
     (method: ComputeMethod) =>
     async (...args: readonly unknown[]): Promise<unknown> => {
-      const compute = live();
-      if (compute === undefined) {
-        throw new ComputeWorkerCrashedError('unavailable', method);
-      }
-      const handle = current?.handle;
-      /* A worker the platform killed without an error event never answers: past the deadline it is dead. */
-      const deadline =
-        handle === undefined
-          ? undefined
-          : setTimeout(() => {
-              died(handle, new Error(`${method} passed the ${String(callDeadline)} ms deadline`));
-            }, callDeadline);
-      (deadline as { unref?: () => void } | undefined)?.unref?.();
+      await slot();
       try {
+        const compute = live(method);
+        if (compute === undefined) {
+          throw new ComputeWorkerCrashedError('unavailable', method);
+        }
+        if (current?.connection.compute === compute) {
+          watch();
+        }
         return await (compute[method] as (...input: readonly unknown[]) => Promise<unknown>)(...args);
       } finally {
-        clearTimeout(deadline);
+        release();
       }
     };
 

@@ -11,7 +11,7 @@
  *
  * @public
  */
-export type ComputeMethod = 'inflate' | 'deflate' | 'sha1' | 'sha256' | 'indexPack' | 'resolveDelta' | 'unzip' | 'grep';
+export type ComputeMethod = 'inflate' | 'deflate' | 'sha1' | 'sha256' | 'indexPack' | 'resolveDelta';
 
 /** Why a call to a compute worker failed without the work itself refusing. */
 export type ComputeWorkerFailure = 'crashed' | 'unavailable';
@@ -59,3 +59,15 @@ export class ComputeWorkerCrashedError extends Error {
  */
 export const isComputeWorkerFailure = (error: unknown): error is ComputeWorkerCrashedError =>
   error instanceof ComputeWorkerCrashedError;
+
+/**
+ * A verdict on the bytes: they are not a zlib stream, a delta that applies, or
+ * a pack that indexes. Marked where the verdict is made, and the only failure
+ * that crosses the seam as one, so a store drops a pack for this and never for
+ * a worker's own trouble (an allocation that failed, a crash).
+ *
+ * @public
+ */
+export class CorruptBytesError extends TypeError {
+  public override readonly name = 'CorruptBytesError';
+}

@@ -2,8 +2,8 @@
  * The compute worker's contract: the CPU work of the Git object store and of
  * the importer and search, and nothing that touches storage (charter D1, D7).
  *
- * Inflate, deflate, delta resolution, hashing, pack indexing, zip decode and
- * grep take bytes in and hand bytes back; the authority does every read and
+ * Inflate, deflate, delta resolution, hashing and pack indexing take bytes in
+ * and hand bytes back (zip decode and grep join with W7 and W9, which use them); the authority does every read and
  * write. A host gives the store a dedicated worker through
  * {@link createSupervisedComputeWorker} (`supervisor.ts`), which that worker
  * serves with {@link serveComputeWorker}; {@link createInlineCompute} runs the
@@ -11,21 +11,22 @@
  * request is structured-cloned to the worker, so the caller's buffers are
  * never detached, and each answer's buffers are transferred back.
  *
- * Failures cross the seam typed: a `TypeError` or `RangeError` the work threw
- * (corrupt bytes — a store drops a pack only for these) arrives as the same
- * class, and a worker that died fails every call it held with a
- * {@link ComputeWorkerCrashedError}, which is neither, so no pack is ever
- * dropped because its worker crashed.
+ * Failures cross the seam typed: a {@link CorruptBytesError}, marked where the
+ * work judged the bytes, arrives as one (a store drops a pack only for this);
+ * anything else the work threw — an allocation that failed, a bug — arrives
+ * as a plain `Error` that judges nothing, and a worker that died fails every
+ * call it held with a {@link ComputeWorkerCrashedError}. No pack is dropped
+ * for either.
+ *
+ * The worker acknowledges each call as it starts it and answers a ping, so the
+ * supervisor can tell a worker that is busy from one that is gone.
  *
  * @module
  */
 
 import { indexPack } from 'isomorphic-git';
-import { grep } from '#compute-worker/grep.js';
-import type { GrepFile, GrepOptions, GrepPattern, GrepResult } from '#compute-worker/grep.js';
-import { unzip } from '#compute-worker/zip.js';
-import type { ZipEntry, ZipLimits } from '#compute-worker/zip.js';
 import { bytesToHex, digest } from '#object-hash.js';
+import { CorruptBytesError } from '#compute-worker/errors.js';
 import type { ComputeMethod } from '#compute-worker/errors.js';
 import { applyDelta } from '#pack-reader/delta.js';
 
@@ -59,10 +60,6 @@ export type ComputeWorker = Readonly<{
     declared: number,
     base: Uint8Array<ArrayBuffer>,
   ) => Promise<Uint8Array<ArrayBuffer>>;
-  /** Every file of a zip archive, each checked against its CRC and size (`zip.ts`). */
-  unzip: (archive: Uint8Array<ArrayBuffer>, limits?: ZipLimits) => Promise<ZipEntry[]>;
-  /** Each line of these files that matches (`grep.ts`). */
-  grep: (files: readonly GrepFile[], pattern: GrepPattern, options?: GrepOptions) => Promise<GrepResult>;
 }>;
 
 const drain = async (stream: ReadableStream<Uint8Array<ArrayBuffer>>): Promise<Uint8Array<ArrayBuffer>> =>
@@ -142,8 +139,16 @@ const memoryFiles = (pack: Uint8Array<ArrayBuffer>) => {
  * @public
  */
 export const createInlineCompute = (): ComputeWorker => {
-  const inflate = async (compressed: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> =>
-    through(new DecompressionStream('deflate'), compressed);
+  const inflate = async (compressed: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> => {
+    try {
+      return await through(new DecompressionStream('deflate'), compressed);
+    } catch (error) {
+      /* A decompression stream fails a stream that is not zlib with a TypeError; anything else is not about the bytes. */
+      throw error instanceof TypeError
+        ? new CorruptBytesError('The bytes are not a zlib stream.', { cause: error })
+        : error;
+    }
+  };
   return Object.freeze({
     inflate,
     deflate: async (raw) => through(new CompressionStream('deflate'), raw),
@@ -151,7 +156,12 @@ export const createInlineCompute = (): ComputeWorker => {
     sha256: async (bytes) => hashHex('sha256', bytes),
     indexPack: async (pack) => {
       const { fs, files } = memoryFiles(pack);
-      await indexPack({ fs, dir: '', gitdir: '', filepath: 'pack.pack' });
+      try {
+        await indexPack({ fs, dir: '', gitdir: '', filepath: 'pack.pack' });
+      } catch (error) {
+        /* The indexer refuses a pack it cannot read; running out of room is not a verdict on the pack. */
+        throw error instanceof RangeError ? error : new CorruptBytesError('The pack does not index.', { cause: error });
+      }
       const written = files.get('pack.idx');
       if (written === undefined) {
         throw new Error('The pack indexer wrote no index.');
@@ -159,19 +169,16 @@ export const createInlineCompute = (): ComputeWorker => {
       return new Uint8Array(written);
     },
     resolveDelta: async (compressed, declared, base) => {
-      let delta: Uint8Array<ArrayBuffer>;
-      try {
-        delta = await inflate(compressed);
-      } catch (error) {
-        throw new TypeError('A delta entry does not inflate.', { cause: error });
-      }
+      const delta = await inflate(compressed);
       if (delta.byteLength !== declared) {
-        throw new TypeError('A delta entry inflates to a size other than the one it declares.');
+        throw new CorruptBytesError('A delta entry inflates to a size other than the one it declares.');
       }
-      return applyDelta(delta, base);
+      try {
+        return applyDelta(delta, base);
+      } catch (error) {
+        throw error instanceof TypeError ? new CorruptBytesError(error.message, { cause: error }) : error;
+      }
     },
-    unzip: async (archive, limits) => unzip(archive, limits),
-    grep: async (files, pattern, options) => grep(files, pattern, options),
   });
 };
 
@@ -183,18 +190,18 @@ export const computeMethods: ReadonlyArray<keyof ComputeWorker & ComputeMethod> 
   'sha256',
   'indexPack',
   'resolveDelta',
-  'unzip',
-  'grep',
 ];
 
 /** One request over the seam. */
 export type ComputeRequest = Readonly<{ id: number; method: ComputeMethod; args: readonly unknown[] }>;
 
-/** One answer: a result, or the error the work threw, by class name. */
+/** One answer: a result, or the error the work threw, by class name; or the call's start; or a ping's answer. */
 export type ComputeAnswer = Readonly<{
   id: number;
   result?: unknown;
   error?: Readonly<{ name: string; message: string }>;
+  started?: true;
+  pong?: true;
 }>;
 
 /**
@@ -232,9 +239,14 @@ const transferablesOf = (value: unknown): Transferable[] => {
  */
 export const serveComputeWorker = (port: ComputePort, compute: ComputeWorker = createInlineCompute()): void => {
   port.addEventListener('message', (event) => {
-    const { id, method, args } = event.data as ComputeRequest;
+    const { id, method, args, ping } = event.data as ComputeRequest & { ping?: true };
+    if (ping === true) {
+      port.postMessage({ id, pong: true } satisfies ComputeAnswer, []);
+      return;
+    }
     // async-iife: bootstrap -- every outcome is posted back, so nothing rejects unobserved.
     void (async (): Promise<void> => {
+      port.postMessage({ id, started: true } satisfies ComputeAnswer, []);
       try {
         const work = compute[method] as (...input: readonly unknown[]) => Promise<unknown>;
         const result = await work(...args);
@@ -248,22 +260,21 @@ export const serveComputeWorker = (port: ComputePort, compute: ComputeWorker = c
   port.start?.();
 };
 
-/* The error a worker threw, as the same class where the class decides what a caller does. */
-const reviveError = (error: Readonly<{ name: string; message: string }>): Error => {
-  if (error.name === 'TypeError') {
-    return new TypeError(error.message);
-  }
-  if (error.name === 'RangeError') {
-    return new RangeError(error.message);
-  }
-  return Object.assign(new Error(error.message), { name: error.name });
-};
+/* The error a worker threw: a verdict on the bytes as one, anything else as an error that judges nothing. */
+const reviveError = (error: Readonly<{ name: string; message: string }>): Error =>
+  error.name === 'CorruptBytesError'
+    ? new CorruptBytesError(error.message)
+    : Object.assign(new Error(error.message), { workerErrorName: error.name });
 
 /** The caller's half of one connection: the contract, and what fails every call it holds. */
 export type ComputeConnection = Readonly<{
   compute: ComputeWorker;
   /** Calls sent and not yet answered. */
   pending: () => number;
+  /** When the worker was last heard from (a start, an answer, a pong), or a call was sent to an idle one. */
+  heard: () => number;
+  /** Ask the worker to answer, so a silent one can be told from a busy one. */
+  ping: () => void;
   /** Fail every call this connection holds, and every call it is given afterwards. */
   close: (failure: (method: ComputeMethod) => Error) => void;
 }>;
@@ -272,14 +283,20 @@ export type ComputeConnection = Readonly<{
  * The store's half of the seam over one port.
  *
  * @param port - A port a {@link serveComputeWorker} serves.
+ * @param now - The clock silence is measured on.
  * @returns The contract over that port, and the means to fail what it holds.
  */
-export const openComputeConnection = (port: ComputePort): ComputeConnection => {
+export const openComputeConnection = (port: ComputePort, now: () => number = Date.now): ComputeConnection => {
   let next = 0;
+  let heard = now();
   let closed: ((method: ComputeMethod) => Error) | undefined;
   const waiting = new Map<number, Readonly<{ method: ComputeMethod; call: PromiseWithResolvers<unknown> }>>();
   port.addEventListener('message', (event) => {
-    const { id, result, error } = event.data as ComputeAnswer;
+    const { id, result, error, started, pong } = event.data as ComputeAnswer;
+    heard = now();
+    if (started === true || pong === true) {
+      return;
+    }
     const held = waiting.get(id);
     waiting.delete(id);
     if (error === undefined) {
@@ -295,6 +312,10 @@ export const openComputeConnection = (port: ComputePort): ComputeConnection => {
     }
     const id = next;
     next += 1;
+    if (waiting.size === 0) {
+      /* An idle worker's silence is not a busy worker's. */
+      heard = now();
+    }
     const call = Promise.withResolvers<unknown>();
     waiting.set(id, { method, call });
     /* Cloned, not transferred: the caller keeps its own bytes, whole and usable (a pack
@@ -308,6 +329,10 @@ export const openComputeConnection = (port: ComputePort): ComputeConnection => {
   return Object.freeze({
     compute: Object.freeze(compute),
     pending: () => waiting.size,
+    heard: () => heard,
+    ping: () => {
+      port.postMessage({ id: -1, ping: true }, []);
+    },
     close: (failure) => {
       closed = failure;
       for (const [id, held] of waiting) {

@@ -61,6 +61,10 @@ export const posthogConfig: { options: Partial<PostHogConfig>; apiKey: string } 
     // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
     capture_pageview: 'history_change',
     persistence: 'localStorage+cookie',
+    // Errors go to Sentry only (browser observability blueprint, D4). `false` also overrides the project's
+    // remote exception-autocapture setting, so PostHog never receives `$exception` events from any host.
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
+    capture_exceptions: false,
     // Send while consent is still active; the SDK's batch queue otherwise flushes
     // already-captured events after a later withdrawal.
     // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options

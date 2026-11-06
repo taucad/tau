@@ -64,6 +64,7 @@ import type {
 } from '@taucad/revisions';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import {
+  cleanLargeObjects,
   publishFailureMessage,
   publishOverHttp,
   readRemoteStorageOverHttp,
@@ -1831,7 +1832,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     divergence: async (head, base) => options.port.divergence({ head: revisionId(head), base: revisionId(base) }),
     diff: async (revision, from, compareOptions) => {
       if (compareOptions?.against === 'checkout') {
-        const original = await options.port.readTree(revisionId(revision));
+        /* From this device alone: a large object is compared by its pointer, so nothing is fetched to list paths. */
+        const original = await options.port.readTree(revisionId(revision), { largeObjects: 'local' });
         if (original === undefined) {
           throw new Error('The selected revision is unavailable.');
         }
@@ -1841,7 +1843,11 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           exclude: (path) => !tauPathPolicy.classify(path).versioned,
           inheritedMode: checkout.mode,
         });
-        return diffRevisionTrees({ original, modified });
+        /* Both sides as a cut records them (D9): a placeholder and the object it stands for are one file, unchanged. */
+        return diffRevisionTrees({
+          original: cleanLargeObjects(original).tree,
+          modified: cleanLargeObjects(modified).tree,
+        });
       }
       /* Against the revision's own first parent by default, which the store
        * knows: a caller that remembered a base would diff the wrong tree when a

@@ -102,7 +102,7 @@ export const largeObjectPlaceholders = (tree: ImmutableRevisionTree): Map<string
 // oxlint-disable-next-line eslint/max-lines-per-function -- one closure over the fills' shared map and seams.
 export const createLargeObjectFill = (
   dependencies: Readonly<{
-    port: Pick<RevisionPort, 'readTree'>;
+    port: Pick<RevisionPort, 'readTree' | 'fetchLargeObjects'>;
     capture: (place: Checkout) => Promise<ImmutableRevisionTree>;
     withCheckoutFence: <Result>(checkoutId: string, operation: () => Promise<Result>) => Promise<Result>;
     materializeTree: (
@@ -460,37 +460,49 @@ export const createLargeObjectFill = (
   const run = async (fill: Fill): Promise<void> => {
     fill.error = undefined;
     tell(fill);
+    const transfer = {
+      signal: fill.controller.signal,
+      firstLargeObjects: () => fill.promoted,
+      onLargeObject: (oid: string, content: Uint8Array<ArrayBuffer>) => {
+        if (!isCurrent(fill) || !fill.wanted.has(oid)) {
+          return;
+        }
+        arrive(fill, oid, content);
+        tellSoon(fill);
+        /* A full batch, or an object an open file waits for, flushes now rather than waiting out the timer. */
+        if (fill.unflushedBytes >= flushBytes || fill.promoted.has(oid)) {
+          flushSoon(fill);
+        } else {
+          scheduleFlush(fill);
+        }
+      },
+    };
     try {
-      const full = await port.readTree(fill.head, {
-        signal: fill.controller.signal,
-        firstLargeObjects: () => fill.promoted,
-        onLargeObject: (oid, content) => {
-          if (!isCurrent(fill) || !fill.wanted.has(oid)) {
-            return;
-          }
-          arrive(fill, oid, content);
-          tellSoon(fill);
-          /* A full batch, or an object an open file waits for, flushes now rather than waiting out the timer. */
-          if (fill.unflushedBytes >= flushBytes || fill.promoted.has(oid)) {
-            flushSoon(fill);
-          } else {
-            scheduleFlush(fill);
-          }
-        },
-      });
+      const full = await port.readTree(fill.head, transfer);
       if (!isCurrent(fill)) {
         return;
       }
       arriveFromTree(fill, full);
+      /* A placeholder the head does not name (an undo's, a merge's) is fetched by its own oid. */
+      const unnamed = [...fill.wanted].flatMap(([oid, size]) => (fill.arrived.has(oid) ? [] : [{ oid, size }]));
+      if (unnamed.length > 0 && port.fetchLargeObjects !== undefined) {
+        const fetched = await port.fetchLargeObjects(unnamed, transfer);
+        if (!isCurrent(fill)) {
+          return;
+        }
+        for (const [oid, content] of fetched) {
+          if (fill.wanted.has(oid)) {
+            arrive(fill, oid, content);
+          }
+        }
+      }
       await flushAll(fill);
       if (!isCurrent(fill)) {
         return;
       }
-      /* A placeholder the head no longer names cannot be filled from it; the next pull's checkout rewrites it. */
-      for (const [path, { oid }] of fill.pending) {
-        if (!fill.arrived.has(oid)) {
-          fill.pending.delete(path);
-        }
+      /* A placeholder neither the head nor the store delivered is still owed: the fill fails, never reads done (D10). */
+      if ([...fill.pending.values()].some(({ oid }) => !fill.arrived.has(oid))) {
+        throw new RevisionPortError('MISSING_LARGE_OBJECT', 'A large object this checkout holds could not be fetched.');
       }
       tell(fill);
     } catch (error) {

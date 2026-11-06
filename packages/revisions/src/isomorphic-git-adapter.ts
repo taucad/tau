@@ -1756,6 +1756,18 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
 
     readLargeObject: async (pointer) => readLocalLfsObject(pointer),
     storeLargeObject: async (pointer, content) => storeLfsObject(pointer.oid, content),
+    fetchLargeObjects: async (pointers, fetchOptions) => {
+      const { contents, report } = await hydrate(
+        pointers,
+        fetchOptions?.onLargeObject,
+        fetchOptions?.signal,
+        fetchOptions?.firstLargeObjects,
+      );
+      if (report.networkObjects > 0) {
+        options.onLfsFetch?.(report);
+      }
+      return contents;
+    },
 
     readTree: async (id: RevisionId, readOptions?: ReadTreeOptions): Promise<ImmutableRevisionTree | undefined> => {
       const commit = await commitOf(id);

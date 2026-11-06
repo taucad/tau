@@ -22,7 +22,7 @@ const parts = { 'models/a.step': 'solid a', 'models/b.step': 'solid bb' } as con
 const pointerOf = (content: string): ReturnType<typeof lfsPointerFor> => lfsPointerFor(encoder.encode(content));
 
 /* A checkout as a map of files, a fence that runs in turn, and a port whose transfer the test drives. */
-const setup = (options: Readonly<{ flushBytes?: number; flushMilliseconds?: number }> = {}) => {
+const setup = (options: Readonly<{ flushBytes?: number; flushMilliseconds?: number; byOid?: boolean }> = {}) => {
   const files = new Map<string, Uint8Array<ArrayBuffer>>([['main.scad', encoder.encode('import("models/a.step");')]]);
   for (const [path, content] of Object.entries(parts)) {
     files.set(path, pointerOf(content).bytes);
@@ -43,6 +43,18 @@ const setup = (options: Readonly<{ flushBytes?: number; flushMilliseconds?: numb
         finish = resolve;
         fail = reject;
       }),
+  );
+  /* Fetches by pointer alone, answered by the test as the remote would: the network may be down. */
+  let fetched: PromiseWithResolvers<ReadonlyMap<string, Uint8Array<ArrayBuffer>>> | undefined;
+  const fetchLargeObjects = vi.fn(
+    async (
+      _pointers: ReadonlyArray<Readonly<{ oid: string; size: number }>>,
+      fetchOptions?: Pick<ReadTreeOptions, 'onLargeObject' | 'signal'>,
+    ) => {
+      onLargeObject = fetchOptions?.onLargeObject;
+      fetched = Promise.withResolvers();
+      return fetched.promise;
+    },
   );
   /* Writers that move the checkout under the next materialization, as an editor's save would. */
   let conflicts = 0;
@@ -77,7 +89,7 @@ const setup = (options: Readonly<{ flushBytes?: number; flushMilliseconds?: numb
     }
   });
   const fill = createLargeObjectFill({
-    port: { readTree },
+    port: options.byOid === true ? { readTree, fetchLargeObjects } : { readTree },
     capture,
     withCheckoutFence: async (_id, operation) => operation(),
     materializeTree,
@@ -94,6 +106,8 @@ const setup = (options: Readonly<{ flushBytes?: number; flushMilliseconds?: numb
     files,
     reports,
     readTree,
+    fetchLargeObjects,
+    fetched: () => fetched,
     materializeTree,
     fill,
     land,
@@ -485,7 +499,11 @@ describe('large-object fill', () => {
     expect(harness.files.get('models/a.step')).toStrictEqual(old.bytes);
     expect(harness.files.get('models/c.step')).toStrictEqual(old.bytes);
     expect(harness.materializeTree).not.toHaveBeenCalled();
-    expect(harness.reports.at(-1)?.facet).toBeUndefined();
+    /* With no store to fetch it by its oid, the placeholder is still owed: never done (D10). */
+    expect(harness.reports.at(-1)?.facet).toMatchObject({
+      phase: 'failed',
+      paths: ['models/a.step', 'models/c.step'],
+    });
   });
 
   it('fills an object the head holds at another path, found by its hash', async () => {
@@ -580,6 +598,42 @@ describe('large-object fill', () => {
       expect(harness.reports.at(-1)?.facet).toBeUndefined();
     });
     expect(harness.text('models/a.step')).toBe('solid a');
+  });
+
+  it('fetches a placeholder no head names by its own oid: failed while offline, filled once the network answers', async () => {
+    const harness = setup({ byOid: true });
+    const done = harness.fill.fill(place, head);
+    const headless = new ImmutableRevisionTree([['main.scad', harness.files.get('main.scad')!]]);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.finish(headless);
+    await vi.waitFor(() => {
+      expect(harness.fetchLargeObjects).toHaveBeenCalled();
+    });
+    expect(harness.fetchLargeObjects.mock.calls[0]?.[0]).toStrictEqual(
+      Object.values(parts).map((content) => pointerOf(content).pointer),
+    );
+    harness.fetched()?.reject(new Error('The remote did not answer in time.'));
+    await done;
+    const failed = harness.reports.at(-1)!;
+    expect(failed.facet).toMatchObject({ phase: 'failed', paths: ['models/a.step', 'models/b.step'] });
+    expect(harness.files.get('models/a.step')).toStrictEqual(pointerOf('solid a').bytes);
+    failed.retry();
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalledTimes(2);
+    });
+    harness.finish(headless);
+    await vi.waitFor(() => {
+      expect(harness.fetchLargeObjects).toHaveBeenCalledTimes(2);
+    });
+    harness.land('models/a.step');
+    harness.fetched()?.resolve(new Map([[pointerOf('solid bb').pointer.oid, encoder.encode('solid bb')]]));
+    await vi.waitFor(() => {
+      expect(harness.reports.at(-1)?.facet).toBeUndefined();
+    });
+    expect(harness.text('models/a.step')).toBe('solid a');
+    expect(harness.text('models/b.step')).toBe('solid bb');
   });
 
   it('answers a caller that names what it wrote every time, even when that is nothing (D10)', async () => {

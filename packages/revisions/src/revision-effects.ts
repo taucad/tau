@@ -1552,6 +1552,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     port: {
       readTree: async (id, readOptions) =>
         transport(readOptions?.signal, async (signal) => port.readTree(id, { ...readOptions, signal })),
+      ...(port.fetchLargeObjects === undefined
+        ? {}
+        : {
+            fetchLargeObjects: async (pointers, fetchOptions) =>
+              transport(fetchOptions?.signal, async (signal) =>
+                port.fetchLargeObjects!(pointers, { ...fetchOptions, signal }),
+              ),
+          }),
     },
     capture: async (place) => capture(place),
     withCheckoutFence,

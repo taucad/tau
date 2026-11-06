@@ -610,6 +610,16 @@ export type RevisionPort = Readonly<{
    * (D9 adoption). A repeat writes nothing. Optional, like `readLargeObject`.
    */
   storeLargeObject?(pointer: Readonly<{ oid: string; size: number }>, content: Uint8Array<ArrayBuffer>): Promise<void>;
+  /**
+   * Large objects by their pointers alone, from this store or else the
+   * remote, whether or not any revision names them: a placeholder an undo or
+   * merge wrote is filled by its own oid (D10 `filled`). Answers every
+   * object's bytes by oid; rejects as a fetching `readTree` does.
+   */
+  fetchLargeObjects?(
+    pointers: ReadonlyArray<Readonly<{ oid: string; size: number }>>,
+    options?: Pick<ReadTreeOptions, 'onLargeObject' | 'firstLargeObjects' | 'signal'>,
+  ): Promise<ReadonlyMap<string, Uint8Array<ArrayBuffer>>>;
   writeRevision(input: WriteRevisionInput): Promise<RevisionReceipt>;
   /** A branch by name, or any other ref spelled in full. */
   readRef(name: string): Promise<RevisionId | undefined>;

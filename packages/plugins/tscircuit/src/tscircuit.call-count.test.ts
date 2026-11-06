@@ -6,9 +6,9 @@
  * wasm-kernel-call-batching-policy-blueprint P3).
  *
  * The board is built with `@tscircuit/manifold-2d`. The tests spy on the `CrossSection` calls
- * Tau's board code makes and count them for traces of growing length. Board regions are already
- * one extrusion each; trace and text strokes are still built segment by segment, so those counts
- * are pinned at today's numbers until the strokes are built as one cross-section per layer.
+ * Tau's board code makes and count them for traces of growing length. Board regions are one
+ * extrusion each, and trace and text strokes are capsule contours built in JavaScript and filled as
+ * one cross-section per side and layer, so the counts do not grow with the segments.
  */
 import { Document } from '@gltf-transform/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -68,50 +68,69 @@ const measureBoard = async (circuitJson: ReadonlyArray<{ type: string }>): Promi
 };
 
 describe('tscircuit presentation board call counts', () => {
-  it('should record per-segment calls for copper traces', async () => {
+  it('should make the same calls for copper traces of any length', async () => {
     const counts = {
       bare: await measureBoard(boardWithTrace(1).slice(0, 1)),
       short: await measureBoard(boardWithTrace(2)),
       long: await measureBoard(boardWithTrace(8)),
     };
 
-    // Blueprint A12 (WP7, charter B6): each trace segment is a hull of two translated circles,
-    // about five calls a segment. B6 builds every capsule's contour in JavaScript and makes one
-    // `new CrossSection(contours, 'Positive')` per layer, so these stop growing with the segments.
-    // The bare board's outline is one translated region.
+    // Blueprint A12 (WP7, charter B6): one `CrossSection.circle` read gives the capsules their
+    // vertices, and the copper layer is one union. The bare board's outline is one translated region.
     expect(counts).toEqual({
       bare: { 'CrossSection.circle': 0, 'CrossSection.hull': 0, 'CrossSection.union': 0, 'CrossSection.translate': 1 },
-      short: { 'CrossSection.circle': 4, 'CrossSection.hull': 2, 'CrossSection.union': 2, 'CrossSection.translate': 5 },
-      long: {
-        'CrossSection.circle': 16,
-        'CrossSection.hull': 8,
-        'CrossSection.union': 2,
-        'CrossSection.translate': 17,
-      },
+      short: { 'CrossSection.circle': 1, 'CrossSection.hull': 0, 'CrossSection.union': 1, 'CrossSection.translate': 1 },
+      long: { 'CrossSection.circle': 1, 'CrossSection.hull': 0, 'CrossSection.union': 1, 'CrossSection.translate': 1 },
     });
   });
 
-  it('should record per-stroke calls for silkscreen text', async () => {
+  it('should make the same calls for silkscreen text of any length', async () => {
     const counts = {
       short: await measureBoard(boardWithText('R1')),
       long: await measureBoard(boardWithText('R1234567')),
     };
 
-    // Blueprint A12 (WP7, charter B6): each glyph stroke is a capsule like a trace segment, and a
-    // union of its own.
+    // Blueprint A12 (WP7, charter B6): glyph strokes are capsules like trace segments, filled with
+    // the rest of the layer's silkscreen.
     expect(counts).toEqual({
-      short: {
-        'CrossSection.circle': 34,
-        'CrossSection.hull': 17,
-        'CrossSection.union': 19,
-        'CrossSection.translate': 35,
-      },
-      long: {
-        'CrossSection.circle': 228,
-        'CrossSection.hull': 114,
-        'CrossSection.union': 116,
-        'CrossSection.translate': 229,
-      },
+      short: { 'CrossSection.circle': 1, 'CrossSection.hull': 0, 'CrossSection.union': 1, 'CrossSection.translate': 1 },
+      long: { 'CrossSection.circle': 1, 'CrossSection.hull': 0, 'CrossSection.union': 1, 'CrossSection.translate': 1 },
     });
+  });
+
+  it('should free every cross-section and solid it derives while building a board', async () => {
+    const m = await getManifoldModule();
+    const probe = m.CrossSection.square([1, 1]);
+    const prototype = Object.getPrototypeOf(probe) as typeof probe;
+    const solidProbe = probe.extrude(1);
+    const solidPrototype = Object.getPrototypeOf(solidProbe) as typeof solidProbe;
+    solidProbe.delete();
+    probe.delete();
+    const spies: MockInstance[] = [
+      ...(['circle', 'square', 'hull', 'union'] as const).map((name) => vi.spyOn(m.CrossSection, name)),
+      ...(['translate', 'rotate', 'offset', 'subtract', 'intersect', 'extrude'] as const).map((name) =>
+        vi.spyOn(prototype, name),
+      ),
+      vi.spyOn(solidPrototype, 'translate'),
+    ];
+    const circuitJson = [
+      ...boardWithTrace(4),
+      { type: 'pcb_silkscreen_text', layer: 'bottom', text: 'U1', font_size: 1, anchor_position: { x: 0, y: 3 } },
+      { type: 'pcb_smtpad', shape: 'rect', layer: 'top', x: -15, y: -2, width: 1, height: 0.6, corner_radius: 0.1 },
+      { type: 'pcb_plated_hole', shape: 'circle', x: 15, y: 2, hole_diameter: 0.8, outer_diameter: 1.4 },
+      { type: 'pcb_via', x: 0, y: 0, outer_diameter: 0.6, hole_diameter: 0.3 },
+      { type: 'pcb_silkscreen_circle', layer: 'top', center: { x: 10, y: -3 }, radius: 1, stroke_width: 0.1 },
+      { type: 'pcb_silkscreen_rect', layer: 'top', center: { x: -10, y: 3 }, width: 2, height: 1, stroke_width: 0.1 },
+    ];
+    try {
+      expect(await buildPresentationBoard(new Document(), circuitJson)).toBeDefined();
+      const handles = spies.flatMap((spy) =>
+        spy.mock.results.map((result) => result.value as { isDeleted(): boolean }),
+      );
+      expect(handles.length).toBeGreaterThan(0);
+      expect(handles.filter((handle) => !handle.isDeleted())).toEqual([]);
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 });

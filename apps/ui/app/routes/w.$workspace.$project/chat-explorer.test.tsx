@@ -469,22 +469,33 @@ describe('ChatExplorerTree', () => {
     await waitFor(() => {
       expect(exportImage).toHaveBeenCalledTimes(1);
     });
+    // The on-screen row leads; the mounted row below it rides along as lookahead in the same batch.
+    expect(exportImage.mock.calls[0]?.[0].exportOptions.views).toMatchObject([
+      { visiblePrimitives: parts[0]!.primitiveRefs },
+      { visiblePrimitives: parts[1]!.primitiveRefs },
+    ]);
+    const requestedIds = (): unknown => demands.mock.lastCall?.[2].map((part) => part.id);
     first.remove();
     await waitFor(() => {
       expect(unobserve).toHaveBeenCalledWith(first);
     });
     await waitFor(() => {
-      expect(demands.mock.lastCall?.[2]).toEqual([]);
+      expect(requestedIds()).toEqual([secondComponentId]);
     });
     act(() => intersect?.([{ ...mock<IntersectionObserverEntry>(), target: first, isIntersecting: true }], observer));
-    expect(demands.mock.lastCall?.[2]).toEqual([]);
+    expect(requestedIds()).toEqual([secondComponentId]);
     const parent = second.parentElement!;
     second.remove();
     await waitFor(() => {
       expect(unobserve).toHaveBeenCalledWith(second);
     });
+    await waitFor(() => {
+      expect(demands.mock.lastCall?.[2]).toEqual([]);
+    });
+    // The mock export returns no image, so the lookahead row failed; asking for it again alone retried it.
+    const exports = exportImage.mock.calls.length;
     act(() => intersect?.([{ ...mock<IntersectionObserverEntry>(), target: second, isIntersecting: true }], observer));
-    expect(exportImage).toHaveBeenCalledTimes(1);
+    expect(exportImage).toHaveBeenCalledTimes(exports);
     const mounts = observe.mock.calls.length;
     parent.append(second);
     await waitFor(() => {
@@ -492,9 +503,9 @@ describe('ChatExplorerTree', () => {
     });
     act(() => intersect?.([{ ...mock<IntersectionObserverEntry>(), target: second, isIntersecting: true }], observer));
     await waitFor(() => {
-      expect(exportImage).toHaveBeenCalledTimes(2);
+      expect(exportImage).toHaveBeenCalledTimes(exports + 1);
     });
-    expect(exportImage.mock.calls[1]?.[0].exportOptions.views).toMatchObject([
+    expect(exportImage.mock.lastCall?.[0].exportOptions.views).toMatchObject([
       { visiblePrimitives: parts[1]!.primitiveRefs },
     ]);
     const staleIntersect = intersect;

@@ -1597,6 +1597,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     if (fillsStopped) {
       return;
     }
+    /* Taken before any await, as `fillSoon` does: a tree write that begins in the gap owns the checkout's next word (D10). */
+    const writes = place === undefined ? undefined : treeWrites.get(place.id);
     const timer = setTimeout(() => {
       resumeTimers.delete(timer);
       // async-iife: bootstrap -- a background fill; its failures are reported through `onLargeObjects`.
@@ -1611,9 +1613,13 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           if (target !== undefined && head !== undefined && !fillsStopped) {
             resumedFills.add(target.id);
             /* Owed: given its placeholders, the fill gives its word even with none to fetch. */
-            await (owed
-              ? largeObjects.fill(target, revisionId(head), largeObjectPlaceholders(await capture(target)))
-              : largeObjects.resume(target, revisionId(head)));
+            const placeholders = owed ? largeObjectPlaceholders(await capture(target)) : undefined;
+            if (place !== undefined && treeWrites.get(place.id) !== writes) {
+              return;
+            }
+            await (placeholders === undefined
+              ? largeObjects.resume(target, revisionId(head))
+              : largeObjects.fill(target, revisionId(head), placeholders));
           }
         } catch (error) {
           /* Unmarked, so the next capture or pull checks again. */

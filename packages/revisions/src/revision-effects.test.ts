@@ -1541,6 +1541,113 @@ describe('restore, through the machine that owns it', () => {
     expect(reports.findLast((report) => report.checkoutId === linkedId)?.facet).toBeUndefined();
   }, 30_000);
 
+  /* D10: an owed check samples the checkout's tree writes before it awaits, as `fillSoon` does: a write begun in the gap owns the word. */
+  it('starts no owed fill for a linked checkout once a newer tree write has begun', async () => {
+    let failWrite = false;
+    let failReads = 0;
+    const reports: LargeObjectsReport[] = [];
+    const live: { filesystem?: RevisionFileSystem } = {};
+    const failing = (filesystem: RevisionFileSystem): RevisionFileSystem =>
+      new Proxy(filesystem, {
+        get: (target, property, receiver) => {
+          const value: unknown = Reflect.get(target, property, receiver);
+          if (typeof value !== 'function') {
+            return value;
+          }
+          const bound = (value as (...parameters: unknown[]) => unknown).bind(target);
+          if (target === live.filesystem) {
+            return bound;
+          }
+          if (property === 'applyBatch') {
+            return async (...parameters: unknown[]) => {
+              if (failWrite) {
+                failWrite = false;
+                /* The recovery's capture and the fill check that follows both fail. */
+                failReads = 2;
+                throw new Error('The disk refused the write.');
+              }
+              return bound(...parameters);
+            };
+          }
+          if (property === 'readdirEntries') {
+            return async (...parameters: unknown[]) => {
+              if (failReads > 0) {
+                failReads -= 1;
+                throw new Error('The disk could not be listed.');
+              }
+              return bound(...parameters);
+            };
+          }
+          return bound;
+        },
+      });
+    const { port, filesystem, actors } = await fixture({ 'main.ts': 'export const size = 1;\n' }, failing, {
+      onLargeObjects: (report) => reports.push(report),
+    });
+    live.filesystem = filesystem;
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const first = await port.writeRevision({
+      tree: new ImmutableRevisionTree([['main.ts', new TextEncoder().encode('export const size = 1;\n')]]),
+      parents: [],
+      provenance: { source: 'user', actorId: 'person-1', createdAt: 1 },
+      summary: { generated: 'base' },
+    });
+    const second = await port.writeRevision({
+      tree: new ImmutableRevisionTree([
+        ['main.ts', new TextEncoder().encode('export const size = 1;\n')],
+        ['extra.txt', new TextEncoder().encode('added\n')],
+      ]),
+      parents: [revisionId(first.commitId)],
+      provenance: { source: 'user', actorId: 'person-1', createdAt: 2 },
+      summary: { generated: 'extra' },
+    });
+    await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(first.commitId) });
+    await port.setHead('main');
+    const linked = await port.addCheckout?.({ branch: 'side', from: revisionId(second.commitId) });
+    expect(linked?.kind).toBe('linked');
+    const linkedId = linked?.id ?? '';
+    const told = (): number => reports.filter((report) => report.checkoutId === linkedId).length;
+
+    const plan = await run<{ planId: string }>(actors.restore.computePlan, {
+      checkoutId: linkedId,
+      target: first.commitId,
+    });
+    failWrite = true;
+    await expect(run(actors.restore.applyPlan, { checkoutId: linkedId, planId: plan.planId })).rejects.toThrow(
+      'The disk refused the write.',
+    );
+    await expect.poll(() => failReads === 0 && !failWrite, { timeout: 10_000 }).toBe(true);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 200);
+    });
+    const before = told();
+    /* The owed check waits on its timer while a restore writes another tree, which gives its own word. */
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      await run(actors.checkout.captureTree, { checkoutId: linkedId });
+      const again = await run<{ planId: string }>(actors.restore.computePlan, {
+        checkoutId: linkedId,
+        target: first.commitId,
+      });
+      await run(actors.restore.applyPlan, { checkoutId: linkedId, planId: again.planId });
+      await vi.waitFor(() => {
+        expect(told()).toBeGreaterThan(before);
+      });
+      const written = told();
+      vi.runOnlyPendingTimers();
+      /* Settle the owed check's work, had it started: its reads are real disk reads. */
+      for (let turn = 0; turn < 50; turn += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one event-loop turn at a time.
+        await new Promise((resolve) => {
+          setImmediate(resolve);
+        });
+      }
+      expect(told()).toBe(written);
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 30_000);
+
   it('mints a dirty checkout before restoring it, and leaves no revision unreachable (I1, L1 probe)', async () => {
     const { port, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' });
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });

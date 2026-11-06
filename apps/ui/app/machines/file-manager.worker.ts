@@ -62,6 +62,7 @@ import { reportToApi } from '#runtime/observability/report-to-api.js';
 import { summarizeLast, withPendingGauge, workerSpanTotals } from '#lib/worker-timing-report.js';
 import { createProjectOpenTimer, markProjectOpen } from '#machines/project-open-timer.js';
 import type { ProjectOpenTimer } from '#machines/project-open-timer.js';
+import { createRevisionCompute } from '#machines/revision-compute.js';
 import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
 
 /**
@@ -111,6 +112,8 @@ const providerRegistry = new ProviderRegistry({
 /* Each mutation's wait for its claims and its time holding them, for the open's worker timings. */
 const resourceQueue = new ResourceQueue({ timings: workerTimings });
 const eventBus = new ChangeEventBus();
+/** One compute worker for every revision store this worker opens (charter D7), started on first use. */
+const revisionCompute = createRevisionCompute();
 eventBus.subscribe(() => {
   workerTimings.count('events.change');
 });
@@ -464,6 +467,7 @@ const revisionRegistry = createWorkerRevisionRegistry({
     return createIsomorphicGitRevisionPort({
       filesystem: fileService.createRootedFileSystem(`/projects/${projectId}`),
       checkouts: checkoutRoutes(projectId),
+      compute: revisionCompute,
       /* The page's session is a cookie on the API's origin, so `include` is the
        * whole of "this browser is signed in" (I8, S24). The worker never holds
        * a token and never puts one in a URL. A *third-party* remote is reached
@@ -491,6 +495,7 @@ const revisionRegistry = createWorkerRevisionRegistry({
     createIsomorphicGitRevisionPort({
       filesystem: fileService.createRootedFileSystem(`/projects/${projectId}`),
       checkouts: checkoutRoutes(projectId),
+      compute: revisionCompute,
       http: createRevisionHttpClient({
         credentials: 'include',
         ...createGitRemoteTransport(credential),

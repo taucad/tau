@@ -33,7 +33,7 @@ import type {
   PackReader,
   StoredObject,
 } from '#pack-reader/pack-reader.js';
-import { createPackBuilder, indexBuiltPack } from '#object-store/pack-writer.js';
+import { buildPack, createPackBuilder, indexBuiltPack } from '#object-store/pack-writer.js';
 import type { PackBuilder } from '#object-store/pack-writer.js';
 
 /** The files a Git store lives in: a rooted view's private store, or a provider's own primitives. */
@@ -63,8 +63,13 @@ const rememberChecked = (key: string): void => {
   }
 };
 
-/* A pack that fails its own checks: the tables or the bytes are not what a whole pack is. */
-const isIntegrityFailure = (error: unknown): boolean => error instanceof TypeError || error instanceof RangeError;
+/*
+ * A pack that fails its own checks: the tables or the bytes are not what a
+ * whole pack is. Only a verdict on the bytes — a `TypeError` from the reader
+ * or a `CorruptBytesError` from the compute — counts; a `RangeError` (an
+ * allocation that failed) or a crash judged nothing, and the pack stays.
+ */
+const isIntegrityFailure = (error: unknown): boolean => error instanceof TypeError;
 
 export const gitFilesOf = (
   filesystem: FileSystemProvider & { readonly privateStore?: PrivateStore },
@@ -168,6 +173,40 @@ const defaultRepack: RepackOptions = {
   maxPackBytes: 64 * 1024 * 1024,
 };
 
+/**
+ * A pack past the ceiling the compute worker indexes (charter D7): it is not
+ * a judgement on its bytes, so nothing is dropped for it. A fetch that meets
+ * it takes the objects one by one instead ({@link ObjectStore.importObjects}).
+ *
+ * @public
+ */
+export class PackCeilingError extends Error {
+  public override readonly name = 'PackCeilingError';
+
+  /** The pack's size, or the bytes read before the ceiling was passed. */
+  public readonly bytes: number;
+
+  /** The ceiling. */
+  public readonly ceiling: number;
+
+  /**
+   * Name the pack's size and the ceiling it passed.
+   *
+   * @param bytes - The pack's size, or the bytes read so far.
+   * @param ceiling - The ceiling.
+   */
+  public constructor(bytes: number, ceiling: number) {
+    super(`A pack of ${String(bytes)} bytes passes the ${String(ceiling)}-byte ceiling a pack is indexed under.`);
+    this.bytes = bytes;
+    this.ceiling = ceiling;
+  }
+}
+
+/** Objects read from somewhere other than this store's own files: a pack on the server, by Range. */
+export type ObjectSource = Readonly<{
+  readMany: (oids: Iterable<string>) => Promise<Map<string, StoredObject>>;
+}>;
+
 /** What a store is made of. */
 export type ObjectStoreOptions = Readonly<{
   files: GitFiles;
@@ -181,6 +220,8 @@ export type ObjectStoreOptions = Readonly<{
   repack?: Partial<RepackOptions>;
   /** The clock retention is measured on. */
   now?: () => number;
+  /** The largest pack {@link ObjectStore.addPack} indexes; none by default. Bytes. */
+  packCeilingBytes?: number;
 }>;
 
 /** One object to store loose: its id when the caller already computed it, else this store hashes it. */
@@ -200,6 +241,24 @@ export type ObjectStore = Readonly<{
   addPack: (pack: Uint8Array<ArrayBuffer>) => Promise<string>;
   /** One undeltified pack of these objects, for a push. */
   packObjects: (oids: readonly string[]) => Promise<Uint8Array<ArrayBuffer>>;
+  /**
+   * Keep objects read elsewhere — a pack on the server — in packs of at most
+   * the repack ceiling, indexed from what was written, never by `indexPack`.
+   * Objects already held are skipped. Answers the packs written.
+   */
+  importObjects: (objects: Iterable<Readonly<{ oid: string } & StoredObject>>) => Promise<string[]>;
+  /**
+   * Read through to a source for an object this store lacks. What it answers
+   * is held beside the store in a byte-bounded cache, never written into it:
+   * `has` stays false for it, so an import never skips a tree whose blobs
+   * were not read. For a store a cold open filled with only its heads.
+   */
+  attachSource: (source: ObjectSource) => void;
+  /**
+   * One object's body as a stream: a whole packed entry inflates as it is
+   * read, so only its deflated bytes are held; anything else is read first.
+   */
+  openBlob: (oid: string) => Promise<ReadableStream<Uint8Array<ArrayBuffer>> | undefined>;
   /** Fold loose objects and small packs under the fence; `force` ignores the thresholds. Answers whether it wrote a pack. */
   repack: (force?: boolean) => Promise<boolean>;
   /** Repack when this store's own loose writes, or its packs, have reached their bound. */
@@ -246,6 +305,8 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
   const { files, gitdir, compute, fenceName } = options;
   const now = options.now ?? Date.now;
   const bounds: RepackOptions = { ...defaultRepack, ...options.repack };
+  const packCeiling = options.packCeilingBytes ?? Number.POSITIVE_INFINITY;
+  const sources: ObjectSource[] = [];
   const counters = emptyReadCounters();
   const cache = createBaseCache(options.cacheBytes ?? 32 * 1024 * 1024);
   const packDirectory = `${gitdir}/objects/pack`;
@@ -486,7 +547,98 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
     }
     /* Another writer — a fetch or a repack in another tab — may have packed it since this store last listed. */
     await listPacks();
-    return readOnce(oid, depth);
+    return (await readOnce(oid, depth)) ?? readThrough(oid);
+  };
+
+  /* Each of `oids` from the first attached source that holds it. */
+  const fromSources = async (oids: readonly string[]): Promise<Map<string, StoredObject>> => {
+    const found = new Map<string, StoredObject>();
+    let missing = oids;
+    for (const source of sources) {
+      if (missing.length === 0) {
+        break;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- a later source is asked only for what the earlier ones lack.
+      for (const [oid, object] of await source.readMany(missing)) {
+        found.set(oid, object);
+      }
+      missing = missing.filter((oid) => !found.has(oid));
+    }
+    return found;
+  };
+
+  /*
+   * Objects read through, held beside the store and never in it: `has`
+   * answers for the store's own files only, so an import that skips what the
+   * store holds never skips a tree whose blobs were not read. Bounded by
+   * bytes, oldest out first.
+   */
+  const readThroughBytes = 32 * 1024 * 1024;
+  const throughCache = new Map<string, StoredObject>();
+  let throughCacheBytes = 0;
+  const holdThrough = (oid: string, object: StoredObject): void => {
+    if (throughCache.has(oid) || object.data.byteLength > readThroughBytes) {
+      return;
+    }
+    throughCache.set(oid, object);
+    throughCacheBytes += object.data.byteLength;
+    for (const [oldest, held] of throughCache) {
+      if (throughCacheBytes <= readThroughBytes) {
+        break;
+      }
+      throughCache.delete(oldest);
+      throughCacheBytes -= held.data.byteLength;
+    }
+  };
+
+  /*
+   * Misses, read through and held beside the store. A commit's tree and
+   * parents are what a walk reads next, so they come in a second request
+   * with it rather than one request each.
+   */
+  const readMisses = async (oids: readonly string[]): Promise<Map<string, StoredObject>> => {
+    const found = await fromSources(oids);
+    const following = new Set<string>();
+    for (const object of found.values()) {
+      if (object.type === 'commit') {
+        const [header = ''] = textDecoder.decode(object.data).split('\n\n', 1);
+        for (const match of header.matchAll(/^(?:tree|parent) ([\da-f]{40})$/gmu)) {
+          following.add(match[1]!);
+        }
+      }
+    }
+    const wanted = [...following].filter((oid) => !found.has(oid));
+    const held = await Promise.all(wanted.map(async (oid) => has(oid)));
+    for (const [oid, object] of await fromSources(wanted.filter((_oid, at) => !held[at]))) {
+      found.set(oid, object);
+    }
+    for (const [oid, object] of found) {
+      holdThrough(oid, object);
+    }
+    return found;
+  };
+
+  /* The misses of one turn, read through in one request: a log walks a generation's parents at once. */
+  let pendingMisses: Readonly<{ oids: Set<string>; answer: Promise<Map<string, StoredObject>> }> | undefined;
+  const readThrough = async (oid: string): Promise<StoredObject | undefined> => {
+    const cached = throughCache.get(oid);
+    if (cached !== undefined || sources.length === 0) {
+      return cached;
+    }
+    if (pendingMisses === undefined) {
+      const oids = new Set<string>();
+      const answer = (async (): Promise<Map<string, StoredObject>> => {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 0);
+        });
+        pendingMisses = undefined;
+        return readMisses([...oids]);
+      })();
+      pendingMisses = { oids, answer };
+    }
+    pendingMisses.oids.add(oid);
+    const answered = await pendingMisses.answer;
+    return answered.get(oid);
   };
 
   /**
@@ -610,9 +762,76 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
    * @returns The pack's name.
    */
   const addPack = async (pack: Uint8Array<ArrayBuffer>): Promise<string> => {
+    if (pack.byteLength > packCeiling) {
+      throw new PackCeilingError(pack.byteLength, packCeiling);
+    }
     const checksum = [...pack.subarray(-20)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
     const packIndex = await compute.indexPack(pack);
     return publishPack(pack, packIndex, checksum);
+  };
+
+  const importObjects = async (objects: Iterable<Readonly<{ oid: string } & StoredObject>>): Promise<string[]> => {
+    const names: string[] = [];
+    let batch: Array<Readonly<{ oid: string } & StoredObject>> = [];
+    let bytes = 0;
+    const flush = async (): Promise<void> => {
+      if (batch.length > 0) {
+        const built = await buildPack(batch, compute);
+        names.push(await publishPack(built.pack, await indexBuiltPack(built, compute), built.checksum));
+      }
+      batch = [];
+      bytes = 0;
+    };
+    for (const object of objects) {
+      // oxlint-disable-next-line no-await-in-loop -- held objects are skipped one lookup at a time.
+      if (!(await has(object.oid))) {
+        if (bytes > 0 && bytes + object.data.byteLength > bounds.maxPackBytes) {
+          // oxlint-disable-next-line no-await-in-loop -- one bounded pack written before the next is filled.
+          await flush();
+        }
+        batch.push(object);
+        bytes += object.data.byteLength;
+      }
+    }
+    await flush();
+    return names;
+  };
+
+  const openBlob = async (oid: string): Promise<ReadableStream<Uint8Array<ArrayBuffer>> | undefined> => {
+    for (const pack of await knownPacks()) {
+      // oxlint-disable-next-line no-await-in-loop -- the first pack that holds it answers.
+      const entry = await pack.wholeEntry(oid);
+      if (entry !== undefined) {
+        let seen = 0;
+        const counted = new TransformStream<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>({
+          transform: (chunk, controller) => {
+            seen += chunk.byteLength;
+            if (seen > entry.size) {
+              /* Past its declared size: stopped here, never inflated to the end. */
+              controller.error(new TypeError(`The object ${oid} inflates past the size it declares.`));
+              return;
+            }
+            controller.enqueue(chunk);
+          },
+          flush: (controller) => {
+            if (seen !== entry.size) {
+              controller.error(new TypeError(`The object ${oid} inflates to a size other than the one it declares.`));
+            }
+          },
+        });
+        return new Blob([entry.compressed])
+          .stream()
+          .pipeThrough(
+            new DecompressionStream('deflate') as unknown as TransformStream<
+              Uint8Array<ArrayBuffer>,
+              Uint8Array<ArrayBuffer>
+            >,
+          )
+          .pipeThrough(counted);
+      }
+    }
+    const object = await read(oid);
+    return object === undefined ? undefined : new Blob([object.data]).stream();
   };
 
   /**
@@ -900,6 +1119,11 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
     has,
     writeLoose,
     addPack,
+    importObjects,
+    attachSource: (source: ObjectSource) => {
+      sources.push(source);
+    },
+    openBlob,
     packObjects,
     repack,
     repackIfDue: async (): Promise<boolean> => {

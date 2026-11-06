@@ -9,6 +9,7 @@
  * @module
  */
 
+import { PackCeilingError } from '#object-store/object-store.js';
 import { Errors } from 'isomorphic-git';
 import { concatBytes } from '#object-hash.js';
 import type { RevisionHttpClient } from '#http-client.js';
@@ -161,7 +162,14 @@ export const postService = async (
     url,
     service,
     body,
-  }: Readonly<{ url: string; service: 'git-receive-pack' | 'git-upload-pack'; body: Uint8Array<ArrayBuffer> }>,
+    maximumBytes,
+  }: Readonly<{
+    url: string;
+    service: 'git-receive-pack' | 'git-upload-pack';
+    body: Uint8Array<ArrayBuffer>;
+    /** Read the answer as it streams, and stop with a {@link PackCeilingError} past this many bytes. */
+    maximumBytes?: number;
+  }>,
 ): Promise<Uint8Array<ArrayBuffer>> => {
   const response = await http.request({
     method: 'POST',
@@ -175,7 +183,13 @@ export const postService = async (
     })(),
   });
   const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+  let received = 0;
   for await (const chunk of response.body) {
+    received += chunk.byteLength;
+    if (maximumBytes !== undefined && received > maximumBytes && response.statusCode === 200) {
+      /* Leaving the loop ends the body: the rest of the answer is never read. */
+      throw new PackCeilingError(received, maximumBytes);
+    }
     chunks.push(new Uint8Array(chunk));
   }
   const answered = concatBytes(...chunks);

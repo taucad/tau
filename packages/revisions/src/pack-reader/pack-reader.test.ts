@@ -9,7 +9,8 @@ import { createInlineCompute } from '#compute-worker/compute-worker.js';
 import { bytesToHex, digest } from '#object-hash.js';
 import { encodePackIndex, readPackIndex } from '#pack-reader/pack-index.js';
 import type { PackIndexEntry } from '#pack-reader/pack-index.js';
-import { applyDelta, createBaseCache, createPackReader, emptyReadCounters } from '#pack-reader/pack-reader.js';
+import { applyDelta } from '#pack-reader/delta.js';
+import { createBaseCache, createPackReader, emptyReadCounters } from '#pack-reader/pack-reader.js';
 
 const compute = createInlineCompute();
 const encoder = new TextEncoder();

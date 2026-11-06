@@ -77,6 +77,9 @@ export const createMemoryRepositoryStore = (): RepositoryStore => {
           `putObject declared ${String(options.contentLength)} bytes for '${key}' but the body is ${String(body.byteLength)}.`,
         );
       }
+      if (options.createOnly === true && objects.has(objectKey(locator, key))) {
+        return;
+      }
       objects.set(objectKey(locator, key), body);
     },
 

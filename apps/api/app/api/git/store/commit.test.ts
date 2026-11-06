@@ -11,6 +11,8 @@ import { commitLease } from '#api/git/store/commit.js';
 import type { CommitPhase, CommitResult } from '#api/git/store/commit.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
 import { hydrateLease } from '#api/git/store/lease.js';
+import { listingKeyFor, listingRetirementKeyFor } from '#api/git/store/listing-key.js';
+import { retentionWindowMilliseconds } from '#api/git/store/limits.js';
 import type { RepositoryLease } from '#api/git/store/lease.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import {
@@ -259,6 +261,12 @@ const keysNamedBy = (manifest: Manifest | undefined): string[] =>
     : [
         ...manifest.packs.flatMap((pack) => (pack.indexStored ? [pack.key, indexKeyFor(pack.key)] : [pack.key])),
         ...(manifest.earlierPushes === null ? [] : [manifest.earlierPushes]),
+        /* Each branch tip's head listing (D8): a catalogue names it as soon as the manifest does. */
+        ...new Set(
+          Object.entries(manifest.refs)
+            .filter(([name]) => name.startsWith('refs/heads/'))
+            .map(([, tip]) => listingKeyFor(tip.oid)),
+        ),
       ];
 
 /** Index of the first manifest write in the journal, failing the test when there is none. */
@@ -299,7 +307,7 @@ const padPushLog = async (store: RepositoryStore, locator: RepositoryLocator): P
 
 describe('commitLease', () => {
   describe('object uploads', () => {
-    it('should upload the pack and its index at once and write the manifest only after both are durable', async () => {
+    it('should upload the pack, its index and the head listing at once and write the manifest only after all are durable', async () => {
       const { store, events, tally } = journaledStore();
       const locator = newLocator();
       const client = newClient();
@@ -307,12 +315,12 @@ describe('commitLease', () => {
       const outcome = await pushAndCommit({ store, locator, client: client.directory });
 
       expect(outcome.committed).toBe(true);
-      expect(tally.mostInFlight).toBe(2);
+      expect(tally.mostInFlight).toBe(3);
       const committed = await readBack(store, locator);
       expect(committed?.generation).toBe(1);
       const manifestAt = manifestWriteAt(events);
       const named = keysNamedBy(committed);
-      expect(named).toHaveLength(2);
+      expect(named).toHaveLength(3);
       expect(named.filter((key) => !putEndedBefore(events, key, manifestAt))).toStrictEqual([]);
     }, 60_000);
 
@@ -337,13 +345,13 @@ describe('commitLease', () => {
         .slice(0, manifestAt)
         .filter((event) => event.kind === 'put-end' && event.key.startsWith('retired/'));
       expect(markers).toHaveLength(2);
-      /* Two markers, the new pack and its index: one round, not four. */
-      expect(tally.mostInFlight).toBe(4);
+      /* Two markers, the new pack, its index, the head listing and the old tip's listing marker: one round, not six. */
+      expect(tally.mostInFlight).toBe(6);
       const committed = await readBack(store, locator);
       expect(committed?.packs).toHaveLength(2);
       /* The kept pack stays under the key an earlier generation stored; everything else is this commit's. */
       const added = keysNamedBy(committed).filter((key) => !before.has(key));
-      expect(added).toHaveLength(2);
+      expect(added).toHaveLength(3);
       expect(added.filter((key) => !putEndedBefore(events, key, manifestAt))).toStrictEqual([]);
     }, 60_000);
 
@@ -363,8 +371,8 @@ describe('commitLease', () => {
       expect(committed?.earlierPushes).toMatch(/^pushes\//u);
       const manifestAt = manifestWriteAt(events);
       expect(putEndedBefore(events, committed?.earlierPushes ?? '', manifestAt)).toBe(true);
-      /* The segment, the new pack and its index. */
-      expect(tally.mostInFlight).toBe(3);
+      /* The segment, the new pack, its index, the head listing and the old tip's listing marker. */
+      expect(tally.mostInFlight).toBe(5);
     }, 60_000);
 
     it('should send a small lease file as the bytes it hashed rather than reading the file again', async () => {
@@ -488,7 +496,8 @@ describe('commitLease', () => {
       expect(tally.manifestWrites).toBe(0);
       expect(await readBack(store, locator)).toStrictEqual(before);
       const uploaded = events.flatMap((event) => (event.kind === 'put-end' ? [event.key] : []));
-      expect(uploaded).toHaveLength(2);
+      /* The pack, its index, the new tip's head listing and the old tip's listing marker: derived, and swept. */
+      expect(uploaded).toHaveLength(4);
       const named = new Set(keysNamedBy(before));
       expect(uploaded.filter((key) => named.has(key))).toStrictEqual([]);
     }, 60_000);
@@ -517,14 +526,14 @@ describe('commitLease', () => {
       expect(observed.inFlight).toBe(0);
       /* The 30 s pack put was aborted rather than awaited to the end. */
       expect(performance.now() - startedAt).toBeLessThan(15_000);
+      /* The pack and the head listing (30 s each here) were both stopped. */
       expect(
-        journaled.events.flatMap((event) =>
-          event.kind === 'put-failed' || event.kind === 'put-aborted' ? [[event.kind, event.key.slice(-4)]] : [],
-        ),
-      ).toStrictEqual([
-        ['put-failed', '.idx'],
-        ['put-aborted', 'pack'],
-      ]);
+        journaled.events
+          .flatMap((event) =>
+            event.kind === 'put-failed' || event.kind === 'put-aborted' ? [`${event.kind} ${event.key.slice(-4)}`] : [],
+          )
+          .toSorted(),
+      ).toStrictEqual(['put-aborted pack', 'put-aborted v.gz', 'put-failed .idx']);
       expect(journaled.tally.manifestWrites).toBe(0);
       expect(await readBack(journaled.store, locator)).toBeUndefined();
     }, 60_000);
@@ -746,6 +755,111 @@ describe('commitLease', () => {
       expect(swept?.retainedBytes).toBeGreaterThan(0);
       const named = keysNamedBy(await readBack(store, locator));
       for (const key of named) {
+        // oxlint-disable-next-line no-await-in-loop -- one read per named key
+        await expect(store.getObject(locator, key)).resolves.toBeDefined();
+      }
+    }, 60_000);
+
+    it('should leave the listings out of an inline compaction sweep, and sweep them on the next deferring push', async () => {
+      const { store: journaled } = journaledStore({ putMilliseconds: 1 });
+      const listed: string[] = [];
+      const store: RepositoryStore = {
+        ...journaled,
+        listObjects: (where, prefix) => {
+          listed.push(prefix);
+          return journaled.listObjects(where, prefix);
+        },
+      };
+      const locator = newLocator();
+      const client = newClient();
+      await pushRevisions({ store, locator, client, count: 5 });
+      /* A listing whose tip was retired past the window: due on the next listing sweep. */
+      const stale = 'f'.repeat(40);
+      const empty = new Uint8Array(0);
+      await store.putObject(locator, listingKeyFor(stale), new Uint8Array([1]), { contentLength: 1, sha256: '' });
+      await store.putObject(
+        locator,
+        listingRetirementKeyFor(stale, new Date(Date.now() - retentionWindowMilliseconds - 60_000)),
+        empty,
+        { contentLength: 0, sha256: '' },
+      );
+      const holdsStale = async (): Promise<boolean> => {
+        for await (const stored of journaled.listObjects(locator, 'listings/')) {
+          if (stored.key === listingKeyFor(stale)) {
+            return true;
+          }
+        }
+        return false;
+      };
+      /* Production's shape: every push defers, and compacts inline only past twice the bound. */
+      const overrides = { packBound: 2, deferCompaction: true, deferredPackLimit: 4 };
+
+      const inline = await pushAndCommit({ store, locator, client: client.directory, overrides });
+      if (!inline.committed || !inline.compacted) {
+        throw new Error('the push did not compact inline');
+      }
+      listed.length = 0;
+      await inline.sweep();
+      /* The measured sweep: `retired/` and `packs/`, nothing more. */
+      expect(listed).toStrictEqual(['retired/', 'packs/']);
+      expect(await holdsStale()).toBe(true);
+
+      /* An inline compaction leaves at most the bound live, so the next push defers and sweeps the listings. */
+      client.revise(100);
+      const { lease, outcome } = await pushKeepingLease({ store, locator, client: client.directory, overrides });
+      await lease.dispose();
+      expect(outcome).toMatchObject({ committed: true, compacted: false });
+      if (!outcome.committed) {
+        throw new Error('the push did not commit');
+      }
+      await outcome.sweep();
+      expect(await holdsStale()).toBe(false);
+    }, 60_000);
+
+    it('should mark the retired tip and sweep listings after a deferred push and after its compaction', async () => {
+      const { store: journaled } = journaledStore({ putMilliseconds: 1 });
+      const listed: string[] = [];
+      const store: RepositoryStore = {
+        ...journaled,
+        listObjects: (where, prefix) => {
+          listed.push(prefix);
+          return journaled.listObjects(where, prefix);
+        },
+      };
+      const locator = newLocator();
+      const client = newClient();
+      await pushRevisions({ store, locator, client, count: 3 });
+      const before = await readBack(store, locator);
+      const retiredTip = before?.refs['refs/heads/main']?.oid;
+      const { lease, outcome } = await pushKeepingLease({
+        store,
+        locator,
+        client: client.directory,
+        overrides: { packBound: 2, deferCompaction: true },
+      });
+      if (!outcome.committed || outcome.compaction === undefined) {
+        throw new Error('the push owed no compaction');
+      }
+      const markers: string[] = [];
+      for await (const stored of store.listObjects(locator, 'retired-listings/')) {
+        markers.push(stored.key);
+      }
+      expect(markers.some((key) => key.endsWith(`-${retiredTip ?? ''}`))).toBe(true);
+
+      listed.length = 0;
+      await outcome.sweep();
+      /* Production defers compaction: the push's own sweep still sweeps the listings. */
+      expect(listed).toEqual(expect.arrayContaining(['retired-listings/', 'listings/']));
+
+      const compacted = await outcome.compaction();
+      await lease.dispose();
+      if (compacted.outcome !== 'committed') {
+        throw new Error(`the compaction ended ${compacted.outcome}`);
+      }
+      listed.length = 0;
+      await compacted.sweep();
+      expect(listed).toEqual(expect.arrayContaining(['packs/', 'retired-listings/', 'listings/']));
+      for (const key of keysNamedBy(await readBack(store, locator))) {
         // oxlint-disable-next-line no-await-in-loop -- one read per named key
         await expect(store.getObject(locator, key)).resolves.toBeDefined();
       }

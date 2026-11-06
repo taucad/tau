@@ -6,8 +6,21 @@ import type { FileLinkLocation } from '#path.js';
 /** The canonical message's version line. A new format is a new line, never a reinterpretation. @public */
 export const fileLinkVersion = 'tau-files-v1';
 
-/** The largest object a link may name: STO-18's 100 MiB per-file limit. @public */
+/** The largest LFS object a link may name: STO-18's 100 MiB per-file limit. @public */
 export const fileLinkMaximumBytes = 104_857_600;
+
+/** The largest repository file a link may name: a pack, at most the 1 GiB repository ceiling (D20). @public */
+export const fileLinkRepositoryMaximumBytes = 1_073_741_824;
+
+/**
+ * The largest size a link to this location may carry.
+ *
+ * @param location - What the link names.
+ * @returns Bytes.
+ * @public
+ */
+export const fileLinkMaximumBytesFor = (location: FileLinkLocation): number =>
+  location.layout === 'repository' ? fileLinkRepositoryMaximumBytes : fileLinkMaximumBytes;
 
 /** How long the API makes a link live, the same as its presigned transfers. Seconds. @public */
 export const fileLinkLifetimeSeconds = 900;
@@ -104,7 +117,7 @@ export const fileLinkOrigin = (baseUrl: string): Readonly<{ origin: string; audi
  *
  * @param input - The origin, object, size, expiry and key.
  * @returns `https://files.<zone>/v1/lfs/...?n=<size>&x=<exp>&k=<kid>&s=<sig>`.
- * @throws RangeError - When the size is not a whole number up to {@link fileLinkMaximumBytes}, or the expiry is not whole seconds.
+ * @throws RangeError - When the size is not a whole number up to {@link fileLinkMaximumBytesFor} the location, or the expiry is not whole seconds.
  * @public
  *
  * @example <caption>Mint a link with the API secret</caption>
@@ -123,8 +136,9 @@ export const fileLinkOrigin = (baseUrl: string): Readonly<{ origin: string; audi
  * ```
  */
 export const signFileLink = async (input: SignFileLinkInput): Promise<string> => {
-  if (!Number.isSafeInteger(input.size) || input.size < 0 || input.size > fileLinkMaximumBytes) {
-    throw new RangeError(`A files link names an object of 0 to ${String(fileLinkMaximumBytes)} bytes.`);
+  const maximum = fileLinkMaximumBytesFor(input.location);
+  if (!Number.isSafeInteger(input.size) || input.size < 0 || input.size > maximum) {
+    throw new RangeError(`A files link names an object of 0 to ${String(maximum)} bytes.`);
   }
   if (!Number.isSafeInteger(input.expiresAt) || input.expiresAt < 1) {
     throw new RangeError('A files link expiry is whole Unix seconds.');

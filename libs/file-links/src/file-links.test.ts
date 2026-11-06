@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   decodeBase64,
   encodeBase64Url,
+  fileLinkEntityTag,
   fileLinkKeyId,
   fileLinkLocationOfKey,
   fileLinkMessage,
@@ -328,5 +329,66 @@ describe('keys and secrets', () => {
   it('should refuse text that is not base64', () => {
     expect(decodeBase64('a*b')).toBeUndefined();
     expect(decodeBase64('abcde')).toBeUndefined();
+  });
+});
+
+describe('repository files', () => {
+  const pack = `pack-${'b'.repeat(40)}-${'c'.repeat(16)}`;
+  const commit = 'd'.repeat(40);
+  const base = { layout: 'repository', ownerId: 'user_1', projectId: 'proj_1' } as const;
+
+  it.each([
+    [{ ...base, kind: 'pack', name: pack }, `/v1/git/user_1/proj_1/packs/${pack}.pack`],
+    [{ ...base, kind: 'index', name: pack }, `/v1/git/user_1/proj_1/packs/${pack}.idx`],
+    [{ ...base, kind: 'listing', name: commit }, `/v1/git/user_1/proj_1/listings/${commit}.tsv.gz`],
+  ] as const)('should round-trip %o through its path and key', (location: FileLinkLocation, path) => {
+    expect(fileLinkPath(location)).toBe(path);
+    expect(parseFileLinkPath(path)).toEqual(location);
+    expect(fileLinkObjectKey(location)).toBe(`tenants/user_1/repos/proj_1/${path.split('/').slice(5).join('/')}`);
+    expect(fileLinkLocationOfKey(fileLinkObjectKey(location))).toEqual(location);
+  });
+
+  it.each([
+    'tenants/user_1/repos/proj_1/manifest.json',
+    'tenants/user_1/repos/proj_1/retired/1700000000000-pack.pack',
+    `tenants/user_1/repos/proj_1/pushes/${commit}.json`,
+    `tenants/user_1/repos/proj_1/packs/${pack}.keep`,
+    `tenants/user_1/repos/proj_1/packs/pack-${'b'.repeat(40)}.pack`,
+    `tenants/user_1/repos/proj_1/listings/${pack}.tsv.gz`,
+    `tenants/user_1/repos/proj_1/listings/${commit}.json`,
+    `tenants/user_1/repos/../packs/${pack}.pack`,
+  ])('should map no other repository key (%s) to a link', (key) => {
+    expect(fileLinkLocationOfKey(key)).toBeUndefined();
+  });
+
+  it.each([
+    `/v1/git/user_1/proj_1/packs/${pack}.pack/`,
+    `/v1/git/user_1/proj_1/manifest.json`,
+    `/v1/git/user_1/proj_1/listings/${commit}.TSV.GZ`,
+    `/v1/git/user%2F1/proj_1/packs/${pack}.idx`,
+    `/v1/git/user_1/proj_1/retired/${pack}.pack`,
+  ])('should refuse %s', (path) => {
+    expect(parseFileLinkPath(path)).toBeUndefined();
+  });
+
+  it('should tag a repository file by its kind and name, and an LFS object by its oid', () => {
+    expect(fileLinkEntityTag({ ...base, kind: 'index', name: pack })).toBe(`index-${pack}`);
+    expect(fileLinkEntityTag({ layout: 'legacy', projectId: 'p', oid: 'a'.repeat(64) })).toBe('a'.repeat(64));
+  });
+
+  it('should sign and verify a pack link above the LFS size limit, up to the repository ceiling', async () => {
+    const key = await signingKey(1);
+    const location: FileLinkLocation = { ...base, kind: 'pack', name: pack };
+    const url = await signFileLink({ baseUrl: first.baseUrl, location, size: 500_000_000, expiresAt: now + 900, key });
+    const verdict = await verifyUrl(url);
+    expect(verdict).toEqual({ ok: true, link: { location, size: 500_000_000, expiresAt: now + 900, kid: key.kid } });
+    await expect(
+      signFileLink({ baseUrl: first.baseUrl, location, size: 1_073_741_825, expiresAt: now + 900, key }),
+    ).rejects.toThrow(RangeError);
+  });
+
+  it('should refuse an LFS link that claims a size only a repository file may have', async () => {
+    const lfs = await verifyUrl(first.url.replace(/n=\d+/u, 'n=500000000'));
+    expect(lfs).toEqual({ ok: false, reason: 'malformed' });
   });
 });

@@ -46,6 +46,7 @@ import { filesystemBackends } from '@taucad/types/constants';
 import type { BridgeLongCall, BridgeProgress, BridgeProtocolSchemas } from '@taucad/rpc/bridge';
 import type { WireValidator } from '@taucad/rpc';
 import { assertRootedPath } from '@taucad/utils/path';
+import type { ComputeRestartedEvent } from '#filesystem-bridge-compute-events.js';
 import { z } from 'zod';
 import { cloneBoundedJson } from '@taucad/parameters/json';
 
@@ -840,9 +841,10 @@ export type FileSystemBridgeWatchRequest = WatchRequest & {
  * own news.
  *
  * - `changeSet`: one committed changeset as the connection's view sees it.
- * - `compute-restarted`: the authority's compute worker died and was
- *   restarted; `failed` names the compute calls that failed typed. No file
- *   state was lost: the compute worker holds none.
+ * - `compute-restarted`: the authority's compute worker died, as its
+ *   supervisor reported it: `failedCalls` failed typed, `restarts` within the
+ *   supervisor's window so far, and whether it `abandoned` the worker for its
+ *   fallback. No file state was lost: the compute worker holds none.
  * - `authority-lost`: the authority itself is gone. Never sent on the wire —
  *   a dead authority sends nothing — the client says it when the connection
  *   closes under it. Nothing the authority had not receipted may be claimed
@@ -852,7 +854,7 @@ export type FileSystemBridgeWatchRequest = WatchRequest & {
  */
 export type FileSystemBridgeEvent =
   | Readonly<{ kind: 'changeSet'; set: ChangeSet }>
-  | Readonly<{ kind: 'compute-restarted'; failed: readonly number[] }>
+  | ComputeRestartedEvent
   | Readonly<{ kind: 'authority-lost' }>;
 
 /** The event frames the wire carries: every {@link FileSystemBridgeEvent} but `authority-lost`. @public */
@@ -905,7 +907,12 @@ const changeSetSchema: z.ZodType<ChangeSet> = z.looseObject({
 });
 const wireEventSchema: z.ZodType<FileSystemBridgeWireEvent> = z.discriminatedUnion('kind', [
   z.looseObject({ kind: z.literal('changeSet'), set: changeSetSchema }),
-  z.looseObject({ kind: z.literal('compute-restarted'), failed: z.array(z.number().int().nonnegative()) }),
+  z.looseObject({
+    kind: z.literal('compute-restarted'),
+    failedCalls: z.number().int().nonnegative(),
+    restarts: z.number().int().nonnegative(),
+    abandoned: z.boolean(),
+  }),
 ]);
 const watchFrameSchema: z.ZodType<FileSystemBridgeWatchFrame> = z.union([
   watchEventSchema,

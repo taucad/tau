@@ -38,8 +38,9 @@ import type {
 import type { Changeset, ChangesetEntry } from '@taucad/filesystem';
 import { observeFileSystemBridgeCrossings } from '#filesystem-bridge-crossings.js';
 import type { FileSystemBridgeCrossings } from '#filesystem-bridge-crossings.js';
+import { computeEventRelay } from '#filesystem-bridge-compute-events.js';
+import type { ComputeCrashNotice } from '#filesystem-bridge-compute-events.js';
 import {
-  computeEventEmitter,
   nodeGrepMatcherWorker,
   conformanceProjectRoot,
   rootedHandlersFor,
@@ -68,7 +69,7 @@ type Opened = {
   /** Write a root file on the authority itself, not through any connection. */
   externalWrite(path: string, content: string): Promise<void>;
   /** Report a compute restart on the authority, as its supervisor would. */
-  computeRestarted(failed: readonly number[]): void;
+  computeRestarted(report: ComputeCrashNotice): void;
   /** Take the authority away from under the connection. */
   killAuthority(): Promise<void>;
   close(): Promise<void>;
@@ -84,7 +85,7 @@ const inProcessPort: Transport = {
   async open(seed, consumer) {
     const { service, handlers } = await rootedWorkspaceHandlers(seed, consumer);
     const crossings = observeFileSystemBridgeCrossings();
-    const compute = computeEventEmitter();
+    const compute = computeEventRelay();
     const connection = createFileSystemBridgePort(handlers, {
       grepMatcherWorker: nodeGrepMatcherWorker,
       computeEvents: compute.source,
@@ -95,7 +96,7 @@ const inProcessPort: Transport = {
       proxy,
       hostCrossings: async () => crossings.snapshot(),
       externalWrite: async (path, content) => service.writeFile(`${conformanceProjectRoot}/${path}`, content),
-      computeRestarted: compute.emit,
+      computeRestarted: compute.onCrash,
       async killAuthority() {
         connection.dispose();
       },
@@ -113,7 +114,7 @@ const authorityConnection: Transport = {
   async open(seed, consumer) {
     const service = await seededWorkspace(seed);
     const crossings = observeFileSystemBridgeCrossings();
-    const compute = computeEventEmitter();
+    const compute = computeEventRelay();
     const boundary = new MessageChannel();
     const exposed = exposeFileSystem(workspaceBridgeService(service), {
       policy: tauPathPolicy,
@@ -130,7 +131,7 @@ const authorityConnection: Transport = {
       proxy,
       hostCrossings: async () => crossings.snapshot(),
       externalWrite: async (path, content) => service.writeFile(`${conformanceProjectRoot}/${path}`, content),
-      computeRestarted: compute.emit,
+      computeRestarted: compute.onCrash,
       async killAuthority() {
         exposed.cleanup();
       },
@@ -180,8 +181,8 @@ const workerPort: Transport = {
         worker.postMessage({ type: 'external-write', path, content });
         await written;
       },
-      computeRestarted(failed) {
-        worker.postMessage({ type: 'compute-restarted', failed });
+      computeRestarted(report) {
+        worker.postMessage({ type: 'compute-restarted', report });
       },
       async killAuthority() {
         await worker.terminate();
@@ -562,9 +563,9 @@ describe.each([inProcessPort, authorityConnection, workerPort])('rooted bridge c
       const host = await open(transport);
       const events = listen(host.proxy);
       await events.subscription.ready;
-      host.computeRestarted([3, 4]);
+      host.computeRestarted({ failedCalls: 2, restarts: 1, abandoned: false });
       await events.until((heard) => heard.some((event) => event.kind === 'compute-restarted'));
-      expect(events.heard).toContainEqual({ kind: 'compute-restarted', failed: [3, 4] });
+      expect(events.heard).toContainEqual({ kind: 'compute-restarted', failedCalls: 2, restarts: 1, abandoned: false });
       events.subscription.unsubscribe();
     });
 

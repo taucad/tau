@@ -57,7 +57,7 @@ import type {
 import { nextFileSystemBridgeConnectionId, timeFileSystemBridgeCall } from '#filesystem-bridge-slow-calls.js';
 import { bindFileSystemLongCall, withHostContentCalls } from '#filesystem-bridge-host-calls.js';
 import type { HostContentCallOptions } from '#filesystem-bridge-host-calls.js';
-import type { ComputeEventSource } from '#filesystem-bridge-supervisor.js';
+import type { ComputeEventSource } from '#filesystem-bridge-compute-events.js';
 import { recordFileSystemBridgeCrossing } from '#filesystem-bridge-crossings.js';
 import { prepareApplyCall, rangeStream, receiptFromWire } from '#filesystem-bridge-client-calls.js';
 import type { ReadStreamOptions } from '#filesystem-bridge-client-calls.js';
@@ -190,8 +190,9 @@ export type FileSystemBridgeProxy = FileSystemBridgeRootedProxy;
  */
 export type FileSystemBridgeHostOptions = HostContentCallOptions & {
   /**
-   * The authority's supervised compute worker, whose `compute-restarted`
-   * events every rooted connection's event channel carries.
+   * The authority's compute news: a `computeEventRelay()`'s `source`, fed
+   * by the compute worker's supervisor. Every rooted connection's event channel
+   * carries its `compute-restarted` frames.
    */
   readonly computeEvents?: ComputeEventSource;
 };

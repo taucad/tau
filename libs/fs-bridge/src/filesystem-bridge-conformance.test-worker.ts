@@ -11,8 +11,8 @@
  *   authority performs — on `port`;
  * - `{ type: 'external-write', path, content }`: write a root file on the
  *   authority, not through any connection, and answer `written`;
- * - `{ type: 'compute-restarted', failed }`: report a compute restart on every
- *   rooted connection's event channel, as the authority's supervisor would;
+ * - `{ type: 'compute-restarted', report }`: relay a compute supervisor's crash
+ *   report to every rooted connection's event channel;
  * - `{ type: 'crossings' }`: answer the host side's I2 crossings since `serve`;
  * - `{ type: 'freeze', gate }`: block this thread until `gate[0]` is notified,
  *   the way a wedged authority stops answering without closing its ports.
@@ -26,8 +26,9 @@ import { serveFileSystemBridgePort } from '#filesystem-bridge.js';
 import type { RootedBridgeConsumer } from '#filesystem-bridge.js';
 import { observeFileSystemBridgeCrossings } from '#filesystem-bridge-crossings.js';
 import type { FileSystemBridgeCrossingsObserver } from '#filesystem-bridge-crossings.js';
+import { computeEventRelay } from '#filesystem-bridge-compute-events.js';
+import type { ComputeCrashNotice } from '#filesystem-bridge-compute-events.js';
 import {
-  computeEventEmitter,
   nodeGrepMatcherWorker,
   conformanceProjectRoot,
   rootedWorkspaceHandlers,
@@ -41,12 +42,12 @@ type ServeRootedMessage = {
   readonly consumer: RootedBridgeConsumer;
 };
 type CrossingsMessage = { readonly type: 'crossings' };
-type ComputeMessage = { readonly type: 'compute-restarted'; readonly failed: readonly number[] };
+type ComputeMessage = { readonly type: 'compute-restarted'; readonly report: ComputeCrashNotice };
 type ExternalWriteMessage = { readonly type: 'external-write'; readonly path: string; readonly content: string };
 
 let externalWrite: ((path: string, content: string) => Promise<void>) | undefined;
 
-const compute = computeEventEmitter();
+const compute = computeEventRelay();
 type FreezeMessage = { readonly type: 'freeze'; readonly gate: Int32Array<SharedArrayBuffer> };
 
 let crossings: FileSystemBridgeCrossingsObserver | undefined;
@@ -107,7 +108,7 @@ parentPort!.on(
       return;
     }
     if (message.type === 'compute-restarted') {
-      compute.emit(message.failed);
+      compute.onCrash(message.report);
       return;
     }
     parentPort!.postMessage({ type: 'frozen' });

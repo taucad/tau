@@ -96,12 +96,11 @@ export { slowFileSystemBridgeCalls, slowFileSystemBridgeCallThreshold } from '#f
 
 export type { SlowFileSystemBridgeCall } from '#filesystem-bridge-slow-calls.js';
 
-export { superviseWorker } from '#filesystem-bridge-supervisor.js';
+export { computeEventRelay } from '#filesystem-bridge-compute-events.js';
 
 export type {
+  ComputeCrashNotice,
+  ComputeEventRelay,
   ComputeEventSource,
   ComputeRestartedEvent,
-  SupervisedWorker,
-  WorkerSupervisor,
-  WorkerSupervisorOptions,
-} from '#filesystem-bridge-supervisor.js';
+} from '#filesystem-bridge-compute-events.js';

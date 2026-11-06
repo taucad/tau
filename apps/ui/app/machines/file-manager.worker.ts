@@ -9,7 +9,7 @@
 
 /* oxlint-disable tau-lint/no-direct-indexeddb -- This worker is the browser compute-store authority. */
 
-import { exposeFileSystem, workerReadyMessageType, workspaceBridgeService } from '@taucad/fs-bridge';
+import { computeEventRelay, exposeFileSystem, workerReadyMessageType, workspaceBridgeService } from '@taucad/fs-bridge';
 import { composeView } from '@taucad/filesystem/composed-view';
 import { withReadContentOps } from '@taucad/filesystem/content-ops';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
@@ -358,6 +358,14 @@ const settingsForRoot = (root: string, policy: typeof tauPathPolicy): MachineSet
   };
 };
 
+/*
+ * The compute worker's news for every rooted connection's event channel
+ * (charter D14, W10). The revision compute worker's one supervisor (W5's
+ * `createSupervisedComputeWorker`) owns restarts; it reports each death to
+ * `computeEvents.onCrash`, and the bridge only relays it.
+ */
+const computeEvents = computeEventRelay();
+
 exposeFileSystem(withPendingGauge(workspaceBridgeService(fileService)), {
   /*
    * Every rooted connection names the surface it reads (architecture L4, W2):
@@ -402,6 +410,7 @@ exposeFileSystem(withPendingGauge(workspaceBridgeService(fileService)), {
   changeEventBus: eventBus,
   createCoalescer: (deliver, coalescingWindow, onOverflow) =>
     new EventCoalescer(deliver, { coalescingWindow, onOverflow }),
+  computeEvents: computeEvents.source,
 });
 
 /**

@@ -1,6 +1,6 @@
 # Privacy Policy - TauCAD Limited
 
-*Effective date: October 25, 2026*
+*Effective date: November 6, 2026*
 
 ## 1. Introduction
 
@@ -110,7 +110,7 @@ Under data protection laws, we rely on the following legal bases:
 |---------------|------------------|
 | **Account Data** | While account is active, plus 90 days after deletion request |
 | **Usage & Analytics Data** | According to the current service-side retention configuration; contact privacy@tau.new for the current schedule |
-| **AI Prompts & Designs** | 12 months for service improvement; deleted upon opt-out |
+| **AI Prompts, Designs & Agent Task Recordings** (service improvement) | Up to 180 days from capture; deleted sooner when you delete the project or your account. Turning off "Improve Tau for everyone" stops new recording |
 | **Support Communications** | 3 years from communication |
 | **Financial Records** | 7 years (as required by law) |
 | **Security Logs** | 12 months |
@@ -160,13 +160,21 @@ We may use your prompts and generated designs to improve our AI features. This i
 **Defaults:** On the free plan this is on unless you turn it off. On a paid plan it is off unless you turn it on.
 **Ratings:** When you rate an agent reply, we use that rating and the reply it rates to improve the Service.
 
+**Agent recording:** When "Improve Tau for everyone" is turned on, or when you rate an agent reply, Tau records your agent tasks for that purpose. Turning the setting on by hand records your explicit choice; the free-plan default alone records nothing.
+
+- *What is recorded.* Task summaries record counts, timings, models and outcomes, without your prompts or designs. A rating records only the rating you give and the run it rates. Full task capture records the prompts, designs, tool calls and replies of a task.
+- *Who can read it.* Only a named Tau operator, for the purpose you allowed. Our observability provider, Langfuse, stores the records for us in the United States and does not use them for its own purposes. Its AI features are turned off for Tau's data.
+- *How long.* Recorded tasks are deleted no later than 180 days after capture. Backups expire on the provider's schedule after that. Deleting a project or your account deletes its recorded tasks. Turning the setting off stops new recording and withdraws your rating permission.
+- *Paid plans.* Content from a paid plan is never used to build evaluation sets or to train models, including copies.
+- *Shared material.* Full task capture, evaluation and training are not available in a project that contains another account's material or that belongs to another account.
+
 **Your Right to Opt Out:** Navigate to **Settings → Data controls** and turn off "Improve Tau for everyone." Opting out will not affect your access to AI features.
 
 ### 9.3 Analytics and Observability
 
 - **PostHog (Cloud)**: Web product analytics and session replay after consent, and desktop app product analytics (USA). [Privacy Policy](https://posthog.com/privacy)
 - **Sentry (Functional Software, Inc.)**: Error and crash reporting for the web app, desktop app and API (USA). [Privacy Policy](https://sentry.io/privacy/)
-- **LangSmith**: AI feature monitoring. [Privacy Policy](https://www.langchain.com/privacy)
+- **Langfuse (Langfuse GmbH)**: Storage of agent task recordings you allow under Agent recording (USA, Oregon). [Privacy Policy](https://langfuse.com/privacy)
 
 ### 9.4 Payment Processing
 

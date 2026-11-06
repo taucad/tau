@@ -189,10 +189,6 @@ export const environmentSchemaBase = z.object({
   MOONSHOT_API_KEY: z.string().optional(),
   ZOO_API_KEY: z.string().optional(),
   ZOO_WEBSOCKET_URL: z.url().default('wss://api.zoo.dev'),
-  LANGSMITH_TRACING: z.string().optional(),
-  LANGSMITH_ENDPOINT: z.string().optional(),
-  LANGSMITH_PROJECT: z.string().optional(),
-  LANGSMITH_API_KEY: z.string().optional(),
 
   // Authentication
   AUTH_SECRET: z.string(),

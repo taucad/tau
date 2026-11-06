@@ -523,6 +523,13 @@ describe('repack decisions', () => {
 
 describe('a corrupt pack (W2 re-review 2)', () => {
   it('is left out with one warning, while loose and other objects read and writes land', async () => {
+    /*
+     * A check this document passed is kept by path, size, time and trailer.
+     * The flip keeps the size and trailer, so the corrupt index is written a
+     * millisecond later. A fast machine writes it in the same millisecond,
+     * and then it is the index the writer already checked.
+     */
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
     const provider = memory();
     const writer = storeOver(gitFilesOf(provider, '.git'));
     /* A pack as a fetch brings it: its objects are nowhere else. */
@@ -539,6 +546,7 @@ describe('a corrupt pack (W2 re-review 2)', () => {
     const packIndex = `.git/objects/pack/${listed.find((name) => name.endsWith('.idx'))!}`;
     const flipped = new Uint8Array(await provider.readFile(packIndex));
     flipped[8 + 256 * 4 + 5] = 255 - flipped[8 + 256 * 4 + 5]!;
+    now.mockReturnValue(1_700_000_000_001);
     await provider.writeFile(packIndex, flipped);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 

@@ -2,6 +2,7 @@ import type { GrepRpcInput, GrepRpcResult } from '#schemas/rpc.schema.js';
 import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { toRpcError } from '#rpc/rpc-error.js';
 import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
+import { getErrno } from '@taucad/utils/error';
 import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
 
 /**
@@ -59,7 +60,15 @@ const knownPending = async (fileSystem: RpcFileSystem, paths: readonly string[])
   if (fileSystem.pendingPaths === undefined || paths.length === 0) {
     return new Set();
   }
-  return new Set(await fileSystem.pendingPaths(paths));
+  try {
+    return new Set(await fileSystem.pendingPaths(paths));
+  } catch (error) {
+    /* A relayed host that predates the call cannot say either (the UI's `pendingPathsUnsupportedCode`). */
+    if (getErrno(error) === 'PENDING_PATHS_UNSUPPORTED') {
+      return new Set();
+    }
+    throw error;
+  }
 };
 
 /* Map over items with at most `limit` in flight, keeping the input order. */

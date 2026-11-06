@@ -440,6 +440,27 @@ describe('handleGrep', () => {
     expect(fileSystem.readFile).not.toHaveBeenCalled();
   });
 
+  /* A relayed host that predates the call cannot say either: its reads answer `PENDING`, so the grep reads. */
+  it('should read every file when the host cannot answer which are pending', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+    fileSystem.readdir.mockResolvedValue([textEntry('a.ts', 20), { name: 'part.step', type: 'file', size: 130 }]);
+    fileSystem.pendingPaths = async () => {
+      throw Object.assign(new Error('This workspace bridge cannot say which files are pending.'), {
+        code: 'PENDING_PATHS_UNSUPPORTED',
+      });
+    };
+    fileSystem.readFile.mockImplementation(async (path) => {
+      if (path === 'part.step') {
+        throw Object.assign(new Error('The large object of part.step is not on this device yet.'), { code: 'PENDING' });
+      }
+      return 'const marker = 1;';
+    });
+
+    const result = await handleGrep({ pattern: 'marker', path: '' }, fileSystem);
+
+    expect(result).toMatchObject({ success: true, totalMatches: 1, pendingFiles: ['part.step'] });
+  });
+
   it('should read at most 16 files at once, keeping the walk order', async () => {
     const fileSystem = mock<RpcFileSystem>();
     const names = Array.from({ length: 40 }, (_, index) => `f${String(index).padStart(2, '0')}.ts`);

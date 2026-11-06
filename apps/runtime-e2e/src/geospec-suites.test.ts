@@ -114,6 +114,14 @@ describe('geospec example suites (regression backbone)', () => {
     expect(report.success).toBe(true);
   });
 
+  // A modular OpenSCAD part is one closed solid in its GLB, so it passes watertight and single-component checks.
+  it('chamfered-cutout-cube geospec suite passes', { timeout: 180_000 }, async () => {
+    const report = await runGeoSpecSuite('libs/tau-examples/src/kernels/openscad/chamfered-cutout-cube');
+    expect(report.passed, JSON.stringify(report.files)).toBe(3);
+    expect(report.failed).toBe(0);
+    expect(report.success).toBe(true);
+  });
+
   it.skipIf(!exampleKernelIds.has('picogk'))(
     'PicoGK turbofan geospec suite passes from its prepared payload-store closure',
     { timeout: 1_500_000 },

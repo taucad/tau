@@ -42,6 +42,7 @@ type GlbJson = {
   nodes: Array<{ name?: string; mesh?: number; children?: number[]; extras?: unknown }>;
   meshes: Array<{ primitives: Array<{ mode?: number; indices?: number; extras?: unknown }> }>;
   accessors: Array<{ count: number }>;
+  materials?: Array<{ name?: string; doubleSided?: boolean }>;
   extensions?: Record<string, unknown>;
   extensionsUsed?: string[];
 };
@@ -146,6 +147,8 @@ describe('OpenRSCAD Explorer topology', () => {
       { openrscad: { displayMode: 'solid', owner: 1 } },
     ]);
     expect(json.extensionsUsed).toEqual(['EXT_mesh_manifold', 'TAU_cad_topology']);
+    // The solid's mesh is closed on its own, so the viewer draws it one-sided.
+    expect(json.materials).toEqual([expect.objectContaining({ name: '#F5A523FF Material', doubleSided: false })]);
 
     const topology = readTopology(json);
     expect(validateTauCadTopology(topology, documentBounds(json))).toEqual([]);

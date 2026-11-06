@@ -148,13 +148,61 @@ describe('LangfuseClient', () => {
     ).resolves.toEqual({ kind: 'retry', reason: 'unreachable' });
   });
 
-  it('should read a trace back as absent only on a 404', async () => {
-    const client = (status: number) =>
-      new LangfuseClient(target, 1000, vi.fn<typeof fetch>().mockResolvedValue(json(status, {})));
+  it('should read a trace back from one row of the v2 observations list, never a v3 route', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json(200, { data: [], meta: {} }));
 
-    await expect(client(200).traceExists('t1')).resolves.toBe('present');
-    await expect(client(404).traceExists('t1')).resolves.toBe('absent');
-    await expect(client(500).traceExists('t1')).resolves.toBe('unavailable');
-    await expect(client(401).traceExists('t1')).resolves.toBe('unavailable');
+    await expect(new LangfuseClient(target, 1000, fetcher).traceExists('t 1')).resolves.toBe('absent');
+    const [url, init] = fetcher.mock.calls[0]!;
+    expect(url instanceof URL && url.origin + url.pathname).toBe(
+      'https://langfuse.test.invalid/api/public/v2/observations',
+    );
+    expect(url instanceof URL && Object.fromEntries(url.searchParams)).toEqual({
+      traceId: 't 1',
+      fields: 'core',
+      limit: '1',
+    });
+    expect(init?.method).toBeUndefined();
+    expect(init?.redirect).toBe('error');
+  });
+
+  it('should answer absent only for an ok answer with an empty page, and present for a non-empty one', async () => {
+    const client = (response: Response) =>
+      new LangfuseClient(target, 1000, vi.fn<typeof fetch>().mockResolvedValue(response));
+
+    await expect(client(json(200, { data: [], meta: {} })).traceExists('t1')).resolves.toBe('absent');
+    await expect(client(json(200, { data: [{ id: 'o1' }], meta: { cursor: 'next' } })).traceExists('t1')).resolves.toBe(
+      'present',
+    );
+    /* An ok answer that is not a page proves nothing. */
+    await expect(client(json(200, {})).traceExists('t1')).resolves.toBe('unavailable');
+    await expect(client(new Response('not json', { status: 200 })).traceExists('t1')).resolves.toBe('unavailable');
+  });
+
+  it('should never read the legacy-API 410 as absence', async () => {
+    const legacy = json(410, {
+      message: 'This API is no longer available for new organizations.',
+      error: 'LEGACY_API_UNAVAILABLE_FOR_NEW_ORGANIZATION',
+      data: [],
+    });
+
+    await expect(
+      new LangfuseClient(target, 1000, vi.fn<typeof fetch>().mockResolvedValue(legacy)).traceExists('t1'),
+    ).resolves.toBe('unavailable');
+  });
+
+  it.each([404, 401, 429, 500, 503])('should answer unavailable, never absent, for a %i', async (status) => {
+    await expect(
+      new LangfuseClient(target, 1000, vi.fn<typeof fetch>().mockResolvedValue(json(status, { data: [] }))).traceExists(
+        't1',
+      ),
+    ).resolves.toBe('unavailable');
+  });
+
+  it('should answer unavailable when the read fails in transport', async () => {
+    await expect(
+      new LangfuseClient(target, 1000, vi.fn<typeof fetch>().mockRejectedValue(failure('ECONNREFUSED'))).traceExists(
+        't1',
+      ),
+    ).resolves.toBe('unavailable');
   });
 });

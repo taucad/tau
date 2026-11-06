@@ -213,6 +213,9 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
       vi.stubGlobal('fetch', fetcher);
       return fetcher;
     };
+    /** What every v3 read answers a new organisation; only the v2 observations list is a valid read. */
+    const legacy = () =>
+      Response.json({ error: 'LEGACY_API_UNAVAILABLE_FOR_NEW_ORGANIZATION', data: [] }, { status: 410 });
     const completedAt = async (erasureId: string) => {
       const [found] = await database
         .select({ completedAt: schema.agentEvidenceErasure.completedAt })
@@ -233,7 +236,10 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
           deleted.push(JSON.parse(typeof init.body === 'string' ? init.body : ''));
           return new Response('{}', { status: 200 });
         }
-        return new Response('{}', { status: present || !url.pathname.endsWith(traceId) ? 200 : 404 });
+        if (url.pathname !== '/api/public/v2/observations' || url.searchParams.get('traceId') !== traceId) {
+          return legacy();
+        }
+        return Response.json({ data: present ? [{ id: 'o1' }] : [], meta: {} });
       });
       const drainer = service();
       const now = Date.now();
@@ -290,6 +296,38 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
       expect(await completedAt(erasureId)).toBeNull();
       expect(metrics.agentEvidenceErasureTraces.add).toHaveBeenCalledWith(expect.any(Number), { outcome: 'retry' });
       expect(metrics.agentEvidenceErasureTraces.add).toHaveBeenCalledWith(1, { outcome: 'recheck' });
+      expect(metrics.agentEvidenceErasureTraces.add).not.toHaveBeenCalledWith(expect.anything(), {
+        outcome: 'absent',
+      });
+    });
+
+    it('should count every unconfirmed read-back as a recheck and never settle on a legacy 410', async () => {
+      const userId = await account();
+      const projectId = await ownedProject(userId);
+      await delivered(await admitted(userId, projectId));
+      const { erasureId } = await eraseProject(projectId);
+      vendor((_url, init) => (init?.method === 'DELETE' ? Response.json({}, { status: 200 }) : legacy()));
+      const drainer = service();
+      const now = Date.now() + 20 * erasureTiming.maxBackoffMilliseconds;
+
+      await drainer.drain(new Date(now));
+      let at = now + erasureTiming.recheckAfterMilliseconds + 1;
+      for (let read = 0; read < 3; read++) {
+        // oxlint-disable-next-line no-await-in-loop -- each pass reads back after the previous one's recheck delay
+        await drainer.drain(new Date(at));
+        const notBefore = at + erasureTiming.unavailableRecheckMilliseconds;
+        // oxlint-disable-next-line no-await-in-loop -- the journal row after this pass
+        expect(await journal(erasureId)).toEqual([
+          expect.objectContaining({ state: 'requested', leaseOwner: null, dueAt: new Date(notBefore) }) as unknown,
+        ]);
+        at = notBefore + 1;
+      }
+      expect(await completedAt(erasureId)).toBeNull();
+      /* Earlier cases may leave their own traces due, so this pass counts at least this trace's three. */
+      const rechecks = metrics.agentEvidenceErasureTraces.add.mock.calls.filter(
+        ([, attributes]) => attributes?.['outcome'] === 'recheck',
+      );
+      expect(rechecks.length).toBeGreaterThanOrEqual(3);
       expect(metrics.agentEvidenceErasureTraces.add).not.toHaveBeenCalledWith(expect.anything(), {
         outcome: 'absent',
       });

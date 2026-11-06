@@ -10,7 +10,7 @@ import type { AppLoadContext, EntryContext, HandleErrorFunction } from 'react-ro
 import { cdnCacheControlResponseHeader } from '#constants/cache.constants.js';
 import { reportOnlyContentSecurityPolicy } from '#lib/content-security-policy.server.js';
 import { isCanonicalProductionUrl } from '#lib/canonical-url.js';
-import { skewProtectionCookie } from '#lib/skew-protection.server.js';
+import { skewProtectionCookie, skewProtectionToken } from '#lib/skew-protection.server.js';
 import { createModulePreloadCap, criticalModuleHrefs, isNotFoundRender } from '#lib/module-preload-cap.js';
 import { claimSsrErrors, leafRouteId, queueSsrError, reportSsrError } from '#lib/sentry.server.js';
 
@@ -63,7 +63,14 @@ export default function handleRequest(
   /* TAU-UI-S: pin this page's later chunk, `.data` and manifest requests to the deploy that rendered it
    * (production only). Never on a document the CDN may store (`cdnBackedSsrRouteHeaders`): a stored
    * `Set-Cookie` would be replayed to every visitor, or keep the response out of the cache. */
-  const skewCookie = responseHeaders.has(cdnCacheControlResponseHeader) ? undefined : skewProtectionCookie(process.env);
+  const skewCookie = responseHeaders.has(cdnCacheControlResponseHeader)
+    ? undefined
+    : skewProtectionCookie(
+        skewProtectionToken(
+          (globalThis as { Netlify?: Parameters<typeof skewProtectionToken>[0] }).Netlify,
+          process.env,
+        ),
+      );
   if (skewCookie !== undefined) {
     responseHeaders.append('Set-Cookie', skewCookie);
   }

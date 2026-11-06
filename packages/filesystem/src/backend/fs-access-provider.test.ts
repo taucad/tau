@@ -195,6 +195,83 @@ describe('FileSystemAccessProvider', () => {
     });
   });
 
+  describe('stat file handle reuse', () => {
+    it('answers a stat after a listing from the listed handle, with current metadata', async () => {
+      await provider.writeFile('dir/a.txt', 'alpha');
+      await provider.refresh();
+      await provider.readdirWithStats('');
+      await provider.readdirWithStats('dir');
+      const directory = await rootHandle.getDirectoryHandle('dir');
+      const lookups = vi.spyOn(directory, 'getFileHandle');
+      const reads = vi.spyOn(Blob.prototype, 'arrayBuffer');
+      try {
+        await expect(provider.stat('dir/a.txt')).resolves.toMatchObject({ type: 'file', size: 5 });
+        expect(lookups).not.toHaveBeenCalled();
+        expect(reads).not.toHaveBeenCalled();
+      } finally {
+        reads.mockRestore();
+      }
+
+      /* A rewrite keeps the file: the kept handle answers its new metadata. */
+      await provider.writeFile('dir/a.txt', 'alphabet');
+      lookups.mockClear();
+      await expect(provider.stat('dir/a.txt')).resolves.toMatchObject({ type: 'file', size: 8 });
+      expect(lookups).not.toHaveBeenCalled();
+    });
+
+    it('looks the path up again when the kept handle no longer resolves', async () => {
+      await provider.writeFile('gone.txt', 'one');
+      await provider.writeFile('replaced.txt', 'one');
+      await provider.writeFile('now-dir', 'one');
+      await provider.readdirWithStats('');
+
+      /* Changes no authority announced: straight to the handles. */
+      await rootHandle.removeEntry('gone.txt');
+      await rootHandle.removeEntry('replaced.txt');
+      const replacement = await rootHandle.getFileHandle('replaced.txt', { create: true });
+      const writable = await replacement.createWritable();
+      await writable.write(new TextEncoder().encode('replacement'));
+      await writable.close();
+      await rootHandle.removeEntry('now-dir');
+      await rootHandle.getDirectoryHandle('now-dir', { create: true });
+
+      await expect(provider.stat('gone.txt')).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(provider.stat('replaced.txt')).resolves.toMatchObject({ type: 'file', size: 11 });
+      await expect(provider.stat('now-dir')).resolves.toMatchObject({ type: 'dir' });
+    });
+
+    it('forgets kept handles for the paths its own mutations name', async () => {
+      await provider.writeFile('moved.txt', 'source');
+      await provider.writeFile('target.txt', 'old');
+      await provider.writeFile('batch/b.txt', 'b');
+      await provider.stat('moved.txt');
+      await provider.stat('target.txt');
+      await provider.stat('batch/b.txt');
+
+      await provider.unlink('target.txt');
+      await provider.rename('moved.txt', 'target.txt');
+      await provider.applyBatch([{ op: 'delete', path: 'batch', kind: 'dir', recursive: true }]);
+
+      await expect(provider.stat('moved.txt')).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(provider.stat('target.txt')).resolves.toMatchObject({ type: 'file', size: 6 });
+      await expect(provider.stat('batch/b.txt')).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+
+    it('drops kept handles on refresh, and keeps none a refresh overtook', async () => {
+      await provider.writeFile('kept.txt', 'kept');
+      await provider.stat('kept.txt');
+      const lookups = vi.spyOn(rootHandle, 'getFileHandle');
+      await provider.refresh(['kept.txt']);
+      await provider.stat('kept.txt');
+      expect(lookups).toHaveBeenCalledTimes(1);
+
+      await provider.refresh();
+      lookups.mockClear();
+      await provider.stat('kept.txt');
+      expect(lookups).toHaveBeenCalledTimes(1);
+    });
+  });
+
   // ---------------------------------------------------------------------------
   // mkdir
   // ---------------------------------------------------------------------------

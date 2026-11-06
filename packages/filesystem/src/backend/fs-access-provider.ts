@@ -202,6 +202,17 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    */
   protected _uncommitted: Readonly<{ store: UncommittedChangesetStore; root: string; owner: string }> | undefined;
   private readonly _handleCache = new Map<string, FileSystemDirectoryHandle>();
+  /**
+   * File handles a listing or a stat already acquired, so the next `stat` of
+   * the same path is one `getFile()` instead of a handle lookup and a
+   * `getFile()`. A handle is a locator (its path), never bytes: only `stat`
+   * reads one, and nothing this provider moves or hands out comes from here.
+   * Fenced like {@link FileSystemAccessProvider._handleCache}: a refresh, a
+   * prefix invalidation, or a removal, rename or batch through this provider
+   * forgets the paths it names, and a handle that no longer resolves (gone,
+   * replaced, now a directory) falls back to the lookup.
+   */
+  private readonly _fileHandleCache = new Map<string, FileSystemFileHandle>();
   private readonly _pendingDirectoryHandles = new Map<string, Promise<FileSystemDirectoryHandle>>();
   private _handleGeneration = 0;
   private readonly _handleCacheMax = handleCacheMaxEntries;
@@ -315,10 +326,25 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
   public async readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>> {
     this._assertReady();
     this._assertRootedPath(path);
+    const generation = this._handleGeneration;
     const directoryHandle = await this._resolveDirectoryHandle(path);
     const handles: Array<[string, FileSystemDirectoryEntryHandle]> = [];
     for await (const entry of directoryEntries(directoryHandle)) {
       handles.push(entry);
+    }
+    /* Enumeration supplied every child's handle: keep them, as readdirEntries
+     * keeps its directories, so a following stat or descent skips the lookup. */
+    if (generation === this._handleGeneration) {
+      for (const [name, handle] of handles) {
+        const childPath = path === '' ? name : `${path}/${name}`;
+        if (handle.kind === 'directory') {
+          if (!this._handleCache.has(childPath)) {
+            this._setHandleCache(childPath, handle);
+          }
+        } else {
+          this._setFileHandleCache(childPath, handle);
+        }
+      }
     }
 
     const listed = await mapConcurrent(handles, statConcurrency, async ([name, handle]) => {
@@ -366,6 +392,21 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       return { type: 'dir', size: 0, mtimeMs: 0 };
     }
 
+    const known = this._fileHandleCache.get(path);
+    if (known !== undefined) {
+      try {
+        const file = await known.getFile();
+        return { type: 'file', size: file.size, mtimeMs: file.lastModified };
+      } catch (error) {
+        /* Gone or replaced by a directory since: forget it and look the path up. */
+        this._fileHandleCache.delete(path);
+        if (!hasDomName(error, 'NotFoundError') && !hasDomName(error, 'TypeMismatchError')) {
+          throw error;
+        }
+      }
+    }
+
+    const generation = this._handleGeneration;
     const parentHandle = await this._resolveDirectoryHandle(segments.slice(0, -1).join('/'));
     const name = segments.at(-1)!;
 
@@ -373,6 +414,9 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     try {
       const fileHandle = await parentHandle.getFileHandle(name);
       const file = await fileHandle.getFile();
+      if (generation === this._handleGeneration) {
+        this._setFileHandleCache(path, fileHandle);
+      }
       return { type: 'file', size: file.size, mtimeMs: file.lastModified };
     } catch (error) {
       fileError = error;
@@ -414,6 +458,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       throw this._eisdir(path);
     }
     await parentHandle.removeEntry(name);
+    this._fileHandleCache.delete(path);
   }
 
   /**
@@ -504,6 +549,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     }
     await this._moveFile(from, to);
     this._invalidateHandleCachePrefix(from);
+    this._fileHandleCache.delete(to);
   }
 
   /**
@@ -515,6 +561,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     this._assertReady();
     if (prefixes === undefined) {
       this._handleCache.clear();
+      this._fileHandleCache.clear();
       this._pendingDirectoryHandles.clear();
       this._handleGeneration++;
       return;
@@ -604,6 +651,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       },
       options,
     );
+    this._forgetBatchFileHandles(entries);
     const kept = await checks?.settled();
     if (kept !== undefined && this._uncommitted !== undefined) {
       /* Every writable of the batch has closed: the creates have settled. A
@@ -1730,6 +1778,39 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     return missing;
   }
 
+  private _setFileHandleCache(key: string, handle: FileSystemFileHandle): void {
+    if (this._fileHandleCache.size >= this._handleCacheMax) {
+      const firstKey = this._fileHandleCache.keys().next().value;
+      if (firstKey !== undefined) {
+        this._fileHandleCache.delete(firstKey);
+      }
+    }
+    this._fileHandleCache.set(key, handle);
+  }
+
+  /** Forget the file handles of every path a batch names; a directory entry forgets its subtree. */
+  private _forgetBatchFileHandles(entries: readonly BatchEntry[]): void {
+    for (const entry of entries) {
+      if (entry.op === 'move') {
+        this._forgetFileHandlesUnder(entry.from);
+        this._forgetFileHandlesUnder(entry.to);
+      } else if (entry.op === 'delete' && entry.kind !== 'file') {
+        this._forgetFileHandlesUnder(entry.path);
+      } else {
+        this._fileHandleCache.delete(entry.path);
+      }
+    }
+  }
+
+  /** Forget `path` and everything under it; the root forgets every kept handle. */
+  private _forgetFileHandlesUnder(path: string): void {
+    for (const key of this._fileHandleCache.keys()) {
+      if (path === '' || key === path || key.startsWith(`${path}/`)) {
+        this._fileHandleCache.delete(key);
+      }
+    }
+  }
+
   private _setHandleCache(key: string, handle: FileSystemDirectoryHandle): void {
     if (this._handleCache.size >= this._handleCacheMax) {
       const firstKey = this._handleCache.keys().next().value;
@@ -1756,6 +1837,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
   private _invalidateHandleCachePrefix(path: string): void {
     this._handleGeneration++;
     this._pendingDirectoryHandles.clear();
+    this._forgetFileHandlesUnder(path);
     if (path === '') {
       this._handleCache.clear();
       return;

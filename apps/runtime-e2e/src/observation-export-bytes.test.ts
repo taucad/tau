@@ -1,6 +1,6 @@
 /**
  * T08: operation observation is read-only. The same model must deliver the same bytes whether nobody observes or the
- * client asks the worker for facts, through a downgraded (budgeted) preview and its exports; and with facts on, the
+ * client asks the worker for facts, through a preview and its exports; and with facts on, the
  * render observation's `triangles` is the delivered tessellation report's count.
  */
 import { createHash } from 'node:crypto';
@@ -19,8 +19,6 @@ import { loadFixture } from '@taucad/tau-examples/fixtures';
 
 /** The birdhouse export fixture of `bundler-parity.test.ts`. */
 const fixture = loadFixture('replicad', 'birdhouse');
-/** Below the birdhouse's medium preview (1,754 triangles), so the preview is coarsened and reported as downgraded. */
-const previewTriangleBudget = 1500;
 
 const sha256 = (bytes: Uint8Array<ArrayBuffer> | string): string => createHash('sha256').update(bytes).digest('hex');
 
@@ -42,13 +40,12 @@ const comparable = (target: string, bytes: Uint8Array<ArrayBuffer>): Uint8Array<
 type Arm = Readonly<{
   preview: string;
   triangles: number;
-  downgraded: number;
   exports: Readonly<Record<string, string>>;
   observations: readonly RuntimeOperationObservation[];
 }>;
 
 /**
- * Render the budgeted preview and export the model once, with observation off or asking for facts.
+ * Render the preview and export the model once, with observation off or asking for facts.
  *
  * @param observe - Whether the client subscribes and asks the worker for facts.
  * @returns What the arm delivered and observed.
@@ -56,7 +53,7 @@ type Arm = Readonly<{
 const runArm = async (observe: boolean): Promise<Arm> => {
   const runtime = defineRuntime({
     plugins: [esbuild(), middleware()],
-    kernels: [replicadKernel({ wasm: 'multi', previewTriangleBudget })],
+    kernels: [replicadKernel({ wasm: 'multi' })],
   });
   const client = createRuntimeClient({
     transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs(fixture.files) }),
@@ -74,8 +71,7 @@ const runArm = async (observe: boolean): Promise<Arm> => {
     if (outcome.superseded || !outcome.rendering.success) {
       throw new Error('The preview did not render.');
     }
-    const { artifact, issues } = outcome.rendering;
-    expect(issues.map(({ code }) => code)).toContain('TESSELLATION_DOWNGRADED');
+    const { artifact } = outcome.rendering;
     const results = await Promise.all(
       (['glb', 'stl', 'step'] as const).map(async (target) => ({ target, result: await document.export(target) })),
     );
@@ -96,7 +92,6 @@ const runArm = async (observe: boolean): Promise<Arm> => {
     return {
       preview: sha256(artifact.content),
       triangles: artifact.tessellation?.triangles ?? Number.NaN,
-      downgraded: artifact.tessellation?.downgraded ?? 0,
       exports,
       observations,
     };
@@ -112,12 +107,10 @@ describe('operation observation leaves delivered bytes unchanged (T08)', () => {
     const on = await runArm(true);
 
     expect(off.observations).toEqual([]);
-    expect(off.downgraded).toBeGreaterThanOrEqual(1);
     expect(Object.keys(off.exports)).toHaveLength(3);
     expect(on.exports).toEqual(off.exports);
     expect(on.preview).toBe(off.preview);
     expect(on.triangles).toBe(off.triangles);
-    expect(on.downgraded).toBe(off.downgraded);
   }, 300_000);
 
   it("should report a render's triangles as its delivered tessellation report", async () => {
@@ -126,7 +119,7 @@ describe('operation observation leaves delivered bytes unchanged (T08)', () => {
 
     expect(renders).toHaveLength(1);
     expect(renders[0]).toMatchObject({ outcome: { type: 'succeeded' }, facts: 'joined' });
-    expect(renders[0]?.adaptations).toContain('TESSELLATION_DOWNGRADED');
+    expect(renders[0]?.adaptations ?? []).not.toContain('TESSELLATION_DOWNGRADED');
     expect(on.triangles).toBeGreaterThan(0);
     expect(renders[0]?.worker?.triangles).toBe(on.triangles);
   }, 300_000);

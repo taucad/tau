@@ -14,7 +14,6 @@ import {
   occtQualityGltfExportSchema,
   occtQualityRenderOptionSchema,
   occtQualityStlExportSchema,
-  occtTriangleBudgets,
 } from '@taucad/occt-core';
 
 /**
@@ -46,10 +45,11 @@ export const replicadOptionsSchema = z.object({
    */
   computeReuse: z.boolean().optional(),
   /**
-   * Triangles a preview may carry before it is coarsened and a `TESSELLATION_DOWNGRADED` warning is reported.
-   * Defaults to the policy preview budget; a host on a memory-constrained device passes a smaller one.
+   * Ignored: previews are never coarsened, so there is no triangle budget. Kept until hosts stop passing it.
+   *
+   * @deprecated No effect; previews mesh at the requested tessellation.
    */
-  previewTriangleBudget: z.number().int().positive().optional().default(occtTriangleBudgets.preview),
+  previewTriangleBudget: z.number().int().positive().optional(),
 });
 
 /**

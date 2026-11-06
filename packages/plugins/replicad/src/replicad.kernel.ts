@@ -59,18 +59,15 @@ import {
   resolveOcctModuleFactory,
   wrapOcWithTracing,
   wrapOcForExceptions,
-  createTessellationBudgetExceededIssue,
   occtExplicitTessellationDefaults,
-  occtTriangleBudgets,
 } from '@taucad/occt-core';
-import type { OcctModuleFactory, OcctResolvedTessellation, OcErrorContext, OcTracingSummary } from '@taucad/occt-core';
+import type { OcctModuleFactory, OcErrorContext, OcTracingSummary } from '@taucad/occt-core';
 
 import {
-  countMesh,
   isDrawingShape,
   normalizeRenderShapes,
   render,
-  renderWithinBudget,
+  renderTessellated,
   resolveReplicadTessellation,
 } from '#utils/render-output.js';
 import * as tauReplicadAnnotations from '#annotations/index.js';
@@ -300,8 +297,6 @@ type ReplicadContext = {
   occt: RealmHold<OpenCascadeInstance>;
   replicadLibrary: ReplicadLibrary;
   tessellationInstancing: boolean;
-  /** Triangles a preview may carry before it is coarsened. */
-  previewTriangleBudget: number;
   replicadInitialised: boolean;
   librarySourceMapCache: Map<string, SourceMapConsumer | undefined>;
   exportNameMap: Map<string, string>;
@@ -493,10 +488,9 @@ export type ReplicadOptions = {
    */
   tessellationInstancing?: boolean;
   /**
-   * Triangles a preview may carry before it is coarsened one step at a time (and a `TESSELLATION_DOWNGRADED`
-   * warning reported). A host on a memory-constrained device passes a smaller budget.
+   * Ignored: previews are never coarsened, so there is no triangle budget. Kept until hosts stop passing it.
    *
-   * @default occtTriangleBudgets.preview (2,000,000)
+   * @deprecated No effect; previews mesh at the requested tessellation.
    */
   previewTriangleBudget?: number;
   /** Load library source maps for enriched error stack traces. Adds ~50ms to init. Defaults to `false`. */
@@ -562,7 +556,6 @@ export const replicadKernel = defineKernel({
       libraryTracing,
       withSourceMapping,
       tessellationInstancing,
-      previewTriangleBudget,
       wasm,
       computeReuse: computeReuseOption,
     } = options;
@@ -713,7 +706,6 @@ export const replicadKernel = defineKernel({
         occt,
         replicadLibrary,
         tessellationInstancing,
-        previewTriangleBudget,
         replicadInitialised: true,
         librarySourceMapCache,
         exportNameMap,
@@ -948,9 +940,8 @@ export const replicadKernel = defineKernel({
       }));
 
       let renderMode: 'flat' | 'tessellation-instanced' | 'mixed' = 'flat';
-      // The render hook cannot tell a viewer preview from a capture, so every render takes the
-      // preview budget.
-      const budgeted = await tracedPhase(tracer, 'mesh.renderDisplayTessellation', () => {
+      // One pass at the requested tessellation: nothing coarsens a mesh (no triangle budget).
+      const rendered = await tracedPhase(tracer, 'mesh.renderDisplayTessellation', () => {
         const renderOutputSpan = tracer.startSpan('replicad.render-output', {
           phase: 'computingGeometry',
           stage: 'render-output',
@@ -959,9 +950,8 @@ export const replicadKernel = defineKernel({
           return context.libraryTrace.runInScope({
             scope: 'render-output',
             operation: () =>
-              renderWithinBudget(namedShapes, {
+              renderTessellated(namedShapes, {
                 request: { tessellation, explicitDefaults: occtExplicitTessellationDefaults.preview },
-                budget: context.previewTriangleBudget,
                 collectBrepEdges: includeEdges || includeTopology,
                 openCascade: context.openCascade,
                 tessellationInstancing: context.tessellationInstancing,
@@ -976,7 +966,7 @@ export const replicadKernel = defineKernel({
         }
       });
 
-      const renderedShapes = budgeted.geometries;
+      const renderedShapes = rendered.geometries;
       const shapes3d = renderedShapes.filter((shape): shape is GeometryReplicad => shape.format === 'replicad');
       if (shapes3d.length === 0) {
         runtime.logger.warn('meshGeometry returning empty: render-output-filtered-empty', {
@@ -1019,8 +1009,8 @@ export const replicadKernel = defineKernel({
       });
       return {
         content: gltfBlob,
-        tessellation: budgeted.tessellation,
-        issues: [...budgeted.issues, ...mechanismIssues],
+        tessellation: rendered.tessellation,
+        issues: mechanismIssues,
       };
     } catch (error) {
       const issue = formatOcRuntimeError(error, context.openCascade, buildErrorContext(context, {}));
@@ -1090,7 +1080,6 @@ export const replicadKernel = defineKernel({
                 tracer: runtime.tracer,
               }),
             );
-            assertWithinExportBudget(requested, countMesh(renderedShapes).triangles);
             const temporaryShapes = renderedShapes.filter(
               (shape): shape is GeometryReplicad => shape.format === 'replicad',
             );
@@ -1206,10 +1195,6 @@ export const replicadKernel = defineKernel({
             ).finally(() => {
               deleteExportCopies(rotated);
             });
-            assertWithinExportBudget(
-              requested,
-              result.reduce((total, file) => total + countStlTriangles(file.bytes, options.binary), 0),
-            );
             return { files: nonemptyExportFiles(result) };
           }
 
@@ -1389,37 +1374,6 @@ async function buildExportBytes(
 ): Promise<Uint8Array<ArrayBuffer>> {
   const blob = shape.blobSTL(tessellation.binary ? { ...tessellation, binary: true } : tessellation);
   return new Uint8Array(await blob.arrayBuffer());
-}
-
-const binaryStlHeaderBytes = 80;
-
-/**
- * Triangles in an STL file: the binary header count, or the ASCII facet count.
- * @param bytes - STL file bytes.
- * @param binary - Whether the file is binary STL.
- * @returns The triangle count.
- */
-function countStlTriangles(bytes: Uint8Array<ArrayBuffer>, binary: boolean): number {
-  if (!binary) {
-    return new TextDecoder().decode(bytes).match(/^\s*facet\b/gm)?.length ?? 0;
-  }
-  return bytes.byteLength < binaryStlHeaderBytes + 4
-    ? 0
-    : new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(binaryStlHeaderBytes, true);
-}
-
-/**
- * Exports refuse instead of coarsening: an over-budget mesh fails with a suggested tessellation.
- * @param requested - The resolved request the export meshed with.
- * @param triangles - Triangles the export produced.
- */
-function assertWithinExportBudget(requested: OcctResolvedTessellation, triangles: number): void {
-  const budget = occtTriangleBudgets.export;
-  if (triangles > budget) {
-    throw new ReplicadBuildError([
-      createTessellationBudgetExceededIssue({ producer: 'replicad', requested, triangles, budget }),
-    ]);
-  }
 }
 
 class ReplicadBuildError extends Error {

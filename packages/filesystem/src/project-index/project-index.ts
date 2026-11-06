@@ -87,6 +87,8 @@ export type IndexSearchOptions = {
   readonly maxResults?: number;
   readonly includeDirectories?: boolean;
   readonly admits?: IndexAdmits;
+  /** Stops a query still waiting for its root's index to open. */
+  readonly signal?: AbortSignal;
 };
 
 /** What one head-metadata compare found (D5). @public */

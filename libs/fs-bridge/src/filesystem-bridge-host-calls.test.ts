@@ -235,6 +235,18 @@ describe('long-call binding', () => {
     expect(bindFileSystemLongCall('readMany', [], longCall)).toEqual([undefined, longCall]);
   });
 
+  it('hands the rooted view its signal on the content, index and copy calls', () => {
+    expect(bindFileSystemLongCall('archive', ['src', { versionedOnly: true }], longCall)).toEqual([
+      'src',
+      { versionedOnly: true, ...longCall },
+    ]);
+    expect(bindFileSystemLongCall('contents', ['src'], longCall)).toEqual(['src', longCall]);
+    expect(bindFileSystemLongCall('search', ['main'], longCall)).toEqual(['main', longCall]);
+    expect(bindFileSystemLongCall('statTree', ['src'], longCall)).toEqual(['src', longCall]);
+    expect(bindFileSystemLongCall('copyTree', ['src', 'backup'], longCall)).toEqual(['src', 'backup', longCall]);
+    expect(bindFileSystemLongCall('duplicate', ['a.ts', 'b.ts'], longCall)).toEqual(['a.ts', 'b.ts', longCall]);
+  });
+
   it("puts apply's signal on the changeset and leaves other calls as they are", () => {
     expect(bindFileSystemLongCall('apply', [{ entries: [] }], longCall)).toEqual([
       { entries: [], signal: longCall.signal },

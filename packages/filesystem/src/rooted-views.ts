@@ -129,9 +129,13 @@ export type RootedPorcelain = {
    */
   apply(changeset: Changeset): Promise<ChangesetReceipt>;
   /** Recursively copy one subtree of this root onto another. */
-  copyTree(source: string, target: string, options?: { admits?: WalkOptions['admits'] }): Promise<void>;
+  copyTree(
+    source: string,
+    target: string,
+    options?: { admits?: WalkOptions['admits']; signal?: AbortSignal },
+  ): Promise<void>;
   /** Copy one file of this root to a new path. */
-  duplicate(source: string, target: string): Promise<void>;
+  duplicate(source: string, target: string, options?: { signal?: AbortSignal }): Promise<void>;
   /** Move one path of this root, answering with the resulting stat. */
   move(source: string, target: string): Promise<FileStat>;
   /** Move many paths sequentially, reporting each completed and failed edit. */
@@ -191,7 +195,7 @@ export type RootedFileSystem = Omit<FileSystemProvider, 'writeFileChecked' | 'de
      */
     search?(query: string, options?: IndexSearchOptions): Promise<FileStatEntry[]>;
     /** Recursively stat one directory of this root from the same index. */
-    statTree?(path: string, options?: { admits?: IndexAdmits }): Promise<FileStatEntry[]>;
+    statTree?(path: string, options?: { admits?: IndexAdmits; signal?: AbortSignal }): Promise<FileStatEntry[]>;
     /**
      * Lazy content facts (D4): from the index while they still describe the
      * bytes, otherwise measured from one read within `byteCap` and recorded.
@@ -503,7 +507,7 @@ export class RootedViews {
     const copyTree = async (
       source: string,
       target: string,
-      options?: { admits?: WalkOptions['admits'] },
+      options?: { admits?: WalkOptions['admits']; signal?: AbortSignal },
     ): Promise<void> => {
       const from = resolveLocal(source);
       const to = resolveLocal(target);
@@ -513,10 +517,12 @@ export class RootedViews {
         sourceResolution: from.resolution,
         targetResolution: to.resolution,
         admits: options?.admits,
+        signal: options?.signal,
         context: mutationContext,
       });
     };
-    const duplicate = async (source: string, target: string): Promise<void> => {
+    const duplicate = async (source: string, target: string, options?: { signal?: AbortSignal }): Promise<void> => {
+      options?.signal?.throwIfAborted();
       const to = resolveLocal(target);
       assertMutableRoot(to.localPath);
       /* A view is captured to one exact mount, so a target the mount table
@@ -525,7 +531,10 @@ export class RootedViews {
       if (!this._pipeline.isCurrentResolution(to.authorityPath, to.resolution)) {
         throw new Error(`[WorkspaceFileService] copy would cross mount boundary at '${to.authorityPath}'.`);
       }
-      await writeFile(target, await readFile(source));
+      const bytes = await readFile(source);
+      /* Nothing is written yet: a copy stopped here leaves the target as it was. */
+      options?.signal?.throwIfAborted();
+      await writeFile(target, bytes);
     };
     const bulkMove = async (edits: readonly BulkMoveEdit[]): Promise<BulkMoveResult> => {
       const resolved = [];
@@ -729,12 +738,17 @@ export class RootedViews {
       assertCurrent();
       const index = await this._projectIndexes.ready(root);
       assertCurrent();
+      options?.signal?.throwIfAborted();
       return index.search(query, options);
     };
-    const statTree = async (path: string, options?: { admits?: IndexAdmits }): Promise<FileStatEntry[]> => {
+    const statTree = async (
+      path: string,
+      options?: { admits?: IndexAdmits; signal?: AbortSignal },
+    ): Promise<FileStatEntry[]> => {
       const { localPath } = resolveLocal(path);
       const index = await this._projectIndexes.ready(root);
       assertCurrent();
+      options?.signal?.throwIfAborted();
       return index.statTree(localPath, options);
     };
     const facts = async (

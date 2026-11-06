@@ -511,11 +511,18 @@ export const withHostContentCalls = <Handlers extends StringKeyedObject>(
 
 /**
  * The bridge methods whose handler takes the long-call controls, and where.
- * Only calls the bridge itself derives (or whose contract names them) take
- * them: a domain handler's trailing slot may already mean something else, such
- * as the mutation context a port binds.
+ * Only calls the bridge itself derives, or whose rooted contract names them,
+ * take them: a domain handler's trailing slot may already mean something else,
+ * such as the mutation context a workspace port binds. Every call here is a
+ * rooted one, whose view takes the signal in that options argument.
  */
 const longCallHandlerSlot: Readonly<Record<string, number>> = {
+  archive: 1,
+  contents: 1,
+  search: 1,
+  statTree: 1,
+  copyTree: 2,
+  duplicate: 2,
   hashFiles: 1,
   readMany: 1,
   glob: 1,

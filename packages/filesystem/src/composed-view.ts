@@ -118,7 +118,7 @@ type WatchableFileSystem = {
  */
 type IndexedFileSystem = {
   search(query: string, options?: IndexSearchOptions): Promise<FileStatEntry[]>;
-  statTree(path: string, options?: { admits?: IndexAdmits }): Promise<FileStatEntry[]>;
+  statTree(path: string, options?: { admits?: IndexAdmits; signal?: AbortSignal }): Promise<FileStatEntry[]>;
   facts(paths: readonly string[], options?: IndexFactsOptions): Promise<ReadonlyMap<string, ContentFacts>>;
   changedSince(since: number, options?: { admits?: IndexAdmits; signal?: AbortSignal }): Promise<IndexChanges>;
 };
@@ -894,7 +894,11 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     ...(base.copyTree === undefined
       ? {}
       : {
-          copyTree: async (source: string, target: string, options?: { admits?: IndexAdmits }) => {
+          copyTree: async (
+            source: string,
+            target: string,
+            options?: { admits?: IndexAdmits; signal?: AbortSignal },
+          ) => {
             const from = await readableSource(source);
             const [to] = await writableTargets([target]);
             /* Every entry a copy writes is a target too: `notes/exports` is
@@ -907,16 +911,17 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
             const visible = admitsVisible(from, options?.admits);
             return base.copyTree!(from, to!, {
               admits: (relativePath, kind) => visible(relativePath, kind) && writableBelow(relativePath),
+              ...(options?.signal === undefined ? {} : { signal: options.signal }),
             });
           },
         }),
     ...(base.duplicate === undefined
       ? {}
       : {
-          duplicate: async (source: string, target: string) => {
+          duplicate: async (source: string, target: string, options?: { signal?: AbortSignal }) => {
             const from = await readableSource(source);
             const [to] = await writableTargets([target]);
-            return base.duplicate!(from, to!);
+            return base.duplicate!(from, to!, options);
           },
         }),
     ...(base.move === undefined
@@ -1196,9 +1201,12 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     ...(base.statTree === undefined
       ? {}
       : {
-          statTree: async (path: string, statOptions?: { admits?: IndexAdmits }): Promise<FileStatEntry[]> => {
+          statTree: async (
+            path: string,
+            statOptions?: { admits?: IndexAdmits; signal?: AbortSignal },
+          ): Promise<FileStatEntry[]> => {
             const target = readablePath(canonical(path));
-            return base.statTree!(target, { admits: admitsVisible(target, statOptions?.admits) });
+            return base.statTree!(target, { ...statOptions, admits: admitsVisible(target, statOptions?.admits) });
           },
         }),
     /* Overlay entries never change, so what changed is the checkout's index, masked. */

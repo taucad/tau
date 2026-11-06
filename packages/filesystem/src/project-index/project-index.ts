@@ -226,15 +226,28 @@ export class ProjectIndex {
    *
    * @param rows - Serialized entries.
    * @param generation - The snapshot's generation.
+   * @param pending - The pending entries by path (D9), as {@link ProjectIndex.pendingSnapshot} gave them.
    * @returns The index.
    */
-  public static fromSnapshot(rows: readonly SnapshotRow[], generation: number): ProjectIndex {
+  public static fromSnapshot(
+    rows: readonly SnapshotRow[],
+    generation: number,
+    pending?: Readonly<Record<string, PendingObject>>,
+  ): ProjectIndex {
     const index = new ProjectIndex({ generation, trustworthyMtime: true });
     for (const [path, kind, size, mtimeMs, facts, factsAt] of rows) {
+      const object = kind === 'f' && pending !== undefined && Object.hasOwn(pending, path) ? pending[path] : undefined;
       const node: Node =
         kind === 'd'
           ? directoryNode(generation, mtimeMs)
-          : { kind: 'file', size, mtimeMs, generation, ...(facts === undefined ? {} : { facts, factsAt }) };
+          : {
+              kind: 'file',
+              size,
+              mtimeMs,
+              generation,
+              ...(facts === undefined ? {} : { facts, factsAt }),
+              ...(object === undefined ? {} : { pending: object }),
+            };
       index._place(path, node, false);
     }
     return index;
@@ -794,6 +807,22 @@ export class ProjectIndex {
       );
     }
     return rows;
+  }
+
+  /**
+   * Every pending entry by path, stored beside the snapshot rows so a reload
+   * knows them without reading a file (D9, I3).
+   *
+   * @returns The pending objects by path.
+   */
+  public pendingSnapshot(): Record<string, PendingObject> {
+    const pending: Record<string, PendingObject> = {};
+    for (const entry of this.walk('', { kinds: ['file'] })) {
+      if (entry.pending !== undefined) {
+        pending[entry.path] = entry.pending;
+      }
+    }
+    return pending;
   }
 
   /* An arriving entry lands: its bytes are at its path now, pending when they are its placeholder's. */

@@ -869,6 +869,26 @@ describe('ProjectIndexes', () => {
     expect(await b.persist('/p')).toBe('written');
   });
 
+  /* D9, I3: a reload knows its pending entries from the snapshot, reading no file to find them. */
+  it('should keep pending entries across a reload without reading a file', async () => {
+    const { provider, reads } = await durableRoot();
+    const object = { oid: 'b'.repeat(64), size: 5_000_000 };
+    await provider.writeFile('project/part.step', 'p'.repeat(131));
+    await provider.writeFile('project/main.scad', 'cube(1);');
+    const before = indexesOver(provider);
+    await before.ready('/p');
+    before.markPending('/p/part.step', object);
+    expect(await before.persist('/p')).toBe('written');
+    const stored = await readIndexSnapshot(provider, 'project');
+    expect(stored?.pending).toEqual({ 'part.step': object });
+
+    const reloaded = indexesOver(provider);
+    await reloaded.ready('/p');
+    expect(reloaded.pendingAt('/p/part.step')).toEqual(object);
+    expect(reloaded.pendingAt('/p/main.scad')).toBeUndefined();
+    expect(reads()).toBe(0);
+  });
+
   it('should re-observe what a notice left unknown before storing a snapshot that claims it', async () => {
     const { provider, reads } = await durableRoot();
     await provider.writeFile('project/a.ts', 'a');

@@ -407,12 +407,16 @@ export class ProjectIndexes {
       provider: resolution.provider,
       providerRoot: resolution.path,
       lockName: resolution.persist.lockName,
-      snapshot: () => ({
-        vector: this.vector(key),
-        rescan: false,
-        writtenAt: Date.now(),
-        entries: state.index.toSnapshot(),
-      }),
+      snapshot: () => {
+        const pending = state.index.pendingSnapshot();
+        return {
+          vector: this.vector(key),
+          rescan: false,
+          writtenAt: Date.now(),
+          entries: state.index.toSnapshot(),
+          ...(Object.keys(pending).length === 0 ? {} : { pending }),
+        };
+      },
     });
     if (written === 'busy') {
       this._schedulePersist(key);
@@ -769,7 +773,7 @@ export class ProjectIndexes {
       resolution.persist === undefined ? undefined : await readIndexSnapshot(resolution.provider, resolution.path);
     const usable = snapshot !== undefined && !snapshot.rescan;
     const index = usable
-      ? ProjectIndex.fromSnapshot(snapshot.entries, snapshot.vector.generation)
+      ? ProjectIndex.fromSnapshot(snapshot.entries, snapshot.vector.generation, snapshot.pending)
       : new ProjectIndex({
           trustworthyMtime:
             resolution.persist !== undefined || resolution.provider.capabilities.trustworthyMtime === true,

@@ -426,6 +426,20 @@ describe('handleGrep', () => {
     expect(result).toMatchObject({ success: true, totalMatches: 1, pendingFiles: ['part.step'] });
   });
 
+  it('should fail without reading a file when the index cannot say which files are pending', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+    fileSystem.readdir.mockResolvedValue([textEntry('a.ts', 20), { name: 'part.step', type: 'file', size: 130 }]);
+    fileSystem.pendingPaths = async () => {
+      throw new Error('The project index could not open.');
+    };
+    fileSystem.readFile.mockResolvedValue('const marker = 1;');
+
+    const result = await handleGrep({ pattern: 'marker', path: '' }, fileSystem);
+
+    expect(result.success).toBe(false);
+    expect(fileSystem.readFile).not.toHaveBeenCalled();
+  });
+
   it('should read at most 16 files at once, keeping the walk order', async () => {
     const fileSystem = mock<RpcFileSystem>();
     const names = Array.from({ length: 40 }, (_, index) => `f${String(index).padStart(2, '0')}.ts`);

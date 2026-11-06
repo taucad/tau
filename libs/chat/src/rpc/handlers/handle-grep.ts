@@ -52,17 +52,14 @@ const grepReadConcurrency = 16;
 /*
  * The files the index already knows are pending (D9): asked before any read, so
  * a grep never starts a download. A host that cannot say is asked nothing, and
- * its reads answer `PENDING` instead.
+ * its reads answer `PENDING` instead; a host whose index fails to answer fails
+ * the grep, which reading every file would turn into downloads.
  */
 const knownPending = async (fileSystem: RpcFileSystem, paths: readonly string[]): Promise<ReadonlySet<string>> => {
   if (fileSystem.pendingPaths === undefined || paths.length === 0) {
     return new Set();
   }
-  try {
-    return new Set(await fileSystem.pendingPaths(paths));
-  } catch {
-    return new Set();
-  }
+  return new Set(await fileSystem.pendingPaths(paths));
 };
 
 /* Map over items with at most `limit` in flight, keeping the input order. */

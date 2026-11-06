@@ -122,11 +122,10 @@ class EdgeTessellationTest(unittest.TestCase):
         self.assertEqual([worker._point(p) for p in fine[0]], [worker._point(p) for p in unmeshed[0]])
         self.assertTrue(all(abs(p.length - 15) < 1e-8 for p in fine[0]))
 
-    def test_budget_retry_rebuilds_edges_from_the_admitted_surface(self):
+    def test_retessellation_rebuilds_edges_from_the_delivered_surface(self):
         shape = Cylinder(15, 18)
-        with self.assertRaises(worker._OverBudget):
-            worker._topology((shape,), 0.001, math.radians(5), 1, include_edges=True)
-        _, meshes = worker._topology((shape,), 0.04, math.radians(24), 10000, include_edges=True)
+        worker._topology((shape,), 0.001, math.radians(5), include_edges=True)
+        _, meshes = worker._topology((shape,), 0.04, math.radians(24), include_edges=True)
         self.assertEqual(len(meshes), 1)
         mesh = next(iter(meshes.values()))
         self.assertTrue(all(edge in boundary_segments(mesh) for edge in line_segments(mesh)))

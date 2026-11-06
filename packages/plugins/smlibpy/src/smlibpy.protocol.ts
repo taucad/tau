@@ -117,13 +117,10 @@ export const smlibpyArtifactSchema = pythonArtifactSchema;
 /** One worker artifact. */
 export type SmlibpyArtifact = z.infer<typeof smlibpyArtifactSchema>;
 
-/**
- * What the worker answers `mesh` with: the triangle and vertex counts, and the mesh bundle when it was within the
- * request's `maxTriangles`.
- */
+/** What the worker answers `mesh` with: the mesh bundle and its triangle and vertex counts. */
 export const smlibpyMeshSchema = z.object({
-  artifactPath: z.string().min(1).optional(),
-  byteLength: z.number().int().nonnegative().optional(),
+  artifactPath: z.string().min(1),
+  byteLength: z.number().int().nonnegative(),
   triangles: z.number().int().nonnegative(),
   vertices: z.number().int().nonnegative(),
 });

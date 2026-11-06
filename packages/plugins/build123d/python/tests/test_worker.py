@@ -303,8 +303,8 @@ class WorkerTest(unittest.TestCase):
             # The same absolute tolerance on a sphere a hundred times larger needs many more triangles.
             large = runtime.dispatch("mesh", {"handleId": "large", "linearTolerance": 0.05, "angularTolerance": 20})
             self.assertGreater(large["triangles"], small["triangles"] * 10)
-            # Native UV extraction must reuse the absolute triangulation that the
-            # budget counted, including when OCCT achieved deflection exceeds its request.
+            # Native UV extraction must reuse the absolute triangulation that was
+            # counted, including when OCCT achieved deflection exceeds its request.
             for name, emitted in (("small", small), ("large", large)):
                 located, counted = worker._triangulate(runtime.handles[name][0], 0.05, math.radians(20))
                 arrays = worker._mesh_arrays(runtime.handles[name][0], located, 0.05, math.radians(20))
@@ -312,19 +312,13 @@ class WorkerTest(unittest.TestCase):
                 self.assertEqual(len(arrays["indices"]) // 3, counted)
                 self.assertEqual(len(arrays["uvs"]) // 2, emitted["vertices"])
 
-            before = set(artifacts.iterdir())
-            refused = runtime.dispatch(
+            # No triangle budget: a request carrying the retired maxTriangles still meshes and writes the GLB.
+            unbudgeted = runtime.dispatch(
                 "mesh",
-                {"handleId": "small", "linearTolerance": 0.05, "angularTolerance": 20, "maxTriangles": small["triangles"] - 1},
+                {"handleId": "small", "linearTolerance": 0.05, "angularTolerance": 20, "maxTriangles": 1},
             )
-            self.assertEqual(refused, {"triangles": small["triangles"], "vertices": small["triangles"] * 3})
-            self.assertEqual(set(artifacts.iterdir()), before, "an over-budget mesh writes no GLB")
-            within = runtime.dispatch(
-                "mesh",
-                {"handleId": "small", "linearTolerance": 0.05, "angularTolerance": 20, "maxTriangles": small["triangles"]},
-            )
-            self.assertEqual(within["triangles"], small["triangles"])
-            self.assertIn("artifactPath", within)
+            self.assertEqual(unbudgeted["triangles"], small["triangles"])
+            self.assertIn("artifactPath", unbudgeted)
 
     def test_resident_lineage_hits_are_share_mode_clones_without_codec_work(self) -> None:
         """G-F1/I1/U2: a warm hit is a lineage lookup plus a clone; no codec, no mesh, no I/O."""

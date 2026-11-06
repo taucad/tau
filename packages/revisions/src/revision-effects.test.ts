@@ -3907,6 +3907,27 @@ for (const actorSet of actorSets) {
       expect(new TextDecoder().decode(await filesystem.readFile('a.txt'))).toBe('theirs\n');
     }, 30_000);
 
+    it('fast-forwards a line the files are not on as that line’s tree, never mixed with the checkout’s (W4 review 4)', async () => {
+      const { port, actors, filesystem, base, theirs } = await twoLines({
+        ours: 'mine\n',
+        theirs: 'base\n',
+        extra: { 'b.txt': 'theirs only\n' },
+      });
+      /* `other` has not moved from the base and has no checkout: the live one, on `main`, is the target. */
+      await port.updateRef({ name: 'other', expectedHead: undefined, head: revisionId(base) });
+
+      const outcome = await run<{ status: string; revisionId?: string }>(actors.branch.merge, {
+        projectId: 'project-1',
+        branch: 'feature',
+        into: 'other',
+      });
+
+      expect(outcome).toMatchObject({ status: 'merged', revisionId: theirs });
+      expect(await port.readRef('other')).toBe(theirs);
+      expect(await filesystem.readFile('a.txt', 'utf8')).toBe('base\n');
+      expect(await filesystem.readFile('b.txt', 'utf8')).toBe('theirs only\n');
+    }, 30_000);
+
     it('says a line already merged is merged, rather than failing', async () => {
       const { port, actors, base, theirs } = await twoLines({ ours: 'base\n', theirs: 'theirs\n' });
       await port.updateRef({ name: 'feature', expectedHead: revisionId(theirs), head: revisionId(base) });

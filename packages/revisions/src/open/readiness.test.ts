@@ -88,6 +88,9 @@ describe('readinessOf', () => {
   it('treats a local project with no revision as complete', () => {
     const local = source({ headRevisionId: undefined, remote: remote('none') });
     expect(readinessOf(local).state).toBe('filled');
+    /* No revision means no placeholder: the fill, which never runs there, is not waited for. */
+    expect(readinessOf(local, false).state).toBe('filled');
+    expect(readinessOf(local, false, 1).state).toBe('materialized');
   });
 
   it('follows the open once it has applied the remote tree', () => {

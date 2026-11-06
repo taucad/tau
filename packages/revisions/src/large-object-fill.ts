@@ -127,7 +127,8 @@ export const createLargeObjectFill = (
     checkoutId: string,
     paths: readonly string[],
     signal?: AbortSignal,
-  ) => Promise<'written' | 'failed' | 'idle'>;
+    stall?: number,
+  ) => Promise<'written' | 'failed' | 'stalled' | 'idle'>;
 }> => {
   const { port, capture, withCheckoutFence, materializeTree, report } = dependencies;
   const flushMilliseconds = dependencies.flushMilliseconds ?? defaultFlushMilliseconds;
@@ -158,19 +159,26 @@ export const createLargeObjectFill = (
 
   /*
    * Wait until `check` holds, answering `true`; `false` once the fill fails or
-   * ends without it. An abort rejects with its reason.
+   * ends without it, or (given `stall`) once that many milliseconds pass with
+   * nothing arriving, flushed or told. An abort rejects with its reason.
    */
-  const until = async (fill: Fill, check: () => boolean, signal?: AbortSignal): Promise<boolean> => {
+  const until = async (fill: Fill, check: () => boolean, signal?: AbortSignal, stall?: number): Promise<boolean> => {
     signal?.throwIfAborted();
     const settled = Promise.withResolvers<boolean>();
     const onAbort = (): void => {
       settled.reject(signal?.reason);
     };
+    let stalled: ReturnType<typeof setTimeout> | undefined;
     const waiter = (): void => {
+      clearTimeout(stalled);
       if (check()) {
         settled.resolve(true);
       } else if (!isCurrent(fill) || fill.error !== undefined) {
         settled.resolve(false);
+      } else if (stall !== undefined) {
+        stalled = setTimeout(() => {
+          settled.resolve(false);
+        }, stall);
       }
     };
     fill.waiters.add(waiter);
@@ -179,6 +187,7 @@ export const createLargeObjectFill = (
       waiter();
       return await settled.promise;
     } finally {
+      clearTimeout(stalled);
       fill.waiters.delete(waiter);
       signal?.removeEventListener('abort', onAbort);
     }
@@ -658,22 +667,25 @@ export const createLargeObjectFill = (
    * @param checkoutId - The checkout.
    * @param paths - Checkout-relative paths.
    * @param signal - Stops waiting; the wait then rejects.
-   * @returns `written`; `failed` when the transfer failed first; `idle` when no fill runs on the checkout.
+   * @param stall - Milliseconds with no progress after which the wait gives up.
+   * @returns `written`; `failed` when the transfer failed first; `stalled` when it made no progress for `stall`;
+   *   `idle` when no fill runs on the checkout.
    */
   const written = async (
     checkoutId: string,
     paths: readonly string[],
     signal?: AbortSignal,
-  ): Promise<'written' | 'failed' | 'idle'> => {
+    stall?: number,
+  ): Promise<'written' | 'failed' | 'stalled' | 'idle'> => {
     for (let current = fills.get(checkoutId); current !== undefined; current = fills.get(checkoutId)) {
       prioritize(current, paths);
       const tracked = current;
       // oxlint-disable-next-line no-await-in-loop -- a replaced fill is followed to its successor, one at a time.
-      if (await until(tracked, () => paths.every((path) => !tracked.pending.has(path)), signal)) {
+      if (await until(tracked, () => paths.every((path) => !tracked.pending.has(path)), signal, stall)) {
         return 'written';
       }
       if (isCurrent(tracked)) {
-        return 'failed';
+        return tracked.error === undefined ? 'stalled' : 'failed';
       }
     }
     return 'idle';

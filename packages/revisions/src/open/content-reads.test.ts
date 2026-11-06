@@ -92,6 +92,22 @@ describe('readContent (D9)', () => {
     expect(await reads.readContent(place, 'models/part.step')).toStrictEqual({ outcome: 'bytes', data: part });
   });
 
+  it('reads a pointer the attributes do not track as the text it is, as adoption decides (W4 review 8)', async () => {
+    const { reads, files, stored } = setup();
+    stored.set(pointer.oid, part);
+    files.set('notes/pointer.txt', pointerBytes);
+    expect(await reads.readContent(place, 'notes/pointer.txt')).toStrictEqual({ outcome: 'bytes', data: pointerBytes });
+    await expect(reads.materialize(place, ['notes/pointer.txt'])).resolves.toBeUndefined();
+    /* Tracked by the project's attributes, the same pointer is a placeholder. */
+    files.set(
+      '.gitattributes',
+      encoder.encode(
+        '# BEGIN Tau generated — large objects are git LFS objects\n/notes/pointer.txt filter=lfs diff=lfs merge=lfs -text\n# END Tau generated\n',
+      ),
+    );
+    expect(await reads.readContent(place, 'notes/pointer.txt')).toStrictEqual({ outcome: 'bytes', data: part });
+  });
+
   it('serves an object that has landed and is not written yet', async () => {
     const { reads, setLook } = setup();
     setLook({ state: 'filling', bytes: part });
@@ -141,7 +157,7 @@ describe('materialize (D9)', () => {
       return 'written';
     });
     await reads.materialize(place, ['main.scad', 'models/part.step']);
-    expect(written).toHaveBeenCalledExactlyOnceWith('live', ['models/part.step'], undefined);
+    expect(written).toHaveBeenCalledExactlyOnceWith('live', ['models/part.step'], undefined, 60_000);
   });
 
   it('starts a fill on a checkout with none running', async () => {
@@ -165,6 +181,15 @@ describe('materialize (D9)', () => {
     });
     /* Bounded: an idle checkout is not started forever. */
     expect(idle.startFill.mock.calls.length).toBeLessThanOrEqual(3);
+  });
+
+  it('gives up with PendingError on a fill that stalls, passing its stall bound (W4 review 5)', async () => {
+    const { reads, written } = setup();
+    written.mockResolvedValue('stalled');
+    await expect(reads.materialize(place, ['models/part.step'], { stallMilliseconds: 5 })).rejects.toBeInstanceOf(
+      PendingError,
+    );
+    expect(written).toHaveBeenCalledWith('live', ['models/part.step'], undefined, 5);
   });
 
   it('stops on its signal', async () => {

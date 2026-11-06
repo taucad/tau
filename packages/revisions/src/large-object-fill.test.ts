@@ -277,6 +277,28 @@ describe('large-object fill', () => {
     await done;
   });
 
+  it('answers `stalled` when the transfer makes no progress for the stall bound, and waits while it does (W4 review 5)', async () => {
+    const harness = setup({ flushMilliseconds: 60_000 });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    const waiting = harness.fill.written(place.id, ['models/a.step', 'models/b.step'], undefined, 200);
+    /* An arrival is progress: the bound starts again. */
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    harness.land('models/a.step');
+    let answered = false;
+    void waiting.then(() => {
+      answered = true;
+    });
+    /* 240 ms in: past the bound from the start, within it from the arrival. */
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(answered).toBe(false);
+    expect(await waiting).toBe('stalled');
+    harness.finish(harness.fullTree());
+    await done;
+  });
+
   it('gives its word once on a checkout with nothing to fill', async () => {
     const harness = setup();
     harness.files.set('models/a.step', encoder.encode(parts['models/a.step']));

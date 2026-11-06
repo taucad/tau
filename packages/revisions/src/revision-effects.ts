@@ -437,7 +437,7 @@ export type RevisionActors = Readonly<{
   materialize: (
     checkoutId: string | undefined,
     paths: readonly string[],
-    options?: Readonly<{ signal?: AbortSignal }>,
+    options?: Readonly<{ signal?: AbortSignal; stallMilliseconds?: number }>,
   ) => Promise<void>;
   /**
    * Store every large file the checkout's attributes track and holds whole,
@@ -1493,6 +1493,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     return record?.treeId;
   };
 
+  /* Tree writes per checkout: a fill started for an older tree after a newer one began never speaks for the newer one. */
+  const treeWrites = new Map<string, number>();
   const {
     equalEntry,
     entryOf,
@@ -1503,6 +1505,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     /* A write of another revision's tree ends the old tree's fill first, silently: the new tree's fill speaks next (D10, I7). */
     onApplyingTree: (place, paths, bracket) => {
       if (bracket?.purpose === 'tree') {
+        treeWrites.set(place.id, (treeWrites.get(place.id) ?? 0) + 1);
         largeObjects.forget(place.id);
       }
       return options.onApplyingTree?.(place, paths, bracket);
@@ -1702,6 +1705,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     };
     /* The written tree from `fillFrom`; after a failure, whatever the checkout holds from its head. */
     const fillSoon = (tree: ImmutableRevisionTree | undefined): void => {
+      /* Taken before any await: a tree write that begins in the gap owns the checkout's next word (D10). */
+      const writes = treeWrites.get(place.id);
       // async-iife: bootstrap -- a background fill; its failures are reported through `onLargeObjects`.
       void (async (): Promise<void> => {
         try {
@@ -1709,8 +1714,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           if (head === undefined || fillsStopped) {
             return;
           }
+          const placeholders = largeObjectPlaceholders(tree ?? (await capture(place)));
+          if (treeWrites.get(place.id) !== writes) {
+            return;
+          }
           resumedFills.add(place.id);
-          await largeObjects.fill(place, revisionId(head), largeObjectPlaceholders(tree ?? (await capture(place))));
+          await largeObjects.fill(place, revisionId(head), placeholders);
         } catch (error) {
           console.warn('[revisions] large-object placeholders could not be checked', error);
         }
@@ -1763,7 +1772,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const materialize = async (
     checkoutId: string | undefined,
     paths: readonly string[],
-    materializeOptions?: Readonly<{ signal?: AbortSignal }>,
+    materializeOptions?: Readonly<{ signal?: AbortSignal; stallMilliseconds?: number }>,
   ): Promise<void> => contentReads.materialize(await readPlaceOf(checkoutId), paths, materializeOptions);
   /* D9: one copy of every large object; see `large-object-adoption.ts`. A port that cannot store one adopts nothing. */
   const { storeLargeObject, readLargeObject } = port;
@@ -3261,7 +3270,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
      */
     await refuseLeased(target);
     const live = await captureFresh(target);
-    const headTreeId = await treeIdOf(await headOf(target));
+    const targetHead = await headOf(target);
+    const headTreeId = await treeIdOf(targetHead);
     if (headTreeId !== (await checkoutTreeId(target.id, live))) {
       throw new CheckoutHeld({
         hold: 'dirty',
@@ -3288,9 +3298,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       await publishMerge(input.into, expectedHead, head);
     };
     if (ours === undefined || base === ours) {
-      /* `validateTarget` proves the files are `ours`, so only what the oid diff to `theirs` names is read (D10). */
+      /*
+       * `validateTarget` proves the files are the target's head: when that is `ours`, only what the oid diff to
+       * `theirs` names is read (D10); a checkout on another line is written `theirs` whole, as a real merge is.
+       */
       const fastForward: MaterializeTarget =
-        ours === undefined
+        ours === undefined || targetHead !== ours
           ? async () => {
               const tree = await port.readTree(theirs, { largeObjects: 'local' });
               if (tree === undefined) {
@@ -3335,7 +3348,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
 
     /* The merged paths over ours as a whole: the files, proven to be ours, unless the checkout is on another line. */
-    const oursFiles = (await headOf(target)) === ours ? live : await port.readTree(ours, { largeObjects: 'local' });
+    const oursFiles = targetHead === ours ? live : await port.readTree(ours, { largeObjects: 'local' });
     if (oursFiles === undefined) {
       throw new RevisionPortError('UNKNOWN_REVISION', 'This project no longer holds both sides of that merge.');
     }

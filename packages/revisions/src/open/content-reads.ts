@@ -12,6 +12,7 @@ import { readLfsPointer } from '#lfs.js';
 import type { LargeObjectLook } from '#large-object-fill.js';
 import type { Checkout } from '#revision-port.js';
 import type { RevisionFileSystem } from '#revision-effects.types.js';
+import { generatedGitattributesPath, isTrackedLargeObjectPath } from '#workspace-config.js';
 
 /** Why a path's object could not be read as bytes. @public */
 export type PendingReason = 'filling' | 'offline' | 'not-fetched';
@@ -56,7 +57,7 @@ export class PendingError extends Error {
 
 /** Options of one read. @public */
 export type ContentReadOptions = Readonly<{
-  /** Milliseconds to wait for an object a running fill is fetching. Absent or 0, a read never waits. */
+  /** Milliseconds to wait for an object a running fill is fetching, at most a minute. Absent or 0, a read never waits. */
   wait?: number;
   signal?: AbortSignal;
 }>;
@@ -76,7 +77,8 @@ export type ContentReadsDependencies = Readonly<{
       checkoutId: string,
       paths: readonly string[],
       signal?: AbortSignal,
-    ) => Promise<'written' | 'failed' | 'idle'>;
+      stall?: number,
+    ) => Promise<'written' | 'failed' | 'stalled' | 'idle'>;
   }>;
   /** Start a fill on a checkout that has placeholders and none running. */
   startFill: (place: Checkout) => Promise<void>;
@@ -91,6 +93,8 @@ const isMissing = (error: unknown): boolean => {
 
 /* Rounds of one `materialize`; see there. */
 const materializeRounds = 3;
+/** How long a `materialize` waits on a fill that makes no progress before it answers pending. Milliseconds. */
+const defaultStallMilliseconds = 60_000;
 
 const isDirectory = (error: unknown): boolean => (error as { code?: unknown } | undefined)?.code === 'EISDIR';
 
@@ -100,7 +104,7 @@ export type ContentReads = Readonly<{
   materialize: (
     place: Checkout,
     paths: readonly string[],
-    options?: Readonly<{ signal?: AbortSignal }>,
+    options?: Readonly<{ signal?: AbortSignal; stallMilliseconds?: number }>,
   ) => Promise<void>;
 }>;
 
@@ -122,6 +126,21 @@ export const createContentReads = (dependencies: ContentReadsDependencies): Cont
     }
   };
 
+  /* A pointer is a placeholder only where the attributes track large objects, as adoption decides: elsewhere it is a person's text. */
+  const pointerAt = async (
+    place: Checkout,
+    path: string,
+    read: ReadOutcome,
+  ): Promise<ReturnType<typeof readLfsPointer>> => {
+    const pointer = read.outcome === 'bytes' ? readLfsPointer(read.data) : undefined;
+    if (pointer === undefined || path === generatedGitattributesPath) {
+      return undefined;
+    }
+    const attributes = await readRaw(place, generatedGitattributesPath);
+    const text = attributes.outcome === 'bytes' ? new TextDecoder().decode(attributes.data) : undefined;
+    return isTrackedLargeObjectPath(path, text) ? pointer : undefined;
+  };
+
   const reasonOf = (look: LargeObjectLook | undefined): PendingReason => {
     if (dependencies.online?.() === false) {
       return 'offline';
@@ -134,7 +153,8 @@ export const createContentReads = (dependencies: ContentReadsDependencies): Cont
     oid: string,
     options: ContentReadOptions,
   ): Promise<Uint8Array<ArrayBuffer> | undefined> => {
-    const wait = options.wait ?? 0;
+    /* Bounded like a stalled `materialize`: no read waits on a transfer longer than that. */
+    const wait = Math.min(options.wait ?? 0, defaultStallMilliseconds);
     if (wait <= 0) {
       return undefined;
     }
@@ -160,7 +180,7 @@ export const createContentReads = (dependencies: ContentReadsDependencies): Cont
    */
   const readContent = async (place: Checkout, path: string, options: ContentReadOptions = {}): Promise<ReadOutcome> => {
     const raw = await readRaw(place, path);
-    const pointer = raw.outcome === 'bytes' ? readLfsPointer(raw.data) : undefined;
+    const pointer = await pointerAt(place, path, raw);
     if (pointer === undefined) {
       return raw;
     }
@@ -184,11 +204,12 @@ export const createContentReads = (dependencies: ContentReadsDependencies): Cont
     place: Checkout,
     paths: readonly string[],
   ): Promise<ReadonlyArray<Readonly<{ path: string; oid: string; size: number }>>> => {
-    const reads = await Promise.all(paths.map(async (path) => [path, await readRaw(place, path)] as const));
-    return reads.flatMap(([path, read]) => {
-      const pointer = read.outcome === 'bytes' ? readLfsPointer(read.data) : undefined;
-      return pointer === undefined ? [] : [{ path, oid: pointer.oid, size: pointer.size }];
-    });
+    const reads = await Promise.all(
+      paths.map(async (path) => [path, await pointerAt(place, path, await readRaw(place, path))] as const),
+    );
+    return reads.flatMap(([path, pointer]) =>
+      pointer === undefined ? [] : [{ path, oid: pointer.oid, size: pointer.size }],
+    );
   };
 
   /**
@@ -198,14 +219,15 @@ export const createContentReads = (dependencies: ContentReadsDependencies): Cont
    *
    * @param place - The checkout.
    * @param paths - Checkout-relative paths.
-   * @param options - Stops waiting; the call then rejects with the abort's reason.
+   * @param options - Stops waiting, the call then rejecting with the abort's reason; and how long a fill may make
+   *   no progress before the call gives up with {@link PendingError}.
    * @returns Once every path holds its bytes.
    * @throws {PendingError} For the first path whose object could not be fetched.
    */
   const materialize = async (
     place: Checkout,
     paths: readonly string[],
-    options: Readonly<{ signal?: AbortSignal }> = {},
+    options: Readonly<{ signal?: AbortSignal; stallMilliseconds?: number }> = {},
   ): Promise<void> => {
     let left = await placeholders(place, paths);
     /* A few rounds, not a loop: an idle checkout is started, and a writer that put a new pointer down meanwhile gets one more. */
@@ -215,8 +237,9 @@ export const createContentReads = (dependencies: ContentReadsDependencies): Cont
         place.id,
         left.map(({ path }) => path),
         options.signal,
+        options.stallMilliseconds ?? defaultStallMilliseconds,
       );
-      if (answer === 'failed') {
+      if (answer === 'failed' || answer === 'stalled') {
         break;
       }
       if (answer === 'idle') {

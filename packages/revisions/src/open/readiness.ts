@@ -66,7 +66,10 @@ export type ReadinessSource = Pick<
  *
  * The tree apply still writes every file before it releases its bracket, so
  * `entryReady` and `materialized` are reached together until the tree is read
- * from the index (W4); this answers the later of the two.
+ * from the index (W4); this answers the later of the two, and `entryReady` is
+ * never produced on its own yet. A surface gated on it (the editor, the
+ * viewer) therefore opens at `materialized` until the index-backed tree lists
+ * entries before their files are written.
  *
  * @param status - A projection with the host's fill facet and apply bracket merged.
  * @param largeObjectsTold - Whether the fill has given its word on this checkout
@@ -92,7 +95,9 @@ export const readinessOf = (
   }
   const applying =
     status.sync.pullPhase === 'applying' || (status.applyingRoots?.includes(status.checkoutRoot) ?? false);
-  const written = status.largeObjects === undefined && largeObjectsTold ? 'filled' : 'materialized';
+  /* With no revision behind the checkout no placeholder can be in it, so silence there is "nothing to fill". */
+  const written =
+    status.largeObjects === undefined && (largeObjectsTold || tree === undefined) ? 'filled' : 'materialized';
   if (applying) {
     return { state: 'treeReady', tree };
   }

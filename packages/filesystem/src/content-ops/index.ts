@@ -19,6 +19,6 @@ export type { ArchiveOptions } from '#content-ops/archive.js';
 export { contents } from '#content-ops/contents.js';
 export type { ContentFileSystem } from '#content-ops/contents.js';
 export { withReadContentOps } from '#content-ops/read-ops.js';
-export type { ContentExportFilter, ReadContentOps } from '#content-ops/read-ops.js';
+export type { Abortable, ContentExportFilter, ReadContentOps } from '#content-ops/read-ops.js';
 export { walk } from '#content-ops/walk.js';
 export type { WalkEntry, WalkFileSystem, WalkOptions } from '#content-ops/walk.js';

@@ -29,6 +29,7 @@ describe('@taucad/rpc wire conformance fixtures (R13, F11)', () => {
       'rs',
       'rs',
       'rc',
+      'rp',
       'nt',
       'ss',
       'sn',

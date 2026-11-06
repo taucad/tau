@@ -942,6 +942,22 @@
       "owner": "tau prepare"
     },
     {
+      "id": "E38",
+      "bound": "rpc long-call liveness: a long call fails PEER_UNRESPONSIVE after 30 s with neither a heartbeat nor progress from the server",
+      "site": "packages/rpc/src/channel.ts",
+      "token": "callLivenessTimer",
+      "class": "Liveness",
+      "owner": "W10"
+    },
+    {
+      "id": "E39",
+      "bound": "rpc long-call heartbeat: the server sends an rp frame every 10 s for each call still running",
+      "site": "packages/rpc/src/channel.ts",
+      "token": "heartbeatTimer",
+      "class": "Liveness",
+      "owner": "W10"
+    },
+    {
       "id": "D25",
       "bound": "Charter D17: read-only oversized replay retirement after 2 s idle; cancelled by active reads/acquisition, never source freshness authority",
       "site": "packages/agent-host/src/launchers/agent-launcher.ts",

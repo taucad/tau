@@ -88,6 +88,7 @@ export { ProjectIndex, timestampGranularityMilliseconds } from '#project-index/p
 export type {
   FactsAt,
   IndexAdmits,
+  IndexChanges,
   IndexCompareResult,
   IndexEntry,
   IndexEntryKind,
@@ -121,7 +122,7 @@ export type {
 } from '#worker-timings.js';
 export { ChangeEventBus, toChangeSet, touchedDirectoriesOf, watchEventsOfChangeSet } from '#change-event-bus.js';
 export { watchByChangeSets } from '#change-set-watch.js';
-export type { BridgeWatchHandle, ChangeSetWatchSource } from '#change-set-watch.js';
+export type { BridgeWatchHandle, ChangeSetChannelEvent, ChangeSetWatchSource } from '#change-set-watch.js';
 export type {
   ChangeSet,
   ChangeSetEntry,
@@ -139,7 +140,7 @@ export {
 } from '#event-coalescer.js';
 export type { CoalescerOptions, ChangeSetCoalescerOptions, FrameScheduler } from '#event-coalescer.js';
 export { tagEventOrigin, getEventOrigin, isEventGloballyVisible } from '#event-origin-registry.js';
-export { WatchRegistry } from '#watch-registry.js';
+export { WatchRegistry, watchEventsOfChangeSetFor } from '#watch-registry.js';
 export type { ChangeSetWatchRequest, WatchRegistryOptions } from '#watch-registry.js';
 export { streamChunkSize, bufferToStream } from '#backend/stream-utils.js';
 export { CrossTabCoordinator } from '#cross-tab-coordinator.js';

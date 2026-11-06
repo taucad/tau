@@ -98,6 +98,22 @@ export type WireRequestCancel = {
   readonly e?: WireError;
 };
 
+/**
+ * Server → client: a pending {@link WireRequest} is still being served.
+ *
+ * Without `d` it is a heartbeat, sent every `callHeartbeatInterval` while the call runs,
+ * so a client's per-call liveness bound can tell a long call from a dead server. With `d`
+ * it carries one progress report the handler made. Neither settles the call.
+ *
+ * @public
+ */
+export type WireRequestProgress = {
+  readonly v: 1;
+  readonly k: 'rp';
+  readonly i: string;
+  readonly d?: unknown;
+};
+
 /* ============================================================================ *
  * Notification family (`n*`)                                                   *
  * ============================================================================ */
@@ -278,6 +294,7 @@ export type WireMessage =
   | WireRequest
   | WireResponse
   | WireRequestCancel
+  | WireRequestProgress
   | WireNotify
   | WireStreamSubscribe
   | WireStreamNext
@@ -345,6 +362,12 @@ export const wireMessageSchema: z.ZodType<WireMessage> = z.discriminatedUnion('k
     k: z.literal('rc'),
     i: nonEmptyStringSchema,
     e: wireErrorSchema.optional(),
+  }),
+  z.object({
+    v: z.literal(wireVersion),
+    k: z.literal('rp'),
+    i: nonEmptyStringSchema,
+    d: z.unknown().optional(),
   }),
   z.object({
     v: z.literal(wireVersion),

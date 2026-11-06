@@ -55,6 +55,15 @@ export type IndexEntry = Readonly<{
   factsAt?: FactsAt;
 }>;
 
+/**
+ * What changed in an index after a generation: the index's generation now,
+ * which the caller passes as `since` next time, and every entry it still
+ * holds whose generation is newer. A removal leaves no entry.
+ *
+ * @public
+ */
+export type IndexChanges = Readonly<{ generation: number; entries: readonly IndexEntry[] }>;
+
 /** Options for a {@link ProjectIndex}. @public */
 export type ProjectIndexOptions = Readonly<{
   /** The generation to continue from (a loaded snapshot's); `0` for a new root. */
@@ -78,6 +87,8 @@ export type IndexSearchOptions = {
   readonly maxResults?: number;
   readonly includeDirectories?: boolean;
   readonly admits?: IndexAdmits;
+  /** Stops a query still waiting for its root's index to open. */
+  readonly signal?: AbortSignal;
 };
 
 /** What one head-metadata compare found (D5). @public */
@@ -326,11 +337,14 @@ export class ProjectIndex {
   /**
    * Entries changed after a generation, for incremental capture and watch catch-up.
    *
+   * Only entries the index still holds: a removal leaves nothing to list.
+   *
    * @param since - A generation this index reported earlier.
-   * @returns Every entry whose generation is newer.
+   * @param options - Optional mask, asked before a descent.
+   * @returns Every admitted entry whose generation is newer.
    */
-  public changedSince(since: number): readonly IndexEntry[] {
-    return [...this.walk('')].filter((entry) => entry.generation > since);
+  public changedSince(since: number, options?: { readonly admits?: IndexAdmits }): readonly IndexEntry[] {
+    return [...this.walk('', { admits: options?.admits })].filter((entry) => entry.generation > since);
   }
 
   /**

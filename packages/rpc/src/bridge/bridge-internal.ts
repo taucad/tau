@@ -1,10 +1,31 @@
 import type { WithTransferables } from '#channel.js';
 import type { BridgeError } from '#bridge/bridge-errors.js';
+import type { BridgeProgress } from '#bridge/bridge-protocol.js';
 import { extractTransferables } from '#bridge/transferables.js';
 import { z } from 'zod';
 
 /** Milliseconds. */
 export const messagePortCallTimeout = 30_000;
+
+/**
+ * Milliseconds. A `'liveness'` call fails only after this long without a frame
+ * for it: the ordinary deadline, measured from the last sign of life instead of
+ * from the start.
+ */
+export const bridgeCallLivenessTimeout = messagePortCallTimeout;
+
+/** Milliseconds. A third of the liveness window, so two lost heartbeats still leave the call alive. */
+export const bridgeCallHeartbeatInterval = bridgeCallLivenessTimeout / 3;
+
+const progressCountSchema = z.number().int().nonnegative();
+
+/** Wire shape of one long-call progress report. */
+export const bridgeProgressSchema: z.ZodType<BridgeProgress> = z.strictObject({
+  done: progressCountSchema,
+  total: progressCountSchema.optional(),
+  bytes: progressCountSchema,
+  totalBytes: progressCountSchema.optional(),
+});
 
 export const broadcastEvent = 'broadcast';
 export const watchEvent = 'watch';
@@ -36,6 +57,7 @@ export const bridgeErrorSchema: z.ZodType<BridgeError> = z.looseObject({
   name: z.string(),
   stack: z.string().optional(),
   code: z.string().optional(),
+  reason: z.string().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -43,6 +65,7 @@ export const bridgeErrorWireSchema = z.object({ __bridgeError: bridgeErrorSchema
 
 const errorInstanceSchema = z.instanceof(Error);
 const bridgeErrorCodeSchema = z.object({ code: z.string().optional() });
+const bridgeErrorReasonSchema = z.object({ reason: z.string().optional() });
 const bridgeErrorMetadataSchema = z.object({ metadata: z.record(z.string(), z.unknown()).optional() });
 
 export const serializeBridgeError = (error: unknown): BridgeError => {
@@ -50,9 +73,11 @@ export const serializeBridgeError = (error: unknown): BridgeError => {
   const parsedStack = z.string().safeParse(parsedError.success ? parsedError.data.stack : undefined);
   const parsedCode = bridgeErrorCodeSchema.safeParse(error);
   const parsedMetadata = bridgeErrorMetadataSchema.safeParse(error);
+  const parsedReason = bridgeErrorReasonSchema.safeParse(error);
   const stack = parsedStack.success ? parsedStack.data : undefined;
   const code = parsedCode.success ? parsedCode.data.code : undefined;
   const metadata = parsedMetadata.success ? parsedMetadata.data.metadata : undefined;
+  const reason = parsedReason.success ? parsedReason.data.reason : undefined;
   /* An explicit `undefined` property is not an absent one once a byte codec is
    * in the path: `msgpackCodec` writes it as nil (deliberately — see
    * `codec/msgpack.ts`) and the decoded `null` fails `.optional()` here. Every
@@ -64,6 +89,7 @@ export const serializeBridgeError = (error: unknown): BridgeError => {
     name: parsedError.success ? parsedError.data.constructor.name : 'Error',
     ...(stack === undefined ? {} : { stack }),
     ...(code === undefined ? {} : { code }),
+    ...(reason === undefined ? {} : { reason }),
     ...(metadata === undefined ? {} : { metadata }),
   });
 };
@@ -72,11 +98,13 @@ export const reconstructError = (
   bridgeError: BridgeError,
 ): Error & {
   code?: string;
+  reason?: string;
   metadata?: Record<string, unknown>;
 } => {
   const error = Object.assign(new Error(bridgeError.message), {
     name: bridgeError.name,
     code: bridgeError.code,
+    ...(bridgeError.reason === undefined ? {} : { reason: bridgeError.reason }),
     metadata: bridgeError.metadata,
   });
   if (bridgeError.stack) {

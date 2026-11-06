@@ -557,6 +557,8 @@ const productionTurnConsumers = async (
     transport: {
       listen: viewProxy.listen,
       closed: viewProxy.closed,
+      /* As the file manager wires it: every watch on the connection's one event channel (D14). */
+      events: (handler) => viewProxy.events(handler),
       watchChangeSets: (request, handler) => viewProxy.watchChangeSets(request, handler),
       watchReady: (request, handler) => viewProxy.watchReady(request, handler),
     },

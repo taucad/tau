@@ -110,6 +110,14 @@ describe('ProjectIndex', () => {
       index.recordFile('src/new.ts', { size: 1 });
       expect(index.changedSince(before).map((entry) => entry.path)).toEqual(['src/new.ts']);
     });
+
+    it('should ask the mask before descending when it answers what changed', () => {
+      const before = index.generation;
+      index.recordFile('src/new.ts', { size: 1 });
+      index.recordFile('docs/new.md', { size: 1 });
+      const admits = (path: string): boolean => path !== 'src';
+      expect(index.changedSince(before, { admits }).map((entry) => entry.path)).toEqual(['docs', 'docs/new.md']);
+    });
   });
 
   describe('mutations', () => {

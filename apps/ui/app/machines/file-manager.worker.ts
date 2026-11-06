@@ -9,7 +9,7 @@
 
 /* oxlint-disable tau-lint/no-direct-indexeddb -- This worker is the browser compute-store authority. */
 
-import { exposeFileSystem, workerReadyMessageType, workspaceBridgeService } from '@taucad/fs-bridge';
+import { computeEventRelay, exposeFileSystem, workerReadyMessageType, workspaceBridgeService } from '@taucad/fs-bridge';
 import { composeView } from '@taucad/filesystem/composed-view';
 import { withReadContentOps } from '@taucad/filesystem/content-ops';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
@@ -111,8 +111,15 @@ const providerRegistry = new ProviderRegistry({
 /* Each mutation's wait for its claims and its time holding them, for the open's worker timings. */
 const resourceQueue = new ResourceQueue({ timings: workerTimings });
 const eventBus = new ChangeEventBus();
+/*
+ * The compute worker's news for every rooted connection's event channel
+ * (charter D14, W10). The revision compute worker's one supervisor (W5's
+ * `createSupervisedComputeWorker`) owns restarts; it reports each death to
+ * `computeEvents.onCrash`, and the bridge only relays it.
+ */
+const computeEvents = computeEventRelay();
 /** One compute worker for every revision store this worker opens (charter D7), started on first use. */
-const revisionCompute = createRevisionCompute();
+const revisionCompute = createRevisionCompute(computeEvents.onCrash);
 eventBus.subscribe(() => {
   workerTimings.count('events.change');
 });
@@ -402,6 +409,7 @@ exposeFileSystem(withPendingGauge(workspaceBridgeService(fileService)), {
   changeEventBus: eventBus,
   createCoalescer: (deliver, coalescingWindow, onOverflow) =>
     new EventCoalescer(deliver, { coalescingWindow, onOverflow }),
+  computeEvents: computeEvents.source,
 });
 
 /**

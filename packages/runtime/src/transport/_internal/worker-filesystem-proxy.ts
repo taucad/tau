@@ -7,7 +7,8 @@ import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 
 /**
  * The worker-facing filesystem over a filesystem bridge port: rooted reads and
- * writes, and watches carried in the change-set form (D6).
+ * writes, and watches carried on the connection's event channel (D14), or in
+ * the change-set form (D6) where the host serves none.
  *
  * @public
  */
@@ -65,10 +66,12 @@ export const createWorkerFileSystemProxy = async (
     lstat: bridge.lstat.bind(bridge),
   };
   if (watchable) {
-    /* Both forms ride the authority's change-set watch (charter D6): a fifty-file
-     * turn reaches a kernel's dependency watch as one frame, expanded here into
-     * its per-path events; a host with no change-set watch answers the per-path
-     * form instead. */
+    /* Both forms ride the connection's one event channel (charter D14): every
+     * watch a kernel holds reads its own events off each change set of the
+     * root, so a fifty-file turn reaches this connection as one frame however
+     * many dependency watches it holds. A host with no event channel answers
+     * the authority-scoped change-set form, and one with neither the per-path
+     * form (D6). */
     fileSystem.watchReady = (request, handler) => watchByChangeSets(bridge, request, handler);
     fileSystem.watch = (request, handler) => {
       const watch = watchByChangeSets(bridge, request, handler);

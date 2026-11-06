@@ -19,7 +19,7 @@ distributions** that include them:
 
 By using Tau, you agree to comply with the license terms of all included dependencies.
 
-*Generated on 2026-10-19*
+*Generated on 2026-11-06*
 
 ## Summary
 
@@ -30,11 +30,12 @@ By using Tau, you agree to comply with the license terms of all included depende
 | (MIT AND BSD-3-Clause) | 1 |
 | (MIT AND Zlib) | 1 |
 | (MIT OR CC0-1.0) | 1 |
+| BlueOak-1.0.0 | 1 |
 | BSD-3-Clause | 4 |
 | ISC | 7 |
 | SEE LICENSE IN LICENSE.md | 1 |
 | WTFPL OR ISC | 1 |
-| MIT | 78 |
+| MIT | 80 |
 
 ## (MIT OR GPL-3.0-or-later)
 
@@ -62,6 +63,10 @@ By using Tau, you agree to comply with the license terms of all included depende
 > This package is dual-licensed. Tau uses it under the **MIT License** terms.
 
 - **type-fest** v4.41.0 — [Repository](https://github.com/sindresorhus/type-fest)
+
+## BlueOak-1.0.0
+
+- **minimatch** v10.2.6 — [Repository](https://github.com/isaacs/minimatch)
 
 ## BSD-3-Clause
 
@@ -97,7 +102,9 @@ By using Tau, you agree to comply with the license terms of all included depende
 - **abort-controller** v3.0.0 — [Repository](https://github.com/mysticatea/abort-controller)
 - **async-lock** v1.4.1 — [Repository](https://github.com/rogierschouten/async-lock)
 - **available-typed-arrays** v1.0.7 — [Repository](https://github.com/inspect-js/available-typed-arrays)
+- **balanced-match** v4.0.4 — [Repository](https://github.com/juliangruber/balanced-match)
 - **base64-js** v1.5.1 — [Repository](https://github.com/beatgammit/base64-js)
+- **brace-expansion** v5.0.12 — [Repository](https://github.com/juliangruber/brace-expansion)
 - **buffer** v6.0.3 — [Repository](https://github.com/feross/buffer)
 - **call-bind** v1.0.9 — [Repository](https://github.com/ljharb/call-bind)
 - **call-bind-apply-helpers** v1.0.2 — [Repository](https://github.com/ljharb/call-bind-apply-helpers)

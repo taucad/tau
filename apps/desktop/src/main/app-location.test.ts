@@ -90,10 +90,12 @@ describe('offerMoveToApplications', () => {
   });
 
   it('should keep this launch going when the move fails', () => {
-    const questions = host([0]);
-    questions.move = vi.fn(() => {
-      throw new Error('permission denied');
-    });
+    const questions = {
+      ...host([0]),
+      move: vi.fn(() => {
+        throw new Error('permission denied');
+      }),
+    };
     expect(offerMoveToApplications(blocked, userData(), questions)).toBe(false);
     expect(questions.log).toHaveBeenCalledWith('warn', 'app-location.move-failed', expect.anything());
   });

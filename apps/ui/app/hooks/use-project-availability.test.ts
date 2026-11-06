@@ -2,6 +2,7 @@ import { renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RevisionStatusProjection } from '@taucad/revisions';
+import type { RevisionClient } from '#types/revision-client.types.js';
 import {
   modelAvailability,
   pendingOpenReadiness,
@@ -125,7 +126,7 @@ describe('opened large-object paths', () => {
       ...status(),
       largeObjects: { phase: 'fetching', paths, objects: 0, totalObjects: 1, bytes: 0, totalBytes: 1 },
     });
-    vi.mocked(useRevisionClient).mockReturnValue(mock({ send }));
+    vi.mocked(useRevisionClient).mockReturnValue(mock<RevisionClient>({ send }));
     return send;
   };
   it('asks the worker to fetch an open file first while it waits', () => {

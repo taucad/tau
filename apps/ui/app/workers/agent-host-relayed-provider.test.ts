@@ -63,14 +63,21 @@ describe('createRelayedFileSystemProvider', () => {
         },
       ) as unknown as RelayedBridge;
 
-    await expect(
-      createRelayedFileSystemProvider(bridgeWith(pendingPaths)).pendingPaths(['main.scad', 'models/part.step']),
-    ).resolves.toEqual(['models/part.step']);
+    /* The relayed provider always carries the call; the port type leaves it optional. */
+    const relayedPendingPaths = (bridge: RelayedBridge): ((paths: readonly string[]) => Promise<readonly string[]>) => {
+      const relayed = createRelayedFileSystemProvider(bridge).pendingPaths;
+      if (relayed === undefined) {
+        throw new Error('The relayed provider does not carry pendingPaths.');
+      }
+      return relayed;
+    };
+
+    await expect(relayedPendingPaths(bridgeWith(pendingPaths))(['main.scad', 'models/part.step'])).resolves.toEqual([
+      'models/part.step',
+    ]);
     const old = vi.fn(async () => {
       throw new Error('Unknown method: pendingPaths');
     });
-    await expect(createRelayedFileSystemProvider(bridgeWith(old)).pendingPaths(['models/part.step'])).resolves.toEqual(
-      [],
-    );
+    await expect(relayedPendingPaths(bridgeWith(old))(['models/part.step'])).resolves.toEqual([]);
   });
 });

@@ -243,14 +243,14 @@ describe('watches on the connection event channel (D14)', () => {
   type ChannelHandler = Parameters<NonNullable<WorkerChangeChannelTransport['events']>>[0];
 
   /** An event channel a test drives: every subscriber hears each frame. */
-  const eventChannel = (ready: Promise<void> = Promise.resolve()) => {
+  const eventChannel = (ready: () => Promise<void> = async () => undefined) => {
     const handlers = new Set<ChannelHandler>();
     const closed = Promise.withResolvers<void>();
     const unsubscribe = vi.fn();
     const events = vi.fn((handler: ChannelHandler) => {
       handlers.add(handler);
       return {
-        ready,
+        ready: ready(),
         closed: closed.promise,
         unsubscribe: () => {
           handlers.delete(handler);
@@ -325,8 +325,9 @@ describe('watches on the connection event channel (D14)', () => {
   });
 
   it('falls back to the change-set form when the connection serves no event channel, for later watches too', async () => {
-    const refused = Promise.reject(Object.assign(new Error('no channel'), { code: 'ENOTSUP' }));
-    refused.catch(() => undefined);
+    const refused = async (): Promise<void> => {
+      throw Object.assign(new Error('no channel'), { code: 'ENOTSUP' });
+    };
     const channelEvents = eventChannel(refused);
     const unsubscribeSets = vi.fn();
     const watchChangeSets = vi.fn((_request: unknown, _handler: (set: ChangeSet) => void) => ({
@@ -351,8 +352,9 @@ describe('watches on the connection event channel (D14)', () => {
   });
 
   it('rejects readiness for any other refusal of the channel', async () => {
-    const refused = Promise.reject(Object.assign(new Error('gone'), { code: 'EIO' }));
-    refused.catch(() => undefined);
+    const refused = async (): Promise<void> => {
+      throw Object.assign(new Error('gone'), { code: 'EIO' });
+    };
     const watchChangeSets = vi.fn();
     const channel = new WorkerChangeChannel({
       transport: { listen: vi.fn().mockReturnValue(vi.fn()), events: eventChannel(refused).events, watchChangeSets },

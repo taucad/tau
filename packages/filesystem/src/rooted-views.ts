@@ -1125,6 +1125,11 @@ export class RootedViews {
       pendingPaths: async (paths: readonly string[]): Promise<readonly string[]> => {
         assertCurrent();
         await this._projectIndexes.ready(root);
+        const absent = (error: unknown): undefined => {
+          if (!isNotFoundError(error)) {
+            throw error;
+          }
+        };
         const pending = await mapConcurrent(paths, statConcurrency, async (path): Promise<boolean> => {
           const at = resolveLocal(path);
           if (projectIndexes.pendingAt(at.authorityPath) !== undefined) {
@@ -1137,24 +1142,13 @@ export class RootedViews {
            * no download starts; the read marks it pending. Only an absent path
            * is not pending: any other failure leaves it unknown, and rejects.
            */
-          const size = await at.resolution.provider.stat(at.resolution.path).then(
-            (stat) => (stat.type === 'file' ? stat.size : undefined),
-            (error: unknown) => {
-              if (isNotFoundError(error)) {
-                return undefined;
-              }
-              throw error;
-            },
-          );
+          const size = await at.resolution.provider
+            .stat(at.resolution.path)
+            .then((stat) => (stat.type === 'file' ? stat.size : undefined), absent);
           if (size === undefined || size > 1024) {
             return false;
           }
-          const read = await readMarked(at).catch((error: unknown) => {
-            if (isNotFoundError(error)) {
-              return undefined;
-            }
-            throw error;
-          });
+          const read = await readMarked(at).catch(absent);
           return read?.object !== undefined;
         });
         return paths.filter((_, index) => pending[index]);

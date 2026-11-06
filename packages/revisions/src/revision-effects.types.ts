@@ -99,8 +99,10 @@ export type ApplyingTreeBracket = Readonly<{ purpose: ApplyingTreePurpose; closu
 
 /**
  * How a tree write ended, told as its bracket is released: `failed` when it
- * threw or was aborted, so a host never reads the tree it began as written
- * (D10, I7).
+ * threw or was aborted and left the checkout torn, so a host never reads the
+ * tree it began as written (D10, I7). A write that threw after changing
+ * nothing, or that put the prior files back, left the checkout whole and is
+ * told `failed: false`; the operation itself still rejects.
  *
  * @public
  */
@@ -177,10 +179,17 @@ export type RevisionActorsOptions = Readonly<{
    * Brackets tree materialization so a disk host can ignore its own watcher
    * events instead of reporting them as editor changes.
    *
-   * `purpose` is `fill` for a large-object fill's flush, which replaces
-   * placeholders with their bytes in place, and `apply` (the default) for
-   * every other materialization: a host can hold a file tree's re-reads for
-   * an apply without holding them for every flush of a long fill.
+   * The bracket's `purpose` (see {@link ApplyingTreePurpose}) is `fill` for a
+   * large-object fill's flush, which replaces placeholders with their bytes in
+   * place; `tree` when another revision's tree replaces the checkout's, which
+   * readiness reads as a new tree; and `apply` (the default) for a write into
+   * the checkout's current tree. A host can hold a file tree's re-reads for
+   * `apply` and `tree` without holding them for every flush of a long fill. A
+   * write that holds the tree also names its entry `closure`, landed first.
+   *
+   * The returned release is called once, with the write's outcome (see
+   * {@link ApplyingTreeOutcome}): a `tree` write released `failed: true` left
+   * the checkout torn and is not its tree written.
    */
   onApplyingTree?: (
     checkout: Checkout,

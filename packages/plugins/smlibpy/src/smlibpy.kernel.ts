@@ -229,7 +229,7 @@ const smlibpyKernelDefinition = defineKernel({
   // A `.py` entry that imports smlibpy selects this kernel; any other falls through to the next Python kernel.
   detectImport: smlibpyDetectPattern,
   name: 'SmlibpyKernel',
-  version: '0.6.2+python3.13.protocol1.topology1.bundle1',
+  version: '0.6.2+python3.13.protocol1.topology1.bundle1.tessellation1',
   optionsSchema: smlibpyOptionsSchema,
   views: {
     model: {

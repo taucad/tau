@@ -239,7 +239,7 @@ const build123dKernelDefinition = defineKernel({
   id: 'build123d',
   extensions: ['py'],
   name: 'Build123dKernel',
-  version: '0.13.0+python3.13.ocp8.0.1.0.0.protocol1.topology1.nativeMotion1.tessellation1.edges1',
+  version: '0.13.0+python3.13.ocp8.0.1.0.0.protocol1.topology1.nativeMotion1.tessellation2.edges1',
   optionsSchema: build123dOptionsSchema,
   // The worker writes exact B-rep edge lines when asked, so the fallback edge pass never runs for this kernel.
   views: {

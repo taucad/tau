@@ -19,9 +19,10 @@
  */
 
 import { memo, useCallback, useId, useMemo, useRef, useState } from 'react';
+import { Loader } from '@taucad/ui/components/loader';
 import type { SubmitEvent } from 'react';
 import { flushSync } from 'react-dom';
-import { ChevronDown, CircleAlert, LoaderCircle, Trash2 } from 'lucide-react';
+import { ChevronDown, CircleAlert, Trash2 } from 'lucide-react';
 import { fffProcessOf, isSimulatedMachine, machineCredentialOf } from '@taucad/runtime/machine';
 import type {
   MachineBindingOutcome,
@@ -312,7 +313,7 @@ function TestingSwitch({
         <span className='flex shrink-0 items-center gap-2'>
           {isPending ? (
             <span role='status' aria-label='Saving' aria-busy='true'>
-              <LoaderCircle aria-hidden className='size-3.5 spin-glyph text-muted-foreground' />
+              <Loader className='size-3.5 text-muted-foreground' />
             </span>
           ) : null}
           <Switch
@@ -441,7 +442,7 @@ const BoundMachine = memo(function BoundMachine({
             )}
             <div className='flex flex-wrap gap-2'>
               <Button type='button' size='sm' variant='destructive' disabled={isRemoving} onClick={remove}>
-                {isRemoving ? <LoaderCircle aria-hidden className='spin-glyph' /> : null}
+                {isRemoving ? <Loader /> : null}
                 Remove
               </Button>
               <Button type='button' size='sm' variant='outline' disabled={isRemoving} autoFocus onClick={cancel}>
@@ -774,7 +775,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
             disabled={busy || finding || physicalProviders.length === 0}
             onClick={onFind}
           >
-            {finding ? <LoaderCircle aria-hidden className='spin-glyph' /> : null}Find machines
+            {finding ? <Loader /> : null}Find machines
           </Button>
           <Button
             type='button'

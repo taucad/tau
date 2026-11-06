@@ -1,9 +1,10 @@
 import type { MachineSettingsProvenance } from '@taucad/runtime/machine/settings';
+import { Loader } from '@taucad/ui/components/loader';
 import { printerPreparation } from '#components/printer/printer-preparation.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { defaultFilamentSlots, machineSliceOptions } from '@taucad/agent-tools/registry';
-import { Check, Eye, Layers, ListChecks, LoaderCircle, Scissors, Send, Settings2 } from 'lucide-react';
+import { Check, Eye, Layers, ListChecks, Scissors, Send, Settings2 } from 'lucide-react';
 import type { JSONSchema7, JSONSchema7Definition } from '@taucad/json-schema';
 import type { ParameterManifest } from '@taucad/parameters';
 import type {
@@ -1378,7 +1379,7 @@ export function PrepareActions({
               void prepare.send();
             }}
           >
-            {isSending ? <LoaderCircle aria-hidden className='spin-glyph' /> : <Send aria-hidden />}
+            {isSending ? <Loader /> : <Send aria-hidden />}
             {action.label}
           </Button>
         </div>
@@ -1407,7 +1408,7 @@ export function PrepareActions({
           aria-describedby={waiting === undefined ? undefined : 'print-slice-blocker'}
           onClick={prepare.sliceNow}
         >
-          {isSlicing ? <LoaderCircle aria-hidden className='spin-glyph' /> : <Scissors aria-hidden />}
+          {isSlicing ? <Loader /> : <Scissors aria-hidden />}
           {action.label}
         </Button>
       </div>

@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useId, useRef, useState } from 'react';
-import { Activity, Bot, History, Info, LoaderCircle, OctagonAlert, Play, TriangleAlert } from 'lucide-react';
+import { Loader } from '@taucad/ui/components/loader';
+import { Activity, Bot, History, Info, OctagonAlert, Play, TriangleAlert } from 'lucide-react';
 import { componentValue, fffProcessOf, machineActionOf, millingProcessOf } from '@taucad/runtime/machine';
 import type {
   ComponentObservation,
@@ -1009,7 +1010,7 @@ export function HistoryStage({
                   />
                 ) : null}
                 {operation.state === 'sending' || operation.state === 'confirming' ? (
-                  <LoaderCircle aria-hidden className='size-3.5 shrink-0 spin-glyph' />
+                  <Loader className='size-3.5 shrink-0' />
                 ) : null}
                 <span className='min-w-0 flex-1 truncate'>
                   {operation.action?.label ?? (operation.kind === 'action' ? 'Action' : kindWords[operation.kind])}

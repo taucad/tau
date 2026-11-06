@@ -1,9 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
+import { Loader } from '@taucad/ui/components/loader';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router';
-import { Check, Link2, Loader2, RefreshCw, ShieldCheck } from 'lucide-react';
+import { Check, Link2, RefreshCw, ShieldCheck } from 'lucide-react';
 import { sharePasswordLimits } from '@taucad/share/artifact';
 import { formatShareUrl } from '@taucad/share/locator';
 import type { ShareLocator } from '@taucad/share/locator';
@@ -930,7 +931,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
       return (
         <SharePaneFrame isDisabled={busy} description='Loading sharing settings…'>
           <div className='flex min-h-36 items-center justify-center'>
-            <Loader2 className='size-5 spin-glyph text-muted-foreground' aria-hidden />
+            <Loader className='size-5 text-muted-foreground' />
           </div>
         </SharePaneFrame>
       );
@@ -977,7 +978,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
               </Button>
               <Button type='button' disabled={busy || visibilityMutating} onClick={handleRepublish}>
                 {busy ? (
-                  <Loader2 className='size-4 spin-glyph' aria-hidden />
+                  <Loader className='size-4' />
                 ) : copied ? (
                   <Check className='size-3.5' aria-hidden />
                 ) : (
@@ -1105,7 +1106,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
             <Button type='button' disabled={!canPublish} onClick={handlePublish}>
               {busy ? (
                 <>
-                  <Loader2 className='size-4 spin-glyph' aria-hidden />
+                  <Loader className='size-4' />
                   <span>Publishing…</span>
                 </>
               ) : (

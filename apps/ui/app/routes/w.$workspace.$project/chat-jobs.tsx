@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Loader } from '@taucad/ui/components/loader';
 import type { ReactNode } from 'react';
 import {
   Ban,
@@ -7,7 +8,6 @@ import {
   Clock3,
   FileOutput,
   Hourglass,
-  LoaderCircle,
   PauseCircle,
   Play,
   RotateCcw,
@@ -100,7 +100,7 @@ export const JobsPanelBody = (): React.JSX.Element => {
         {isLoading && jobs.length === 0 ? (
           <div role='status' className='grid min-h-full place-items-center text-sm text-muted-foreground'>
             <span className='flex items-center gap-2'>
-              <LoaderCircle aria-hidden className='size-4 spin-glyph' />
+              <Loader className='size-4' />
               Loading jobs
             </span>
           </div>

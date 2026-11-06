@@ -1,4 +1,5 @@
-import { AlertCircle, ArrowLeft, LoaderCircle, RefreshCcw, WifiOff } from 'lucide-react';
+import { AlertCircle, ArrowLeft, RefreshCcw, WifiOff } from 'lucide-react';
+import { Loader } from '@taucad/ui/components/loader';
 import { lazy, Suspense, useCallback, useEffect, useSyncExternalStore } from 'react';
 import { isRouteErrorResponse, useLocation, useNavigate, useRouteError } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
@@ -168,7 +169,7 @@ export function ErrorPage(): React.JSX.Element {
   if (isModuleLoadFailure && staleOutcome === undefined) {
     return (
       <div className='flex min-h-full flex-1 flex-col items-center justify-center gap-3 px-4 py-8'>
-        <LoaderCircle className='size-6 spin-glyph text-muted-foreground' />
+        <Loader className='size-6 text-muted-foreground' />
         <p role='status' className='text-sm text-muted-foreground'>
           Checking for a newer version of Tau…
         </p>

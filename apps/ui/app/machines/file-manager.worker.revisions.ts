@@ -65,6 +65,7 @@ import type {
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import {
   cleanLargeObjects,
+  PendingError,
   publishFailureMessage,
   publishOverHttp,
   readRemoteStorageOverHttp,
@@ -481,7 +482,7 @@ export const createPendingObjectSource =
           // oxlint-disable-next-line no-await-in-loop -- as above
           resolved = await revisions.resolvePlaceholder(checkoutId, path, request);
         } catch (error) {
-          if ((error as { code?: unknown } | undefined)?.code === 'PENDING') {
+          if (error instanceof PendingError) {
             throw error;
           }
           continue;

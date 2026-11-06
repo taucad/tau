@@ -33,12 +33,17 @@ const describeThrown = (error: unknown): Thrown | undefined => {
  * generic sentence only when the event carries none of them (a worker script that fails to load fires a plain `error`
  * event with nothing in it).
  */
-const failureMessage = (
-  type: string,
-  eventMessage: string | undefined,
-  thrown: Thrown | undefined,
-  scriptUrl: string | undefined,
-): string => {
+const failureMessage = ({
+  type,
+  eventMessage,
+  thrown,
+  scriptUrl,
+}: {
+  readonly type: string;
+  readonly eventMessage: string | undefined;
+  readonly thrown: Thrown | undefined;
+  readonly scriptUrl: string | undefined;
+}): string => {
   if (eventMessage !== undefined && eventMessage !== '') {
     return eventMessage;
   }
@@ -88,7 +93,7 @@ export const reportWorkerFailures = <Started extends Worker>(worker: Started, na
     const errorEvent = typeof ErrorEvent !== 'undefined' && event instanceof ErrorEvent ? event : undefined;
     const thrown = describeThrown(errorEvent?.error);
     const scriptUrl = errorEvent !== undefined && errorEvent.filename !== '' ? errorEvent.filename : undefined;
-    const message = failureMessage(event.type, errorEvent?.message, thrown, scriptUrl);
+    const message = failureMessage({ type: event.type, eventMessage: errorEvent?.message, thrown, scriptUrl });
     const location =
       scriptUrl === undefined ? {} : { filename: scriptUrl, lineno: errorEvent?.lineno, colno: errorEvent?.colno };
     // async-iife: bootstrap -- an event listener cannot await; reporting never rejects.

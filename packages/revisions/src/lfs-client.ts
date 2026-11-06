@@ -217,6 +217,8 @@ export type LfsDownloadManyInput = Readonly<{
    * download runs goes next, behind only the transfers already in flight.
    */
   first?: () => ReadonlySet<string>;
+  /** Told whenever bytes of an object arrive, by its oid (I10: a read's stall bound restarts on progress). */
+  progress?: (oid: string) => void;
 }>;
 
 /** One project's LFS transport. @public */
@@ -657,8 +659,9 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
   const downloadObject = async (
     pointer: LfsPointer,
     initial: BatchObject,
-    signal?: AbortSignal,
+    transferOptions?: Readonly<{ signal?: AbortSignal | undefined; progress?: (() => void) | undefined }>,
   ): Promise<Readonly<{ content: Uint8Array<ArrayBuffer>; transfer: LfsDownloadTransfer }>> => {
+    const signal = transferOptions?.signal;
     if (initial.error !== undefined) {
       throw new Error(`The remote refused large object ${pointer.oid}.`);
     }
@@ -703,6 +706,7 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
             }
             content.set(chunk.value, received);
             received += chunk.value.byteLength;
+            transferOptions?.progress?.();
           }
         } catch (error) {
           signal?.throwIfAborted();
@@ -781,11 +785,9 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
     },
 
     download: async (pointer: LfsDownloadInput): Promise<Uint8Array<ArrayBuffer>> => {
-      const { content } = await downloadObject(
-        pointer,
-        await refresh('download', pointer, pointer.signal),
-        pointer.signal,
-      );
+      const { content } = await downloadObject(pointer, await refresh('download', pointer, pointer.signal), {
+        signal: pointer.signal,
+      });
       return content;
     },
 
@@ -796,7 +798,7 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
      * when it expired while it waited, and handed over as soon as it arrives,
      * so a reload part-way through keeps what was already stored.
      */
-    downloadMany: async ({ pointers, received, signal, first }: LfsDownloadManyInput): Promise<void> => {
+    downloadMany: async ({ pointers, received, signal, first, progress }: LfsDownloadManyInput): Promise<void> => {
       signal?.throwIfAborted();
       /* Not yet asked of the batch endpoint, in tree order. */
       const queued = new Map(pointers.map((pointer) => [pointer.oid, pointer] as const));
@@ -839,7 +841,15 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
         },
         async (answer, transferSignal) => {
           const pointer = { oid: answer.oid, size: answer.size };
-          const { content, transfer } = await downloadObject(pointer, answer, transferSignal);
+          const { content, transfer } = await downloadObject(pointer, answer, {
+            signal: transferSignal,
+            progress:
+              progress === undefined
+                ? undefined
+                : () => {
+                    progress(pointer.oid);
+                  },
+          });
           await received(pointer, content, transfer);
         },
       );

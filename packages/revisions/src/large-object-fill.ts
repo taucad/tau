@@ -131,6 +131,8 @@ export const createLargeObjectFill = (
     paths: readonly string[],
     wait?: FillWait,
   ) => Promise<'written' | 'failed' | 'stalled' | 'idle'>;
+  /** Move these paths to the front of the checkout's running fill (D10); nothing when none runs. */
+  prioritize: (checkoutId: string, paths: readonly string[]) => void;
 }> => {
   const { port, capture, withCheckoutFence, materializeTree, report } = dependencies;
   const flushMilliseconds = dependencies.flushMilliseconds ?? defaultFlushMilliseconds;
@@ -706,7 +708,21 @@ export const createLargeObjectFill = (
     }
   };
 
-  return { fill, resume, forget, stop, look, arrival, written };
+  return {
+    fill,
+    resume,
+    forget,
+    stop,
+    look,
+    arrival,
+    written,
+    prioritize: (checkoutId: string, paths: readonly string[]): void => {
+      const current = fills.get(checkoutId);
+      if (current !== undefined) {
+        prioritize(current, paths);
+      }
+    },
+  };
 };
 
 /** One large object as a running fill sees it. @public */

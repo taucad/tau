@@ -1012,6 +1012,13 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
 
   /** Large-object downloads in flight, by oid; see {@link hydrate}. */
   const downloads = new Map<string, Promise<Uint8Array<ArrayBuffer>>>();
+  /** Every reader's progress listener, by oid, whichever reader's transfer brings the bytes. */
+  const progressListeners = new Map<string, Set<() => void>>();
+  const progressed = (oid: string): void => {
+    for (const listener of progressListeners.get(oid) ?? []) {
+      listener();
+    }
+  };
 
   /**
    * The real bytes behind every pointer a tree read found.
@@ -1025,10 +1032,54 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    * @param pointers - The pointers, in tree order; repeats are resolved once.
    * @param hydrateOptions - `onLargeObject` is told about each object this read fetched, as it lands; `signal` stops
    *   this read's transfers (a concurrent reader waiting on one fetches it itself); `firstLargeObjects` names oids to
-   *   fetch before the rest, asked again before each transfer.
+   *   fetch before the rest, asked again before each transfer; `onTransferProgress` hears bytes arrive for any of
+   *   these objects, a transfer this read joined included.
    * @returns The bytes by oid, and what the phase cost.
    */
   const hydrate = async (
+    pointers: readonly LfsPointer[],
+    hydrateOptions?: Readonly<{
+      onLargeObject?: ReadTreeOptions['onLargeObject'];
+      signal?: AbortSignal;
+      firstLargeObjects?: ReadTreeOptions['firstLargeObjects'];
+      onTransferProgress?: ReadTreeOptions['onTransferProgress'];
+    }>,
+  ): Promise<Readonly<{ contents: ReadonlyMap<string, Uint8Array<ArrayBuffer>>; report: LfsFetchReport }>> => {
+    const { onTransferProgress } = hydrateOptions ?? {};
+    if (onTransferProgress === undefined) {
+      return hydrateObjects(pointers, hydrateOptions);
+    }
+    const listening = new Map(
+      pointers.map(
+        ({ oid }) =>
+          [
+            oid,
+            () => {
+              onTransferProgress(oid);
+            },
+          ] as const,
+      ),
+    );
+    for (const [oid, listener] of listening) {
+      const listeners = progressListeners.get(oid) ?? new Set();
+      listeners.add(listener);
+      progressListeners.set(oid, listeners);
+    }
+    try {
+      return await hydrateObjects(pointers, hydrateOptions);
+    } finally {
+      for (const [oid, listener] of listening) {
+        const listeners = progressListeners.get(oid);
+        listeners?.delete(listener);
+        if (listeners?.size === 0) {
+          progressListeners.delete(oid);
+        }
+      }
+    }
+  };
+
+  /* See {@link hydrate}. */
+  const hydrateObjects = async (
     pointers: readonly LfsPointer[],
     hydrateOptions?: Readonly<{
       onLargeObject?: ReadTreeOptions['onLargeObject'];
@@ -1064,6 +1115,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         pointers: [...wanted.values()],
         ...(signal === undefined ? {} : { signal }),
         ...(first === undefined ? {} : { first }),
+        progress: progressed,
         received: async (pointer, content, { transport }) => {
           transports.set(transport, (transports.get(transport) ?? 0) + 1);
           await storeLfsObject(pointer.oid, content);

@@ -62,6 +62,20 @@ export type ContentReadOptions = Readonly<{
   signal?: AbortSignal;
 }>;
 
+/**
+ * How the authority asks for one placeholder's object (slice a). @public
+ */
+export type PlaceholderRequest = Readonly<{
+  /** The reader stops waiting; a transfer the fill shares is never aborted for it. */
+  signal?: AbortSignal;
+  /** Called whenever bytes of the object arrive, whoever started the transfer (I10's stall bound). */
+  onProgress?: () => void;
+  /** The pointer's bytes, when the path does not hold them yet (a copy's target). */
+  pointer?: Uint8Array<ArrayBuffer>;
+  /** Answer from this device alone: refuse with `PendingError` rather than fetch. */
+  localOnly?: boolean;
+}>;
+
 /** What the reads are built over. */
 export type ContentReadsDependencies = Readonly<{
   useFileSystem: <Result>(
@@ -78,15 +92,20 @@ export type ContentReadsDependencies = Readonly<{
       paths: readonly string[],
       wait?: FillWait,
     ) => Promise<'written' | 'failed' | 'stalled' | 'idle'>;
+    /** Move these paths to the front of a running fill's queue. */
+    prioritize?: (checkoutId: string, paths: readonly string[]) => void;
   }>;
   /** Start a fill on a checkout that has placeholders and none running. */
   startFill: (place: Checkout) => Promise<void>;
   /** Whether this host can reach its remote; absent, it is assumed to. */
   online?: () => boolean;
-  /** One object fetched by its oid from the remote, for a read that must have it (slice a); absent, none is. */
+  /**
+   * One object fetched by its oid from the remote, for a read that must have it (slice a); absent, none is. A
+   * transfer already running for it is joined, and `onProgress` hears its bytes arrive.
+   */
   fetchObject?: (
     pointer: Readonly<{ oid: string; size: number }>,
-    signal?: AbortSignal,
+    onProgress?: () => void,
   ) => Promise<Uint8Array<ArrayBuffer> | undefined>;
 }>;
 
@@ -113,7 +132,7 @@ export type ContentReads = Readonly<{
   resolvePlaceholder: (
     place: Checkout,
     path: string,
-    signal?: AbortSignal,
+    request?: PlaceholderRequest,
   ) => Promise<Uint8Array<ArrayBuffer> | undefined>;
 }>;
 
@@ -271,28 +290,34 @@ export const createContentReads = (dependencies: ContentReadsDependencies): Cont
 
   /**
    * The object one placeholder stands for, for the authority's read-through
-   * (slice a): from the fill or the store, else fetched by its oid. Nothing is
-   * written to the checkout.
+   * (slice a): from the fill or the store, else fetched by its oid, moved to
+   * the front of the fill and joined with its transfer when it has one, so the
+   * object is downloaded once. The fetch is never aborted for the reader: the
+   * authority stops waiting on its own. Nothing is written to the checkout.
    *
    * @param place - The checkout.
    * @param path - A checkout-relative path.
-   * @param signal - The reader's bound.
+   * @param request - See {@link PlaceholderRequest}.
    * @returns The bytes, or `undefined` when the path holds no placeholder.
    * @throws {PendingError} When the object could not be had.
    */
   const resolvePlaceholder = async (
     place: Checkout,
     path: string,
-    signal?: AbortSignal,
+    request?: PlaceholderRequest,
   ): Promise<Uint8Array<ArrayBuffer> | undefined> => {
-    const pointer = await pointerAt(place, path, await readRaw(place, path));
+    request?.signal?.throwIfAborted();
+    const read: ReadOutcome =
+      request?.pointer === undefined ? await readRaw(place, path) : { outcome: 'bytes', data: request.pointer };
+    const pointer = await pointerAt(place, path, read);
     if (pointer === undefined) {
       return undefined;
     }
-    const data =
-      fill.look(place.id, pointer.oid)?.bytes ??
-      (await readStoredObject(pointer)) ??
-      (await dependencies.fetchObject?.(pointer, signal));
+    let data = fill.look(place.id, pointer.oid)?.bytes ?? (await readStoredObject(pointer));
+    if (data === undefined && request?.localOnly !== true) {
+      fill.prioritize?.(place.id, [path]);
+      data = await dependencies.fetchObject?.(pointer, request?.onProgress);
+    }
     if (data === undefined) {
       throw new PendingError({ path, ...pointer, reason: reasonOf(fill.look(place.id, pointer.oid)) });
     }

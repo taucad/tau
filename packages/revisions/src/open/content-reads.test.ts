@@ -41,6 +41,7 @@ const setup = (changes: Partial<ContentReadsDependencies> = {}) => {
   } as unknown as RevisionFileSystem;
   const written = vi.fn<ContentReadsDependencies['fill']['written']>(async () => 'idle');
   const startFill = vi.fn(async () => undefined);
+  const prioritize = vi.fn();
   const reads = createContentReads({
     useFileSystem: async (_place, operation) => operation(filesystem),
     readStoredObject: async ({ oid }) => stored.get(oid),
@@ -56,12 +57,14 @@ const setup = (changes: Partial<ContentReadsDependencies> = {}) => {
           }),
         ]),
       written,
+      prioritize,
     },
     startFill,
     ...changes,
   });
   return {
     reads,
+    prioritize,
     files,
     stored,
     written,
@@ -225,5 +228,36 @@ describe('resolvePlaceholder (slice a)', () => {
     files.set('notes/pointer.txt', pointerBytes);
     expect(await reads.resolvePlaceholder(place, 'notes/pointer.txt')).toBeUndefined();
     await expect(reads.resolvePlaceholder(place, 'models/part.step')).rejects.toBeInstanceOf(PendingError);
+  });
+
+  it('moves the path to the front of the fill and hears the transfer progress, without a signal of its own', async () => {
+    const fetchObject = vi.fn<NonNullable<ContentReadsDependencies['fetchObject']>>(async (_pointer, onProgress) => {
+      onProgress?.();
+      return part;
+    });
+    const { reads, prioritize } = setup({ fetchObject });
+    const onProgress = vi.fn();
+    const controller = new AbortController();
+    expect(
+      await reads.resolvePlaceholder(place, 'models/part.step', { signal: controller.signal, onProgress }),
+    ).toStrictEqual(part);
+    expect(prioritize).toHaveBeenCalledWith(place.id, ['models/part.step']);
+    expect(fetchObject).toHaveBeenCalledWith(pointer, onProgress);
+    expect(onProgress).toHaveBeenCalledTimes(1);
+  });
+
+  it('answers a copy’s target from the pointer it is given, and from this device alone when asked', async () => {
+    const fetchObject = vi.fn(async () => part);
+    const { reads, stored } = setup({ fetchObject });
+    /* Not on disk yet: the pointer the copy carries decides. */
+    await expect(
+      reads.resolvePlaceholder(place, 'models/copy.step', { pointer: pointerBytes, localOnly: true }),
+    ).rejects.toBeInstanceOf(PendingError);
+    expect(await reads.resolvePlaceholder(place, 'notes/copy.txt', { pointer: pointerBytes })).toBeUndefined();
+    expect(fetchObject).not.toHaveBeenCalled();
+    stored.set(pointer.oid, part);
+    expect(
+      await reads.resolvePlaceholder(place, 'models/copy.step', { pointer: pointerBytes, localOnly: true }),
+    ).toStrictEqual(part);
   });
 });

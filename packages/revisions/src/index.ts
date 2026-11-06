@@ -193,7 +193,7 @@ export type {
   RevisionStatusProjection,
 } from '#project-revisions.types.js';
 export { reachesReadiness, readinessOf, settleReadiness } from '#open/readiness.js';
-export type { ContentReadOptions, ReadOutcome } from '#open/content-reads.js';
+export type { ContentReadOptions, PlaceholderRequest, ReadOutcome } from '#open/content-reads.js';
 export type { ProjectReadinessReading } from '#open/readiness.js';
 export type { BranchOperation } from '#branch.types.js';
 export type { ResolutionSide } from '#resolution.types.js';

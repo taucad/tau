@@ -381,30 +381,31 @@ export const createApplyTreeEffects = (
        * placeholder with its object: `entryReady` is read from it.
        */
       const closure = purpose === 'fill' ? undefined : entryClosurePaths(targetFiles.get('tau.json')?.content);
-      if (closure !== undefined) {
-        const first = new Set(closure);
-        changedFiles.sort(([left], [right]) => Number(first.has(right)) - Number(first.has(left)));
-        const arriving = new Set(changedFiles.map(([path]) => path));
-        const placeholders = largeObjectPlaceholders(target);
-        live.expectEntries?.(
-          target.entries().map(({ path, content }) => {
-            const pending = placeholders.get(path);
-            return {
-              path,
-              size: content.byteLength,
-              ...(pending === undefined ? {} : { pending: { oid: pending.oid, size: pending.size } }),
-              arriving: arriving.has(path),
-            };
-          }),
-        );
-      }
+      const first = new Set(closure);
       const writtenPaths = changedFiles.map(([path]) => path);
-      const release = onApplyingTree?.(place, [...removedPaths, ...writtenPaths].sort(), {
-        purpose,
-        ...(closure === undefined ? {} : { closure }),
-      });
+      let release: ReturnType<NonNullable<typeof onApplyingTree>> | undefined;
+      let failed = true;
       const heldAt = workerTimings.now();
       try {
+        release = onApplyingTree?.(place, [...removedPaths, ...writtenPaths].sort(), {
+          purpose,
+          ...(closure === undefined ? {} : { closure }),
+        });
+        if (closure !== undefined) {
+          const arriving = new Set(writtenPaths);
+          const placeholders = largeObjectPlaceholders(target);
+          await live.expectEntries?.(
+            target.entries().map(({ path, content }) => {
+              const pending = placeholders.get(path);
+              return {
+                path,
+                size: content.byteLength,
+                ...(pending === undefined ? {} : { pending: { oid: pending.oid, size: pending.size } }),
+                arriving: arriving.has(path),
+              };
+            }),
+          );
+        }
         /* Removals: every removed file moves aside, its moved bytes prove it
          * was the file this apply meant to remove, and the backups go — a
          * changeset per bound for each step, not a lock set per file. */
@@ -428,131 +429,136 @@ export const createApplyTreeEffects = (
         await pruneEmptiedDirectories(live, removedPaths, targetFiles.keys());
         signal?.throwIfAborted();
 
-        /* A path the checkout did not hold has nothing to move aside or verify:
-         * it is one `create` write with its mode at its final path, refused if
-         * anything took it since the capture — no sibling, no rename (C8). The
-         * provider records each create's size until the changeset settles, and
-         * the next open removes a file a killed apply left short, so the path
-         * reads absent and is written again (I1). */
-        const created = changedFiles.filter(([path]) => !liveFiles.has(path));
-        raiseRefusal(
-          await applyChangesets(
-            live,
-            splitChangeset(
-              created.map(
-                ([path, entry]): ChangesetEntry => ({
-                  op: 'write',
-                  path,
-                  data: entry.content,
-                  mode: entry.mode,
-                  create: true,
-                }),
-              ),
-            ),
-            signal,
-          ),
-          created.map(([path]) => path),
-        );
-
-        /* A replacement stages its bytes beside the file, moves the file aside
-         * and verifies it, then publishes the staged sibling with one native
-         * move and drops the backup a phase later — so the checkout holds the
-         * old bytes or the new ones at every instant (I1). */
-        const replaced = changedFiles
-          .filter(([path]) => liveFiles.has(path))
-          .map(([path, entry]) => ({
-            path,
-            entry,
-            staged: temporarySibling(path, 'staged'),
-            backup: temporarySibling(path, 'backup'),
-            expected: liveFiles.get(path),
-          }));
-        const staged = new Set<string>();
-        const published = new Set<string>();
-        try {
-          const stagedReceipts = await applyChangesets(
-            live,
-            splitChangeset(
-              replaced.map(
-                ({ staged: stagedPath, entry }): ChangesetEntry => ({
-                  op: 'write',
-                  path: stagedPath,
-                  data: entry.content,
-                  mode: entry.mode,
-                  create: true,
-                }),
-              ),
-            ),
-            signal,
-          );
-          for (const [index, { staged: stagedPath }] of replaced.entries()) {
-            if (stagedReceipts[index]?.outcome !== 'failed') {
-              staged.add(stagedPath);
-            }
-          }
+        /* D10: the entry closure lands first, created and replaced alike, then the rest. */
+        const land = async (files: typeof changedFiles): Promise<void> => {
+          /* A path the checkout did not hold has nothing to move aside or verify:
+           * it is one `create` write with its mode at its final path, refused if
+           * anything took it since the capture — no sibling, no rename (C8). The
+           * provider records each create's size until the changeset settles, and
+           * the next open removes a file a killed apply left short, so the path
+           * reads absent and is written again (I1). */
+          const created = files.filter(([path]) => !liveFiles.has(path));
           raiseRefusal(
-            stagedReceipts,
-            replaced.map(({ staged: stagedPath }) => stagedPath),
+            await applyChangesets(
+              live,
+              splitChangeset(
+                created.map(
+                  ([path, entry]): ChangesetEntry => ({
+                    op: 'write',
+                    path,
+                    data: entry.content,
+                    mode: entry.mode,
+                    create: true,
+                  }),
+                ),
+              ),
+              signal,
+            ),
+            created.map(([path]) => path),
           );
-          await moveAsideVerified(live, replaced, signal);
-          /* Each replacement is one publish and, a phase later, one backup removal. */
-          const pairs = Math.floor(maximumChangesetEntries / 2);
-          const chunks: Array<typeof replaced> = [];
-          for (let start = 0; start < replaced.length; start += pairs) {
-            chunks.push(replaced.slice(start, start + pairs));
-          }
-          const publishReceipts = await applyChangesets(
-            live,
-            chunks.map((chunk) => [
-              ...chunk.map(({ staged: from, path }): ChangesetEntry => ({ op: 'move', from, to: path })),
-              ...chunk.map(({ backup }): ChangesetEntry => ({ op: 'delete', path: backup, kind: 'file', phase: 1 })),
-            ]),
-            undefined,
-          );
-          const publications: ChangesetEntryReceipt[] = [];
-          const backupsDropped = new Set<string>();
-          let offset = 0;
-          for (const chunk of chunks) {
-            publications.push(...publishReceipts.slice(offset, offset + chunk.length));
-            for (const [position, { backup }] of chunk.entries()) {
-              if (publishReceipts[offset + chunk.length + position]?.outcome === 'applied') {
-                backupsDropped.add(backup);
+
+          /* A replacement stages its bytes beside the file, moves the file aside
+           * and verifies it, then publishes the staged sibling with one native
+           * move and drops the backup a phase later — so the checkout holds the
+           * old bytes or the new ones at every instant (I1). */
+          const replaced = files
+            .filter(([path]) => liveFiles.has(path))
+            .map(([path, entry]) => ({
+              path,
+              entry,
+              staged: temporarySibling(path, 'staged'),
+              backup: temporarySibling(path, 'backup'),
+              expected: liveFiles.get(path),
+            }));
+          const staged = new Set<string>();
+          const published = new Set<string>();
+          try {
+            const stagedReceipts = await applyChangesets(
+              live,
+              splitChangeset(
+                replaced.map(
+                  ({ staged: stagedPath, entry }): ChangesetEntry => ({
+                    op: 'write',
+                    path: stagedPath,
+                    data: entry.content,
+                    mode: entry.mode,
+                    create: true,
+                  }),
+                ),
+              ),
+              signal,
+            );
+            for (const [index, { staged: stagedPath }] of replaced.entries()) {
+              if (stagedReceipts[index]?.outcome !== 'failed') {
+                staged.add(stagedPath);
               }
             }
-            offset += chunk.length * 2;
-          }
-          for (const [index, { staged: from }] of replaced.entries()) {
-            if (publications[index]?.outcome === 'applied') {
-              published.add(from);
+            raiseRefusal(
+              stagedReceipts,
+              replaced.map(({ staged: stagedPath }) => stagedPath),
+            );
+            await moveAsideVerified(live, replaced, signal);
+            /* Each replacement is one publish and, a phase later, one backup removal. */
+            const pairs = Math.floor(maximumChangesetEntries / 2);
+            const chunks: Array<typeof replaced> = [];
+            for (let start = 0; start < replaced.length; start += pairs) {
+              chunks.push(replaced.slice(start, start + pairs));
             }
-          }
-          /* A replacement whose publish did not land puts its backup back; one
-           * that did drops a backup its removal phase skipped. */
-          await applyChangesets(
-            live,
-            splitChangeset(
+            const publishReceipts = await applyChangesets(
+              live,
+              chunks.map((chunk) => [
+                ...chunk.map(({ staged: from, path }): ChangesetEntry => ({ op: 'move', from, to: path })),
+                ...chunk.map(({ backup }): ChangesetEntry => ({ op: 'delete', path: backup, kind: 'file', phase: 1 })),
+              ]),
+              undefined,
+            );
+            const publications: ChangesetEntryReceipt[] = [];
+            const backupsDropped = new Set<string>();
+            let offset = 0;
+            for (const chunk of chunks) {
+              publications.push(...publishReceipts.slice(offset, offset + chunk.length));
+              for (const [position, { backup }] of chunk.entries()) {
+                if (publishReceipts[offset + chunk.length + position]?.outcome === 'applied') {
+                  backupsDropped.add(backup);
+                }
+              }
+              offset += chunk.length * 2;
+            }
+            for (const [index, { staged: from }] of replaced.entries()) {
+              if (publications[index]?.outcome === 'applied') {
+                published.add(from);
+              }
+            }
+            /* A replacement whose publish did not land puts its backup back; one
+             * that did drops a backup its removal phase skipped. */
+            await applyChangesets(
+              live,
+              splitChangeset(
+                replaced
+                  .filter(({ staged: from }) => !published.has(from))
+                  .map(({ backup, path }): ChangesetEntry => ({ op: 'move', from: backup, to: path })),
+              ),
+              undefined,
+            );
+            await Promise.all(
               replaced
-                .filter(({ staged: from }) => !published.has(from))
-                .map(({ backup, path }): ChangesetEntry => ({ op: 'move', from: backup, to: path })),
-            ),
-            undefined,
-          );
-          await Promise.all(
-            replaced
-              .filter(({ staged: from, backup }) => published.has(from) && !backupsDropped.has(backup))
-              .map(async ({ backup }) => unlinkIfPresent(live, backup)),
-          );
-          raiseRefusal(
-            publications,
-            replaced.map(({ path }) => path),
-          );
-        } finally {
-          /* Bytes staged and never published are this call's litter, swept
-           * before the verification re-reads the tree they would appear in. */
-          await Promise.all(
-            [...staged].filter((path) => !published.has(path)).map(async (path) => unlinkIfPresent(live, path)),
-          );
-        }
+                .filter(({ staged: from, backup }) => published.has(from) && !backupsDropped.has(backup))
+                .map(async ({ backup }) => unlinkIfPresent(live, backup)),
+            );
+            raiseRefusal(
+              publications,
+              replaced.map(({ path }) => path),
+            );
+          } finally {
+            /* Bytes staged and never published are this call's litter, swept
+             * before the verification re-reads the tree they would appear in. */
+            await Promise.all(
+              [...staged].filter((path) => !published.has(path)).map(async (path) => unlinkIfPresent(live, path)),
+            );
+          }
+        };
+        await land(changedFiles.filter(([path]) => first.has(path)));
+        await land(changedFiles.filter(([path]) => !first.has(path)));
         signal?.throwIfAborted();
         const reread = await capture(place, target);
         const verified = new Map(reread.entries().map((entry) => [entry.path, entry]));
@@ -575,13 +581,14 @@ export const createApplyTreeEffects = (
             `The files you have open did not keep the paths this change wrote: ${unverified.join(', ')}`,
           );
         }
+        failed = false;
         return [...removedPaths, ...writtenPaths].sort();
       } finally {
         workerTimings.record('apply.hold', heldAt);
         if (closure !== undefined) {
           live.endExpectation?.();
         }
-        release?.();
+        release?.({ failed });
       }
     });
 

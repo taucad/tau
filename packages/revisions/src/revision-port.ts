@@ -558,6 +558,11 @@ export type ReadTreeOptions = Readonly<{
    * cannot order its transfers may ignore it.
    */
   firstLargeObjects?: () => ReadonlySet<string>;
+  /**
+   * Told whenever bytes of one of this read's large objects arrive, by its
+   * oid, including a transfer another reader started and this one joined.
+   */
+  onTransferProgress?: (oid: string) => void;
   /** Stops a fetching read's transfers; the read then rejects. */
   signal?: AbortSignal;
 }>;
@@ -618,7 +623,7 @@ export type RevisionPort = Readonly<{
    */
   fetchLargeObjects?(
     pointers: ReadonlyArray<Readonly<{ oid: string; size: number }>>,
-    options?: Pick<ReadTreeOptions, 'onLargeObject' | 'firstLargeObjects' | 'signal'>,
+    options?: Pick<ReadTreeOptions, 'onLargeObject' | 'firstLargeObjects' | 'onTransferProgress' | 'signal'>,
   ): Promise<ReadonlyMap<string, Uint8Array<ArrayBuffer>>>;
   writeRevision(input: WriteRevisionInput): Promise<RevisionReceipt>;
   /** A branch by name, or any other ref spelled in full. */

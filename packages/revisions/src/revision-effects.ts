@@ -45,7 +45,7 @@ import type { EntryClosure } from '#open/entry-closure.js';
 import { createContentReads } from '#open/content-reads.js';
 import { createLargeObjectAdoption } from '#large-object-adoption.js';
 import type { LargeObjectAdoption } from '#large-object-adoption.js';
-import type { ContentReadOptions, ReadOutcome } from '#open/content-reads.js';
+import type { ContentReadOptions, PlaceholderRequest, ReadOutcome } from '#open/content-reads.js';
 import {
   prepareProjectManifest,
   validateLegacyProjectIdentity,
@@ -449,7 +449,7 @@ export type RevisionActors = Readonly<{
   resolvePlaceholder: (
     checkoutId: string | undefined,
     path: string,
-    signal?: AbortSignal,
+    request?: PlaceholderRequest,
   ) => Promise<Uint8Array<ArrayBuffer> | undefined>;
   /**
    * Store every large file the checkout's attributes track and holds whole,
@@ -1753,12 +1753,22 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const contentReads = createContentReads({
     useFileSystem,
     readStoredObject: async (pointer) => port.readLargeObject?.(pointer),
-    fetchObject: async (pointer, signal) => {
+    /* No reader's signal: the transfer may be the fill's too, and only a close stops it (I10, S4). */
+    fetchObject: async (pointer, onProgress) => {
       if (port.fetchLargeObjects === undefined) {
         return undefined;
       }
-      const fetched = await transport(signal, async (bounded) =>
-        port.fetchLargeObjects!([pointer], { signal: bounded }),
+      const fetched = await transport(undefined, async (bounded) =>
+        port.fetchLargeObjects!([pointer], {
+          signal: bounded,
+          ...(onProgress === undefined
+            ? {}
+            : {
+                onTransferProgress: () => {
+                  onProgress();
+                },
+              }),
+        }),
       );
       return fetched.get(pointer.oid);
     },
@@ -1795,8 +1805,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     paths: readonly string[],
     materializeOptions?: Readonly<{ signal?: AbortSignal; stallMilliseconds?: number }>,
   ): Promise<void> => contentReads.materialize(await readPlaceOf(checkoutId), paths, materializeOptions);
-  const resolvePlaceholder: RevisionActors['resolvePlaceholder'] = async (checkoutId, path, signal) =>
-    contentReads.resolvePlaceholder(await readPlaceOf(checkoutId), path, signal);
+  const resolvePlaceholder: RevisionActors['resolvePlaceholder'] = async (checkoutId, path, request) =>
+    contentReads.resolvePlaceholder(await readPlaceOf(checkoutId), path, request);
   /* D9: one copy of every large object; see `large-object-adoption.ts`. A port that cannot store one adopts nothing. */
   const { storeLargeObject, readLargeObject } = port;
   const adoption =

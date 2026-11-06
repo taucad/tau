@@ -137,6 +137,16 @@ describe('settleReadiness', () => {
     expect(readinessOf(source({ entryClosureLanded: true })).state).toBe('filled');
   });
 
+  it('never reads a failed write’s new tree as materialized (D10, I7)', () => {
+    const writing = readinessOf(source({ applyingRoots: ['/projects/p'] }), false, 1);
+    const failed = readinessOf(source({ treeWriteFailed: true }), false, 1);
+    expect(failed).toEqual({ state: 'treeReady', tree: 'live:h1:1' });
+    expect(settleReadiness(writing, failed)).toEqual({ state: 'treeReady', tree: 'live:h1:1' });
+    /* What it already showed stays shown. */
+    const entry = readinessOf(source({ applyingRoots: ['/projects/p'], entryClosureLanded: true }), false, 1);
+    expect(settleReadiness(entry, failed)).toBe(entry);
+  });
+
   it('moves forward within one tree', () => {
     const tree = readinessOf(source({ applyingRoots: ['/projects/p'] }));
     const filled = readinessOf(source());

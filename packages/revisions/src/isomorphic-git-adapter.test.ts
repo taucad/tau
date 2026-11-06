@@ -700,6 +700,22 @@ describe('reading a tree with large objects', () => {
     expect(transfer).toHaveBeenCalledTimes(parts.length);
   });
 
+  /* I10, S4: a read-through that joins the fill's download hears its bytes arrive, and the object downloads once. */
+  it('tells a reader that joined a download as its bytes arrive, downloading the object once', async () => {
+    const { port, head, transfer, evict } = await lfsStore();
+    await evict(...parts.map(([, content]) => content!));
+    const { pointer } = lfsPointerFor(encoder.encode(parts[0]![1]));
+    const progress = vi.fn();
+    const [tree, fetched] = await Promise.all([
+      port.readTree(head),
+      port.fetchLargeObjects!([pointer], { onTransferProgress: progress }),
+    ]);
+    expect(fetched.get(pointer.oid)).toStrictEqual(encoder.encode(parts[0]![1]));
+    expect(tree?.get(parts[0]![0]!)).toStrictEqual(encoder.encode(parts[0]![1]));
+    expect(transfer).toHaveBeenCalledTimes(parts.length);
+    expect(progress).toHaveBeenCalledWith(pointer.oid);
+  });
+
   it("fetches for itself what another reader's failed download did not deliver", async () => {
     const { port, head, transfer, evict } = await lfsStore();
     await evict(...parts.map(([, content]) => content!));

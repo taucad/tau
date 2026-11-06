@@ -66,7 +66,11 @@ export type ReadinessSource = Pick<
   | 'largeObjects'
   | 'applyingRoots'
 > &
-  Readonly<{ entryClosureLanded?: boolean }>;
+  Readonly<{
+    entryClosureLanded?: boolean;
+    /** The last write of another revision's tree failed: that tree was never written whole. */
+    treeWriteFailed?: boolean;
+  }>;
 
 /**
  * What one merged projection says about readiness, before monotonicity.
@@ -106,6 +110,10 @@ export const readinessOf = (
     status.largeObjects === undefined && (largeObjectsTold || tree === undefined) ? 'filled' : 'materialized';
   if (applying) {
     return { state: status.entryClosureLanded === true ? 'entryReady' : 'treeReady', tree };
+  }
+  if (status.treeWriteFailed === true) {
+    /* An aborted write of a new tree: known, never `materialized` (I7 keeps what it already showed). */
+    return { state: 'treeReady', tree };
   }
   if (tree !== undefined || status.remote.phase === 'none') {
     /* A local project with no revision yet is complete: its files are the only copy. */

@@ -97,6 +97,15 @@ export type ApplyingTreePurpose = 'apply' | 'tree' | 'fill';
  */
 export type ApplyingTreeBracket = Readonly<{ purpose: ApplyingTreePurpose; closure?: readonly string[] }>;
 
+/**
+ * How a tree write ended, told as its bracket is released: `failed` when it
+ * threw or was aborted, so a host never reads the tree it began as written
+ * (D10, I7).
+ *
+ * @public
+ */
+export type ApplyingTreeOutcome = Readonly<{ failed: boolean }>;
+
 /** Dependencies one project's actor set is built from. @public */
 export type RevisionActorsOptions = Readonly<{
   /** The content-addressed store every revision id comes from. */
@@ -173,7 +182,11 @@ export type RevisionActorsOptions = Readonly<{
    * every other materialization: a host can hold a file tree's re-reads for
    * an apply without holding them for every flush of a long fill.
    */
-  onApplyingTree?: (checkout: Checkout, paths: readonly string[], bracket?: ApplyingTreeBracket) => (() => void) | void;
+  onApplyingTree?: (
+    checkout: Checkout,
+    paths: readonly string[],
+    bracket?: ApplyingTreeBracket,
+  ) => ((outcome?: ApplyingTreeOutcome) => void) | void;
   /**
    * Told how a checkout's large-object placeholders are being filled.
    *

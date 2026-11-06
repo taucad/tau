@@ -734,16 +734,19 @@ describe('the entry closure of a tree write (D10)', () => {
     });
     const brackets: Array<Readonly<{ purpose: string; closure?: readonly string[] }> | undefined> = [];
 
+    const outcomes: unknown[] = [];
     await materializer(watched, undefined, (_place, _paths, bracket) => {
       brackets.push(bracket);
       events.push('bracket');
-      return () => {
+      return (outcome) => {
+        outcomes.push(outcome);
         events.push('release');
       };
     })(liveCheckout, target, { before: new ImmutableRevisionTree([['old.scad', 'old\n']]), purpose: 'tree' });
 
-    /* The index learns the whole tree before the bracket opens and any byte lands. */
-    expect(events.slice(0, 2)).toEqual(['expect', 'bracket']);
+    /* The index learns the whole tree as the bracket opens, before any byte lands. */
+    expect(events.slice(0, 2)).toEqual(['bracket', 'expect']);
+    expect(outcomes).toEqual([{ failed: false }]);
     expect(expected).toHaveLength(604);
     expect(expected.find((entry) => entry.path === 'models/part.step')).toEqual({
       path: 'models/part.step',
@@ -756,6 +759,88 @@ describe('the entry closure of a tree write (D10)', () => {
     /* The closure lands in the first changeset, before the tree's other files. */
     expect(events.slice(2, 4).toSorted()).toEqual(['tau.json', 'zz/main.scad']);
     expect(events.slice(-2)).toEqual(['end', 'release']);
+  });
+
+  it('should land the closure first across created and replaced files', async () => {
+    const context = await project({ 'tau.json': '{}\n', 'zz/main.scad': 'cube(0);\n' });
+    const manifest = serializeProjectManifest({
+      $schema: projectManifestSchemaUrl,
+      name: 'Bracket',
+      description: '',
+      tags: [],
+      assets: { main: { entryPath: 'zz/main.scad' } },
+    });
+    const target = new ImmutableRevisionTree([
+      ['a/new.scad', 'cube(1);\n'],
+      ['tau.json', manifest],
+      ['zz/main.scad', 'cube(2);\n'],
+    ]);
+    const published: string[] = [];
+    const { checkout } = context;
+    const watched: RevisionFileSystem = Object.assign(Object.create(checkout) as RevisionFileSystem, {
+      applyBatch: async (entries: readonly BatchEntry[], batchOptions?: BatchOptions): Promise<BatchReceipt[]> => {
+        published.push(
+          ...entries.flatMap((entry) =>
+            entry.op === 'write' && entry.create === true && !entry.path.includes('tau-staged')
+              ? [entry.path]
+              : entry.op === 'move' && !entry.to.includes('tau-backup')
+                ? [entry.to]
+                : [],
+          ),
+        );
+        return checkout.applyBatch!(entries, batchOptions);
+      },
+    });
+
+    await materializer(watched)(liveCheckout, target, {
+      before: new ImmutableRevisionTree([
+        ['tau.json', '{}\n'],
+        ['zz/main.scad', 'cube(0);\n'],
+      ]),
+      purpose: 'tree',
+    });
+
+    /* Both closure files are replacements, yet they land before the created file. */
+    expect(published.indexOf('a/new.scad')).toBeGreaterThan(published.indexOf('tau.json'));
+    expect(published.indexOf('a/new.scad')).toBeGreaterThan(published.indexOf('zz/main.scad'));
+  });
+
+  it('should end the expectation even when the bracket throws, and tell a failed write as failed', async () => {
+    const context = await project({});
+    const target = new ImmutableRevisionTree([
+      ['tau.json', '{}\n'],
+      ['a.scad', 'a\n'],
+    ]);
+    const endExpectation = vi.fn();
+    const watched: RevisionFileSystem = Object.assign(Object.create(context.checkout) as RevisionFileSystem, {
+      expectEntries: vi.fn(),
+      endExpectation,
+    });
+    await expect(
+      materializer(watched, undefined, () => {
+        throw new Error('host bracket failed');
+      })(liveCheckout, target, { before: new ImmutableRevisionTree([]), purpose: 'tree' }),
+    ).rejects.toThrow('host bracket failed');
+    expect(endExpectation).toHaveBeenCalledTimes(1);
+
+    /* An aborted write releases its bracket as failed, so its tree is never read as written. */
+    const outcomes: unknown[] = [];
+    const controller = new AbortController();
+    const aborting: RevisionFileSystem = Object.assign(Object.create(watched) as RevisionFileSystem, {
+      applyBatch: async (entries: readonly BatchEntry[], batchOptions?: BatchOptions): Promise<BatchReceipt[]> => {
+        const receipts = await context.checkout.applyBatch!(entries, batchOptions);
+        controller.abort(new Error('closed'));
+        return receipts;
+      },
+    });
+    await expect(
+      materializer(aborting, undefined, () => (outcome) => {
+        outcomes.push(outcome);
+      })(liveCheckout, target, { before: new ImmutableRevisionTree([]), purpose: 'tree', signal: controller.signal }),
+    ).rejects.toThrow();
+    /* The recovery that puts the prior files back is a write of its own, and it lands. */
+    expect(outcomes).toEqual([{ failed: true }, { failed: false }]);
+    expect(endExpectation).toHaveBeenCalledTimes(3);
   });
 
   it('should tell nothing for a fill flush', async () => {

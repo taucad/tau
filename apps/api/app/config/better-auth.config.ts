@@ -18,7 +18,7 @@ import { eq } from 'drizzle-orm';
 import { storageTombstone, user as userTable } from '#database/schema.js';
 import { eraseAccountEvidence } from '#api/agent-observability/evidence-erasure.js';
 import type { Environment } from '#config/environment.config.js';
-import { staticAuthConfig } from '#config/auth.js';
+import { staticAuthConfig } from '#config/auth-static.config.js';
 import { cliDeviceAuthorization } from '#config/cli-device-authorization.js';
 import { emailDomainNotAllowed, isEmailDomainAllowed } from '#auth/email-domain-allowlist.js';
 import type { EmailService } from '#email/email.service.js';

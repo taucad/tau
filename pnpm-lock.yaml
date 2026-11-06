@@ -5546,6 +5546,9 @@ importers:
       electron:
         specifier: '>=37.0.0'
         version: 43.7.9
+      minimatch:
+        specifier: ^10.2.5
+        version: 10.2.6
       nanoid:
         specifier: 'catalog:'
         version: 5.1.16

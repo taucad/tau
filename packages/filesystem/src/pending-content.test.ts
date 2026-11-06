@@ -81,6 +81,7 @@ describe('pending entries (D9)', () => {
         object: { oid, size: part.byteLength },
       },
       expect.any(AbortSignal),
+      expect.any(Function),
     );
     const streamed = await new Response(view.readFileStream!('models/part.step')).arrayBuffer();
     expect(new Uint8Array(streamed)).toStrictEqual(part);
@@ -90,7 +91,11 @@ describe('pending entries (D9)', () => {
     expect(source).toHaveBeenCalledWith(
       expect.objectContaining({ root: route, path: 'models/part.step' }),
       expect.any(AbortSignal),
+      expect.any(Function),
     );
+    /* So does the service's stream. */
+    const serviceStreamed = await new Response(await service.readFileStream(`${route}/models/part.step`)).arrayBuffer();
+    expect(new Uint8Array(serviceStreamed)).toStrictEqual(part);
     /* The revision layer owns the pointers and reads them as they are. */
     const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
     expect(await raw.readFile('models/part.step')).toStrictEqual(pointer);
@@ -138,6 +143,43 @@ describe('pending entries (D9)', () => {
     stalling.dispose();
   });
 
+  it('should bound a read by stalls, not by a deadline, and leave a shared transfer running when it refuses (I10)', async () => {
+    const bounded = await createService(40);
+    const view = bounded.createRootedFileSystem(route);
+    /* A slow transfer that keeps making progress outlives the bound many times over. */
+    bounded.setPendingObjectSource(async (_request, _signal, progress) => {
+      for (let step = 0; step < 8; step += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one chunk at a time, as a transfer arrives.
+        await new Promise((resolve) => {
+          setTimeout(resolve, 20);
+        });
+        progress();
+      }
+      return part;
+    });
+    expect(await view.readFile('models/part.step')).toStrictEqual(part);
+    /* A transfer with no progress refuses the read; the transfer itself, shared with the fill, is not aborted. */
+    let finish: (bytes: Uint8Array<ArrayBuffer>) => void = () => undefined;
+    const transfer = new Promise<Uint8Array<ArrayBuffer>>((resolve) => {
+      finish = resolve;
+    });
+    let readerSignal: AbortSignal | undefined;
+    bounded.setPendingObjectSource(async (_request, signal) => {
+      readerSignal = signal;
+      return transfer;
+    });
+    await expect(view.readFile('models/part.step')).rejects.toMatchObject({ code: 'PENDING' });
+    expect(readerSignal?.aborted).toBe(true);
+    finish(part);
+    expect(await transfer).toStrictEqual(part);
+    /* The caller's own cancellation reaches the source as well. */
+    const controller = new AbortController();
+    const streamed = view.readFileStream!('models/part.step', { signal: controller.signal });
+    controller.abort(new Error('closed'));
+    await expect(new Response(streamed).arrayBuffer()).rejects.toThrow();
+    bounded.dispose();
+  });
+
   it('should read a pointer the host says is no placeholder as the text it is', async () => {
     service.setPendingObjectSource(async () => undefined);
     expect(await service.createRootedFileSystem(route).readFile('models/part.step')).toStrictEqual(pointer);
@@ -148,7 +190,13 @@ describe('pending entries (D9)', () => {
     service.setPendingObjectSource(source);
     const view = service.createRootedFileSystem(route);
     await view.duplicate!('models/part.step', 'models/copy.step');
-    expect(source).not.toHaveBeenCalled();
+    /* The copy only asks the device whether the target is a tracked name. */
+    expect(source).toHaveBeenCalledTimes(1);
+    expect(source).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'models/copy.step', pointer, localOnly: true }),
+      expect.any(AbortSignal),
+      expect.any(Function),
+    );
     const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
     expect(await raw.readFile('models/copy.step')).toStrictEqual(pointer);
     expect(decoder.decode(await view.readFile('models/copy.step'))).toBe('solid part\n');
@@ -156,23 +204,55 @@ describe('pending entries (D9)', () => {
     await view.writeFile('models/copy.step', 'mine');
     expect(await view.readFile('models/copy.step', 'utf8')).toBe('mine');
   });
+
+  it('should never write pointer text under a name the project does not track', async () => {
+    const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = service.createRootedFileSystem(route);
+    /* Untracked there, the object on the device: the copy is the object. */
+    let local = true;
+    service.setPendingObjectSource(async (request) => {
+      if (request.path.startsWith('notes/')) {
+        return undefined;
+      }
+      if (request.localOnly === true && !local) {
+        throw new Error('not on this device');
+      }
+      return part;
+    });
+    await view.duplicate!('models/part.step', 'notes/copy.txt');
+    expect(await raw.readFile('notes/copy.txt')).toStrictEqual(part);
+    /* Untracked there, the object not here: refused, nothing written. */
+    local = false;
+    await expect(view.duplicate!('models/part.step', 'notes/other.txt')).rejects.toMatchObject({ code: 'PENDING' });
+    await expect(raw.readFile('notes/other.txt')).rejects.toMatchObject({ code: 'ENOENT' });
+    /* Tracked there, the object not here: the pointer is the copy. */
+    await view.duplicate!('models/part.step', 'models/again.step');
+    expect(await raw.readFile('models/again.step')).toStrictEqual(pointer);
+  });
 });
 
 describe('expected entries (D10)', () => {
-  it('should know a tree write’s entries in the root’s index and answer when they have landed', async () => {
+  it('should know a tree write’s entries in a cold root’s index and answer when they have landed', async () => {
+    const source = vi.fn<PendingObjectSource>(async () => part);
+    service.setPendingObjectSource(source);
     const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
-    /* A cold root learns nothing and answers no expectation. */
-    raw.expectEntries!([{ path: 'tau.json', size: 2, arriving: true }]);
     expect(raw.entriesLanded!(['tau.json'])).toBeUndefined();
-    await raw.statTree!('');
-    raw.expectEntries!([
+    /* No warm-up: the expectation opens the cold index. */
+    await raw.expectEntries!([
       { path: 'tau.json', size: 2, arriving: true },
       { path: 'models/part.step', size: pointer.byteLength, pending: { oid, size: part.byteLength }, arriving: false },
     ]);
     expect(raw.entriesLanded!(['tau.json'])).toBe(false);
-    expect(raw.entriesLanded!(['models/part.step'])).toBe(true);
+    /* A placeholder is not readable as its pointer: it lands with its object. */
+    expect(raw.entriesLanded!(['models/part.step'])).toBe(false);
+    /* A consumer that only searches learns it is pending from the index, starting no download. */
+    const view = service.createRootedFileSystem(route);
+    expect(await view.pendingPaths!(['main.scad', 'models/part.step'])).toStrictEqual(['models/part.step']);
+    expect(source).not.toHaveBeenCalled();
     await raw.writeFile('tau.json', '{}');
+    await raw.writeFile('models/part.step', part);
     expect(raw.entriesLanded!(['tau.json', 'models/part.step'])).toBe(true);
+    expect(await view.pendingPaths!(['models/part.step'])).toStrictEqual([]);
     raw.endExpectation!();
     expect(raw.entriesLanded!(['tau.json'])).toBeUndefined();
   });

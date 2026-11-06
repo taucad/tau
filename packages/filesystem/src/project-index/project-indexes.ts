@@ -499,11 +499,28 @@ export class ProjectIndexes {
    *
    * @param absolutePath - Absolute file path.
    * @param object - The large object its pointer names.
+   * @param observed - The size the pointer was read at, and {@link ProjectIndexes.generationAt} before the read.
    */
-  public markPending(absolutePath: string, object: PendingObject): void {
+  public markPending(
+    absolutePath: string,
+    object: PendingObject,
+    observed?: Readonly<{ size: number; generation?: number | undefined }>,
+  ): void {
     this._apply(absolutePath, (index, relative) => {
-      index.markPending(relative, object);
+      index.markPending(relative, object, observed);
     });
+  }
+
+  /**
+   * The generation of one entry in the warm index that covers it, taken before a read so a mark made from that read
+   * can tell whether a write landed since.
+   *
+   * @param absolutePath - Absolute file path.
+   * @returns The generation, or `undefined` when no warm index holds the entry.
+   */
+  public generationAt(absolutePath: string): number | undefined {
+    const covering = this._covering(absolutePath);
+    return covering?.index.entry(covering.relative)?.generation;
   }
 
   /**
@@ -519,14 +536,15 @@ export class ProjectIndexes {
 
   /**
    * Know a tree's entries before its write lands them, in the index of that
-   * exact root (see {@link ProjectIndex.expect}). A root with no index learns
-   * nothing, and answers no expectation.
+   * exact root (see {@link ProjectIndex.expect}), opening it when it is cold.
    *
    * @param root - Absolute root the tree is written to.
    * @param entries - Every entry of the tree, root-relative.
    */
-  public expect(root: string, entries: readonly ExpectedEntry[]): void {
-    this._states.get(normalizePath(root))?.index.expect(entries);
+  public async expect(root: string, entries: readonly ExpectedEntry[]): Promise<void> {
+    /* A cold root is opened first, so a cold open's write is known as it lands. */
+    const index = await this.ready(root);
+    index.expect(entries);
   }
 
   /**

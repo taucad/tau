@@ -316,26 +316,7 @@ export class WorkspaceFileService {
     const { provider, path: resolvedPath } = await this._resolve(canonicalPath, { scope: optionsObject?.scope });
     const encoding = options === 'utf8' || optionsObject?.encoding === 'utf8' ? 'utf8' : undefined;
 
-    const read = await provider.readFile(resolvedPath);
-    /* A pending entry reads as its object, never its pointer (D9). */
-    const object = pendingObjectOf(read);
-    let data = read;
-    if (object !== undefined) {
-      this._projectIndexes.markPending(canonicalPath, object);
-      /* The source answers by mount, as a rooted view's read asks it. */
-      const root =
-        optionsObject?.scope === undefined ? this._mountTable.resolve(canonicalPath).entry?.prefix : undefined;
-      const local = root === undefined ? canonicalPath : canonicalPath.slice(root === '/' ? 1 : root.length + 1);
-      data = await readThroughPending(
-        this._pendingSource,
-        { authorityPath: canonicalPath, root: root ?? canonicalPath, path: local, object },
-        {
-          pointer: read,
-          ...(signal === undefined ? {} : { signal }),
-          stallMilliseconds: this._pendingStallMilliseconds,
-        },
-      );
-    }
+    const data = await this._readThrough(canonicalPath, { provider, path: resolvedPath }, optionsObject);
     return encoding === 'utf8' ? new TextDecoder().decode(data) : data;
   }
 
@@ -357,7 +338,19 @@ export class WorkspaceFileService {
       throw new DOMException('The operation was aborted.', 'AbortError');
     }
 
-    const { provider, path: resolvedPath } = this._resolveProvider(resolveAuthorityPath(filepath));
+    const canonicalPath = resolveAuthorityPath(filepath);
+    const { provider, path: resolvedPath } = this._resolveProvider(canonicalPath);
+
+    /* A file small enough to be a pointer is read whole, so a pending entry streams its object (D9). */
+    let size: number | undefined;
+    try {
+      ({ size } = await provider.stat(resolvedPath));
+    } catch {
+      size = undefined;
+    }
+    if (size !== undefined && size <= 1024) {
+      return bufferToStream(await this._readThrough(canonicalPath, { provider, path: resolvedPath }, options), options);
+    }
 
     if (provider.readFileStream) {
       return provider.readFileStream(resolvedPath, options);
@@ -1269,6 +1262,42 @@ export class WorkspaceFileService {
     this._watchRegistry.dispose();
     this._registry.disposeAll();
     this._eventBus.dispose();
+  }
+
+  /**
+   * Read one file's bytes, through to its object when it is a pending entry (D9). The pointer is marked pending
+   * unless a write landed after the read began (I7).
+   *
+   * @param canonicalPath - Absolute authority path.
+   * @param resolved - The provider and path it resolves to.
+   * @param options - The caller's cancellation and the scope it read under.
+   * @returns The bytes the path stands for.
+   */
+  private async _readThrough(
+    canonicalPath: string,
+    resolved: Readonly<{ provider: FileSystemProvider; path: string }>,
+    options?: Readonly<{ signal?: AbortSignal | undefined; scope?: WorkspaceScope | undefined }>,
+  ): Promise<Uint8Array<ArrayBuffer>> {
+    const generation = this._projectIndexes.generationAt(canonicalPath);
+    const read = await resolved.provider.readFile(resolved.path);
+    const object = pendingObjectOf(read);
+    if (object === undefined) {
+      return read;
+    }
+    this._projectIndexes.markPending(canonicalPath, object, { size: read.byteLength, generation });
+    /* The source answers by mount, as a rooted view's read asks it. */
+    const root = options?.scope === undefined ? this._mountTable.resolve(canonicalPath).entry?.prefix : undefined;
+    const local = root === undefined ? canonicalPath : canonicalPath.slice(root === '/' ? 1 : root.length + 1);
+    const signal = options?.signal;
+    return readThroughPending(
+      this._pendingSource,
+      { authorityPath: canonicalPath, root: root ?? canonicalPath, path: local, object },
+      {
+        pointer: read,
+        ...(signal === undefined ? {} : { signal }),
+        stallMilliseconds: this._pendingStallMilliseconds,
+      },
+    );
   }
 
   private async _configureProjectRoots(configuration: ProjectRootConfiguration): Promise<void> {

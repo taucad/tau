@@ -435,7 +435,23 @@ describe('ProjectIndex pending entries (D9)', () => {
     expect(index.pendingFor('other.step')).toBeUndefined();
   });
 
-  it('should know a tree write’s entries before they land, each placeholder landing pending (D10)', () => {
+  it('should not mark a pointer read pending when a write landed after the read began (I7)', () => {
+    const index = observed([file('part.step', 131, 1000)]);
+    const before = index.entry('part.step')!.generation;
+    /* The fill writes the object while the pointer's read is in flight. */
+    index.recordFile('part.step', { size: object.size });
+    index.markPending('part.step', object, { size: 131, generation: before });
+    expect(index.pendingFor('part.step')).toBeUndefined();
+    /* A size that is not the read's is not the pointer either. */
+    index.markPending('part.step', object, { size: 131 });
+    expect(index.pendingFor('part.step')).toBeUndefined();
+    /* The read's own observation still marks. */
+    index.recordFile('part.step', { size: 131 });
+    index.markPending('part.step', object, { size: 131, generation: index.entry('part.step')!.generation });
+    expect(index.pendingFor('part.step')).toStrictEqual(object);
+  });
+
+  it('should know a tree write’s entries before they land, each placeholder arriving until its object lands (D10)', () => {
     const index = observed([file('tau.json', 40, 1000), file('held.step', 131, 1000)]);
     expect(index.expecting).toBe(false);
     index.expect([
@@ -444,9 +460,10 @@ describe('ProjectIndex pending entries (D9)', () => {
       { path: 'main.scad', size: 20, arriving: true },
       { path: 'models/part.step', size: 131, pending: object, arriving: true },
     ]);
-    /* An entry the checkout already holds is known now, a placeholder as a pending entry. */
+    /* An entry the checkout already holds is known now, a placeholder as a pending entry still arriving. */
     expect(index.expecting).toBe(true);
     expect(index.pendingFor('held.step')).toStrictEqual(object);
+    expect(index.arriving('held.step')).toBe(true);
     expect(index.arriving('tau.json')).toBe(false);
     expect(index.arriving('main.scad')).toBe(true);
     /* A write lands an entry; a placeholder lands pending when its bytes are its pointer's. */
@@ -455,8 +472,12 @@ describe('ProjectIndex pending entries (D9)', () => {
     index.recordFile('models/.part.step.staged', { size: 131 });
     expect(index.arriving('models/part.step')).toBe(true);
     index.move('models/.part.step.staged', 'models/part.step');
-    expect(index.arriving('models/part.step')).toBe(false);
     expect(index.pendingFor('models/part.step')).toStrictEqual(object);
+    /* A pointer is not readable bytes: the placeholder lands when its object does. */
+    expect(index.arriving('models/part.step')).toBe(true);
+    index.recordFile('models/part.step', { size: object.size });
+    expect(index.arriving('models/part.step')).toBe(false);
+    expect(index.pendingFor('models/part.step')).toBeUndefined();
     index.endExpectation();
     expect(index.expecting).toBe(false);
   });

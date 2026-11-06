@@ -31,6 +31,10 @@ export type PendingObjectRequest = Readonly<{
   /** The path relative to that mount. */
   path: string;
   object: PendingObject;
+  /** The pointer's bytes, when the path does not hold them yet (a copy's target). */
+  pointer?: Uint8Array<ArrayBuffer>;
+  /** Answer from the device alone: refuse rather than fetch. */
+  localOnly?: boolean;
 }>;
 
 /**
@@ -39,14 +43,19 @@ export type PendingObjectRequest = Readonly<{
  * placeholder after all (a pointer the project's attributes do not track is a
  * person's text, read as it is). Rejects when the object cannot be had.
  *
+ * `signal` says the read no longer waits; a transfer other readers share
+ * must outlive it. `progress` is called whenever bytes of the object arrive,
+ * whoever started their transfer: each call restarts the read's stall bound.
+ *
  * @public
  */
 export type PendingObjectSource = (
   request: PendingObjectRequest,
   signal: AbortSignal,
+  progress: () => void,
 ) => Promise<Uint8Array<ArrayBuffer> | undefined>;
 
-/** How long one read waits on a pending entry before it refuses (I10). Milliseconds. @public */
+/** How long one read waits on a pending entry with no progress before it refuses (I10). Milliseconds. @public */
 export const pendingStallMilliseconds = 60_000;
 
 /** A read of a pending entry whose object could not be had in time. @public */
@@ -92,8 +101,8 @@ export const pendingObjectOf = (bytes: Uint8Array<ArrayBuffer>): PendingObject |
 
 /**
  * Read through one pending entry: its object's bytes from the source, under
- * the stall bound; the pointer's own bytes when the source says the path is
- * no placeholder.
+ * a no-progress stall bound that every arrival of bytes restarts; the
+ * pointer's own bytes when the source says the path is no placeholder.
  *
  * @param source - The host's source; absent, every pending read refuses.
  * @param request - What was read and what it names.
@@ -112,25 +121,42 @@ export const readThroughPending = async (
   if (source === undefined) {
     throw new PendingContentError(request.path, request.object);
   }
-  const stall = AbortSignal.timeout(stallMilliseconds);
-  const bounded = signal === undefined ? stall : AbortSignal.any([signal, stall]);
+  signal?.throwIfAborted();
+  const controller = new AbortController();
   /* The bound holds even over a source that ignores its signal. */
-  const ended = new Promise<never>((_resolve, reject) => {
-    bounded.addEventListener(
-      'abort',
-      () => {
-        reject(bounded.reason as Error);
-      },
-      { once: true },
-    );
-  });
+  const ended = Promise.withResolvers<never>();
+  // oxlint-disable-next-line promise/prefer-await-to-then -- marks the rejection handled; the race below awaits it.
+  ended.promise.catch(() => undefined);
+  const stop = (reason: unknown): void => {
+    controller.abort(reason);
+    ended.reject(reason);
+  };
+  let settled = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const progress = (): void => {
+    clearTimeout(timer);
+    if (!settled) {
+      timer = setTimeout(() => {
+        stop(new Error(`No bytes of ${request.path}'s large object arrived for ${String(stallMilliseconds)} ms.`));
+      }, stallMilliseconds);
+    }
+  };
+  const onAbort = (): void => {
+    stop(signal?.reason);
+  };
+  signal?.addEventListener('abort', onAbort, { once: true });
+  progress();
   try {
-    const bytes = await Promise.race([source(request, bounded), ended]);
+    const bytes = await Promise.race([source(request, controller.signal, progress), ended.promise]);
     return bytes ?? pointer;
   } catch (error) {
     if (signal?.aborted === true) {
       throw error;
     }
     throw new PendingContentError(request.path, request.object, { cause: error });
+  } finally {
+    settled = true;
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
   }
 };

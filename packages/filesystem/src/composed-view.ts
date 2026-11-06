@@ -121,6 +121,8 @@ type IndexedFileSystem = {
   statTree(path: string, options?: { admits?: IndexAdmits; signal?: AbortSignal }): Promise<FileStatEntry[]>;
   facts(paths: readonly string[], options?: IndexFactsOptions): Promise<ReadonlyMap<string, ContentFacts>>;
   changedSince(since: number, options?: { admits?: IndexAdmits; signal?: AbortSignal }): Promise<IndexChanges>;
+  /** Which of these files are pending entries, answered from the index without a read (D9). */
+  pendingPaths(paths: readonly string[]): Promise<readonly string[]>;
 };
 
 /**
@@ -1218,6 +1220,18 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
             changedOptions?: { admits?: IndexAdmits; signal?: AbortSignal },
           ): Promise<IndexChanges> =>
             base.changedSince!(since, { ...changedOptions, admits: admitsVisible('', changedOptions?.admits) }),
+        }),
+    /* An overlay entry is never pending: only project files are asked about, masked like `readFile`. */
+    ...(base.pendingPaths === undefined
+      ? {}
+      : {
+          pendingPaths: async (paths: readonly string[]): Promise<readonly string[]> => {
+            const targets = paths.map((path) => readablePath(canonical(path)));
+            const routes = await Promise.all(targets.map(async (target) => routeFor(target)));
+            const asked = targets.filter((_, index) => routes[index]!.kind !== 'overlay');
+            const pending = new Set(asked.length === 0 ? [] : await base.pendingPaths!(asked));
+            return paths.filter((_, index) => pending.has(targets[index]!));
+          },
         }),
     /*
      * The mutating porcelain is a batch in the pipeline below, not N port

@@ -701,10 +701,21 @@ export class ProjectIndex {
    *
    * @param path - Root-relative file path.
    * @param object - The large object its pointer names.
+   * @param observed - The size the pointer was read at, and the entry's generation before the read: a write
+   *   that landed since (another size, or a later generation) is not the pointer, and is left as it is.
    */
-  public markPending(path: string, object: PendingObject): void {
+  public markPending(
+    path: string,
+    object: PendingObject,
+    observed?: Readonly<{ size: number; generation?: number | undefined }>,
+  ): void {
     const node = this._resolve(segmentsOf(path));
-    if (node?.kind !== 'file' || (node.pending?.oid === object.oid && node.pending.size === object.size)) {
+    if (
+      node?.kind !== 'file' ||
+      (node.pending?.oid === object.oid && node.pending.size === object.size) ||
+      (observed !== undefined &&
+        (node.size !== observed.size || (observed.generation !== undefined && node.generation > observed.generation)))
+    ) {
       return;
     }
     node.pending = object;
@@ -715,7 +726,8 @@ export class ProjectIndex {
    * Know a tree's entries before its write lands them (D10). Each one the
    * checkout already holds is known now, a placeholder among them as a pending
    * entry; each one the write lands stays arriving until a write or a move puts
-   * it at its path, and lands pending when its bytes are its placeholder's.
+   * it at its path. A placeholder is not readable as its pointer: it stays
+   * arriving, pending once its pointer lands, until its object's bytes do.
    * Replaces whatever an earlier write expected.
    *
    * @param entries - Every entry of the tree.
@@ -723,10 +735,11 @@ export class ProjectIndex {
   public expect(entries: readonly ExpectedEntry[]): void {
     this._arriving = new Map();
     for (const entry of entries) {
-      if (entry.arriving) {
+      if (entry.arriving || entry.pending !== undefined) {
         this._arriving.set(entry.path, entry);
-      } else if (entry.pending !== undefined && this._resolve(segmentsOf(entry.path))?.size === entry.size) {
-        this.markPending(entry.path, entry.pending);
+      }
+      if (!entry.arriving) {
+        this._land(entry.path);
       }
     }
   }
@@ -789,8 +802,10 @@ export class ProjectIndex {
     if (expected === undefined) {
       return;
     }
-    this._arriving!.delete(path);
-    if (expected.pending !== undefined && this._resolve(segmentsOf(path))?.size === expected.size) {
+    const size = this._resolve(segmentsOf(path))?.size;
+    if (expected.pending === undefined || size === expected.pending.size) {
+      this._arriving!.delete(path);
+    } else if (size === expected.size) {
       this.markPending(path, expected.pending);
     }
   }

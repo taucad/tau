@@ -1587,3 +1587,46 @@ export const createFileSystemBridgeHello = (input: HelloInput): FileSystemBridge
     error: input.error,
   };
 };
+
+/**
+ * The long calls (charter D14, Rule 32): calls whose work grows with their
+ * input — files, bytes, entries — and so have no honest wall-clock deadline.
+ * Each runs under the `'liveness'` policy: it lives while the authority sends
+ * heartbeats or progress for it and fails `PEER_UNRESPONSIVE` only after a
+ * whole liveness window of silence, so a transport deadline never classifies
+ * a mutation as failed while the authority is still applying it (I10).
+ *
+ * The value is the index of the call's options argument that carries the
+ * caller's {@link LongCall} controls, or `undefined` for a call whose signature
+ * has no slot for them (it still gets the liveness policy). A pending-project
+ * commit is one: it waits for a cross-tab lock, removes a half-written target,
+ * then writes every file and the manifest, so it used to need its own
+ * five-minute deadline.
+ *
+ * Both ends read this one table: the client to split the controls off and pick
+ * the liveness policy, the server to hand them back to the handler at the
+ * same slot. Internal: not part of the package barrel.
+ */
+export const fileSystemLongCalls: Readonly<Record<string, number | undefined>> = {
+  readMany: 1,
+  hashFiles: 1,
+  statTree: 1,
+  search: 1,
+  archive: 1,
+  contents: 1,
+  copyTree: 2,
+  duplicate: 2,
+  glob: 1,
+  grep: 1,
+  indexStats: 1,
+  facts: 1,
+  changedSince: 1,
+  /* Its controls ride `ApplyOptions` and the changeset's own signal;
+   * `prepareApplyCall` takes them out. */
+  apply: undefined,
+  writeFiles: undefined,
+  bulkMove: undefined,
+  commitPendingProjectDirectory: undefined,
+  listProjectManifests: undefined,
+  getScopedZippedDirectory: undefined,
+};

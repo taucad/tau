@@ -29,6 +29,7 @@ import type {
 import {
   defaultGrepFileBytes,
   defaultGrepResults,
+  fileSystemLongCalls,
   maxGrepLineCharacters,
   maxReadManyBytes,
 } from '#filesystem-bridge-protocol.js';
@@ -525,31 +526,11 @@ export const withHostContentCalls = <Handlers extends StringKeyedObject>(
 };
 
 /**
- * The bridge methods whose handler takes the long-call controls, and where.
- * Only calls the bridge itself derives, or whose rooted contract names them,
- * take them: a domain handler's trailing slot may already mean something else,
- * such as the mutation context a workspace port binds. Every call here is a
- * rooted one, whose view takes the signal in that options argument.
- */
-const longCallHandlerSlot: Readonly<Record<string, number>> = {
-  archive: 1,
-  contents: 1,
-  search: 1,
-  statTree: 1,
-  copyTree: 2,
-  duplicate: 2,
-  hashFiles: 1,
-  readMany: 1,
-  glob: 1,
-  grep: 1,
-  indexStats: 1,
-  facts: 1,
-  changedSince: 1,
-};
-
-/**
  * Hand a long call's abort signal and progress sink to the handlers that take
- * them, merged into their options argument. `apply` takes the signal on the
+ * them, merged into their options argument at the slot `fileSystemLongCalls`
+ * names. Only calls the bridge itself derives, or whose rooted contract names
+ * them, have a slot: a domain handler's trailing argument may already mean
+ * something else, such as the mutation context a workspace port binds. `apply` takes the signal on the
  * changeset itself, where the pipeline reads it: abort stops later phases.
  *
  * @param method - The bridge method being served.
@@ -561,7 +542,7 @@ export const bindFileSystemLongCall = (method: string, args: unknown[], longCall
   if (method === 'apply') {
     return [{ ...(args[0] as FileSystemBridgeChangeset), signal: longCall.signal }, ...args.slice(1)];
   }
-  const slot = longCallHandlerSlot[method];
+  const slot = fileSystemLongCalls[method];
   if (slot === undefined) {
     return args;
   }

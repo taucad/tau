@@ -39,6 +39,7 @@ import {
   createFileSystemBridgeHello,
   fileSystemBridgeProtocolVersion,
   fileSystemBridgeSchemas,
+  fileSystemLongCalls,
   FileSystemBridgeProtocolVersionError,
 } from '#filesystem-bridge-protocol.js';
 import type {
@@ -222,51 +223,12 @@ const isFileSystemBridgeConnection = (
 const defaultUiCoalescingWindow = 500;
 
 /**
- * The long calls (charter D14, Rule 32): calls whose work grows with their
- * input — files, bytes, entries — and so have no honest wall-clock deadline.
- * Each runs under the `'liveness'` policy: it lives while the authority sends
- * heartbeats or progress for it and fails `PEER_UNRESPONSIVE` only after a
- * whole liveness window of silence, so a transport deadline never classifies
- * a mutation as failed while the authority is still applying it (I10).
- *
- * The value is the index of the call's options argument that carries the
- * caller's {@link LongCall} controls, or `undefined` for a call whose signature
- * has no slot for them (it still gets the liveness policy). A pending-project
- * commit is one: it waits for a cross-tab lock, removes a half-written target,
- * then writes every file and the manifest, so it used to need its own
- * five-minute deadline.
- */
-const longCalls: Readonly<Record<string, number | undefined>> = {
-  readMany: 1,
-  hashFiles: 1,
-  statTree: 1,
-  search: 1,
-  archive: 1,
-  contents: 1,
-  copyTree: 2,
-  duplicate: 2,
-  glob: 1,
-  grep: 1,
-  indexStats: 1,
-  facts: 1,
-  changedSince: 1,
-  /* Its controls ride `ApplyOptions` and the changeset's own signal;
-   * `prepareApplyCall` takes them out. */
-  apply: undefined,
-  writeFiles: undefined,
-  bulkMove: undefined,
-  commitPendingProjectDirectory: undefined,
-  listProjectManifests: undefined,
-  getScopedZippedDirectory: undefined,
-};
-
-/**
  * Take a long call's {@link LongCall} controls out of its options argument:
  * an `AbortSignal` and a function cannot cross the wire, and the bridge
  * carries both itself. Arguments of every other call pass through unchanged.
  */
 const splitLongCall = (method: string, args: readonly unknown[]): { args: unknown[]; longCall?: LongCall } => {
-  const slot = longCalls[method];
+  const slot = fileSystemLongCalls[method];
   const bag = slot === undefined ? undefined : args[slot];
   if (slot === undefined || bag === null || typeof bag !== 'object') {
     return { args: [...args] };
@@ -296,7 +258,7 @@ const fileSystemCallTimeout = (method: string): BridgeCallTimeout | undefined =>
    * Connection loss still settles them as potentially applied. */
   method === 'writeFileChecked' || method === 'deleteFileChecked'
     ? 'none'
-    : Object.hasOwn(longCalls, method)
+    : Object.hasOwn(fileSystemLongCalls, method)
       ? 'liveness'
       : undefined;
 

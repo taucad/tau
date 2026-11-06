@@ -1382,11 +1382,270 @@ describe('restore, through the machine that owns it', () => {
     });
     expect(tree.facts.filter((fact) => fact.type === 'checkoutChanged')).toEqual([]);
     expect(await filesystem.exists('extra.txt')).toBe(false);
+    /* A restore writes another revision's tree: a new tree for readiness, with the closure it lands first (D10, I7). */
     expect(onApplyingTree).toHaveBeenCalledWith(expect.objectContaining({ id: 'live' }), ['extra.txt'], {
-      purpose: 'apply',
+      purpose: 'tree',
+      closure: ['tau.json'],
     });
     expect(release).toHaveBeenCalledOnce();
     tree.actor.stop();
+  }, 30_000);
+
+  /* D10: a tree write whose fill check fails owes the checkout the fill's word; the next capture gives it. */
+  it('checks the fill again at the next capture when a failed tree write leaves its check unanswered', async () => {
+    let failWrite = false;
+    let failReads = 0;
+    const { port, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' });
+    const failing = new Proxy(filesystem, {
+      get: (target, property, receiver) => {
+        const value: unknown = Reflect.get(target, property, receiver);
+        if (typeof value !== 'function') {
+          return value;
+        }
+        const bound = (value as (...parameters: unknown[]) => unknown).bind(target);
+        if (property === 'applyBatch') {
+          return async (...parameters: unknown[]) => {
+            if (failWrite) {
+              failWrite = false;
+              /* The recovery's capture and the fill check that follows both fail. */
+              failReads = 2;
+              throw new Error('The disk refused the write.');
+            }
+            return bound(...parameters);
+          };
+        }
+        if (property === 'readdirEntries') {
+          return async (...parameters: unknown[]) => {
+            if (failReads > 0) {
+              failReads -= 1;
+              throw new Error('The disk could not be listed.');
+            }
+            return bound(...parameters);
+          };
+        }
+        return bound;
+      },
+    });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const reports: LargeObjectsReport[] = [];
+    const tree = await startTree(port, failing, { onLargeObjects: (report) => reports.push(report) });
+    await filesystem.writeFile('extra.txt', 'added\n');
+    const first = await tree.save();
+    await filesystem.unlink('extra.txt');
+    await tree.save();
+
+    failWrite = true;
+    const restoreRef = tree.actor.getSnapshot().children.restore;
+    restoreRef?.send({ type: 'restore', revisionId: first });
+    await expect.poll(() => failReads === 0 && !failWrite, { timeout: 10_000 }).toBe(true);
+    await expect.poll(() => restoreRef?.getSnapshot().value, { timeout: 10_000 }).toBe('idle');
+    await new Promise((resolve) => {
+      setTimeout(resolve, 200);
+    });
+    const told = reports.length;
+
+    await filesystem.writeFile('later.ts', 'export const later = true;\n');
+    await tree.save();
+    await vi.waitFor(() => {
+      expect(reports.length).toBeGreaterThan(told);
+    });
+    expect(reports.at(-1)?.facet).toBeUndefined();
+    tree.actor.stop();
+  }, 30_000);
+
+  /* D10: the same owed check, for a linked checkout: its next capture gives the fill's word, not only a later pull. */
+  it('checks a linked checkout fill again at its next capture when a failed tree write leaves its check unanswered', async () => {
+    let failWrite = false;
+    let failReads = 0;
+    const reports: LargeObjectsReport[] = [];
+    const live: { filesystem?: RevisionFileSystem } = {};
+    const failing = (filesystem: RevisionFileSystem): RevisionFileSystem =>
+      new Proxy(filesystem, {
+        get: (target, property, receiver) => {
+          const value: unknown = Reflect.get(target, property, receiver);
+          if (typeof value !== 'function') {
+            return value;
+          }
+          const bound = (value as (...parameters: unknown[]) => unknown).bind(target);
+          if (target === live.filesystem) {
+            return bound;
+          }
+          if (property === 'applyBatch') {
+            return async (...parameters: unknown[]) => {
+              if (failWrite) {
+                failWrite = false;
+                /* The recovery's capture and the fill check that follows both fail. */
+                failReads = 2;
+                throw new Error('The disk refused the write.');
+              }
+              return bound(...parameters);
+            };
+          }
+          if (property === 'readdirEntries') {
+            return async (...parameters: unknown[]) => {
+              if (failReads > 0) {
+                failReads -= 1;
+                throw new Error('The disk could not be listed.');
+              }
+              return bound(...parameters);
+            };
+          }
+          return bound;
+        },
+      });
+    const { port, filesystem, actors } = await fixture({ 'main.ts': 'export const size = 1;\n' }, failing, {
+      onLargeObjects: (report) => reports.push(report),
+    });
+    live.filesystem = filesystem;
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const first = await port.writeRevision({
+      tree: new ImmutableRevisionTree([['main.ts', new TextEncoder().encode('export const size = 1;\n')]]),
+      parents: [],
+      provenance: { source: 'user', actorId: 'person-1', createdAt: 1 },
+      summary: { generated: 'base' },
+    });
+    const second = await port.writeRevision({
+      tree: new ImmutableRevisionTree([
+        ['main.ts', new TextEncoder().encode('export const size = 1;\n')],
+        ['extra.txt', new TextEncoder().encode('added\n')],
+      ]),
+      parents: [revisionId(first.commitId)],
+      provenance: { source: 'user', actorId: 'person-1', createdAt: 2 },
+      summary: { generated: 'extra' },
+    });
+    await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(first.commitId) });
+    await port.setHead('main');
+    const linked = await port.addCheckout?.({ branch: 'side', from: revisionId(second.commitId) });
+    expect(linked?.kind).toBe('linked');
+    const linkedId = linked?.id ?? '';
+    const told = (): number => reports.filter((report) => report.checkoutId === linkedId).length;
+
+    const plan = await run<{ planId: string }>(actors.restore.computePlan, {
+      checkoutId: linkedId,
+      target: first.commitId,
+    });
+    failWrite = true;
+    await expect(run(actors.restore.applyPlan, { checkoutId: linkedId, planId: plan.planId })).rejects.toThrow(
+      'The disk refused the write.',
+    );
+    await expect.poll(() => failReads === 0 && !failWrite, { timeout: 10_000 }).toBe(true);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 200);
+    });
+    const before = told();
+
+    await run(actors.checkout.captureTree, { checkoutId: linkedId });
+    await vi.waitFor(() => {
+      expect(told()).toBeGreaterThan(before);
+    });
+    expect(reports.findLast((report) => report.checkoutId === linkedId)?.facet).toBeUndefined();
+  }, 30_000);
+
+  /* D10: an owed check samples the checkout's tree writes before it awaits, as `fillSoon` does: a write begun in the gap owns the word. */
+  it('starts no owed fill for a linked checkout once a newer tree write has begun', async () => {
+    let failWrite = false;
+    let failReads = 0;
+    const reports: LargeObjectsReport[] = [];
+    const live: { filesystem?: RevisionFileSystem } = {};
+    const failing = (filesystem: RevisionFileSystem): RevisionFileSystem =>
+      new Proxy(filesystem, {
+        get: (target, property, receiver) => {
+          const value: unknown = Reflect.get(target, property, receiver);
+          if (typeof value !== 'function') {
+            return value;
+          }
+          const bound = (value as (...parameters: unknown[]) => unknown).bind(target);
+          if (target === live.filesystem) {
+            return bound;
+          }
+          if (property === 'applyBatch') {
+            return async (...parameters: unknown[]) => {
+              if (failWrite) {
+                failWrite = false;
+                /* The recovery's capture and the fill check that follows both fail. */
+                failReads = 2;
+                throw new Error('The disk refused the write.');
+              }
+              return bound(...parameters);
+            };
+          }
+          if (property === 'readdirEntries') {
+            return async (...parameters: unknown[]) => {
+              if (failReads > 0) {
+                failReads -= 1;
+                throw new Error('The disk could not be listed.');
+              }
+              return bound(...parameters);
+            };
+          }
+          return bound;
+        },
+      });
+    const { port, filesystem, actors } = await fixture({ 'main.ts': 'export const size = 1;\n' }, failing, {
+      onLargeObjects: (report) => reports.push(report),
+    });
+    live.filesystem = filesystem;
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const first = await port.writeRevision({
+      tree: new ImmutableRevisionTree([['main.ts', new TextEncoder().encode('export const size = 1;\n')]]),
+      parents: [],
+      provenance: { source: 'user', actorId: 'person-1', createdAt: 1 },
+      summary: { generated: 'base' },
+    });
+    const second = await port.writeRevision({
+      tree: new ImmutableRevisionTree([
+        ['main.ts', new TextEncoder().encode('export const size = 1;\n')],
+        ['extra.txt', new TextEncoder().encode('added\n')],
+      ]),
+      parents: [revisionId(first.commitId)],
+      provenance: { source: 'user', actorId: 'person-1', createdAt: 2 },
+      summary: { generated: 'extra' },
+    });
+    await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(first.commitId) });
+    await port.setHead('main');
+    const linked = await port.addCheckout?.({ branch: 'side', from: revisionId(second.commitId) });
+    expect(linked?.kind).toBe('linked');
+    const linkedId = linked?.id ?? '';
+    const told = (): number => reports.filter((report) => report.checkoutId === linkedId).length;
+
+    const plan = await run<{ planId: string }>(actors.restore.computePlan, {
+      checkoutId: linkedId,
+      target: first.commitId,
+    });
+    failWrite = true;
+    await expect(run(actors.restore.applyPlan, { checkoutId: linkedId, planId: plan.planId })).rejects.toThrow(
+      'The disk refused the write.',
+    );
+    await expect.poll(() => failReads === 0 && !failWrite, { timeout: 10_000 }).toBe(true);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 200);
+    });
+    const before = told();
+    /* The owed check waits on its timer while a restore writes another tree, which gives its own word. */
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      await run(actors.checkout.captureTree, { checkoutId: linkedId });
+      const again = await run<{ planId: string }>(actors.restore.computePlan, {
+        checkoutId: linkedId,
+        target: first.commitId,
+      });
+      await run(actors.restore.applyPlan, { checkoutId: linkedId, planId: again.planId });
+      await vi.waitFor(() => {
+        expect(told()).toBeGreaterThan(before);
+      });
+      const written = told();
+      vi.runOnlyPendingTimers();
+      /* Settle the owed check's work, had it started: its reads are real disk reads. */
+      for (let turn = 0; turn < 50; turn += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one event-loop turn at a time.
+        await new Promise((resolve) => {
+          setImmediate(resolve);
+        });
+      }
+      expect(told()).toBe(written);
+    } finally {
+      vi.useRealTimers();
+    }
   }, 30_000);
 
   it('mints a dirty checkout before restoring it, and leaves no revision unreachable (I1, L1 probe)', async () => {
@@ -3621,6 +3880,69 @@ describe('independent sync record failures', () => {
   }, 30_000);
 });
 
+/* D9, D10: a real merge writes its paths over the files the fence holds, so a fill that landed meanwhile stays landed. */
+it('keeps a placeholder a fill wrote during a real merge, writing only the merged paths', async () => {
+  const { port, filesystem } = await fixture({ 'a.txt': 'base\n' });
+  await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+  await port.setHead('main');
+  const generated = await Promise.all(
+    [generatedGitattributesPath, generatedIgnorePath].map(
+      async (path) => [path, new TextDecoder().decode(await filesystem.readFile(path))] as const,
+    ),
+  );
+  const part = 'solid part\n'.repeat(8);
+  const write = async (content: Readonly<Record<string, string>>, parents: readonly string[]): Promise<string> => {
+    const written = await port.writeRevision({
+      parents: parents.map((parent) => revisionId(parent)),
+      tree: new ImmutableRevisionTree([...generated, ...Object.entries(content)]),
+      provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 13) },
+      summary: { generated: 'Revision' },
+    });
+    return written.commitId;
+  };
+  const base = await write({ 'a.txt': 'base\n', 'models/part.step': part }, []);
+  const theirs = await write({ 'a.txt': 'theirs\n', 'models/part.step': part }, [base]);
+  const ours = await write({ 'a.txt': 'base\n', 'models/part.step': part, 'c.txt': 'ours\n' }, [base]);
+  await port.updateRef({ name: 'feature', expectedHead: undefined, head: revisionId(theirs) });
+  await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(ours) });
+  /* The checkout on `main`, the part still its placeholder. */
+  await filesystem.writeFile('c.txt', 'ours\n');
+  await filesystem.mkdir('models', { recursive: true });
+  await filesystem.writeFile('models/part.step', lfsPointerFor(new TextEncoder().encode(part)).bytes);
+  /* The fill lands the part after the merge captured the checkout and before its write. */
+  const onApplyingTree = vi.fn(
+    (..._parameters: unknown[]) =>
+      (): void =>
+        undefined,
+  );
+  const actors = createRevisionActors({
+    port: {
+      ...port,
+      diff: async (input) => {
+        await filesystem.writeFile('models/part.step', part);
+        return port.diff(input);
+      },
+    },
+    projectId: 'project-1',
+    filesystem: async () => filesystem,
+    onApplyingTree,
+  });
+
+  const outcome = await run<{ status: string }>(actors.branch.merge, {
+    projectId: 'project-1',
+    branch: 'feature',
+    into: 'main',
+  });
+
+  expect(outcome.status).toBe('merged');
+  expect(await filesystem.readFile('models/part.step', 'utf8')).toBe(part);
+  expect(await filesystem.readFile('a.txt', 'utf8')).toBe('theirs\n');
+  const treeWrites = onApplyingTree.mock.calls.filter(
+    (call) => (call[2] as { purpose?: string } | undefined)?.purpose === 'tree',
+  );
+  expect(treeWrites.map(([, paths]) => paths)).toStrictEqual([['a.txt']]);
+}, 30_000);
+
 for (const actorSet of actorSets) {
   describe.runIf(actorSet.enabled)(`merging two lines — ${actorSet.name}`, () => {
     /** A project on `main` with a `feature` branch that moved on from the same base. */
@@ -3904,6 +4226,27 @@ for (const actorSet of actorSets) {
       expect(outcome).toStrictEqual({ status: 'merged', revisionId: theirs });
       expect(await port.readRef('main')).toBe(theirs);
       expect(new TextDecoder().decode(await filesystem.readFile('a.txt'))).toBe('theirs\n');
+    }, 30_000);
+
+    it('fast-forwards a line the files are not on as that line’s tree, never mixed with the checkout’s (W4 review 4)', async () => {
+      const { port, actors, filesystem, base, theirs } = await twoLines({
+        ours: 'mine\n',
+        theirs: 'base\n',
+        extra: { 'b.txt': 'theirs only\n' },
+      });
+      /* `other` has not moved from the base and has no checkout: the live one, on `main`, is the target. */
+      await port.updateRef({ name: 'other', expectedHead: undefined, head: revisionId(base) });
+
+      const outcome = await run<{ status: string; revisionId?: string }>(actors.branch.merge, {
+        projectId: 'project-1',
+        branch: 'feature',
+        into: 'other',
+      });
+
+      expect(outcome).toMatchObject({ status: 'merged', revisionId: theirs });
+      expect(await port.readRef('other')).toBe(theirs);
+      expect(await filesystem.readFile('a.txt', 'utf8')).toBe('base\n');
+      expect(await filesystem.readFile('b.txt', 'utf8')).toBe('theirs only\n');
     }, 30_000);
 
     it('says a line already merged is merged, rather than failing', async () => {
@@ -4974,6 +5317,49 @@ describe('opening before large objects arrive', () => {
       expect(project.reports.at(-1)?.facet).toBeUndefined();
     });
     expect(await project.filesystem.readFile('models/part.step', 'utf8')).toBe(project.part);
+  }, 30_000);
+
+  /* D9: a placeholder reads as pending, never its pointer text; `materialize` makes it a file. */
+  it('reads a placeholder as pending until its object is here, and materializes it on request', async () => {
+    const project = await leftMidDownload();
+    await vi.waitFor(() => {
+      expect(project.reports.at(-1)?.facet).toMatchObject({ phase: 'fetching' });
+    });
+    expect(await project.actors.readContent(undefined, 'models/part.step')).toMatchObject({
+      outcome: 'pending',
+      reason: 'filling',
+    });
+    expect(await project.actors.readContent(undefined, 'main.scad')).toStrictEqual({
+      outcome: 'bytes',
+      data: new TextEncoder().encode('import("models/part.step");\n'),
+    });
+    const materializing = project.actors.materialize(undefined, ['models/part.step']);
+    project.land();
+    await materializing;
+    expect(await project.filesystem.readFile('models/part.step', 'utf8')).toBe(project.part);
+    expect(await project.actors.readContent(undefined, 'models/part.step')).toStrictEqual({
+      outcome: 'bytes',
+      data: new TextEncoder().encode(project.part),
+    });
+    await expect(project.actors.readContent('nowhere', 'main.scad')).rejects.toMatchObject({
+      code: 'CHECKOUT_CONFLICT',
+    });
+  }, 30_000);
+
+  it('reads a placeholder from the store when its object is here but not yet written', async () => {
+    const project = await leftMidDownload();
+    await vi.waitFor(() => {
+      expect(project.signals).toHaveLength(1);
+    });
+    const { pointer } = lfsPointerFor(new TextEncoder().encode(project.part));
+    await project.filesystem.writeFile(`.git/${lfsObjectPath(pointer.oid)}`, project.part);
+    expect(await project.actors.readContent(undefined, 'models/part.step')).toStrictEqual({
+      outcome: 'bytes',
+      data: new TextEncoder().encode(project.part),
+    });
+    /* Read, not written: the checkout still holds the pointer until the fill writes it. */
+    expect(await project.filesystem.readFile('models/part.step')).toStrictEqual(project.pointerBytes);
+    await project.actors.settled();
   }, 30_000);
 
   it('stops the fill when the project closes, and writes nothing after', async () => {

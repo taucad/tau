@@ -1,10 +1,22 @@
+import { renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RevisionStatusProjection } from '@taucad/revisions';
-import { modelAvailability, pendingPathSet, projectAvailability } from '#hooks/use-project-availability.js';
+import type { RevisionClient } from '#types/revision-client.types.js';
+import {
+  modelAvailability,
+  pendingOpenReadiness,
+  pendingPathSet,
+  projectAvailability,
+  readyFor,
+  surfaceReadiness,
+  useLargeObjectPending,
+  useOpenedLargeObjectPending,
+} from '#hooks/use-project-availability.js';
+import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
 
 vi.mock('#hooks/use-project.js', () => ({ useProject: vi.fn() }));
-vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: vi.fn() }));
+vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: vi.fn(), useRevisionClient: vi.fn() }));
 vi.mock('#hooks/use-cloud-projects.js', () => ({ useTauCloudIntent: vi.fn(), canOpenCloudProject: vi.fn() }));
 
 const status = (changes: Partial<RevisionStatusProjection['sync']> = {}): RevisionStatusProjection =>
@@ -65,6 +77,9 @@ describe('model availability', () => {
   });
   it('is ready when no large object is outstanding', () => {
     expect(modelAvailability('ready', undefined)).toBe('ready');
+    /* D10: a render opens at `filled`; a tree written and not yet filled waits, whatever the facet says. */
+    expect(modelAvailability('ready', undefined, 'materialized')).toBe('files');
+    expect(modelAvailability('ready', undefined, 'filled')).toBe('ready');
   });
 });
 
@@ -76,5 +91,69 @@ describe('pending large-object paths', () => {
     expect(set.has('main.scad')).toBe(false);
     expect(pendingPathSet(paths)).toBe(set);
     expect(pendingPathSet([...paths])).not.toBe(set);
+  });
+});
+
+/* D10: the editor, tree and viewer open early; search, export, LSP and a cut wait for every file; a render for every object. */
+describe('surface readiness', () => {
+  it('opens the tree at treeReady and the editor and viewer at entryReady', () => {
+    expect(readyFor('tree', 'treeReady')).toBe(true);
+    expect(readyFor('editor', 'treeReady')).toBe(false);
+    expect(readyFor('editor', 'entryReady')).toBe(true);
+    expect(readyFor('viewer', 'entryReady')).toBe(true);
+  });
+  it('holds search, export, the LSP workspace and a cut until every authored file is a file', () => {
+    for (const surface of ['search', 'export', 'lsp', 'cut'] as const) {
+      expect(surfaceReadiness[surface]).toBe('materialized');
+      expect(readyFor(surface, 'entryReady')).toBe(false);
+      expect(readyFor(surface, 'materialized')).toBe(true);
+    }
+  });
+  it('holds a model render until every large object is here', () => {
+    expect(readyFor('model', 'materialized')).toBe(false);
+    expect(readyFor('model', 'filled')).toBe(true);
+  });
+  it('serves nothing from an unknown state', () => {
+    expect(readyFor('tree', undefined)).toBe(false);
+  });
+});
+
+/* D10: an opened path jumps the fill queue; a file-tree row listing it does not. */
+describe('opened large-object paths', () => {
+  const pendingOn = (paths: readonly string[]): ReturnType<typeof vi.fn> => {
+    const send = vi.fn();
+    vi.mocked(useRevisionStatus).mockReturnValue({
+      ...status(),
+      largeObjects: { phase: 'fetching', paths, objects: 0, totalObjects: 1, bytes: 0, totalBytes: 1 },
+    });
+    vi.mocked(useRevisionClient).mockReturnValue(mock<RevisionClient>({ send }));
+    return send;
+  };
+  it('asks the worker to fetch an open file first while it waits', () => {
+    const send = pendingOn(['models/a.step']);
+    const { result } = renderHook(() => useOpenedLargeObjectPending('models/a.step'));
+    expect(result.current).toBe(true);
+    expect(send).toHaveBeenCalledExactlyOnceWith({ command: 'prioritizeLargeObjects', paths: ['models/a.step'] });
+  });
+  it('asks nothing for a file that is here, or for a row that only lists one', () => {
+    const send = pendingOn(['models/a.step']);
+    renderHook(() => useOpenedLargeObjectPending('main.scad'));
+    renderHook(() => useLargeObjectPending('models/a.step'));
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
+/* S20: a tab waiting on another tab's cold open shows what the opener announced, never its own empty reading. */
+describe('readiness while a cold open is owed', () => {
+  const none = mock<RevisionStatusProjection['remote']>({ kind: 'none', phase: 'none' });
+  const tau = mock<RevisionStatusProjection['remote']>({ kind: 'tau', phase: 'connected' });
+  it('follows the opener until this tab’s own root is connected', () => {
+    expect(pendingOpenReadiness(undefined, undefined)).toBe('connected');
+    expect(pendingOpenReadiness({ readiness: 'filled', remote: none }, undefined)).toBe('connected');
+    expect(pendingOpenReadiness({ readiness: 'filled', remote: none }, 'treeReady')).toBe('treeReady');
+  });
+  it('takes its own reading once its root is connected', () => {
+    expect(pendingOpenReadiness({ readiness: 'materialized', remote: tau }, 'treeReady')).toBe('materialized');
+    expect(pendingOpenReadiness({ readiness: undefined, remote: tau }, 'treeReady')).toBe('treeReady');
   });
 });

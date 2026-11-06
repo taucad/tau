@@ -87,6 +87,20 @@ describe('createProviderRpcFileSystem', () => {
     await expect(fileSystemFor().readBinaryFile('../foreign.glb')).rejects.toThrow();
   });
 
+  it('should answer pending paths from the view’s index, and offer none over a view without one (D9)', async () => {
+    expect(fileSystemFor().pendingPaths).toBeUndefined();
+    const pendingPaths = vi.fn(async (paths: readonly string[]) => paths.filter((path) => path.endsWith('.step')));
+    const indexed = createProviderRpcFileSystem({
+      provider: composeView(
+        { filesystem: Object.assign(Object.create(provider) as MemoryProvider, { pendingPaths }) },
+        { consumer: 'agent', policy: tauPathPolicy },
+      ),
+      mutations: new ResourceQueue(),
+    });
+    expect(await indexed.pendingPaths!(['main.scad', 'models/part.step'])).toStrictEqual(['models/part.step']);
+    expect(pendingPaths).toHaveBeenCalledWith(['main.scad', 'models/part.step']);
+  });
+
   it('should refuse oversized byte reads before asking the provider for content', async () => {
     await provider.writeFile('part.glb', Uint8Array.from([0, 255]));
     const metadata = await provider.stat('part.glb');

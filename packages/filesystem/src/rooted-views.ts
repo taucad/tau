@@ -46,6 +46,7 @@ import type {
 import type { MountResolution, MountTable } from '#mount-table.js';
 import type { ProjectIndexes, IndexFactsOptions } from '#project-index/project-indexes.js';
 import type {
+  ExpectedEntry,
   IndexAdmits,
   IndexChanges,
   IndexCompareResult,
@@ -57,9 +58,16 @@ import type { BulkMoveEdit, BulkMoveResult, MutationPipeline, ResolvedChangesetE
 import type { AppendFence, Changeset, ChangesetReceipt } from '#changeset.js';
 import type { ChangeSetWatchRequest, WatchRegistry } from '#watch-registry.js';
 import type { ChangeSet, ChangeSetEntry } from '#change-event-bus.js';
-import { RootedFileSystemError, WorkspaceMutationError } from '#workspace-errors.js';
+import { RootedFileSystemError, WorkspaceMutationError, isNotFoundError } from '#workspace-errors.js';
+import { mapConcurrent, statConcurrency } from '#concurrency.js';
 import { bufferToStream, validateFileReadStreamOptions } from '#backend/stream-utils.js';
 import { getEventOrigin } from '#event-origin-registry.js';
+import { PendingContentError, pendingObjectOf, readThroughPending } from '#pending-content.js';
+import type { PendingObject, PendingObjectRequest, PendingObjectSource } from '#pending-content.js';
+
+/* A provider's own utf8 read keeps a byte-order mark; so does this one. */
+// eslint-disable-next-line @typescript-eslint/naming-convention -- `ignoreBOM` is the native TextDecoder option name.
+const utf8 = new TextDecoder('utf-8', { ignoreBOM: true });
 
 /** The control plane a rooted view serves outside the mutation pipeline. */
 const privateStoreDirectory = '.git';
@@ -197,6 +205,25 @@ export type RootedFileSystem = Omit<FileSystemProvider, 'writeFileChecked' | 'de
     /** Recursively stat one directory of this root from the same index. */
     statTree?(path: string, options?: { admits?: IndexAdmits; signal?: AbortSignal }): Promise<FileStatEntry[]>;
     /**
+     * Know a tree's entries before a write lands them (D10), in this root's
+     * index, opened first when it is cold: placeholders as pending entries,
+     * every entry arriving until its bytes land. Optional: only the authority's
+     * own view keeps an index.
+     */
+    expectEntries?(entries: readonly ExpectedEntry[]): Promise<void>;
+    /**
+     * Which of these files the root's index holds as pending entries: their
+     * large object is not on the device yet. Answered from the index, and for
+     * a file the size of a pointer it does not hold as pending, from that
+     * file's bytes read raw: never through, so a consumer that only asks
+     * never starts a download (D9).
+     */
+    pendingPaths?(paths: readonly string[]): Promise<readonly string[]>;
+    /** Whether these paths of the expected tree have all landed; `undefined` while no tree is expected here. */
+    entriesLanded?(paths: readonly string[]): boolean | undefined;
+    /** End this root's expectation: the tree write is over. */
+    endExpectation?(): void;
+    /**
      * Lazy content facts (D4): from the index while they still describe the
      * bytes, otherwise measured from one read within `byteCap` and recorded.
      */
@@ -225,6 +252,9 @@ export class RootedViews {
   private readonly _watchRegistry: WatchRegistry;
   /** Every root's Project Index, opened by the authority that owns its I/O. */
   private readonly _projectIndexes: ProjectIndexes;
+  /** Where a read of a pending entry gets its object (D9). */
+  private readonly _pendingSource: () => PendingObjectSource | undefined;
+  private readonly _pendingStallMilliseconds: number | undefined;
 
   /**
    * Create the rooted-view factory over the authority's own collaborators.
@@ -236,11 +266,15 @@ export class RootedViews {
     pipeline: MutationPipeline;
     watchRegistry: WatchRegistry;
     projectIndexes: ProjectIndexes;
+    pendingSource?: () => PendingObjectSource | undefined;
+    pendingStallMilliseconds?: number;
   }) {
     this._mountTable = options.mountTable;
     this._pipeline = options.pipeline;
     this._watchRegistry = options.watchRegistry;
     this._projectIndexes = options.projectIndexes;
+    this._pendingSource = options.pendingSource ?? (() => undefined);
+    this._pendingStallMilliseconds = options.pendingStallMilliseconds;
   }
 
   /**
@@ -249,9 +283,17 @@ export class RootedViews {
    *
    * @param authorityRoot - Exact authority-global mount path to capture.
    * @param mutationContext - Optional origin metadata for echo suppression.
+   * @param options - `placeholders: 'raw'` for the revision layer, which owns
+   *   large-object pointers and reads them as they are; every other view reads
+   *   a pending entry through to its object (D9).
    * @returns A writable filesystem whose root is the captured mount.
    */
-  public create(authorityRoot: string, mutationContext?: WorkspaceMutationContext): RootedFileSystem {
+  public create(
+    authorityRoot: string,
+    mutationContext?: WorkspaceMutationContext,
+    options?: Readonly<{ placeholders?: 'raw' }>,
+  ): RootedFileSystem {
+    const raw = options?.placeholders === 'raw';
     const root = resolveAuthorityPath(authorityRoot);
     const captured = this._mountTable.getExactMount(root);
     if (captured === undefined) {
@@ -309,18 +351,54 @@ export class RootedViews {
       return root === '/' ? `/${pattern}` : `${root}/${pattern}`;
     };
 
+    /*
+     * A pointer read is a pending entry (D9): the index records it, and every
+     * view but the revision layer's raw one reads through to its object.
+     */
+    const stallMilliseconds = this._pendingStallMilliseconds;
+    const pendingSource = this._pendingSource;
+    const ask = async (
+      request: PendingObjectRequest,
+      pointer: Uint8Array<ArrayBuffer>,
+      signal?: AbortSignal,
+    ): Promise<Uint8Array<ArrayBuffer>> =>
+      readThroughPending(pendingSource(), request, {
+        pointer,
+        ...(signal === undefined ? {} : { signal }),
+        stallMilliseconds,
+      });
+    /* Read one file's bytes, marking a pointer pending unless a write landed after the read began (I7). */
+    const readMarked = async (
+      at: ReturnType<typeof resolveLocal>,
+    ): Promise<Readonly<{ bytes: Uint8Array<ArrayBuffer>; object: PendingObject | undefined }>> => {
+      const generation = projectIndexes.generationAt(at.authorityPath);
+      const bytes = await at.resolution.provider.readFile(at.resolution.path);
+      const object = pendingObjectOf(bytes);
+      if (object !== undefined) {
+        projectIndexes.markPending(at.authorityPath, object, { size: bytes.byteLength, generation });
+      }
+      return { bytes, object };
+    };
+    const throughPending = async (
+      at: ReturnType<typeof resolveLocal>,
+      read: Readonly<{ bytes: Uint8Array<ArrayBuffer>; object: PendingObject | undefined }>,
+      signal?: AbortSignal,
+    ): Promise<Uint8Array<ArrayBuffer>> =>
+      raw || read.object === undefined
+        ? read.bytes
+        : ask({ authorityPath: at.authorityPath, root, path: at.localPath, object: read.object }, read.bytes, signal);
     function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
     function readFile(path: string, encoding: 'utf8'): Promise<string>;
     async function readFile(path: string, encoding?: 'utf8'): Promise<string | Uint8Array<ArrayBuffer>> {
-      const { resolution, localPath } = resolveLocal(path);
-      if (encoding === 'utf8') {
-        return resolution.provider.readFile(resolution.path, 'utf8');
-      }
+      const at = resolveLocal(path);
       const observedAt = Date.now();
-      const bytes = await resolution.provider.readFile(resolution.path);
+      const read = await readMarked(at);
+      if (encoding === 'utf8') {
+        return utf8.decode(await throughPending(at, read));
+      }
       /* A whole read already holds every fact a listing asks for (D4): keep them. */
-      projectIndexes.recordRead(root, localPath, { bytes, observedAt });
-      return bytes;
+      projectIndexes.recordRead(root, at.localPath, { bytes: read.bytes, observedAt });
+      return throughPending(at, read);
     }
 
     /* One provider call for the whole set: a remote provider digests beside its
@@ -353,8 +431,31 @@ export class RootedViews {
 
     const readFileStream = (path: string, options?: FileReadStreamOptions): ReadableStream<Uint8Array<ArrayBuffer>> => {
       validateFileReadStreamOptions(options);
-      const { resolution } = resolveLocal(path);
-      let reader = resolution.provider.readFileStream?.(resolution.path, options).getReader();
+      const at = resolveLocal(path);
+      const { resolution } = at;
+      /* A pending entry is a pointer of at most 1 KiB: a stream that may be one is read whole and through it (D9). */
+      const small = async (): Promise<boolean> => {
+        if (raw) {
+          return false;
+        }
+        try {
+          const { size } = await resolution.provider.stat(resolution.path);
+          return size <= 1024;
+        } catch {
+          return false;
+        }
+      };
+      let reader: ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>> | undefined;
+      const open = async (): Promise<ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>>> => {
+        if (await small()) {
+          const read = await readMarked(at);
+          return bufferToStream(await throughPending(at, read, options?.signal), options).getReader();
+        }
+        return (
+          resolution.provider.readFileStream?.(resolution.path, options) ??
+          bufferToStream(await resolution.provider.readFile(resolution.path), options)
+        ).getReader();
+      };
       const cancelAfterFailure = async (reason: unknown): Promise<void> => {
         try {
           await reader?.cancel(reason);
@@ -367,7 +468,7 @@ export class RootedViews {
           async pull(controller) {
             try {
               assertCurrent();
-              reader ??= bufferToStream(await resolution.provider.readFile(resolution.path), options).getReader();
+              reader ??= await open();
               const result = await reader.read();
               assertCurrent();
               if (result.done) {
@@ -531,10 +632,38 @@ export class RootedViews {
       if (!this._pipeline.isCurrentResolution(to.authorityPath, to.resolution)) {
         throw new Error(`[WorkspaceFileService] copy would cross mount boundary at '${to.authorityPath}'.`);
       }
-      const bytes = await readFile(source);
-      /* Nothing is written yet: a copy stopped here leaves the target as it was. */
+      /*
+       * Copy-on-write: a pending entry is copied as its pointer and stays
+       * pending where the target is a tracked name. Under a name the project
+       * does not track, a pointer would be a person's text: the copy is the
+       * object, from the device alone, or refused with PENDING.
+       */
+      const from = resolveLocal(source);
+      const { bytes, object } = await readMarked(from);
+      if (raw || object === undefined || pendingSource() === undefined) {
+        /* Nothing is written yet: a copy stopped here leaves the target as it was. */
+        options?.signal?.throwIfAborted();
+        await writeFile(target, bytes);
+        return;
+      }
+      const local = { object, pointer: bytes, localOnly: true } as const;
+      /* The source answers a name it does not track with the pointer itself. */
+      let untracked: boolean;
+      try {
+        untracked =
+          (await ask({ authorityPath: to.authorityPath, root, path: to.localPath, ...local }, bytes)) === bytes;
+      } catch (error) {
+        if (!(error instanceof PendingContentError)) {
+          throw error;
+        }
+        /* Tracked there, its object not here: the pointer is what the copy is. */
+        untracked = false;
+      }
+      const copied = untracked
+        ? await ask({ authorityPath: from.authorityPath, root, path: from.localPath, ...local }, bytes)
+        : bytes;
       options?.signal?.throwIfAborted();
-      await writeFile(target, bytes);
+      await writeFile(target, copied);
     };
     const bulkMove = async (edits: readonly BulkMoveEdit[]): Promise<BulkMoveResult> => {
       const resolved = [];
@@ -986,6 +1115,52 @@ export class RootedViews {
       watchChangeSets,
       search,
       statTree,
+      expectEntries: async (entries: readonly ExpectedEntry[]): Promise<void> => {
+        assertCurrent();
+        await this._projectIndexes.expect(
+          root,
+          entries.map((entry) => ({ ...entry, path: resolveLocal(entry.path).localPath })),
+        );
+      },
+      pendingPaths: async (paths: readonly string[]): Promise<readonly string[]> => {
+        assertCurrent();
+        await this._projectIndexes.ready(root);
+        const absent = (error: unknown): undefined => {
+          if (!isNotFoundError(error)) {
+            throw error;
+          }
+        };
+        const pending = await mapConcurrent(paths, statConcurrency, async (path): Promise<boolean> => {
+          const at = resolveLocal(path);
+          if (projectIndexes.pendingAt(at.authorityPath) !== undefined) {
+            return true;
+          }
+          /*
+           * The index learns a placeholder from a read or a tree write, and a
+           * lost or rescanned snapshot forgets it: its scans read no bytes
+           * (I3). A file the size of a pointer is read raw, never through, so
+           * no download starts; the read marks it pending. Only an absent path
+           * is not pending: any other failure leaves it unknown, and rejects.
+           */
+          const size = await at.resolution.provider
+            .stat(at.resolution.path)
+            .then((stat) => (stat.type === 'file' ? stat.size : undefined), absent);
+          if (size === undefined || size > 1024) {
+            return false;
+          }
+          const read = await readMarked(at).catch(absent);
+          return read?.object !== undefined;
+        });
+        return paths.filter((_, index) => pending[index]);
+      },
+      entriesLanded: (paths: readonly string[]): boolean | undefined =>
+        this._projectIndexes.landed(
+          root,
+          paths.map((path) => resolveLocal(path).localPath),
+        ),
+      endExpectation: (): void => {
+        this._projectIndexes.endExpectation(root);
+      },
       facts,
       compareIndex,
       changedSince,

@@ -26,6 +26,7 @@
  */
 
 import type { StatContentMetadata } from '@taucad/types';
+import type { PendingObject } from '#pending-content.js';
 import type { ContentFacts, FileStatEntry } from '#types.js';
 
 /** The coarsest modification time a filesystem we index reports: FAT's two seconds. @public */
@@ -53,6 +54,13 @@ export type IndexEntry = Readonly<{
   generation: number;
   facts?: ContentFacts;
   factsAt?: FactsAt;
+  /**
+   * Present on a pending entry: the file holds the pointer of this large
+   * object, which has not reached the device yet. Reads go through to the
+   * object (see `pending-content.ts`); a write, or an observation that finds
+   * the bytes changed, ends it.
+   */
+  pending?: PendingObject;
 }>;
 
 /**
@@ -75,6 +83,15 @@ export type ProjectIndexOptions = Readonly<{
    */
   trustworthyMtime?: boolean;
 }>;
+
+/**
+ * One entry of a tree being written, known before its bytes land (D10): its
+ * size, the large object it is a placeholder for where it is one, and whether
+ * this write lands it (`false` for an entry the checkout already holds).
+ *
+ * @public
+ */
+export type ExpectedEntry = Readonly<{ path: string; size: number; pending?: PendingObject; arriving: boolean }>;
 
 /** One row an observation of the provider listed: head metadata only. @public */
 export type ObservedRow = Readonly<{ path: string; kind: IndexEntryKind; size: number; mtimeMs: number }>;
@@ -120,6 +137,7 @@ type Node = {
   pendingMtime?: boolean;
   facts?: ContentFacts;
   factsAt?: FactsAt;
+  pending?: PendingObject;
   children?: Map<string, Node>;
 };
 
@@ -208,15 +226,28 @@ export class ProjectIndex {
    *
    * @param rows - Serialized entries.
    * @param generation - The snapshot's generation.
+   * @param pending - The pending entries by path (D9), as {@link ProjectIndex.pendingSnapshot} gave them.
    * @returns The index.
    */
-  public static fromSnapshot(rows: readonly SnapshotRow[], generation: number): ProjectIndex {
+  public static fromSnapshot(
+    rows: readonly SnapshotRow[],
+    generation: number,
+    pending?: Readonly<Record<string, PendingObject>>,
+  ): ProjectIndex {
     const index = new ProjectIndex({ generation, trustworthyMtime: true });
     for (const [path, kind, size, mtimeMs, facts, factsAt] of rows) {
+      const object = kind === 'f' && pending !== undefined && Object.hasOwn(pending, path) ? pending[path] : undefined;
       const node: Node =
         kind === 'd'
           ? directoryNode(generation, mtimeMs)
-          : { kind: 'file', size, mtimeMs, generation, ...(facts === undefined ? {} : { facts, factsAt }) };
+          : {
+              kind: 'file',
+              size,
+              mtimeMs,
+              generation,
+              ...(facts === undefined ? {} : { facts, factsAt }),
+              ...(object === undefined ? {} : { pending: object }),
+            };
       index._place(path, node, false);
     }
     return index;
@@ -231,6 +262,10 @@ export class ProjectIndex {
   private _observing = 0;
   /** Paths an external fact left unknown; the next refresh re-observes them. */
   private readonly _stale = new Set<string>();
+  /** Write-path mtimes an observation adopted since {@link ProjectIndex.takeAdoptedMtimes} last ran. */
+  private _adoptedMtimes = 0;
+  /** The entries a tree write announced and has not landed yet (D10); `undefined` while no write expects any. */
+  private _arriving: Map<string, ExpectedEntry> | undefined;
 
   /**
    * @param options - The generation to continue from, and whether the provider's mtime can key facts.
@@ -245,6 +280,20 @@ export class ProjectIndex {
     return this._generation;
   }
 
+  /**
+   * How many write-path mtimes observations adopted since the last call, and
+   * reset. Adopting one changes no entry's generation (its bytes are the ones
+   * recorded), but a snapshot stored before it holds the write's clock instead
+   * of the provider's mtime, so every later load would find the file changed.
+   *
+   * @returns The count since the last call.
+   */
+  public takeAdoptedMtimes(): number {
+    const adopted = this._adoptedMtimes;
+    this._adoptedMtimes = 0;
+    return adopted;
+  }
+
   /** Whether an observation of the whole root has completed (a scan, or a load and its compare). */
   public get isComplete(): boolean {
     return this._complete;
@@ -253,6 +302,21 @@ export class ProjectIndex {
   /** Paths an external fact left unknown since the last refresh. */
   public get stalePaths(): readonly string[] {
     return [...this._stale];
+  }
+
+  /**
+   * Pending entries a write recorded before the provider reported their mtime
+   * (D9). A snapshot would store a guessed mtime for them, which the reload's
+   * compare takes for a change and drops the entry's pending object with.
+   */
+  public get unmeasuredPendingPaths(): readonly string[] {
+    const paths: string[] = [];
+    for (const entry of this.walk('', { kinds: ['file'] })) {
+      if (entry.pending !== undefined && this._resolve(segmentsOf(entry.path))?.pendingMtime === true) {
+        paths.push(entry.path);
+      }
+    }
+    return paths;
   }
 
   /**
@@ -442,6 +506,7 @@ export class ProjectIndex {
       },
       true,
     );
+    this._land(path);
   }
 
   /**
@@ -499,6 +564,7 @@ export class ProjectIndex {
     if (this._observing > 0 || !this._complete) {
       this._stale.add(to);
     }
+    this._land(to);
   }
 
   /**
@@ -578,7 +644,12 @@ export class ProjectIndex {
         }
         return;
       }
-      if (node?.kind === row.kind && (row.kind === 'dir' || (node.size === row.size && node.mtimeMs === row.mtimeMs))) {
+      if (
+        node?.kind === row.kind &&
+        (row.kind === 'dir' || (node.size === row.size && (node.mtimeMs === row.mtimeMs || node.pendingMtime === true)))
+      ) {
+        /* A write's own entry learns the provider's mtime, keeping what the write knew (its pending object, D9). */
+        this._adoptMtime(node, row.mtimeMs);
         if (!this._trustworthyMtime) {
           this._dropFacts(node);
         }
@@ -658,6 +729,9 @@ export class ProjectIndex {
       return;
     }
     if (node.size !== at.size || node.mtimeMs !== at.mtimeMs || node.pendingMtime === true) {
+      if (node.size !== at.size) {
+        delete node.pending;
+      }
       node.size = at.size;
       node.mtimeMs = at.mtimeMs;
       delete node.pendingMtime;
@@ -667,6 +741,86 @@ export class ProjectIndex {
     node.facts = merged ? { ...node.facts, ...facts } : facts;
     node.factsAt = { size: at.size, mtimeMs: at.mtimeMs, observedAt: at.observedAt };
     this._stale.delete(path);
+  }
+
+  /**
+   * Make one file a pending entry: it holds the pointer of `object`. A write
+   * over it, or an observation that finds its bytes changed, ends it. Not
+   * persisted: the revision layer's first read of the checkout marks it again.
+   *
+   * @param path - Root-relative file path.
+   * @param object - The large object its pointer names.
+   * @param observed - The size the pointer was read at, and the entry's generation before the read: a write
+   *   that landed since (another size, or a later generation) is not the pointer, and is left as it is.
+   */
+  public markPending(
+    path: string,
+    object: PendingObject,
+    observed?: Readonly<{ size: number; generation?: number | undefined }>,
+  ): void {
+    const node = this._resolve(segmentsOf(path));
+    if (
+      node?.kind !== 'file' ||
+      (node.pending?.oid === object.oid && node.pending.size === object.size) ||
+      (observed !== undefined &&
+        (node.size !== observed.size || (observed.generation !== undefined && node.generation > observed.generation)))
+    ) {
+      return;
+    }
+    node.pending = object;
+    node.generation = this._bump(path);
+  }
+
+  /**
+   * Know a tree's entries before its write lands them (D10). Each one the
+   * checkout already holds is known now, a placeholder among them as a pending
+   * entry; each one the write lands stays arriving until a write or a move puts
+   * it at its path. A placeholder is not readable as its pointer: it stays
+   * arriving, pending once its pointer lands, until its object's bytes do.
+   * Replaces whatever an earlier write expected.
+   *
+   * @param entries - Every entry of the tree.
+   */
+  public expect(entries: readonly ExpectedEntry[]): void {
+    this._arriving = new Map();
+    for (const entry of entries) {
+      if (entry.arriving || entry.pending !== undefined) {
+        this._arriving.set(entry.path, entry);
+      }
+      if (!entry.arriving) {
+        this._land(entry.path);
+      }
+    }
+  }
+
+  /** Whether a tree write expects entries now. */
+  public get expecting(): boolean {
+    return this._arriving !== undefined;
+  }
+
+  /**
+   * Whether a path of the expected tree has not landed yet.
+   *
+   * @param path - Root-relative file path.
+   * @returns `true` while it is arriving.
+   */
+  public arriving(path: string): boolean {
+    return this._arriving?.has(path) === true;
+  }
+
+  /** End the expectation: the tree write is over, landed or not. */
+  public endExpectation(): void {
+    this._arriving = undefined;
+  }
+
+  /**
+   * The large object a pending entry names.
+   *
+   * @param path - Root-relative file path.
+   * @returns The object, or `undefined` when the path is not pending.
+   */
+  public pendingFor(path: string): PendingObject | undefined {
+    return this._resolve(segmentsOf(path))?.pending;
   }
 
   /**
@@ -689,6 +843,36 @@ export class ProjectIndex {
       );
     }
     return rows;
+  }
+
+  /**
+   * Every pending entry by path, stored beside the snapshot rows so a reload
+   * knows them without reading a file (D9, I3).
+   *
+   * @returns The pending objects by path.
+   */
+  public pendingSnapshot(): Record<string, PendingObject> {
+    const pending: Record<string, PendingObject> = {};
+    for (const entry of this.walk('', { kinds: ['file'] })) {
+      if (entry.pending !== undefined) {
+        pending[entry.path] = entry.pending;
+      }
+    }
+    return pending;
+  }
+
+  /* An arriving entry lands: its bytes are at its path now, pending when they are its placeholder's. */
+  private _land(path: string): void {
+    const expected = this._arriving?.get(path);
+    if (expected === undefined) {
+      return;
+    }
+    const size = this._resolve(segmentsOf(path))?.size;
+    if (expected.pending === undefined || size === expected.pending.size) {
+      this._arriving!.delete(path);
+    } else if (size === expected.size) {
+      this.markPending(path, expected.pending);
+    }
   }
 
   private _merge(start: number, prefix: string, rows: readonly ObservedRow[]): IndexCompareResult {
@@ -725,6 +909,7 @@ export class ProjectIndex {
           if (node.pendingMtime === true) {
             node.mtimeMs = row.mtimeMs;
             delete node.pendingMtime;
+            this._adoptedMtimes += 1;
             if (node.factsAt !== undefined) {
               node.factsAt = { ...node.factsAt, mtimeMs: row.mtimeMs };
               /* Bytes modified after the writer measured them are not the
@@ -751,6 +936,7 @@ export class ProjectIndex {
         delete node.facts;
         delete node.factsAt;
         delete node.pendingMtime;
+        delete node.pending;
         this._generation += 1;
         node.generation = this._generation;
         mismatched.push(row.path);
@@ -808,6 +994,16 @@ export class ProjectIndex {
     return facts;
   }
 
+  /* A node a write recorded before the provider reported its mtime takes the provider's; its facts are re-measured. */
+  private _adoptMtime(node: Node, mtimeMs: number): void {
+    if (node.pendingMtime !== true) {
+      return;
+    }
+    node.mtimeMs = mtimeMs;
+    delete node.pendingMtime;
+    this._dropFacts(node);
+  }
+
   private _entryOf(path: string, node: Node): IndexEntry {
     return {
       path,
@@ -817,6 +1013,7 @@ export class ProjectIndex {
       generation: node.generation,
       ...(node.facts === undefined ? {} : { facts: node.facts }),
       ...(node.factsAt === undefined ? {} : { factsAt: node.factsAt }),
+      ...(node.pending === undefined ? {} : { pending: node.pending }),
     };
   }
 

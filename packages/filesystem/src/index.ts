@@ -85,7 +85,10 @@ export type { CapacityDecision, CapacityDomain, CapacityMeasurement, CapacityReq
 
 export { BoundedFileCache } from '#bounded-file-cache.js';
 export { ProjectIndex, timestampGranularityMilliseconds } from '#project-index/project-index.js';
+export { PendingContentError, pendingObjectOf, pendingStallMilliseconds } from '#pending-content.js';
+export type { PendingObject, PendingObjectRequest, PendingObjectSource } from '#pending-content.js';
 export type {
+  ExpectedEntry,
   FactsAt,
   IndexAdmits,
   IndexChanges,

@@ -48,4 +48,39 @@ describe('createRelayedFileSystemProvider', () => {
       provider.writeFileChecked?.({ path: 'main.scad', data: new Uint8Array([1]), preconditions: [] }),
     ).rejects.toMatchObject({ code: 'CHECKED_WRITE_UNSUPPORTED', applicationState: 'known-not-applied' });
   });
+
+  /* D9: the agent's grep and guard learn pending files from the root's index, never by a read that would fetch. */
+  it('should relay pendingPaths, and say a bridge that predates it cannot answer', async () => {
+    const pendingPaths = vi.fn(async () => ['models/part.step']);
+    const bridgeWith = (call: unknown): RelayedBridge =>
+      new Proxy(
+        { hello: { payload: { state: 'ready', capabilities: {} } }, pendingPaths: call } as Record<
+          PropertyKey,
+          unknown
+        >,
+        {
+          get: (target, property) => target[property] ?? vi.fn(),
+        },
+      ) as unknown as RelayedBridge;
+
+    /* The relayed provider always carries the call; the port type leaves it optional. */
+    const relayedPendingPaths = (bridge: RelayedBridge): ((paths: readonly string[]) => Promise<readonly string[]>) => {
+      const relayed = createRelayedFileSystemProvider(bridge).pendingPaths;
+      if (relayed === undefined) {
+        throw new Error('The relayed provider does not carry pendingPaths.');
+      }
+      return relayed;
+    };
+
+    await expect(relayedPendingPaths(bridgeWith(pendingPaths))(['main.scad', 'models/part.step'])).resolves.toEqual([
+      'models/part.step',
+    ]);
+    const old = vi.fn(async () => {
+      throw new Error('Unknown method: pendingPaths');
+    });
+    /* Not "none": the guard then checks the file's bytes, which a pending read refuses. */
+    await expect(relayedPendingPaths(bridgeWith(old))(['models/part.step'])).rejects.toMatchObject({
+      code: 'PENDING_PATHS_UNSUPPORTED',
+    });
+  });
 });

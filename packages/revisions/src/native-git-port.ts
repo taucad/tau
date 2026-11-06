@@ -70,6 +70,7 @@ import type {
   SetRevisionRemoteInput,
   RevisionRef,
   RevisionTag,
+  RevisionTreeListing,
   RemoteRef,
   RevisionRemoteAddress,
   UpdateRevisionRefInput,
@@ -781,15 +782,18 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     return textDecoder.decode(result.stdout).trim();
   };
 
-  const listTree = async (commit: string): Promise<ReadonlyMap<string, Readonly<{ oid: string; mode: FileMode }>>> => {
-    const stdout = await output(['ls-tree', '-rz', '--full-tree', commit]);
-    const paths = new Map<string, Readonly<{ oid: string; mode: FileMode }>>();
+  const listTree = async (
+    commit: string,
+  ): Promise<ReadonlyMap<string, Readonly<{ oid: string; mode: FileMode; size: number }>>> => {
+    /* `-l` adds each blob's size, padded with spaces: git reads it from the object header, not the blob. */
+    const stdout = await output(['ls-tree', '-rlz', '--full-tree', commit]);
+    const paths = new Map<string, Readonly<{ oid: string; mode: FileMode; size: number }>>();
     for (const record of textDecoder.decode(stdout).split('\0')) {
       if (record === '') {
         continue;
       }
       const tab = record.indexOf('\t');
-      const header = record.slice(0, tab).split(' ');
+      const header = record.slice(0, tab).split(/ +/u);
       if (
         tab === -1 ||
         header[1] !== 'blob' ||
@@ -798,7 +802,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       ) {
         throw new RevisionPortError('ENGINE_FAILED', 'A revision tree holds a non-file entry.');
       }
-      paths.set(record.slice(tab + 1), { oid: header[2], mode: header[0] });
+      paths.set(record.slice(tab + 1), { oid: header[2], mode: header[0], size: Number(header[3]) });
     }
     return paths;
   };
@@ -1372,6 +1376,18 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         summary: entry.summary,
         receipt: await receiptOf(id, commit),
       });
+    },
+
+    listTree: async (id: RevisionId): Promise<readonly RevisionTreeListing[] | undefined> => {
+      const commit = await readCommitObject(id);
+      if (commit === undefined) {
+        return undefined;
+      }
+      return Object.freeze(
+        [...(await listTree(commit.tree))]
+          .toSorted(([left], [right]) => (left < right ? -1 : 1))
+          .map(([path, entry]) => Object.freeze({ path, ...entry })),
+      );
     },
 
     /* Three processes whatever the tree holds: the commit, its paths, and one

@@ -21,9 +21,16 @@ import { directoryConcurrency, mapConcurrent, statConcurrency } from '#concurren
 import { workerTimings } from '#worker-timings.js';
 import type { ContentFacts, ContentFactsOptions, FileStatEntry, FileSystemProvider, PathPolicy } from '#types.js';
 import { ProjectIndex, timestampGranularityMilliseconds } from '#project-index/project-index.js';
-import type { IndexAdmits, IndexCompareResult, IndexEntryKind, ObservedRow } from '#project-index/project-index.js';
+import type {
+  ExpectedEntry,
+  IndexAdmits,
+  IndexCompareResult,
+  IndexEntryKind,
+  ObservedRow,
+} from '#project-index/project-index.js';
 import { projectIndexDirectory, readIndexSnapshot, writeIndexSnapshot } from '#project-index/index-snapshot.js';
 import type { IndexVector } from '#project-index/index-snapshot.js';
+import type { PendingObject } from '#pending-content.js';
 
 /** Reserved root paths no index ever holds (I9): its own snapshot, and import staging. @public */
 export const reservedIndexPaths: readonly string[] = Object.freeze([projectIndexDirectory, '.tau-staging']);
@@ -384,7 +391,12 @@ export class ProjectIndexes {
       return 'skipped';
     }
     /* A snapshot claims every notice its vector names: re-observe what those
-     * notices left unknown first, so it never stores a view older than its vector. */
+     * notices left unknown first, so it never stores a view older than its vector.
+     * A pending entry still waiting for its mtime is observed too, so the stored
+     * mtime is the provider's and the reload keeps it pending (D9). */
+    for (const path of state.index.unmeasuredPendingPaths) {
+      state.index.invalidate(path);
+    }
     if (state.index.stalePaths.length > 0) {
       await this._refreshStale(key, state.index);
       clearTimeout(state.persistTimer);
@@ -400,12 +412,16 @@ export class ProjectIndexes {
       provider: resolution.provider,
       providerRoot: resolution.path,
       lockName: resolution.persist.lockName,
-      snapshot: () => ({
-        vector: this.vector(key),
-        rescan: false,
-        writtenAt: Date.now(),
-        entries: state.index.toSnapshot(),
-      }),
+      snapshot: () => {
+        const pending = state.index.pendingSnapshot();
+        return {
+          vector: this.vector(key),
+          rescan: false,
+          writtenAt: Date.now(),
+          entries: state.index.toSnapshot(),
+          ...(Object.keys(pending).length === 0 ? {} : { pending }),
+        };
+      },
     });
     if (written === 'busy') {
       this._schedulePersist(key);
@@ -484,6 +500,81 @@ export class ProjectIndexes {
     this._apply(absolutePath, (index, relative) => {
       index.recordFile(relative, { ...written, observedAt });
     });
+  }
+
+  /**
+   * Make one file a pending entry in every index that holds it (see
+   * {@link ProjectIndex.markPending}).
+   *
+   * @param absolutePath - Absolute file path.
+   * @param object - The large object its pointer names.
+   * @param observed - The size the pointer was read at, and {@link ProjectIndexes.generationAt} before the read.
+   */
+  public markPending(
+    absolutePath: string,
+    object: PendingObject,
+    observed?: Readonly<{ size: number; generation?: number | undefined }>,
+  ): void {
+    this._apply(absolutePath, (index, relative) => {
+      index.markPending(relative, object, observed);
+    });
+  }
+
+  /**
+   * The generation of one entry in the warm index that covers it, taken before a read so a mark made from that read
+   * can tell whether a write landed since.
+   *
+   * @param absolutePath - Absolute file path.
+   * @returns The generation, or `undefined` when no warm index holds the entry.
+   */
+  public generationAt(absolutePath: string): number | undefined {
+    const covering = this._covering(absolutePath);
+    return covering?.index.entry(covering.relative)?.generation;
+  }
+
+  /**
+   * The large object a warm index records for one pending entry.
+   *
+   * @param absolutePath - Absolute file path.
+   * @returns The object, or `undefined` when no index has it pending.
+   */
+  public pendingAt(absolutePath: string): PendingObject | undefined {
+    const covering = this._covering(absolutePath);
+    return covering?.index.pendingFor(covering.relative);
+  }
+
+  /**
+   * Know a tree's entries before its write lands them, in the index of that
+   * exact root (see {@link ProjectIndex.expect}), opening it when it is cold.
+   *
+   * @param root - Absolute root the tree is written to.
+   * @param entries - Every entry of the tree, root-relative.
+   */
+  public async expect(root: string, entries: readonly ExpectedEntry[]): Promise<void> {
+    /* A cold root is opened first, so a cold open's write is known as it lands. */
+    const index = await this.ready(root);
+    index.expect(entries);
+  }
+
+  /**
+   * Whether every one of these paths of the expected tree has landed (D10).
+   *
+   * @param root - Absolute root the tree is written to.
+   * @param paths - Root-relative file paths.
+   * @returns `true` when none is arriving; `undefined` when that root's index expects no tree.
+   */
+  public landed(root: string, paths: readonly string[]): boolean | undefined {
+    const index = this._states.get(normalizePath(root))?.index;
+    return index?.expecting === true ? paths.every((path) => !index.arriving(path)) : undefined;
+  }
+
+  /**
+   * End a root's expectation: its tree write is over.
+   *
+   * @param root - Absolute root.
+   */
+  public endExpectation(root: string): void {
+    this._states.get(normalizePath(root))?.index.endExpectation();
   }
 
   /**
@@ -687,7 +778,7 @@ export class ProjectIndexes {
       resolution.persist === undefined ? undefined : await readIndexSnapshot(resolution.provider, resolution.path);
     const usable = snapshot !== undefined && !snapshot.rescan;
     const index = usable
-      ? ProjectIndex.fromSnapshot(snapshot.entries, snapshot.vector.generation)
+      ? ProjectIndex.fromSnapshot(snapshot.entries, snapshot.vector.generation, snapshot.pending)
       : new ProjectIndex({
           trustworthyMtime:
             resolution.persist !== undefined || resolution.provider.capabilities.trustworthyMtime === true,
@@ -768,7 +859,9 @@ export class ProjectIndexes {
     if (state !== undefined && prefix === '') {
       state.lastCompare = result;
     }
-    if (result.mismatched.length > 0) {
+    /* An adopted mtime changes what the snapshot must hold, not the generation. */
+    const adopted = index.takeAdoptedMtimes();
+    if (result.mismatched.length > 0 || adopted > 0) {
       this._schedulePersist(root);
     }
     return result;

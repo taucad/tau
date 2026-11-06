@@ -52,7 +52,7 @@ import type { AgentHostProjectProvide, AgentHostProjectRebridge } from '#workers
 import { closeProvidedPorts, createDisposers } from '#workers/agent-host-projects.js';
 import { createResidentPlacement } from '#workers/agent-host-placement.js';
 import { createPortRevisionsClient } from '#workers/agent-host-revisions.js';
-import { guardLargeObjectFiles, guardLargeObjectKernel } from '#lib/large-object-guard.js';
+import { guardLargeObjectFiles, guardLargeObjectKernel, pendingPathsUnsupportedCode } from '#lib/large-object-guard.js';
 import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 import { createIdleRuntimeClient } from '#workers/idle-runtime-client.js';
 import { createWorkerEvidence } from '#workers/agent-host-evidence.js';
@@ -84,6 +84,7 @@ type ProjectFileSystemBridge = Pick<
   | 'watchChangeSets'
   | 'hello'
   | 'dispose'
+  | 'pendingPaths'
 >;
 
 /** What the worker as a whole gives each project host. */
@@ -288,7 +289,9 @@ const swappable = <Target extends object>(
  * @returns The provider every tool call and the GeoSpec bridge read through.
  * @internal
  */
-export const createRelayedFileSystemProvider = (proxy: ProjectFileSystemBridge): FileSystemProvider => {
+export const createRelayedFileSystemProvider = (
+  proxy: ProjectFileSystemBridge,
+): FileSystemProvider & Pick<ComposedView, 'pendingPaths'> => {
   const { payload } = proxy.hello;
   if (payload.state !== 'ready') {
     throw Object.assign(new Error(`Workspace filesystem bridge is ${payload.state}.`), {
@@ -337,6 +340,22 @@ export const createRelayedFileSystemProvider = (proxy: ProjectFileSystemBridge):
     rename: proxy.rename.bind(proxy),
     exists: proxy.exists.bind(proxy),
     lstat: proxy.lstat.bind(proxy),
+    /* A host that predates the call cannot say, which is not "none": its callers check another way (reads refuse with PENDING). */
+    pendingPaths: async (paths) => {
+      try {
+        return await proxy.pendingPaths(paths);
+      } catch (error) {
+        if (error instanceof Error && error.message === 'Unknown method: pendingPaths') {
+          throw Object.assign(
+            new Error('This workspace bridge cannot say which files are pending.', { cause: error }),
+            {
+              code: pendingPathsUnsupportedCode,
+            },
+          );
+        }
+        throw error;
+      }
+    },
     dispose: () => undefined,
   };
 };
@@ -676,7 +695,7 @@ const composeProjectHost = async (
   });
   /* The registry over one filesystem: the project's own, or an attempt's checkout its placement granted (W8 G09). */
   const toolRegistryOver = (
-    provider: FileSystemProvider,
+    provider: FileSystemProvider & Pick<ComposedView, 'pendingPaths'>,
     preferences: Pick<ProjectFileSystemBridge, 'readMachineSettings'>,
   ): ToolRegistry => {
     const view = composeView(

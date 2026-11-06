@@ -119,6 +119,7 @@ import type {
   SetRevisionRemoteInput,
   RevisionRef,
   RevisionTag,
+  RevisionTreeListing,
   UpdateRevisionRefInput,
   UpdateRevisionRefResult,
   WriteRevisionInput,
@@ -688,6 +689,8 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
 
   /* Ids of the trees this store writes, kept across mints (E3). */
   const treeIds = createTreeIdMemo();
+  /* Each blob's size, and the large object a pointer names, as a cold open's head listings said: `listTree` reads no blob for them (D10). */
+  const listedSizes = new Map<string, Pick<RevisionTreeListing, 'size' | 'largeObject'>>();
   /* Whether the store already holds an object, packed or loose. */
   const holds = async (oid: string): Promise<boolean> => objects.has(oid);
   /*
@@ -802,6 +805,13 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     const opened = reach === undefined ? undefined : await coldOpenFromCatalogue(reach);
     if (opened === undefined) {
       return undefined;
+    }
+    for (const { entries } of opened.listings) {
+      for (const { oid, size, lfs } of entries) {
+        if (size !== undefined) {
+          listedSizes.set(oid, { size, ...(lfs === undefined ? {} : { largeObject: lfs }) });
+        }
+      }
     }
     await settleShallow(opened.shallow);
     reach?.access.onColdOpen?.(opened.report);
@@ -1002,6 +1012,13 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
 
   /** Large-object downloads in flight, by oid; see {@link hydrate}. */
   const downloads = new Map<string, Promise<Uint8Array<ArrayBuffer>>>();
+  /** Every reader's progress listener, by oid, whichever reader's transfer brings the bytes. */
+  const progressListeners = new Map<string, Set<() => void>>();
+  const progressed = (oid: string): void => {
+    for (const listener of progressListeners.get(oid) ?? []) {
+      listener();
+    }
+  };
 
   /**
    * The real bytes behind every pointer a tree read found.
@@ -1013,15 +1030,64 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    * arrives, so a reload part-way through fetches only what is still missing.
    *
    * @param pointers - The pointers, in tree order; repeats are resolved once.
-   * @param delivered - Told about each object this read fetched, as it lands.
-   * @param signal - Stops this read's transfers; a concurrent reader waiting on one fetches it itself.
+   * @param hydrateOptions - `onLargeObject` is told about each object this read fetched, as it lands; `signal` stops
+   *   this read's transfers (a concurrent reader waiting on one fetches it itself); `firstLargeObjects` names oids to
+   *   fetch before the rest, asked again before each transfer; `onTransferProgress` hears bytes arrive for any of
+   *   these objects, a transfer this read joined included.
    * @returns The bytes by oid, and what the phase cost.
    */
   const hydrate = async (
     pointers: readonly LfsPointer[],
-    delivered?: ReadTreeOptions['onLargeObject'],
-    signal?: AbortSignal,
+    hydrateOptions?: Readonly<{
+      onLargeObject?: ReadTreeOptions['onLargeObject'];
+      signal?: AbortSignal;
+      firstLargeObjects?: ReadTreeOptions['firstLargeObjects'];
+      onTransferProgress?: ReadTreeOptions['onTransferProgress'];
+    }>,
   ): Promise<Readonly<{ contents: ReadonlyMap<string, Uint8Array<ArrayBuffer>>; report: LfsFetchReport }>> => {
+    const { onTransferProgress } = hydrateOptions ?? {};
+    if (onTransferProgress === undefined) {
+      return hydrateObjects(pointers, hydrateOptions);
+    }
+    const listening = new Map(
+      pointers.map(
+        ({ oid }) =>
+          [
+            oid,
+            () => {
+              onTransferProgress(oid);
+            },
+          ] as const,
+      ),
+    );
+    for (const [oid, listener] of listening) {
+      const listeners = progressListeners.get(oid) ?? new Set();
+      listeners.add(listener);
+      progressListeners.set(oid, listeners);
+    }
+    try {
+      return await hydrateObjects(pointers, hydrateOptions);
+    } finally {
+      for (const [oid, listener] of listening) {
+        const listeners = progressListeners.get(oid);
+        listeners?.delete(listener);
+        if (listeners?.size === 0) {
+          progressListeners.delete(oid);
+        }
+      }
+    }
+  };
+
+  /* See {@link hydrate}. */
+  const hydrateObjects = async (
+    pointers: readonly LfsPointer[],
+    hydrateOptions?: Readonly<{
+      onLargeObject?: ReadTreeOptions['onLargeObject'];
+      signal?: AbortSignal;
+      firstLargeObjects?: ReadTreeOptions['firstLargeObjects'];
+    }>,
+  ): Promise<Readonly<{ contents: ReadonlyMap<string, Uint8Array<ArrayBuffer>>; report: LfsFetchReport }>> => {
+    const { onLargeObject: delivered, signal, firstLargeObjects: first } = hydrateOptions ?? {};
     const startedAt = Date.now();
     const contents = new Map<string, Uint8Array<ArrayBuffer>>();
     const shared = new Map<string, Readonly<{ pointer: LfsPointer; inFlight: Promise<Uint8Array<ArrayBuffer>> }>>();
@@ -1048,6 +1114,8 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       await client.downloadMany({
         pointers: [...wanted.values()],
         ...(signal === undefined ? {} : { signal }),
+        ...(first === undefined ? {} : { first }),
+        progress: progressed,
         received: async (pointer, content, { transport }) => {
           transports.set(transport, (transports.get(transport) ?? 0) + 1);
           await storeLfsObject(pointer.oid, content);
@@ -1741,6 +1809,16 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       });
     },
 
+    readLargeObject: async (pointer) => readLocalLfsObject(pointer),
+    storeLargeObject: async (pointer, content) => storeLfsObject(pointer.oid, content),
+    fetchLargeObjects: async (pointers, fetchOptions) => {
+      const { contents, report } = await hydrate(pointers, fetchOptions);
+      if (report.networkObjects > 0) {
+        options.onLfsFetch?.(report);
+      }
+      return contents;
+    },
+
     readTree: async (id: RevisionId, readOptions?: ReadTreeOptions): Promise<ImmutableRevisionTree | undefined> => {
       const commit = await commitOf(id);
       if (commit === undefined) {
@@ -1780,8 +1858,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           ]),
         );
       }
-      const hydrated =
-        pointers.length === 0 ? undefined : await hydrate(pointers, readOptions?.onLargeObject, readOptions?.signal);
+      const hydrated = pointers.length === 0 ? undefined : await hydrate(pointers, readOptions);
       if (hydrated !== undefined && hydrated.report.networkObjects > 0) {
         options.onLfsFetch?.(hydrated.report);
       }
@@ -2087,6 +2164,17 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       });
     },
 
+    listTree: async (id: RevisionId): Promise<readonly RevisionTreeListing[] | undefined> => {
+      const commit = await commitOf(id);
+      if (commit === undefined) {
+        return undefined;
+      }
+      const files = [...(await flatTree(commit.tree))].flatMap(([path, { oid, mode }]) =>
+        mode === '100644' || mode === '100755' ? [Object.freeze({ path, oid, mode, ...listedSizes.get(oid) })] : [],
+      );
+      return Object.freeze(files.toSorted((left, right) => (left.path < right.path ? -1 : 1)));
+    },
+
     diff: async (input: RevisionDiffInput): Promise<readonly RevisionDiffEntry[]> => {
       const toCommit = await requireCommit(input.to);
       const fromCommit = input.from === undefined ? undefined : await requireCommit(input.from);
@@ -2228,13 +2316,14 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           body,
           ...(ceiling === undefined ? {} : { maximumBytes: ceiling }),
         }).catch(async (error: unknown) => {
-          if (
-            error instanceof PackCeilingError &&
-            (await importFromCatalogue({ url, families: coldFamilies, signal: input.signal, wants }))
-          ) {
+          if (!(error instanceof PackCeilingError)) {
+            return refused(error);
+          }
+          if (await importFromCatalogue({ url, families: coldFamilies, signal: input.signal, wants })) {
             return undefined;
           }
-          return refused(error);
+          /* A catalogue that does not answer (not deployed, a lapsed link) costs one more request, never the fetch. */
+          return postService(http, { url, service: 'git-upload-pack', body }).catch(refused);
         });
         const pack = (() => {
           try {

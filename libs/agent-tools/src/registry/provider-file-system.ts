@@ -289,7 +289,18 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
     };
   };
 
+  const { pendingPaths } = provider;
   return {
+    /* Pending entries come from the view's index, so a search learns them without a read (D9). */
+    ...(pendingPaths === undefined
+      ? {}
+      : {
+          pendingPaths: async (paths: readonly string[]): Promise<readonly string[]> => {
+            const targets = paths.map((path) => assertRootedPath(path));
+            const pending = new Set(await pendingPaths.call(provider, targets));
+            return paths.filter((_, index) => pending.has(targets[index]!));
+          },
+        }),
     async readBinaryFile(path) {
       assertNotAborted(signal);
       const target = assertRootedPath(path);

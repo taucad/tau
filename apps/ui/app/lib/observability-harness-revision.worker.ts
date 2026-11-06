@@ -21,10 +21,10 @@ const service = new WorkspaceFileService({
 const registry = createWorkerRevisionRegistry({
   createPort: async (projectId) =>
     createIsomorphicGitRevisionPort({
-      filesystem: service.createRootedFileSystem(`/projects/${projectId}`),
+      filesystem: service.createRootedFileSystem(`/projects/${projectId}`, undefined, { placeholders: 'raw' }),
       checkouts: createCheckoutRoutes({ mountTable, fileService: service })(projectId),
     }),
-  filesystem: (root) => service.createRootedFileSystem(root),
+  filesystem: (root) => service.createRootedFileSystem(root, undefined, { placeholders: 'raw' }),
   completeChanges: true,
   observe: (root, onChanged) =>
     eventBus.subscribe((event) => {

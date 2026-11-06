@@ -131,7 +131,11 @@ const emptyResult = (toolName: string, value: unknown): boolean => {
     return false;
   }
   return (
-    (toolName === 'grep' && value['totalMatches'] === 0) || (toolName === 'glob_search' && value['totalFiles'] === 0)
+    /* A grep that could not search a pending file has not found nothing. */
+    (toolName === 'grep' &&
+      value['totalMatches'] === 0 &&
+      !(Array.isArray(value['pendingFiles']) && value['pendingFiles'].length > 0)) ||
+    (toolName === 'glob_search' && value['totalFiles'] === 0)
   );
 };
 

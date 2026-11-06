@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Mock } from 'vitest';
+import type { ChangeSet, ChangeSetEntry } from '@taucad/filesystem';
 import type { WorkerChangeChannelTransport } from '#worker-change-channel.js';
 import { WorkerChangeChannel } from '#worker-change-channel.js';
 
@@ -23,6 +24,61 @@ describe('WorkerChangeChannel', () => {
     createTestChannel(listen);
     expect(listen).toHaveBeenCalledOnce();
     expect(listen).toHaveBeenCalledWith('fileChanged', expect.any(Function));
+  });
+
+  it('expands a changeset message into its facts and one change set (D6)', () => {
+    const listen = vi.fn().mockReturnValue(vi.fn());
+    const { channel, wire } = createTestChannel(listen);
+    const written = vi.fn();
+    const deleted = vi.fn();
+    const sets = vi.fn();
+    channel.onFileWritten({ handler: written });
+    channel.onFileDeleted({ handler: deleted });
+    channel.onChangeSet(sets);
+
+    wire({
+      type: 'changeSet',
+      entries: [
+        ...Array.from({ length: 49 }, (_, index) => ({
+          type: 'fileWritten',
+          path: `agent/file-${String(index)}.ts`,
+          backend: 'opfs',
+        })),
+        { type: 'fileDeleted', path: 'top.ts', backend: 'opfs' },
+      ],
+    });
+
+    expect(written).toHaveBeenCalledTimes(49);
+    expect(deleted).toHaveBeenCalledOnce();
+    expect(sets).toHaveBeenCalledOnce();
+    expect(sets).toHaveBeenCalledWith(
+      expect.objectContaining({ generation: 1, touchedDirectories: ['', 'agent'], backend: 'opfs' }),
+    );
+    expect(sets.mock.calls[0]![0].entries).toHaveLength(50);
+    channel.dispose();
+  });
+
+  it('ignores a changeset message carrying anything but path facts', () => {
+    const listen = vi.fn().mockReturnValue(vi.fn());
+    const { channel, wire } = createTestChannel(listen);
+    const sets = vi.fn();
+    channel.onChangeSet(sets);
+    wire({ type: 'changeSet', entries: [{ type: 'changeSet', entries: [] }] });
+    wire({ type: 'changeSet', entries: 'nope' });
+    expect(sets).not.toHaveBeenCalled();
+    channel.dispose();
+  });
+
+  it('reports a summary in the relative namespace as a reset of its prefix', () => {
+    const listen = vi.fn().mockReturnValue(vi.fn());
+    const { channel, wire } = createTestChannel(listen);
+    const sets = vi.fn();
+    channel.onChangeSet(sets);
+    wire({ type: 'backendChanged', backend: 'opfs' });
+    expect(sets).toHaveBeenCalledWith(
+      expect.objectContaining({ entries: [], reset: { prefix: '', reason: 'topology' } }),
+    );
+    channel.dispose();
   });
 
   it('ignores a payload that is not a change event', () => {
@@ -144,6 +200,39 @@ describe('acknowledged observation watches', () => {
     expect(watch.ready).toBe(ready.promise);
     expect(watch.closed).toBe(closed.promise);
     expect(watchReady).toHaveBeenCalledWith({ paths: ['settings.json'] }, handler);
+    watch.dispose();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    channel.dispose();
+  });
+
+  it('registers the change-set form when the transport offers it, never a per-path wire watch (D6, S8)', async () => {
+    const unsubscribe = vi.fn();
+    let deliver: ((set: ChangeSet) => void) | undefined;
+    const watchReady = vi.fn();
+    const watchChangeSets = vi.fn((_request: unknown, handler: (set: ChangeSet) => void) => {
+      deliver = handler;
+      return { ready: Promise.resolve(), closed: Promise.withResolvers<void>().promise, unsubscribe };
+    });
+    const channel = new WorkerChangeChannel({
+      transport: { listen: vi.fn().mockReturnValue(vi.fn()), watchReady, watchChangeSets },
+    });
+    const handler = vi.fn();
+    const watch = channel.watchReady({ paths: ['src'], recursive: false }, handler);
+    await watch.ready;
+
+    deliver!({
+      generation: 3,
+      entries: Array.from(
+        { length: 50 },
+        (_, index): ChangeSetEntry => ({ op: 'written', path: `src/file-${String(index)}.ts`, kind: 'file' }),
+      ),
+      touchedDirectories: ['src'],
+    });
+
+    expect(watchReady).not.toHaveBeenCalled();
+    expect(watchChangeSets).toHaveBeenCalledOnce();
+    expect(handler).toHaveBeenCalledTimes(50);
+    expect(handler).toHaveBeenLastCalledWith({ type: 'change', path: 'src/file-49.ts' });
     watch.dispose();
     expect(unsubscribe).toHaveBeenCalledOnce();
     channel.dispose();

@@ -9,7 +9,6 @@ import { ResourceQueue } from '#resource-queue.js';
 import { ChangeEventBus } from '#change-event-bus.js';
 import { MountTable } from '#mount-table.js';
 import { CrossTabCoordinator } from '#cross-tab-coordinator.js';
-import { SharedPool } from '@taucad/memory';
 import type { ChangeEvent, FileSystemProvider, WatchEvent } from '#types.js';
 import {
   createIdbWorkspaceFileService,
@@ -727,9 +726,7 @@ describe('WorkspaceFileService', () => {
       expect(handler).not.toHaveBeenCalled();
     });
 
-    it('clears search, pool, route, and discovery derivatives without reviving providers', async () => {
-      const pool = new SharedPool(new SharedArrayBuffer(128 * 1024), { maxEntries: 8 });
-      service.setFilePool(pool);
+    it('clears search, route, and discovery derivatives without reviving providers', async () => {
       await service.writeFile('/cached.txt', 'cached');
       await service.readFile('/cached.txt');
       /* Captured before dispose: after it the mount is gone, so a fresh rooted
@@ -741,7 +738,6 @@ describe('WorkspaceFileService', () => {
 
       service.dispose();
 
-      expect(pool.has('/cached.txt')).toBe(false);
       await expect(service.listProjectManifests()).resolves.toEqual({ entries: [], roots: [] });
       await expect(rooted.search!('cached')).rejects.toThrow();
       expect(getProvider).not.toHaveBeenCalled();
@@ -850,200 +846,37 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
     expect(stats.length).toBeGreaterThan(0);
   });
 
-  // ---------------------------------------------------------------------------
-  // SharedPool integration
-  // ---------------------------------------------------------------------------
-
-  describe('SharedPool integration', () => {
-    async function createWorkspaceFileServiceWithPool() {
-      const buffer = new SharedArrayBuffer(128 * 1024);
-      const pool = new SharedPool(buffer, { maxEntries: 128 });
-
-      const providerRegistry = new ProviderRegistry();
-      const provider = await providerRegistry.getProvider({ backend: 'memory', storageRootKey: 'memory:test-root' });
-      const mountTable = new MountTable();
-      mountTable.mount('/', provider, { class: 'authored', backend: 'memory', storageRootKey: 'memory:test-root' });
-
-      const resourceQueue = new ResourceQueue();
-      const eventBus = new ChangeEventBus();
-
-      const svc = new WorkspaceFileService({
-        providerRegistry,
-        resourceQueue,
-        eventBus,
-        filePool: pool,
-        mountTable,
-      });
-
-      return { service: svc, pool, eventBus, provider };
-    }
-
-    it('stores utf8 reads in the pool under the same conditions as byte reads', async () => {
-      const { service: svc, pool } = await createWorkspaceFileServiceWithPool();
-      await svc.writeFile('/decoded.txt', 'decoded content');
-
-      await expect(svc.readFile('/decoded.txt', 'utf8')).resolves.toBe('decoded content');
-
-      expect(decoder.decode(pool.resolveCopy('/decoded.txt'))).toBe('decoded content');
+  it('keeps the tree index warm for the writes that survived a partial batch failure', async () => {
+    const providerRegistry = new ProviderRegistry();
+    const provider = await providerRegistry.getProvider({ backend: 'memory', storageRootKey: 'memory:test-root' });
+    const mountTable = new MountTable();
+    mountTable.mount('/', provider, { class: 'authored', backend: 'memory', storageRootKey: 'memory:test-root' });
+    const svc = new WorkspaceFileService({
+      providerRegistry,
+      resourceQueue: new ResourceQueue(),
+      eventBus: new ChangeEventBus(),
+      mountTable,
+    });
+    await svc.writeFile('/keep.txt', 'keep');
+    await svc.writeFile('/doomed.txt', 'before');
+    await svc.createRootedFileSystem('/').statTree!('');
+    const readdirWithStats = vi.spyOn(provider, 'readdirWithStats');
+    const writeFile = provider.writeFile.bind(provider);
+    vi.spyOn(provider, 'writeFile').mockImplementation(async (path, data) => {
+      if (path === 'doomed.txt') {
+        throw new Error('write failed');
+      }
+      return writeFile(path, data);
     });
 
-    it('keeps a scoped utf8 read out of the pool', async () => {
-      const { service: svc, pool } = await createWorkspaceFileServiceWithPool();
-      await svc.writeFile('/scoped.txt', 'scoped content');
-      const scope = { backend: 'memory', storageRootKey: 'memory:test-root' } as const;
+    await expect(svc.writeFiles({ '/ok.txt': { content: 'ok' }, '/doomed.txt': { content: 'after' } })).rejects.toThrow(
+      'write failed',
+    );
 
-      await expect(svc.readFile('/scoped.txt', { encoding: 'utf8', scope })).resolves.toBe('scoped content');
-
-      expect(pool.has('/scoped.txt')).toBe(false);
-    });
-
-    it('keeps cached state for the writes that survived a partial batch failure', async () => {
-      const { service: svc, pool, provider } = await createWorkspaceFileServiceWithPool();
-      await svc.writeFile('/keep.txt', 'keep');
-      await svc.writeFile('/doomed.txt', 'before');
-      await svc.readFile('/keep.txt');
-      await svc.readFile('/doomed.txt');
-      await svc.createRootedFileSystem('/').statTree!('');
-      const readdirWithStats = vi.spyOn(provider, 'readdirWithStats');
-      const writeFile = provider.writeFile.bind(provider);
-      const successfulPath = '/ok.txt';
-      const failedPath = '/doomed.txt';
-      const failedProviderPath = 'doomed.txt';
-      vi.spyOn(provider, 'writeFile').mockImplementation(async (path, data) => {
-        if (path === failedProviderPath) {
-          throw new Error('write failed');
-        }
-        return writeFile(path, data);
-      });
-
-      await expect(
-        svc.writeFiles({ [successfulPath]: { content: 'ok' }, [failedPath]: { content: 'after' } }),
-      ).rejects.toThrow('write failed');
-
-      expect(pool.has('/keep.txt')).toBe(true);
-      expect(pool.has('/doomed.txt')).toBe(false);
-      await expect(svc.createRootedFileSystem('/').statTree!('')).resolves.toContainEqual(
-        expect.objectContaining({ path: 'ok.txt' }),
-      );
-      expect(readdirWithStats).not.toHaveBeenCalled();
-    });
-
-    it('should store binary content in pool after readFile', async () => {
-      const { service: svc, pool } = await createWorkspaceFileServiceWithPool();
-      await svc.writeFile('/cached.txt', 'pooled content');
-
-      await svc.readFile('/cached.txt');
-
-      const cached = pool.resolveCopy('/cached.txt');
-      expect(cached).toBeDefined();
-      expect(decoder.decode(cached)).toBe('pooled content');
-    });
-
-    it('stores aliased reads under only their canonical shared-pool key', async () => {
-      const { service: svc, pool } = await createWorkspaceFileServiceWithPool();
-      await svc.writeFile('/directory/cached.txt', 'pooled content');
-
-      await svc.readFile('/directory/./cached.txt');
-
-      expect(pool.has('/directory/cached.txt')).toBe(true);
-      expect(pool.has('/directory/./cached.txt')).toBe(false);
-    });
-
-    it('should invalidate pool entry on writeFile', async () => {
-      const { service: svc, pool } = await createWorkspaceFileServiceWithPool();
-      await svc.writeFile('/update.txt', 'original');
-      await svc.readFile('/update.txt');
-      expect(pool.has('/update.txt')).toBe(true);
-
-      await svc.writeFile('/update.txt', 'updated');
-      expect(pool.has('/update.txt')).toBe(false);
-    });
-
-    it('should invalidate pooled content when writeFiles restores a file', async () => {
-      const { service: svc, pool } = await createWorkspaceFileServiceWithPool();
-      const path = '/main.scad';
-      await svc.writeFile(path, 'cube-with-cutout');
-      await svc.readFile(path);
-      expect(decoder.decode(pool.resolveCopy(path))).toBe('cube-with-cutout');
-
-      await svc.writeFiles({ [path]: { content: 'plain-cube' } });
-
-      expect(pool.has(path)).toBe(false);
-      expect(await svc.readFile(path, 'utf8')).toBe('plain-cube');
-    });
-
-    it('should invalidate pool entries on rename', async () => {
-      const { service: svc, pool } = await createWorkspaceFileServiceWithPool();
-      await svc.writeFile('/old.txt', 'data');
-      await svc.readFile('/old.txt');
-      expect(pool.has('/old.txt')).toBe(true);
-
-      await svc.move('/old.txt', '/new.txt');
-      expect(pool.has('/old.txt')).toBe(false);
-      expect(pool.has('/new.txt')).toBe(false);
-    });
-
-    it('should invalidate pool entry on unlink', async () => {
-      const { service: svc, pool } = await createWorkspaceFileServiceWithPool();
-      await svc.writeFile('/delete.txt', 'data');
-      await svc.readFile('/delete.txt');
-      expect(pool.has('/delete.txt')).toBe(true);
-
-      await svc.unlink('/delete.txt');
-      expect(pool.has('/delete.txt')).toBe(false);
-    });
-
-    it('should work identically without pool', async () => {
-      const { service: svc } = await createWorkspaceFileService();
-      await svc.writeFile('/no-pool.txt', 'data');
-
-      const content = await svc.readFile('/no-pool.txt', 'utf8');
-      expect(content).toBe('data');
-    });
-
-    it('should accept filePool via setFilePool after construction', async () => {
-      const { service: svc } = await createWorkspaceFileService();
-      const buffer = new SharedArrayBuffer(128 * 1024);
-      const pool = new SharedPool(buffer, { maxEntries: 128 });
-
-      svc.setFilePool(pool);
-
-      await svc.writeFile('/late-pool.txt', 'late binding');
-      await svc.readFile('/late-pool.txt');
-
-      const cached = pool.resolveCopy('/late-pool.txt');
-      expect(cached).toBeDefined();
-      expect(decoder.decode(cached)).toBe('late binding');
-    });
-
-    it('should invalidate late-bound pool on writeFile', async () => {
-      const { service: svc } = await createWorkspaceFileService();
-      const buffer = new SharedArrayBuffer(128 * 1024);
-      const pool = new SharedPool(buffer, { maxEntries: 128 });
-
-      svc.setFilePool(pool);
-
-      await svc.writeFile('/invalidate.txt', 'original');
-      await svc.readFile('/invalidate.txt');
-      expect(pool.has('/invalidate.txt')).toBe(true);
-
-      await svc.writeFile('/invalidate.txt', 'updated');
-      expect(pool.has('/invalidate.txt')).toBe(false);
-    });
-
-    it('keeps pooled bytes readable after the returned buffer is transferred away', async () => {
-      const { service: svc, pool } = await createWorkspaceFileServiceWithPool();
-      await svc.writeFile('/transferred.bin', 'pooled payload');
-
-      const first = (await svc.readFile('/transferred.bin')) as Uint8Array<ArrayBuffer>;
-      // The bridge transfers read results to the main thread, which detaches
-      // this buffer on the worker side. The pool must already hold its own copy.
-      structuredClone(first, { transfer: [first.buffer] });
-      expect(first.buffer.detached).toBe(true);
-
-      expect(decoder.decode(pool.resolveCopy('/transferred.bin'))).toBe('pooled payload');
-      await expect(svc.readFile('/transferred.bin', 'utf8')).resolves.toBe('pooled payload');
-    });
+    await expect(svc.createRootedFileSystem('/').statTree!('')).resolves.toContainEqual(
+      expect.objectContaining({ path: 'ok.txt' }),
+    );
+    expect(readdirWithStats).not.toHaveBeenCalled();
   });
 
   // ---------------------------------------------------------------------------

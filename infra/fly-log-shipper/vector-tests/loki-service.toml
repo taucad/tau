@@ -1,0 +1,65 @@
+# Vector unit tests for vector-configs/sinks/loki.toml (W8). Not copied into the
+# image; the deploy workflow runs them with the image's own Vector before it
+# deploys:
+#   vector test /etc/vector/vector.toml /etc/vector/sinks/loki.toml <this file>
+# Each input is one raw Fly NATS log message, the shape Loki stores as the body.
+
+[[tests]]
+name = "a staging API line is tau-api and an app field cannot override it"
+[[tests.inputs]]
+insert_at = "log_json"
+type = "raw"
+value = '''{"event":{"provider":"app"},"fly":{"app":{"instance":"m1","name":"tau-api-staging","process_group":"app"},"region":"syd"},"host":"h1","log":{"level":"info"},"message":"{\"level\":30,\"msg\":\"hello\",\"service_name\":\"spoof\"}"}'''
+[[tests.outputs]]
+extract_from = "loki_service"
+[[tests.outputs.conditions]]
+type = "vrl"
+source = '''
+      assert_eq!(.service_name, "tau-api")
+      assert_eq!(.level, 30)
+      assert_eq!(.msg, "hello")
+      assert_eq!(.fly.app.process_group, "app")
+      '''
+
+[[tests]]
+name = "every process group of the API app, in both environments, is tau-api"
+[[tests.inputs]]
+insert_at = "log_json"
+type = "raw"
+value = '''{"event":{"provider":"app"},"fly":{"app":{"instance":"m2","name":"tau-api-staging","process_group":"billing-operations"},"region":"syd"},"host":"h1","log":{"level":"info"},"message":"plain text"}'''
+[[tests.inputs]]
+insert_at = "log_json"
+type = "raw"
+value = '''{"event":{"provider":"runner"},"fly":{"app":{"instance":"m3","name":"tau-api","process_group":"revisions-maintenance"},"region":"syd"},"host":"h2","log":{"level":"info"},"message":"Pulling container image"}'''
+[[tests.outputs]]
+extract_from = "loki_service"
+[[tests.outputs.conditions]]
+type = "vrl"
+source = '''
+      assert_eq!(.service_name, "tau-api")
+      assert_eq!(.level, "info")
+      '''
+
+[[tests]]
+name = "other apps keep their own service name"
+[[tests.inputs]]
+insert_at = "log_json"
+type = "raw"
+value = '''{"event":{"provider":"app"},"fly":{"app":{"instance":"m4","name":"tau-storage-staging"},"region":"syd"},"host":"h3","log":{"level":"info"},"message":"x"}'''
+[[tests.outputs]]
+extract_from = "loki_service"
+[[tests.outputs.conditions]]
+type = "vrl"
+source = '''assert_eq!(.service_name, "tau-storage")'''
+
+[[tests]]
+name = "a line without a Fly app name carries no service_name"
+[[tests.inputs]]
+insert_at = "log_json"
+type = "raw"
+value = '''{"event":{"provider":"health"},"host":"h4","log":{"level":"info"},"message":"no fly block","service_name":"stale"}'''
+[[tests.outputs]]
+extract_from = "loki_service"
+[[tests.outputs.conditions]]
+type = "vrl"
+source = '''assert!(!exists(.service_name))'''

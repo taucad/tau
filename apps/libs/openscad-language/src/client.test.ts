@@ -66,8 +66,6 @@ describe('OpenscadLanguageClient', () => {
     expect(worker.commands[0]).toEqual({
       type: 'init',
       assets: { url: '/openscad-language/abc/assets-manifest.json', sha256: 'a'.repeat(64) },
-      rootDirectory: '/projects/demo',
-      filePoolBuffer: undefined,
     });
   });
 

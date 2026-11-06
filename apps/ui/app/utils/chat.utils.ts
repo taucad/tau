@@ -578,11 +578,18 @@ function aggregateUsage(usageParts: UsageData[]): string {
     return '';
   }
 
+  /* `inputTokens` is the uncached input only: cache reads and writes are separate
+   * provider counts, so a turn served mostly from cache must not read as a dozen
+   * tokens of input. Each count is summed and rendered on its own. */
   let inputTokens = 0;
+  let cacheReadTokens = 0;
+  let cacheWriteTokens = 0;
   let outputTokens = 0;
   const operationIds = new Set<string>();
   for (const d of usageParts) {
     inputTokens += d.inputTokens;
+    cacheReadTokens += d.cacheReadTokens;
+    cacheWriteTokens += d.cacheWriteTokens;
     outputTokens += d.outputTokens;
     if (d.operationId !== undefined) {
       operationIds.add(d.operationId);
@@ -599,7 +606,7 @@ function aggregateUsage(usageParts: UsageData[]): string {
   const operations = operationIds.size === 0 ? '' : ` | Tau operations: ${[...operationIds].sort().join(', ')}`;
   const agent = last?.agent === undefined ? '' : `Agent: ${last.agent} | `;
 
-  return `${agent}Model: ${model} | Tokens: ${inputTokens} in / ${outputTokens} out${operations}`;
+  return `${agent}Model: ${model} | Tokens: ${inputTokens} in / ${cacheReadTokens} cache read / ${cacheWriteTokens} cache write / ${outputTokens} out${operations}`;
 }
 
 /**

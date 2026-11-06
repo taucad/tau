@@ -150,16 +150,12 @@ export const build123dArtifactSchema = pythonArtifactSchema.extend({
 
 /** Native output artifact and optional preserved-mechanism diagnostics. */
 export type Build123dArtifact = z.infer<typeof build123dArtifactSchema>;
-/**
- * What the worker answers `mesh` with. Over the request's `maxTriangles` it writes no GLB and answers the counts alone.
- */
-export const build123dMeshSchema = build123dArtifactSchema.partial().extend({
-  artifactPath: z.string().min(1).optional(),
-  byteLength: z.number().int().nonnegative().optional(),
+/** What the worker answers `mesh` with: the GLB and its triangle and vertex counts. */
+export const build123dMeshSchema = build123dArtifactSchema.extend({
   triangles: z.number().int().nonnegative(),
   vertices: z.number().int().nonnegative(),
 });
-/** One `mesh` answer: the triangle and vertex counts, and the GLB when it was within the request's budget. */
+/** One `mesh` answer: the GLB with its triangle and vertex counts. */
 export type Build123dMesh = z.infer<typeof build123dMeshSchema>;
 
 /** What the worker answers `measure` with: the shapes' bounding-box diagonal in millimetres. */

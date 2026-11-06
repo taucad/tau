@@ -70,7 +70,11 @@ Files currently open in the editor tabs: ${snapshot.openFiles.map((file) => file
     parts.push(`<project_layout>
 Below is a cached/partial snapshot of the current project's file structure. Runner tools such as test_model perform their own recursive project discovery and are not limited to this visible tree:
 
-${renderFileTree(snapshot.fileTree)}
+${renderFileTree(snapshot.fileTree)}${
+      snapshot.fileTreeOmitted === undefined
+        ? ''
+        : `\n  (${String(snapshot.fileTreeOmitted)} more files not listed; list or search the project to see them)`
+    }
 </project_layout>`);
   }
   if (snapshot?.workbench) {

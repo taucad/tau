@@ -11,8 +11,8 @@
  * "Everything after" is one sequence, and it is the reason there is a class
  * here rather than a function per operation (authority Rule 5a): acquire the
  * cross-tab and queue locks for the whole operation, refresh the providers
- * inside them, mutate, then record the completion — shared file pool, per-root
- * tree index, one summary change event, cross-tab notification — or, on a
+ * inside them, mutate, then record the completion — per-root
+ * Project Index, one summary change event, cross-tab notification — or, on a
  * half-finished mutation, drop exactly the derivatives that became
  * untrustworthy. A tree copy does that once for the copy; a batch write
  * settles per file, so a rejected path costs only its own derivatives.
@@ -34,7 +34,6 @@ import {
   parentDirectory,
   resolveAuthorityPath,
 } from '@taucad/utils/path';
-import type { SharedPool } from '@taucad/memory';
 import type {
   ChangeEvent,
   ChangeSetEvent,
@@ -57,7 +56,14 @@ import { readDirectoryEntries } from '#backend/directory-entries.js';
 import { tagEventAuthorities, tagEventOrigin } from '#event-origin-registry.js';
 import { parseRoute } from '#project-routes.js';
 import { applyBatchWithPrimitives, mapRolling } from '#backend/batch.js';
-import type { BatchEntry, BatchReceipt, ChangesetEntry, ChangesetEntryReceipt, ChangesetReceipt } from '#changeset.js';
+import type {
+  AppendFence,
+  BatchEntry,
+  BatchReceipt,
+  ChangesetEntry,
+  ChangesetEntryReceipt,
+  ChangesetReceipt,
+} from '#changeset.js';
 import {
   changesetReceipt,
   inHandBytes,
@@ -369,13 +375,21 @@ export class MutationPipeline {
   private readonly _eventBus: ChangeEventBus;
   private readonly _crossTabCoordinator: CrossTabCoordinator;
   private readonly _projectIndexes: ProjectIndexes;
-  /**
-   * Read through a function, not a field: the writer-side pool arrives after
-   * construction (`setFilePool`) and stays owned by the composition root.
-   */
-  private readonly _filePool: () => SharedPool | undefined;
   /** Convenience entries this task is coalescing into one changeset, per origin (D22). */
   private readonly _pending = new Map<string, PendingChangeset>();
+  /**
+   * The highest fencing token applied per record-log path (D23); a lower one is a stale writer.
+   *
+   * Limits: the map lives in this authority's memory only. It is not
+   * persisted, so a restarted authority (a reload, a new worker) forgets every
+   * token and accepts the first token it sees per path again; it is not shared
+   * between authorities, so two tabs each with their own authority do not see
+   * each other's tokens. Across both, the expected-length check still refuses
+   * an append that would interleave, since it reads the file itself. Entries are
+   * never evicted: one number per log path fenced in this authority's lifetime,
+   * which is one per chat segment opened, not per append.
+   */
+  private readonly _appendFences = new Map<string, number>();
 
   /**
    * Create the pipeline over the authority's own collaborators.
@@ -388,14 +402,12 @@ export class MutationPipeline {
     eventBus: ChangeEventBus;
     crossTabCoordinator: CrossTabCoordinator;
     projectIndexes: ProjectIndexes;
-    filePool: () => SharedPool | undefined;
   }) {
     this._mountTable = options.mountTable;
     this._resourceQueue = options.resourceQueue;
     this._eventBus = options.eventBus;
     this._crossTabCoordinator = options.crossTabCoordinator;
     this._projectIndexes = options.projectIndexes;
-    this._filePool = options.filePool;
   }
 
   /**
@@ -833,7 +845,6 @@ export class MutationPipeline {
         continue;
       }
       const resolution = this._mountTable.resolve(path);
-      this._filePool()?.invalidate(path);
       this._projectIndexes.removeFile(path);
       events.push({
         event: { type: 'fileDeleted', path, backend: resolution.backend },
@@ -842,7 +853,6 @@ export class MutationPipeline {
       notices.push({ type: 'delete', path, authority: this.physicalAuthority(resolution) });
     }
     if (unrouted) {
-      this._filePool()?.clear();
       this._projectIndexes.invalidate('/');
       events.push({ event: { type: 'backendChanged', backend }, operations: [] });
       notices.push({ type: 'directory-change', path: '/', authority: { storageRootKey, providerBasePath: '' } });
@@ -1176,7 +1186,6 @@ export class MutationPipeline {
         }
         if (result.status === 'applied') {
           if (this.isCurrentResolution(path, resolution)) {
-            this._filePool()?.invalidate(path);
             this._projectIndexes.removeFile(path);
           }
           this.emitChangeEvent({ type: 'fileDeleted', path, backend: resolution.backend }, context, { operations });
@@ -1204,14 +1213,22 @@ export class MutationPipeline {
     path,
     resolution,
     data,
+    fence,
     context,
   }: {
     path: string;
     resolution: MountResolution;
     data: Uint8Array<ArrayBuffer> | string;
+    /** Refuse the append unless the file is still `expectedLength` bytes and `token` is current (D23). */
+    fence?: AppendFence;
     context?: WorkspaceMutationContext;
   }): Promise<void> {
-    await this._settle(this.enqueue({ entry: { op: 'append', path, data }, resolution }, context));
+    await this._settle(
+      this.enqueue(
+        { entry: { op: 'append', path, data, ...(fence === undefined ? {} : { fence }) }, resolution },
+        context,
+      ),
+    );
   }
 
   public async moveResolved({
@@ -1682,19 +1699,27 @@ export class MutationPipeline {
   ): Promise<void> {
     const settle = (index: number, result: BatchReceipt): void => {
       batches[index] = result;
+      const { batch, resolution } = prepared[index]!;
+      const durability =
+        batch.op === 'append' && result.outcome === 'applied' ? resolution.provider.capabilities.durability : undefined;
       receipts[index] = {
         index,
         outcome: result.outcome,
         ...(result.error === undefined ? {} : { error: result.error }),
         ...(result.kind === undefined ? {} : { kind: result.kind }),
+        ...(durability === undefined ? {} : { durability }),
       };
     };
+    const fenceRefusals = await this._checkAppendFences(prepared, indexes);
+    for (const [index, refusal] of fenceRefusals) {
+      settle(index, refusal);
+    }
     const isCrossProvider = (index: number): boolean => {
       const { batch, resolution, targetResolution } = prepared[index]!;
       return batch.op === 'move' && targetResolution !== undefined && targetResolution.provider !== resolution.provider;
     };
     const byProvider = Map.groupBy(
-      indexes.filter((index) => !isCrossProvider(index)),
+      indexes.filter((index) => !isCrossProvider(index) && !fenceRefusals.has(index)),
       (index) => prepared[index]!.resolution.provider,
     );
     const options = signal === undefined ? undefined : { signal };
@@ -1721,6 +1746,105 @@ export class MutationPipeline {
           settle(index, await this._moveAcrossProviders(prepared[index]!));
         }),
     ]);
+    for (const index of indexes) {
+      const { entry, path } = prepared[index]!;
+      if (entry.op === 'append' && entry.fence?.token !== undefined && receipts[index]!.outcome === 'applied') {
+        this._appendFences.set(path, Math.max(this._appendFences.get(path) ?? entry.fence.token, entry.fence.token));
+      }
+    }
+  }
+
+  /**
+   * Check every fenced append of one phase under the changeset's lock set (D23):
+   * the writer's token must not be older than one already applied to the
+   * path, and the file must still be the length the writer last knew. The
+   * check reads metadata only; the exclusive token on the path keeps it true
+   * until the append lands.
+   *
+   * Appends to one path are judged in entry order against a running length
+   * and token, not each against the length before the changeset: two appends
+   * that both fence at L cannot both pass, and a pipelined append at L then
+   * one at L + n both can. An append that is refused adds nothing to the
+   * running length, so whatever was built on it is refused too.
+   *
+   * @param prepared - Every admitted entry.
+   * @param indexes - This phase's entries.
+   * @returns A refusal per fenced append whose condition does not hold.
+   */
+  private async _checkAppendFences(
+    prepared: readonly PreparedEntry[],
+    indexes: readonly number[],
+  ): Promise<Map<number, BatchReceipt>> {
+    const refusals = new Map<number, BatchReceipt>();
+    const byPath = Map.groupBy(
+      indexes.toSorted((left, right) => left - right),
+      (index) => prepared[index]!.path,
+    );
+    await Promise.all(
+      [...byPath.values()].map(async (group) => {
+        if (!group.some((index) => prepared[index]!.entry.op === 'append' && prepared[index]!.entry.fence)) {
+          return;
+        }
+        const { path, resolution } = prepared[group[0]!]!;
+        let length: number | undefined;
+        try {
+          const stat = await resolution.provider.stat(resolution.path);
+          length = stat.size;
+        } catch (error) {
+          const { code } = error as { code?: unknown };
+          if (code !== 'ENOENT' && code !== 'ENOTDIR') {
+            for (const index of group) {
+              if (prepared[index]!.entry.op === 'append' && prepared[index]!.entry.fence !== undefined) {
+                refusals.set(index, { outcome: 'failed', error });
+              }
+            }
+            return;
+          }
+          length = 0;
+        }
+        let highest = this._appendFences.get(path);
+        for (const index of group) {
+          const { entry, batch } = prepared[index]!;
+          if (entry.op !== 'append') {
+            /* Any other change to the path in this phase leaves its length unknown to the appends after it. */
+            length = undefined;
+            continue;
+          }
+          const added = batch.op === 'append' ? batch.data.byteLength : 0;
+          if (entry.fence === undefined) {
+            length = length === undefined ? undefined : length + added;
+            continue;
+          }
+          const { expectedLength, token } = entry.fence;
+          if (token !== undefined && highest !== undefined && token < highest) {
+            refusals.set(index, {
+              outcome: 'failed',
+              error: Object.assign(
+                errnoError('EFENCED', `append to '${path}' from fence ${String(token)} after ${String(highest)}`),
+                { token, highest },
+              ),
+            });
+            continue;
+          }
+          if (length !== expectedLength) {
+            const actualLength = length ?? Number.NaN;
+            refusals.set(index, {
+              outcome: 'failed',
+              error: Object.assign(
+                errnoError('EAPPENDSTALE', `'${path}' is ${String(actualLength)} bytes, not ${String(expectedLength)}`),
+                { expectedLength, actualLength },
+              ),
+            });
+            continue;
+          }
+          length += added;
+          if (token !== undefined) {
+            highest = Math.max(highest ?? token, token);
+          }
+        }
+      }),
+    );
+    return refusals;
   }
 
   /**
@@ -1853,7 +1977,6 @@ export class MutationPipeline {
         case 'write':
         case 'append': {
           if (current) {
-            this._filePool()?.invalidate(path);
             if (batch.op === 'write' && entry.bytes !== undefined) {
               /* The write path is where content facts are recorded: the bytes are in hand (D4). */
               this._projectIndexes.addFile(path, {
@@ -1884,16 +2007,12 @@ export class MutationPipeline {
         case 'delete': {
           if (kind === 'dir') {
             if (current) {
-              if (batch.recursive === true) {
-                this._filePool()?.clear();
-              }
               this._projectIndexes.removeDirectory(path);
             }
             events.push({ event: { type: 'directoryDeleted', path, backend }, operations });
             notify('rmdir', path, resolution);
           } else {
             if (current) {
-              this._filePool()?.invalidate(path);
               this._projectIndexes.removeFile(path);
             }
             events.push({ event: { type: 'fileDeleted', path, backend }, operations });
@@ -1906,11 +2025,8 @@ export class MutationPipeline {
           const targetResolution = entry.targetResolution ?? resolution;
           const targetIsCurrent = this.isCurrentResolution(target, targetResolution);
           if (current && targetIsCurrent) {
-            this._filePool()?.invalidate(path);
-            this._filePool()?.invalidate(target);
             this._projectIndexes.rename(path, target);
           } else if (current || targetIsCurrent) {
-            this._filePool()?.clear();
             this._projectIndexes.invalidate(path);
             this._projectIndexes.invalidate(target);
           }
@@ -1933,16 +2049,9 @@ export class MutationPipeline {
         ...(target === undefined ? [] : [{ path: target, resolution: targetResolution ?? resolution }]),
       ]);
       const globallyVisible = touched.some(({ path, resolution }) => this.isCurrentResolution(path, resolution));
-      /* A file entry that may have landed costs only its own derivatives
-       * (Rule 5a); a directory-shaped one, everything below it. */
-      for (const { batch, path, resolution } of uncertain) {
+      for (const { path, resolution } of uncertain) {
         if (!this.isCurrentResolution(path, resolution)) {
           continue;
-        }
-        if (batch.op === 'write' || batch.op === 'append' || (batch.op === 'delete' && batch.kind === 'file')) {
-          this._filePool()?.invalidate(path);
-        } else {
-          this._filePool()?.clear();
         }
         /* An entry that may have landed leaves its path unknown, never the whole root (D5). */
         this._projectIndexes.invalidate(path);
@@ -2019,7 +2128,6 @@ export class MutationPipeline {
   }): void {
     const { backend: resolvedBackend } = resolution;
     if (this.isCurrentResolution(path, resolution)) {
-      this._filePool()?.invalidate(path);
       this._projectIndexes.addFile(path, { size: bytes.byteLength, facts: getFileContentMetadata(bytes) });
     }
     if (resolution.entry !== undefined) {

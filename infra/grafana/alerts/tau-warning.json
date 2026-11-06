@@ -1320,6 +1320,158 @@
         "service": "tau-api",
         "component": "agent-observability"
       }
+    },
+    {
+      "uid": "api-llm-stream-severed",
+      "title": "P1: API Response Stream Severed (Fly PU05)",
+      "condition": "stream_severed_threshold",
+      "data": [
+        {
+          "refId": "stream_severed_logs",
+          "queryType": "range",
+          "relativeTimeRange": {
+            "from": 600,
+            "to": 0
+          },
+          "datasourceUid": "loki",
+          "model": {
+            "expr": "sum by (fly_app_instance) (count_over_time({service_name=\"tau-api\"} | event_provider=\"proxy\" |= \"[PU05]\" [5m]))",
+            "intervalMs": 15000,
+            "maxDataPoints": 43200,
+            "queryType": "range",
+            "refId": "stream_severed_logs"
+          }
+        },
+        {
+          "refId": "stream_severed_reduce",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          },
+          "datasourceUid": "__expr__",
+          "model": {
+            "type": "reduce",
+            "reducer": "last",
+            "expression": "stream_severed_logs",
+            "refId": "stream_severed_reduce"
+          }
+        },
+        {
+          "refId": "stream_severed_threshold",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          },
+          "datasourceUid": "__expr__",
+          "model": {
+            "type": "threshold",
+            "expression": "stream_severed_reduce",
+            "conditions": [
+              {
+                "type": "query",
+                "evaluator": {
+                  "type": "gt",
+                  "params": [0]
+                },
+                "operator": {
+                  "type": "and"
+                }
+              }
+            ],
+            "refId": "stream_severed_threshold"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "Error",
+      "for": "0s",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/playbooks/chat-llm-failing.md",
+        "summary": "Fly's proxy logged [PU05] (could not finish reading the response body from the instance) for an API Machine in the last 5 min: a response stream was cut mid-body, in practice a funded LLM step on /v1/llm/* killed by a stop that did not drain (2026-11-05 deploy cut). Fly's proxy line carries no request path, so every API response counts. Check the Machine's stop lines and api-exit-without-drain, then whether a funded step was cut and settled."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "lifecycle"
+      }
+    },
+    {
+      "uid": "api-exit-without-drain",
+      "title": "P1: API Exit Without Drain",
+      "condition": "exit_undrained_threshold",
+      "data": [
+        {
+          "refId": "exit_undrained_logs",
+          "queryType": "range",
+          "relativeTimeRange": {
+            "from": 600,
+            "to": 0
+          },
+          "datasourceUid": "loki",
+          "model": {
+            "expr": "sum by (fly_app_instance) (count_over_time({service_name=\"tau-api\"} | event_provider=\"app\" |= \"Main child exited\" |= `\"process_group\":\"app\"` [2m])) unless on (fly_app_instance) sum by (fly_app_instance) (count_over_time({service_name=\"tau-api\"} | event_provider=\"app\" |= \"Shutdown drained\" [5m]))",
+            "intervalMs": 15000,
+            "maxDataPoints": 43200,
+            "queryType": "range",
+            "refId": "exit_undrained_logs"
+          }
+        },
+        {
+          "refId": "exit_undrained_reduce",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          },
+          "datasourceUid": "__expr__",
+          "model": {
+            "type": "reduce",
+            "reducer": "last",
+            "expression": "exit_undrained_logs",
+            "refId": "exit_undrained_reduce"
+          }
+        },
+        {
+          "refId": "exit_undrained_threshold",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          },
+          "datasourceUid": "__expr__",
+          "model": {
+            "type": "threshold",
+            "expression": "exit_undrained_reduce",
+            "conditions": [
+              {
+                "type": "query",
+                "evaluator": {
+                  "type": "gt",
+                  "params": [0]
+                },
+                "operator": {
+                  "type": "and"
+                }
+              }
+            ],
+            "refId": "exit_undrained_threshold"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "Error",
+      "for": "0s",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/system/services/api.md",
+        "summary": "An API app Machine's init logged `Main child exited` with no `Shutdown drained` on the same Machine in the 5 min before: the process died without completing its graceful drain (a repeated stop signal, a crash or a SIGKILL at kill_timeout). In-flight model steps were cut without the zero settlement; read the Machine's log around the exit and the funded-operation recovery rules."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "lifecycle"
+      }
     }
   ]
 }

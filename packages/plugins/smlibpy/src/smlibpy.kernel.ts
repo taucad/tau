@@ -5,7 +5,7 @@ import { createExportFile } from '@taucad/runtime/types';
 import { actionDigest, canonicalizeComputeAction, contentDigest } from '@taucad/cache-core';
 import type { ActionDigest, ComputeAction } from '@taucad/cache-core';
 import { sha256StringSync } from '@taucad/utils/hash';
-import { occtExplicitTessellationDefaults, occtTriangleBudgets } from '@taucad/occt-core';
+import { occtExplicitTessellationDefaults } from '@taucad/occt-core';
 import type { OcctTessellationTolerances } from '@taucad/occt-core';
 import {
   bindPythonKernel,
@@ -28,13 +28,7 @@ import {
   smlibpyMeshSchema,
 } from '#smlibpy.protocol.js';
 import type { SmlibpyAnalysis, SmlibpyArtifact, SmlibpyMesh } from '#smlibpy.protocol.js';
-import {
-  assertExportWithinBudget,
-  meshExportWithinBudget,
-  meshPreviewWithinBudget,
-  resolveSmlibpyTessellation,
-  SmlibpyTessellationRefusal,
-} from '#smlibpy-tessellation.js';
+import { meshTessellation, resolveSmlibpyTessellation } from '#smlibpy-tessellation.js';
 import { smlibpyExportSchemas, smlibpyOptionsSchema, smlibpyRenderSchema } from '#smlibpy.schemas.js';
 import { createSmlibpyResidentBinding } from '#smlibpy-resident.js';
 import { smlibpyWorker } from '#smlibpy-worker.js';
@@ -78,9 +72,6 @@ class SmlibpyKernelError extends Error {
 }
 
 const issuesFrom = (error: unknown, fileName?: string): KernelIssue[] => {
-  if (error instanceof SmlibpyTessellationRefusal) {
-    return [error.issue];
-  }
   if (error instanceof PythonWorkerError) {
     return error.issues.map(({ code: pythonCode, type: pythonType, ...issue }) => ({
       ...issue,
@@ -165,10 +156,10 @@ const meshRequests = ({
   runtime: Pick<KernelServices, 'signal'>;
   session: PythonSession;
 }>): {
-  mesh: (tolerances: OcctTessellationTolerances, maxTriangles?: number) => Promise<SmlibpyMesh>;
+  mesh: (tolerances: OcctTessellationTolerances) => Promise<SmlibpyMesh>;
   measureDiagonal: () => Promise<number>;
 } => ({
-  mesh: async (tolerances, maxTriangles) =>
+  mesh: async (tolerances) =>
     session.request({
       method: 'mesh',
       params: {
@@ -176,7 +167,6 @@ const meshRequests = ({
         linearTolerance: tolerances.linearTolerance,
         angularTolerance: tolerances.angularTolerance,
         edges,
-        ...(maxTriangles === undefined ? {} : { maxTriangles }),
       },
       schema: smlibpyMeshSchema,
       signal: runtime.signal,
@@ -231,20 +221,6 @@ const bundleToGltf = async (
   return { bytes, issues };
 };
 
-/**
- * Triangles in an STL file: the binary header's count, or the ASCII `facet` records.
- *
- * @param bytes - The STL file.
- * @param binary - Whether it is binary STL.
- * @returns Its triangle count.
- */
-const stlTriangles = (bytes: Uint8Array<ArrayBuffer>, binary: boolean): number =>
-  binary
-    ? bytes.byteLength < 84
-      ? 0
-      : new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(80, true)
-    : (new TextDecoder().decode(bytes).match(/\bfacet\s+normal\b/gu)?.length ?? 0);
-
 const modelContent = ['includeEdges', 'includeTopology'] as const;
 
 const smlibpyKernelDefinition = defineKernel({
@@ -253,7 +229,7 @@ const smlibpyKernelDefinition = defineKernel({
   // A `.py` entry that imports smlibpy selects this kernel; any other falls through to the next Python kernel.
   detectImport: smlibpyDetectPattern,
   name: 'SmlibpyKernel',
-  version: '0.6.2+python3.13.protocol1.topology1.bundle1',
+  version: '0.6.2+python3.13.protocol1.topology1.bundle1.tessellation1',
   optionsSchema: smlibpyOptionsSchema,
   views: {
     model: {
@@ -430,12 +406,11 @@ const smlibpyKernelDefinition = defineKernel({
         runtime,
         session: context.session,
       });
-      // The render hook cannot tell a viewer preview from a capture, so every render takes the preview budget.
-      const meshed = await meshPreviewWithinBudget(
+      // One pass at the requested tessellation: nothing coarsens a mesh (no triangle budget).
+      const meshed = await meshTessellation(
         {
           tessellation: options.tessellation,
           explicitDefaults: occtExplicitTessellationDefaults.preview,
-          budget: occtTriangleBudgets.preview,
           measureDiagonal,
         },
         mesh,
@@ -476,11 +451,10 @@ const smlibpyKernelDefinition = defineKernel({
             runtime,
             session: context.session,
           });
-          const meshed = await meshExportWithinBudget(
+          const meshed = await meshTessellation(
             {
               tessellation: options.tessellation,
               explicitDefaults: occtExplicitTessellationDefaults.export,
-              budget: occtTriangleBudgets.export,
               measureDiagonal,
             },
             mesh,
@@ -505,7 +479,6 @@ const smlibpyKernelDefinition = defineKernel({
           const requested = await resolveSmlibpyTessellation({
             tessellation: options.tessellation,
             explicitDefaults: occtExplicitTessellationDefaults.export,
-            budget: occtTriangleBudgets.export,
             measureDiagonal,
           });
           const artifact = await context.session.request({
@@ -522,7 +495,6 @@ const smlibpyKernelDefinition = defineKernel({
             signal: runtime.signal,
           });
           const bytes = await context.session.readArtifact(artifact);
-          assertExportWithinBudget(requested, stlTriangles(bytes, options.binary), occtTriangleBudgets.export);
           return { files: [createExportFile('stl', 'model.stl', asBuffer(bytes))] };
         }
         default: {

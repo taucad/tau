@@ -52,7 +52,6 @@ describe('kernel-worker constants', () => {
       'smlib',
       'gltf',
       'brep',
-      'rhino',
       'assimp',
       'replicad',
       'zoo',

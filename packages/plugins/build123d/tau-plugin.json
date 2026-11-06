@@ -853,8 +853,8 @@
           },
           {
             "name": "worker.py",
-            "integrity": "sha256-4u8c6tapLE7nBCfGgKlVB8WzDGV24NhuwXTys+Pb1/w=",
-            "byteLength": 39714,
+            "integrity": "sha256-6YhYSvk9pT75U+9X1wP3eNs9tyJIQ7qgSEANIy0z7AY=",
+            "byteLength": 38930,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -864,8 +864,8 @@
           },
           {
             "name": "native_materials.py",
-            "integrity": "sha256-unp+EEzh/m44WkEaVtlVXchEUTYr8ZuyfDVX640eeOY=",
-            "byteLength": 4171,
+            "integrity": "sha256-3MJnm5no1ssgbZrR1OeMJ3qxTJBPUlh08cXzdYP4fhs=",
+            "byteLength": 4166,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -1781,8 +1781,8 @@
           },
           {
             "name": "worker.py",
-            "integrity": "sha256-4u8c6tapLE7nBCfGgKlVB8WzDGV24NhuwXTys+Pb1/w=",
-            "byteLength": 39714,
+            "integrity": "sha256-6YhYSvk9pT75U+9X1wP3eNs9tyJIQ7qgSEANIy0z7AY=",
+            "byteLength": 38930,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -1792,8 +1792,8 @@
           },
           {
             "name": "native_materials.py",
-            "integrity": "sha256-unp+EEzh/m44WkEaVtlVXchEUTYr8ZuyfDVX640eeOY=",
-            "byteLength": 4171,
+            "integrity": "sha256-3MJnm5no1ssgbZrR1OeMJ3qxTJBPUlh08cXzdYP4fhs=",
+            "byteLength": 4166,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -2710,8 +2710,8 @@
           },
           {
             "name": "worker.py",
-            "integrity": "sha256-4u8c6tapLE7nBCfGgKlVB8WzDGV24NhuwXTys+Pb1/w=",
-            "byteLength": 39714,
+            "integrity": "sha256-6YhYSvk9pT75U+9X1wP3eNs9tyJIQ7qgSEANIy0z7AY=",
+            "byteLength": 38930,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -2721,8 +2721,8 @@
           },
           {
             "name": "native_materials.py",
-            "integrity": "sha256-unp+EEzh/m44WkEaVtlVXchEUTYr8ZuyfDVX640eeOY=",
-            "byteLength": 4171,
+            "integrity": "sha256-3MJnm5no1ssgbZrR1OeMJ3qxTJBPUlh08cXzdYP4fhs=",
+            "byteLength": 4166,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -3639,8 +3639,8 @@
           },
           {
             "name": "worker.py",
-            "integrity": "sha256-4u8c6tapLE7nBCfGgKlVB8WzDGV24NhuwXTys+Pb1/w=",
-            "byteLength": 39714,
+            "integrity": "sha256-6YhYSvk9pT75U+9X1wP3eNs9tyJIQ7qgSEANIy0z7AY=",
+            "byteLength": 38930,
             "format": "raw",
             "origin": {
               "kind": "packagePath",
@@ -3650,8 +3650,8 @@
           },
           {
             "name": "native_materials.py",
-            "integrity": "sha256-unp+EEzh/m44WkEaVtlVXchEUTYr8ZuyfDVX640eeOY=",
-            "byteLength": 4171,
+            "integrity": "sha256-3MJnm5no1ssgbZrR1OeMJ3qxTJBPUlh08cXzdYP4fhs=",
+            "byteLength": 4166,
             "format": "raw",
             "origin": {
               "kind": "packagePath",

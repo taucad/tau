@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import path from 'node:path';
 import process from 'node:process';
+import { setTimeout } from 'node:timers/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const apiRoot = path.resolve(import.meta.dirname, '../..');
@@ -70,27 +71,37 @@ describe('closeGracefullyOnSignal', () => {
     const answered = await response;
     await expect(answered.json()).resolves.toEqual({ ok: true });
     await expect(child.exited).resolves.toEqual({ code: undefined, signal: 'SIGTERM' });
-    expect(child.lines.slice(-2)).toEqual(['request finished', 'database closed']);
+    expect(child.lines.slice(child.lines.indexOf('request finished'))).toEqual([
+      'request finished',
+      'log: Shutdown drained; closing modules',
+      'database closed',
+      'log: Shutdown complete',
+    ]);
   }, 60_000);
 
-  it('should exit at once on a second signal during the drain', async () => {
+  it('should log and ignore a second signal during the drain and exit only after the request', async () => {
     const started = await start();
     child = started.child;
-    // Long enough that the drain cannot finish before the second signal, however loaded the machine.
-    const response = fetch(`${started.url}/slow?ms=20000`);
-    const responseRejection = expect(response).rejects.toThrow();
+    // Outlasts the second signal by seconds, however loaded the machine, and ends before the fixture's 5 s cut.
+    const response = fetch(`${started.url}/slow?ms=4000`);
     await vi.waitFor(() => {
       expect(child!.lines).toContain('request entered');
     });
 
     child.process.kill('SIGTERM');
-    await vi.waitFor(async () => {
-      await expect(fetch(`${started.url}/slow`)).rejects.toThrow();
-    });
+    await setTimeout(1000);
     child.process.kill('SIGTERM');
 
+    const answered = await response;
+    await expect(answered.json()).resolves.toEqual({ ok: true });
     await expect(child.exited).resolves.toEqual({ code: undefined, signal: 'SIGTERM' });
-    expect(child.lines).not.toContain('database closed');
-    await responseRejection;
+    expect(child.lines.slice(child.lines.indexOf('log: Shutdown started'))).toEqual([
+      'log: Shutdown started',
+      'warn: Shutdown signal repeated during the drain; ignored',
+      'request finished',
+      'log: Shutdown drained; closing modules',
+      'database closed',
+      'log: Shutdown complete',
+    ]);
   }, 60_000);
 });

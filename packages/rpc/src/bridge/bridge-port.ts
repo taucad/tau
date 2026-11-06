@@ -31,7 +31,7 @@ export function createBridgePort<T extends StringKeyedObject, Hello = unknown>(
   if (serverWrapped.start) {
     serverWrapped.start();
   }
-  createBridgeServer(handlers, serverWrapped, {
+  const server = createBridgeServer(handlers, serverWrapped, {
     hello: options?.hello,
     protocolSchemas: options?.protocolSchemas,
   });
@@ -43,6 +43,12 @@ export function createBridgePort<T extends StringKeyedObject, Hello = unknown>(
       });
       safeDispose(() => {
         channel.port2.close();
+      });
+      /* Then release what the server holds (its watches): a browser fires no `close` event on a port its own
+       * realm closed, so waiting for one would keep every watch registered for the authority's lifetime. The
+       * ports are closed first, so the peer still learns of the closure from its port, not a hard-close frame. */
+      safeDispose(() => {
+        server.dispose();
       });
     },
   };

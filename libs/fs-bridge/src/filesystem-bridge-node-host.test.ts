@@ -338,8 +338,10 @@ describe('filesystem bridge authority on a Node host (X8)', () => {
 describe('one rooted connection as the change transport (W12a)', () => {
   const collect = (proxy: FileSystemBridgeProxy): { events: ChangeEvent[]; stop: () => void } => {
     const events: ChangeEvent[] = [];
+    /* A changeset arrives as one message (D6); a consumer reads its facts in order. */
     const stop = proxy.listen('fileChanged', (event) => {
-      events.push(event as ChangeEvent);
+      const message = event as ChangeEvent;
+      events.push(...(message.type === 'changeSet' ? message.entries : [message]));
     });
     return { events, stop };
   };

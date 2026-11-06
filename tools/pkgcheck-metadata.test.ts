@@ -483,14 +483,14 @@ describe('peerDependencyIssues', () => {
   it('reads a baked store path as the same witness and rejects an optionalDependency', () => {
     expect(
       peerDependencyIssues({
-        packageName: '@taucad/rhino',
+        packageName: '@taucad/example-kernel',
         manifest: { optionalDependencies: { zod: 'catalog:' } },
         emitted: [{ path: 'dist/plugin.d.mts', specifier: vendoredZodSpecifier }],
         rules: zodRules,
       }),
     ).toEqual([
-      '@taucad/rhino: zod is an optionalDependency; it must be a required peerDependency with a workspace devDependency — schema instance and type identity must not fork across an install',
-      `@taucad/rhino: zod must be declared in peerDependencies (witness: dist/plugin.d.mts imports "${vendoredZodSpecifier}")`,
+      '@taucad/example-kernel: zod is an optionalDependency; it must be a required peerDependency with a workspace devDependency — schema instance and type identity must not fork across an install',
+      `@taucad/example-kernel: zod must be declared in peerDependencies (witness: dist/plugin.d.mts imports "${vendoredZodSpecifier}")`,
     ]);
   });
 
@@ -710,26 +710,28 @@ describe('vendoredAssetIssues', () => {
     ]);
   });
 
-  const rhinoEntry = {
-    project: '@taucad/rhino',
-    root: 'packages/plugins/rhino',
-    from: 'node_modules/rhino3dm/rhino3dm.wasm',
-    to: 'src/wasm/rhino3dm.wasm',
+  const exportlessEntry = {
+    project: '@taucad/example-kernel',
+    root: 'packages/plugins/example-kernel',
+    from: 'node_modules/example-wasm/example-wasm.wasm',
+    to: 'src/wasm/example-wasm.wasm',
   };
 
   it('reports a vendored binary no copy entry writes', () => {
     expect(
       vendoredAssetIssues({
-        entries: [rhinoEntry],
+        entries: [exportlessEntry],
         trackedPaths: [],
-        ignoredPaths: ['packages/plugins/rhino/src/wasm/rhino3dm.wasm'],
+        ignoredPaths: ['packages/plugins/example-kernel/src/wasm/example-wasm.wasm'],
         assetFiles: [
-          { project: '@taucad/rhino', path: 'src/wasm/rhino3dm.wasm' },
+          { project: '@taucad/example-kernel', path: 'src/wasm/example-wasm.wasm' },
           { project: '@taucad/example', path: 'src/wasm/orphan.wasm' },
         ],
         upstreamExports: [],
         reasons: {
-          '@taucad/rhino': { 'node_modules/rhino3dm/rhino3dm.wasm': 'rhino3dm declares no exports field' },
+          '@taucad/example-kernel': {
+            'node_modules/example-wasm/example-wasm.wasm': 'example-wasm declares no exports field',
+          },
         },
       }),
     ).toEqual([
@@ -740,28 +742,30 @@ describe('vendoredAssetIssues', () => {
   it('reports a copy whose file no upstream exports subpath covers', () => {
     expect(
       vendoredAssetIssues({
-        entries: [rhinoEntry],
+        entries: [exportlessEntry],
         trackedPaths: [],
-        ignoredPaths: ['packages/plugins/rhino/src/wasm/rhino3dm.wasm'],
+        ignoredPaths: ['packages/plugins/example-kernel/src/wasm/example-wasm.wasm'],
         assetFiles: [],
         upstreamExports: [],
         reasons: {},
       }),
     ).toEqual([
-      '@taucad/rhino: copy-assets reads node_modules/rhino3dm/rhino3dm.wasm, which rhino3dm does not expose through package.json#exports; record a reason in vendoredAssetReasons or move the asset behind an exported subpath',
+      '@taucad/example-kernel: copy-assets reads node_modules/example-wasm/example-wasm.wasm, which example-wasm does not expose through package.json#exports; record a reason in vendoredAssetReasons or move the asset behind an exported subpath',
     ]);
   });
 
   it('accepts an uncovered deep path and an unrecipied binary that carry a recorded reason', () => {
     expect(
       vendoredAssetIssues({
-        entries: [rhinoEntry],
+        entries: [exportlessEntry],
         trackedPaths: [],
-        ignoredPaths: ['packages/plugins/rhino/src/wasm/rhino3dm.wasm'],
+        ignoredPaths: ['packages/plugins/example-kernel/src/wasm/example-wasm.wasm'],
         assetFiles: [{ project: '@taucad/example', path: 'src/wasm/private.wasm' }],
         upstreamExports: [],
         reasons: {
-          '@taucad/rhino': { 'node_modules/rhino3dm/rhino3dm.wasm': 'rhino3dm declares no exports field' },
+          '@taucad/example-kernel': {
+            'node_modules/example-wasm/example-wasm.wasm': 'example-wasm declares no exports field',
+          },
           '@taucad/example': { 'src/wasm/private.wasm': 'private generated test fixture' },
         },
       }),

@@ -207,6 +207,7 @@ Callers own clients returned by `createTestRuntimeClient` and always shut them d
 - `evaluate` — handle, offers, parameterized and error cases
 - `render` / `export` — offered view and export IDs, route options, nonempty artifacts and no-handle failure
 - Geometry naming — parse GLB/glTF output and assert node/mesh parity, material/scene naming, component IDs/selectors, and artifact filenames per `docs/policy/geometry-naming-policy.md`
+- Library calls — a kernel over a wasm or native library adds `src/<name>.call-count.test.ts`: spy on the library methods Tau calls during a render with edges and one export, and assert the count stays the same as the fixture's element count grows (`docs/policy/cad-performance-policy.md` Rule 3)
 
 Reference quality bar: `packages/plugins/openrscad/src/openrscad.kernel.test.ts`.
 
@@ -335,6 +336,7 @@ If `apps/api` changed: `NX_DAEMON=false ./node_modules/.bin/nx run-many -t lint 
 - [ ] `packages/plugins/<name>/src/index.ts` exports `plugin`, the alias, and `<alias>Kernel`
 - [ ] `packages/plugins/<name>/package.json` — engine dependency plus the `@taucad/runtime-testing` test dependency
 - [ ] `.size-limit.json` placeholder replaced by a measured budget
+- [ ] A kernel that drives a wasm or native library calls it once per operation per shape on render, edge, topology and export paths, has `src/<name>.call-count.test.ts` for render with edges and one export, exposes a summary tracer, and frees every handle (`docs/policy/cad-performance-policy.md` Rule 3)
 - [ ] UI, desktop, CLI, GeoSpec, runtime-e2e, tau-examples, and converter runtimes each reviewed; applicable manifests and lists updated; coverage tests green
 - [ ] `libs/types/src/constants/kernel.constants.ts` — catalog entry and backend/language mappings
 - [ ] `apps/ui/app/components/icons/raw/<id>.svg` added and sprite regenerated

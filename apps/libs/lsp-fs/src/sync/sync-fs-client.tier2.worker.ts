@@ -6,7 +6,6 @@ type Tier2WorkerMessage = Readonly<{
   port: MessagePort;
   slotSab: SharedArrayBuffer;
   arenaSab: SharedArrayBuffer;
-  filePoolBuffer?: SharedArrayBuffer;
 }>;
 
 parentPort?.once('message', (message: Tier2WorkerMessage) => {
@@ -14,7 +13,6 @@ parentPort?.once('message', (message: Tier2WorkerMessage) => {
     port: message.port,
     slotSab: message.slotSab,
     arenaSab: message.arenaSab,
-    filePoolBuffer: message.filePoolBuffer,
     workspaceRootAbsolute: workerData.workspaceRootAbsolute as string,
   });
 

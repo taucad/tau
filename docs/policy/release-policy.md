@@ -3,7 +3,7 @@ title: 'Release Policy'
 description: 'Versioning, building, and publishing strategy for @taucad/* npm packages: Nx Release, version plans, tsdown, OIDC.'
 status: active
 created: '2026-02-27'
-updated: '2026-10-24'
+updated: '2026-11-06'
 related:
   - docs/policy/version-policy.md
   - docs/policy/public-surface-policy.md
@@ -265,16 +265,16 @@ The script reads the public registry and refuses the whole plan if any package o
 
 Every command is idempotent, so a rerun after a failure continues. The superseded packages and their pointers live in the script:
 
-| Package version                    | Deprecation message                                               |
-| ---------------------------------- | ----------------------------------------------------------------- |
-| `@taucad/converter@0.1.0-beta.0`   | Use @taucad/assimp, @taucad/brep, @taucad/gltf, or @taucad/rhino. |
-| `@taucad/events@0.1.0-beta.0`      | Bundled into @taucad/runtime.                                     |
-| `@taucad/memory@0.1.0-beta.0`      | Bundled into @taucad/runtime.                                     |
-| `@taucad/types@0.1.0-beta.0`       | Use @taucad/runtime/types.                                        |
-| `@taucad/json-schema@0.1.0-beta.0` | Bundled into @taucad/runtime.                                     |
-| `@taucad/utils@0.1.0-beta.0`       | Bundled into @taucad/runtime.                                     |
-| `@taucad/fs-client@0.1.0-beta.0`   | Use @taucad/runtime/filesystem.                                   |
-| `@taucad/telemetry@0.1.0-beta.0`   | Internal Tau application package; no public replacement.          |
+| Package version                    | Deprecation message                                      |
+| ---------------------------------- | -------------------------------------------------------- |
+| `@taucad/converter@0.1.0-beta.0`   | Use @taucad/assimp, @taucad/brep, or @taucad/gltf.       |
+| `@taucad/events@0.1.0-beta.0`      | Bundled into @taucad/runtime.                            |
+| `@taucad/memory@0.1.0-beta.0`      | Bundled into @taucad/runtime.                            |
+| `@taucad/types@0.1.0-beta.0`       | Use @taucad/runtime/types.                               |
+| `@taucad/json-schema@0.1.0-beta.0` | Bundled into @taucad/runtime.                            |
+| `@taucad/utils@0.1.0-beta.0`       | Bundled into @taucad/runtime.                            |
+| `@taucad/fs-client@0.1.0-beta.0`   | Use @taucad/runtime/filesystem.                          |
+| `@taucad/telemetry@0.1.0-beta.0`   | Internal Tau application package; no public replacement. |
 
 The retired `@taucad/testing` package has no one-to-one replacement: its chat schema and prompt/harness concerns moved to their owners before the narrower `@taucad/runtime-testing` package was created. Do not deprecate it with a misleading replacement pointer.
 

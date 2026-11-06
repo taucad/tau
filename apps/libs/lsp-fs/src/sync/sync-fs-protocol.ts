@@ -54,7 +54,6 @@ export type TauSyncFsInitMessage = Readonly<{
   port: MessagePort;
   slotSab: SharedArrayBuffer;
   arenaSab: SharedArrayBuffer;
-  filePoolBuffer?: SharedArrayBuffer;
   /** Worker absolute path prefix (same as {@link WorkspacePathResolver} root). */
   workspaceRootAbsolute: string;
 }>;

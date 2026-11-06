@@ -1,4 +1,3 @@
-import { SharedPool } from '@taucad/memory';
 import { joinPath } from '@taucad/utils/path';
 import { createSyncRequestClient } from '@taucad/fs-bridge/sync';
 
@@ -24,7 +23,7 @@ export type SyncFsClient = Readonly<{
 
 /**
  * Lifecycle event emitted by {@link createSyncFsClient} for diagnostic
- * tracing of path translation, tier routing (pool vs slot), and slot error codes.
+ * tracing of path translation, slot routing, and slot error codes.
  *
  * @public
  */
@@ -43,11 +42,10 @@ export type SyncFsProbe = Readonly<{
    */
   absolutePath: string | undefined;
   /**
-   * - `pool`        served from the {@link SharedPool} Tier-0 cache.
    * - `slot`        sent over the SAB slot to the FM worker.
    * - `translation` failed before any tier ran (URI scheme mismatch, etc.).
    */
-  tier: 'pool' | 'slot' | 'translation';
+  tier: 'slot' | 'translation';
   /**
    * - `ok`         success.
    * - `notFound`   slot returned `syncError.notFound`.
@@ -72,7 +70,6 @@ export type CreateSyncFsClientOptions = Readonly<{
   port: MessagePort;
   slotSab: SharedArrayBuffer;
   arenaSab: SharedArrayBuffer;
-  filePoolBuffer?: SharedArrayBuffer;
   workspaceRootAbsolute: string;
   /** Optional cap for a single `readFile` / `listDirectories` payload; default full arena. */
   arenaBytes?: number;
@@ -87,7 +84,7 @@ type ResolvedTarget = Readonly<
 >;
 
 /**
- * Worker-side sync client: Tier 0 `SharedPool.resolveCopy` then Tier 2 slot round-trip.
+ * Worker-side sync client: every read is a slot round-trip to the FM worker.
  *
  * @public
  */
@@ -95,7 +92,6 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
   const int32 = new Int32Array(options.slotSab, 0, slotInt32Length);
   const arenaBytes = options.arenaBytes ?? options.arenaSab.byteLength;
   const arena = new Uint8Array(options.arenaSab, 0, arenaBytes);
-  const pool = options.filePoolBuffer ? new SharedPool(options.filePoolBuffer) : undefined;
   const decoder = options.textDecoder ?? new TextDecoder();
   const root = options.workspaceRootAbsolute;
   const { onProbe } = options;
@@ -159,21 +155,6 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
         return undefined;
       }
 
-      const fromPool = pool?.resolveCopy(target.absolutePath);
-      if (fromPool) {
-        const decoded = decoder.decode(fromPool);
-        onProbe?.({
-          op: 'readFile',
-          fileName,
-          relativePath: target.relativePath,
-          absolutePath: target.absolutePath,
-          tier: 'pool',
-          outcome: 'ok',
-          payloadBytes: fromPool.byteLength,
-        });
-        return decoded;
-      }
-
       try {
         perform('readFile', target.relativePath);
         const errorCode = Atomics.load(int32, slotIndex.errorCode);
@@ -216,18 +197,6 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
       if (target.absolutePath === undefined) {
         emitTranslationFailure('fileExists', fileName, target.translationError);
         return false;
-      }
-
-      if (pool?.resolveCopy(target.absolutePath)) {
-        onProbe?.({
-          op: 'fileExists',
-          fileName,
-          relativePath: target.relativePath,
-          absolutePath: target.absolutePath,
-          tier: 'pool',
-          outcome: 'ok',
-        });
-        return true;
       }
 
       try {

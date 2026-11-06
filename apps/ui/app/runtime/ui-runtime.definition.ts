@@ -12,7 +12,6 @@ import { opencascade } from '@taucad/opencascade';
 import { picogk } from '@taucad/picogk/browser';
 import { picovoxel } from '@taucad/picovoxel';
 import { replicad } from '@taucad/replicad';
-import { rhino } from '@taucad/rhino';
 import { tscircuit } from '@taucad/tscircuit';
 import { slicer } from '@taucad/slicer';
 import { smlib } from '@taucad/smlib';
@@ -80,7 +79,6 @@ const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptio
     smlib(),
     gltf(),
     brep(),
-    rhino(),
     image(),
     slicer(),
     assimp({ preset: 'all' }),

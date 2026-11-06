@@ -37,15 +37,36 @@ export type ChangesetPhase = 0 | 1 | 2;
 export type ChangesetWriteData = Uint8Array<ArrayBuffer> | Blob | ReadableStream<Uint8Array<ArrayBuffer>> | string;
 
 /**
+ * The condition a record-log append is applied under (charter D23).
+ *
+ * - `expectedLength`: the file's length, in bytes, the writer last knew; an
+ *   absent file has length 0.
+ * - `token`: the writer's fencing token, monotonic per log; a lower token than
+ *   one already applied to the path is a stale writer.
+ *
+ * @public
+ */
+export type AppendFence = Readonly<{ expectedLength: number; token?: number }>;
+
+/**
+ * How a provider makes an append durable (L1 invariant 16).
+ * @public
+ */
+export type AppendDurability = 'exclusive-append' | 'stream-append' | 'transactional-rewrite' | 'ephemeral';
+
+/**
  * One entry of a changeset, spelled in its caller's namespace.
  *
  * - `write` replaces or creates a file, creating missing parents. `create`
  *   refuses with `EEXIST` when anything is already at the path.
  * - `append` appends at the file's current length under an exclusive handle;
- *   appends to one path keep their entry order (D23). Appends are ordered
- *   only, not fenced: no entry carries an expected length or a writer's
- *   fence token, so two writers' appends to one path interleave by arrival.
- *   Fenced appends arrive with the agent event log's writer fence (W8).
+ *   appends to one path keep their entry order (D23). A `fence` makes the
+ *   append conditional, checked under the changeset's exclusive token for the
+ *   path: it refuses with `EAPPENDSTALE` when the file's length is not
+ *   `expectedLength` (another writer appended first), and with `EFENCED` when
+ *   `token` is lower than the highest token this authority has applied to the
+ *   path (a writer that lost its lease). Without a fence, appends are ordered
+ *   only. The receipt names the provider's durability class.
  * - `delete` removes what is at the path. `kind` refuses the other kind
  *   (`EISDIR`/`ENOTDIR`); a directory needs `recursive` unless it is empty.
  * - `move` renames; `replace` lets a file replace an existing file atomically
@@ -68,6 +89,7 @@ export type ChangesetEntry =
       op: 'append';
       path: string;
       data: Uint8Array<ArrayBuffer> | string;
+      fence?: AppendFence;
       phase?: ChangesetPhase;
     }>
   | Readonly<{ op: 'delete'; path: string; kind?: 'file' | 'dir'; recursive?: boolean; phase?: ChangesetPhase }>
@@ -101,6 +123,8 @@ export type ChangesetEntryReceipt = Readonly<{
   error?: unknown;
   /** The kind of entry a `delete` removed or a `move` moved. */
   kind?: 'file' | 'dir';
+  /** For an applied append: the provider's declared durability class, when it declares one. */
+  durability?: AppendDurability;
 }>;
 
 /** Everything one changeset did. @public */

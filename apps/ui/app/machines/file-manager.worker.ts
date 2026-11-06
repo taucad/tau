@@ -38,7 +38,6 @@ import {
 import type { MountEntry, WorkspaceScope } from '@taucad/filesystem';
 import type { MachineSettingsService } from '@taucad/types';
 
-import { SharedPool } from '@taucad/memory';
 import type { kernelTypePackageMaps as KernelTypePackageMaps } from '@taucad/api-extractor/kernel-types';
 import type { authoringTypeMaps as AuthoringTypeMaps } from '@taucad/api-extractor/authoring-types';
 import type { SyncFsWorkspaceAdapter } from '@taucad/lsp-fs/sync';
@@ -683,12 +682,6 @@ self.addEventListener(
       }
       return;
     }
-    if (data.type === 'filePool' && data.buffer instanceof SharedArrayBuffer) {
-      fileService.setFilePool(new SharedPool(data.buffer));
-      console.debug('[FM-Worker] filePool attached');
-      return;
-    }
-
     if (data.type === 'revisionsConnect' && data.port instanceof MessagePort) {
       if (typeof data.projectId === 'string' && data.projectId.length > 0) {
         if (data.hostServesRevisions === true) {

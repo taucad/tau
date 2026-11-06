@@ -196,24 +196,44 @@ const shapeWithoutTopLocation = (oc: OpenCascadeInstance, shape: AnyShape): AnyS
   return prototype;
 };
 
-const findProductFaceByIndex = (
+/**
+ * Collects the product's faces at the given indices in one `TopExp_Explorer` walk, which stops at the
+ * highest index. The indices count faces in explorer order, as the interface resolver numbers them.
+ *
+ * @param oc - The OpenCascade instance.
+ * @param productLabel - The product whose faces are numbered.
+ * @param faceIndices - The face indices the entry's interfaces reference.
+ * @returns The faces found, by index. The caller deletes them.
+ */
+const findProductFaces = (
   oc: OpenCascadeInstance,
   productLabel: TDF_Label,
-  faceIndex: number,
-): TopoDS_Face | undefined => {
+  faceIndices: ReadonlySet<number>,
+): Map<number, TopoDS_Face> => {
+  const faces = new Map<number, TopoDS_Face>();
+  if (faceIndices.size === 0) {
+    return faces;
+  }
+  const lastIndex = Math.max(...faceIndices);
   const productShape = oc.XCAFDoc_ShapeTool.GetShape(productLabel);
   const explorer = new oc.TopExp_Explorer(productShape, oc.TopAbs_ShapeEnum.TopAbs_FACE);
-  let index = 0;
-
-  while (explorer.More()) {
-    if (index === faceIndex) {
-      return oc.TopoDS.Face(explorer.Value());
+  try {
+    for (let index = 0; explorer.More(); index += 1) {
+      if (faceIndices.has(index)) {
+        const value = explorer.Value();
+        faces.set(index, oc.TopoDS.Face(value));
+        value.delete();
+      }
+      if (index === lastIndex) {
+        break;
+      }
+      explorer.Next();
     }
-    explorer.Next();
-    index += 1;
+  } finally {
+    explorer.delete();
+    productShape.delete();
   }
-
-  return undefined;
+  return faces;
 };
 
 const addNamedFace = (options: {
@@ -221,11 +241,11 @@ const addNamedFace = (options: {
   shapeTool: XCAFDoc_ShapeTool;
   productLabel: TDF_Label;
   entryName: string;
-  shape: AnyShape;
   name: string;
+  face: TopoDS_Face | undefined;
   faceIndex: number;
 }): void => {
-  const face = findProductFaceByIndex(options.oc, options.productLabel, options.faceIndex);
+  const { face } = options;
   if (!face) {
     throw new Error(
       `GeoSpec interface '${options.name}' on entry '${options.entryName}' references missing faceIndex ${options.faceIndex}`,
@@ -256,14 +276,22 @@ const attachInterfaces = (options: {
   shapeTool: XCAFDoc_ShapeTool;
   productLabel: TDF_Label;
   entryName: string;
-  shape: AnyShape;
   interfaces: ResolvedReplicadInterface[] | undefined;
 }): void => {
-  for (const entry of options.interfaces ?? []) {
-    if (entry.kind === 'datum') {
-      continue;
+  const faceInterfaces = (options.interfaces ?? []).filter((entry) => entry.kind !== 'datum');
+  const faces = findProductFaces(
+    options.oc,
+    options.productLabel,
+    new Set(faceInterfaces.map((entry) => entry.faceIndex)),
+  );
+  try {
+    for (const entry of faceInterfaces) {
+      addNamedFace({ ...options, name: entry.name, face: faces.get(entry.faceIndex), faceIndex: entry.faceIndex });
     }
-    addNamedFace({ ...options, name: entry.name, faceIndex: entry.faceIndex });
+  } finally {
+    for (const face of faces.values()) {
+      face.delete();
+    }
   }
 };
 
@@ -448,7 +476,6 @@ const buildDocument = (
       shapeTool,
       productLabel,
       entryName: productName,
-      shape: prototypeShape,
       interfaces,
     });
 

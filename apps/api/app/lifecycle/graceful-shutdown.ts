@@ -53,14 +53,17 @@ const logger = new Logger('Shutdown');
  *
  * @param app - The started API application.
  * @param phases - When each phase gives up, in milliseconds after the call.
+ * @param signal - The stop signal that started the stop, for the log line.
  */
 export async function closeGracefully(
   app: NestFastifyApplication,
   phases: ShutdownPhases = shutdownPhases,
+  signal?: NodeJS.Signals,
 ): Promise<void> {
   const started = Date.now();
   const shutdown = app.get(ShutdownService);
   const fastify = app.getHttpAdapter().getInstance();
+  logger.log({ signal, cutAt: phases.cut, abandonAt: phases.abandon }, 'Shutdown started');
   shutdown.stop();
   const closed = fastify.close();
   // `server.close()` closes idle keep-alive connections once; one whose request
@@ -99,25 +102,41 @@ export async function closeGracefully(
 /**
  * Replaces `app.enableShutdownHooks()`: on SIGTERM (Fly's `kill_signal`) or
  * SIGINT, closes gracefully and then re-raises the signal so the process exits
- * the way it would have without a handler. The re-raise ends the process only
- * while no other listener for that signal exists; the signal-path test fails
- * the day one is added.
+ * the way it would have without a handler.
+ *
+ * Both listeners stay installed for the whole drain, so a repeated SIGTERM or
+ * SIGINT is logged and ignored rather than killing the process by Node's
+ * default disposition: Fly init has sent a second SIGTERM 72 s into a drain,
+ * well inside `kill_timeout`. Only SIGKILL ends a stop early. Once
+ * `app.close()` returns the listeners are removed and the first signal is
+ * re-raised once. The re-raise ends the process only while no other listener
+ * for that signal exists; the signal-path test fails the day one is added.
  *
  * @param app - The started API application.
  * @param phases - When each phase gives up.
  */
 export function closeGracefullyOnSignal(app: NestFastifyApplication, phases: ShutdownPhases = shutdownPhases): void {
   const signals = ['SIGTERM', 'SIGINT'] as const;
+  let stopping: { readonly signal: NodeJS.Signals; readonly at: number } | undefined;
   const onSignal = async (signal: NodeJS.Signals): Promise<void> => {
-    for (const each of signals) {
-      process.removeListener(each, onSignal);
+    if (stopping) {
+      logger.warn(
+        { signal, firstSignal: stopping.signal, sinceFirst: Date.now() - stopping.at },
+        'Shutdown signal repeated during the drain; ignored',
+      );
+      return;
     }
 
+    stopping = { signal, at: Date.now() };
     try {
-      await closeGracefully(app, phases);
+      await closeGracefully(app, phases, signal);
     } catch (error) {
       logger.error(error, 'Graceful shutdown failed');
     } finally {
+      for (const each of signals) {
+        process.removeListener(each, onSignal);
+      }
+
       process.kill(process.pid, signal);
     }
   };

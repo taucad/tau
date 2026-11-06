@@ -11,7 +11,7 @@ import { betterAuth } from 'better-auth';
 import { memoryAdapter } from 'better-auth/adapters/memory';
 import { fromNodeHeaders } from 'better-auth/node';
 import { AuthGuard } from '#auth/auth.guard.js';
-import { staticAuthConfig } from '#config/auth.js';
+import { staticAuthConfig } from '#config/auth-static.config.js';
 import { authInstanceKey } from '#constants/auth.constant.js';
 
 const testEmail = 'one-time-token@example.test';

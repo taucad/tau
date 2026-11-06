@@ -1,3 +1,5 @@
+import { watchByChangeSets } from '@taucad/filesystem';
+import type { ChangeSetWatchSource } from '@taucad/filesystem';
 import { EventLogError } from '#log/event-log-error.js';
 import { createEventLogAppender } from '#log/event-log-appender.js';
 import type { EventLogAppender, EventLogStorage } from '#log/event-log-appender.js';
@@ -59,6 +61,17 @@ export type ProviderEventLogOptions = {
     readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
     writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
     appendFile?(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
+    /**
+     * Append only while the file is still `fence.expectedLength` bytes, refusing with `EAPPENDSTALE` (or `EFENCED`)
+     * and writing nothing otherwise (D23). When present the log's appends use it, so the Web Lock is no longer the
+     * only thing between two writers: a writer in another browser profile, device or process is fenced by the
+     * authority itself.
+     */
+    appendFileFenced?(
+      path: string,
+      data: Uint8Array<ArrayBuffer> | string,
+      fence: { readonly expectedLength: number },
+    ): Promise<void>;
     unlink(path: string): Promise<void>;
     /** Current durable byte size; omission retains the full-read compatibility fallback. */
     stat?(path: string): Promise<{ readonly size: number; readonly mtimeMs?: number }>;
@@ -282,7 +295,11 @@ const openProviderWriter = async (
   };
   const storage: EventLogStorage = {
     read: readBytes,
-    append: async (bytes) => appendFile.call(fileSystem, filePath, bytes),
+    append: async (bytes, expectedLength) =>
+      fileSystem.appendFileFenced === undefined || expectedLength === undefined
+        ? appendFile.call(fileSystem, filePath, bytes)
+        : fileSystem.appendFileFenced(filePath, bytes, { expectedLength }),
+    fencesAppends: fileSystem.appendFileFenced !== undefined,
     truncate: async (size) => {
       if (!(await fileSystem.exists(filePath))) {
         if (size === 0) {
@@ -421,6 +438,60 @@ export type BrowserChatStoreOptions = Readonly<{
 }>;
 
 const logName = 'events.jsonl';
+
+/** The observation {@link BrowserChatStoreOptions.observeLog} takes. @public */
+export type RootedLogObserver = NonNullable<BrowserChatStoreOptions['observeLog']>;
+
+/**
+ * Observe chat logs on a rooted project filesystem in the change-set form
+ * (D6, D23): a peer's append storm on a log arrives once per committed
+ * changeset, not once per append, and a source that refuses the form with
+ * `ENOTSUP` falls back to its per-path watch. The observation resolves once
+ * the authority acknowledges it, reports a closed or failed watch through
+ * `onError`, and releases on abort.
+ *
+ * @param projectRoot - The rooted project filesystem (a bridge proxy or a rooted view).
+ * @returns The `observeLog` for {@link createBrowserChatStore}.
+ * @public
+ */
+export const createRootedLogObserver =
+  (projectRoot: ChangeSetWatchSource): RootedLogObserver =>
+  async ({ path, signal, onChange, onError }) => {
+    let released = false;
+    const subscription = watchByChangeSets(projectRoot, { paths: [path] }, onChange);
+    const release = (): void => {
+      if (!released) {
+        released = true;
+        signal.removeEventListener('abort', release);
+        subscription.unsubscribe();
+      }
+    };
+    signal.addEventListener('abort', release, { once: true });
+    // async-iife: bootstrap
+    // The observation owns its closure monitor until release; stale callbacks are fenced.
+    void (async () => {
+      try {
+        await subscription.closed;
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- Release may run while the observation closure is awaited.
+        if (!released && !signal.aborted) {
+          onError(new Error(`Chat log observation closed for ${path}.`));
+        }
+      } catch (error) {
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- Release may run while the observation closure is awaited.
+        if (!released && !signal.aborted) {
+          onError(error);
+        }
+      }
+    })();
+    try {
+      await subscription.ready;
+      signal.throwIfAborted();
+      return release;
+    } catch (error) {
+      release();
+      throw error;
+    }
+  };
 
 /**
  * Chat logs for one project in a browser worker. A read never creates the chat, takes a lock or keeps a handle

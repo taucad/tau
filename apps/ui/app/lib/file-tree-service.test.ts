@@ -847,7 +847,8 @@ describe('FileTreeService', () => {
       expect(proxy.readDirectory).not.toHaveBeenCalled();
     });
 
-    it('should not call readDirectory on fileDeleted for unknown path', async () => {
+    it('should patch nothing and re-read the touched directory once on fileDeleted for an unknown path (D6)', async () => {
+      const snapshotBefore = service.getTreeSnapshot();
       const event: ChangeEvent = {
         type: 'fileDeleted',
         path: 'nonexistent.ts',
@@ -855,9 +856,14 @@ describe('FileTreeService', () => {
       };
 
       emitWorker(event);
+
+      expect(service.getTreeSnapshot()).toBe(snapshotBefore);
+      expect(proxy.readDirectory).not.toHaveBeenCalled();
+
       await vi.advanceTimersByTimeAsync(200);
 
-      expect(proxy.readDirectory).not.toHaveBeenCalled();
+      expect(proxy.readDirectory).toHaveBeenCalledOnce();
+      expect(proxy.readDirectory).toHaveBeenCalledWith('/project');
     });
 
     // ── fileRenamed — optimistic rename ──

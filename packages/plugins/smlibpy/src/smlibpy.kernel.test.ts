@@ -240,8 +240,8 @@ describe('SMLibPy kernel', () => {
     );
 
     expect(requestParams(context.session.request)).toEqual([
-      { handleId: 'shape', linearTolerance: 0.05, angularTolerance: 20, edges: false, maxTriangles: 2_000_000 },
-      { handleId: 'shape', linearTolerance: 0.05, angularTolerance: 20, edges: true, maxTriangles: 2_000_000 },
+      { handleId: 'shape', linearTolerance: 0.05, angularTolerance: 20, edges: false },
+      { handleId: 'shape', linearTolerance: 0.05, angularTolerance: 20, edges: true },
     ]);
     expect(context.session.readArtifact).toHaveBeenCalledWith({
       artifactPath: meshAnswer.artifactPath,
@@ -256,16 +256,12 @@ describe('SMLibPy kernel', () => {
     ]);
   });
 
-  it('meshes a preset render from the measured diagonal and coarsens an over-budget mesh', async () => {
+  it('meshes a preset render once from the measured diagonal, however large', async () => {
     const context = createContext();
     const handle = { sessionGeneration: 2, handleId: 'shape' };
-    const overBudget = { triangles: 3_000_000, vertices: 9_000_000 };
     context.session.request
       .mockResolvedValueOnce({ diagonal: 2000 })
-      .mockResolvedValueOnce(overBudget)
-      .mockResolvedValueOnce(overBudget)
-      .mockResolvedValueOnce(overBudget)
-      .mockResolvedValueOnce(meshAnswer);
+      .mockResolvedValueOnce({ ...meshAnswer, triangles: 3_000_000, vertices: 9_000_000 });
 
     const rendered = await definition.render?.(
       { view: 'model', handle, options: { tessellation: 'medium' } },
@@ -273,13 +269,15 @@ describe('SMLibPy kernel', () => {
       context,
     );
 
-    expect(requestedMethods(context.session.request)).toEqual(['measure', 'mesh', 'mesh', 'mesh', 'mesh']);
-    // The last coarser step is delivered whatever it costs, so it asks for no budget.
-    expect(requestParams(context.session.request).at(-1)).not.toHaveProperty('maxTriangles');
-    expect(rendered).toMatchObject({
-      tessellation: { requested: 'medium', downgraded: 3 },
-      issues: [expect.objectContaining({ code: 'TESSELLATION_DOWNGRADED' })],
+    expect(requestedMethods(context.session.request)).toEqual(['measure', 'mesh']);
+    expect(requestParams(context.session.request).at(-1)).toEqual({
+      handleId: 'shape',
+      linearTolerance: 1,
+      angularTolerance: 20,
+      edges: false,
     });
+    expect(rendered).toMatchObject({ tessellation: { requested: 'medium', triangles: 3_000_000 }, issues: [] });
+    expect(rendered?.tessellation).not.toHaveProperty('downgraded');
   });
 
   it('reports mechanism issues on render and writes a valid mechanism into the topology', async () => {
@@ -326,7 +324,7 @@ describe('SMLibPy kernel', () => {
     expect(valid!.issues).toEqual([]);
   });
 
-  it('exports GLB and glTF in the requested frame and unit within the export budget', async () => {
+  it('exports GLB and glTF in the requested frame and unit', async () => {
     const context = createContext();
     const handle = { sessionGeneration: 2, handleId: 'shape' };
     context.session.request.mockResolvedValue(meshAnswer);
@@ -348,28 +346,23 @@ describe('SMLibPy kernel', () => {
     const json = JSON.parse(new TextDecoder().decode(gltf.files[0].bytes)) as { asset: { version: string } };
     expect(json.asset.version).toBe('2.0');
     expect(requestParams(context.session.request)).toEqual([
-      { handleId: 'shape', linearTolerance: 0.05, angularTolerance: 20, edges: false, maxTriangles: 20_000_000 },
-      { handleId: 'shape', linearTolerance: 0.05, angularTolerance: 20, edges: true, maxTriangles: 20_000_000 },
+      { handleId: 'shape', linearTolerance: 0.05, angularTolerance: 20, edges: false },
+      { handleId: 'shape', linearTolerance: 0.05, angularTolerance: 20, edges: true },
     ]);
   });
 
-  it('refuses an over-budget GLB export with RESOURCE_LIMIT', async () => {
+  it('exports a GLB above the former 20,000,000-triangle budget', async () => {
     const context = createContext();
-    context.session.request.mockResolvedValueOnce({ triangles: 30_000_000, vertices: 90_000_000 });
+    context.session.request.mockResolvedValueOnce({ ...meshAnswer, triangles: 30_000_000, vertices: 90_000_000 });
 
-    await expect(
-      definition.export!(
-        { exportId: 'glb', handle: { sessionGeneration: 2, handleId: 'shape' }, options: glbOptions },
-        runtime,
-        context,
-      ),
-    ).rejects.toMatchObject({
-      name: 'SmlibpyKernelError',
-      issues: [
-        expect.objectContaining({ code: 'RESOURCE_LIMIT', details: expect.objectContaining({ producer: 'smlibpy' }) }),
-      ],
-    });
-    expect(context.session.readArtifact).not.toHaveBeenCalled();
+    const exported = await definition.export!(
+      { exportId: 'glb', handle: { sessionGeneration: 2, handleId: 'shape' }, options: glbOptions },
+      runtime,
+      context,
+    );
+
+    expect(exported).toMatchObject({ files: [{ name: 'model.glb' }] });
+    expect(context.session.readArtifact).toHaveBeenCalledOnce();
   });
 
   it('exports STEP from the retained exact bodies in the requested frame', async () => {
@@ -392,7 +385,7 @@ describe('SMLibPy kernel', () => {
     ]);
   });
 
-  it('exports binary and ASCII STL at resolved tolerances and refuses one over the export budget', async () => {
+  it('exports binary and ASCII STL at resolved tolerances, at any triangle count', async () => {
     const context = createContext();
     const handle = { sessionGeneration: 2, handleId: 'shape' };
     const binary = new Uint8Array(84 + 50 * 2);
@@ -453,13 +446,12 @@ describe('SMLibPy kernel', () => {
     const huge = new Uint8Array(84);
     new DataView(huge.buffer).setUint32(80, 30_000_000, true);
     context.session.readArtifact.mockResolvedValueOnce(huge);
-    await expect(
-      definition.export!(
-        { exportId: 'stl', handle, options: { ...renderOptions, binary: true, coordinateSystem: 'z-up' } },
-        runtime,
-        context,
-      ),
-    ).rejects.toMatchObject({ issues: [expect.objectContaining({ code: 'RESOURCE_LIMIT' })] });
+    const unbudgeted = await definition.export!(
+      { exportId: 'stl', handle, options: { ...renderOptions, binary: true, coordinateSystem: 'z-up' } },
+      runtime,
+      context,
+    );
+    expect(unbudgeted.files[0].bytes).toEqual(huge);
   });
 
   it('announces verified worker admissions, refreshes warm candidates and skips the off arm', async () => {

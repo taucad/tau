@@ -2816,40 +2816,6 @@
       ]
     },
     {
-      "bom-ref": "ba7a7e104ce1fe6e385a411a56d9555dc84451362bf19bb27c3557eb8d1e78e6",
-      "type": "file",
-      "name": "tau-worker/native_materials.py",
-      "hashes": [
-        {
-          "alg": "SHA-256",
-          "content": "ba7a7e104ce1fe6e385a411a56d9555dc84451362bf19bb27c3557eb8d1e78e6"
-        }
-      ],
-      "licenses": [
-        {
-          "expression": "Apache-2.0"
-        }
-      ],
-      "properties": [
-        {
-          "name": "taucad:target",
-          "value": "darwin-arm64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "darwin-x64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-arm64-glibc"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-x64-glibc"
-        }
-      ]
-    },
-    {
       "bom-ref": "bb6b2b5450f1edbfa597d924f9ac2dd099e625562e492021d7dd614f65f8a22d",
       "type": "library",
       "name": "svgwrite",
@@ -3312,28 +3278,18 @@
       ]
     },
     {
-      "bom-ref": "e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5",
-      "type": "library",
-      "name": "sympy",
-      "version": "1.14.0",
-      "purl": "pkg:pypi/sympy@1.14.0?file_name=sympy-1.14.0-py3-none-any.whl",
+      "bom-ref": "dcc2679b99e8d6cb206d9ad1d4e78c277ab14c904f525874f1c5f37583f87e1b",
+      "type": "file",
+      "name": "tau-worker/native_materials.py",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5"
+          "content": "dcc2679b99e8d6cb206d9ad1d4e78c277ab14c904f525874f1c5f37583f87e1b"
         }
       ],
       "licenses": [
         {
-          "license": {
-            "name": "BSD"
-          }
-        }
-      ],
-      "externalReferences": [
-        {
-          "type": "distribution",
-          "url": "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl"
+          "expression": "Apache-2.0"
         }
       ],
       "properties": [
@@ -3356,18 +3312,28 @@
       ]
     },
     {
-      "bom-ref": "e2ef1cead6a92c4ee70427c680a95507c5b30c6576e0d86ec174f2b3e3dbd7fc",
-      "type": "file",
-      "name": "tau-worker/worker.py",
+      "bom-ref": "e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5",
+      "type": "library",
+      "name": "sympy",
+      "version": "1.14.0",
+      "purl": "pkg:pypi/sympy@1.14.0?file_name=sympy-1.14.0-py3-none-any.whl",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "e2ef1cead6a92c4ee70427c680a95507c5b30c6576e0d86ec174f2b3e3dbd7fc"
+          "content": "e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5"
         }
       ],
       "licenses": [
         {
-          "expression": "Apache-2.0"
+          "license": {
+            "name": "BSD"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl"
         }
       ],
       "properties": [
@@ -3447,6 +3413,40 @@
         {
           "name": "taucad:target",
           "value": "darwin-x64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "e988584af93da53ef953ef57d703f778db3db7224843baa048400d232d33ec06",
+      "type": "file",
+      "name": "tau-worker/worker.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "e988584af93da53ef953ef57d703f778db3db7224843baa048400d232d33ec06"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
         }
       ]
     },

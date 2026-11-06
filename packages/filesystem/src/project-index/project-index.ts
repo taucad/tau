@@ -116,6 +116,42 @@ const defaultSearchMaxResults = 100;
 
 const segmentsOf = (path: string): string[] => path.split('/').filter(Boolean);
 
+/**
+ * How a search query matches a path: a substring, or a glob when it holds `*` or `?` (D18).
+ *
+ * @param query - The query as typed.
+ * @returns A case-insensitive matcher over an entry's relative path and name.
+ */
+const searchMatcher = (query: string): ((path: string, name: string) => boolean) => {
+  const lower = query.toLowerCase();
+  if (!/[*?]/u.test(lower)) {
+    return (path) => path.toLowerCase().includes(lower);
+  }
+  let source = '';
+  for (let index = 0; index < lower.length; index++) {
+    const character = lower[index]!;
+    if (character === '*' && lower[index + 1] === '*') {
+      if (lower[index + 2] === '/') {
+        source += '(?:.*/)?';
+        index += 2;
+      } else {
+        source += '.*';
+        index++;
+      }
+    } else if (character === '*') {
+      source += '[^/]*';
+    } else if (character === '?') {
+      source += '[^/]';
+    } else {
+      source += String.raw`\^$.*+?()[]{}|`.includes(character) ? `\\${character}` : character;
+    }
+  }
+  const pattern = new RegExp(`^${source}$`, 'u');
+  return lower.includes('/')
+    ? (path) => pattern.test(path.toLowerCase())
+    : (_path, name) => pattern.test(name.toLowerCase());
+};
+
 const joinPath = (prefix: string, name: string): string => (prefix === '' ? name : `${prefix}/${name}`);
 
 const isUnder = (path: string, prefix: string): boolean =>
@@ -326,24 +362,26 @@ export class ProjectIndex {
   }
 
   /**
-   * Case-insensitive substring search over paths.
+   * Case-insensitive search over paths: a substring, or, when the query holds a
+   * glob character (`*`, `?`), a glob (D18). `**` spans directories, `*` and `?`
+   * stay inside one segment, and a pattern without a `/` matches the entry's name.
    *
-   * @param query - Substring to match.
+   * @param query - Substring or glob to match.
    * @param options - Result cap, whether directories match, and the mask.
    * @returns Matches relative to the root.
    */
   public search(query: string, options?: IndexSearchOptions): FileStatEntry[] {
     const maxResults = options?.maxResults ?? defaultSearchMaxResults;
-    const lowerQuery = query.toLowerCase();
+    const matches = searchMatcher(query);
     const results: FileStatEntry[] = [];
     for (const entry of this.walk('', { admits: options?.admits })) {
       if (results.length >= maxResults) {
         break;
       }
-      if (!entry.path.toLowerCase().includes(lowerQuery)) {
+      const name = entry.path.split('/').at(-1) ?? entry.path;
+      if (!matches(entry.path, name)) {
         continue;
       }
-      const name = entry.path.split('/').at(-1) ?? entry.path;
       if (entry.kind === 'file') {
         results.push({
           path: entry.path,

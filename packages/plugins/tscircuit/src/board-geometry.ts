@@ -101,8 +101,58 @@ type Shapes = {
   // oxlint-disable-next-line eslint/max-params -- a rectangle's centre, size, rotation and corner radius, as Manifold takes them.
   rect: (x: number, y: number, width: number, height: number, rotation?: number, radius?: number) => CrossSection;
   polygon: (points: Point[]) => CrossSection | undefined;
-  stroke: (points: Point[], width: number) => CrossSection | undefined;
+  /** Append the outline of a round-capped stroke to `contours`, one capsule per segment, built in JavaScript. */
+  strokeContours: (contours: Vec2[][], points: Point[], width: number) => void;
+  /** One cross-section filling the union of `contours`, or `undefined` when there are none. */
+  fill: (contours: Vec2[][]) => CrossSection | undefined;
   union: (parts: CrossSection[]) => CrossSection;
+};
+
+/**
+ * Free the handles a result was derived from.
+ * @param result - The derived value.
+ * @param inputs - Handles no longer needed.
+ * @returns `result`.
+ */
+const consume = <T>(result: T, ...inputs: ReadonlyArray<{ delete: () => void } | undefined>): T => {
+  for (const input of inputs) {
+    input?.delete();
+  }
+  return result;
+};
+
+/**
+ * Cross product of `ab` and `ac`.
+ * @param a - The corner.
+ * @param b - The first point.
+ * @param c - The second point.
+ * @returns A positive value when `a`, `b`, `c` turn counter-clockwise.
+ */
+const turn = (a: Vec2, b: Vec2, c: Vec2): number => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+
+/**
+ * Counter-clockwise convex hull (Andrew's monotone chain), without collinear points: the contour
+ * `CrossSection.hull` returns for the same points.
+ * @param points - The points to enclose.
+ * @returns The hull's vertices.
+ */
+const convexHull = (points: Vec2[]): Vec2[] => {
+  const sorted = points.toSorted((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const lower: Vec2[] = [];
+  for (const point of sorted) {
+    while (lower.length >= 2 && turn(lower.at(-2)!, lower.at(-1)!, point) <= 0) {
+      lower.pop();
+    }
+    lower.push(point);
+  }
+  const upper: Vec2[] = [];
+  for (const point of sorted.toReversed()) {
+    while (upper.length >= 2 && turn(upper.at(-2)!, upper.at(-1)!, point) <= 0) {
+      upper.pop();
+    }
+    upper.push(point);
+  }
+  return [...lower.slice(0, -1), ...upper.slice(0, -1)];
 };
 
 const createShapes = (m: ManifoldToplevel): Shapes => {
@@ -117,42 +167,57 @@ const createShapes = (m: ManifoldToplevel): Shapes => {
       ],
       'Positive',
     );
-  const circle = (x: number, y: number, radius: number): CrossSection =>
-    m.CrossSection.circle(Math.max(radius, 1e-4), circleSegments).translate([x, y]);
+  const circle = (x: number, y: number, radius: number): CrossSection => {
+    const base = m.CrossSection.circle(Math.max(radius, 1e-4), circleSegments);
+    return consume(base.translate([x, y]), base);
+  };
   // oxlint-disable-next-line eslint/max-params -- matches `Shapes.rect`.
   const rect = (x: number, y: number, width: number, height: number, rotation = 0, radius = 0): CrossSection => {
     const r = Math.max(0, Math.min(radius, width / 2, height / 2));
-    const core =
-      r > 0
-        ? m.CrossSection.square([Math.max(width - 2 * r, 1e-4), Math.max(height - 2 * r, 1e-4)], true).offset(
-            r,
-            'Round',
-            2,
-            circleSegments,
-          )
-        : m.CrossSection.square([Math.max(width, 1e-4), Math.max(height, 1e-4)], true);
-    return core.rotate(rotation).translate([x, y]);
+    let core: CrossSection;
+    if (r > 0) {
+      const square = m.CrossSection.square([Math.max(width - 2 * r, 1e-4), Math.max(height - 2 * r, 1e-4)], true);
+      core = consume(square.offset(r, 'Round', 2, circleSegments), square);
+    } else {
+      core = m.CrossSection.square([Math.max(width, 1e-4), Math.max(height, 1e-4)], true);
+    }
+    const rotated = consume(core.rotate(rotation), core);
+    return consume(rotated.translate([x, y]), rotated);
   };
   const polygon = (points: Point[]): CrossSection | undefined =>
     points.length < 3 ? undefined : new m.CrossSection([points.map((point): Vec2 => [point.x, point.y])], 'Positive');
-  const stroke = (points: Point[], width: number): CrossSection | undefined => {
+  // `CrossSection.circle` vertices for a unit radius, read once per build so a stroke's capsules
+  // use the same points as the circles they replace.
+  let unitCircle: Vec2[] | undefined;
+  const circleContour = (x: number, y: number, radius: number): Vec2[] => {
+    if (!unitCircle) {
+      const unit = m.CrossSection.circle(1, circleSegments);
+      unitCircle = unit.toPolygons()[0] ?? [];
+      unit.delete();
+    }
+    const r = Math.max(radius, 1e-4);
+    return unitCircle.map(([px, py]): Vec2 => [r * px + x, r * py + y]);
+  };
+  const strokeContours = (contours: Vec2[][], points: Point[], width: number): void => {
     if (points.length === 0 || width <= 0) {
-      return undefined;
+      return;
     }
     const radius = width / 2;
     if (points.length === 1) {
-      return circle(points[0]!.x, points[0]!.y, radius);
+      contours.push(circleContour(points[0]!.x, points[0]!.y, radius));
+      return;
     }
-    const segments: CrossSection[] = [];
     for (let index = 1; index < points.length; index++) {
       const a = points[index - 1]!;
       const b = points[index]!;
-      segments.push(m.CrossSection.hull([circle(a.x, a.y, radius), circle(b.x, b.y, radius)]));
+      contours.push(convexHull([...circleContour(a.x, a.y, radius), ...circleContour(b.x, b.y, radius)]));
     }
-    return m.CrossSection.union(segments);
   };
+  // Overlapping counter-clockwise contours under the positive fill rule are their union.
+  const fill = (contours: Vec2[][]): CrossSection | undefined =>
+    contours.length === 0 ? undefined : new m.CrossSection(contours, 'Positive');
   const union = (parts: CrossSection[]): CrossSection => (parts.length === 0 ? empty() : m.CrossSection.union(parts));
-  return { m, circle, rect, polygon, stroke, union };
+  return { m, circle, rect, polygon, strokeContours, fill, union };
 };
 
 // =============================================================================
@@ -189,7 +254,7 @@ const smtPadShape = (shapes: Shapes, pad: Element, grow: number): CrossSection |
     }
     case 'polygon': {
       const polygon = shapes.polygon(pointsOf(pad['points']));
-      return polygon && grow > 0 ? polygon.offset(grow, 'Round') : polygon;
+      return polygon && grow > 0 ? consume(polygon.offset(grow, 'Round'), polygon) : polygon;
     }
     default: {
       const radius = numberOf(pad, 'corner_radius', numberOf(pad, 'rect_border_radius'));
@@ -238,7 +303,7 @@ const platedHoleShapes = (
     case 'hole_with_polygon_pad': {
       const outline = pointsOf(hole['pad_outline']).map((point) => ({ x: x + point.x, y: y + point.y }));
       const pad = shapes.polygon(outline);
-      return { pad: pad && grow > 0 ? pad.offset(grow, 'Round') : pad, drill: drillOf() };
+      return { pad: pad && grow > 0 ? consume(pad.offset(grow, 'Round'), pad) : pad, drill: drillOf() };
     }
     default: {
       const width = numberOf(hole, 'rect_pad_width', numberOf(hole, 'outer_diameter')) + 2 * grow;
@@ -353,6 +418,29 @@ const textSegments = (element: Element): { segments: Array<[Point, Point]>; stro
   return { segments: raw.map(([a, b]) => [place(a), place(b)]), strokeWidth: glyphHeight * silkscreenStrokeRatio };
 };
 
+type BrepShape = { outer_ring?: { vertices?: unknown }; inner_rings?: Array<{ vertices?: unknown }> };
+
+/**
+ * A copper pour's outer ring less its inner rings.
+ * @param shapes - The board's 2D primitives.
+ * @param brep - The pour's rings.
+ * @returns The pour region, or `undefined` when the outer ring is degenerate.
+ */
+const brepPourShape = (shapes: Shapes, brep: BrepShape): CrossSection | undefined => {
+  const outer = shapes.polygon(pointsOf(brep.outer_ring?.vertices));
+  if (!outer) {
+    return undefined;
+  }
+  const inner = (brep.inner_rings ?? [])
+    .map((ring) => shapes.polygon(pointsOf(ring.vertices)))
+    .filter((ring) => ring !== undefined);
+  if (inner.length === 0) {
+    return outer;
+  }
+  const holes = shapes.union(inner);
+  return consume(outer.subtract(holes), outer, holes, ...inner);
+};
+
 const collectRegions = (shapes: Shapes, elements: Element[], board: Element): BoardRegions => {
   const sides: Record<Side, SideRegions> = {
     top: { copper: [], openings: [], silkscreen: [] },
@@ -364,6 +452,11 @@ const collectRegions = (shapes: Shapes, elements: Element[], board: Element): Bo
     if (shape) {
       sides[side][key].push(shape);
     }
+  };
+  // Trace and silkscreen strokes are gathered as contours and filled once per side and layer.
+  const strokes: Record<Side, Record<'copper' | 'silkscreen', Vec2[][]>> = {
+    top: { copper: [], silkscreen: [] },
+    bottom: { copper: [], silkscreen: [] },
   };
 
   for (const element of elements) {
@@ -378,16 +471,22 @@ const collectRegions = (shapes: Shapes, elements: Element[], board: Element): Bo
       }
       case 'pcb_plated_hole': {
         const { pad, drill } = platedHoleShapes(shapes, element, 0);
-        const { pad: opening } = platedHoleShapes(shapes, element, maskExpansion);
+        const { pad: opening, drill: openingDrill } = platedHoleShapes(shapes, element, maskExpansion);
+        openingDrill?.delete();
+        const covered = element['is_covered_with_solder_mask'] === true;
         for (const side of layersOf(element)) {
           push(side, 'copper', pad);
-          if (element['is_covered_with_solder_mask'] !== true) {
+          if (!covered) {
             push(side, 'openings', opening);
           }
         }
+        if (covered) {
+          opening?.delete();
+        }
         if (drill) {
           drills.push(drill);
-          barrels.push(drill.offset(barrelWall, 'Round').subtract(drill));
+          const wall = drill.offset(barrelWall, 'Round');
+          barrels.push(consume(wall.subtract(drill), wall));
         }
         break;
       }
@@ -399,7 +498,8 @@ const collectRegions = (shapes: Shapes, elements: Element[], board: Element): Bo
         push('top', 'copper', pad);
         push('bottom', 'copper', pad);
         drills.push(drill);
-        barrels.push(drill.offset(barrelWall, 'Round').subtract(drill));
+        const wall = drill.offset(barrelWall, 'Round');
+        barrels.push(consume(wall.subtract(drill), wall));
         break;
       }
       case 'pcb_hole': {
@@ -418,7 +518,7 @@ const collectRegions = (shapes: Shapes, elements: Element[], board: Element): Bo
         let runWidth = 0;
         const flush = (): void => {
           if (runLayer && run.length > 1) {
-            push(runLayer, 'copper', shapes.stroke(run, runWidth));
+            shapes.strokeContours(strokes[runLayer].copper, run, runWidth);
           }
           run = [];
         };
@@ -443,17 +543,7 @@ const collectRegions = (shapes: Shapes, elements: Element[], board: Element): Bo
         const [side = 'top'] = layersOf(element);
         switch (element['shape']) {
           case 'brep': {
-            const brep = element['brep_shape'] as {
-              outer_ring?: { vertices?: unknown };
-              inner_rings?: Array<{ vertices?: unknown }>;
-            };
-            const outer = shapes.polygon(pointsOf(brep.outer_ring?.vertices));
-            if (outer) {
-              const inner = (brep.inner_rings ?? [])
-                .map((ring) => shapes.polygon(pointsOf(ring.vertices)))
-                .filter((ring) => ring !== undefined);
-              push(side, 'copper', inner.length > 0 ? outer.subtract(shapes.union(inner)) : outer);
-            }
+            push(side, 'copper', brepPourShape(shapes, element['brep_shape'] as BrepShape));
             break;
           }
           case 'polygon': {
@@ -483,7 +573,11 @@ const collectRegions = (shapes: Shapes, elements: Element[], board: Element): Bo
       }
       case 'pcb_silkscreen_path': {
         const [side = 'top'] = layersOf(element);
-        push(side, 'silkscreen', shapes.stroke(pointsOf(element['route']), numberOf(element, 'stroke_width', 0.1)));
+        shapes.strokeContours(
+          strokes[side].silkscreen,
+          pointsOf(element['route']),
+          numberOf(element, 'stroke_width', 0.1),
+        );
         break;
       }
       case 'pcb_silkscreen_line': {
@@ -492,7 +586,7 @@ const collectRegions = (shapes: Shapes, elements: Element[], board: Element): Bo
           { x: numberOf(element, 'x1'), y: numberOf(element, 'y1') },
           { x: numberOf(element, 'x2'), y: numberOf(element, 'y2') },
         ];
-        push(side, 'silkscreen', shapes.stroke(points, numberOf(element, 'stroke_width', 0.1)));
+        shapes.strokeContours(strokes[side].silkscreen, points, numberOf(element, 'stroke_width', 0.1));
         break;
       }
       case 'pcb_silkscreen_rect': {
@@ -502,15 +596,17 @@ const collectRegions = (shapes: Shapes, elements: Element[], board: Element): Bo
         const height = numberOf(element, 'height');
         const strokeWidth = numberOf(element, 'stroke_width', 0.1);
         const outer = shapes.rect(center.x, center.y, width + strokeWidth, height + strokeWidth);
-        push(
-          side,
-          'silkscreen',
-          element['is_filled'] === true
-            ? outer
-            : outer.subtract(
-                shapes.rect(center.x, center.y, Math.max(width - strokeWidth, 0), Math.max(height - strokeWidth, 0)),
-              ),
-        );
+        if (element['is_filled'] === true) {
+          push(side, 'silkscreen', outer);
+        } else {
+          const inner = shapes.rect(
+            center.x,
+            center.y,
+            Math.max(width - strokeWidth, 0),
+            Math.max(height - strokeWidth, 0),
+          );
+          push(side, 'silkscreen', consume(outer.subtract(inner), outer, inner));
+        }
         break;
       }
       case 'pcb_silkscreen_circle': {
@@ -518,23 +614,16 @@ const collectRegions = (shapes: Shapes, elements: Element[], board: Element): Bo
         const center = (element['center'] ?? { x: 0, y: 0 }) as Point;
         const radius = numberOf(element, 'radius');
         const strokeWidth = numberOf(element, 'stroke_width', 0.1);
-        push(
-          side,
-          'silkscreen',
-          shapes
-            .circle(center.x, center.y, radius + strokeWidth / 2)
-            .subtract(shapes.circle(center.x, center.y, Math.max(radius - strokeWidth / 2, 0))),
-        );
+        const outer = shapes.circle(center.x, center.y, radius + strokeWidth / 2);
+        const inner = shapes.circle(center.x, center.y, Math.max(radius - strokeWidth / 2, 0));
+        push(side, 'silkscreen', consume(outer.subtract(inner), outer, inner));
         break;
       }
       case 'pcb_silkscreen_text': {
         const [side = 'top'] = layersOf(element);
         const { segments, strokeWidth } = textSegments(element);
-        const strokes = segments
-          .map(([a, b]) => shapes.stroke([a, b], strokeWidth))
-          .filter((stroke) => stroke !== undefined);
-        if (strokes.length > 0) {
-          push(side, 'silkscreen', shapes.union(strokes));
+        for (const [a, b] of segments) {
+          shapes.strokeContours(strokes[side].silkscreen, [a, b], strokeWidth);
         }
         break;
       }
@@ -542,6 +631,11 @@ const collectRegions = (shapes: Shapes, elements: Element[], board: Element): Bo
         break;
       }
     }
+  }
+
+  for (const side of ['top', 'bottom'] as const) {
+    push(side, 'copper', shapes.fill(strokes[side].copper));
+    push(side, 'silkscreen', shapes.fill(strokes[side].silkscreen));
   }
 
   const center = (board['center'] ?? { x: 0, y: 0 }) as Point;
@@ -648,7 +742,8 @@ const addSlab = (
   if (region.isEmpty() || z1 <= z0) {
     return;
   }
-  const solid = region.extrude(z1 - z0).translate([0, 0, z0]);
+  const extruded = region.extrude(z1 - z0);
+  const solid = consume(extruded.translate([0, 0, z0]), extruded);
   const mesh = solid.getMesh();
   solid.delete();
   const { numProp, vertProperties, triVerts } = mesh;
@@ -733,54 +828,71 @@ export const buildPresentationBoard = async (
 
   for (const board of boards) {
     const regions = collectRegions(shapes, elements, board);
-    const materials = createMaterials(document, regions, options);
-    const { outline, thickness } = regions;
-    const half = thickness / 2;
-    const drills = shapes.union(regions.drills);
-    const boardArea = outline.subtract(drills);
+    // Every region and intermediate cross-section of this board is freed once its slabs are meshed.
+    const owned = new Set<CrossSection>([
+      regions.outline,
+      ...regions.drills,
+      ...regions.barrels,
+      ...Object.values(regions.sides).flatMap((side) => [...side.copper, ...side.openings, ...side.silkscreen]),
+    ]);
+    const own = (section: CrossSection): CrossSection => {
+      owned.add(section);
+      return section;
+    };
+    try {
+      const materials = createMaterials(document, regions, options);
+      const { outline, thickness } = regions;
+      const half = thickness / 2;
+      const drills = own(shapes.union(regions.drills));
+      const boardArea = own(outline.subtract(drills));
 
-    addSlab(document, root, 'core', boardArea, -half, half, materials.core);
-    addSlab(
-      document,
-      root,
-      'barrels',
-      shapes.union(regions.barrels).intersect(outline),
-      -half - copperThickness,
-      half + copperThickness,
-      materials.finish,
-    );
-
-    for (const side of ['top', 'bottom'] as const) {
-      const { copper: copperParts, openings: openingParts, silkscreen: silkParts } = regions.sides[side];
-      const copper = shapes.union(copperParts).intersect(boardArea);
-      const openings = shapes.union(openingParts);
-      const maskArea = boardArea.subtract(openings);
-      const maskOnCopper = maskArea.intersect(copper);
-      const maskOnLaminate = maskArea.subtract(copper);
-      const exposed = copper.intersect(openings);
-      const silk = shapes.union(silkParts).intersect(maskArea);
-      // Heights measured outward from the core face; the bottom side mirrors them.
-      const span = (from: number, to: number): [number, number] =>
-        side === 'top' ? [half + from, half + to] : [-half - to, -half - from];
-      addSlab(document, root, `${side}-copper`, maskOnCopper, ...span(0, copperThickness), materials.copper);
-      addSlab(document, root, `${side}-finish`, exposed, ...span(0, copperThickness + 0.004), materials.finish);
+      addSlab(document, root, 'core', boardArea, -half, half, materials.core);
       addSlab(
         document,
         root,
-        `${side}-mask-copper`,
-        maskOnCopper,
-        ...span(copperThickness, copperThickness + maskThickness),
-        materials.maskOverCopper[side],
+        'barrels',
+        own(own(shapes.union(regions.barrels)).intersect(outline)),
+        -half - copperThickness,
+        half + copperThickness,
+        materials.finish,
       );
-      addSlab(document, root, `${side}-mask`, maskOnLaminate, ...span(0, maskThickness), materials.mask[side]);
-      addSlab(
-        document,
-        root,
-        `${side}-silkscreen`,
-        silk,
-        ...span(0, copperThickness + maskThickness + silkscreenThickness),
-        materials.silkscreen[side],
-      );
+
+      for (const side of ['top', 'bottom'] as const) {
+        const { copper: copperParts, openings: openingParts, silkscreen: silkParts } = regions.sides[side];
+        const copper = own(own(shapes.union(copperParts)).intersect(boardArea));
+        const openings = own(shapes.union(openingParts));
+        const maskArea = own(boardArea.subtract(openings));
+        const maskOnCopper = own(maskArea.intersect(copper));
+        const maskOnLaminate = own(maskArea.subtract(copper));
+        const exposed = own(copper.intersect(openings));
+        const silk = own(own(shapes.union(silkParts)).intersect(maskArea));
+        // Heights measured outward from the core face; the bottom side mirrors them.
+        const span = (from: number, to: number): [number, number] =>
+          side === 'top' ? [half + from, half + to] : [-half - to, -half - from];
+        addSlab(document, root, `${side}-copper`, maskOnCopper, ...span(0, copperThickness), materials.copper);
+        addSlab(document, root, `${side}-finish`, exposed, ...span(0, copperThickness + 0.004), materials.finish);
+        addSlab(
+          document,
+          root,
+          `${side}-mask-copper`,
+          maskOnCopper,
+          ...span(copperThickness, copperThickness + maskThickness),
+          materials.maskOverCopper[side],
+        );
+        addSlab(document, root, `${side}-mask`, maskOnLaminate, ...span(0, maskThickness), materials.mask[side]);
+        addSlab(
+          document,
+          root,
+          `${side}-silkscreen`,
+          silk,
+          ...span(0, copperThickness + maskThickness + silkscreenThickness),
+          materials.silkscreen[side],
+        );
+      }
+    } finally {
+      for (const section of owned) {
+        section.delete();
+      }
     }
   }
   return root;

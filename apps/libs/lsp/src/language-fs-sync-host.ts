@@ -6,7 +6,7 @@ const languageHostSlotBytes = slotInt32Length * Int32Array.BYTES_PER_ELEMENT;
 
 /** @public */
 export type TauLanguageHostInit = Readonly<
-  Pick<TauSyncFsInitMessage, 'port' | 'slotSab' | 'arenaSab' | 'filePoolBuffer' | 'workspaceRootAbsolute'>
+  Pick<TauSyncFsInitMessage, 'port' | 'slotSab' | 'arenaSab' | 'workspaceRootAbsolute'>
 >;
 
 /**
@@ -17,7 +17,6 @@ export type TauLanguageHostInit = Readonly<
 export type TauLanguageFileManagerSnapshotContext = Readonly<{
   worker: Worker | undefined;
   rootDirectory: string;
-  filePoolBuffer?: SharedArrayBuffer;
 }>;
 
 /** @public */
@@ -77,7 +76,6 @@ export function openTauLanguageHostPort(fileManagerRef: TauLanguageFileManagerRe
     port: channel.port1,
     slotSab,
     arenaSab,
-    filePoolBuffer: snap.context.filePoolBuffer,
     workspaceRootAbsolute,
   };
 }

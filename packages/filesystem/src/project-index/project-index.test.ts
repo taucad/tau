@@ -96,6 +96,15 @@ describe('ProjectIndex', () => {
       ]);
     });
 
+    it('should match a glob query against names, or against paths when it names a directory (D18)', () => {
+      const searched = (query: string): string[] => index.search(query).map(({ path }) => path);
+
+      expect(searched('*.MD')).toEqual(['README.md']);
+      expect(searched('src/**/*.ts')).toEqual(['src/main.ts', 'src/utils/helper.ts']);
+      expect(searched('src/*.ts')).toEqual(['src/main.ts']);
+      expect(searched('h?lper.ts')).toEqual(['src/utils/helper.ts']);
+    });
+
     it('should answer only entries changed after a generation', () => {
       const before = index.generation;
       index.recordFile('src/new.ts', { size: 1 });

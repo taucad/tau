@@ -1606,6 +1606,8 @@ export const createFileSystemBridgeHello = (input: HelloInput): FileSystemBridge
  * Both ends read this one table: the client to split the controls off and pick
  * the liveness policy, the server to hand them back to the handler at the
  * same slot. Internal: not part of the package barrel.
+ *
+ * @internal
  */
 export const fileSystemLongCalls: Readonly<Record<string, number | undefined>> = {
   readMany: 1,

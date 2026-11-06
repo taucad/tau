@@ -28,9 +28,10 @@ Kernel I/O methods use the shared entry and event types: `FileEntry`, `FileStat`
 | `fromMemoryFs(files?)`       | `@taucad/runtime/filesystem`         | In-memory Map-backed filesystem, optionally seeded        |
 | `fromFsLike(fs)`             | `@taucad/runtime/filesystem`         | An already-confined virtual filesystem                    |
 | `fromFileSystemBridge(open)` | `@taucad/runtime/filesystem`         | A fresh rooted bridge connection for each runtime binding |
-| `nodeGrepMatcherWorker`      | `@taucad/runtime/filesystem/node`    | Runs a bridge's regex `grep` on a `worker_threads` thread |
 
 Every constructor establishes the root of the [runtime-path namespace](../concepts/path-namespaces). Filesystem method arguments are root-relative, so `main.ts` refers to a file beneath the supplied root and `''` refers to the root itself.
+
+A Node.js host passes `nodeGrepMatcherWorker`, also from `@taucad/runtime/filesystem/node`, as `grepMatcherWorker` to the filesystem bridge so a regex `grep` runs on a terminable `worker_threads` thread.
 
 ## Bridge Types
 

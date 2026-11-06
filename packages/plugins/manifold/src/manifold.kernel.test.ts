@@ -107,7 +107,7 @@ describe('ManifoldWorker', () => {
     const glb = extractGltfBytes(result);
     const definition = await resolveRuntimePluginDefinition('kernel', manifoldKernel());
     const runtime = createMockKernelRuntime();
-    const context = { manifoldCadModule: {} };
+    const context = await definition.initialize({}, runtime);
     const handle = { glb };
     const fresh = definition.deserializeHandle!(
       {
@@ -749,7 +749,7 @@ describe('ManifoldWorker', () => {
         (() => {
           throw new Error('Manifold native-handle deserializer must be defined');
         });
-      const context = { manifoldCadModule: {} };
+      const context = await definition.initialize({}, runtime);
       const serializedHandle = serialize({ handle: nativeHandle }, runtime, context);
       const restored = deserialize({ serialized: serializedHandle }, runtime, context);
 

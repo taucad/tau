@@ -56,13 +56,21 @@ const failureMessage = ({
   return type === 'messageerror' ? 'A worker message could not be deserialized' : 'A worker failed';
 };
 
-/** The script's path, so one failing script groups the same on every host that serves it. */
+/** Vite's content hash before the extension: `runtime.worker-B6x_k2Qa.js` names the script `runtime.worker.js`. */
+const contentHash = /-[\w-]{8}(?=\.[cm]?js$)/;
+
+/**
+ * The script's path without its origin or content hash, so one failing script groups the same on every host and
+ * across deploys. The full URL stays in the report's `worker` context.
+ */
 const scriptPath = (scriptUrl: string): string => {
+  let path = scriptUrl;
   try {
-    return new URL(scriptUrl).pathname;
+    path = new URL(scriptUrl).pathname;
   } catch {
-    return scriptUrl;
+    // Not an absolute URL: group on it as given.
   }
+  return path.replace(contentHash, '');
 };
 
 /** Workers that have reported once: one report per worker incarnation, whatever follows. */

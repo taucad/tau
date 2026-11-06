@@ -104,20 +104,50 @@ describe('reportWorkerFailures', () => {
     ]);
   });
 
-  it('should name the failing script when the event carries nothing else', () => {
-    const event = new ErrorEvent('error', { filename: 'https://taucad.dev/assets/runtime.worker-abc123.js' });
+  it('should name the failing script when the event carries nothing else, keeping its full URL in the context', () => {
+    const filename = 'https://taucad.dev/assets/runtime.worker-B6x_k2Qa.js';
 
-    reportWorkerFailures(fakeWorker(), 'kernel').dispatchEvent(event);
+    reportWorkerFailures(fakeWorker(), 'kernel').dispatchEvent(new ErrorEvent('error', { filename }));
 
-    const [error, details] = mocks.reportUiError.mock.calls[0] as unknown as [Error, { fingerprint: string[] }];
-    expect(error.message).toBe('A worker failed in /assets/runtime.worker-abc123.js');
+    const [error, details] = mocks.reportUiError.mock.calls[0] as unknown as [
+      Error,
+      { contexts: { worker: Record<string, unknown> }; fingerprint: string[] },
+    ];
+    expect(error.message).toBe('A worker failed in /assets/runtime.worker.js');
+    expect(details.contexts.worker['filename']).toBe(filename);
     expect(details.fingerprint).toEqual([
       'worker-failure',
       'kernel',
       'error',
-      'A worker failed in /assets/runtime.worker-abc123.js',
-      '/assets/runtime.worker-abc123.js',
+      'A worker failed in /assets/runtime.worker.js',
+      '/assets/runtime.worker.js',
     ]);
+  });
+
+  // D19: a fingerprint carrying the build hash would split `TAU-UI-N` into a new issue every deploy.
+  it('should fingerprint two builds of the same script the same', () => {
+    const thrown = new TypeError('kernel exploded');
+    for (const filename of [
+      'https://taucad.dev/assets/runtime.worker-B6x_k2Qa.js',
+      'https://tau.new/assets/runtime.worker-Zq9-p1Lm.js',
+    ]) {
+      reportWorkerFailures(fakeWorker(), 'kernel').dispatchEvent(
+        new ErrorEvent('error', { message: 'Uncaught TypeError: kernel exploded', error: thrown, filename }),
+      );
+    }
+
+    const [first, second] = mocks.reportUiError.mock.calls.map(
+      (call) => (call as unknown as [Error, { fingerprint: string[] }])[1].fingerprint,
+    );
+    expect(first).toEqual([
+      'worker-failure',
+      'kernel',
+      'error',
+      'TypeError',
+      'Uncaught TypeError: kernel exploded',
+      '/assets/runtime.worker.js',
+    ]);
+    expect(second).toEqual(first);
   });
 
   it('should fall back to the generic message only when the event carries nothing', () => {

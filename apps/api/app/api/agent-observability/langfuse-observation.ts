@@ -435,11 +435,12 @@ export const runRootSpan = (span: OtlpSpan): OtlpSpan | undefined =>
       };
 
 /**
- * The OTLP/HTTP JSON request body for one observation and its run's root. One
+ * The OTLP/HTTP JSON request body for one observation, then its run's root. One
  * fact per request keeps the vendor's answer about that one item exact: a batch
  * can drop a malformed span silently while acknowledging the rest (T02 attempt
  * 2). The root rides along because a child whose parent was never sent renders
- * as another root; it is fixed, grouping-only and upserted by its id.
+ * as another root; it is fixed, grouping-only and upserted by its id. The fact
+ * stays the first span, as a reader of the body that takes one span expects.
  *
  * @param span - The observation.
  * @returns The request body.
@@ -453,7 +454,7 @@ export const otlpBody = (span: OtlpSpan): string => {
         scopeSpans: [
           {
             scope: { name: 'tau-agent-evidence', version: observationMapperVersion },
-            spans: root === undefined ? [span] : [root, span],
+            spans: root === undefined ? [span] : [span, root],
           },
         ],
       },

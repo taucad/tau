@@ -129,12 +129,12 @@ describe('langfuseObservation', () => {
     expect(attribute(apiOnly, 'langfuse.release')).toBe('api-build-1');
   });
 
-  it('should send one fact per request body, after its run root', async () => {
+  it('should send one fact per request body, first, then its run root', async () => {
     const { span } = langfuseObservation(await evidenceFixture(), context, pseudonym);
     const body = JSON.parse(otlpBody(span)) as { resourceSpans: Array<{ scopeSpans: Array<{ spans: unknown[] }> }> };
 
     expect(body.resourceSpans).toHaveLength(1);
-    expect(body.resourceSpans[0]!.scopeSpans[0]!.spans).toEqual([runRootSpan(span), span]);
+    expect(body.resourceSpans[0]!.scopeSpans[0]!.spans).toEqual([span, runRootSpan(span)]);
   });
 });
 

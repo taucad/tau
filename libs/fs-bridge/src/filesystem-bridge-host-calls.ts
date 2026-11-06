@@ -9,16 +9,19 @@
  * caller asked for bodies.
  */
 import { headSniffByteLength, seemsBinary } from '@taucad/filesystem';
-import type { Changeset, ChangesetReceipt } from '@taucad/filesystem';
+import type { Changeset, ChangesetReceipt, ContentFacts, IndexChanges } from '@taucad/filesystem';
 import type { BridgeServerLongCall, StringKeyedObject } from '@taucad/rpc/bridge';
 import type { FileStatEntry } from '@taucad/types';
 import { sha256Bytes } from '@taucad/utils/hash';
 import type {
+  FactsOptions,
+  FactsWireRows,
   FileSystemBridgeChangeset,
   GlobOptions,
   GrepMatch,
   GrepOptions,
   GrepResult,
+  IndexChangedSince,
   IndexStats,
   LongCall,
   ReadManyWireRows,
@@ -37,6 +40,11 @@ const progressInterval = 100;
 type ReadBytes = (path: string) => Promise<Uint8Array<ArrayBuffer>>;
 type StatTree = (path: string) => Promise<FileStatEntry[]>;
 type Apply = (changeset: Changeset) => Promise<ChangesetReceipt>;
+type Facts = (
+  paths: readonly string[],
+  options?: FactsOptions & LongCall,
+) => Promise<ReadonlyMap<string, ContentFacts>>;
+type ChangedSince = (since: number, options?: LongCall) => Promise<IndexChanges>;
 type ReadStream = (
   path: string,
   options: { readonly position: number; readonly length: number },
@@ -381,6 +389,30 @@ const refuseApply = async (): Promise<never> => {
   throw codedError('This connection serves no changeset apply.', 'ENOTSUP');
 };
 
+/** The view's facts as wire rows, in request order. */
+const hostFacts =
+  (facts: Facts) =>
+  async (paths: readonly string[], options?: FactsOptions & LongCall): Promise<FactsWireRows> => {
+    throwIfAborted(options?.signal);
+    return [...(await facts(paths, options))];
+  };
+
+/** What changed, with each entry's measurement record left on the authority. */
+const hostChangedSince =
+  (changedSince: ChangedSince) =>
+  async (since: number, options?: LongCall): Promise<IndexChangedSince> => {
+    throwIfAborted(options?.signal);
+    const changes = await changedSince(since, options);
+    return {
+      generation: changes.generation,
+      entries: changes.entries.map(({ factsAt: _factsAt, ...entry }) => entry),
+    };
+  };
+
+const refuseIndexQuery = async (): Promise<never> => {
+  throw codedError('This connection serves no index queries.', 'ENOTSUP');
+};
+
 /** The index queries a handler set answers itself or the bridge derives from its `statTree`. */
 const derivedIndexCalls = (
   own: Partial<Record<string, unknown>>,
@@ -417,8 +449,10 @@ export type HostContentCallOptions = {
  * Serve the derived calls beside a handler set that reads files, each only
  * where the handlers do not bring their own: `hashFiles`, `readMany` and
  * `readRange` from `readFile`; `glob`, `grep` and `indexStats` from
- * `statTree`; and `apply` with its receipt's errors as wire data, or refused
- * with `ENOTSUP` where the view serves no changeset. A set without `readFile`
+ * `statTree`; `apply` with its receipt's errors as wire data, or refused
+ * with `ENOTSUP` where the view serves no changeset; and the index queries
+ * `facts` and `changedSince` as wire data, or refused with `ENOTSUP` where the
+ * view has no index. A set without `readFile`
  * is returned unchanged. Members stay bound to the original handler set, so a
  * class's private state survives.
  *
@@ -443,6 +477,11 @@ export const withHostContentCalls = <Handlers extends StringKeyedObject>(
     ...(typeof own['readRange'] === 'function' ? {} : { readRange: hostReadRange(read, stream) }),
     ...derivedIndexCalls(own, handlers, { read, worker: options?.grepMatcherWorker }),
     apply: typeof own['apply'] === 'function' ? hostApply((own['apply'] as Apply).bind(handlers)) : refuseApply,
+    facts: typeof own['facts'] === 'function' ? hostFacts((own['facts'] as Facts).bind(handlers)) : refuseIndexQuery,
+    changedSince:
+      typeof own['changedSince'] === 'function'
+        ? hostChangedSince((own['changedSince'] as ChangedSince).bind(handlers))
+        : refuseIndexQuery,
   };
   return new Proxy(handlers, {
     get(target, property) {
@@ -471,6 +510,8 @@ const longCallHandlerSlot: Readonly<Record<string, number>> = {
   glob: 1,
   grep: 1,
   indexStats: 1,
+  facts: 1,
+  changedSince: 1,
 };
 
 /**

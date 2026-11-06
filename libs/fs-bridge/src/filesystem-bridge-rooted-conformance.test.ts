@@ -1,8 +1,8 @@
 /**
  * Rooted bridge conformance suite (charter W10, wire v3's second slice): the
  * calls a rooted connection answers over a real authority — `apply`, `glob`,
- * `grep`, `indexStats` and `readStream` — run against every transport a rooted
- * connection rides:
+ * `grep`, `indexStats`, the index queries `facts` and `changedSince`, and
+ * `readStream` — run against every transport a rooted connection rides:
  *
  * - **in-process port**: `createFileSystemBridgePort` over the root's view;
  * - **authority connection**: a rooted connection to `exposeFileSystem`, whose
@@ -467,6 +467,67 @@ describe.each([inProcessPort, authorityConnection, workerPort])('rooted bridge c
       await expect(proxy.indexStats('', { signal: AbortSignal.abort() })).rejects.toMatchObject({
         name: 'AbortError',
       });
+    });
+
+    it('answers content facts as a map, leaves out a missing path and a directory, and records what it measured', async () => {
+      const { proxy } = await open(transport);
+      // An index query first, so the root's index is open and keeps what `facts` measures.
+      await expect(proxy.indexStats('lib')).resolves.toMatchObject({ files: 3 });
+      const facts = await proxy.facts(['lib/part.ts', 'lib/notes.md', 'lib/blob.bin', 'lib', 'no/such.ts'], {
+        lineCount: true,
+      });
+      expect(facts).toBeInstanceOf(Map);
+      expect([...facts.keys()]).toEqual(['lib/part.ts', 'lib/notes.md', 'lib/blob.bin']);
+      expect(facts.get('lib/part.ts')).toMatchObject({ contentKind: 'text', lineCount: 4 });
+      expect(facts.get('lib/notes.md')).toMatchObject({ contentKind: 'text', lineCount: 3 });
+      expect(facts.get('lib/blob.bin')).toEqual({ contentKind: 'binary' });
+      // Measured once on the authority, then answered from its index.
+      await expect(proxy.indexStats('lib')).resolves.toEqual({
+        files: 3,
+        bytes: 6 + 22 + 63,
+        textFiles: 2,
+        binaryFiles: 1,
+        lines: 3 + 4,
+      });
+    });
+
+    it('digests a file on request, and stops on an aborted signal', async () => {
+      const { proxy } = await open(transport);
+      const [facts, digests] = await Promise.all([
+        proxy.facts(['main.ts'], { digests: ['sha256'] }),
+        proxy.hashFiles(['main.ts']),
+      ]);
+      expect(facts.get('main.ts')?.sha256).toBe(digests['main.ts']);
+      await expect(proxy.facts(['main.ts'], { signal: AbortSignal.abort() })).rejects.toMatchObject({
+        name: 'AbortError',
+      });
+    });
+
+    it('answers what the index changed after a generation, and only that', async () => {
+      const { proxy } = await open(transport);
+      const first = await proxy.changedSince(0);
+      expect(first.entries.map(({ path }) => path)).toEqual(expect.arrayContaining(['lib/part.ts', 'main.ts']));
+      expect(first.entries.every((entry) => !('factsAt' in entry))).toBe(true);
+      await proxy.writeFile('lib/new.ts', 'export {};\n');
+      const next = await proxy.changedSince(first.generation);
+      expect(next.generation).toBeGreaterThan(first.generation);
+      expect(next.entries.map(({ path }) => path)).toContain('lib/new.ts');
+      expect(next.entries.map(({ path }) => path)).not.toContain('lib/part.ts');
+      await expect(proxy.changedSince(next.generation)).resolves.toMatchObject({ entries: [] });
+      await expect(proxy.changedSince(0, { signal: AbortSignal.abort() })).rejects.toMatchObject({
+        name: 'AbortError',
+      });
+    });
+
+    it("masks what changed by the connection's view", async () => {
+      const { proxy } = await open(transport, 'agent', { ...files, '.git/HEAD': 'ref: refs/heads/main\n' });
+      const rows = await proxy.statTree('');
+      const visible = new Set(rows.map(({ path }) => path));
+      const changed = await proxy.changedSince(0);
+      const changedFiles = changed.entries.filter(({ kind }) => kind === 'file').map(({ path }) => path);
+      expect(changedFiles).toContain('lib/part.ts');
+      expect(changedFiles.some((path) => path.startsWith('.git'))).toBe(false);
+      expect(changedFiles.every((path) => visible.has(path))).toBe(true);
     });
   });
 

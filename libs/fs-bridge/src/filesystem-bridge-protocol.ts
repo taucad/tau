@@ -5,6 +5,9 @@ import type {
   ChangesetEntry,
   ChangesetReceipt,
   ChangeSetWatchRequest,
+  ContentFacts,
+  IndexChanges,
+  IndexEntry,
   ProviderCapabilities,
   FileSystemProvider,
   FileTreeNode,
@@ -75,7 +78,8 @@ const discriminatedResultUnion = <
  * instead of dying at 30 s, carry the caller's abort and report progress. No
  * shim for 8 (D20). The same version carries the second slice: `apply` (one
  * changeset over the wire), `glob`, `grep` and `indexStats` — calls a v9 peer
- * either serves or refuses, so the slices share one bump (D20).
+ * either serves or refuses, so the slices share one bump (D20). So does the
+ * third: the index queries `facts` and `changedSince`.
  * @public
  */
 export const fileSystemBridgeProtocolVersion = 9;
@@ -248,6 +252,46 @@ export type IndexStats = {
   readonly lines: number;
 };
 
+/**
+ * What a `facts` call measures beyond each file's kind (charter D4): line
+ * counts of text files, digests, and the largest file read in full to learn
+ * either. The caller's listed head metadata does not cross the wire; the
+ * authority's index holds its own.
+ *
+ * @public
+ */
+export type FactsOptions = Readonly<{
+  lineCount?: boolean;
+  byteCap?: number;
+  digests?: ReadonlyArray<'sha256' | 'blobOid'>;
+}>;
+
+/**
+ * `facts`'s wire form: `[path, facts]` rows in request order, a path the
+ * authority has no facts for left out. A map does not survive every transport
+ * the bridge rides; rows do.
+ */
+export type FactsWireRows = Array<[string, ContentFacts]>;
+
+/**
+ * One index entry as `changedSince` carries it: the authority's own record of
+ * when its facts were measured stays on the authority.
+ *
+ * @public
+ */
+export type IndexChangedEntry = Omit<IndexEntry, 'factsAt'>;
+
+/**
+ * What a root's index changed after a generation (charter D3): its generation
+ * now, which the caller passes as `since` next time, and every entry it still
+ * holds that changed later. A removal leaves no entry; generations are one
+ * index's own, so a caller that sees `generation` go backwards starts over
+ * from `0`.
+ *
+ * @public
+ */
+export type IndexChangedSince = Readonly<{ generation: number; entries: readonly IndexChangedEntry[] }>;
+
 /** Matches a `grep` returns when the caller names no cap. @public */
 export const defaultGrepResults = 250;
 /** Most matches one `grep` returns. @public */
@@ -396,6 +440,13 @@ export type FileSystemBridgeRuntimeService = FileSystemProvider &
     glob?: (pattern: string, options?: GlobOptions & LongCall) => Promise<FileStatEntry[]>;
     grep?: (pattern: string, options?: GrepOptions & LongCall) => Promise<GrepResult>;
     indexStats?: (path: string, options?: LongCall) => Promise<IndexStats>;
+    /*
+     * The index queries (charter D3, D4): the root's own index answers them,
+     * so a host that hands over a bare provider offers neither and the bridge
+     * refuses both with `ENOTSUP`.
+     */
+    facts?: (paths: readonly string[], options?: FactsOptions & LongCall) => Promise<ReadonlyMap<string, ContentFacts>>;
+    changedSince?: (since: number, options?: LongCall) => Promise<IndexChanges>;
     /*
      * The mutating porcelain is the rooted surface's too (charter D4): one batch
      * in the mutation pipeline, mask-checked by the composed view above it. A
@@ -549,6 +600,18 @@ export type FileSystemBridgeRootedCalls = MachineSettingsService &
     grep(pattern: string, options?: GrepOptions & LongCall): Promise<GrepResult>;
     /** Totals of one subtree from the root's index. */
     indexStats(path: string, options?: LongCall): Promise<IndexStats>;
+    /**
+     * Content facts of visible files (charter D4): from the index while they
+     * still describe the bytes, otherwise measured on the authority within
+     * `byteCap` and recorded there. A missing path or a directory is left out
+     * of the map; a connection with no index refuses with `ENOTSUP`.
+     */
+    facts(paths: readonly string[], options?: FactsOptions & LongCall): Promise<ReadonlyMap<string, ContentFacts>>;
+    /**
+     * What the root's index changed after `since` (charter D3), masked by the
+     * connection's view; a connection with no index refuses with `ENOTSUP`.
+     */
+    changedSince(since: number, options?: LongCall): Promise<IndexChangedSince>;
   };
 
 /**
@@ -575,7 +638,9 @@ type FileSystemBridgeCallResult<Name extends FileSystemBridgeCallName> = Name ex
   ? string | Uint8Array<ArrayBuffer>
   : Name extends 'readMany'
     ? ReadManyWireRows
-    : Awaited<ReturnType<FileSystemBridgeService[Name]>>;
+    : Name extends 'facts'
+      ? FactsWireRows
+      : Awaited<ReturnType<FileSystemBridgeService[Name]>>;
 
 type FileSystemBridgeCallSchemas = {
   readonly [Name in FileSystemBridgeCallName]: {
@@ -1155,6 +1220,33 @@ const indexStatsSchema: z.ZodType<IndexStats> = z.looseObject({
   binaryFiles: countSchema,
   lines: countSchema,
 });
+const contentFactsSchema: z.ZodType<ContentFacts> = z.looseObject({
+  contentKind: z.enum(['text', 'binary']),
+  lineCount: countSchema.optional(),
+  sha256: sha256HexSchema.optional(),
+  blobOid: z
+    .string()
+    .regex(/^[0-9a-f]{40}$/u)
+    .optional(),
+});
+const factsOptionsSchema = z.looseObject({
+  lineCount: z.boolean().optional(),
+  byteCap: countSchema.optional(),
+  digests: z.array(z.enum(['sha256', 'blobOid'])).optional(),
+});
+const indexChangedSinceSchema: z.ZodType<IndexChangedSince> = z.looseObject({
+  generation: countSchema,
+  entries: z.array(
+    z.looseObject({
+      path: z.string(),
+      kind: z.enum(['file', 'dir']),
+      size: countSchema,
+      mtimeMs: z.number(),
+      generation: countSchema,
+      facts: contentFactsSchema.optional(),
+    }),
+  ),
+});
 const changesetPhaseSchema = z.union([z.literal(0), z.literal(1), z.literal(2)]).optional();
 const changesetEntrySchema: z.ZodType<FileSystemBridgeChangesetEntry> = z.discriminatedUnion('op', [
   z.strictObject({
@@ -1418,6 +1510,11 @@ const callSchemas = {
   glob: { args: z.tuple([z.string(), globOptionsSchema.optional()]), result: fileStatEntriesSchema },
   grep: { args: z.tuple([z.string(), grepOptionsSchema.optional()]), result: grepResultSchema },
   indexStats: { args: z.tuple([rootedPathSchema]), result: indexStatsSchema },
+  facts: {
+    args: z.tuple([z.array(rootedPathSchema).max(maxReadManyPaths), factsOptionsSchema.optional()]),
+    result: z.array(z.tuple([z.string(), contentFactsSchema])),
+  },
+  changedSince: { args: z.tuple([countSchema]), result: indexChangedSinceSchema },
 } satisfies FileSystemBridgeCallSchemas;
 
 const broadcastValidator = z.looseObject({ event: z.literal('fileChanged'), data: changeEventSchema });

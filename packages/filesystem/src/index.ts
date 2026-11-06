@@ -88,6 +88,7 @@ export { ProjectIndex, timestampGranularityMilliseconds } from '#project-index/p
 export type {
   FactsAt,
   IndexAdmits,
+  IndexChanges,
   IndexCompareResult,
   IndexEntry,
   IndexEntryKind,

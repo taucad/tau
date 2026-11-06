@@ -45,7 +45,12 @@ import type {
 } from '#types.js';
 import type { MountResolution, MountTable } from '#mount-table.js';
 import type { ProjectIndexes, IndexFactsOptions } from '#project-index/project-indexes.js';
-import type { IndexAdmits, IndexCompareResult, IndexSearchOptions } from '#project-index/project-index.js';
+import type {
+  IndexAdmits,
+  IndexChanges,
+  IndexCompareResult,
+  IndexSearchOptions,
+} from '#project-index/project-index.js';
 import type { WalkOptions } from '#content-ops/walk.js';
 import { causeToMutationError, preflightCreate, preflightDelete, preflightMove } from '#mutation-pipeline.js';
 import type { BulkMoveEdit, BulkMoveResult, MutationPipeline, ResolvedChangesetEntry } from '#mutation-pipeline.js';
@@ -197,6 +202,12 @@ export type RootedFileSystem = Omit<FileSystemProvider, 'writeFileChecked' | 'de
      * first, so every fact it trusts has passed the compare and the racy guard.
      */
     compareIndex?(): Promise<IndexCompareResult>;
+    /**
+     * What this root's index changed after `since` (D3): its generation now,
+     * and every entry it still holds that changed later. Unmasked here, like
+     * `statTree`; a removal leaves no entry.
+     */
+    changedSince?(since: number, options?: { admits?: IndexAdmits; signal?: AbortSignal }): Promise<IndexChanges>;
   };
 
 /**
@@ -740,6 +751,16 @@ export class RootedViews {
         }),
       );
     };
+    const changedSince = async (
+      since: number,
+      options?: { admits?: IndexAdmits; signal?: AbortSignal },
+    ): Promise<IndexChanges> => {
+      assertCurrent();
+      const index = await this._projectIndexes.ready(root);
+      assertCurrent();
+      options?.signal?.throwIfAborted();
+      return { generation: index.generation, entries: index.changedSince(since, options) };
+    };
     const compareIndex = async (): Promise<IndexCompareResult> => {
       assertCurrent();
       const result = await this._projectIndexes.compare(root);
@@ -953,6 +974,7 @@ export class RootedViews {
       statTree,
       facts,
       compareIndex,
+      changedSince,
       copyTree,
       duplicate,
       move,

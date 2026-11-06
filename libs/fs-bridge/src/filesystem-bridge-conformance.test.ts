@@ -290,6 +290,13 @@ describe.each([inProcessPort, authorityConnection, workerPort])('bridge conforma
     await expect(proxy.readMany(tooMany)).rejects.toMatchObject({ code: 'WIRE_VALIDATION_FAILED' });
   });
 
+  it('refuses the index queries with ENOTSUP where the connection serves a bare provider', async () => {
+    const { proxy } = await open(transport);
+    await expect(proxy.facts(['lib/c.bin'])).rejects.toMatchObject({ code: 'ENOTSUP' });
+    await expect(proxy.changedSince(0)).rejects.toMatchObject({ code: 'ENOTSUP' });
+    await expect(proxy.changedSince(-1)).rejects.toMatchObject({ code: 'WIRE_VALIDATION_FAILED' });
+  });
+
   it('counts a write as one copy per path, or one transfer when the caller hands its bytes over (I2)', async () => {
     const { proxy } = await open(transport);
     const crossings = observeFileSystemBridgeCrossings();

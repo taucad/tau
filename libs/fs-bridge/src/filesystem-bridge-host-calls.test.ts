@@ -163,6 +163,48 @@ describe('derived apply', () => {
   });
 });
 
+describe('derived index queries', () => {
+  type IndexQueries = {
+    facts(paths: readonly string[]): Promise<Array<[string, unknown]>>;
+    changedSince(since: number): Promise<{ generation: number; entries: ReadonlyArray<Record<string, unknown>> }>;
+  };
+  const queries = (handlers: StringKeyedObject): IndexQueries => served(handlers) as unknown as IndexQueries;
+
+  it("carries a view's facts as rows in its order, and refuses where the view has none", async () => {
+    const facts = new Map([
+      ['b.ts', { contentKind: 'text', lineCount: 2 }],
+      ['a.bin', { contentKind: 'binary' }],
+    ]);
+    await expect(queries({ readFile: vi.fn(), facts: async () => facts }).facts(['b.ts', 'a.bin'])).resolves.toEqual([
+      ['b.ts', { contentKind: 'text', lineCount: 2 }],
+      ['a.bin', { contentKind: 'binary' }],
+    ]);
+    await expect(queries({ readFile: vi.fn() }).facts(['b.ts'])).rejects.toMatchObject({ code: 'ENOTSUP' });
+  });
+
+  it("keeps each changed entry's measurement record on the authority", async () => {
+    const changedSince = async () => ({
+      generation: 9,
+      entries: [
+        {
+          path: 'a.ts',
+          kind: 'file',
+          size: 1,
+          mtimeMs: 2,
+          generation: 9,
+          facts: { contentKind: 'text' },
+          factsAt: { size: 1, mtimeMs: 2, observedAt: 3 },
+        },
+      ],
+    });
+    await expect(queries({ readFile: vi.fn(), changedSince }).changedSince(4)).resolves.toEqual({
+      generation: 9,
+      entries: [{ path: 'a.ts', kind: 'file', size: 1, mtimeMs: 2, generation: 9, facts: { contentKind: 'text' } }],
+    });
+    await expect(queries({ readFile: vi.fn() }).changedSince(4)).rejects.toMatchObject({ code: 'ENOTSUP' });
+  });
+});
+
 describe('long-call binding', () => {
   const longCall: BridgeServerLongCall = { signal: new AbortController().signal, onProgress: vi.fn() };
 

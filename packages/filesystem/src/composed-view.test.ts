@@ -626,6 +626,16 @@ describe('composeView index-backed reads', () => {
           .filter(({ path }) => path.includes(query))
           .slice(0, options?.maxResults ?? 100),
       statTree: async (path: string, options?: { admits?: Admits }) => admitted(path, options?.admits),
+      changedSince: async (since: number, options?: { admits?: Admits }) => ({
+        generation: since + rows.length,
+        entries: admitted('', options?.admits).map(({ path, type, size, mtimeMs }) => ({
+          path,
+          kind: type,
+          size,
+          mtimeMs,
+          generation: since + 1,
+        })),
+      }),
     });
   };
 
@@ -668,11 +678,30 @@ describe('composeView index-backed reads', () => {
     await expect(view.statTree!('.git')).rejects.toMatchObject({ code: 'EPERM' });
   });
 
+  it('masks what the index changed, before the descent', async () => {
+    const view = composeView(
+      {
+        filesystem: indexed([
+          { path: '.git', type: 'dir' },
+          { path: '.git/HEAD', type: 'file' },
+          { path: 'src', type: 'dir' },
+          { path: 'src/main.ts', type: 'file' },
+        ]),
+      },
+      { consumer: 'agent', policy: tauPathPolicy },
+    );
+
+    const changes = await view.changedSince!(3);
+    expect(changes.generation).toBe(7);
+    expect(changes.entries.map(({ path }) => path)).toEqual(['src', 'src/main.ts']);
+  });
+
   it('offers neither read when the composed filesystem has no index', async () => {
     const view = composeView({ filesystem: provider }, { consumer: 'user', policy: tauPathPolicy });
 
     expect(view.search).toBeUndefined();
     expect(view.statTree).toBeUndefined();
+    expect(view.changedSince).toBeUndefined();
   });
 });
 

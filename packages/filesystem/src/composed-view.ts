@@ -51,7 +51,7 @@ import { bufferToStream } from '#backend/stream-utils.js';
 import { factsConcurrency, measureContentFacts } from '#content-metadata.js';
 import { mapConcurrent } from '#concurrency.js';
 import { workerTimings } from '#worker-timings.js';
-import type { IndexAdmits, IndexSearchOptions } from '#project-index/project-index.js';
+import type { IndexAdmits, IndexChanges, IndexSearchOptions } from '#project-index/project-index.js';
 import type { IndexFactsOptions } from '#project-index/project-indexes.js';
 import type { AppendFence, Changeset, ChangesetEntry, ChangesetReceipt } from '#changeset.js';
 import type { ChangeSet, ChangeSetEntry } from '#change-event-bus.js';
@@ -120,6 +120,7 @@ type IndexedFileSystem = {
   search(query: string, options?: IndexSearchOptions): Promise<FileStatEntry[]>;
   statTree(path: string, options?: { admits?: IndexAdmits }): Promise<FileStatEntry[]>;
   facts(paths: readonly string[], options?: IndexFactsOptions): Promise<ReadonlyMap<string, ContentFacts>>;
+  changedSince(since: number, options?: { admits?: IndexAdmits; signal?: AbortSignal }): Promise<IndexChanges>;
 };
 
 /**
@@ -1191,6 +1192,16 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
             const target = readablePath(canonical(path));
             return base.statTree!(target, { admits: admitsVisible(target, statOptions?.admits) });
           },
+        }),
+    /* Overlay entries never change, so what changed is the checkout's index, masked. */
+    ...(base.changedSince === undefined
+      ? {}
+      : {
+          changedSince: async (
+            since: number,
+            changedOptions?: { admits?: IndexAdmits; signal?: AbortSignal },
+          ): Promise<IndexChanges> =>
+            base.changedSince!(since, { ...changedOptions, admits: admitsVisible('', changedOptions?.admits) }),
         }),
     /*
      * The mutating porcelain is a batch in the pipeline below, not N port

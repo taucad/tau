@@ -48,6 +48,7 @@ import type {
   LongCall,
   ReadManyResult,
   ReadManyWireRows,
+  FactsWireRows,
   FileSystemBridgeWatchFrame,
   FileSystemBridgeWatchRequest,
   FileSystemBridgeService,
@@ -244,6 +245,8 @@ const longCalls: Readonly<Record<string, number | undefined>> = {
   glob: 1,
   grep: 1,
   indexStats: 1,
+  facts: 1,
+  changedSince: 1,
   /* Its controls ride `ApplyOptions` and the changeset's own signal;
    * `prepareApplyCall` takes them out. */
   apply: undefined,
@@ -1893,6 +1896,9 @@ export function createFileSystemBridgeProxy(
           );
           if (property === 'readMany') {
             return readManyResult(result as ReadManyWireRows);
+          }
+          if (property === 'facts') {
+            return new Map(result as FactsWireRows);
           }
           if (property === 'apply') {
             return receiptFromWire(result as ChangesetReceipt);

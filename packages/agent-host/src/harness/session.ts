@@ -313,8 +313,31 @@ const nextWithin = async <T>(watch: StallWatch<T>): Promise<IteratorResult<T>> =
   }
 };
 
-/** The waits between lookups of an attempt the gateway is still settling, about 15 s in all, before the run ends. */
+/**
+ * The waits between lookups of an attempt the gateway is still settling, about 15 s in all. Past them a run ends,
+ * unless the gateway stated when it settles the attempt ({@link settlementPollCap}).
+ */
 const pendingAttemptWaits = [250, 500, 1000, 2000, 4000, 8000] as const;
+
+/**
+ * W2 (D2): past {@link pendingAttemptWaits}, an attempt whose last stated `settlesBy` is still ahead is asked about
+ * again at this capped backoff until that instant. The bound is the gateway's statement, never this constant.
+ */
+const settlementPollCap = 8000;
+
+/**
+ * Read the `settlesBy` a pending answer states.
+ *
+ * @param resolution - The gateway's answer.
+ * @returns Epoch milliseconds, or `undefined` when the answer is not pending or states no readable instant.
+ */
+const settlementInstant = (resolution: InvocationResolution): number | undefined => {
+  if (resolution.status !== 'pending' || resolution.settlesBy === undefined) {
+    return undefined;
+  }
+  const instant = Date.parse(resolution.settlesBy);
+  return Number.isNaN(instant) ? undefined : instant;
+};
 
 /** Resolve after `milliseconds` on the clock, or reject with the signal's reason once it aborts. */
 const waitOn = async (clock: HostClock, milliseconds: number, signal: AbortSignal): Promise<void> => {
@@ -334,13 +357,19 @@ const waitOn = async (clock: HostClock, milliseconds: number, signal: AbortSigna
 };
 
 /**
- * Ask about one earlier attempt until it settles, within {@link pendingAttemptWaits} (EQ1: Tau waits by itself). A
- * stopped run's call is still settling at the gateway when the next message starts or the run resumes at once
- * (StopSettlement); a run's first step and a Resume both wait here.
+ * Ask about one earlier attempt until it settles, within {@link pendingAttemptWaits} (EQ1: Tau waits by itself), then,
+ * while the gateway's last stated `settlesBy` is ahead, every {@link settlementPollCap} until that instant (W2, I3). An
+ * answer without `settlesBy` (an older gateway) ends after the short waits, as before. A stopped run's call is still
+ * settling at the gateway when the next message starts or the run resumes at once (StopSettlement); a run's first
+ * step, its lost-reply retry and a Resume all wait here.
+ *
+ * `settlesBy` is a wall-clock instant, read against `Date.now()` at the first lookup; the time since is counted on the
+ * clock: its `now` when it has one, and never less than the waits it has run, so a stepped or instant clock moves the
+ * bound with its timers.
  *
  * @param input - The funded transport that asks the gateway, the earlier attempt, the clock the waits run on, and the
  *   signal that aborts the waits and the lookups.
- * @returns The last answer: `pending` or `unavailable` once the waits are spent.
+ * @returns The last answer: `pending` or `unavailable` once the waits are spent and `settlesBy` is not ahead.
  */
 export const settledInvocation = async ({
   funding,
@@ -353,15 +382,41 @@ export const settledInvocation = async ({
   clock: HostClock;
   signal: AbortSignal;
 }>): Promise<InvocationResolution> => {
-  let resolution = await funding.resolveInvocation({ attemptId, signal });
-  for (const wait of pendingAttemptWaits) {
-    if (resolution.status !== 'pending' && resolution.status !== 'unavailable') {
+  const clockNow = (): number => clock.now?.() ?? Date.now();
+  const startedAt = Date.now();
+  const started = clockNow();
+  let waited = 0;
+  const elapsed = (): number => Math.max(clockNow() - started, waited);
+  const lookUp = async (): Promise<InvocationResolution> => funding.resolveInvocation({ attemptId, signal });
+  /* The gateway's latest statement, as time since the first lookup; an `unavailable` answer does not withdraw it. */
+  const boundAfter = (answer: InvocationResolution, previous: number | undefined): number | undefined => {
+    const settlesBy = settlementInstant(answer);
+    return settlesBy === undefined ? previous : settlesBy - startedAt;
+  };
+  const wait = async (milliseconds: number): Promise<void> => {
+    await waitOn(clock, milliseconds, signal);
+    waited += milliseconds;
+  };
+  const unsettled = (answer: InvocationResolution): boolean =>
+    answer.status === 'pending' || answer.status === 'unavailable';
+  let resolution = await lookUp();
+  let bound = boundAfter(resolution, undefined);
+  for (const shortWait of pendingAttemptWaits) {
+    if (!unsettled(resolution)) {
       break;
     }
     // oxlint-disable-next-line no-await-in-loop -- each lookup follows the previous answer's wait.
-    await waitOn(clock, wait, signal);
+    await wait(shortWait);
     // oxlint-disable-next-line no-await-in-loop -- as above.
-    resolution = await funding.resolveInvocation({ attemptId, signal });
+    resolution = await lookUp();
+    bound = boundAfter(resolution, bound);
+  }
+  while (unsettled(resolution) && bound !== undefined && elapsed() < bound) {
+    // oxlint-disable-next-line no-await-in-loop -- each lookup follows the previous answer's wait.
+    await wait(Math.min(settlementPollCap, bound - elapsed()));
+    // oxlint-disable-next-line no-await-in-loop -- as above.
+    resolution = await lookUp();
+    bound = boundAfter(resolution, bound);
   }
   return resolution;
 };

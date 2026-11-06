@@ -723,6 +723,13 @@
       "kind": "witness",
       "ref": "StartWaits: Send now's lookup can beat the API noticing the cut"
     },
+    "StopSettlement.no-settles-by-NoWaitEndBeforeSettlesBy.cfg": {
+      "tier": "pr",
+      "expect": { "violated": "NoWaitEndBeforeSettlesBy" },
+      "kind": "defect",
+      "ref": "A lost reply's live retry ends RUN_ABANDONED{MODEL_ATTEMPT_PENDING} after the host's short waits while the gateway's settlesBy is minutes away",
+      "fixedBy": "W2 (settlesBy)"
+    },
     "StopSettlement.resume-no-wait-StopNeverRefuses.cfg": {
       "tier": "pr",
       "expect": { "violated": "StopNeverRefuses" },
@@ -733,13 +740,13 @@
     "StopSettlement.target.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "R1: a stop's cut settles when the API notices it, both resolve-first lookups wait, a user who keeps resuming proceeds"
+      "ref": "R1: a stop's cut settles when the API notices it, both resolve-first lookups wait (until the gateway's settlesBy when it states one, W2 I3), a user who keeps resuming proceeds"
     },
     "StopSettlement.wait-only-StopNeverPauses.cfg": {
       "tier": "pr",
       "expect": { "violated": "StopNeverPauses" },
       "kind": "witness",
-      "ref": "ImmediateCut: the host's bounded wait alone cannot outlast the recovery sweep"
+      "ref": "ImmediateCut: the host's short waits alone (no settlesBy) cannot outlast the recovery sweep"
     },
     "TurnSettlement.daemon.cfg": {
       "tier": "pr",

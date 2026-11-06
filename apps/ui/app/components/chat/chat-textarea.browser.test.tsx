@@ -553,7 +553,7 @@ describe('question dictation', () => {
         </TooltipProvider>,
       );
       if (variant === 'options') {
-        await page.getByRole('button', { name: 'C, Something else: answer in your own words' }).click();
+        await page.getByRole('radio', { name: 'Other: answer in your own words' }).click();
       }
       const box = page.getByRole('textbox', { name: 'Your answer' });
       const region = screen.getByRole('region', { name: 'Question reply' });

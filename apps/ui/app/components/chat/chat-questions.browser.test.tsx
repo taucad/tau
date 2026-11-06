@@ -104,9 +104,14 @@ it('wraps long question choices at enlarged text size and preserves keyboard cho
       />
     </div>,
   );
-  const group = screen.getByRole('group');
+  const group = screen.getByRole('group', { name: ask.questions[0]!.question });
   expect(group.scrollWidth).toBeLessThanOrEqual(group.clientWidth);
-  await userEvent.click(screen.getByRole('button', { name: /^A,/u }));
+  const first = screen.getAllByRole('radio')[0]!;
+  first.focus();
+  await userEvent.keyboard(' ');
+  expect(first).toBeChecked();
+  expect(onAnswer).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole('button', { name: 'Submit' }));
   expect(onAnswer).toHaveBeenCalledWith('q-1', { choice: ask.questions[0]!.options[0]!.label });
   await page.screenshot({ path: '../../../../../out/test-results/message-queue/question-enlarged.png' });
 });
@@ -145,13 +150,14 @@ it.each(['', 'dark', 'dark black', 'dark high-contrast'])(
         />
       </div>,
     );
-    await userEvent.click(screen.getByRole('button', { name: 'PLA' }));
-    await userEvent.click(screen.getByRole('button', { name: 'PETG' }));
+    await userEvent.click(screen.getByRole('checkbox', { name: 'PLA' }));
+    expect(screen.getByRole('button', { name: 'Submit' })).toBeDisabled();
+    await userEvent.click(screen.getByRole('checkbox', { name: 'PETG' }));
     expect(onAnswer).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'PLA' })).toHaveAttribute('aria-pressed', 'true');
-    await userEvent.click(screen.getByRole('button', { name: 'Confirm selection' }));
+    expect(screen.getByRole('checkbox', { name: 'PLA' })).toBeChecked();
+    await userEvent.click(screen.getByRole('button', { name: 'Submit' }));
     expect(onAnswer).toHaveBeenCalledWith('materials', { value: ['pla', 'petg'] });
-    const group = screen.getByRole('group');
+    const group = screen.getByRole('group', { name: 'Which materials should be compared?' });
     expect(group.scrollWidth).toBeLessThanOrEqual(group.clientWidth);
   },
 );
@@ -268,7 +274,7 @@ it.each(['', 'dark'])('should dictate an own-words answer beside the draft in th
       </div>
     </TooltipProvider>,
   );
-  await userEvent.click(screen.getByRole('button', { name: /^C, Something else/u }));
+  await userEvent.click(screen.getByRole('radio', { name: 'Other: answer in your own words' }));
   const box = screen.getByRole('textbox', { name: 'Your answer' });
   await userEvent.type(box, 'Clamp it to the tube.');
   await userEvent.click(await screen.findByRole('button', { name: 'Dictate' }));

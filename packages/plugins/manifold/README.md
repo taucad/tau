@@ -38,12 +38,12 @@ Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, o
 
 ## API
 
-| Export            | Kind            | Use                                                                           |
-| ----------------- | --------------- | ----------------------------------------------------------------------------- |
-| `manifold`        | toolkit factory | package-named authoring factory; presets select capabilities                  |
-| `plugin`          | toolkit factory | the same factory under its mechanical name, for loaders that read a fixed key |
-| `manifoldKernel`  | kernel factory  | direct `kernels` composition; reads `ts`, `js`                                |
-| `ManifoldOptions` | type            | `{ wasmUrl?: string }` — override the bundled Manifold WASM                   |
+| Export            | Kind            | Use                                                                                                                        |
+| ----------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `manifold`        | toolkit factory | package-named authoring factory; presets select capabilities                                                               |
+| `plugin`          | toolkit factory | the same factory under its mechanical name, for loaders that read a fixed key                                              |
+| `manifoldKernel`  | kernel factory  | direct `kernels` composition; reads `ts`, `js`                                                                             |
+| `ManifoldOptions` | type            | `{ wasmUrl?: string, libraryTracing?: 'off' \| 'summary' \| 'per-call' }` — a custom Manifold WASM; user-code call tracing |
 
 One preset, `default`, selecting `kernels.default`.
 

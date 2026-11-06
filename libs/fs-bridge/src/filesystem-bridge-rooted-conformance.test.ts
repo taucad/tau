@@ -51,6 +51,7 @@ import {
   rootedHandlersFor,
   rootedWorkspaceHandlers,
   seededWorkspace,
+  seededWorkspaceWithProvider,
 } from '#filesystem-bridge-rooted.test-fixture.js';
 
 const encoder = new TextEncoder();
@@ -758,6 +759,152 @@ const advance = async (milliseconds: number): Promise<void> => {
     }
   }
 };
+
+/**
+ * A connection whose authority's provider can be held mid-batch, so a test
+ * can cut a mutating call off while the authority is part-way through it.
+ */
+const openHeld = async (
+  transport: 'in-process port' | 'authority connection',
+): Promise<{ proxy: FileSystemBridgeRootedProxy; holdBatch(batch: number): HeldBatch }> => {
+  const { service, projectProvider } = await seededWorkspaceWithProvider(files);
+  let proxy: FileSystemBridgeRootedProxy;
+  let cleanup: () => void;
+  if (transport === 'in-process port') {
+    const handlers = rootedHandlersFor({
+      service,
+      root: conformanceProjectRoot,
+      context: { originClientId: 'conformance' },
+      consumer: 'working-copy',
+    });
+    proxy = createFileSystemBridgeProxy(createFileSystemBridgePort(handlers));
+    cleanup = () => undefined;
+  } else {
+    const boundary = new MessageChannel();
+    const exposed = exposeFileSystem(workspaceBridgeService(service), {
+      policy: tauPathPolicy,
+      handlerForRoot: (root, context, rootConsumer) =>
+        rootedHandlersFor({ service, root, context, consumer: rootConsumer }),
+      messageSource: boundary.port2,
+    });
+    const connection = openFileSystemBridge(boundary.port1, { root: conformanceProjectRoot, consumer: 'working-copy' });
+    proxy = createTransferredFileSystemBridgeProxy(connection.port);
+    cleanup = () => {
+      exposed.cleanup();
+      boundary.port1.close();
+      boundary.port2.close();
+    };
+  }
+  opened.push({
+    proxy,
+    hostCrossings: async () => new Map(),
+    externalWrite: async () => undefined,
+    computeRestarted: () => undefined,
+    killAuthority: async () => undefined,
+    async close() {
+      proxy.dispose();
+      cleanup();
+      service.dispose();
+    },
+  });
+  await proxy.ready;
+  const applyBatch = projectProvider.applyBatch!.bind(projectProvider);
+  return {
+    proxy,
+    holdBatch(batch) {
+      const reached = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const serverAborted = Promise.withResolvers<void>();
+      const settled = Promise.withResolvers<boolean>();
+      let batches = 0;
+      projectProvider.applyBatch = async (entries, options) => {
+        batches += 1;
+        if (batches !== batch) {
+          return applyBatch(entries, options);
+        }
+        options?.signal?.addEventListener('abort', () => {
+          serverAborted.resolve();
+        });
+        reached.resolve();
+        await release.promise;
+        const receipts = await applyBatch(entries, options);
+        settled.resolve(receipts.every(({ outcome }) => outcome === 'applied'));
+        return receipts;
+      };
+      return {
+        reached: reached.promise,
+        serverAborted: serverAborted.promise,
+        settled: settled.promise,
+        release: release.resolve,
+        batches: () => batches,
+      };
+    },
+  };
+};
+
+type HeldBatch = {
+  /** The held batch has started. */
+  readonly reached: Promise<void>;
+  /** The authority's own signal for the call has fired: the caller's cancel arrived. */
+  readonly serverAborted: Promise<void>;
+  /** The held batch finished; `true` when every entry of it applied. */
+  readonly settled: Promise<boolean>;
+  release(): void;
+  batches(): number;
+};
+
+describe.each(['in-process port', 'authority connection'] as const)(
+  'rooted bridge conformance: a mutating call cut off mid-call over the %s (W10 F1)',
+  (transport) => {
+    it('reports a three-phase changeset aborted mid-call as potentially applied, and the root shows what landed', async () => {
+      const { proxy, holdBatch } = await openHeld(transport);
+      const held = holdBatch(2);
+      const controller = new AbortController();
+      const applying = proxy.apply(
+        {
+          entries: [
+            { op: 'write', path: 'phase-0.ts', data: '0', phase: 0 },
+            { op: 'write', path: 'phase-1.ts', data: '1', phase: 1 },
+            { op: 'write', path: 'phase-2.ts', data: '2', phase: 2 },
+          ],
+        },
+        { signal: controller.signal },
+      );
+      await held.reached;
+      controller.abort();
+      await expect(applying).rejects.toMatchObject({ name: 'AbortError', applicationState: 'potentially-applied' });
+      await held.serverAborted;
+      held.release();
+      // The phase in flight settles as its provider answers; the abort stops the phase after it.
+      const phaseOneLanded = await held.settled;
+      await expect(proxy.exists('phase-0.ts')).resolves.toBe(true);
+      await expect(proxy.exists('phase-1.ts')).resolves.toBe(phaseOneLanded);
+      await expect(proxy.exists('phase-2.ts')).resolves.toBe(false);
+      expect(held.batches()).toBe(2);
+    });
+
+    it('reports a copy aborted mid-call as potentially applied', async () => {
+      const { proxy, holdBatch } = await openHeld(transport);
+      const held = holdBatch(1);
+      const controller = new AbortController();
+      const copying = proxy.copyTree('lib', 'backup', { signal: controller.signal });
+      await held.reached;
+      controller.abort();
+      await expect(copying).rejects.toMatchObject({ name: 'AbortError', applicationState: 'potentially-applied' });
+      await held.serverAborted;
+      held.release();
+      await held.settled;
+    });
+
+    it('reports an abort before the call reached the wire as known not applied', async () => {
+      const { proxy } = await openHeld(transport);
+      await expect(
+        proxy.apply({ entries: [{ op: 'write', path: 'never.ts', data: 'x' }] }, { signal: AbortSignal.abort() }),
+      ).rejects.toMatchObject({ name: 'AbortError', applicationState: 'known-not-applied' });
+      await expect(proxy.exists('never.ts')).resolves.toBe(false);
+    });
+  },
+);
 
 describe('rooted bridge conformance: apply outlives the ordinary deadline (W10, I10)', () => {
   it('keeps an apply alive past 30 s while its authority applies it, and answers its receipt', async () => {

@@ -7,7 +7,7 @@
  */
 import { Worker as NodeWorker } from 'node:worker_threads';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
-import type { WorkspaceMutationContext } from '@taucad/filesystem';
+import type { FileSystemProvider, WorkspaceMutationContext } from '@taucad/filesystem';
 import { composeView } from '@taucad/filesystem/composed-view';
 import { withReadContentOps } from '@taucad/filesystem/content-ops';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
@@ -59,6 +59,20 @@ const unique = (): string => Math.random().toString(36).slice(2);
 export const seededWorkspace = async (
   files: Record<string, string | Uint8Array<ArrayBuffer>>,
 ): Promise<WorkspaceFileService> => {
+  const { service } = await seededWorkspaceWithProvider(files);
+  return service;
+};
+
+/**
+ * {@link seededWorkspace}, with the provider that holds the project root's
+ * bytes, for a test that must see or hold the authority's own I/O.
+ *
+ * @param files - The root's files.
+ * @returns The authority service and the project root's provider.
+ */
+export const seededWorkspaceWithProvider = async (
+  files: Record<string, string | Uint8Array<ArrayBuffer>>,
+): Promise<{ service: WorkspaceFileService; projectProvider: FileSystemProvider }> => {
   const providerRegistry = new ProviderRegistry();
   const storageRootKey = `memory:conformance-root-${unique()}`;
   const rootProvider = await providerRegistry.getProvider({ backend: 'memory', storageRootKey });
@@ -70,12 +84,13 @@ export const seededWorkspace = async (
     eventBus: new ChangeEventBus(),
     mountTable,
   });
+  const projectStorageRootKey = `memory:conformance-project-${unique()}`;
   await service.configureProjectRoots({
     projects: [
       {
         projectId: conformanceProjectId,
         backend: 'memory',
-        storageRootKey: `memory:conformance-project-${unique()}`,
+        storageRootKey: projectStorageRootKey,
         providerBasePath: conformanceProjectId,
       },
     ],
@@ -86,7 +101,11 @@ export const seededWorkspace = async (
       service.writeFile(`${conformanceProjectRoot}/${path}`, content),
     ),
   );
-  return service;
+  const projectProvider = await providerRegistry.getProvider({
+    backend: 'memory',
+    storageRootKey: projectStorageRootKey,
+  });
+  return { service, projectProvider };
 };
 
 /**

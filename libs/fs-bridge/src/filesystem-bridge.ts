@@ -667,6 +667,48 @@ const checkedWritePreDeliveryError = (
   );
 };
 
+/**
+ * The bridge calls that mutate the root without a precondition: a failure the
+ * caller cannot place before or after the authority began says so, as a
+ * checked write's does.
+ */
+const mutatingCalls: ReadonlySet<string> = new Set([
+  'apply',
+  'writeFiles',
+  'bulkMove',
+  'commitPendingProjectDirectory',
+  'copyTree',
+  'duplicate',
+]);
+
+/** Codes that end a call the authority may already be applying. */
+const lostCallCodes: ReadonlySet<unknown> = new Set(['PEER_UNRESPONSIVE', 'PEER_GONE']);
+
+/**
+ * A mutating call's failure with what is known about its effect (I10).
+ *
+ * The caller's abort after the call was sent, and a connection that stopped
+ * answering or died under it, all leave the authority possibly mid-way: some
+ * phases or files may have landed. They are `potentially-applied`, like a
+ * checked write's, so the caller re-reads before it retries. An abort before
+ * the call was sent is `known-not-applied`. Every other failure is the
+ * authority's own answer and passes through.
+ *
+ * @param error - The rejection.
+ * @param sent - Whether the call reached the wire.
+ * @returns The error, carrying `applicationState` where the effect is unknown.
+ */
+const classifyMutationFailure = (error: unknown, sent: boolean): unknown => {
+  if (checkedWriteApplicationState(error) !== undefined) {
+    return error;
+  }
+  const { name, code } = (error ?? {}) as { name?: unknown; code?: unknown };
+  if (name === 'AbortError') {
+    return withCheckedWriteApplicationState(error, sent ? 'potentially-applied' : 'known-not-applied');
+  }
+  return lostCallCodes.has(code) ? withCheckedWriteApplicationState(error, 'potentially-applied') : error;
+};
+
 const classifyCheckedWriteFailure = (error: unknown): Error => {
   restoreCheckedWriteApplicationState(error);
   if (checkedWriteApplicationState(error) !== undefined) {
@@ -1889,11 +1931,14 @@ export function createFileSystemBridgeProxy(
             );
           }
         }
+        /* Whether the call reached the wire: an abort before it never did. */
+        let sent = false;
         try {
           const split = property === 'apply' ? await prepareApplyCall(args) : splitLongCall(property, args);
-          const result = await timeFileSystemBridgeCall(connectionId, property, async () =>
-            call(property, split.args, split.longCall),
-          );
+          const result = await timeFileSystemBridgeCall(connectionId, property, async () => {
+            sent = split.longCall?.signal?.aborted !== true;
+            return call(property, split.args, split.longCall);
+          });
           if (property === 'readMany') {
             return readManyResult(result as ReadManyWireRows);
           }
@@ -1910,6 +1955,9 @@ export function createFileSystemBridgeProxy(
           }
           if (property === 'writeFileChecked' || property === 'deleteFileChecked') {
             throw classifyCheckedWriteFailure(error);
+          }
+          if (mutatingCalls.has(property)) {
+            throw classifyMutationFailure(error, sent);
           }
           throw error;
         }

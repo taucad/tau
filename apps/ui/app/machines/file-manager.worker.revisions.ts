@@ -109,6 +109,9 @@ import { fetchGeoSpecCandidates, publishGeoSpecCandidate } from '#lib/geospec-ca
 export const versionedChangePaths = (event: ChangeEvent, projectRoot: string): readonly string[] =>
   classifiedChangePaths(event, projectRoot, tauPathPolicy);
 
+/** How long a comparison against the checkout waits for a large object a running fill is fetching (D9). */
+const compareWaitMilliseconds = 10_000;
+
 /** The sentence a lost compare-and-swap reads as, in the log (the page's words come from its code). */
 const casLostMessage = 'Something else changed this project first. Try again.';
 
@@ -1406,6 +1409,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       throw new Error('The checkout head tree is unavailable.');
     }
     return {
+      id: checkout.id,
       filesystem,
       mode: (path: string): FileMode => basis?.mode(path) ?? '100644',
     };
@@ -1729,23 +1733,15 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         const checkout = await comparisonCheckout([path]);
         const { filesystem } = checkout;
         const recorded = tree.get(path);
-        let working: Uint8Array<ArrayBuffer> | undefined;
         let mode = checkout.mode(path);
-        try {
-          working = await filesystem.readFile(path);
+        /* Through the content read, so a placeholder compares as its object, never as its pointer text (D9). */
+        const read = await readContent(checkout.id, path, { wait: compareWaitMilliseconds });
+        if (read.outcome === 'pending') {
+          throw Object.assign(new Error(`The large object of ${path} is not on this device yet.`), { code: 'PENDING' });
+        }
+        const working = read.outcome === 'bytes' ? read.data : undefined;
+        if (working !== undefined) {
           mode = (await filesystem.getFileMode?.(path)) ?? mode;
-        } catch (error) {
-          if (
-            !(
-              typeof error === 'object' &&
-              error !== null &&
-              (('code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR' || error.code === 'EISDIR')) ||
-                ('name' in error && error.name === 'NotFoundError'))
-            )
-          ) {
-            throw error;
-          }
-          working = undefined;
         }
         return compareRevisionFile({
           original: recorded === undefined ? undefined : { content: recorded, mode: tree.mode(path) ?? '100644' },

@@ -888,7 +888,18 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       type: 'error',
       code: 'PENDING',
     });
+    /* W4 review 7: a comparison against the checkout reads through a placeholder too, never its pointer text. */
+    const head = second.frames.findLast((frame) => frame.type === 'status')?.status.headRevisionId;
+    await project.writeFile('models/copy.step', bytes);
+    second.send({ command: 'compare', id: 73, revisionId: head!, path: 'models/copy.step', against: 'checkout' });
+    await vi.waitFor(() => {
+      expect(second.frames.find((frame) => 'id' in frame && frame.id === 73)).toMatchObject({
+        type: 'error',
+        code: 'PENDING',
+      });
+    });
     expect(await project.readFile('models/part.step')).toStrictEqual(bytes);
+    await project.unlink('models/copy.step');
 
     await project.writeFile(objectFile, part);
     const framesBeforeFill = second.frames.length;
@@ -1249,6 +1260,14 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     await turnFinalized(alpha, 'turn-1');
     const head = root.status().headRevisionId;
     expect(head).toBeDefined();
+    /* The turn's own reads (a capture's mode basis for its new head) settle first; under load they ran late. */
+    await expect
+      .poll(async () => {
+        const before = asked.length;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        return asked.length === before;
+      })
+      .toBe(true);
     asked.length = 0;
     expect(await root.compare(head!, 'main.scad')).toMatchObject({ original: 'cube(10);', modified: 'cube(20);' });
     expect(await root.compare(head!, 'main.scad', { against: 'checkout' })).toMatchObject({ change: 'unchanged' });

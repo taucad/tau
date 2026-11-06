@@ -15,6 +15,7 @@
  */
 import { MessageChannel as NodeMessageChannel, Worker } from 'node:worker_threads';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { wrapMessagePort } from '@taucad/rpc';
 import type { MessagePortLike } from '@taucad/rpc';
 import {
   createFileSystemBridgePort,
@@ -22,6 +23,7 @@ import {
   createTransferredFileSystemBridgeProxy,
   exposeFileSystem,
   openFileSystemBridge,
+  serveFileSystemBridgePort,
   workspaceBridgeService,
 } from '#filesystem-bridge.js';
 import type { FileSystemBridgeRootedProxy, RootedBridgeConsumer } from '#filesystem-bridge.js';
@@ -31,6 +33,7 @@ import {
   maxGlobPatternLength,
   maxGrepFileBytes,
   maxGrepLineCharacters,
+  maxGrepPatternLength,
 } from '#filesystem-bridge-protocol.js';
 import { grepMatchDeadline } from '#filesystem-bridge-grep-matcher.js';
 import type {
@@ -428,6 +431,10 @@ describe.each([inProcessPort, authorityConnection, workerPort])('rooted bridge c
       await expect(proxy.grep('x', { maxFileBytes: maxGrepFileBytes + 1 })).rejects.toMatchObject(refused);
       await expect(proxy.grep('x', { glob: longPattern })).rejects.toMatchObject(refused);
       await expect(proxy.glob(longPattern)).rejects.toMatchObject(refused);
+      await expect(proxy.grep('a'.repeat(maxGrepPatternLength + 1))).rejects.toMatchObject(refused);
+      await expect(proxy.grep('a'.repeat(maxGrepPatternLength), { fixedStrings: true })).resolves.toMatchObject({
+        matches: [],
+      });
       await expect(proxy.facts(['main.ts'], { byteCap: maxFactsByteCap + 1 })).rejects.toMatchObject(refused);
       await expect(proxy.grep('x', { maxFileBytes: maxGrepFileBytes })).resolves.toMatchObject({ truncated: false });
     });
@@ -1078,5 +1085,113 @@ describe('rooted bridge conformance: apply outlives the ordinary deadline (W10, 
     await expect(pending).resolves.toMatchObject({ state: 'applied', applied: 1 });
     vi.useRealTimers();
     await expect(proxy.readFile('late.txt', 'utf8')).resolves.toBe('late');
+  });
+});
+
+describe('rooted bridge conformance: a sent apply its connection cuts off is potentially applied (W10)', () => {
+  const changeset: Changeset = { entries: [{ op: 'write', path: 'cut.ts', data: 'x' }] };
+  const potentiallyApplied = (code: string) => ({ code, applicationState: 'potentially-applied' });
+
+  /** A rooted worker authority whose thread can be blocked mid-call. */
+  const openFreezable = async (): Promise<{
+    proxy: FileSystemBridgeRootedProxy;
+    worker: Worker;
+    freeze(): Promise<void>;
+    thaw(): void;
+  }> => {
+    const worker = new Worker(new URL('filesystem-bridge-conformance.test-worker.ts', import.meta.url));
+    const channel = new NodeMessageChannel();
+    const serving = workerMessage(worker, 'serving');
+    worker.postMessage({ type: 'serve-rooted', port: channel.port1, files, consumer: 'working-copy' }, [channel.port1]);
+    await serving;
+    const proxy = createTransferredFileSystemBridgeProxy(channel.port2 as unknown as MessagePortLike);
+    await proxy.ready;
+    const gate = new Int32Array(new SharedArrayBuffer(4));
+    const thaw = (): void => {
+      Atomics.store(gate, 0, 1);
+      Atomics.notify(gate, 0);
+    };
+    opened.push({
+      proxy,
+      hostCrossings: async () => new Map(),
+      externalWrite: async () => undefined,
+      computeRestarted: () => undefined,
+      killAuthority: async () => undefined,
+      async close() {
+        thaw();
+        proxy.dispose();
+        await worker.terminate();
+      },
+    });
+    return {
+      proxy,
+      worker,
+      async freeze() {
+        const frozen = workerMessage(worker, 'frozen');
+        worker.postMessage({ type: 'freeze', gate });
+        await frozen;
+      },
+      thaw,
+    };
+  };
+
+  it('when the authority stops answering (PEER_UNRESPONSIVE)', async () => {
+    const host = await openFreezable();
+    await host.freeze();
+    vi.useFakeTimers();
+    const applying = host.proxy.apply(changeset);
+    const failure = expect(applying).rejects.toMatchObject(potentiallyApplied('PEER_UNRESPONSIVE'));
+    await vi.advanceTimersByTimeAsync(30_000);
+    await failure;
+    vi.useRealTimers();
+    host.thaw();
+  });
+
+  it('when the authority dies (PEER_GONE)', async () => {
+    const host = await openFreezable();
+    await host.freeze();
+    const applying = host.proxy.apply(changeset);
+    const failure = expect(applying).rejects.toMatchObject(potentiallyApplied('PEER_GONE'));
+    await host.worker.terminate();
+    await failure;
+  });
+
+  it('when the authority closes the connection (PEER_CLOSED)', async () => {
+    const { service, handlers } = await rootedWorkspaceHandlers(files, 'working-copy');
+    const reached = Promise.withResolvers<void>();
+    const held: FileSystemBridgeRuntimeService = {
+      ...handlers,
+      async apply() {
+        reached.resolve();
+        return new Promise<never>(() => {
+          // Never answers: the connection closes first.
+        });
+      },
+    };
+    const channel = new NodeMessageChannel();
+    const served = wrapMessagePort<unknown>(channel.port1 as unknown as MessagePortLike, { label: 'peer-closed' });
+    served.start?.();
+    const server = serveFileSystemBridgePort(held, served);
+    const proxy = createTransferredFileSystemBridgeProxy(channel.port2 as unknown as MessagePortLike);
+    opened.push({
+      proxy,
+      hostCrossings: async () => new Map(),
+      externalWrite: async () => undefined,
+      computeRestarted: () => undefined,
+      killAuthority: async () => undefined,
+      async close() {
+        proxy.dispose();
+        server.dispose();
+        channel.port1.close();
+        service.dispose();
+      },
+    });
+    await proxy.ready;
+    const applying = proxy.apply(changeset);
+    const failure = expect(applying).rejects.toMatchObject(potentiallyApplied('PEER_CLOSED'));
+    await reached.promise;
+    // The authority's graceful close: its channel says goodbye while the call is still running.
+    channel.port1.postMessage({ v: 1, k: 'lb', r: 'authority closing' });
+    await failure;
   });
 });

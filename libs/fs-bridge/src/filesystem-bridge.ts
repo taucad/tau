@@ -684,8 +684,22 @@ const mutatingCalls: ReadonlySet<string> = new Set([
   'duplicate',
 ]);
 
-/** Codes that end a call the authority may already be applying. */
-const lostCallCodes: ReadonlySet<unknown> = new Set(['PEER_UNRESPONSIVE', 'PEER_GONE']);
+/**
+ * The channel close codes (`ChannelCloseCode`): each ends a call without the
+ * authority's answer, so a sent mutation may already be applying.
+ */
+const lostCallCodes: ReadonlySet<unknown> = new Set([
+  'PEER_UNRESPONSIVE',
+  'PEER_GONE',
+  'PEER_CLOSED',
+  'CHANNEL_CLOSED',
+]);
+
+/** Whether a sent call's rejection is the authority's own answer, not a cut-off call. */
+const isAuthorityAnswer = (error: unknown): boolean => {
+  const { name, code } = (error ?? {}) as { name?: unknown; code?: unknown };
+  return name !== 'AbortError' && !lostCallCodes.has(code);
+};
 
 /**
  * A mutating call's failure with what is known about its effect (I10).
@@ -1769,7 +1783,8 @@ export function createFileSystemBridge(
  * closes under it, or when a call finds the authority unresponsive
  * (`PEER_UNRESPONSIVE`: no heartbeat, progress or answer within its liveness
  * window) while the port stays open. Whichever comes first is the loss; the
- * other says nothing more. A loss clears once a call is answered again, so the
+ * other says nothing more. A loss clears once a call is answered again (with a
+ * result or an error), so the
  * next one is announced too.
  *
  * On a loss, `onLost` runs as well: the proxy resets every change-set watch it
@@ -1932,27 +1947,52 @@ export function createFileSystemBridgeProxy(
           handler: (set: ChangeSet) => void,
         ): ReturnType<FileSystemBridgeProxyTransport['watchChangeSets']> => {
           let generation = 0;
+          /* A second reset with no frame between them says nothing new. */
+          let resetSinceFrame = false;
+          let active = true;
           const registration = watchReady({ ...request, form: 'change-sets' }, (frame) => {
             const set = frame as ChangeSet;
             generation = set.generation;
+            resetSinceFrame = false;
             handler(set);
           });
-          const leaveLost = connectionLost.subscribe(() => {
+          const reset = (): void => {
+            if (!active || resetSinceFrame) {
+              return;
+            }
+            resetSinceFrame = true;
             handler(lostConnectionReset(generation));
-          });
-          // A refused registration hears no reset; its caller handles `ready`.
-          const forgetIfRefused = async (): Promise<void> => {
+          };
+          const leaveLost = connectionLost.subscribe(reset);
+          const leave = (): void => {
+            active = false;
+            leaveLost();
+          };
+          /* The watch holds its loss subscription only while it is open. A refused
+           * registration hears no reset (its caller handles `ready`); a watch the
+           * connection's close ends hears its reset first, since the watch closes
+           * at the channel's teardown, before the connection's own close settles. */
+          const followRegistration = async (): Promise<void> => {
             try {
               await registration.ready;
             } catch {
-              leaveLost();
+              leave();
+              return;
             }
+            try {
+              await registration.closed;
+            } catch (error) {
+              if (!isDisposed && !isAuthorityAnswer(error)) {
+                reset();
+              }
+            }
+            leave();
           };
-          void forgetIfRefused();
+          void followRegistration();
           return {
             ...registration,
             unsubscribe() {
-              leaveLost();
+              leave();
               registration.unsubscribe();
             },
           };
@@ -1992,11 +2032,11 @@ export function createFileSystemBridgeProxy(
           }
         }
         /* Whether the call reached the wire: an abort before it never did. */
-        let sent = false;
+        const wire = { sent: false };
         try {
           const split = property === 'apply' ? await prepareApplyCall(args) : splitLongCall(property, args);
           const result = await timeFileSystemBridgeCall(connectionId, property, async () => {
-            sent = split.longCall?.signal?.aborted !== true;
+            wire.sent = split.longCall?.signal?.aborted !== true;
             return call(property, split.args, split.longCall);
           });
           events.answered();
@@ -2013,12 +2053,15 @@ export function createFileSystemBridgeProxy(
         } catch (error) {
           if ((error as { code?: unknown } | undefined)?.code === 'PEER_UNRESPONSIVE') {
             events.announceLost();
+          } else if (wire.sent && isAuthorityAnswer(error)) {
+            // An error answer is still an answer: the authority is back.
+            events.answered();
           }
           if (property === 'writeFileChecked' || property === 'deleteFileChecked') {
             throw classifyCheckedWriteFailure(error);
           }
           if (mutatingCalls.has(property)) {
-            throw classifyMutationFailure(error, sent);
+            throw classifyMutationFailure(error, wire.sent);
           }
           throw error;
         }

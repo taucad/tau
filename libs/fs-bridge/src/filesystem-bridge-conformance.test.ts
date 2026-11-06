@@ -466,6 +466,29 @@ describe('bridge conformance: authority death after ready (W10)', () => {
     expect(text(answered.get('a.ts'))).toBe('alpha');
     await loseOnce();
     expect(heard).toEqual([{ kind: 'authority-lost' }, { kind: 'authority-lost' }]);
+    // An error answer is an answer too.
+    await expect(host.proxy.readRange('no-such.ts', 0, 1)).rejects.toMatchObject({ code: 'ENOENT' });
+    await loseOnce();
+    expect(heard).toEqual([{ kind: 'authority-lost' }, { kind: 'authority-lost' }, { kind: 'authority-lost' }]);
     subscription.unsubscribe();
+  });
+
+  it('gives a refused change-set watch no reset when the connection is later lost', async () => {
+    const host = await openWorkerHost(files);
+    opened.push(host);
+    const sets: unknown[] = [];
+    const watch = host.proxy.watchChangeSets({ paths: [''], recursive: true }, (set) => sets.push(set));
+    // A plain handler set serves no change-set watch.
+    await expect(watch.ready).rejects.toThrow('do not implement');
+    await host.freeze();
+    vi.useFakeTimers();
+    const pending = host.proxy.readMany(['a.ts']);
+    const failure = expect(pending).rejects.toMatchObject({ code: 'PEER_UNRESPONSIVE' });
+    await vi.advanceTimersByTimeAsync(30_000);
+    await failure;
+    vi.useRealTimers();
+    host.thaw();
+    expect(sets).toEqual([]);
+    watch.unsubscribe();
   });
 });

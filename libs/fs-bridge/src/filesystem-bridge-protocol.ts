@@ -311,6 +311,8 @@ export const defaultGrepFileBytes = 4 * 1024 * 1024;
 export const maxGrepFileBytes = 256 * 1024 * 1024;
 /** Longest glob pattern `glob`, or `grep`'s `glob` option, takes. @public */
 export const maxGlobPatternLength = 4096;
+/** Longest regular expression (or literal) a `grep` takes, the same as a glob's. @public */
+export const maxGrepPatternLength = maxGlobPatternLength;
 /** Largest file a `facts` call may be asked to read in full, to count lines or digest it. @public */
 export const maxFactsByteCap = 1024 * 1024 * 1024;
 /** Most context lines on each side of a `grep` match. @public */
@@ -1532,7 +1534,10 @@ const callSchemas = {
     args: z.tuple([z.string().max(maxGlobPatternLength), globOptionsSchema.optional()]),
     result: fileStatEntriesSchema,
   },
-  grep: { args: z.tuple([z.string(), grepOptionsSchema.optional()]), result: grepResultSchema },
+  grep: {
+    args: z.tuple([z.string().max(maxGrepPatternLength), grepOptionsSchema.optional()]),
+    result: grepResultSchema,
+  },
   indexStats: { args: z.tuple([rootedPathSchema]), result: indexStatsSchema },
   facts: {
     args: z.tuple([z.array(rootedPathSchema).max(maxReadManyPaths), factsOptionsSchema.optional()]),

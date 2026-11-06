@@ -25,6 +25,7 @@
  */
 
 import { indexPack } from 'isomorphic-git';
+import { installBufferGlobal } from '#buffer-global.js';
 import { bytesToHex, digest } from '#object-hash.js';
 import { CorruptBytesError } from '#compute-worker/errors.js';
 import type { ComputeMethod } from '#compute-worker/errors.js';
@@ -183,6 +184,8 @@ export const createInlineCompute = (): ComputeWorker => {
     sha1: async (bytes) => hashHex('sha1', bytes),
     sha256: async (bytes) => hashHex('sha256', bytes),
     indexPack: async (pack) => {
+      /* This realm may be a fresh worker with no `Buffer`; without one the indexer reads a `null` pack. */
+      installBufferGlobal();
       const { fs, files } = memoryFiles(pack);
       try {
         await indexPack({ fs, dir: '', gitdir: '', filepath: 'pack.pack' });

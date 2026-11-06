@@ -385,8 +385,9 @@ describe('OpenRSCADKernel', () => {
     // of @taulabs/openrscad-engine, which cannot silently fall behind. It names
     // the engine *release*, not the backend: the addon and the WebAssembly
     // build of one release are byte-identical (`native-wasm-parity.test.ts`),
-    // so they deliberately share this cache namespace.
-    expect(definition.version).toBe('0.11.0-beta.5');
+    // so they deliberately share this cache namespace. The build metadata moves
+    // when the kernel's own meshing changes, which the engine release cannot see.
+    expect(definition.version).toBe('0.11.0-beta.5+tessellation1');
   });
 
   it('keeps the geometry cache bounded across repeated parameter edits of one model', async () => {

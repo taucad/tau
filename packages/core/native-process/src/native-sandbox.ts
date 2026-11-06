@@ -287,6 +287,58 @@ export const releaseNativeSandbox = async (): Promise<void> => {
   await release;
 };
 
+/**
+ * How many times one launch starts the sandbox runtime before reporting its Linux network bridge as unavailable.
+ *
+ * @internal
+ */
+export const bridgeStartAttempts = 3;
+
+/** Milliseconds to pause before the next start, growing with each failed one: a host slow to start `socat` is usually a busy one. */
+const bridgeRetryDelay = 250;
+
+/**
+ * Whether a failed {@link SandboxManager.initialize} is the Linux network bridge starting too slowly.
+ *
+ * The runtime starts two `socat` bridges and gives their sockets about 600 ms to appear before it kills them and
+ * rejects with `Failed to create bridge sockets after 5 attempts` (or reports a bridge that died or never started).
+ * On a loaded host that window is sometimes too short, and nothing about the next start depends on the last one.
+ */
+const isBridgeStartFailure = (error: unknown): boolean => error instanceof Error && /\bbridge\b/iu.test(error.message);
+
+/**
+ * Initialize the sandbox runtime, starting it again after a transient Linux bridge failure.
+ *
+ * The runtime clears its own state after a failed start, but runs that cleanup without awaiting it; the reset here is
+ * awaited, and the pause after it outlasts the runtime's own, so the next start never races the last one's teardown.
+ * Every other failure, and the last bridge failure, is reported as it is.
+ *
+ * @param profile - The process-wide baseline profile.
+ */
+const initializeWithBridgeRetry = async (profile: NativeSandboxProfile): Promise<void> => {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- each start must finish before the next one begins.
+      await SandboxManager.initialize(profile);
+      return;
+    } catch (error) {
+      if (attempt >= bridgeStartAttempts || !isBridgeStartFailure(error)) {
+        throw error;
+      }
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- the failed start's bridges and proxy must be gone first.
+        await SandboxManager.reset();
+      } catch {
+        // The runtime already started its own cleanup; a second one that fails leaves nothing more to stop.
+      }
+      // oxlint-disable-next-line no-await-in-loop -- the pause is the point.
+      await new Promise((resolve) => {
+        setTimeout(resolve, bridgeRetryDelay * attempt);
+      });
+    }
+  }
+};
+
 const ensureInitialized = async (): Promise<void> => {
   // A launch never initializes into a runtime whose reset is still under way.
   try {
@@ -310,7 +362,7 @@ const ensureInitialized = async (): Promise<void> => {
     if (profile.seccomp) {
       accessSync(profile.seccomp.applyPath, constants.X_OK);
     }
-    await SandboxManager.initialize(profile);
+    await initializeWithBridgeRetry(profile);
   })();
   const attempt = initialization;
   try {

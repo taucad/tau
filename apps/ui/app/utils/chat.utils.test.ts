@@ -884,19 +884,6 @@ describe('serializeMessage', () => {
         },
         'Mesh: 4096 triangles, 2050 vertices, 18 ms\nResolution: requested high, linearTolerance 0.06 mm, angularTolerance 12°',
       ],
-      [
-        'a downgraded render',
-        {
-          triangles: 1_999_872,
-          vertices: 1_000_014,
-          elapsed: 812,
-          requested: 'extra-high',
-          linearTolerance: 0.02,
-          angularTolerance: 10,
-          downgraded: 1,
-        },
-        'Mesh: 1999872 triangles, 1000014 vertices, 812 ms\nResolution: requested extra-high, linearTolerance 0.02 mm, angularTolerance 10°, downgraded 1',
-      ],
     ])('serializes the evaluate_model mesh cost of %s', (_kernel, tessellation, line) => {
       const message = baseMessage([
         {

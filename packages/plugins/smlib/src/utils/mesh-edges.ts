@@ -12,8 +12,10 @@ export type BoundarySource = {
   owners: ArrayLike<number>;
   /** The body's edges, in `edges()` order; their index is the edge id. */
   edges: readonly SmlibModule.Edge[];
-  /** The body's vertices, where one edge ends and the next begins. */
-  vertices: readonly SmlibModule.Vertex[];
+  /** For each edge, the indices into `vertices` of its two end vertices (`ext.brep_dump`'s `v0`, `v1`). */
+  ends: ReadonlyArray<readonly [number, number]>;
+  /** The positions of the body's vertices, where one edge ends and the next begins. */
+  vertices: ReadonlyArray<ArrayLike<number>>;
   /** The mesh's chord tolerance. */
   tolerance: number;
 };
@@ -31,15 +33,16 @@ export type BoundarySource = {
  * A triangle edge is on a B-rep edge where the triangles either side of it belong to different
  * faces, or where only one triangle uses it (the border of a sheet). Those segments are chained
  * between B-rep vertices and branch points. A chain is given to the one B-rep edge that joins the
- * same two vertices; where several do (two arcs between one pair of vertices) or its ends are not
+ * same two vertices (the edges' end vertices come from the kernel's topology, not from evaluating
+ * each edge); where several do (two arcs between one pair of vertices) or its ends are not
  * vertices, to the edge nearest an interior point of it. Most chains so cost no kernel call. A chain
  * farther than the tolerance from every edge (a misclassified triangle) is left out.
  *
- * @param source - The mesh, its triangles' faces, the body's edges and vertices, and the chord tolerance.
+ * @param source - The mesh, its triangles' faces, the body's edges, their end vertices and the vertices' positions, and the chord tolerance.
  * @returns The polylines found for each edge id; an edge the mesh does not bound has none.
  */
 export function meshBoundaryPolylines(source: BoundarySource): Map<number, number[][][]> {
-  const { mesh, owners, edges, vertices, tolerance } = source;
+  const { mesh, owners, edges, ends, vertices, tolerance } = source;
   const { points, corners } = weld(mesh);
   const pointCount = points.length / 3;
   const adjacency = boundaryAdjacency(corners, owners, pointCount);
@@ -66,12 +69,9 @@ export function meshBoundaryPolylines(source: BoundarySource): Map<number, numbe
   }
   const endsKey = (a: number, b: number): string => (a < b ? `${a}:${b}` : `${b}:${a}`);
   const byEnds = new Map<string, number[]>();
-  for (const [edgeId, edge] of edges.entries()) {
-    const ends = edgeEnds(edge).map(([x, y, z]) => vertexAt(x!, y!, z!));
-    if (ends.length === 2 && ends[0]! >= 0 && ends[1]! >= 0) {
-      const key = endsKey(ends[0]!, ends[1]!);
-      byEnds.set(key, [...(byEnds.get(key) ?? []), edgeId]);
-    }
+  for (const [edgeId, [first, last]] of ends.entries()) {
+    const key = endsKey(first, last);
+    byEnds.set(key, [...(byEnds.get(key) ?? []), edgeId]);
   }
   const margin = 2 * tolerance + 1e-6;
   const boxes = new Map<number, { low: number[]; high: number[] }>();
@@ -262,32 +262,18 @@ function boundaryAdjacency(corners: Uint32Array, owners: ArrayLike<number>, poin
 }
 
 /**
- * Where an edge starts and ends.
- * @param edge - The edge.
- * @returns Its two end points, or none when the kernel cannot give them.
- */
-function edgeEnds(edge: SmlibModule.Edge): number[][] {
-  try {
-    return [edge.start.toArray(), edge.end.toArray()];
-  } catch {
-    return [];
-  }
-}
-
-/**
  * Find a B-rep vertex by position: a grid of the vertices, searched in the 27 cells around a point.
- * @param vertices - The body's vertices.
+ * @param positions - The body's vertices' positions.
  * @param reach - How far a point may sit from its vertex.
  * @returns A lookup from a position to the index of the vertex within reach of it, or -1.
  */
 function vertexLocator(
-  vertices: readonly SmlibModule.Vertex[],
+  positions: ReadonlyArray<ArrayLike<number>>,
   reach: number,
 ): (x: number, y: number, z: number) => number {
   const cell = (value: number): number => Math.floor(value / reach);
   const grid = new Map<string, number[]>();
-  const positions = vertices.map((vertex) => [vertex.x, vertex.y, vertex.z]);
-  for (const [index, [x, y, z]] of positions.entries()) {
+  for (const [index, { 0: x, 1: y, 2: z }] of positions.entries()) {
     const key = `${cell(x!)},${cell(y!)},${cell(z!)}`;
     grid.set(key, [...(grid.get(key) ?? []), index]);
   }
@@ -297,7 +283,7 @@ function vertexLocator(
     let nearest = reach;
     for (const [dx, dy, dz] of offsets) {
       for (const index of grid.get(`${cell(x) + dx!},${cell(y) + dy!},${cell(z) + dz!}`) ?? []) {
-        const [vx, vy, vz] = positions[index]!;
+        const { 0: vx, 1: vy, 2: vz } = positions[index]!;
         const distance = Math.hypot(vx! - x, vy! - y, vz! - z);
         if (distance <= nearest) {
           nearest = distance;

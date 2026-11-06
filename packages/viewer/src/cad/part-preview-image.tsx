@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Maximize2 } from 'lucide-react';
+import { Loader } from '@taucad/ui/components/loader';
 import { cn } from '@taucad/ui/utils/cn';
 
 /**
@@ -44,7 +45,7 @@ export function PartPreviewImage({
 /**
  * A part's identity frame. With a rendered preview and `onOpen` it is a button that opens the part
  * gallery, showing an open glyph on hover, focus and coarse pointers; otherwise it shows `fallback`.
- * A refreshing preview keeps its last image, dimmed.
+ * While a preview renders, a spinner takes the swatch's place, or turns over the dimmed last image when one is refreshing.
  * @public
  */
 export function PartPreviewFrame({
@@ -70,20 +71,37 @@ export function PartPreviewFrame({
     'relative flex shrink-0 items-center justify-center overflow-hidden rounded-xs bg-muted ring-1 ring-border',
     className,
   );
+  const isRendering = preview?.status === 'pending';
+  // The spinner stands in for the swatch while the first preview renders, and turns over the dimmed last
+  // image while a preview refreshes.
+  const renderingIndicator = isRendering ? (
+    <span
+      data-slot='part-preview-loading'
+      className={cn(
+        'absolute inset-0 flex items-center justify-center',
+        preview.bytes ? 'text-foreground' : 'text-muted-foreground',
+      )}
+    >
+      <Loader className='size-6' />
+    </span>
+  ) : undefined;
   if (!preview?.bytes) {
     return (
       <span aria-hidden='true' className={frameClassName}>
-        {fallback}
+        {renderingIndicator ?? fallback}
       </span>
     );
   }
   const image = (
-    <PartPreviewImage
-      bytes={preview.bytes}
-      className={cn('size-full object-contain', preview.status === 'pending' && 'opacity-50')}
-      onError={onDecodeError}
-      onLoad={onDecoded}
-    />
+    <>
+      <PartPreviewImage
+        bytes={preview.bytes}
+        className={cn('size-full object-contain', isRendering && 'opacity-40')}
+        onError={onDecodeError}
+        onLoad={onDecoded}
+      />
+      {renderingIndicator}
+    </>
   );
   if (!onOpen) {
     return (

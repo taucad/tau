@@ -292,7 +292,7 @@ describe('document protocol payload-shape coverage (C18)', () => {
     }
   });
 
-  it('preserves the requested form, effective tolerances and downgrade count of an OCCT mesh', () => {
+  it('preserves the requested form and effective tolerances of an OCCT mesh', () => {
     const tessellation = {
       triangles: 5006,
       vertices: 2505,
@@ -300,7 +300,6 @@ describe('document protocol payload-shape coverage (C18)', () => {
       requested: 'medium',
       linearTolerance: 0.0087,
       angularTolerance: 20,
-      downgraded: 0,
     } as const;
     const rendered = {
       subscriptionId: 'view',
@@ -316,7 +315,7 @@ describe('document protocol payload-shape coverage (C18)', () => {
     } as const;
     const parsed = wire.notifies.rendered.safeParse(rendered);
     expect(parsed.success && parsed.data.success ? parsed.data.artifact.tessellation : undefined).toEqual(tessellation);
-    for (const invalid of [{ requested: 'ultra' }, { linearTolerance: 0 }, { downgraded: -1 }, { downgraded: 0.5 }]) {
+    for (const invalid of [{ requested: 'ultra' }, { linearTolerance: 0 }, { angularTolerance: -1 }]) {
       expect(
         wire.notifies.rendered.safeParse({
           ...rendered,
@@ -324,5 +323,11 @@ describe('document protocol payload-shape coverage (C18)', () => {
         }).success,
       ).toBe(false);
     }
+    // A report from an older kernel may still carry a downgrade count; the wire drops it.
+    const legacy = wire.notifies.rendered.safeParse({
+      ...rendered,
+      artifact: { ...rendered.artifact, tessellation: { ...tessellation, downgraded: 1 } },
+    });
+    expect(legacy.success && legacy.data.success ? legacy.data.artifact.tessellation : undefined).toEqual(tessellation);
   });
 });

@@ -8,7 +8,7 @@ import {
   nextRateLimitRetry,
   rateLimitRetryDelayMilliseconds,
   recordRateLimitAutoResume,
-} from '#utils/rate-limit-auto-resume.js';
+} from '#utils/run-auto-resume.js';
 
 /** How often the countdown redraws; the label shows whole seconds. Milliseconds. */
 const countdownTickMilliseconds = 250;
@@ -65,7 +65,7 @@ function ResumeCountdown({
  * A provider's `RATE_LIMITED` refusal is transient, so with `autoResume` the
  * card resumes the run on its own after the wait Codex would take, counting
  * down beside Resume, until the run's automatic retries are spent
- * (`#utils/rate-limit-auto-resume`).
+ * (`#utils/run-auto-resume`).
  */
 export const ChatErrorRateLimit = memo(function ({
   className,

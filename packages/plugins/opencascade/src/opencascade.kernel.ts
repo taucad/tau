@@ -105,12 +105,6 @@ export type OpenCascadeOptions = {
   wasm?: 'auto' | 'full' | 'multi' | OpenCascadeWasmConfig;
   /** OC API call tracing mode. `'summary'` (default) emits aggregated stats, `'per-call'` emits individual spans. */
   ocTracing?: 'off' | 'summary' | 'per-call';
-  /**
-   * Ignored: previews are never coarsened, so there is no triangle budget. Kept until hosts stop passing it.
-   *
-   * @deprecated No effect; previews mesh at the requested tessellation.
-   */
-  previewTriangleBudget?: number;
 };
 
 // =============================================================================
@@ -625,7 +619,7 @@ export const opencascadeKernel = defineKernel({
   name: 'OpenCascadeKernel',
   // 1.3.0: the model view and GLB export claim `includeEdges` and draw B-rep edge lines themselves,
   // so a render cached by 1.2.0 with fallback overlay lines stops matching and ages out.
-  version: '1.3.0',
+  version: '1.4.0',
   optionsSchema: opencascadeOptionsSchema,
   views: {
     model: {

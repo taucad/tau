@@ -32,7 +32,8 @@ const bounded = (max: number) => z.number().int().min(0).max(max);
 const release = z.string().regex(releasePattern);
 const mergedOutcomes: ReadonlySet<string> = new Set(['superseded', 'cancelled', 'abandoned']);
 const pluginOperations: ReadonlySet<string> = new Set(['transcode', 'export', 'job', 'machine']);
-const machineRoutes: ReadonlySet<string> = new Set(['desktop', 'cli', 'daemon', 'cloud']);
+/** Every Node host route: `tau mcp --machines` is the machine host's production wiring (D-T12-3). */
+const machineRoutes: ReadonlySet<string> = new Set(['desktop', 'cli', 'mcp', 'daemon', 'cloud']);
 
 const workerFactsSchema = z.strictObject({
   queue: milliseconds,

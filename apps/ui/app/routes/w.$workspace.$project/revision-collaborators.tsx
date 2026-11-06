@@ -12,8 +12,9 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { Loader } from '@taucad/ui/components/loader';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Loader2, Trash2 } from 'lucide-react';
+import { AlertTriangle, Trash2 } from 'lucide-react';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
 import { Input } from '@taucad/ui/components/input';
@@ -284,7 +285,7 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
               invite.mutate();
             }}
           >
-            {invite.isPending ? <Loader2 className='size-4 spin-glyph' aria-hidden /> : undefined}
+            {invite.isPending ? <Loader className='size-4' /> : undefined}
             <span>Create invitation</span>
           </Button>
         </div>

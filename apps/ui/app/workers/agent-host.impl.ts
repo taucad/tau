@@ -57,7 +57,7 @@ import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js'
 import { createIdleRuntimeClient } from '#workers/idle-runtime-client.js';
 import { createWorkerEvidence } from '#workers/agent-host-evidence.js';
 import type { HostEvidence, RunRating } from '@taucad/agent-observability/host-evidence';
-import { readBuildRelease } from '#lib/build-identity.js';
+import { readBuildRelease, unknownBuildRelease } from '#lib/build-identity.js';
 import { forwardOperations } from '#telemetry/worker-forwarding.js';
 import type { ForwardEntry, WorkerTelemetry } from '#telemetry/worker-forwarding.js';
 import type { IdleRuntimeClient } from '#workers/idle-runtime-client.js';
@@ -501,6 +501,19 @@ export const openBrowserProjectHost = async (
   }
 };
 
+/**
+ * The build the host's evidence reports: the page's release label from the provide message, since a worker reads
+ * neither the define nor `window.ENV` and its own read is always the unknown label. The unknown label is no build, so
+ * it is reported as none and the observation shows `unknown` (I7), never `0000000`.
+ *
+ * @param release - The page's label, absent from an older page.
+ * @returns The build label, or `undefined`.
+ */
+export const hostBuildOf = (release: string | undefined): string | undefined => {
+  const label = release ?? readBuildRelease();
+  return label === unknownBuildRelease ? undefined : label;
+};
+
 const composeProjectHost = async (
   provide: AgentHostProjectProvide,
   worker: ResidentWorkerContext,
@@ -852,7 +865,7 @@ const composeProjectHost = async (
       apiBaseUrl: provide.gatewayBaseUrl.replace(/\/+$/u, ''),
       principal: provide.principal,
       projectId: provide.authority.projectId,
-      hostBuild: readBuildRelease(),
+      hostBuild: hostBuildOf(provide.release),
       readEvents: async (input) => launcher.host.readEvents(input),
     });
     opened(() => evidence?.close());

@@ -724,7 +724,7 @@ export const manifoldKernel = defineKernel({
   builtinModuleNames: ['manifold-3d', 'manifold-3d/manifoldCAD'],
   builtinPackages: { 'manifold-3d': manifoldPackage },
   name: 'ManifoldKernel',
-  version: '1.2.0',
+  version: '1.3.0',
   optionsSchema: manifoldOptionsSchema,
   views: { model: { title: 'Model', mimeType: 'model/gltf-binary', optionsSchema: manifoldRenderSchema } },
   exports: {

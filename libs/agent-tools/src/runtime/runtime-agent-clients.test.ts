@@ -238,7 +238,6 @@ describe('createRuntimeAgentClients', () => {
       requested: 'extra-high',
       linearTolerance: 0.02,
       angularTolerance: 10,
-      downgraded: 1,
     };
     const clients = clientsFor(
       runtimeFixture({ render: () => rendering({ mimeType: 'model/gltf-binary', content: glb(), tessellation }) }),

@@ -808,6 +808,14 @@ describe('createGatewayModelTransport', () => {
       });
     });
 
+    it('should report the settlement instant a pending attempt states (W2)', async () => {
+      /* The API's default invocation deadline plus its recovery grace, from an admission at the epoch. */
+      const settlesBy = new Date(300_000 + 5 * 60_000).toISOString();
+      await expect(
+        resolverFor(async () => json({ state: 'pending', operationId: 'operation-1', settlesBy }))(),
+      ).resolves.toEqual({ status: 'pending', settlesBy });
+    });
+
     it('should report a voided attempt when the gateway never admitted it', async () => {
       await expect(resolverFor(async () => json({ state: 'not_found', voided: true }))()).resolves.toEqual({
         status: 'voided',

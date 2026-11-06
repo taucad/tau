@@ -463,9 +463,7 @@ export function createRuntimeClient(options: {
         terminationReason,
         entryFormat: (filename) => entryFormatOf(filename, kernelExtensions()),
         exportRoute: (kernelId, target) =>
-          capabilities?.routes.find(
-            (route) => route.targetFormat === target && (kernelId === undefined || route.kernelId === kernelId),
-          ),
+          capabilities?.routes.find((route) => route.targetFormat === target && route.kernelId === kernelId),
       });
       lifecycleState = 'connected';
     })();

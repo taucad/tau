@@ -1384,7 +1384,10 @@ jobs:
 
   production-api:
     needs: [resolve, verify-app, app-release]
+    # `app-release` needs `source-kit`, which an API release skips; a skipped
+    # ancestor fails the implicit success(), so state the result explicitly.
     if: >-
+      !cancelled() && needs.app-release.result == 'success' &&
       github.event_name == 'push' && needs.resolve.outputs.project == 'api' &&
       github.ref == format('refs/tags/{0}', needs.resolve.outputs.tag)
     name: Production API
@@ -1402,6 +1405,7 @@ jobs:
   # created their logins. One at a time: maintenance must stay a singleton.
   production-mirror:
     needs: [production-api]
+    if: ${{ !cancelled() && needs.production-api.result == 'success' }}
     name: Production mirror
     permissions:
       contents: read
@@ -1414,6 +1418,7 @@ jobs:
 
   production-maintenance:
     needs: [production-mirror]
+    if: ${{ !cancelled() && needs.production-mirror.result == 'success' }}
     name: Production maintenance
     permissions:
       contents: read
@@ -1438,6 +1443,18 @@ jobs:
     uses: ./.github/workflows/deploy-ui.yml
     with:
       environment: production
+    secrets: inherit
+
+  # The marketing pages tau.new's edge proxies (prod `MARKETING_ORIGIN`).
+  production-www:
+    needs: [production-ui]
+    name: Production marketing site
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy-www-review.yml
+    with:
+      alias: prod
     secrets: inherit
 
   production-docs:

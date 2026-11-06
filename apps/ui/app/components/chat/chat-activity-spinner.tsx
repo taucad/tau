@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { LoaderCircle } from 'lucide-react';
+import { Loader } from '@taucad/ui/components/loader';
 import { cn } from '@taucad/ui/utils/cn';
 
 const loadMetalMorphSpinner = async () => import('#components/geometry/loader/metal-morph-spinner.js');
@@ -27,7 +27,7 @@ export type ChatActivitySpinnerProperties = Readonly<{
  * The shared source supersamples every copy to keep its reflections crisp.
  */
 export function ChatActivitySpinner({ className }: ChatActivitySpinnerProperties): React.JSX.Element {
-  const flatSpinner = <LoaderCircle className='size-[0.9rem] shrink-0 spin-glyph' />;
+  const flatSpinner = <Loader className='size-[0.9rem] shrink-0' />;
 
   return (
     <span

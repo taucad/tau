@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Loader } from '@taucad/ui/components/loader';
 import { useSelector } from '@xstate/react';
 import {
   ArrowLeft,
@@ -11,7 +12,6 @@ import {
   EyeOff,
   FileBox,
   Focus,
-  LoaderCircle,
   Target,
   X,
 } from 'lucide-react';
@@ -548,7 +548,7 @@ function StageStatus({
     <div className='absolute top-3 left-3 flex flex-wrap items-center gap-2 rounded-md bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow-xs'>
       {isRendering ? (
         <span role='status' aria-busy='true' className='flex items-center gap-1.5'>
-          <LoaderCircle aria-hidden='true' className='size-3.5 spin-glyph' />
+          <Loader className='size-3.5' />
           Rendering preview
         </span>
       ) : undefined}

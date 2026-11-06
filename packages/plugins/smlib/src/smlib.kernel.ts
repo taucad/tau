@@ -57,6 +57,8 @@ import {
 } from '#utils/render-output.js';
 import type { DrawingEntry, NamedInputShape, SmlibLibrary } from '#utils/render-output.js';
 import { convertSmlibGeometriesToGltf } from '#utils/smlib-to-gltf.js';
+import { loadSmlibKernel } from '#utils/smlib-kernel.js';
+import type { SmlibKernel } from '#utils/smlib-kernel.js';
 
 const kernelId = 'smlib';
 
@@ -84,6 +86,8 @@ type SerializedHandle = GlbResources & { shapes: SerializedShape[]; drawings: Dr
 
 type SmlibContext = {
   library: SmlibLibrary;
+  /** The library's raw kernel layer, for the whole-body edge and curve calls. */
+  kernel: SmlibKernel;
   libraryTrace: KernelLibraryTraceHandle<SmlibLibrary>;
 };
 
@@ -238,7 +242,7 @@ export const smlibKernel = defineKernel({
     [smlibModuleName]: { name: smlibPackage.name, version: smlibPackage.version },
   },
   name: 'SmlibKernel',
-  version: '1.1.0',
+  version: '1.2.0',
   optionsSchema: smlibOptionsSchema,
   views: {
     model: {
@@ -275,9 +279,11 @@ export const smlibKernel = defineKernel({
     const { logger, tracer } = runtime;
     const span = tracer.startSpan('smlib.wasm-init');
     let module: SmlibLibrary;
+    let kernel: SmlibKernel;
     try {
       // Importing the library instantiates its WebAssembly kernel (top-level await).
       module = await import('@classcad/smlibwasm');
+      kernel = await loadSmlibKernel();
     } finally {
       span.end();
     }
@@ -291,7 +297,7 @@ export const smlibKernel = defineKernel({
     });
     registerSmlibModule(runtime, libraryTrace.tracedLibrary);
     logger.debug(`SMLib kernel initialized (smlibwasm ${module.version}, libraryTracing: ${options.libraryTracing})`);
-    return { library, libraryTrace };
+    return { library, kernel, libraryTrace };
   },
 
   async resolve({ entryPath }, runtime) {
@@ -400,7 +406,7 @@ export const smlibKernel = defineKernel({
           shapes: entries.filter(({ shape }) => !isDrawingShape(context.library, shape)),
           drawings: entries
             .filter(({ shape }) => isDrawingShape(context.library, shape))
-            .map((entry) => sampleDrawing(context.library, entry)),
+            .map((entry) => sampleDrawing(context.library, context.kernel, entry)),
           mechanism,
           ...(model ? { images: model.images, textures: model.textures, samplers: model.samplers } : {}),
         };
@@ -418,7 +424,7 @@ export const smlibKernel = defineKernel({
 
   async render(input, runtime, context) {
     const { handle } = input;
-    const { library } = context;
+    const { library, kernel } = context;
     if (input.view === 'drawing') {
       const selected =
         input.instance === undefined ? handle.drawings : handle.drawings.filter(({ name }) => name === input.instance);
@@ -449,6 +455,7 @@ export const smlibKernel = defineKernel({
             operation: () =>
               renderTessellated(modelShapes, {
                 library,
+                kernel,
                 request: {
                   tessellation: options.tessellation,
                   explicitDefaults: occtExplicitTessellationDefaults.preview,
@@ -503,7 +510,7 @@ export const smlibKernel = defineKernel({
   },
 
   async export(input, runtime, context) {
-    const { library } = context;
+    const { library, kernel } = context;
     return context.libraryTrace.runInScope({
       scope: 'export',
       operation: async () => {
@@ -536,6 +543,7 @@ export const smlibKernel = defineKernel({
             const geometries = await tracedPhase(runtime.tracer, 'export.renderGlbTessellation', () =>
               render(entries, {
                 library,
+                kernel,
                 tessellation: requested,
                 collectBrepEdges: content?.includeEdges === true || content?.includeTopology === true,
                 tracer: runtime.tracer,

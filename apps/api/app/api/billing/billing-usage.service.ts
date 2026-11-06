@@ -31,6 +31,18 @@ type QueryDatabase = Pick<DatabaseType, 'transaction'>;
 type QueryConfig = { get(key: string, options: { infer: true }): unknown };
 type Collection = 'rows' | 'days' | 'models' | 'activities';
 
+/**
+ * The attempt route's answer (GI-R3, W2): an operation receipt, a `pending` one with the instant the gateway settles it
+ * by, or a key the lookup voided.
+ */
+export type AttemptReceipt =
+  | Exclude<WireOperationReceipt, { readonly state: 'pending' }>
+  | (Extract<WireOperationReceipt, { readonly state: 'pending' }> & {
+      /** `due_at` plus the recovery grace: past it, recovery may resolve the hold without supplier evidence (W2, D2). */
+      readonly settlesBy: string;
+    })
+  | { readonly state: 'not_found'; readonly voided: true };
+
 export type RawUsageQuery = {
   range?: unknown;
   startDate?: unknown;
@@ -824,7 +836,7 @@ export class BillingUsageService {
     surface: string;
     attemptKey: string;
     rawQuery: unknown;
-  }): Promise<WireOperationReceipt | { readonly state: 'not_found'; readonly voided: true }> {
+  }): Promise<AttemptReceipt> {
     this.parseRawObject(input.rawQuery, []);
     // Legacy completion receipts remain readable after the producer and route are retired.
     if (
@@ -844,9 +856,22 @@ export class BillingUsageService {
       'deployment.environment': this.configuredEnvironment(),
       'tau.billing.attempt_resolution.outcome': 'voided' in resolved ? 'voided' : 'found',
     });
-    return 'voided' in resolved
-      ? { state: 'not_found', voided: true }
-      : this.getOperationReceipt({ authUserId: input.authUserId, operationId: resolved.id, rawQuery: {} });
+    if ('voided' in resolved) {
+      return { state: 'not_found', voided: true };
+    }
+    const { receipt, settlesBy } = await this.readOperationReceipt({
+      authUserId: input.authUserId,
+      operationId: resolved.id,
+      rawQuery: {},
+    });
+    if (receipt.state !== 'pending') {
+      return receipt;
+    }
+    if (settlesBy === undefined) {
+      throw new Error(`Operation ${resolved.id} was read pending without its settlement instant`);
+    }
+    // W2: the host waits on a pending attempt until this instant, never past it on a host constant alone.
+    return { ...receipt, settlesBy };
   }
 
   /** Reads one owner-scoped operation and a bounded correction page. */
@@ -855,11 +880,25 @@ export class BillingUsageService {
     operationId: string;
     rawQuery: unknown;
   }): Promise<WireOperationReceipt> {
+    const { receipt } = await this.readOperationReceipt(input);
+    return receipt;
+  }
+
+  /**
+   * {@link getOperationReceipt}, with the pending hold's `due_at` plus the recovery grace read in the same snapshot
+   * (`settlesBy`, set only when the receipt is `pending`).
+   */
+  private async readOperationReceipt(input: {
+    authUserId: string;
+    operationId: string;
+    rawQuery: unknown;
+  }): Promise<{ readonly receipt: WireOperationReceipt; readonly settlesBy: string | undefined }> {
     const environment = this.configuredEnvironment();
     parseIdentityInput(input.operationId, 'operationId');
     const raw = this.parseRawObject(input.rawQuery, ['snapshotRevision', 'correctionCursor', 'pageSize']);
     const pageSize = parsePageSize(raw.pageSize);
-    return this.databaseService.database.transaction(
+    let settlesBy: string | undefined;
+    const receipt = await this.databaseService.database.transaction(
       async (transaction) => {
         await transaction.execute(sql`select set_config('statement_timeout', ${statementTimeout.toString()}, true)`);
         const authority = await this.resolveAuthority(transaction, environment, input.authUserId);
@@ -930,10 +969,13 @@ export class BillingUsageService {
           admitted_at: string | null;
           dispatch_state: string;
           authorized_atoms: string;
+          settles_by: string;
         }>(
           transaction,
           sql`select customer_state,
           to_char(admitted_at at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') admitted_at,
+          to_char((due_at + make_interval(mins => ${recoveryGraceMinutes})) at time zone 'UTC',
+            'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') settles_by,
           dispatch_state,authorized_atoms::text from billing.credit_operation
           where account_id=${authority.account_id} and environment=${environment} and id=${input.operationId}`,
         );
@@ -949,6 +991,7 @@ export class BillingUsageService {
               authority,
             );
           }
+          settlesBy = operation.settles_by;
           return wireOperationReceiptSchema.parse({
             state: 'pending',
             schemaVersion: 1,
@@ -1044,6 +1087,7 @@ export class BillingUsageService {
       },
       { isolationLevel: 'repeatable read', accessMode: 'read only' },
     );
+    return { receipt, settlesBy };
   }
 
   private configuredEnvironment(): BillingEnvironment {

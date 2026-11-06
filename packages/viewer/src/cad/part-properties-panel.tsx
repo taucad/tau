@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
+import { Loader } from '@taucad/ui/components/loader';
 import { PaneVirtualList } from '@taucad/ui/components/pane-virtual-list';
-import { Box, ChevronDown, CircleAlert, CircleHelp, LoaderCircle } from 'lucide-react';
+import { Box, ChevronDown, CircleAlert, CircleHelp } from 'lucide-react';
 import type { GeometryComponentNode } from '@taucad/types';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { cn } from '@taucad/ui/utils/cn';
@@ -114,7 +115,7 @@ export function PartPropertiesPanel({
         >
           <span className='flex items-center gap-1.5'>
             {preview.status === 'pending' ? (
-              <LoaderCircle aria-hidden='true' className='size-3.5 spin-glyph' />
+              <Loader className='size-3.5' />
             ) : (
               <CircleAlert aria-hidden='true' className='size-3.5' />
             )}

@@ -17,26 +17,14 @@ export {
 } from '#occt-schemas.js';
 export type { OcctExplicitTessellation, OcctTessellation, OcctTessellationQuality } from '#occt-schemas.js';
 
-// Tessellation resolution and budgets
+// Tessellation resolution
 export {
-  coarsenOcctTessellation,
-  createTessellationBudgetExceededIssue,
-  createTessellationDowngradedIssue,
   occtExplicitTessellationDefaults,
-  occtMaxTessellationDowngrades,
   occtPresetLinearToleranceRange,
   occtTessellationPresets,
-  occtTriangleBudgets,
   resolveOcctTessellation,
-  suggestOcctTessellation,
-  tessellateWithinOcctBudget,
 } from '#occt-tessellation.js';
-export type {
-  OcctBudgetedTessellation,
-  OcctResolvedTessellation,
-  OcctTessellationLane,
-  OcctTessellationTolerances,
-} from '#occt-tessellation.js';
+export type { OcctResolvedTessellation, OcctTessellationTolerances } from '#occt-tessellation.js';
 
 // Handle scopes
 export { createOcScope } from '#oc-scope.js';

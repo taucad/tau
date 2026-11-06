@@ -89,7 +89,7 @@ describe('Model component rows', () => {
     expect(preview).toHaveClass('size-[80px]', 'rounded-xs');
     expect(preview).toHaveAttribute('tabindex', '-1');
     // A refreshing preview keeps its last image, dimmed.
-    expect(preview.querySelector('img')).toHaveClass('opacity-50');
+    expect(preview.querySelector('img')).toHaveClass('opacity-40');
     // The frame is a sibling of the selection button, never nested in it.
     // The refreshing preview's status describes the selection button; its name stays the part's.
     const selection = screen.getByRole('button', { name: 'planetary_housing' });

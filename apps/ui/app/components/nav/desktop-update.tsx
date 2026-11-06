@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUpCircle, Check, Download, LoaderCircle, ShieldAlert } from 'lucide-react';
+import { ArrowUpCircle, Check, Download, ShieldAlert } from 'lucide-react';
+import { Loader } from '@taucad/ui/components/loader';
 import type { DesktopUpdateBridge, DesktopUpdateSnapshot } from '@taucad/types/desktop-updates';
 import { useSidebar } from '@taucad/ui/components/sidebar';
 import { UpdateControl } from '#components/nav/update-control.js';
@@ -107,7 +108,7 @@ export function DesktopUpdateControl({
   const Icon = failed
     ? ShieldAlert
     : busy || phase === 'downloading'
-      ? LoaderCircle
+      ? Loader
       : phase === 'current'
         ? Check
         : phase === 'available'

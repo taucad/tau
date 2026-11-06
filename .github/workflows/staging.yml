@@ -93,12 +93,16 @@ jobs:
   # built from its code also need `API tests` and `Billing contracts`, which run on
   # every push to `main`. A check that never ran reports `missing`, which no deploy
   # accepts. This job passes whatever it reports: a red check belongs to `ci.yml`.
+  # The wait runs up to 340 minutes, inside GitHub's 360-minute job limit: on
+  # 2026-11-06 `ci.yml` push runs on `main` took up to 4 h 33 min under a backlog, so
+  # the earlier 170-minute wait gave up on every commit and staging served no API
+  # deploy from at least 2026-11-03.
   ci:
     name: Wait for CI checks
     needs: plan
     if: needs.plan.result == 'success' && needs.plan.outputs.deploy-apps != '[]'
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 350
     permissions:
       actions: read
     outputs:
@@ -118,7 +122,7 @@ jobs:
              "billing-e2e": "Billing contracts (no Stripe credentials)"}
         run: |
           set -euo pipefail
-          deadline=$(( $(date +%s) + 170 * 60 ))
+          deadline=$(( $(date +%s) + 340 * 60 ))
           jobs='[]'
           while :; do
             run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&event=push&branch=main&per_page=1" \

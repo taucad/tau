@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
@@ -9,6 +9,8 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../.
 
 const pluginPackages = readdirSync(resolve(repositoryRoot, 'packages/plugins'), { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
+  // A removed plugin leaves its untracked node_modules behind in existing checkouts; only manifests name packages.
+  .filter((entry) => existsSync(resolve(repositoryRoot, 'packages/plugins', entry.name, 'package.json')))
   .map((entry) => ({
     name: JSON.parse(readFileSync(resolve(repositoryRoot, 'packages/plugins', entry.name, 'package.json'), 'utf8'))
       .name as string,

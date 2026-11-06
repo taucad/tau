@@ -1,12 +1,15 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { sweepTemporarySiblings } from '#apply-tree.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { lfsObjectPath, lfsPointerFor, readLfsPointer } from '#lfs.js';
 import { createRevisionActors } from '#revision-effects.js';
+import { ImmutableRevisionTree, revisionTreeFiles } from '#algorithms/revision-tree.js';
+import { createLargeObjectAdoption } from '#large-object-adoption.js';
+import type { Checkout } from '#revision-port.js';
 import type { RevisionActors, RevisionFileSystem } from '#revision-effects.js';
 
 const encoder = new TextEncoder();
@@ -135,6 +138,35 @@ describe('adopting a large file (D9)', () => {
     expect(await raw.readFile('models/other.step')).toStrictEqual(pointerBytes);
     await actors.settled();
   }, 30_000);
+
+  /* A checkout of many large files is never copied whole: each candidate is copied once, to be stored. */
+  it('shares every unchanged record with the capture and copies only the file being stored', async () => {
+    const before = new ImmutableRevisionTree([
+      ['main.scad', 'import("models/part.step");\n'],
+      ['models/part.step', part],
+    ]);
+    const entries = vi.spyOn(before, 'entries');
+    const stored = new Map<string, Uint8Array<ArrayBuffer>>();
+    let target: ImmutableRevisionTree | undefined;
+    const { adopt } = createLargeObjectAdoption({
+      capture: async () => before,
+      withCheckoutFence: async (_id, operation) => operation(),
+      materializeTree: async (_place, tree) => {
+        target = tree;
+      },
+      storeObject: async (object, content) => {
+        stored.set(object.oid, content);
+      },
+      readStoredObject: async (object) => stored.get(object.oid),
+    });
+
+    expect(await adopt({ id: 'c1' } as Checkout)).toStrictEqual({ adopted: ['models/part.step'], left: [] });
+    expect(entries).not.toHaveBeenCalled();
+    expect(stored.get(pointer.oid)).toStrictEqual(part);
+    expect(stored.get(pointer.oid)).not.toBe(revisionTreeFiles(before).get('models/part.step')?.content);
+    expect(revisionTreeFiles(target!).get('main.scad')).toBe(revisionTreeFiles(before).get('main.scad'));
+    expect(target!.get('models/part.step')).toStrictEqual(pointerBytes);
+  });
 
   /* The W4 gate: a kill between every step leaves the full file, or the pointer with the verified object. */
   it('leaves the full file or the pointer with its object, whichever change it is killed at', async () => {

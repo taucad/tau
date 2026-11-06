@@ -20,8 +20,9 @@
  * never read again.
  */
 import { generatedGitattributesPath, isTrackedLargeObjectPath } from '#workspace-config.js';
-import { ImmutableRevisionTree } from '#algorithms/index.js';
-import type { RevisionTreeInput } from '#algorithms/index.js';
+import type { ImmutableRevisionTree } from '#algorithms/index.js';
+import { adoptRevisionTree, revisionTreeFiles } from '#algorithms/revision-tree.js';
+import type { RevisionTreeFile } from '#algorithms/revision-tree.js';
 import { lfsPointerFor, readLfsPointer } from '#lfs.js';
 import type { LfsPointer } from '#lfs.js';
 import { RevisionPortError } from '#revision-port.js';
@@ -73,25 +74,27 @@ export const createLargeObjectAdoption = (
   const adopt = async (place: Checkout): Promise<LargeObjectAdoption> =>
     withCheckoutFence(place.id, async () => {
       const before = await capture(place);
-      const attributesFile = before.get(generatedGitattributesPath);
+      /* The capture's own records, uncopied: only the file being stored is copied, one at a time. */
+      const files = revisionTreeFiles(before);
+      const attributesFile = files.get(generatedGitattributesPath)?.content;
       const attributes = attributesFile === undefined ? undefined : decoder.decode(attributesFile);
-      const candidates = before
-        .entries()
+      const candidates = [...files]
         .filter(
-          ({ path, content }) =>
+          ([path, { content }]) =>
             path !== generatedGitattributesPath &&
             isTrackedLargeObjectPath(path, attributes) &&
             readLfsPointer(content) === undefined,
-        );
+        )
+        .map(([path]) => path);
       if (candidates.length === 0) {
         return { adopted: [], left: [] };
       }
       const pointers = new Map<string, Readonly<{ pointer: LfsPointer; bytes: Uint8Array<ArrayBuffer> }>>();
       const left: string[] = [];
-      for (const { path, content } of candidates) {
-        const { pointer, bytes } = lfsPointerFor(content);
+      for (const path of candidates) {
+        const { pointer, bytes } = lfsPointerFor(files.get(path)!.content);
         // oxlint-disable-next-line no-await-in-loop -- one object at a time, so only one large file is resident beside the capture.
-        await storeObject(pointer, content);
+        await storeObject(pointer, before.get(path)!);
         // oxlint-disable-next-line no-await-in-loop -- verified as it is stored.
         if (await verified(pointer)) {
           pointers.set(path, { pointer, bytes });
@@ -102,11 +105,20 @@ export const createLargeObjectAdoption = (
       if (pointers.size === 0) {
         return { adopted: [], left };
       }
-      const entries: RevisionTreeInput[] = before
-        .entries()
-        .map(({ path, content, mode }) => [path, pointers.get(path)?.bytes ?? content, mode]);
+      /* Every other file shares its record with the capture; an adopted one holds its pointer. */
+      const target = adoptRevisionTree(
+        new Map<string, RevisionTreeFile>(
+          [...files].map(([path, record]) => {
+            const adopted = pointers.get(path);
+            return [
+              path,
+              adopted === undefined ? record : Object.freeze({ content: adopted.bytes, mode: record.mode }),
+            ];
+          }),
+        ),
+      );
       try {
-        await materializeTree(place, new ImmutableRevisionTree(entries), { before, purpose: 'fill' });
+        await materializeTree(place, target, { before, purpose: 'fill' });
       } catch (error) {
         if (error instanceof RevisionPortError && error.code === 'CHECKOUT_CONFLICT') {
           /* Someone wrote meanwhile: their files stay whole, and the objects stay stored for the next adoption. */

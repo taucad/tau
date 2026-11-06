@@ -7,7 +7,7 @@ import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { memoryAdapter } from 'better-auth/adapters/memory';
 import { bearer, magicLink } from 'better-auth/plugins';
-import { staticAuthConfig } from '#config/auth.js';
+import { staticAuthConfig } from '#config/auth-static.config.js';
 
 const baseURL = 'http://localhost:3333';
 const email = 'purpose-isolation@example.test';

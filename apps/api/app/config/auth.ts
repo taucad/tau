@@ -19,6 +19,3 @@ export const auth = betterAuth({
   database: drizzleAdapter(db, { provider: 'pg' }),
   ...staticAuthConfig,
 });
-
-/** Kept for integration tests that still import it from here; the runtime must not (see the module note). */
-export { staticAuthConfig };

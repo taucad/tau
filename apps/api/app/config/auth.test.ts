@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { getSchema } from 'better-auth/db';
+import type * as BetterAuthModule from 'better-auth';
+import type postgres from 'postgres';
 
 /*
  * D17: the CLI-only instance in `auth.ts` used to be created whenever the runtime imported
@@ -14,7 +16,7 @@ const { betterAuthCalls, postgresCalls } = vi.hoisted(() => ({
 }));
 
 vi.mock('better-auth', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('better-auth')>();
+  const actual = await importOriginal<typeof BetterAuthModule>();
   return {
     ...actual,
     betterAuth: ((options: Parameters<typeof actual.betterAuth>[0]) => {
@@ -25,7 +27,7 @@ vi.mock('better-auth', async (importOriginal) => {
 });
 
 vi.mock('postgres', async (importOriginal) => {
-  const actual = await importOriginal<{ default: typeof import('postgres') }>();
+  const actual = await importOriginal<{ default: typeof postgres }>();
   const spied = ((...args: Parameters<typeof actual.default>) => {
     postgresCalls.count += 1;
     return actual.default(...args);

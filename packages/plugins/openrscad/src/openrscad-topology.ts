@@ -251,6 +251,7 @@ const toComponent = (json: GltfJson, draft: Draft, drafts: Map<number, Draft>): 
  * A module whose only component is one solid takes that solid's primitives, and a solid left with no primitive of its
  * own is not listed: its triangles are all reachable through their modules.
  *
+ * @internal
  * @param json - The GLB's JSON chunk.
  * @returns The payload, or `undefined` when no node carries OpenRSCAD extras.
  */
@@ -272,6 +273,7 @@ export const deriveOpenrscadTopology = (json: GltfJson): TauCadTopologyPayload |
  * goes inline in the root `extensions` and every `extras` stays as the engine wrote it. A GLB without OpenRSCAD node
  * extras, or one that already declares a topology, comes back as given.
  *
+ * @internal
  * @param glb - The GLB the engine wrote.
  * @returns The GLB with its `TAU_cad_topology` payload.
  */

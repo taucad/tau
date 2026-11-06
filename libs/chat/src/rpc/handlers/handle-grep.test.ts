@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RpcDirectoryEntry, RpcFileStat, RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
@@ -408,6 +408,45 @@ describe('handleGrep', () => {
 
     expect(result).toMatchObject({ success: true, totalMatches: 1, pendingFiles: ['part.step'] });
     expect(result.success && result.matches).toEqual([expect.objectContaining({ file: 'a.ts', line: 1 })]);
+  });
+
+  /* A grep during a cold open asks the index first: a pending file is named at once, its object never fetched. */
+  it('should name the files the index holds as pending without reading them', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+    fileSystem.readdir.mockResolvedValue([textEntry('a.ts', 20), { name: 'part.step', type: 'file', size: 130 }]);
+    const pendingPaths = vi.fn<NonNullable<RpcFileSystem['pendingPaths']>>(async () => ['part.step']);
+    fileSystem.pendingPaths = pendingPaths;
+    fileSystem.readFile.mockResolvedValue('const marker = 1;');
+
+    const result = await handleGrep({ pattern: 'marker', path: '' }, fileSystem);
+
+    expect(pendingPaths).toHaveBeenCalledWith(['a.ts', 'part.step']);
+    expect(fileSystem.readFile).toHaveBeenCalledTimes(1);
+    expect(fileSystem.readFile).toHaveBeenCalledWith('a.ts');
+    expect(result).toMatchObject({ success: true, totalMatches: 1, pendingFiles: ['part.step'] });
+  });
+
+  it('should read at most 16 files at once, keeping the walk order', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+    const names = Array.from({ length: 40 }, (_, index) => `f${String(index).padStart(2, '0')}.ts`);
+    fileSystem.readdir.mockResolvedValue(names.map((name) => textEntry(name, 20)));
+    fileSystem.pendingPaths = async () => [];
+    let inFlight = 0;
+    let most = 0;
+    fileSystem.readFile.mockImplementation(async (path) => {
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      await new Promise((resolve) => {
+        setTimeout(resolve, path.endsWith('0.ts') ? 5 : 1);
+      });
+      inFlight -= 1;
+      return `marker in ${path}`;
+    });
+
+    const result = await handleGrep({ pattern: 'marker', path: '', headLimit: 100 }, fileSystem);
+
+    expect(most).toBe(16);
+    expect(result.success && result.matches.map(({ file }) => file)).toStrictEqual(names);
   });
 
   it('should carry no pendingFiles when every file was searched', async () => {

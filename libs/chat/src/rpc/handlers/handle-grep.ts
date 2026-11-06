@@ -46,6 +46,45 @@ type GrepMatch = { file: string; line: number; content: string; before?: string[
 /* A file whose large object has not reached the device (the authority's `PENDING`) was not searched, so it is named rather than counted as no matches. */
 const isPending = (error: unknown): boolean => (error as { code?: unknown } | undefined)?.code === 'PENDING';
 
+/** How many files one grep reads at once. */
+const grepReadConcurrency = 16;
+
+/*
+ * The files the index already knows are pending (D9): asked before any read, so
+ * a grep never starts a download. A host that cannot say is asked nothing, and
+ * its reads answer `PENDING` instead.
+ */
+const knownPending = async (fileSystem: RpcFileSystem, paths: readonly string[]): Promise<ReadonlySet<string>> => {
+  if (fileSystem.pendingPaths === undefined || paths.length === 0) {
+    return new Set();
+  }
+  try {
+    return new Set(await fileSystem.pendingPaths(paths));
+  } catch {
+    return new Set();
+  }
+};
+
+/* Map over items with at most `limit` in flight, keeping the input order. */
+const mapBounded = async <Item, Result>(
+  items: readonly Item[],
+  limit: number,
+  run: (item: Item) => Promise<Result>,
+): Promise<Result[]> => {
+  const results: Result[] = Array.from({ length: items.length });
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      // oxlint-disable-next-line no-await-in-loop -- one read at a time per worker bounds the reads in flight.
+      results[index] = await run(items[index]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+};
+
 function truncateMatchLine(line: string): string {
   return line.slice(0, maxGrepLineChars);
 }
@@ -92,8 +131,11 @@ export async function handleGrep(input: GrepRpcInput, fileSystem: RpcFileSystem)
       filesToSearch = filesToSearch.filter((path) => minimatch(path, input.glob!, { matchBase: true, dot: true }));
     }
 
-    const pending = new Set<string>();
-    const searchPromises = filesToSearch.map(async (filePath) => {
+    const pending = new Set<string>(await knownPending(fileSystem, filesToSearch));
+    const searchFile = async (filePath: string): Promise<GrepMatch[]> => {
+      if (pending.has(filePath)) {
+        return [];
+      }
       try {
         const text = await fileSystem.readFile(filePath);
         const lines = text.split('\n');
@@ -132,9 +174,9 @@ export async function handleGrep(input: GrepRpcInput, fileSystem: RpcFileSystem)
         }
         return [];
       }
-    });
+    };
 
-    const allFileMatches = await Promise.all(searchPromises);
+    const allFileMatches = await mapBounded(filesToSearch, grepReadConcurrency, searchFile);
     const flatMatches: GrepMatch[] = [];
     for (const fileMatches of allFileMatches) {
       flatMatches.push(...fileMatches);
@@ -149,7 +191,7 @@ export async function handleGrep(input: GrepRpcInput, fileSystem: RpcFileSystem)
       truncated: totalMatches > offset + headLimit,
       appliedHeadLimit: headLimit,
       appliedOffset: offset,
-      /* In the walk's order, whichever read finished first. */
+      /* In the walk's order. */
       ...(pending.size === 0 ? {} : { pendingFiles: filesToSearch.filter((path) => pending.has(path)) }),
     };
   } catch (error) {

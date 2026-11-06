@@ -48,9 +48,9 @@ function fsBridgePort(port: MessagePort, label: string): Port<unknown> {
   return wrapped;
 }
 
-it('rejects shallow metadata from an exact bridge listing', async () => {
+it('carries metadata rows that hold only the facts already known (I3)', async () => {
   const channel = new MessageChannel();
-  const row = { name: 'large.txt', type: 'file', size: 2048, mtimeMs: 1, contentKind: 'text' };
+  const row = { name: 'large.txt', type: 'file', size: 2048, mtimeMs: 1 };
   const server = createBridgeServer(
     { readdirWithStats: async () => [row], stat: async () => row },
     fsBridgePort(channel.port1, 'listing-server'),
@@ -70,10 +70,8 @@ it('rejects shallow metadata from an exact bridge listing', async () => {
     },
   });
   try {
-    await expect(proxy.readdirWithStats('')).rejects.toThrow('missing required metadata');
-    await expect(proxy.readdirWithStats('', { content: 'head' })).resolves.toEqual([row]);
-    await expect(proxy.stat('large.txt')).rejects.toThrow('missing required metadata');
-    await expect(proxy.stat('large.txt', { content: 'head' })).resolves.toEqual(row);
+    await expect(proxy.readdirWithStats('')).resolves.toEqual([row]);
+    await expect(proxy.stat('large.txt')).resolves.toEqual(row);
   } finally {
     proxy.dispose();
     server.dispose();

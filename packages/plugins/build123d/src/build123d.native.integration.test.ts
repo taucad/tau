@@ -352,7 +352,11 @@ def main(params):
       phases.push({ phase, elapsed: Math.round(performance.now() - started) });
     };
     onTestFailed(async () => {
-      await annotate(JSON.stringify({ phases, elapsed: Math.round(performance.now() - started) }), 'native-round-trip');
+      // A timeout fails the test before this hook runs, and annotate() then rejects, so
+      // print the phases first: they are the only record of where the time went.
+      const summary = JSON.stringify({ phases, elapsed: Math.round(performance.now() - started) });
+      console.error(`native round-trip phases: ${summary}`);
+      await annotate(summary, 'native-round-trip');
     });
     mark('create-client');
     const client = createTestRuntimeClient({
@@ -374,7 +378,7 @@ def main(params):
             'main.py': `from dataclasses import dataclass
 from math import isclose
 from pathlib import Path
-from build123d import Location, import_step
+from build123d import BoundBox, Location, import_step
 from planetary import main as original_model, Params as PlanetParams
 
 @dataclass(frozen=True)
@@ -408,7 +412,10 @@ def main(params):
             world = Location()
             for ancestor in shape.path:
                 world = world * ancestor.location
-            box = shape.located(world).bounding_box()
+            # Shape.located() deep-copies the node, and with it the whole assembly tree it
+            # links to; 68 of those took most of this test's time. Locating the OCCT handle
+            # shares the geometry and gives identical bounds.
+            box = BoundBox.from_topo_ds(shape.wrapped.Located(world.wrapped))
             return (*box.min, *box.max)
         if any(abs(left - right) > params.bounds_tolerance for left, right in zip(bounds(before), bounds(after), strict=True)):
             raise ValueError(f"STEP changed world-space native bounds: {path}")

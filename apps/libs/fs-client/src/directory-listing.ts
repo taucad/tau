@@ -1,4 +1,4 @@
-import type { FileTreeContentMetadata } from '@taucad/types';
+import type { FileProvenance, StatContentMetadata } from '@taucad/types';
 
 /**
  * Typed directory listing surface for {@link FileTreeService.listDirectory}.
@@ -14,6 +14,8 @@ export type ListedDirectoryEntry =
       size: number;
       /** Last-modified timestamp in milliseconds since the Unix epoch. */
       mtimeMs: number;
+      /** What the composed view says about this entry; absent until a view stamps it. */
+      provenance?: FileProvenance;
     }
   | ({
       name: string;
@@ -23,7 +25,9 @@ export type ListedDirectoryEntry =
       size: number;
       /** Last-modified timestamp in milliseconds since the Unix epoch. */
       mtimeMs: number;
-    } & FileTreeContentMetadata);
+      /** What the composed view says about this entry; absent until a view stamps it. */
+      provenance?: FileProvenance;
+    } & StatContentMetadata);
 
 /**
  * Discriminated snapshot for reactive directory listing consumers (see {@link useDirectoryListing}).

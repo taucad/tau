@@ -117,6 +117,11 @@ export const viewerRenderProfile = {
   edges: {
     /** Characteristic-edge stroke width in CSS pixels. */
     lineWidthCssPixels: 1,
+    /**
+     * Characteristic-edge stroke width on a thumbnail card, in CSS pixels at the size the card is shown: the reviewed
+     * card line weight (2 px on a 512 px card). Heavier than the viewer's own, so edges survive the downscale.
+     */
+    cardLineWidthCssPixels: 2,
   },
   /** Per-scheme factors. Dark mode raises the ambient floor while preserving the key and reflections. */
   colorSchemes: {

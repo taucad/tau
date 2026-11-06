@@ -553,19 +553,20 @@ const composeProjectHost = async (
   });
   /* One function composes every view on every host (charter D1): the bundles,
    * the registry mask and provenance are all inside it, so this worker only
-   * adapts the RPC shape over it. The agent view is what the *executors* of
-   * project code read too — the kernel runtime below and the GeoSpec runner's
-   * port — because the code they run is code the agent wrote (CI1, W14). */
+   * adapts the RPC shape over it. The *executors* of project code — the kernel
+   * runtime below and the GeoSpec runner's port — read the `'agent'` consumer
+   * too, because the code they run is code the agent wrote (CI1, W14), but
+   * without the system skills overlay: a kernel never resolves `.agents/skills`,
+   * and only the agent's tools serve the bundles (I1). This is the executor view
+   * every host composes (`executorViewFor` in packages/host/src/host-daemon.ts and
+   * apps/desktop/src/tau/services-host.impl.ts). */
   const workspaceProvider = createRelayedFileSystemProvider(fileSystem);
   const workbenchRootProvider = createRelayedFileSystemProvider(projectRoot);
   const workbenchRootView = composeView(
     { filesystem: workbenchRootProvider },
     { consumer: 'user', policy: tauPathPolicy },
   );
-  const agentView = composeView(
-    { filesystem: workspaceProvider },
-    { consumer: 'agent', policy: tauPathPolicy, overlays: [systemSkillsOverlay()] },
-  );
+  const executorView = composeView({ filesystem: workspaceProvider }, { consumer: 'agent', policy: tauPathPolicy });
   /* One runtime client per project host, shared by every turn and chat of the project (RH-A6). */
   // Agent tools select offered IDs at runtime; this host deliberately constructs the public dynamic client.
   /* Runtime telemetry (FR-14): only when the page handed a context, i.e. only where the page would record. */
@@ -576,7 +577,7 @@ const composeProjectHost = async (
   const createAgentRuntime = (): AppRuntimeClient => {
     const created = createRuntimeClient<AnyRuntimeDefinition>(
       createDefaultKernelOptions({
-        fileSystem: fromFsLike(createRuntimeFsLike(agentView)),
+        fileSystem: fromFsLike(createRuntimeFsLike(executorView)),
         runtimeConfig,
         compute,
       }),
@@ -608,7 +609,7 @@ const composeProjectHost = async (
   const revisions = revisionsSlot?.view;
   opened(() => revisions?.close());
   const geoSpecClient = createGeoSpecWorkerRpcClient({
-    openFileSystemBridge: () => createFileSystemBridgePort(agentView),
+    openFileSystemBridge: () => createFileSystemBridgePort(executorView),
     runtimeConfig,
     // No outer RPC budget bounds a browser-placed test_model call; this host budget is the bound.
     runnerTimeout: geoSpecDefaultRunBudget,
@@ -807,7 +808,7 @@ const composeProjectHost = async (
                 appendFileFenced: async (path, bytes, fence) => projectRoot.appendFileFenced(path, bytes, fence),
                 unlink: async (path) => projectRoot.unlink(path),
                 // The durable rooted bridge owns canonical metadata; log allocation only needs size.
-                stat: async (path, options) => projectRoot.stat(path, options),
+                stat: async (path) => projectRoot.stat(path),
                 // The chat's `events/` directory: the other devices' segments the model's history merges in (XD1).
                 readdir: async (path) => projectRoot.readdir(path),
               },

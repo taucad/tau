@@ -71,8 +71,8 @@ describe('checked-out legacy project conversion', () => {
     const controller = new AbortController();
     const stat = filesystem.stat.bind(filesystem);
     let identityChecks = 0;
-    vi.spyOn(filesystem, 'stat').mockImplementation(async (path, options) => {
-      const result = await stat(path, options);
+    vi.spyOn(filesystem, 'stat').mockImplementation(async (path) => {
+      const result = await stat(path);
       if (path === '.tau/project.json') {
         identityChecks += 1;
         if (identityChecks === 2) {

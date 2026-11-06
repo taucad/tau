@@ -24,10 +24,19 @@ const textEncoder = new TextEncoder();
  */
 const maxUnboundedReadBytes = 256 * 1024;
 
-const toFileMetadata = (stat: Extract<RpcFileStat, { isDirectory: false }>): RpcFileMetadata =>
-  stat.contentKind === 'text'
-    ? { type: 'file', size: stat.size, contentKind: 'text', lineCount: stat.lineCount }
-    : { type: 'file', size: stat.size, contentKind: 'binary' };
+/* A stat that could not measure a large file within its cap reports its size alone (D4): no metadata then. */
+const toFileMetadata = (stat: Extract<RpcFileStat, { isDirectory: false }>): RpcFileMetadata | undefined =>
+  stat.contentKind === 'binary'
+    ? { type: 'file', size: stat.size, contentKind: 'binary' }
+    : stat.contentKind === 'text' && stat.lineCount !== undefined
+      ? { type: 'file', size: stat.size, contentKind: 'text', lineCount: stat.lineCount }
+      : undefined;
+const fileMetadataOf = (
+  stat: Extract<RpcFileStat, { isDirectory: false }>,
+): Readonly<{ fileMetadata?: RpcFileMetadata }> => {
+  const fileMetadata = toFileMetadata(stat);
+  return fileMetadata === undefined ? {} : { fileMetadata };
+};
 
 /** @public */
 export async function handleReadFile(input: ReadFileRpcInput, fileSystem: RpcFileSystem): Promise<ReadFileRpcResult> {
@@ -51,7 +60,7 @@ export async function handleReadFile(input: ReadFileRpcInput, fileSystem: RpcFil
         success: false,
         errorCode: rpcClientErrorCode.ioError,
         message: `File is binary (${fileStat.size} bytes) and cannot be read as text.`,
-        fileMetadata: toFileMetadata(fileStat),
+        ...fileMetadataOf(fileStat),
       };
     }
 
@@ -66,10 +75,10 @@ export async function handleReadFile(input: ReadFileRpcInput, fileSystem: RpcFil
         success: false,
         errorCode: rpcClientErrorCode.resultTooLarge,
         message:
-          `File is ${kilobytes} KB with ${fileStat.lineCount} lines. ` +
+          `File is ${kilobytes} KB${fileStat.lineCount === undefined ? '' : ` with ${fileStat.lineCount} lines`}. ` +
           `Use offset and limit to read in ${maxReadLines}-line chunks, ` +
           `or grep for specific content.`,
-        fileMetadata: toFileMetadata(fileStat),
+        ...fileMetadataOf(fileStat),
       };
     }
 

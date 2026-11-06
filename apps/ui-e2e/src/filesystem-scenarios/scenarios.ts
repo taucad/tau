@@ -176,7 +176,7 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
     id: 'S5',
     title: 'Warm open to render',
     model:
-      'A fresh authority over the populated project (a reload): one statTree listing, then one exact stat per file as the per-file status compare. The revisions capture memo is not modelled.',
+      "A fresh authority over the populated project (a reload): the file tree's statTree loads the root's persisted Project Index and runs its one head-metadata compare, then one exact stat per file stands in for the per-file status compare a status check makes until W6. The revisions capture memo is not modelled.",
     times: [{ metric: 'duration', limit: 2000, description: '≤ 2 s' }],
     gates: [
       {
@@ -198,6 +198,13 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
         description: '0 blob reads for the status compare (bytes read)',
       },
       {
+        id: 'S5.index-compares',
+        metric: 'indexCompares',
+        comparison: 'equals',
+        limit: 1,
+        description: "1 head-metadata compare of the root's Project Index per warm open (production `index.compare`)",
+      },
+      {
         id: 'S5.compares',
         metric: 'metadataRequests',
         comparison: 'at-most',
@@ -206,7 +213,7 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
         qualifier: {
           kind: 'model-bound',
           reason:
-            "The runner's compare is its own loop of one stat per entry, so the count is fixed by the model; it becomes real when W3's Project Index gives warm open a production compare to drive.",
+            "The runner keeps a per-file stat as the status check's stand-in until W6 drives status from the Project Index, so the count is fixed by the model; the index's own open is one compare.",
         },
       },
     ],
@@ -371,6 +378,13 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
         description: 'binary bytes read = 0',
       },
       { id: 'S12.walks', metric: 'walkCalls', comparison: 'equals', limit: 0, description: 'walk calls = 0 (index)' },
+      {
+        id: 'S12.listing-bytes',
+        metric: 'listingBytesRead',
+        comparison: 'at-most',
+        limit: 'listingByteCeiling',
+        description: "listings' content facts read ≤ one head per file + text within the line-count cap (D4)",
+      },
     ],
   },
   {
@@ -458,7 +472,8 @@ export const scenarioTable: readonly ScenarioDefinition[] = [
   {
     id: 'S19',
     title: 'Grep while saving and reading',
-    model: 'S12 grep while a 1 MiB save (S7) lands and a viewer reads one file every 20 ms, all on one authority.',
+    model:
+      'S12 grep while a 1 MiB save (S7) lands and a viewer reads one file every 20 ms, all on one authority; the viewer keeps reading until the sample holds at least 40 reads, so p95 is a percentile and not the slowest read. readMax and readsDuringGrep (reads completed before grep and glob return) are recorded for information and never gated.',
     times: [
       { metric: 'saveLatency', limit: 100, description: 'S7 unchanged' },
       { metric: 'readP95', limit: 200, description: 'reads p95 ≤ 200 ms' },

@@ -1,5 +1,11 @@
-export type { FileLinkLocation } from '#path.js';
+export type {
+  FileLinkLfsLocation,
+  FileLinkLocation,
+  FileLinkRepositoryKind,
+  FileLinkRepositoryLocation,
+} from '#path.js';
 export {
+  fileLinkEntityTag,
   fileLinkLocationOfKey,
   fileLinkObjectKey,
   fileLinkPath,
@@ -24,9 +30,11 @@ export {
   fileLinkClockSkewSeconds,
   fileLinkLifetimeSeconds,
   fileLinkMaximumBytes,
+  fileLinkMaximumBytesFor,
   fileLinkMaximumLifetimeSeconds,
   fileLinkMessage,
   fileLinkOrigin,
+  fileLinkRepositoryMaximumBytes,
   fileLinkVersion,
   signFileLink,
 } from '#sign.js';

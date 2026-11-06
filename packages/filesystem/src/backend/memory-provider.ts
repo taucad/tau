@@ -5,10 +5,9 @@
  * filesystem operations (tests, scratch spaces).
  */
 
-import type { DirectoryEntry, FileStatOptions, FileStat, HeadFileStat, ProviderCapabilities } from '#types.js';
+import type { DirectoryEntry, FileStat, ProviderCapabilities } from '#types.js';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
 import { indexDirectoryEntries } from '#backend/directory-entries.js';
-import { fileStatFromBytes, headFileStatFromBytes } from '#content-metadata.js';
 
 /**
  * Non-persistent, in-memory filesystem provider.
@@ -16,10 +15,6 @@ import { fileStatFromBytes, headFileStatFromBytes } from '#content-metadata.js';
  * @public
  */
 export class MemoryProvider extends AbstractFileSystemProvider {
-  /** @returns `true` for the supported head listing mode. */
-  public get supportsHeadListing(): true {
-    return true;
-  }
   /**
    * Backend identifier; always `'memory'`.
    * @returns The literal string `'memory'`.
@@ -96,19 +91,11 @@ export class MemoryProvider extends AbstractFileSystemProvider {
    * @param path - Absolute directory path to enumerate.
    * @returns Each entry's name paired with its stat metadata.
    */
-  public readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>>;
-  public readdirWithStats(
-    path: string,
-    options: { readonly content: 'head' },
-  ): Promise<Array<{ name: string } & HeadFileStat>>;
-  public async readdirWithStats(
-    path: string,
-    options?: { readonly content: 'head' },
-  ): Promise<Array<{ name: string } & (FileStat | HeadFileStat)>> {
+  public async readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>> {
     this._assertRootedPath(path);
     const names = await this.readdir(path);
     const prefix = path === '' ? '' : `${path}/`;
-    const result: Array<{ name: string } & (FileStat | HeadFileStat)> = [];
+    const result: Array<{ name: string } & FileStat> = [];
     for (const name of names) {
       const fullPath = `${prefix}${name}`;
       if (this._dirs.has(fullPath)) {
@@ -119,13 +106,11 @@ export class MemoryProvider extends AbstractFileSystemProvider {
           mtimeMs: this._mtimes.get(fullPath) ?? 0,
         });
       } else {
-        const data = this._files.get(fullPath);
-        const bytes = data ?? new Uint8Array();
         result.push({
           name,
-          ...(options?.content === 'head'
-            ? headFileStatFromBytes(bytes, this._mtimes.get(fullPath) ?? Date.now())
-            : fileStatFromBytes(bytes, this._mtimes.get(fullPath) ?? Date.now())),
+          type: 'file',
+          size: this._files.get(fullPath)?.byteLength ?? 0,
+          mtimeMs: this._mtimes.get(fullPath) ?? Date.now(),
         });
       }
     }
@@ -138,17 +123,14 @@ export class MemoryProvider extends AbstractFileSystemProvider {
    * @param path - Absolute path to stat.
    * @returns Type/size/mtime for the entry at `path`.
    */
-  public async stat(path: string): Promise<FileStat>;
-  public async stat(path: string, options: FileStatOptions): Promise<FileStat | HeadFileStat>;
-  public async stat(path: string, options?: FileStatOptions): Promise<FileStat | HeadFileStat> {
+  public async stat(path: string): Promise<FileStat> {
     this._assertRootedPath(path);
     if (this._dirs.has(path)) {
       return { type: 'dir', size: 0, mtimeMs: this._mtimes.get(path) ?? 0 };
     }
     const data = this._files.get(path);
     if (data) {
-      const mtime = this._mtimes.get(path) ?? Date.now();
-      return options?.content === 'head' ? headFileStatFromBytes(data, mtime) : fileStatFromBytes(data, mtime);
+      return { type: 'file', size: data.byteLength, mtimeMs: this._mtimes.get(path) ?? Date.now() };
     }
     throw this._enoent(path);
   }

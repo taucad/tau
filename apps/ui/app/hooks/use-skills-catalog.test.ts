@@ -3,6 +3,10 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { WatchEvent } from '@taucad/filesystem';
 import { mock } from 'vitest-mock-extended';
 import { MemoryProvider } from '@taucad/filesystem/backend';
+import { composeView } from '@taucad/filesystem/composed-view';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
+import { createSkillBundleOverlay, createSkillBundleRegistry } from '@taucad/agent-tools/registry';
+import { systemSkillBundles } from '@taucad/skills/resources';
 import { ObservationService } from '@taucad/fs-client/observation-service';
 import type { FileContentResult } from '@taucad/fs-client/file-content-service';
 import { FileContentService } from '@taucad/fs-client/file-content-service';
@@ -657,5 +661,106 @@ describe('usePromptSkillsCatalog', () => {
     unmount();
 
     expect(mockUnsubscribe).toHaveBeenCalledTimes(subscriptions);
+  });
+});
+
+describe('useSkillsCatalog over the composed user view', () => {
+  beforeEach(() => {
+    actualContentService = undefined;
+    mockContentObservations.clear();
+    vi.clearAllMocks();
+    settledCallbacks.clear();
+    treeSnapshot = new Map();
+  });
+
+  /** Serve the tree and reader from the user's composed view with the real system-skill overlay. */
+  function serveComposedView(provider: MemoryProvider) {
+    const resourceReader = vi.fn(async () => {
+      throw new Error('Skill discovery must not fetch overlay resources');
+    });
+    const overlay = createSkillBundleOverlay(createSkillBundleRegistry(systemSkillBundles), resourceReader);
+    const overlayRead = vi.fn(overlay.read);
+    const view = composeView(
+      { filesystem: provider },
+      { consumer: 'user', policy: tauPathPolicy, overlays: [{ ...overlay, read: overlayRead }] },
+    );
+    mockReadFile.mockImplementation(async (path) => view.readFile(path));
+    mockListDirectory.mockImplementation(async (path) => {
+      const rows = await view.readdirWithStats(path);
+      return rows.map(({ name, provenance, ...stat }): ListedDirectoryEntry => {
+        const row = { name, path: `${path}/${name}`, size: stat.size, mtimeMs: stat.mtimeMs };
+        const stamped = provenance === undefined ? {} : { provenance };
+        return stat.type === 'dir'
+          ? { ...row, isFolder: true, ...stamped }
+          : { ...row, isFolder: false, contentKind: 'text', ...stamped };
+      });
+    });
+    return { overlayRead, resourceReader };
+  }
+
+  it('labels every compiled system skill system with its bundle fingerprint and reads no overlay bytes', async () => {
+    const { overlayRead, resourceReader } = serveComposedView(new MemoryProvider());
+
+    const { result } = renderHook(() => useSkillsCatalog());
+    await waitFor(() => {
+      expect(result.current).toHaveLength(16);
+    });
+
+    expect(overlayRead).not.toHaveBeenCalled();
+    expect(resourceReader).not.toHaveBeenCalled();
+    expect(mockReadFile.mock.calls.map(([path]) => path)).toStrictEqual(['.agents/plugins/installed.json']);
+    expect(systemSkillsCatalog).toHaveLength(16);
+    expect(result.current.every((skill) => skill.source === 'system')).toBe(true);
+    const fingerprints = new Map(result.current.map((skill) => [skill.name, skill.fingerprint]));
+    for (const bundle of systemSkillBundles) {
+      expect(fingerprints.get(bundle.slug)).toBe(bundle.fingerprint);
+    }
+  });
+
+  it('keeps a project override and installed store skill as their own sources', async () => {
+    const slug = systemSkillBundles[0]?.slug ?? 'missing-bundle';
+    const provider = new MemoryProvider();
+    await provider.writeFile(`.agents/skills/${slug}/SKILL.md`, skillMarkdown(slug, 'Workspace override'));
+    await provider.writeFile(
+      '.agents/plugins/installed.json',
+      JSON.stringify({
+        skills: {
+          woodworking: {
+            status: 'shadowed',
+            source: 'tau-store',
+            installedPath: '.agents/skills/woodworking/SKILL.md',
+            version: '1.0.0',
+            updatedAt: '2026-09-02T00:00:00.000Z',
+          },
+        },
+      }),
+    );
+    const { overlayRead } = serveComposedView(provider);
+
+    const { result } = renderHook(() => useSkillsCatalog());
+    await waitFor(() => {
+      expect(result.current.some((skill) => skill.name === 'woodworking')).toBe(true);
+    });
+
+    expect(overlayRead).not.toHaveBeenCalled();
+    expect(result.current.filter((skill) => skill.name === slug)).toEqual([
+      expect.objectContaining({ description: 'Workspace override', source: 'user' }),
+    ]);
+    expect(result.current.find((skill) => skill.name === 'woodworking')).toMatchObject({ source: 'tau-store' });
+  });
+
+  it('hides a bundle behind a project folder at its slug that has no SKILL.md', async () => {
+    const slug = systemSkillBundles[0]?.slug ?? 'missing-bundle';
+    const provider = new MemoryProvider();
+    await provider.writeFile(`.agents/skills/${slug}/notes.md`, '# Notes\n');
+    const { overlayRead } = serveComposedView(provider);
+
+    const { result } = renderHook(() => useSkillsCatalog());
+    await waitFor(() => {
+      expect(result.current).toHaveLength(15);
+    });
+
+    expect(overlayRead).not.toHaveBeenCalled();
+    expect(result.current.some((skill) => skill.name === slug)).toBe(false);
   });
 });

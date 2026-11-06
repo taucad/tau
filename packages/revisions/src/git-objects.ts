@@ -134,7 +134,7 @@ const assertObjectId = (format: ObjectFormat, value: string): string => {
  * @param body - Object payload.
  * @returns `<type> <length>\0<body>`.
  */
-const frameObject = (type: GitObjectType, body: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> =>
+export const frameObject = (type: GitObjectType, body: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> =>
   concatBytes(textEncoder.encode(`${assertType(type)} ${body.length}\0`), body);
 
 /**

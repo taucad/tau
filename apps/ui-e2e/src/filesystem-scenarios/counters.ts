@@ -46,6 +46,15 @@ export type ScenarioCounts = {
   /** Blob/File content reads and their bytes, plus sync-handle reads. */
   blobReads: number;
   bytesRead: number;
+  /**
+   * Bytes of the Project Index's own files (`.tau/index/`), kept apart from
+   * `bytesRead`: loading the index is not a read of the project's content
+   * (I3), but it is reported, never hidden.
+   */
+  indexBytesRead: number;
+  /** Durable writes of those files and their bytes, kept apart from `writes` and `bytesWritten` the same way. */
+  indexWrites: number;
+  indexBytesWritten: number;
   /** `crypto.subtle.digest` calls and bytes. */
   digests: number;
   bytesHashed: number;
@@ -73,6 +82,9 @@ const emptyCounts = (): ScenarioCounts => ({
   handleLookups: 0,
   blobReads: 0,
   bytesRead: 0,
+  indexBytesRead: 0,
+  indexWrites: 0,
+  indexBytesWritten: 0,
   digests: 0,
   bytesHashed: 0,
   broadcastPosts: 0,
@@ -151,6 +163,34 @@ export const installScenarioCounters = (): ScenarioCounters => {
   let tracedNames = new Set<string>();
   let tracedWrites: TracedWrite[] = [];
   let tracedLocks: TracedWrite[] = [];
+  /* The Project Index's own files, recognised by where their handles came
+   * from — a file looked up in `index` under `.tau` — never by a file name a
+   * project could also use. A `File` or `Blob` read from one is its bytes. */
+  const indexDirectories = new WeakSet<FileSystemDirectoryHandle>();
+  const indexFiles = new WeakSet<FileSystemFileHandle>();
+  const indexBlobs = new WeakSet<Blob>();
+  const countWrite = (handle: FileSystemFileHandle): void => {
+    if (indexFiles.has(handle)) {
+      counts.indexWrites += 1;
+      return;
+    }
+    counts.writes += 1;
+  };
+  const countWritten = (handle: FileSystemFileHandle, bytes: number): void => {
+    if (indexFiles.has(handle)) {
+      counts.indexBytesWritten += bytes;
+      return;
+    }
+    counts.bytesWritten += bytes;
+  };
+  const countRead = (index: boolean, bytes: number): void => {
+    if (index) {
+      counts.indexBytesRead += bytes;
+      return;
+    }
+    counts.blobReads += 1;
+    counts.bytesRead += bytes;
+  };
   const noteWriteStart = (name: string): void => {
     if (tracedNames.has(name) && !tracedWrites.some((write) => write.name === name)) {
       tracedWrites.push({ name, startedAt: performance.now(), operationsBefore: counts.writes + counts.renames });
@@ -214,24 +254,25 @@ export const installScenarioCounters = (): ScenarioCounters => {
   const { createWritable } = fileHandle;
   fileHandle.createWritable = async function (this: FileSystemFileHandle, ...parameters) {
     counts.writableOpens += 1;
-    noteWriteStart(this.name);
+    const { name } = this;
+    noteWriteStart(name);
     const stream = await createWritable.apply(this, parameters);
     const write = stream.write.bind(stream);
     const close = stream.close.bind(stream);
     stream.write = async (data) => {
       if (data instanceof Blob) {
-        counts.bytesWritten += data.size;
+        countWritten(this, data.size);
       } else if (ArrayBuffer.isView(data) || data instanceof ArrayBuffer) {
-        counts.bytesWritten += data.byteLength;
+        countWritten(this, data.byteLength);
       } else if (typeof data === 'string') {
-        counts.bytesWritten += new TextEncoder().encode(data).byteLength;
+        countWritten(this, new TextEncoder().encode(data).byteLength);
       }
       return write(data);
     };
     stream.close = async () => {
       await close();
       counts.writableCommits += 1;
-      counts.writes += 1;
+      countWrite(this);
     };
     return stream;
   };
@@ -247,8 +288,7 @@ export const installScenarioCounters = (): ScenarioCounters => {
       let wrote = false;
       handle.read = (buffer, options) => {
         const bytes = read(buffer, options);
-        counts.blobReads += 1;
-        counts.bytesRead += bytes;
+        countRead(indexFiles.has(this), bytes);
         return bytes;
       };
       handle.write = (buffer, options) => {
@@ -257,14 +297,14 @@ export const installScenarioCounters = (): ScenarioCounters => {
         }
         wrote = true;
         const bytes = write(buffer, options);
-        counts.bytesWritten += bytes;
+        countWritten(this, bytes);
         return bytes;
       };
       handle.close = () => {
         close();
         if (wrote) {
           counts.syncHandleWriteSessions += 1;
-          counts.writes += 1;
+          countWrite(this);
         }
       };
       return handle;
@@ -296,44 +336,61 @@ export const installScenarioCounters = (): ScenarioCounters => {
   const { getFileHandle } = directory;
   directory.getFileHandle = async function (this: FileSystemDirectoryHandle, ...parameters) {
     counts.handleLookups += 1;
-    return getFileHandle.apply(this, parameters);
+    const handle = await getFileHandle.apply(this, parameters);
+    if (indexDirectories.has(this)) {
+      indexFiles.add(handle);
+    }
+    return handle;
   };
   const { getDirectoryHandle } = directory;
   directory.getDirectoryHandle = async function (this: FileSystemDirectoryHandle, ...parameters) {
     counts.handleLookups += 1;
-    return getDirectoryHandle.apply(this, parameters);
+    const handle = await getDirectoryHandle.apply(this, parameters);
+    if (this.name === '.tau' && handle.name === 'index') {
+      indexDirectories.add(handle);
+    }
+    return handle;
   };
   const { getFile } = fileHandle;
   fileHandle.getFile = async function (this: FileSystemFileHandle) {
     counts.getFileCalls += 1;
-    return getFile.call(this);
+    const file = await getFile.call(this);
+    if (indexFiles.has(this)) {
+      indexBlobs.add(file);
+    }
+    return file;
   };
 
-  /* Content reads. `slice()` makes a Blob whose reads are counted here too. */
+  /* Content reads. `slice()` makes a Blob whose reads are counted here too,
+   * and one sliced from an index file is the index's. */
   const blob = Blob.prototype;
+  const { slice } = blob;
+  blob.slice = function (this: Blob, ...parameters: Parameters<Blob['slice']>) {
+    const sliced = slice.apply(this, parameters);
+    if (indexBlobs.has(this)) {
+      indexBlobs.add(sliced);
+    }
+    return sliced;
+  };
   const { arrayBuffer } = blob;
   blob.arrayBuffer = async function (this: Blob) {
     const result = await arrayBuffer.call(this);
-    counts.blobReads += 1;
-    counts.bytesRead += result.byteLength;
+    countRead(indexBlobs.has(this), result.byteLength);
     return result;
   };
   const { text } = blob;
   blob.text = async function (this: Blob) {
-    counts.blobReads += 1;
-    counts.bytesRead += this.size;
+    countRead(indexBlobs.has(this), this.size);
     return text.call(this);
   };
   const { bytes } = blob;
   blob.bytes = async function (this: Blob) {
-    counts.blobReads += 1;
-    counts.bytesRead += this.size;
+    countRead(indexBlobs.has(this), this.size);
     return bytes.call(this);
   };
   const { stream } = blob;
   blob.stream = function (this: Blob) {
-    counts.blobReads += 1;
-    counts.bytesRead += this.size;
+    countRead(indexBlobs.has(this), this.size);
     return stream.call(this);
   };
 

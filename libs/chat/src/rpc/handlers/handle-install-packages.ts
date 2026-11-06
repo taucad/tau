@@ -19,7 +19,7 @@ const toBundlerFileSystem = (fileSystem: RpcFileSystem): BundlerFileSystem => {
     return value.isDirectory;
   };
   const names = async (path: string): Promise<string[]> => {
-    const entries = await fileSystem.readdir(path);
+    const entries = await fileSystem.readdir(path, { contentFacts: false });
     return entries.map((entry) => entry.name);
   };
   const remove = async (path: string): Promise<void> => {
@@ -74,7 +74,7 @@ const toIssues = (issues: readonly PackageIssue[]): InstallPackagesOutput['issue
 const nonNpmManifest = async (
   fileSystem: RpcFileSystem,
 ): Promise<{ readonly language: 'Python' | 'C#'; readonly manifest: string } | undefined> => {
-  const entries = await fileSystem.readdir('');
+  const entries = await fileSystem.readdir('', { contentFacts: false });
   const names = entries.filter(({ type }) => type !== 'dir').map(({ name }) => name);
   if (names.includes('package.json')) {
     return undefined;

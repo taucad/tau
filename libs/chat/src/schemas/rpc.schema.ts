@@ -198,6 +198,7 @@ const rpcDirectoryEntrySchema = zod.union([
   directoryEntrySchema.options[0].extend({ modifiedAt: zod.string().optional() }).strict(),
   directoryEntrySchema.options[1].extend({ modifiedAt: zod.string().optional() }).strict(),
   directoryEntrySchema.options[2].extend({ modifiedAt: zod.string().optional() }).strict(),
+  directoryEntrySchema.options[3].extend({ modifiedAt: zod.string().optional() }).strict(),
 ]);
 
 const listDirectoryRpc = defineRpc({
@@ -219,6 +220,7 @@ const rpcGlobEntrySchema = zod.union([
   globEntrySchema.options[0].extend({ modifiedAt: zod.string().optional() }).strict(),
   globEntrySchema.options[1].extend({ modifiedAt: zod.string().optional() }).strict(),
   globEntrySchema.options[2].extend({ modifiedAt: zod.string().optional() }).strict(),
+  globEntrySchema.options[3].extend({ modifiedAt: zod.string().optional() }).strict(),
 ]);
 
 const globSearchRpc = defineRpc({

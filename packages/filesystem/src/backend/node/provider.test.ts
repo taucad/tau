@@ -632,28 +632,25 @@ describe('NodeFsProvider atomic writes', () => {
 });
 
 describe('NodeFsProvider head listing', () => {
-  it('avoids full reads and leaves exact counts fresh after a same-size external edit', async () => {
+  it('stats and lists head metadata without opening a file (I3)', async () => {
     const root = createRoot();
     const provider = new NodeFsProvider(root);
-    const file = join(root, 'large.txt');
-    writeFileSync(file, `${'a'.repeat(1024)}\nend`);
+    writeFileSync(join(root, 'large.txt'), `${'a'.repeat(1024)}\nend`);
     const fullRead = vi.spyOn(fs, 'readFile');
+    const open = vi.spyOn(fs, 'open');
 
-    const headRows = await provider.readdirWithStats('', { content: 'head' });
-    expect(headRows.find(({ name }) => name === 'large.txt')).toMatchObject({
-      contentKind: 'text',
+    const rows = await provider.readdirWithStats('');
+    const stat = await provider.stat('large.txt');
+
+    /* Exactly kind, size and time: no content fact rides along. */
+    expect(rows.find(({ name }) => name === 'large.txt')).toStrictEqual({
+      name: 'large.txt',
+      type: 'file',
       size: 1028,
+      mtimeMs: stat.mtimeMs,
     });
+    expect(stat).toStrictEqual({ type: 'file', size: 1028, mtimeMs: stat.mtimeMs });
     expect(fullRead).not.toHaveBeenCalled();
-    const head = await provider.stat('large.txt', { content: 'head' });
-    expect(head).toMatchObject({ type: 'file', size: 1028, contentKind: 'text' });
-    expect(head).not.toHaveProperty('lineCount');
-    expect(fullRead).not.toHaveBeenCalled();
-    writeFileSync(file, `${'a'.repeat(1024)}-end`);
-    expect(await provider.stat('large.txt')).toMatchObject({ contentKind: 'text', lineCount: 1 });
-    const exactRows = await provider.readdirWithStats('');
-    expect(exactRows.find(({ name }) => name === 'large.txt')).toMatchObject({
-      lineCount: 1,
-    });
+    expect(open).not.toHaveBeenCalled();
   });
 });

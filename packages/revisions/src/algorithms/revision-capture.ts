@@ -14,6 +14,9 @@ import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 import { bufferToStream } from '@taucad/filesystem/backend/stream-utils';
 import { walk } from '@taucad/filesystem/content-ops';
 import type { WalkFileSystem } from '@taucad/filesystem/content-ops';
+/* The Project Index's racy-timestamp window (FAT's two seconds): the memo never
+ * trusts a stat this young, by the same rule the index applies to its facts (EQ7, C3). */
+import { timestampGranularityMilliseconds } from '@taucad/filesystem';
 import type { DirectoryEntry, FileMode, FileStatEntry, FileSystemProvider } from '@taucad/filesystem';
 import { adoptRevisionTree, revisionTreeFiles } from '#algorithms/revision-tree.js';
 import type { ImmutableRevisionTree, RevisionTreeFile } from '#algorithms/revision-tree.js';
@@ -159,8 +162,8 @@ const captureOnce = async (
     }
   };
   /*
-   * A kind-carrying listing spares a `stat` per child — on OPFS `stat` reads a
-   * text file whole to count its lines. A child that vanishes after the
+   * A kind-carrying listing spares a `stat` per child: one listing round trip
+   * instead of one per entry. A child that vanishes after the
    * listing is skipped by its read, exactly as one that vanishes after `stat`.
    */
   const listChildren = async (path: string): Promise<ReadonlyArray<{ name: string; kind?: 'file' | 'dir' }>> => {
@@ -505,13 +508,6 @@ const isExcludedPath = (path: string, excluded: ((path: string) => boolean) | un
  * written by whoever made it, so it is copied.
  */
 const capturedBytesOf = new WeakSet<Uint8Array<ArrayBuffer>>();
-
-/**
- * The coarsest modification time a filesystem we capture through reports: FAT's
- * two seconds. Nothing advertises its own resolution, so the memo assumes the
- * worst and never trusts a stat this young (EQ7, C3).
- */
-const timestampGranularityMilliseconds = 2000;
 
 /**
  * How many bytes of one checkout a memo may keep resident, by default.

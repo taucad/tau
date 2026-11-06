@@ -94,6 +94,12 @@ status=0
 NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
   TAU_SHELL_CONFORMANCE_RECEIPT="$HOME/shell-conformance-receipt.json" \
   pnpm nx run native-process-core:test:shell-conformance --skip-nx-cache || status=$?
+# The native sandbox every kernel worker runs in, as the packaged app runs it: the stock bwrap first on PATH and the
+# selector's copy named by TAU_NATIVE_SANDBOX_BWRAP. Stock Ubuntu 26.04 confines /usr/bin/bwrap with
+# bwrap-userns-restrict, so apply-seccomp opens its nested namespace only through the Tau copy (qualification
+# 41865985263 ubuntu2604-*: build123d's bytecode compile exited 1 and no model rendered). CI=1 forbids a skip.
+(cd packages/core/native-process && PATH="$HOME/node/bin:/usr/local/bin:/usr/bin:/bin" CI=1 \
+  TAU_NATIVE_SANDBOX_BWRAP="$bwrap" pnpm exec vitest run src/native-sandbox.integration.test.ts) || status=$?
 # The host shell service's rows over the same provider and bwrap (H01-H06), with their own receipt.
 NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
   TAU_SHELL_CONFORMANCE_RECEIPT="$HOME/shell-service-conformance-receipt.json" \

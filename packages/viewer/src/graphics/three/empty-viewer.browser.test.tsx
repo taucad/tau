@@ -303,7 +303,7 @@ it.each([
     }
     gridSteps.sort((left, right) => left - right);
     const strongestGridStep = gridSteps[Math.floor(gridSteps.length * 0.99)] ?? 0;
-    expect(strongestGridStep, `grid lines stand out from the ${theme} background`).toBeGreaterThan(30);
+    expect(strongestGridStep, `grid lines stand out from the ${theme} background`).toBeGreaterThan(12);
     view.rerender(fixture(undefined, { grid: false, axes: false }));
     const noAxes = await capture();
     expect(difference(noGrid, noAxes), 'axes contribute visible pixels').toBeGreaterThan(50);

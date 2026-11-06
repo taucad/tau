@@ -95,6 +95,8 @@ function catalogFor(tree: FileTreeService, readFile: Reader, content: Content): 
             }
             return bytes;
           },
+          // Rows keep the composed view's provenance, so the resolver takes system skills from the
+          // compiled catalog and never reads overlay bytes; the tree listing keeps subscribePath live.
           listDirectory: async (path) => {
             let entries = directories.get(path);
             if (!entries) {

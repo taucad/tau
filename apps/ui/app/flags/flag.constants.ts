@@ -22,12 +22,29 @@ export type FlagDefinition = {
 };
 
 /**
- * Resolve the boolean default for `tauDebug` from the runtime environment
- * (`TAU_DEBUG=1|true`). The env var is the source of truth (drives e2e and
- * deployment toggling); a localStorage override still wins because the
+ * Resolve the boolean default for `tauDebug` (the *Debug tools* switch).
+ *
+ * `TAU_DEBUG=1|true` turns the switch on by default only in an undeployed
+ * build (local dev and the e2e suite, which set it). A deployed site
+ * (`TAU_DEPLOY_CONTEXT` set, staging included) may carry `TAU_DEBUG` for its
+ * debug routes and harnesses, but users there start with debug tools off and
+ * opt in from Experimental settings. A stored override always wins because the
  * default only fires when no override is stored.
  */
-const tauDebugDefault = Boolean(ENV.TAU_DEBUG);
+export function resolveTauDebugDefault({
+  isDebugEnvironment,
+  deployContext,
+}: {
+  readonly isDebugEnvironment: boolean | undefined;
+  readonly deployContext: string | undefined;
+}): boolean {
+  return Boolean(isDebugEnvironment) && deployContext === undefined;
+}
+
+const tauDebugDefault = resolveTauDebugDefault({
+  isDebugEnvironment: ENV.TAU_DEBUG,
+  deployContext: ENV.TAU_DEPLOY_CONTEXT,
+});
 
 export const flagRegistry = {
   machines: {

@@ -1,7 +1,7 @@
 /**
  * `hashFiles` passes down through the rooted view and the composed view to the
- * provider that holds the bytes, in one call; overlay entries and providers
- * without the call keep reading.
+ * provider that holds the bytes, in one call; overlay entries keep reading, and
+ * a rooted view over a provider without the call answers from its root index.
  */
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
@@ -131,10 +131,15 @@ describe('rooted view hashFiles', () => {
     }
   });
 
-  it('offers no hashFiles over a provider without one', async () => {
-    const { service, rooted } = await rootedOver(new MemoryProvider());
+  it('answers from the root index over a provider without one', async () => {
+    const provider = new MemoryProvider();
+    await provider.writeFile('gear/main.ts', 'model');
+    const { service, rooted } = await rootedOver(provider);
     try {
-      expect(rooted.hashFiles).toBeUndefined();
+      await expect(rooted.hashFiles!(['main.ts', 'gone.ts'])).resolves.toEqual({
+        'main.ts': sha256('model'),
+        'gone.ts': 'missing',
+      });
     } finally {
       service.dispose();
     }

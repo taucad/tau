@@ -180,7 +180,7 @@ describe('createProviderEventLog', () => {
     stat.mockClear();
     await log.append(event(1));
     expect(readFile.mock.calls.filter(([path]) => path === filePath)).toHaveLength(0);
-    expect(stat).toHaveBeenCalledWith(filePath, { content: 'head' });
+    expect(stat).toHaveBeenCalledWith(filePath);
     const before = fixture.files.get(filePath)!;
     const changed = new Uint8Array(before.byteLength + 1);
     changed.set(before);

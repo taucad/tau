@@ -14,9 +14,17 @@ export {
 export type { BambuStudioEngine } from '#registry/print-profiles.js';
 export { createProviderRpcFileSystem, type ProviderRpcFileSystemOptions } from '#registry/provider-file-system.js';
 export { createRuntimeWorkbenchClient, type WorkbenchRuntime } from '#registry/workbench-client.js';
-export { createSkillBundleOverlay, createSkillBundleRegistry } from '#registry/skill-overlay.js';
+export {
+  createCachedSkillResourceReader,
+  createSkillBundleOverlay,
+  createSkillBundleRegistry,
+} from '#registry/skill-overlay.js';
 export type {
+  CachedSkillResourceReader,
+  CachedSkillResourceReaderOptions,
   ReadSkillResource,
+  SkillResourceCacheEvent,
+  SkillResourceCacheStats,
   SkillBundleRegistry,
   SkillResourceDescriptor,
   SystemSkillBundle,

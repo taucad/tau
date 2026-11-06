@@ -383,6 +383,19 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     directory: false,
   },
 
+  /* The Project Index's snapshot (D5): regenerable, at the project root only,
+   * where every released client already leaves an unlisted `.tau` member
+   * unversioned. No agent lists or reads it, and no watcher echoes its writes. */
+  {
+    prefix: '.tau/index',
+    class: 'cache',
+    versioned: false,
+    agentAccess: 'hidden',
+    watch: 'none',
+    anchored: true,
+    match: 'root',
+    directory: true,
+  },
   /* Cache: regenerable, never versioned, never transferred, never watched. */
   {
     prefix: '.tau/cache',

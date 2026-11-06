@@ -110,6 +110,45 @@ export const sandboxRuntimeSeccomp = (
 };
 
 /**
+ * The environment variable naming the bubblewrap every Linux native worker starts through.
+ *
+ * Absent, the runtime runs `bwrap` from `PATH`. Stock Ubuntu 26.04 confines `/usr/bin/bwrap` with its
+ * `bwrap-userns-restrict` AppArmor profile, which lets bubblewrap create its user namespace but strips the
+ * capabilities the sandbox runtime's `apply-seccomp` helper needs to open its nested one, so every worker exits 1 with
+ * `write /proc/self/setgroups (nested userns is capability-restricted …)`. A packaged desktop app ships its own copy
+ * under an AppArmor profile of its own and names it here, the same binary its shell sandbox already runs.
+ *
+ * @public
+ */
+export const nativeSandboxBwrapVariable = 'TAU_NATIVE_SANDBOX_BWRAP';
+
+/**
+ * The bubblewrap {@link nativeSandboxBwrapVariable} names, when it names one on Linux.
+ *
+ * The path is spliced, unquoted, ahead of the seccomp descriptor the worker reads, so only an absolute path of plain
+ * characters is accepted; anything else refuses every launch rather than running a different binary.
+ *
+ * @internal
+ * @param environment - Environment to read; defaults to this process's.
+ * @param platform - Host operating system.
+ * @returns The absolute bubblewrap path, or `undefined` to use `bwrap` from `PATH`.
+ * @throws {NativeRuntimeUnavailableError} When the variable holds anything but a plain absolute path.
+ */
+export const nativeSandboxBwrap = (
+  environment: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): string | undefined => {
+  const path = environment[nativeSandboxBwrapVariable];
+  if (platform !== 'linux' || path === undefined || path === '') {
+    return undefined;
+  }
+  if (!/^\/[\w./+-]+$/u.test(path) || path.split('/').includes('..')) {
+    throw new NativeRuntimeUnavailableError(`${nativeSandboxBwrapVariable} must be a plain absolute path.`);
+  }
+  return path;
+};
+
+/**
  * Resolve the Linux proxy agent on the physical filesystem for bubblewrap mounts.
  *
  * @internal
@@ -150,6 +189,7 @@ export const deniedWriteRoots = (): string[] => getDefaultWritePaths().filter((p
  */
 export type NativeSandboxProfile = {
   seccomp?: { applyPath: string };
+  bwrapPath?: string;
   javaAgentJarPath?: string;
   network: { allowedDomains: string[]; deniedDomains: string[]; strictAllowlist: boolean };
   filesystem: { denyRead: string[]; allowRead: string[]; allowWrite: string[]; denyWrite: string[] };
@@ -176,19 +216,23 @@ export type NativeSandboxProfile = {
  */
 export const nativeSandboxPolicy = (
   launch?: Pick<NativeSandboxLaunch, 'readablePaths' | 'writablePath'>,
-): NativeSandboxProfile => ({
-  seccomp: sandboxRuntimeSeccomp(),
-  javaAgentJarPath: sandboxRuntimeJavaAgent(),
-  network: { allowedDomains: [], deniedDomains: ['*'], strictAllowlist: true },
-  filesystem: {
-    denyRead: deniedReadRoots(),
-    allowRead: launch
-      ? physicalVariants([...launch.readablePaths, launch.writablePath, ...sandboxRuntimeReadRoots()])
-      : [],
-    allowWrite: launch ? physicalVariants([launch.writablePath]) : [],
-    denyWrite: deniedWriteRoots(),
-  },
-});
+): NativeSandboxProfile => {
+  const bwrapPath = nativeSandboxBwrap();
+  return {
+    seccomp: sandboxRuntimeSeccomp(),
+    ...(bwrapPath === undefined ? {} : { bwrapPath }),
+    javaAgentJarPath: sandboxRuntimeJavaAgent(),
+    network: { allowedDomains: [], deniedDomains: ['*'], strictAllowlist: true },
+    filesystem: {
+      denyRead: deniedReadRoots(),
+      allowRead: launch
+        ? physicalVariants([...launch.readablePaths, launch.writablePath, ...sandboxRuntimeReadRoots()])
+        : [],
+      allowWrite: launch ? physicalVariants([launch.writablePath]) : [],
+      denyWrite: deniedWriteRoots(),
+    },
+  };
+};
 
 const unavailable = (error: unknown): NativeRuntimeUnavailableError =>
   error instanceof NativeRuntimeUnavailableError
@@ -387,10 +431,11 @@ const refuseLinkCreation = (argv: readonly string[]): readonly string[] => {
     throw new NativeRuntimeUnavailableError('the sandbox runtime returned a vector Tau cannot refuse links in.');
   }
   if (process.platform === 'linux') {
-    if (!wrapped.startsWith('bwrap ')) {
+    const bwrap = `${nativeSandboxBwrap() ?? 'bwrap'} `;
+    if (!wrapped.startsWith(bwrap)) {
       throw new NativeRuntimeUnavailableError('the sandbox runtime did not start bwrap, so links cannot be refused.');
     }
-    return [shell!, flag, `bwrap --seccomp ${String(linkRefusalDescriptor)} ${wrapped.slice('bwrap '.length)}`];
+    return [shell!, flag, `${bwrap}--seccomp ${String(linkRefusalDescriptor)} ${wrapped.slice(bwrap.length)}`];
   }
   if (process.platform === 'darwin') {
     /* The runtime single-quotes the profile, spelling each quote inside it as '"'"'. */

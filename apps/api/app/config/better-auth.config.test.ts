@@ -59,6 +59,10 @@ const createConfig = (
         ['AUTH_SECRET', 'test-secret'],
         ['AUTH_URL', authUrl],
         ['TAU_FRONTEND_URL', 'http://localhost:3000'],
+        [
+          'ADDITIONAL_CORS_ORIGINS',
+          ['https://taucad-prod-us.netlify.app', 'https://deploy-preview-*--taucad.netlify.app'],
+        ],
         ['GITHUB_CLIENT_ID', 'github-id'],
         ['GITHUB_CLIENT_SECRET', 'github-secret'],
         ['GOOGLE_CLIENT_ID', 'google-id'],
@@ -525,6 +529,19 @@ describe('getBetterAuthConfig email callbacks', () => {
  * plugin, which no unit test can see; these cases pin the composition so a real
  * divergence between the two arrays cannot hide behind a build artefact again.
  */
+describe('getBetterAuthConfig trusted origins', () => {
+  it('trusts the frontend URL and every additional CORS origin, and never the desktop origin', () => {
+    const { config } = createConfig();
+
+    expect(config.trustedOrigins).toEqual([
+      'http://localhost:3000',
+      'https://taucad-prod-us.netlify.app',
+      'https://deploy-preview-*--taucad.netlify.app',
+    ]);
+    expect(config.trustedOrigins).not.toContain('app://tau');
+  });
+});
+
 describe('getBetterAuthConfig runtime bearer composition', () => {
   const email = 'runtime-bearer@example.test';
   const password = 'correct horse battery staple';

@@ -1,12 +1,17 @@
+/** A listed file: a text count is present only where the listing could measure it (D4, EQ15). */
 type FileMetadataDisplayInput =
   | {
       size: number;
       contentKind: 'text';
-      lineCount: number;
+      lineCount?: number;
     }
   | {
       size: number;
       contentKind: 'binary';
+    }
+  | {
+      size: number;
+      contentKind?: undefined;
     };
 
 export function formatToolFileSize(bytes: number): string {
@@ -27,5 +32,8 @@ export function formatToolFileMetadata(input: FileMetadataDisplayInput): string 
   if (input.contentKind === 'binary') {
     return `binary, ${formatToolFileSize(input.size)}`;
   }
-  return `${formatLineCount(input.lineCount)}, ${formatToolFileSize(input.size)}`;
+  if (input.contentKind === 'text' && input.lineCount !== undefined) {
+    return `${formatLineCount(input.lineCount)}, ${formatToolFileSize(input.size)}`;
+  }
+  return formatToolFileSize(input.size);
 }

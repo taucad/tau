@@ -226,6 +226,47 @@ describe('WorkspaceFileService external webaccess observation', () => {
     expect(refresh).toHaveBeenCalledWith(undefined);
   });
 
+  /* Review E3, at the ingest: the index's own snapshot write must not come back as a fact that schedules the next. */
+  it('ingests no fact about the Project Index snapshot, so storing it never stores it again', async () => {
+    const { service, provider } = await createWebAccessService({ native: true });
+    const rooted = service.createRootedFileSystem(`/projects/${alphaProjectId}`);
+    await rooted.statTree!('');
+    const snapshot = `${alphaPhysicalRoot}/.tau/index/snapshot.json`;
+    await vi.waitFor(
+      async () => {
+        await expect(provider.exists(snapshot)).resolves.toBe(true);
+      },
+      { timeout: 5000, interval: 100 },
+    );
+    /* The project's first scoped poll records its baseline. */
+    await service.pollExternalChanges(`/projects/${alphaProjectId}`);
+    const writes = vi.spyOn(provider, 'writeFile');
+    const refresh = vi.spyOn(provider, 'refresh');
+
+    TestFileSystemObserver.instances[0]!.callback([
+      {
+        type: 'modified',
+        changedHandle: fileHandle('snapshot.json'),
+        relativePathComponents: ['alpha-project', '.tau', 'index', 'snapshot.json'],
+      },
+    ]);
+    await service.pollExternalChanges(`/projects/${alphaProjectId}`);
+    await rooted.statTree!('');
+    /* Past the two-second snapshot debounce. */
+    await new Promise((resolve) => {
+      setTimeout(resolve, 2500);
+    });
+
+    expect(writes).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
+  }, 15_000);
+
+  it('offers no index-backed hashFiles on a folder other programs edit', async () => {
+    const { service } = await createWebAccessService();
+
+    expect(service.createRootedFileSystem(`/projects/${alphaProjectId}`).hashFiles).toBeUndefined();
+  });
+
   it('reads external snapshot file metadata with bounded concurrency', async () => {
     let inFlight = 0;
     let maxInFlight = 0;

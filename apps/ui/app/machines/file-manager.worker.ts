@@ -61,6 +61,7 @@ import { reportToApi } from '#runtime/observability/report-to-api.js';
 import { summarizeLast, withPendingGauge, workerSpanTotals } from '#lib/worker-timing-report.js';
 import { createProjectOpenTimer, markProjectOpen } from '#machines/project-open-timer.js';
 import type { ProjectOpenTimer } from '#machines/project-open-timer.js';
+import { createRevisionCompute } from '#machines/revision-compute.js';
 import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
 
 /**
@@ -110,6 +111,8 @@ const providerRegistry = new ProviderRegistry({
 /* Each mutation's wait for its claims and its time holding them, for the open's worker timings. */
 const resourceQueue = new ResourceQueue({ timings: workerTimings });
 const eventBus = new ChangeEventBus();
+/** One compute worker for every revision store this worker opens (charter D7), started on first use. */
+const revisionCompute = createRevisionCompute();
 eventBus.subscribe(() => {
   workerTimings.count('events.change');
 });
@@ -362,6 +365,13 @@ exposeFileSystem(withPendingGauge(workspaceBridgeService(fileService)), {
    * gets the checkout itself, because the host's own capture, apply and language
    * planes must read the working copy and never the overlays composed above it
    * (V6). A connection that names neither never reaches here (CI2).
+   *
+   * Only `'user'` composes the system skills overlay. The page's `'agent'`
+   * connections are executors of project code — the editor's kernel runtime
+   * (`cad.machine.ts`) and the file manager's runtime bridge
+   * (`use-file-manager.tsx`) — and an executor never sees `.agents/skills`
+   * (I1). The agent's tools open `'working-copy'` and compose their own overlay
+   * above it, as `agent-host.impl.ts` does.
    */
   // oxlint-disable-next-line max-params -- RootedFileSystemHandlerFactory's own arity.
   handlerForRoot: (root, context, consumer, policy) => {
@@ -369,7 +379,7 @@ exposeFileSystem(withPendingGauge(workspaceBridgeService(fileService)), {
     /* A skill bundle belongs to a checkout, not to the dependency mount: the
      * mount is opened as its own root since W11, and composing the overlay there
      * would grow an `.agents` row inside `node_modules`. */
-    const overlays = root === dependencyMountRoot ? [] : [systemSkillsOverlay()];
+    const overlays = consumer === 'user' && root !== dependencyMountRoot ? [systemSkillsOverlay()] : [];
     const view = consumer === 'working-copy' ? filesystem : composeView({ filesystem }, { consumer, overlays, policy });
     /*
      * The read content operations run here, over the view the connection asked
@@ -456,6 +466,7 @@ const revisionRegistry = createWorkerRevisionRegistry({
     return createIsomorphicGitRevisionPort({
       filesystem: fileService.createRootedFileSystem(`/projects/${projectId}`),
       checkouts: checkoutRoutes(projectId),
+      compute: revisionCompute,
       /* The page's session is a cookie on the API's origin, so `include` is the
        * whole of "this browser is signed in" (I8, S24). The worker never holds
        * a token and never puts one in a URL. A *third-party* remote is reached
@@ -483,6 +494,7 @@ const revisionRegistry = createWorkerRevisionRegistry({
     createIsomorphicGitRevisionPort({
       filesystem: fileService.createRootedFileSystem(`/projects/${projectId}`),
       checkouts: checkoutRoutes(projectId),
+      compute: revisionCompute,
       http: createRevisionHttpClient({
         credentials: 'include',
         ...createGitRemoteTransport(credential),

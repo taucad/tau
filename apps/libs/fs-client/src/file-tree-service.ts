@@ -5,7 +5,7 @@ import type {
   FileProvenance,
   FileStatEntry,
   FileStat,
-  FileTreeContentMetadata,
+  StatContentMetadata,
 } from '@taucad/types';
 import type { ChangeSet, ChangeSetEntry, DirectoryStatRow, FileTreeNode } from '@taucad/filesystem';
 import { getFileContentMetadata } from '@taucad/filesystem';
@@ -137,10 +137,13 @@ export const isTauTemporarySiblingName = (name: string): boolean => tauTemporary
 const isTauTemporarySiblingPath = (path: string): boolean =>
   isTauTemporarySiblingName(path.slice(path.lastIndexOf('/') + 1));
 
-const fileMetadataFields = (metadata: FileTreeContentMetadata): FileTreeContentMetadata =>
+/* Facts ride along only when the listing already knew them (I3). */
+const fileMetadataFields = (metadata: StatContentMetadata): StatContentMetadata =>
   metadata.contentKind === 'text'
     ? { contentKind: 'text', ...(metadata.lineCount === undefined ? {} : { lineCount: metadata.lineCount }) }
-    : { contentKind: 'binary' };
+    : metadata.contentKind === 'binary'
+      ? { contentKind: 'binary' }
+      : {};
 
 /**
  * Lightweight file listing entry for search / complete-tree snapshots.
@@ -150,7 +153,7 @@ const fileMetadataFields = (metadata: FileTreeContentMetadata): FileTreeContentM
 export type FileItem = {
   path: string;
   size: number;
-} & FileTreeContentMetadata;
+} & StatContentMetadata;
 
 /**
  * The tree key of a key's directory: `''` for a top-level key, `undefined` for the root itself.
@@ -1792,6 +1795,7 @@ export class FileTreeService {
         isFolder: true,
         size: entry.size,
         mtimeMs: entry.mtimeMs,
+        ...(entry.provenance === undefined ? {} : { provenance: entry.provenance }),
       };
     }
     return {
@@ -1801,6 +1805,7 @@ export class FileTreeService {
       size: entry.size,
       mtimeMs: entry.mtimeMs,
       ...fileMetadataFields(entry),
+      ...(entry.provenance === undefined ? {} : { provenance: entry.provenance }),
     };
   }
 

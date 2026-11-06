@@ -1,5 +1,5 @@
 import { watchByChangeSets } from '@taucad/filesystem';
-import type { ChangeSetWatchSource, FileStatOptions } from '@taucad/filesystem';
+import type { ChangeSetWatchSource } from '@taucad/filesystem';
 import { EventLogError } from '#log/event-log-error.js';
 import { createEventLogAppender } from '#log/event-log-appender.js';
 import type { EventLogAppender, EventLogStorage } from '#log/event-log-appender.js';
@@ -74,7 +74,7 @@ export type ProviderEventLogOptions = {
     ): Promise<void>;
     unlink(path: string): Promise<void>;
     /** Current durable byte size; omission retains the full-read compatibility fallback. */
-    stat?(path: string, options: FileStatOptions): Promise<{ readonly size: number; readonly mtimeMs?: number }>;
+    stat?(path: string): Promise<{ readonly size: number; readonly mtimeMs?: number }>;
     /**
      * The entry names of a directory, rejecting `ENOENT` when it does not exist. A chat store lists the chat's
      * `events/` directory with it to read the other devices' segments (XD1); without it the history is this
@@ -313,7 +313,7 @@ const openProviderWriter = async (
     size: async () => {
       if (fileSystem.stat) {
         try {
-          const stat = await fileSystem.stat(filePath, { content: 'head' });
+          const stat = await fileSystem.stat(filePath);
           return stat.size;
         } catch (error) {
           if (
@@ -698,9 +698,7 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
                 : {
                     stat: async (name: string) =>
                       readOrAbsent(async () => {
-                        const { size, mtimeMs } = await stat.call(fileSystem, `${directory}/${name}`, {
-                          content: 'head',
-                        });
+                        const { size, mtimeMs } = await stat.call(fileSystem, `${directory}/${name}`);
                         /* Size alone cannot tell a rewrite of the same length: with no modification time, read the bytes. */
                         return mtimeMs !== undefined && mtimeMs > 0 ? { size, modifiedAt: mtimeMs } : undefined;
                       }, undefined),

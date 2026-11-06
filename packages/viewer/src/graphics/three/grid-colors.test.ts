@@ -21,8 +21,8 @@ import {
 
 describe('Grid theme colors', () => {
   it('uses tints tuned for gamma compositing over the page background in both themes', () => {
-    expect(infiniteGridColorLightMode).toBe(0x73_73_73);
-    expect(infiniteGridColorDarkMode).toBe(0x99_99_99);
+    expect(infiniteGridColorLightMode).toBe(0xb9_b9_b9);
+    expect(infiniteGridColorDarkMode).toBe(0x58_58_58);
   });
 
   it('uses maximum neutral tints and stronger opacity in high-contrast mode', () => {

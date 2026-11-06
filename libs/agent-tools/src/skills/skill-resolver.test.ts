@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { createSkillResolver } from '#skills/skill-resolver.js';
-import type { SkillResolverDependencies } from '#skills/skill-resolver.js';
+import type { SkillResolverDependencies, SkillResolverDirectoryEntry } from '#skills/skill-resolver.js';
 
 const encoder = new TextEncoder();
 
@@ -10,7 +10,7 @@ const skillMarkdown = (name: string, description: string): string =>
 
 const resolverOver = (
   files: Record<string, string>,
-  directories: Record<string, ReadonlyArray<{ name: string; isFolder?: boolean }>>,
+  directories: Record<string, readonly SkillResolverDirectoryEntry[]>,
   extra: Partial<SkillResolverDependencies> = {},
 ) =>
   createSkillResolver({
@@ -202,6 +202,110 @@ describe('createSkillResolver', () => {
     expect(listed[0]).toMatchObject({
       source: 'tau-store',
       resourceUri: 'tau-store:skills/woodworking/SKILL.md',
+    });
+  });
+
+  describe('composed-view provenance', () => {
+    const overlayProvenance = (slug: string) =>
+      ({
+        source: 'system-skills',
+        versioned: false,
+        agentAccess: 'read-only',
+        identity: `skill:${slug}@1.0.0#bundle-fingerprint`,
+      }) as const;
+    const projectProvenance = { source: 'project', versioned: true, agentAccess: 'read-write' } as const;
+    const demoSystemSkill = {
+      slug: 'demo',
+      name: 'Demo',
+      version: '1.0.0',
+      whenToUse: 'Use for demos.',
+      skillMarkdown: skillMarkdown('demo', 'System demo'),
+      fingerprint: 'bundle-fingerprint',
+      files: [{ path: 'SKILL.md' }],
+    };
+
+    it('takes an overlay row from the compiled catalog without reading its bytes', async () => {
+      const readFile = vi.fn(async (path: string) => {
+        throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
+      });
+      const resolver = createSkillResolver({
+        readFile,
+        listDirectory: vi.fn(async (path: string) =>
+          path === '.agents/skills' ? [{ name: 'demo', isFolder: true, provenance: overlayProvenance('demo') }] : [],
+        ),
+        systemSkills: [demoSystemSkill],
+      });
+
+      expect(await resolver.listSkills()).toStrictEqual([
+        expect.objectContaining({
+          name: 'demo',
+          source: 'system',
+          fingerprint: 'bundle-fingerprint',
+          resourceUri: 'system:skills/demo/SKILL.md',
+        }),
+      ]);
+      expect(readFile.mock.calls.map(([path]) => path)).toStrictEqual(['.agents/plugins/installed.json']);
+    });
+
+    it('keeps a project row that overrides a bundle as the workspace skill', async () => {
+      const resolver = resolverOver(
+        { '.agents/skills/demo/SKILL.md': skillMarkdown('demo', 'Workspace demo') },
+        {
+          '.agents/skills': [
+            {
+              name: 'demo',
+              isFolder: true,
+              provenance: { ...projectProvenance, overrides: 'skill:demo@1.0.0#bundle-fingerprint' },
+            },
+          ],
+        },
+        { systemSkills: [demoSystemSkill] },
+      );
+
+      expect(await resolver.listSkills()).toStrictEqual([
+        expect.objectContaining({
+          description: 'Workspace demo',
+          source: 'user',
+          shadowedSources: [expect.objectContaining({ source: 'system' })],
+        }),
+      ]);
+    });
+
+    it('lets a project folder without SKILL.md hide the bundle it replaces', async () => {
+      const resolver = resolverOver(
+        {},
+        {
+          '.agents/skills': [
+            {
+              name: 'demo',
+              isFolder: true,
+              provenance: { ...projectProvenance, overrides: 'skill:demo@1.0.0#bundle-fingerprint' },
+            },
+          ],
+        },
+        { systemSkills: [demoSystemSkill] },
+      );
+
+      expect(await resolver.listSkills()).toStrictEqual([]);
+    });
+
+    it('lists project rows beside overlay rows', async () => {
+      const resolver = resolverOver(
+        { '.agents/skills/bracket/SKILL.md': skillMarkdown('bracket', 'Bracket design rules') },
+        {
+          '.agents/skills': [
+            { name: 'bracket', isFolder: true, provenance: projectProvenance },
+            { name: 'demo', isFolder: true, provenance: overlayProvenance('demo') },
+          ],
+        },
+        { systemSkills: [demoSystemSkill] },
+      );
+
+      const listed = await resolver.listSkills();
+      expect(listed.map(({ name, source }) => ({ name, source }))).toStrictEqual([
+        { name: 'bracket', source: 'user' },
+        { name: 'demo', source: 'system' },
+      ]);
     });
   });
 

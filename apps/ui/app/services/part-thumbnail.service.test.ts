@@ -257,6 +257,9 @@ describe('PartThumbnailService', () => {
         height: 1536,
         quality: 0.95,
         lineWidth: 6,
+        lineColor: '#000000',
+        toneMapping: 'neutral',
+        lighting: { ambient: 0.1 / Math.PI },
         views: [
           {
             visiblePrimitives: [

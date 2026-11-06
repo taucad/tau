@@ -10,22 +10,46 @@ description: Guides tscircuit TSX electronics authoring in main.tsx. Use when cr
 1. Author `main.tsx` (or `.jsx`) and `export default` one board component. Helper components may live in local `.tsx` files imported relatively.
 2. `React` is a global, so importing it is optional; `tscircuit` and `@tscircuit/core` both resolve to the core exports (`sel`, `useResistor`, …).
 3. Elements are lower-case JSX tags: `<board>`, `<resistor>`, `<capacitor>`, `<led>`, `<diode>`, `<chip>`, `<pinheader>`, `<trace>`, `<net>`, `<group>`. Give every component a unique `name`.
-4. `footprint` is a footprinter string: `0402`, `0805`, `soic8`, `dip8`, `tssop16`, `pinrow4_p2.54mm`, `axial_p10mm`, `radial_p5mm`, `to220_3`. Place with `pcbX`/`pcbY` (mm) and `schX`/`schY`.
+4. `footprint` is a footprinter string (`0402`, `0805`, `soic8`, `dip8`, `tssop16`, `pinrow4_p2.54mm`, `axial_p10mm`, `radial_p5mm`, `to220_3`) or a `kicad:` footprint. Place with `pcbX`/`pcbY` (mm) and `schX`/`schY`.
 5. Wire with `<trace from='.R1 > .pin1' to='.U1 > .VCC' />`, `to='net.GND'`, or `connections` on a part. Selectors name a pin by its label or `pinN`. Prefer named nets for power and ground.
 6. Parameters: export `defaultParameters` (a plain object); Tau passes edited values as props.
-7. Rendering and routing are offline. URL footprints and CAD models are never fetched; `kicad:`/`jlcpcb:` parts remain unplaced.
-8. Views: `board` (3D GLB, default), `schematic` (SVG sheets), `pcb` (SVG, `pinNumbers` option). `screenshot.view` selects one, `screenshot.instance` a sheet. Export IDs for `export_model.to`: `board` (`glb`), `bom` (`csv`), `netlist` (`txt`), `circuit` (`json`).
+7. Rendering and routing are offline by default. URL footprints and CAD models are never fetched and `jlcpcb:` parts remain unplaced. `kicad:` footprints in Tau's bundled KiCad pack render offline with their real KiCad 3D body (see Real parts); other `kicad:` names stay unplaced unless the kernel option `parts` is `'online'`, which loads them from tscircuit's part hosts.
+8. Views: `board` (3D GLB, default; `style` option `presentation`, the default set by the kernel option `boardStyle`, or `technical`, a plain slab with edges), `schematic` (SVG sheets; `theme` option `light`, `dark` or `engineering`), `pcb` (SVG; `pinNumbers`, and `palette` option `fabrication` or `engineering`). `screenshot.view` selects one, `screenshot.instance` a sheet. Export IDs for `export_model.to`: `board` (`glb`), `bom` (`csv`), `netlist` (`txt`), `circuit` (`json`).
+
+## Real parts
+
+Plain footprinter strings already get real KiCad bodies offline: `res0201` to `res2512` and `cap0201` to `cap1812` (write `footprint='0603'` on a `<resistor>` or `<capacitor>`), `0402` to `1206` on `<led>` and `<inductor>`, `sot23`, `sot23_5`, `sot23_6`, `sot223`, `sot323`, `sot363`, `to220`, `soic8`, `soic14`, `soic16`, `qfn16`, `qfn20`, `qfn24`, `qfn32`, `lqfp48`, `lqfp64`, `dip8`, `dip14`, `dip16`, `pinrow2` to `pinrow10`, `hc49`, `sod123`, `sod123f`, `sod323`, `sod523`, `sma`, `smb`, `smc` and `minimelf`. Other strings (`tssop16`, `msop8`, `to92`, `axial`, `electrolytic`) keep generic bodies.
+
+Write `kicad:<Library>/<Footprint>` for a part outside that list. The bundled pack (about a hundred footprints) also holds, among others:
+
+- ICs: `kicad:Package_SO/TSSOP-8_4.4x3mm_P0.65mm` (and `TSSOP-14_4.4x5mm`, `TSSOP-16_4.4x5mm`, `TSSOP-20_4.4x6.5mm`, all `_P0.65mm`), `kicad:Package_SO/MSOP-8_3x3mm_P0.65mm`, `MSOP-10_3x3mm_P0.5mm`, `kicad:Package_QFP/TQFP-32_7x7mm_P0.8mm`, `TQFP-44_10x10mm_P0.8mm`, `kicad:Package_SON/WSON-8-1EP_6x5mm_P1.27mm_EP3.4x4.3mm`, `kicad:Package_DFN_QFN/QFN-56-1EP_7x7mm_P0.4mm_EP3.2x3.2mm`.
+- Transistors and regulators: `kicad:Package_TO_SOT_SMD/SOT-89-3`, `TO-252-2`, `TO-263-2`, `kicad:Package_TO_SOT_THT/TO-92_Inline`.
+- Passives and discretes: `kicad:Capacitor_SMD/CP_Elec_6.3x5.4`, `kicad:Capacitor_THT/CP_Radial_D5.0mm_P2.00mm`, `CP_Radial_D8.0mm_P3.50mm`, `kicad:Resistor_THT/R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal`, `kicad:Diode_THT/D_DO-41_SOD81_P10.16mm_Horizontal`, `kicad:Fuse/Fuse_1206_3216Metric`, `kicad:LED_THT/LED_D3.0mm`, `LED_D5.0mm`, `kicad:LED_SMD/LED_WS2812B_PLCC4_5.0x5.0mm_P3.2mm`, `kicad:Inductor_SMD/L_Coilcraft_XAL7070-XXX`, `L_Bourns_SRN6045TA`, `L_Bourns-SRN4018`, `kicad:Buzzer_Beeper/Buzzer_12x9.5RM7.6`.
+- Crystals and switches: `kicad:Crystal/Crystal_SMD_3225-4Pin_3.2x2.5mm`, `Crystal_SMD_2520-4Pin_2.5x2.0mm`, `kicad:Button_Switch_SMD/SW_SPST_PTS810`, `SW_SPST_TL3342`, `SW_SPDT_PCM12`, `kicad:Button_Switch_THT/SW_PUSH_6mm`.
+- Connectors: `kicad:Connector_USB/USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal`, `kicad:Connector_PinHeader_2.54mm/PinHeader_2x05_P2.54mm_Vertical`, `PinHeader_2x10_P2.54mm_Vertical`, `kicad:Connector_JST/JST_PH_B2B-PH-K_1x02_P2.00mm_Vertical`, `JST_PH_S2B-PH-K_1x02_P2.00mm_Horizontal`, `JST_XH_B2B-XH-A_1x02_P2.50mm_Vertical`, `JST_SH_SM03B-SRSS-TB_1x03-1MP_P1.00mm_Horizontal`, `JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal`, `kicad:Connector_BarrelJack/BarrelJack_Horizontal`, `kicad:Connector_Card/microSD_HC_Hirose_DM3AT-SF-PEJM5`, `kicad:Connector_Coaxial/U.FL_Hirose_U.FL-R-SMT-1_Vertical`, `kicad:TerminalBlock_Phoenix/TerminalBlock_Phoenix_MKDS-1,5-2-5.08_1x02_P5.08mm_Horizontal` (and `-3-5.08_1x03`).
+- Modules: `kicad:RF_Module/ESP32-WROOM-32`, `kicad:RF_Module/ESP32-S3-WROOM-1`.
+
+A `kicad:` footprint's pads keep their KiCad pad names. Numbered pads (`1`, `2`, …) match `pin1`, `pin2`, …, so map them with `pinLabels`: diodes are `pin1` cathode and `pin2` anode, and the 4-pin crystal is `pin1` to `pin4`. Named pads match nothing until a label carries the name, so give each such pin its pad name as an alias: `pinLabels={{ pin3: ['CC1', 'A5'], pin17: ['SHIELD', 'SH'] }}` on the USB-C receptacle (pads `A1` to `B12` and `SH`), and `pin4: ['MP_GND', 'MP']` on the JST SH connector. A pin without a pad is silently off the board: its net shows `is not connected … by a PCB trace` and its pads stay unrouted. Use `<connector>` or `<chip>` for connectors and terminal blocks. A custom `<footprint>` has no 3D body, so prefer a pack footprint when one fits.
+
+## Layout and looks
+
+- Set `solderMaskColor` (`green`, `blue`, `red`, `black`, `white`, `purple`, `yellow` or a CSS colour) and optionally `silkscreenColor` on `<board>`; the 3D board and the `pcb` view's fabrication palette both use them.
+- Size the board for the parts' courtyards. Overlapping courtyards fail placement DRC, which skips autorouting and leaves every trace open. Keep `placementDrcChecksDisabled` for intended same-net pad overlaps, such as a USB-C receptacle's stacked VBUS and GND pads, and say why in a comment.
+- Place decoupling capacitors beside their supply pins and use named nets. Dense boards autoroute slowly: a 60-net RP2040 board takes about four minutes. If the default router fails on a dense board (`SameNetViaMergerSolver could not find route transition`), set `autorouterVersion='beta_pipeline4'` on `<board>`. Route power with a `<net>` `nominalTraceWidth`, and pour ground with `<copperpour layer='bottom' connectsTo='net.GND' />`.
+- Use `<schematicsheet>` only for designs split across sheets; a single sheet frames and shrinks the drawing.
 
 ## Check a board
 
 1. After edits, call `evaluate_model` and read every issue; `ready` may still carry errors. Fix the first error before its consequences, then open pins, routing and placement.
-2. Capture `schematic` and `pcb` separately, at most twice each per inspection cycle; use `board` for mechanical fit.
+2. Capture `schematic` and `pcb` separately, at most twice each per inspection cycle; use `board` for mechanical fit. In each capture, check that no part sits off the board or on another part, no pad shows an open ratsnest line, silkscreen labels do not cover pads, and schematic labels are readable.
 3. For parts and open pins, prefer `netlist` and `bom` exports to circuit JSON: call `export_model`, then `read_file` on its artifact path and check its `sourceRevision`. Binary exports still need a user request.
 
 ## Wrong / Correct
 
 - Wrong: `schPinArrangement={{ leftSide: { pins: ['IN'] } }}` (invalid props, chip not created). Correct: `leftSide: ['IN', 'GND']`, `{ pins: [...], direction: 'top-to-bottom' }` or `leftPinCount: 2`.
-- Wrong: `cadModel='to220_5'` (throws `String cadModel not yet implemented`). Correct: omit `cadModel`; a footprinter `footprint` already has a 3D body, and `cadModel={null}` hides it.
+- Wrong: `cadModel='to220_5'` (throws `String cadModel not yet implemented`). Correct: omit `cadModel`; a footprinter or pack `kicad:` `footprint` already has a 3D body, and `cadModel={null}` hides it.
+- Wrong: `footprint='kicad:Package_SO/SOIC-20W_7.5x12.8mm_P1.27mm'` offline (not in the pack; the part stays unplaced). Correct: a pack footprint or a footprinter string such as `soic16`, or ask for the `parts: 'online'` option.
+- Wrong: `connections={{ anode: 'net.VBUS' }}` on a `kicad:Diode_SMD/D_SOD-123` diode. Correct: `pin2: 'net.VBUS'`; KiCad pads are numbered.
 - Wrong: invented footprint functions such as `cappr_d10mm_p5mm`. Correct: a function from the footprint strings reference, e.g. `radial_p5mm`.
 - Wrong: editing traces for `Could not find port for selector ".U1 > .OUT"`. Correct: fix why `U1` was not created; its error is reported first.
 - Wrong: chasing `No <schematicsheet> was found` or `missing schematic reference designator text`. Correct: leave them; they are schematic styling warnings on any board without a custom sheet or symbol. Fix `missing a trace` warnings instead.
@@ -442,39 +466,6 @@ ResistorPinLabels: "pin1" | "pin2" | "pos" | "neg"
   connections?: Connections<CapacitorPinLabels>
 
 CapacitorPinLabels: "pin1" | "pin2" | "pos" | "neg" | "anode" | "cathode"
-
-// JSX element <led> with LedProps, required name
-<led>: LedProps extends CommonComponentProps
-  connections?: Partial<Record<"left" | "right" | "pin1" | "pin2" | "anode" | "pos" | "cathode" | "neg", string | readonly string[] | string[]>>
-  pinLabels?: Partial<Record<"left" | "right" | "pin1" | "pin2" | "anode" | "pos" | "cathode" | "neg", string | readonly string[] | string[]>> | Partial<Record<"1" | "2", string | readonly string[] | string[]>>
-  schOrientation?: "vertical" | "horizontal" | "pos_top" | "pos_bottom" | "pos_left" | "pos_right" | "neg_top" | "neg_bottom" | "neg_left" | "neg_right"
-  color?: string
-  wavelength?: string
-  schDisplayValue?: string
-  laser?: boolean
-
-// JSX element <pinheader> with PinHeaderProps, required pinCount, name
-<pinheader>: PinHeaderProps extends CommonComponentProps
-  // Number of pins in the header
-  pinCount: number
-  // Diameter of the through-hole for each pin
-  holeDiameter?: number | string
-  // Labels for each pin
-  pinLabels?: Record<string, SchematicPinLabel> | SchematicPinLabel[]
-  // Connections to other components
-  connections?: Connections<string>
-  // … 16 more members in the API reference: pitch, schFacingDirection, gender, connectsFromAbove, connectsFromBelow, showSilkscreenPinLabels, pcbPinLabels, doubleRow, rightAngle, pcbOrientation, platedDiameter, facingDirection, schPinArrangement, schPinStyle, schWidth, schHeight
-```
-
-### PCB, footprint and CAD primitives
-
-```ts
-// JSX element <silkscreencircle> with SilkscreenCircleProps, required radius
-<silkscreencircle>: SilkscreenCircleProps extends Omit<PcbLayoutProps, "pcbRotation">
-  radius: string | number
-  strokeWidth?: string | number
-  isFilled?: boolean
-  isOutline?: boolean
 ```
 
 ## API reference

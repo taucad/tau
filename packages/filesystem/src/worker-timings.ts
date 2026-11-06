@@ -51,7 +51,11 @@ export type WorkerTimingSpan = (typeof workerTimingSpans)[number];
  *
  * - `events.change`: change events the worker's bus delivered.
  * - `revisions.changed`: `changed` events sent to a checkout machine.
- * - `listing.bytes`: file bytes a directory listing read to describe its entries.
+ * - `index.load`: Project Index roots opened from a persisted snapshot (D5).
+ * - `index.scan`: Project Index roots opened with no trustworthy snapshot.
+ * - `index.compare`: head-metadata observations of an index root or subtree (0 bytes read, I3).
+ * - `index.facts.bytes`: file bytes a lazy `facts` request read through a root's index (D4).
+ * - `view.facts.bytes`: file bytes a composed view's own `facts` read, over a base with no index.
  * - `locks.set`: ordered Web Lock sets a mutation acquired (one per `withCrossTabLocks` call).
  * - `locks.token`: the tokens those sets named, so `locks.token / locks.set` is the mean set size.
  * - `changesets`: changesets the authority applied under their lock set (one per `apply`, D2).
@@ -61,13 +65,19 @@ export type WorkerTimingSpan = (typeof workerTimingSpans)[number];
  * - `uncommitted.deleteFailed`: settled or checked records whose delete failed after retries; left behind, harmless.
  * - `watch.pathEvents`: per-path watch events delivered to handlers (the `watch` form), one per handler.
  * - `watch.changeSets`: change sets delivered to handlers (the `watchChangeSets` form, D6), one per handler.
+ * - `overlay.read` / `overlay.fetch`: system skill resource reads, and those that reached the network rather than
+ *   the realm's resource cache, so `overlay.fetch / overlay.read` is the miss rate.
  *
  * @public
  */
 export const workerTimingCounters = [
   'events.change',
   'revisions.changed',
-  'listing.bytes',
+  'index.load',
+  'index.scan',
+  'index.compare',
+  'index.facts.bytes',
+  'view.facts.bytes',
   'locks.set',
   'locks.token',
   'changesets',
@@ -77,6 +87,8 @@ export const workerTimingCounters = [
   'uncommitted.deleteFailed',
   'watch.pathEvents',
   'watch.changeSets',
+  'overlay.read',
+  'overlay.fetch',
 ] as const;
 
 /** One counter's name. @public */

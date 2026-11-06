@@ -7,7 +7,7 @@ import type {
   FileProvenance,
 } from '@taucad/types';
 import { isWorkspaceMutationError, WorkspaceMutationError } from '@taucad/filesystem';
-import type { DirectoryStatRow, FileStatOptions, FileTreeNode, HeadFileStat } from '@taucad/filesystem';
+import type { DirectoryStatRow, FileTreeNode } from '@taucad/filesystem';
 import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
 import type { BulkMoveEdit, BulkMoveResult, FileSystemClient, WorkspaceAuthorityClient } from '#file-system-client.js';
 import { resolveAuthorityPath } from '@taucad/utils/path';
@@ -28,11 +28,9 @@ export type ComposedViewProxy = {
   readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
   readdir(path: string): Promise<string[]>;
   stat(path: string): Promise<FileStat>;
-  stat(path: string, options: FileStatOptions): Promise<FileStat | HeadFileStat>;
   lstat(path: string): Promise<FileStat>;
   exists(path: string): Promise<boolean>;
   readdirWithStats(path: string): Promise<DirectoryStatRow[]>;
-  readdirWithStats(path: string, options: { readonly content: 'head' }): Promise<Array<DirectoryStatRow<HeadFileStat>>>;
   provenance(path: string): Promise<FileProvenance>;
   /** ZIP one subtree of the view; `{ versionedOnly }` keeps the bytes that are the project. */
   archive(path: string, options?: ContentExportFilter): Promise<Blob>;
@@ -133,7 +131,7 @@ const outsideCheckoutProvenance: FileProvenance = Object.freeze({
 const dependencyMountName = 'node_modules';
 const dependencyMountPath = `/${dependencyMountName}`;
 
-const treeNode = (row: DirectoryStatRow<HeadFileStat>): FileTreeNode => {
+const treeNode = (row: DirectoryStatRow): FileTreeNode => {
   const common = {
     id: row.name,
     name: row.name,
@@ -144,7 +142,8 @@ const treeNode = (row: DirectoryStatRow<HeadFileStat>): FileTreeNode => {
   if (row.type === 'dir') {
     return { ...common, children: [] };
   }
-  return row.contentKind === 'text' ? { ...common, contentKind: 'text' } : { ...common, contentKind: 'binary' };
+  /* A tree row carries a known classification and never reads for one (I3). */
+  return row.contentKind === undefined ? common : { ...common, contentKind: row.contentKind };
 };
 
 /**
@@ -381,8 +380,12 @@ export const createComposedViewClient = (input: {
    * remembering its absence would let one transient authority failure — or one
    * listing that raced the mount — cost the session its row for good.
    */
-  let dependencyMount: Promise<DirectoryStatRow<Extract<FileStat, { type: 'dir' }>> | undefined> | undefined;
-  const dependencyMountStat = async (): Promise<DirectoryStatRow<Extract<FileStat, { type: 'dir' }>> | undefined> => {
+  let dependencyMount:
+    | Promise<({ readonly name: string } & Extract<FileStat, { type: 'dir' }>) | undefined>
+    | undefined;
+  const dependencyMountStat = async (): Promise<
+    ({ readonly name: string } & Extract<FileStat, { type: 'dir' }>) | undefined
+  > => {
     dependencyMount ??= (async () => {
       try {
         const mount = await dependencies.stat('');
@@ -529,9 +532,9 @@ export const createComposedViewClient = (input: {
       const { proxy, path } = servedBy(absolutePath);
       return proxy.readdir(path);
     },
-    stat: (async (absolutePath: string, options?: FileStatOptions) => {
+    stat: async (absolutePath: string) => {
       const { proxy, path } = servedBy(absolutePath);
-      const result = options ? await proxy.stat(path, options) : await proxy.stat(path);
+      const result = await proxy.stat(path);
       if (isDependency(proxy)) {
         /* A dependency view classifies its own root as if it were a checkout, so
          * the mount's class is stamped here, where it is known (blueprint W3). */
@@ -539,7 +542,7 @@ export const createComposedViewClient = (input: {
       }
       remember(path, result.provenance);
       return result;
-    }) as FileSystemClient['stat'],
+    },
     lstat: async (absolutePath: string) => {
       const { proxy, path } = servedBy(absolutePath);
       return proxy.lstat(path);
@@ -579,7 +582,7 @@ export const createComposedViewClient = (input: {
     },
     readDirectory: async (absolutePath: string) => {
       const { proxy, path: relative } = servedBy(absolutePath);
-      const rows = await proxy.readdirWithStats(relative, { content: 'head' });
+      const rows = await proxy.readdirWithStats(relative);
       if (isDependency(proxy)) {
         return rows.map((row) => treeNode({ ...row, provenance: outsideCheckoutProvenance }));
       }

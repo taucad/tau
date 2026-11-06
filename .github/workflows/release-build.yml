@@ -1382,9 +1382,15 @@ jobs:
           export TAU_DESKTOP_SOURCE_SHA
           pnpm nx run desktop:publish --args=promote
 
+  # Every production job states its own success checks behind `!cancelled()`.
+  # Without a status function, `if` adds an implicit `success()`, and that is
+  # false whenever any ancestor was skipped: an API release always skips
+  # `source-kit` (it gates `app-release`), so api@0.1.1 and api@0.2.0 published
+  # but never deployed.
   production-api:
     needs: [resolve, verify-app, app-release]
     if: >-
+      !cancelled() && needs.app-release.result == 'success' &&
       github.event_name == 'push' && needs.resolve.outputs.project == 'api' &&
       github.ref == format('refs/tags/{0}', needs.resolve.outputs.tag)
     name: Production API
@@ -1402,6 +1408,7 @@ jobs:
   # created their logins. One at a time: maintenance must stay a singleton.
   production-mirror:
     needs: [production-api]
+    if: ${{ !cancelled() && needs.production-api.result == 'success' }}
     name: Production mirror
     permissions:
       contents: read
@@ -1414,6 +1421,7 @@ jobs:
 
   production-maintenance:
     needs: [production-mirror]
+    if: ${{ !cancelled() && needs.production-mirror.result == 'success' }}
     name: Production maintenance
     permissions:
       contents: read
@@ -1429,6 +1437,7 @@ jobs:
   production-ui:
     needs: [resolve, verify-app, source-kit, app-release]
     if: >-
+      !cancelled() && needs.source-kit.result == 'success' && needs.app-release.result == 'success' &&
       github.event_name == 'push' && needs.resolve.outputs.project == 'ui' &&
       github.ref == format('refs/tags/{0}', needs.resolve.outputs.tag)
     name: Production UI
@@ -1443,6 +1452,7 @@ jobs:
   production-docs:
     needs: [resolve, verify-app, app-release]
     if: >-
+      !cancelled() && needs.app-release.result == 'success' &&
       github.event_name == 'push' && needs.resolve.outputs.project == 'ui' &&
       github.ref == format('refs/tags/{0}', needs.resolve.outputs.tag)
     name: Production docs

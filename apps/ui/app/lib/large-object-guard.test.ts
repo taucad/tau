@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RpcFileSystem, RpcGeoSpecClient, RpcGraphicsClient, RpcRuntimeClient } from '@taucad/chat/rpc';
 import { toRpcError } from '@taucad/chat/rpc';
@@ -112,6 +112,33 @@ describe('the agent tools while large objects download', () => {
     });
     expect(files.get('/models/part.step')).toStrictEqual(placeholder);
     expect(fileSystem.readBinaryFile).not.toHaveBeenCalled();
+  });
+
+  /* A host that predates the index query: the guard checks the bytes, and refuses on anything but absence. */
+  it('checks the bytes when the host cannot answer, and refuses unless the file is absent', async () => {
+    const { files, fileSystem } = filesystem();
+    fileSystem.pendingPaths = async () => {
+      throw Object.assign(new Error('This workspace bridge cannot say which files are pending.'), {
+        code: 'PENDING_PATHS_UNSUPPORTED',
+      });
+    };
+    const guarded = guardLargeObjectFiles(fileSystem);
+    await expect(guarded.writeFile('/models/part.step', 'solid mine')).rejects.toMatchObject({ retryable: true });
+    expect(files.get('/models/part.step')).toStrictEqual(placeholder);
+    await guarded.writeFile('/new.scad', 'cube(2);\n');
+    expect(decoder.decode(files.get('/new.scad'))).toBe('cube(2);\n');
+
+    /* Such a host's read of a pending entry refuses with PENDING rather than answer its pointer. */
+    vi.mocked(fileSystem.readBinaryFile).mockRejectedValueOnce(
+      Object.assign(new Error('The large object of models/part.step is not here yet.'), { code: 'PENDING' }),
+    );
+    await expect(guarded.writeFile('/models/part.step', 'solid mine')).rejects.toThrow('still downloading from');
+    vi.mocked(fileSystem.stat).mockRejectedValueOnce(Object.assign(new Error('The storage is busy.'), { code: 'EIO' }));
+    await expect(guarded.writeFile('/models/part.step', 'solid mine')).rejects.toMatchObject({
+      code: 'OPERATION_TIMEOUT',
+      retryable: true,
+    });
+    expect(files.get('/models/part.step')).toStrictEqual(placeholder);
   });
 
   it('answers kernel calls with a retryable wait until every object has landed', async () => {

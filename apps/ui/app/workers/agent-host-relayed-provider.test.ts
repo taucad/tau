@@ -50,7 +50,7 @@ describe('createRelayedFileSystemProvider', () => {
   });
 
   /* D9: the agent's grep and guard learn pending files from the root's index, never by a read that would fetch. */
-  it('should relay pendingPaths, and know of none on a bridge that predates it', async () => {
+  it('should relay pendingPaths, and say a bridge that predates it cannot answer', async () => {
     const pendingPaths = vi.fn(async () => ['models/part.step']);
     const bridgeWith = (call: unknown): RelayedBridge =>
       new Proxy(
@@ -78,6 +78,9 @@ describe('createRelayedFileSystemProvider', () => {
     const old = vi.fn(async () => {
       throw new Error('Unknown method: pendingPaths');
     });
-    await expect(relayedPendingPaths(bridgeWith(old))(['models/part.step'])).resolves.toEqual([]);
+    /* Not "none": the guard then checks the file's bytes, which a pending read refuses. */
+    await expect(relayedPendingPaths(bridgeWith(old))(['models/part.step'])).rejects.toMatchObject({
+      code: 'PENDING_PATHS_UNSUPPORTED',
+    });
   });
 });

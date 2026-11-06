@@ -52,7 +52,7 @@ import type { AgentHostProjectProvide, AgentHostProjectRebridge } from '#workers
 import { closeProvidedPorts, createDisposers } from '#workers/agent-host-projects.js';
 import { createResidentPlacement } from '#workers/agent-host-placement.js';
 import { createPortRevisionsClient } from '#workers/agent-host-revisions.js';
-import { guardLargeObjectFiles, guardLargeObjectKernel } from '#lib/large-object-guard.js';
+import { guardLargeObjectFiles, guardLargeObjectKernel, pendingPathsUnsupportedCode } from '#lib/large-object-guard.js';
 import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 import { createIdleRuntimeClient } from '#workers/idle-runtime-client.js';
 import { createWorkerEvidence } from '#workers/agent-host-evidence.js';
@@ -340,13 +340,18 @@ export const createRelayedFileSystemProvider = (
     rename: proxy.rename.bind(proxy),
     exists: proxy.exists.bind(proxy),
     lstat: proxy.lstat.bind(proxy),
-    /* A host that predates the call knows of no pending entry; its reads refuse with PENDING instead. */
+    /* A host that predates the call cannot say, which is not "none": its callers check another way (reads refuse with PENDING). */
     pendingPaths: async (paths) => {
       try {
         return await proxy.pendingPaths(paths);
       } catch (error) {
         if (error instanceof Error && error.message === 'Unknown method: pendingPaths') {
-          return [];
+          throw Object.assign(
+            new Error('This workspace bridge cannot say which files are pending.', { cause: error }),
+            {
+              code: pendingPathsUnsupportedCode,
+            },
+          );
         }
         throw error;
       }

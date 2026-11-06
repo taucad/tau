@@ -1,5 +1,5 @@
 // oxlint-disable-next-line import/consistent-type-specifier-style -- a separate type import trips import/no-duplicates.
-import { Primitive, WebIO, type Document, type JSONDocument, type Mesh } from '@gltf-transform/core';
+import { Primitive, WebIO, type Document, type JSONDocument } from '@gltf-transform/core';
 import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
 import { allExtensions, detectEdges, embedGltfResources } from '@taucad/geometry-core';
 import { cadEdgeOverlayMaterialDefaults } from '@taucad/runtime/types';
@@ -9,19 +9,6 @@ import { z } from 'zod';
 
 import { defineMiddleware } from '@taucad/runtime/middleware';
 import { nonemptyExportFiles } from '@taucad/runtime/kernel';
-
-/**
- * Most triangles a render's fallback edge pass processes, summed over every triangle primitive.
- *
- * The dihedral detector is linear in triangles and dominates render time on dense meshes: on a
- * 2.1 GHz Xeon the whole pass took about 4 s at this limit and about 20 s at the 2,000,000-triangle
- * preview budget, so the preview budget alone would not bound it. The limit applies to the whole
- * render rather than to each primitive because the pass's time is the sum over primitives; a
- * render above it keeps its surfaces, gets no generated edges and logs the count. Export keeps
- * detecting edges on every primitive so requested export bytes stay stable.
- * @internal
- */
-export const gltfEdgeDetectionMaxTriangles = 500_000;
 
 /**
  * Read the positions and supported indices of a triangle primitive.
@@ -45,25 +32,6 @@ function readTriangleInput(
 }
 
 /**
- * Count the triangles the fallback detector would process across the given meshes.
- *
- * @param meshes - Source meshes of a glTF document
- * @returns The summed triangle count of every eligible triangle primitive
- */
-function countTriangles(meshes: readonly Mesh[]): number {
-  let triangles = 0;
-  for (const mesh of meshes) {
-    for (const primitive of mesh.listPrimitives()) {
-      const input = readTriangleInput(primitive);
-      if (input) {
-        triangles += Math.floor((input.indices?.length ?? input.positions.length / 3) / 3);
-      }
-    }
-  }
-  return triangles;
-}
-
-/**
  * Create fallback edge primitives for every eligible triangle mesh in a glTF document.
  *
  * For each triangle primitive:
@@ -76,19 +44,11 @@ function countTriangles(meshes: readonly Mesh[]): number {
  * once fallback is selected, authored lines do not prove that every triangle
  * primitive already carries a complete auxiliary overlay.
  *
- * With a budget, a document whose eligible triangles sum to more than `maxTriangles` gets no
- * edges and one warning.
- *
  * @param document - The glTF document to process
  * @param thresholdDegrees - the dihedral angle threshold in degrees for edge detection
- * @param budget - Optional whole-document triangle limit and the logger that reports a skip
  * @returns Whether any edge primitives were added
  */
-function addEdgePrimitivesToDocument(
-  document: Document,
-  thresholdDegrees: number,
-  budget?: { maxTriangles: number; logger: RuntimeLogger },
-): boolean {
+function addEdgePrimitivesToDocument(document: Document, thresholdDegrees: number): boolean {
   let edgesAdded = false;
 
   // Create unlit extension for edge materials (lazily initialized)
@@ -114,15 +74,6 @@ function addEdgePrimitivesToDocument(
 
   // Process each source mesh. Newly created sibling edge meshes are not inputs.
   const sourceMeshes = document.getRoot().listMeshes();
-  if (budget) {
-    const triangles = countTriangles(sourceMeshes);
-    if (triangles > budget.maxTriangles) {
-      budget.logger.warn(
-        `Skipping fallback edge detection for a render with ${String(triangles)} triangles (limit ${String(budget.maxTriangles)})`,
-      );
-      return false;
-    }
-  }
   for (const mesh of sourceMeshes) {
     const primitivesToAdd: Primitive[] = [];
 
@@ -199,7 +150,7 @@ function addEdgePrimitivesToDocument(
  *
  * @param content - The GLB or JSON glTF bytes to process
  * @param thresholdDegrees - the dihedral angle threshold in degrees for edge detection
- * @param options - Export resources, output format and the optional whole-document triangle budget
+ * @param options - Export resources and output format
  * @returns The requested glTF format with owner-local edges added, or the original if no work was needed
  */
 async function addEdgePrimitivesToGltf(
@@ -208,11 +159,9 @@ async function addEdgePrimitivesToGltf(
   {
     resources = {},
     outputFormat = 'glb',
-    budget,
   }: {
     resources?: JSONDocument['resources'];
     outputFormat?: 'glb' | 'gltf';
-    budget?: { maxTriangles: number; logger: RuntimeLogger };
   } = {},
 ): Promise<Uint8Array<ArrayBuffer>> {
   const io = new WebIO().registerExtensions(allExtensions);
@@ -228,7 +177,7 @@ async function addEdgePrimitivesToGltf(
         resources,
       });
 
-  if (!addEdgePrimitivesToDocument(document, thresholdDegrees, budget)) {
+  if (!addEdgePrimitivesToDocument(document, thresholdDegrees)) {
     return content;
   }
   if (outputFormat === 'gltf') {
@@ -270,9 +219,7 @@ async function addEdgesToResult(
 
   logger.trace('Adding edge primitives to GLTF geometry');
 
-  const content = await addEdgePrimitivesToGltf(result.data.content, thresholdDegrees, {
-    budget: { maxTriangles: gltfEdgeDetectionMaxTriangles, logger },
-  });
+  const content = await addEdgePrimitivesToGltf(result.data.content, thresholdDegrees);
   if (content === result.data.content) {
     return result;
   }
@@ -289,15 +236,14 @@ async function addEdgesToResult(
 /**
  * Add fallback GLTF edge primitives only when the selected route requests them.
  *
- * A render runs the pass only when the call asks for `includeEdges` and the render carries at most
- * `gltfEdgeDetectionMaxTriangles` triangles in total; `includeEdges: false` turns it off for that
- * call. An export that asks for edges always gets them, so requested export bytes stay stable.
+ * A render runs the pass whenever the call asks for `includeEdges`, at any triangle count;
+ * `includeEdges: false` turns it off for that call. An export that asks for edges always gets them.
  * @public
  */
 export const gltfEdgeDetection = defineMiddleware({
   id: 'gltfEdgeDetection',
   name: 'GltfEdgeDetection',
-  version: '3.0.0',
+  version: '3.1.0',
   content: {
     views: { 'model/gltf-binary': ['includeEdges'] },
     exports: { glb: ['includeEdges'], gltf: ['includeEdges'] },

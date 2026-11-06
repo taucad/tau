@@ -21,7 +21,6 @@ type Definition = Awaited<ReturnType<typeof resolve>>;
 type RenderRequest = Parameters<NonNullable<Definition['render']>>[0];
 type ExportRequest = Parameters<NonNullable<Definition['export']>>[0];
 expectTypeOf<Extract<RenderRequest, { view: 'board' }>['options']>().toEqualTypeOf<{
-  style?: 'presentation' | 'technical';
   finish?: 'enig' | 'hasl' | 'bare';
 }>();
 expectTypeOf<Extract<RenderRequest, { view: 'schematic' }>['instance']>().toEqualTypeOf<string | undefined>();

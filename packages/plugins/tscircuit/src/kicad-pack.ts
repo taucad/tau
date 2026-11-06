@@ -11,7 +11,7 @@
  */
 
 /** Bump when entries or tessellation change: it is part of the kernel's cache identity. @public */
-export const kicadPackVersion = '2026.11.1';
+export const kicadPackVersion = '2026.11.2';
 
 /** The mirror the pack is built from, and where the online parts mode fetches KiCad footprints. @public */
 export const kicadFootprintCacheUrl = 'https://kicad-mod-cache.tscircuit.com';
@@ -21,7 +21,10 @@ export const packModelScheme = 'tau-models:';
 
 /** A footprinter footprint the pack's model replaces the generic body of. @public */
 export type KicadPackFootprinter = {
-  /** Exact `cad_component.footprinter_string`, as core writes it (`res0402`, `soic8`, `pinrow4`). */
+  /**
+   * `cad_component.footprinter_string`, as core writes it (`res0402`, `soic8`, `pinrow4`), without the parameters
+   * that never change the part ({@link footprinterCandidates}).
+   */
   readonly string: string;
   /** Only for source components of this `ftype`, for strings shared across kinds (`0603` LED or inductor). */
   readonly ftype?: string;
@@ -45,8 +48,8 @@ export type KicadPack = {
   /** The entry for a KiCad `Library/Footprint` name. */
   readonly entry: (name: string) => KicadPackEntry | undefined;
   /**
-   * The entry whose model replaces the generic body for an exact footprinter string, preferring a
-   * mapping for the source component's `ftype`.
+   * The entry whose model replaces the generic body for a footprinter string, preferring a mapping for the source
+   * component's `ftype`; parameters that never change the part are ignored ({@link footprinterCandidates}).
    */
   readonly forFootprinter: (value: string, ftype?: string) => KicadPackEntry | undefined;
   /** The entry a `tau-models:` URL names. */
@@ -54,6 +57,28 @@ export type KicadPack = {
 };
 
 const footprinterKey = (value: string, ftype?: string): string => (ftype === undefined ? value : `${ftype}:${value}`);
+
+/*
+ * Footprinter parameters that never move a pad centre or change the body: colours, pin labels, hole and ring
+ * diameters, and a pin row's default 2.54 mm pitch. Anything else (pitch, rows, `female`, `smd`) changes the part.
+ */
+const cosmeticToken = /^(?:color\(.*\)|nopinlabels|pinlabel.*|id[\d.]+(?:mm)?|od[\d.]+(?:mm)?)$/u;
+const defaultPinrowPitch = /^p2\.54(?:mm)?$/u;
+
+/**
+ * The strings a footprinter string may match in the pack, most specific first: itself, then without the parameters
+ * that never change the part (`0603_color(green)` is `0603`, `pinrow2_p5.08mm_id1.3mm_od2.4mm` is `pinrow2_p5.08mm`).
+ *
+ * @public
+ */
+export const footprinterCandidates = (value: string): string[] => {
+  const [family = '', ...parameters] = value.split('_');
+  const kept = parameters.filter(
+    (token) => !cosmeticToken.test(token) && !(family.startsWith('pinrow') && defaultPinrowPitch.test(token)),
+  );
+  const normalized = [family, ...kept].join('_');
+  return normalized === value ? [value] : [value, normalized];
+};
 
 const indexPack = (entries: readonly KicadPackEntry[]): KicadPack => {
   const byName = new Map(entries.map((entry) => [entry.name, entry]));
@@ -66,8 +91,17 @@ const indexPack = (entries: readonly KicadPackEntry[]): KicadPack => {
   return {
     entries,
     entry: (name) => byName.get(name),
-    forFootprinter: (value, ftype) =>
-      (ftype === undefined ? undefined : byFootprinter.get(footprinterKey(value, ftype))) ?? byFootprinter.get(value),
+    forFootprinter: (value, ftype) => {
+      for (const candidate of footprinterCandidates(value)) {
+        const entry =
+          (ftype === undefined ? undefined : byFootprinter.get(footprinterKey(candidate, ftype))) ??
+          byFootprinter.get(candidate);
+        if (entry) {
+          return entry;
+        }
+      }
+      return undefined;
+    },
     ofModelUrl: (url) =>
       url.startsWith(modelPrefix) && url.endsWith('.glb')
         ? byName.get(url.slice(modelPrefix.length, -'.glb'.length))
@@ -129,3 +163,41 @@ export const loadPackModel = async (
   entry: KicadPackEntry,
   fetchAsset: typeof globalThis.fetch,
 ): Promise<Uint8Array<ArrayBuffer>> => readAsset(entry.model, fetchAsset);
+
+type PadElement = { type?: unknown; x?: unknown; y?: unknown; points?: unknown };
+
+const padCentres = new WeakMap<KicadPackEntry, Promise<{ x: number; y: number }>>();
+
+/**
+ * The centre of an entry's pad bounds in its model frame (KiCad's footprint origin is often pin 1). A footprinter
+ * footprint is centred on its pads, so the model's origin moves here to sit on them.
+ */
+export const loadPackPadCentre = async (
+  entry: KicadPackEntry,
+  fetchAsset: typeof globalThis.fetch,
+): Promise<{ x: number; y: number }> => {
+  const cached = padCentres.get(entry);
+  if (cached) {
+    return cached;
+  }
+  const centre = (async () => {
+    const footprint = await loadPackFootprint(entry, fetchAsset);
+    const points = (Array.isArray(footprint) ? (footprint as PadElement[]) : [])
+      .filter((element) => element.type === 'pcb_smtpad' || element.type === 'pcb_plated_hole')
+      .flatMap((element) =>
+        Array.isArray(element.points)
+          ? (element.points as Array<{ x: number; y: number }>)
+          : typeof element.x === 'number' && typeof element.y === 'number'
+            ? [{ x: element.x, y: element.y }]
+            : [],
+      );
+    if (points.length === 0) {
+      return { x: 0, y: 0 };
+    }
+    const xs = points.map((point) => point.x);
+    const ys = points.map((point) => point.y);
+    return { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 };
+  })();
+  padCentres.set(entry, centre);
+  return centre;
+};

@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from 
 import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { Profiler, useSyncExternalStore } from 'react';
 import type { RefObject } from 'react';
-import { setLiveViewOptions } from '#workbench-records/live-view-options.js';
+import { getLiveViewOptions, setLiveViewOptions } from '#workbench-records/live-view-options.js';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { createActor, createAsyncLogic } from 'xstate';
@@ -752,18 +752,34 @@ describe('ChatViewer reopen-renderer overlay', () => {
     });
     const calls = runtime.viewSpy.mock.calls.length;
 
-    // The record catches up and the draft yields: the same options keep the same subscription.
+    // Until the record holds the draft, a re-render keeps the draft: no step back to the older record's options.
+    act(() => {
+      setLiveViewOptions('view-1', {
+        viewId: 'model',
+        options: { tessellation: { linearTolerance: 0.02, angularTolerance: 5 } },
+      });
+    });
+    expect(getLiveViewOptions('view-1')?.options).toEqual({
+      tessellation: { linearTolerance: 0.02, angularTolerance: 5 },
+    });
+    expect(runtime.viewSpy).toHaveBeenCalledTimes(calls);
+
+    // The record catches up and the draft yields by itself: the same options keep the same subscription.
     mockViewSettings = {
       'view-1': {
         entryPath: helperEntryPath,
         graphicsSettings: defaultGraphicsSettings,
-        kernelViews: [{ id: 'model', options: { tessellation: { linearTolerance: 0.02, angularTolerance: 5 } } }],
+        kernelViews: [{ id: 'model', options: { tessellation: { angularTolerance: 5, linearTolerance: 0.02 } } }],
       },
     };
-    viewer.rerender(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    // The project mock delivers no context update; re-sending the same draft re-renders the pane as the watcher would.
     act(() => {
-      setLiveViewOptions('view-1', undefined);
+      setLiveViewOptions('view-1', {
+        viewId: 'model',
+        options: { tessellation: { linearTolerance: 0.02, angularTolerance: 5 } },
+      });
     });
+    expect(getLiveViewOptions('view-1')).toBeUndefined();
     expect(runtime.viewSpy).toHaveBeenCalledTimes(calls);
 
     // A draft for another kernel view leaves this one alone.

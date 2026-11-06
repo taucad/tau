@@ -70,9 +70,9 @@ An authored schematic sheet with a unique name keeps its selection across reorde
 ambiguous sheets receive evaluation-local IDs and titles marked “current evaluation”; their choices expire on the next evaluation. Parts outside
 all sheets produce a warning naming the parts. SVG output is fitted in pixels and carries no
 physical units. The GLB builds the board from its copper, finish, solder mask and silkscreen layer geometry.
-The kernel option `boardStyle` picks the default 3D look, `presentation` (the default) or `technical` (a plain
-slab with feature edges), and the `board` view and export take a `style` option that overrides it. Neither
-style rasterizes a board texture.
+No board texture is rasterized. The `board` view and export take the runtime's `includeEdges` content, as the
+mechanical kernels do: it draws feature edges on the part bodies and the board outline and holes, never on the
+copper, mask or silkscreen.
 
 Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, or your own host. See
 [`@taucad/runtime`](https://www.npmjs.com/package/@taucad/runtime) for the client lifecycle.

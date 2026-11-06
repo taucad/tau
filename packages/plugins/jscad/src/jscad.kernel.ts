@@ -357,7 +357,7 @@ export const jscadKernel = defineKernel({
   builtinModuleNames: ['@jscad/modeling'],
   builtinPackages: { '@jscad/modeling': modelingPackage },
   name: 'JscadKernel',
-  version: '1.1.0',
+  version: '1.2.0',
   views: {
     model: {
       title: 'Model',

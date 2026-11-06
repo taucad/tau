@@ -600,7 +600,7 @@ export const opencascadeKernel = defineKernel({
   name: 'OpenCascadeKernel',
   // 1.3.0: the model view and GLB export claim `includeEdges` and draw B-rep edge lines themselves,
   // so a render cached by 1.2.0 with fallback overlay lines stops matching and ages out.
-  version: '1.3.0',
+  version: '1.4.0',
   optionsSchema: opencascadeOptionsSchema,
   views: {
     model: {

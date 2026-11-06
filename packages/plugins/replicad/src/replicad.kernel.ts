@@ -508,7 +508,7 @@ export const replicadKernel = defineKernel({
   name: 'ReplicadKernel',
   // 1.5.0: native-handle snapshots are binary BRep. The version keys every cached entry, so text
   // snapshots from 1.4.0 stop matching and age out; there is nothing to migrate.
-  version: '1.5.0',
+  version: '1.6.0',
   optionsSchema: replicadOptionsSchema,
   views: {
     model: {

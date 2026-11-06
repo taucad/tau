@@ -111,8 +111,15 @@ const providerRegistry = new ProviderRegistry({
 /* Each mutation's wait for its claims and its time holding them, for the open's worker timings. */
 const resourceQueue = new ResourceQueue({ timings: workerTimings });
 const eventBus = new ChangeEventBus();
+/*
+ * The compute worker's news for every rooted connection's event channel
+ * (charter D14, W10). The revision compute worker's one supervisor (W5's
+ * `createSupervisedComputeWorker`) owns restarts; it reports each death to
+ * `computeEvents.onCrash`, and the bridge only relays it.
+ */
+const computeEvents = computeEventRelay();
 /** One compute worker for every revision store this worker opens (charter D7), started on first use. */
-const revisionCompute = createRevisionCompute();
+const revisionCompute = createRevisionCompute(computeEvents.onCrash);
 eventBus.subscribe(() => {
   workerTimings.count('events.change');
 });
@@ -357,14 +364,6 @@ const settingsForRoot = (root: string, policy: typeof tauPathPolicy): MachineSet
     machineSettingsSettlement: async (operationId) => captured.settlement(operationId),
   };
 };
-
-/*
- * The compute worker's news for every rooted connection's event channel
- * (charter D14, W10). The revision compute worker's one supervisor (W5's
- * `createSupervisedComputeWorker`) owns restarts; it reports each death to
- * `computeEvents.onCrash`, and the bridge only relays it.
- */
-const computeEvents = computeEventRelay();
 
 exposeFileSystem(withPendingGauge(workspaceBridgeService(fileService)), {
   /*

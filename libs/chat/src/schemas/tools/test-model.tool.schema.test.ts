@@ -60,12 +60,16 @@ describe('testModelOutputSchema', () => {
     ).toBe(false);
   });
 
-  it.each(['invalid-expectation', 'analysis-limit', 'resource-limit', 'work-budget', 'unsupported-evidence'])(
-    'should name the %s refusal cause',
-    (category) => {
-      expect(geoSpecFailureCategorySchema.parse(category)).toBe(category);
-    },
-  );
+  it.each([
+    'invalid-expectation',
+    'accuracy',
+    'analysis-limit',
+    'resource-limit',
+    'work-budget',
+    'unsupported-evidence',
+  ])('should name the %s refusal cause', (category) => {
+    expect(geoSpecFailureCategorySchema.parse(category)).toBe(category);
+  });
 });
 
 describe('testModelOutputSchema limit', () => {

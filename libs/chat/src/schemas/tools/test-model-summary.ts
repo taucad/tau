@@ -43,6 +43,7 @@ export type TestModelSummary = {
 /** The categories of a claim that was refused, not decided false. */
 const undecidedCategories: ReadonlySet<FailureCategory> = new Set([
   'invalid-expectation',
+  'accuracy',
   'unsupported-evidence',
   'analysis-limit',
   'resource-limit',

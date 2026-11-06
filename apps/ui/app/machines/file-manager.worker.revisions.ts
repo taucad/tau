@@ -821,6 +821,25 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   const treeWrites = new Map<string, number>();
   /* How many host writes (applies and fill flushes) are open on each checkout root. */
   const writing = new Map<string, number>();
+  /*
+   * D10: each root's tree write in progress, with the entry closure it lands
+   * first, and the view whose index answers when that closure has landed.
+   * `landed` is set once the index says so, and stays until the write ends.
+   */
+  const entryClosures = new Map<string, { closure: readonly string[]; view?: RootedFileSystem; landed: boolean }>();
+  const entryClosureLanded = (root: string | undefined): boolean => {
+    const entry = root === undefined ? undefined : entryClosures.get(root);
+    if (entry !== undefined && !entry.landed && entry.view?.entriesLanded?.(entry.closure) === true) {
+      entry.landed = true;
+    }
+    return entry?.landed === true;
+  };
+  const watchEntryClosure = async (root: string, closure: readonly string[]): Promise<void> => {
+    const entry: { closure: readonly string[]; view?: RootedFileSystem; landed: boolean } = { closure, landed: false };
+    entryClosures.set(root, entry);
+    entry.view = await options.filesystem(root);
+    republish();
+  };
   /* Each checkout's changes observed while a host write held its root: raised once, together, when the last closes. */
   const deferredChanges = new Map<string, Readonly<{ root: string; paths: Set<string> }>>();
 
@@ -968,6 +987,10 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       if (holdsTree) {
         applying.set(root, (applying.get(root) ?? 0) + 1);
       }
+      if (bracket?.closure !== undefined) {
+        // async-iife: bootstrap -- the view is opened once per write; the reading follows as it lands.
+        void watchEntryClosure(root, bracket.closure);
+      }
       writing.set(root, (writing.get(root) ?? 0) + 1);
       republish();
       let released = false;
@@ -987,6 +1010,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         const remaining = (applying.get(root) ?? 1) - 1;
         if (remaining === 0) {
           applying.delete(root);
+          entryClosures.delete(root);
         } else {
           applying.set(root, remaining);
         }
@@ -1009,7 +1033,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     readiness = settleReadiness(
       readiness,
       readinessOf(
-        merged,
+        { ...merged, entryClosureLanded: entryClosureLanded(status.checkoutRoot) },
         status.checkoutId !== undefined && largeObjectsTold.has(status.checkoutId),
         status.checkoutId === undefined ? 0 : (treeWrites.get(status.checkoutId) ?? 0),
       ),
@@ -1080,6 +1104,10 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     if ((writing.get(root) ?? 0) === 0) {
       changed(checkoutId, paths);
       return;
+    }
+    /* A tree write's own files: the reading may reach `entryReady` as its closure lands (D10). */
+    if (entryClosures.get(root)?.landed === false) {
+      republish();
     }
     const held = deferredChanges.get(checkoutId) ?? { root, paths: new Set<string>() };
     for (const path of paths) {

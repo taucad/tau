@@ -1031,6 +1031,55 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
   });
 
   /*
+   * D10: a tree write tells the checkout's index every entry before any lands,
+   * and lands the entry closure first; once the index has it, the reading is
+   * `entryReady` while the rest is still being written, then moves on (I7).
+   */
+  it('should publish entryReady between treeReady and the end of a restore once its entry closure has landed', async () => {
+    const fixture = harness(['alpha'], (port) => port, { observeFileEvents: true });
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    await project.writeFile('lib/a.scad', 'a();');
+    const alpha = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    const session = await root.placementSession();
+    await place(session, turnKey(1));
+    await project.writeFile('main.scad', 'cube(20);');
+    await finish(session, turnKey(1));
+    await turnFinalized(alpha, 'turn-1');
+    const head = alpha.frames.findLast((frame) => frame.type === 'status')?.status.headRevisionId;
+    /* The page's file tree has listed the root, so its index is warm. */
+    await project.statTree!('');
+    await settle(10);
+    const statusesBefore = alpha.frames.filter((frame) => frame.type === 'status').length;
+
+    await project.writeFile('main.scad', 'cube(30);');
+    await project.writeFile('lib/a.scad', 'b();');
+    const before = await root.log();
+    alpha.send({ command: 'restore', revisionId: head! });
+    await vi.waitFor(
+      async () => {
+        expect(await root.log()).toHaveLength(before.length + 2);
+      },
+      { timeout: 10_000 },
+    );
+    await settle(10);
+
+    const statuses = alpha.frames
+      .filter((frame) => frame.type === 'status')
+      .slice(statusesBefore)
+      .map((frame) => frame.status);
+    const readiness = statuses
+      .map((status) => status.readiness)
+      .filter((state, index, all) => index === 0 || all[index - 1] !== state);
+    const from = readiness.indexOf('treeReady');
+    expect(readiness.slice(from)).toEqual(['treeReady', 'entryReady', 'materialized', 'filled']);
+    /* Reached while the write still held the tree, not at its end. */
+    expect(statuses.find((status) => status.readiness === 'entryReady')?.applyingRoots).toEqual(['/projects/alpha']);
+    expect(await project.readFile('main.scad', 'utf8')).toBe('cube(20);');
+  });
+
+  /*
    * A restore's own writes would each raise a change, and each change re-enters
    * the checkout's comparison: held while the apply writes, they reach the
    * checkout as one change naming every path it wrote.

@@ -133,15 +133,14 @@ describe('Manifold kernel call counts', () => {
     large = await measureInstanced(8);
   });
 
-  it('should record one full mesh copy per glTF node on the render and GLB export paths', () => {
-    // Blueprint A11 (WP6, charter B5): `addMissingNormals` copies the whole mesh with
-    // `getMesh()` for every scene node only to read its `runOriginalID`, and reads `numProp()` per
-    // node, even when the nodes share one manifold. manifold-3d's scene builder adds one cached
-    // `getMesh()` per source. B5 caches the mesh read per manifold, as `calculateNormals` already
-    // is, so `getMesh` stops growing with the node count.
+  it('should copy each source mesh once, however many glTF nodes share it, on the render and GLB export paths', () => {
+    // Blueprint A11 (WP6, charter B5): `addMissingNormals` reads `getMesh().runOriginalID` and
+    // `numProp()` once per source manifold, as `calculateNormals` already was, so the counts stay
+    // flat as instanced nodes grow. manifold-3d's scene builder adds one cached `getMesh()` per
+    // source, which makes two.
     expect({ small: small.render, large: large.render }).toEqual({
-      small: { 'Manifold.getMesh': 3, 'Manifold.calculateNormals': 1, 'Manifold.numProp': 2 },
-      large: { 'Manifold.getMesh': 9, 'Manifold.calculateNormals': 1, 'Manifold.numProp': 8 },
+      small: { 'Manifold.getMesh': 2, 'Manifold.calculateNormals': 1, 'Manifold.numProp': 1 },
+      large: { 'Manifold.getMesh': 2, 'Manifold.calculateNormals': 1, 'Manifold.numProp': 1 },
     });
     // The GLB export meshes the model through the same path.
     expect({ small: small.glb, large: large.glb }).toEqual({ small: small.render, large: large.render });

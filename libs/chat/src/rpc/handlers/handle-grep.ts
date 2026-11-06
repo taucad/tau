@@ -43,6 +43,9 @@ async function collectFilePaths(
 
 type GrepMatch = { file: string; line: number; content: string; before?: string[]; after?: string[] };
 
+/* A file whose large object has not reached the device (the authority's `PENDING`) was not searched, so it is named rather than counted as no matches. */
+const isPending = (error: unknown): boolean => (error as { code?: unknown } | undefined)?.code === 'PENDING';
+
 function truncateMatchLine(line: string): string {
   return line.slice(0, maxGrepLineChars);
 }
@@ -89,6 +92,7 @@ export async function handleGrep(input: GrepRpcInput, fileSystem: RpcFileSystem)
       filesToSearch = filesToSearch.filter((path) => minimatch(path, input.glob!, { matchBase: true, dot: true }));
     }
 
+    const pending = new Set<string>();
     const searchPromises = filesToSearch.map(async (filePath) => {
       try {
         const text = await fileSystem.readFile(filePath);
@@ -122,7 +126,10 @@ export async function handleGrep(input: GrepRpcInput, fileSystem: RpcFileSystem)
         }
 
         return fileMatches;
-      } catch {
+      } catch (error) {
+        if (isPending(error)) {
+          pending.add(filePath);
+        }
         return [];
       }
     });
@@ -142,6 +149,8 @@ export async function handleGrep(input: GrepRpcInput, fileSystem: RpcFileSystem)
       truncated: totalMatches > offset + headLimit,
       appliedHeadLimit: headLimit,
       appliedOffset: offset,
+      /* In the walk's order, whichever read finished first. */
+      ...(pending.size === 0 ? {} : { pendingFiles: filesToSearch.filter((path) => pending.has(path)) }),
     };
   } catch (error) {
     return toRpcError(error);

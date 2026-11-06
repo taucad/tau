@@ -85,6 +85,8 @@ const forEachReported = async <Item>(
   let done = 0;
   let bytes = 0;
   let reportedAt = Number.NEGATIVE_INFINITY;
+  /* Set by the first lane that fails, so no other lane takes another item. */
+  let stopped = false;
   const report = (final: boolean): void => {
     const now = performance.now();
     if (onProgress === undefined || (!final && now - reportedAt < progressInterval)) {
@@ -94,15 +96,22 @@ const forEachReported = async <Item>(
     onProgress({ done, total: items.length, bytes });
   };
   const lane = async (): Promise<void> => {
-    while (next < items.length) {
+    while (!stopped && next < items.length) {
       if (signal?.aborted) {
+        stopped = true;
         throw abortError();
       }
       const index = next++;
-      /* Await first, then add: `bytes += await …` reads `bytes` before the
-       * await, so lanes finishing side by side would overwrite each other. */
-      // oxlint-disable-next-line no-await-in-loop -- one lane reads one file after another; lanes run side by side.
-      const read = await work(items[index]!, index);
+      let read: number;
+      try {
+        /* Await first, then add: `bytes += await …` reads `bytes` before the
+         * await, so lanes finishing side by side would overwrite each other. */
+        // oxlint-disable-next-line no-await-in-loop -- one lane reads one file after another; lanes run side by side.
+        read = await work(items[index]!, index);
+      } catch (error) {
+        stopped = true;
+        throw error;
+      }
       bytes += read;
       done += 1;
       report(false);
@@ -278,7 +287,13 @@ const hostGrep =
     throwIfAborted(options?.signal);
     const { candidates, skipped } = await grepCandidates(statTree, options);
     const limit = options?.maxResults ?? defaultGrepResults;
-    const shape = { expression, context: options?.context ?? 0, maxLine: maxGrepLineCharacters };
+    /* One past the cap per file, so `truncated` still sees a file that holds more. */
+    const shape = {
+      expression,
+      context: options?.context ?? 0,
+      maxLine: maxGrepLineCharacters,
+      maxMatches: limit + 1,
+    };
     /* A caller's expression runs where it can be stopped; a literal cannot backtrack. */
     const matcher =
       options?.fixedStrings === true || candidates.length === 0

@@ -148,6 +148,44 @@ describe('derived readMany', () => {
     await expect(readMany(['a.bin', 'b.bin'])).rejects.toMatchObject({ code: 'EFBIG' });
   });
 
+  it('stops every lane once one fails: no file after the failure is read', async () => {
+    const settle = async (): Promise<void> =>
+      new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+    const paths = Array.from({ length: 20 }, (_, index) => `f${String(index)}.bin`);
+    // The first file alone passes the cap; the other lanes' reads are still in flight.
+    const readFile = vi.fn(async (path: string) => {
+      if (path === 'f0.bin') {
+        return sized(maxReadManyBytes + 1);
+      }
+      await settle();
+      return sized(1);
+    });
+    const { readMany, hashFiles } = withHostContentCalls({ readFile }) as unknown as {
+      readMany(paths: readonly string[]): Promise<ReadManyWireRows>;
+      hashFiles(paths: readonly string[]): Promise<Record<string, string>>;
+    };
+    await expect(readMany(paths)).rejects.toMatchObject({ code: 'EFBIG' });
+    await settle();
+    await settle();
+    // Eight lanes started one file each; none took another after the failure.
+    expect(readFile).toHaveBeenCalledTimes(8);
+
+    readFile.mockClear();
+    readFile.mockImplementation(async (path: string) => {
+      if (path === 'f0.bin') {
+        throw codedError('EIO');
+      }
+      await settle();
+      return encoder.encode('x');
+    });
+    await expect(hashFiles(paths)).rejects.toMatchObject({ code: 'EIO' });
+    await settle();
+    await settle();
+    expect(readFile).toHaveBeenCalledTimes(8);
+  });
+
   it("refuses a host's own answer over the cap at the caller's validator", () => {
     const rows = [['a.bin', sized(maxReadManyBytes + 1)]];
     expect(fileSystemBridgeSchemas.calls.readMany.result.safeParse(rows).success).toBe(false);

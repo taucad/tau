@@ -37,21 +37,25 @@ type MatchInput = {
   readonly expression: RegExp;
   readonly context: number;
   readonly maxLine: number;
+  /** Most matches one file yields; collecting stops there. */
+  readonly maxMatches: number;
 };
 
 /**
- * Every line of one file's text that the expression matches, with its
- * context, each line cut at `maxLine` characters.
+ * The lines of one file's text that the expression matches, with their
+ * context, each line cut at `maxLine` characters, up to `maxMatches` of them:
+ * an expression that matches every line of a large file must not build a match
+ * per line on the authority.
  *
  * Self-contained on purpose: its source is the matcher worker's, so it may
  * name nothing outside itself and declares no named inner functions (a
  * transform that keeps function names would wrap them in a helper the worker
  * does not have).
  */
-export const matchFileLines = ({ path, text, expression, context, maxLine }: MatchInput): GrepMatch[] => {
+export const matchFileLines = ({ path, text, expression, context, maxLine, maxMatches }: MatchInput): GrepMatch[] => {
   const lines = text.split(/\r?\n/u);
   const matches: GrepMatch[] = [];
-  for (let index = 0; index < lines.length; index += 1) {
+  for (let index = 0; index < lines.length && matches.length < maxMatches; index += 1) {
     const line = lines[index]!;
     const found = expression.exec(line);
     if (found === null) {
@@ -88,7 +92,7 @@ self.onmessage = (event) => {
     self.postMessage({ type: "ready" });
     return;
   }
-  self.postMessage({ type: "matched", id: data.id, matches: matchFileLines({ path: data.path, text: data.text, expression, context: data.context, maxLine: data.maxLine }) });
+  self.postMessage({ type: "matched", id: data.id, matches: matchFileLines({ path: data.path, text: data.text, expression, context: data.context, maxLine: data.maxLine, maxMatches: data.maxMatches }) });
 };
 `;
 
@@ -184,6 +188,7 @@ export const boundedLineMatcher = async ({
   expression,
   context,
   maxLine,
+  maxMatches,
   worker,
 }: Omit<MatchInput, 'path' | 'text'> & { readonly worker?: GrepMatcherWorkerFactory }): Promise<FileLineMatcher> => {
   let failure: Error | undefined;
@@ -262,7 +267,7 @@ export const boundedLineMatcher = async ({
         );
       }, grepMatchDeadline);
       pending = { id, resolve, reject, timer };
-      channel.post({ type: 'match', id, path, text, context, maxLine });
+      channel.post({ type: 'match', id, path, text, context, maxLine, maxMatches });
     });
   return {
     async match(path, text) {

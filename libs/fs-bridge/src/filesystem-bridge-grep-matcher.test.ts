@@ -49,7 +49,7 @@ class FailingWebWorker extends EventTarget {
   }
 }
 
-const shape = (source: string) => ({ expression: new RegExp(source, 'iu'), context: 1, maxLine: 8 });
+const shape = (source: string) => ({ expression: new RegExp(source, 'iu'), context: 1, maxLine: 8, maxMatches: 100 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -93,8 +93,23 @@ describe('bounded grep matcher', () => {
   });
 
   it('matches a literal on the calling thread', async () => {
-    const matcher = literalLineMatcher({ expression: /a\.b/iu, context: 0, maxLine: 8 });
+    const matcher = literalLineMatcher({ expression: /a\.b/iu, context: 0, maxLine: 8, maxMatches: 100 });
     await expect(matcher.match('x', 'a.b\naxb')).resolves.toEqual([{ path: 'x', line: 1, column: 1, text: 'a.b' }]);
     matcher.close();
+  });
+
+  it('stops collecting a file at maxMatches, on the calling thread and in the worker', async () => {
+    // An empty literal matches every line.
+    const text = Array.from({ length: 10_000 }, (_, line) => `line ${String(line)}`).join('\n');
+    const capped = { expression: /(?:)/u, context: 2, maxLine: 8, maxMatches: 3 };
+    const local = literalLineMatcher(capped);
+    await expect(local.match('big.txt', text)).resolves.toHaveLength(3);
+    const bounded = await boundedLineMatcher({ ...capped, worker: nodeGrepMatcherWorker });
+    try {
+      const matches = await bounded.match('big.txt', text);
+      expect(matches.map(({ line }) => line)).toEqual([1, 2, 3]);
+    } finally {
+      bounded.close();
+    }
   });
 });

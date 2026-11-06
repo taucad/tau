@@ -58,7 +58,8 @@ import type { BulkMoveEdit, BulkMoveResult, MutationPipeline, ResolvedChangesetE
 import type { AppendFence, Changeset, ChangesetReceipt } from '#changeset.js';
 import type { ChangeSetWatchRequest, WatchRegistry } from '#watch-registry.js';
 import type { ChangeSet, ChangeSetEntry } from '#change-event-bus.js';
-import { RootedFileSystemError, WorkspaceMutationError } from '#workspace-errors.js';
+import { RootedFileSystemError, WorkspaceMutationError, isNotFoundError } from '#workspace-errors.js';
+import { mapConcurrent, statConcurrency } from '#concurrency.js';
 import { bufferToStream, validateFileReadStreamOptions } from '#backend/stream-utils.js';
 import { getEventOrigin } from '#event-origin-registry.js';
 import { PendingContentError, pendingObjectOf, readThroughPending } from '#pending-content.js';
@@ -1124,29 +1125,38 @@ export class RootedViews {
       pendingPaths: async (paths: readonly string[]): Promise<readonly string[]> => {
         assertCurrent();
         await this._projectIndexes.ready(root);
-        const pending = await Promise.all(
-          paths.map(async (path): Promise<boolean> => {
-            const at = resolveLocal(path);
-            if (projectIndexes.pendingAt(at.authorityPath) !== undefined) {
-              return true;
+        const pending = await mapConcurrent(paths, statConcurrency, async (path): Promise<boolean> => {
+          const at = resolveLocal(path);
+          if (projectIndexes.pendingAt(at.authorityPath) !== undefined) {
+            return true;
+          }
+          /*
+           * The index learns a placeholder from a read or a tree write, and a
+           * lost or rescanned snapshot forgets it: its scans read no bytes
+           * (I3). A file the size of a pointer is read raw, never through, so
+           * no download starts; the read marks it pending. Only an absent path
+           * is not pending: any other failure leaves it unknown, and rejects.
+           */
+          const size = await at.resolution.provider.stat(at.resolution.path).then(
+            (stat) => (stat.type === 'file' ? stat.size : undefined),
+            (error: unknown) => {
+              if (isNotFoundError(error)) {
+                return undefined;
+              }
+              throw error;
+            },
+          );
+          if (size === undefined || size > 1024) {
+            return false;
+          }
+          const read = await readMarked(at).catch((error: unknown) => {
+            if (isNotFoundError(error)) {
+              return undefined;
             }
-            /*
-             * The index learns a placeholder from a read or a tree write, and a
-             * lost or rescanned snapshot forgets it: its scans read no bytes
-             * (I3). A file the size of a pointer is read raw, never through, so
-             * no download starts; the read marks it pending.
-             */
-            const size = await at.resolution.provider.stat(at.resolution.path).then(
-              (stat) => (stat.type === 'file' ? stat.size : undefined),
-              () => undefined,
-            );
-            if (size === undefined || size > 1024) {
-              return false;
-            }
-            const read = await readMarked(at);
-            return read.object !== undefined;
-          }),
-        );
+            throw error;
+          });
+          return read?.object !== undefined;
+        });
         return paths.filter((_, index) => pending[index]);
       },
       entriesLanded: (paths: readonly string[]): boolean | undefined =>

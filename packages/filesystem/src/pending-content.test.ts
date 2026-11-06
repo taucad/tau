@@ -11,6 +11,7 @@ import type { PendingObjectSource } from '#pending-content.js';
 import { ProviderRegistry } from '#provider-registry.js';
 import { ResourceQueue } from '#resource-queue.js';
 import { WorkspaceFileService } from '#workspace-file-service.js';
+import type { FileSystemProvider } from '#types.js';
 
 /*
  * Pending entries (D9, W4 slice a): a checkout path whose bytes are a large
@@ -31,11 +32,14 @@ const pointer = encoder.encode(
 );
 
 let service: WorkspaceFileService;
+/* The memory provider under the project, for a test that makes one of its calls fail. */
+let memory: FileSystemProvider;
 
 const createService = async (pendingStallMilliseconds?: number): Promise<WorkspaceFileService> => {
   const providerRegistry = new ProviderRegistry();
   const scope = { backend: 'memory', storageRootKey: 'memory:pending-content' } as const;
   const provider = await providerRegistry.getProvider(scope);
+  memory = provider;
   const mountTable = new MountTable();
   mountTable.mount('/', provider, { class: 'authored', ...scope });
   const created = new WorkspaceFileService({
@@ -244,6 +248,47 @@ describe('pending paths', () => {
     /* A write replaces the pointer: the path is not pending after it. */
     await view.writeFile('models/part.step', part);
     expect(await view.pendingPaths!(['models/part.step'])).toStrictEqual([]);
+  });
+
+  /* Fail closed: a guard told "not pending" would let a write replace the pointer. */
+  it('should reject when a stat or read fails for a reason other than absence', async () => {
+    const view = service.createRootedFileSystem(route);
+    const failure = Object.assign(new Error('The storage is busy.'), { code: 'EIO' });
+    const stat = vi.spyOn(memory, 'stat').mockRejectedValueOnce(failure);
+    await expect(view.pendingPaths!(['models/part.step'])).rejects.toBe(failure);
+    stat.mockRestore();
+    const read = vi.spyOn(memory, 'readFile').mockRejectedValueOnce(failure);
+    await expect(view.pendingPaths!(['models/part.step'])).rejects.toBe(failure);
+    read.mockRestore();
+    /* Gone between its stat and its read: absent, so not pending. */
+    vi.spyOn(memory, 'readFile').mockRejectedValueOnce(Object.assign(new Error('gone'), { code: 'ENOENT' }));
+    expect(await view.pendingPaths!(['models/part.step', 'models/absent.step'])).toStrictEqual([]);
+    expect(await view.pendingPaths!(['models/part.step'])).toStrictEqual(['models/part.step']);
+  });
+
+  it('should ask at most the stat bound at once, keeping the input order', async () => {
+    const view = service.createRootedFileSystem(route);
+    const names = Array.from({ length: 40 }, (_, index) => `notes/n${String(index).padStart(2, '0')}.txt`);
+    for (const name of names) {
+      // oxlint-disable-next-line no-await-in-loop -- setup, in order.
+      await service.writeFile(`${route}/${name}`, name.endsWith('7.txt') ? pointer : 'text');
+    }
+    await view.pendingPaths!(['main.scad']);
+    const original = memory.stat.bind(memory);
+    let inFlight = 0;
+    let most = 0;
+    vi.spyOn(memory, 'stat').mockImplementation(async (path) => {
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      await new Promise((resolve) => {
+        setTimeout(resolve, 1);
+      });
+      inFlight -= 1;
+      return original(path);
+    });
+    expect(await view.pendingPaths!(names)).toStrictEqual(names.filter((name) => name.endsWith('7.txt')));
+    expect(most).toBeLessThanOrEqual(16);
+    expect(most).toBeGreaterThan(1);
   });
 });
 

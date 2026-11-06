@@ -66,9 +66,12 @@ export const guardLargeObjectFiles = <FileSystem extends RpcFileSystem>(fileSyst
       let pending: readonly string[];
       try {
         pending = await fileSystem.pendingPaths([path]);
-      } catch {
-        /* Unknown: the write itself answers. */
-        return;
+      } catch (error) {
+        /* Unknown: the file may be a placeholder, so the write waits rather than replace its pointer. */
+        throw Object.assign(
+          new Error(`Could not tell whether ${path} is still downloading. Try again in a moment.`, { cause: error }),
+          { code: rpcClientErrorCode.operationTimeout, retryable: true },
+        );
       }
       if (pending.length > 0) {
         throw largeObjectDownloadingError(path);

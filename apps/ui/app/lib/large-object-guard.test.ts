@@ -100,6 +100,20 @@ describe('the agent tools while large objects download', () => {
     expect(files.has('/models/part.step')).toBe(false);
   });
 
+  it('refuses a write, retryably, when the index cannot say whether the file is pending', async () => {
+    const { files, fileSystem } = filesystem();
+    fileSystem.pendingPaths = async () => {
+      throw new Error('The project index could not open.');
+    };
+    const guarded = guardLargeObjectFiles(fileSystem);
+    await expect(guarded.writeFile('/models/part.step', 'solid mine')).rejects.toMatchObject({
+      code: 'OPERATION_TIMEOUT',
+      retryable: true,
+    });
+    expect(files.get('/models/part.step')).toStrictEqual(placeholder);
+    expect(fileSystem.readBinaryFile).not.toHaveBeenCalled();
+  });
+
   it('answers kernel calls with a retryable wait until every object has landed', async () => {
     let facet: LargeObjectsFacet | undefined = downloading;
     const kernelClient = mock<RpcRuntimeClient>();

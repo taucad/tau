@@ -747,19 +747,25 @@ export const useTauCloudIntentConnection = ({
                 getRevisionSessionUser()?.id === account &&
                 tauCloudIntent.get(projectId) === 'open' &&
                 canOpenCloudProject(projectId);
-              const client = peekRevisionClient(projectId);
-              if (client === undefined) {
-                if (owed()) {
-                  await connectRemote('tau');
-                }
-                return;
-              }
-              /* S20: one cold open per device. A second tab waits here and finds the open done. */
+              /*
+               * S20: one cold open per device. A second tab waits here and finds the open done. The client is
+               * looked up as the open goes, so a tab whose client is not made yet still takes the lock, and one
+               * whose client is replaced lets it go.
+               */
+              let opened = peekRevisionClient(projectId);
               await holdCloudOpen({
                 projectId,
                 owed,
                 connect: async () => connectRemote('tau'),
-                source: client,
+                source: {
+                  status: () => peekRevisionClient(projectId)?.status(),
+                  subscribe: (listener) => peekRevisionClient(projectId)?.subscribe(listener) ?? (() => undefined),
+                  alive: () => {
+                    const current = peekRevisionClient(projectId);
+                    opened ??= current;
+                    return current === opened;
+                  },
+                },
               });
             } catch (error) {
               if (

@@ -50,13 +50,32 @@ export const openSettled = (status: RevisionStatusProjection | undefined): boole
 type OpenSource = Readonly<{
   status: () => RevisionStatusProjection | undefined;
   subscribe: (listener: () => void) => () => void;
+  /** Whether the client this open runs on is still this tab's; absent, it always is. */
+  alive?: () => boolean;
 }>;
+
+/** Liveness bounds of one held open (S20). Milliseconds. */
+export type CloudOpenBounds = Readonly<{
+  /** How often the holder says it is alive to the tabs waiting on it. */
+  heartbeat: number;
+  /** How long the holder keeps the lock while its projection does not move. */
+  holderStall: number;
+  /** How long a waiting tab hears nothing from the holder before it takes the lock over. */
+  waiterStall: number;
+}>;
+
+const defaultBounds: CloudOpenBounds = { heartbeat: 5000, holderStall: 120_000, waiterStall: 20_000 };
 
 /**
  * Hold the project's open lock across `connect` and the pull it starts,
  * announcing this tab's readiness to its peers as it goes.
  *
- * @param input - The project, whether the open is still owed once the lock is held, the connection, and the opener's projection.
+ * Bounded both ways: the holder lets go when its client goes away or its
+ * projection stops moving for `holderStall`, and says it is alive every
+ * `heartbeat` meanwhile; a waiting tab that hears nothing for `waiterStall`
+ * (a frozen or hung holder) takes the lock over and opens the project itself.
+ *
+ * @param input - The project, whether the open is still owed once the lock is held, the connection, the opener's projection, and its bounds.
  * @returns Whether this tab connected (`false` when a peer had already opened it).
  */
 export const holdCloudOpen = async (
@@ -66,47 +85,91 @@ export const holdCloudOpen = async (
     connect: () => Promise<void>;
     source: OpenSource;
     signal?: AbortSignal;
+    bounds?: Partial<CloudOpenBounds>;
   }>,
 ): Promise<boolean> => {
   const { projectId, owed, connect, source, signal } = input;
+  const bounds = { ...defaultBounds, ...input.bounds };
+  const channel = typeof BroadcastChannel === 'undefined' ? undefined : new BroadcastChannel(channelName(projectId));
   const run = async (): Promise<boolean> => {
     if (!owed()) {
       return false;
     }
-    const channel = typeof BroadcastChannel === 'undefined' ? undefined : new BroadcastChannel(channelName(projectId));
     const settled = Promise.withResolvers<void>();
     let announced: ProjectReadiness | undefined;
+    let seen = source.status();
+    let movedAt = Date.now();
     const look = (): void => {
       const status = source.status();
+      if (status !== seen) {
+        seen = status;
+        movedAt = Date.now();
+      }
       const readiness = status?.readiness;
       if (readiness !== undefined && readiness !== announced) {
         announced = readiness;
         channel?.postMessage({ readiness } satisfies ReadinessNotice);
       }
-      if (openSettled(status) || !owed()) {
+      if (openSettled(status) || !owed() || source.alive?.() === false || Date.now() - movedAt >= bounds.holderStall) {
         settled.resolve();
       }
     };
     const unsubscribe = source.subscribe(look);
+    const beat = setInterval(() => {
+      look();
+      channel?.postMessage({ alive: true });
+    }, bounds.heartbeat);
     const stop = (): void => {
       settled.resolve();
     };
     signal?.addEventListener('abort', stop, { once: true });
     try {
+      channel?.postMessage({ alive: true });
       await connect();
       look();
       await settled.promise;
       return true;
     } finally {
+      clearInterval(beat);
       unsubscribe();
       signal?.removeEventListener('abort', stop);
-      channel?.close();
     }
   };
   const locks = (globalThis.navigator as Navigator | undefined)?.locks;
-  return locks === undefined
-    ? run()
-    : locks.request(cloudOpenLockName(projectId), signal === undefined ? {} : { signal }, run);
+  if (locks === undefined) {
+    try {
+      return await run();
+    } finally {
+      channel?.close();
+    }
+  }
+  /* A waiter that hears nothing from the holder for `waiterStall` stops waiting and takes the lock over. */
+  const silence = new AbortController();
+  let quiet: ReturnType<typeof setTimeout> | undefined;
+  const listen = (): void => {
+    clearTimeout(quiet);
+    quiet = setTimeout(() => {
+      silence.abort();
+    }, bounds.waiterStall);
+  };
+  channel?.addEventListener('message', listen);
+  listen();
+  const waiting = signal === undefined ? silence.signal : AbortSignal.any([signal, silence.signal]);
+  try {
+    return await locks.request(cloudOpenLockName(projectId), { signal: waiting }, async () => {
+      clearTimeout(quiet);
+      channel?.removeEventListener('message', listen);
+      return run();
+    });
+  } catch (error) {
+    if (!silence.signal.aborted || signal?.aborted === true) {
+      throw error;
+    }
+    return await locks.request(cloudOpenLockName(projectId), { steal: true }, run);
+  } finally {
+    clearTimeout(quiet);
+    channel?.close();
+  }
 };
 
 /**

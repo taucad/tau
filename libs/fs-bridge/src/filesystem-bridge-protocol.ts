@@ -109,6 +109,15 @@ export type LongCallProgress = BridgeProgress;
 export const maxReadManyPaths = 4096;
 
 /**
+ * Most bytes one `readMany` answers in all: the authority refuses the call
+ * with `EFBIG` once its files pass it, so one reply never holds an unbounded
+ * set of large files. A larger set is a sequence of calls, or `readRange`.
+ *
+ * @public
+ */
+export const maxReadManyBytes = 512 * 1024 * 1024;
+
+/**
  * Most bytes one `readRange` returns: a page, not a whole large file. A larger
  * read is a sequence of ranges.
  *
@@ -298,6 +307,12 @@ export const defaultGrepResults = 250;
 export const maxGrepResults = 5000;
 /** Largest file a `grep` reads when the caller names no cap. @public */
 export const defaultGrepFileBytes = 4 * 1024 * 1024;
+/** Largest file a `grep` may be asked to read: its bytes become one string on the authority. @public */
+export const maxGrepFileBytes = 256 * 1024 * 1024;
+/** Longest glob pattern `glob`, or `grep`'s `glob` option, takes. @public */
+export const maxGlobPatternLength = 4096;
+/** Largest file a `facts` call may be asked to read in full, to count lines or digest it. @public */
+export const maxFactsByteCap = 1024 * 1024 * 1024;
 /** Most context lines on each side of a `grep` match. @public */
 export const maxGrepContext = 10;
 /** Characters of a matched or context line a `grep` returns. @public */
@@ -1191,11 +1206,11 @@ const globOptionsSchema = z.looseObject({
 });
 const grepOptionsSchema = z.looseObject({
   path: rootedPathSchema.optional(),
-  glob: z.string().optional(),
+  glob: z.string().max(maxGlobPatternLength).optional(),
   caseSensitive: z.boolean().optional(),
   fixedStrings: z.boolean().optional(),
   maxResults: countSchema.max(maxGrepResults).optional(),
-  maxFileBytes: countSchema.optional(),
+  maxFileBytes: countSchema.max(maxGrepFileBytes).optional(),
   context: countSchema.max(maxGrepContext).optional(),
 });
 const grepResultSchema: z.ZodType<GrepResult> = z.looseObject({
@@ -1231,7 +1246,7 @@ const contentFactsSchema: z.ZodType<ContentFacts> = z.looseObject({
 });
 const factsOptionsSchema = z.looseObject({
   lineCount: z.boolean().optional(),
-  byteCap: countSchema.optional(),
+  byteCap: countSchema.max(maxFactsByteCap).optional(),
   digests: z.array(z.enum(['sha256', 'blobOid'])).optional(),
 });
 const indexChangedSinceSchema: z.ZodType<IndexChangedSince> = z.looseObject({
@@ -1496,7 +1511,13 @@ const callSchemas = {
   hashFiles: { args: z.tuple([z.array(rootedPathSchema)]), result: fileDigestsSchema },
   readMany: {
     args: z.tuple([z.array(rootedPathSchema).max(maxReadManyPaths)]),
-    result: z.array(z.tuple([z.string(), z.union([bytesSchema, z.literal('missing')])])),
+    result: z
+      .array(z.tuple([z.string(), z.union([bytesSchema, z.literal('missing')])]))
+      .refine(
+        (rows) =>
+          rows.reduce((total, [, data]) => total + (data === 'missing' ? 0 : data.byteLength), 0) <= maxReadManyBytes,
+        { message: `readMany answered more than ${String(maxReadManyBytes)} bytes` },
+      ),
   },
   readRange: {
     args: z.tuple([
@@ -1507,7 +1528,10 @@ const callSchemas = {
     result: bytesSchema,
   },
   apply: { args: z.tuple([changesetSchema]), result: changesetReceiptSchema },
-  glob: { args: z.tuple([z.string(), globOptionsSchema.optional()]), result: fileStatEntriesSchema },
+  glob: {
+    args: z.tuple([z.string().max(maxGlobPatternLength), globOptionsSchema.optional()]),
+    result: fileStatEntriesSchema,
+  },
   grep: { args: z.tuple([z.string(), grepOptionsSchema.optional()]), result: grepResultSchema },
   indexStats: { args: z.tuple([rootedPathSchema]), result: indexStatsSchema },
   facts: {

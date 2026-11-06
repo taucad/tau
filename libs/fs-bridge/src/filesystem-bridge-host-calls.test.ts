@@ -10,7 +10,8 @@ import type { BridgeServerLongCall, StringKeyedObject } from '@taucad/rpc/bridge
 import type { FileStatEntry } from '@taucad/types';
 import { bindFileSystemLongCall, withHostContentCalls } from '#filesystem-bridge-host-calls.js';
 import { prepareApplyCall, rangeStream, receiptFromWire } from '#filesystem-bridge-client-calls.js';
-import type { GrepResult, IndexStats } from '#filesystem-bridge-protocol.js';
+import { fileSystemBridgeSchemas, maxReadManyBytes } from '#filesystem-bridge-protocol.js';
+import type { GrepResult, IndexStats, ReadManyWireRows } from '#filesystem-bridge-protocol.js';
 import { nodeGrepMatcherWorker } from '#filesystem-bridge-rooted.test-fixture.js';
 
 const encoder = new TextEncoder();
@@ -130,6 +131,26 @@ describe('derived grep', () => {
     // Eight lanes start before any finishes; the four files after them are never read.
     expect(readFile).toHaveBeenCalledTimes(8);
     expect(result.filesSearched).toBe(8);
+  });
+});
+
+describe('derived readMany', () => {
+  /** A file that says it holds `size` bytes without the test allocating them. */
+  const sized = (size: number): Uint8Array<ArrayBuffer> =>
+    Object.defineProperty(new Uint8Array(1), 'byteLength', { value: size });
+
+  it('refuses with EFBIG once the files it read pass the total byte cap', async () => {
+    const share = Math.floor(maxReadManyBytes / 2) + 1;
+    const { readMany } = withHostContentCalls({ readFile: async () => sized(share) }) as unknown as {
+      readMany(paths: readonly string[]): Promise<ReadManyWireRows>;
+    };
+    await expect(readMany(['a.bin'])).resolves.toHaveLength(1);
+    await expect(readMany(['a.bin', 'b.bin'])).rejects.toMatchObject({ code: 'EFBIG' });
+  });
+
+  it("refuses a host's own answer over the cap at the caller's validator", () => {
+    const rows = [['a.bin', sized(maxReadManyBytes + 1)]];
+    expect(fileSystemBridgeSchemas.calls.readMany.result.safeParse(rows).success).toBe(false);
   });
 });
 

@@ -26,7 +26,12 @@ import {
 } from '#filesystem-bridge.js';
 import type { FileSystemBridgeRootedProxy, RootedBridgeConsumer } from '#filesystem-bridge.js';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
-import { maxGrepLineCharacters } from '#filesystem-bridge-protocol.js';
+import {
+  maxFactsByteCap,
+  maxGlobPatternLength,
+  maxGrepFileBytes,
+  maxGrepLineCharacters,
+} from '#filesystem-bridge-protocol.js';
 import { grepMatchDeadline } from '#filesystem-bridge-grep-matcher.js';
 import type {
   FileSystemBridgeEvent,
@@ -413,6 +418,17 @@ describe.each([inProcessPort, authorityConnection, workerPort])('rooted bridge c
       const [long] = await grepMatches(proxy, 'needle', { glob: 'long.txt' });
       expect(long?.text).toHaveLength(maxGrepLineCharacters);
       expect(long?.column).toBe(maxGrepLineCharacters + 52);
+    });
+
+    it('refuses out-of-contract caps and patterns before the authority sees them', async () => {
+      const { proxy } = await open(transport);
+      const longPattern = `${'*'.repeat(maxGlobPatternLength)}.ts`;
+      const refused = { code: 'WIRE_VALIDATION_FAILED' };
+      await expect(proxy.grep('x', { maxFileBytes: maxGrepFileBytes + 1 })).rejects.toMatchObject(refused);
+      await expect(proxy.grep('x', { glob: longPattern })).rejects.toMatchObject(refused);
+      await expect(proxy.glob(longPattern)).rejects.toMatchObject(refused);
+      await expect(proxy.facts(['main.ts'], { byteCap: maxFactsByteCap + 1 })).rejects.toMatchObject(refused);
+      await expect(proxy.grep('x', { maxFileBytes: maxGrepFileBytes })).resolves.toMatchObject({ truncated: false });
     });
 
     it('refuses an invalid expression with EINVAL', async () => {

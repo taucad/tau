@@ -26,7 +26,12 @@ import type {
   LongCall,
   ReadManyWireRows,
 } from '#filesystem-bridge-protocol.js';
-import { defaultGrepFileBytes, defaultGrepResults, maxGrepLineCharacters } from '#filesystem-bridge-protocol.js';
+import {
+  defaultGrepFileBytes,
+  defaultGrepResults,
+  maxGrepLineCharacters,
+  maxReadManyBytes,
+} from '#filesystem-bridge-protocol.js';
 import { ownedForTransfer } from '#filesystem-bridge-crossings.js';
 import { boundedLineMatcher, literalLineMatcher } from '#filesystem-bridge-grep-matcher.js';
 import type { FileLineMatcher, GrepMatcherWorkerFactory } from '#filesystem-bridge-grep-matcher.js';
@@ -145,9 +150,15 @@ const hostReadMany =
   async (paths: readonly string[], options?: LongCall): Promise<ReadManyWireRows> => {
     const unique = [...new Set(paths)];
     const rows: ReadManyWireRows = Array.from({ length: unique.length });
+    let total = 0;
     await forEachReported(unique, options, async (path, index) => {
       try {
-        const data = ownedForTransfer(path, await read(path));
+        const bytes = await read(path);
+        total += bytes.byteLength;
+        if (total > maxReadManyBytes) {
+          throw codedError(`readMany passed its ${String(maxReadManyBytes)}-byte total at '${path}'.`, 'EFBIG');
+        }
+        const data = ownedForTransfer(path, bytes);
         rows[index] = [path, data];
         return data.byteLength;
       } catch (error) {

@@ -138,6 +138,40 @@
       ]
     },
     {
+      "bom-ref": "43c24f20e0ce2df87754f21f901fd89c4c05755ba4469eb473c470e127bab14f",
+      "type": "file",
+      "name": "tau-worker/worker.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "43c24f20e0ce2df87754f21f901fd89c4c05755ba4469eb473c470e127bab14f"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
       "bom-ref": "52c808f96484f5571a5cc863775ce50247c17dfb3b0361f8ed6b4b0456f80080",
       "type": "library",
       "name": "numpy",
@@ -326,40 +360,6 @@
         {
           "name": "taucad:target",
           "value": "darwin-x64"
-        }
-      ]
-    },
-    {
-      "bom-ref": "987c38e13fe1379311a025cb5525e5a3081ce5bee9709ffa3ef2ee73bb5433bd",
-      "type": "file",
-      "name": "tau-worker/worker.py",
-      "hashes": [
-        {
-          "alg": "SHA-256",
-          "content": "987c38e13fe1379311a025cb5525e5a3081ce5bee9709ffa3ef2ee73bb5433bd"
-        }
-      ],
-      "licenses": [
-        {
-          "expression": "Apache-2.0"
-        }
-      ],
-      "properties": [
-        {
-          "name": "taucad:target",
-          "value": "darwin-arm64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "darwin-x64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-arm64-glibc"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-x64-glibc"
         }
       ]
     },

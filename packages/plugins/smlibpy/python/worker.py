@@ -406,38 +406,48 @@ def _face_arrays(mesh: Any, owners: Any) -> dict[str, Any]:
         if mesh.normals is not None
         else numpy.repeat(numpy.asarray(mesh.triangle_normals, dtype=numpy.float64)[:, None, :], 3, axis=1)
     )
-    face_ids = numpy.zeros(len(triangles), dtype=numpy.int64) if owners is None else owners
-    positions: list[Any] = []
-    normals: list[Any] = []
-    indices: list[Any] = []
-    groups: list[dict[str, int]] = []
-    offset = 0
-    start = 0
-    for face_id in sorted(set(face_ids.tolist())):
-        selected = face_ids == face_id
-        used, local = numpy.unique(triangles[selected], return_inverse=True)
-        sums = numpy.zeros((len(used), 3))
-        numpy.add.at(sums, local.reshape(-1), corner_normals[selected].reshape(-1, 3))
-        lengths = numpy.linalg.norm(sums, axis=1, keepdims=True)
-        sums = numpy.where(lengths > 0, sums / numpy.where(lengths > 0, lengths, 1), (0.0, 0.0, 1.0))
-        positions.append(numpy.asarray(mesh.vertices, dtype=numpy.float64)[used])
-        normals.append(sums)
-        indices.append(local.reshape(-1) + offset)
-        count = int(selected.sum()) * 3
-        groups.append({"start": start, "count": count, "faceId": int(face_id)})
-        offset += len(used)
-        start += count
-    empty = numpy.zeros((0, 3))
+    face_ids = numpy.zeros(len(triangles), dtype=numpy.int64) if owners is None else numpy.asarray(owners, numpy.int64)
+    vertices = numpy.asarray(mesh.vertices, dtype=numpy.float64).reshape(-1, 3)
+    if len(triangles) == 0:
+        return {
+            "vertices": numpy.zeros((0, 3)),
+            "normals": numpy.zeros((0, 3)),
+            "triangles": numpy.zeros(0, dtype=numpy.int64),
+            "faceGroups": [],
+        }
+    # In one pass for every face: triangles grouped by face (in mesh order within each), and each face's vertices as
+    # the distinct (face, vertex) pairs, which sort by face and then by vertex.
+    order = numpy.argsort(face_ids, kind="stable")
+    grouped = triangles[order]
+    corner_faces = numpy.repeat(face_ids[order], 3)
+    pairs, local = numpy.unique(corner_faces * len(vertices) + grouped.reshape(-1), return_inverse=True)
+    corner_normals = corner_normals[order].reshape(-1, 3)
+    sums = numpy.stack(
+        [numpy.bincount(local, weights=corner_normals[:, axis], minlength=len(pairs)) for axis in range(3)], axis=1
+    )
+    lengths = numpy.linalg.norm(sums, axis=1, keepdims=True)
+    sums = numpy.where(lengths > 0, sums / numpy.where(lengths > 0, lengths, 1), (0.0, 0.0, 1.0))
+    faces, counts = numpy.unique(face_ids, return_counts=True)
+    starts = numpy.concatenate([[0], numpy.cumsum(counts)[:-1]]) * 3
     return {
-        "vertices": numpy.concatenate(positions) if positions else empty,
-        "normals": numpy.concatenate(normals) if normals else empty,
-        "triangles": numpy.concatenate(indices) if indices else numpy.zeros(0, dtype=numpy.int64),
-        "faceGroups": groups,
+        "vertices": vertices[pairs % len(vertices)],
+        "normals": sums,
+        "triangles": local.reshape(-1),
+        "faceGroups": [
+            {"start": int(start), "count": int(count) * 3, "faceId": int(face)}
+            for face, start, count in zip(faces, starts, counts)
+        ],
     }
 
 
-def _edge_polylines(item: Any, angular_tolerance: float) -> list[tuple[int, Any]]:
-    """The B-rep edges as polylines, each with its index in the body's edges, leaving out the seams of closed faces."""
+def _edge_polylines(item: Any, angular_tolerance: float, surface: tuple[Any, Any, Any] | None = None,
+                    linear_tolerance: float = 0.0) -> list[tuple[int, Any]]:
+    """The B-rep edges as polylines, each with its index in the body's edges, leaving out the seams of closed faces.
+
+    With the body's `surface` (from `_surface`), each edge is drawn through the face mesh's own samples of it
+    (`_mesh_boundary_polylines`), so the line lies on the triangles' edges; an edge the mesh does not bound falls back
+    to the kernel's boundary samples.
+    """
 
     import numpy
     from smlibpy import Edge, Face, Mesh, Wire
@@ -456,16 +466,183 @@ def _edge_polylines(item: Any, angular_tolerance: float) -> list[tuple[int, Any]
             for index, edge in enumerate(edges)
         ]
     body = item.to_shell() if isinstance(item, Face) else item
-    flat, counts, _ = k.tessellate_boundaries(body._brep, angle_tolerance_deg=angular_tolerance)
     seams = set(ext.seam_edges(body._brep))
+    flat, counts, _ = k.tessellate_boundaries(body._brep, angle_tolerance_deg=angular_tolerance)
     points = numpy.asarray(flat, dtype=numpy.float64).reshape(-1, 3)
+    samples = numpy.split(points, numpy.cumsum(counts)[:-1]) if len(counts) else []
+    from_mesh: dict[int, list[Any]] = {}
+    if surface is not None:
+        mesh, owners, _ = surface
+        try:
+            from_mesh = _mesh_boundary_polylines(
+                mesh, owners, list(body.edges(seams=True)), list(body.vertices()), samples, linear_tolerance
+            )
+        except Exception:  # a body the kernel cannot measure against: every edge takes the kernel's samples
+            from_mesh = {}
     polylines = []
-    start = 0
-    for index, count in enumerate(counts):
-        if count >= 2 and index not in seams:
-            polylines.append((index, points[start : start + count]))
-        start += count
+    for index, line in enumerate(samples):
+        if index in seams:
+            continue
+        if index in from_mesh:
+            polylines.extend((index, chain) for chain in from_mesh[index])
+        elif len(line) >= 2:
+            polylines.append((index, line))
     return polylines
+
+
+def _vertex_locator(positions: list[tuple[float, float, float]], reach: float) -> Any:
+    """A lookup from a position to the index of the B-rep vertex within `reach` of it (-1 for none), on a grid of the
+    vertices searched in the 27 cells around the position."""
+
+    grid: dict[tuple[int, int, int], list[int]] = {}
+    for index, position in enumerate(positions):
+        grid.setdefault(tuple(math.floor(value / reach) for value in position), []).append(index)  # type: ignore[arg-type]
+    offsets = [(dx, dy, dz) for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1)]
+
+    def find(point: Any) -> int:
+        cell = [math.floor(value / reach) for value in point]
+        best, nearest = -1, reach
+        for dx, dy, dz in offsets:
+            for index in grid.get((cell[0] + dx, cell[1] + dy, cell[2] + dz), ()):
+                distance = math.dist(positions[index], point)
+                if distance <= nearest:
+                    best, nearest = index, distance
+        return best
+
+    return find
+
+
+def _mesh_boundary_polylines(
+    mesh: Any, owners: Any, edges: list[Any], vertices: list[Any], samples: list[Any], tolerance: float
+) -> dict[int, list[Any]]:
+    """The polylines of each B-rep edge, read from the face mesh's own boundary samples.
+
+    The body is meshed in one pass, so neighbouring faces share the points where they meet: those points are the
+    mesh's samples of the B-rep edge between them. Sampling the edge's curve again (at other parameters) draws a line
+    that cuts across the faceted surface by up to the chord tolerance; lines read from the mesh lie exactly on the
+    triangles' edges, as OCCT's PolygonOnTriangulation does for the OpenCascade-based kernels.
+
+    A triangle edge is on a B-rep edge where the triangles either side of it belong to different faces, or where only
+    one triangle uses it (the border of a sheet). Those segments are chained between B-rep vertices and branch points,
+    and a chain farther than the tolerance from every edge is left out. Mirrors `meshBoundaryPolylines` in the `smlib`
+    plugin.
+
+    A chain is given to the one B-rep edge that joins the same two vertices, so most chains cost no kernel call; where
+    several do, or its ends are not vertices, to the edge nearest an interior point of it. `samples` are the kernel's
+    boundary samples of each edge: their ends name the edge's vertices, and they bound where to measure (an edge's box
+    is theirs grown by its longest chord, more than any bulge of the curve between two samples, and the tolerance).
+    """
+
+    import numpy
+
+    positions = numpy.asarray(mesh.vertices, dtype=numpy.float64).reshape(-1, 3)
+    triangles = numpy.asarray(mesh.triangles, dtype=numpy.int64).reshape(-1, 3)
+    if len(triangles) == 0 or not edges:
+        return {}
+    points, welded = numpy.unique(positions, axis=0, return_inverse=True)
+    corners = welded.reshape(-1)[triangles]
+    face = numpy.zeros(len(triangles), dtype=numpy.int64) if owners is None else numpy.asarray(owners, dtype=numpy.int64)
+    pairs = numpy.concatenate([corners[:, [0, 1]], corners[:, [1, 2]], corners[:, [2, 0]]])
+    pair_owner = numpy.concatenate([face, face, face])
+    keep = pairs[:, 0] != pairs[:, 1]
+    pairs = numpy.sort(pairs[keep], axis=1)
+    pair_owner = pair_owner[keep]
+    order = numpy.lexsort((pair_owner, pairs[:, 1], pairs[:, 0]))
+    pairs, pair_owner = pairs[order], pair_owner[order]
+    starts = numpy.flatnonzero(numpy.r_[True, numpy.any(pairs[1:] != pairs[:-1], axis=1)])
+    sizes = numpy.diff(numpy.r_[starts, len(pairs)])
+    lowest = pair_owner[starts]
+    highest = pair_owner[starts + sizes - 1]
+    boundary = pairs[starts[(sizes == 1) | (lowest != highest)]]
+
+    adjacency: dict[int, list[int]] = {}
+    for a, b in boundary.tolist():
+        adjacency.setdefault(a, []).append(b)
+        adjacency.setdefault(b, []).append(a)
+    if not adjacency:
+        return {}
+    stops = {point for point, neighbours in adjacency.items() if len(neighbours) != 2}
+    reach = max(tolerance * 1e-2, 1e-6)
+    vertex_at = _vertex_locator([(vertex.x, vertex.y, vertex.z) for vertex in vertices], reach)
+    # The boundary point at each vertex: points sorted by x, so each vertex checks only the few within reach in x.
+    nodes = numpy.fromiter(adjacency.keys(), dtype=numpy.int64)
+    nodes = nodes[numpy.argsort(points[nodes, 0], kind="stable")]
+    xs = points[nodes, 0]
+    point_vertex: dict[int, int] = {}
+    for index, vertex in enumerate(vertices):
+        at = numpy.array((vertex.x, vertex.y, vertex.z))
+        window = nodes[numpy.searchsorted(xs, at[0] - reach) : numpy.searchsorted(xs, at[0] + reach, side="right")]
+        if len(window):
+            distances = numpy.linalg.norm(points[window] - at, axis=1)
+            nearest = int(numpy.argmin(distances))
+            if distances[nearest] <= reach:
+                point_vertex[int(window[nearest])] = index
+    stops.update(point_vertex)
+
+    by_ends: dict[tuple[int, int], list[int]] = {}
+    for edge_id, line in enumerate(samples[: len(edges)]):
+        if len(line) >= 1:
+            first, last = vertex_at(line[0].tolist()), vertex_at(line[-1].tolist())
+            if first >= 0 and last >= 0:
+                by_ends.setdefault((min(first, last), max(first, last)), []).append(edge_id)
+
+    margin = 2 * tolerance + 1e-6
+    low = numpy.full((len(edges), 3), numpy.inf)
+    high = numpy.full((len(edges), 3), -numpy.inf)
+    for edge_id, line in enumerate(samples[: len(edges)]):
+        if len(line) == 0:
+            continue
+        chord = float(numpy.linalg.norm(numpy.diff(line, axis=0), axis=1).max()) if len(line) > 1 else 0.0
+        low[edge_id] = line.min(axis=0) - chord - margin
+        high[edge_id] = line.max(axis=0) + chord + margin
+    result: dict[int, list[Any]] = {}
+
+    def nearest_edge(chain: list[int], candidates: Any) -> int:
+        probe = points[chain[len(chain) // 2]] if len(chain) > 2 else (points[chain[0]] + points[chain[1]]) / 2
+        inside = numpy.all((probe >= low[candidates]) & (probe <= high[candidates]), axis=1)
+        best, nearest = -1, margin
+        for edge_id in numpy.asarray(candidates)[inside].tolist():
+            distance = edges[edge_id].distance_to(tuple(probe.tolist()))
+            if distance <= nearest:
+                best, nearest = edge_id, distance
+        return best
+
+    every_edge = numpy.arange(len(edges))
+
+    def assign(chain: list[int]) -> None:
+        first, last = point_vertex.get(chain[0]), point_vertex.get(chain[-1])
+        joining = [] if first is None or last is None else by_ends.get((min(first, last), max(first, last)), [])
+        best = joining[0] if len(joining) == 1 else nearest_edge(chain, joining if joining else every_edge)
+        if best >= 0:
+            result.setdefault(best, []).append(points[chain])
+
+    visited: set[tuple[int, int]] = set()
+
+    def segment(a: int, b: int) -> tuple[int, int]:
+        return (a, b) if a < b else (b, a)
+
+    def walk(start: int, following: int) -> list[int]:
+        chain, previous, current = [start], start, following
+        while True:
+            visited.add(segment(previous, current))
+            chain.append(current)
+            if current == start or current in stops:
+                return chain
+            # A point that is not a stop has two segments, and the walk arrived on one of them: the other is unvisited,
+            # since an earlier walk through this point would have taken both (a walk ends only at a stop or its start).
+            onward = next(point for point in adjacency[current] if segment(current, point) not in visited)
+            previous, current = current, onward
+
+    # Open chains run from stop to stop; what is left are closed loops with no stop on them.
+    for start in sorted(stops):
+        for following in adjacency[start]:
+            if segment(start, following) not in visited:
+                assign(walk(start, following))
+    for start, neighbours in adjacency.items():
+        for following in neighbours:
+            if segment(start, following) not in visited:
+                assign(walk(start, following))
+    return result
 
 
 def _edge_arrays(polylines: list[tuple[int, Any]]) -> dict[str, Any]:
@@ -534,7 +711,9 @@ def _mesh_model(
     for config, surface in zip(configs, surfaces):
         faces = _face_arrays(surface[0], surface[1]) if surface is not None else None
         curve = isinstance(config["shape"], (Edge, Wire))
-        lines = _edge_arrays(_edge_polylines(config["shape"], angular_tolerance) if edges or curve else [])
+        lines = _edge_arrays(
+            _edge_polylines(config["shape"], angular_tolerance, surface, linear_tolerance) if edges or curve else []
+        )
         entry: dict[str, Any] = {key: value for key, value in config.items() if key != "shape" and value is not None}
         entry["faces"] = (
             {

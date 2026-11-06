@@ -13,14 +13,14 @@
  * also lets the trap pass requests to tscircuit's own part hosts.
  */
 
-import { Primitive, WebIO } from '@gltf-transform/core';
+import { Mesh, Primitive, WebIO } from '@gltf-transform/core';
 import {
   allExtensions,
   detectEdges,
   markClosedMeshesSingleSided,
   normalizeGltfGeometryNames,
 } from '@taucad/geometry-core';
-import type { Document, Material, Node, Root, Scene } from '@gltf-transform/core';
+import type { Document, Material, Node, Scene } from '@gltf-transform/core';
 import type { AnyCircuitElement } from 'circuit-json';
 import type { ComponentType } from 'react';
 import { z } from 'zod';
@@ -102,11 +102,6 @@ export const tscircuitOptionsSchema = z.object({
     title: 'Parts',
     description: "Local parts only, or also fetch KiCad footprints and 3D models from tscircuit's part hosts.",
   }),
-  boardStyle: z.enum(['presentation', 'technical']).optional().meta({
-    title: 'Board style',
-    description:
-      'Default 3D board look: presentation builds real copper, mask and silkscreen layers; technical shows a plain slab with edges. A board view or export can override it.',
-  }),
 });
 
 /** The hosts `parts: 'online'` may reach, over HTTPS only. @public */
@@ -132,13 +127,11 @@ const schematicViewOptionsSchema = z.object({
   }),
 });
 
-/** The board view's look: a layered presentation board by default, or the converter's technical slab. */
+/**
+ * The board view's options. Edge lines are the runtime's `includeEdges` content, as on the mechanical kernels; a
+ * saved `style` from before is stripped and ignored.
+ */
 const boardViewOptionsSchema = z.object({
-  style: z.enum(['presentation', 'technical']).optional().meta({
-    title: 'Style',
-    description:
-      "Presentation builds real copper, mask and silkscreen layers; technical shows a plain slab with edges. Defaults to the kernel's board style.",
-  }),
   finish: z
     .enum(['enig', 'hasl', 'bare'])
     .optional()
@@ -180,8 +173,6 @@ type TscircuitNativeHandle = {
 type TscircuitContext = {
   /** Whether the fetch guard may pass requests to {@link onlinePartHosts}; off when absent. */
   online?: boolean;
-  /** The kernel's default board style; presentation when absent. */
-  boardStyle?: 'presentation' | 'technical';
   /** Evaluate an entry module's board component to settled circuit JSON. */
   renderCircuit: (
     module: unknown,
@@ -554,7 +545,8 @@ const withViewBox = (svg: string): string => {
     : svg;
 };
 
-const addFeatureEdges = (document: Document, root: Root): void => {
+// Feature edges (30 degrees) for the given triangle primitives, as LINES beside each in its mesh.
+const addFeatureEdges = (document: Document, primitives: readonly Primitive[]): void => {
   const edgeMaterial = document
     .createMaterial('tau-edge-material')
     .setBaseColorFactor([...cadEdgeOverlayMaterialDefaults.baseColorFactor])
@@ -562,34 +554,29 @@ const addFeatureEdges = (document: Document, root: Root): void => {
     .setRoughnessFactor(cadEdgeOverlayMaterialDefaults.roughnessFactor)
     .setDoubleSided(cadEdgeOverlayMaterialDefaults.doubleSided)
     .setAlphaMode(cadEdgeOverlayMaterialDefaults.alphaMode);
-  for (const mesh of root.listMeshes()) {
-    for (const primitive of mesh.listPrimitives()) {
-      if (primitive.getMode() !== Primitive.Mode['TRIANGLES']) {
-        continue;
+  for (const primitive of primitives) {
+    const positions = primitive.getAttribute('POSITION')?.getArray();
+    const indices = primitive.getIndices()?.getArray();
+    if (primitive.getMode() !== Primitive.Mode['TRIANGLES'] || !(positions instanceof Float32Array)) {
+      continue;
+    }
+    const edges = detectEdges(
+      positions,
+      indices instanceof Uint16Array || indices instanceof Uint32Array ? indices : undefined,
+      30,
+    );
+    if (edges.positions.length === 0) {
+      continue;
+    }
+    const lines = document
+      .createPrimitive()
+      .setMode(Primitive.Mode['LINES']!)
+      .setMaterial(edgeMaterial)
+      .setAttribute('POSITION', document.createAccessor('edge-positions').setType('VEC3').setArray(edges.positions));
+    for (const parent of primitive.listParents()) {
+      if (parent instanceof Mesh) {
+        parent.addPrimitive(lines);
       }
-      const positions = primitive.getAttribute('POSITION')?.getArray();
-      const indices = primitive.getIndices()?.getArray();
-      if (!(positions instanceof Float32Array)) {
-        continue;
-      }
-      const edges = detectEdges(
-        positions,
-        indices instanceof Uint16Array || indices instanceof Uint32Array ? indices : undefined,
-        30,
-      );
-      if (edges.positions.length === 0) {
-        continue;
-      }
-      mesh.addPrimitive(
-        document
-          .createPrimitive()
-          .setMode(Primitive.Mode['LINES']!)
-          .setMaterial(edgeMaterial)
-          .setAttribute(
-            'POSITION',
-            document.createAccessor('edge-positions').setType('VEC3').setArray(edges.positions),
-          ),
-      );
     }
   }
 };
@@ -635,55 +622,18 @@ const boardSlabTest = (circuitJson: CircuitElement[]): ((node: Node) => boolean)
   };
 };
 
-// Six times a primitive's signed volume: negative when its triangles wind inward.
-const signedVolumeOf = (primitive: Primitive): number => {
-  const position = primitive.getAttribute('POSITION');
-  const indices = primitive.getIndices();
-  if (!position || !indices) {
-    return 0;
-  }
-  let volume = 0;
-  for (let index = 0; index + 2 < indices.getCount(); index += 3) {
-    const [a = [], b = [], c = []] = [0, 1, 2].map((corner) =>
-      position.getElement(indices.getScalar(index + corner), []),
-    );
-    const [ax = 0, ay = 0, az = 0, bx = 0, by = 0, bz = 0, cx = 0, cy = 0, cz = 0] = [...a, ...b, ...c];
-    volume += ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx);
-  }
-  return volume;
-};
-
-// The converter winds its board slab inward (its normals point out). Drawn one-sided, the slab then
-// shows its far walls through the near ones, so the technical board turns it outward.
-const windBoardSlabOutward = (scene: Scene | undefined, circuitJson: CircuitElement[]): void => {
-  const isBoardSlab = boardSlabTest(circuitJson);
-  for (const node of scene?.listChildren() ?? []) {
-    if (!isBoardSlab(node)) {
-      continue;
-    }
-    for (const primitive of node.getMesh()?.listPrimitives() ?? []) {
-      const indices = primitive.getIndices();
-      if (primitive.getMode() !== Primitive.Mode['TRIANGLES'] || !indices || signedVolumeOf(primitive) >= 0) {
-        continue;
-      }
-      const array = indices.getArray();
-      if (!array) {
-        continue;
-      }
-      for (let index = 0; index + 2 < array.length; index += 3) {
-        [array[index + 1], array[index + 2]] = [array[index + 2]!, array[index + 1]!];
-      }
-      indices.setArray(array);
-    }
-  }
-};
-
 // Swap the converter's untextured board slab for the layered presentation board, and give the
-// component bodies presentation materials.
+// component bodies presentation materials. With edges, the part bodies and the board core (its
+// outline and holes) get feature edges; copper, mask, finish and silkscreen get none, as their
+// outlines would be most of the lines and read as noise.
 const presentBoard = async (
   document: Document,
   scene: Scene | undefined,
-  { circuitJson, options }: { circuitJson: CircuitElement[]; options: BoardPresentationOptions },
+  {
+    circuitJson,
+    options,
+    includeEdges,
+  }: { circuitJson: CircuitElement[]; options: BoardPresentationOptions; includeEdges: boolean },
 ): Promise<void> => {
   const { buildPresentationBoard } = await import('#board-geometry.js');
   const { applyPresentationMaterial } = await import('#presentation-materials.js');
@@ -706,9 +656,19 @@ const presentBoard = async (
   for (const material of document.getRoot().listMaterials()) {
     applyPresentationMaterial(material);
   }
+  const primitivesOf = (): Primitive[] =>
+    document
+      .getRoot()
+      .listMeshes()
+      .flatMap((mesh) => mesh.listPrimitives());
+  const partPrimitives = includeEdges ? primitivesOf() : [];
   const board = await buildPresentationBoard(document, circuitJson, options);
   if (board && scene) {
     scene.addChild(board);
+  }
+  if (includeEdges) {
+    const corePrimitives = primitivesOf().filter((primitive) => primitive.getMaterial()?.getName() === 'pcb-core');
+    addFeatureEdges(document, [...partPrimitives, ...corePrimitives]);
   }
 };
 
@@ -718,23 +678,17 @@ const applyGlbConvention = async (
   { coordinateSystem, unit }: GlbConvention,
   {
     circuitJson,
-    options: { style = 'presentation', finish },
-  }: { circuitJson: CircuitElement[]; options: BoardViewOptions },
+    options: { finish },
+    includeEdges,
+  }: { circuitJson: CircuitElement[]; options: BoardViewOptions; includeEdges: boolean },
 ): Promise<Uint8Array<ArrayBuffer>> => {
   const io = new WebIO().registerExtensions(allExtensions);
   const document = await io.readBinary(glb);
   const root = document.getRoot();
   const scene = root.getDefaultScene() ?? root.listScenes()[0];
-  if (style === 'technical') {
-    windBoardSlabOutward(scene, circuitJson);
-  }
-  // Converter part bodies and the technical slab: the presentation board below is built afterwards.
+  // Converter part bodies only: the presentation board below is built afterwards.
   markClosedMeshesSingleSided(document);
-  if (style === 'presentation') {
-    await presentBoard(document, scene, { circuitJson, options: { finish } });
-  } else {
-    addFeatureEdges(document, root);
-  }
+  await presentBoard(document, scene, { circuitJson, options: { finish }, includeEdges });
   if (!scene) {
     return glb;
   }
@@ -764,29 +718,63 @@ const applyGlbConvention = async (
   });
 };
 
+type ConverterOutput = { glb: Uint8Array<ArrayBuffer>; issues: KernelIssue[] };
+
+// The converter's GLB per settled circuit and parts mode. It takes seconds on a dense board, while
+// the post-pass (presentation board, edges) is cheap, so a view change such as the edge toggle
+// reuses it. Keyed weakly by the handle's circuit JSON, so it lives as long as that evaluation.
+const converterOutputs = new WeakMap<CircuitElement[], Map<boolean, Promise<ConverterOutput>>>();
+
+const convert = async (circuitJson: CircuitElement[], online: boolean): Promise<ConverterOutput> => {
+  const { convertCircuitJsonToGltf } = await import('#engine/gltf.js');
+  // The converter never rasterizes a board texture: the presentation board is layer geometry.
+  const { value, issues } = await withOfflineFetch(
+    async () =>
+      convertCircuitJsonToGltf(asCircuitJson(await withPackModels(circuitJson)), {
+        format: 'glb',
+        boardTextureResolution: 0,
+      }),
+    { online },
+  );
+  if (!(value instanceof ArrayBuffer)) {
+    throw new TypeError('circuit-json-to-gltf did not return binary GLB bytes.');
+  }
+  return { glb: new Uint8Array(value), issues };
+};
+
+const convertedGlb = async (circuitJson: CircuitElement[], online: boolean): Promise<ConverterOutput> => {
+  const byMode = converterOutputs.get(circuitJson) ?? new Map<boolean, Promise<ConverterOutput>>();
+  converterOutputs.set(circuitJson, byMode);
+  const output = byMode.get(online) ?? convert(circuitJson, online);
+  byMode.set(online, output);
+  try {
+    return await output;
+  } catch (error) {
+    // A failed conversion is not kept, so the next request tries again.
+    if (byMode.get(online) === output) {
+      byMode.delete(online);
+    }
+    throw error;
+  }
+};
+
 // One GLB path for render and export (charter D6, D8).
 const circuitJsonToGlb = async (
   circuitJson: CircuitElement[],
   convention: GlbConvention,
-  { online = false, ...options }: BoardViewOptions & { online?: boolean | undefined } = {},
+  {
+    online = false,
+    includeEdges = false,
+    ...options
+  }: BoardViewOptions & { online?: boolean | undefined; includeEdges?: boolean | undefined } = {},
 ): Promise<{ content: Uint8Array<ArrayBuffer>; issues: KernelIssue[] }> => {
-  const { convertCircuitJsonToGltf } = await import('#engine/gltf.js');
-  // The converter never rasterizes a board texture: presentation builds the board from layer
-  // geometry, and technical shows the converter's plain slab with feature edges.
+  const converted = await convertedGlb(circuitJson, online);
+  // Each pass reads its own copy, so no edit can reach the cached bytes.
   const { value: content, issues } = await withOfflineFetch(
-    async () => {
-      const glb = await convertCircuitJsonToGltf(asCircuitJson(await withPackModels(circuitJson)), {
-        format: 'glb',
-        boardTextureResolution: 0,
-      });
-      if (!(glb instanceof ArrayBuffer)) {
-        throw new TypeError('circuit-json-to-gltf did not return binary GLB bytes.');
-      }
-      return applyGlbConvention(new Uint8Array(glb), convention, { circuitJson, options });
-    },
+    async () => applyGlbConvention(new Uint8Array(converted.glb), convention, { circuitJson, options, includeEdges }),
     { online },
   );
-  return { content, issues };
+  return { content, issues: [...converted.issues, ...issues] };
 };
 
 const textExportFile = (format: 'csv' | 'txt' | 'json', name: string, text: string) =>
@@ -844,10 +832,15 @@ export const tscircuitKernel = defineKernel({
     flatbush: { name: 'flatbush', version: '4.6.2' },
   },
   name: 'TscircuitKernel',
-  version: `1.2.0+kicad.${kicadPackVersion}`,
+  version: `1.3.0+kicad.${kicadPackVersion}`,
   optionsSchema: tscircuitOptionsSchema,
   views: {
-    board: { title: '3D board', mimeType: 'model/gltf-binary', optionsSchema: boardViewOptionsSchema },
+    board: {
+      title: '3D board',
+      mimeType: 'model/gltf-binary',
+      optionsSchema: boardViewOptionsSchema,
+      content: ['includeEdges'],
+    },
     schematic: {
       title: 'Schematic',
       mimeType: 'image/svg+xml',
@@ -862,6 +855,7 @@ export const tscircuitKernel = defineKernel({
       mimeType: 'model/gltf-binary',
       extension: 'glb',
       optionsSchema: tscircuitExportSchemas.board,
+      content: ['includeEdges'],
     },
     bom: {
       title: 'Bill of materials',
@@ -885,7 +879,6 @@ export const tscircuitKernel = defineKernel({
 
   async initialize(options, runtime): Promise<TscircuitContext> {
     const online = options.parts === 'online';
-    const boardStyle = options.boardStyle ?? 'presentation';
     const [reactModule, jsxRuntimeModule, core] = await Promise.all([
       import('#engine/react.js'),
       import('#engine/jsx-runtime.js'),
@@ -905,7 +898,6 @@ export const tscircuitKernel = defineKernel({
     runtime.logger.debug('Initialized tscircuit kernel with @tscircuit/core');
     return {
       online,
-      boardStyle,
       async renderCircuit(module, parameters) {
         const component = resolveCircuitComponent(module);
         if (!component) {
@@ -1070,7 +1062,7 @@ export const tscircuitKernel = defineKernel({
       case 'board': {
         const { content, issues } = await circuitJsonToGlb(circuitJson, displayGlbConvention, {
           ...request.options,
-          style: request.options.style ?? context.boardStyle,
+          includeEdges: request.content?.includeEdges === true,
           online: context.online,
         });
         return { content, issues };
@@ -1112,16 +1104,17 @@ export const tscircuitKernel = defineKernel({
     return { circuitJson: parsed['circuitJson'], sheets: mappings };
   },
 
-  async export({ exportId, handle, options }, _runtime, context) {
-    const { circuitJson } = handle;
+  async export(input, _runtime, context) {
+    const { circuitJson } = input.handle;
     const issues = collectCircuitIssues(circuitJson);
-    switch (exportId) {
+    switch (input.exportId) {
       case 'board': {
-        const { coordinateSystem, unit, style, finish } = options;
+        const { options, content: exportContent } = input;
+        const { coordinateSystem, unit, finish } = options;
         const { content, issues: glbIssues } = await circuitJsonToGlb(
           circuitJson,
           { coordinateSystem, unit },
-          { style: style ?? context.boardStyle, finish, online: context.online },
+          { finish, includeEdges: exportContent?.includeEdges === true, online: context.online },
         );
         return { files: [createExportFile('glb', 'model.glb', content)], issues: [...issues, ...glbIssues] };
       }
@@ -1143,8 +1136,10 @@ export const tscircuitKernel = defineKernel({
         return { files: [textExportFile('json', 'circuit.json', JSON.stringify(circuitJson, null, 2))], issues };
       }
       default: {
-        const exhaustive: never = exportId;
-        throw new Error(`Export '${String(exhaustive)}' is not supported by tscircuit.`);
+        const exhaustive: never = input;
+        throw new Error(
+          `Export '${JSON.stringify(Reflect.get(exhaustive, 'exportId'))}' is not supported by tscircuit.`,
+        );
       }
     }
   },

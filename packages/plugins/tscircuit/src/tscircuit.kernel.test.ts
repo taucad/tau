@@ -22,7 +22,21 @@ import {
 } from '@taucad/runtime-testing';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import type * as GltfEngine from '#engine/gltf.js';
 import { tscircuitDetectPattern, tscircuitKernel } from '#tscircuit.kernel.js';
+
+// Counts converter runs, so a test can show a view change reuses the converter's GLB.
+const converterRuns = vi.hoisted(() => ({ count: 0 }));
+vi.mock('#engine/gltf.js', async (importOriginal) => {
+  const original = await importOriginal<typeof GltfEngine>();
+  return {
+    ...original,
+    convertCircuitJsonToGltf: async (...input: Parameters<typeof original.convertCircuitJsonToGltf>) => {
+      converterRuns.count++;
+      return original.convertCircuitJsonToGltf(...input);
+    },
+  };
+});
 
 // =============================================================================
 // Fixtures
@@ -792,51 +806,45 @@ describe('TscircuitKernel', () => {
       expect(root.listMaterials().some((material) => material.getName().includes('mask'))).toBe(true);
     });
 
-    it('should render the technical board untextured when the kernel option asks for it', async () => {
+    it('should draw edges on part bodies and the board outline only when edges are asked for', async () => {
       const client = createClient({ 'main.tsx': fixtureBoard });
       expectGlb(await render(client, 'main.tsx'));
       const circuitJson = await readSettledCircuitJson(client);
       const runtime = createMockKernelRuntime();
+      const context = await definition.initialize({}, runtime);
       const handle = { circuitJson, sheets: new Map() };
-      const technical = await definition.render!(
-        { view: 'board', handle, options: {} },
-        runtime,
-        await definition.initialize({ boardStyle: 'technical' }, runtime),
-      );
       const io = await createNodeIo();
-      const technicalDocument = await io.readBinary(technical.content as Uint8Array<ArrayBuffer>);
-      const root = technicalDocument.getRoot();
-      expect(root.listNodes().some((node) => node.getName() === 'pcb')).toBe(false);
-      // No raster board texture on either path: the slab is a plain material.
-      expect(root.listTextures()).toHaveLength(0);
-      // Every one-sided solid, the slab included, winds outward, or culling would show its far walls.
-      const oneSided = root
-        .listMeshes()
-        .flatMap((mesh) => mesh.listPrimitives())
-        .filter((primitive) => primitive.getMaterial()?.getDoubleSided() === false);
-      expect(oneSided.length).toBeGreaterThan(1);
-      for (const primitive of oneSided) {
-        const position = primitive.getAttribute('POSITION')!;
-        const indices = primitive.getIndices()!;
-        let volume = 0;
-        for (let index = 0; index < indices.getCount(); index += 3) {
-          const [a, b, c] = [0, 1, 2].map((corner) => position.getElement(indices.getScalar(index + corner), []));
-          volume +=
-            a![0]! * (b![1]! * c![2]! - b![2]! * c![1]!) -
-            a![1]! * (b![0]! * c![2]! - b![2]! * c![0]!) +
-            a![2]! * (b![0]! * c![1]! - b![1]! * c![0]!);
-        }
-        expect(volume).toBeGreaterThan(0);
-      }
-      // A view option still overrides the kernel default.
-      const presentation = await definition.render!(
-        { view: 'board', handle, options: { style: 'presentation' } },
+      const lineMeshes = async (content: Uint8Array<ArrayBuffer>) => {
+        const document = await io.readBinary(content);
+        const root = document.getRoot();
+        // No raster board texture: the board is layer geometry.
+        expect(root.listTextures()).toHaveLength(0);
+        expect(root.listNodes().some((node) => node.getName() === 'pcb')).toBe(true);
+        return root.listMeshes().filter((mesh) => mesh.listPrimitives().some((primitive) => primitive.getMode() === 1));
+      };
+      const runsBefore = converterRuns.count;
+      const plain = await definition.render!({ view: 'board', handle, options: {} }, runtime, context);
+      expect(await lineMeshes(plain.content as Uint8Array<ArrayBuffer>)).toHaveLength(0);
+
+      const edged = await definition.render!(
+        { view: 'board', handle, options: {}, content: { includeEdges: true } },
         runtime,
-        await definition.initialize({ boardStyle: 'technical' }, runtime),
+        context,
       );
-      const presentedDocument = await io.readBinary(presentation.content as Uint8Array<ArrayBuffer>);
-      const presented = presentedDocument.getRoot();
-      expect(presented.listNodes().some((node) => node.getName() === 'pcb')).toBe(true);
+      const edgedMeshes = await lineMeshes(edged.content as Uint8Array<ArrayBuffer>);
+      const board = edgedMeshes.find((mesh) =>
+        mesh.listPrimitives().some((primitive) => primitive.getMaterial()?.getName() === 'pcb-core'),
+      );
+      // The board core carries the outline and the holes; copper, mask, finish and silkscreen get no lines.
+      const boardPrimitives = board?.listPrimitives() ?? [];
+      expect(boardPrimitives.filter((primitive) => primitive.getMode() === 1)).toHaveLength(
+        boardPrimitives.filter((primitive) => primitive.getMaterial()?.getName() === 'pcb-core').length,
+      );
+      expect(boardPrimitives.length).toBeGreaterThan(4);
+      // Every part body is edged too: more than the core alone.
+      expect(edgedMeshes.length).toBeGreaterThan(4);
+      // The edge toggle reruns only the post-pass: the converter ran once for both renders.
+      expect(converterRuns.count - runsBefore).toBe(1);
     });
 
     it('should render the schematic output as an SVG with a viewBox and schematic elements', async () => {

@@ -7,7 +7,7 @@
 5. Wire with `<trace from='.R1 > .pin1' to='.U1 > .VCC' />`, `to='net.GND'`, or `connections` on a part. Selectors name a pin by its label or `pinN`. Prefer named nets for power and ground.
 6. Parameters: export `defaultParameters` (a plain object); Tau passes edited values as props.
 7. Rendering and routing are offline by default. URL footprints and CAD models are never fetched and `jlcpcb:` parts remain unplaced. `kicad:` footprints in Tau's bundled KiCad pack render offline with their real KiCad 3D body (see Real parts); other `kicad:` names stay unplaced unless the kernel option `parts` is `'online'`, which loads them from tscircuit's part hosts.
-8. Views: `board` (3D GLB, default; `style` option `presentation`, the default set by the kernel option `boardStyle`, or `technical`, a plain slab with edges), `schematic` (SVG sheets; `theme` option `light`, `dark` or `engineering`), `pcb` (SVG; `pinNumbers`, and `palette` option `fabrication` or `engineering`). `screenshot.view` selects one, `screenshot.instance` a sheet. Export IDs for `export_model.to`: `board` (`glb`), `bom` (`csv`), `netlist` (`txt`), `circuit` (`json`).
+8. Views: `board` (3D GLB, default; layered copper, mask and silkscreen; `finish` option `enig`, `hasl` or `bare`; edge lines follow the viewer's edge toggle), `schematic` (SVG sheets; `theme` option `light`, `dark` or `engineering`), `pcb` (SVG; `pinNumbers`, and `palette` option `fabrication` or `engineering`). `screenshot.view` selects one, `screenshot.instance` a sheet. Export IDs for `export_model.to`: `board` (`glb`), `bom` (`csv`), `netlist` (`txt`), `circuit` (`json`).
 
 ## Real parts
 

@@ -65,7 +65,7 @@ def tessellate_surface(shape: Any, linear_tolerance: float, angular_tolerance: f
             # Native mesh() checks the stored achieved deflection, which can be
             # slightly above its requested value. Admit that existing absolute
             # triangulation for extraction; never let UV extraction remesh in
-            # Build123D's relative mode after the triangle budget was checked.
+            # Build123D's relative mode after the triangles were counted.
             from OCP.BRep import BRep_Tool
             from OCP.TopLoc import TopLoc_Location
             mesh = BRep_Tool.Triangulation_s(face.wrapped, TopLoc_Location())

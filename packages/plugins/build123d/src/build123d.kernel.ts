@@ -6,7 +6,7 @@ import { actionDigest, canonicalizeComputeAction, contentDigest } from '@taucad/
 import type { ActionDigest, ComputeAction } from '@taucad/cache-core';
 import { sha256StringSync } from '@taucad/utils/hash';
 import { admitMechanism, validateMechanismMotion } from '@taucad/kinematics';
-import { occtExplicitTessellationDefaults, occtTriangleBudgets } from '@taucad/occt-core';
+import { occtExplicitTessellationDefaults } from '@taucad/occt-core';
 import type { OcctTessellationTolerances } from '@taucad/occt-core';
 import {
   bindPythonKernel,
@@ -26,11 +26,7 @@ import {
   build123dMeshSchema,
 } from '#build123d.protocol.js';
 import type { Build123dAnalysis, Build123dArtifact, Build123dMesh } from '#build123d.protocol.js';
-import {
-  Build123dTessellationRefusal,
-  meshExportWithinBudget,
-  meshPreviewWithinBudget,
-} from '#build123d-tessellation.js';
+import { meshTessellation } from '#build123d-tessellation.js';
 import { build123dExportSchemas, build123dOptionsSchema, build123dRenderSchema } from '#build123d.schemas.js';
 import { createBuild123dResidentBinding } from '#build123d-resident.js';
 import { build123dWorker } from '#build123d-worker.js';
@@ -80,9 +76,6 @@ class Build123dKernelError extends Error {
 const issuesFrom = (error: unknown, fileName?: string): KernelIssue[] => {
   if (error instanceof Build123dKernelError) {
     return error.issues;
-  }
-  if (error instanceof Build123dTessellationRefusal) {
-    return [error.issue];
   }
   if (error instanceof PythonWorkerError) {
     return error.issues.map(({ code: pythonCode, type: pythonType, ...issue }) => ({
@@ -216,10 +209,10 @@ const meshRequests = (
   runtime: Pick<KernelServices, 'signal'>,
   session: PythonSession,
 ): {
-  mesh: (tolerances: OcctTessellationTolerances, maxTriangles?: number) => Promise<Build123dMesh>;
+  mesh: (tolerances: OcctTessellationTolerances) => Promise<Build123dMesh>;
   measureDiagonal: () => Promise<number>;
 } => ({
-  mesh: async (tolerances, maxTriangles) =>
+  mesh: async (tolerances) =>
     session.request({
       method: 'mesh',
       params: {
@@ -227,7 +220,6 @@ const meshRequests = (
         linearTolerance: tolerances.linearTolerance,
         angularTolerance: tolerances.angularTolerance,
         includeEdges,
-        ...(maxTriangles === undefined ? {} : { maxTriangles }),
       },
       schema: build123dMeshSchema,
       signal: runtime.signal,
@@ -446,13 +438,12 @@ const build123dKernelDefinition = defineKernel({
         runtime,
         context.session,
       );
-      // The render hook cannot tell a viewer preview from a capture, so every render takes the preview budget.
-      const meshed = await meshPreviewWithinBudget(
+      // One pass at the requested tessellation: nothing coarsens a mesh (no triangle budget).
+      const meshed = await meshTessellation(
         {
           tessellation: options.tessellation,
           fallback: 'medium',
           explicitDefaults: occtExplicitTessellationDefaults.preview,
-          budget: occtTriangleBudgets.preview,
           staleCode: 'VIEW_OPTIONS_INVALID',
           measureDiagonal,
         },
@@ -479,12 +470,11 @@ const build123dKernelDefinition = defineKernel({
           runtime,
           context.session,
         );
-        const meshed = await meshExportWithinBudget(
+        const meshed = await meshTessellation(
           {
             tessellation: input.options.tessellation,
             fallback: 'high',
             explicitDefaults: occtExplicitTessellationDefaults.export,
-            budget: occtTriangleBudgets.export,
             staleCode: 'EXPORT_OPTIONS_INVALID',
             measureDiagonal,
           },

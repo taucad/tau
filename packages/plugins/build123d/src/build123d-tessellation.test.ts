@@ -4,11 +4,7 @@ import { occtExplicitTessellationDefaults } from '@taucad/occt-core';
 import type { OcctTessellation, OcctTessellationTolerances } from '@taucad/occt-core';
 import { describe, expect, it, vi } from 'vitest';
 
-import {
-  Build123dTessellationRefusal,
-  meshExportWithinBudget,
-  meshPreviewWithinBudget,
-} from '#build123d-tessellation.js';
+import { meshTessellation } from '#build123d-tessellation.js';
 import type { Build123dMesh } from '#build123d.protocol.js';
 
 const glb = { artifactPath: '/private/model.glb', byteLength: 3 };
@@ -20,10 +16,9 @@ const glb = { artifactPath: '/private/model.glb', byteLength: 3 };
  * @returns The mesh request spy.
  */
 const workerMesh = (trianglesAtOneMillimetre: number) =>
-  vi.fn(async (tolerances: OcctTessellationTolerances, maxTriangles?: number): Promise<Build123dMesh> => {
+  vi.fn(async (tolerances: OcctTessellationTolerances): Promise<Build123dMesh> => {
     const triangles = Math.round(trianglesAtOneMillimetre / tolerances.linearTolerance);
-    const counts = { triangles, vertices: triangles * 3 };
-    return maxTriangles !== undefined && triangles > maxTriangles ? counts : { ...counts, ...glb };
+    return { triangles, vertices: triangles * 3, ...glb };
   });
 
 const previewLane = (tessellation: OcctTessellation, measureDiagonal = vi.fn(async () => 2000)) =>
@@ -31,7 +26,6 @@ const previewLane = (tessellation: OcctTessellation, measureDiagonal = vi.fn(asy
     tessellation,
     fallback: 'medium',
     explicitDefaults: occtExplicitTessellationDefaults.preview,
-    budget: 1000,
     staleCode: 'VIEW_OPTIONS_INVALID',
     measureDiagonal,
   }) as const;
@@ -41,25 +35,16 @@ describe('build123d preview tessellation', () => {
     const measureDiagonal = vi.fn(async () => 2000);
     const mesh = workerMesh(100);
 
-    const meshed = await meshPreviewWithinBudget(previewLane('medium', measureDiagonal), mesh);
+    const meshed = await meshTessellation(previewLane('medium', measureDiagonal), mesh);
 
     expect(measureDiagonal).toHaveBeenCalledOnce();
-    expect(mesh).toHaveBeenCalledExactlyOnceWith(
-      { requested: 'medium', linearTolerance: 1, angularTolerance: 20 },
-      1000,
-    );
+    expect(mesh).toHaveBeenCalledExactlyOnceWith({ requested: 'medium', linearTolerance: 1, angularTolerance: 20 });
     expect(meshed).toMatchObject({
       artifact: glb,
-      tessellation: {
-        triangles: 100,
-        vertices: 300,
-        requested: 'medium',
-        linearTolerance: 1,
-        angularTolerance: 20,
-        downgraded: 0,
-      },
+      tessellation: { triangles: 100, vertices: 300, requested: 'medium', linearTolerance: 1, angularTolerance: 20 },
       issues: [],
     });
+    expect(meshed.tessellation).not.toHaveProperty('downgraded');
     expect(meshed.tessellation.elapsed).toBeGreaterThanOrEqual(0);
   });
 
@@ -67,53 +52,28 @@ describe('build123d preview tessellation', () => {
     const measureDiagonal = vi.fn(async () => 2000);
     const mesh = workerMesh(1);
 
-    const meshed = await meshPreviewWithinBudget(previewLane({ linearTolerance: 0.05 }, measureDiagonal), mesh);
+    const meshed = await meshTessellation(previewLane({ linearTolerance: 0.05 }, measureDiagonal), mesh);
 
     expect(measureDiagonal).not.toHaveBeenCalled();
-    expect(mesh).toHaveBeenCalledExactlyOnceWith(
-      { requested: 'explicit', linearTolerance: 0.05, angularTolerance: 20 },
-      1000,
-    );
+    expect(mesh).toHaveBeenCalledExactlyOnceWith({
+      requested: 'explicit',
+      linearTolerance: 0.05,
+      angularTolerance: 20,
+    });
     expect(meshed.tessellation).toMatchObject({ requested: 'explicit', linearTolerance: 0.05, angularTolerance: 20 });
   });
 
-  it('coarsens an over-budget preview one step at a time and warns', async () => {
-    const mesh = workerMesh(3000);
+  it('meshes a large preview once at the requested tolerance, never coarser', async () => {
+    const mesh = workerMesh(3_000_000);
 
-    const meshed = await meshPreviewWithinBudget(previewLane({ linearTolerance: 1, angularTolerance: 20 }), mesh);
+    const meshed = await meshTessellation(previewLane({ linearTolerance: 1, angularTolerance: 20 }), mesh);
 
-    expect(mesh.mock.calls.map(([tolerances, budget]) => [tolerances.linearTolerance, budget])).toEqual([
-      [1, 1000],
-      [2, 1000],
-      [4, 1000],
-    ]);
-    expect(meshed.tessellation).toMatchObject({
-      triangles: 750,
-      linearTolerance: 4,
-      angularTolerance: 28,
-      downgraded: 2,
+    expect(mesh).toHaveBeenCalledOnce();
+    expect(meshed).toMatchObject({
+      artifact: glb,
+      tessellation: { triangles: 3_000_000, linearTolerance: 1, angularTolerance: 20 },
+      issues: [],
     });
-    expect(meshed.issues).toEqual([
-      expect.objectContaining({
-        code: 'TESSELLATION_DOWNGRADED',
-        severity: 'warning',
-        details: expect.objectContaining({ producer: 'build123d', downgraded: 2, triangles: 750, budget: 1000 }),
-      }),
-    ]);
-  });
-
-  it('delivers the third coarser step whatever it costs', async () => {
-    const mesh = workerMesh(1_000_000);
-
-    const meshed = await meshPreviewWithinBudget(previewLane({ linearTolerance: 1, angularTolerance: 20 }), mesh);
-
-    expect(mesh.mock.calls.map(([tolerances, budget]) => [tolerances.linearTolerance, budget])).toEqual([
-      [1, 1000],
-      [2, 1000],
-      [4, 1000],
-      [8, undefined],
-    ]);
-    expect(meshed).toMatchObject({ artifact: glb, tessellation: { triangles: 125_000, downgraded: 3 } });
   });
 
   it('meshes a stale radian value at the default preset and says so', async () => {
@@ -121,13 +81,10 @@ describe('build123d preview tessellation', () => {
     const mesh = workerMesh(100);
     const stale = { linearTolerance: 0.05, angularTolerance: 0.1 };
 
-    const meshed = await meshPreviewWithinBudget(previewLane(stale, measureDiagonal), mesh);
+    const meshed = await meshTessellation(previewLane(stale, measureDiagonal), mesh);
 
     expect(measureDiagonal).toHaveBeenCalledOnce();
-    expect(mesh).toHaveBeenCalledExactlyOnceWith(
-      { requested: 'medium', linearTolerance: 1, angularTolerance: 20 },
-      1000,
-    );
+    expect(mesh).toHaveBeenCalledExactlyOnceWith({ requested: 'medium', linearTolerance: 1, angularTolerance: 20 });
     expect(meshed.issues).toEqual([
       expect.objectContaining({
         code: 'VIEW_OPTIONS_INVALID',
@@ -140,19 +97,11 @@ describe('build123d preview tessellation', () => {
   it('keeps an explicit angle above π degrees and an explicit length alone', async () => {
     const mesh = workerMesh(1);
 
-    const above = await meshPreviewWithinBudget(previewLane({ angularTolerance: 3.2 }), mesh);
-    const lengthOnly = await meshPreviewWithinBudget(previewLane({ linearTolerance: 0.05 }), mesh);
+    const above = await meshTessellation(previewLane({ angularTolerance: 3.2 }), mesh);
+    const lengthOnly = await meshTessellation(previewLane({ linearTolerance: 0.05 }), mesh);
 
     expect(above).toMatchObject({ tessellation: { requested: 'explicit', angularTolerance: 3.2 }, issues: [] });
     expect(lengthOnly).toMatchObject({ tessellation: { requested: 'explicit', angularTolerance: 20 }, issues: [] });
-  });
-
-  it('refuses a worker answer that withholds an unbounded GLB', async () => {
-    const mesh = vi.fn(async () => ({ triangles: 5000, vertices: 15_000 }));
-
-    await expect(
-      meshPreviewWithinBudget(previewLane({ linearTolerance: 1, angularTolerance: 20 }), mesh),
-    ).rejects.toThrow(/without a GLB/);
   });
 });
 
@@ -162,42 +111,34 @@ describe('build123d export tessellation', () => {
       tessellation,
       fallback: 'high',
       explicitDefaults: occtExplicitTessellationDefaults.export,
-      budget: 1000,
       staleCode: 'EXPORT_OPTIONS_INVALID',
       measureDiagonal: async () => 8000,
     }) as const;
 
-  it('meshes the high preset within the export budget', async () => {
+  it('meshes the high preset', async () => {
     const mesh = workerMesh(100);
 
-    const meshed = await meshExportWithinBudget(exportLane('high'), mesh);
+    const meshed = await meshTessellation(exportLane('high'), mesh);
 
-    expect(mesh).toHaveBeenCalledExactlyOnceWith({ requested: 'high', linearTolerance: 1, angularTolerance: 12 }, 1000);
+    expect(mesh).toHaveBeenCalledExactlyOnceWith({ requested: 'high', linearTolerance: 1, angularTolerance: 12 });
     expect(meshed).toMatchObject({
       artifact: glb,
-      tessellation: { triangles: 100, vertices: 300, requested: 'high', linearTolerance: 1, downgraded: 0 },
+      tessellation: { triangles: 100, vertices: 300, requested: 'high', linearTolerance: 1 },
       issues: [],
     });
   });
 
-  it('refuses an over-budget export with a suggested tolerance instead of coarsening it', async () => {
-    const mesh = workerMesh(4000);
+  it('exports a mesh above the former 20,000,000-triangle budget instead of refusing it', async () => {
+    const mesh = workerMesh(25_000_000);
 
-    const refusal = await meshExportWithinBudget(exportLane({ linearTolerance: 1, angularTolerance: 20 }), mesh).catch(
-      (error: unknown) => error,
-    );
+    const meshed = await meshTessellation(exportLane({ linearTolerance: 1, angularTolerance: 20 }), mesh);
 
     expect(mesh).toHaveBeenCalledOnce();
-    expect(refusal).toBeInstanceOf(Build123dTessellationRefusal);
-    expect((refusal as Build123dTessellationRefusal).issue).toMatchObject({
-      code: 'RESOURCE_LIMIT',
-      severity: 'error',
-      details: { producer: 'build123d', suggested: { linearTolerance: 4 }, triangles: 4000, budget: 1000 },
-    });
+    expect(meshed).toMatchObject({ artifact: glb, tessellation: { triangles: 25_000_000 }, issues: [] });
   });
 
   it('meshes a stale radian export value at the high preset with an export warning', async () => {
-    const meshed = await meshExportWithinBudget(
+    const meshed = await meshTessellation(
       exportLane({ linearTolerance: 0.01, angularTolerance: 0.1 }),
       workerMesh(100),
     );

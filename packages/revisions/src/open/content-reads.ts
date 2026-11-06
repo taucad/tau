@@ -9,7 +9,7 @@
  * the explicit form, for a consumer that needs the physical file.
  */
 import { readLfsPointer } from '#lfs.js';
-import type { LargeObjectLook } from '#large-object-fill.js';
+import type { FillWait, LargeObjectLook } from '#large-object-fill.js';
 import type { Checkout } from '#revision-port.js';
 import type { RevisionFileSystem } from '#revision-effects.types.js';
 import { generatedGitattributesPath, isTrackedLargeObjectPath } from '#workspace-config.js';
@@ -76,14 +76,18 @@ export type ContentReadsDependencies = Readonly<{
     written: (
       checkoutId: string,
       paths: readonly string[],
-      signal?: AbortSignal,
-      stall?: number,
+      wait?: FillWait,
     ) => Promise<'written' | 'failed' | 'stalled' | 'idle'>;
   }>;
   /** Start a fill on a checkout that has placeholders and none running. */
   startFill: (place: Checkout) => Promise<void>;
   /** Whether this host can reach its remote; absent, it is assumed to. */
   online?: () => boolean;
+  /** One object fetched by its oid from the remote, for a read that must have it (slice a); absent, none is. */
+  fetchObject?: (
+    pointer: Readonly<{ oid: string; size: number }>,
+    signal?: AbortSignal,
+  ) => Promise<Uint8Array<ArrayBuffer> | undefined>;
 }>;
 
 const isMissing = (error: unknown): boolean => {
@@ -106,6 +110,11 @@ export type ContentReads = Readonly<{
     paths: readonly string[],
     options?: Readonly<{ signal?: AbortSignal; stallMilliseconds?: number }>,
   ) => Promise<void>;
+  resolvePlaceholder: (
+    place: Checkout,
+    path: string,
+    signal?: AbortSignal,
+  ) => Promise<Uint8Array<ArrayBuffer> | undefined>;
 }>;
 
 /* The reads one root serves; see the module comment. */
@@ -236,8 +245,10 @@ export const createContentReads = (dependencies: ContentReadsDependencies): Cont
       const answer = await fill.written(
         place.id,
         left.map(({ path }) => path),
-        options.signal,
-        options.stallMilliseconds ?? defaultStallMilliseconds,
+        {
+          ...(options.signal === undefined ? {} : { signal: options.signal }),
+          stall: options.stallMilliseconds ?? defaultStallMilliseconds,
+        },
       );
       if (answer === 'failed' || answer === 'stalled') {
         break;
@@ -258,5 +269,35 @@ export const createContentReads = (dependencies: ContentReadsDependencies): Cont
     }
   };
 
-  return { readContent, materialize };
+  /**
+   * The object one placeholder stands for, for the authority's read-through
+   * (slice a): from the fill or the store, else fetched by its oid. Nothing is
+   * written to the checkout.
+   *
+   * @param place - The checkout.
+   * @param path - A checkout-relative path.
+   * @param signal - The reader's bound.
+   * @returns The bytes, or `undefined` when the path holds no placeholder.
+   * @throws {PendingError} When the object could not be had.
+   */
+  const resolvePlaceholder = async (
+    place: Checkout,
+    path: string,
+    signal?: AbortSignal,
+  ): Promise<Uint8Array<ArrayBuffer> | undefined> => {
+    const pointer = await pointerAt(place, path, await readRaw(place, path));
+    if (pointer === undefined) {
+      return undefined;
+    }
+    const data =
+      fill.look(place.id, pointer.oid)?.bytes ??
+      (await readStoredObject(pointer)) ??
+      (await dependencies.fetchObject?.(pointer, signal));
+    if (data === undefined) {
+      throw new PendingError({ path, ...pointer, reason: reasonOf(fill.look(place.id, pointer.oid)) });
+    }
+    return data;
+  };
+
+  return { readContent, materialize, resolvePlaceholder };
 };

@@ -100,6 +100,9 @@ export const largeObjectPlaceholders = (tree: ImmutableRevisionTree): Map<string
  *   ends every fill and resolves once none is writing.
  */
 // oxlint-disable-next-line eslint/max-lines-per-function -- one closure over the fills' shared map and seams.
+/** How one wait on a fill ends early: `signal` aborts it, `stall` gives up after that many milliseconds without progress. @internal */
+export type FillWait = Readonly<{ signal?: AbortSignal; stall?: number }>;
+
 export const createLargeObjectFill = (
   dependencies: Readonly<{
     port: Pick<RevisionPort, 'readTree' | 'fetchLargeObjects'>;
@@ -126,8 +129,7 @@ export const createLargeObjectFill = (
   written: (
     checkoutId: string,
     paths: readonly string[],
-    signal?: AbortSignal,
-    stall?: number,
+    wait?: FillWait,
   ) => Promise<'written' | 'failed' | 'stalled' | 'idle'>;
 }> => {
   const { port, capture, withCheckoutFence, materializeTree, report } = dependencies;
@@ -162,7 +164,8 @@ export const createLargeObjectFill = (
    * ends without it, or (given `stall`) once that many milliseconds pass with
    * nothing arriving, flushed or told. An abort rejects with its reason.
    */
-  const until = async (fill: Fill, check: () => boolean, signal?: AbortSignal, stall?: number): Promise<boolean> => {
+  const until = async (fill: Fill, check: () => boolean, wait: FillWait = {}): Promise<boolean> => {
+    const { signal, stall } = wait;
     signal?.throwIfAborted();
     const settled = Promise.withResolvers<boolean>();
     const onAbort = (): void => {
@@ -654,7 +657,7 @@ export const createLargeObjectFill = (
         bytes = current.landed.get(oid);
         return bytes !== undefined;
       },
-      signal,
+      { signal },
     );
     return found ? bytes : undefined;
   };
@@ -666,22 +669,20 @@ export const createLargeObjectFill = (
    *
    * @param checkoutId - The checkout.
    * @param paths - Checkout-relative paths.
-   * @param signal - Stops waiting; the wait then rejects.
-   * @param stall - Milliseconds with no progress after which the wait gives up.
+   * @param wait - `signal` stops waiting (the wait then rejects); `stall` is the milliseconds with no progress after which it gives up.
    * @returns `written`; `failed` when the transfer failed first; `stalled` when it made no progress for `stall`;
    *   `idle` when no fill runs on the checkout.
    */
   const written = async (
     checkoutId: string,
     paths: readonly string[],
-    signal?: AbortSignal,
-    stall?: number,
+    wait?: FillWait,
   ): Promise<'written' | 'failed' | 'stalled' | 'idle'> => {
     for (let current = fills.get(checkoutId); current !== undefined; current = fills.get(checkoutId)) {
       prioritize(current, paths);
       const tracked = current;
       // oxlint-disable-next-line no-await-in-loop -- a replaced fill is followed to its successor, one at a time.
-      if (await until(tracked, () => paths.every((path) => !tracked.pending.has(path)), signal, stall)) {
+      if (await until(tracked, () => paths.every((path) => !tracked.pending.has(path)), wait)) {
         return 'written';
       }
       if (isCurrent(tracked)) {

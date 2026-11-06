@@ -268,7 +268,7 @@ describe('large-object fill', () => {
       expect(harness.readTree).toHaveBeenCalled();
     });
     const controller = new AbortController();
-    const aborted = harness.fill.written(place.id, ['models/a.step'], controller.signal);
+    const aborted = harness.fill.written(place.id, ['models/a.step'], { signal: controller.signal });
     controller.abort(new Error('closed'));
     await expect(aborted).rejects.toThrow('closed');
     const writing = harness.fill.written(place.id, ['models/a.step']);
@@ -283,17 +283,18 @@ describe('large-object fill', () => {
     await vi.waitFor(() => {
       expect(harness.readTree).toHaveBeenCalled();
     });
-    const waiting = harness.fill.written(place.id, ['models/a.step', 'models/b.step'], undefined, 200);
+    const waiting = harness.fill.written(place.id, ['models/a.step', 'models/b.step'], { stall: 200 });
+    const delay = async (milliseconds: number): Promise<'waiting'> => {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, milliseconds);
+      });
+      return 'waiting';
+    };
     /* An arrival is progress: the bound starts again. */
-    await new Promise((resolve) => setTimeout(resolve, 120));
+    await delay(120);
     harness.land('models/a.step');
-    let answered = false;
-    void waiting.then(() => {
-      answered = true;
-    });
     /* 240 ms in: past the bound from the start, within it from the arrival. */
-    await new Promise((resolve) => setTimeout(resolve, 120));
-    expect(answered).toBe(false);
+    expect(await Promise.race([waiting, delay(120)])).toBe('waiting');
     expect(await waiting).toBe('stalled');
     harness.finish(harness.fullTree());
     await done;

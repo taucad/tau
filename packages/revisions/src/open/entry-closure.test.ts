@@ -123,9 +123,8 @@ describe('the entry closure (D10)', () => {
 
   it('is tau.json alone, or nothing, when the manifest names nothing it can read', async () => {
     const unnamed = await store({ 'tau.json': '{}', 'main.scad': 'cube(1);\n' });
-    expect((await readEntryClosure(unnamed.port, unnamed.head))?.files.map(({ path }) => path)).toStrictEqual([
-      'tau.json',
-    ]);
+    const named = await readEntryClosure(unnamed.port, unnamed.head);
+    expect(named?.files.map(({ path }) => path)).toStrictEqual(['tau.json']);
     const bare = await store({ 'main.scad': 'cube(1);\n' });
     expect(await readEntryClosure(bare.port, bare.head)).toStrictEqual({ files: [], missing: ['tau.json'] });
   });

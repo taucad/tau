@@ -157,7 +157,7 @@ describe('materialize (D9)', () => {
       return 'written';
     });
     await reads.materialize(place, ['main.scad', 'models/part.step']);
-    expect(written).toHaveBeenCalledExactlyOnceWith('live', ['models/part.step'], undefined, 60_000);
+    expect(written).toHaveBeenCalledExactlyOnceWith('live', ['models/part.step'], { stall: 60_000 });
   });
 
   it('starts a fill on a checkout with none running', async () => {
@@ -189,19 +189,41 @@ describe('materialize (D9)', () => {
     await expect(reads.materialize(place, ['models/part.step'], { stallMilliseconds: 5 })).rejects.toBeInstanceOf(
       PendingError,
     );
-    expect(written).toHaveBeenCalledWith('live', ['models/part.step'], undefined, 5);
+    expect(written).toHaveBeenCalledWith('live', ['models/part.step'], { stall: 5 });
   });
 
   it('stops on its signal', async () => {
     const { reads, written } = setup();
     const controller = new AbortController();
-    written.mockImplementation(async (_id, _paths, signal) => {
-      signal?.throwIfAborted();
+    written.mockImplementation(async (_id, _paths, wait) => {
+      wait?.signal?.throwIfAborted();
       return 'idle';
     });
     controller.abort(new Error('closed'));
     await expect(reads.materialize(place, ['models/part.step'], { signal: controller.signal })).rejects.toThrow(
       'closed',
     );
+  });
+});
+
+describe('resolvePlaceholder (slice a)', () => {
+  it('answers a placeholder’s object from the store, else fetched by its oid, writing nothing', async () => {
+    const fetchObject = vi.fn(async () => part);
+    const { reads, files, stored } = setup({ fetchObject });
+    expect(await reads.resolvePlaceholder(place, 'models/part.step')).toStrictEqual(part);
+    expect(fetchObject).toHaveBeenCalledWith(pointer, undefined);
+    expect(files.get('models/part.step')).toStrictEqual(pointerBytes);
+    stored.set(pointer.oid, part);
+    fetchObject.mockClear();
+    expect(await reads.resolvePlaceholder(place, 'models/part.step')).toStrictEqual(part);
+    expect(fetchObject).not.toHaveBeenCalled();
+  });
+
+  it('answers undefined for a path that holds no placeholder, and PendingError when nothing has the object', async () => {
+    const { reads, files } = setup({ fetchObject: async () => undefined });
+    expect(await reads.resolvePlaceholder(place, 'main.scad')).toBeUndefined();
+    files.set('notes/pointer.txt', pointerBytes);
+    expect(await reads.resolvePlaceholder(place, 'notes/pointer.txt')).toBeUndefined();
+    await expect(reads.resolvePlaceholder(place, 'models/part.step')).rejects.toBeInstanceOf(PendingError);
   });
 });

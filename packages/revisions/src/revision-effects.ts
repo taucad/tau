@@ -440,6 +440,17 @@ export type RevisionActors = Readonly<{
     options?: Readonly<{ signal?: AbortSignal; stallMilliseconds?: number }>,
   ) => Promise<void>;
   /**
+   * The object one placeholder stands for, fetched by its oid when it is not
+   * on this device and written nowhere: what the authority answers a read of
+   * a pending entry with (slice a). `undefined` when the path holds no
+   * placeholder; rejects with a `PendingError` when the object cannot be had.
+   */
+  resolvePlaceholder: (
+    checkoutId: string | undefined,
+    path: string,
+    signal?: AbortSignal,
+  ) => Promise<Uint8Array<ArrayBuffer> | undefined>;
+  /**
    * Store every large file the checkout's attributes track and holds whole,
    * then leave only its pointer in the checkout (D9 adoption). Crash-safe: a
    * kill at any step leaves the full file, or the pointer with the verified
@@ -1741,6 +1752,15 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const contentReads = createContentReads({
     useFileSystem,
     readStoredObject: async (pointer) => port.readLargeObject?.(pointer),
+    fetchObject: async (pointer, signal) => {
+      if (port.fetchLargeObjects === undefined) {
+        return undefined;
+      }
+      const fetched = await transport(signal, async (bounded) =>
+        port.fetchLargeObjects!([pointer], { signal: bounded }),
+      );
+      return fetched.get(pointer.oid);
+    },
     fill: largeObjects,
     startFill: async (place) => {
       const head = await headOf(place);
@@ -1774,6 +1794,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     paths: readonly string[],
     materializeOptions?: Readonly<{ signal?: AbortSignal; stallMilliseconds?: number }>,
   ): Promise<void> => contentReads.materialize(await readPlaceOf(checkoutId), paths, materializeOptions);
+  const resolvePlaceholder: RevisionActors['resolvePlaceholder'] = async (checkoutId, path, signal) =>
+    contentReads.resolvePlaceholder(await readPlaceOf(checkoutId), path, signal);
   /* D9: one copy of every large object; see `large-object-adoption.ts`. A port that cannot store one adopts nothing. */
   const { storeLargeObject, readLargeObject } = port;
   const adoption =
@@ -3609,6 +3631,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     readConflict,
     readContent,
     materialize,
+    resolvePlaceholder,
     adoptLargeObjects,
     readEntryClosure: entryClosureOf,
     chatDevice: async () => {
@@ -5768,6 +5791,8 @@ export type ProjectRevisions = Readonly<{
   readContent: RevisionActors['readContent'];
   /** See {@link RevisionActors.materialize}. */
   materialize: RevisionActors['materialize'];
+  /** See {@link RevisionActors.resolvePlaceholder}. */
+  resolvePlaceholder: RevisionActors['resolvePlaceholder'];
   /** See {@link RevisionActors.adoptLargeObjects}. */
   adoptLargeObjects: RevisionActors['adoptLargeObjects'];
   /** See {@link RevisionActors.readEntryClosure}. */
@@ -5900,6 +5925,7 @@ export const createProjectRevisionsActor = (options: ProjectRevisionActorOptions
     readConflict: actors.readConflict,
     readContent: actors.readContent,
     materialize: actors.materialize,
+    resolvePlaceholder: actors.resolvePlaceholder,
     adoptLargeObjects: actors.adoptLargeObjects,
     readEntryClosure: actors.readEntryClosure,
     chatDevice: actors.chatDevice,

@@ -1023,17 +1023,20 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    * arrives, so a reload part-way through fetches only what is still missing.
    *
    * @param pointers - The pointers, in tree order; repeats are resolved once.
-   * @param delivered - Told about each object this read fetched, as it lands.
-   * @param signal - Stops this read's transfers; a concurrent reader waiting on one fetches it itself.
-   * @param first - Oids to fetch before the rest, asked again before each transfer.
+   * @param hydrateOptions - `onLargeObject` is told about each object this read fetched, as it lands; `signal` stops
+   *   this read's transfers (a concurrent reader waiting on one fetches it itself); `firstLargeObjects` names oids to
+   *   fetch before the rest, asked again before each transfer.
    * @returns The bytes by oid, and what the phase cost.
    */
   const hydrate = async (
     pointers: readonly LfsPointer[],
-    delivered?: ReadTreeOptions['onLargeObject'],
-    signal?: AbortSignal,
-    first?: ReadTreeOptions['firstLargeObjects'],
+    hydrateOptions?: Readonly<{
+      onLargeObject?: ReadTreeOptions['onLargeObject'];
+      signal?: AbortSignal;
+      firstLargeObjects?: ReadTreeOptions['firstLargeObjects'];
+    }>,
   ): Promise<Readonly<{ contents: ReadonlyMap<string, Uint8Array<ArrayBuffer>>; report: LfsFetchReport }>> => {
+    const { onLargeObject: delivered, signal, firstLargeObjects: first } = hydrateOptions ?? {};
     const startedAt = Date.now();
     const contents = new Map<string, Uint8Array<ArrayBuffer>>();
     const shared = new Map<string, Readonly<{ pointer: LfsPointer; inFlight: Promise<Uint8Array<ArrayBuffer>> }>>();
@@ -1757,12 +1760,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     readLargeObject: async (pointer) => readLocalLfsObject(pointer),
     storeLargeObject: async (pointer, content) => storeLfsObject(pointer.oid, content),
     fetchLargeObjects: async (pointers, fetchOptions) => {
-      const { contents, report } = await hydrate(
-        pointers,
-        fetchOptions?.onLargeObject,
-        fetchOptions?.signal,
-        fetchOptions?.firstLargeObjects,
-      );
+      const { contents, report } = await hydrate(pointers, fetchOptions);
       if (report.networkObjects > 0) {
         options.onLfsFetch?.(report);
       }
@@ -1808,10 +1806,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           ]),
         );
       }
-      const hydrated =
-        pointers.length === 0
-          ? undefined
-          : await hydrate(pointers, readOptions?.onLargeObject, readOptions?.signal, readOptions?.firstLargeObjects);
+      const hydrated = pointers.length === 0 ? undefined : await hydrate(pointers, readOptions);
       if (hydrated !== undefined && hydrated.report.networkObjects > 0) {
         options.onLfsFetch?.(hydrated.report);
       }

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { Topic } from '@taucad/events';
 import type { ChangeSet } from '#change-event-bus.js';
 import { watchByChangeSets } from '#change-set-watch.js';
 import type { BridgeWatchHandle, ChangeSetChannelEvent } from '#change-set-watch.js';
@@ -85,23 +86,19 @@ describe('watchByChangeSets on the connection event channel (D14)', () => {
 
   /** An event channel that hands each subscriber every frame. */
   const channelSource = (ready: () => Promise<void> = async () => undefined) => {
-    const handlers = new Set<ChannelHandler>();
+    const topic = new Topic<ChangeSetChannelEvent>({ name: 'test.events' });
     const subscriptions: Array<ReturnType<typeof handle>> = [];
     const events = vi.fn((handler: ChannelHandler) => {
-      handlers.add(handler);
+      const leave = topic.subscribe(handler);
       const subscription = handle(ready());
-      subscription.unsubscribe.mockImplementation(() => {
-        handlers.delete(handler);
-      });
+      subscription.unsubscribe.mockImplementation(leave);
       subscriptions.push(subscription);
       return subscription;
     });
     const send = (event: ChangeSetChannelEvent): void => {
-      for (const handler of handlers) {
-        handler(event);
-      }
+      topic.emit(event);
     };
-    return { events, send, subscriptions };
+    return { events, send, subscriptions, topic };
   };
 
   it('serves every watch from the channel, each with its own events, never the scoped forms', async () => {
@@ -158,6 +155,9 @@ describe('watchByChangeSets on the connection event channel (D14)', () => {
     await second.ready;
     expect(channel.events).toHaveBeenCalledOnce();
     expect(source.watchChangeSets).toHaveBeenCalledTimes(2);
+    // The refused registration left the channel when the watch stepped down.
+    expect(channel.subscriptions[0]!.unsubscribe).toHaveBeenCalledOnce();
+    expect(channel.topic.size).toBe(0);
     first.unsubscribe();
     second.unsubscribe();
     expect(perPath.unsubscribe).toHaveBeenCalledTimes(2);

@@ -505,7 +505,7 @@ export class WorkerChangeChannel {
   public watchReady(request: WatchRequest, handler: (event: WatchEvent) => void): ObservationWatch {
     const { events } = this.transport;
     if (events !== undefined && !this.#eventsUnsupported) {
-      const watch = this.#observed(request, this.#watchOnEvents(events, request, handler));
+      const watch = this.#watchOnEvents(events, request, handler);
       return { ready: watch.ready, closed: watch.closed, dispose: watch.unsubscribe };
     }
     const watch = this.#authorityWatch(request, handler);
@@ -625,14 +625,19 @@ export class WorkerChangeChannel {
     request: WatchRequest,
     handler: (event: WatchEvent) => void,
   ): BridgeWatchHandle {
-    const initial = events((event) => {
-      if (event.kind !== 'changeSet') {
-        return;
-      }
-      for (const watchEvent of watchEventsOfChangeSetFor(event.set, request)) {
-        handler(watchEvent);
-      }
-    });
+    /* Only the channel registration is handed to the diagnostic seam here: a
+     * fallback comes from the transport's own forms, which hand themselves. */
+    const initial = this.#observed(
+      request,
+      events((event) => {
+        if (event.kind !== 'changeSet') {
+          return;
+        }
+        for (const watchEvent of watchEventsOfChangeSetFor(event.set, request)) {
+          handler(watchEvent);
+        }
+      }),
+    );
     let current: BridgeWatchHandle = initial;
     let unsubscribed = false;
     const register = async (): Promise<void> => {
@@ -643,6 +648,8 @@ export class WorkerChangeChannel {
         if (fallback === undefined) {
           throw error;
         }
+        /* The refused registration may still hold a subscriber on the channel. */
+        initial.unsubscribe();
         this.#eventsUnsupported = true;
         current = fallback;
         await current.ready;

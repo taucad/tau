@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Mock } from 'vitest';
+import { Topic } from '@taucad/events';
 import type { ChangeSet, ChangeSetEntry } from '@taucad/filesystem';
 import type { WorkerChangeChannelTransport } from '#worker-change-channel.js';
 import { WorkerChangeChannel } from '#worker-change-channel.js';
@@ -244,26 +245,24 @@ describe('watches on the connection event channel (D14)', () => {
 
   /** An event channel a test drives: every subscriber hears each frame. */
   const eventChannel = (ready: () => Promise<void> = async () => undefined) => {
-    const handlers = new Set<ChannelHandler>();
+    const topic = new Topic<Parameters<ChannelHandler>[0]>({ name: 'test.events' });
     const closed = Promise.withResolvers<void>();
     const unsubscribe = vi.fn();
     const events = vi.fn((handler: ChannelHandler) => {
-      handlers.add(handler);
+      const leave = topic.subscribe(handler);
       return {
         ready: ready(),
         closed: closed.promise,
         unsubscribe: () => {
-          handlers.delete(handler);
+          leave();
           unsubscribe();
         },
       };
     });
     const send = (set: ChangeSet): void => {
-      for (const handler of handlers) {
-        handler({ kind: 'changeSet', set });
-      }
+      topic.emit({ kind: 'changeSet', set });
     };
-    return { events, send, closed, unsubscribe, handlers };
+    return { events, send, closed, unsubscribe, topic };
   };
 
   const set = (entries: ChangeSetEntry[]): ChangeSet => ({ generation: 1, entries, touchedDirectories: [] });
@@ -313,10 +312,8 @@ describe('watches on the connection event channel (D14)', () => {
     const handler = vi.fn();
     const watch = channel.watchReady({ paths: [''], recursive: true }, handler);
     await watch.ready;
-    for (const subscriber of channelEvents.handlers) {
-      subscriber({ kind: 'compute-restarted' });
-      subscriber({ kind: 'authority-lost' });
-    }
+    channelEvents.topic.emit({ kind: 'compute-restarted' });
+    channelEvents.topic.emit({ kind: 'authority-lost' });
     expect(handler).not.toHaveBeenCalled();
     channelEvents.closed.resolve();
     await expect(watch.closed).resolves.toBeUndefined();
@@ -345,6 +342,9 @@ describe('watches on the connection event channel (D14)', () => {
     await second.ready;
     expect(channelEvents.events).toHaveBeenCalledOnce();
     expect(watchChangeSets).toHaveBeenCalledTimes(2);
+    // The refused registration left the channel when the watch stepped down.
+    expect(channelEvents.unsubscribe).toHaveBeenCalledOnce();
+    expect(channelEvents.topic.size).toBe(0);
     first.dispose();
     second.dispose();
     expect(unsubscribeSets).toHaveBeenCalledTimes(2);
@@ -383,9 +383,38 @@ describe('watches on the connection event channel (D14)', () => {
     });
     const watch = channel.watchReady({ paths: ['main.ts'] }, vi.fn());
     await watch.ready;
-    expect(observeWatch).toHaveBeenCalledWith({ paths: ['main.ts'] }, expect.objectContaining({ ready: watch.ready }));
+    expect(observeWatch).toHaveBeenCalledOnce();
+    expect(observeWatch.mock.calls[0]?.[0]).toEqual({ paths: ['main.ts'] });
     expect(() => channel.watchReady({ paths: ['refused.ts'] }, vi.fn())).toThrow(failure);
     expect(channelEvents.unsubscribe).toHaveBeenCalledOnce();
+    watch.dispose();
+    channel.dispose();
+  });
+
+  it('hands a stepped-down watch to the diagnostic seam once: the channel registration, then only the transport form', async () => {
+    const refused = async (): Promise<void> => {
+      throw Object.assign(new Error('no channel'), { code: 'ENOTSUP' });
+    };
+    const channelEvents = eventChannel(refused);
+    const observeWatch = vi.fn((_request: unknown, watch: ReturnType<typeof channelEvents.events>) => watch);
+    const watchChangeSets = vi.fn((_request: unknown, _handler: (set: ChangeSet) => void) => ({
+      ready: Promise.resolve(),
+      closed: Promise.withResolvers<void>().promise,
+      unsubscribe: vi.fn(),
+    }));
+    const channel = new WorkerChangeChannel({
+      transport: {
+        listen: vi.fn().mockReturnValue(vi.fn()),
+        events: channelEvents.events,
+        observeWatch,
+        watchChangeSets,
+      },
+    });
+    const watch = channel.watchReady({ paths: ['src'] }, vi.fn());
+    await watch.ready;
+    expect(observeWatch).toHaveBeenCalledOnce();
+    expect(watchChangeSets).toHaveBeenCalledOnce();
+    expect(channelEvents.topic.size).toBe(0);
     watch.dispose();
     channel.dispose();
   });

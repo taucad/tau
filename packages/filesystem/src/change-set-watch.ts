@@ -61,6 +61,8 @@ const steppingDown = (
       if (!isUnsupported(error) || unsubscribed || fallback === undefined) {
         throw error;
       }
+      /* The refused registration may still hold a subscriber on its source. */
+      initial.unsubscribe();
       current = fallback();
       await current.ready;
     }

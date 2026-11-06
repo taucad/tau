@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Loader } from '@taucad/ui/components/loader';
 import {
   ArrowDown,
   ArrowLeft,
@@ -12,7 +13,6 @@ import {
   Crosshair,
   Hand,
   House,
-  LoaderCircle,
   Move,
   OctagonX,
   RefreshCw,
@@ -246,11 +246,7 @@ export function ActionButton({
         void send();
       }}
     >
-      {isPending ? (
-        <LoaderCircle aria-hidden className='spin-glyph' />
-      ) : Icon === undefined ? null : (
-        <Icon aria-hidden />
-      )}
+      {isPending ? <Loader /> : Icon === undefined ? null : <Icon aria-hidden />}
       {label ?? descriptor.label}
       <QualificationBadge descriptor={descriptor} />
     </Button>
@@ -634,11 +630,7 @@ function JogPad({
                   void control.apply(motion.id, 'motion.home', {});
                 }}
               >
-                {control.pending === `${motion.id}:motion.home` ? (
-                  <LoaderCircle aria-hidden className='spin-glyph' />
-                ) : (
-                  <House aria-hidden />
-                )}
+                {control.pending === `${motion.id}:motion.home` ? <Loader /> : <House aria-hidden />}
                 Home
               </Button>
             )}
@@ -1561,7 +1553,7 @@ function ActivityCard({
         ) : isFinished ? (
           <Check aria-hidden className='size-4 shrink-0 text-success' />
         ) : (
-          <LoaderCircle aria-hidden className='size-4 shrink-0 spin-glyph' />
+          <Loader className='size-4 shrink-0' />
         )}
         <span className='min-w-0 truncate'>{activity.label}</span>
         <span className='sr-only'>{isWaiting ? ` ${entry.name} waits for you: ${awaiting.label}` : ''}</span>
@@ -1578,7 +1570,7 @@ function ActivityCard({
             <p className='text-muted-foreground'>Answer on the machine&apos;s screen.</p>
           ) : answered === prompt.promptId ? (
             <p role='status' className='flex items-center gap-2 text-muted-foreground'>
-              <LoaderCircle aria-hidden className='size-3.5 shrink-0 spin-glyph' />
+              <Loader className='size-3.5 shrink-0' />
               Waiting for {entry.name} to continue…
             </p>
           ) : (
@@ -1825,7 +1817,7 @@ function CameraView({
       isCancelled = true;
     };
   }, [capture, failure, isSupported, shouldCapture]);
-  const busyGlyph = <LoaderCircle aria-hidden className='spin-glyph' />;
+  const busyGlyph = <Loader />;
 
   return (
     <div className='flex min-w-0 flex-col gap-2'>

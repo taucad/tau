@@ -1,7 +1,8 @@
 import * as React from 'react';
+import { Loader } from '@taucad/ui/components/loader';
 import { createContext, useContext, useState, useCallback } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { ChevronRight, LoaderCircle } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { Button } from '@taucad/ui/components/button';
 import { AnimatedShinyText } from '#components/magicui/animated-shiny-text.js';
@@ -233,7 +234,7 @@ function ChatToolCardIcon({ icon: Icon, className, tone }: ChatToolCardIconProps
   const { status, variant, isCollapsible } = useChatToolCard();
 
   if (status === 'loading') {
-    return <LoaderCircle className={cn('size-3 shrink-0 spin-glyph text-inherit', className)} />;
+    return <Loader className={cn('size-3 shrink-0 text-inherit', className)} />;
   }
 
   const toneClassName = tone ? toneClass[tone] : undefined;

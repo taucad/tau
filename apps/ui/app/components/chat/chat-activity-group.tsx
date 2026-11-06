@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { ChevronRight, LoaderCircle, Wrench } from 'lucide-react';
+import { Loader } from '@taucad/ui/components/loader';
+import { ChevronRight, Wrench } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { Button } from '@taucad/ui/components/button';
@@ -36,11 +37,7 @@ export function ChatActivityGroup({
           className='group/chat-tool-trigger -ml-2 flex w-full min-w-0 items-center justify-start gap-1.5 overflow-hidden font-normal text-muted-foreground hover:bg-transparent hover:text-foreground dark:hover:bg-transparent'
         >
           {isBusy ? (
-            <LoaderCircle
-              aria-hidden='true'
-              data-slot='activity-group-spinner'
-              className='size-3 shrink-0 spin-glyph'
-            />
+            <Loader data-slot='activity-group-spinner' className='size-3 shrink-0' />
           ) : (
             <Icon aria-hidden='true' className='size-3 shrink-0' />
           )}

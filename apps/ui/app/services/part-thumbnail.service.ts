@@ -32,31 +32,43 @@ export type PartThumbnailSource = Readonly<{
   renderContent?: () => Uint8Array<ArrayBuffer>;
 }>;
 
+/**
+ * Which rendition a caller shows: `row` for the 80 px identity frames in the Parts pane and Properties,
+ * `gallery` for the part gallery's large stage.
+ */
+export type PartThumbnailResolution = 'row' | 'gallery';
+
 const maxSourceBytes = 64 * 1024 * 1024;
 const maxRequestedParts = 128;
 const maxPreviewBytes = 8 * 1024 * 1024;
+// Finished previews outlive the rows that asked for them, so a row scrolled back into view shows at once.
+const maxCachedBytes = 16 * 1024 * 1024;
 const batchSize = 4;
-// One rendition serves the 80 px frames and the gallery: the agreed 1536 px long side on the parts' square frame.
-const previewSize = 1536;
+// 80 px frames at up to 3x device pixels; the gallery keeps the agreed 1536 px long side.
+const previewSizes = { row: 256, gallery: 1536 } as const satisfies Record<PartThumbnailResolution, number>;
 const previewQuality = 0.95;
-// The light-scheme viewer's look with the card edge weight, the gallery's 512 px display width (6 px edges at 1536).
+// The light-scheme viewer's look with the card edge weight at the gallery's 512 px display width: 6 px edges at
+// 1536 and 1 px at 256, so a row keeps the same edge weight relative to the part as the gallery.
 // Captures use the light scheme's look, chosen by the operator on 2026-11-05 for black edges.
-const previewLook = buildViewerCaptureImageOptions({
-  width: previewSize,
-  height: previewSize,
-  colorScheme: 'light',
-  displayWidth: 512,
-});
+const previewLook = (size: number) =>
+  buildViewerCaptureImageOptions({ width: size, height: size, colorScheme: 'light', displayWidth: 512 });
+
+/** A requested part with the largest rendition any of its callers shows. */
+type QueuedPart = PartThumbnailRequest & Readonly<{ size: number }>;
+type CachedPreview = Readonly<{ size: number; bytes: Uint8Array<ArrayBuffer> }>;
+/** One submitted batch: the source it rendered, its rendition size and its parts in view order. */
+type RenderedBatch = Readonly<{ hash: string; size: number; parts: readonly PartThumbnailRequest[] }>;
 
 type Work = Readonly<{
   generation: number;
   source: PartThumbnailSource;
-  parts: readonly PartThumbnailRequest[];
+  parts: readonly QueuedPart[];
   manualPartId: string | undefined;
 }>;
 type OwnerDemand = Readonly<{
   source?: PartThumbnailSource;
   parts: readonly PartThumbnailRequest[];
+  size: number;
 }>;
 
 /**
@@ -69,7 +81,12 @@ export class PartThumbnailService {
   private readonly imageService: Pick<HeadlessImageService, 'export'>;
   private readonly states = new Map<string, PartThumbnailState>();
   private snapshotValue: ReadonlyMap<string, PartThumbnailState> = new Map();
+  /** Each part's appearance key, without the rendition size. */
   private readonly identities = new Map<string, string>();
+  /** The rendition size of each part's current bytes. */
+  private readonly sizes = new Map<string, number>();
+  /** Finished previews by appearance key, least recently used first. */
+  private readonly cache = new Map<string, CachedPreview>();
   private readonly decodedById = new Map<string, Uint8Array<ArrayBuffer>>();
   private readonly ownerDemands = new Map<string, OwnerDemand>();
   private readonly changes = new Topic<void>({ name: 'PartThumbnailService.changes' });
@@ -106,7 +123,7 @@ export class PartThumbnailService {
     }
     this.presentedSourceKey = key;
     for (const [owner, demand] of this.ownerDemands) {
-      this.ownerDemands.set(owner, { parts: demand.parts });
+      this.ownerDemands.set(owner, { parts: demand.parts, size: demand.size });
     }
     this.invalidate();
   }
@@ -115,7 +132,7 @@ export class PartThumbnailService {
   public request(
     source: PartThumbnailSource,
     parts: readonly PartThumbnailRequest[],
-    options?: { readonly manualPartId?: string },
+    options?: { readonly manualPartId?: string; readonly resolution?: PartThumbnailResolution },
   ): void {
     this.requestForOwner('default', source, parts, options);
   }
@@ -127,10 +144,10 @@ export class PartThumbnailService {
     owner: string,
     source: PartThumbnailSource,
     parts: readonly PartThumbnailRequest[],
-    options?: { readonly manualPartId?: string },
+    options?: { readonly manualPartId?: string; readonly resolution?: PartThumbnailResolution },
   ): void {
     this.validateRequest(source, parts);
-    this.ownerDemands.set(owner, { source, parts: [...parts] });
+    this.ownerDemands.set(owner, { source, parts: [...parts], size: previewSizes[options?.resolution ?? 'row'] });
     this.replaceRequest(source, this.partsFor(source), options);
   }
   /* oxlint-enable eslint/max-params */
@@ -149,9 +166,7 @@ export class PartThumbnailService {
     const retainedIds = new Set(retainedDemands.flatMap((demand) => demand.parts.map((part) => part.id)));
     for (const id of this.states.keys()) {
       if (!retainedIds.has(id)) {
-        this.states.delete(id);
-        this.identities.delete(id);
-        this.decodedById.delete(id);
+        this.forget(id);
       }
     }
     this.generation += 1;
@@ -170,6 +185,8 @@ export class PartThumbnailService {
     this.decodedById.clear();
     this.snapshotValue = new Map();
     this.identities.clear();
+    this.sizes.clear();
+    this.cache.clear();
     this.changes.dispose();
   }
 
@@ -185,9 +202,7 @@ export class PartThumbnailService {
       if (state.bytes) {
         this.states.set(id, { status: 'ready', bytes: state.bytes });
       } else {
-        this.states.delete(id);
-        this.identities.delete(id);
-        this.decodedById.delete(id);
+        this.forget(id);
       }
     }
     this.emit();
@@ -218,7 +233,7 @@ export class PartThumbnailService {
       (part) =>
         ![...this.ownerDemands.values()].some((demand) => demand.parts.some((candidate) => candidate.id === part.id)),
     );
-    this.ownerDemands.set(owner, { parts: failedParts });
+    this.ownerDemands.set(owner, { parts: failedParts, size: previewSizes.row });
     for (const part of failedParts) {
       this.states.set(part.id, { status: 'failed', ...lastGood.get(part.id), error });
     }
@@ -232,6 +247,11 @@ export class PartThumbnailService {
       return;
     }
     const lastGood = this.decodedById.get(id);
+    for (const [key, cached] of this.cache) {
+      if (cached.bytes === bytes) {
+        this.cache.delete(key);
+      }
+    }
     this.states.set(id, {
       status: 'failed',
       ...(lastGood && lastGood !== bytes ? { bytes: lastGood } : {}),
@@ -251,64 +271,77 @@ export class PartThumbnailService {
 
   private replaceRequest(
     source: PartThumbnailSource,
-    parts: readonly PartThumbnailRequest[],
+    parts: readonly QueuedPart[],
     options?: { readonly manualPartId?: string },
   ): void {
     if (this.disposed) {
       throw new Error('PartThumbnailService is disposed');
     }
     const seen = this.validateRequest(source, parts);
-    const sameVisualWork = this.isSameVisualWork(source, parts);
+    const { current } = this;
+    const sourceChanged =
+      current?.source.geometryHash !== source.geometryHash || current.source.sourcePath !== source.sourcePath;
     const retrying = parts.some((part) => {
       const key = this.identity(source.geometryHash, part);
       return this.identities.get(part.id) === key && this.states.get(part.id)?.status === 'failed';
     });
-    if (!sameVisualWork || retrying) {
+    // A changed visible page of the same source reorders the queue: the batch on the GPU still finishes and its
+    // images are cached. Only a new source or an explicit retry cancels it.
+    if (sourceChanged || retrying) {
       this.generation += 1;
       this.activeAbort?.abort(new DOMException('Part thumbnail request was superseded.', 'AbortError'));
     }
     const { generation } = this;
-    const readyByIdentity = new Map<string, Uint8Array<ArrayBuffer>>();
-    for (const [id, state] of this.states) {
-      if (state.status === 'ready' && state.bytes) {
-        readyByIdentity.set(this.identities.get(id)!, state.bytes);
-      }
-    }
     this.current = { generation, source, parts: [...parts], manualPartId: options?.manualPartId };
     for (const id of this.states.keys()) {
       if (
         !seen.has(id) &&
         ![...this.ownerDemands.values()].some((demand) => !demand.source && demand.parts.some((part) => part.id === id))
       ) {
-        this.states.delete(id);
-        this.identities.delete(id);
-        this.decodedById.delete(id);
+        this.forget(id);
       }
     }
     for (const part of parts) {
       const identity = this.identity(source.geometryHash, part);
-      if (this.identities.get(part.id) === identity && this.states.get(part.id)?.status === 'ready') {
+      const state = this.states.get(part.id);
+      if (
+        this.identities.get(part.id) === identity &&
+        state?.status === 'ready' &&
+        (this.sizes.get(part.id) ?? 0) >= part.size
+      ) {
         continue;
       }
       this.identities.set(part.id, identity);
-      const sharedBytes = readyByIdentity.get(identity);
-      this.states.set(
-        part.id,
-        sharedBytes ? { status: 'ready', bytes: sharedBytes } : { status: 'pending', ...this.lastGood(part.id) },
-      );
+      // A failed part asked for again is a retry: render it afresh rather than serve a cached copy.
+      if (state?.status === 'failed') {
+        this.cache.delete(identity);
+      }
+      const cached = state?.status === 'failed' ? undefined : this.cached(identity, part.size);
+      if (cached) {
+        this.states.set(part.id, { status: 'ready', bytes: cached.bytes });
+        this.sizes.set(part.id, cached.size);
+      } else {
+        this.states.set(part.id, { status: 'pending', ...this.lastGood(part.id) });
+      }
     }
     this.emit();
     void this.drain();
   }
 
-  private partsFor(source: PartThumbnailSource): PartThumbnailRequest[] {
+  private partsFor(source: PartThumbnailSource): QueuedPart[] {
     const compatible = [...this.ownerDemands]
       .filter(
         ([, demand]) =>
           demand.source?.sourcePath === source.sourcePath && demand.source.geometryHash === source.geometryHash,
       )
-      .sort(([left], [right]) => Number(right === 'viewer') - Number(left === 'viewer'))
+      .sort(([left], [right]) => this.ownerRank(left) - this.ownerRank(right))
       .map(([, demand]) => demand);
+    const sizes = new Map<string, number>();
+    for (const demand of compatible) {
+      for (const part of demand.parts) {
+        sizes.set(part.id, Math.max(sizes.get(part.id) ?? 0, demand.size));
+      }
+    }
     const seen = new Set<string>();
     return compatible
       .flatMap((demand) => demand.parts)
@@ -319,7 +352,13 @@ export class PartThumbnailService {
         seen.add(part.id);
         return true;
       })
-      .slice(0, maxRequestedParts);
+      .slice(0, maxRequestedParts)
+      .map((part) => ({ ...part, size: sizes.get(part.id)! }));
+  }
+
+  /** The open gallery's stage first, then the viewer's selection, then the pane's rows. */
+  private ownerRank(owner: string): number {
+    return owner === 'gallery' ? 0 : owner === 'viewer' ? 1 : 2;
   }
 
   private lastGood(id: string): Pick<PartThumbnailState, 'bytes'> {
@@ -327,8 +366,41 @@ export class PartThumbnailService {
     return bytes ? { bytes } : {};
   }
 
+  private forget(id: string): void {
+    this.states.delete(id);
+    this.identities.delete(id);
+    this.sizes.delete(id);
+    this.decodedById.delete(id);
+  }
+
+  /** A cached preview at least as large as asked for, marked as most recently used. */
+  private cached(identity: string, size: number): CachedPreview | undefined {
+    const entry = this.cache.get(identity);
+    if (!entry || entry.size < size) {
+      return undefined;
+    }
+    this.cache.delete(identity);
+    this.cache.set(identity, entry);
+    return entry;
+  }
+
+  private remember(identity: string, entry: CachedPreview): void {
+    const existing = this.cache.get(identity);
+    this.cache.delete(identity);
+    this.cache.set(identity, existing && existing.size > entry.size ? existing : entry);
+    let total = [...this.cache.values()].reduce((sum, cached) => sum + cached.bytes.byteLength, 0);
+    for (const [key, cached] of this.cache) {
+      if (total <= maxCachedBytes) {
+        break;
+      }
+      this.cache.delete(key);
+      total -= cached.bytes.byteLength;
+    }
+  }
+
+  /** A part's appearance key; the rendition size is tracked beside it so a large image serves a small frame. */
   private identity(hash: string, part: PartThumbnailRequest): string {
-    return `${part.visualKey ?? hash}:${JSON.stringify(part.primitives)}:part-webp-${previewSize}-q${previewQuality}-viewer-profile-v2`;
+    return `${part.visualKey ?? hash}:${JSON.stringify(part.primitives)}:part-webp-q${previewQuality}-viewer-profile-v3`;
   }
 
   private validateRequest(source: PartThumbnailSource, parts: readonly PartThumbnailRequest[]): Set<string> {
@@ -343,16 +415,6 @@ export class PartThumbnailService {
       seen.add(part.id);
     }
     return seen;
-  }
-
-  private isSameVisualWork(source: PartThumbnailSource, parts: readonly PartThumbnailRequest[]): boolean {
-    const { current } = this;
-    if (current?.source.geometryHash !== source.geometryHash || current.source.sourcePath !== source.sourcePath) {
-      return false;
-    }
-    const currentKeys = new Set(current.parts.map((part) => this.identity(source.geometryHash, part)));
-    const requestedKeys = new Set(parts.map((part) => this.identity(source.geometryHash, part)));
-    return currentKeys.size === requestedKeys.size && [...requestedKeys].every((key) => currentKeys.has(key));
   }
 
   private emit(): void {
@@ -371,7 +433,7 @@ export class PartThumbnailService {
         const work = this.current;
         const pendingKeys = new Set<string>();
         const missing = work.parts.filter((part) => {
-          const key = this.identity(work.source.geometryHash, part);
+          const key = `${this.identity(work.source.geometryHash, part)}@${part.size}`;
           if (this.states.get(part.id)?.status !== 'pending' || pendingKeys.has(key)) {
             return false;
           }
@@ -382,7 +444,9 @@ export class PartThumbnailService {
           return;
         }
         const manualPart = missing.find((part) => part.id === work.manualPartId);
-        const chunk = manualPart ? [manualPart] : missing.slice(0, batchSize);
+        // One batch renders at one size, so it takes the next parts that share the first part's rendition.
+        const { size } = manualPart ?? missing[0]!;
+        const chunk = manualPart ? [manualPart] : missing.filter((part) => part.size === size).slice(0, batchSize);
         const views = chunk.map((part, index): NonNullable<BatchPreviewOptions['views']>[number] => ({
           id: `part-${index}`,
           visiblePrimitives: part.primitives.map((primitive) => ({ ...primitive })),
@@ -403,7 +467,7 @@ export class PartThumbnailService {
           }
           const files = await this.imageService.export({
             kind: manualPart ? 'manual-thumbnail' : 'automatic-thumbnail',
-            identity: `${work.source.geometryHash}:parts:${chunk.map((part) => this.identity(work.source.geometryHash, part)).join('|')}:submission-${++this.submission}`,
+            identity: `${work.source.geometryHash}:parts-${size}:${chunk.map((part) => this.identity(work.source.geometryHash, part)).join('|')}:submission-${++this.submission}`,
             signal: controller.signal,
             sourceFormat: 'glb',
             sourcePath: work.source.sourcePath,
@@ -412,10 +476,10 @@ export class PartThumbnailService {
             format: 'webp',
             exportOptions: {
               mode: 'batch',
-              width: previewSize,
-              height: previewSize,
+              width: size,
+              height: size,
               quality: previewQuality,
-              ...previewLook,
+              ...previewLook(size),
               views,
             },
           });
@@ -423,13 +487,13 @@ export class PartThumbnailService {
           if (this.disposed || this.generation !== work.generation) {
             continue;
           }
-          this.accept(chunk, files);
+          this.accept({ hash: work.source.geometryHash, size, parts: chunk }, files);
         } catch (error) {
           // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- A caller may dispose during the await.
           if (this.disposed || this.generation !== work.generation) {
             continue;
           }
-          this.failChunk(work.source.geometryHash, chunk, error);
+          this.failChunk({ hash: work.source.geometryHash, size, parts: chunk }, error);
         } finally {
           if (this.activeAbort === controller) {
             this.activeAbort = undefined;
@@ -454,13 +518,15 @@ export class PartThumbnailService {
     }
   }
 
-  private accept(parts: readonly PartThumbnailRequest[], files: readonly ExportFile[] | undefined): void {
+  /** Cache every rendered image, and show it on each currently requested part with the same appearance. */
+  private accept({ hash, size, parts }: RenderedBatch, files: readonly ExportFile[] | undefined): void {
     const byName = new Map(files?.map((file) => [file.name, file]));
+    const requested = this.current?.source.geometryHash === hash ? this.current.parts : [];
     for (const [index, part] of parts.entries()) {
       const file = byName.get(`render-part-${index}.webp`);
-      const identity = this.identity(this.current!.source.geometryHash, part);
-      const recipients = this.current!.parts.filter(
-        (candidate) => this.identity(this.current!.source.geometryHash, candidate) === identity,
+      const identity = this.identity(hash, part);
+      const recipients = requested.filter(
+        (candidate) => this.identity(hash, candidate) === identity && candidate.size <= size,
       );
       if (file?.mimeType !== 'image/webp' || file.bytes.byteLength === 0 || file.bytes.byteLength > maxPreviewBytes) {
         for (const recipient of recipients) {
@@ -473,18 +539,20 @@ export class PartThumbnailService {
         continue;
       }
       const bytes = new Uint8Array(file.bytes);
+      this.remember(identity, { size, bytes });
       for (const recipient of recipients) {
         this.states.set(recipient.id, { status: 'ready', bytes });
+        this.sizes.set(recipient.id, size);
       }
     }
     this.limitStoredBytes();
     this.emit();
   }
 
-  private failChunk(hash: string, chunk: readonly PartThumbnailRequest[], error: unknown): void {
+  private failChunk({ hash, size, parts: chunk }: RenderedBatch, error: unknown): void {
     const failedKeys = new Set(chunk.map((part) => this.identity(hash, part)));
-    for (const part of this.current!.parts) {
-      if (failedKeys.has(this.identity(hash, part))) {
+    for (const part of this.current?.parts ?? []) {
+      if (part.size === size && failedKeys.has(this.identity(hash, part))) {
         this.states.set(part.id, { status: 'failed', ...this.lastGood(part.id), error });
       }
     }

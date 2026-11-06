@@ -1583,6 +1583,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   });
   /* Once per checkout per session: placeholders a reload left mid-download are picked up again. */
   const resumedFills = new Set<string>();
+  /* Checkouts a tree write left without the fill's word (its check failed): the next capture checks again (D10). */
+  const owedFills = new Set<string>();
   const resumeTimers = new Set<ReturnType<typeof setTimeout>>();
   let fillsStopped = false;
   /*
@@ -1590,7 +1592,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * place is the project directory, found as the root starts. A write of
    * another revision's tree starts its own fill (`writeRevisionTree`).
    */
-  const fillLater = (place: Checkout | undefined): void => {
+  const fillLater = (place: Checkout | undefined, owed = false): void => {
     if (fillsStopped) {
       return;
     }
@@ -1607,11 +1609,19 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           const head = target === undefined ? undefined : await headOf(target);
           if (target !== undefined && head !== undefined && !fillsStopped) {
             resumedFills.add(target.id);
-            await largeObjects.resume(target, revisionId(head));
+            if (owed) {
+              /* Given its placeholders, the fill gives its word even with none to fetch. */
+              await largeObjects.fill(target, revisionId(head), largeObjectPlaceholders(await capture(target)));
+            } else {
+              await largeObjects.resume(target, revisionId(head));
+            }
           }
         } catch (error) {
           /* Unmarked, so the next capture or pull checks again. */
           resumedFills.delete(target?.id ?? '');
+          if (owed && target !== undefined) {
+            owedFills.add(target.id);
+          }
           console.warn('[revisions] large-object placeholders could not be checked', error);
         }
       })();
@@ -1619,9 +1629,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     resumeTimers.add(timer);
   };
   const resumeFill = (place: Checkout): void => {
-    if (!resumedFills.has(place.id)) {
+    const owed = owedFills.delete(place.id);
+    if (!resumedFills.has(place.id) || owed) {
       resumedFills.add(place.id);
-      fillLater(place);
+      fillLater(place, owed);
     }
   };
   /* A close: no fill starts again, and none is still writing when this resolves. */
@@ -1733,6 +1744,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           resumedFills.add(place.id);
           await largeObjects.fill(place, revisionId(head), placeholders);
         } catch (error) {
+          /* Owed, so the checkout's next capture checks again: readiness never waits on a word nobody gives. */
+          owedFills.add(place.id);
           console.warn('[revisions] large-object placeholders could not be checked', error);
         }
       })();

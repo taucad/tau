@@ -1391,6 +1391,68 @@ describe('restore, through the machine that owns it', () => {
     tree.actor.stop();
   }, 30_000);
 
+  /* D10: a tree write whose fill check fails owes the checkout the fill's word; the next capture gives it. */
+  it('checks the fill again at the next capture when a failed tree write leaves its check unanswered', async () => {
+    let failWrite = false;
+    let failReads = 0;
+    const { port, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' });
+    const failing = new Proxy(filesystem, {
+      get: (target, property, receiver) => {
+        const value: unknown = Reflect.get(target, property, receiver);
+        if (typeof value !== 'function') {
+          return value;
+        }
+        const bound = (value as (...parameters: unknown[]) => unknown).bind(target);
+        if (property === 'applyBatch') {
+          return async (...parameters: unknown[]) => {
+            if (failWrite) {
+              failWrite = false;
+              /* The recovery's capture and the fill check that follows both fail. */
+              failReads = 2;
+              throw new Error('The disk refused the write.');
+            }
+            return bound(...parameters);
+          };
+        }
+        if (property === 'readdirEntries') {
+          return async (...parameters: unknown[]) => {
+            if (failReads > 0) {
+              failReads -= 1;
+              throw new Error('The disk could not be listed.');
+            }
+            return bound(...parameters);
+          };
+        }
+        return bound;
+      },
+    });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const reports: LargeObjectsReport[] = [];
+    const tree = await startTree(port, failing, { onLargeObjects: (report) => reports.push(report) });
+    await filesystem.writeFile('extra.txt', 'added\n');
+    const first = await tree.save();
+    await filesystem.unlink('extra.txt');
+    await tree.save();
+
+    failWrite = true;
+    const restoreRef = tree.actor.getSnapshot().children.restore;
+    restoreRef?.send({ type: 'restore', revisionId: first });
+    await expect.poll(() => failReads === 0 && !failWrite, { timeout: 10_000 }).toBe(true);
+    await expect.poll(() => restoreRef?.getSnapshot().value, { timeout: 10_000 }).toBe('idle');
+    await new Promise((resolve) => {
+      setTimeout(resolve, 200);
+    });
+    const told = reports.length;
+
+    await filesystem.writeFile('later.ts', 'export const later = true;\n');
+    await tree.save();
+    await vi.waitFor(() => {
+      expect(reports.length).toBeGreaterThan(told);
+    });
+    expect(reports.at(-1)?.facet).toBeUndefined();
+    tree.actor.stop();
+  }, 30_000);
+
   it('mints a dirty checkout before restoring it, and leaves no revision unreachable (I1, L1 probe)', async () => {
     const { port, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' });
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });

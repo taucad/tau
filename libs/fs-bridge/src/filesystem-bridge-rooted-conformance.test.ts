@@ -470,6 +470,26 @@ describe.each([inProcessPort, authorityConnection, workerPort])('rooted bridge c
         name: 'AbortError',
       });
     });
+
+    it('stops at an abort sent while the call is running on the authority', async () => {
+      const { proxy } = await open(transport);
+      const controller = new AbortController();
+      const heard: LongCallProgress[] = [];
+      // The first progress report comes from the authority mid-call, before its answer.
+      const searching = proxy.grep('export', {
+        signal: controller.signal,
+        onProgress(progress) {
+          heard.push(progress);
+          controller.abort();
+        },
+      });
+      await expect(searching).rejects.toMatchObject({ name: 'AbortError' });
+      expect(heard).toHaveLength(1);
+      const [report] = heard;
+      expect(report!.done).toBeLessThan(report!.total ?? Number.POSITIVE_INFINITY);
+      // The connection still serves the next call.
+      await expect(grepPaths(proxy, 'fillet')).resolves.toEqual(['lib/part.ts']);
+    });
   });
 
   describe('index queries', () => {
@@ -569,6 +589,35 @@ describe.each([inProcessPort, authorityConnection, workerPort])('rooted bridge c
       controller.abort();
       await expect(reader.read()).rejects.toMatchObject({ name: 'AbortError' });
       expect(() => proxy.readStream('docs/readme.md', { chunkBytes: 0 })).toThrow(RangeError);
+    });
+
+    it('drops the page on the wire when the signal aborts mid-pull, and stays errored', async () => {
+      const { proxy } = await open(transport);
+      const pageSent = Promise.withResolvers<void>();
+      let pages = 0;
+      /* The stream pulls pages through its receiver, so this one counts them as they leave. */
+      const counted = Object.create(proxy, {
+        readRange: {
+          async value(path: string, offset: number, length: number) {
+            pages += 1;
+            const page = proxy.readRange(path, offset, length);
+            if (pages === 2) {
+              pageSent.resolve();
+            }
+            return page;
+          },
+        },
+      }) as FileSystemBridgeRootedProxy;
+      const controller = new AbortController();
+      const reader = counted.readStream('docs/readme.md', { chunkBytes: 2, signal: controller.signal }).getReader();
+      const first = await reader.read();
+      expect(decoder.decode(first.value)).toBe('Re');
+      const second = reader.read();
+      await pageSent.promise;
+      controller.abort();
+      await expect(second).rejects.toMatchObject({ name: 'AbortError' });
+      await expect(reader.read()).rejects.toMatchObject({ name: 'AbortError' });
+      expect(pages).toBe(2);
     });
   });
 
@@ -806,7 +855,11 @@ const advance = async (milliseconds: number): Promise<void> => {
  */
 const openHeld = async (
   transport: 'in-process port' | 'authority connection',
-): Promise<{ proxy: FileSystemBridgeRootedProxy; holdBatch(batch: number): HeldBatch }> => {
+): Promise<{
+  proxy: FileSystemBridgeRootedProxy;
+  holdBatch(batch: number): HeldBatch;
+  holdStat(path: string): HeldStat;
+}> => {
   const { service, projectProvider } = await seededWorkspaceWithProvider(files);
   let proxy: FileSystemBridgeRootedProxy;
   let cleanup: () => void;
@@ -849,8 +902,21 @@ const openHeld = async (
   });
   await proxy.ready;
   const applyBatch = projectProvider.applyBatch!.bind(projectProvider);
+  const stat = projectProvider.stat.bind(projectProvider);
   return {
     proxy,
+    holdStat(path) {
+      const reached = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      projectProvider.stat = async (providerPath) => {
+        if (providerPath.endsWith(`/${path}`)) {
+          reached.resolve();
+          await release.promise;
+        }
+        return stat(providerPath);
+      };
+      return { reached: reached.promise, release: release.resolve };
+    },
     holdBatch(batch) {
       const reached = Promise.withResolvers<void>();
       const release = Promise.withResolvers<void>();
@@ -880,6 +946,12 @@ const openHeld = async (
       };
     },
   };
+};
+
+type HeldStat = {
+  /** The authority's provider has been asked to stat the held path. */
+  readonly reached: Promise<void>;
+  release(): void;
 };
 
 type HeldBatch = {
@@ -934,6 +1006,20 @@ describe.each(['in-process port', 'authority connection'] as const)(
       await held.serverAborted;
       held.release();
       await held.settled;
+    });
+
+    it('stops a facts query at an abort sent while the authority is measuring', async () => {
+      const { proxy, holdStat } = await openHeld(transport);
+      const held = holdStat('main.ts');
+      const controller = new AbortController();
+      const measuring = proxy.facts(['main.ts'], { digests: ['sha256'], signal: controller.signal });
+      await held.reached;
+      controller.abort();
+      await expect(measuring).rejects.toMatchObject({ name: 'AbortError' });
+      held.release();
+      // The connection still answers the same query afterwards.
+      const facts = await proxy.facts(['main.ts'], { digests: ['sha256'] });
+      expect(facts.get('main.ts')?.sha256).toMatch(/^[\da-f]{64}$/);
     });
 
     it('reports an abort before the call reached the wire as known not applied', async () => {

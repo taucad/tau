@@ -1,11 +1,15 @@
+import { MessageChannel } from 'node:worker_threads';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
+import type { MessagePortLike } from '@taucad/rpc';
 import * as barrel from '#index.js';
 import {
   createFileSystemBridgeHello,
+  FileSystemBridgeProtocolVersionError,
   fileSystemBridgeProtocolVersion,
   fileSystemBridgeSchemas,
 } from '#filesystem-bridge-protocol.js';
+import { createTransferredFileSystemBridgeProxy } from '#filesystem-bridge.js';
 
 describe('void call results', () => {
   const { result } = fileSystemBridgeSchemas.calls.writeFile;
@@ -59,6 +63,37 @@ describe('filesystem bridge protocol version', () => {
         v: 4,
       }),
     ).toThrow('protocol version mismatch');
+  });
+
+  const helloAt = (v: number) => ({
+    ...createFileSystemBridgeHello({
+      state: 'ready',
+      capabilities: { persistent: false, writable: true, quotaBased: false },
+      watchable: false,
+    }),
+    v,
+  });
+
+  it('rejects a version 8 hello, the protocol before long calls', () => {
+    expect(() => fileSystemBridgeSchemas.hello.parse(helloAt(8))).toThrow(FileSystemBridgeProtocolVersionError);
+    expect(fileSystemBridgeSchemas.hello.parse(helloAt(fileSystemBridgeProtocolVersion))).toMatchObject({ v: 9 });
+  });
+
+  it('refuses a connection whose authority answers with a version 8 hello', async () => {
+    const channel = new MessageChannel();
+    const proxy = createTransferredFileSystemBridgeProxy(channel.port2 as unknown as MessagePortLike);
+    channel.port1.postMessage({ v: 1, k: 'lh', o: 1, d: helloAt(8) });
+    try {
+      const refusal = await proxy.ready.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(refusal).toBeInstanceOf(FileSystemBridgeProtocolVersionError);
+      expect(refusal).toMatchObject({ expected: 9, received: 8, code: 'FILESYSTEM_BRIDGE_PROTOCOL_VERSION_MISMATCH' });
+    } finally {
+      proxy.dispose();
+      channel.port1.close();
+    }
   });
 });
 

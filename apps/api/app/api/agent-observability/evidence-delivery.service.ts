@@ -181,15 +181,23 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
       await runInPool(pending, deliveryTiming.concurrency, async (row) => {
         const progress = { identified: false };
         count(
-          await this.isolate(row, 'deliver', progress, now, async () =>
-            this.deliver({ client, pseudonym }, row, now, progress),
-          ),
+          await this.isolate(row, {
+            stage: 'deliver',
+            progress,
+            now,
+            attempt: async () => this.deliver({ client, pseudonym, progress }, row, now),
+          }),
         );
       });
       const uncertain = await leaseUncertain(database, lease);
       await runInPool(uncertain, deliveryTiming.concurrency, async (row) => {
         count(
-          await this.isolate(row, 'reconcile', { identified: true }, now, async () => this.reconcile(client, row, now)),
+          await this.isolate(row, {
+            stage: 'reconcile',
+            progress: { identified: true },
+            now,
+            attempt: async () => this.reconcile(client, row, now),
+          }),
         );
       });
       this.metrics.agentEvidencePasses.add(1, { 'tau.worker': 'delivery', outcome: 'ok' });
@@ -231,10 +239,17 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
    */
   private async isolate(
     row: LeasedDelivery,
-    stage: 'deliver' | 'reconcile',
-    progress: Readonly<{ identified: boolean }>,
-    now: Date,
-    attempt: () => Promise<string>,
+    {
+      stage,
+      progress,
+      now,
+      attempt,
+    }: Readonly<{
+      stage: 'deliver' | 'reconcile';
+      progress: Readonly<{ identified: boolean }>;
+      now: Date;
+      attempt: () => Promise<string>;
+    }>,
   ): Promise<string> {
     try {
       return await attempt();
@@ -316,10 +331,13 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async deliver(
-    { client, pseudonym }: Readonly<{ client: LangfuseClient; pseudonym: Uint8Array<ArrayBuffer> }>,
+    {
+      client,
+      pseudonym,
+      progress,
+    }: Readonly<{ client: LangfuseClient; pseudonym: Uint8Array<ArrayBuffer>; progress: { identified: boolean } }>,
     row: LeasedDelivery,
     now: Date,
-    progress: { identified: boolean },
   ): Promise<string> {
     const evidence = this.open(row);
     if (evidence === 'key-unavailable') {

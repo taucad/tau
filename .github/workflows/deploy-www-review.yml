@@ -12,6 +12,12 @@
 # The build matches `apps/www/netlify.toml`: launch metadata on, canonical
 # origin https://tau.new.
 #
+# `release-build.yml` → `production-www` calls it with `channel: production` on
+# each `ui@*` release: that run publishes the release tag to the `prod` alias,
+# which production's `MARKETING_ORIGIN` names, and skips the staging-only
+# supersede, content and history steps. Like `staging`, `prod` is a draft deploy
+# and costs no Netlify credits.
+#
 # Manual redeploy: `gh workflow run deploy-www-review.yml` from `main`.
 # Website rollback of the desktop installer catalog: the same command with
 # `-f installer_catalog=false` republishes the page with its catalog-free ZIP
@@ -22,6 +28,11 @@ name: Deploy marketing review site to Netlify
 
 on:
   workflow_call:
+    inputs:
+      channel:
+        description: staging publishes the `staging` alias; production publishes `prod` from a release tag
+        type: string
+        default: staging
   workflow_dispatch:
     inputs:
       installer_catalog:
@@ -39,9 +50,9 @@ jobs:
     name: Deploy marketing review site
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    environment: staging
+    environment: ${{ inputs.channel == 'production' && 'production' || 'staging' }}
     concurrency:
-      group: deploy-www-review
+      group: deploy-www-review-${{ inputs.channel == 'production' && 'production' || 'staging' }}
       cancel-in-progress: false
     env:
       # Job scope, so Netlify's own rebuild inside `netlify deploy` keeps the flag too.
@@ -50,12 +61,14 @@ jobs:
       WWW_INSTALLER_CATALOG: ${{ format('{0}', inputs.installer_catalog) == 'false' && 'false' || 'true' }}
       NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
       SITE_ID: 17066c91-5b08-4cc0-b45c-32b0ea08b4e9
-      URL: https://staging--taucad-marketing-review.netlify.app
+      CHANNEL: ${{ inputs.channel == 'production' && 'production' || 'staging' }}
+      ALIAS: ${{ inputs.channel == 'production' && 'prod' || 'staging' }}
+      URL: https://${{ inputs.channel == 'production' && 'prod' || 'staging' }}--taucad-marketing-review.netlify.app
     steps:
       - name: Require the Netlify token
         run: |
           if [ -z "$NETLIFY_AUTH_TOKEN" ]; then
-            echo "::error::NETLIFY_AUTH_TOKEN is not set on the staging environment. Set netlify_auth_token_staging on tau-cloud's tau-repo HCP workspace and apply it."
+            echo "::error::NETLIFY_AUTH_TOKEN is not set on the $CHANNEL environment. Set netlify_auth_token_$CHANNEL on tau-cloud's tau-repo HCP workspace and apply it."
             exit 1
           fi
 
@@ -71,6 +84,7 @@ jobs:
       # after a newer one has deployed; it must not put its commit back.
       - name: Skip a staging deploy a newer commit has superseded
         id: superseded
+        if: env.CHANNEL == 'staging'
         uses: ./.github/actions/staging-deploy-superseded
         with:
           job-name: Deploy marketing review site
@@ -98,7 +112,7 @@ jobs:
 
       - name: Compare the marketing build with staging
         id: content
-        if: steps.build.outcome == 'success'
+        if: steps.build.outcome == 'success' && env.CHANNEL == 'staging'
         uses: ./.github/actions/netlify-staging-content
         with:
           site-id: ${{ env.SITE_ID }}
@@ -111,15 +125,15 @@ jobs:
         if: steps.superseded.outputs.superseded != 'true' && steps.content.outputs.unchanged != 'true'
         working-directory: apps/www
         env:
-          MESSAGE: ${{ github.workflow }} ${{ github.sha }} [staging] content:${{ steps.content.outputs.hash }}
+          MESSAGE: ${{ github.workflow }} ${{ github.ref_name }} ${{ github.sha }} [${{ env.ALIAS }}] content:${{ steps.content.outputs.hash }}
         run: |
           "$GITHUB_WORKSPACE/scripts/node_modules/.bin/netlify" deploy \
-            --alias staging --context production --filter @taucad/www \
+            --alias "$ALIAS" --context production --filter @taucad/www \
             --site "$SITE_ID" --message "$MESSAGE"
 
       # The plan of the next push to `main` diffs `www` against this commit.
       - name: Record this staging deploy
-        if: steps.superseded.outputs.superseded != 'true'
+        if: steps.superseded.outputs.superseded != 'true' && env.CHANNEL == 'staging'
         uses: ./.github/actions/staging-deploy-history
         with:
           mode: record

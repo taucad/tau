@@ -1455,3 +1455,20 @@ jobs:
       environment: production
       tag: ${{ needs.resolve.outputs.tag }}
     secrets: inherit
+
+  # The UI's marketing edge function proxies tau.new's marketing pages to the
+  # review site's `prod` alias (`marketing_origin` in tau-cloud's prod-us), so
+  # each UI release republishes apps/www at its tag alongside the app.
+  production-www:
+    needs: [resolve, verify-app, app-release]
+    if: >-
+      github.event_name == 'push' && needs.resolve.outputs.project == 'ui' &&
+      github.ref == format('refs/tags/{0}', needs.resolve.outputs.tag)
+    name: Production marketing site
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy-www-review.yml
+    with:
+      channel: production
+    secrets: inherit

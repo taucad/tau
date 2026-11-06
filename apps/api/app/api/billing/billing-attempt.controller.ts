@@ -1,14 +1,14 @@
 /* oxlint-disable new-cap -- NestJS Header is a decorator factory */
 import { Controller, Get, Header, Param, Query, UseGuards } from '@nestjs/common';
 import type { attemptReceiptSchema } from '@taucad/agent-host/wire';
-import type { WireOperationReceipt } from '@taucad/billing';
 import type { z } from 'zod';
 import { BillingUsageService } from '#api/billing/billing-usage.service.js';
+import type { AttemptReceipt } from '#api/billing/billing-usage.service.js';
 import { billingAccountClosedError, isBillingAccountClosed } from '#api/llm/llm-gateway.error.js';
 import { LlmGatewayAuthGuard, LlmGatewayPrincipal } from '#api/llm/llm-gateway.guard.js';
 
-/** The attempt route's answer: a receipt, or a key the lookup voided (GI-R3). */
-export type AttemptLookupAnswer = WireOperationReceipt | { readonly state: 'not_found'; readonly voided: true };
+/** The attempt route's answer: a receipt (a `pending` one with its `settlesBy`, W2), or a key the lookup voided (GI-R3). */
+export type AttemptLookupAnswer = AttemptReceipt;
 
 /**
  * The owner-scoped attempt lookup, signed in as the model gateway is (RV5-F2): a paired daemon resolves the attempts
@@ -41,7 +41,7 @@ export class BillingAttemptController {
       }
       throw error;
     }
-    // D11: the host parses this answer; a renamed or dropped field fails this typecheck, not a resume.
+    // D11: the host parses this answer; a renamed, dropped or retyped field (`settlesBy` included) fails this typecheck.
     return answer satisfies z.input<typeof attemptReceiptSchema>;
   }
 }

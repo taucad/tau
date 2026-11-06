@@ -4,9 +4,11 @@ import type { ConfigService } from '@nestjs/config';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import type postgres from 'postgres';
 import { mock, mockDeep } from 'vitest-mock-extended';
+import { recoveryGraceMinutes } from '#api/billing/credit-ledger.service.js';
 import type { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import { describe, expect, it, vi } from 'vitest';
 import { BillingUsageService } from '#api/billing/billing-usage.service.js';
+import { environmentSchemaBase } from '#config/environment.config.js';
 import type { Environment } from '#config/environment.config.js';
 import type { DatabaseService, DatabaseType } from '#database/database.service.js';
 import type { MetricsService } from '#telemetry/metrics.js';
@@ -298,5 +300,93 @@ describe('BillingUsageService open holds', () => {
     const { databaseService, service } = createService('invalid');
     await expect(service.getOpenHolds({ authUserId: 'user_1' })).rejects.toBeInstanceOf(ServiceUnavailableException);
     expect(databaseService.database.transaction).not.toHaveBeenCalled();
+  });
+});
+
+describe('BillingUsageService attempt receipts (W2)', () => {
+  const authority = {
+    binding_id: 'binding_1',
+    account_id: 'account_1',
+    status: 'open',
+    revision: '7',
+    promo_atoms: '0',
+    plan_atoms: '0',
+    purchased_atoms: '0',
+    debt_atoms: '0',
+    promo_held_atoms: '0',
+    plan_held_atoms: '0',
+    purchased_held_atoms: '0',
+    pending_issuance_atoms: '0',
+    revoked_at: null,
+    as_of: '2026-11-06T00:01:00.000000Z',
+  };
+  const admittedAt = '2026-11-06T00:00:00.000000Z';
+  /* The hold is due one configured invocation deadline after admission; recovery may settle it a grace later. */
+  const deadline = environmentSchemaBase.shape.BILLING_INVOCATION_DEADLINE.parse(undefined);
+  const settlesBy = new Date(Date.parse(admittedAt) + deadline + recoveryGraceMinutes * 60_000)
+    .toISOString()
+    .replace('Z', '000Z');
+
+  const pendingService = () => {
+    const databaseService = mockDeep<DatabaseService>();
+    const configService = mock<ConfigService<Environment, true>>();
+    configService.get.mockImplementation((key: string) =>
+      key === 'BILLING_ENVIRONMENT' ? 'staging' : 'billing-usage-test-secret-with-32-chars',
+    );
+    const ledger = mock<CreditLedgerService>();
+    ledger.resolveAttempt.mockResolvedValue(
+      mock<Awaited<ReturnType<CreditLedgerService['resolveAttempt']>>>({ id: 'operation_1' }),
+    );
+    const transaction = mockDeep<Tx>();
+    databaseService.database.transaction.mockImplementation(async (callback) => callback(transaction));
+    transaction.execute
+      .mockResolvedValueOnce(queryRows([]))
+      .mockResolvedValueOnce(queryRows([authority]))
+      .mockResolvedValueOnce(
+        queryRows([
+          {
+            customer_state: 'pending',
+            admitted_at: admittedAt,
+            dispatch_state: 'accepted',
+            authorized_atoms: '1200',
+            settles_by: settlesBy,
+          },
+        ]),
+      );
+    return { service: new BillingUsageService(databaseService, configService, ledger), transaction };
+  };
+
+  it('states when the gateway settles a pending attempt: the hold due time plus the recovery grace', async () => {
+    const { service, transaction } = pendingService();
+
+    const answer = await service.getAttemptReceipt({
+      authUserId: 'user_1',
+      surface: 'gateway',
+      attemptKey: 'run-1:1:0',
+      rawQuery: {},
+    });
+
+    expect(answer).toMatchObject({ state: 'pending', operationId: 'operation_1', admittedAt, settlesBy });
+    const [query] = transaction.execute.mock.calls[2]!;
+    if (typeof query === 'string') {
+      throw new TypeError('Expected a parameterized operation query');
+    }
+    const compiled = new PgDialect().sqlToQuery(query.getSQL());
+    // The instant is the database's own `due_at + grace`, in the snapshot that read the pending row.
+    expect(compiled.sql).toContain('(due_at + make_interval(mins => $1))');
+    expect(compiled.params[0]).toBe(recoveryGraceMinutes);
+  });
+
+  it('keeps the strict operation receipt free of the attempt-only settlement instant', async () => {
+    const { service } = pendingService();
+
+    const receipt = await service.getOperationReceipt({
+      authUserId: 'user_1',
+      operationId: 'operation_1',
+      rawQuery: {},
+    });
+
+    expect(receipt).toMatchObject({ state: 'pending', operationId: 'operation_1' });
+    expect(receipt).not.toHaveProperty('settlesBy');
   });
 });

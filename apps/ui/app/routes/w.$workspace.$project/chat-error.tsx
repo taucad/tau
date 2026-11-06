@@ -268,7 +268,7 @@ function ChatErrorModelPending({
       globalThis.clearTimeout(boundTimer);
       globalThis.clearTimeout(nextLookup);
     };
-  }, [waiting, runId, attempt, attemptId]);
+  }, [waiting, runId, attemptId]);
 
   return waiting ? modelPendingCard({ className, ...(raw === undefined ? {} : { raw }) }) : paused;
 }

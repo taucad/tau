@@ -11,9 +11,12 @@ import { EXTManifold } from 'manifold-3d/manifold-gltf';
 import type { Artifact, RenderResult, KernelExportResult } from '@taucad/runtime/types';
 import type { KernelMiddlewareServices } from '@taucad/runtime/middleware';
 
-import { gltfEdgeDetection, gltfEdgeDetectionMaxTriangles } from '#gltf-edge-detection.middleware.js';
+import { gltfEdgeDetection } from '#gltf-edge-detection.middleware.js';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { createMockRuntime, createErrorResult } from '@taucad/runtime-testing';
+
+/** The removed render cap on fallback edge detection (D3); fixtures above it prove there is no cap. */
+const formerMaxTriangles = 500_000;
 
 // =============================================================================
 // Constants
@@ -361,11 +364,11 @@ async function createImplicitIndexInputsGltf(): Promise<Uint8Array<ArrayBuffer>>
 /**
  * Create a GLB with one 12-triangle cube primitive and one indexed primitive per
  * entry of `largeTriangles`. By default the single large primitive alone sits
- * just above the fallback triangle budget. Each large primitive references three
+ * just above the former fallback cap. Each large primitive references three
  * vertices only, so the fixture stays a few megabytes.
  */
-async function createOverBudgetGltf(
-  largeTriangles: readonly number[] = [gltfEdgeDetectionMaxTriangles + 1],
+async function createLargeGltf(
+  largeTriangles: readonly number[] = [formerMaxTriangles + 1],
 ): Promise<Uint8Array<ArrayBuffer>> {
   const io = new NodeIO();
   const document = new Document();
@@ -536,7 +539,7 @@ describe('gltfEdgeDetection', () => {
   });
 
   it('should version owner-local edge output for geometry cache invalidation', () => {
-    expect(gltfEdgeDetectionDefinition.version).toBe('3.0.0');
+    expect(gltfEdgeDetectionDefinition.version).toBe('3.1.0');
   });
 
   describe('wrapRender', () => {
@@ -965,28 +968,9 @@ describe('gltfEdgeDetection', () => {
     }
   });
 
-  describe('triangle budget', () => {
-    it('adds render edges without a skip warning when every primitive is within the budget', async () => {
-      const content = await createCubeGltfWithoutLines();
-      const { input, runtime } = createEdgeDetectionContext();
-
-      const result = await gltfEdgeDetectionDefinition.wrapRender!(
-        input,
-        createMockRenderHandler(createRenderSuccess({ mimeType: 'model/gltf-binary', content })),
-        runtime,
-      );
-
-      expect(result.success).toBe(true);
-      if (result.success) {
-        const primitives = await analyzeGltfPrimitives(gltfBytes(result.data));
-        expect(primitives[0]).toMatchObject({ triangleCount: 1, lineCount: 1, linePrimitiveVertexCounts: [24] });
-      }
-      expect(runtime.logger.warn).not.toHaveBeenCalled();
-    });
-
-    it('adds render edges when the render sums to exactly the budget', async () => {
-      const cubeTriangles = 12;
-      const content = await createOverBudgetGltf([gltfEdgeDetectionMaxTriangles - cubeTriangles]);
+  describe('no triangle cap (D3)', () => {
+    it('adds render edges above the former 500,000-triangle cap without a skip warning', async () => {
+      const content = await createLargeGltf();
       const { input, runtime } = createEdgeDetectionContext();
 
       const result = await gltfEdgeDetectionDefinition.wrapRender!(
@@ -1003,45 +987,27 @@ describe('gltfEdgeDetection', () => {
       expect(runtime.logger.warn).not.toHaveBeenCalled();
     });
 
-    it('skips render edges for a render above the budget and logs the count once', async () => {
-      const content = await createOverBudgetGltf();
+    it('adds render edges when primitives together exceed the former cap', async () => {
+      const half = formerMaxTriangles / 2;
+      const content = await createLargeGltf([half, half + 1]);
       const { input, runtime } = createEdgeDetectionContext();
-      const handlerResult = createRenderSuccess({ mimeType: 'model/gltf-binary', content });
 
       const result = await gltfEdgeDetectionDefinition.wrapRender!(
         input,
-        createMockRenderHandler(handlerResult),
+        createMockRenderHandler(createRenderSuccess({ mimeType: 'model/gltf-binary', content })),
         runtime,
       );
 
-      // The cube is within the budget on its own, but the render as a whole is not.
-      expect(result).toBe(handlerResult);
-      expect(runtime.logger.warn).toHaveBeenCalledTimes(1);
-      expect(runtime.logger.warn).toHaveBeenCalledWith(
-        `Skipping fallback edge detection for a render with ${gltfEdgeDetectionMaxTriangles + 13} triangles (limit ${gltfEdgeDetectionMaxTriangles})`,
-      );
+      expect(result.success).toBe(true);
+      if (result.success) {
+        const primitives = await analyzeGltfPrimitives(gltfBytes(result.data));
+        expect(primitives[0]).toMatchObject({ triangleCount: 3, lineCount: 1 });
+      }
+      expect(runtime.logger.warn).not.toHaveBeenCalled();
     });
 
-    it('sums triangles across primitives that are each within the budget', async () => {
-      const half = gltfEdgeDetectionMaxTriangles / 2;
-      const content = await createOverBudgetGltf([half, half]);
-      const { input, runtime } = createEdgeDetectionContext();
-      const handlerResult = createRenderSuccess({ mimeType: 'model/gltf-binary', content });
-
-      const result = await gltfEdgeDetectionDefinition.wrapRender!(
-        input,
-        createMockRenderHandler(handlerResult),
-        runtime,
-      );
-
-      expect(result).toBe(handlerResult);
-      expect(runtime.logger.warn).toHaveBeenCalledWith(
-        `Skipping fallback edge detection for a render with ${gltfEdgeDetectionMaxTriangles + 12} triangles (limit ${gltfEdgeDetectionMaxTriangles})`,
-      );
-    });
-
-    it('runs no edge pass and logs no skip when the call turns edges off', async () => {
-      const content = await createOverBudgetGltf();
+    it('runs no edge pass when the call turns edges off', async () => {
+      const content = await createLargeGltf();
       const { runtime } = createEdgeDetectionContext();
       const handlerResult = createRenderSuccess({ mimeType: 'model/gltf-binary', content });
 
@@ -1056,8 +1022,8 @@ describe('gltfEdgeDetection', () => {
       expect(runtime.logger.warn).not.toHaveBeenCalled();
     });
 
-    it('keeps export edge detection unbudgeted so requested export bytes are unchanged', async () => {
-      const content = await createOverBudgetGltf();
+    it('adds export edges on a large mesh', async () => {
+      const content = await createLargeGltf();
       const { runtime } = createEdgeDetectionContext();
 
       const result = await gltfEdgeDetectionDefinition.wrapExport!(

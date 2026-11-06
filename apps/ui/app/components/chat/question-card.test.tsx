@@ -227,29 +227,25 @@ describe('QuestionCard · open single choice', () => {
   });
 
   it('shows progress on Submit and locks the options while the answer is written', () => {
-    const view = renderCard();
+    const properties: QuestionCardProperties = {
+      ask: formAsk,
+      answers: undefined,
+      now: askedAt + 5000,
+      onAnswer: vi.fn(),
+      onHold: vi.fn(),
+      onDecline: vi.fn(),
+    };
+    const view = render(<QuestionCard {...properties} />);
     fireEvent.click(radio(/^Faceted gem/u));
     fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
-    view.onAnswer = vi.fn();
-    cleanup();
-    render(
-      <TooltipProvider>
-        <QuestionCard
-          ask={formAsk}
-          answers={undefined}
-          now={askedAt + 5000}
-          isPending
-          onAnswer={vi.fn()}
-          onHold={vi.fn()}
-          onDecline={vi.fn()}
-        />
-      </TooltipProvider>,
-    );
+    view.rerender(<QuestionCard {...properties} isPending />);
 
+    expect(screen.getByRole('button', { name: 'Submit' })).toHaveAttribute('aria-busy', 'true');
     expect(screen.getByRole('button', { name: 'Submit' })).toBeDisabled();
     for (const option of screen.getAllByRole('radio')) {
       expect(option).toBeDisabled();
     }
+    expect(radio(/^Faceted gem/u)).toBeChecked();
   });
 
   it('counts down against the extended deadline once held', () => {

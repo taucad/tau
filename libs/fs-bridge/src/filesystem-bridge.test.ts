@@ -15,8 +15,8 @@ import {
 } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
-import type { WatchEvent, WatchRequest, WorkspaceScope } from '@taucad/filesystem';
-import type { ChangeEvent } from '@taucad/types';
+import type { ChangeSet, WatchEvent, WatchRequest, WorkspaceScope } from '@taucad/filesystem';
+import type { ChangeEvent, PathChangeEvent } from '@taucad/types';
 import type { FileSystemBridgeHello, FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import {
   bindMutationContextForPort,
@@ -927,9 +927,15 @@ describe('exposeFileSystem coalesced delivery', () => {
     bus.emit(written('/b.txt'));
     bus.emit({ type: 'fileWritten', path: '/c.txt', backend: 'opfs' });
 
-    expect(emitSpy).toHaveBeenCalledTimes(2);
-    expect(emitSpy).toHaveBeenNthCalledWith(1, 'fileChanged', { type: 'backendChanged', backend: 'memory' });
-    expect(emitSpy).toHaveBeenNthCalledWith(2, 'fileChanged', { type: 'backendChanged', backend: 'opfs' });
+    /* One message per port per delivery (D6): both loss signals travel together. */
+    expect(emitSpy).toHaveBeenCalledOnce();
+    expect(emitSpy).toHaveBeenCalledWith('fileChanged', {
+      type: 'changeSet',
+      entries: [
+        { type: 'backendChanged', backend: 'memory' },
+        { type: 'backendChanged', backend: 'opfs' },
+      ],
+    });
 
     handle.cleanup();
     channel.port2.close();
@@ -988,12 +994,47 @@ describe('exposeFileSystem coalesced delivery', () => {
     bus.emit(written('/b.txt'));
     vi.advanceTimersByTime(100);
 
-    expect(emitSpy).toHaveBeenCalledTimes(2);
-    expect(emitSpy).toHaveBeenNthCalledWith(1, 'fileChanged', written('/a.txt'));
-    expect(emitSpy).toHaveBeenNthCalledWith(2, 'fileChanged', written('/b.txt'));
+    /* The window's facts arrive by its deadline as one message (D6). */
+    expect(emitSpy).toHaveBeenCalledOnce();
+    expect(emitSpy).toHaveBeenCalledWith('fileChanged', {
+      type: 'changeSet',
+      entries: [written('/a.txt'), written('/b.txt')],
+    });
 
     handle.cleanup();
     channel.port2.close();
+  });
+
+  it('should deliver a fifty-fact changeset to each port as one message (S8, D6)', () => {
+    const bus = new ChangeEventBus();
+    const handle = exposeFileSystem({}, { policy: tauPathPolicy, changeEventBus: bus });
+    const channels = [new MessageChannel(), new MessageChannel()];
+    for (const channel of channels) {
+      for (const handler of messageHandlers) {
+        handler(
+          new MessageEvent('message', {
+            data: { v: fileSystemBridgeProtocolVersion, type: filesystemBridgeConnectMessageType, port: channel.port1 },
+          }),
+        );
+      }
+    }
+    const spies = [...handle.serverHandles.values()].map((serverHandle) => vi.spyOn(serverHandle, 'emit'));
+    const facts = Array.from({ length: 50 }, (_, index) =>
+      written(`/agent/file-${String(index)}.ts`),
+    ) as PathChangeEvent[];
+
+    bus.emit({ type: 'changeSet', entries: facts });
+
+    expect(spies).toHaveLength(2);
+    for (const spy of spies) {
+      expect(spy).toHaveBeenCalledOnce();
+      expect(spy).toHaveBeenCalledWith('fileChanged', { type: 'changeSet', entries: facts });
+    }
+
+    handle.cleanup();
+    for (const channel of channels) {
+      channel.port2.close();
+    }
   });
 });
 
@@ -1621,6 +1662,34 @@ describe('exposeFileSystem skip-originator dispatch', () => {
       expect(handlerForRoot.mock.calls[0]?.[1].originClientId).toMatch(/^port_/u);
       expect(handlerForRoot.mock.calls[1]?.[0]).toBe(`/projects/${betaProjectId}`);
       expect(handlerForRoot.mock.calls[1]?.[1].originClientId).toMatch(/^port_/u);
+
+      /* D6: the change-set form crosses the rooted wire as one frame per
+       * committed changeset, however many paths it wrote. */
+      const sets: ChangeSet[] = [];
+      const changeSetWatch = alpha.watchChangeSets({ paths: [''], recursive: true }, (set) => sets.push(set));
+      await changeSetWatch.ready;
+      await service.writeFiles(
+        Object.fromEntries(
+          Array.from({ length: 50 }, (_, index) => [
+            `/projects/${alphaProjectId}/turn/file-${String(index)}.ts`,
+            { content: `export const value = ${String(index)};` },
+          ]),
+        ),
+      );
+      await vi.waitFor(() => {
+        expect(sets).toHaveLength(1);
+      });
+      expect(sets[0]!.entries.filter((entry) => entry.kind === 'file')).toHaveLength(50);
+      expect(sets[0]!.entries.every((entry) => entry.path.startsWith('turn'))).toBe(true);
+      changeSetWatch.unsubscribe();
+
+      /* D23: a fenced append crosses the rooted wire as one call, and its
+       * refusal keeps its code and writes nothing. */
+      await alpha.appendFileFenced('log.jsonl', 'a\n', { expectedLength: 0, token: 1 });
+      await expect(
+        alpha.appendFileFenced('log.jsonl', 'late\n', { expectedLength: 0, token: 1 }),
+      ).rejects.toMatchObject({ code: 'EAPPENDSTALE' });
+      await expect(alpha.readFile('log.jsonl', 'utf8')).resolves.toBe('a\n');
     } finally {
       stopWatch();
       stopBroadcast();

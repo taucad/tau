@@ -143,7 +143,7 @@ export const assertBoundedChangeset = (entries: readonly ChangesetEntry[]): void
  * streams staged first, phases in order (a later phase only once every entry
  * of the earlier one applied), every entry's outcome reported. No locks, no
  * derivatives, no change event — a provider with an authority above it takes
- * the authority's `apply` instead.
+ * the authority's `apply` instead. A fenced append (D23) is refused here.
  *
  * @param provider - The provider, its paths the changeset's paths.
  * @param changeset - The entries and an abort signal; `lifecycle` has nothing to fence here.
@@ -167,6 +167,10 @@ export const applyChangesetToProvider = async (
   );
   const phases = new Map<number, PhaseAdmission>();
   const batches = entries.map((entry) => {
+    if (entry.op === 'append' && entry.fence !== undefined) {
+      /* A fence is checked under the authority's lock set; a bare provider has none to hold it true. */
+      throw errnoError('EINVAL', `a fenced append to '${entry.path}' needs an authority's apply`);
+    }
     const batch = toBatchEntry(
       entry,
       entry.op === 'move' ? entry.from : entry.path,

@@ -7,16 +7,12 @@ import type {
   FileStat,
   StatContentMetadata,
 } from '@taucad/types';
-import type { DirectoryStatRow, FileTreeNode } from '@taucad/filesystem';
+import type { ChangeSet, ChangeSetEntry, DirectoryStatRow, FileTreeNode } from '@taucad/filesystem';
 import { getFileContentMetadata } from '@taucad/filesystem';
 import { Topic } from '@taucad/events';
 import type { FileContentService, ContentChangeEvent } from '#file-content-service.js';
 import type { ComposedViewClient } from '#composed-view-client.js';
-import type {
-  WorkerChangeChannel,
-  WorkerRelativeDirectoryRenameEvent,
-  WorkerRelativeRenameEvent,
-} from '#worker-change-channel.js';
+import type { WorkerChangeChannel } from '#worker-change-channel.js';
 import type { WorkspacePathResolver } from '#workspace-path-resolver.js';
 import { WorkspacePathEscapeError } from '#workspace-path-resolver.js';
 import type { VisibilityProvider } from '#visibility-provider.js';
@@ -159,6 +155,141 @@ export type FileItem = {
   size: number;
 } & StatContentMetadata;
 
+/**
+ * The tree key of a key's directory: `''` for a top-level key, `undefined` for the root itself.
+ *
+ * @param key - A root-relative tree key.
+ * @returns Its parent's key.
+ */
+const parentKeyOf = (key: string): string | undefined => {
+  const trimmed = key.endsWith('/') ? key.slice(0, -1) : key;
+  if (trimmed === '') {
+    return undefined;
+  }
+  const slash = trimmed.lastIndexOf('/');
+  return slash === -1 ? '' : trimmed.slice(0, slash);
+};
+
+const directoryKeyOf = (key: string): string => (key.endsWith('/') ? key.slice(0, -1) : key);
+
+/**
+ * The tree's path map with a per-directory child index (charter D18).
+ *
+ * Every listing merge, level read, subtree drop and subtree rename is work on
+ * one directory, so it reads that directory's children (or its subtree)
+ * instead of scanning every key: tree work per change set is O(touched
+ * directories × their children), not O(touched directories × N). It is still
+ * the `Map` readers receive; its iteration order is the map's own.
+ */
+class DirectoryIndexedTree extends Map<string, FileEntry> {
+  readonly #children = new Map<string, Set<string>>();
+
+  public constructor(source?: DirectoryIndexedTree) {
+    /* Populate after `super()`: a `Map` constructor's own `set` calls would run before the index exists. */
+    super();
+    if (source !== undefined) {
+      for (const [key, entry] of source) {
+        super.set(key, entry);
+      }
+      for (const [directory, children] of source.#children) {
+        this.#children.set(directory, new Set(children));
+      }
+    }
+  }
+
+  public override set(key: string, value: FileEntry): this {
+    if (!this.has(key)) {
+      this.#link(key);
+    }
+    return super.set(key, value);
+  }
+
+  public override delete(key: string): boolean {
+    if (!super.delete(key)) {
+      return false;
+    }
+    this.#unlink(key);
+    return true;
+  }
+
+  public override clear(): void {
+    super.clear();
+    this.#children.clear();
+  }
+
+  /**
+   * The keys directly inside a directory, as a copy the caller may mutate the tree under.
+   *
+   * @param directory - A directory key (`''` for the root).
+   * @returns Its child keys that are in the tree.
+   */
+  public childKeys(directory: string): string[] {
+    return [...(this.#children.get(directoryKeyOf(directory)) ?? [])].filter((key) => this.has(key));
+  }
+
+  /**
+   * Every key strictly below a directory, as a copy.
+   *
+   * @param directory - A directory key (`''` for the root: every key but `''`).
+   * @returns The subtree's keys that are in the tree.
+   */
+  public descendantKeys(directory: string): string[] {
+    const out: string[] = [];
+    const pending = [directoryKeyOf(directory)];
+    while (pending.length > 0) {
+      const children = this.#children.get(pending.pop()!);
+      if (children === undefined) {
+        continue;
+      }
+      for (const child of children) {
+        if (this.has(child)) {
+          out.push(child);
+        }
+        pending.push(child);
+      }
+    }
+    return out;
+  }
+
+  /*
+   * A key is linked under its parent, and every ancestor under its own, even
+   * when the ancestor has no entry yet (an optimistic add into an unlisted
+   * directory), so a subtree read finds every key a prefix scan would.
+   */
+  #link(key: string): void {
+    let child = key;
+    let parent = parentKeyOf(child);
+    while (parent !== undefined) {
+      let children = this.#children.get(parent);
+      if (children === undefined) {
+        children = new Set();
+        this.#children.set(parent, children);
+      }
+      if (children.has(child)) {
+        return;
+      }
+      children.add(child);
+      child = parent;
+      parent = parentKeyOf(child);
+    }
+  }
+
+  /* Unlink a key no longer in the tree, and each ancestor left with neither an entry nor children. */
+  #unlink(key: string): void {
+    let child = key;
+    while (!this.has(child) && (this.#children.get(child)?.size ?? 0) === 0) {
+      this.#children.delete(child);
+      const parent = parentKeyOf(child);
+      if (parent === undefined) {
+        return;
+      }
+      const siblings = this.#children.get(parent);
+      siblings?.delete(child);
+      child = parent;
+    }
+  }
+}
+
 type FileTreeServiceInit = {
   proxy: ComposedViewClient;
   paths: WorkspacePathResolver;
@@ -169,6 +300,9 @@ type FileTreeServiceInit = {
   refreshDebounce?: number;
   onExternalPollTelemetry?: (aggregate: ExternalPollTelemetry) => void;
 };
+
+/** Milliseconds an interactive search waits for the next keystroke (D18). */
+const searchDebounce = 120;
 
 /**
  * Single tree/metadata authority on the main thread.
@@ -213,7 +347,7 @@ export class FileTreeService {
       this.listingObservations.delete(path);
     }
   });
-  private _tree: Map<string, FileEntry>;
+  private _tree: DirectoryIndexedTree;
   /*
    * Whether `_tree` has been handed to a reader. A handed-out snapshot is never
    * mutated: the next change copies it once, and every further change before
@@ -226,6 +360,16 @@ export class FileTreeService {
   private readonly paths: WorkspacePathResolver;
   private readonly visibility: VisibilityProvider;
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Each search window waiting out its debounce, by caller, and every call it will answer. */
+  private readonly pendingSearches = new Map<
+    string,
+    {
+      timer: ReturnType<typeof setTimeout>;
+      query: string;
+      options: { maxResults?: number; includeDirectories?: boolean } | undefined;
+      waiters: Array<{ resolve(entries: FileStatEntry[]): void; reject(error: unknown): void }>;
+    }
+  >();
   /* Every directory a mutation touched in this window. A re-read lists one
    * directory, so collapsing two to their common ancestor re-read neither. */
   private readonly pendingRefreshPaths = new Set<string>();
@@ -267,7 +411,7 @@ export class FileTreeService {
     this.visibility = init.visibility;
     this.refreshDebounce = init.refreshDebounce ?? defaultRefreshDebounce;
     this.onExternalPollTelemetry = init.onExternalPollTelemetry;
-    this._tree = new Map();
+    this._tree = new DirectoryIndexedTree();
     if (init.initialEntries) {
       for (const entry of init.initialEntries) {
         this._tree.set(entry.path, entry);
@@ -285,65 +429,8 @@ export class FileTreeService {
       }
     }
     this.unsubscribeChannel = [
-      init.channel.onFileWritten({
-        interestedIn: (relativePath) =>
-          this.isDirectoryResolvedKey(this.paths.parentOf(relativePath)) ||
-          this._inFlightDirectoryList.has(this.paths.parentOf(relativePath)),
-        handler: (event) => {
-          this.handleFileWrittenRelative(event.path);
-        },
-      }),
-      init.channel.onFileDeleted({
-        handler: (event) => {
-          this.handleFileDeletedRelative(event.path);
-        },
-      }),
-      init.channel.onFileRenamed({
-        interestedIn: (relativePath) =>
-          this.isDirectoryResolvedKey(this.paths.parentOf(relativePath)) ||
-          this._inFlightDirectoryList.has(this.paths.parentOf(relativePath)),
-        handler: (event) => {
-          this.handleFileRenamedRelative(event);
-        },
-      }),
-      init.channel.onDirectoryChanged({
-        interestedIn: (relativeDirectory) =>
-          this.isDirectoryResolvedKey(relativeDirectory) || this._inFlightDirectoryList.has(relativeDirectory),
-        handler: (event) => {
-          this.handleDirectoryChangedRelative(event.path);
-        },
-      }),
-      init.channel.onDirectoryCreated({
-        handler: (event) => {
-          this.handleDirectoryCreatedRelative(event.path);
-        },
-      }),
-      init.channel.onDirectoryDeleted({
-        handler: (event) => {
-          this.handleDirectoryDeletedRelative(event.path);
-        },
-      }),
-      init.channel.onDirectoryRenamed({
-        handler: (event) => {
-          this.handleDirectoryRenamedRelative(event);
-        },
-      }),
-      init.channel.onFileCopied({
-        handler: ({ targetPath }) => {
-          this.invalidatePendingDirectory(this.paths.parentOf(targetPath));
-          this.refreshResolvedParent(targetPath);
-        },
-      }),
-      init.channel.onDirectoryCopied({
-        handler: ({ targetPath }) => {
-          this.invalidatePendingDirectory(this.paths.parentOf(targetPath));
-          for (const key of this._inFlightDirectoryList.keys()) {
-            if (key === targetPath || key.startsWith(`${targetPath}/`)) {
-              this.invalidatePendingDirectory(key);
-            }
-          }
-          this.refreshResolvedParent(targetPath);
-        },
+      init.channel.onChangeSet((set) => {
+        this.handleChangeSet(set);
       }),
       init.channel.onBackendChanged(() => {
         for (const key of this._inFlightDirectoryList.keys()) {
@@ -676,6 +763,62 @@ export class FileTreeService {
   }
 
   /**
+   * Search as a person types (D18): one caller's calls inside one debounce
+   * window collapse into a single index query for its latest query, and each
+   * of those calls is answered with that result, so a burst of keystrokes
+   * costs the worker one walk. Each caller has its own window: `caller`
+   * names it, and without one the result bound and directory flag do, so two
+   * pickers searching at once never answer each other's queries. The query
+   * may be a substring or a glob such as `*.ts`, where `**` spans directories.
+   *
+   * @param query - Substring or glob, as typed.
+   * @param options - Result bound, whether directories are included, and the caller's window.
+   * @returns The caller's latest query's matches.
+   */
+  public async searchFilesDebounced(
+    query: string,
+    options?: { maxResults?: number; includeDirectories?: boolean; caller?: string },
+  ): Promise<FileStatEntry[]> {
+    const { caller, ...searchOptions } = options ?? {};
+    const window =
+      caller ?? JSON.stringify([searchOptions.maxResults ?? null, searchOptions.includeDirectories ?? null]);
+    const { promise, resolve, reject } = Promise.withResolvers<FileStatEntry[]>();
+    const open = this.pendingSearches.get(window);
+    const waiters = open?.waiters ?? [];
+    if (open !== undefined) {
+      clearTimeout(open.timer);
+    }
+    waiters.push({ resolve, reject });
+    const run = async (): Promise<void> => {
+      const pending = this.pendingSearches.get(window);
+      this.pendingSearches.delete(window);
+      if (pending === undefined) {
+        return;
+      }
+      try {
+        const entries = await this.searchFiles(pending.query, pending.options);
+        for (const waiter of pending.waiters) {
+          waiter.resolve(entries);
+        }
+      } catch (error) {
+        for (const waiter of pending.waiters) {
+          waiter.reject(error);
+        }
+      }
+    };
+    this.pendingSearches.set(window, {
+      timer: setTimeout(() => {
+        // async-iife: bootstrap
+        void run();
+      }, searchDebounce),
+      query,
+      options: options === undefined ? undefined : searchOptions,
+      waiters,
+    });
+    return promise;
+  }
+
+  /**
    * Remove a directory via proxy.
    * @param path - Workspace-relative directory to remove (must be empty per worker semantics).
    */
@@ -691,22 +834,7 @@ export class FileTreeService {
    * @param path - Directory to re-read once the window closes.
    */
   public scheduleRefresh(path: string): void {
-    if (this.disposed) {
-      return;
-    }
-    this.pendingRefreshPaths.add(path);
-
-    if (this.refreshTimer !== undefined) {
-      clearTimeout(this.refreshTimer);
-      this.refreshTimer = undefined;
-    }
-    if (this.refreshPauses > 0) {
-      return;
-    }
-
-    this.refreshTimer = setTimeout(() => {
-      this.drainPendingRefreshes();
-    }, this.refreshDebounce);
+    this.scheduleRefreshes([path]);
   }
 
   /**
@@ -913,7 +1041,7 @@ export class FileTreeService {
     this.nativelyObserved = false;
     this.reschedulePoll?.();
 
-    const newTree = new Map<string, FileEntry>();
+    const newTree = new DirectoryIndexedTree();
     if (initialEntries) {
       for (const entry of initialEntries) {
         newTree.set(entry.path, entry);
@@ -956,6 +1084,13 @@ export class FileTreeService {
   public dispose(): void {
     this.disposed = true;
     this.pendingRefreshPaths.clear();
+    for (const pending of this.pendingSearches.values()) {
+      clearTimeout(pending.timer);
+      for (const waiter of pending.waiters) {
+        waiter.resolve([]);
+      }
+    }
+    this.pendingSearches.clear();
     this.closedSignal.resolve();
     const observations = [...this.listingObservations.values()];
     for (const reference of observations) {
@@ -1032,6 +1167,37 @@ export class FileTreeService {
 
   // === Private: Worker Event Handlers (workspace-relative paths) ===
 
+  /**
+   * Collect several directories for one debounced re-read window, resetting
+   * the timer once rather than once per directory.
+   * @param paths - Directories to re-read once the window closes.
+   */
+  private scheduleRefreshes(paths: Iterable<string>): void {
+    if (this.disposed) {
+      return;
+    }
+    let added = false;
+    for (const path of paths) {
+      this.pendingRefreshPaths.add(path);
+      added = true;
+    }
+    if (!added) {
+      return;
+    }
+
+    if (this.refreshTimer !== undefined) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = undefined;
+    }
+    if (this.refreshPauses > 0) {
+      return;
+    }
+
+    this.refreshTimer = setTimeout(() => {
+      this.drainPendingRefreshes();
+    }, this.refreshDebounce);
+  }
+
   /*
    * Re-read up to {@link refreshesPerTask} collected directories, once each,
    * and leave the rest to the next task; a hold taken meanwhile keeps them.
@@ -1070,20 +1236,66 @@ export class FileTreeService {
     }
   }
 
-  private handleFileWrittenRelative(relativePath: string): void {
-    this.invalidatePendingDirectory(this.paths.parentOf(relativePath));
-    const parentPath = this.paths.parentOf(relativePath);
-    if (
-      this.isDirectoryResolvedKey(parentPath) &&
-      (this.listingObservations.get(parentPath)?.deref()?.activeLeaseCount ?? 0) === 0
-    ) {
-      this.scheduleRefresh(parentPath);
+  /*
+   * One delivered change set (charter D6): the work is per touched directory,
+   * not per path. A fifty-file write into one directory invalidates and
+   * re-reads that directory once; only structural entries (deletions,
+   * directory creations, moves) patch the tree one by one, in commit order,
+   * so a delete followed by a move onto the same name lands as the move.
+   * A scoped reset re-reads every resolved directory at or below its prefix;
+   * a topology reset is the backend swap `onBackendChanged` resyncs.
+   */
+  private handleChangeSet(set: ChangeSet): void {
+    if (this.disposed) {
+      return;
     }
+    if (set.reset !== undefined) {
+      if (set.reset.reason !== 'topology') {
+        this.handleResetRelative(set.reset.prefix);
+      }
+      return;
+    }
+    for (const entry of set.entries) {
+      this.applyStructuralEntry(entry);
+    }
+    const refreshes: string[] = [];
+    for (const directory of set.touchedDirectories) {
+      this.invalidatePendingDirectory(directory);
+      if (this.isRefreshableDirectory(directory)) {
+        refreshes.push(directory);
+      }
+    }
+    this.scheduleRefreshes(refreshes);
   }
 
-  private handleFileDeletedRelative(relativePath: string): void {
-    this.invalidatePendingDirectory(this.paths.parentOf(relativePath));
-    this.optimisticDelete(relativePath);
+  private applyStructuralEntry(entry: ChangeSetEntry): void {
+    switch (entry.op) {
+      case 'written': {
+        return;
+      }
+      case 'created': {
+        if (entry.kind === 'dir') {
+          this.invalidatePendingSubtree(entry.path);
+          this.handleDirectoryCreatedRelative(entry.path);
+        }
+        return;
+      }
+      case 'deleted': {
+        if (entry.kind === 'dir') {
+          this.dropSubtree(entry.path);
+        } else {
+          this.optimisticDelete(entry.path);
+        }
+        return;
+      }
+      case 'moved': {
+        if (entry.kind === 'dir') {
+          this.handleDirectoryRenamedRelative({ oldPath: entry.oldPath, newPath: entry.path });
+        } else {
+          this.applyFileMove(entry.oldPath, entry.path);
+        }
+      }
+    }
   }
 
   /*
@@ -1091,51 +1303,53 @@ export class FileTreeService {
    * makes it true (Rule 7). A rename from a name the tree never listed — a
    * staged copy swapped into place — patches nothing, and a listing taken
    * mid-swap can land after the patch, so only a re-read that starts after
-   * the event settles the directory.
+   * the event settles the directory. An apply's staged or backup sibling
+   * never enters the tree: renaming a row to or from one would drop the real
+   * name until the re-read lands, so only the parent re-reads settle it.
    */
-  private handleFileRenamedRelative(event: WorkerRelativeRenameEvent): void {
-    for (const path of [event.oldPath, event.newPath]) {
-      if (path !== undefined) {
-        this.invalidatePendingDirectory(this.paths.parentOf(path));
+  private applyFileMove(oldPath: string | undefined, newPath: string): void {
+    const touchesSibling = [oldPath, newPath].some((path) => path !== undefined && isTauTemporarySiblingPath(path));
+    if (touchesSibling || oldPath === undefined) {
+      return;
+    }
+    this.optimisticRename(oldPath, newPath);
+  }
+
+  /*
+   * Cost (accepted, review W8): a scoped reset re-reads every resolved
+   * directory at or below its prefix, so an observer-uncertain reset of the
+   * root re-reads every directory listed this session, one `readDirectory`
+   * each, issued {@link refreshesPerTask} per task. That is bounded by what
+   * the tree has listed, not by the project's size, and such a reset comes
+   * only from an observer that lost events (a native watcher overflow, a
+   * cross-tab sequence gap), not from ordinary writes.
+   */
+  private handleResetRelative(prefix: string): void {
+    this.invalidatePendingSubtree(prefix);
+    const refreshes: string[] = [];
+    if (this.isRefreshableDirectory(prefix)) {
+      refreshes.push(prefix);
+    }
+    for (const key of this._tree.descendantKeys(prefix)) {
+      if (this.isRefreshableDirectory(key)) {
+        refreshes.push(key);
       }
     }
-    const oldRelative = event.oldPath;
-    const newRelative = event.newPath;
-    /* An apply's staged or backup sibling never enters the tree: renaming a
-     * row to or from one would drop the real name until the re-read lands, so
-     * only the parent re-reads below settle it. */
-    const touchesSibling = [oldRelative, newRelative].some(
-      (path) => path !== undefined && isTauTemporarySiblingPath(path),
+    this.scheduleRefreshes(refreshes);
+  }
+
+  /* A resolved directory no leased observation re-reads by itself. */
+  private isRefreshableDirectory(key: string): boolean {
+    return (
+      this.isDirectoryResolvedKey(key) && (this.listingObservations.get(key)?.deref()?.activeLeaseCount ?? 0) === 0
     );
-    if (!touchesSibling && oldRelative !== undefined && newRelative !== undefined) {
-      this.optimisticRename(oldRelative, newRelative);
-    } else if (!touchesSibling && oldRelative !== undefined) {
-      this.optimisticDelete(oldRelative);
-    }
-    for (const path of [oldRelative, newRelative]) {
-      if (path !== undefined) {
-        this.refreshResolvedParent(path);
+  }
+
+  private invalidatePendingSubtree(relativePath: string): void {
+    for (const key of this._inFlightDirectoryList.keys()) {
+      if (key === relativePath || key.startsWith(`${relativePath}/`) || relativePath === '') {
+        this.invalidatePendingDirectory(key);
       }
-    }
-  }
-
-  private refreshResolvedParent(relativePath: string): void {
-    const parentPath = this.paths.parentOf(relativePath);
-    if (
-      this.isDirectoryResolvedKey(parentPath) &&
-      (this.listingObservations.get(parentPath)?.deref()?.activeLeaseCount ?? 0) === 0
-    ) {
-      this.scheduleRefresh(parentPath);
-    }
-  }
-
-  private handleDirectoryChangedRelative(relativePath: string): void {
-    this.invalidatePendingDirectory(relativePath);
-    if (
-      this.isDirectoryResolvedKey(relativePath) &&
-      (this.listingObservations.get(relativePath)?.deref()?.activeLeaseCount ?? 0) === 0
-    ) {
-      this.scheduleRefresh(relativePath);
     }
   }
 
@@ -1164,7 +1378,7 @@ export class FileTreeService {
     this.dropSubtree(relativePath);
   }
 
-  private handleDirectoryRenamedRelative(event: WorkerRelativeDirectoryRenameEvent): void {
+  private handleDirectoryRenamedRelative(event: Readonly<{ oldPath?: string; newPath?: string }>): void {
     const { oldPath, newPath } = event;
     if (oldPath !== undefined && newPath !== undefined) {
       this.renameSubtree(oldPath, newPath);
@@ -1180,14 +1394,12 @@ export class FileTreeService {
   }
 
   private dropSubtree(relativePath: string): void {
-    for (const key of this._inFlightDirectoryList.keys()) {
-      if (key === relativePath || key.startsWith(`${relativePath}/`) || relativePath === '') {
-        this.invalidatePendingDirectory(key);
-      }
-    }
+    this.invalidatePendingSubtree(relativePath);
     this.invalidatePendingDirectory(this.paths.parentOf(relativePath));
-    const prefix = relativePath === '' ? '' : relativePath.endsWith('/') ? relativePath : `${relativePath}/`;
-    const doomed = [...this._tree.keys()].filter((key) => key === relativePath || key.startsWith(prefix));
+    const doomed = [
+      ...(this._tree.has(relativePath) ? [relativePath] : []),
+      ...this._tree.descendantKeys(relativePath),
+    ];
     if (doomed.length > 0) {
       const newTree = this.draftTree();
       for (const key of doomed) {
@@ -1209,7 +1421,10 @@ export class FileTreeService {
     const oldPrefix = oldPath === '' ? '' : oldPath.endsWith('/') ? oldPath : `${oldPath}/`;
     const newPrefix = newPath === '' ? '' : newPath.endsWith('/') ? newPath : `${newPath}/`;
     const ownEntry = this._tree.get(oldPath);
-    const moved = [...this._tree.entries()].filter(([key]) => key.startsWith(oldPrefix));
+    const moved = this._tree
+      .descendantKeys(oldPath)
+      .filter((key) => key.startsWith(oldPrefix))
+      .map((key) => [key, this._tree.get(key)!] as const);
     if (ownEntry === undefined && moved.length === 0) {
       return;
     }
@@ -1239,9 +1454,9 @@ export class FileTreeService {
    * otherwise one copy of it that becomes current.
    * @returns The map a change may mutate.
    */
-  private draftTree(): Map<string, FileEntry> {
+  private draftTree(): DirectoryIndexedTree {
     if (this._treeHandedOut) {
-      this._tree = new Map(this._tree);
+      this._tree = new DirectoryIndexedTree(this._tree);
       this._treeHandedOut = false;
     }
     return this._tree;
@@ -1566,18 +1781,10 @@ export class FileTreeService {
   }
 
   private entriesAtDirectoryLevel(directoryKey: string): ListedDirectoryEntry[] {
-    const prefix = directoryKey === '' ? '' : directoryKey.endsWith('/') ? directoryKey : `${directoryKey}/`;
-    const out: ListedDirectoryEntry[] = [];
-    for (const [entryPath, entry] of this._tree) {
-      if (prefix === '') {
-        if (entryPath !== '' && !entryPath.includes('/')) {
-          out.push(this.toListedDirectoryEntry(entryPath, entry));
-        }
-      } else if (entryPath.startsWith(prefix) && !entryPath.slice(prefix.length).includes('/')) {
-        out.push(this.toListedDirectoryEntry(entryPath, entry));
-      }
-    }
-    return out.sort((a, b) => a.name.localeCompare(b.name));
+    return this._tree
+      .childKeys(directoryKey)
+      .map((entryPath) => this.toListedDirectoryEntry(entryPath, this._tree.get(entryPath)!))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   private toListedDirectoryEntry(path: string, entry: FileEntry): ListedDirectoryEntry {
@@ -1646,27 +1853,15 @@ export class FileTreeService {
     const newTree = this.draftTree();
     const prefix = directoryKey === '' ? '' : directoryKey.endsWith('/') ? directoryKey : `${directoryKey}/`;
 
-    const existingChildKeys = new Set<string>();
-    for (const key of newTree.keys()) {
-      if (prefix === '') {
-        if (!key.includes('/') && key !== '') {
-          existingChildKeys.add(key);
-        }
-      } else if (key.startsWith(prefix) && !key.slice(prefix.length).includes('/')) {
-        existingChildKeys.add(key);
-      }
-    }
-
+    /* Only this directory's children and the subtrees of the ones that went: O(children), not O(tree). */
     const diskNames = new Set(entries.map((node) => node.name));
-    for (const key of existingChildKeys) {
+    for (const key of newTree.childKeys(directoryKey)) {
       const name = prefix === '' ? key : key.slice(prefix.length);
       if (!diskNames.has(name)) {
+        const descendants = newTree.descendantKeys(key);
         newTree.delete(key);
-        const subtreePrefix = `${key}/`;
-        for (const descendant of newTree.keys()) {
-          if (descendant.startsWith(subtreePrefix)) {
-            newTree.delete(descendant);
-          }
+        for (const descendant of descendants) {
+          newTree.delete(descendant);
         }
       }
     }

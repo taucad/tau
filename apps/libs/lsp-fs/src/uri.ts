@@ -3,7 +3,7 @@ import { assertRootedPath } from '@taucad/utils/path';
 
 /**
  * Convert a canonical `file://` language-document URI to the workspace-relative key used
- * by {@link FileContentService} and the file-pool (`joinPath(root, relative)`).
+ * by {@link FileContentService} (`joinPath(root, relative)`).
  *
  * @public
  */

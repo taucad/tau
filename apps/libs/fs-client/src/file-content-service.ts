@@ -9,7 +9,6 @@ import { PathSubscriberRegistry } from '#path-subscriber-registry.js';
 import type { RefreshGenerationGuard } from '#refresh-generation-guard.js';
 import type { WorkerChangeChannel, WorkerRelativeRenameEvent } from '#worker-change-channel.js';
 import type { WorkspacePathResolver } from '#workspace-path-resolver.js';
-import type { SharedPool } from '@taucad/memory';
 import type { BulkMoveEdit, BulkMoveResult } from '#file-system-client.js';
 import type { ComposedViewClient } from '#composed-view-client.js';
 import type { FileWriteSource } from '#file-write-source.js';
@@ -147,8 +146,6 @@ type FileContentServiceInit = {
    * Defaults to 50 MiB (matches VS Code's web confirmation limit).
    */
   openSizeBytes?: number;
-  /** Reader-side shared file pool for zero-IPC cached reads across threads. */
-  filePool?: SharedPool;
   /**
    * The document-wide budget this service retains bytes against, beside its own
    * `cacheOptions` bounds. Omitted, the service bounds only itself.
@@ -266,7 +263,6 @@ export class FileContentService {
   private readonly cache: BoundedFileCache;
   private readonly channel: WorkerChangeChannel;
   private readonly proxy: ComposedViewClient;
-  private readonly filePool: SharedPool | undefined;
   private readonly retainedOutcomeEntries: number;
   private readonly retainedOutcomeBytes: number;
   /** A released outcome larger than this is not retained: the cache would refuse it too (D-UI-07). */
@@ -309,7 +305,6 @@ export class FileContentService {
     this.proxy = init.proxy;
     this.paths = init.paths;
     this.refreshGuard = init.refreshGuard;
-    this.filePool = init.filePool;
     this.retainedOutcomeEntries = init.cacheOptions?.maxEntries ?? defaultMaxEntries;
     this.retainedOutcomeBytes = init.cacheOptions?.maxTotalBytes ?? defaultMaxTotalBytes;
     this.openSizeBytes = init.openSizeBytes ?? defaultOpenSizeBytes;
@@ -503,7 +498,6 @@ export class FileContentService {
     if (existing) {
       return existing;
     }
-    let authoritative = false;
     const service = new ObservationService<FileContentResult>({
       resource: path,
       watch: (invalidate, reset) =>
@@ -515,12 +509,11 @@ export class FileContentService {
           }
         }),
       invalidate: () => {
-        authoritative = true;
         this.refreshGuard.begin(path);
       },
       read: async ({ signal, isCurrent }) => {
         const generation = this.refreshGuard.begin(path);
-        const result = await this.computeOutcome(path, generation, { authoritative });
+        const result = await this.computeOutcome(path, generation);
         signal.throwIfAborted();
         if (result.kind === 'error') {
           throw result.cause instanceof Error ? result.cause : new Error(String(result.cause));
@@ -1737,12 +1730,8 @@ export class FileContentService {
     }
   }
 
-  private async computeOutcome(
-    path: string,
-    generation: number,
-    options?: ResolveOptions & { authoritative?: boolean },
-  ): Promise<FileContentResult> {
-    const data = await this.readBytes(path, generation, options?.authoritative);
+  private async computeOutcome(path: string, generation: number, options?: ResolveOptions): Promise<FileContentResult> {
+    const data = await this.readBytes(path, generation);
     if (data === undefined) {
       return this.outcomes.get(path) ?? loadingOutcome;
     }
@@ -1792,22 +1781,7 @@ export class FileContentService {
     return outcome;
   }
 
-  private async readBytes(
-    path: string,
-    generation: number,
-    bypassSharedPool = false,
-  ): Promise<Uint8Array<ArrayBuffer> | undefined> {
-    if (!bypassSharedPool && this.filePool) {
-      const absolutePath = this.paths.toAbsolutePath(path);
-      const poolData = this.filePool.resolveCopy(absolutePath);
-      if (poolData) {
-        if (this.refreshGuard.isCurrent(path, generation)) {
-          this.setOrphaned(path, false);
-        }
-        return poolData;
-      }
-    }
-
+  private async readBytes(path: string, generation: number): Promise<Uint8Array<ArrayBuffer> | undefined> {
     const absolutePath = this.paths.toAbsolutePath(path);
     try {
       const data = await this.proxy.readFile(absolutePath);

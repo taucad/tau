@@ -4,7 +4,7 @@
 
 The editor writes through the file-manager service. The project machine owns CAD units keyed by entry path and viewer demand; each active [`cadMachine`](../../apps/ui/app/machines/cad.machine.ts) connects a runtime client to a rooted filesystem view. A CAD unit opens a document for its entry path and a default view for display. The worker resolves source dependencies, evaluates a native handle, renders the view, and emits document and view events. The CAD unit translates those events into its display state and rendering projection. See [runtime-topology.md](runtime-topology.md) for the runtime document protocol and abort channel.
 
-The browser's [file-manager worker](../../apps/ui/app/machines/file-manager.worker.ts) owns workspace filesystem access, mounted providers, and the change bus. It exposes rooted, consumer-scoped filesystem bridges. The CAD unit obtains an `agent` view rooted at its selected project filesystem, so the kernel reads the same authored source view as the agent rather than the uncomposed working copy. The runtime receives only that filesystem capability and local paths; it has no project-route or authority-global file-pool access.
+The browser's [file-manager worker](../../apps/ui/app/machines/file-manager.worker.ts) owns workspace filesystem access, mounted providers, and the change bus. It exposes rooted, consumer-scoped filesystem bridges. The CAD unit obtains an `agent` view rooted at its selected project filesystem, so the kernel reads the same authored source view as the agent rather than the uncomposed working copy. The runtime receives only that filesystem capability and local paths; it has no project-route access.
 
 ## Document and display lifecycle
 

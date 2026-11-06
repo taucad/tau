@@ -5,7 +5,6 @@ import { EditorSaveConflictError, FileContentService } from '#file-content-servi
 import { FileContentBudget } from '#file-content-budget.js';
 import type { ContentChangeEvent, FileContentResult, OutcomeChangeEvent } from '#file-content-service.js';
 import { BinaryFileError, FileNotFoundError, FileTooLargeError } from '#file-content-errors.js';
-import { SharedPool } from '@taucad/memory';
 import type { ChangeEvent, FileStat } from '@taucad/types';
 import type { WorkerChangeChannelTransport } from '#worker-change-channel.js';
 import type { WatchEvent } from '@taucad/filesystem';
@@ -1153,130 +1152,6 @@ describe('FileContentService', () => {
       expectTextContent(result, ascii);
       expect(tinyCache.peek('mystery.dat')).toBeUndefined();
       expect(callback).toHaveBeenCalledOnce();
-    });
-  });
-
-  describe('SharedPool fast path', () => {
-    const encoder = new TextEncoder();
-
-    function createPoolService(options?: { openSizeBytes?: number }): {
-      service: FileContentService;
-      pool: SharedPool;
-      proxy: ComposedViewClient;
-      emitFileChanged: (event: ChangeEvent) => void;
-    } {
-      const buffer = new SharedArrayBuffer(16 * 1024 * 1024);
-      const pool = new SharedPool(buffer, { maxEntries: 128 });
-      const mockProxy = createMockProxy();
-      const listen = vi.fn().mockReturnValue(vi.fn());
-      const paths = new WorkspacePathResolver('/project');
-      const channel = new WorkerChangeChannel({ transport: { listen } });
-      const refreshGuard = new RefreshGenerationGuard();
-      const svc = new FileContentService({
-        proxy: mockProxy,
-        paths,
-        channel,
-        refreshGuard,
-        filePool: pool,
-        openSizeBytes: options?.openSizeBytes ?? 50 * 1024 * 1024,
-      });
-      return {
-        service: svc,
-        pool,
-        proxy: mockProxy,
-        emitFileChanged: (event) => {
-          (listen.mock.calls[0]![1] as (data: unknown) => void)(event);
-        },
-      };
-    }
-
-    it('should resolve text from shared pool on cache miss', async () => {
-      const { service: svc, pool, proxy: mockProxy } = createPoolService();
-
-      pool.store('/project/pooled.ts', encoder.encode('pool content'));
-
-      const result = await svc.resolve('pooled.ts');
-      expect(result.kind).toBe('text');
-      if (result.kind === 'text') {
-        expect(new TextDecoder().decode(result.content)).toBe('pool content');
-      }
-      expect(mockProxy.readFile).not.toHaveBeenCalled();
-    });
-
-    it('should produce binary outcome when pool returns binary bytes', async () => {
-      const { service: svc, pool, proxy: mockProxy } = createPoolService();
-
-      const binaryBytes = new Uint8Array(2048);
-      binaryBytes[0] = 0x00;
-      pool.store('/project/mystery.dat', binaryBytes);
-
-      const result = await svc.resolve('mystery.dat');
-
-      expect(result.kind).toBe('binary');
-      if (result.kind === 'binary') {
-        expect(result.size).toBe(2048);
-      }
-      expect(mockProxy.readFile).not.toHaveBeenCalled();
-      expect(svc.peek('mystery.dat')).toEqual(binaryBytes);
-    });
-
-    it('should produce too-large outcome when pool returns oversize ASCII bytes', async () => {
-      const { service: svc, pool, proxy: mockProxy } = createPoolService({ openSizeBytes: 1024 });
-
-      const big = makeAsciiBuffer(4096);
-      pool.store('/project/mystery.dat', big);
-
-      const result = await svc.resolve('mystery.dat');
-
-      expect(result.kind).toBe('too-large');
-      if (result.kind === 'too-large') {
-        expect(result.size).toBe(4096);
-        expect(result.limit).toBe(1024);
-      }
-      expect(mockProxy.readFile).not.toHaveBeenCalled();
-    });
-
-    it('should fall through to worker RPC on double miss', async () => {
-      const { service: svc, proxy: mockProxy } = createPoolService();
-
-      const workerData = new Uint8Array([7, 8, 9]);
-      vi.mocked(mockProxy.readFile).mockResolvedValue(workerData);
-
-      const result = await svc.resolve('worker-only.ts');
-      expect(mockProxy.readFile).toHaveBeenCalledWith('/project/worker-only.ts');
-      expectTextContent(result, workerData);
-    });
-
-    it('should bypass stale pooled bytes when a worker invalidation requests an authoritative reread', async () => {
-      const { service: svc, pool, proxy: mockProxy, emitFileChanged: emit } = createPoolService();
-      pool.store('/project/main.ts', encoder.encode('stale'));
-      await svc.resolve('main.ts');
-      vi.mocked(mockProxy.readFile).mockResolvedValue(encoder.encode('fresh'));
-
-      emit({ type: 'directoryChanged', path: '', backend: 'webaccess' });
-
-      await vi.waitFor(() => {
-        const outcome = svc.peekOutcome('main.ts');
-        expect(outcome.kind).toBe('text');
-        if (outcome.kind === 'text') {
-          expect(new TextDecoder().decode(outcome.content)).toBe('fresh');
-        }
-      });
-      expect(mockProxy.readFile).toHaveBeenCalledWith('/project/main.ts');
-    });
-
-    it('should preserve existing cache hit behaviour after pool fast path', async () => {
-      const { service: svc, proxy: mockProxy } = createPoolService();
-
-      const workerData = new Uint8Array([1, 2, 3]);
-      vi.mocked(mockProxy.readFile).mockResolvedValue(workerData);
-
-      await svc.resolve('cached.ts');
-      vi.mocked(mockProxy.readFile).mockClear();
-
-      const result = await svc.resolve('cached.ts');
-      expect(mockProxy.readFile).not.toHaveBeenCalled();
-      expectTextContent(result, workerData);
     });
   });
 

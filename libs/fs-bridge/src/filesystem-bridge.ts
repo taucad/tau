@@ -15,6 +15,8 @@ import type { MessagePortLike } from '@taucad/rpc';
 import type { ChangeEvent, PathChangeEvent } from '@taucad/types';
 import type { ComposedViewConsumer } from '@taucad/filesystem/composed-view';
 import type {
+  ChangeSet,
+  ChangeSetWatchRequest,
   FileStat,
   CheckedFileWrite,
   CheckedFileWriteResult,
@@ -40,6 +42,8 @@ import {
 import type {
   FileSystemBridgeHello,
   FileSystemBridgeRuntimeService,
+  FileSystemBridgeWatchFrame,
+  FileSystemBridgeWatchRequest,
   FileSystemBridgeService,
   FileSystemBridgeUnrootedCalls,
   FileSystemBridgeWorkspaceService,
@@ -104,6 +108,16 @@ export type FileSystemBridgeProxyTransport = {
   watchReady(
     request: WatchRequest,
     handler: (event: WatchEvent) => void,
+  ): { unsubscribe: () => void; ready: Promise<void>; closed: Promise<void> };
+  /**
+   * The change-set form of a watch (charter D6): one {@link ChangeSet} per
+   * committed changeset that reaches the request, as one wire frame. Served by a
+   * rooted connection over the authority; `ready` rejects with `ENOTSUP` where
+   * the connection offers only the per-path form.
+   */
+  watchChangeSets(
+    request: ChangeSetWatchRequest,
+    handler: (set: ChangeSet) => void,
   ): { unsubscribe: () => void; ready: Promise<void>; closed: Promise<void> };
 };
 
@@ -333,7 +347,7 @@ const cloneWriteArgsForTransfer = (method: string, args: unknown[]): unknown[] =
       },
     ];
   }
-  if ((method === 'writeFile' || method === 'appendFile') && args.length >= 2) {
+  if ((method === 'writeFile' || method === 'appendFile' || method === 'appendFileFenced') && args.length >= 2) {
     return [args[0], cloneWritePayloadForTransfer(args[1]), ...args.slice(2)];
   }
 
@@ -537,6 +551,62 @@ const serializeRootedResults = (handlers: StringKeyedObject): StringKeyedObject 
       serializeBulkMoveResult(await bulkMove(...args));
   }
   return Object.keys(overrides).length === 0 ? handlers : { ...handlers, ...overrides };
+};
+
+/**
+ * Serve a watch request's change-set form (charter D6) beside its per-path form.
+ *
+ * A request with `form: 'change-sets'` subscribes the handler set's own
+ * `watchChangeSets`, and each committed changeset that reaches it crosses the
+ * wire as one frame. A handler set without one refuses the form with `ENOTSUP`
+ * rather than inventing kinds the per-path stream does not carry, so the
+ * client knows to keep the per-path form. Any other request is the handler
+ * set's own `watch`.
+ *
+ * @param handlers - The handlers one connection is served.
+ * @returns The same handlers, answering the change-set form when they can.
+ */
+const withChangeSetWatch = <Handlers extends StringKeyedObject>(handlers: Handlers): Handlers => {
+  const { watch, watchChangeSets } = handlers as Partial<Record<string, unknown>>;
+  if (typeof watch !== 'function' && typeof watchChangeSets !== 'function') {
+    return handlers;
+  }
+  const perPath = watch as
+    | ((request: WatchRequest, handler: (event: WatchEvent) => void) => (() => void) | Promise<() => void>)
+    | undefined;
+  const changeSets = watchChangeSets as
+    | ((request: ChangeSetWatchRequest, handler: (set: ChangeSet) => void) => () => void)
+    | undefined;
+  const served = (
+    request: FileSystemBridgeWatchRequest,
+    handler: (frame: FileSystemBridgeWatchFrame) => void,
+  ): (() => void) | Promise<() => void> => {
+    const { form, coalesce, ...rest } = request;
+    if (form === 'change-sets') {
+      if (changeSets === undefined) {
+        throw Object.assign(new Error('This connection serves no change-set watch.'), { code: 'ENOTSUP' });
+      }
+      return changeSets.call(handlers, { ...rest, ...(coalesce === undefined ? {} : { coalesce }) }, handler);
+    }
+    if (perPath === undefined) {
+      throw new Error('Bridge handlers do not implement watch()');
+    }
+    return perPath.call(handlers, rest, handler);
+  };
+  return new Proxy(handlers, {
+    get(target, property) {
+      if (property === 'watch') {
+        return served;
+      }
+      /* Bound to the real handler set, so a class's private state survives the proxy. */
+      const value: unknown = Reflect.get(target, property, target);
+      const descriptor = Reflect.getOwnPropertyDescriptor(target, property);
+      /* A frozen member must be returned as itself (proxy invariant). */
+      return typeof value === 'function' && !(descriptor?.configurable === false && descriptor.writable === false)
+        ? (value as (...callArgs: unknown[]) => unknown).bind(target)
+        : value;
+    },
+  });
 };
 
 /**
@@ -970,19 +1040,34 @@ function exposeFileSystemHandlers(
    * instead of K times (event-fanout policy).
    */
   const scopedByRoot = new Map<string, PathChangeEvent | undefined>();
+  /*
+   * One message per port per delivery (charter D6): every fact a port may see
+   * from one changeset (or one coalescing window) travels together, as the
+   * fact itself when there is one and as a `changeSet` envelope otherwise, so
+   * a peer does one unit of work per changeset instead of one per path.
+   */
   const deliverToHandles = (events: PathChangeEvent[]): void => {
+    const perPort = new Map<MessagePort, PathChangeEvent[]>();
+    const factsFor = (port: MessagePort): PathChangeEvent[] => {
+      let facts = perPort.get(port);
+      if (facts === undefined) {
+        facts = [];
+        perPort.set(port, facts);
+      }
+      return facts;
+    };
     for (const event of events) {
       const originClientId = getEventOrigin(event);
       hiddenByPath.clear();
       scopedByRoot.clear();
-      for (const [recipientPort, handle] of serverHandles) {
+      for (const recipientPort of serverHandles.keys()) {
         const recipientPortId = portIds.get(recipientPort);
         if (originClientId !== undefined && recipientPortId !== undefined && originClientId === recipientPortId) {
           continue;
         }
         const scope = scopedPorts.get(recipientPort);
         if (scope === undefined) {
-          handle.emit('fileChanged', event);
+          factsFor(recipientPort).push(event);
           continue;
         }
         const masked = scope.consumer !== 'working-copy';
@@ -999,9 +1084,13 @@ function exposeFileSystemHandlers(
         }
         const scoped = scopedByRoot.get(memoKey);
         if (scoped !== undefined) {
-          handle.emit('fileChanged', scoped);
+          factsFor(recipientPort).push(scoped);
         }
       }
+    }
+    for (const [recipientPort, facts] of perPort) {
+      const message: ChangeEvent = facts.length === 1 ? facts[0]! : { type: 'changeSet', entries: facts };
+      serverHandles.get(recipientPort)?.emit('fileChanged', message);
     }
   };
 
@@ -1023,8 +1112,8 @@ function exposeFileSystemHandlers(
   }
 
   /* One bus event per changeset (D2): a change set's facts are tagged one by
-   * one, so each is filtered and delivered as itself — bridge clients keep
-   * receiving path facts. */
+   * one, so each is filtered and scoped by itself, and a port receives the
+   * survivors together as one message (D6). */
   const unsubscribeEventBus = options?.changeEventBus?.subscribe((event) => {
     const changeEvent = event as ChangeEvent;
     const facts = (changeEvent.type === 'changeSet' ? changeEvent.entries : [changeEvent]).filter((fact) =>
@@ -1067,7 +1156,7 @@ function exposeFileSystemHandlers(
         return { portHandlers: createUnavailableHandlers(unavailableError), unavailableError };
       }
       scopedPorts.set(port, { root: rooted.data.root, consumer: rooted.data.consumer });
-      return { portHandlers: withHostHashFiles(serializeRootedResults(rootedHandlers)) };
+      return { portHandlers: withChangeSetWatch(withHostHashFiles(serializeRootedResults(rootedHandlers))) };
     } catch (error) {
       /* The refusal the hello states is the refusal the caller gets: a
        * `VirtualPathError` from a non-canonical root used to reach the client as
@@ -1129,7 +1218,10 @@ function exposeFileSystemHandlers(
     const mutationContext = { originClientId: portId };
     const { portHandlers, unavailableError } =
       requestedRoot === undefined
-        ? { portHandlers: bindMutationContextForPort(handlers, mutationContext), unavailableError: undefined }
+        ? {
+            portHandlers: withChangeSetWatch(bindMutationContextForPort(handlers, mutationContext)),
+            unavailableError: undefined,
+          }
         : serveRootedPort(port, event.data, mutationContext);
     const handlersAvailable = unavailableError === undefined;
 
@@ -1162,17 +1254,18 @@ function exposeFileSystemHandlers(
               },
             });
 
-    serverHandle = createBridgeServer<StringKeyedObject, WatchRequest, WatchEvent, FileSystemBridgeHello>(
-      portHandlers,
-      wrappedPort,
-      {
-        hello,
-        protocolSchemas: fileSystemBridgeSchemas,
-        onDisconnect() {
-          disconnectPort();
-        },
+    serverHandle = createBridgeServer<
+      StringKeyedObject,
+      FileSystemBridgeWatchRequest,
+      FileSystemBridgeWatchFrame,
+      FileSystemBridgeHello
+    >(portHandlers, wrappedPort, {
+      hello,
+      protocolSchemas: fileSystemBridgeSchemas,
+      onDisconnect() {
+        disconnectPort();
       },
-    );
+    });
     /* A refused connection gets its `unavailable` hello and its throwing
      * handlers, and nothing else: a port answered `ROOT_UNAVAILABLE` is not a
      * recipient of the change stream for the root it was denied. */
@@ -1418,7 +1511,7 @@ export function serveFileSystemBridgePort(
   handlers: FileSystemBridgeRuntimeService,
   port: Port<unknown>,
 ): BridgeServerHandle {
-  const served = withHostHashFiles(handlers);
+  const served = withChangeSetWatch(withHostHashFiles(handlers));
   return createBridgeServer(served, port, runtimeFileSystemBridgeOptions(served));
 }
 
@@ -1430,7 +1523,7 @@ export function serveFileSystemBridgePort(
  * @public
  */
 export function createFileSystemBridgePort(handlers: FileSystemBridgeRuntimeService): FileSystemBridgeConnection {
-  const served = withHostHashFiles(handlers);
+  const served = withChangeSetWatch(withHostHashFiles(handlers));
   const bridge = createBridgePort(served, runtimeFileSystemBridgeOptions(served));
   return {
     port: asFileSystemBridgePort(bridge.port),
@@ -1486,8 +1579,8 @@ export function createFileSystemBridgeProxy(
   }
 
   const { call, listen, watch, watchReady, ready, closed, hello, dispose } = createBridgeCall<
-    WatchRequest,
-    WatchEvent,
+    FileSystemBridgeWatchRequest,
+    FileSystemBridgeWatchFrame,
     FileSystemBridgeHello
   >(resolvedBridge.port, {
     prepareCallArgs: cloneWriteArgsForTransfer,
@@ -1530,6 +1623,13 @@ export function createFileSystemBridgeProxy(
       }
       if (property === 'watchReady') {
         return watchReady;
+      }
+      if (property === 'watchChangeSets') {
+        return (
+          request: ChangeSetWatchRequest,
+          handler: (set: ChangeSet) => void,
+        ): ReturnType<FileSystemBridgeProxyTransport['watchChangeSets']> =>
+          watchReady({ ...request, form: 'change-sets' }, handler as (frame: FileSystemBridgeWatchFrame) => void);
       }
       if (property === 'ready') {
         return ready;

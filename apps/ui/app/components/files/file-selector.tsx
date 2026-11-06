@@ -64,7 +64,8 @@ function useFileSelectorContextSearch(
       if (!treeService) {
         return [];
       }
-      const items = await treeService.searchFiles(query, {
+      const items = await treeService.searchFilesDebounced(query, {
+        caller: 'file-selector',
         maxResults: 100,
         includeDirectories: shouldIncludeDirectories,
       });

@@ -83,7 +83,7 @@ Concrete option placement MUST be enforced by **per-transport Zod schemas**. The
 
 Third-party transports pick the descriptor row matching their wire. `@taucad/runtime-testing` is a development-only package root; ESLint bans it from production source.
 
-For persisted browser projects, trusted application composition selects the authority-global route and supplies a writable rooted filesystem. Runtime transports, workers, kernels, bundlers, middleware, GeoSpec, and headless rendering receive only that opaque filesystem plus root-relative runtime paths. The capability's root is `''`; it is not the host OS root. None may receive a project id, `projectRootPath`, global mount table, global `/projects/<id>` path, grant/rights object, authority-global file-pool buffer, or host filesystem path.
+For persisted browser projects, trusted application composition selects the authority-global route and supplies a writable rooted filesystem. Runtime transports, workers, kernels, bundlers, middleware, GeoSpec, and headless rendering receive only that opaque filesystem plus root-relative runtime paths. The capability's root is `''`; it is not the host OS root. None may receive a project id, `projectRootPath`, global mount table, global `/projects/<id>` path, grant/rights object, shared buffer of file bytes, or host filesystem path.
 
 ## Entity Model
 

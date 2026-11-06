@@ -23,6 +23,16 @@ import {
   WorkspaceFileService,
   workerTimings,
 } from '@taucad/filesystem';
+import {
+  createTransferredFileSystemBridgeProxy,
+  exposeFileSystem,
+  filesystemBridgeConnectMessageType,
+  fileSystemBridgeProtocolVersion,
+  workspaceBridgeService,
+} from '@taucad/fs-bridge';
+import { createRootedLogObserver } from '@taucad/agent-host/browser';
+import { createWorkerFileSystemProxy } from '@taucad/runtime/worker';
+import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import type { RootedFileSystem } from '@taucad/filesystem';
 import { composeView } from '@taucad/filesystem/composed-view';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
@@ -70,6 +80,23 @@ const service = new WorkspaceFileService({
   policy: tauPathPolicy,
 });
 const projects = new Map<string, ScenarioProject>();
+
+/*
+ * Rooted bridge connections, served as the file-manager worker serves them: a
+ * `'working-copy'` port gets the checkout, `'user'` and `'agent'` ports that
+ * consumer's composed view. S8 connects its production consumers here.
+ */
+const bridgeConnections = new EventTarget();
+exposeFileSystem(workspaceBridgeService(service), {
+  // oxlint-disable-next-line max-params -- RootedFileSystemHandlerFactory's own arity.
+  handlerForRoot: (root, context, consumer, policy) => {
+    const filesystem = service.createRootedFileSystem(root, context);
+    return consumer === 'working-copy' ? filesystem : composeView({ filesystem }, { consumer, policy });
+  },
+  policy: tauPathPolicy,
+  changeEventBus: eventBus,
+  messageSource: bridgeConnections,
+});
 let plan: FixturePlan | undefined;
 
 const fixturePlan = (): FixturePlan => {
@@ -469,6 +496,153 @@ const stopProbe = async (): Promise<ProbeReport> => {
   };
 };
 
+/**
+ * One agent turn: the model's fifty parallel write calls, dispatched together
+ * through the host's RPC filesystem as one task issues them.
+ *
+ * @param live - The project's rooted view.
+ * @param turn - The turn's directory name.
+ */
+const agentTurn = async (live: RootedFileSystem, turn: string): Promise<void> => {
+  const tally: AgentTally = { readdirCalls: 0, reads: 0, binaryBytesRead: 0, textBytesRead: 0 };
+  const fileSystem = agentFileSystem(live, tally);
+  const text = new TextDecoder();
+  await Promise.all(
+    Array.from({ length: 50 }, async (_, index) =>
+      fileSystem.writeFile(`agent/${turn}/file-${String(index)}.ts`, text.decode(saveText(2048, index))),
+    ),
+  );
+};
+
+/**
+ * The production consumers that hear an agent turn, each built by the
+ * production code that builds it, over a connection this authority serves as
+ * the file-manager worker serves it (`exposeFileSystem` with a per-consumer
+ * view): the file manager's `WorkerChangeChannel` over a `'user'` port (the
+ * watches the Files tree and the open documents take), a kernel's dependency
+ * watch through the runtime's own `createWorkerFileSystemProxy` over an
+ * `'agent'` port, and the agent host's `createRootedLogObserver` over a
+ * `'working-copy'` project-root port. Each request reaches the turn, so a
+ * consumer whose production path fell back to the per-path form shows in
+ * production's `watch.pathEvents` counter.
+ *
+ * @param projectId - The project the turn writes.
+ * @param turn - The turn the consumers must hear.
+ * @returns How many consumers are registered, and their disposer.
+ */
+const productionTurnConsumers = async (
+  projectId: string,
+  turn: string,
+): Promise<{ count: number; dispose(): void }> => {
+  const connect = (consumer: 'user' | 'agent' | 'working-copy'): MessagePort => {
+    const channel = new MessageChannel();
+    bridgeConnections.dispatchEvent(
+      new MessageEvent('message', {
+        data: {
+          v: fileSystemBridgeProtocolVersion,
+          type: filesystemBridgeConnectMessageType,
+          port: channel.port1,
+          root: `/projects/${projectId}`,
+          consumer,
+        },
+      }),
+    );
+    return channel.port2;
+  };
+  const viewProxy = createTransferredFileSystemBridgeProxy(connect('user'));
+  const projectRoot = createTransferredFileSystemBridgeProxy(connect('working-copy'));
+  const kernelFileSystem = await createWorkerFileSystemProxy(connect('agent'));
+  await Promise.all([viewProxy.ready, projectRoot.ready]);
+  const channel = new WorkerChangeChannel({
+    transport: {
+      listen: viewProxy.listen,
+      closed: viewProxy.closed,
+      watchChangeSets: (request, handler) => viewProxy.watchChangeSets(request, handler),
+      watchReady: (request, handler) => viewProxy.watchReady(request, handler),
+    },
+  });
+  const noop = (): void => undefined;
+  const tree = channel.watchReady({ paths: [''], recursive: true }, noop);
+  const kernel = kernelFileSystem.watchReady!({ paths: ['agent'], recursive: true }, noop);
+  const logAbort = new AbortController();
+  const observeLog = createRootedLogObserver(projectRoot);
+  const log = observeLog({
+    path: `agent/${turn}/file-0.ts`,
+    signal: logAbort.signal,
+    onChange: noop,
+    onError: noop,
+  });
+  await Promise.all([tree.ready, kernel.ready, log]);
+  return {
+    count: 3,
+    dispose: (): void => {
+      tree.dispose();
+      kernel.unsubscribe();
+      logAbort.abort();
+      channel.dispose();
+      kernelFileSystem.dispose();
+      viewProxy.dispose();
+      projectRoot.dispose();
+    },
+  };
+};
+
+/**
+ * S8's three turns (D6, I8). The measured turn has one rooted recursive
+ * change-set watch, and production's `watch.changeSets` counter must read 1.
+ * The second has the production consumers registered over real bridge
+ * connections; each must hear it once, and production's `watch.pathEvents`
+ * counter must read 0. The third adds one per-path consumer, the form the
+ * gate keeps off the hot path, and the same counter must read 50: the zero
+ * is a measurement, not a counter nothing increments.
+ *
+ * @param live - The project's rooted view.
+ * @param projectId - Its project.
+ * @returns The measured turn, with the other two turns' counts beside it.
+ */
+const agentTurns = async (live: RootedFileSystem, projectId: string): Promise<WorkerMeasurement> => {
+  const noop = (): void => undefined;
+  const stopRooted = live.watchChangeSets!({ paths: [''], recursive: true }, noop);
+  let measured: WorkerMeasurement;
+  try {
+    measured = await measure(async () => {
+      await agentTurn(live, randomUuid().slice(0, 8));
+    });
+  } finally {
+    stopRooted();
+  }
+
+  const consumed = randomUuid().slice(0, 8);
+  const consumers = await productionTurnConsumers(projectId, consumed);
+  try {
+    const withConsumers = await measure(async () => {
+      await agentTurn(live, consumed);
+    });
+    const stopPerPath = live.watch({ paths: ['agent'], recursive: true }, noop);
+    let withPerPath: WorkerMeasurement;
+    try {
+      withPerPath = await measure(async () => {
+        await agentTurn(live, randomUuid().slice(0, 8));
+      });
+    } finally {
+      stopPerPath();
+    }
+    return {
+      ...measured,
+      extra: {
+        ...measured.extra,
+        watchDeliveries: measured.productionCounters['watch.changeSets'] ?? 0,
+        consumers: consumers.count,
+        consumerChangeSets: withConsumers.productionCounters['watch.changeSets'] ?? 0,
+        pathWatchDeliveries: withConsumers.productionCounters['watch.pathEvents'] ?? 0,
+        armedPathWatchDeliveries: withPerPath.productionCounters['watch.pathEvents'] ?? 0,
+      },
+    };
+  } finally {
+    consumers.dispose();
+  }
+};
+
 /* The Project Index probes' own paths (W3). */
 const indexTabPath = 'w3-tab-write.txt';
 const indexExternalPath = 'w3-external-edit.txt';
@@ -674,30 +848,7 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
       });
     }
     case 'agent-write': {
-      /* One agent turn: the model's fifty parallel write calls, dispatched
-       * together through the host's RPC filesystem as one task issues them. */
-      let deliveries = 0;
-      const stop = live.watch({ paths: [''], recursive: true }, () => {
-        deliveries += 1;
-      });
-      const turn = randomUuid().slice(0, 8);
-      const tally: AgentTally = { readdirCalls: 0, reads: 0, binaryBytesRead: 0, textBytesRead: 0 };
-      const fileSystem = agentFileSystem(live, tally);
-      const text = new TextDecoder();
-      try {
-        const measured = await measure(async () => {
-          await Promise.all(
-            Array.from({ length: 50 }, async (_, index) =>
-              fileSystem.writeFile(`agent/${turn}/file-${String(index)}.ts`, text.decode(saveText(2048, index))),
-            ),
-          );
-          return {};
-        });
-        await quiet(300);
-        return { ...measured, extra: { ...measured.extra, watchDeliveries: deliveries } };
-      } finally {
-        stop();
-      }
+      return agentTurns(live, projectId);
     }
     case 'grep-glob': {
       const measured = await measure(async () => grepAndGlob(live));

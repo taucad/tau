@@ -47,14 +47,24 @@ const fileReferenceSchema = z.union([
   baseFileReferenceSchema,
 ]);
 
+/** The most files a snapshot's `fileTree` lists (D18). @public */
+export const maxSnapshotFileTreeEntries = 500;
+
 /**
  * Schema for the editor context snapshot.
  * Provides the LLM with awareness of what the user is currently working on.
  * @public
  */
 export const snapshotSchema = z.object({
-  /** Array of file entries representing the project filesystem */
+  /**
+   * The project's files, shallowest first and then by path. The producer bounds
+   * it at {@link maxSnapshotFileTreeEntries} so a large project costs the turn a
+   * fixed amount of context (D18); the schema does not, so a client from before
+   * the bound, which sends every file, is still accepted rather than refused.
+   */
   fileTree: z.array(fileTreeEntrySchema).optional(),
+  /** How many files the bound left out of `fileTree`; absent when it lists them all. */
+  fileTreeOmitted: z.number().int().positive().optional(),
   /** The file currently being rendered by the CAD engine */
   activeFile: z
     .union([

@@ -55,7 +55,7 @@ The invariant that satisfies them: **one provider instance per storage root, sha
 
 ### 1. Single filesystem authority per host
 
-All filesystem I/O runs in one place per host — the file-manager worker in the browser, or the caller-supplied rooted filesystem in CLI/Node environments. Trusted administration uses the authority-global namespace to select and configure project and checkout routes. Runtime, GeoSpec, preview, chat, and headless consumers receive only an opaque rooted filesystem with full authored-data write semantics for one selected checkout; that capability's root is `''`, and host-owned records follow Rule 15. No feature worker may instantiate providers, open backing stores, inspect global routes, or receive the authority-global shared file pool. The main thread remains the host writer of asset thumbnail files declared by `tau.json`.
+All filesystem I/O runs in one place per host — the file-manager worker in the browser, or the caller-supplied rooted filesystem in CLI/Node environments. Trusted administration uses the authority-global namespace to select and configure project and checkout routes. Runtime, GeoSpec, preview, chat, and headless consumers receive only an opaque rooted filesystem with full authored-data write semantics for one selected checkout; that capability's root is `''`, and host-owned records follow Rule 15. No feature worker may instantiate providers, open backing stores, or inspect global routes; file bytes reach it only through its rooted view's calls, with no shared file pool beside them. The main thread remains the host writer of asset thumbnail files declared by `tau.json`.
 
 **Why**: Requirement C is unenforceable with more than one writer topology; every coherence mechanism in this policy assumes a single chokepoint.
 
@@ -268,7 +268,7 @@ There is no user-configurable policy, no per-project policy file, no plugin API 
 - Catching `WorkspaceDirectoryRequiredError` and falling back to another backend (Rule 10).
 - Adding a second cross-tab coherence channel instead of using `CrossTabCoordinator` (Rule 6).
 - Treating `ProjectLibraryState` as a discovery registry or using it to recover manifest fields (Rule 5).
-- Passing an authority-global bridge, global file-pool buffer, project id, or global `/projects/<id>` path into runtime/headless code instead of issuing a rooted view (Rules 4 and 15).
+- Passing an authority-global bridge, a shared buffer of file bytes, project id, or global `/projects/<id>` path into runtime/headless code instead of issuing a rooted view (Rules 4 and 15).
 - Reintroducing read-only source views or cache-only write allowlists; full authored-data writes remain available, with the registry's complete host-record ownership exception (Rule 15).
 - Writing revision store, ref, binding or epoch state through the authored filesystem surface, excluding it by a blanket `.tau` or `dist` glob, or copying a private cache into a candidate slot (Rule 16).
 

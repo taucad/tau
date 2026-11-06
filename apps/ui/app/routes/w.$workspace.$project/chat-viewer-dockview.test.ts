@@ -359,7 +359,7 @@ describe('createViewerFileDataSource', () => {
     ]);
     const listDirectory = vi.fn(async () => []);
     const source = createViewerFileDataSource(
-      { listDirectory, searchFiles, getTreeSnapshot: () => new Map() },
+      { listDirectory, searchFilesDebounced: searchFiles, getTreeSnapshot: () => new Map() },
       capabilities,
     );
     expect(await source.searchFiles('touch-parameters')).toEqual([
@@ -368,6 +368,7 @@ describe('createViewerFileDataSource', () => {
     expect(searchFiles).toHaveBeenCalledExactlyOnceWith('touch-parameters', {
       maxResults: 100,
       includeDirectories: false,
+      caller: 'quick-open',
     });
     expect(listDirectory).not.toHaveBeenCalled();
   });
@@ -398,7 +399,7 @@ describe('createViewerFileDataSource', () => {
     const listDirectory = vi.fn(async () => listed);
     const searchFiles = vi.fn(async () => []);
     const source = createViewerFileDataSource(
-      { listDirectory, searchFiles, getTreeSnapshot: () => snapshot },
+      { listDirectory, searchFilesDebounced: searchFiles, getTreeSnapshot: () => snapshot },
       capabilities,
     );
     expect(await source.loadDirectory('public')).toEqual([folder, listed[1]]);
@@ -412,7 +413,7 @@ describe('createViewerFileDataSource', () => {
     const source = createViewerFileDataSource(
       {
         listDirectory: async () => [{ ...valid, isFolder: false }],
-        searchFiles: async (query, options) =>
+        searchFilesDebounced: async (query, options) =>
           query === 'wheel.js' ? [valid] : candidates.slice(0, options?.maxResults),
         getTreeSnapshot: () => new Map(),
       },
@@ -434,7 +435,7 @@ describe('createViewerFileDataSource', () => {
         listDirectory: async () => {
           throw failure;
         },
-        searchFiles: async () => [],
+        searchFilesDebounced: async () => [],
         getTreeSnapshot: () => new Map(),
       },
       capabilities,

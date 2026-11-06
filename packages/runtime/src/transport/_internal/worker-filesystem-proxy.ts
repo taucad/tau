@@ -1,4 +1,4 @@
-import { RootedFileSystemError } from '@taucad/filesystem';
+import { RootedFileSystemError, watchByChangeSets } from '@taucad/filesystem';
 import type { WatchEvent, WatchRequest } from '@taucad/filesystem';
 import { createFileSystemBridgeProxy, createTransferredFileSystemBridgeProxy } from '@taucad/fs-bridge';
 import type { FileSystemBridge } from '@taucad/fs-bridge';
@@ -6,6 +6,10 @@ import type { MessagePortLike } from '@taucad/rpc';
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 
 /**
+ * The worker-facing filesystem over a filesystem bridge port: rooted reads and
+ * writes, and watches carried in the change-set form (D6).
+ *
+ * @public
  */
 export type WorkerFileSystemProxy = RuntimeFileSystemBase & {
   watchReady?(
@@ -21,6 +25,8 @@ export type WorkerFileSystemProxy = RuntimeFileSystemBase & {
  * @param source - Either a raw structured-clone `MessagePortLike` (worker
  * topologies) or an already-wired {@link FileSystemBridge} whose `port` is any
  * {@link Port} — a socket, for instance.
+ * @returns The filesystem, once the bridge hello says the host is ready.
+ * @public
  */
 export const createWorkerFileSystemProxy = async (
   source: MessagePortLike | FileSystemBridge,
@@ -59,8 +65,24 @@ export const createWorkerFileSystemProxy = async (
     lstat: bridge.lstat.bind(bridge),
   };
   if (watchable) {
-    fileSystem.watch = bridge.watch;
-    fileSystem.watchReady = bridge.watchReady;
+    /* Both forms ride the authority's change-set watch (charter D6): a fifty-file
+     * turn reaches a kernel's dependency watch as one frame, expanded here into
+     * its per-path events; a host with no change-set watch answers the per-path
+     * form instead. */
+    fileSystem.watchReady = (request, handler) => watchByChangeSets(bridge, request, handler);
+    fileSystem.watch = (request, handler) => {
+      const watch = watchByChangeSets(bridge, request, handler);
+      const observeReady = async (): Promise<void> => {
+        try {
+          await watch.ready;
+        } catch {
+          /* The synchronous form cannot observe a registration failure. */
+        }
+      };
+      // async-iife: bootstrap
+      void observeReady();
+      return watch.unsubscribe;
+    };
   }
   /* A host that predates `hashFiles` does not advertise it; revalidation then reads bodies. */
   if (hello.hashable === true) {

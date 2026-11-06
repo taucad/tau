@@ -17,7 +17,6 @@
 
 import type { FileSystemBackend } from '@taucad/types';
 import { assertRootedPath, parentDirectory, resolveAuthorityPath } from '@taucad/utils/path';
-import type { SharedPool } from '@taucad/memory';
 import type { ExternalChangeFact, FileSystemProvider, PathPolicy } from '#types.js';
 import { isChromiumSwapArtifactName } from '#backend/fs-access-provider.js';
 import { mapConcurrent } from '#concurrency.js';
@@ -117,8 +116,6 @@ export class ExternalChangeIngest {
   private readonly _crossTabCoordinator: CrossTabCoordinator;
   private readonly _projectIndexes: ProjectIndexes;
   private readonly _policy: PathPolicy | undefined;
-  /** Read through a function: the writer-side pool arrives after construction. */
-  private readonly _filePool: () => SharedPool | undefined;
   /** Drops the registry's provider for a root whose physical identity changed. */
   private readonly _disposeStorageRoot: (storageRootKey: string) => void;
   private readonly _observedExternalRoots = new Map<string, ObservedExternalRoot>();
@@ -135,7 +132,6 @@ export class ExternalChangeIngest {
     crossTabCoordinator: CrossTabCoordinator;
     projectIndexes: ProjectIndexes;
     policy?: PathPolicy;
-    filePool: () => SharedPool | undefined;
     disposeStorageRoot: (storageRootKey: string) => void;
   }) {
     this._registry = options.registry;
@@ -144,7 +140,6 @@ export class ExternalChangeIngest {
     this._crossTabCoordinator = options.crossTabCoordinator;
     this._projectIndexes = options.projectIndexes;
     this._policy = options.policy;
-    this._filePool = options.filePool;
     this._disposeStorageRoot = options.disposeStorageRoot;
   }
 
@@ -745,7 +740,6 @@ export class ExternalChangeIngest {
     physicalPaths: readonly string[];
   }): void {
     if (scoped === undefined) {
-      this._filePool()?.clear();
       /* A change that cannot be localized leaves every root unknown; each
        * compares in full before its next answer (D5), facts kept where unchanged. */
       this._projectIndexes.invalidate('/');
@@ -753,7 +747,6 @@ export class ExternalChangeIngest {
     }
     for (const physicalPath of scoped.physicalPaths) {
       for (const { path } of this._logicalMappingsForPhysicalPath(scoped.state, physicalPath)) {
-        this._filePool()?.invalidate(path);
         this._projectIndexes.invalidate(path);
       }
     }

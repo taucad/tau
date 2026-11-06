@@ -1,7 +1,8 @@
 import { Topic } from '@taucad/events';
-import type { WatchRequest, WatchEvent } from '@taucad/filesystem';
+import { toChangeSet, watchByChangeSets } from '@taucad/filesystem';
+import type { ChangeSet, ChangeSetWatchRequest, WatchRequest, WatchEvent } from '@taucad/filesystem';
 import type { ObservationWatch } from '#observation-service.js';
-import type { ChangeEvent, FileSystemBackend } from '@taucad/types';
+import type { ChangeEvent, FileSystemBackend, PathChangeEvent } from '@taucad/types';
 
 /**
  * Transport surface required to wire worker push events (typically
@@ -15,6 +16,16 @@ export type WorkerChangeChannelTransport = {
   watchReady?: (
     request: WatchRequest,
     handler: (event: WatchEvent) => void,
+  ) => { ready: Promise<void>; closed: Promise<void>; unsubscribe(): void };
+  /**
+   * The authority's change-set form of a watch (charter D6): one frame per
+   * committed changeset. When present, every watch this channel registers uses
+   * it, so a fifty-file turn crosses the wire once per watch rather than once
+   * per path; `ready` rejecting with `ENOTSUP` falls back to `watchReady`.
+   */
+  watchChangeSets?: (
+    request: ChangeSetWatchRequest,
+    handler: (set: ChangeSet) => void,
   ) => { ready: Promise<void>; closed: Promise<void>; unsubscribe(): void };
   closed?: Promise<void>;
 };
@@ -117,6 +128,10 @@ function isChangeEvent(value: unknown): value is ChangeEvent {
     return false;
   }
   const { type } = value as { type: unknown };
+  if (type === 'changeSet') {
+    const { entries } = value as { entries?: unknown };
+    return Array.isArray(entries) && entries.every((entry) => isChangeEvent(entry) && entry.type !== 'changeSet');
+  }
   return (
     type === 'fileWritten' ||
     type === 'fileDeleted' ||
@@ -130,6 +145,28 @@ function isChangeEvent(value: unknown): value is ChangeEvent {
     type === 'backendChanged'
   );
 }
+
+/** The authority's root spelling (`/`) is this namespace's `''`. */
+const relativeDirectory = (directory: string): string => (directory === '/' ? '' : directory);
+
+/**
+ * One delivery's facts as one change set in the workspace-relative namespace (charter D6).
+ *
+ * @param facts - Every fact of one delivery, in order.
+ * @param generation - This channel's delivery count.
+ * @returns The change set, or `undefined` for none.
+ */
+const relativeChangeSet = (facts: readonly PathChangeEvent[], generation: number): ChangeSet | undefined => {
+  const set = toChangeSet(facts, generation);
+  if (set === undefined) {
+    return undefined;
+  }
+  return {
+    ...set,
+    touchedDirectories: [...new Set(set.touchedDirectories.map(relativeDirectory))],
+    ...(set.reset === undefined ? {} : { reset: { ...set.reset, prefix: relativeDirectory(set.reset.prefix) } }),
+  };
+};
 
 /**
  * Owns a single `fileChanged` subscription and fans out typed, workspace-relative
@@ -188,6 +225,8 @@ export class WorkerChangeChannel {
   readonly #backendChanged = new Topic<Extract<ChangeEvent, { type: 'backendChanged' }>>({
     name: 'WorkerChangeChannel.backendChanged',
   });
+  readonly #changeSets = new Topic<ChangeSet>({ name: 'WorkerChangeChannel.changeSets' });
+  #deliveries = 0;
 
   /** Whether exact authority watches own observation invalidation. @returns True for a real watch transport. */
   public get hasAuthorityWatch(): boolean {
@@ -372,6 +411,19 @@ export class WorkerChangeChannel {
   }
 
   /**
+   * Subscribe to one {@link ChangeSet} per delivery (charter D6): every fact
+   * one changeset (or one bridge coalescing window) carried, with the
+   * directories it touched, after the per-kind topics have heard each fact.
+   *
+   * @param handler - Receives each change set.
+   * @param options - Optional AbortSignal lifecycle binding.
+   * @returns Unsubscribe function removing `handler`.
+   */
+  public onChangeSet(handler: (set: ChangeSet) => void, options?: { signal?: AbortSignal }): () => void {
+    return this.#changeSets.subscribe(handler, options);
+  }
+
+  /**
    * Subscribe to backend swap events (IndexedDB ↔ OPFS, etc.).
    * @param handler - Invoked whenever the worker reports a backend transition.
    * @param options - Optional AbortSignal lifecycle binding.
@@ -405,6 +457,7 @@ export class WorkerChangeChannel {
     this.#directoryCopied.dispose();
     this.#directoryChanged.dispose();
     this.#backendChanged.dispose();
+    this.#changeSets.dispose();
   }
 
   /**
@@ -414,6 +467,10 @@ export class WorkerChangeChannel {
    * @returns Actual registration acknowledgement and closure.
    */
   public watchReady(request: WatchRequest, handler: (event: WatchEvent) => void): ObservationWatch {
+    if (this.transport.watchChangeSets) {
+      const watch = watchByChangeSets(this.transport, request, handler);
+      return { ready: watch.ready, closed: watch.closed, dispose: watch.unsubscribe };
+    }
     if (this.transport.watchReady) {
       const watch = this.transport.watchReady(request, handler);
       return { ready: watch.ready, closed: watch.closed, dispose: watch.unsubscribe };
@@ -520,6 +577,20 @@ export class WorkerChangeChannel {
     if (!isChangeEvent(data)) {
       return;
     }
+    const facts = data.type === 'changeSet' ? data.entries : [data];
+    for (const fact of facts) {
+      this.#dispatchFact(fact);
+    }
+    this.#deliveries += 1;
+    if (this.#changeSets.size > 0) {
+      const set = relativeChangeSet(facts, this.#deliveries);
+      if (set !== undefined) {
+        this.#changeSets.emit(set);
+      }
+    }
+  }
+
+  #dispatchFact(data: PathChangeEvent): void {
     switch (data.type) {
       case 'fileWritten': {
         this.#fileWritten.emit(data);

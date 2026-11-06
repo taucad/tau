@@ -761,6 +761,27 @@ describe('serializeMessage', () => {
       );
     });
 
+    it('serializes the files a grep could not search because their large object is pending', () => {
+      const message = baseMessage([
+        {
+          type: 'tool-grep',
+          toolCallId: 'c1',
+          state: 'output-available',
+          input: { pattern: 'foo' },
+          output: {
+            matches: [],
+            totalMatches: 0,
+            pendingFiles: ['models/part.step'],
+            appliedHeadLimit: 50,
+            appliedOffset: 0,
+          },
+        },
+      ]);
+      expect(serializeMessage(message)).toBe(
+        '<tool_call name="grep">\npattern: foo\n</tool_call>\n<tool_result>\nTotal: 0\nNot searched (large object not on this device yet): models/part.step\n</tool_result>',
+      );
+    });
+
     it('serializes tool-grep context lines with ripgrep-style separators', () => {
       const message = baseMessage([
         {

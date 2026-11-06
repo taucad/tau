@@ -243,6 +243,9 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
     output: (output) =>
       joinLines(
         `Total: ${output.totalMatches}`,
+        output.pendingFiles?.length
+          ? `Not searched (large object not on this device yet): ${output.pendingFiles.join(', ')}`
+          : undefined,
         output.matches
           .flatMap((match) => {
             const firstLine = match.line - (match.before?.length ?? 0);

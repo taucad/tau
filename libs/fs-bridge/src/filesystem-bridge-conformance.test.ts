@@ -28,7 +28,7 @@ import {
 } from '#filesystem-bridge.js';
 import type { FileSystemBridgeProxy } from '#filesystem-bridge.js';
 import { fileSystemBridgeProtocolVersion, maxReadManyPaths, maxReadRangeBytes } from '#filesystem-bridge-protocol.js';
-import type { LongCallProgress } from '#filesystem-bridge-protocol.js';
+import type { FileSystemBridgeEvent, LongCallProgress } from '#filesystem-bridge-protocol.js';
 import { observeFileSystemBridgeCrossings } from '#filesystem-bridge-crossings.js';
 import type { FileSystemBridgeCrossings } from '#filesystem-bridge-crossings.js';
 
@@ -409,5 +409,30 @@ describe('bridge conformance: authority death after ready (W10)', () => {
     // The connection itself is still open: a thawed authority answers the next call.
     const after = await host.proxy.readMany(['a.ts']);
     expect(text(after.get('a.ts'))).toBe('alpha');
+  });
+  it('tells event subscribers the authority is lost once, on the first unresponsive call, and not again on close', async () => {
+    const host = await openWorkerHost(files);
+    opened.push(host);
+    const heard: FileSystemBridgeEvent[] = [];
+    const subscription = host.proxy.events((event) => heard.push(event));
+    // A plain handler set serves no event channel; the loss is the client's to say regardless.
+    await subscription.ready.catch(() => undefined);
+    await host.freeze();
+    vi.useFakeTimers();
+    const first = host.proxy.readMany(['a.ts']);
+    const firstFailure = expect(first).rejects.toMatchObject({ code: 'PEER_UNRESPONSIVE' });
+    await vi.advanceTimersByTimeAsync(30_000);
+    await firstFailure;
+    expect(heard).toEqual([{ kind: 'authority-lost' }]);
+    const second = host.proxy.readMany(['a.ts']);
+    const secondFailure = expect(second).rejects.toMatchObject({ code: 'PEER_UNRESPONSIVE' });
+    await vi.advanceTimersByTimeAsync(30_000);
+    await secondFailure;
+    vi.useRealTimers();
+    host.thaw();
+    await host.worker.terminate();
+    await host.proxy.closed;
+    expect(heard).toEqual([{ kind: 'authority-lost' }]);
+    subscription.unsubscribe();
   });
 });

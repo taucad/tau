@@ -134,7 +134,8 @@ export type FileSystemBridgeProxyTransport = {
    * The connection's event channel (charter D14): every change set of the
    * root as this connection's view sees it, `compute-restarted` when the
    * authority's compute worker was replaced, and `authority-lost` once when
-   * the connection closes under its subscribers. However many subscribe, the
+   * the connection closes under its subscribers or a call finds the authority
+   * unresponsive (`PEER_UNRESPONSIVE`). However many subscribe, the
    * connection holds one channel on the wire. The connection's own writes are
    * not echoed back (each has its receipt). A rooted connection over the
    * authority serves it; elsewhere `ready` rejects with `ENOTSUP`.
@@ -1716,7 +1717,11 @@ export function createFileSystemBridge(
 /**
  * One connection's event channel, fanned out: the first subscriber opens it
  * on the wire, the last one to leave closes it, and every subscriber hears
- * `authority-lost` once if the connection closes while the proxy is live.
+ * `authority-lost` once per loss while the proxy is live: when the connection
+ * closes under it, or when a call finds the authority unresponsive
+ * (`PEER_UNRESPONSIVE`: no heartbeat, progress or answer within its liveness
+ * window) while the port stays open. Whichever comes first is the loss; the
+ * other says nothing more.
  */
 const eventChannel = ({
   watchReady,
@@ -1728,20 +1733,27 @@ const eventChannel = ({
   >['watchReady'];
   readonly closed: Promise<void>;
   readonly isDisposed: () => boolean;
-}): ((handler: (event: FileSystemBridgeEvent) => void) => FileSystemBridgeEventSubscription) => {
+}): {
+  readonly subscribe: (handler: (event: FileSystemBridgeEvent) => void) => FileSystemBridgeEventSubscription;
+  readonly announceLost: () => void;
+} => {
   const topic = new Topic<FileSystemBridgeEvent>({ name: 'FileSystemBridge.events' });
   let wire: ReturnType<typeof watchReady> | undefined;
   let lost = false;
-  const announceLost = async (): Promise<void> => {
-    await closed;
-    if (!isDisposed()) {
-      lost = true;
-      topic.emit({ kind: 'authority-lost' });
+  const announceLost = (): void => {
+    if (lost || isDisposed()) {
+      return;
     }
+    lost = true;
+    topic.emit({ kind: 'authority-lost' });
+  };
+  const announceOnClose = async (): Promise<void> => {
+    await closed;
+    announceLost();
   };
   // async-iife: bootstrap -- `closed` only resolves; the announcement is the outcome.
-  void announceLost();
-  return (handler) => {
+  void announceOnClose();
+  const subscribe = (handler: (event: FileSystemBridgeEvent) => void): FileSystemBridgeEventSubscription => {
     const leave = topic.subscribe(handler);
     let subscribed = true;
     if (lost) {
@@ -1770,6 +1782,7 @@ const eventChannel = ({
       closed: opened.closed,
     };
   };
+  return { subscribe, announceLost };
 };
 
 /**
@@ -1831,7 +1844,7 @@ export function createFileSystemBridgeProxy(
         return watchReady;
       }
       if (property === 'events') {
-        return events;
+        return events.subscribe;
       }
       if (property === 'watchChangeSets') {
         return (
@@ -1886,6 +1899,9 @@ export function createFileSystemBridgeProxy(
           }
           return result;
         } catch (error) {
+          if ((error as { code?: unknown } | undefined)?.code === 'PEER_UNRESPONSIVE') {
+            events.announceLost();
+          }
           if (property === 'writeFileChecked' || property === 'deleteFileChecked') {
             throw classifyCheckedWriteFailure(error);
           }

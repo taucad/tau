@@ -846,8 +846,9 @@ export type FileSystemBridgeWatchRequest = WatchRequest & {
  *   supervisor's window so far, and whether it `abandoned` the worker for its
  *   fallback. No file state was lost: the compute worker holds none.
  * - `authority-lost`: the authority itself is gone. Never sent on the wire —
- *   a dead authority sends nothing — the client says it when the connection
- *   closes under it. Nothing the authority had not receipted may be claimed
+ *   a dead authority sends nothing — the client says it, once, when the
+ *   connection closes under it or a call finds the authority unresponsive
+ *   (`PEER_UNRESPONSIVE`). Nothing the authority had not receipted may be claimed
  *   saved; the recovery path is a reload.
  *
  * @public

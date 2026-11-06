@@ -62,6 +62,7 @@ import {
   readUploadPackPack,
   receivePack,
 } from '#adapter-transport/adapter-transport.js';
+import { installBufferGlobal } from '#buffer-global.js';
 import { createInlineCompute } from '#compute-worker/compute-worker.js';
 import type { ComputeWorker } from '#compute-worker/compute-worker.js';
 import { createObjectStore, gitFilesOf, isMissing, PackCeilingError } from '#object-store/object-store.js';
@@ -131,28 +132,14 @@ import {
 } from '#workspace-config.js';
 
 /*
- * `isomorphic-git` reads the Node `Buffer` *global*, and a browser has none.
- *
- * Not a style choice of the library's: `GitTree.toObject`, `GitIndex` and its
- * `BufferCursor` all call `Buffer.from`/`alloc`/`concat` directly
- * (`isomorphic-git@1.38.5/index.js` :422, :663, :2577), so the first object a
- * browser host *writes* throws `Buffer is not defined` — which is what a fresh
- * project's first turn hit, as a failed base cut it could not report (W19-b).
- * Reading never touched it, which is why the port looked healthy until a mint.
- *
- * Here rather than in a host: this module is the only thing in Tau that calls
- * `isomorphic-git`, so one assignment covers every browser host of the package
- * instead of one per host that forgets. `node:`-less on purpose — Node resolves
- * the bare specifier to its own builtin and `??=` then keeps it, while a
- * bundler resolves the `buffer` package, which is the whole point.
+ * `isomorphic-git` reads the Node `Buffer` *global*, and a browser has none:
+ * the first object a browser host *writes* threw `Buffer is not defined`, which
+ * is what a fresh project's first turn hit as a failed base cut (W19-b). This
+ * module is the only thing in Tau that calls `isomorphic-git` from the
+ * file-manager realm, so one call here covers every browser host of the port;
+ * the compute worker's realm installs its own (`#buffer-global.js`).
  */
-// oxlint-disable-next-line node-js/prefer-global/buffer, unicorn/prefer-node-protocol -- The global is exactly what is missing, and `node:buffer` has no browser build.
-import { Buffer as BufferPolyfill } from 'buffer';
-
-/* `@types/node` types the global as always present; in a browser it is not,
- * which is the whole reason for the line below. */
-const hostGlobals: { Buffer?: typeof BufferPolyfill } = globalThis;
-hostGlobals.Buffer ??= BufferPolyfill;
+installBufferGlobal();
 
 /**
  * Where one linked checkout's files are, and which project they belong to.

@@ -7,6 +7,7 @@ const strokeWidth = 2;
 /** The tail sweeps three quarters of the ring, fading from clear to the solid head. */
 const tailSweep = 270;
 const segmentCount = 48;
+const trackOpacity = 0.15;
 
 const pointAt = (degrees: number): string => {
   const radians = (degrees * Math.PI) / 180;
@@ -30,7 +31,8 @@ const tailSegments = Array.from({ length: segmentCount }, (_, index) => {
 const headPath = `M${pointAt(tailSweep - 0.01)}A${radius} ${radius} 0 0 1 ${pointAt(tailSweep)}`;
 
 /**
- * An indeterminate spinner: a solid leading head that turns clockwise with a tail fading out behind it.
+ * An indeterminate spinner: a solid leading head that turns clockwise round a faint track, with a tail fading
+ * out behind it.
  * It is hidden from assistive technology unless it is given an accessible name; otherwise the caller
  * announces the busy state.
  *
@@ -52,6 +54,8 @@ export function Loader({ className, ...props }: LoaderProps): React.JSX.Element 
       className={cn('spin-glyph', className)}
     >
       <g stroke='currentColor' strokeWidth={strokeWidth}>
+        {/* The faint full ring the head travels round; the tail fades into it. */}
+        <circle cx='12' cy='12' r={radius} strokeOpacity={trackOpacity} />
         {tailSegments.map((segment) => (
           <path key={segment.path} d={segment.path} strokeOpacity={segment.opacity} />
         ))}

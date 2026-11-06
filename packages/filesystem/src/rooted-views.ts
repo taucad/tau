@@ -212,8 +212,10 @@ export type RootedFileSystem = Omit<FileSystemProvider, 'writeFileChecked' | 'de
     expectEntries?(entries: readonly ExpectedEntry[]): Promise<void>;
     /**
      * Which of these files the root's index holds as pending entries: their
-     * large object is not on the device yet. Answered from the index alone,
-     * so a consumer that only searches never starts a download (D9).
+     * large object is not on the device yet. Answered from the index, and for
+     * a file the size of a pointer it does not hold as pending, from that
+     * file's bytes read raw: never through, so a consumer that only asks
+     * never starts a download (D9).
      */
     pendingPaths?(paths: readonly string[]): Promise<readonly string[]>;
     /** Whether these paths of the expected tree have all landed; `undefined` while no tree is expected here. */
@@ -1122,7 +1124,30 @@ export class RootedViews {
       pendingPaths: async (paths: readonly string[]): Promise<readonly string[]> => {
         assertCurrent();
         await this._projectIndexes.ready(root);
-        return paths.filter((path) => projectIndexes.pendingAt(resolveLocal(path).authorityPath) !== undefined);
+        const pending = await Promise.all(
+          paths.map(async (path): Promise<boolean> => {
+            const at = resolveLocal(path);
+            if (projectIndexes.pendingAt(at.authorityPath) !== undefined) {
+              return true;
+            }
+            /*
+             * The index learns a placeholder from a read or a tree write, and a
+             * lost or rescanned snapshot forgets it: its scans read no bytes
+             * (I3). A file the size of a pointer is read raw, never through, so
+             * no download starts; the read marks it pending.
+             */
+            const size = await at.resolution.provider.stat(at.resolution.path).then(
+              (stat) => (stat.type === 'file' ? stat.size : undefined),
+              () => undefined,
+            );
+            if (size === undefined || size > 1024) {
+              return false;
+            }
+            const read = await readMarked(at);
+            return read.object !== undefined;
+          }),
+        );
+        return paths.filter((_, index) => pending[index]);
       },
       entriesLanded: (paths: readonly string[]): boolean | undefined =>
         this._projectIndexes.landed(

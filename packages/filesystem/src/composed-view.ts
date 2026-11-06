@@ -121,7 +121,7 @@ type IndexedFileSystem = {
   statTree(path: string, options?: { admits?: IndexAdmits; signal?: AbortSignal }): Promise<FileStatEntry[]>;
   facts(paths: readonly string[], options?: IndexFactsOptions): Promise<ReadonlyMap<string, ContentFacts>>;
   changedSince(since: number, options?: { admits?: IndexAdmits; signal?: AbortSignal }): Promise<IndexChanges>;
-  /** Which of these files are pending entries, answered from the index without a read (D9). */
+  /** Which of these files are pending entries: from the index, or a pointer-sized file read raw (D9). */
   pendingPaths(paths: readonly string[]): Promise<readonly string[]>;
 };
 

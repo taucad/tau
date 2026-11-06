@@ -231,6 +231,22 @@ describe('pending entries (D9)', () => {
   });
 });
 
+describe('pending paths', () => {
+  /* A reload whose index snapshot was lost or marked for rescan rebuilt it from metadata (I3): no read, no tree write. */
+  it('should know a placeholder the index was never told of, from its own bytes, starting no download', async () => {
+    const source = vi.fn<PendingObjectSource>(async () => part);
+    service.setPendingObjectSource(source);
+    const view = service.createRootedFileSystem(route);
+    expect(await view.pendingPaths!(['models/part.step', 'main.scad', 'models/absent.step'])).toStrictEqual([
+      'models/part.step',
+    ]);
+    expect(source).not.toHaveBeenCalled();
+    /* A write replaces the pointer: the path is not pending after it. */
+    await view.writeFile('models/part.step', part);
+    expect(await view.pendingPaths!(['models/part.step'])).toStrictEqual([]);
+  });
+});
+
 describe('expected entries (D10)', () => {
   it('should know a tree write’s entries in a cold root’s index and answer when they have landed', async () => {
     const source = vi.fn<PendingObjectSource>(async () => part);

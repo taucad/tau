@@ -444,7 +444,11 @@ describe.each([inProcessPort, authorityConnection, workerPort])('rooted bridge c
         },
       });
       expect(result.matches.length).toBeGreaterThan(0);
-      expect(reports.at(-1)).toMatchObject({ done: result.filesSearched, total: result.filesSearched });
+      // Progress counts every file read, including one its bytes show is binary.
+      const last = reports.at(-1);
+      expect(last?.done).toBe(last?.total);
+      expect(last?.total).toBeGreaterThanOrEqual(result.filesSearched);
+      expect(last?.total).toBeLessThanOrEqual(result.filesSearched + result.filesSkipped);
       await expect(proxy.grep('export', { signal: AbortSignal.abort() })).rejects.toMatchObject({
         name: 'AbortError',
       });
@@ -454,15 +458,11 @@ describe.each([inProcessPort, authorityConnection, workerPort])('rooted bridge c
   describe('index queries', () => {
     it("totals a subtree from the root's index", async () => {
       const { proxy } = await open(transport);
-      await expect(proxy.indexStats('lib')).resolves.toEqual({
-        files: 3,
-        bytes: 6 + 22 + 63,
-        textFiles: 2,
-        binaryFiles: 1,
-        lines: 3 + 4,
-      });
+      const lib = await proxy.indexStats('lib');
+      expect(lib).toMatchObject({ files: 3, bytes: 6 + 22 + 63 });
+      // Content facts count only where the index already knows them (I3).
+      expect(lib.textFiles + lib.binaryFiles).toBeLessThanOrEqual(lib.files);
       const root = await proxy.indexStats('');
-      expect(root).toMatchObject({ binaryFiles: 1 });
       expect(root.files).toBeGreaterThanOrEqual(5);
       await expect(proxy.indexStats('', { signal: AbortSignal.abort() })).rejects.toMatchObject({
         name: 'AbortError',

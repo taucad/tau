@@ -8,6 +8,7 @@
  * and each answers where the bytes live: one round trip, bodies only where the
  * caller asked for bodies.
  */
+import { headSniffByteLength, seemsBinary } from '@taucad/filesystem';
 import type { Changeset, ChangesetReceipt } from '@taucad/filesystem';
 import type { BridgeServerLongCall, StringKeyedObject } from '@taucad/rpc/bridge';
 import type { FileStatEntry } from '@taucad/types';
@@ -292,6 +293,7 @@ const grepFiles = async ({
   let found = 0;
   let gone = 0;
   let unread = 0;
+  let binary = 0;
   await forEachReported(candidates, options, async (row, index) => {
     /* Lanes take files in index order, so once the finished files hold the
      * cap, no file not yet started can reach the first `limit` matches. */
@@ -309,6 +311,12 @@ const grepFiles = async ({
       }
       throw error;
     }
+    /* A row carries its kind only when the index already knows it (I3); the
+     * bytes are in hand now, so an unknown one is judged from its head. */
+    if (row.type === 'file' && row.contentKind === undefined && seemsBinary(data.subarray(0, headSniffByteLength))) {
+      binary += 1;
+      return data.byteLength;
+    }
     const matches = await matcher.match(row.path, decoder.decode(data));
     perFile[index] = matches;
     found += matches.length;
@@ -317,8 +325,8 @@ const grepFiles = async ({
   const all = perFile.flatMap((matches) => matches ?? []);
   return {
     matches: all.slice(0, limit),
-    filesSearched: candidates.length - gone - unread,
-    filesSkipped: skipped + gone,
+    filesSearched: candidates.length - gone - unread - binary,
+    filesSkipped: skipped + gone + binary,
     truncated: all.length > limit || (unread > 0 && all.length >= limit),
   };
 };
@@ -335,10 +343,12 @@ const hostIndexStats =
       }
       stats.files += 1;
       stats.bytes += row.size;
+      /* Content facts ride a stat row only when already known (I3): a file
+         no write or facts request has measured counts toward neither kind. */
       if (row.contentKind === 'text') {
         stats.textFiles += 1;
-        stats.lines += row.lineCount;
-      } else {
+        stats.lines += row.lineCount ?? 0;
+      } else if (row.contentKind === 'binary') {
         stats.binaryFiles += 1;
       }
     }

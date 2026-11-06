@@ -234,7 +234,9 @@ export type GrepResult = {
 
 /**
  * Totals of one subtree's files, from the root's index (charter D3): no file
- * is read.
+ * is read. Content facts are counted only where the index already knows them
+ * (I3): `textFiles + binaryFiles` can be less than `files`, and `lines` sums
+ * the line counts already measured.
  *
  * @public
  */

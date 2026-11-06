@@ -1,3 +1,4 @@
+import { parseRuntimeEntry } from '@taucad/telemetry';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -67,6 +68,22 @@ describe('machineOperationReporter', () => {
     expect(entry).toMatchObject({ name: 'runtime.operation', duration: 42 });
     expect(entry['detail']).toMatchObject({ operation: 'machine', outcome: 'succeeded' });
     expect(JSON.stringify(entry)).not.toMatch(/machineId|serial|address/u);
+  });
+
+  it('D-T12-3: should produce an entry the ingest admits on the tau mcp --machines route', () => {
+    const record = vi.fn();
+    machineOperationReporter({
+      record,
+      context: (caller) => ({ route: 'mcp', caller, release: '0.1.0-beta.9', platform: 'node', os: 'darwin' }),
+    })({ provider: 'bambu-simulator', kind: 'stop', status: 'accepted', requester: 'agent', duration: 12 });
+
+    const [entry] = record.mock.calls[0] as [Parameters<typeof parseRuntimeEntry>[0]];
+    expect(parseRuntimeEntry(entry)?.detail).toMatchObject({
+      operation: 'machine',
+      machineKind: 'stop',
+      route: 'mcp',
+      caller: 'agent',
+    });
   });
 
   it('should tag a request from a person as the editor', () => {

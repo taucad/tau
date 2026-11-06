@@ -71,7 +71,7 @@ export class RuntimeDocumentSessionClient {
   readonly #terminationReason: () => SettleReason;
   readonly #entryFormat: (filename: string) => string | undefined;
   readonly #exportRoute: (
-    kernelId: string | undefined,
+    kernelId: string,
     target: string,
   ) => Readonly<{ transcoderId?: string; sourceFormat: string }> | undefined;
   readonly #documents = new Map<string, ReturnType<RuntimeDocumentSessionClient['open']>>();
@@ -93,9 +93,9 @@ export class RuntimeDocumentSessionClient {
       terminationReason?: () => SettleReason;
       /** The entry file's registered format, for an evaluation's observation. */
       entryFormat?: (filename: string) => string | undefined;
-      /** The route an export target selects, for its observation's transcoder. */
+      /** The route an export target selects on the document's kernel, for its observation's transcoder. */
       exportRoute?: (
-        kernelId: string | undefined,
+        kernelId: string,
         target: string,
       ) => Readonly<{ transcoderId?: string; sourceFormat: string }> | undefined;
     } = {},
@@ -1032,15 +1032,26 @@ export class RuntimeDocumentSessionClient {
         throw operationError ?? new OperationAbortedError();
       }
       const operationId = randomUuid();
-      const exportKernel = latestDescription?.kernelId;
-      const route = this.#exportRoute(exportKernel, target);
-      const exportAttempt = observer?.begin({
-        operation: 'export',
-        operationId,
-        format: target,
-        ...(exportKernel === undefined ? {} : { kernel: exportKernel }),
-        ...(route?.transcoderId === undefined ? {} : { plugin: route.transcoderId, sourceFormat: route.sourceFormat }),
-      });
+      const exportAttempt = observer?.begin({ operation: 'export', operationId, format: target });
+      /* The route, and so the transcoder, belongs to the kernel that owns the document. An export requested right
+       * after `open` starts before the worker describes the document, so it is stamped when it settles; a route is
+       * never guessed from another kernel that writes the same format. */
+      const stampExportRoute = (): void => {
+        if (exportAttempt === undefined || exportAttempt.kernel !== undefined) {
+          return;
+        }
+        const kernel = latestDescription?.kernelId;
+        if (kernel === undefined) {
+          return;
+        }
+        exportAttempt.kernel = kernel;
+        const route = this.#exportRoute(kernel, target);
+        if (route?.transcoderId !== undefined) {
+          exportAttempt.plugin = route.transcoderId;
+          exportAttempt.sourceFormat = route.sourceFormat;
+        }
+      };
+      stampExportRoute();
       const closedExport = Promise.withResolvers<never>();
       const timedExport = Promise.withResolvers<never>();
       let exportTimeoutError: OperationTimeoutError | undefined;
@@ -1153,9 +1164,11 @@ export class RuntimeDocumentSessionClient {
         };
         const running = work();
         const result = await Promise.race([running, closedExport.promise, timedExport.promise]);
+        stampExportRoute();
         observer?.settle(exportAttempt, { type: 'result', result: { success: result.success, issues: result.issues } });
         return result;
       } catch (error) {
+        stampExportRoute();
         observer?.settle(exportAttempt, exportSettleReason(error));
         throw error;
       } finally {

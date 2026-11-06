@@ -44,7 +44,6 @@ describe('evaluateModelOutputSchema', () => {
       requested: 'high',
       linearTolerance: 0.05,
       angularTolerance: 16,
-      downgraded: 1,
     };
 
     expect(evaluateModelOutputSchema.parse({ status: 'ready', tessellation })).toEqual({
@@ -55,12 +54,7 @@ describe('evaluateModelOutputSchema', () => {
 
   it('should reject a tessellation resolution the runtime cannot report', () => {
     const counts = { triangles: 12, vertices: 8, elapsed: 3 };
-    for (const resolution of [
-      { requested: 'coarse' },
-      { linearTolerance: 0 },
-      { angularTolerance: -1 },
-      { downgraded: 0.5 },
-    ]) {
+    for (const resolution of [{ requested: 'coarse' }, { linearTolerance: 0 }, { angularTolerance: -1 }]) {
       expect(
         evaluateModelOutputSchema.safeParse({ status: 'ready', tessellation: { ...counts, ...resolution } }).success,
       ).toBe(false);

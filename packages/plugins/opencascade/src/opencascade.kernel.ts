@@ -105,12 +105,6 @@ export type OpenCascadeOptions = {
   wasm?: 'auto' | 'full' | 'multi' | OpenCascadeWasmConfig;
   /** OC API call tracing mode. `'summary'` (default) emits aggregated stats, `'per-call'` emits individual spans. */
   ocTracing?: 'off' | 'summary' | 'per-call';
-  /**
-   * Ignored: previews are never coarsened, so there is no triangle budget. Kept until hosts stop passing it.
-   *
-   * @deprecated No effect; previews mesh at the requested tessellation.
-   */
-  previewTriangleBudget?: number;
 };
 
 // =============================================================================

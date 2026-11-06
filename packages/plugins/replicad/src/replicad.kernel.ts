@@ -487,12 +487,6 @@ export type ReplicadOptions = {
    * @default true
    */
   tessellationInstancing?: boolean;
-  /**
-   * Ignored: previews are never coarsened, so there is no triangle budget. Kept until hosts stop passing it.
-   *
-   * @deprecated No effect; previews mesh at the requested tessellation.
-   */
-  previewTriangleBudget?: number;
   /** Load library source maps for enriched error stack traces. Adds ~50ms to init. Defaults to `false`. */
   withSourceMapping?: boolean;
 };

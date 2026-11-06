@@ -9,9 +9,8 @@ const prefix = 'tessellation.effective';
 /**
  * Flatten a render's tessellation report into `tessellation.effective.*` span attributes.
  *
- * The form is `preset` (with the preset name) or `explicit`; tolerances are the effective ones, after any
- * downgrade, and `downgraded` reads the report's step count, so the next audit can read the distribution of
- * effective resolutions from traces alone.
+ * The form is `preset` (with the preset name) or `explicit`, and the tolerances are the ones the mesh was produced
+ * at, so the next audit can read the distribution of effective resolutions from traces alone.
  *
  * @param report - The delivered artifact's tessellation report, if the kernel produced one.
  * @returns The attributes, or an empty object when the render carries no report.
@@ -25,7 +24,6 @@ export const tessellationSpanAttributes = (report: TessellationReport | undefine
     [`${prefix}.triangles`]: report.triangles,
     [`${prefix}.vertices`]: report.vertices,
     [`${prefix}.elapsed`]: report.elapsed,
-    [`${prefix}.downgraded`]: (report.downgraded ?? 0) > 0,
   };
   if (report.requested !== undefined) {
     attributes[`${prefix}.form`] = report.requested === 'explicit' ? 'explicit' : 'preset';
@@ -38,9 +36,6 @@ export const tessellationSpanAttributes = (report: TessellationReport | undefine
   }
   if (report.angularTolerance !== undefined) {
     attributes[`${prefix}.angularTolerance`] = report.angularTolerance;
-  }
-  if (report.downgraded !== undefined) {
-    attributes[`${prefix}.downgradeSteps`] = report.downgraded;
   }
   if (report.voxelSize !== undefined) {
     attributes[`${prefix}.voxelSize`] = report.voxelSize;

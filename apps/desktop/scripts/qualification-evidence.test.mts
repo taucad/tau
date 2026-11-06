@@ -654,6 +654,18 @@ const main = (): void => {
     stage.security.measurements['appArmorUsernsRestriction'] = 'unavailable:ENOENT';
   }
   assert.equal(collectQualificationReceipt(debian).environment.kind, 'ci');
+  const resolute = platformFixture('linux-appimage');
+  for (const stage of resolute.stages) {
+    stage.security.osVersion = 'Linux\nID=ubuntu\nVERSION_ID="26.04"';
+  }
+  assert.equal(collectQualificationReceipt(resolute).environment.kind, 'ci');
+  for (const version of ['22.04', '25.10', '26.04.1']) {
+    const unsupported = platformFixture('linux-appimage');
+    for (const stage of unsupported.stages) {
+      stage.security.osVersion = `Linux\nID=ubuntu\nVERSION_ID="${version}"`;
+    }
+    assert.throws(() => collectQualificationReceipt(unsupported), /outside qualified support matrix/u);
+  }
   const apt = platformFixture('linux-apt');
   assert.equal(collectQualificationReceipt(apt).route, 'linux-apt');
   const software = platformFixture('linux-appimage');

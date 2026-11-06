@@ -1,26 +1,12 @@
 // @vitest-environment node
 /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- vitest asymmetric matchers return any */
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import type { ExportResult, Rendering } from '@taucad/runtime';
 import { assertRenderingSuccess, createTestRuntimeClient } from '@taucad/runtime-testing';
 import { esbuildBundler } from '@taucad/esbuild';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { jscadKernel } from '#jscad.kernel.js';
-import {
-  createJscadTessellationBudgetExceededIssue,
-  jscadTessellationQualities,
-  meshWithinJscadBudget,
-  resolveJscadTessellation,
-  withDefaultSegments,
-} from '#jscad-tessellation.js';
-import type * as TessellationModule from '#jscad-tessellation.js';
-
-const budgets = vi.hoisted(() => ({ preview: 2_000_000, export: 20_000_000 }));
-
-vi.mock('#jscad-tessellation.js', async (importOriginal) => {
-  const original = await importOriginal<typeof TessellationModule>();
-  return { ...original, jscadTriangleBudgets: budgets };
-});
+import { jscadTessellationQualities, resolveJscadTessellation, withDefaultSegments } from '#jscad-tessellation.js';
 
 const sphere = (radius: number, segments?: number): string =>
   `import { primitives } from '@jscad/modeling';
@@ -148,63 +134,20 @@ describe('JSCAD tessellation presets (P2)', () => {
   });
 });
 
-describe('JSCAD triangle budget (P4)', () => {
-  it('halves the segments one step at a time, at most three times', async () => {
-    const seen: number[] = [];
-    const outcome = await meshWithinJscadBudget({
-      segments: 128,
-      budget: 10,
-      async mesh(segments) {
-        seen.push(segments);
-        return { triangles: 100 };
-      },
-    });
-    expect(seen).toEqual([128, 64, 32, 16]);
-    expect(outcome).toMatchObject({ segments: 16, downgraded: 3 });
+describe('JSCAD without a triangle budget', () => {
+  it('renders a preview once at the requested segments, never coarser', async () => {
+    const rendering = await renderModel(sphere(50), { tessellation: 'extra-high' });
+    const report = reportOf(rendering);
+    const written = reportOf(await renderModel(sphere(50, 128)));
+    expect(report).toMatchObject({ requested: 'extra-high', triangles: written.triangles });
+    expect(report).not.toHaveProperty('downgraded');
+    assertRenderingSuccess(rendering);
+    expect(rendering.issues).not.toContainEqual(expect.objectContaining({ code: 'TESSELLATION_DOWNGRADED' }));
   });
 
-  it('downgrades an over-budget preview and reports the effective segments', async () => {
-    const fitted = reportOf(await renderModel(sphere(50), { tessellation: 'extra-high' }));
-    budgets.preview = Math.floor(fitted.triangles / 2);
-    try {
-      const rendering = await renderModel(sphere(50), { tessellation: 'extra-high' });
-      const report = reportOf(rendering);
-      expect(report.downgraded).toBe(1);
-      expect(report.triangles).toBeLessThanOrEqual(budgets.preview);
-      assertRenderingSuccess(rendering);
-      expect(rendering.issues).toEqual([
-        expect.objectContaining({
-          code: 'TESSELLATION_DOWNGRADED',
-          severity: 'warning',
-          details: expect.objectContaining({
-            producer: 'jscad',
-            requested: { form: 'extra-high', segments: 128 },
-            effective: { segments: 64 },
-            downgraded: 1,
-          }),
-        }),
-      ]);
-    } finally {
-      budgets.preview = 2_000_000;
-    }
-  });
-
-  it('refuses an over-budget export instead of coarsening it', async () => {
-    budgets.export = 100;
-    try {
-      const exported = await exportModel(sphere(50), { tessellation: 'high' });
-      expect(exported.success).toBe(false);
-      // The kernel throws a `RESOURCE_LIMIT` issue; the runtime's export boundary keeps only its message.
-      expect(issueText(exported)).toContain('over the 100-triangle export budget');
-      expect(issueText(exported)).toContain('{ segments: 32 }');
-    } finally {
-      budgets.export = 20_000_000;
-    }
-    const issue = createJscadTessellationBudgetExceededIssue({
-      requested: { requested: 'high', segments: 64 },
-      triangles: 30_000_000,
-      budget: 20_000_000,
-    });
-    expect(issue.code).toBe('RESOURCE_LIMIT');
+  it('exports at the requested segments with no triangle check', async () => {
+    const exported = await exportModel(sphere(50), { tessellation: 'extra-high' });
+    expect(issueText(exported)).toBe('');
+    expect(exported.success).toBe(true);
   });
 });

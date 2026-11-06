@@ -154,7 +154,7 @@ describe('headless capture adapter', () => {
     expect(job.exportOptions).toMatchObject({
       width: 2400,
       height: 1350,
-      ...buildViewerCaptureImageOptions({ width: 2400, height: 1350, colorScheme: 'dark' }),
+      ...buildViewerCaptureImageOptions({ width: 2400, height: 1350, colorScheme: 'light' }),
       camera: {
         framing: 'fixed',
         position: [8, -6, 4],
@@ -225,7 +225,7 @@ describe('headless capture adapter', () => {
         mode: 'batch',
         width: 1600,
         height: 1600,
-        ...buildViewerCaptureImageOptions({ width: 1600, height: 1600, colorScheme: 'dark' }),
+        ...buildViewerCaptureImageOptions({ width: 1600, height: 1600, colorScheme: 'light' }),
         background: '#242424',
         axes: true,
         scaleBar: true,
@@ -261,13 +261,13 @@ describe('headless capture adapter', () => {
         width: 1600,
         height: 1600,
         lineWidth: Math.hypot(1600, 1600) / 960,
-        lineColor: '#868686',
+        lineColor: '#000000',
         lines: false,
       },
     });
   });
 
-  it('should pass the dark-scheme viewer look explicitly for utility captures', async () => {
+  it('should pass the light-scheme viewer look explicitly for utility captures', async () => {
     const exportImage = vi.fn<ExportImage>(async (_job) => [png(2400, 1350)]);
 
     await captureSettledCadImages({
@@ -282,12 +282,14 @@ describe('headless capture adapter', () => {
         width: 2400,
         height: 1350,
         lineWidth: Math.hypot(2400, 1350) / 960,
-        lineColor: '#868686',
+        lineColor: '#000000',
         toneMapping: 'neutral',
         ao: { intensity: 0.75, distanceFalloff: 1, samples: 16, resolutionScale: 0.5 },
         lighting: {
           headlamp: { intensity: 1.5, rightOffset: 2, upOffset: 2 },
           lights: [],
+          // The light scheme has no ambient boost: Three.js ambient 0.1 over π.
+          ambient: 0.1 / Math.PI,
           environment: { intensity: 1 },
           space: 'view',
         },

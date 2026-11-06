@@ -100,7 +100,8 @@ export const createMcpViewerPartThumbnails =
       return failure('RESULT_TOO_LARGE', 'The shown model is too large to render part thumbnails from.');
     }
     const size = request.size ?? partThumbnailSizeLimit;
-    const look = buildViewerCaptureImageOptions({ width: size, height: size, colorScheme: 'dark', displayWidth: 512 });
+    // Captures use the light scheme's look, chosen by the operator on 2026-11-05 for black edges.
+    const look = buildViewerCaptureImageOptions({ width: size, height: size, colorScheme: 'light', displayWidth: 512 });
     const runtime = await runtimeFor(root);
     const result = await runtime.transcode({
       from: 'glb',

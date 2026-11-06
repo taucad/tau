@@ -18,11 +18,12 @@ const thumbnailPath = 'thumbnail.webp';
 const thumbnailWidth = 1536;
 const thumbnailHeight = 1152;
 const thumbnailQuality = 0.95;
-// The dark-scheme viewer at the thumbnail's pixel ratio: edges, ambient occlusion, tone mapping and lights.
+// The light-scheme viewer at the thumbnail's pixel ratio: edges, ambient occlusion, tone mapping and lights. Captures
+// use the light scheme's look, chosen by the operator on 2026-11-05 for black edges.
 const thumbnailLook = buildViewerCaptureImageOptions({
   width: thumbnailWidth,
   height: thumbnailHeight,
-  colorScheme: 'dark',
+  colorScheme: 'light',
 });
 
 const validateThumbnailWebp = async (bytes: Uint8Array<ArrayBuffer>): Promise<void> => {
@@ -249,7 +250,7 @@ export function useThumbnailGenerator(options?: { onStored?: (bytes: Uint8Array<
         clearThumbnail(event.rendering.evaluationId);
         return;
       }
-      const identity = `${projectId}:${mainEntryPath}:${event.rendering.hash}:webp:q${thumbnailQuality}:${thumbnailWidth}x${thumbnailHeight}:m0.1:lw${thumbnailLook.lineWidth}:camera-bounds-v1:edges:viewer-profile-v2`;
+      const identity = `${projectId}:${mainEntryPath}:${event.rendering.hash}:webp:q${thumbnailQuality}:${thumbnailWidth}x${thumbnailHeight}:m0.1:lw${thumbnailLook.lineWidth}:camera-bounds-v1:edges:viewer-profile-v3`;
       if (identityRef.current !== identity) {
         generationRef.current += 1;
         identityRef.current = identity;

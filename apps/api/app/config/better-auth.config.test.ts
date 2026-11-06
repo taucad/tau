@@ -339,7 +339,7 @@ describe('getBetterAuthConfig abuse gates', () => {
   });
 
   it('caps session reads without reducing the global auth limit', async () => {
-    const { staticAuthConfig } = await import('#config/auth.js');
+    const { staticAuthConfig } = await import('#config/auth-static.config.js');
     const counts = new Map<string, number>();
     const appliedLimits: number[] = [];
     const auth = betterAuth({
@@ -398,7 +398,7 @@ describe('getBetterAuthConfig abuse gates', () => {
 
   it('keeps bearer last in both lockstep plugin lists', async () => {
     const { config } = createConfig();
-    const { staticAuthConfig } = await import('#config/auth.js');
+    const { staticAuthConfig } = await import('#config/auth-static.config.js');
 
     expect(config.plugins?.at(-1)?.id).toBe('bearer');
     expect(staticAuthConfig.plugins.at(-1)?.id).toBe('bearer');
@@ -409,7 +409,7 @@ describe('getBetterAuthConfig abuse gates', () => {
   // is load-bearing for the magic-link callback test below.
   it('pins the same plugin order in both lockstep plugin lists', async () => {
     const { config } = createConfig();
-    const { staticAuthConfig } = await import('#config/auth.js');
+    const { staticAuthConfig } = await import('#config/auth-static.config.js');
     const expected = ['api-key', 'magic-link', 'one-time-token', 'device-authorization', 'bearer'];
 
     expect(config.plugins?.map((plugin) => plugin.id)).toEqual(expected);
@@ -418,7 +418,7 @@ describe('getBetterAuthConfig abuse gates', () => {
 
   it('stores desktop one-time tokens hashed so a leaked verification row cannot be replayed', async () => {
     const { config } = createConfig();
-    const { staticAuthConfig } = await import('#config/auth.js');
+    const { staticAuthConfig } = await import('#config/auth-static.config.js');
     const runtimeOtt = config.plugins?.find((plugin) => plugin.id === 'one-time-token') as unknown as {
       options?: { storeToken?: string };
     };

@@ -18,6 +18,61 @@ export class WorkerFailure extends Error {
   public override readonly name = 'WorkerFailure';
 }
 
+/** What the worker threw, as far as the event carries it: `ErrorEvent.error` is often `null` across the worker boundary. */
+type Thrown = { readonly name: string; readonly message: string; readonly stack?: string };
+
+const describeThrown = (error: unknown): Thrown | undefined => {
+  if (error instanceof Error) {
+    return { name: error.name, message: error.message, ...(error.stack === undefined ? {} : { stack: error.stack }) };
+  }
+  return typeof error === 'string' && error !== '' ? { name: 'Error', message: error } : undefined;
+};
+
+/**
+ * The report's message: the browser's own error message, else the thrown error's, else the failing script, and the
+ * generic sentence only when the event carries none of them (a worker script that fails to load fires a plain `error`
+ * event with nothing in it).
+ */
+const failureMessage = ({
+  type,
+  eventMessage,
+  thrown,
+  scriptUrl,
+}: {
+  readonly type: string;
+  readonly eventMessage: string | undefined;
+  readonly thrown: Thrown | undefined;
+  readonly scriptUrl: string | undefined;
+}): string => {
+  if (eventMessage !== undefined && eventMessage !== '') {
+    return eventMessage;
+  }
+  if (thrown !== undefined && thrown.message !== '') {
+    return `${thrown.name}: ${thrown.message}`;
+  }
+  if (type === 'error' && scriptUrl !== undefined) {
+    return `A worker failed in ${scriptPath(scriptUrl)}`;
+  }
+  return type === 'messageerror' ? 'A worker message could not be deserialized' : 'A worker failed';
+};
+
+/** Vite's content hash before the extension: `runtime.worker-B6x_k2Qa.js` names the script `runtime.worker.js`. */
+const contentHash = /-[\w-]{8}(?=\.[cm]?js$)/;
+
+/**
+ * The script's path without its origin or content hash, so one failing script groups the same on every host and
+ * across deploys. The full URL stays in the report's `worker` context.
+ */
+const scriptPath = (scriptUrl: string): string => {
+  let path = scriptUrl;
+  try {
+    path = new URL(scriptUrl).pathname;
+  } catch {
+    // Not an absolute URL: group on it as given.
+  }
+  return path.replace(contentHash, '');
+};
+
 /** Workers that have reported once: one report per worker incarnation, whatever follows. */
 const reportedWorkers = new WeakSet<Worker>();
 
@@ -43,23 +98,24 @@ export const reportWorkerFailures = <Started extends Worker>(worker: Started, na
       return;
     }
     reportedWorkers.add(worker);
-    const isMessageError = event.type === 'messageerror';
     const errorEvent = typeof ErrorEvent !== 'undefined' && event instanceof ErrorEvent ? event : undefined;
-    const message =
-      errorEvent !== undefined && errorEvent.message !== ''
-        ? errorEvent.message
-        : isMessageError
-          ? 'A worker message could not be deserialized'
-          : 'A worker failed';
+    const thrown = describeThrown(errorEvent?.error);
+    const scriptUrl = errorEvent !== undefined && errorEvent.filename !== '' ? errorEvent.filename : undefined;
+    const message = failureMessage({ type: event.type, eventMessage: errorEvent?.message, thrown, scriptUrl });
     const location =
-      errorEvent !== undefined && errorEvent.filename !== ''
-        ? { filename: errorEvent.filename, lineno: errorEvent.lineno, colno: errorEvent.colno }
-        : {};
+      scriptUrl === undefined ? {} : { filename: scriptUrl, lineno: errorEvent?.lineno, colno: errorEvent?.colno };
     // async-iife: bootstrap -- an event listener cannot await; reporting never rejects.
-    void reportUiError(new WorkerFailure(message), {
+    void reportUiError(new WorkerFailure(message, thrown === undefined ? undefined : { cause: errorEvent?.error }), {
       tags: { worker: name, ...(name === 'kernel' ? { 'runtime.transport': 'web-worker' } : {}) },
-      contexts: { worker: { event: event.type, ...location } },
-      fingerprint: ['worker-failure', name, event.type, message],
+      contexts: { worker: { event: event.type, ...location, ...(thrown === undefined ? {} : { error: thrown }) } },
+      fingerprint: [
+        'worker-failure',
+        name,
+        event.type,
+        ...(thrown === undefined ? [] : [thrown.name]),
+        message,
+        ...(scriptUrl === undefined ? [] : [scriptPath(scriptUrl)]),
+      ],
     });
   };
   worker.addEventListener('error', report);

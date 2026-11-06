@@ -1,98 +1,14 @@
 import { betterAuth } from 'better-auth';
-import type { BetterAuthOptions } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { apiKey } from '@better-auth/api-key';
-import { bearer, magicLink, oneTimeToken } from 'better-auth/plugins';
 import postgres from 'postgres';
-import { cliDeviceAuthorization } from '#config/cli-device-authorization.js';
-import { tokenLifetimeSeconds } from '#email/email-copy.js';
 import { drizzle } from 'drizzle-orm/postgres-js';
-
-const accountOptions: NonNullable<BetterAuthOptions['account']> = {
-  accountLinking: {
-    enabled: true,
-    trustedProviders: ['github', 'google', 'email-password'],
-    allowDifferentEmails: false,
-  },
-};
-accountOptions.encryptOAuthTokens = true;
+import { staticAuthConfig } from '#config/auth-static.config.js';
 
 /**
- * Static Better Auth configuration.
- * Defines plugins and settings that determine the database schema.
- * This config is used by both the CLI for schema generation and the runtime config.
+ * Better Auth instance for CLI schema generation (`nx run api:auth-schema-generate`).
  *
- * IMPORTANT: When adding/removing plugins here, you must also update the plugin
- * array in better-auth.config.ts to maintain sync. Runtime validation will throw
- * an error if the counts don't match.
- */
-export const staticAuthConfig = {
-  plugins: [
-    apiKey(),
-    magicLink({
-      expiresIn: tokenLifetimeSeconds.magicLink,
-      sendMagicLink() {
-        // No-op for mock configuration
-      },
-    }),
-    // Desktop sign-in handoff (ruling D7): mints a short-lived, single-use token
-    // the Electron main process exchanges for a bearer session over loopback.
-    // Reuses the existing `verification` table — no schema change.
-    oneTimeToken({ storeToken: 'hashed' }),
-    cliDeviceAuthorization('https://tau.new'),
-    // `bearer()` stays LAST: its after-hook reads the `set-cookie` every earlier
-    // plugin may have written and re-emits it as `set-auth-token`.
-    bearer(),
-  ],
-  emailAndPassword: {
-    enabled: true,
-    autoSignIn: true,
-    requireEmailVerification: true,
-    // Shared with the email copy so the sentence and the deadline cannot drift.
-    resetPasswordTokenExpiresIn: tokenLifetimeSeconds.resetPassword,
-    revokeSessionsOnPasswordReset: true,
-  },
-  emailVerification: {
-    expiresIn: tokenLifetimeSeconds.verifyEmail,
-    sendOnSignUp: true,
-    sendOnSignIn: true,
-    autoSignInAfterVerification: true,
-    async sendVerificationEmail() {
-      // No-op for mock configuration
-    },
-  },
-  // Provider tokens are consumed by server-owned capability endpoints only.
-  disabledPaths: ['/get-access-token', '/refresh-token'],
-  basePath: '/v1/auth',
-  appName: 'Tau',
-  session: {
-    expiresIn: 60 * 60 * 24 * 7, // 7 days
-    updateAge: 60 * 60 * 24, // 24 hours
-  },
-  account: accountOptions,
-  rateLimit: {
-    enabled: true,
-    window: 10,
-    max: 100,
-    storage: 'memory',
-    customRules: {
-      '/get-session': { window: 10, max: 20 },
-    },
-  },
-  advanced: {
-    cookiePrefix: 'tau',
-    // Only use secure cookies in production. Note: this requires SSL.
-    useSecureCookies: import.meta.env.PROD,
-    defaultCookieAttributes: {
-      httpOnly: true,
-      secure: import.meta.env.PROD, // Only secure cookies in production
-      sameSite: 'lax',
-    },
-  },
-} as const satisfies BetterAuthOptions;
-
-/**
- * Better Auth instance for CLI schema generation.
+ * Creating it logs Better Auth's warnings for the missing secret and base URL, so only the
+ * CLI may import this module. The runtime and tests import `#config/auth-static.config.js`.
  * Mock database connection - the CLI only needs the config structure, not a real connection.
  * @see https://www.better-auth.com/docs/concepts/cli#generate
  */

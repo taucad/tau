@@ -25,7 +25,7 @@ import {
   resolveHostGitCredential,
 } from '#api/hosts/host-git-credential.js';
 import { AuthGuard } from '#auth/auth.guard.js';
-import { staticAuthConfig } from '#config/auth.js';
+import { staticAuthConfig } from '#config/auth-static.config.js';
 import type { Environment } from '#config/environment.config.js';
 import { authInstanceKey } from '#constants/auth.constant.js';
 import { corsBaseConfiguration } from '#constants/cors.constant.js';

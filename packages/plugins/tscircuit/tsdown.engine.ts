@@ -186,6 +186,7 @@ export default defineConfig({
     'jsx-runtime': 'src/engine/jsx-runtime.ts',
     alphabet: 'src/engine/alphabet.ts',
     'kicad-catalog': 'src/engine/kicad-catalog.ts',
+    'generic-body': 'src/engine/generic-body.ts',
   },
   outDir: 'dist/engine',
   format: 'esm',

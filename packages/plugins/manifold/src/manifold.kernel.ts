@@ -433,6 +433,9 @@ async function addMissingNormals(nodes: readonly BaseGLTFNode[]): Promise<void> 
 
   // Shared sources stay shared, so manifold-3d's per-source node cache behaves as before.
   const withNormals = new Map<Manifold, Manifold>();
+  // One `getMesh()` copy and one `numProp()` read per source, however many nodes share it.
+  const runIdsBySource = new Map<Manifold, readonly number[]>();
+  const propertyCountBySource = new Map<Manifold, number>();
   const labelledMaterials = new Map<GLTFMaterial, Map<string, GLTFMaterial>>();
   for (const node of scene) {
     if (!(node instanceof gltfNodeModule.GLTFNode) || node.manifold === undefined) {
@@ -440,7 +443,12 @@ async function addMissingNormals(nodes: readonly BaseGLTFNode[]): Promise<void> 
     }
     const { manifold } = node;
     const material = getBackupMaterial(node);
-    const runMaterials = [...new Set(manifold.getMesh().runOriginalID)].flatMap((id) => {
+    let runIds = runIdsBySource.get(manifold);
+    if (!runIds) {
+      runIds = [...new Set(manifold.getMesh().runOriginalID)];
+      runIdsBySource.set(manifold, runIds);
+    }
+    const runMaterials = runIds.flatMap((id) => {
       const runMaterial = getMaterialById(id);
       return runMaterial ? [{ id, runMaterial }] : [];
     });
@@ -461,7 +469,11 @@ async function addMissingNormals(nodes: readonly BaseGLTFNode[]): Promise<void> 
       continue;
     }
 
-    const propertyCount = manifold.numProp();
+    let propertyCount = propertyCountBySource.get(manifold);
+    if (propertyCount === undefined) {
+      propertyCount = manifold.numProp();
+      propertyCountBySource.set(manifold, propertyCount);
+    }
     const labels: GLTFAttribute[] = [...authored];
     let labelledChannels = 0;
     for (const attribute of authored) {

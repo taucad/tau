@@ -79,7 +79,8 @@ const discriminatedResultUnion = <
  * shim for 8 (D20). The same version carries the second slice: `apply` (one
  * changeset over the wire), `glob`, `grep` and `indexStats` — calls a v9 peer
  * either serves or refuses, so the slices share one bump (D20). So does the
- * third: the index queries `facts` and `changedSince`.
+ * third: the index queries `facts` and `changedSince`, and
+ * `pendingPaths` (D9, W4).
  * @public
  */
 export const fileSystemBridgeProtocolVersion = 9;
@@ -436,6 +437,7 @@ export type FileSystemBridgeRuntimeService = FileSystemProvider &
      */
     search?: (query: string, options?: SearchOptions) => Promise<FileStatEntry[]>;
     statTree?: (path: string) => Promise<FileStatEntry[]>;
+    pendingPaths?: (paths: readonly string[]) => Promise<readonly string[]>;
     /*
      * A host whose provider can digest without buffering supplies its own; the
      * bridge otherwise derives one from `readFile` on the host's side of the wire.
@@ -629,6 +631,11 @@ export type FileSystemBridgeRootedCalls = MachineSettingsService &
      * connection's view; a connection with no index refuses with `ENOTSUP`.
      */
     changedSince(since: number, options?: LongCall): Promise<IndexChangedSince>;
+    /**
+     * Which of these files the root's index holds as pending entries (D9),
+     * answered without a read. A long call: a cold index opens first.
+     */
+    pendingPaths(paths: readonly string[], options?: LongCall): Promise<readonly string[]>;
   };
 
 /**
@@ -1544,6 +1551,7 @@ const callSchemas = {
     result: z.array(z.tuple([z.string(), contentFactsSchema])),
   },
   changedSince: { args: z.tuple([countSchema]), result: indexChangedSinceSchema },
+  pendingPaths: { args: z.tuple([z.array(rootedPathSchema)]), result: z.array(z.string()) },
 } satisfies FileSystemBridgeCallSchemas;
 
 const broadcastValidator = z.looseObject({ event: z.literal('fileChanged'), data: changeEventSchema });
@@ -1623,6 +1631,7 @@ export const fileSystemLongCalls: Readonly<Record<string, number | undefined>> =
   indexStats: 1,
   facts: 1,
   changedSince: 1,
+  pendingPaths: 1,
   /* Its controls ride `ApplyOptions` and the changeset's own signal;
    * `prepareApplyCall` takes them out. */
   apply: undefined,

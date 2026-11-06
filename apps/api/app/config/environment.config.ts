@@ -255,9 +255,11 @@ export const environmentSchemaBase = z.object({
     .number()
     .int()
     .min(1)
-    .max(300_000)
+    .max(600_000)
     .default(300_000)
-    .describe('Maximum funded provider execution time in milliseconds, including admission'),
+    .describe(
+      'Maximum funded provider execution time in milliseconds, including admission. Production keeps the default; staging sets 600000 (deploy-cut charter D15).',
+    ),
   BILLING_RECOVERY_INTERVAL_MS: z.coerce
     .number()
     .int()

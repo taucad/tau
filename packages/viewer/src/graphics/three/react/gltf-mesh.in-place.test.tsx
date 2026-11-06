@@ -16,6 +16,7 @@ import * as surfaceBatchOwners from '#graphics/three/utils/gltf-surface-batches.
 import * as sectionTopology from '#graphics/three/utils/section-surface-topology.js';
 import { getModelEmphasisSet } from '#graphics/three/materials/model-emphasis-registry.js';
 import { getModelComponentOwner } from '#graphics/three/utils/model-component-owner.js';
+import { buildModuleAboveSolidGlb } from '#graphics/three/utils/gltf-node-groups.test-utils.js';
 
 const mocks = vi.hoisted(() => {
   const sceneBounds = { min: [-20, -10, -5], max: [20, 10, 5] };
@@ -578,5 +579,57 @@ describe('GltfMesh model raycast', () => {
     const binStart = source.byteOffset + 28 + jsonLength + (view.byteOffset ?? 0);
     const loaded = await parser.loadBufferView(0);
     expect([...new Uint8Array(loaded)]).toEqual([...new Uint8Array(source.buffer, binStart, view.byteLength)]);
+  });
+});
+
+describe('GltfMesh node children', () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    mocks.graphicsActor.send.mockClear();
+  });
+
+  const presentModuleAboveSolid = async (enableLines: boolean): Promise<GLTF> => {
+    const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
+    render(
+      <GltfMesh
+        gltfFile={buildModuleAboveSolidGlb()}
+        geometryHash={`node-children-${enableLines}`}
+        presentationRevision={1}
+        enableLines={enableLines}
+        enableMatcap={false}
+      />,
+    );
+    await waitForCommits([1]);
+    return (await parseAsync.mock.results[0]?.value) as GLTF;
+  };
+
+  const findSolid = (scene: Object3D): Object3D | undefined => scene.getObjectByName('Solid');
+
+  const isWorldVisible = (object: Object3D): boolean => {
+    for (let current: Object3D | undefined = object; current; current = current.parent ?? undefined) {
+      if (!current.visible) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  // OpenRSCAD writes a module node holding only its feature-edge LINES, with its solid as a child node.
+  it('should keep a module node child solid when the module edges become fat lines', async () => {
+    const gltf = await presentModuleAboveSolid(true);
+
+    const solid = findSolid(gltf.scene);
+    expect(solid?.type).toBe('Mesh');
+    expect(isWorldVisible(solid!)).toBe(true);
+    expect(gltf.scene.getObjectByProperty('type', 'LineSegments2')).toBeDefined();
+  });
+
+  it('should keep a module node child solid visible when edges are off', async () => {
+    const gltf = await presentModuleAboveSolid(false);
+
+    const solid = findSolid(gltf.scene);
+    expect(solid?.type).toBe('Mesh');
+    expect(isWorldVisible(solid!)).toBe(true);
   });
 });

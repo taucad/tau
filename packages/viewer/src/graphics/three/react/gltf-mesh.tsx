@@ -7,6 +7,7 @@ import {
   gltfSurfacePresentationTag,
 } from '#graphics/three/utils/gltf-surface-batches.js';
 import type { GltfSurfaceBatches } from '#graphics/three/utils/gltf-surface-batches.js';
+import { separateGltfNodeChildren } from '#graphics/three/utils/gltf-node-groups.js';
 import { subscribeToMatcapLoad } from '#graphics/three/materials/matcap-material.js';
 import { geometryReceiptAt, recordRendererSpan } from '#lib/renderer-telemetry.js';
 import { invalidateSceneTransparency } from '#graphics/three/utils/scene-transparency-revision.js';
@@ -832,6 +833,8 @@ function usePresentationPreparation({
           stats.activeParses -= 1;
         }
         timings.parse = performance.now() - parseStartedAt;
+        // A primitive's visibility must not decide its node's child nodes (OpenRSCAD module edges above its solids).
+        separateGltfNodeChildren(gltf.scene, gltf.parser.associations as Map<Object3D, GltfLoaderAssociation>);
         // The presentation keeps the parser for section topology and keeps `gltfFile`; one copy of the
         // binary data is enough.
         releaseGltfBinaryChunk(gltf.parser, gltfFile);

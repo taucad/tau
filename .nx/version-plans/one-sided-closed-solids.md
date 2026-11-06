@@ -7,7 +7,6 @@ jscad: minor
 picovoxel: minor
 opencascade: minor
 brep: minor
-rhino: minor
 tscircuit: minor
 zoo: minor
 openrscad: minor

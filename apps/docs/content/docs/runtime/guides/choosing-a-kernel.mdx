@@ -19,7 +19,6 @@ Pick kernels by source language or import format, and install only the packages 
 | `@taucad/zoo`         | KCL                                       | Configured remote Zoo execution                       |
 | `@taucad/gltf`        | glTF/GLB                                  | glTF interchange with optional Draco                  |
 | `@taucad/brep`        | STEP/STP/IGES/IGS/BREP                    | BRep-family file import                               |
-| `@taucad/rhino`       | 3DM                                       | Rhino file import                                     |
 | `@taucad/assimp`      | Mesh and scene formats                    | OBJ, FBX, STL, PLY, DAE, and related imports          |
 | `@taucad/smlibpy`     | Python using smlibpy                      | Native NURBS BRep, PBR materials and mechanisms       |
 | `@taucad/build123d`   | Python using Build123d                    | Native BRep assemblies, joints, textured GLB and STEP |
@@ -30,7 +29,7 @@ There is no catch-all Tau kernel. Every first-party import extension has an expl
 
 ## Compose toolkits
 
-Pass one factory per package to `defineRuntime`. Source-code kernels need a bundler beside them; file-import kernels such as `gltf()`, `brep()`, `rhino()`, and `assimp()` do not:
+Pass one factory per package to `defineRuntime`. Source-code kernels need a bundler beside them; file-import kernels such as `gltf()`, `brep()`, and `assimp()` do not:
 
 ```typescript
 import { defineRuntime } from '@taucad/runtime/worker';

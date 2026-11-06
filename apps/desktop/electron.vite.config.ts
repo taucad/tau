@@ -43,7 +43,6 @@ const bundledWorkspaceDependencies = [
   '@taucad/picogk',
   '@taucad/picovoxel',
   '@taucad/replicad',
-  '@taucad/rhino',
   '@taucad/rpc',
   '@taucad/runtime',
   '@taucad/skills',

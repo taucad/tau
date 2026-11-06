@@ -248,15 +248,12 @@ describe('Tau-owned plugin alias surface', () => {
 });
 
 describe('Tau-owned kernel assertion surface', () => {
-  it('should keep only the documented rhino3dm declaration adapter', () => {
+  it('should keep no non-literal type assertions in kernel modules', () => {
     const assertions = pluginSourceRoots
       .map((root) => `${root}/${packageNameOf(root)}.kernel.ts`)
       .filter((path) => collectSourceFiles(path.slice(0, path.lastIndexOf('/'))).includes(path))
       .flatMap((path) => collectNonLiteralKernelAssertions(readSourceFile(path)));
 
-    expect(assertions).toEqual([
-      'packages/plugins/rhino/src/rhino.kernel.ts: importedFactory as unknown as RhinoFactory',
-      'packages/plugins/rhino/src/rhino.kernel.ts: importedFactory as unknown',
-    ]);
+    expect(assertions).toEqual([]);
   });
 });

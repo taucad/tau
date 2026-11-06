@@ -26,7 +26,6 @@ const builtInKernelIds = [
   'smlib',
   'gltf',
   'brep',
-  'rhino',
   'tscircuit',
   'zoo',
   'smlibpy',

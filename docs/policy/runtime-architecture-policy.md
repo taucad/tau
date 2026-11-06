@@ -3,7 +3,7 @@ title: 'Runtime Architecture Policy'
 description: 'Runtime SDK ownership and CAD worker architecture. Covers generic job/configuration modules, plugin boundaries, transport, and independent lifecycles.'
 status: active
 created: '2026-02-18'
-updated: '2026-10-18'
+updated: '2026-11-06'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/worker-policy.md
@@ -206,7 +206,7 @@ With the single-worker-per-geometry-unit architecture, only the backend for the 
 - jscad file: ~5 MB
 - smlib file: ~6.5 MB (SMLib NURBS WASM from `@classcad/smlibwasm`, loaded by the library's own Emscripten glue; selected only for files importing `@classcad/smlibwasm`)
 - kcl file: ~3 MB (KCL WASM)
-- STEP/STL/3DM/glTF file: package-owned import-kernel backend (`@taucad/brep`, `@taucad/assimp`, `@taucad/rhino`, `@taucad/gltf` after the converter dissolution)
+- STEP/STL/glTF file: package-owned import-kernel backend (`@taucad/brep`, `@taucad/assimp`, `@taucad/gltf` after the converter dissolution)
 
 Runtime itself must not import these concrete backends from its root or engine subpaths. Previously, all five kernels were loaded eagerly (~90 MB per CadMachine).
 

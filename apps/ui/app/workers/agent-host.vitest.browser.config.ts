@@ -70,7 +70,6 @@ export default defineConfig({
       'replicad',
       'replicad-opencascadejs/multi/init',
       'replicad-opencascadejs/single/init',
-      '@taucad/rhino > rhino3dm',
       'vitest-mock-extended',
       'vscode-uri',
     ],

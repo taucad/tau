@@ -437,7 +437,7 @@ export class OfflineEngine {
   }
 
   public edgeId(solid: SolidEntity, edge: TopoDS_Shape): string {
-    const id = idForSubShape(solid.edges, edge, this.mint);
+    const id = idForSubShape(this.oc, solid.edges, edge, this.mint);
     this.scene.subShapeOwner.set(id, solid.id);
     return id;
   }
@@ -1277,7 +1277,7 @@ export class OfflineEngine {
   }
 
   private faceId(solid: SolidEntity, face: TopoDS_Shape): string {
-    const id = idForSubShape(solid.faces, face, this.mint);
+    const id = idForSubShape(this.oc, solid.faces, face, this.mint);
     this.scene.subShapeOwner.set(id, solid.id);
     return id;
   }

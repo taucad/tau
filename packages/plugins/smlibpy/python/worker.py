@@ -56,14 +56,6 @@ class _ComputeCancelled(Exception):
     """Cooperative cancellation observed at a safe operation boundary."""
 
 
-class _OverBudget(Exception):
-    """A tessellation produced more triangles than the request allowed; no bundle was written."""
-
-    def __init__(self, triangles: int) -> None:
-        super().__init__(f"{triangles} triangles")
-        self.triangles = triangles
-
-
 def _canonical_compute_value(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
 
@@ -691,9 +683,9 @@ class _Bundle:
 
 
 def _mesh_model(
-    model: dict[str, Any], path: Path, linear_tolerance: float, angular_tolerance: float, max_triangles: int | None, edges: bool
+    model: dict[str, Any], path: Path, linear_tolerance: float, angular_tolerance: float, edges: bool
 ) -> dict[str, int]:
-    """Tessellate every shape, refusing before any array is built when the total exceeds `max_triangles`."""
+    """Tessellate every shape once at the requested tolerances and write the mesh bundle."""
 
     from smlibpy import Edge, Wire
 
@@ -703,8 +695,6 @@ def _mesh_model(
         for config in configs
     ]
     triangles = sum(len(surface[2]) for surface in surfaces if surface is not None)
-    if max_triangles is not None and triangles > max_triangles:
-        raise _OverBudget(triangles)
     bundle = _Bundle()
     shapes: list[dict[str, Any]] = []
     vertices = 0
@@ -935,17 +925,13 @@ class Worker:
         if method == "mesh":
             # Millimetres and degrees at the protocol boundary, as smlibpy takes them.
             artifact = self.artifacts.create("smlibpy-mesh.bin")
-            try:
-                counts = _mesh_model(
-                    self.handles[params["handleId"]],
-                    artifact,
-                    params["linearTolerance"],
-                    params["angularTolerance"],
-                    params.get("maxTriangles"),
-                    params.get("edges", True),
-                )
-            except _OverBudget as exceeded:
-                return {"triangles": exceeded.triangles, "vertices": exceeded.triangles * 3}
+            counts = _mesh_model(
+                self.handles[params["handleId"]],
+                artifact,
+                params["linearTolerance"],
+                params["angularTolerance"],
+                params.get("edges", True),
+            )
             return {"artifactPath": str(artifact), "byteLength": artifact.stat().st_size, **counts}
         if method == "export":
             return self._export(params)

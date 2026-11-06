@@ -59,7 +59,7 @@ This pass catches what the pass-1 regex cannot: an entry that imports a local mo
 
 ### Pass 3: Application Catch-All
 
-If the application registered a kernel with `extensions: ['*']`, it is selected now. No first-party package publishes a catch-all: import formats are owned by explicit `gltf`, `brep`, `rhino`, and `assimp` kernel IDs.
+If the application registered a kernel with `extensions: ['*']`, it is selected now. No first-party package publishes a catch-all: import formats are owned by explicit `gltf`, `brep`, and `assimp` kernel IDs.
 
 If nothing matches, selection returns `undefined` and the framework reports that no kernel can handle the file.
 

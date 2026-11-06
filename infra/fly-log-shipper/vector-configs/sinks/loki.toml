@@ -1,0 +1,62 @@
+# Replaces the image's /etc/vector/sinks/loki.toml (flyio/log-shipper v0.0.8),
+# which Vector cannot extend from a second file: a component may be declared once.
+#
+# loki_json and every upstream sink setting and label are kept as they were;
+# the sink now reads loki_service, which adds service_name, so Grafana Cloud
+# stops filing every line under unknown_service. Its value is the Tau service
+# the metrics contract names (libs/telemetry, OTel service.name): the Fly app
+# name without its -staging suffix, so tau-api-staging and tau-api both give
+# tau-api. It is a function of fly_app_name, so it adds no stream. The process
+# group is not a label (it would be a second one); it stays in the body as
+# fly.app.process_group.
+#
+# The image's start script expands this file as a shell here-document before
+# Vector reads it: write no dollar sign other than the env references below,
+# no backtick and no backslash.
+
+[transforms.loki_json]
+type = "remap"
+inputs = ["log_json"]
+source = '''
+  .level = .log.level
+  if starts_with(.message, "{") ?? false {
+    # parse json messages
+    json = object!(parse_json!(.message))
+    del(.message)
+    . |= json
+  }
+  '''
+
+[transforms.loki_service]
+type = "remap"
+inputs = ["loki_json"]
+source = '''
+  # Runs after the merge above, so an app's own service_name field cannot override it.
+  app = string(.fly.app.name) ?? ""
+  if ends_with(app, "-staging") {
+    app = slice!(app, 0, -8)
+  }
+  if app == "" {
+    del(.service_name)
+  } else {
+    .service_name = app
+  }
+  '''
+
+[sinks.loki]
+type = "loki"
+inputs = ["loki_service"]
+endpoint = "${LOKI_URL}"
+compression = "gzip"
+auth.strategy = "basic"
+auth.user = "${LOKI_USERNAME}"
+auth.password = "${LOKI_PASSWORD}"
+encoding.codec = "json"
+
+labels.event_provider = "{{event.provider}}"
+labels.fly_region = "{{fly.region}}"
+labels.fly_app_name = "{{fly.app.name}}"
+labels.fly_app_instance = "{{fly.app.instance}}"
+labels.host = "{{host}}"
+labels.level = "{{level}}"
+labels.service_name = "{{service_name}}"

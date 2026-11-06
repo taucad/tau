@@ -403,7 +403,6 @@ describe('Build123d kernel lifecycle errors', () => {
           linearTolerance: 0.05,
           angularTolerance: 20,
           includeEdges: false,
-          maxTriangles: 20_000_000,
         },
         signal: runtime.signal,
       }),
@@ -469,26 +468,25 @@ describe('Build123d kernel lifecycle errors', () => {
           linearTolerance: 1,
           angularTolerance: 20,
           includeEdges: false,
-          maxTriangles: 2_000_000,
         },
       }),
     ]);
     expect(rendered).toMatchObject({
       content: new Uint8Array([1, 2, 3]),
-      tessellation: { triangles: 8, vertices: 24, requested: 'medium', linearTolerance: 1, downgraded: 0 },
+      tessellation: { triangles: 8, vertices: 24, requested: 'medium', linearTolerance: 1 },
       issues: [],
     });
   });
 
-  it('coarsens an over-budget render and delivers its last step unbounded', async () => {
+  it('renders a large mesh once at the requested tolerance, with no budget', async () => {
     const context = createContext();
     const handle = { sessionGeneration: 2, handleId: 'shape' };
-    const overBudget = { triangles: 3_000_000, vertices: 9_000_000 };
-    context.session.request
-      .mockResolvedValueOnce(overBudget)
-      .mockResolvedValueOnce(overBudget)
-      .mockResolvedValueOnce(overBudget)
-      .mockResolvedValueOnce({ ...overBudget, artifactPath: '/private/model.glb', byteLength: 3 });
+    context.session.request.mockResolvedValueOnce({
+      triangles: 3_000_000,
+      vertices: 9_000_000,
+      artifactPath: '/private/model.glb',
+      byteLength: 3,
+    });
 
     const rendered = await definition.render?.(
       { view: 'model', handle, options: { tessellation: { linearTolerance: 0.5, angularTolerance: 20 } } },
@@ -497,15 +495,13 @@ describe('Build123d kernel lifecycle errors', () => {
     );
 
     expect(context.session.request.mock.calls.map(([call]) => (call as { params: unknown }).params)).toEqual([
-      { handleId: 'shape', linearTolerance: 0.5, angularTolerance: 20, includeEdges: false, maxTriangles: 2_000_000 },
-      { handleId: 'shape', linearTolerance: 1, angularTolerance: 24, includeEdges: false, maxTriangles: 2_000_000 },
-      { handleId: 'shape', linearTolerance: 2, angularTolerance: 28, includeEdges: false, maxTriangles: 2_000_000 },
-      { handleId: 'shape', linearTolerance: 4, angularTolerance: 32, includeEdges: false },
+      { handleId: 'shape', linearTolerance: 0.5, angularTolerance: 20, includeEdges: false },
     ]);
     expect(rendered).toMatchObject({
-      tessellation: { requested: 'explicit', linearTolerance: 4, angularTolerance: 32, downgraded: 3 },
-      issues: [expect.objectContaining({ code: 'TESSELLATION_DOWNGRADED' })],
+      tessellation: { requested: 'explicit', triangles: 3_000_000, linearTolerance: 0.5, angularTolerance: 20 },
+      issues: [],
     });
+    expect(rendered?.tessellation).not.toHaveProperty('downgraded');
   });
 
   it('exports STEP from the retained shapes', async () => {
@@ -524,38 +520,32 @@ describe('Build123d kernel lifecycle errors', () => {
     expect(exported).toMatchObject({ files: [{ name: 'assembly.step', bytes: new Uint8Array([1, 2, 3]) }] });
   });
 
-  it('refuses an over-budget GLB export with RESOURCE_LIMIT', async () => {
+  it('exports a GLB above the former 20,000,000-triangle budget', async () => {
     const context = createContext();
     const handle = { sessionGeneration: 2, handleId: 'shape' };
-    context.session.request.mockResolvedValueOnce({ triangles: 30_000_000, vertices: 90_000_000 });
-
-    await expect(
-      definition.export!(
-        {
-          exportId: 'glb',
-          handle,
-          options: {
-            tessellation: { linearTolerance: 0.01 },
-            coordinateSystem: 'y-up',
-            unit: { length: 'meter' },
-          },
-        },
-        runtime,
-        context,
-      ),
-    ).rejects.toMatchObject({
-      name: 'Build123dKernelError',
-      issues: [
-        expect.objectContaining({
-          code: 'RESOURCE_LIMIT',
-          details: expect.objectContaining({
-            producer: 'build123d',
-            suggested: { linearTolerance: 0.015, angularTolerance: 20 },
-          }),
-        }),
-      ],
+    context.session.request.mockResolvedValueOnce({
+      triangles: 30_000_000,
+      vertices: 90_000_000,
+      artifactPath: '/private/model.glb',
+      byteLength: 3,
     });
-    expect(context.session.readArtifact).not.toHaveBeenCalled();
+
+    const exported = await definition.export!(
+      {
+        exportId: 'glb',
+        handle,
+        options: {
+          tessellation: { linearTolerance: 0.01 },
+          coordinateSystem: 'y-up',
+          unit: { length: 'meter' },
+        },
+      },
+      runtime,
+      context,
+    );
+
+    expect(exported).toMatchObject({ files: [{ name: 'model.glb' }] });
+    expect(context.session.readArtifact).toHaveBeenCalledOnce();
   });
 
   it('announces verified worker admissions, refreshes warm candidates and skips the off arm', async () => {

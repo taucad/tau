@@ -259,7 +259,7 @@ describe('serializeMessage', () => {
           },
         },
       ]);
-      expect(serializeMessage(message)).toBe('Model: gpt-4 | Tokens: 10 in / 20 out');
+      expect(serializeMessage(message)).toBe('Model: gpt-4 | Tokens: 10 in / 0 cache read / 0 cache write / 20 out');
     });
 
     /* V6: an external turn's tokens are the vendor's own report, and Tau quotes
@@ -281,7 +281,9 @@ describe('serializeMessage', () => {
           },
         },
       ]);
-      expect(serializeMessage(message)).toBe('Agent: codex | Model: gpt-5.3-codex | Tokens: 1200 in / 300 out');
+      expect(serializeMessage(message)).toBe(
+        'Agent: codex | Model: gpt-5.3-codex | Tokens: 1200 in / 0 cache read / 0 cache write / 300 out',
+      );
     });
 
     /* B4 R2: an export names the funded operations whose receipts hold the
@@ -319,7 +321,9 @@ describe('serializeMessage', () => {
         },
       ]);
       const serialized = serializeMessage(message);
-      expect(serialized).toBe('Model: claude-3 | Tokens: 6 in / 17 out | Tau operations: op_a, op_b');
+      expect(serialized).toBe(
+        'Model: claude-3 | Tokens: 6 in / 0 cache read / 0 cache write / 17 out | Tau operations: op_a, op_b',
+      );
       expect(serialized).not.toContain('$');
     });
 
@@ -352,7 +356,46 @@ describe('serializeMessage', () => {
           },
         },
       ]);
-      expect(serializeMessage(message)).toBe('Model: claude-3 | Tokens: 15 in / 35 out');
+      expect(serializeMessage(message)).toBe('Model: claude-3 | Tokens: 15 in / 0 cache read / 0 cache write / 35 out');
+    });
+
+    /* P3: input is the uncached count only. A cached turn's export must show the
+     * cache reads and writes beside it, or a turn served from cache reads as a
+     * dozen tokens of input. The counts are summed per field across parts. */
+    it('separates uncached input, cache read, cache write and output', () => {
+      const message = baseMessage([
+        {
+          type: 'data-usage',
+          data: {
+            type: 'usage',
+            id: 'u1',
+            model: 'claude-sonnet-4-5',
+            inputTokens: 5,
+            outputTokens: 4000,
+            reasoningTokens: 0,
+            cacheReadTokens: 100_000,
+            cacheWriteTokens: 73_243,
+            operationId: 'op_a',
+          },
+        },
+        {
+          type: 'data-usage',
+          data: {
+            type: 'usage',
+            id: 'u2',
+            model: 'claude-sonnet-4-5',
+            inputTokens: 7,
+            outputTokens: 6969,
+            reasoningTokens: 0,
+            cacheReadTokens: 117_850,
+            cacheWriteTokens: 0,
+            operationId: 'op_a',
+          },
+        },
+      ]);
+      expect(serializeMessage(message)).toBe(
+        'Model: claude-sonnet-4-5 | Tokens: 12 in / 217850 cache read / 73243 cache write / 10969 out | Tau operations: op_a',
+      );
     });
   });
 

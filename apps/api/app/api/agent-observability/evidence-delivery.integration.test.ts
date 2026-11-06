@@ -85,7 +85,11 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
     return found!;
   };
 
-  const service = (allowed: readonly TelemetryPurpose[] = ['summary', 'content'], keyVersion = 1) => {
+  const service = (
+    allowed: readonly TelemetryPurpose[] = ['summary', 'content'],
+    keyVersion = 1,
+    failingProject?: string,
+  ) => {
     const config = mock<ConfigService>();
     /* eslint-disable @typescript-eslint/naming-convention -- environment variables are UPPER_CASED */
     const values: Record<string, unknown> = {
@@ -115,6 +119,15 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
       },
       protection: 'free',
     });
+    if (failingProject !== undefined) {
+      const answer = purposes.getAdmissionAuthority.getMockImplementation();
+      purposes.getAdmissionAuthority.mockImplementation(async (userId, projectId) => {
+        if (projectId === failingProject) {
+          throw new Error('authority unavailable');
+        }
+        return answer!(userId, projectId);
+      });
+    }
     return new EvidenceDeliveryService(
       { database } as unknown as DatabaseService,
       config as unknown as ConstructorParameters<typeof EvidenceDeliveryService>[1],
@@ -204,6 +217,32 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
     expect(retried.leaseExpiresAt!.getTime()).toBeGreaterThan(now.getTime());
     /* The vendor's reason stays on the row; the series carries only the bounded outcome. */
     expect(metrics.agentEvidenceDeliveries.add).toHaveBeenCalledWith(1, { outcome: 'retry' });
+  });
+
+  it('should settle a row whose attempt fails on its own, without stranding the rest of the batch', async () => {
+    const failing = await admitted();
+    const healthy = await admitted();
+    vendor((url) =>
+      url.pathname.endsWith('/otel/v1/traces') ? json(200, { name: 'otel-ingestion-job' }) : json(200, { data: [] }),
+    );
+    const now = new Date();
+
+    const counts = await service(['summary', 'content'], 1, failing.projectId).drain(now);
+
+    /* Nothing was sent for the failed row, so it backs off and is sent again; it is not left leased. */
+    const failed = await row(failing.receiptId);
+    expect(failed).toMatchObject({ state: 'pending', reason: 'error', traceId: null, leaseOwner: null });
+    expect(failed.payload).not.toBeNull();
+    expect(failed.leaseExpiresAt!.getTime()).toBeGreaterThan(now.getTime());
+    expect(await row(healthy.receiptId)).toMatchObject({ state: 'uncertain', reason: 'acknowledged' });
+    expect(counts).toMatchObject({ 'retry:error': 1, 'sent:acknowledged': 1 });
+    expect(metrics.agentEvidencePasses.add).toHaveBeenCalledWith(1, { 'tau.worker': 'delivery', outcome: 'ok' });
+
+    /* A later sweep finds nothing abandoned: no worker died. */
+    expect(await sweepBacklog(database, new Date(now.getTime() + deliveryTiming.leaseMilliseconds + 1000))).toEqual({
+      expired: 0,
+      abandoned: 0,
+    });
   });
 
   it('should hold a payload sealed under a key this deployment lacks, and count it apart from a retry', async () => {

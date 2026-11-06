@@ -8,15 +8,20 @@
 # fly_log_shipper_secrets), never values here: ORG, ACCESS_TOKEN (read-only org
 # token), LOKI_URL, LOKI_USERNAME, LOKI_PASSWORD.
 #
-# No services and no public listener: the Machine only dials out. Deployed by
-# `.github/workflows/deploy-log-shipper.yml`.
+# Loki labels: the upstream set (event_provider, fly_region, fly_app_name,
+# fly_app_instance, host, level) plus service_name, the Tau service
+# (`vector-configs/sinks/loki.toml`).
+#
+# No services and no public listener: the Machine only dials out. Built from
+# the Dockerfile and deployed by `.github/workflows/deploy-log-shipper.yml`.
 
 app = 'tau-log-shipper'
 primary_region = 'syd'
 
 [build]
-# Pinned by digest; bump both together after reading the upstream changelog.
-image = 'flyio/log-shipper:v0.0.8@sha256:72c7ff62b6871b86968650a67cec99d2b438b157b1da8f5bb365a8184dcaeeec'
+# The pinned upstream image plus Tau's Loki sink (`service_name` label); the
+# digest lives in the Dockerfile.
+dockerfile = 'Dockerfile'
 
 [[vm]]
 memory = '256mb'

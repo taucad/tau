@@ -14,7 +14,6 @@ export const runtimeKernelIds = [
   'picogk',
   'picovoxel',
   'replicad',
-  'rhino',
   'smlib',
   'smlibpy',
   'tscircuit',
@@ -68,7 +67,6 @@ export const exportFormats = [
 
 /** File formats: every kernel extension, every transcoder edge source and every export format. @public */
 export const fileFormats = [
-  '3dm',
   '3mf',
   'ac',
   'amf',

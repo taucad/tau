@@ -79,7 +79,6 @@
     "@taucad/react": "workspace:*",
     "@taucad/replicad": "workspace:*",
     "@taucad/revisions": "workspace:*",
-    "@taucad/rhino": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/share": "workspace:*",
     "@taucad/skills": "workspace:*",

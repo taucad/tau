@@ -628,9 +628,6 @@ const vendoredAssetReasons: Readonly<Record<string, Readonly<Record<string, stri
     '../../../node_modules/replicad/dist/replicad.js.map':
       '@taulabs/replicad exports "." only, not ./replicad.js.map; kept per blueprint Q1 until the sourcemap moves behind an opt-in dev flag',
   },
-  '@taucad/rhino': {
-    'node_modules/rhino3dm/rhino3dm.wasm': 'rhino3dm declares no exports field, so the deep path is the only address',
-  },
   '@taucad/zoo': {
     'src/offline/wasm/LICENSE.OCCT': 'LGPL-2.1 text the checked-in Open CASCADE build must ship beside its WASM',
     'src/offline/wasm/LICENSE.OCCT-Exception':

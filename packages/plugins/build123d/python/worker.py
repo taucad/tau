@@ -551,14 +551,6 @@ def _point(vector: Any) -> tuple[float, float, float]:
     return (float(vector.X) / 1000, float(vector.Z) / 1000, -float(vector.Y) / 1000)
 
 
-class _OverBudget(Exception):
-    """A tessellation produced more triangles than the request allowed; no GLB was written."""
-
-    def __init__(self, triangles: int) -> None:
-        super().__init__(f"{triangles} triangles")
-        self.triangles = triangles
-
-
 def _bounding_diagonal(shapes: tuple[Any, ...]) -> float:
     """The bounding-box diagonal in millimetres of every shape together; zero when there is nothing to bound."""
     from OCP.Bnd import Bnd_Box
@@ -682,11 +674,9 @@ def _topology(
     shapes: tuple[Any, ...],
     linear_tolerance: float,
     angular_tolerance: float,
-    max_triangles: int | None = None,
     include_edges: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
-    """Components and their meshes. Raises `_OverBudget` before building any mesh arrays when the
-    triangulated parts together exceed `max_triangles`."""
+    """Components and their meshes, triangulated once at the requested tolerances."""
     components: list[dict[str, Any]] = []
     leaves: list[tuple[str, Any]] = []
     used_ids: set[str] = set()
@@ -736,9 +726,6 @@ def _topology(
         (component_id, shape, *_triangulate(shape, linear_tolerance, angular_tolerance))
         for component_id, shape in leaves
     ]
-    triangles = sum(count for _component_id, _shape, _located, count in triangulated)
-    if max_triangles is not None and triangles > max_triangles:
-        raise _OverBudget(triangles)
     meshes = {
         component_id: _mesh_arrays(shape, located, linear_tolerance, angular_tolerance, include_edges)
         for component_id, shape, located, _count in triangulated
@@ -905,16 +892,12 @@ class Worker:
         if method == "mesh":
             # Millimetres and degrees at the protocol boundary; OCCT takes the angle in radians.
             shapes = self.handles[params["handleId"]]
-            try:
-                components, meshes = _topology(
-                    shapes,
-                    params["linearTolerance"],
-                    math.radians(params["angularTolerance"]),
-                    params.get("maxTriangles"),
-                    params.get("includeEdges") is True,
-                )
-            except _OverBudget as exceeded:
-                return {"triangles": exceeded.triangles, "vertices": exceeded.triangles * 3}
+            components, meshes = _topology(
+                shapes,
+                params["linearTolerance"],
+                math.radians(params["angularTolerance"]),
+                params.get("includeEdges") is True,
+            )
             triangles = sum(len(mesh["indices"]) // 3 for mesh in meshes.values())
             vertices = sum(len(mesh["positions"]) // 3 for mesh in meshes.values())
             projection = project_mechanism(shapes, components, self.motion.get(params["handleId"]), meshes=meshes)

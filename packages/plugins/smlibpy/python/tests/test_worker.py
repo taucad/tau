@@ -413,11 +413,12 @@ class WorkerTest(unittest.TestCase):
             self.assertNotIn("compute", built)
             handle = built["handleId"]
             self.assertGreater(space.dispatch("measure", {"handleId": handle})["diagonal"], 10)
-            refused = space.dispatch(
+            # No triangle budget: a request carrying the retired maxTriangles still writes the bundle.
+            unbudgeted = space.dispatch(
                 "mesh", {"handleId": handle, "linearTolerance": 0.1, "angularTolerance": 15, "maxTriangles": 1}
             )
-            self.assertNotIn("artifactPath", refused)
-            self.assertGreater(refused["triangles"], 1)
+            self.assertIn("artifactPath", unbudgeted)
+            self.assertGreater(unbudgeted["triangles"], 1)
             meshed = space.dispatch("mesh", {"handleId": handle, "linearTolerance": 0.1, "angularTolerance": 15})
             header, body = read_bundle(Path(meshed["artifactPath"]))
             self.assertEqual(len(body) + len(json.dumps(header)) > 0, True)

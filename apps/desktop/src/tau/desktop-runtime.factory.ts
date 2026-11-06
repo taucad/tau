@@ -15,7 +15,6 @@ import { createOpenrscadKernel } from '@taucad/openrscad';
 import { picogk } from '@taucad/picogk';
 import { picovoxel } from '@taucad/picovoxel';
 import { replicad } from '@taucad/replicad';
-import { rhino } from '@taucad/rhino';
 import { smlib } from '@taucad/smlib';
 import { smlibpy } from '@taucad/smlibpy';
 import { slicer } from '@taucad/slicer';
@@ -105,7 +104,6 @@ const createDesktopRuntimeImplementation = (options: DesktopRuntimeOptions = {})
           smlib(),
           gltf(),
           brep(),
-          rhino(),
           image(),
           slicer(),
           assimp({

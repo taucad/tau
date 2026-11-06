@@ -612,7 +612,7 @@ export default defineConfig(({ command, mode }) => {
       // not a `nx dev ui` concern; dev is plain HTTP regardless of TTY/--host.
       allowedHosts: true,
       // `runtime-ssr-assets.vite-plugin.ts` rewrites package-owned `import.meta.resolve`
-      // assets (resvg WASM, Geist fonts, occt/rhino WASM) to `/@fs/<abs path>` URLs at
+      // assets (resvg WASM, Geist fonts, occt WASM) to `/@fs/<abs path>` URLs at
       // serve time, and those paths live in sibling packages. Vite 8 refuses to serve
       // them unless the workspace root is allowed. NOT the skill-read widening it was
       // originally commented as: the skills moved to JSON modules and no longer need it,

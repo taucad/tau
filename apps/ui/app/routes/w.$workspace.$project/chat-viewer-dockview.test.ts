@@ -222,7 +222,7 @@ describe('listViewerSelectableFiles', () => {
         capabilities(
           { kind: 'kernel', id: 'replicad', extensions: ['ts', 'js'] },
           { kind: 'kernel', id: 'assimp', extensions: ['mesh.xml'] },
-          { kind: 'kernel', id: 'rhino', extensions: ['*'] },
+          { kind: 'kernel', id: 'catch-all', extensions: ['*'] },
         ),
       ),
     ).toEqual([

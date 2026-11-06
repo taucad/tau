@@ -200,7 +200,6 @@ describe('desktop runtime kernels', () => {
       jscad: [],
       manifold: [],
       openrscad: [],
-      rhino: [],
       smlib: [],
       tscircuit: [],
     });

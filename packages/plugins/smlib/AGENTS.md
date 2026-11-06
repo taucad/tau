@@ -49,6 +49,7 @@ Then follow the [AGENTS policy](../../../docs/policy/agents-md-policy.md), the [
 - [Runtime architecture policy](../../../docs/policy/runtime-architecture-policy.md)
 - [Library API policy](../../../docs/policy/library-api-policy.md)
 - [Testing policy](../../../docs/policy/testing-policy.md)
+- [CAD performance policy](../../../docs/policy/cad-performance-policy.md) Rule 3 for every call into smlibwasm
 
 Keep this file limited to verified local entrypoints, invariants and checks. Put cross-project standards in their policy owner and repeatable procedures in a shared skill.
 

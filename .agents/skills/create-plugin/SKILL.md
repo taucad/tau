@@ -74,6 +74,12 @@ the four-role CAD executor. ABI 2 plugins must declare a runtime peer range that
 excludes ABI 1 releases before publication; a generated range is not release
 qualification.
 
+A kernel or transcoder that drives a wasm or native library follows
+`docs/policy/cad-performance-policy.md` Rule 3: render, edge, topology and
+export paths call the library once per operation per shape, never per
+triangle, node, sample, edge or face; a `<name>.call-count.test.ts` pins the
+counts; a summary tracer exposes the calls; and every embind handle is freed.
+
 Wire only the consumers and host runtimes in the request. Record why an
 incompatible runtime is skipped. Remove superseded code after behavior parity.
 

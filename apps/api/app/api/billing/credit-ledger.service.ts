@@ -171,7 +171,8 @@ const invocationSchema = z
       })
       .strict()
       .optional(),
-    executionTimeout: z.number().int().min(1).max(300_000),
+    // Matches the BILLING_INVOCATION_DEADLINE schema maximum (deploy-cut charter D15).
+    executionTimeout: z.number().int().min(1).max(600_000),
   })
   .strict();
 const persistedInvocationEvidenceSchema = terminalHistorySchema

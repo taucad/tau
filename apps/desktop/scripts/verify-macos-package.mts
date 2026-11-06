@@ -1015,7 +1015,6 @@ if (!isQuickLookEnabled() || architecture === 'x64') {
     const classifications = [
       ['packages/plugins/gltf/src/fixtures/cube.glb', ['org.khronos.glb']],
       ['packages/plugins/brep/src/fixtures/cube.step', ['com.taucad.step', 'com.shapr3d.step', 'com.shapr3d.stp']],
-      ['packages/plugins/rhino/src/fixtures/cube-mesh.3dm', ['com.mcneel.rhinoceros.3dm', 'com.shapr3d.rhino.3dm']],
       ['packages/plugins/assimp/src/fixtures/cube-ascii.fbx', ['com.autodesk.mac.fbx']],
     ] as const;
     // Ask Launch Services rather than Spotlight: kMDItemContentType is indexed

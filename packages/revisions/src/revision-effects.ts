@@ -1467,8 +1467,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     useFileSystem(place, async (rooted) => {
       captureOptions.signal?.throwIfAborted();
       await sweepTemporarySiblings(place, rooted);
-      /* The project directory, where an open writes placeholders; a pull resumes any other checkout's. */
-      if (place.kind === 'live') {
+      /* The project directory, where an open writes placeholders; a pull resumes any other checkout's, and any
+       * checkout a failed tree write owes a check is checked again here (D10). */
+      if (place.kind === 'live' || owedFills.has(place.id)) {
         resumeFill(place);
       }
       const { modeBasis, bypassMemo, changed, signal } = captureOptions;
@@ -1609,12 +1610,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           const head = target === undefined ? undefined : await headOf(target);
           if (target !== undefined && head !== undefined && !fillsStopped) {
             resumedFills.add(target.id);
-            if (owed) {
-              /* Given its placeholders, the fill gives its word even with none to fetch. */
-              await largeObjects.fill(target, revisionId(head), largeObjectPlaceholders(await capture(target)));
-            } else {
-              await largeObjects.resume(target, revisionId(head));
-            }
+            /* Owed: given its placeholders, the fill gives its word even with none to fetch. */
+            await (owed
+              ? largeObjects.fill(target, revisionId(head), largeObjectPlaceholders(await capture(target)))
+              : largeObjects.resume(target, revisionId(head)));
           }
         } catch (error) {
           /* Unmarked, so the next capture or pull checks again. */

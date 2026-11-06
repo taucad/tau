@@ -1453,6 +1453,94 @@ describe('restore, through the machine that owns it', () => {
     tree.actor.stop();
   }, 30_000);
 
+  /* D10: the same owed check, for a linked checkout: its next capture gives the fill's word, not only a later pull. */
+  it('checks a linked checkout fill again at its next capture when a failed tree write leaves its check unanswered', async () => {
+    let failWrite = false;
+    let failReads = 0;
+    const reports: LargeObjectsReport[] = [];
+    const live: { filesystem?: RevisionFileSystem } = {};
+    const failing = (filesystem: RevisionFileSystem): RevisionFileSystem =>
+      new Proxy(filesystem, {
+        get: (target, property, receiver) => {
+          const value: unknown = Reflect.get(target, property, receiver);
+          if (typeof value !== 'function') {
+            return value;
+          }
+          const bound = (value as (...parameters: unknown[]) => unknown).bind(target);
+          if (target === live.filesystem) {
+            return bound;
+          }
+          if (property === 'applyBatch') {
+            return async (...parameters: unknown[]) => {
+              if (failWrite) {
+                failWrite = false;
+                /* The recovery's capture and the fill check that follows both fail. */
+                failReads = 2;
+                throw new Error('The disk refused the write.');
+              }
+              return bound(...parameters);
+            };
+          }
+          if (property === 'readdirEntries') {
+            return async (...parameters: unknown[]) => {
+              if (failReads > 0) {
+                failReads -= 1;
+                throw new Error('The disk could not be listed.');
+              }
+              return bound(...parameters);
+            };
+          }
+          return bound;
+        },
+      });
+    const { port, filesystem, actors } = await fixture({ 'main.ts': 'export const size = 1;\n' }, failing, {
+      onLargeObjects: (report) => reports.push(report),
+    });
+    live.filesystem = filesystem;
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const first = await port.writeRevision({
+      tree: new ImmutableRevisionTree([['main.ts', new TextEncoder().encode('export const size = 1;\n')]]),
+      parents: [],
+      provenance: { source: 'user', actorId: 'person-1', createdAt: 1 },
+      summary: { generated: 'base' },
+    });
+    const second = await port.writeRevision({
+      tree: new ImmutableRevisionTree([
+        ['main.ts', new TextEncoder().encode('export const size = 1;\n')],
+        ['extra.txt', new TextEncoder().encode('added\n')],
+      ]),
+      parents: [revisionId(first.commitId)],
+      provenance: { source: 'user', actorId: 'person-1', createdAt: 2 },
+      summary: { generated: 'extra' },
+    });
+    await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(first.commitId) });
+    await port.setHead('main');
+    const linked = await port.addCheckout?.({ branch: 'side', from: revisionId(second.commitId) });
+    expect(linked?.kind).toBe('linked');
+    const linkedId = linked?.id ?? '';
+    const told = (): number => reports.filter((report) => report.checkoutId === linkedId).length;
+
+    const plan = await run<{ planId: string }>(actors.restore.computePlan, {
+      checkoutId: linkedId,
+      target: first.commitId,
+    });
+    failWrite = true;
+    await expect(run(actors.restore.applyPlan, { checkoutId: linkedId, planId: plan.planId })).rejects.toThrow(
+      'The disk refused the write.',
+    );
+    await expect.poll(() => failReads === 0 && !failWrite, { timeout: 10_000 }).toBe(true);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 200);
+    });
+    const before = told();
+
+    await run(actors.checkout.captureTree, { checkoutId: linkedId });
+    await vi.waitFor(() => {
+      expect(told()).toBeGreaterThan(before);
+    });
+    expect(reports.findLast((report) => report.checkoutId === linkedId)?.facet).toBeUndefined();
+  }, 30_000);
+
   it('mints a dirty checkout before restoring it, and leaves no revision unreachable (I1, L1 probe)', async () => {
     const { port, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' });
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
@@ -3696,15 +3784,15 @@ it('keeps a placeholder a fill wrote during a real merge, writing only the merge
     ),
   );
   const part = 'solid part\n'.repeat(8);
-  const write = async (content: Readonly<Record<string, string>>, parents: readonly string[]): Promise<string> =>
-    (
-      await port.writeRevision({
-        parents: parents.map((parent) => revisionId(parent)),
-        tree: new ImmutableRevisionTree([...generated, ...Object.entries(content)]),
-        provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 13) },
-        summary: { generated: 'Revision' },
-      })
-    ).commitId;
+  const write = async (content: Readonly<Record<string, string>>, parents: readonly string[]): Promise<string> => {
+    const written = await port.writeRevision({
+      parents: parents.map((parent) => revisionId(parent)),
+      tree: new ImmutableRevisionTree([...generated, ...Object.entries(content)]),
+      provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 13) },
+      summary: { generated: 'Revision' },
+    });
+    return written.commitId;
+  };
   const base = await write({ 'a.txt': 'base\n', 'models/part.step': part }, []);
   const theirs = await write({ 'a.txt': 'theirs\n', 'models/part.step': part }, [base]);
   const ours = await write({ 'a.txt': 'base\n', 'models/part.step': part, 'c.txt': 'ours\n' }, [base]);
@@ -3743,7 +3831,7 @@ it('keeps a placeholder a fill wrote during a real merge, writing only the merge
   expect(await filesystem.readFile('models/part.step', 'utf8')).toBe(part);
   expect(await filesystem.readFile('a.txt', 'utf8')).toBe('theirs\n');
   const treeWrites = onApplyingTree.mock.calls.filter(
-    ([, , bracket]) => (bracket as { purpose?: string } | undefined)?.purpose === 'tree',
+    (call) => (call[2] as { purpose?: string } | undefined)?.purpose === 'tree',
   );
   expect(treeWrites.map(([, paths]) => paths)).toStrictEqual([['a.txt']]);
 }, 30_000);

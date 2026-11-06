@@ -909,15 +909,13 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     await project.unlink('models/copy.step');
     /* A placeholder is the object it stands for: a diff against the checkout neither fetches it nor lists it changed. */
     const reopened = await fixture.root('alpha');
-    expect((await reopened.diff(head!, undefined, { against: 'checkout' })).map(({ path }) => path)).not.toContain(
-      'models/part.step',
-    );
+    const pendingDiff = await reopened.diff(head!, undefined, { against: 'checkout' });
+    expect(pendingDiff.map(({ path }) => path)).not.toContain('models/part.step');
 
     await project.writeFile(objectFile, part);
     /* Its object on the device and the pointer still on disk: the same file, still unchanged. */
-    expect((await reopened.diff(head!, undefined, { against: 'checkout' })).map(({ path }) => path)).not.toContain(
-      'models/part.step',
-    );
+    const landedDiff = await reopened.diff(head!, undefined, { against: 'checkout' });
+    expect(landedDiff.map(({ path }) => path)).not.toContain('models/part.step');
     /* Once the object is on the device the authority reads through to it, before any fill has written the file. */
     expect(await project.readFile('models/part.step', 'utf8')).toBe(part);
     expect(await raw.readFile('models/part.step')).toStrictEqual(bytes);

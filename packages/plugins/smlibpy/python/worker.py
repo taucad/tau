@@ -610,8 +610,6 @@ def _mesh_boundary_polylines(
     every_edge = numpy.arange(len(edges))
 
     def assign(chain: list[int]) -> None:
-        if len(chain) < 2:
-            return
         first, last = point_vertex.get(chain[0]), point_vertex.get(chain[-1])
         joining = [] if first is None or last is None else by_ends.get((min(first, last), max(first, last)), [])
         best = joining[0] if len(joining) == 1 else nearest_edge(chain, joining if joining else every_edge)
@@ -630,9 +628,9 @@ def _mesh_boundary_polylines(
             chain.append(current)
             if current == start or current in stops:
                 return chain
-            onward = next((point for point in adjacency[current] if segment(current, point) not in visited), None)
-            if onward is None:
-                return chain
+            # A point that is not a stop has two segments, and the walk arrived on one of them: the other is unvisited,
+            # since an earlier walk through this point would have taken both (a walk ends only at a stop or its start).
+            onward = next(point for point in adjacency[current] if segment(current, point) not in visited)
             previous, current = current, onward
 
     # Open chains run from stop to stop; what is left are closed loops with no stop on them.

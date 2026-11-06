@@ -17,6 +17,7 @@ import type {
   ReadRequest,
 } from '@taucad/agent-host/wire';
 import { randomUuid } from '@taucad/utils/id';
+import { readBuildRelease } from '#lib/build-identity.js';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 import type {
@@ -837,6 +838,7 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
           runtimeConfig: options.runtimeConfig,
           testingEnabled: options.testingEnabled,
           ...(principal === undefined ? {} : { principal }),
+          release: readBuildRelease(),
           ...telemetryContextOf(pageTelemetry()?.workerContext()),
         },
         transferables,

@@ -277,6 +277,36 @@ describe('observeTurns', () => {
     expect(JSON.stringify(observation)).not.toContain('SYNTHETIC_FAILURE');
   });
 
+  it('keeps a failed ending’s code and the code it wrapped, never its message', () => {
+    const abandoned = term('t1', [
+      { type: 'run.lifecycle', state: 'running', attempt: 1 },
+      {
+        type: 'run.lifecycle',
+        state: 'failed',
+        attempt: 1,
+        detail: { message: 'SYNTHETIC_FAILURE', code: 'RUN_ABANDONED', details: { code: 'MODEL_ATTEMPT_PENDING' } },
+      },
+    ]);
+    const coded = term('t1', [
+      { type: 'run.lifecycle', state: 'running', attempt: 1 },
+      { type: 'run.lifecycle', state: 'failed', attempt: 1, detail: { message: 'SYNTHETIC_FAILURE', code: 'X_CODE' } },
+    ]);
+    const uncoded = term('t1', [
+      { type: 'run.lifecycle', state: 'running', attempt: 1 },
+      { type: 'run.lifecycle', state: 'failed', attempt: 1, detail: { message: 'SYNTHETIC_FAILURE' } },
+    ]);
+    const [observation] = observeTurns(chatId, abandoned);
+
+    expect(observation?.ending).toEqual({
+      source: { chatId, leaderEpoch: 't1', sequence: 1 },
+      at: start + 1000,
+      failure: { code: 'RUN_ABANDONED', wrapped: 'MODEL_ATTEMPT_PENDING' },
+    });
+    expect(JSON.stringify(observation)).not.toContain('SYNTHETIC_FAILURE');
+    expect(observeTurns(chatId, coded)[0]?.ending?.failure).toEqual({ code: 'X_CODE', wrapped: undefined });
+    expect(observeTurns(chatId, uncoded)[0]?.ending).not.toHaveProperty('failure');
+  });
+
   it('measures an approval pause, and leaves an unanswered one open', () => {
     const answered = term('t1', [
       { type: 'run.lifecycle', state: 'running', attempt: 1 },

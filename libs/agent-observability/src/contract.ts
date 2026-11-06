@@ -147,6 +147,12 @@ const summary = z.discriminatedUnion('kind', [
       termination: outcome,
       success: z.enum(['verified', 'failed', 'unknown']),
       assessment: id.nullable(),
+      /*
+       * The ending code's owner and retry class from the refusal registry, and the code itself: the wrapped one when a
+       * `wait`-class code was recorded as `RUN_ABANDONED`. Optional so an older host's outcome still admits.
+       */
+      failureClass: z.strictObject({ owner: id, retry: id }).optional(),
+      code: id.optional(),
     })
     .refine(
       (value) => value.success === 'unknown' || value.assessment !== null,

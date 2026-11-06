@@ -628,7 +628,7 @@ describe.each([inProcessPort, authorityConnection, workerPort])('rooted bridge c
               { op: 'write', path: '.tau/project.json', data: '{}' },
             ],
           }),
-        ).rejects.toMatchObject({ code: 'EPERM' });
+        ).rejects.toMatchObject({ code: 'EPERM', reason: 'WORKSPACE_MASKED_PATH' });
         await expect(proxy.exists('visible.ts')).resolves.toBe(false);
       },
     );
@@ -637,8 +637,22 @@ describe.each([inProcessPort, authorityConnection, workerPort])('rooted bridge c
       const agent = await open(transport, 'agent');
       const user = await open(transport, 'user');
       const changeset: Changeset = { entries: [{ op: 'write', path: '.tau/chats/c1.json', data: '{}' }] };
-      await expect(agent.proxy.apply(changeset)).rejects.toMatchObject({ code: 'EROFS' });
+      await expect(agent.proxy.apply(changeset)).rejects.toMatchObject({
+        code: 'EROFS',
+        reason: 'WORKSPACE_MASKED_PATH',
+      });
       await expect(user.proxy.apply(changeset)).resolves.toMatchObject({ state: 'applied' });
+    });
+
+    it('carries the masked reason beside the code on a single write, and no reason on an ordinary failure', async () => {
+      const { proxy } = await open(transport, 'agent');
+      await expect(proxy.writeFile('.tau/project.json', '{}')).rejects.toMatchObject({
+        code: 'EPERM',
+        reason: 'WORKSPACE_MASKED_PATH',
+      });
+      const missing = await proxy.readFile('no/such/file.ts').catch((error: unknown) => error);
+      expect(missing).toMatchObject({ code: 'ENOENT' });
+      expect((missing as { reason?: unknown }).reason).toBeUndefined();
     });
   });
 });

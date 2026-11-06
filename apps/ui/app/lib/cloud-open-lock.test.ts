@@ -166,6 +166,48 @@ describe('one cold open per device (S20)', () => {
     expect(await second).toBe(true);
   });
 
+  it('lets go when the opener’s session closes its client mid-open, so the next tab opens', async () => {
+    vi.stubGlobal('navigator', { locks: fakeLocks() });
+    let close = (): void => undefined;
+    let closed = false;
+    const opener = tab();
+    const first = holdCloudOpen({
+      projectId: 'p6',
+      owed: () => true,
+      connect: async () => {
+        opener.move({ sync: { pullPhase: 'fetching' } });
+      },
+      source: {
+        ...opener.source,
+        subscribe: (listener) => {
+          const unsubscribe = opener.source.subscribe(listener);
+          /* A closed client keeps its registry entry and drops its projection (RevisionClient.close). */
+          close = () => {
+            closed = true;
+            listener();
+          };
+          return unsubscribe;
+        },
+        status: () => (closed ? undefined : opener.source.status()),
+      },
+      /* Neither the heartbeat nor the stall bound would let go within the test. */
+      bounds: { heartbeat: 60_000, holderStall: 60_000 },
+    });
+    const connect = vi.fn(async () => undefined);
+    const peer = tab();
+    const second = holdCloudOpen({ projectId: 'p6', owed: () => true, connect, source: peer.source });
+    await vi.waitFor(() => {
+      expect(opener.source.status()).toBeDefined();
+    });
+    close();
+    expect(await first).toBe(true);
+    await vi.waitFor(() => {
+      expect(connect).toHaveBeenCalledOnce();
+    });
+    peer.move({ sync: { hasAppliedRemote: true } });
+    expect(await second).toBe(true);
+  });
+
   it('lets go of an open whose projection stops moving (W4 review 2)', async () => {
     vi.stubGlobal('navigator', { locks: fakeLocks() });
     const opener = tab();

@@ -70,8 +70,8 @@ const defaultBounds: CloudOpenBounds = { heartbeat: 5000, holderStall: 120_000, 
  * Hold the project's open lock across `connect` and the pull it starts,
  * announcing this tab's readiness to its peers as it goes.
  *
- * Bounded both ways: the holder lets go when its client goes away or its
- * projection stops moving for `holderStall`, and says it is alive every
+ * Bounded both ways: the holder lets go when its client goes away, closes
+ * (its projection, once there, is gone) or stops moving for `holderStall`, and says it is alive every
  * `heartbeat` meanwhile; a waiting tab that hears nothing for `waiterStall`
  * (a frozen or hung holder) takes the lock over and opens the project itself.
  *
@@ -99,18 +99,28 @@ export const holdCloudOpen = async (
     let announced: ProjectReadiness | undefined;
     let seen = source.status();
     let movedAt = Date.now();
+    /* Whether the opener's projection has existed: one that then goes away is a client closed or a connection lost. */
+    let projected = seen !== undefined;
     const look = (): void => {
       const status = source.status();
       if (status !== seen) {
         seen = status;
         movedAt = Date.now();
       }
+      const closed = projected && status === undefined;
+      projected ||= status !== undefined;
       const readiness = status?.readiness;
       if (readiness !== undefined && readiness !== announced) {
         announced = readiness;
         channel?.postMessage({ readiness } satisfies ReadinessNotice);
       }
-      if (openSettled(status) || !owed() || source.alive?.() === false || Date.now() - movedAt >= bounds.holderStall) {
+      if (
+        closed ||
+        openSettled(status) ||
+        !owed() ||
+        source.alive?.() === false ||
+        Date.now() - movedAt >= bounds.holderStall
+      ) {
         settled.resolve();
       }
     };

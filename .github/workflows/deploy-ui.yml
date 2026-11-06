@@ -140,26 +140,8 @@ jobs:
           sha: ${{ github.sha }}
           github-token: ${{ github.token }}
 
-      # GitHub environment credentials are the sole source for UI source maps.
-      # Validate the pair before Netlify resolves its site environment. Missing or
-      # malformed credentials fail before the build; they never fall back.
-      - name: Validate the PostHog source-map credentials
-        id: posthog
-        env:
-          TOKEN: ${{ secrets.POSTHOG_CLI_TOKEN }}
-          ENV_ID: ${{ vars.POSTHOG_CLI_ENV_ID }}
-          ENVIRONMENT: ${{ inputs.environment }}
-        run: |
-          set -euo pipefail
-          if [[ "$TOKEN" =~ ^phx_[A-Za-z0-9_-]+$ ]] && [[ "$ENV_ID" =~ ^[1-9][0-9]*$ ]]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            message="Configure a PostHog personal API key and numeric project ID in tau-repo: posthog_cli_token_$ENVIRONMENT and posthog_cli_env_id_$ENVIRONMENT, then apply the reviewed plan. Netlify credentials are not used."
-            echo "::error::$message"
-            exit 1
-          fi
-
+      # The GitHub environment's Sentry token is the sole source for UI source maps.
+      # A missing token fails before the build; it never falls back.
       - name: Require the Sentry source-map credential
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
@@ -208,12 +190,10 @@ jobs:
           MESSAGE: ${{ github.workflow }} ${{ github.sha }}
           # Both environments require successful uploads before deployment.
           TAU_SOURCEMAPS_OPTIONAL: 'false'
-          TAU_SOURCEMAPS_ENABLED: ${{ steps.posthog.outputs.enabled }}
+          TAU_SOURCEMAPS_ENABLED: 'true'
           # Netlify site variables outrank process variables. Map these distinct
           # GitHub-owned inputs only at the upload command, after that merge.
           TAU_SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          TAU_POSTHOG_CLI_TOKEN: ${{ secrets.POSTHOG_CLI_TOKEN }}
-          TAU_POSTHOG_CLI_ENV_ID: ${{ vars.POSTHOG_CLI_ENV_ID }}
           # The live deploy whose recent `/assets/*` this one keeps serving, so pages
           # loaded before it go live keep loading their chunks (`retain-previous-assets.mts`).
           TAU_RETAIN_ASSETS_FROM: ${{ steps.site.outputs.retain_from }}

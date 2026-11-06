@@ -133,6 +133,14 @@ it('masks all replay text and inputs while still blocking invitation links', () 
   expect(recording?.blockSelector).toContain('a[href*="/invitations/"]');
 });
 
+it('leaves exception capture to Sentry on every host, overriding the project remote setting', () => {
+  // Browser observability blueprint, D4: errors go to Sentry only.
+  /* eslint-disable @typescript-eslint/naming-convention -- posthog-js option names. */
+  expect(webPosthogOptions()).toMatchObject({ capture_exceptions: false });
+  expect(desktopPosthogOptions()).toMatchObject({ capture_exceptions: false });
+  /* eslint-enable @typescript-eslint/naming-convention -- restore test naming rules. */
+});
+
 describe('webPosthogOptions', () => {
   it('compresses captures, because the edge function forwards the body unexamined', () => {
     /* eslint-disable @typescript-eslint/naming-convention -- posthog-js option names. */

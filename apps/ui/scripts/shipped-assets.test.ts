@@ -135,7 +135,7 @@ describe('files the UI build ships', () => {
     const commands = project.targets.sourcemaps.options.commands.filter(
       (command) => command.includes('{projectRoot}/build/client') && /\binject\b/u.test(command),
     );
-    expect(commands.some((command) => command.includes('posthog'))).toBe(true);
+    expect(commands.some((command) => command.includes('posthog'))).toBe(false);
     expect(commands.some((command) => command.includes('sentry-cli'))).toBe(true);
     for (const command of commands) {
       expect(command).toMatch(
@@ -151,8 +151,8 @@ describe('files the UI build ships', () => {
     const inject = project.targets.sourcemaps.options.commands.find(
       (command) => command.includes('{projectRoot}/build/client') && /\binject\b/u.test(command),
     );
-    // Run the declared command without PostHog, which needs its API; the Sentry injection runs offline.
-    const sentryOnly = inject!.replace(/npx -y @posthog\/cli sourcemap inject [^&']*&& /u, '');
+    // Errors go to Sentry only, so the declared command carries no PostHog injector; it runs offline.
+    const sentryOnly = inject!;
     expect(sentryOnly).not.toContain('posthog');
     const client = await createClient();
     const projectRoot = dirname(dirname(client));

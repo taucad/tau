@@ -385,9 +385,10 @@ export class MutationPipeline {
    * token and accepts the first token it sees per path again; it is not shared
    * between authorities, so two tabs each with their own authority do not see
    * each other's tokens. Across both, the expected-length check still refuses
-   * an append that would interleave, since it reads the file itself. Entries are
-   * never evicted: one number per log path fenced in this authority's lifetime,
-   * which is one per chat segment opened, not per append.
+   * an append that would interleave, since it stats the file's current size
+   * (metadata only, I3). Entries are never evicted: one number per log path
+   * fenced in this authority's lifetime, which is one per chat segment opened,
+   * not per append.
    */
   private readonly _appendFences = new Map<string, number>();
 

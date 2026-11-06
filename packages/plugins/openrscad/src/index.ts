@@ -10,6 +10,7 @@ export { openrscad, openrscad as plugin } from '#openrscad.plugin.js';
 export {
   createOpenrscadKernel,
   openrscadKernel,
+  openrscadOptionsSchema,
   openrscadRenderSchema,
   openrscadExportSchemas,
 } from '#openrscad.kernel.js';

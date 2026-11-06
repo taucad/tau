@@ -905,6 +905,19 @@ describe('composeView masked apply', () => {
     },
   );
 
+  it.each(['agent', 'user'] as const)(
+    'should refuse a lifecycle changeset for the %s before asking about any path',
+    async (consumer) => {
+      const base = applying();
+      const view = composeView({ filesystem: base }, { consumer, policy: tauPathPolicy });
+
+      await expect(
+        view.apply!({ entries: [{ op: 'write', path: 'src/a.ts', data: 'a' }], lifecycle: true }),
+      ).rejects.toMatchObject({ code: 'EPERM' });
+      expect(base.apply).not.toHaveBeenCalled();
+    },
+  );
+
   it('should refuse a records entry for an agent and admit it for a person', async () => {
     const agentBase = applying();
     const userBase = applying();

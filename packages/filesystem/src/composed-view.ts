@@ -851,11 +851,19 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
    * changeset with the masked-path error and nothing is applied. A recursive
    * delete and a move's source reach paths nobody named, so their subtrees are
    * walked as `rmdir` and `rename` walk them.
+   *
+   * A `lifecycle` changeset takes the project token exclusively: the fence a
+   * project create, delete, adoption or topology replacement needs (D3). That
+   * is the authority's own work, never a masked consumer's, so the view
+   * refuses it with `EPERM` before anything is asked or applied.
    */
   const maskedApply = async (
     apply: (changeset: Changeset) => Promise<ChangesetReceipt>,
     changeset: Changeset,
   ): Promise<ChangesetReceipt> => {
+    if (changeset.lifecycle === true) {
+      fileSystemError('EPERM', `EPERM: the ${options.consumer} view may not apply a lifecycle changeset.`);
+    }
     const named = changeset.entries.flatMap((entry) => (entry.op === 'move' ? [entry.from, entry.to] : [entry.path]));
     const targets = await writableTargets(named);
     let at = 0;

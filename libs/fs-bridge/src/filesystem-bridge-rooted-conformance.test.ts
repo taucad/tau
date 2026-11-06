@@ -692,6 +692,10 @@ describe.each([inProcessPort, authorityConnection, workerPort])('rooted bridge c
           }),
         ).rejects.toMatchObject({ code: 'EPERM', reason: 'WORKSPACE_MASKED_PATH' });
         await expect(proxy.exists('visible.ts')).resolves.toBe(false);
+        await expect(
+          proxy.apply({ entries: [{ op: 'write', path: 'visible.ts', data: 'x' }], lifecycle: true }),
+        ).rejects.toMatchObject({ code: 'EPERM' });
+        await expect(proxy.exists('visible.ts')).resolves.toBe(false);
       },
     );
 

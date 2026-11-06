@@ -104,7 +104,6 @@ describe('@taucad/mcp', () => {
       requested: 'extra-high',
       linearTolerance: 0.02,
       angularTolerance: 10,
-      downgraded: 1,
     };
     const client = await connect({ dispatch: async () => ({ success: true, status: 'ready', tessellation }) });
     try {

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { tessellationSpanAttributes } from '#framework/tessellation-span-attributes.js';
 
 describe('tessellationSpanAttributes', () => {
-  it('should flatten a downgraded preset report into tessellation.effective attributes', () => {
+  it('should flatten a preset report into tessellation.effective attributes', () => {
     expect(
       tessellationSpanAttributes({
         triangles: 1_999_000,
@@ -11,7 +11,6 @@ describe('tessellationSpanAttributes', () => {
         requested: 'high',
         linearTolerance: 0.04,
         angularTolerance: 13,
-        downgraded: 2,
       }),
     ).toEqual({
       'tessellation.effective.form': 'preset',
@@ -21,8 +20,6 @@ describe('tessellationSpanAttributes', () => {
       'tessellation.effective.triangles': 1_999_000,
       'tessellation.effective.vertices': 1_000_500,
       'tessellation.effective.elapsed': 812,
-      'tessellation.effective.downgraded': true,
-      'tessellation.effective.downgradeSteps': 2,
     });
   });
 
@@ -40,7 +37,6 @@ describe('tessellationSpanAttributes', () => {
       'tessellation.effective.form': 'explicit',
       'tessellation.effective.linearTolerance': 0.1,
       'tessellation.effective.angularTolerance': 5,
-      'tessellation.effective.downgraded': false,
     });
     expect(attributes).not.toHaveProperty('tessellation.effective.preset');
   });
@@ -58,8 +54,13 @@ describe('tessellationSpanAttributes', () => {
       'tessellation.effective.vertices': 1_000_000,
       'tessellation.effective.elapsed': 90,
       'tessellation.effective.voxelSize': 0.2,
-      'tessellation.effective.downgraded': false,
     });
+  });
+
+  it('should carry no downgrade attribute, since kernels render at the requested tolerance', () => {
+    const attributes = tessellationSpanAttributes({ triangles: 10, vertices: 8, elapsed: 1, requested: 'high' });
+
+    expect(Object.keys(attributes).filter((key) => key.includes('downgrade'))).toEqual([]);
   });
 
   it('should return no attributes without a report', () => {

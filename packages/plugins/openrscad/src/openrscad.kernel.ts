@@ -564,6 +564,12 @@ class OpenRscadExportError extends Error {
 /** Engine version this kernel is authored against. @public */
 const engineVersion = '0.11.0-beta.4';
 
+/**
+ * Build metadata for changes in this kernel's own meshing, which the engine release does not capture.
+ * `tessellation1`: previews and exports mesh once, with no triangle budget (kernel budget program D1).
+ */
+const kernelMeshing = 'tessellation1';
+
 /** Options for {@link createOpenrscadKernel}. @public */
 export type CreateOpenrscadKernelOptions = {
   /**
@@ -582,7 +588,7 @@ export type CreateOpenrscadKernelOptions = {
   loadBackend?: () => Promise<OpenRscadBackend>;
   /**
    * Kernel version, and with it the runtime's build-cache namespace. It is the
-   * *engine release*, not the backend: one release's addon and WebAssembly
+   * *engine release* with this kernel's meshing as build metadata, not the backend: one release's addon and WebAssembly
    * build are byte-identical artifacts, gated per release, so they share one
    * cache key deliberately. Override this only for an engine build that is not
    * that release.
@@ -600,7 +606,7 @@ export type CreateOpenrscadKernelOptions = {
  */
 export const createOpenrscadKernel = ({
   loadBackend = async () => import('@taulabs/openrscad-engine'),
-  version = engineVersion,
+  version = `${engineVersion}+${kernelMeshing}`,
 }: CreateOpenrscadKernelOptions = {}) =>
   defineKernel({
     id: 'openrscad',

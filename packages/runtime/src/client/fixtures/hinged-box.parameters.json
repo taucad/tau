@@ -58,7 +58,7 @@
           "producer": "@taucad/middleware/parameterUnits",
           "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
           "rule": "length-height-token-v1/quantity-kind",
-          "sourceRevision": "89bce02b7d74ddd97402ac7d82cf1cfd16fca247158cd9e3d11b5510e26f7647"
+          "sourceRevision": "bdd61d9d1abbbf76fb70b0511fa24b7bbd96635d1b04758270f590f99ad0cbd7"
         },
         "space": {
           "evidence": "urn:taucad:parameter-schema:root#/properties/height;instance=/height;name=height",
@@ -66,7 +66,7 @@
           "producer": "@taucad/middleware/parameterUnits",
           "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
           "rule": "length-height-token-v1/space",
-          "sourceRevision": "89bce02b7d74ddd97402ac7d82cf1cfd16fca247158cd9e3d11b5510e26f7647"
+          "sourceRevision": "bdd61d9d1abbbf76fb70b0511fa24b7bbd96635d1b04758270f590f99ad0cbd7"
         },
         "unit": {
           "evidence": "urn:taucad:parameter-schema:root#/properties/height;instance=/height;name=height",
@@ -74,7 +74,7 @@
           "producer": "@taucad/middleware/parameterUnits",
           "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
           "rule": "length-height-token-v1/unit",
-          "sourceRevision": "89bce02b7d74ddd97402ac7d82cf1cfd16fca247158cd9e3d11b5510e26f7647"
+          "sourceRevision": "bdd61d9d1abbbf76fb70b0511fa24b7bbd96635d1b04758270f590f99ad0cbd7"
         }
       },
       "quantityKind": "http://qudt.org/vocab/quantitykind/Height",
@@ -89,7 +89,7 @@
           "producer": "@taucad/middleware/parameterUnits",
           "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
           "rule": "length-radius-token-v1/quantity-kind",
-          "sourceRevision": "89bce02b7d74ddd97402ac7d82cf1cfd16fca247158cd9e3d11b5510e26f7647"
+          "sourceRevision": "bdd61d9d1abbbf76fb70b0511fa24b7bbd96635d1b04758270f590f99ad0cbd7"
         },
         "space": {
           "evidence": "urn:taucad:parameter-schema:root#/properties/hingeRadius;instance=/hingeRadius;name=hingeRadius",
@@ -97,7 +97,7 @@
           "producer": "@taucad/middleware/parameterUnits",
           "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
           "rule": "length-radius-token-v1/space",
-          "sourceRevision": "89bce02b7d74ddd97402ac7d82cf1cfd16fca247158cd9e3d11b5510e26f7647"
+          "sourceRevision": "bdd61d9d1abbbf76fb70b0511fa24b7bbd96635d1b04758270f590f99ad0cbd7"
         },
         "unit": {
           "evidence": "urn:taucad:parameter-schema:root#/properties/hingeRadius;instance=/hingeRadius;name=hingeRadius",
@@ -105,7 +105,7 @@
           "producer": "@taucad/middleware/parameterUnits",
           "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
           "rule": "length-radius-token-v1/unit",
-          "sourceRevision": "89bce02b7d74ddd97402ac7d82cf1cfd16fca247158cd9e3d11b5510e26f7647"
+          "sourceRevision": "bdd61d9d1abbbf76fb70b0511fa24b7bbd96635d1b04758270f590f99ad0cbd7"
         }
       },
       "quantityKind": "http://qudt.org/vocab/quantitykind/Radius",
@@ -120,7 +120,7 @@
           "producer": "@taucad/middleware/parameterUnits",
           "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
           "rule": "length-length-token-v1/quantity-kind",
-          "sourceRevision": "89bce02b7d74ddd97402ac7d82cf1cfd16fca247158cd9e3d11b5510e26f7647"
+          "sourceRevision": "bdd61d9d1abbbf76fb70b0511fa24b7bbd96635d1b04758270f590f99ad0cbd7"
         },
         "space": {
           "evidence": "urn:taucad:parameter-schema:root#/properties/length;instance=/length;name=length",
@@ -128,7 +128,7 @@
           "producer": "@taucad/middleware/parameterUnits",
           "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
           "rule": "length-length-token-v1/space",
-          "sourceRevision": "89bce02b7d74ddd97402ac7d82cf1cfd16fca247158cd9e3d11b5510e26f7647"
+          "sourceRevision": "bdd61d9d1abbbf76fb70b0511fa24b7bbd96635d1b04758270f590f99ad0cbd7"
         },
         "unit": {
           "evidence": "urn:taucad:parameter-schema:root#/properties/length;instance=/length;name=length",
@@ -136,7 +136,7 @@
           "producer": "@taucad/middleware/parameterUnits",
           "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
           "rule": "length-length-token-v1/unit",
-          "sourceRevision": "89bce02b7d74ddd97402ac7d82cf1cfd16fca247158cd9e3d11b5510e26f7647"
+          "sourceRevision": "bdd61d9d1abbbf76fb70b0511fa24b7bbd96635d1b04758270f590f99ad0cbd7"
         }
       },
       "quantityKind": "http://qudt.org/vocab/quantitykind/Length",
@@ -151,7 +151,7 @@
           "producer": "@taucad/middleware/parameterUnits",
           "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
           "rule": "length-thickness-token-v1/quantity-kind",
-          "sourceRevision": "89bce02b7d74ddd97402ac7d82cf1cfd16fca247158cd9e3d11b5510e26f7647"
+          "sourceRevision": "bdd61d9d1abbbf76fb70b0511fa24b7bbd96635d1b04758270f590f99ad0cbd7"
         },
         "space": {
           "evidence": "urn:taucad:parameter-schema:root#/properties/lidThickness;instance=/lidThickness;name=lidThickness",
@@ -159,7 +159,7 @@
           "producer": "@taucad/middleware/parameterUnits",
           "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
           "rule": "length-thickness-token-v1/space",
-          "sourceRevision": "89bce02b7d74ddd97402ac7d82cf1cfd16fca247158cd9e3d11b5510e26f7647"
+          "sourceRevision": "bdd61d9d1abbbf76fb70b0511fa24b7bbd96635d1b04758270f590f99ad0cbd7"
         },
         "unit": {
           "evidence": "urn:taucad:parameter-schema:root#/properties/lidThickness;instance=/lidThickness;name=lidThickness",
@@ -167,7 +167,7 @@
           "producer": "@taucad/middleware/parameterUnits",
           "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
           "rule": "length-thickness-token-v1/unit",
-          "sourceRevision": "89bce02b7d74ddd97402ac7d82cf1cfd16fca247158cd9e3d11b5510e26f7647"
+          "sourceRevision": "bdd61d9d1abbbf76fb70b0511fa24b7bbd96635d1b04758270f590f99ad0cbd7"
         }
       },
       "quantityKind": "http://qudt.org/vocab/quantitykind/Length",
@@ -182,7 +182,7 @@
           "producer": "@taucad/middleware/parameterUnits",
           "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
           "rule": "length-width-token-v1/quantity-kind",
-          "sourceRevision": "89bce02b7d74ddd97402ac7d82cf1cfd16fca247158cd9e3d11b5510e26f7647"
+          "sourceRevision": "bdd61d9d1abbbf76fb70b0511fa24b7bbd96635d1b04758270f590f99ad0cbd7"
         },
         "space": {
           "evidence": "urn:taucad:parameter-schema:root#/properties/width;instance=/width;name=width",
@@ -190,7 +190,7 @@
           "producer": "@taucad/middleware/parameterUnits",
           "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
           "rule": "length-width-token-v1/space",
-          "sourceRevision": "89bce02b7d74ddd97402ac7d82cf1cfd16fca247158cd9e3d11b5510e26f7647"
+          "sourceRevision": "bdd61d9d1abbbf76fb70b0511fa24b7bbd96635d1b04758270f590f99ad0cbd7"
         },
         "unit": {
           "evidence": "urn:taucad:parameter-schema:root#/properties/width;instance=/width;name=width",
@@ -198,7 +198,7 @@
           "producer": "@taucad/middleware/parameterUnits",
           "profile": "tau-parameter-units-03;manifest=tau-json-structure-units-03-v1;language=en;length=mm;angle=deg",
           "rule": "length-width-token-v1/unit",
-          "sourceRevision": "89bce02b7d74ddd97402ac7d82cf1cfd16fca247158cd9e3d11b5510e26f7647"
+          "sourceRevision": "bdd61d9d1abbbf76fb70b0511fa24b7bbd96635d1b04758270f590f99ad0cbd7"
         }
       },
       "quantityKind": "http://qudt.org/vocab/quantitykind/Width",

@@ -130,7 +130,6 @@ const tessellationReport = z
     requested: z.enum(['low', 'medium', 'high', 'extra-high', 'explicit']).optional(),
     linearTolerance: z.number().positive().optional(),
     angularTolerance: z.number().positive().optional(),
-    downgraded: count.optional(),
   })
   .strip();
 const artifact = z

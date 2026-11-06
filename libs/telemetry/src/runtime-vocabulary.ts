@@ -220,6 +220,7 @@ export const kernelIssueCodes = [
   'SOURCE_SNAPSHOT_CHANGED',
   'SOURCE_SNAPSHOT_INVALID',
   'SVG_DOCUMENT_INVALID',
+  // Retired (kernel budget program D9): no kernel emits it; older clients may still report it.
   'TESSELLATION_DOWNGRADED',
   'TRANSCODER_CAPABILITY_MISSING',
   'TRANSCODER_EXECUTION_FAILED',

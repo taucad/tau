@@ -3685,6 +3685,69 @@ describe('independent sync record failures', () => {
   }, 30_000);
 });
 
+/* D9, D10: a real merge writes its paths over the files the fence holds, so a fill that landed meanwhile stays landed. */
+it('keeps a placeholder a fill wrote during a real merge, writing only the merged paths', async () => {
+  const { port, filesystem } = await fixture({ 'a.txt': 'base\n' });
+  await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+  await port.setHead('main');
+  const generated = await Promise.all(
+    [generatedGitattributesPath, generatedIgnorePath].map(
+      async (path) => [path, new TextDecoder().decode(await filesystem.readFile(path))] as const,
+    ),
+  );
+  const part = 'solid part\n'.repeat(8);
+  const write = async (content: Readonly<Record<string, string>>, parents: readonly string[]): Promise<string> =>
+    (
+      await port.writeRevision({
+        parents: parents.map((parent) => revisionId(parent)),
+        tree: new ImmutableRevisionTree([...generated, ...Object.entries(content)]),
+        provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 13) },
+        summary: { generated: 'Revision' },
+      })
+    ).commitId;
+  const base = await write({ 'a.txt': 'base\n', 'models/part.step': part }, []);
+  const theirs = await write({ 'a.txt': 'theirs\n', 'models/part.step': part }, [base]);
+  const ours = await write({ 'a.txt': 'base\n', 'models/part.step': part, 'c.txt': 'ours\n' }, [base]);
+  await port.updateRef({ name: 'feature', expectedHead: undefined, head: revisionId(theirs) });
+  await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(ours) });
+  /* The checkout on `main`, the part still its placeholder. */
+  await filesystem.writeFile('c.txt', 'ours\n');
+  await filesystem.mkdir('models', { recursive: true });
+  await filesystem.writeFile('models/part.step', lfsPointerFor(new TextEncoder().encode(part)).bytes);
+  /* The fill lands the part after the merge captured the checkout and before its write. */
+  const onApplyingTree = vi.fn(
+    (..._parameters: unknown[]) =>
+      (): void =>
+        undefined,
+  );
+  const actors = createRevisionActors({
+    port: {
+      ...port,
+      diff: async (input) => {
+        await filesystem.writeFile('models/part.step', part);
+        return port.diff(input);
+      },
+    },
+    projectId: 'project-1',
+    filesystem: async () => filesystem,
+    onApplyingTree,
+  });
+
+  const outcome = await run<{ status: string }>(actors.branch.merge, {
+    projectId: 'project-1',
+    branch: 'feature',
+    into: 'main',
+  });
+
+  expect(outcome.status).toBe('merged');
+  expect(await filesystem.readFile('models/part.step', 'utf8')).toBe(part);
+  expect(await filesystem.readFile('a.txt', 'utf8')).toBe('theirs\n');
+  const treeWrites = onApplyingTree.mock.calls.filter(
+    ([, , bracket]) => (bracket as { purpose?: string } | undefined)?.purpose === 'tree',
+  );
+  expect(treeWrites.map(([, paths]) => paths)).toStrictEqual([['a.txt']]);
+}, 30_000);
+
 for (const actorSet of actorSets) {
   describe.runIf(actorSet.enabled)(`merging two lines — ${actorSet.name}`, () => {
     /** A project on `main` with a `feature` branch that moved on from the same base. */

@@ -3405,11 +3405,16 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       provenance: provenanceOf('merge', []),
       summary: Object.freeze({ generated: `Merged ${sourceLabel} into ${input.into}` }),
     });
-    await writeRevisionTree(target, tree, {
-      fillFrom: revisionId(receipt.commitId),
-      validate: validateTarget,
-      publish: async () => landMerge(ours, revisionId(receipt.commitId)),
-    });
+    /* Over the fenced capture when it is ours: a fill that landed since `live` keeps its file, never its pointer again. */
+    await writeRevisionTree(
+      target,
+      targetHead === ours ? async (before) => overlay(before, paths, merged.tree) : tree,
+      {
+        fillFrom: revisionId(receipt.commitId),
+        validate: validateTarget,
+        publish: async () => landMerge(ours, revisionId(receipt.commitId)),
+      },
+    );
     return { status: 'merged', revisionId: receipt.commitId, checkoutId: target.id };
   };
 

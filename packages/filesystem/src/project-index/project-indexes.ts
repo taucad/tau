@@ -391,7 +391,12 @@ export class ProjectIndexes {
       return 'skipped';
     }
     /* A snapshot claims every notice its vector names: re-observe what those
-     * notices left unknown first, so it never stores a view older than its vector. */
+     * notices left unknown first, so it never stores a view older than its vector.
+     * A pending entry still waiting for its mtime is observed too, so the stored
+     * mtime is the provider's and the reload keeps it pending (D9). */
+    for (const path of state.index.unmeasuredPendingPaths) {
+      state.index.invalidate(path);
+    }
     if (state.index.stalePaths.length > 0) {
       await this._refreshStale(key, state.index);
       clearTimeout(state.persistTimer);

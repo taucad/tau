@@ -889,6 +889,30 @@ describe('ProjectIndexes', () => {
     expect(reads()).toBe(0);
   });
 
+  /* D9: a tree write's placeholder is recorded before the provider reports its mtime; the snapshot stores the provider's. */
+  it('should keep a placeholder a write landed pending across a reload, its mtime observed before storing', async () => {
+    const { provider } = await durableRoot();
+    const object = { oid: 'd'.repeat(64), size: 5_000_000 };
+    const pointer = 'p'.repeat(131);
+    const before = indexesOver(provider);
+    await before.ready('/p');
+    await before.expect('/p', [{ path: 'part.step', size: 131, pending: object, arriving: true }]);
+    await provider.writeFile('project/part.step', pointer);
+    /* The write's bracket records its size, never the provider's mtime, which a later clock makes differ. */
+    vi.useFakeTimers({ now: Date.now() + 60_000 });
+    try {
+      before.addFile('/p/part.step', { size: pointer.length });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(before.pendingAt('/p/part.step')).toBeDefined();
+    expect(await before.persist('/p')).toBe('written');
+
+    const reloaded = indexesOver(provider);
+    await reloaded.ready('/p');
+    expect(reloaded.pendingAt('/p/part.step')).toEqual(object);
+  });
+
   it('should keep each well-formed pending entry when another in the stored map is malformed', () => {
     const object = { oid: 'c'.repeat(64), size: 7 };
     const parsed = parseIndexSnapshot(

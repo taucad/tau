@@ -289,6 +289,21 @@ export class ProjectIndex {
   }
 
   /**
+   * Pending entries a write recorded before the provider reported their mtime
+   * (D9). A snapshot would store a guessed mtime for them, which the reload's
+   * compare takes for a change and drops the entry's pending object with.
+   */
+  public get unmeasuredPendingPaths(): readonly string[] {
+    const paths: string[] = [];
+    for (const entry of this.walk('', { kinds: ['file'] })) {
+      if (entry.pending !== undefined && this._resolve(segmentsOf(entry.path))?.pendingMtime === true) {
+        paths.push(entry.path);
+      }
+    }
+    return paths;
+  }
+
+  /**
    * One entry.
    *
    * @param path - Root-relative path, `''` for the root.
@@ -613,7 +628,12 @@ export class ProjectIndex {
         }
         return;
       }
-      if (node?.kind === row.kind && (row.kind === 'dir' || (node.size === row.size && node.mtimeMs === row.mtimeMs))) {
+      if (
+        node?.kind === row.kind &&
+        (row.kind === 'dir' || (node.size === row.size && (node.mtimeMs === row.mtimeMs || node.pendingMtime === true)))
+      ) {
+        /* A write's own entry learns the provider's mtime, keeping what the write knew (its pending object, D9). */
+        this._adoptMtime(node, row.mtimeMs);
         if (!this._trustworthyMtime) {
           this._dropFacts(node);
         }
@@ -870,18 +890,7 @@ export class ProjectIndex {
           continue;
         }
         if (node.size === row.size && (node.mtimeMs === row.mtimeMs || node.pendingMtime === true)) {
-          if (node.pendingMtime === true) {
-            node.mtimeMs = row.mtimeMs;
-            delete node.pendingMtime;
-            if (node.factsAt !== undefined) {
-              node.factsAt = { ...node.factsAt, mtimeMs: row.mtimeMs };
-              /* Bytes modified after the writer measured them are not the
-               * bytes it measured: a same-size rewrite since. */
-              if (row.mtimeMs > node.factsAt.observedAt) {
-                this._dropFacts(node);
-              }
-            }
-          }
+          this._adoptMtime(node, row.mtimeMs);
           if (!this._trustworthyMtime) {
             this._dropFacts(node);
             continue;
@@ -955,6 +964,23 @@ export class ProjectIndex {
       return undefined;
     }
     return facts;
+  }
+
+  /* A node a write recorded before the provider reported its mtime takes the provider's. */
+  private _adoptMtime(node: Node, mtimeMs: number): void {
+    if (node.pendingMtime !== true) {
+      return;
+    }
+    node.mtimeMs = mtimeMs;
+    delete node.pendingMtime;
+    if (node.factsAt !== undefined) {
+      node.factsAt = { ...node.factsAt, mtimeMs };
+      /* Bytes modified after the writer measured them are not the bytes it
+       * measured: a same-size rewrite since. */
+      if (mtimeMs > node.factsAt.observedAt) {
+        this._dropFacts(node);
+      }
+    }
   }
 
   private _entryOf(path: string, node: Node): IndexEntry {

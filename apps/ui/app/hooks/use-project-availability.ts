@@ -69,21 +69,38 @@ export function useProjectAvailability(): ProjectAvailability {
  */
 export type ModelAvailability = ProjectAvailability | 'files' | 'filesFailed';
 
-/** {@link ModelAvailability} from the project's availability and its large-object facet. */
+/**
+ * {@link ModelAvailability} from the project's availability, its large-object
+ * facet and its published readiness.
+ *
+ * A render opens at `filled` (D10, {@link surfaceReadiness}): a project whose
+ * host publishes readiness waits for it there, even between a tree write and
+ * the new tree's fill. A host that publishes none yet is read from its facet.
+ *
+ * @param project - The project's availability.
+ * @param largeObjects - The large-object facet.
+ * @param readiness - The published readiness, when the host publishes one.
+ * @returns What the model surface shows.
+ */
 export function modelAvailability(
   project: ProjectAvailability,
   largeObjects: Pick<LargeObjectsFacet, 'phase'> | undefined,
+  readiness?: ProjectReadiness,
 ): ModelAvailability {
-  if (project !== 'ready' || largeObjects === undefined) {
+  if (project !== 'ready') {
     return project;
+  }
+  if (largeObjects === undefined) {
+    return readiness === undefined || readyFor('model', readiness) ? 'ready' : 'files';
   }
   return largeObjects.phase === 'failed' ? 'filesFailed' : 'files';
 }
 
-/** Shared readiness for the viewer and the other kernel surfaces. */
+/** Shared readiness for the viewer, export and the other kernel surfaces. */
 export function useModelAvailability(): ModelAvailability {
   const project = useProjectAvailability();
-  return modelAvailability(project, useRevisionStatus()?.largeObjects);
+  const status = useRevisionStatus();
+  return modelAvailability(project, status?.largeObjects, status?.readiness);
 }
 
 /**

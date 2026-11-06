@@ -1068,6 +1068,11 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
     saveRevision: async (trigger) => {
       await ask({ command: 'saveRevision', ...(trigger === undefined ? {} : { trigger }) });
     },
+    /* On the selected checkout, which is the one the page's files are rooted at. */
+    materialize: async (paths) => {
+      const checkoutId = status?.checkoutId;
+      await ask({ command: 'materialize', paths, ...(checkoutId === undefined ? {} : { checkoutId }) });
+    },
     createBranch: async (name, from) => {
       const result = await ask({ command: 'createBranch', name, ...(from === undefined ? {} : { from }) });
       if (result.kind !== 'branch') {

@@ -2,7 +2,10 @@ import { render, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
+import { lfsPointerFor } from '@taucad/revisions';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
+import { revisionClients } from '#services/revision-client-registry.js';
+import type { RevisionClient } from '#types/revision-client.types.js';
 
 const editorRef = vi.hoisted(() => ({ send: vi.fn() }));
 const contentService = vi.hoisted(() => ({ current: undefined as FileContentService | undefined }));
@@ -97,5 +100,35 @@ describe('EditorDocumentSessionProvider navigation', () => {
     const environment = await mountEnvironment();
     await environment.navigate({ uri: 'file:///main.kcl', line: 1, column: 1, declaration: { text: 'x' } });
     expect(openFileCalls()).toEqual([]);
+  });
+});
+
+describe('EditorDocumentSessionProvider language reads (D9, W4 review 3)', () => {
+  it('should make a placeholder its file before a language service reads it, and read any other file as it is', async () => {
+    const part = new TextEncoder().encode('solid part');
+    const { bytes } = lfsPointerFor(part);
+    const disk = new Map<string, Uint8Array<ArrayBuffer>>([
+      ['main.kcl', new TextEncoder().encode('x = 1')],
+      ['models/part.step', bytes],
+    ]);
+    fileManager.readFile.mockImplementation(async (path: string) => disk.get(path.replace(/^\/+/u, '')));
+    const materialize = vi.fn(async (paths: readonly string[]) => {
+      for (const path of paths) {
+        disk.set(path, part);
+      }
+    });
+    revisionClients.set('p', {
+      client: mock<RevisionClient>({ materialize }),
+      worker: mock<Worker>(),
+    });
+    try {
+      const environment = await mountEnvironment();
+      expect(await environment.fileManager.readFile('/main.kcl')).toStrictEqual(disk.get('main.kcl'));
+      expect(materialize).not.toHaveBeenCalled();
+      expect(await environment.fileManager.readFile('/models/part.step')).toStrictEqual(part);
+      expect(materialize).toHaveBeenCalledExactlyOnceWith(['models/part.step']);
+    } finally {
+      revisionClients.delete('p');
+    }
   });
 });

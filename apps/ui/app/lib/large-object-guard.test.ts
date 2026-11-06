@@ -28,6 +28,8 @@ const filesystem = (): Readonly<{ files: Map<string, Uint8Array<ArrayBuffer>>; f
   const fileSystem = mock<RpcFileSystem>();
   fileSystem.readFile.mockImplementation(async (path) => decoder.decode(read(path)));
   fileSystem.readBinaryFile.mockImplementation(async (path) => read(path));
+  /* The index's answer: which files are still placeholders, known without a read. */
+  fileSystem.pendingPaths = async (paths) => paths.filter((path) => files.get(path) === placeholder);
   fileSystem.writeFile.mockImplementation(async (path, content) => {
     files.set(path, encoder.encode(content));
   });
@@ -84,6 +86,8 @@ describe('the agent tools while large objects download', () => {
       guarded.writeFileChecked({ path: '/models/part.step', data: 'x', preconditions: [] }),
     ).rejects.toMatchObject({ retryable: true });
     expect(files.get('/models/part.step')).toStrictEqual(placeholder);
+    /* Decided from the index: a read of a pending entry would fetch its object. */
+    expect(fileSystem.readBinaryFile).not.toHaveBeenCalled();
     expect(fileSystem.editFile).not.toHaveBeenCalled();
     expect(fileSystem.writeFileChecked).not.toHaveBeenCalled();
 

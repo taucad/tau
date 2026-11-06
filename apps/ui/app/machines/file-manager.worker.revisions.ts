@@ -47,6 +47,7 @@ import type {
   IsomorphicGitCheckoutOptions,
   KeepalivePushOutcome,
   LargeObjectsReport,
+  PlaceholderRequest,
   ProjectReadinessReading,
   ReadOutcome,
   PublishDraft,
@@ -454,13 +455,20 @@ export const createCheckoutRoutes = (options: {
  */
 export const createPendingObjectSource =
   (roots: () => ReadonlyMap<string, Promise<WorkerProjectRevisions>>): PendingObjectSource =>
-  async ({ root, path }, signal) => {
+  async ({ root, path, pointer, localOnly }, signal, progress) => {
+    /* The reader's signal only says it stopped waiting: the fetch it joins is the fill's too, and runs on (I10). */
+    const request: PlaceholderRequest = {
+      signal,
+      onProgress: progress,
+      ...(pointer === undefined ? {} : { pointer }),
+      ...(localOnly === undefined ? {} : { localOnly }),
+    };
     const open = roots();
     const projectRoot = /^\/projects\/([^/]+)$/u.exec(root);
     const live = projectRoot === null ? undefined : open.get(projectRoot[1]!);
     if (live !== undefined) {
       const revisions = await live;
-      return revisions.resolvePlaceholder(undefined, path, signal);
+      return revisions.resolvePlaceholder(undefined, path, request);
     }
     const checkoutId = /^\/checkouts\/([^/]+)$/u.exec(root)?.[1];
     if (checkoutId !== undefined) {
@@ -470,7 +478,7 @@ export const createPendingObjectSource =
           // oxlint-disable-next-line no-await-in-loop -- the one project that knows the checkout answers
           const revisions = await pending;
           // oxlint-disable-next-line no-await-in-loop -- as above
-          resolved = await revisions.resolvePlaceholder(checkoutId, path, signal);
+          resolved = await revisions.resolvePlaceholder(checkoutId, path, request);
         } catch (error) {
           if ((error as { code?: unknown } | undefined)?.code === 'PENDING') {
             throw error;
@@ -530,7 +538,7 @@ export type WorkerProjectRevisions = Readonly<{
   resolvePlaceholder: (
     checkoutId: string | undefined,
     path: string,
-    signal?: AbortSignal,
+    request?: PlaceholderRequest,
   ) => Promise<Uint8Array<ArrayBuffer> | undefined>;
   /** One content-change event on a checkout, already filtered to versioned paths. */
   changed: (checkoutId: string, paths: readonly string[]) => void;
@@ -837,9 +845,17 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   const watchEntryClosure = async (root: string, closure: readonly string[]): Promise<void> => {
     const entry: { closure: readonly string[]; view?: RootedFileSystem; landed: boolean } = { closure, landed: false };
     entryClosures.set(root, entry);
-    entry.view = await options.filesystem(root);
+    try {
+      entry.view = await options.filesystem(root);
+    } catch (error) {
+      /* Without the view the reading stays at treeReady until the write ends: late, never wrong (I7). */
+      console.warn('[revisions] the entry closure cannot be watched', error);
+      return;
+    }
     republish();
   };
+  /* Checkouts whose last write of another revision's tree failed: that tree is never read as written (D10, I7). */
+  const failedTreeWrites = new Set<string>();
   /* Each checkout's changes observed while a host write held its root: raised once, together, when the last closes. */
   const deferredChanges = new Map<string, Readonly<{ root: string; paths: Set<string> }>>();
 
@@ -980,6 +996,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       /* A new tree: the old one's fill has ended silently, and the reading waits for the new one's word. */
       if (bracket?.purpose === 'tree') {
         treeWrites.set(id, (treeWrites.get(id) ?? 0) + 1);
+        failedTreeWrites.delete(id);
         largeObjectsTold.delete(id);
         largeObjects.delete(id);
         fillWindows.delete(id);
@@ -994,11 +1011,14 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       writing.set(root, (writing.get(root) ?? 0) + 1);
       republish();
       let released = false;
-      return () => {
+      return (outcome) => {
         if (released) {
           return;
         }
         released = true;
+        if (bracket?.purpose === 'tree' && outcome?.failed === true) {
+          failedTreeWrites.add(id);
+        }
         closeWrite(root);
         if (!holdsTree) {
           return;
@@ -1033,7 +1053,11 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     readiness = settleReadiness(
       readiness,
       readinessOf(
-        { ...merged, entryClosureLanded: entryClosureLanded(status.checkoutRoot) },
+        {
+          ...merged,
+          entryClosureLanded: entryClosureLanded(status.checkoutRoot),
+          treeWriteFailed: status.checkoutId !== undefined && failedTreeWrites.has(status.checkoutId),
+        },
         status.checkoutId !== undefined && largeObjectsTold.has(status.checkoutId),
         status.checkoutId === undefined ? 0 : (treeWrites.get(status.checkoutId) ?? 0),
       ),

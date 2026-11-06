@@ -61,6 +61,20 @@ export const largeObjectDownloadingError = (path: string): Error =>
  */
 export const guardLargeObjectFiles = <FileSystem extends RpcFileSystem>(fileSystem: FileSystem): FileSystem => {
   const refuseIfPlaceholder = async (path: string): Promise<void> => {
+    /* The index says so without a read: a read of a pending entry would fetch its object (D9). */
+    if (fileSystem.pendingPaths !== undefined) {
+      let pending: readonly string[];
+      try {
+        pending = await fileSystem.pendingPaths([path]);
+      } catch {
+        /* Unknown: the write itself answers. */
+        return;
+      }
+      if (pending.length > 0) {
+        throw largeObjectDownloadingError(path);
+      }
+      return;
+    }
     let current: Uint8Array<ArrayBuffer>;
     try {
       const metadata = await fileSystem.stat(path);

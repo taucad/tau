@@ -84,6 +84,7 @@ type ProjectFileSystemBridge = Pick<
   | 'watchChangeSets'
   | 'hello'
   | 'dispose'
+  | 'pendingPaths'
 >;
 
 /** What the worker as a whole gives each project host. */
@@ -288,7 +289,9 @@ const swappable = <Target extends object>(
  * @returns The provider every tool call and the GeoSpec bridge read through.
  * @internal
  */
-export const createRelayedFileSystemProvider = (proxy: ProjectFileSystemBridge): FileSystemProvider => {
+export const createRelayedFileSystemProvider = (
+  proxy: ProjectFileSystemBridge,
+): FileSystemProvider & Pick<ComposedView, 'pendingPaths'> => {
   const { payload } = proxy.hello;
   if (payload.state !== 'ready') {
     throw Object.assign(new Error(`Workspace filesystem bridge is ${payload.state}.`), {
@@ -337,6 +340,17 @@ export const createRelayedFileSystemProvider = (proxy: ProjectFileSystemBridge):
     rename: proxy.rename.bind(proxy),
     exists: proxy.exists.bind(proxy),
     lstat: proxy.lstat.bind(proxy),
+    /* A host that predates the call knows of no pending entry; its reads refuse with PENDING instead. */
+    pendingPaths: async (paths) => {
+      try {
+        return await proxy.pendingPaths(paths);
+      } catch (error) {
+        if (error instanceof Error && error.message === 'Unknown method: pendingPaths') {
+          return [];
+        }
+        throw error;
+      }
+    },
     dispose: () => undefined,
   };
 };
@@ -676,7 +690,7 @@ const composeProjectHost = async (
   });
   /* The registry over one filesystem: the project's own, or an attempt's checkout its placement granted (W8 G09). */
   const toolRegistryOver = (
-    provider: FileSystemProvider,
+    provider: FileSystemProvider & Pick<ComposedView, 'pendingPaths'>,
     preferences: Pick<ProjectFileSystemBridge, 'readMachineSettings'>,
   ): ToolRegistry => {
     const view = composeView(

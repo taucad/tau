@@ -48,4 +48,29 @@ describe('createRelayedFileSystemProvider', () => {
       provider.writeFileChecked?.({ path: 'main.scad', data: new Uint8Array([1]), preconditions: [] }),
     ).rejects.toMatchObject({ code: 'CHECKED_WRITE_UNSUPPORTED', applicationState: 'known-not-applied' });
   });
+
+  /* D9: the agent's grep and guard learn pending files from the root's index, never by a read that would fetch. */
+  it('should relay pendingPaths, and know of none on a bridge that predates it', async () => {
+    const pendingPaths = vi.fn(async () => ['models/part.step']);
+    const bridgeWith = (call: unknown): RelayedBridge =>
+      new Proxy(
+        { hello: { payload: { state: 'ready', capabilities: {} } }, pendingPaths: call } as Record<
+          PropertyKey,
+          unknown
+        >,
+        {
+          get: (target, property) => target[property] ?? vi.fn(),
+        },
+      ) as unknown as RelayedBridge;
+
+    await expect(
+      createRelayedFileSystemProvider(bridgeWith(pendingPaths)).pendingPaths(['main.scad', 'models/part.step']),
+    ).resolves.toEqual(['models/part.step']);
+    const old = vi.fn(async () => {
+      throw new Error('Unknown method: pendingPaths');
+    });
+    await expect(createRelayedFileSystemProvider(bridgeWith(old)).pendingPaths(['models/part.step'])).resolves.toEqual(
+      [],
+    );
+  });
 });

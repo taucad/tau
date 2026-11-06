@@ -1,5 +1,7 @@
 import { randomBytes } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { Evidence } from '@taucad/agent-observability/contract';
+import { evidenceSchema } from '@taucad/agent-observability/contract';
 import { evidenceFixture, privateMarker } from '#api/agent-observability/evidence.test-fixture.js';
 import {
   langfuseObservation,
@@ -7,8 +9,14 @@ import {
   observationSpanId,
   otlpBody,
   pseudonymKey,
+  runRootName,
+  runRootSpan,
+  runRootSpanId,
 } from '#api/agent-observability/langfuse-observation.js';
 import type { OtlpSpan } from '#api/agent-observability/langfuse-observation.js';
+import { providerAttemptEvidence } from '#api/agent-observability/model-invocation-evidence.js';
+import type { ObservedAttempt } from '#api/agent-observability/model-invocation-evidence.js';
+import { settlementEvidence } from '#api/agent-observability/settlement-evidence.js';
 
 const pseudonym = pseudonymKey(Uint8Array.from(randomBytes(32)));
 const context = { environment: 'staging', receipt: 'evr_1', protection: 'pro' } as const;
@@ -121,11 +129,199 @@ describe('langfuseObservation', () => {
     expect(attribute(apiOnly, 'langfuse.release')).toBe('api-build-1');
   });
 
-  it('should send one span per request body', async () => {
+  it('should send one fact per request body, after its run root', async () => {
     const { span } = langfuseObservation(await evidenceFixture(), context, pseudonym);
     const body = JSON.parse(otlpBody(span)) as { resourceSpans: Array<{ scopeSpans: Array<{ spans: unknown[] }> }> };
 
     expect(body.resourceSpans).toHaveLength(1);
-    expect(body.resourceSpans[0]!.scopeSpans[0]!.spans).toEqual([span]);
+    expect(body.resourceSpans[0]!.scopeSpans[0]!.spans).toEqual([runRootSpan(span), span]);
+  });
+});
+
+const milliseconds = (nanoseconds: string): number => Number(BigInt(nanoseconds) / 1_000_000n);
+const imageReference = 'registry.fly.io/tau-api-staging:deployment-01KSYNTHETIC';
+const attempt: ObservedAttempt = {
+  principal: 'user-a',
+  project: 'project-a',
+  attemptKey: 'run-1:1:0',
+  chat: 'chat-1',
+  surface: 'gateway',
+  wire: 'anthropic',
+  requestedModel: 'anthropic-claude-test',
+  provider: 'anthropic',
+  operation: 'op-1',
+  startedAt: 1_800_000_000_000,
+  duration: 107_481,
+  stream: {
+    stop: 'toolUse',
+    usage: { input: 10, output: 20, cacheRead: 0, cacheWrite: 0, reasoning: null, missing: 'none' },
+    resolvedModel: 'anthropic-claude-test',
+    response: 'response-1',
+    firstChunk: 400,
+    firstText: 650,
+  },
+  ended: 'completed',
+};
+const authority = { policyEpoch: 'epoch-a', protection: 'pro' } as const;
+
+const outcome = async (
+  fact: Partial<Extract<Evidence['payload'], { plane: 'summary' }>['fact']>,
+): Promise<Evidence> => {
+  const base = await evidenceFixture();
+  return evidenceSchema.parse({
+    ...base,
+    semantic: { kind: 'outcome', id: 'run-1' },
+    payload: {
+      plane: 'summary',
+      fact: { kind: 'outcome', termination: 'failed', success: 'unknown', assessment: null, ...fact },
+    },
+  });
+};
+
+describe('langfuseObservation run structure (W5)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('should hang a provider span under its run root, timed by its relay phases', async () => {
+    vi.stubEnv('FLY_IMAGE_REF', imageReference);
+    const evidence = await providerAttemptEvidence(attempt, authority);
+    const { span } = langfuseObservation(evidence, context, pseudonym);
+    const start = milliseconds(span.startTimeUnixNano);
+    const end = milliseconds(span.endTimeUnixNano);
+    const wait = Number(attribute(span, 'langfuse.observation.metadata.phase.provider-wait@api-relay'));
+    const stream = Number(attribute(span, 'langfuse.observation.metadata.phase.provider-stream@api-relay'));
+    const completionStart = Date.parse(String(attribute(span, 'langfuse.observation.completion_start_time')));
+
+    expect(evidenceSchema.safeParse(evidence).success).toBe(true);
+    expect(span.parentSpanId).toBe(runRootSpanId('staging', 'user-a', evidence.run));
+    expect(start).toBe(attempt.startedAt);
+    expect(end - completionStart).toBe(stream);
+    expect(completionStart - start).toBe(wait);
+    expect(end - start).toBe(attempt.duration);
+    expect(attribute(span, 'langfuse.observation.level')).toBeUndefined();
+    expect(attribute(span, 'langfuse.release')).toBe('tau-api-staging:deployment-01KSYNTHETIC');
+  });
+
+  it('should time a tool span by its host-recorded interval and give it the same root', async () => {
+    const base = await evidenceFixture();
+    const tool = evidenceSchema.parse({
+      ...base,
+      semantic: { kind: 'tool', id: 'call-1' },
+      clocks: {
+        ...base.clocks,
+        occurredAt: 1_800_000_000_000,
+        intervals: [{ phase: 'tool', domain: 'host-recorded', start: 1_800_000_000_000, end: 1_800_000_065_644 }],
+      },
+      payload: {
+        plane: 'summary',
+        fact: {
+          kind: 'tool',
+          call: 'call-1',
+          dispatch: 'dispatch-1',
+          toolClass: 'other',
+          toolVersion: null,
+          schemaVersion: null,
+          modelCall: null,
+          outcome: 'completed',
+          revisionBefore: null,
+          revisionAfter: null,
+        },
+      },
+    });
+    const { span } = langfuseObservation(tool, context, pseudonym);
+    const instruction = langfuseObservation(base, { ...context, receipt: 'evr_2' }, pseudonym).span;
+
+    expect(milliseconds(span.endTimeUnixNano) - milliseconds(span.startTimeUnixNano)).toBe(
+      Number(attribute(span, 'langfuse.observation.metadata.phase.tool@host-recorded')),
+    );
+    expect(milliseconds(span.endTimeUnixNano) - milliseconds(span.startTimeUnixNano)).toBe(65_644);
+    expect(span.parentSpanId).toBe(instruction.parentSpanId);
+    expect(instruction.startTimeUnixNano).toBe(instruction.endTimeUnixNano);
+  });
+
+  it('should send one fixed, grouping-only root per run that a scorecard read never counts', async () => {
+    const first = langfuseObservation(await evidenceFixture(), context, pseudonym).span;
+    const second = langfuseObservation(await outcome({}), { ...context, receipt: 'evr_2' }, pseudonym).span;
+    const otherRun = langfuseObservation(
+      { ...(await evidenceFixture()), run: 'run-b' },
+      { ...context, receipt: 'evr_3' },
+      pseudonym,
+    ).span;
+    const rootOf = (span: OtlpSpan): OtlpSpan => runRootSpan(span)!;
+
+    expect(rootOf(first).spanId).toBe(rootOf(second).spanId);
+    expect(rootOf(first).attributes).toEqual(rootOf(second).attributes);
+    expect(rootOf(otherRun).spanId).not.toBe(rootOf(first).spanId);
+    expect(rootOf(first).parentSpanId).toBeUndefined();
+    expect(rootOf(first).traceId).toBe(first.traceId);
+    expect(rootOf(first).name).toBe(runRootName);
+    expect(rootOf(first).name.startsWith('tau.')).toBe(false);
+    expect(attribute(rootOf(first), 'langfuse.release')).toBeUndefined();
+    expect(attribute(rootOf(first), 'langfuse.observation.metadata.root')).toBe(true);
+    expect(runRootSpan(rootOf(first))).toBeUndefined();
+    expect(otlpBody(first)).not.toContain('run-a');
+  });
+
+  it('should mark a failed outcome ERROR and name its failure class', async () => {
+    const { span } = langfuseObservation(
+      await outcome({ failureClass: { owner: 'host', retry: 'wait' }, code: 'MODEL_ATTEMPT_PENDING' }),
+      context,
+      pseudonym,
+    );
+    const message = 'run failed: MODEL_ATTEMPT_PENDING (owner host, retry wait)';
+
+    expect(attribute(span, 'langfuse.observation.level')).toBe('ERROR');
+    expect(attribute(span, 'langfuse.observation.status_message')).toBe(message);
+    expect(span.status).toEqual({ code: 2, message });
+    expect(attribute(span, 'langfuse.observation.metadata.fact.failureClass.owner')).toBe('host');
+    expect(attribute(span, 'langfuse.observation.metadata.fact.failureClass.retry')).toBe('wait');
+    expect(attribute(span, 'langfuse.observation.metadata.fact.code')).toBe('MODEL_ATTEMPT_PENDING');
+  });
+
+  it('should mark an older host failed outcome ERROR as unclassified, and leave a completed one DEFAULT', async () => {
+    const legacy = langfuseObservation(await outcome({}), context, pseudonym).span;
+    const completed = langfuseObservation(await outcome({ termination: 'completed' }), context, pseudonym).span;
+
+    expect(attribute(legacy, 'langfuse.observation.level')).toBe('ERROR');
+    expect(attribute(legacy, 'langfuse.observation.status_message')).toBe('run failed: unclassified');
+    expect(attribute(completed, 'langfuse.observation.level')).toBeUndefined();
+    expect(completed.status).toEqual({ code: 1 });
+  });
+
+  it('should report a real release on both planes and never 0000000', async () => {
+    vi.stubEnv('FLY_IMAGE_REF', imageReference);
+    const host = await evidenceFixture();
+    const release = (evidence: Evidence): unknown =>
+      attribute(langfuseObservation(evidence, context, pseudonym).span, 'langfuse.release');
+    const settlement = await settlementEvidence(
+      {
+        operation: {
+          id: 'op-1',
+          accountId: 'account-1',
+          environment: 'staging',
+          attemptKey: 'run-1:1:0',
+          projectHint: 'project-a',
+          chatHint: 'chat-1',
+          admittedAt: new Date(attempt.startedAt),
+          activationId: 'activation-1',
+        },
+        receipt: {
+          terminalRevision: 1n,
+          chargedAtoms: 0n,
+          supplierCostPicoUsd: null,
+          resolvedAt: new Date(attempt.startedAt + 1000),
+        },
+        normalization: undefined,
+      },
+      'user-a',
+      { ...authority, project: 'project-a' },
+    );
+
+    expect(release({ ...host, versions: { ...host.versions, hostBuild: 'abc1234' } })).toBe('abc1234');
+    expect(release({ ...host, versions: { ...host.versions, hostBuild: '0000000' } })).toBe('unknown');
+    expect(release(await providerAttemptEvidence(attempt, authority))).toBe('tau-api-staging:deployment-01KSYNTHETIC');
+    expect(evidenceSchema.safeParse(settlement).success).toBe(true);
+    expect(release(settlement)).toBe('tau-api-staging:deployment-01KSYNTHETIC');
   });
 });

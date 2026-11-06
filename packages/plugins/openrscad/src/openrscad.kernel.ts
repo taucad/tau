@@ -26,14 +26,16 @@ import type {
 import {
   asBuffer,
   assertRootedPath,
+  createKernelLibraryTracer,
   createKernelSuccess,
   createKernelParameterDeclaration,
   defineKernel,
+  defineLibraryTracePolicy,
   gltfExportConventionSchema,
   isRecordObject,
   resolveImportPath,
 } from '@taucad/runtime/kernel';
-import type { KernelFileSystem, KernelIssue, RuntimeLogger } from '@taucad/runtime/kernel';
+import type { KernelFileSystem, KernelIssue, KernelLibraryTraceHandle, RuntimeLogger } from '@taucad/runtime/kernel';
 
 const maxIncludeDepth = 50;
 const useIncludePattern = /^\s*(?:use|include)\s*["<]([^">]+)[">]/gm;
@@ -48,9 +50,28 @@ type OpenRscadBackend = typeof OpenRscadModule;
 const geometryCacheByteCap = 64 * 1024 * 1024;
 
 type OpenRscadContext = {
+  /** The engine, behind the library tracer when tracing is on. */
   backend: OpenRscadBackend;
+  libraryTrace: KernelLibraryTraceHandle<OpenRscadBackend>;
   entryPath: string | undefined;
 };
+
+/**
+ * Library tracing for the engine: counts every call the kernel makes into it (`renderToGlb`, `exportShape3D`,
+ * `cacheStats`, …) in an `openrscad.library.summary` span after each engine call. Only functions are wrapped; the
+ * engine's results are plain data.
+ */
+const openrscadLibraryTracePolicy = defineLibraryTracePolicy({
+  library: 'openrscad',
+  spanPrefix: 'openrscad.library',
+  summarySpanName: 'openrscad.library.summary',
+  traceCall() {
+    return { type: 'trace' };
+  },
+  shouldWrapValue(context) {
+    return typeof context.value === 'function';
+  },
+});
 
 /**
  * Render-time OpenSCAD tessellation options. Left out, previews use the `medium` preset for whatever the script does
@@ -69,6 +90,15 @@ const exportTessellationSchema = z.object({
     .optional()
     .meta({ default: 'high' })
     .describe("Tessellation quality for mesh-based exports; left out, the script's own $fn, $fa and $fs are kept"),
+});
+
+/**
+ * OpenRSCAD kernel options.
+ * @public
+ */
+export const openrscadOptionsSchema = z.object({
+  /** Engine call tracing mode (`openrscad.library.summary`); left out, tracing is off. */
+  libraryTracing: z.enum(['off', 'summary', 'per-call']).optional(),
 });
 
 /** Native OpenRSCAD 3D export options; left out, mesh exports use the `high` preset where the script sets nothing. @public */
@@ -577,6 +607,7 @@ export const createOpenrscadKernel = ({
     extensions: ['scad'],
     name: 'OpenRSCADKernel',
     version,
+    optionsSchema: openrscadOptionsSchema,
     evaluateOptionsSchema: z.object({}),
     views: {
       model: {
@@ -602,7 +633,7 @@ export const createOpenrscadKernel = ({
       },
     },
 
-    async initialize(_options, { logger }) {
+    async initialize(options, { logger, tracer }) {
       const backend = await loadBackend();
       // Which payload the engine's export map actually bound. A Node host that
       // no platform package covers still renders — through the WebAssembly
@@ -617,7 +648,14 @@ export const createOpenrscadKernel = ({
           data: backend.backendCause,
         });
       }
-      const context: OpenRscadContext = { backend, entryPath: undefined };
+      // A plain-object facade: the engine may be a module namespace, whose bindings a tracing proxy cannot replace.
+      const libraryTrace = createKernelLibraryTracer<OpenRscadBackend>({
+        library: { ...backend },
+        tracer,
+        mode: options.libraryTracing ?? 'off',
+        policy: openrscadLibraryTracePolicy,
+      });
+      const context: OpenRscadContext = { backend: libraryTrace.tracedLibrary, libraryTrace, entryPath: undefined };
       return context;
     },
 
@@ -632,7 +670,13 @@ export const createOpenrscadKernel = ({
 
     async describe({ entryPath }, { filesystem }, context) {
       const source = await filesystem.readFile(entryPath, 'utf8');
-      const { defaultParameters, jsonSchema } = await parseCustomizer(source, context.backend.parameters);
+      let customizer: Awaited<ReturnType<typeof parseCustomizer>>;
+      try {
+        customizer = await parseCustomizer(source, context.backend.parameters);
+      } finally {
+        context.libraryTrace.emitSummary();
+      }
+      const { defaultParameters, jsonSchema } = customizer;
       return createKernelSuccess({
         parameters: createKernelParameterDeclaration(defaultParameters, jsonSchema, {
           id: 'urn:taucad:openrscad:parameters',
@@ -675,6 +719,7 @@ export const createOpenrscadKernel = ({
           ),
         );
       } finally {
+        context.libraryTrace.emitSummary();
         span.end();
       }
       if (result.echo) {
@@ -748,6 +793,7 @@ export const createOpenrscadKernel = ({
             ),
           );
         } finally {
+          context.libraryTrace.emitSummary();
           span.end();
         }
         return {
@@ -787,6 +833,7 @@ export const createOpenrscadKernel = ({
         try {
           return await exportArtifact();
         } finally {
+          context.libraryTrace.emitSummary();
           span.end();
         }
       };

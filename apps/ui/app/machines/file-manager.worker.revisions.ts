@@ -78,7 +78,13 @@ import {
 import { requireParameterRecord, serializeParameterRecord } from '@taucad/parameters';
 import { revisionId, compareRevisionFile, captureRevisionTree, diffRevisionTrees } from '@taucad/revisions/algorithms';
 import type { RevisionFileComparison } from '@taucad/revisions/algorithms';
-import type { FileMode, MountTable, RootedFileSystem, WorkspaceFileService } from '@taucad/filesystem';
+import type {
+  FileMode,
+  MountTable,
+  PendingObjectSource,
+  RootedFileSystem,
+  WorkspaceFileService,
+} from '@taucad/filesystem';
 import { workerTimings } from '@taucad/filesystem';
 import type { ActorOptions, AnyActorLogic } from 'xstate';
 import type { ChangeEvent } from '@taucad/types';
@@ -428,10 +434,54 @@ export const createCheckoutRoutes = (options: {
           class: 'authored',
         });
       }
-      return fileService.createRootedFileSystem(prefix);
+      /* The revision layer owns the pointers: its views read placeholders as they are (slice a). */
+      return fileService.createRootedFileSystem(prefix, undefined, { placeholders: 'raw' });
     },
   });
 };
+
+/**
+ * The authority's source for pending entries (slice a): a read that meets a
+ * placeholder goes through to its object, fetched by oid through the project's
+ * revisions and written nowhere. A project root is its live checkout; a
+ * `/checkouts/<id>` mount belongs to whichever open project knows that
+ * checkout. No open project serving it rejects, which the authority answers
+ * with `PENDING`, never pointer text.
+ *
+ * @param roots - The registry's live roots.
+ * @returns The source to hand `WorkspaceFileService.setPendingObjectSource`.
+ * @public
+ */
+export const createPendingObjectSource =
+  (roots: () => ReadonlyMap<string, Promise<WorkerProjectRevisions>>): PendingObjectSource =>
+  async ({ root, path }, signal) => {
+    const open = roots();
+    const projectRoot = /^\/projects\/([^/]+)$/u.exec(root);
+    const live = projectRoot === null ? undefined : open.get(projectRoot[1]!);
+    if (live !== undefined) {
+      const revisions = await live;
+      return revisions.resolvePlaceholder(undefined, path, signal);
+    }
+    const checkoutId = /^\/checkouts\/([^/]+)$/u.exec(root)?.[1];
+    if (checkoutId !== undefined) {
+      for (const pending of open.values()) {
+        let resolved: Uint8Array<ArrayBuffer> | undefined;
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- the one project that knows the checkout answers
+          const revisions = await pending;
+          // oxlint-disable-next-line no-await-in-loop -- as above
+          resolved = await revisions.resolvePlaceholder(checkoutId, path, signal);
+        } catch (error) {
+          if ((error as { code?: unknown } | undefined)?.code === 'PENDING') {
+            throw error;
+          }
+          continue;
+        }
+        return resolved;
+      }
+    }
+    throw new Error(`No open project serves the large object of ${root}/${path}.`);
+  };
 
 /** One project's revision root, as the worker's port protocol drives it. @public */
 export type WorkerProjectRevisions = Readonly<{
@@ -476,6 +526,12 @@ export type WorkerProjectRevisions = Readonly<{
   ) => Promise<ReadOutcome>;
   /** Make these paths physical files; rejects with code `PENDING` for one whose object could not be fetched (D9). */
   materialize: (checkoutId: string | undefined, paths: readonly string[]) => Promise<void>;
+  /** A placeholder's object for the authority's read-through, fetched by oid and written nowhere (slice a). */
+  resolvePlaceholder: (
+    checkoutId: string | undefined,
+    path: string,
+    signal?: AbortSignal,
+  ) => Promise<Uint8Array<ArrayBuffer> | undefined>;
   /** One content-change event on a checkout, already filtered to versioned paths. */
   changed: (checkoutId: string, paths: readonly string[]) => void;
   /** Name one revision, or re-point an existing name (S31). */
@@ -768,167 +824,176 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   /* Each checkout's changes observed while a host write held its root: raised once, together, when the last closes. */
   const deferredChanges = new Map<string, Readonly<{ root: string; paths: Set<string> }>>();
 
-  const { actor, settled, turns, recordEditorConflict, readConflict, readContent, materialize, pullsChats } =
-    createProjectRevisionsActor({
-      port: options.port,
-      projectId,
-      ...(options.clock === undefined ? {} : { clock: options.clock }),
-      ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
-      actorId: projectId,
-      /* Only a feed that sees every write lets a cut skip the files it did not name (E1). */
-      completeChanges: options.completeChanges === true && options.observe !== undefined,
-      deviceId: () => device,
-      ...(options.recordHistoryPush === undefined ? {} : { recordHistoryPush: options.recordHistoryPush }),
-      /*
-       * The scheduler's three exits need to know whether this document can reach
-       * anything (S41). A worker has the events itself — `globalThis` is a
-       * `WorkerGlobalScope` and fires `online`/`offline` — so nothing is injected
-       * from the page for this one.
-       */
-      /* D12: the same `.tau/parameters/**` codec the desktop host injects, at every merge. */
-      parameters: { read: requireParameterRecord, serialize: serializeParameterRecord },
-      /*
-       * D13: another device's push wakes this open project over the API's long
-       * poll, with this document's session — the same cookie the git routes take.
-       * The origin is read per request, so a page that names it later is heard.
-       */
-      remoteMoves: (input, handlers) => {
-        const open = (streamHandlers: RevisionStreamHandlers): (() => void) =>
-          watchRevisionStream(
-            {
-              projectId: input.projectId,
-              apiBaseUrl: () => options.apiBaseUrl?.(),
-              auth: () => ({ kind: 'cookie' }),
-            },
-            streamHandlers,
-          );
-        return options.attention === undefined ? open(handlers) : options.attention.gate(open, handlers);
-      },
-      connectivity: (report) => {
-        const online = (): void => {
-          report(true);
+  const {
+    actor,
+    settled,
+    turns,
+    recordEditorConflict,
+    readConflict,
+    readContent,
+    materialize,
+    resolvePlaceholder,
+    pullsChats,
+  } = createProjectRevisionsActor({
+    port: options.port,
+    projectId,
+    ...(options.clock === undefined ? {} : { clock: options.clock }),
+    ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
+    actorId: projectId,
+    /* Only a feed that sees every write lets a cut skip the files it did not name (E1). */
+    completeChanges: options.completeChanges === true && options.observe !== undefined,
+    deviceId: () => device,
+    ...(options.recordHistoryPush === undefined ? {} : { recordHistoryPush: options.recordHistoryPush }),
+    /*
+     * The scheduler's three exits need to know whether this document can reach
+     * anything (S41). A worker has the events itself — `globalThis` is a
+     * `WorkerGlobalScope` and fires `online`/`offline` — so nothing is injected
+     * from the page for this one.
+     */
+    /* D12: the same `.tau/parameters/**` codec the desktop host injects, at every merge. */
+    parameters: { read: requireParameterRecord, serialize: serializeParameterRecord },
+    /*
+     * D13: another device's push wakes this open project over the API's long
+     * poll, with this document's session — the same cookie the git routes take.
+     * The origin is read per request, so a page that names it later is heard.
+     */
+    remoteMoves: (input, handlers) => {
+      const open = (streamHandlers: RevisionStreamHandlers): (() => void) =>
+        watchRevisionStream(
+          {
+            projectId: input.projectId,
+            apiBaseUrl: () => options.apiBaseUrl?.(),
+            auth: () => ({ kind: 'cookie' }),
+          },
+          streamHandlers,
+        );
+      return options.attention === undefined ? open(handlers) : options.attention.gate(open, handlers);
+    },
+    connectivity: (report) => {
+      const online = (): void => {
+        report(true);
+      };
+      const offline = (): void => {
+        report(false);
+      };
+      globalThis.addEventListener('online', online);
+      globalThis.addEventListener('offline', offline);
+      return () => {
+        globalThis.removeEventListener('online', online);
+        globalThis.removeEventListener('offline', offline);
+      };
+    },
+    actor: ({ runId }) => {
+      if (person === undefined) {
+        return undefined;
+      }
+      /* A cut a run holds is the agent's: `git log`'s author stays the person
+       * through `onBehalfOf`, while `Tau-Actor` names the model. */
+      return runId === undefined ? person : { kind: 'agent', id: 'agent', runId, onBehalfOf: person };
+    },
+    filesystem: async (checkout) => options.filesystem(checkout.root),
+    /* Tau Cloud's repository for this project, from the origin the page named. */
+    remoteUrl: (id) => {
+      const apiBaseUrl = options.apiBaseUrl?.();
+      return apiBaseUrl === undefined ? undefined : tauRemoteUrl(apiBaseUrl, id);
+    },
+    /* D18: the owner's usage for the Sync region, with the page's own session. */
+    remoteStorage: async () => {
+      const apiBaseUrl = options.apiBaseUrl?.();
+      return apiBaseUrl === undefined
+        ? undefined
+        : readRemoteStorageOverHttp(apiBaseUrl, { kind: 'cookie' }, projectId);
+    },
+    /* P51: connecting registers the project before anything asks the remote
+     * for an advertisement it would otherwise answer `404`. */
+    registerRemoteProject: async (id) => {
+      let name: string | undefined;
+      try {
+        const filesystem = await options.filesystem(`/projects/${id}`);
+        const manifest = JSON.parse(await filesystem.readFile('tau.json', 'utf8')) as {
+          readonly name?: unknown;
         };
-        const offline = (): void => {
-          report(false);
-        };
-        globalThis.addEventListener('online', online);
-        globalThis.addEventListener('offline', offline);
-        return () => {
-          globalThis.removeEventListener('online', online);
-          globalThis.removeEventListener('offline', offline);
-        };
-      },
-      actor: ({ runId }) => {
-        if (person === undefined) {
-          return undefined;
+        name = typeof manifest.name === 'string' && manifest.name.trim() !== '' ? manifest.name.trim() : undefined;
+      } catch {
+        /* Registration still makes an empty or incomplete local project
+         * recoverable; the API's fallback name is honest until tau.json exists. */
+      }
+      const apiBaseUrl = options.apiBaseUrl?.();
+      if (apiBaseUrl === undefined) {
+        /* No origin means no session: the same sentence the API's own 401
+         * answers, from the one ladder both hosts read (C6). */
+        throw new Error(registerProjectFailureMessage(401));
+      }
+      await registerProjectOverHttp(apiBaseUrl, { kind: 'cookie' }, { id, name });
+    },
+    publishPublication: async (input) => {
+      const apiBaseUrl = options.apiBaseUrl?.();
+      if (apiBaseUrl === undefined) {
+        throw new Error(publishFailureMessage(401));
+      }
+      /* The document's session is the whole credential (I8): nothing is carried
+       * through this module and nothing is written under the project. */
+      return publishOverHttp(apiBaseUrl, { kind: 'cookie' }, input);
+    },
+    onChatsProjected: (chatIds) => {
+      events.emit({ type: 'chats.projected', projectId, chatIds });
+    },
+    /* Files open before their large objects arrive (the operator's "open the UI, model waits"): the page's viewer waits on this. */
+    onLargeObjects: (report) => {
+      timeFill(report);
+      largeObjectsTold.add(report.checkoutId);
+      if (report.facet === undefined) {
+        largeObjects.delete(report.checkoutId);
+      } else {
+        largeObjects.set(report.checkoutId, report);
+      }
+      republish();
+    },
+    /*
+     * The page's file tree holds its re-reads for a root while an apply writes
+     * it, and lists it once after. A fill's flush is left out: it replaces
+     * placeholders in place, once a second for minutes, and a hold taken and
+     * released per flush re-listed every directory it touched each time.
+     */
+    onApplyingTree: ({ id, root }, paths, bracket) => {
+      const holdsTree = bracket?.purpose !== 'fill';
+      const startedAt = workerTimings.now();
+      /* A new tree: the old one's fill has ended silently, and the reading waits for the new one's word. */
+      if (bracket?.purpose === 'tree') {
+        treeWrites.set(id, (treeWrites.get(id) ?? 0) + 1);
+        largeObjectsTold.delete(id);
+        largeObjects.delete(id);
+        fillWindows.delete(id);
+      }
+      if (holdsTree) {
+        applying.set(root, (applying.get(root) ?? 0) + 1);
+      }
+      writing.set(root, (writing.get(root) ?? 0) + 1);
+      republish();
+      let released = false;
+      return () => {
+        if (released) {
+          return;
         }
-        /* A cut a run holds is the agent's: `git log`'s author stays the person
-         * through `onBehalfOf`, while `Tau-Actor` names the model. */
-        return runId === undefined ? person : { kind: 'agent', id: 'agent', runId, onBehalfOf: person };
-      },
-      filesystem: async (checkout) => options.filesystem(checkout.root),
-      /* Tau Cloud's repository for this project, from the origin the page named. */
-      remoteUrl: (id) => {
-        const apiBaseUrl = options.apiBaseUrl?.();
-        return apiBaseUrl === undefined ? undefined : tauRemoteUrl(apiBaseUrl, id);
-      },
-      /* D18: the owner's usage for the Sync region, with the page's own session. */
-      remoteStorage: async () => {
-        const apiBaseUrl = options.apiBaseUrl?.();
-        return apiBaseUrl === undefined
-          ? undefined
-          : readRemoteStorageOverHttp(apiBaseUrl, { kind: 'cookie' }, projectId);
-      },
-      /* P51: connecting registers the project before anything asks the remote
-       * for an advertisement it would otherwise answer `404`. */
-      registerRemoteProject: async (id) => {
-        let name: string | undefined;
-        try {
-          const filesystem = await options.filesystem(`/projects/${id}`);
-          const manifest = JSON.parse(await filesystem.readFile('tau.json', 'utf8')) as {
-            readonly name?: unknown;
-          };
-          name = typeof manifest.name === 'string' && manifest.name.trim() !== '' ? manifest.name.trim() : undefined;
-        } catch {
-          /* Registration still makes an empty or incomplete local project
-           * recoverable; the API's fallback name is honest until tau.json exists. */
+        released = true;
+        closeWrite(root);
+        if (!holdsTree) {
+          return;
         }
-        const apiBaseUrl = options.apiBaseUrl?.();
-        if (apiBaseUrl === undefined) {
-          /* No origin means no session: the same sentence the API's own 401
-           * answers, from the one ladder both hosts read (C6). */
-          throw new Error(registerProjectFailureMessage(401));
+        /* An apply that wrote nothing has nothing to account for; to the second, a window may include its neighbours. */
+        if (paths.length > 0) {
+          logWorkerTimings(`apply of ${String(paths.length)} paths`, workerTimings.summarize(startedAt));
         }
-        await registerProjectOverHttp(apiBaseUrl, { kind: 'cookie' }, { id, name });
-      },
-      publishPublication: async (input) => {
-        const apiBaseUrl = options.apiBaseUrl?.();
-        if (apiBaseUrl === undefined) {
-          throw new Error(publishFailureMessage(401));
-        }
-        /* The document's session is the whole credential (I8): nothing is carried
-         * through this module and nothing is written under the project. */
-        return publishOverHttp(apiBaseUrl, { kind: 'cookie' }, input);
-      },
-      onChatsProjected: (chatIds) => {
-        events.emit({ type: 'chats.projected', projectId, chatIds });
-      },
-      /* Files open before their large objects arrive (the operator's "open the UI, model waits"): the page's viewer waits on this. */
-      onLargeObjects: (report) => {
-        timeFill(report);
-        largeObjectsTold.add(report.checkoutId);
-        if (report.facet === undefined) {
-          largeObjects.delete(report.checkoutId);
+        const remaining = (applying.get(root) ?? 1) - 1;
+        if (remaining === 0) {
+          applying.delete(root);
         } else {
-          largeObjects.set(report.checkoutId, report);
+          applying.set(root, remaining);
         }
         republish();
-      },
-      /*
-       * The page's file tree holds its re-reads for a root while an apply writes
-       * it, and lists it once after. A fill's flush is left out: it replaces
-       * placeholders in place, once a second for minutes, and a hold taken and
-       * released per flush re-listed every directory it touched each time.
-       */
-      onApplyingTree: ({ id, root }, paths, bracket) => {
-        const holdsTree = bracket?.purpose !== 'fill';
-        const startedAt = workerTimings.now();
-        /* A new tree: the old one's fill has ended silently, and the reading waits for the new one's word. */
-        if (bracket?.purpose === 'tree') {
-          treeWrites.set(id, (treeWrites.get(id) ?? 0) + 1);
-          largeObjectsTold.delete(id);
-          largeObjects.delete(id);
-          fillWindows.delete(id);
-        }
-        if (holdsTree) {
-          applying.set(root, (applying.get(root) ?? 0) + 1);
-        }
-        writing.set(root, (writing.get(root) ?? 0) + 1);
-        republish();
-        let released = false;
-        return () => {
-          if (released) {
-            return;
-          }
-          released = true;
-          closeWrite(root);
-          if (!holdsTree) {
-            return;
-          }
-          /* An apply that wrote nothing has nothing to account for; to the second, a window may include its neighbours. */
-          if (paths.length > 0) {
-            logWorkerTimings(`apply of ${String(paths.length)} paths`, workerTimings.summarize(startedAt));
-          }
-          const remaining = (applying.get(root) ?? 1) - 1;
-          if (remaining === 0) {
-            applying.delete(root);
-          } else {
-            applying.set(root, remaining);
-          }
-          republish();
-        };
-      },
-    });
+      };
+    },
+  });
 
   /* The last readiness reading: settled here, where the fill and the apply bracket are merged (D10, I7). */
   let readiness: ProjectReadinessReading | undefined;
@@ -1789,6 +1854,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     readConflict,
     readContent,
     materialize,
+    resolvePlaceholder,
     createBranch,
     pullRemote: async (chatId) => {
       const answer = await session?.pull({ requestId: `page-pull:${chatId}:${String(Date.now())}`, chatId });

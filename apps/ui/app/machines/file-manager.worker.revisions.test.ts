@@ -21,6 +21,7 @@ import type { RootedFileSystem } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import {
   createCheckoutRoutes,
+  createPendingObjectSource,
   createRemoteAttention,
   createWorkerRevisionRegistry,
   versionedChangePaths,
@@ -142,7 +143,7 @@ const harness = (
       extra.onCreatePort?.();
       return wrapPort(
         createIsomorphicGitRevisionPort({
-          filesystem: service.createRootedFileSystem(`/projects/${projectId}`),
+          filesystem: service.createRootedFileSystem(`/projects/${projectId}`, undefined, { placeholders: 'raw' }),
           /* Exactly what `file-manager.worker.ts` gives the real port, so a branch
            * created here is created the way the browser creates one (P24). */
           checkouts: checkoutRoutes(projectId),
@@ -150,7 +151,7 @@ const harness = (
       );
     },
     filesystem: (root) => {
-      const filesystem = service.createRootedFileSystem(root);
+      const filesystem = service.createRootedFileSystem(root, undefined, { placeholders: 'raw' });
       return extra.wrapFileSystem?.(filesystem) ?? filesystem;
     },
     observe: (root, onChanged) => {
@@ -858,6 +859,8 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     await project.unlink(objectFile);
 
     const second = await fixture.open('alpha');
+    /* Slice (a): the worker's own wiring, so the authority reads a pending entry through the revisions. */
+    fixture.service.setPendingObjectSource(createPendingObjectSource(fixture.registry.roots));
     /* The first capture of the session picks the placeholder up; with no remote, the transfer fails. */
     fixture.announce('alpha', ['main.scad']);
     await vi.waitFor(
@@ -898,10 +901,16 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
         code: 'PENDING',
       });
     });
-    expect(await project.readFile('models/part.step')).toStrictEqual(bytes);
+    /* Slice (a): the disk keeps the pointer, and the authority's read never answers it: with no way to fetch the object it refuses. */
+    const raw = fixture.service.createRootedFileSystem('/projects/alpha', undefined, { placeholders: 'raw' });
+    expect(await raw.readFile('models/part.step')).toStrictEqual(bytes);
+    await expect(project.readFile('models/part.step')).rejects.toMatchObject({ code: 'PENDING' });
     await project.unlink('models/copy.step');
 
     await project.writeFile(objectFile, part);
+    /* Once the object is on the device the authority reads through to it, before any fill has written the file. */
+    expect(await project.readFile('models/part.step', 'utf8')).toBe(part);
+    expect(await raw.readFile('models/part.step')).toStrictEqual(bytes);
     const framesBeforeFill = second.frames.length;
     second.send({ command: 'retryLargeObjects' });
     await vi.waitFor(
@@ -1151,7 +1160,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
 
     /* Another writer on the same store moves the line. */
     const other = createIsomorphicGitRevisionPort({
-      filesystem: fixture.service.createRootedFileSystem('/projects/alpha'),
+      filesystem: fixture.service.createRootedFileSystem('/projects/alpha', undefined, { placeholders: 'raw' }),
     });
     await other.updateRef({
       name: 'main',
@@ -1264,7 +1273,9 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     await expect
       .poll(async () => {
         const before = asked.length;
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        await new Promise((resolve) => {
+          setTimeout(resolve, 100);
+        });
         return asked.length === before;
       })
       .toBe(true);

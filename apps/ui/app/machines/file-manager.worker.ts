@@ -52,6 +52,7 @@ import { homeBackendFromWorkerName } from '#machines/file-manager-worker-name.js
 import { listWorkspaceDirectories } from '#machines/file-manager-sync-fs-adapter.js';
 import {
   createCheckoutRoutes,
+  createPendingObjectSource,
   createWorkerRevisionRegistry,
   versionedChangePaths,
 } from '#machines/file-manager.worker.revisions.js';
@@ -473,7 +474,7 @@ const revisionRegistry = createWorkerRevisionRegistry({
     });
     projectOpenTimers.set(projectId, openTimer);
     return createIsomorphicGitRevisionPort({
-      filesystem: fileService.createRootedFileSystem(`/projects/${projectId}`),
+      filesystem: fileService.createRootedFileSystem(`/projects/${projectId}`, undefined, { placeholders: 'raw' }),
       checkouts: checkoutRoutes(projectId),
       compute: revisionCompute,
       /*
@@ -509,7 +510,7 @@ const revisionRegistry = createWorkerRevisionRegistry({
   },
   createCandidatePort: (projectId, credential, signal) =>
     createIsomorphicGitRevisionPort({
-      filesystem: fileService.createRootedFileSystem(`/projects/${projectId}`),
+      filesystem: fileService.createRootedFileSystem(`/projects/${projectId}`, undefined, { placeholders: 'raw' }),
       checkouts: checkoutRoutes(projectId),
       compute: revisionCompute,
       http: createRevisionHttpClient({
@@ -537,7 +538,8 @@ const revisionRegistry = createWorkerRevisionRegistry({
       markProjectOpen(timer, status);
     }
   },
-  filesystem: (root) => fileService.createRootedFileSystem(root),
+  /* The revision layer owns the pointers: its views read placeholders as they are (slice a). */
+  filesystem: (root) => fileService.createRootedFileSystem(root, undefined, { placeholders: 'raw' }),
   /* Every write in this worker raises its change event inside the write, so a
    * cut can capture only the paths the bus named (E1). */
   completeChanges: true,
@@ -551,6 +553,8 @@ const revisionRegistry = createWorkerRevisionRegistry({
   /* W8 TS-S5: the agent channel's own transport, injected so the registry holds no rpc (R3). */
   servePlacement: ({ port, projectId, session }) => serveTurnPlacementChannel({ port, projectId, session }),
 });
+/* Slice (a): the authority's reads of a pending entry go through to its object, by oid. */
+fileService.setPendingObjectSource(createPendingObjectSource(revisionRegistry.roots));
 
 let languageFsSyncDispose: { dispose(): void } | undefined;
 let computeStore: ReturnType<typeof createIndexedDbComputeEngine> | undefined;

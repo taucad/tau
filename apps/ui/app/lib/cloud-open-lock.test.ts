@@ -204,7 +204,9 @@ describe('one cold open per device (S20)', () => {
       bounds: { waiterStall: 60 },
     });
     /* The holder beats every 10 ms: the waiter keeps waiting well past its 60 ms of silence. */
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await new Promise((resolve) => {
+      setTimeout(resolve, 200);
+    });
     expect(connect).not.toHaveBeenCalled();
     opener.move({ sync: { hasAppliedRemote: true } });
     await beating;

@@ -304,7 +304,7 @@ describe('watches on the connection event channel (D14)', () => {
     channel.dispose();
   });
 
-  it('ignores the frames that are not change sets and follows the channel closing', async () => {
+  it('resets a watch when the channel announces the authority lost, ignores compute news, and follows the channel closing', async () => {
     const channelEvents = eventChannel();
     const channel = new WorkerChangeChannel({
       transport: { listen: vi.fn().mockReturnValue(vi.fn()), events: channelEvents.events },
@@ -313,8 +313,9 @@ describe('watches on the connection event channel (D14)', () => {
     const watch = channel.watchReady({ paths: [''], recursive: true }, handler);
     await watch.ready;
     channelEvents.topic.emit({ kind: 'compute-restarted' });
-    channelEvents.topic.emit({ kind: 'authority-lost' });
     expect(handler).not.toHaveBeenCalled();
+    channelEvents.topic.emit({ kind: 'authority-lost' });
+    expect(handler.mock.calls).toEqual([[{ type: 'reset' }]]);
     channelEvents.closed.resolve();
     await expect(watch.closed).resolves.toBeUndefined();
     watch.dispose();

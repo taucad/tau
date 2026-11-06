@@ -101,7 +101,7 @@ describe('watchByChangeSets on the connection event channel (D14)', () => {
     return { events, send, subscriptions, topic };
   };
 
-  it('serves every watch from the channel, each with its own events, never the scoped forms', async () => {
+  it('serves every watch from the channel, each with its own events and a reset on a lost authority, never the scoped forms', async () => {
     const channel = channelSource();
     const source = { events: channel.events, watchReady: vi.fn(), watchChangeSets: vi.fn() };
     const kernel: WatchEvent[] = [];
@@ -128,8 +128,9 @@ describe('watchByChangeSets on the connection event channel (D14)', () => {
     expect(kernel).toEqual([
       { type: 'change', path: 'agent/t1/events.jsonl' },
       { type: 'change', path: 'agent/t1/file-0.ts' },
+      { type: 'reset' },
     ]);
-    expect(log).toEqual([{ type: 'change', path: 'agent/t1/events.jsonl' }]);
+    expect(log).toEqual([{ type: 'change', path: 'agent/t1/events.jsonl' }, { type: 'reset' }]);
     expect(source.watchChangeSets).not.toHaveBeenCalled();
     expect(source.watchReady).not.toHaveBeenCalled();
     kernelWatch.unsubscribe();

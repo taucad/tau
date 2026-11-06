@@ -40,7 +40,7 @@ import type {
   GrepOptions,
   LongCallProgress,
 } from '#filesystem-bridge-protocol.js';
-import type { Changeset, ChangesetEntry } from '@taucad/filesystem';
+import type { ChangeSet, Changeset, ChangesetEntry } from '@taucad/filesystem';
 import { observeFileSystemBridgeCrossings } from '#filesystem-bridge-crossings.js';
 import type { FileSystemBridgeCrossings } from '#filesystem-bridge-crossings.js';
 import { computeEventRelay } from '#filesystem-bridge-compute-events.js';
@@ -594,6 +594,27 @@ describe.each([inProcessPort, authorityConnection, workerPort])('rooted bridge c
       return { heard, subscription, until };
     };
 
+    /** Every change set a whole-root watch hears, and a wait for the next that matches. */
+    const watchSets = (proxy: FileSystemBridgeRootedProxy) => {
+      const sets: ChangeSet[] = [];
+      const waiters = new Set<() => void>();
+      const watch = proxy.watchChangeSets({ paths: [''], recursive: true }, (set) => {
+        sets.push(set);
+        for (const wake of waiters) {
+          wake();
+        }
+      });
+      const until = async (found: () => boolean): Promise<void> => {
+        while (!found()) {
+          // oxlint-disable-next-line no-await-in-loop -- each change set wakes the wait once.
+          await new Promise<void>((resolve) => {
+            waiters.add(resolve);
+          });
+        }
+      };
+      return { sets, until, watch };
+    };
+
     const changedPaths = (events: readonly FileSystemBridgeEvent[]): string[] =>
       events.flatMap((event) => (event.kind === 'changeSet' ? event.set.entries.map((entry) => entry.path) : []));
 
@@ -659,6 +680,25 @@ describe.each([inProcessPort, authorityConnection, workerPort])('rooted bridge c
       await late.until((heard) => heard.length > 0);
       expect(events.heard.filter((event) => event.kind === 'authority-lost')).toHaveLength(1);
       expect(late.heard).toEqual([{ kind: 'authority-lost' }]);
+    });
+
+    it('resets every live change-set watch once, at its last generation, when the connection dies', async () => {
+      const host = await open(transport);
+      const { sets, until, watch } = watchSets(host.proxy);
+      await watch.ready;
+      await host.externalWrite('seen.ts', 'x');
+      await until(() => sets.flatMap((set) => set.entries).some((entry) => entry.path === 'seen.ts'));
+      const { generation } = sets.at(-1)!;
+      const events = listen(host.proxy);
+      await events.subscription.ready;
+      await host.killAuthority();
+      await until(() => sets.some((set) => set.reset !== undefined));
+      await host.proxy.closed;
+      await events.until((heard) => heard.some((event) => event.kind === 'authority-lost'));
+      expect(sets.filter((set) => set.reset !== undefined)).toEqual([
+        { generation, entries: [], touchedDirectories: [], reset: { prefix: '', reason: 'observer-uncertain' } },
+      ]);
+      watch.unsubscribe();
     });
 
     it('says nothing is lost when the caller disposes its own connection', async () => {

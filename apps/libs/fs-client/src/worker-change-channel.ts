@@ -630,6 +630,13 @@ export class WorkerChangeChannel {
     const initial = this.#observed(
       request,
       events((event) => {
+        /* A lost connection may have dropped frames: the watch re-reads (D6). */
+        if (event.kind === 'authority-lost') {
+          handler({ type: 'reset' });
+          return;
+        }
+        /* `compute-restarted` has no consumer here yet: a watch reads files,
+         * and a compute restart changes none. */
         if (event.kind !== 'changeSet') {
           return;
         }

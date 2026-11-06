@@ -125,7 +125,10 @@ export type FileSystemBridgeProxyTransport = {
    * The change-set form of a watch (charter D6): one {@link ChangeSet} per
    * committed changeset that reaches the request, as one wire frame. Served by a
    * rooted connection over the authority; `ready` rejects with `ENOTSUP` where
-   * the connection offers only the per-path form.
+   * the connection offers only the per-path form. When the connection is lost
+   * (`authority-lost`), every live watch hears one reset with reason
+   * `observer-uncertain` at its last generation, so a tree re-reads instead of
+   * trusting a stream that may have gaps.
    */
   watchChangeSets(
     request: ChangeSetWatchRequest,
@@ -1766,21 +1769,28 @@ export function createFileSystemBridge(
  * closes under it, or when a call finds the authority unresponsive
  * (`PEER_UNRESPONSIVE`: no heartbeat, progress or answer within its liveness
  * window) while the port stays open. Whichever comes first is the loss; the
- * other says nothing more.
+ * other says nothing more. A loss clears once a call is answered again, so the
+ * next one is announced too.
+ *
+ * On a loss, `onLost` runs as well: the proxy resets every change-set watch it
+ * holds, so a tree re-reads instead of trusting a stream that may have gaps.
  */
 const eventChannel = ({
   watchReady,
   closed,
   isDisposed,
+  onLost,
 }: {
   readonly watchReady: ReturnType<
     typeof createBridgeCall<FileSystemBridgeWatchRequest, FileSystemBridgeWatchFrame, FileSystemBridgeHello>
   >['watchReady'];
   readonly closed: Promise<void>;
   readonly isDisposed: () => boolean;
+  readonly onLost: () => void;
 }): {
   readonly subscribe: (handler: (event: FileSystemBridgeEvent) => void) => FileSystemBridgeEventSubscription;
   readonly announceLost: () => void;
+  readonly answered: () => void;
 } => {
   const topic = new Topic<FileSystemBridgeEvent>({ name: 'FileSystemBridge.events' });
   let wire: ReturnType<typeof watchReady> | undefined;
@@ -1790,7 +1800,11 @@ const eventChannel = ({
       return;
     }
     lost = true;
+    onLost();
     topic.emit({ kind: 'authority-lost' });
+  };
+  const answered = (): void => {
+    lost = false;
   };
   const announceOnClose = async (): Promise<void> => {
     await closed;
@@ -1827,8 +1841,20 @@ const eventChannel = ({
       closed: opened.closed,
     };
   };
-  return { subscribe, announceLost };
+  return { subscribe, announceLost, answered };
 };
+
+/**
+ * The reset a change-set watch hears when its connection is lost (D6): every
+ * path it watches must be re-read, since frames may have been missed. It keeps
+ * the last generation the watch saw, because nothing new was committed.
+ */
+const lostConnectionReset = (generation: number): ChangeSet => ({
+  generation,
+  entries: [],
+  touchedDirectories: [],
+  reset: { prefix: '', reason: 'observer-uncertain' },
+});
 
 /**
  * Create a typed proxy over a filesystem bridge.
@@ -1861,7 +1887,16 @@ export function createFileSystemBridgeProxy(
   });
   const connectionId = nextFileSystemBridgeConnectionId();
   let isDisposed = false;
-  const events = eventChannel({ watchReady, closed, isDisposed: () => isDisposed });
+  /* Every live change-set watch subscribes here for the reset it hears when the connection is lost. */
+  const connectionLost = new Topic<undefined>({ name: 'FileSystemBridge.connectionLost' });
+  const events = eventChannel({
+    watchReady,
+    closed,
+    isDisposed: () => isDisposed,
+    onLost() {
+      connectionLost.emit(undefined);
+    },
+  });
 
   return new Proxy({} as FileSystemBridgeProxy, {
     get(_target, property, receiver: FileSystemBridgeRootedProxy): unknown {
@@ -1895,8 +1930,33 @@ export function createFileSystemBridgeProxy(
         return (
           request: ChangeSetWatchRequest,
           handler: (set: ChangeSet) => void,
-        ): ReturnType<FileSystemBridgeProxyTransport['watchChangeSets']> =>
-          watchReady({ ...request, form: 'change-sets' }, handler as (frame: FileSystemBridgeWatchFrame) => void);
+        ): ReturnType<FileSystemBridgeProxyTransport['watchChangeSets']> => {
+          let generation = 0;
+          const registration = watchReady({ ...request, form: 'change-sets' }, (frame) => {
+            const set = frame as ChangeSet;
+            generation = set.generation;
+            handler(set);
+          });
+          const leaveLost = connectionLost.subscribe(() => {
+            handler(lostConnectionReset(generation));
+          });
+          // A refused registration hears no reset; its caller handles `ready`.
+          const forgetIfRefused = async (): Promise<void> => {
+            try {
+              await registration.ready;
+            } catch {
+              leaveLost();
+            }
+          };
+          void forgetIfRefused();
+          return {
+            ...registration,
+            unsubscribe() {
+              leaveLost();
+              registration.unsubscribe();
+            },
+          };
+        };
       }
       if (property === 'ready') {
         return ready;
@@ -1939,6 +1999,7 @@ export function createFileSystemBridgeProxy(
             sent = split.longCall?.signal?.aborted !== true;
             return call(property, split.args, split.longCall);
           });
+          events.answered();
           if (property === 'readMany') {
             return readManyResult(result as ReadManyWireRows);
           }

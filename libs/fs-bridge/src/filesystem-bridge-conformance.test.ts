@@ -154,6 +154,7 @@ const openWorkerHost = async (seed: Record<string, string>): Promise<WorkerHost>
       return new Map(crossings);
     },
     async freeze() {
+      Atomics.store(gate, 0, 0);
       const frozen = workerMessage(worker, 'frozen');
       worker.postMessage({ type: 'freeze', gate });
       await frozen;
@@ -440,6 +441,31 @@ describe('bridge conformance: authority death after ready (W10)', () => {
     await host.worker.terminate();
     await host.proxy.closed;
     expect(heard).toEqual([{ kind: 'authority-lost' }]);
+    subscription.unsubscribe();
+  });
+
+  it('clears the loss once a call is answered again, so the next loss is announced too', async () => {
+    const host = await openWorkerHost(files);
+    opened.push(host);
+    const heard: FileSystemBridgeEvent[] = [];
+    const subscription = host.proxy.events((event) => heard.push(event));
+    await subscription.ready.catch(() => undefined);
+    const loseOnce = async (): Promise<void> => {
+      await host.freeze();
+      vi.useFakeTimers();
+      const pending = host.proxy.readMany(['a.ts']);
+      const failure = expect(pending).rejects.toMatchObject({ code: 'PEER_UNRESPONSIVE' });
+      await vi.advanceTimersByTimeAsync(30_000);
+      await failure;
+      vi.useRealTimers();
+      host.thaw();
+    };
+    await loseOnce();
+    expect(heard).toEqual([{ kind: 'authority-lost' }]);
+    const answered = await host.proxy.readMany(['a.ts']);
+    expect(text(answered.get('a.ts'))).toBe('alpha');
+    await loseOnce();
+    expect(heard).toEqual([{ kind: 'authority-lost' }, { kind: 'authority-lost' }]);
     subscription.unsubscribe();
   });
 });

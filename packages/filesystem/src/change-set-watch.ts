@@ -131,7 +131,9 @@ const watchByScopedForms = (
  * 3. In the per-path form.
  *
  * A form the connection answers `ENOTSUP` for steps down to the next; a source
- * whose event channel was refused skips it for later watches.
+ * whose event channel was refused skips it for later watches. A watch on the
+ * event channel hears a `reset` when the channel announces `authority-lost`,
+ * so its consumer re-reads instead of trusting a stream that may have gaps.
  *
  * @param source - The bridge proxy.
  * @param request - Paths and matching scope.
@@ -156,6 +158,13 @@ export const watchByChangeSets = (
     return scoped();
   }
   const initial = events.call(source, (event) => {
+    /* A lost connection may have dropped frames: the watch re-reads (D6). */
+    if (event.kind === 'authority-lost') {
+      handler({ type: 'reset' });
+      return;
+    }
+    /* `compute-restarted` has no consumer here yet: a watch reads files, and a
+     * compute restart changes none. Its subscribers are the compute's callers. */
     if (event.kind !== 'changeSet') {
       return;
     }

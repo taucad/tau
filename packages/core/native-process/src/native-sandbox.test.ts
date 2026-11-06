@@ -18,6 +18,8 @@ import {
 const sandbox = vi.hoisted(() => ({
   supported: true,
   dependencyErrors: [] as string[],
+  /* Every dependency check reads `dependencyErrors` unless a test queues its own answer. */
+  dependencyCheck: vi.fn((): string[] => sandbox.dependencyErrors),
   initialize: vi.fn(async () => undefined),
   reset: vi.fn(async () => undefined),
   wrap: vi.fn<(command: string, ...rest: unknown[]) => void>(),
@@ -32,7 +34,7 @@ vi.mock('@anthropic-ai/sandbox-runtime', async (importActual) => ({
   // eslint-disable-next-line @typescript-eslint/naming-convention -- mirrors the runtime's exported class.
   SandboxManager: {
     isSupportedPlatform: () => sandbox.supported,
-    checkDependenciesAsync: async () => ({ errors: sandbox.dependencyErrors, warnings: [] }),
+    checkDependenciesAsync: async () => ({ errors: sandbox.dependencyCheck(), warnings: [] }),
     initialize: sandbox.initialize,
     reset: sandbox.reset,
     wrapWithSandboxArgv: async (command: string, ...rest: unknown[]) => {
@@ -69,6 +71,7 @@ afterEach(() => {
   sandbox.wrapped = undefined;
   sandbox.wrap.mockClear();
   sandbox.reset.mockClear();
+  sandbox.dependencyCheck.mockClear();
   vi.useRealTimers();
   Object.defineProperty(process, 'platform', platformDescriptor);
   vi.unstubAllEnvs();
@@ -213,6 +216,37 @@ describe('a Linux network bridge that starts too slowly', () => {
     await expect(launchFresh(launch)).rejects.toThrow(/proxy bind failed/);
     expect(sandbox.initialize).toHaveBeenCalledOnce();
     expect(sandbox.reset).not.toHaveBeenCalled();
+  });
+});
+
+describe('a sandbox prerequisite that is slow to find', () => {
+  const freshLauncher = async (): Promise<typeof launchInNativeSandbox> => {
+    vi.resetModules();
+    const fresh = await import('#native-sandbox.js');
+    return fresh.launchInNativeSandbox;
+  };
+
+  it('should check again before reporting it missing, so a slow lookup does not fail the launch', async () => {
+    vi.useFakeTimers();
+    sandbox.dependencyCheck.mockReturnValueOnce(['ripgrep (rg) not found']);
+    const launchFresh = await freshLauncher();
+
+    const launched = launchFresh(launch);
+    await vi.runAllTimersAsync();
+
+    await expect(launched).resolves.toBeDefined();
+    expect(sandbox.dependencyCheck).toHaveBeenCalledTimes(2);
+  });
+
+  it('should report a prerequisite missing on every check, after a bounded number of checks', async () => {
+    vi.useFakeTimers();
+    sandbox.dependencyErrors = ['ripgrep (rg) not found'];
+    const launchFresh = await freshLauncher();
+
+    const failed = expect(launchFresh(launch)).rejects.toThrow(/sandbox could not start: ripgrep \(rg\) not found$/);
+    await vi.runAllTimersAsync();
+    await failed;
+    expect(sandbox.dependencyCheck).toHaveBeenCalledTimes(3);
   });
 });
 

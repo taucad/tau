@@ -1,8 +1,8 @@
 /**
  * Manifold tessellation: a quality preset or Manifold's explicit circular-detail settings, never both.
  *
- * The preset table, triangle budgets, downgrade step and issue codes mirror `@taucad/occt-core`'s
- * `occt-schemas.ts` and `occt-tessellation.ts`, so every kernel uses the same words for the same cost.
+ * The preset table mirrors `@taucad/occt-core`'s `occt-schemas.ts`, so every kernel uses the same words for the
+ * same cost. There is no triangle budget: a preview or export meshes once at the requested detail.
  * Manifold has no chordal deviation of its own: it splits each circle into
  * `min(360 / angle, 2πr / edgeLength)` segments. A preset therefore sets the edge length to the size-derived
  * linear value and the angle to the smaller of the preset angle and the angle whose chord deviates by that
@@ -13,7 +13,7 @@
 
 import { z } from 'zod';
 import { quantity, quantityKinds } from '@taucad/runtime/kernel';
-import type { KernelIssue, TessellationReport } from '@taucad/runtime/types';
+import type { TessellationReport } from '@taucad/runtime/types';
 
 /** Tessellation quality presets, coarsest first. @public */
 export const manifoldTessellationQualities = ['low', 'medium', 'high', 'extra-high'] as const;
@@ -118,12 +118,6 @@ export const manifoldTessellationPresets: Readonly<
 
 const presetLinearRange = { min: 0.001, max: 50 } as const;
 
-/** Triangle budgets: over the preview budget a render coarsens, over the export budget an export refuses. @public */
-export const manifoldTriangleBudgets = { preview: 2_000_000, export: 20_000_000 } as const;
-
-/** How many coarser steps a preview takes before delivering what it has. @public */
-export const manifoldMaxTessellationDowngrades = 3;
-
 const degrees = (radians: number): number => (radians * 180) / Math.PI;
 
 /**
@@ -165,57 +159,14 @@ export const resolveManifoldTessellation = (
 };
 
 /**
- * One step coarser: twice the edge length, four degrees more angle, half the fixed segments.
- *
- * @param detail - The settings that produced too many triangles.
- * @returns The next coarser settings.
- * @public
- */
-export const coarsenManifoldTessellation = (detail: ManifoldCircularDetail): ManifoldCircularDetail => ({
-  ...(detail.segments === undefined ? {} : { segments: Math.max(3, Math.round(detail.segments / 2)) }),
-  linearTolerance: detail.linearTolerance * 2,
-  angularTolerance: detail.angularTolerance + 4,
-});
-
-/** The outcome of meshing within a budget. @public */
-export type ManifoldBudgetedMesh<T> = Readonly<{ result: T; effective: ManifoldCircularDetail; downgraded: number }>;
-
-/**
- * Mesh, then coarsen one step at a time while the result exceeds the budget, at most
- * {@link manifoldMaxTessellationDowngrades} times; the last result is delivered even if still over budget.
- *
- * @param options - Starting settings, the triangle budget and the meshing to run.
- * @returns The delivered result, its settings and the number of coarser steps.
- * @public
- */
-export const meshWithinManifoldBudget = async <T extends Readonly<{ triangles: number }>>(options: {
-  detail: ManifoldCircularDetail;
-  budget: number;
-  mesh: (detail: ManifoldCircularDetail) => Promise<T>;
-}): Promise<ManifoldBudgetedMesh<T>> => {
-  let effective = options.detail;
-  let result = await options.mesh(effective);
-  let downgraded = 0;
-  while (result.triangles > options.budget && downgraded < manifoldMaxTessellationDowngrades) {
-    effective = coarsenManifoldTessellation(effective);
-    downgraded++;
-    // oxlint-disable-next-line no-await-in-loop -- each step depends on the previous count.
-    result = await options.mesh(effective);
-  }
-  return { result, effective, downgraded };
-};
-
-/**
  * The cost report for a delivered mesh.
  *
- * @param options - Requested form, effective settings, steps taken, counts and elapsed milliseconds.
- * @returns Counts, elapsed milliseconds and the effective resolution, as hosts show them.
+ * @param options - Requested settings, counts and elapsed milliseconds.
+ * @returns Counts, elapsed milliseconds and the resolution, as hosts show them.
  * @public
  */
 export const createManifoldTessellationReport = (options: {
   requested: ManifoldResolvedTessellation;
-  effective: ManifoldCircularDetail;
-  downgraded: number;
   triangles: number;
   vertices: number;
   elapsed: number;
@@ -224,87 +175,6 @@ export const createManifoldTessellationReport = (options: {
   vertices: options.vertices,
   elapsed: options.elapsed,
   requested: options.requested.requested,
-  linearTolerance: options.effective.linearTolerance,
-  angularTolerance: options.effective.angularTolerance,
-  downgraded: options.downgraded,
+  linearTolerance: options.requested.linearTolerance,
+  angularTolerance: options.requested.angularTolerance,
 });
-
-const detailOf = (detail: ManifoldCircularDetail): Record<string, number> => ({
-  ...(detail.segments === undefined ? {} : { segments: detail.segments }),
-  linearTolerance: detail.linearTolerance,
-  angularTolerance: detail.angularTolerance,
-});
-
-const formatDetail = (detail: ManifoldCircularDetail): string =>
-  `{ ${Object.entries(detailOf(detail))
-    .map(([key, value]) => `${key}: ${String(value)}`)
-    .join(', ')} }`;
-
-const requestedLabel = (requested: ManifoldResolvedTessellation): string =>
-  requested.requested === 'explicit' ? 'explicit settings' : `preset '${requested.requested}'`;
-
-/**
- * The warning a preview reports after coarsening an over-budget mesh.
- *
- * @param options - Requested and effective settings, steps taken, triangles and budget.
- * @returns A `TESSELLATION_DOWNGRADED` warning.
- * @public
- */
-export const createManifoldTessellationDowngradedIssue = (options: {
-  requested: ManifoldResolvedTessellation;
-  effective: ManifoldCircularDetail;
-  downgraded: number;
-  triangles: number;
-  budget: number;
-}): KernelIssue => {
-  const { requested, effective, downgraded, triangles, budget } = options;
-  return {
-    message:
-      `Tessellation exceeded the ${String(budget)}-triangle budget at ${requestedLabel(requested)} ${formatDetail(requested)}; ` +
-      `coarsened ${String(downgraded)} step${downgraded === 1 ? '' : 's'} to ${formatDetail(effective)} ` +
-      `(${String(triangles)} triangles). Request a coarser preset or explicit settings to choose the mesh yourself.`,
-    code: 'TESSELLATION_DOWNGRADED',
-    type: 'kernel',
-    severity: 'warning',
-    details: {
-      producer: 'manifold',
-      requested: { form: requested.requested, ...detailOf(requested) },
-      effective: detailOf(effective),
-      downgraded,
-      triangles,
-      budget,
-    },
-  };
-};
-
-/**
- * The error an export reports instead of coarsening a mesh over its budget.
- *
- * @param options - Requested settings, triangles produced and budget.
- * @returns A `RESOURCE_LIMIT` error naming a suggested coarser request.
- * @public
- */
-export const createManifoldTessellationBudgetExceededIssue = (options: {
-  requested: ManifoldResolvedTessellation;
-  triangles: number;
-  budget: number;
-}): KernelIssue => {
-  const { requested, triangles, budget } = options;
-  const suggested = coarsenManifoldTessellation(requested);
-  return {
-    message:
-      `Export tessellation produced ${String(triangles)} triangles, over the ${String(budget)}-triangle export budget, ` +
-      `at ${requestedLabel(requested)} ${formatDetail(requested)}. Exports are never coarsened silently; ` +
-      `request a coarser preset or tessellation ${formatDetail(suggested)}.`,
-    code: 'RESOURCE_LIMIT',
-    type: 'kernel',
-    severity: 'error',
-    details: {
-      producer: 'manifold',
-      requested: { form: requested.requested, ...detailOf(requested) },
-      suggested: detailOf(suggested),
-      triangles,
-      budget,
-    },
-  };
-};

@@ -1,8 +1,8 @@
 /**
  * OpenSCAD tessellation: a quality preset or explicit `$fn`, `$fs` and `$fa`, never both.
  *
- * The preset table, triangle budgets, downgrade step and issue codes mirror `@taucad/occt-core`'s
- * `occt-schemas.ts` and `occt-tessellation.ts`, so every kernel uses the same words for the same cost.
+ * The preset table mirrors `@taucad/occt-core`'s `occt-schemas.ts`, so every kernel uses the same words for the
+ * same cost. There is no triangle budget: a preview or export meshes once at the requested values.
  * OpenSCAD splits a circle into `max(min(360 / $fa, 2πr / $fs), 5)` fragments unless `$fn` is set. A preset
  * therefore sets `$fs` to the size-derived linear value and `$fa` to the smaller of the preset angle and the
  * angle whose chord deviates by that linear value on a circle as large as the model, so a preset is
@@ -13,7 +13,7 @@
 
 import { z } from 'zod';
 import { quantity, quantityKinds } from '@taucad/runtime/kernel';
-import type { KernelIssue, TessellationReport } from '@taucad/runtime/types';
+import type { TessellationReport } from '@taucad/runtime/types';
 
 /** Tessellation quality presets, coarsest first. @public */
 export const openrscadTessellationQualities = ['low', 'medium', 'high', 'extra-high'] as const;
@@ -129,12 +129,6 @@ export const openrscadTessellationPresets: Readonly<
 
 const presetLinearRange = { min: 0.001, max: 50 } as const;
 
-/** Triangle budgets: over the preview budget a render coarsens, over the export budget an export refuses. @public */
-export const openrscadTriangleBudgets = { preview: 2_000_000, export: 20_000_000 } as const;
-
-/** How many coarser steps a preview takes before delivering what it has. @public */
-export const openrscadMaxTessellationDowngrades = 3;
-
 const degrees = (radians: number): number => (radians * 180) / Math.PI;
 
 /**
@@ -227,64 +221,14 @@ export const resolveOpenrscadRequest = (options: {
 };
 
 /**
- * One step coarser: twice `$fs`, four degrees more `$fa`, half `$fn`. Fields the script owns stay unset.
- *
- * @param resolution - The values that produced too many triangles.
- * @returns The next coarser values.
- * @public
- */
-export const coarsenOpenrscadTessellation = (resolution: OpenrscadResolution): OpenrscadResolution => ({
-  ...(resolution.segments === undefined
-    ? {}
-    : { segments: resolution.segments === 0 ? 0 : Math.max(3, Math.round(resolution.segments / 2)) }),
-  ...(resolution.linearTolerance === undefined ? {} : { linearTolerance: resolution.linearTolerance * 2 }),
-  ...(resolution.angularTolerance === undefined ? {} : { angularTolerance: resolution.angularTolerance + 4 }),
-});
-
-/** The outcome of meshing within a budget. @public */
-export type OpenrscadBudgetedMesh<T> = Readonly<{ result: T; effective: OpenrscadResolution; downgraded: number }>;
-
-/**
- * Mesh, then coarsen one step at a time while the result exceeds the budget, at most
- * {@link openrscadMaxTessellationDowngrades} times; the last result is delivered even if still over budget.
- *
- * @param options - Starting values, the triangle budget and the meshing to run.
- * @returns The delivered result, its values and the number of coarser steps.
- * @public
- */
-export const meshWithinOpenrscadBudget = async <T extends Readonly<{ triangles: number }>>(options: {
-  resolution: OpenrscadResolution;
-  budget: number;
-  mesh: (resolution: OpenrscadResolution) => Promise<T>;
-}): Promise<OpenrscadBudgetedMesh<T>> => {
-  let effective = options.resolution;
-  let result = await options.mesh(effective);
-  let downgraded = 0;
-  while (result.triangles > options.budget && downgraded < openrscadMaxTessellationDowngrades) {
-    const coarser = coarsenOpenrscadTessellation(effective);
-    if (JSON.stringify(coarser) === JSON.stringify(effective)) {
-      // Every value is the script's own (or `$fn = 0` alone): there is nothing this side can coarsen.
-      break;
-    }
-    effective = coarser;
-    downgraded++;
-    // oxlint-disable-next-line no-await-in-loop -- each step depends on the previous count.
-    result = await options.mesh(effective);
-  }
-  return { result, effective, downgraded };
-};
-
-/**
  * The cost report for a delivered mesh. Tolerances the script kept for itself are not reported.
  *
- * @param options - Requested form, effective values, steps taken, counts and elapsed milliseconds.
- * @returns Counts, elapsed milliseconds and the effective resolution, as hosts show them.
+ * @param options - Requested values, counts and elapsed milliseconds.
+ * @returns Counts, elapsed milliseconds and the resolution, as hosts show them.
  * @public
  */
 export const createOpenrscadTessellationReport = (options: {
   requested: OpenrscadResolvedTessellation;
-  effective: OpenrscadResolution;
-  downgraded: number;
   triangles: number;
   vertices: number;
   elapsed: number;
@@ -293,87 +237,6 @@ export const createOpenrscadTessellationReport = (options: {
   vertices: options.vertices,
   elapsed: options.elapsed,
   requested: options.requested.requested,
-  ...(options.effective.linearTolerance === undefined ? {} : { linearTolerance: options.effective.linearTolerance }),
-  ...(options.effective.angularTolerance === undefined ? {} : { angularTolerance: options.effective.angularTolerance }),
-  downgraded: options.downgraded,
+  ...(options.requested.linearTolerance === undefined ? {} : { linearTolerance: options.requested.linearTolerance }),
+  ...(options.requested.angularTolerance === undefined ? {} : { angularTolerance: options.requested.angularTolerance }),
 });
-
-const valuesOf = (resolution: OpenrscadResolution): Record<string, number> => ({
-  ...(resolution.segments === undefined ? {} : { segments: resolution.segments }),
-  ...(resolution.linearTolerance === undefined ? {} : { linearTolerance: resolution.linearTolerance }),
-  ...(resolution.angularTolerance === undefined ? {} : { angularTolerance: resolution.angularTolerance }),
-});
-
-const formatValues = (resolution: OpenrscadResolution): string =>
-  `{ ${Object.entries(valuesOf(resolution))
-    .map(([key, value]) => `${key}: ${String(value)}`)
-    .join(', ')} }`;
-
-const requestedLabel = (requested: OpenrscadResolvedTessellation): string =>
-  requested.requested === 'explicit' ? 'explicit values' : `preset '${requested.requested}'`;
-
-/**
- * The warning a preview reports after coarsening an over-budget mesh.
- *
- * @param options - Requested and effective values, steps taken, triangles and budget.
- * @returns A `TESSELLATION_DOWNGRADED` warning.
- * @public
- */
-export const createOpenrscadTessellationDowngradedIssue = (options: {
-  requested: OpenrscadResolvedTessellation;
-  effective: OpenrscadResolution;
-  downgraded: number;
-  triangles: number;
-  budget: number;
-}): KernelIssue => {
-  const { requested, effective, downgraded, triangles, budget } = options;
-  return {
-    message:
-      `Tessellation exceeded the ${String(budget)}-triangle budget at ${requestedLabel(requested)} ${formatValues(requested)}; ` +
-      `coarsened ${String(downgraded)} step${downgraded === 1 ? '' : 's'} to ${formatValues(effective)} ` +
-      `(${String(triangles)} triangles). Request a coarser preset or explicit values to choose the mesh yourself.`,
-    code: 'TESSELLATION_DOWNGRADED',
-    type: 'kernel',
-    severity: 'warning',
-    details: {
-      producer: 'openrscad',
-      requested: { form: requested.requested, ...valuesOf(requested) },
-      effective: valuesOf(effective),
-      downgraded,
-      triangles,
-      budget,
-    },
-  };
-};
-
-/**
- * The error an export reports instead of coarsening a mesh over its budget.
- *
- * @param options - Requested values, triangles produced and budget.
- * @returns A `RESOURCE_LIMIT` error naming a suggested coarser request.
- * @public
- */
-export const createOpenrscadTessellationBudgetExceededIssue = (options: {
-  requested: OpenrscadResolvedTessellation;
-  triangles: number;
-  budget: number;
-}): KernelIssue => {
-  const { requested, triangles, budget } = options;
-  const suggested = coarsenOpenrscadTessellation(requested);
-  return {
-    message:
-      `Export tessellation produced ${String(triangles)} triangles, over the ${String(budget)}-triangle export budget, ` +
-      `at ${requestedLabel(requested)} ${formatValues(requested)}. Exports are never coarsened silently; ` +
-      `request a coarser preset or tessellation ${formatValues(suggested)}.`,
-    code: 'RESOURCE_LIMIT',
-    type: 'kernel',
-    severity: 'error',
-    details: {
-      producer: 'openrscad',
-      requested: { form: requested.requested, ...valuesOf(requested) },
-      suggested: valuesOf(suggested),
-      triangles,
-      budget,
-    },
-  };
-};

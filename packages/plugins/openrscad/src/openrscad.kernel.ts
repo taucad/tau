@@ -13,12 +13,8 @@ import { createExportFile } from '@taucad/runtime/types';
 import type { JSONSchema7, JSONSchema7Definition } from '@taucad/runtime/types';
 
 import {
-  createOpenrscadTessellationBudgetExceededIssue,
-  createOpenrscadTessellationDowngradedIssue,
   createOpenrscadTessellationReport,
-  meshWithinOpenrscadBudget,
   openrscadTessellationSchema,
-  openrscadTriangleBudgets,
   resolveOpenrscadRequest,
   scriptOwnedResolution,
 } from '#openrscad-tessellation.js';
@@ -764,7 +760,6 @@ export const createOpenrscadKernel = ({
         diagonal: nativeHandle.diagonal ?? Number.NaN,
         owned: scriptOwnedResolution([nativeHandle.source, ...Object.values(nativeHandle.files)]),
       });
-      const budget = openrscadTriangleBudgets.preview;
       const meshAt = async (
         resolution: OpenrscadResolution,
       ): Promise<{ content: Uint8Array<ArrayBuffer>; issues: KernelIssue[]; triangles: number; vertices: number }> => {
@@ -808,33 +803,15 @@ export const createOpenrscadKernel = ({
           vertices: result.vertexCount,
         };
       };
-      const { result, effective, downgraded } = await meshWithinOpenrscadBudget({
-        resolution: requested,
-        budget,
-        mesh: meshAt,
-      });
+      // One OpenSCAD run at the requested values: nothing coarsens a mesh (no triangle budget).
+      const result = await meshAt(requested);
       const tessellation = createOpenrscadTessellationReport({
         requested,
-        effective,
-        downgraded,
         triangles: result.triangles,
         vertices: result.vertices,
         elapsed: performance.now() - started,
       });
-      const issues =
-        downgraded === 0
-          ? result.issues
-          : [
-              ...result.issues,
-              createOpenrscadTessellationDowngradedIssue({
-                requested,
-                effective,
-                downgraded,
-                triangles: result.triangles,
-                budget,
-              }),
-            ];
-      return { content: result.content, tessellation, issues };
+      return { content: result.content, tessellation, issues: result.issues };
     },
 
     async export(input, { tracer }, context) {
@@ -860,16 +837,10 @@ export const createOpenrscadKernel = ({
           span.end();
         }
       };
-      const checked = (result: ExportShape3DOutput, requested: OpenrscadResolvedTessellation): KernelIssue[] => {
+      const checked = (result: ExportShape3DOutput): KernelIssue[] => {
         const issues = collectIssues(result, nativeHandle.source, nativeHandle.entryPath);
         if (!result.ok) {
           throw new OpenRscadExportError(issues);
-        }
-        const budget = openrscadTriangleBudgets.export;
-        if (result.triangleCount > budget) {
-          throw new OpenRscadExportError([
-            createOpenrscadTessellationBudgetExceededIssue({ requested, triangles: result.triangleCount, budget }),
-          ]);
         }
         return issues;
       };
@@ -894,7 +865,7 @@ export const createOpenrscadKernel = ({
               }),
             ),
           );
-          const issues = checked(result, requested);
+          const issues = checked(result);
           return { files: [createExportFile('glb', 'model.glb', asBuffer(result.bytes))], issues };
         }
         case '3mf': {
@@ -913,7 +884,7 @@ export const createOpenrscadKernel = ({
               }),
             ),
           );
-          const issues = checked(result, requested);
+          const issues = checked(result);
           return { files: [createExportFile('3mf', 'model.3mf', asBuffer(result.bytes))], issues };
         }
         default: {

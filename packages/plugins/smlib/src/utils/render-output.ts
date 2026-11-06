@@ -9,6 +9,9 @@ import type { ShapeConfig, SmlibShape } from '#model.js';
 import type { GeometrySmlib } from '#smlib.types.js';
 import { normalizeColor } from '#utils/normalize-color.js';
 import { meshBoundaryPolylines } from '#utils/mesh-edges.js';
+import { evaluateNurbs } from '#utils/nurbs.js';
+import { boundaryPolylines, brepOf, edgeIndices, edgeNurbs, edgeTopology } from '#utils/smlib-kernel.js';
+import type { SmlibKernel } from '#utils/smlib-kernel.js';
 import { projectSurfaceCoordinates } from '#utils/surface-coordinates.js';
 
 /** The `@classcad/smlibwasm` module the kernel loaded. */
@@ -18,6 +21,8 @@ type Tessellation = OcctTessellationTolerances;
 
 type RenderOptions = {
   library: SmlibLibrary;
+  /** The raw kernel layer, for the whole-body edge calls. */
+  kernel: SmlibKernel;
   tessellation: Tessellation;
   collectBrepEdges?: boolean;
   tracer?: RuntimeSpanTracer;
@@ -237,26 +242,28 @@ const minimumCurveSegments = 4;
 const maximumCurveDepth = 10;
 
 /**
- * Sample one edge into a polyline: its two ends for a line, otherwise an adaptive bisection on the
- * curve parameter until each chord is within the linear tolerance of the curve and turns by less
- * than the angular tolerance.
- * @param edge - The edge to sample.
+ * Sample a curve into a polyline by adaptive bisection on its parameter, until each chord is within
+ * the linear tolerance of the curve and turns by less than the angular tolerance.
+ * @param evaluate - The curve's point at a parameter.
+ * @param range - The parameters of the polyline's first and last point (the first may be the larger).
  * @param tessellation - Linear and angular tolerances.
  * @returns The polyline's points.
  */
-function sampleEdge(edge: SmlibModule.Edge, tessellation: Tessellation): number[][] {
-  const start = edge.pointAt(0).toArray();
-  const end = edge.pointAt(1).toArray();
-  if (edge.geomType === 'line') {
-    return [start, end];
-  }
+export function sampleCurve(
+  evaluate: (t: number) => number[],
+  range: readonly [number, number],
+  tessellation: Tessellation,
+): number[][] {
+  const [first, last] = range;
+  const start = evaluate(first);
+  const end = evaluate(last);
   const maximumTurn = (tessellation.angularTolerance * Math.PI) / 180;
   const distance = (a: number[], b: number[]): number => Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!);
   const points: number[][] = [];
   type Span = { t0: number; p0: number[]; t1: number; p1: number[] };
   const refine = ({ t0, p0, t1, p1 }: Span, depth: number): void => {
     const tm = (t0 + t1) / 2;
-    const pm = edge.pointAt(tm).toArray();
+    const pm = evaluate(tm);
     const chordMid = [(p0[0]! + p1[0]!) / 2, (p0[1]! + p1[1]!) / 2, (p0[2]! + p1[2]!) / 2];
     const sagitta = distance(pm, chordMid);
     const half = distance(p0, p1) / 2;
@@ -269,49 +276,116 @@ function sampleEdge(edge: SmlibModule.Edge, tessellation: Tessellation): number[
     points.push(p1);
   };
   points.push(start);
-  const seeds = Array.from({ length: minimumCurveSegments + 1 }, (_, index) => index / minimumCurveSegments);
   let previous = start;
-  for (let index = 1; index < seeds.length; index++) {
-    const t = seeds[index]!;
-    const point = index === seeds.length - 1 ? end : edge.pointAt(t).toArray();
-    refine({ t0: seeds[index - 1]!, p0: previous, t1: t, p1: point }, 0);
+  let previousT = first;
+  for (let index = 1; index <= minimumCurveSegments; index++) {
+    const t = index === minimumCurveSegments ? last : first + ((last - first) * index) / minimumCurveSegments;
+    const point = index === minimumCurveSegments ? end : evaluate(t);
+    refine({ t0: previousT, p0: previous, t1: t, p1: point }, 0);
     previous = point;
+    previousT = t;
   }
   return points;
+}
+
+/**
+ * Sample one edge into a polyline, from start to end: its two ends for a line, otherwise an adaptive
+ * bisection ({@link sampleCurve}) of its curve, read once as a NURBS (`ext.curve_data`) and
+ * evaluated in JavaScript. One kernel call per edge, however many samples the curve takes.
+ * @param kernel - The raw kernel layer.
+ * @param edge - The edge to sample.
+ * @param tessellation - Linear and angular tolerances.
+ * @returns The polyline's points.
+ */
+export function sampleEdge(kernel: SmlibKernel, edge: SmlibModule.Edge, tessellation: Tessellation): number[][] {
+  const { curve, reversed } = edgeNurbs(kernel, edge);
+  const [t0, t1] = curve.interval;
+  const range: [number, number] = reversed ? [t1, t0] : [t0, t1];
+  const evaluate = (t: number): number[] => evaluateNurbs(curve, t);
+  if (curve.kind === 'line') {
+    return [evaluate(range[0]), evaluate(range[1])];
+  }
+  return sampleCurve(evaluate, range, tessellation);
+}
+
+/** Finest turn per segment of a fallback edge, in degrees: 4,096 segments on a full circle. */
+const finestFallbackTurn = 360 / 4096;
+
+/**
+ * The largest turn per segment that keeps a circular arc no larger than the body within the linear
+ * tolerance, capped by the angular tolerance: `k.tessellate_boundaries` takes only an angle.
+ * @param tessellation - Linear and angular tolerances.
+ * @param mesh - The body's mesh, whose extent bounds the radius of its arcs.
+ * @returns The angle in degrees.
+ */
+function fallbackTurn(tessellation: Tessellation, mesh: FaceMesh): number {
+  const low = [Infinity, Infinity, Infinity];
+  const high = [-Infinity, -Infinity, -Infinity];
+  for (let index = 0; index < mesh.vertices.length; index++) {
+    const axis = index % 3;
+    low[axis] = Math.min(low[axis]!, mesh.vertices[index]!);
+    high[axis] = Math.max(high[axis]!, mesh.vertices[index]!);
+  }
+  const radius = Math.hypot(high[0]! - low[0]!, high[1]! - low[1]!, high[2]! - low[2]!) / 2;
+  const chordTurn =
+    radius > tessellation.linearTolerance
+      ? (2 * Math.acos(1 - tessellation.linearTolerance / radius) * 180) / Math.PI
+      : tessellation.angularTolerance;
+  return Math.max(finestFallbackTurn, Math.min(tessellation.angularTolerance, chordTurn));
 }
 
 /**
  * Append a body's edges as a segment soup, one scalar range per edge.
  *
  * Each edge is drawn through the face mesh's own samples of it (see {@link meshBoundaryPolylines}),
- * so the line lies on the triangles' edges at any tessellation. An edge the mesh does not bound (the
- * faces were not told apart) falls back to sampling its curve; a seam, which lies inside one face,
- * is left out, as `smlibpy` leaves it out.
+ * matched by the end vertices that one `ext.brep_dump` of the body records, so the line lies on the
+ * triangles' edges at any tessellation. Edges the mesh does not bound (the faces were not told
+ * apart) fall back to the kernel's own polylines of every edge, from one `k.tessellate_boundaries`
+ * call; a seam (`ext.seam_edges`), which lies inside one face, is left out, as `smlibpy` leaves it out.
  * @param target - The shape's edge buffers.
  * @param shape - The body or face whose edges are drawn.
- * @param surface - The mesh of the whole shape, which face each triangle belongs to, and the tolerances it was made with.
+ * @param surface - The shape's mesh, its triangles' faces, the tolerances it was made with, and the library and kernel layer.
  */
 function appendEdges(
   target: GeometrySmlib['edges'],
   shape: SmlibModule.Shape,
-  surface: { mesh: FaceMesh; owners: Int32Array; tessellation: Tessellation },
+  surface: {
+    mesh: FaceMesh;
+    owners: Int32Array;
+    tessellation: Tessellation;
+    library: SmlibLibrary;
+    kernel: SmlibKernel;
+  },
 ): void {
-  const { tessellation } = surface;
+  const { tessellation, library, kernel } = surface;
   const edges = [...shape.edges()];
+  const brep = brepOf(library, shape);
   let fromMesh = new Map<number, number[][][]>();
   try {
+    const topology = edgeTopology(kernel, { brep, edges, scope: shape instanceof library.Face ? 'edges' : 'body' });
     fromMesh = meshBoundaryPolylines({
       mesh: surface.mesh,
       owners: surface.owners,
       edges,
-      vertices: [...shape.vertices()],
+      ends: topology.ends,
+      vertices: topology.vertices,
       tolerance: tessellation.linearTolerance,
     });
   } catch {
-    // A body the kernel cannot measure against: every edge samples its curve.
+    // A body the kernel cannot measure against: every edge takes the kernel's polyline.
   }
-  for (const [edgeId, edge] of edges.entries()) {
-    const polylines = fromMesh.get(edgeId) ?? (isSeam(edge) ? [] : [sampleEdge(edge, tessellation)]);
+  const kernelPolylines = (): ((edgeId: number) => number[][][]) => {
+    const { polylines, seams } = boundaryPolylines(kernel, brep, fallbackTurn(tessellation, surface.mesh));
+    const indices = edgeIndices(kernel, brep, edges);
+    return (edgeId) => {
+      const index = indices[edgeId]!;
+      const polyline = polylines[index] ?? [];
+      return seams.has(index) || polyline.length < 2 ? [] : [polyline];
+    };
+  };
+  let fallback: ((edgeId: number) => number[][][]) | undefined;
+  for (const edgeId of edges.keys()) {
+    const polylines = fromMesh.get(edgeId) ?? (fallback ??= kernelPolylines())(edgeId);
     const start = target.lines.length;
     for (const points of polylines) {
       for (let index = 1; index < points.length; index++) {
@@ -323,14 +397,6 @@ function appendEdges(
     }
   }
 }
-
-const isSeam = (edge: SmlibModule.Edge): boolean => {
-  try {
-    return edge.isSeam;
-  } catch {
-    return false;
-  }
-};
 
 /**
  * Join face meshes into one mesh of the body, with the face each triangle came from.
@@ -387,7 +453,7 @@ function emptyGeometry(config: NamedInputShape): GeometrySmlib {
  * @returns The shape's grouped geometry.
  */
 function renderMesh(config: NamedInputShape, options: RenderOptions): GeometrySmlib {
-  const { library, tessellation, collectBrepEdges = false, tracer } = options;
+  const { library, kernel, tessellation, collectBrepEdges = false, tracer } = options;
   const geometry = emptyGeometry(config);
   const { shape } = config;
   const attributes = {
@@ -448,7 +514,7 @@ function renderMesh(config: NamedInputShape, options: RenderOptions): GeometrySm
   if (collectBrepEdges && surface && !(shape instanceof library.Mesh)) {
     const faceMesh = surface;
     withSpan({ tracer, name: 'smlib.tessellate.edges', attributes: { ...attributes, output: 'edges' } }, () => {
-      appendEdges(geometry.edges, shape, { ...faceMesh, tessellation });
+      appendEdges(geometry.edges, shape, { ...faceMesh, tessellation, library, kernel });
     });
   }
 
@@ -488,16 +554,18 @@ export type DrawingEntry = Omit<NamedInputShape, 'shape'> & {
 
 /**
  * Sample a drawing's edges once, at a print tolerance independent of model tessellation. The
- * samples, not the live curves, are retained, so drawings survive a snapshot.
+ * samples, not the live curves, are retained, so drawings survive a snapshot. Each edge's curve is
+ * read from the kernel once and evaluated in JavaScript ({@link sampleEdge}).
  *
  * @param library - Loaded SMLib module.
+ * @param kernel - The raw kernel layer.
  * @param config - A drawing entry (an edge or a wire).
  * @returns The entry with its sampled polylines in place of the shape.
  */
-export function sampleDrawing(library: SmlibLibrary, config: NamedInputShape): DrawingEntry {
+export function sampleDrawing(library: SmlibLibrary, kernel: SmlibKernel, config: NamedInputShape): DrawingEntry {
   const { shape, ...metadata } = config;
   const edges = shape instanceof library.Edge ? [shape] : [...(shape as SmlibModule.Wire).edges()];
-  return { ...metadata, polylines: edges.map((edge) => sampleEdge(edge, drawingTessellation)) };
+  return { ...metadata, polylines: edges.map((edge) => sampleEdge(kernel, edge, drawingTessellation)) };
 }
 
 /**

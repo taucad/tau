@@ -7,7 +7,9 @@
  * kernel through a real runtime client, and asserts how many calls Tau made. Paths that are already
  * batched assert O(shapes): the count does not change when the fixture's element count grows. Known
  * per-element paths pin today's counts, named by blueprint finding and the work package that will
- * lower them; a later change that lowers a count updates the number here.
+ * lower them; a later change that lowers a count updates the number here. The raw
+ * `@classcad/smlibwasm/kernel` calls that replaced the per-element ones are counted through a
+ * proxy of that layer in `utils/edge-sampling.test.ts`, since the library also calls them itself.
  */
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { MockInstance } from 'vitest';
@@ -149,16 +151,14 @@ describe('SMLib kernel call counts', () => {
     large = await measurePlate(4);
   });
 
-  it('should record per-edge calls on the render-with-edges and GLB export paths', () => {
-    // Blueprint A8 (WP4, charter B3): `edge.start` + `edge.end` per edge and the x/y/z of every
-    // B-rep vertex, read once per render to match mesh chains to edges by their end vertices. B3
-    // replaces them with one `ext.brep_dump` (or `Edge.vertices()`) per body, so these become
-    // independent of the hole count. A7 (`isSeam` and `pointAt` for edges the mesh does not
-    // bound) and A9 (`bbox` + `distanceTo` for ambiguous chains) stay at zero on this plate.
-    expect({ small: small.render, large: large.render }).toEqual({
-      small: { ...none, 'Edge.start': 32, 'Edge.end': 32, 'Vertex.x': 24 },
-      large: { ...none, 'Edge.start': 56, 'Edge.end': 56, 'Vertex.x': 48 },
-    });
+  it('should draw edges without any per-edge call on the render-with-edges and GLB export paths', () => {
+    // Blueprint A8 (charter B3): mesh chains are matched to edges by the end vertices that one
+    // `ext.brep_dump` per body records, in place of `edge.start` + `edge.end` per edge and the x/y/z
+    // of every B-rep vertex (32/32/24 calls on the small plate, 56/56/48 on the large one before
+    // B3). A7: edges the mesh does not bound take one `k.tessellate_boundaries` per body, not
+    // `isSeam` + `pointAt` per edge. A9 (`bbox` + `distanceTo` for ambiguous chains) stays at zero
+    // on this plate. The counts no longer depend on the hole count.
+    expect({ small: small.render, large: large.render }).toEqual({ small: none, large: none });
     // The GLB export draws edges through the same path, so it pins the same counts.
     expect(small.glb).toEqual(small.render);
     expect(large.glb).toEqual(large.render);
@@ -169,17 +169,14 @@ describe('SMLib kernel call counts', () => {
     expect({ small: small.step, large: large.step }).toEqual({ small: none, large: none });
   });
 
-  it('should record per-sample calls when a drawing is sampled', async () => {
+  it('should sample a drawing without any per-sample call', async () => {
     const small = await measureCircleDrawing(10);
     const large = await measureCircleDrawing(50);
 
-    // Blueprint A6 (WP3, charter B4): a drawing edge is sampled by bisection with one
-    // `Edge.pointAt` per sample, so the count grows with the curve's size at the 0.01 mm print
-    // tolerance. B4 reads the curve once with `ext.curve_data(curve, nurbs=true)` and evaluates it in
-    // JavaScript: one kernel call per edge, whatever the radius.
-    expect({ small, large }).toEqual({
-      small: { ...none, 'Edge.pointAt': 257 },
-      large: { ...none, 'Edge.pointAt': 513 },
-    });
+    // Blueprint A6 (charter B4): a drawing edge's curve is read once with
+    // `ext.curve_data(curve, nurbs=true)` and evaluated in JavaScript, in place of one
+    // `Edge.pointAt` per bisection sample (257 calls for r = 10 and 513 for r = 50 before B4).
+    // `edge-sampling.test.ts` pins the one `ext.curve_data` per edge.
+    expect({ small, large }).toEqual({ small: none, large: none });
   });
 });

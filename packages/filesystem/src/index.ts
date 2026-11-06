@@ -139,7 +139,7 @@ export {
 } from '#event-coalescer.js';
 export type { CoalescerOptions, ChangeSetCoalescerOptions, FrameScheduler } from '#event-coalescer.js';
 export { tagEventOrigin, getEventOrigin, isEventGloballyVisible } from '#event-origin-registry.js';
-export { WatchRegistry } from '#watch-registry.js';
+export { WatchRegistry, watchEventsOfChangeSetFor } from '#watch-registry.js';
 export type { ChangeSetWatchRequest, WatchRegistryOptions } from '#watch-registry.js';
 export { streamChunkSize, bufferToStream } from '#backend/stream-utils.js';
 export { CrossTabCoordinator } from '#cross-tab-coordinator.js';

@@ -72,6 +72,9 @@ const defaultFlushBytes = 32 * 1024 * 1024;
 /** How many times one flush re-sweeps a checkout a writer changed under it before leaving it to the next flush. */
 const conflictSweeps = 3;
 
+/** How one wait on a fill ends early: `signal` aborts it, `stall` gives up after that many milliseconds without progress. @internal */
+export type FillWait = Readonly<{ signal?: AbortSignal; stall?: number }>;
+
 /**
  * The placeholders a tree holds: every entry that is a pointer.
  *
@@ -100,9 +103,6 @@ export const largeObjectPlaceholders = (tree: ImmutableRevisionTree): Map<string
  *   ends every fill and resolves once none is writing.
  */
 // oxlint-disable-next-line eslint/max-lines-per-function -- one closure over the fills' shared map and seams.
-/** How one wait on a fill ends early: `signal` aborts it, `stall` gives up after that many milliseconds without progress. @internal */
-export type FillWait = Readonly<{ signal?: AbortSignal; stall?: number }>;
-
 export const createLargeObjectFill = (
   dependencies: Readonly<{
     port: Pick<RevisionPort, 'readTree' | 'fetchLargeObjects'>;

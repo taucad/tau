@@ -28,6 +28,18 @@ export type EntryClosure = Readonly<{
 }>;
 
 /**
+ * The paths of an entry closure: `tau.json`, then each file its manifest names.
+ *
+ * @param manifest - `tau.json`'s bytes, if the tree holds it.
+ * @returns The paths, manifest first.
+ */
+export const entryClosurePaths = (manifest: Uint8Array<ArrayBuffer> | undefined): string[] => {
+  const parsed = manifest === undefined ? undefined : parseProjectManifestBytes(manifest);
+  const main = parsed?.success === true ? parsed.data.assets.main : undefined;
+  return ['tau.json', ...new Set([main?.entryPath, main?.thumbnail].filter((path) => path !== undefined))];
+};
+
+/**
  * Read one revision's entry closure by the oids its tree names (D10).
  *
  * @param port - The store: its tree listing and its path-scoped tree reads.
@@ -57,9 +69,7 @@ export const readEntryClosure = async (
     });
   };
   const [manifest] = await read(['tau.json']);
-  const parsed = manifest === undefined ? undefined : parseProjectManifestBytes(manifest.content);
-  const main = parsed?.success === true ? parsed.data.assets.main : undefined;
-  const named = [...new Set([main?.entryPath, main?.thumbnail].filter((path) => path !== undefined))];
+  const named = manifest === undefined ? [] : entryClosurePaths(manifest.content).slice(1);
   const files = await read(named);
   return Object.freeze({
     files: Object.freeze([...(manifest === undefined ? [] : [manifest]), ...files]),

@@ -122,6 +122,21 @@ describe('settleReadiness', () => {
     expect(settleReadiness(left, readinessOf(source(), true, 1))).toEqual({ state: 'filled', tree: 'live:h1:1' });
   });
 
+  it('reads entryReady once the written tree’s entry closure has landed, before materialized (D10, I7)', () => {
+    const writing = readinessOf(source({ applyingRoots: ['/projects/p'] }), false, 1);
+    expect(writing.state).toBe('treeReady');
+    const entry = readinessOf(source({ applyingRoots: ['/projects/p'], entryClosureLanded: true }), false, 1);
+    expect(settleReadiness(writing, entry)).toEqual({ state: 'entryReady', tree: 'live:h1:1' });
+    /* Within the tree nothing steps back, and the write's end moves it on. */
+    expect(settleReadiness(entry, writing)).toBe(entry);
+    expect(settleReadiness(entry, readinessOf(source(), false, 1))).toEqual({
+      state: 'materialized',
+      tree: 'live:h1:1',
+    });
+    /* No write in progress: the closure says nothing. */
+    expect(readinessOf(source({ entryClosureLanded: true })).state).toBe('filled');
+  });
+
   it('moves forward within one tree', () => {
     const tree = readinessOf(source({ applyingRoots: ['/projects/p'] }));
     const filled = readinessOf(source());

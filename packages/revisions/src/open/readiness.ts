@@ -48,7 +48,13 @@ const rank = (state: ProjectReadiness): number => projectReadinessStates.indexOf
 export const reachesReadiness = (state: ProjectReadiness | undefined, needed: ProjectReadiness): boolean =>
   state !== undefined && rank(state) >= rank(needed);
 
-/** The projection fields a reading is derived from. @public */
+/**
+ * The projection fields a reading is derived from, and whether the entry
+ * closure of the tree being written has landed: the host asks the checkout's
+ * index, which knows every entry of that tree before any lands (D10).
+ *
+ * @public
+ */
 export type ReadinessSource = Pick<
   RevisionStatusProjection,
   | 'checkoutId'
@@ -59,17 +65,17 @@ export type ReadinessSource = Pick<
   | 'sync'
   | 'largeObjects'
   | 'applyingRoots'
->;
+> &
+  Readonly<{ entryClosureLanded?: boolean }>;
 
 /**
  * What one merged projection says about readiness, before monotonicity.
  *
- * The tree apply still writes every file before it releases its bracket, so
- * `entryReady` and `materialized` are reached together until the tree is read
- * from the index (W4); this answers the later of the two, and `entryReady` is
- * never produced on its own yet. A surface gated on it (the editor, the
- * viewer) therefore opens at `materialized` until the index-backed tree lists
- * entries before their files are written.
+ * While a write holds the tree it reads `treeReady`, then `entryReady` once
+ * its entry closure has landed: the write lands the closure first, and the
+ * checkout's index knows every entry of the tree, each placeholder with its
+ * object, before any lands (D10). The write's end reads `materialized`, or
+ * `filled` once the fill has nothing left to bring.
  *
  * @param status - A projection with the host's fill facet and apply bracket merged.
  * @param largeObjectsTold - Whether the fill has given its word on this checkout
@@ -99,7 +105,7 @@ export const readinessOf = (
   const written =
     status.largeObjects === undefined && (largeObjectsTold || tree === undefined) ? 'filled' : 'materialized';
   if (applying) {
-    return { state: 'treeReady', tree };
+    return { state: status.entryClosureLanded === true ? 'entryReady' : 'treeReady', tree };
   }
   if (tree !== undefined || status.remote.phase === 'none') {
     /* A local project with no revision yet is complete: its files are the only copy. */

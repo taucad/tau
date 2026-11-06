@@ -13,6 +13,8 @@ import { walk } from '@taucad/filesystem/content-ops';
 import { ImmutableRevisionTree } from '#algorithms/index.js';
 import type { RevisionTreeEntry, RevisionTreeInput } from '#algorithms/index.js';
 import { equalBytes } from '#object-hash.js';
+import { largeObjectPlaceholders } from '#large-object-fill.js';
+import { entryClosurePaths } from '#open/entry-closure.js';
 import { assertMaterializableRevisionTree } from '#portable-tree.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { Checkout } from '#revision-port.js';
@@ -373,8 +375,34 @@ export const createApplyTreeEffects = (
         const current = liveFiles.get(path);
         return current === undefined || !equalBytes(current.content, entry.content) || current.mode !== entry.mode;
       });
+      /*
+       * D10: a write that holds the tree lands the entry closure first, and the
+       * checkout's index knows every entry of the tree before any lands, each
+       * placeholder with its object: `entryReady` is read from it.
+       */
+      const closure = purpose === 'fill' ? undefined : entryClosurePaths(targetFiles.get('tau.json')?.content);
+      if (closure !== undefined) {
+        const first = new Set(closure);
+        changedFiles.sort(([left], [right]) => Number(first.has(right)) - Number(first.has(left)));
+        const arriving = new Set(changedFiles.map(([path]) => path));
+        const placeholders = largeObjectPlaceholders(target);
+        live.expectEntries?.(
+          target.entries().map(({ path, content }) => {
+            const pending = placeholders.get(path);
+            return {
+              path,
+              size: content.byteLength,
+              ...(pending === undefined ? {} : { pending: { oid: pending.oid, size: pending.size } }),
+              arriving: arriving.has(path),
+            };
+          }),
+        );
+      }
       const writtenPaths = changedFiles.map(([path]) => path);
-      const release = onApplyingTree?.(place, [...removedPaths, ...writtenPaths].sort(), { purpose });
+      const release = onApplyingTree?.(place, [...removedPaths, ...writtenPaths].sort(), {
+        purpose,
+        ...(closure === undefined ? {} : { closure }),
+      });
       const heldAt = workerTimings.now();
       try {
         /* Removals: every removed file moves aside, its moved bytes prove it
@@ -550,6 +578,9 @@ export const createApplyTreeEffects = (
         return [...removedPaths, ...writtenPaths].sort();
       } finally {
         workerTimings.record('apply.hold', heldAt);
+        if (closure !== undefined) {
+          live.endExpectation?.();
+        }
         release?.();
       }
     });

@@ -87,6 +87,16 @@ export type TurnPlacement = Readonly<{ runId: string }> &
  */
 export type ApplyingTreePurpose = 'apply' | 'tree' | 'fill';
 
+/**
+ * What a tree write tells its host as it begins. A write that holds the tree
+ * names its entry closure (`tau.json` and the files it names), which it lands
+ * first; once the checkout's index has every one of them landed, the host may
+ * read the tree as `entryReady` (D10).
+ *
+ * @public
+ */
+export type ApplyingTreeBracket = Readonly<{ purpose: ApplyingTreePurpose; closure?: readonly string[] }>;
+
 /** Dependencies one project's actor set is built from. @public */
 export type RevisionActorsOptions = Readonly<{
   /** The content-addressed store every revision id comes from. */
@@ -163,11 +173,7 @@ export type RevisionActorsOptions = Readonly<{
    * every other materialization: a host can hold a file tree's re-reads for
    * an apply without holding them for every flush of a long fill.
    */
-  onApplyingTree?: (
-    checkout: Checkout,
-    paths: readonly string[],
-    bracket?: Readonly<{ purpose: ApplyingTreePurpose }>,
-  ) => (() => void) | void;
+  onApplyingTree?: (checkout: Checkout, paths: readonly string[], bracket?: ApplyingTreeBracket) => (() => void) | void;
   /**
    * Told how a checkout's large-object placeholders are being filled.
    *

@@ -24,11 +24,20 @@ import { createActor } from 'xstate';
 
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { walk } from '@taucad/filesystem/content-ops';
-import type { BatchEntry, BatchOptions, BatchReceipt, FileMode, FileStatEntry } from '@taucad/filesystem';
+import type {
+  BatchEntry,
+  BatchOptions,
+  BatchReceipt,
+  ExpectedEntry,
+  FileMode,
+  FileStatEntry,
+} from '@taucad/filesystem';
+import { projectManifestSchemaUrl, serializeProjectManifest } from '@taucad/project-core';
 
 import { captureRevisionTree, ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import { createApplyTreeEffects } from '#apply-tree.js';
 import { revisionTreeId } from '#git-tree-id.js';
+import { lfsPointerFor } from '#lfs.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import type { Checkout, RevisionPort } from '#revision-port.js';
 import { RevisionPortError } from '#revision-port.js';
@@ -265,13 +274,14 @@ const liveCheckout: Checkout = {
 const materializer = (
   checkout: RevisionFileSystem,
   prepareTarget?: Parameters<typeof createApplyTreeEffects>[0]['prepareTarget'],
+  onApplyingTree?: Parameters<typeof createApplyTreeEffects>[0]['onApplyingTree'],
 ) => {
   let temporary = 0;
   return createApplyTreeEffects({
     useFileSystem: async (_place, operation) => operation(checkout),
     capture: async () =>
       captureRevisionTree(checkout, { exclude: (path) => !tauRevisionPolicy.policy.classify(path).versioned }),
-    onApplyingTree: undefined,
+    onApplyingTree,
     ...(prepareTarget === undefined ? {} : { prepareTarget }),
     policy: tauRevisionPolicy.policy,
     withCheckoutFence: async (_checkoutId, operation) => operation(),
@@ -682,6 +692,87 @@ describe('a large apply', () => {
     expect(context.counts.calls.filter((call) => call === 'rename')).toHaveLength(0);
     await expect(context.tree.getFileMode('bin/run.sh')).resolves.toBe('100755');
     await expect(context.tree.getFileMode('bin/readme.txt')).resolves.toBe('100644');
+  });
+});
+
+describe('the entry closure of a tree write (D10)', () => {
+  it('should tell the index every entry before any lands, and land the entry closure first', async () => {
+    const context = await project({ 'old.scad': 'old\n' });
+    const { pointer, bytes: pointerBytes } = lfsPointerFor(new TextEncoder().encode('solid part\n'));
+    const manifest = serializeProjectManifest({
+      $schema: projectManifestSchemaUrl,
+      name: 'Bracket',
+      description: '',
+      tags: [],
+      assets: { main: { entryPath: 'zz/main.scad' } },
+    });
+    const target = new ImmutableRevisionTree([
+      ...Array.from({ length: 600 }, (_, index): [string, string] => [
+        `src/file-${String(index).padStart(4, '0')}.scad`,
+        'cube(1);\n',
+      ]),
+      ['old.scad', 'old\n'],
+      ['models/part.step', pointerBytes],
+      ['tau.json', manifest],
+      ['zz/main.scad', 'cube(2);\n'],
+    ]);
+    const events: string[] = [];
+    let expected: readonly ExpectedEntry[] = [];
+    const { checkout } = context;
+    const watched: RevisionFileSystem = Object.assign(Object.create(checkout) as RevisionFileSystem, {
+      expectEntries: (entries: readonly ExpectedEntry[]) => {
+        expected = entries;
+        events.push('expect');
+      },
+      endExpectation: () => {
+        events.push('end');
+      },
+      applyBatch: async (entries: readonly BatchEntry[], batchOptions?: BatchOptions): Promise<BatchReceipt[]> => {
+        events.push(...entries.flatMap((entry) => (entry.op === 'write' ? [entry.path] : [])));
+        return checkout.applyBatch!(entries, batchOptions);
+      },
+    });
+    const brackets: Array<Readonly<{ purpose: string; closure?: readonly string[] }> | undefined> = [];
+
+    await materializer(watched, undefined, (_place, _paths, bracket) => {
+      brackets.push(bracket);
+      events.push('bracket');
+      return () => {
+        events.push('release');
+      };
+    })(liveCheckout, target, { before: new ImmutableRevisionTree([['old.scad', 'old\n']]), purpose: 'tree' });
+
+    /* The index learns the whole tree before the bracket opens and any byte lands. */
+    expect(events.slice(0, 2)).toEqual(['expect', 'bracket']);
+    expect(expected).toHaveLength(604);
+    expect(expected.find((entry) => entry.path === 'models/part.step')).toEqual({
+      path: 'models/part.step',
+      size: pointerBytes.byteLength,
+      pending: { oid: pointer.oid, size: pointer.size },
+      arriving: true,
+    });
+    expect(expected.find((entry) => entry.path === 'old.scad')?.arriving).toBe(false);
+    expect(brackets).toEqual([{ purpose: 'tree', closure: ['tau.json', 'zz/main.scad'] }]);
+    /* The closure lands in the first changeset, before the tree's other files. */
+    expect(events.slice(2, 4).toSorted()).toEqual(['tau.json', 'zz/main.scad']);
+    expect(events.slice(-2)).toEqual(['end', 'release']);
+  });
+
+  it('should tell nothing for a fill flush', async () => {
+    const context = await project({});
+    const expectEntries = vi.fn();
+    const brackets: unknown[] = [];
+    const watched: RevisionFileSystem = Object.assign(Object.create(context.checkout) as RevisionFileSystem, {
+      expectEntries,
+    });
+    await materializer(watched, undefined, (_place, _paths, bracket) => {
+      brackets.push(bracket);
+    })(liveCheckout, new ImmutableRevisionTree([['a.scad', 'a\n']]), {
+      before: new ImmutableRevisionTree([]),
+      purpose: 'fill',
+    });
+    expect(expectEntries).not.toHaveBeenCalled();
+    expect(brackets).toEqual([{ purpose: 'fill' }]);
   });
 });
 

@@ -221,6 +221,7 @@ import type { RevisionActorsOptions, RevisionFileSystem, UseCheckoutFileSystem }
 
 /* oxlint-disable no-barrel-files/no-barrel-files -- Preserve the published revision-effects contract names. */
 export type {
+  ApplyingTreeBracket,
   ApplyingTreePurpose,
   CheckoutFileSystems,
   RevisionActorsOptions,

@@ -53,7 +53,7 @@ import { mapConcurrent } from '#concurrency.js';
 import { workerTimings } from '#worker-timings.js';
 import type { IndexAdmits, IndexSearchOptions } from '#project-index/project-index.js';
 import type { IndexFactsOptions } from '#project-index/project-indexes.js';
-import type { AppendFence } from '#changeset.js';
+import type { AppendFence, Changeset, ChangesetEntry, ChangesetReceipt } from '#changeset.js';
 import type { ChangeSet, ChangeSetEntry } from '#change-event-bus.js';
 import type { ChangeSetWatchRequest } from '#watch-registry.js';
 import type { RootedPorcelain } from '#rooted-views.js';
@@ -844,7 +844,44 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
    * under the project root is a records row. The control plane needs no such
    * care — it is the control plane at any depth (path policy contract, PP3).
    */
+  /**
+   * One changeset through the mask (charter D2): every entry's paths answered
+   * before the pipeline sees any of them, so a masked entry refuses the whole
+   * changeset with the masked-path error and nothing is applied. A recursive
+   * delete and a move's source reach paths nobody named, so their subtrees are
+   * walked as `rmdir` and `rename` walk them.
+   */
+  const maskedApply = async (
+    apply: (changeset: Changeset) => Promise<ChangesetReceipt>,
+    changeset: Changeset,
+  ): Promise<ChangesetReceipt> => {
+    const named = changeset.entries.flatMap((entry) => (entry.op === 'move' ? [entry.from, entry.to] : [entry.path]));
+    const targets = await writableTargets(named);
+    let at = 0;
+    const entries = changeset.entries.map((entry): ChangesetEntry => {
+      if (entry.op === 'move') {
+        at += 2;
+        return { ...entry, from: targets[at - 2]!, to: targets[at - 1]! };
+      }
+      at += 1;
+      return { ...entry, path: targets[at - 1]! };
+    });
+    await Promise.all(
+      entries.map(async (entry) => {
+        if (entry.op === 'move') {
+          await refuseHiddenSubtree(entry.from);
+        } else if (entry.op === 'delete' && entry.recursive === true) {
+          await refuseHiddenSubtree(entry.path);
+        }
+      }),
+    );
+    return apply({ ...changeset, entries });
+  };
+
   const porcelain = (base: Partial<RootedPorcelain>): Partial<RootedPorcelain> => ({
+    ...(base.apply === undefined
+      ? {}
+      : { apply: async (changeset: Changeset) => maskedApply(base.apply!.bind(base), changeset) }),
     ...(base.copyTree === undefined
       ? {}
       : {

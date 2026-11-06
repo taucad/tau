@@ -5,8 +5,9 @@
  * own `watch.changeSets` counter. The same subscribers on per-watch change-set
  * registrations cost one delivery each, which shows the counter moves.
  */
-import { describe, expect, it } from 'vitest';
-import { workerTimings } from '@taucad/filesystem';
+import { describe, expect, it, vi } from 'vitest';
+import { watchByChangeSets, workerTimings } from '@taucad/filesystem';
+import type { WatchEvent } from '@taucad/filesystem';
 import { createFileSystemBridgePort, createFileSystemBridgeProxy } from '#filesystem-bridge.js';
 import type { FileSystemBridgeRootedProxy } from '#filesystem-bridge.js';
 import { conformanceProjectRoot, rootedWorkspaceHandlers } from '#filesystem-bridge-rooted.test-fixture.js';
@@ -60,6 +61,40 @@ describe('one event channel per connection', () => {
       for (const subscription of subscriptions) {
         subscription.unsubscribe();
       }
+    } finally {
+      close();
+    }
+  });
+
+  it("serves a kernel's dependency watch and a log observer's watch from the one channel (watchByChangeSets)", async () => {
+    const { proxy, write, close } = await open();
+    try {
+      const dependency: WatchEvent[] = [];
+      const log: WatchEvent[] = [];
+      const both = heardBy(2);
+      const dependencyWatch = watchByChangeSets(proxy, { paths: ['agent'], recursive: true }, (event) => {
+        dependency.push(event);
+        both.handler();
+      });
+      const logWatch = watchByChangeSets(proxy, { paths: ['agent/events.jsonl'] }, (event) => {
+        log.push(event);
+        both.handler();
+      });
+      await Promise.all([dependencyWatch.ready, logWatch.ready]);
+      const before = deliveries();
+      await write('agent/events.jsonl');
+      await both.all;
+      expect(deliveries() - before).toBe(1);
+      expect(dependency).toEqual([{ type: 'change', path: 'agent/events.jsonl' }]);
+      expect(log).toEqual([{ type: 'change', path: 'agent/events.jsonl' }]);
+      await write('docs/elsewhere.md');
+      await write('agent/file-0.ts');
+      await vi.waitFor(() => {
+        expect(dependency).toContainEqual({ type: 'change', path: 'agent/file-0.ts' });
+      });
+      expect(log).toHaveLength(1);
+      dependencyWatch.unsubscribe();
+      logWatch.unsubscribe();
     } finally {
       close();
     }

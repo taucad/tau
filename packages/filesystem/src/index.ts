@@ -121,7 +121,7 @@ export type {
 } from '#worker-timings.js';
 export { ChangeEventBus, toChangeSet, touchedDirectoriesOf, watchEventsOfChangeSet } from '#change-event-bus.js';
 export { watchByChangeSets } from '#change-set-watch.js';
-export type { BridgeWatchHandle, ChangeSetWatchSource } from '#change-set-watch.js';
+export type { BridgeWatchHandle, ChangeSetChannelEvent, ChangeSetWatchSource } from '#change-set-watch.js';
 export type {
   ChangeSet,
   ChangeSetEntry,

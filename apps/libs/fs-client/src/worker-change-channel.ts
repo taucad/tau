@@ -1,20 +1,24 @@
 import { Topic } from '@taucad/events';
 import { toChangeSet, watchByChangeSets, watchEventsOfChangeSetFor } from '@taucad/filesystem';
-import type { BridgeWatchHandle, ChangeSet, ChangeSetWatchRequest, WatchRequest, WatchEvent } from '@taucad/filesystem';
+import type {
+  BridgeWatchHandle,
+  ChangeSet,
+  ChangeSetChannelEvent,
+  ChangeSetWatchRequest,
+  WatchRequest,
+  WatchEvent,
+} from '@taucad/filesystem';
 import type { ObservationWatch } from '#observation-service.js';
 import type { ChangeEvent, FileSystemBackend, PathChangeEvent } from '@taucad/types';
 
 /**
- * One frame of a connection's event channel, as this channel reads it: a
- * rooted proxy's `FileSystemBridgeEvent`, written out structurally so this
- * package does not depend on the bridge.
+ * One frame of a connection's event channel, as this channel reads it: the
+ * filesystem package's structural form of a rooted proxy's
+ * `FileSystemBridgeEvent`, so this package does not depend on the bridge.
  *
  * @public
  */
-export type WorkerChannelEvent =
-  | Readonly<{ kind: 'changeSet'; set: ChangeSet }>
-  | Readonly<{ kind: 'compute-restarted' }>
-  | Readonly<{ kind: 'authority-lost' }>;
+export type WorkerChannelEvent = ChangeSetChannelEvent;
 
 /**
  * Transport surface required to wire worker push events (typically
@@ -678,8 +682,10 @@ export class WorkerChangeChannel {
    * @returns The registration, or `undefined` for a transport with neither.
    */
   #authorityWatch(request: WatchRequest, handler: (event: WatchEvent) => void): BridgeWatchHandle | undefined {
-    if (this.transport.watchChangeSets) {
-      return watchByChangeSets(this.transport, request, handler);
+    const { watchChangeSets, watchReady } = this.transport;
+    if (watchChangeSets) {
+      /* Only the older forms: this channel has already tried, or has no, event channel. */
+      return watchByChangeSets({ watchChangeSets, watchReady }, request, handler);
     }
     return this.transport.watchReady?.(request, handler);
   }

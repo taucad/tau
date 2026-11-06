@@ -1129,6 +1129,65 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(await project.readFile('lib/a.scad', 'utf8')).toBe('a();');
   });
 
+  /* D10, I7: an aborted restore's tree is never read as written, and its rollback, which writes the checkout whole again, is. */
+  it('should reach materialized after an aborted restore rolls the checkout back', async () => {
+    let failNext = false;
+    const fixture = harness(['alpha'], (port) => port, {
+      observeFileEvents: true,
+      wrapFileSystem: (filesystem) => ({
+        ...filesystem,
+        ...(filesystem.apply === undefined
+          ? {}
+          : {
+              apply: async (changeset) => {
+                if (
+                  failNext &&
+                  changeset.entries.some((entry) => entry.op === 'write' && entry.path.startsWith('lib/'))
+                ) {
+                  failNext = false;
+                  throw new Error('The disk went away.');
+                }
+                return filesystem.apply!(changeset);
+              },
+            }),
+      }),
+    });
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    await project.writeFile('lib/a.scad', 'a();');
+    const alpha = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    const session = await root.placementSession();
+    await place(session, turnKey(1));
+    await project.writeFile('main.scad', 'cube(20);');
+    await finish(session, turnKey(1));
+    await turnFinalized(alpha, 'turn-1');
+    const head = alpha.frames.findLast((frame) => frame.type === 'status')?.status.headRevisionId;
+    await project.writeFile('main.scad', 'cube(30);');
+    await project.writeFile('lib/a.scad', 'b();');
+    await settle(10);
+    const statusesBefore = alpha.frames.filter((frame) => frame.type === 'status').length;
+
+    failNext = true;
+    alpha.send({ command: 'restore', revisionId: head! });
+    await vi.waitFor(
+      () => {
+        expect(failNext).toBe(false);
+        const statuses = alpha.frames.slice(statusesBefore).filter((frame) => frame.type === 'status');
+        expect(statuses.some((frame) => frame.status.applyingRoots !== undefined)).toBe(true);
+        expect(statuses.at(-1)?.status.applyingRoots).toBeUndefined();
+      },
+      { timeout: 10_000 },
+    );
+    await settle(10);
+
+    /* The rollback put the prior files back. */
+    expect(await project.readFile('lib/a.scad', 'utf8')).toBe('b();');
+    expect(await project.readFile('main.scad', 'utf8')).toBe('cube(30);');
+    const last = alpha.frames.findLast((frame) => frame.type === 'status');
+    expect(['materialized', 'filled']).toContain(last?.status.readiness);
+  });
+
   /*
    * A restore's own writes would each raise a change, and each change re-enters
    * the checkout's comparison: held while the apply writes, they reach the

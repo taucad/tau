@@ -855,7 +855,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     republish();
   };
   /* Checkouts whose last write of another revision's tree failed: that tree is never read as written (D10, I7). */
-  const failedTreeWrites = new Set<string>();
+  /* The head each was at when the reading first saw the failure: a new head ends it. */
+  const failedTreeWrites = new Map<string, Readonly<{ seen: boolean; head?: string | undefined }>>();
   /* Each checkout's changes observed while a host write held its root: raised once, together, when the last closes. */
   const deferredChanges = new Map<string, Readonly<{ root: string; paths: Set<string> }>>();
 
@@ -1017,7 +1018,10 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         }
         released = true;
         if (bracket?.purpose === 'tree' && outcome?.failed === true) {
-          failedTreeWrites.add(id);
+          failedTreeWrites.set(id, { seen: false });
+        } else if (holdsTree && outcome?.failed !== true) {
+          /* A later write that held the tree and landed (a rollback, say) wrote the checkout whole again. */
+          failedTreeWrites.delete(id);
         }
         closeWrite(root);
         if (!holdsTree) {
@@ -1050,6 +1054,14 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       ...(facet === undefined ? {} : { largeObjects: facet }),
       ...(applyingRoots.length === 0 ? {} : { applyingRoots }),
     };
+    if (status.checkoutId !== undefined && failedTreeWrites.has(status.checkoutId)) {
+      const failedAt = failedTreeWrites.get(status.checkoutId);
+      if (failedAt?.seen === false) {
+        failedTreeWrites.set(status.checkoutId, { seen: true, head: status.headRevisionId });
+      } else if (failedAt?.head !== status.headRevisionId) {
+        failedTreeWrites.delete(status.checkoutId);
+      }
+    }
     readiness = settleReadiness(
       readiness,
       readinessOf(

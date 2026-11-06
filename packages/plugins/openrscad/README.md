@@ -38,15 +38,16 @@ Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, o
 
 ## API
 
-| Export                         | Kind            | Use                                                                              |
-| ------------------------------ | --------------- | -------------------------------------------------------------------------------- |
-| `openrscad`                    | toolkit factory | package-named authoring factory; presets select capabilities                     |
-| `plugin`                       | toolkit factory | the same factory under its mechanical name, for loaders that read a fixed key    |
-| `openrscadKernel`              | kernel factory  | direct `kernels` composition; reads `scad`                                       |
-| `createOpenrscadKernel`        | kernel builder  | the same kernel with an injected engine binding, for hosts that supply their own |
-| `openrscadRenderSchema`        | zod schema      | preview render options                                                           |
-| `openrscadExportSchemas`       | zod schemas     | per-target export options (`glb`, `3mf`)                                         |
-| `CreateOpenrscadKernelOptions` | type            | `{ loadBackend?, version? }` — a host recipe's backend choice, never a probe     |
+| Export                         | Kind            | Use                                                                                 |
+| ------------------------------ | --------------- | ----------------------------------------------------------------------------------- |
+| `openrscad`                    | toolkit factory | package-named authoring factory; presets select capabilities                        |
+| `plugin`                       | toolkit factory | the same factory under its mechanical name, for loaders that read a fixed key       |
+| `openrscadKernel`              | kernel factory  | direct `kernels` composition; reads `scad`                                          |
+| `createOpenrscadKernel`        | kernel builder  | the same kernel with an injected engine binding, for hosts that supply their own    |
+| `openrscadOptionsSchema`       | zod schema      | kernel options: `libraryTracing` (`'off'` when left out, `'summary'`, `'per-call'`) |
+| `openrscadRenderSchema`        | zod schema      | preview render options                                                              |
+| `openrscadExportSchemas`       | zod schemas     | per-target export options (`glb`, `3mf`)                                            |
+| `CreateOpenrscadKernelOptions` | type            | `{ loadBackend?, version? }` — a host recipe's backend choice, never a probe        |
 
 One preset, `default`, selecting `kernels.default`.
 

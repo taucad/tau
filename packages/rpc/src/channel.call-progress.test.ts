@@ -212,6 +212,44 @@ describe('@taucad/rpc call progress and per-call liveness (W10, I10)', () => {
     server.dispose();
   });
 
+  it('should leave undefined fields out of a progress report, so a binary codec never turns them into null', async () => {
+    const wire = createLinkedPorts();
+    let report: ((data: unknown) => void) | undefined;
+    let finish: (() => void) | undefined;
+    const server = serve(
+      wire.server,
+      async (context: ChannelCallContext) =>
+        new Promise((resolve) => {
+          report = context.progress;
+          finish = () => {
+            resolve('ok');
+          };
+        }),
+    );
+    const client = createChannelClient({ port: wire.client, sessionKey: 's' });
+    await client.ready;
+
+    const seen: unknown[] = [];
+    const result = client.call('bulk', null, undefined, {
+      onProgress(data) {
+        seen.push(data);
+      },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    report!({ done: 1, total: undefined, bytes: 10 });
+    await vi.advanceTimersByTimeAsync(0);
+    finish!();
+    await expect(result).resolves.toBe('ok');
+    const sent = wire.fromServer.find((frame) => (frame as { k: string; d?: unknown }).k === 'rp') as {
+      d: Record<string, unknown>;
+    };
+    expect(Object.keys(sent.d)).toEqual(['done', 'bytes']);
+    expect(seen).toEqual([{ done: 1, bytes: 10 }]);
+    expect(Object.keys(seen[0] as Record<string, unknown>)).toEqual(['done', 'bytes']);
+    client.close();
+    server.dispose();
+  });
+
   it('should stop the heartbeat when the caller aborts a call whose handler never settles', async () => {
     const wire = createLinkedPorts();
     let serverSignal: AbortSignal | undefined;
@@ -234,6 +272,31 @@ describe('@taucad/rpc call progress and per-call liveness (W10, I10)', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(serverSignal?.aborted).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
+    client.close();
+    server.dispose();
+  });
+
+  it('should drop a request still queued behind the hello when its liveness bound expires, and say it was never sent', async () => {
+    const wire = createLinkedPorts();
+    // The server never answers the hello, so the request waits in the client's queue.
+    wire.freezeServer();
+    const server = serve(wire.server, async () => 'ran');
+    const client = createChannelClient({ port: wire.client, sessionKey: 's' });
+    const unready = expect(client.ready).rejects.toThrow();
+    // Shorter than the hello's own 30 s bound, so the call's bound expires first.
+    const result = client.call('mutate', null, undefined, { livenessTimeout: heartbeatInterval });
+    const failure = expect(result).rejects.toMatchObject({ code: 'PEER_UNRESPONSIVE', requestSent: false });
+    await vi.advanceTimersByTimeAsync(heartbeatInterval);
+    await failure;
+    // A request still queued when the hello's bound closes the channel says the same.
+    const late = client.call('mutate', null);
+    const closing = expect(late).rejects.toMatchObject({ name: 'ChannelClosedError', requestSent: false });
+    await vi.advanceTimersByTimeAsync(livenessTimeout);
+    await closing;
+    await unready;
+    // Neither the request nor a cancel for it ever crossed.
+    expect(frameKinds(wire.fromClient)).not.toContain('rq');
+    expect(frameKinds(wire.fromClient)).not.toContain('rc');
     client.close();
     server.dispose();
   });

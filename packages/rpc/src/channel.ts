@@ -376,6 +376,22 @@ const toWireError = (error: unknown): WireError => {
   return { m: String(error) };
 };
 
+/**
+ * A progress report as it crosses the wire. A binary codec (msgpack) turns an
+ * `undefined` field into `null`, which a report's schema then refuses, so a
+ * plain object's undefined fields are left out here, for every report sent.
+ */
+const progressForWire = (data: unknown): unknown => {
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+    return data;
+  }
+  const prototype: unknown = Object.getPrototypeOf(data);
+  if (prototype !== Object.prototype && prototype !== null) {
+    return data;
+  }
+  return Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined));
+};
+
 const fromWireError = (error: WireError): Error => {
   const out = new Error(error.m);
   if (error.c !== undefined) {
@@ -1212,8 +1228,13 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
   const cleanupPendingState = (info: CloseInfo): void => {
     clearTimeout(livenessTimer);
     const closedError = new ChannelClosedError(info);
-    for (const [, p] of callPending) {
-      p.reject(closedError);
+    /* A request still queued behind the hello never reached the server; its
+     * rejection says so (`requestSent: false`), as a liveness expiry's does. */
+    const queuedRequests = new Set(sendQueue.flatMap(({ frame }) => (frame.k === 'rq' ? [frame.i] : [])));
+    for (const [id, p] of callPending) {
+      p.reject(
+        queuedRequests.has(id) ? Object.assign(new ChannelClosedError(info), { requestSent: false }) : closedError,
+      );
     }
     callPending.clear();
     callPendingNames.clear();
@@ -1311,15 +1332,24 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
           }
           callPending.delete(id);
           callPendingNames.delete(id);
-          try {
-            port.postMessage({ v: 1, k: 'rc', i: id, e: { m: 'unresponsive' } } satisfies WireRequestCancel);
-          } catch {
-            // The peer may already be gone; the rejection below is the answer.
+          /* A request still queued behind the hello never reached the server:
+           * drop it, as an abort does, so the server never runs it after the
+           * caller was told it failed. `requestSent` says which case this was. */
+          const queued = sendQueue.findIndex((item) => item.frame.k === 'rq' && item.frame.i === id);
+          const requestSent = queued === -1;
+          if (requestSent) {
+            try {
+              port.postMessage({ v: 1, k: 'rc', i: id, e: { m: 'unresponsive' } } satisfies WireRequestCancel);
+            } catch {
+              // The peer may already be gone; the rejection below is the answer.
+            }
+          } else {
+            sendQueue.splice(queued, 1);
           }
           pending.reject(
             Object.assign(
               new Error(`Call '${name}' received no frame for ${String(callLiveness)}ms; the server is unresponsive.`),
-              { code: callUnresponsiveCode },
+              { code: callUnresponsiveCode, requestSent },
             ),
           );
         };
@@ -1661,7 +1691,7 @@ export const createChannelServer = <P extends RpcProtocol = EmptyRpcProtocol>(
       const callContext: ChannelCallContext = {
         sessionKey,
         progress: (data) => {
-          postCallProgress({ v: 1, k: 'rp', i: id, d: data });
+          postCallProgress({ v: 1, k: 'rp', i: id, d: progressForWire(data) });
         },
       };
       let heartbeatTimer: ReturnType<typeof setInterval> | undefined;

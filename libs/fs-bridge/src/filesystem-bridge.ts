@@ -708,7 +708,8 @@ const isAuthorityAnswer = (error: unknown): boolean => {
  * answering or died under it, all leave the authority possibly mid-way: some
  * phases or files may have landed. They are `potentially-applied`, like a
  * checked write's, so the caller re-reads before it retries. An abort before
- * the call was sent is `known-not-applied`. Every other failure is the
+ * the call was sent, and a liveness expiry while the request still waited
+ * behind the hello (`requestSent: false`), are `known-not-applied`. Every other failure is the
  * authority's own answer and passes through.
  *
  * @param error - The rejection.
@@ -719,9 +720,13 @@ const classifyMutationFailure = (error: unknown, sent: boolean): unknown => {
   if (checkedWriteApplicationState(error) !== undefined) {
     return error;
   }
-  const { name, code } = (error ?? {}) as { name?: unknown; code?: unknown };
+  const { name, code, requestSent } = (error ?? {}) as { name?: unknown; code?: unknown; requestSent?: unknown };
   if (name === 'AbortError') {
     return withCheckedWriteApplicationState(error, sent ? 'potentially-applied' : 'known-not-applied');
+  }
+  /* The channel dropped the request from its queue before it reached the wire. */
+  if (requestSent === false) {
+    return withCheckedWriteApplicationState(error, 'known-not-applied');
   }
   return lostCallCodes.has(code) ? withCheckedWriteApplicationState(error, 'potentially-applied') : error;
 };

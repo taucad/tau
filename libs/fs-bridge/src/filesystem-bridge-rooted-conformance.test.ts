@@ -405,6 +405,10 @@ describe.each([inProcessPort, authorityConnection, workerPort])('rooted bridge c
       const everything = await proxy.grep('', { maxResults: 3 });
       expect(everything.matches).toHaveLength(3);
       expect(everything.truncated).toBe(true);
+      // One file holding more than the cap: collected to one past it, and still truncated.
+      const oneFile = await proxy.grep('', { fixedStrings: true, maxResults: 1, glob: 'lib/notes.md' });
+      expect(oneFile.matches).toHaveLength(1);
+      expect(oneFile.truncated).toBe(true);
       const all = await proxy.grep('e');
       expect(all.filesSkipped).toBeGreaterThanOrEqual(1);
       expect(all.matches.some((found) => found.path === 'lib/blob.bin')).toBe(false);
@@ -1088,7 +1092,7 @@ describe('rooted bridge conformance: apply outlives the ordinary deadline (W10, 
   });
 });
 
-describe('rooted bridge conformance: a sent apply its connection cuts off is potentially applied (W10)', () => {
+describe('rooted bridge conformance: an apply its connection cuts off (W10)', () => {
   const changeset: Changeset = { entries: [{ op: 'write', path: 'cut.ts', data: 'x' }] };
   const potentiallyApplied = (code: string) => ({ code, applicationState: 'potentially-applied' });
 
@@ -1135,7 +1139,25 @@ describe('rooted bridge conformance: a sent apply its connection cuts off is pot
     };
   };
 
-  it('when the authority stops answering (PEER_UNRESPONSIVE)', async () => {
+  it('is known not applied when it never left the queue behind an unanswered hello', async () => {
+    const channel = new NodeMessageChannel();
+    vi.useFakeTimers();
+    const proxy = createTransferredFileSystemBridgeProxy(channel.port2 as unknown as MessagePortLike);
+    const unready = expect(proxy.ready).rejects.toThrow();
+    try {
+      const applying = proxy.apply(changeset);
+      const failure = expect(applying).rejects.toMatchObject({ applicationState: 'known-not-applied' });
+      await vi.advanceTimersByTimeAsync(30_000);
+      await failure;
+      await unready;
+    } finally {
+      vi.useRealTimers();
+      proxy.dispose();
+      channel.port1.close();
+    }
+  });
+
+  it('is potentially applied when the authority stops answering (PEER_UNRESPONSIVE)', async () => {
     const host = await openFreezable();
     await host.freeze();
     vi.useFakeTimers();
@@ -1147,7 +1169,7 @@ describe('rooted bridge conformance: a sent apply its connection cuts off is pot
     host.thaw();
   });
 
-  it('when the authority dies (PEER_GONE)', async () => {
+  it('is potentially applied when the authority dies (PEER_GONE)', async () => {
     const host = await openFreezable();
     await host.freeze();
     const applying = host.proxy.apply(changeset);
@@ -1156,7 +1178,7 @@ describe('rooted bridge conformance: a sent apply its connection cuts off is pot
     await failure;
   });
 
-  it('when the authority closes the connection (PEER_CLOSED)', async () => {
+  it('is potentially applied when the authority closes the connection (PEER_CLOSED)', async () => {
     const { service, handlers } = await rootedWorkspaceHandlers(files, 'working-copy');
     const reached = Promise.withResolvers<void>();
     const held: FileSystemBridgeRuntimeService = {

@@ -121,6 +121,13 @@ import { parseDesktopInstallation } from '#main/update-identity.js';
 import { z } from 'zod';
 import type { DesktopUpdater, DesktopUpdaterOptions } from '#main/updater.js';
 import { startDesktopUpdater } from '#main/updater.js';
+import type { MoveToApplicationsHost } from '#main/app-location.js';
+import {
+  assessAppLocation,
+  locationBlocksUpdates,
+  moveToApplications,
+  offerMoveToApplications,
+} from '#main/app-location.js';
 import { preparableNativeDeployments } from '#tau/desktop-native-deployments.js';
 import { createDesktopKernelPreparer } from '#tau/native-preparation.js';
 import { desktopNativeKernelIds, startNativeStore } from '#tau/native-store.js';
@@ -540,6 +547,27 @@ const bootstrapElectronApp = async (): Promise<void> => {
     /* A fallback means the shell timed out or failed: only well-known CLI
      * directories were added, and nothing from its rc files applied. */
     log.log(loginShell.fallback ? 'warn' : 'info', 'main.login-shell-path', loginShell);
+  }
+
+  /* On macOS, Squirrel.Mac cannot replace a copy run from Downloads (translocated) or from its disk image, so a
+   * release build offers once to move itself to Applications. Packages that honour test overrides, and the
+   * update and route probes, never ask. */
+  const appLocation = process.platform === 'darwin' && app.isPackaged ? assessAppLocation(process.execPath) : undefined;
+  const moveHost: MoveToApplicationsHost = {
+    ask: (options) => dialog.showMessageBoxSync(options),
+    move: (options) => app.moveToApplicationsFolder(options),
+    log: (level, event, detail) => {
+      log.log(level, event, detail);
+    },
+  };
+  if (
+    environmentLocked &&
+    otaProbe === undefined &&
+    routeQualification === undefined &&
+    offerMoveToApplications(appLocation, app.getPath('userData'), moveHost)
+  ) {
+    /* Electron relaunches Tau from Applications and quits this copy. */
+    return;
   }
 
   /* L2's contract: the home root must exist before the renderer's first mount,
@@ -2264,6 +2292,14 @@ const bootstrapElectronApp = async (): Promise<void> => {
     log: (level, event, detail) => {
       log.log(level, event, detail);
     },
+    ...(appLocation === undefined
+      ? {}
+      : {
+          appLocation: {
+            blocksUpdates: locationBlocksUpdates(appLocation),
+            move: () => moveToApplications(moveHost),
+          },
+        }),
   };
   let platformUpdater;
   if (process.platform !== 'darwin' && app.isPackaged) {

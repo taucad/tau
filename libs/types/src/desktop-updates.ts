@@ -13,7 +13,9 @@ export type DesktopUpdateSnapshot = {
     | 'error'
     | 'saving'
     | 'restart-blocked'
-    | 'restarting';
+    | 'restarting'
+    /** On macOS: an update exists, but this copy of Tau runs where it cannot be replaced (Downloads, a disk image). */
+    | 'move-required';
   readonly currentVersion: string;
   readonly channel: 'staging' | 'production';
   readonly version?: string;

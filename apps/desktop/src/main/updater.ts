@@ -4,6 +4,7 @@ import type { DesktopUpdateSnapshot } from '@taucad/types/desktop-updates';
 
 import type { DesktopChannel } from '#main/environment.js';
 import { desktopArchiveName, desktopDownloadOrigin, desktopReleaseIdentity } from '#shared/desktop-release.js';
+import { moveToApplicationsDetail } from '#main/app-location.js';
 
 export const updateRepository = 'taucad/tau';
 /** Milliseconds between background checks. */
@@ -171,6 +172,11 @@ export type DesktopUpdaterOptions = {
   readonly candidateTag?: string;
   /** Diagnostic constraint; selects no URL and cannot bypass the shipping feed or signature checks. */
   readonly expectedUpdate?: { readonly tag: string; readonly version: string; readonly sourceCommit: string };
+  /**
+   * On macOS: whether Squirrel.Mac can replace the bundle where it runs (not from Downloads or a disk image),
+   * and the move to Applications that lets it.
+   */
+  readonly appLocation?: { readonly blocksUpdates: boolean; readonly move: () => boolean };
 };
 
 export type DesktopUpdater = {
@@ -201,8 +207,9 @@ export const startDesktopUpdater = (options: DesktopUpdaterOptions): DesktopUpda
     channel,
     installOnQuit: platform === 'darwin',
   };
-  const publish = (phase: DesktopUpdateSnapshot['phase']): void => {
-    snapshot = { ...snapshot, revision: snapshot.revision + 1, phase };
+  const publish = (phase: DesktopUpdateSnapshot['phase'], detail?: string): void => {
+    const { detail: _previous, ...rest } = snapshot;
+    snapshot = { ...rest, revision: snapshot.revision + 1, phase, ...(detail === undefined ? {} : { detail }) };
     options.onState?.(snapshot);
   };
   if (!options.packaged || source.kind === 'disabled') {
@@ -232,14 +239,27 @@ export const startDesktopUpdater = (options: DesktopUpdaterOptions): DesktopUpda
   let checking: Promise<AvailableUpdate | undefined> | undefined;
   let installing = false;
   const squirrel = platform === 'darwin';
+  /* Squirrel.Mac replaces the bundle in place, which a translocated or disk-image copy cannot allow. */
+  let moveRequired = squirrel && options.appLocation?.blocksUpdates === true;
+  const askToMove = (): void => {
+    status = moveToApplicationsDetail;
+    publish('move-required', moveToApplicationsDetail);
+  };
   const failed = (error: unknown): void => {
     downloading = false;
     downloaded = false;
+    const message = error instanceof Error ? error.message : String(error);
+    log('warn', 'updater.error', { message });
+    /* The location check can miss a read-only volume; Squirrel's own refusal says the same thing. */
+    if (squirrel && offered && options.appLocation && /read-only/iu.test(message)) {
+      moveRequired = true;
+      askToMove();
+      return;
+    }
     offered = undefined;
-    status = `Update failed: ${error instanceof Error ? error.message : String(error)}. Check again to retry.`;
+    status = `Update failed: ${message}. Check again to retry.`;
     snapshot = { ...snapshot, version: undefined, releasePage: undefined };
     publish('error');
-    log('warn', 'updater.error', { message: status });
   };
   const install = async (): Promise<void> => {
     if (!downloaded || installing) {
@@ -308,13 +328,19 @@ export const startDesktopUpdater = (options: DesktopUpdaterOptions): DesktopUpda
         throw new Error('Qualification update differs from the expected release');
       }
       if (update.version === offered?.version) {
-        publish('available');
+        if (moveRequired) {
+          askToMove();
+        } else {
+          publish('available');
+        }
         return update;
       }
       offered = update;
       snapshot = { ...snapshot, version: update.version, releasePage: update.releasePage };
       log('info', 'updater.available', { version: update.version, current: currentVersion, channel, feedUrl });
-      if (squirrel) {
+      if (moveRequired) {
+        askToMove();
+      } else if (squirrel) {
         downloading = true;
         status = `Downloading Tau ${update.version}…`;
         publish('downloading');
@@ -358,6 +384,11 @@ export const startDesktopUpdater = (options: DesktopUpdaterOptions): DesktopUpda
     install,
     snapshot: () => snapshot,
     download: async () => {
+      if (moveRequired && options.appLocation) {
+        /* The card's Move to Applications: Electron relaunches Tau from Applications when it succeeds. */
+        options.appLocation.move();
+        return;
+      }
       if (!squirrel && offered) {
         await options.openExternal(`${releaseBaseUrl(offered.tag, origin)}/${desktopArchiveName(platform, arch)}`);
       }

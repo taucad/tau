@@ -533,8 +533,11 @@ export type FileSystemBridgeRootedCalls = MachineSettingsService &
      * receipt. A long call: it lives while the authority applies it, so a
      * transport deadline never reports a changeset failed that is still being
      * applied (I10). An entry's `error` arrives as an `Error` carrying the
-     * provider's `code`. A connection whose view serves no changeset refuses
-     * with `ENOTSUP`.
+     * provider's `code`. A masked view (`agent`, `user`) answers every
+     * entry's paths first: one masked entry refuses the whole changeset with
+     * the mask's error (`EPERM`, or `EROFS` for an agent's records path) and
+     * nothing is applied. A connection whose handlers apply no changeset (a
+     * bare provider) refuses with `ENOTSUP`.
      */
     apply(changeset: Changeset, options?: ApplyOptions): Promise<ChangesetReceipt>;
     /** Index rows whose root-relative path matches a glob (`*.ts` matches at any depth). */

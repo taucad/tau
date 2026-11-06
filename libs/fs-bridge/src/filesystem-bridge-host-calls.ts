@@ -24,6 +24,8 @@ import type {
 } from '#filesystem-bridge-protocol.js';
 import { defaultGrepFileBytes, defaultGrepResults, maxGrepLineCharacters } from '#filesystem-bridge-protocol.js';
 import { ownedForTransfer } from '#filesystem-bridge-crossings.js';
+import { boundedLineMatcher, literalLineMatcher } from '#filesystem-bridge-grep-matcher.js';
+import type { FileLineMatcher, GrepMatcherWorkerFactory } from '#filesystem-bridge-grep-matcher.js';
 
 /** Reads one `readMany` keeps in flight: enough to overlap I/O, few enough to bound open handles. */
 const readManyConcurrency = 8;
@@ -224,38 +226,6 @@ const grepExpression = (pattern: string, options: GrepOptions | undefined): RegE
   }
 };
 
-const clipLine = (line: string): string =>
-  line.length > maxGrepLineCharacters ? line.slice(0, maxGrepLineCharacters) : line;
-
-/** Every line of one file's text that the expression matches, with its context. */
-const matchLines = (
-  { path, text }: { readonly path: string; readonly text: string },
-  expression: RegExp,
-  context: number,
-): GrepMatch[] => {
-  const lines = text.split(/\r?\n/u);
-  const matches: GrepMatch[] = [];
-  for (const [index, line] of lines.entries()) {
-    const found = expression.exec(line);
-    if (found === null) {
-      continue;
-    }
-    matches.push({
-      path,
-      line: index + 1,
-      column: found.index + 1,
-      text: clipLine(line),
-      ...(context === 0
-        ? {}
-        : {
-            before: lines.slice(Math.max(0, index - context), index).map((row) => clipLine(row)),
-            after: lines.slice(index + 1, index + 1 + context).map((row) => clipLine(row)),
-          }),
-    });
-  }
-  return matches;
-};
-
 /** The files a `grep` reads, and how many index rows it passes over unread. */
 const grepCandidates = async (
   statTree: StatTree,
@@ -282,48 +252,76 @@ const grepCandidates = async (
 };
 
 const hostGrep =
-  (statTree: StatTree, read: ReadBytes) =>
+  (statTree: StatTree, read: ReadBytes, worker: GrepMatcherWorkerFactory | undefined) =>
   async (pattern: string, options?: GrepOptions & LongCall): Promise<GrepResult> => {
     const expression = grepExpression(pattern, options);
     throwIfAborted(options?.signal);
     const { candidates, skipped } = await grepCandidates(statTree, options);
     const limit = options?.maxResults ?? defaultGrepResults;
-    const context = options?.context ?? 0;
-    const decoder = new TextDecoder();
-    const perFile: Array<GrepMatch[] | undefined> = Array.from({ length: candidates.length });
-    let found = 0;
-    let gone = 0;
-    let unread = 0;
-    await forEachReported(candidates, options, async (row, index) => {
-      /* Lanes take files in index order, so once the finished files hold the
-       * cap, no file not yet started can reach the first `limit` matches. */
-      if (found >= limit) {
-        unread += 1;
+    const shape = { expression, context: options?.context ?? 0, maxLine: maxGrepLineCharacters };
+    /* A caller's expression runs where it can be stopped; a literal cannot backtrack. */
+    const matcher =
+      options?.fixedStrings === true || candidates.length === 0
+        ? literalLineMatcher(shape)
+        : await boundedLineMatcher({ ...shape, ...(worker === undefined ? {} : { worker }) });
+    try {
+      return await grepFiles({ candidates, skipped, limit, matcher, read, options });
+    } finally {
+      matcher.close();
+    }
+  };
+
+/** Read and match each candidate, in index order, until the cap. */
+const grepFiles = async ({
+  candidates,
+  skipped,
+  limit,
+  matcher,
+  read,
+  options,
+}: {
+  readonly candidates: readonly FileStatEntry[];
+  readonly skipped: number;
+  readonly limit: number;
+  readonly matcher: FileLineMatcher;
+  readonly read: ReadBytes;
+  readonly options: LongCall | undefined;
+}): Promise<GrepResult> => {
+  const decoder = new TextDecoder();
+  const perFile: Array<GrepMatch[] | undefined> = Array.from({ length: candidates.length });
+  let found = 0;
+  let gone = 0;
+  let unread = 0;
+  await forEachReported(candidates, options, async (row, index) => {
+    /* Lanes take files in index order, so once the finished files hold the
+     * cap, no file not yet started can reach the first `limit` matches. */
+    if (found >= limit) {
+      unread += 1;
+      return 0;
+    }
+    let data: Uint8Array<ArrayBuffer>;
+    try {
+      data = await read(row.path);
+    } catch (error) {
+      if (isAbsence(error)) {
+        gone += 1;
         return 0;
       }
-      let data: Uint8Array<ArrayBuffer>;
-      try {
-        data = await read(row.path);
-      } catch (error) {
-        if (isAbsence(error)) {
-          gone += 1;
-          return 0;
-        }
-        throw error;
-      }
-      const matches = matchLines({ path: row.path, text: decoder.decode(data) }, expression, context);
-      perFile[index] = matches;
-      found += matches.length;
-      return data.byteLength;
-    });
-    const all = perFile.flatMap((matches) => matches ?? []);
-    return {
-      matches: all.slice(0, limit),
-      filesSearched: candidates.length - gone - unread,
-      filesSkipped: skipped + gone,
-      truncated: all.length > limit || (unread > 0 && all.length >= limit),
-    };
+      throw error;
+    }
+    const matches = await matcher.match(row.path, decoder.decode(data));
+    perFile[index] = matches;
+    found += matches.length;
+    return data.byteLength;
+  });
+  const all = perFile.flatMap((matches) => matches ?? []);
+  return {
+    matches: all.slice(0, limit),
+    filesSearched: candidates.length - gone - unread,
+    filesSkipped: skipped + gone,
+    truncated: all.length > limit || (unread > 0 && all.length >= limit),
   };
+};
 
 const hostIndexStats =
   (statTree: StatTree) =>
@@ -377,7 +375,7 @@ const refuseApply = async (): Promise<never> => {
 const derivedIndexCalls = (
   own: Partial<Record<string, unknown>>,
   handlers: StringKeyedObject,
-  read: ReadBytes,
+  { read, worker }: { readonly read: ReadBytes; readonly worker: GrepMatcherWorkerFactory | undefined },
 ): Record<string, unknown> => {
   if (typeof own['statTree'] !== 'function') {
     return {};
@@ -385,9 +383,24 @@ const derivedIndexCalls = (
   const statTree = (own['statTree'] as StatTree).bind(handlers);
   return {
     ...(typeof own['glob'] === 'function' ? {} : { glob: hostGlob(statTree) }),
-    ...(typeof own['grep'] === 'function' ? {} : { grep: hostGrep(statTree, read) }),
+    ...(typeof own['grep'] === 'function' ? {} : { grep: hostGrep(statTree, read, worker) }),
     ...(typeof own['indexStats'] === 'function' ? {} : { indexStats: hostIndexStats(statTree) }),
   };
+};
+
+/**
+ * What a host tells the derived calls about its platform.
+ *
+ * @public
+ */
+export type HostContentCallOptions = {
+  /**
+   * Starts the worker a `grep` pattern runs in, so the pattern can be stopped
+   * (see `filesystem-bridge-grep-matcher.ts`). Needed only where the platform
+   * has no web `Worker`, such as Node; without either, a non-literal pattern
+   * is refused with `ENOTSUP`.
+   */
+  readonly grepMatcherWorker?: GrepMatcherWorkerFactory;
 };
 
 /**
@@ -400,9 +413,13 @@ const derivedIndexCalls = (
  * class's private state survives.
  *
  * @param handlers - The handlers one connection is served.
+ * @param options - The host's grep matcher worker, where its platform has no web `Worker`.
  * @returns The same handlers, answering the derived calls.
  */
-export const withHostContentCalls = <Handlers extends StringKeyedObject>(handlers: Handlers): Handlers => {
+export const withHostContentCalls = <Handlers extends StringKeyedObject>(
+  handlers: Handlers,
+  options?: HostContentCallOptions,
+): Handlers => {
   const own = handlers as Partial<Record<string, unknown>>;
   if (typeof own['readFile'] !== 'function') {
     return handlers;
@@ -414,7 +431,7 @@ export const withHostContentCalls = <Handlers extends StringKeyedObject>(handler
     ...(typeof own['hashFiles'] === 'function' ? {} : { hashFiles: hostHashFiles(read) }),
     ...(typeof own['readMany'] === 'function' ? {} : { readMany: hostReadMany(read) }),
     ...(typeof own['readRange'] === 'function' ? {} : { readRange: hostReadRange(read, stream) }),
-    ...derivedIndexCalls(own, handlers, read),
+    ...derivedIndexCalls(own, handlers, { read, worker: options?.grepMatcherWorker }),
     apply: typeof own['apply'] === 'function' ? hostApply((own['apply'] as Apply).bind(handlers)) : refuseApply,
   };
   return new Proxy(handlers, {

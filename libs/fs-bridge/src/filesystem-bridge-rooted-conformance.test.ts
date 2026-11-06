@@ -27,16 +27,18 @@ import {
 import type { FileSystemBridgeRootedProxy, RootedBridgeConsumer } from '#filesystem-bridge.js';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { maxGrepLineCharacters } from '#filesystem-bridge-protocol.js';
+import { grepMatchDeadline } from '#filesystem-bridge-grep-matcher.js';
 import type {
   FileSystemBridgeRuntimeService,
   GrepMatch,
   GrepOptions,
   LongCallProgress,
 } from '#filesystem-bridge-protocol.js';
-import type { ChangesetEntry } from '@taucad/filesystem';
+import type { Changeset, ChangesetEntry } from '@taucad/filesystem';
 import { observeFileSystemBridgeCrossings } from '#filesystem-bridge-crossings.js';
 import type { FileSystemBridgeCrossings } from '#filesystem-bridge-crossings.js';
 import {
+  nodeGrepMatcherWorker,
   conformanceProjectRoot,
   rootedHandlersFor,
   rootedWorkspaceHandlers,
@@ -74,7 +76,9 @@ const inProcessPort: Transport = {
   async open(seed, consumer) {
     const { service, handlers } = await rootedWorkspaceHandlers(seed, consumer);
     const crossings = observeFileSystemBridgeCrossings();
-    const proxy = createFileSystemBridgeProxy(createFileSystemBridgePort(handlers));
+    const proxy = createFileSystemBridgeProxy(
+      createFileSystemBridgePort(handlers, { grepMatcherWorker: nodeGrepMatcherWorker }),
+    );
     await proxy.ready;
     return {
       proxy,
@@ -96,6 +100,7 @@ const authorityConnection: Transport = {
     const boundary = new MessageChannel();
     const exposed = exposeFileSystem(workspaceBridgeService(service), {
       policy: tauPathPolicy,
+      grepMatcherWorker: nodeGrepMatcherWorker,
       handlerForRoot: (root, context, rootConsumer) =>
         rootedHandlersFor({ service, root, context, consumer: rootConsumer }),
       messageSource: boundary.port2,
@@ -380,6 +385,21 @@ describe.each([inProcessPort, authorityConnection, workerPort])('rooted bridge c
       await expect(proxy.grep('(unclosed')).rejects.toMatchObject({ code: 'EINVAL' });
     });
 
+    it('stops a pattern that backtracks past its deadline with ETIMEDOUT, and the authority keeps answering', async () => {
+      const { proxy } = await open(transport, 'working-copy', {
+        'evil.txt': `${'a'.repeat(40)}!\n`,
+        'fine.txt': 'aaa\n',
+      });
+      const started = performance.now();
+      await expect(proxy.grep(String.raw`^(a+)+$`)).rejects.toMatchObject({ code: 'ETIMEDOUT' });
+      // One file's deadline and a worker's start, not the pattern's lifetime.
+      expect(performance.now() - started).toBeLessThan(grepMatchDeadline + 5000);
+      await expect(proxy.readFile('fine.txt', 'utf8')).resolves.toBe('aaa\n');
+      // A literal never backtracks, so it stays on the authority's own thread.
+      await expect(grepPaths(proxy, '(a+)+$', { fixedStrings: true })).resolves.toEqual([]);
+      await expect(grepPaths(proxy, 'a+$', { glob: 'fine.txt' })).resolves.toEqual(['fine.txt']);
+    });
+
     it('reports progress per file and stops on an aborted signal', async () => {
       const { proxy } = await open(transport);
       const reports: LongCallProgress[] = [];
@@ -449,11 +469,40 @@ describe.each([inProcessPort, authorityConnection, workerPort])('rooted bridge c
       await expect(grepPaths(agent.proxy, 'secret-project')).resolves.toEqual([]);
     });
 
-    it('refuses apply with ENOTSUP where the view serves no changeset', async () => {
-      const { proxy } = await open(transport, 'agent');
-      await expect(proxy.apply({ entries: [{ op: 'write', path: 'x.ts', data: 'x' }] })).rejects.toMatchObject({
-        code: 'ENOTSUP',
+    it.each(['agent', 'user'] as const)('applies a changeset of visible paths for the %s', async (consumer) => {
+      const { proxy } = await open(transport, consumer);
+      const receipt = await proxy.apply({
+        entries: [
+          { op: 'write', path: 'src/new.ts', data: 'export {};\n' },
+          { op: 'move', from: 'docs/readme.md', to: 'docs/README.md' },
+        ],
       });
+      expect(receipt).toMatchObject({ state: 'applied', applied: 2 });
+      await expect(proxy.readFile('src/new.ts', 'utf8')).resolves.toBe('export {};\n');
+    });
+
+    it.each(['agent', 'user'] as const)(
+      'refuses the whole changeset for the %s when one entry is masked, applying nothing',
+      async (consumer) => {
+        const { proxy } = await open(transport, consumer);
+        await expect(
+          proxy.apply({
+            entries: [
+              { op: 'write', path: 'visible.ts', data: 'x' },
+              { op: 'write', path: '.tau/project.json', data: '{}' },
+            ],
+          }),
+        ).rejects.toMatchObject({ code: 'EPERM' });
+        await expect(proxy.exists('visible.ts')).resolves.toBe(false);
+      },
+    );
+
+    it('refuses a records entry for the agent with EROFS and admits it for the user', async () => {
+      const agent = await open(transport, 'agent');
+      const user = await open(transport, 'user');
+      const changeset: Changeset = { entries: [{ op: 'write', path: '.tau/chats/c1.json', data: '{}' }] };
+      await expect(agent.proxy.apply(changeset)).rejects.toMatchObject({ code: 'EROFS' });
+      await expect(user.proxy.apply(changeset)).resolves.toMatchObject({ state: 'applied' });
     });
   });
 });

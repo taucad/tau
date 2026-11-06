@@ -54,6 +54,7 @@ import type {
 } from '#filesystem-bridge-protocol.js';
 import { nextFileSystemBridgeConnectionId, timeFileSystemBridgeCall } from '#filesystem-bridge-slow-calls.js';
 import { bindFileSystemLongCall, withHostContentCalls } from '#filesystem-bridge-host-calls.js';
+import type { HostContentCallOptions } from '#filesystem-bridge-host-calls.js';
 import { recordFileSystemBridgeCrossing } from '#filesystem-bridge-crossings.js';
 import { prepareApplyCall, rangeStream, receiptFromWire } from '#filesystem-bridge-client-calls.js';
 import type { ReadStreamOptions } from '#filesystem-bridge-client-calls.js';
@@ -1041,21 +1042,22 @@ const createUnavailableHandlers = (error: unknown): StringKeyedObject =>
  * @returns Handle with cleanup, activePorts, and serverHandles
  * @public
  */
-type InternalExposeFileSystemOptions = FileSystemBridgeOptions & {
-  // oxlint-disable-next-line max-params -- mirrors RootedFileSystemHandlerFactory.
-  handlerForRoot?: (
-    root: string,
-    context: WorkspaceMutationContext,
-    consumer: RootedBridgeConsumer,
-    policy: PathPolicy,
-  ) => StringKeyedObject | undefined;
-  policy: PathPolicy;
-  changeEventBus?: BridgeChangeEventBus;
-  /* Inline `Pick`, no named alias.
-   * ponytail: one more port-like type declaration is exactly the failure mode
-   * this batch guards against — six already exist in the tree. */
-  messageSource?: Pick<EventTarget, 'addEventListener' | 'removeEventListener'>;
-};
+type InternalExposeFileSystemOptions = FileSystemBridgeOptions &
+  HostContentCallOptions & {
+    // oxlint-disable-next-line max-params -- mirrors RootedFileSystemHandlerFactory.
+    handlerForRoot?: (
+      root: string,
+      context: WorkspaceMutationContext,
+      consumer: RootedBridgeConsumer,
+      policy: PathPolicy,
+    ) => StringKeyedObject | undefined;
+    policy: PathPolicy;
+    changeEventBus?: BridgeChangeEventBus;
+    /* Inline `Pick`, no named alias.
+     * ponytail: one more port-like type declaration is exactly the failure mode
+     * this batch guards against — six already exist in the tree. */
+    messageSource?: Pick<EventTarget, 'addEventListener' | 'removeEventListener'>;
+  };
 
 function exposeFileSystemHandlers(
   handlers: StringKeyedObject,
@@ -1229,7 +1231,9 @@ function exposeFileSystemHandlers(
         return { portHandlers: createUnavailableHandlers(unavailableError), unavailableError };
       }
       scopedPorts.set(port, { root: rooted.data.root, consumer: rooted.data.consumer });
-      return { portHandlers: withChangeSetWatch(withHostContentCalls(serializeRootedResults(rootedHandlers))) };
+      return {
+        portHandlers: withChangeSetWatch(withHostContentCalls(serializeRootedResults(rootedHandlers), options)),
+      };
     } catch (error) {
       /* The refusal the hello states is the refusal the caller gets: a
        * `VirtualPathError` from a non-canonical root used to reach the client as
@@ -1446,28 +1450,29 @@ export function workspaceBridgeService(service: WorkspaceFileService): FileSyste
 /** Expose the complete workspace filesystem service over validated bridge connections. @public */
 export function exposeFileSystem(
   handlers: FileSystemBridgeWorkspaceService | FileSystemBridgeRuntimeService,
-  options?: FileSystemBridgeOptions & {
-    handlerForRoot?: RootedFileSystemHandlerFactory;
-    /**
-     * The reserved layout this server enforces on the change stream (D6).
-     *
-     * A masked rooted connection (`'user'`, `'agent'`) is never told about a path
-     * its own view hides, so an agent cannot learn the names or the timing of
-     * control-plane writes it may not read (CI1). Any host that serves a masked
-     * consumer passes its policy here; a `'working-copy'` connection receives the
-     * stream whole either way. It is also what {@link RootedFileSystemHandlerFactory}
-     * is handed, rebased on the connection's root.
-     */
-    policy: PathPolicy;
-    changeEventBus?: BridgeChangeEventBus;
-    /**
-     * Where to listen for connect envelopes. Defaults to the worker global,
-     * exactly as before. A `node:worker_threads` `MessagePort` satisfies this
-     * directly (it *is* an `EventTarget`), which is what lets the authority
-     * run in a plain Node process, an Electron utility, or a daemon.
-     */
-    messageSource?: Pick<EventTarget, 'addEventListener' | 'removeEventListener'>;
-  },
+  options?: FileSystemBridgeOptions &
+    HostContentCallOptions & {
+      handlerForRoot?: RootedFileSystemHandlerFactory;
+      /**
+       * The reserved layout this server enforces on the change stream (D6).
+       *
+       * A masked rooted connection (`'user'`, `'agent'`) is never told about a path
+       * its own view hides, so an agent cannot learn the names or the timing of
+       * control-plane writes it may not read (CI1). Any host that serves a masked
+       * consumer passes its policy here; a `'working-copy'` connection receives the
+       * stream whole either way. It is also what {@link RootedFileSystemHandlerFactory}
+       * is handed, rebased on the connection's root.
+       */
+      policy: PathPolicy;
+      changeEventBus?: BridgeChangeEventBus;
+      /**
+       * Where to listen for connect envelopes. Defaults to the worker global,
+       * exactly as before. A `node:worker_threads` `MessagePort` satisfies this
+       * directly (it *is* an `EventTarget`), which is what lets the authority
+       * run in a plain Node process, an Electron utility, or a daemon.
+       */
+      messageSource?: Pick<EventTarget, 'addEventListener' | 'removeEventListener'>;
+    },
 ): ExposeFileSystemHandle {
   return exposeFileSystemHandlers(handlers, options);
 }
@@ -1579,14 +1584,16 @@ const runtimeFileSystemBridgeOptions = (handlers: FileSystemBridgeRuntimeService
  *
  * @param handlers - Rooted filesystem authority exposed to the peer.
  * @param port - Existing RPC port, including a wrapped transferred channel.
+ * @param options - What the host tells the derived calls about its platform.
  * @returns Server handle whose disposal closes the bridge lifecycle.
  * @public
  */
 export function serveFileSystemBridgePort(
   handlers: FileSystemBridgeRuntimeService,
   port: Port<unknown>,
+  options?: HostContentCallOptions,
 ): BridgeServerHandle {
-  const served = withChangeSetWatch(withHostContentCalls(handlers));
+  const served = withChangeSetWatch(withHostContentCalls(handlers, options));
   return createBridgeServer(served, port, runtimeFileSystemBridgeOptions(served));
 }
 
@@ -1597,8 +1604,11 @@ export function serveFileSystemBridgePort(
  *
  * @public
  */
-export function createFileSystemBridgePort(handlers: FileSystemBridgeRuntimeService): FileSystemBridgeConnection {
-  const served = withChangeSetWatch(withHostContentCalls(handlers));
+export function createFileSystemBridgePort(
+  handlers: FileSystemBridgeRuntimeService,
+  options?: HostContentCallOptions,
+): FileSystemBridgeConnection {
+  const served = withChangeSetWatch(withHostContentCalls(handlers, options));
   const bridge = createBridgePort(served, runtimeFileSystemBridgeOptions(served));
   return {
     port: asFileSystemBridgePort(bridge.port),

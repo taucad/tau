@@ -72,6 +72,16 @@ export type {
 
 export { defaultReadStreamChunkBytes } from '#filesystem-bridge-client-calls.js';
 
+export { grepMatchDeadline } from '#filesystem-bridge-grep-matcher.js';
+
+export type {
+  GrepMatcherChannel,
+  GrepMatcherChannelEvents,
+  GrepMatcherWorkerFactory,
+} from '#filesystem-bridge-grep-matcher.js';
+
+export type { HostContentCallOptions } from '#filesystem-bridge-host-calls.js';
+
 export type { ReadStreamOptions } from '#filesystem-bridge-client-calls.js';
 
 export { observeFileSystemBridgeCrossings } from '#filesystem-bridge-crossings.js';

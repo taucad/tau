@@ -11,6 +11,7 @@ import type { FileStatEntry } from '@taucad/types';
 import { bindFileSystemLongCall, withHostContentCalls } from '#filesystem-bridge-host-calls.js';
 import { prepareApplyCall, rangeStream, receiptFromWire } from '#filesystem-bridge-client-calls.js';
 import type { GrepResult, IndexStats } from '#filesystem-bridge-protocol.js';
+import { nodeGrepMatcherWorker } from '#filesystem-bridge-rooted.test-fixture.js';
 
 const encoder = new TextEncoder();
 
@@ -31,7 +32,8 @@ type Derived = {
   apply(changeset: Record<string, unknown>): Promise<ChangesetReceipt>;
 };
 
-const served = (handlers: StringKeyedObject): Derived => withHostContentCalls(handlers) as unknown as Derived;
+const served = (handlers: StringKeyedObject): Derived =>
+  withHostContentCalls(handlers, { grepMatcherWorker: nodeGrepMatcherWorker }) as unknown as Derived;
 
 const codedError = (code: string): Error => Object.assign(new Error(code), { code });
 
@@ -79,6 +81,17 @@ describe('derived index calls', () => {
 });
 
 describe('derived grep', () => {
+  it('refuses a pattern with ENOTSUP where the host has no worker to bound it in, and still answers a literal', async () => {
+    const handlers = withHostContentCalls({
+      readFile: async () => encoder.encode('needle'),
+      statTree: async () => [file('a.ts')],
+    }) as unknown as Derived;
+    await expect(handlers.grep('nee+dle')).rejects.toMatchObject({ code: 'ENOTSUP' });
+    await expect(handlers.grep('needle', { fixedStrings: true })).resolves.toMatchObject({
+      matches: [{ path: 'a.ts' }],
+    });
+  });
+
   it('counts a file gone between the index and the read as skipped, not searched', async () => {
     const handlers = served({
       async readFile(path: string) {
@@ -121,6 +134,10 @@ describe('derived grep', () => {
 });
 
 describe('derived apply', () => {
+  it('refuses with ENOTSUP where the handler set applies no changeset', async () => {
+    await expect(served({ readFile: vi.fn() }).apply({ entries: [] })).rejects.toMatchObject({ code: 'ENOTSUP' });
+  });
+
   it("carries an entry's error as data, whatever was thrown", async () => {
     const handlers = served({
       readFile: vi.fn(),

@@ -22,7 +22,7 @@ import { serveFileSystemBridgePort } from '#filesystem-bridge.js';
 import type { RootedBridgeConsumer } from '#filesystem-bridge.js';
 import { observeFileSystemBridgeCrossings } from '#filesystem-bridge-crossings.js';
 import type { FileSystemBridgeCrossingsObserver } from '#filesystem-bridge-crossings.js';
-import { rootedWorkspaceHandlers } from '#filesystem-bridge-rooted.test-fixture.js';
+import { nodeGrepMatcherWorker, rootedWorkspaceHandlers } from '#filesystem-bridge-rooted.test-fixture.js';
 
 type ServeMessage = { readonly type: 'serve'; readonly port: MessagePort; readonly files: Record<string, string> };
 type ServeRootedMessage = {
@@ -51,7 +51,7 @@ const serveRooted = async ({ port, files, consumer }: ServeRootedMessage): Promi
   crossings = observeFileSystemBridgeCrossings();
   const wrapped = wrapMessagePort<unknown>(port as unknown as MessagePortLike, { label: 'conformance-worker-rooted' });
   wrapped.start?.();
-  serveFileSystemBridgePort(handlers, wrapped);
+  serveFileSystemBridgePort(handlers, wrapped, { grepMatcherWorker: nodeGrepMatcherWorker });
   parentPort!.postMessage({ type: 'serving' });
 };
 

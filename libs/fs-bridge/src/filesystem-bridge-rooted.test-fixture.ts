@@ -5,6 +5,7 @@
  * filesystem for the working copy, a masked view for any other consumer, plus
  * the read content operations served over it.
  */
+import { Worker as NodeWorker } from 'node:worker_threads';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import type { WorkspaceMutationContext } from '@taucad/filesystem';
 import { composeView } from '@taucad/filesystem/composed-view';
@@ -12,6 +13,34 @@ import { withReadContentOps } from '@taucad/filesystem/content-ops';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { RootedBridgeConsumer } from '#filesystem-bridge.js';
 import type { FileSystemBridgeRuntimeService } from '#filesystem-bridge-protocol.js';
+import type { GrepMatcherWorkerFactory } from '#filesystem-bridge-grep-matcher.js';
+
+/**
+ * A classic web-worker script made runnable on a `worker_threads` thread:
+ * `self` is shimmed over the thread's port, as a Node host shims it.
+ *
+ * @param source - The web-worker script.
+ * @returns The script a `worker_threads` worker evaluates.
+ */
+export const nodeWorkerScript = (source: string): string => `const { parentPort } = require("node:worker_threads");
+globalThis.self = { postMessage: (message) => parentPort.postMessage(message) };
+parentPort.on("message", (data) => self.onmessage({ data }));
+${source}`;
+
+/** A Node host's grep matcher worker: the bridge's script on a `worker_threads` thread. */
+export const nodeGrepMatcherWorker: GrepMatcherWorkerFactory = (source, events) => {
+  const worker = new NodeWorker(nodeWorkerScript(source), { eval: true });
+  worker.on('message', events.onMessage);
+  worker.on('error', events.onError);
+  return {
+    post(message) {
+      worker.postMessage(message);
+    },
+    terminate() {
+      void worker.terminate();
+    },
+  };
+};
 
 /** The project the suite's workspace holds. */
 export const conformanceProjectId = 'proj_aaaaaaaaaaaaaaaaaaaaa';

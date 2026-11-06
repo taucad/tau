@@ -400,6 +400,42 @@ const indexesOver = (provider: FileSystemProvider, tab: { tabId: string; seq: nu
     persistDelayMilliseconds: 60_000,
   });
 
+describe('ProjectIndex pending entries (D9)', () => {
+  const object = { oid: 'a'.repeat(64), size: 5_000_000 };
+
+  it('should hold a pending entry until a write or a changed observation ends it, and carry it on a move', () => {
+    const index = observed([file('part.step', 131, 1000), file('other.step', 131, 1000)]);
+    const before = index.generation;
+    index.markPending('part.step', object);
+    expect(index.pendingFor('part.step')).toStrictEqual(object);
+    expect(index.entry('part.step')?.pending).toStrictEqual(object);
+    expect(index.generation).toBeGreaterThan(before);
+    /* Marking again changes nothing; a directory or an unknown path is never pending. */
+    const marked = index.generation;
+    index.markPending('part.step', object);
+    index.markPending('missing.step', object);
+    expect(index.generation).toBe(marked);
+    /* An unchanged observation keeps it; a move carries it. */
+    index.completeObservation(index.beginObservation(), '', [
+      file('part.step', 131, 1000),
+      file('other.step', 131, 1000),
+    ]);
+    expect(index.pendingFor('part.step')).toStrictEqual(object);
+    index.move('part.step', 'moved.step');
+    expect(index.pendingFor('moved.step')).toStrictEqual(object);
+    /* The fill's write of the object, or anyone's, ends it. */
+    index.recordFile('moved.step', { size: object.size });
+    expect(index.pendingFor('moved.step')).toBeUndefined();
+    /* So does an observation that finds the bytes changed. */
+    index.markPending('other.step', object);
+    index.completeObservation(index.beginObservation(), '', [
+      file('moved.step', object.size, 2000),
+      file('other.step', 131, 3000),
+    ]);
+    expect(index.pendingFor('other.step')).toBeUndefined();
+  });
+});
+
 describe('ProjectIndexes', () => {
   it('should open, list and compare a root reading no file content (I3)', async () => {
     const { provider, reads } = await durableRoot();

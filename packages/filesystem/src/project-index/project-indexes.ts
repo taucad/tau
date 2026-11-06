@@ -24,6 +24,7 @@ import { ProjectIndex, timestampGranularityMilliseconds } from '#project-index/p
 import type { IndexAdmits, IndexCompareResult, IndexEntryKind, ObservedRow } from '#project-index/project-index.js';
 import { projectIndexDirectory, readIndexSnapshot, writeIndexSnapshot } from '#project-index/index-snapshot.js';
 import type { IndexVector } from '#project-index/index-snapshot.js';
+import type { PendingObject } from '#pending-content.js';
 
 /** Reserved root paths no index ever holds (I9): its own snapshot, and import staging. @public */
 export const reservedIndexPaths: readonly string[] = Object.freeze([projectIndexDirectory, '.tau-staging']);
@@ -484,6 +485,30 @@ export class ProjectIndexes {
     this._apply(absolutePath, (index, relative) => {
       index.recordFile(relative, { ...written, observedAt });
     });
+  }
+
+  /**
+   * Make one file a pending entry in every index that holds it (see
+   * {@link ProjectIndex.markPending}).
+   *
+   * @param absolutePath - Absolute file path.
+   * @param object - The large object its pointer names.
+   */
+  public markPending(absolutePath: string, object: PendingObject): void {
+    this._apply(absolutePath, (index, relative) => {
+      index.markPending(relative, object);
+    });
+  }
+
+  /**
+   * The large object a warm index records for one pending entry.
+   *
+   * @param absolutePath - Absolute file path.
+   * @returns The object, or `undefined` when no index has it pending.
+   */
+  public pendingAt(absolutePath: string): PendingObject | undefined {
+    const covering = this._covering(absolutePath);
+    return covering?.index.pendingFor(covering.relative);
   }
 
   /**

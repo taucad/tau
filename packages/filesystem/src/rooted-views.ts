@@ -60,6 +60,12 @@ import type { ChangeSet, ChangeSetEntry } from '#change-event-bus.js';
 import { RootedFileSystemError, WorkspaceMutationError } from '#workspace-errors.js';
 import { bufferToStream, validateFileReadStreamOptions } from '#backend/stream-utils.js';
 import { getEventOrigin } from '#event-origin-registry.js';
+import { pendingObjectOf, readThroughPending } from '#pending-content.js';
+import type { PendingObjectSource } from '#pending-content.js';
+
+/* A provider's own utf8 read keeps a byte-order mark; so does this one. */
+// eslint-disable-next-line @typescript-eslint/naming-convention -- `ignoreBOM` is the native TextDecoder option name.
+const utf8 = new TextDecoder('utf-8', { ignoreBOM: true });
 
 /** The control plane a rooted view serves outside the mutation pipeline. */
 const privateStoreDirectory = '.git';
@@ -225,6 +231,9 @@ export class RootedViews {
   private readonly _watchRegistry: WatchRegistry;
   /** Every root's Project Index, opened by the authority that owns its I/O. */
   private readonly _projectIndexes: ProjectIndexes;
+  /** Where a read of a pending entry gets its object (D9). */
+  private readonly _pendingSource: () => PendingObjectSource | undefined;
+  private readonly _pendingStallMilliseconds: number | undefined;
 
   /**
    * Create the rooted-view factory over the authority's own collaborators.
@@ -236,11 +245,15 @@ export class RootedViews {
     pipeline: MutationPipeline;
     watchRegistry: WatchRegistry;
     projectIndexes: ProjectIndexes;
+    pendingSource?: () => PendingObjectSource | undefined;
+    pendingStallMilliseconds?: number;
   }) {
     this._mountTable = options.mountTable;
     this._pipeline = options.pipeline;
     this._watchRegistry = options.watchRegistry;
     this._projectIndexes = options.projectIndexes;
+    this._pendingSource = options.pendingSource ?? (() => undefined);
+    this._pendingStallMilliseconds = options.pendingStallMilliseconds;
   }
 
   /**
@@ -249,9 +262,17 @@ export class RootedViews {
    *
    * @param authorityRoot - Exact authority-global mount path to capture.
    * @param mutationContext - Optional origin metadata for echo suppression.
+   * @param options - `placeholders: 'raw'` for the revision layer, which owns
+   *   large-object pointers and reads them as they are; every other view reads
+   *   a pending entry through to its object (D9).
    * @returns A writable filesystem whose root is the captured mount.
    */
-  public create(authorityRoot: string, mutationContext?: WorkspaceMutationContext): RootedFileSystem {
+  public create(
+    authorityRoot: string,
+    mutationContext?: WorkspaceMutationContext,
+    options?: Readonly<{ placeholders?: 'raw' }>,
+  ): RootedFileSystem {
+    const raw = options?.placeholders === 'raw';
     const root = resolveAuthorityPath(authorityRoot);
     const captured = this._mountTable.getExactMount(root);
     if (captured === undefined) {
@@ -309,18 +330,40 @@ export class RootedViews {
       return root === '/' ? `/${pattern}` : `${root}/${pattern}`;
     };
 
+    /*
+     * A pointer read is a pending entry (D9): the index records it, and every
+     * view but the revision layer's raw one reads through to its object.
+     */
+    const throughPending = async (
+      authorityPath: string,
+      localPath: string,
+      bytes: Uint8Array<ArrayBuffer>,
+    ): Promise<Uint8Array<ArrayBuffer>> => {
+      const object = pendingObjectOf(bytes);
+      if (object === undefined) {
+        return bytes;
+      }
+      projectIndexes.markPending(authorityPath, object);
+      return raw
+        ? bytes
+        : readThroughPending(
+            this._pendingSource(),
+            { authorityPath, root, path: localPath, object },
+            { pointer: bytes, stallMilliseconds: this._pendingStallMilliseconds },
+          );
+    };
     function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
     function readFile(path: string, encoding: 'utf8'): Promise<string>;
     async function readFile(path: string, encoding?: 'utf8'): Promise<string | Uint8Array<ArrayBuffer>> {
-      const { resolution, localPath } = resolveLocal(path);
-      if (encoding === 'utf8') {
-        return resolution.provider.readFile(resolution.path, 'utf8');
-      }
+      const { resolution, localPath, authorityPath } = resolveLocal(path);
       const observedAt = Date.now();
       const bytes = await resolution.provider.readFile(resolution.path);
+      if (encoding === 'utf8') {
+        return utf8.decode(await throughPending(authorityPath, localPath, bytes));
+      }
       /* A whole read already holds every fact a listing asks for (D4): keep them. */
       projectIndexes.recordRead(root, localPath, { bytes, observedAt });
-      return bytes;
+      return throughPending(authorityPath, localPath, bytes);
     }
 
     /* One provider call for the whole set: a remote provider digests beside its
@@ -353,8 +396,30 @@ export class RootedViews {
 
     const readFileStream = (path: string, options?: FileReadStreamOptions): ReadableStream<Uint8Array<ArrayBuffer>> => {
       validateFileReadStreamOptions(options);
-      const { resolution } = resolveLocal(path);
-      let reader = resolution.provider.readFileStream?.(resolution.path, options).getReader();
+      const { resolution, localPath, authorityPath } = resolveLocal(path);
+      /* A pending entry is a pointer of at most 1 KiB: a stream that may be one is read whole and through it (D9). */
+      const small = async (): Promise<boolean> => {
+        if (raw) {
+          return false;
+        }
+        try {
+          const { size } = await resolution.provider.stat(resolution.path);
+          return size <= 1024;
+        } catch {
+          return false;
+        }
+      };
+      let reader: ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>> | undefined;
+      const open = async (): Promise<ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>>> => {
+        if (await small()) {
+          const bytes = await resolution.provider.readFile(resolution.path);
+          return bufferToStream(await throughPending(authorityPath, localPath, bytes), options).getReader();
+        }
+        return (
+          resolution.provider.readFileStream?.(resolution.path, options) ??
+          bufferToStream(await resolution.provider.readFile(resolution.path), options)
+        ).getReader();
+      };
       const cancelAfterFailure = async (reason: unknown): Promise<void> => {
         try {
           await reader?.cancel(reason);
@@ -367,7 +432,7 @@ export class RootedViews {
           async pull(controller) {
             try {
               assertCurrent();
-              reader ??= bufferToStream(await resolution.provider.readFile(resolution.path), options).getReader();
+              reader ??= await open();
               const result = await reader.read();
               assertCurrent();
               if (result.done) {
@@ -531,7 +596,9 @@ export class RootedViews {
       if (!this._pipeline.isCurrentResolution(to.authorityPath, to.resolution)) {
         throw new Error(`[WorkspaceFileService] copy would cross mount boundary at '${to.authorityPath}'.`);
       }
-      const bytes = await readFile(source);
+      /* Copy-on-write: a pending entry is copied as its pointer and stays pending; its object is fetched when read. */
+      const from = resolveLocal(source);
+      const bytes = await from.resolution.provider.readFile(from.resolution.path);
       /* Nothing is written yet: a copy stopped here leaves the target as it was. */
       options?.signal?.throwIfAborted();
       await writeFile(target, bytes);

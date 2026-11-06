@@ -26,6 +26,7 @@
  */
 
 import type { StatContentMetadata } from '@taucad/types';
+import type { PendingObject } from '#pending-content.js';
 import type { ContentFacts, FileStatEntry } from '#types.js';
 
 /** The coarsest modification time a filesystem we index reports: FAT's two seconds. @public */
@@ -53,6 +54,13 @@ export type IndexEntry = Readonly<{
   generation: number;
   facts?: ContentFacts;
   factsAt?: FactsAt;
+  /**
+   * Present on a pending entry: the file holds the pointer of this large
+   * object, which has not reached the device yet. Reads go through to the
+   * object (see `pending-content.ts`); a write, or an observation that finds
+   * the bytes changed, ends it.
+   */
+  pending?: PendingObject;
 }>;
 
 /**
@@ -120,6 +128,7 @@ type Node = {
   pendingMtime?: boolean;
   facts?: ContentFacts;
   factsAt?: FactsAt;
+  pending?: PendingObject;
   children?: Map<string, Node>;
 };
 
@@ -658,6 +667,9 @@ export class ProjectIndex {
       return;
     }
     if (node.size !== at.size || node.mtimeMs !== at.mtimeMs || node.pendingMtime === true) {
+      if (node.size !== at.size) {
+        delete node.pending;
+      }
       node.size = at.size;
       node.mtimeMs = at.mtimeMs;
       delete node.pendingMtime;
@@ -667,6 +679,33 @@ export class ProjectIndex {
     node.facts = merged ? { ...node.facts, ...facts } : facts;
     node.factsAt = { size: at.size, mtimeMs: at.mtimeMs, observedAt: at.observedAt };
     this._stale.delete(path);
+  }
+
+  /**
+   * Make one file a pending entry: it holds the pointer of `object`. A write
+   * over it, or an observation that finds its bytes changed, ends it. Not
+   * persisted: the revision layer's first read of the checkout marks it again.
+   *
+   * @param path - Root-relative file path.
+   * @param object - The large object its pointer names.
+   */
+  public markPending(path: string, object: PendingObject): void {
+    const node = this._resolve(segmentsOf(path));
+    if (node?.kind !== 'file' || (node.pending?.oid === object.oid && node.pending.size === object.size)) {
+      return;
+    }
+    node.pending = object;
+    node.generation = this._bump(path);
+  }
+
+  /**
+   * The large object a pending entry names.
+   *
+   * @param path - Root-relative file path.
+   * @returns The object, or `undefined` when the path is not pending.
+   */
+  public pendingFor(path: string): PendingObject | undefined {
+    return this._resolve(segmentsOf(path))?.pending;
   }
 
   /**
@@ -751,6 +790,7 @@ export class ProjectIndex {
         delete node.facts;
         delete node.factsAt;
         delete node.pendingMtime;
+        delete node.pending;
         this._generation += 1;
         node.generation = this._generation;
         mismatched.push(row.path);
@@ -817,6 +857,7 @@ export class ProjectIndex {
       generation: node.generation,
       ...(node.facts === undefined ? {} : { facts: node.facts }),
       ...(node.factsAt === undefined ? {} : { factsAt: node.factsAt }),
+      ...(node.pending === undefined ? {} : { pending: node.pending }),
     };
   }
 

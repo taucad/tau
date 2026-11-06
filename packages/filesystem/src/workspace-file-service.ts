@@ -59,6 +59,8 @@ import { assertRootedPath, joinRelativePath, parentDirectory, resolveAuthorityPa
 import { MissingWorkspaceHandleError, WorkspaceMutationError } from '#workspace-errors.js';
 import { fileMetadataFields } from '#content-metadata.js';
 import { archive } from '#content-ops/archive.js';
+import { pendingObjectOf, readThroughPending } from '#pending-content.js';
+import type { PendingObjectSource } from '#pending-content.js';
 import { checkoutRoute, nodeModulesRoute, parseRoute, projectRoute } from '#project-routes.js';
 
 /** Milliseconds. */
@@ -145,6 +147,8 @@ export class WorkspaceFileService {
   private readonly _crossTabCoordinator: CrossTabCoordinator;
   private readonly _mountTable: MountTable;
   private readonly _policy: PathPolicy | undefined;
+  private _pendingSource: PendingObjectSource | undefined;
+  private readonly _pendingStallMilliseconds: number | undefined;
   /* Told the live mount prefixes, an index never answers for a path behind a nested mount. */
   private readonly _projectIndexes: ProjectIndexes;
   private readonly _projectRoutes = new Set<string>();
@@ -175,8 +179,11 @@ export class WorkspaceFileService {
      * a workspace with no reserved layout means.
      */
     policy?: PathPolicy;
+    /** How long a read of a pending entry waits for its object; see {@link pendingStallMilliseconds}. */
+    pendingStallMilliseconds?: number;
   }) {
     this._registry = options.providerRegistry;
+    this._pendingStallMilliseconds = options.pendingStallMilliseconds;
     this._resourceQueue = options.resourceQueue;
     this._eventBus = options.eventBus;
     // Kernels deduplicate by content hash, so a lone edit is delivered at once and only the burst behind it waits.
@@ -206,6 +213,10 @@ export class WorkspaceFileService {
       pipeline: this._pipeline,
       watchRegistry: this._watchRegistry,
       projectIndexes: this._projectIndexes,
+      pendingSource: () => this._pendingSource,
+      ...(options.pendingStallMilliseconds === undefined
+        ? {}
+        : { pendingStallMilliseconds: options.pendingStallMilliseconds }),
     });
     this._projectDirectories = new ProjectDirectories({
       registry: this._registry,
@@ -257,10 +268,26 @@ export class WorkspaceFileService {
    *
    * @param authorityRoot - Exact authority-global mount path to capture.
    * @param mutationContext - Optional origin metadata for echo suppression.
+   * @param options - `placeholders: 'raw'` for the revision layer alone, which reads large-object pointers as they are.
    * @returns A writable filesystem whose root is the captured mount.
    */
-  public createRootedFileSystem(authorityRoot: string, mutationContext?: WorkspaceMutationContext): RootedFileSystem {
-    return this._rootedViews.create(authorityRoot, mutationContext);
+  public createRootedFileSystem(
+    authorityRoot: string,
+    mutationContext?: WorkspaceMutationContext,
+    options?: Readonly<{ placeholders?: 'raw' }>,
+  ): RootedFileSystem {
+    return this._rootedViews.create(authorityRoot, mutationContext, options);
+  }
+
+  /**
+   * Say where a read of a pending entry gets its large object (D9): the
+   * revision layer's store, fetching by oid on demand. Without one, every
+   * such read refuses with `PENDING`.
+   *
+   * @param source - The host's source, or `undefined` to remove it.
+   */
+  public setPendingObjectSource(source: PendingObjectSource | undefined): void {
+    this._pendingSource = source;
   }
 
   // --- Read operations (direct to provider, no serialization) ---
@@ -289,7 +316,26 @@ export class WorkspaceFileService {
     const { provider, path: resolvedPath } = await this._resolve(canonicalPath, { scope: optionsObject?.scope });
     const encoding = options === 'utf8' || optionsObject?.encoding === 'utf8' ? 'utf8' : undefined;
 
-    const data = await provider.readFile(resolvedPath);
+    const read = await provider.readFile(resolvedPath);
+    /* A pending entry reads as its object, never its pointer (D9). */
+    const object = pendingObjectOf(read);
+    let data = read;
+    if (object !== undefined) {
+      this._projectIndexes.markPending(canonicalPath, object);
+      /* The source answers by mount, as a rooted view's read asks it. */
+      const root =
+        optionsObject?.scope === undefined ? this._mountTable.resolve(canonicalPath).entry?.prefix : undefined;
+      const local = root === undefined ? canonicalPath : canonicalPath.slice(root === '/' ? 1 : root.length + 1);
+      data = await readThroughPending(
+        this._pendingSource,
+        { authorityPath: canonicalPath, root: root ?? canonicalPath, path: local, object },
+        {
+          pointer: read,
+          ...(signal === undefined ? {} : { signal }),
+          stallMilliseconds: this._pendingStallMilliseconds,
+        },
+      );
+    }
     return encoding === 'utf8' ? new TextDecoder().decode(data) : data;
   }
 

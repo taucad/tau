@@ -648,7 +648,7 @@ const checkSecurity = (stage: QualificationStageEvidence, target: QualificationE
   if (platform === 'linux') {
     const os = security.osVersion;
     requireEvidence(
-      (/ID=ubuntu/u.test(os) && /VERSION_ID="?24\.04/u.test(os)) ||
+      (/ID=ubuntu/u.test(os) && /VERSION_ID="?(?:24|26)\.04"?$/mu.test(os)) ||
         (/ID=debian/u.test(os) && /VERSION_ID="?13/u.test(os)),
       'Linux stock distro is outside qualified support matrix',
     );

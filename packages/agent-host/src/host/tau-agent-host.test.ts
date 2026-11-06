@@ -1,3 +1,4 @@
+import { StepClock, flush } from '@taucad/xstate-testing/clock';
 import { describe, expect, it, vi } from 'vitest';
 import type {
   InvocationFunding,
@@ -5346,6 +5347,269 @@ describe('model attempts: charge and proceed (RA-S11, EQ1)', () => {
     expect(await readLog(file)).toEqual(before);
     expect(sim.attempts).toEqual(['run-1:1:0']);
     await survivor.close();
+  });
+
+  describe('the gateway-stated settlement bound (W2, D2, I3)', () => {
+    /* The API's default invocation deadline and recovery grace (apps/api), which this package cannot import. */
+    const invocationDeadline = 300_000;
+    const recoveryGrace = 5 * 60_000;
+    /** The `settlesBy` of an attempt whose hold is due a deadline after dispatch: `ahead` from now on the wall clock. */
+    const settlesByAhead = (ahead: number): string => {
+      const dispatchedAt = Date.now() - invocationDeadline - recoveryGrace + ahead;
+      return new Date(dispatchedAt + invocationDeadline + recoveryGrace).toISOString();
+    };
+    /** When the simulated gateway finishes the attempt: after the short waits, before the stated instant. */
+    const settlesAfter = 40_000;
+
+    /**
+     * The gateway answers `pending` with `settlesBy` until `settleAt` on the host's clock, then as the ledger does. The
+     * lookups record the clock time they were asked at.
+     */
+    const pendingUntil = ({
+      sim,
+      clock,
+      settlesBy,
+      settleAt,
+    }: Readonly<{ sim: ReturnType<typeof gateway>; clock: StepClock; settlesBy: string; settleAt: number }>) => {
+      const asked: number[] = [];
+      const { funding } = sim.transport;
+      if (funding.type !== 'funded') {
+        throw new Error('The simulated gateway is funded');
+      }
+      const transport: ModelTransport = {
+        ...sim.transport,
+        funding: {
+          ...funding,
+          resolveInvocation: async (request) => {
+            asked.push(clock.now());
+            return clock.now() < settleAt ? { status: 'pending', settlesBy } : funding.resolveInvocation(request);
+          },
+        },
+      };
+      return { transport, asked };
+    };
+
+    const steppedHostOn = ({
+      file,
+      transport,
+      idPrefix,
+      clock,
+    }: Readonly<{
+      file: ReturnType<typeof createMemoryLogFile>;
+      transport: ModelTransport;
+      idPrefix: string;
+      clock: StepClock;
+    }>) =>
+      createTauAgentHost({
+        ...hostOptions({
+          openEventLog: file.open,
+          transport,
+          toolRegistry: tools(async () => ({ content: null, isError: false })),
+          idPrefix,
+        }),
+        clock,
+      });
+
+    /** Steps the host's clock by `milliseconds`, letting each lookup arm its next wait. */
+    const step = async (clock: StepClock, milliseconds: number): Promise<void> => {
+      for (let passed = 0; passed < milliseconds; passed += 250) {
+        // oxlint-disable-next-line no-await-in-loop -- each step sees what the previous one settled.
+        await clock.advanceAsync(250);
+      }
+      await flush();
+    };
+
+    it('should keep a lost reply pending 60 s ahead waiting in the live run until terminal, charge recorded first', async () => {
+      const clock = new StepClock();
+      const file = createMemoryLogFile();
+      const sim = gateway(['drop', 'complete']);
+      // The relay dropped the reply while the supplier was still running: pending until the gateway finishes it.
+      const { transport, asked } = pendingUntil({
+        sim,
+        clock,
+        settlesBy: settlesByAhead(60_000),
+        settleAt: settlesAfter,
+      });
+      const host = steppedHostOn({ file, transport, idPrefix: 'w2-live', clock });
+
+      const started = start(host, 'chat-w2-live');
+      await vi.waitFor(() => {
+        expect(asked.length).toBeGreaterThan(0);
+      });
+      // Past the short waits (about 16 s), the run is still live and has not ended on a wait code.
+      await step(clock, 30_000);
+      expect(await host.describeRun('chat-w2-live')).toMatchObject({ state: 'running' });
+      expect(invocationRows(await readLog(file))).toEqual(['prepared run-1:1:0']);
+      await step(clock, 30_000);
+      await started;
+
+      // ChargeAfterRecordedLoss: the charge of the lost reply is recorded before the retry's prepared row.
+      expect(invocationRows(await readLog(file))).toEqual([
+        'prepared run-1:1:0',
+        'settled run-1:1:0 settled',
+        'prepared run-1:1:1',
+      ]);
+      // The short waits' seven lookups, then the 8 s polls until the gateway finished the attempt.
+      expect(asked.length).toBeGreaterThan(7);
+      expect(asked.at(-1)).toBeGreaterThanOrEqual(settlesAfter);
+      const snapshot = await host.snapshot('chat-w2-live');
+      expect(snapshot).toMatchObject({ state: 'completed' });
+      expect(snapshot.failure).toBeUndefined();
+      expect(sim.charges()).toBe(2);
+      await host.close();
+    });
+
+    it('should let a Resume wait for a pending attempt until terminal while settlesBy is ahead', async () => {
+      const sim = gateway(['hang', 'complete']);
+      const file = await diedMidCall(sim, 'chat-w2-resume');
+      const clock = new StepClock();
+      const { transport, asked } = pendingUntil({
+        sim,
+        clock,
+        settlesBy: settlesByAhead(60_000),
+        settleAt: settlesAfter,
+      });
+      const survivor = steppedHostOn({ file, transport, idPrefix: 'w2-resume', clock });
+      await survivor.markAbandoned('chat-w2-resume');
+      // The supplier finishes at the gateway once the simulated 40 s have passed.
+      sim.keys.set('run-1:1:0', 'charged');
+      asked.length = 0;
+
+      const answer = survivor.command({
+        type: 'resume',
+        commandId: 'resume-w2',
+        payload: { chatId: 'chat-w2-resume', runId: 'run-1' },
+      });
+      await vi.waitFor(() => {
+        expect(asked.length).toBeGreaterThan(0);
+      });
+      await step(clock, 60_000);
+
+      await expect(answer).resolves.toMatchObject({ status: 'applied' });
+      expect(asked.length).toBeGreaterThan(7);
+      await vi.waitFor(async () => {
+        expect(await survivor.snapshot('chat-w2-resume')).toMatchObject({ state: 'completed' });
+      });
+      expect(invocationRows(await readLog(file))).toEqual([
+        'prepared run-1:1:0',
+        'settled run-1:1:0 settled',
+        'prepared run-1:2:0',
+      ]);
+      await survivor.close();
+    });
+
+    it('should release a Resume waiting on a future settlesBy within one poll when the person stops the run', async () => {
+      const sim = gateway(['hang', 'complete']);
+      const file = await diedMidCall(sim, 'chat-w2-stop');
+      const clock = new StepClock();
+      const { transport, asked } = pendingUntil({
+        sim,
+        clock,
+        settlesBy: settlesByAhead(10 * 60_000),
+        settleAt: 10 * 60_000,
+      });
+      const survivor = steppedHostOn({ file, transport, idPrefix: 'w2-stop', clock });
+      await survivor.markAbandoned('chat-w2-stop');
+      const before = await readLog(file);
+      asked.length = 0;
+      let answered: number | undefined;
+      const resumed = (async () => {
+        try {
+          return await survivor.command({
+            type: 'resume',
+            commandId: 'resume-w2-stop',
+            payload: { chatId: 'chat-w2-stop', runId: 'run-1' },
+          });
+        } finally {
+          answered = clock.now();
+        }
+      })();
+      await vi.waitFor(() => {
+        expect(asked.length).toBeGreaterThan(0);
+      });
+      // Past the short waits, the Resume polls the gateway every 8 s.
+      await step(clock, 20_000);
+      expect(answered).toBeUndefined();
+      const stoppedAt = clock.now();
+
+      const cancelled = survivor.command({
+        type: 'cancel',
+        commandId: 'cancel-w2-stop',
+        payload: { chatId: 'chat-w2-stop', runId: 'run-1' },
+      });
+      await step(clock, 8000);
+
+      // The Resume is refused within one poll, as a Resume the gateway has not answered is refused today.
+      expect(answered).toBeDefined();
+      expect(answered! - stoppedAt).toBeLessThanOrEqual(8000);
+      await expect(resumed).resolves.toMatchObject({ status: 'refused', code: 'MODEL_ATTEMPT_PENDING' });
+      // The held Stop is answered as after any refused Resume: the abandoned run stays as it was, resumable.
+      await expect(cancelled).resolves.toMatchObject({ status: 'applied', details: { state: 'failed' } });
+      expect(await readLog(file)).toEqual(before);
+      // Nothing was prepared or sent past the attempt the gateway still owns.
+      expect(invocationRows(await readLog(file))).toEqual(['prepared run-1:1:0']);
+      expect(sim.attempts).toEqual(['run-1:1:0']);
+
+      // Once the gateway finishes it, a Resume records its charge before the next prepared row (ChargeAfterRecordedLoss).
+      sim.keys.set('run-1:1:0', 'charged');
+      await step(clock, 10 * 60_000 - clock.now());
+      const again = survivor.command({
+        type: 'resume',
+        commandId: 'resume-w2-stop-again',
+        payload: { chatId: 'chat-w2-stop', runId: 'run-1' },
+      });
+      await step(clock, 1000);
+      await expect(again).resolves.toMatchObject({ status: 'applied' });
+      await vi.waitFor(async () => {
+        expect(await survivor.snapshot('chat-w2-stop')).toMatchObject({ state: 'completed' });
+      });
+      expect(invocationRows(await readLog(file))).toEqual([
+        'prepared run-1:1:0',
+        'settled run-1:1:0 settled',
+        'prepared run-1:2:0',
+      ]);
+      await survivor.close();
+    });
+
+    it('should refuse a Resume MODEL_ATTEMPT_PENDING after the short waits, as today, once settlesBy is past', async () => {
+      const sim = gateway(['hang']);
+      const file = await diedMidCall(sim, 'chat-w2-past');
+      const settlesBy = settlesByAhead(-1000);
+      const { funding } = sim.transport;
+      if (funding.type !== 'funded') {
+        throw new Error('The simulated gateway is funded');
+      }
+      const lookups: string[] = [];
+      const transport: ModelTransport = {
+        ...sim.transport,
+        funding: {
+          ...funding,
+          resolveInvocation: async ({ attemptId }) => {
+            lookups.push(attemptId);
+            return { status: 'pending', settlesBy };
+          },
+        },
+      };
+      const survivor = instantHostOn(file, transport, 'w2-past');
+      await survivor.markAbandoned('chat-w2-past');
+      const before = await readLog(file);
+      lookups.length = 0;
+
+      const answer = await survivor.command({
+        type: 'resume',
+        commandId: 'resume-w2-past',
+        payload: { chatId: 'chat-w2-past', runId: 'run-1' },
+      });
+
+      expect(answer).toMatchObject({
+        status: 'refused',
+        code: 'MODEL_ATTEMPT_PENDING',
+        details: { attemptId: 'run-1:1:0' },
+      });
+      expect(lookups).toEqual(Array.from({ length: 7 }, () => 'run-1:1:0'));
+      expect(await readLog(file)).toEqual(before);
+      await survivor.close();
+    });
   });
 
   it('should refuse the late request of an attempt the host abandoned', async () => {

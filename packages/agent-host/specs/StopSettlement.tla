@@ -10,35 +10,41 @@
 (*   attempt  one gateway attempt A, live when the run starts. A stop cuts *)
 (*            it (the client closes the stream); the API notices the cut   *)
 (*            within Notice ticks (`finish()` on the closed reply). A lost *)
-(*            reply leaves it `pending` with no cut; the host's own run    *)
-(*            ends abandoned (`invocationResolved`). The recovery sweep    *)
+(*            reply leaves it `pending` with no cut; the run retries once  *)
+(*            in place (EQ1), and the retry's `prepareInvocation` looks A  *)
+(*            up first while the run stays running. The recovery sweep     *)
 (*            settles any unresolved attempt at Due (due_at + grace).      *)
 (*   next     after a stop or a pause the user starts a run (Send now, a   *)
 (*            new message) or resumes. Either looks A up first. A start    *)
 (*            runs `settledInvocation` (session.ts); a resume runs         *)
 (*            `resolveInvocations` (tau-agent-host.ts). A pending answer   *)
-(*            waits and asks again while the wait budget lasts, else a     *)
-(*            start ends `RUN_ABANDONED` (paused) and a resume is refused  *)
-(*            `MODEL_ATTEMPT_PENDING` (the pending card).                  *)
+(*            waits and asks again while the wait budget lasts or, when    *)
+(*            the gateway states `settlesBy` (= Due, W2), until Due; else  *)
+(*            a start or retry ends `RUN_ABANDONED` (paused) and a resume  *)
+(*            is refused `MODEL_ATTEMPT_PENDING` (the pending card).       *)
 (*   page     "checking" while a lookup runs. A paused or stopped run      *)
 (*            offers Resume. After a refused Resume the run's own card     *)
 (*            ("Chat paused", "You stopped this turn") outranks the        *)
 (*            pending refusal (`selectVisibleChatError`) and offers Resume *)
-(*            again; `pending` marks that refusal.                         *)
+(*            again; `pending` marks that refusal. A Stop during any      *)
+(*            lookup's wait ends it at once (`StopLookup`, W2).            *)
 (*                                                                         *)
 (* Time is a tick counter from A's start; one wait is one tick. ASSUME     *)
 (* Notice < Budget < Due: the API notices a cut well inside the host's     *)
-(* wait, and recovery is minutes away, beyond it.                          *)
+(* short waits (Budget, `pendingAttemptWaits`), and recovery is minutes    *)
+(* away, beyond them; only the gateway's `settlesBy` reaches it (W2, D2).  *)
 (*                                                                         *)
 (* Knobs (all TRUE is the implementation):                                 *)
 (*   ImmediateCut  the API terminalizes a noticed client cut at once, as   *)
 (*                 it does for a stopping process (taucad/tau#851)         *)
 (*   StartWaits    a start's lookup waits within the budget (#851)         *)
 (*   ResumeWaits   a resume's lookup waits within the budget               *)
+(*   SettlesBy     the gateway states `settlesBy` on a pending answer and  *)
+(*                 the host keeps waiting until it (W2)                    *)
 (***************************************************************************)
 EXTENDS Integers
 
-CONSTANTS Notice, Budget, Due, ImmediateCut, StartWaits, ResumeWaits
+CONSTANTS Notice, Budget, Due, ImmediateCut, StartWaits, ResumeWaits, SettlesBy
 
 ASSUME Notice \in Nat /\ Budget \in Nat /\ Due \in Nat /\ Notice < Budget /\ Budget < Due
 
@@ -48,7 +54,7 @@ VARIABLES
     cutAt,    \* the tick the stop cut A (0 when never cut)
     cause,    \* "none" | "stop" | "loss": how A's run ended
     clock,    \* ticks since A started
-    req,      \* "none" | "start" | "resume": the request resolving A
+    req,      \* "none" | "start" | "resume" | "retry": the request resolving A
     first,    \* the tick that request first looked A up
     last,     \* the tick of its latest lookup (-1 before the first)
     page      \* "running" | "stopped" | "paused" | "pending" | "checking" | "proceeded"
@@ -62,11 +68,15 @@ Init ==
 TypeOK ==
     /\ att \in {"live", "cut", "lost", "settled"}
     /\ noticed \in BOOLEAN /\ cutAt \in 0..Due /\ cause \in {"none", "stop", "loss"}
-    /\ clock \in 0..Due /\ req \in {"none", "start", "resume"}
+    /\ clock \in 0..Due /\ req \in {"none", "start", "resume", "retry"}
     /\ first \in 0..Due /\ last \in -1..Due
     /\ page \in {"running", "stopped", "paused", "pending", "checking", "proceeded"}
 
-Waits(r) == IF r = "start" THEN StartWaits ELSE ResumeWaits
+\* A start and the in-run retry both look A up in `prepareInvocation`.
+Waits(r) == IF r = "resume" THEN ResumeWaits ELSE StartWaits
+
+\* A pending answer is asked again: within the short waits, or until the stated `settlesBy` (W2).
+KeepsWaiting == clock < first + Budget \/ (SettlesBy /\ clock < Due)
 
 \* The page offers Resume.
 Offered == page \in {"stopped", "paused", "pending"}
@@ -77,10 +87,16 @@ Stop ==   \* Stop, or Send now's targeted cancel: the client closes A's stream
     /\ att' = "cut" /\ cutAt' = clock /\ cause' = "stop" /\ page' = "stopped"
     /\ UNCHANGED <<noticed, clock, req, first, last>>
 
-LoseReply ==   \* the reply never arrives; the run ends abandoned while A stays pending
-    /\ page = "running" /\ att = "live"
-    /\ att' = "lost" /\ cause' = "loss" /\ page' = "paused"
-    /\ UNCHANGED <<noticed, cutAt, clock, req, first, last>>
+LoseReply ==   \* the reply never arrives while A stays pending; the live run retries, looking A up first (EQ1)
+    /\ page = "running" /\ att = "live" /\ req = "none"
+    /\ att' = "lost" /\ cause' = "loss" /\ req' = "retry" /\ first' = clock /\ last' = -1
+    /\ UNCHANGED <<noticed, cutAt, clock, page>>
+
+StopLookup ==   \* Stop while a lookup waits on A (a start, the live retry, or a Resume, W2): the wait ends
+    \* at once, A stays as it is, and the page offers Resume again
+    /\ req # "none"
+    /\ page' = "stopped" /\ req' = "none" /\ last' = -1
+    /\ UNCHANGED <<att, noticed, cutAt, cause, clock, first>>
 
 \* ---------------- the API ----------------
 ApiNotice ==   \* `finish()` sees the closed client
@@ -117,9 +133,9 @@ Lookup ==   \* resolve-first: one `resolveInvocation` answer
     /\ clock > last \/ clock = Due   \* asks again after a wait; the clock stops at Due, time does not
     /\ IF att = "settled"
        THEN /\ page' = "proceeded" /\ req' = "none" /\ last' = -1
-       ELSE IF Waits(req) /\ clock < first + Budget
+       ELSE IF Waits(req) /\ KeepsWaiting
             THEN /\ last' = clock /\ UNCHANGED <<page, req>>
-            ELSE /\ page' = IF req = "start" THEN "paused" ELSE "pending"
+            ELSE /\ page' = IF req = "resume" THEN "pending" ELSE "paused"
                  /\ req' = "none" /\ last' = -1
     /\ UNCHANGED <<att, noticed, cutAt, cause, clock, first>>
 
@@ -127,13 +143,13 @@ Done ==   \* the run proceeded: nothing left to model
     /\ page = "proceeded"
     /\ UNCHANGED vars
 
-Next == Stop \/ LoseReply \/ ApiNotice \/ Recover \/ Tick \/ Send \/ Resume \/ Lookup \/ Done
+Next == Stop \/ LoseReply \/ StopLookup \/ ApiNotice \/ Recover \/ Tick \/ Send \/ Resume \/ Lookup \/ Done
 
 \* The system's processes are weakly fair; the user is not.
 Spec == Init /\ [][Next]_vars /\ WF_vars(ApiNotice) /\ WF_vars(Recover) /\ WF_vars(Tick) /\ WF_vars(Lookup)
 
-\* A user who keeps taking the action the page offers.
-LiveSpec == Spec /\ WF_vars(Resume)
+\* A user who keeps taking the action the page offers, and in the end stops pressing Stop.
+LiveSpec == Spec /\ WF_vars(Resume) /\ <>[][~StopLookup]_vars
 
 \* ---------------- properties ----------------
 
@@ -142,6 +158,13 @@ StopNeverPauses == page = "paused" => cause = "loss"
 
 \* A Resume after a stop is never refused on the attempt the stop cut.
 StopNeverRefuses == page = "pending" => cause = "loss"
+
+\* I3 (W2): no run ends on a wait code, and no Resume is refused one, while the gateway's
+\* stated settlement time (Due) is still ahead.
+NoWaitEndBeforeSettlesBy == page \in {"paused", "pending"} => clock >= Due
+
+\* W2: however long the gateway's settlesBy, a Stop ends every lookup's wait at once.
+StopReleasesLookup == req # "none" => ENABLED StopLookup
 
 \* Every lookup the host starts is answered: a successor leaves admission.
 LookupAnswered == (req # "none") ~> (req = "none")

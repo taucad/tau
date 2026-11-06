@@ -46,6 +46,7 @@ import type {
 import type { MountResolution, MountTable } from '#mount-table.js';
 import type { ProjectIndexes, IndexFactsOptions } from '#project-index/project-indexes.js';
 import type {
+  ExpectedEntry,
   IndexAdmits,
   IndexChanges,
   IndexCompareResult,
@@ -202,6 +203,17 @@ export type RootedFileSystem = Omit<FileSystemProvider, 'writeFileChecked' | 'de
     search?(query: string, options?: IndexSearchOptions): Promise<FileStatEntry[]>;
     /** Recursively stat one directory of this root from the same index. */
     statTree?(path: string, options?: { admits?: IndexAdmits; signal?: AbortSignal }): Promise<FileStatEntry[]>;
+    /**
+     * Know a tree's entries before a write lands them (D10), in this root's
+     * index: placeholders as pending entries, the rest as arriving until their
+     * bytes land. A root whose index is cold learns nothing. Optional: only the
+     * authority's own view keeps an index.
+     */
+    expectEntries?(entries: readonly ExpectedEntry[]): void;
+    /** Whether these paths of the expected tree have all landed; `undefined` while no tree is expected here. */
+    entriesLanded?(paths: readonly string[]): boolean | undefined;
+    /** End this root's expectation: the tree write is over. */
+    endExpectation?(): void;
     /**
      * Lazy content facts (D4): from the index while they still describe the
      * bytes, otherwise measured from one read within `byteCap` and recorded.
@@ -1053,6 +1065,21 @@ export class RootedViews {
       watchChangeSets,
       search,
       statTree,
+      expectEntries: (entries: readonly ExpectedEntry[]): void => {
+        assertCurrent();
+        this._projectIndexes.expect(
+          root,
+          entries.map((entry) => ({ ...entry, path: resolveLocal(entry.path).localPath })),
+        );
+      },
+      entriesLanded: (paths: readonly string[]): boolean | undefined =>
+        this._projectIndexes.landed(
+          root,
+          paths.map((path) => resolveLocal(path).localPath),
+        ),
+      endExpectation: (): void => {
+        this._projectIndexes.endExpectation(root);
+      },
       facts,
       compareIndex,
       changedSince,

@@ -84,6 +84,15 @@ export type ProjectIndexOptions = Readonly<{
   trustworthyMtime?: boolean;
 }>;
 
+/**
+ * One entry of a tree being written, known before its bytes land (D10): its
+ * size, the large object it is a placeholder for where it is one, and whether
+ * this write lands it (`false` for an entry the checkout already holds).
+ *
+ * @public
+ */
+export type ExpectedEntry = Readonly<{ path: string; size: number; pending?: PendingObject; arriving: boolean }>;
+
 /** One row an observation of the provider listed: head metadata only. @public */
 export type ObservedRow = Readonly<{ path: string; kind: IndexEntryKind; size: number; mtimeMs: number }>;
 
@@ -240,6 +249,8 @@ export class ProjectIndex {
   private _observing = 0;
   /** Paths an external fact left unknown; the next refresh re-observes them. */
   private readonly _stale = new Set<string>();
+  /** The entries a tree write announced and has not landed yet (D10); `undefined` while no write expects any. */
+  private _arriving: Map<string, ExpectedEntry> | undefined;
 
   /**
    * @param options - The generation to continue from, and whether the provider's mtime can key facts.
@@ -451,6 +462,7 @@ export class ProjectIndex {
       },
       true,
     );
+    this._land(path);
   }
 
   /**
@@ -508,6 +520,7 @@ export class ProjectIndex {
     if (this._observing > 0 || !this._complete) {
       this._stale.add(to);
     }
+    this._land(to);
   }
 
   /**
@@ -699,6 +712,46 @@ export class ProjectIndex {
   }
 
   /**
+   * Know a tree's entries before its write lands them (D10). Each one the
+   * checkout already holds is known now, a placeholder among them as a pending
+   * entry; each one the write lands stays arriving until a write or a move puts
+   * it at its path, and lands pending when its bytes are its placeholder's.
+   * Replaces whatever an earlier write expected.
+   *
+   * @param entries - Every entry of the tree.
+   */
+  public expect(entries: readonly ExpectedEntry[]): void {
+    this._arriving = new Map();
+    for (const entry of entries) {
+      if (entry.arriving) {
+        this._arriving.set(entry.path, entry);
+      } else if (entry.pending !== undefined && this._resolve(segmentsOf(entry.path))?.size === entry.size) {
+        this.markPending(entry.path, entry.pending);
+      }
+    }
+  }
+
+  /** Whether a tree write expects entries now. */
+  public get expecting(): boolean {
+    return this._arriving !== undefined;
+  }
+
+  /**
+   * Whether a path of the expected tree has not landed yet.
+   *
+   * @param path - Root-relative file path.
+   * @returns `true` while it is arriving.
+   */
+  public arriving(path: string): boolean {
+    return this._arriving?.has(path) === true;
+  }
+
+  /** End the expectation: the tree write is over, landed or not. */
+  public endExpectation(): void {
+    this._arriving = undefined;
+  }
+
+  /**
    * The large object a pending entry names.
    *
    * @param path - Root-relative file path.
@@ -728,6 +781,18 @@ export class ProjectIndex {
       );
     }
     return rows;
+  }
+
+  /* An arriving entry lands: its bytes are at its path now, pending when they are its placeholder's. */
+  private _land(path: string): void {
+    const expected = this._arriving?.get(path);
+    if (expected === undefined) {
+      return;
+    }
+    this._arriving!.delete(path);
+    if (expected.pending !== undefined && this._resolve(segmentsOf(path))?.size === expected.size) {
+      this.markPending(path, expected.pending);
+    }
   }
 
   private _merge(start: number, prefix: string, rows: readonly ObservedRow[]): IndexCompareResult {

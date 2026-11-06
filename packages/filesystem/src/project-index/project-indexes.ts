@@ -21,7 +21,13 @@ import { directoryConcurrency, mapConcurrent, statConcurrency } from '#concurren
 import { workerTimings } from '#worker-timings.js';
 import type { ContentFacts, ContentFactsOptions, FileStatEntry, FileSystemProvider, PathPolicy } from '#types.js';
 import { ProjectIndex, timestampGranularityMilliseconds } from '#project-index/project-index.js';
-import type { IndexAdmits, IndexCompareResult, IndexEntryKind, ObservedRow } from '#project-index/project-index.js';
+import type {
+  ExpectedEntry,
+  IndexAdmits,
+  IndexCompareResult,
+  IndexEntryKind,
+  ObservedRow,
+} from '#project-index/project-index.js';
 import { projectIndexDirectory, readIndexSnapshot, writeIndexSnapshot } from '#project-index/index-snapshot.js';
 import type { IndexVector } from '#project-index/index-snapshot.js';
 import type { PendingObject } from '#pending-content.js';
@@ -509,6 +515,39 @@ export class ProjectIndexes {
   public pendingAt(absolutePath: string): PendingObject | undefined {
     const covering = this._covering(absolutePath);
     return covering?.index.pendingFor(covering.relative);
+  }
+
+  /**
+   * Know a tree's entries before its write lands them, in the index of that
+   * exact root (see {@link ProjectIndex.expect}). A root with no index learns
+   * nothing, and answers no expectation.
+   *
+   * @param root - Absolute root the tree is written to.
+   * @param entries - Every entry of the tree, root-relative.
+   */
+  public expect(root: string, entries: readonly ExpectedEntry[]): void {
+    this._states.get(normalizePath(root))?.index.expect(entries);
+  }
+
+  /**
+   * Whether every one of these paths of the expected tree has landed (D10).
+   *
+   * @param root - Absolute root the tree is written to.
+   * @param paths - Root-relative file paths.
+   * @returns `true` when none is arriving; `undefined` when that root's index expects no tree.
+   */
+  public landed(root: string, paths: readonly string[]): boolean | undefined {
+    const index = this._states.get(normalizePath(root))?.index;
+    return index?.expecting === true ? paths.every((path) => !index.arriving(path)) : undefined;
+  }
+
+  /**
+   * End a root's expectation: its tree write is over.
+   *
+   * @param root - Absolute root.
+   */
+  public endExpectation(root: string): void {
+    this._states.get(normalizePath(root))?.index.endExpectation();
   }
 
   /**

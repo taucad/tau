@@ -157,3 +157,23 @@ describe('pending entries (D9)', () => {
     expect(await view.readFile('models/copy.step', 'utf8')).toBe('mine');
   });
 });
+
+describe('expected entries (D10)', () => {
+  it('should know a tree write’s entries in the root’s index and answer when they have landed', async () => {
+    const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    /* A cold root learns nothing and answers no expectation. */
+    raw.expectEntries!([{ path: 'tau.json', size: 2, arriving: true }]);
+    expect(raw.entriesLanded!(['tau.json'])).toBeUndefined();
+    await raw.statTree!('');
+    raw.expectEntries!([
+      { path: 'tau.json', size: 2, arriving: true },
+      { path: 'models/part.step', size: pointer.byteLength, pending: { oid, size: part.byteLength }, arriving: false },
+    ]);
+    expect(raw.entriesLanded!(['tau.json'])).toBe(false);
+    expect(raw.entriesLanded!(['models/part.step'])).toBe(true);
+    await raw.writeFile('tau.json', '{}');
+    expect(raw.entriesLanded!(['tau.json', 'models/part.step'])).toBe(true);
+    raw.endExpectation!();
+    expect(raw.entriesLanded!(['tau.json'])).toBeUndefined();
+  });
+});

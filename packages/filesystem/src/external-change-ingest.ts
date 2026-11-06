@@ -731,6 +731,9 @@ export class ExternalChangeIngest {
 
   /**
    * Drop the derivatives an external change invalidated.
+   *
+   * @param scoped - Root and provider-physical paths whose subtrees changed. Omit
+   *                 for a full drop when the change cannot be localized.
    */
   private _invalidateExternalDerivatives(scoped?: {
     state: ObservedExternalRoot;

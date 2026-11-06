@@ -116,9 +116,10 @@ export function useRowWindow(
     };
   }, [container, update, windowed]);
 
+  /* `update` changes with `count`, so a new row count re-measures the window. */
   useEffect(() => {
     update();
-  }, [count, update]);
+  }, [update]);
 
   // oxlint-disable-next-line typescript/no-restricted-types -- React hands a ref callback null on detach.
   const measureRow = useCallback((element: HTMLElement | null) => {

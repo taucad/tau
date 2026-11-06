@@ -119,6 +119,7 @@ import type {
   SetRevisionRemoteInput,
   RevisionRef,
   RevisionTag,
+  RevisionTreeListing,
   UpdateRevisionRefInput,
   UpdateRevisionRefResult,
   WriteRevisionInput,
@@ -688,6 +689,8 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
 
   /* Ids of the trees this store writes, kept across mints (E3). */
   const treeIds = createTreeIdMemo();
+  /* Each blob's size, and the large object a pointer names, as a cold open's head listings said: `listTree` reads no blob for them (D10). */
+  const listedSizes = new Map<string, Pick<RevisionTreeListing, 'size' | 'largeObject'>>();
   /* Whether the store already holds an object, packed or loose. */
   const holds = async (oid: string): Promise<boolean> => objects.has(oid);
   /*
@@ -802,6 +805,13 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     const opened = reach === undefined ? undefined : await coldOpenFromCatalogue(reach);
     if (opened === undefined) {
       return undefined;
+    }
+    for (const { entries } of opened.listings) {
+      for (const { oid, size, lfs } of entries) {
+        if (size !== undefined) {
+          listedSizes.set(oid, { size, ...(lfs === undefined ? {} : { largeObject: lfs }) });
+        }
+      }
     }
     await settleShallow(opened.shallow);
     reach?.access.onColdOpen?.(opened.report);
@@ -2093,6 +2103,17 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         ahead: sided.filter((side) => side === 'head').length,
         behind: sided.filter((side) => side === 'base').length,
       });
+    },
+
+    listTree: async (id: RevisionId): Promise<readonly RevisionTreeListing[] | undefined> => {
+      const commit = await commitOf(id);
+      if (commit === undefined) {
+        return undefined;
+      }
+      const files = [...(await flatTree(commit.tree))].flatMap(([path, { oid, mode }]) =>
+        mode === '100644' || mode === '100755' ? [Object.freeze({ path, oid, mode, ...listedSizes.get(oid) })] : [],
+      );
+      return Object.freeze(files.toSorted((left, right) => (left.path < right.path ? -1 : 1)));
     },
 
     diff: async (input: RevisionDiffInput): Promise<readonly RevisionDiffEntry[]> => {

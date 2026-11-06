@@ -505,6 +505,15 @@ describe.runIf(gitToolchainOnPath)('the cold open from a hosted catalogue (D8)',
     expect(served.wholePackReads()).toBe(0);
     expect(reports).toHaveLength(1);
     expect(await port.readRef('refs/remotes/origin/main')).toBe(hosted.main);
+    /* D10: the head listing's sizes ride the tree listing, with no blob read for them. */
+    const listing = await port.listTree?.(revisionId(hosted.main));
+    const sized = lines(hosted.git('ls-tree', '-r', '-l', hosted.main)).map((line) => {
+      const [meta = '', path = ''] = line.split('\t');
+      return [path, Number(meta.split(/\s+/u)[3])];
+    });
+    expect(listing?.map(({ path, size }) => [path, size])).toStrictEqual(
+      sized.toSorted(([left], [right]) => (String(left) < String(right) ? -1 : 1)),
+    );
   });
 
   it('sizes each object from the index when a head has no listing, so a batch never holds the repository', async () => {

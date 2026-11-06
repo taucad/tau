@@ -40,6 +40,8 @@ import type { CaptureMemo, RevisionId, RevisionTreeInput } from '#algorithms/ind
 import { createApplyTreeEffects, sweepTemporarySiblings as sweepApplyLitter } from '#apply-tree.js';
 import type { MaterializeTarget } from '#apply-tree.js';
 import { createLargeObjectFill, largeObjectPlaceholders } from '#large-object-fill.js';
+import { readEntryClosure } from '#open/entry-closure.js';
+import type { EntryClosure } from '#open/entry-closure.js';
 import { createContentReads } from '#open/content-reads.js';
 import { createLargeObjectAdoption } from '#large-object-adoption.js';
 import type { LargeObjectAdoption } from '#large-object-adoption.js';
@@ -445,6 +447,13 @@ export type RevisionActors = Readonly<{
    * read-through of every consumer first.
    */
   adoptLargeObjects: (checkoutId: string | undefined) => Promise<LargeObjectAdoption>;
+  /**
+   * The entry closure of the checkout's head (`tau.json` and the files it
+   * names), read by the oids its tree names without reading any other blob
+   * (D10). `undefined` before the checkout has a head, or on a port that
+   * cannot list a tree without reading it.
+   */
+  readEntryClosure: (checkoutId: string | undefined) => Promise<EntryClosure | undefined>;
   /**
    * The record device this host's chat segments sync under (EQ10(a)), or `undefined` on a host that records no chats.
    *
@@ -1744,6 +1753,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           storeObject: async (pointer, content) => storeLargeObject.call(port, pointer, content),
           readStoredObject: async (pointer) => readLargeObject.call(port, pointer),
         });
+  const entryClosureOf = async (checkoutId: string | undefined): Promise<EntryClosure | undefined> => {
+    const head = await headOf(await readPlaceOf(checkoutId));
+    return head === undefined ? undefined : readEntryClosure(port, revisionId(head));
+  };
   const adoptLargeObjects = async (checkoutId: string | undefined): Promise<LargeObjectAdoption> =>
     adoption === undefined ? { adopted: [], left: [] } : adoption.adopt(await readPlaceOf(checkoutId));
 
@@ -3544,6 +3557,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     readContent,
     materialize,
     adoptLargeObjects,
+    readEntryClosure: entryClosureOf,
     chatDevice: async () => {
       const context = await chatContext();
       return context?.deviceId;
@@ -5698,6 +5712,8 @@ export type ProjectRevisions = Readonly<{
   materialize: RevisionActors['materialize'];
   /** See {@link RevisionActors.adoptLargeObjects}. */
   adoptLargeObjects: RevisionActors['adoptLargeObjects'];
+  /** See {@link RevisionActors.readEntryClosure}. */
+  readEntryClosure: RevisionActors['readEntryClosure'];
   /** The record device this host's chat segments sync under; see {@link RevisionActors.chatDevice}. */
   chatDevice: () => Promise<string | undefined>;
   /** Whether this host pulls the project's chats at all; see {@link RevisionActors.pullsChats}. */
@@ -5827,6 +5843,7 @@ export const createProjectRevisionsActor = (options: ProjectRevisionActorOptions
     readContent: actors.readContent,
     materialize: actors.materialize,
     adoptLargeObjects: actors.adoptLargeObjects,
+    readEntryClosure: actors.readEntryClosure,
     chatDevice: actors.chatDevice,
     pullsChats: actors.pullsChats,
   };

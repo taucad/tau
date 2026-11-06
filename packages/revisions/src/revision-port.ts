@@ -563,6 +563,24 @@ export type ReadTreeOptions = Readonly<{
 }>;
 
 /**
+ * One file of a revision's tree, as its tree objects name it: no blob is read
+ * to list it (D10).
+ *
+ * @public
+ */
+export type RevisionTreeListing = Readonly<{
+  path: string;
+  /** The blob's id. */
+  oid: string;
+  /** A regular or an executable file: a tree's other entries are not checkout files. */
+  mode: '100644' | '100755';
+  /** The blob's size, when the store knows it without reading the blob (a head listing, or the engine's own). */
+  size?: number;
+  /** The large object a pointer blob names, when the store knows it without reading the pointer. */
+  largeObject?: Readonly<{ oid: string; size: number }>;
+}>;
+
+/**
  * The substrate capability. Every host constructs one; the port, not the
  * engine, is the seam callers program against.
  *
@@ -574,6 +592,12 @@ export type RevisionPort = Readonly<{
   readRevision(id: RevisionId): Promise<RevisionRecord | undefined>;
   /** The tree; a host without large objects, or with its own smudge, may ignore `options`. */
   readTree(id: RevisionId, options?: ReadTreeOptions): Promise<ImmutableRevisionTree | undefined>;
+  /**
+   * Every file of one revision's tree by path, from its tree objects alone:
+   * what a viewer-first open lists before any file is written (D10).
+   * `undefined` when the store does not hold the revision.
+   */
+  listTree?(id: RevisionId): Promise<readonly RevisionTreeListing[] | undefined>;
   /**
    * One large object from this store alone, or `undefined` when it is not
    * here; nothing is fetched. A host whose checkouts never hold a placeholder

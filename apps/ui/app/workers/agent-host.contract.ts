@@ -128,6 +128,11 @@ export type AgentHostProjectProvide = {
   /** The signed-in account the session cookie funds, which the host checks an attempt against (W11 GI-Q6). */
   readonly principal?: string | undefined;
   /**
+   * The page's release label (`readBuildRelease`), which the host's evidence reports as its build. A worker reads
+   * neither the define nor `window.ENV`, so its own read is always the unknown label. Absent from an older page.
+   */
+  readonly release?: string | undefined;
+  /**
    * Runtime telemetry (FR-14, `host-agent.ts`): the page's context, present only when the page would record. The host
    * maps its runtime client's and the GeoSpec runner's attempts with it and sends each entry back on `telemetry`.
    */
@@ -427,6 +432,7 @@ const provideSchema = z.strictObject({
   }),
   testingEnabled: z.boolean().optional(),
   principal: nonEmptyString.optional(),
+  release: nonEmptyString.optional(),
   telemetry: z
     .strictObject({
       route: z.enum(['browser', 'desktop']),

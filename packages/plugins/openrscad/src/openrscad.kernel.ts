@@ -23,6 +23,7 @@ import type {
   OpenrscadResolvedTessellation,
   OpenrscadTessellation,
 } from '#openrscad-tessellation.js';
+import { addOpenrscadTopology } from '#openrscad-topology.js';
 import {
   asBuffer,
   assertRootedPath,
@@ -562,7 +563,7 @@ class OpenRscadExportError extends Error {
 }
 
 /** Engine version this kernel is authored against. @public */
-const engineVersion = '0.11.0-beta.4';
+const engineVersion = '0.11.0-beta.5';
 
 /** Options for {@link createOpenrscadKernel}. @public */
 export type CreateOpenrscadKernelOptions = {
@@ -726,7 +727,7 @@ export const createOpenrscadKernel = ({
         logger.debug(result.echo);
       }
       const issues = collectIssues(result, bundle.source, normalizedEntryPath);
-      const preview = await markClosedGlbMeshesSingleSided(asBuffer(result.bytes));
+      const preview = addOpenrscadTopology(await markClosedGlbMeshesSingleSided(asBuffer(result.bytes)));
       const nativeHandle: OpenRscadNativeHandle = {
         previewGlb: preview,
         previewGlbTessellation: resolutionKey(scriptResolution),
@@ -797,7 +798,7 @@ export const createOpenrscadKernel = ({
           span.end();
         }
         return {
-          content: await markClosedGlbMeshesSingleSided(asBuffer(result.bytes)),
+          content: addOpenrscadTopology(await markClosedGlbMeshesSingleSided(asBuffer(result.bytes))),
           issues: collectIssues(result, nativeHandle.source, nativeHandle.entryPath),
           triangles: result.triangleCount,
           vertices: result.vertexCount,
@@ -866,7 +867,11 @@ export const createOpenrscadKernel = ({
             ),
           );
           const issues = checked(result);
-          return { files: [createExportFile('glb', 'model.glb', asBuffer(result.bytes))], issues };
+          // Explorer and a downloaded GLB read the same module components.
+          return {
+            files: [createExportFile('glb', 'model.glb', addOpenrscadTopology(asBuffer(result.bytes)))],
+            issues,
+          };
         }
         case '3mf': {
           const { options } = input;

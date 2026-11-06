@@ -331,8 +331,8 @@ catalogs:
       specifier: 0.1.192
       version: 0.1.192
     '@taulabs/openrscad-engine':
-      specifier: 0.11.0-beta.4
-      version: 0.11.0-beta.4
+      specifier: 0.11.0-beta.5
+      version: 0.11.0-beta.5
     '@testing-library/jest-dom':
       specifier: 6.6.3
       version: 6.6.3
@@ -2068,7 +2068,7 @@ importers:
         version: link:../../packages/plugins/zoo
       '@taulabs/openrscad-engine':
         specifier: 'catalog:'
-        version: 0.11.0-beta.4
+        version: 0.11.0-beta.5
       electron-updater:
         specifier: 'catalog:'
         version: 6.8.11
@@ -2695,7 +2695,7 @@ importers:
         version: link:../../libs/types
       '@taulabs/openrscad-engine':
         specifier: 'catalog:'
-        version: 0.11.0-beta.4
+        version: 0.11.0-beta.5
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.2
@@ -2965,7 +2965,7 @@ importers:
         version: link:../../packages/plugins/zoo
       '@taulabs/openrscad-engine':
         specifier: 'catalog:'
-        version: 0.11.0-beta.4
+        version: 0.11.0-beta.5
       '@vscode/codicons':
         specifier: 'catalog:'
         version: 0.0.46-24
@@ -4901,7 +4901,7 @@ importers:
         version: link:../../core/geometry
       '@taulabs/openrscad-engine':
         specifier: 'catalog:'
-        version: 0.11.0-beta.4
+        version: 0.11.0-beta.5
     devDependencies:
       '@gltf-transform/core':
         specifier: 'catalog:'
@@ -6118,7 +6118,7 @@ importers:
         version: link:../packages/ui
       '@taulabs/openrscad-engine':
         specifier: 'catalog:'
-        version: 0.11.0-beta.4
+        version: 0.11.0-beta.5
       ink:
         specifier: 'catalog:'
         version: 6.8.0(@types/react@19.2.17)(react@19.3.1)
@@ -13862,40 +13862,40 @@ packages:
     peerDependencies:
       '@langchain/core': ^1.2.1
 
-  '@taulabs/openrscad-engine-darwin-arm64@0.11.0-beta.4':
-    resolution: {integrity: sha512-+Gsg7cdlz4k6RJEsIW3M+eC9soK+2X5Xl+TBmzOJzXy+RjmJYgjt3H0JTh30dPkG3M88gbYdmZscT1T8kIeZ4A==}
+  '@taulabs/openrscad-engine-darwin-arm64@0.11.0-beta.5':
+    resolution: {integrity: sha512-gZIHet+Qi6bzCXu5uXg+RMLkwFsyLsHq7ok4S4HSE+PrqqC3tcPIk1a689HHCOmmYOoZoBnH32pvPDZmScOjXw==}
     engines: {node: '>=20'}
     cpu: [arm64]
     os: [darwin]
 
-  '@taulabs/openrscad-engine-darwin-x64@0.11.0-beta.4':
-    resolution: {integrity: sha512-F3MBAQfGCpb5tHo6LTNYAxmODCje4LkXwP3X6W0iI+FhyknpjnrWBwR/UC7U4RPeZZQFLnnRLnYLB3ebHmJ95g==}
+  '@taulabs/openrscad-engine-darwin-x64@0.11.0-beta.5':
+    resolution: {integrity: sha512-kJlJe/B0PQ/lPRP/dELxYfvQZTMsYVbSzDt7MjjqvgwjmKtQ79FfjuNUQz+16Jc+Hdb8MMuPuIIZW9td9TsLhg==}
     engines: {node: '>=20'}
     cpu: [x64]
     os: [darwin]
 
-  '@taulabs/openrscad-engine-linux-arm64-gnu@0.11.0-beta.4':
-    resolution: {integrity: sha512-xFw+didDcTalHseQFolq+xoFDsx65U4gqZ5PW5SCqR8IRi9yHhZWzVswqR2bXuVEG3zA81eSjrSLmmcF7oFCsw==}
+  '@taulabs/openrscad-engine-linux-arm64-gnu@0.11.0-beta.5':
+    resolution: {integrity: sha512-uFgmvmgYcdPAFdvSPL8YO33fGAmXXPYLSYZb8v7mzdzPKMuyNdCEH838s3t5kqo+wUwWZRJY0H4bIPucCbj2fw==}
     engines: {node: '>=20'}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  '@taulabs/openrscad-engine-linux-x64-gnu@0.11.0-beta.4':
-    resolution: {integrity: sha512-mEewSFU/x0s5nPEBpYg5c264cDFpAZ0Vr7wY9q7k/LgIKqCjKXmED/t0ApGZ1CDhv5+e+AGyOpTodtA9EA8Qyw==}
+  '@taulabs/openrscad-engine-linux-x64-gnu@0.11.0-beta.5':
+    resolution: {integrity: sha512-KMlqDc4fr15DcQNZ98MQ6EM1+cBk2VaD5hEdN1uBwllZfE3yjnsh4X4Za3SFw6KFgPmpwsV6/LUahdSQonbyhA==}
     engines: {node: '>=20'}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  '@taulabs/openrscad-engine-win32-x64-msvc@0.11.0-beta.4':
-    resolution: {integrity: sha512-Y68hcr1t22NPWT+gwP7vxZxQSXUOrCDffBwVlMp5ugKd7RQpRdbO9mF/WXhpD0p+MOET/6VhNgmDZHTe0wm5MQ==}
+  '@taulabs/openrscad-engine-win32-x64-msvc@0.11.0-beta.5':
+    resolution: {integrity: sha512-DMvPAhglGV5nMlLx5F19IQA3gQsCusOphR1K4zzR22ShMnTgLEBNcOdr7YIJDDDL26tjwVHxbtHdWVqQ6BRHWQ==}
     engines: {node: '>=20'}
     cpu: [x64]
     os: [win32]
 
-  '@taulabs/openrscad-engine@0.11.0-beta.4':
-    resolution: {integrity: sha512-bmtPUwTJT34lU2bNoUVyX61GKpGGF9V4KtFerHsS2eawkWzakIbztMCcPAExRx+WI0dxK+Vgp394hPM4gV9JRA==}
+  '@taulabs/openrscad-engine@0.11.0-beta.5':
+    resolution: {integrity: sha512-jXQwh6NYfgpKh+eQMR/8hVYUuvbaH5zISD02T8o0atRQoV9w+4F8D7enfAYgejEJtbGJVr5J+/zzTzf7QJqgWw==}
     engines: {node: '>=20'}
 
   '@taulabs/replicad-opencascadejs@0.23.0-beta.0':
@@ -34970,28 +34970,28 @@ snapshots:
     dependencies:
       '@langchain/core': 1.2.17(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.223.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.12.0(@opentelemetry/api@1.9.1))(openai@7.32.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/signature-v4@5.7.4)(undici@8.11.2)(ws@8.22.0)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(ws@8.22.0)
 
-  '@taulabs/openrscad-engine-darwin-arm64@0.11.0-beta.4':
+  '@taulabs/openrscad-engine-darwin-arm64@0.11.0-beta.5':
     optional: true
 
-  '@taulabs/openrscad-engine-darwin-x64@0.11.0-beta.4':
+  '@taulabs/openrscad-engine-darwin-x64@0.11.0-beta.5':
     optional: true
 
-  '@taulabs/openrscad-engine-linux-arm64-gnu@0.11.0-beta.4':
+  '@taulabs/openrscad-engine-linux-arm64-gnu@0.11.0-beta.5':
     optional: true
 
-  '@taulabs/openrscad-engine-linux-x64-gnu@0.11.0-beta.4':
+  '@taulabs/openrscad-engine-linux-x64-gnu@0.11.0-beta.5':
     optional: true
 
-  '@taulabs/openrscad-engine-win32-x64-msvc@0.11.0-beta.4':
+  '@taulabs/openrscad-engine-win32-x64-msvc@0.11.0-beta.5':
     optional: true
 
-  '@taulabs/openrscad-engine@0.11.0-beta.4':
+  '@taulabs/openrscad-engine@0.11.0-beta.5':
     optionalDependencies:
-      '@taulabs/openrscad-engine-darwin-arm64': 0.11.0-beta.4
-      '@taulabs/openrscad-engine-darwin-x64': 0.11.0-beta.4
-      '@taulabs/openrscad-engine-linux-arm64-gnu': 0.11.0-beta.4
-      '@taulabs/openrscad-engine-linux-x64-gnu': 0.11.0-beta.4
-      '@taulabs/openrscad-engine-win32-x64-msvc': 0.11.0-beta.4
+      '@taulabs/openrscad-engine-darwin-arm64': 0.11.0-beta.5
+      '@taulabs/openrscad-engine-darwin-x64': 0.11.0-beta.5
+      '@taulabs/openrscad-engine-linux-arm64-gnu': 0.11.0-beta.5
+      '@taulabs/openrscad-engine-linux-x64-gnu': 0.11.0-beta.5
+      '@taulabs/openrscad-engine-win32-x64-msvc': 0.11.0-beta.5
 
   '@taulabs/replicad-opencascadejs@0.23.0-beta.0': {}
 

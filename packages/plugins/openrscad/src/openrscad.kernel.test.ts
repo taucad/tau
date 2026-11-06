@@ -139,6 +139,8 @@ type GlbJson = {
   }>;
   scene?: number;
   scenes?: Array<{ nodes?: number[] }>;
+  extensions?: Record<string, unknown>;
+  extensionsUsed?: string[];
 };
 
 const readGlbJson = (bytes: Uint8Array<ArrayBuffer>): GlbJson => {
@@ -146,6 +148,27 @@ const readGlbJson = (bytes: Uint8Array<ArrayBuffer>): GlbJson => {
   const jsonLength = view.getUint32(12, true);
   return JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + jsonLength))) as GlbJson;
 };
+
+type TopologyPayload = {
+  components: Array<{
+    id: string;
+    name: string;
+    kind: string;
+    parentId?: string;
+    childIds?: string[];
+    primitiveRefs?: Array<{ nodeIndex: number; meshIndex?: number; primitiveIndex: number }>;
+  }>;
+};
+
+const readTopology = (json: GlbJson): TopologyPayload => json.extensions?.['TAU_cad_topology'] as TopologyPayload;
+
+/** The module node an OpenRSCAD primitive names as the owner of its triangles. */
+const ownerOf = (extras: unknown): number | undefined => {
+  const owner = (extras as { openrscad?: { owner?: unknown } } | undefined)?.openrscad?.owner;
+  return typeof owner === 'number' ? owner : undefined;
+};
+
+const isRecordOwner = (extras: unknown, owner: number): boolean => ownerOf(extras) === owner;
 
 /** Feature-edge line segments across every mesh in the document. */
 const countLineSegments = (json: GlbJson): number =>
@@ -363,7 +386,7 @@ describe('OpenRSCADKernel', () => {
     // the engine *release*, not the backend: the addon and the WebAssembly
     // build of one release are byte-identical (`native-wasm-parity.test.ts`),
     // so they deliberately share this cache namespace.
-    expect(definition.version).toBe('0.11.0-beta.4');
+    expect(definition.version).toBe('0.11.0-beta.5');
   });
 
   it('keeps the geometry cache bounded across repeated parameter edits of one model', async () => {
@@ -472,8 +495,8 @@ describe('OpenRSCADKernel', () => {
     });
     expect(getBoundingBoxFromInspect(report)?.size).toEqual([0.01, 0.01, 0.01]);
     await expect(readGltfNamingSummary(result.geometry.content)).resolves.toEqual({
-      nodeNames: ['#F5A523FF Shape 1'],
-      meshNames: ['#F5A523FF Shape 1'],
+      nodeNames: ['#F5A523FF Shape'],
+      meshNames: ['#F5A523FF Shape'],
       materialNames: ['#F5A523FF Material'],
       sceneNames: [''],
     });
@@ -587,8 +610,8 @@ translate([1, 0, 0]) color("blue") cube(2);
     expect(created.handle.stats.volume).toBeCloseTo(12, 6);
     await expect(getSignedVolumeFromGlb(created.geometry.content)).resolves.toBeCloseTo(0.000000016, 12);
     await expect(readGltfNamingSummary(created.geometry.content)).resolves.toMatchObject({
-      nodeNames: ['#0000FFFF Shape 1', '#FF0000FF Shape 1'],
-      meshNames: ['#0000FFFF Shape 1', '#FF0000FF Shape 1'],
+      nodeNames: ['#FF0000FF Shape', '#0000FFFF Shape'],
+      meshNames: ['#FF0000FF Shape', '#0000FFFF Shape'],
     });
 
     const exportInput = {
@@ -627,8 +650,8 @@ color("red") difference() {
     expect(created.handle.stats.volume).toBeCloseTo(4, 6);
     await expect(getSignedVolumeFromGlb(created.geometry.content)).resolves.toBeCloseTo(0.000000004, 12);
     await expect(readGltfNamingSummary(created.geometry.content)).resolves.toMatchObject({
-      nodeNames: ['#FF0000FF Shape 1'],
-      meshNames: ['#FF0000FF Shape 1'],
+      nodeNames: ['#FF0000FF Shape'],
+      meshNames: ['#FF0000FF Shape'],
       materialNames: ['#FF0000FF Material'],
     });
   });
@@ -651,9 +674,9 @@ color("green") cube(10);
     });
     const previewJson = readGlbJson(preview.geometry.content);
     expect(previewJson.nodes?.map((node) => node.name)).toEqual([
-      '#008000FF Shape 1',
-      '#FF0000FF Shape 1',
-      '#0000FFFF Shape 1',
+      '#0000FFFF Shape',
+      '#008000FF Shape',
+      '#FF0000FF Shape',
     ]);
     expect(previewJson.materials?.map((material) => [material.name, material.alphaMode ?? 'OPAQUE'])).toEqual([
       ['#0000FFFF Material', 'OPAQUE'],
@@ -675,7 +698,7 @@ color("green") cube(10);
       context,
     );
     const exportedJson = readGlbJson(exported.files[0].bytes);
-    expect(exportedJson.nodes?.map((node) => node.name)).toEqual(['#008000FF Shape 1', '#FF0000FF Shape 1']);
+    expect(exportedJson.nodes?.map((node) => node.name)).toEqual(['#008000FF Shape', '#FF0000FF Shape']);
     expect(exportedJson.materials?.map((material) => material.name)).toEqual([
       '#008000FF Material',
       '#FF0000FF Material',
@@ -702,10 +725,30 @@ color("red") {
     });
 
     const summary = await readGltfNamingSummary(created.geometry.content);
-    expect(summary.nodeNames).toEqual(['Part 1', 'Part 2']);
-    expect(summary.meshNames).toEqual(summary.nodeNames);
+    // Each occurrence is a mesh-less module node over its one closed solid.
+    expect(summary.nodeNames).toEqual(['Part 1', 'Part 2', 'Part 1', 'Part 2']);
+    expect(summary.meshNames).toEqual(['Part 1', 'Part 2']);
 
-    const json = readGlbJson(created.geometry.content);
+    const engineJson = readGlbJson(created.geometry.content);
+    expect(engineJson.nodes?.map(({ mesh, children }) => ({ mesh, children }))).toEqual([
+      { mesh: undefined, children: [2] },
+      { mesh: undefined, children: [3] },
+      { mesh: 0, children: undefined },
+      { mesh: 1, children: undefined },
+    ]);
+    // Explorer keeps one row per occurrence: the module row takes its only solid's triangles.
+    expect(
+      readTopology(engineJson).components.map(({ name, kind, primitiveRefs }) => ({ name, kind, primitiveRefs })),
+    ).toEqual([
+      { name: 'Part 1', kind: 'part', primitiveRefs: [{ nodeIndex: 2, meshIndex: 0, primitiveIndex: 0 }] },
+      { name: 'Part 2', kind: 'part', primitiveRefs: [{ nodeIndex: 3, meshIndex: 1, primitiveIndex: 0 }] },
+    ]);
+    const json = {
+      ...engineJson,
+      nodes: engineJson.nodes
+        ?.slice(0, 2)
+        .map((node) => ({ ...node, mesh: engineJson.nodes?.[node.children![0]!]?.mesh })),
+    };
     expect(json.nodes).toHaveLength(2);
     const round = (value: number): number => {
       const rounded = Math.round(value * 1_000_000) / 1_000_000;
@@ -788,13 +831,30 @@ color("red") {
 
     const plainJson = readGlbJson(plain.geometry.content);
     const edgedJson = readGlbJson(edged.geometry.content);
+    const meshModes = (json: GlbJson) =>
+      json.meshes?.map((mesh) => mesh.primitives.map((primitive) => primitive.mode ?? 4));
     expect(plainJson.nodes).toHaveLength(1);
-    expect(edgedJson.nodes).toEqual(plainJson.nodes);
-    expect(plainJson.meshes?.[0]?.primitives.map((primitive) => primitive.mode ?? 4)).toEqual([4]);
-    expect(edgedJson.meshes?.[0]?.primitives.map((primitive) => primitive.mode ?? 4)).toEqual([4, 1]);
-    const lineAccessor = edgedJson.meshes?.[0]?.primitives[1]?.indices;
+    // A manifold mesh holds TRIANGLES only, so an anonymous solid's lines hang on a LINES-only child node.
+    expect(edgedJson.nodes).toEqual([
+      { ...plainJson.nodes?.[0], children: [1] },
+      { mesh: 1, name: '#FF0000FF Shape Edges' },
+    ]);
+    expect(meshModes(plainJson)).toEqual([[4]]);
+    expect(meshModes(edgedJson)).toEqual([[4], [1]]);
+    const lineAccessor = edgedJson.meshes?.[1]?.primitives[0]?.indices;
     expect(lineAccessor).toBeTypeOf('number');
     expect(edgedJson.accessors?.[lineAccessor!]?.count).toBe(24);
+    // Explorer rows are the same: the lines belong to the solid's row.
+    expect(readTopology(edgedJson).components.map(({ id, primitiveRefs }) => ({ id, primitiveRefs }))).toEqual([
+      {
+        id: 'component:node-0',
+        primitiveRefs: [
+          { nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 },
+          { nodeIndex: 1, meshIndex: 1, primitiveIndex: 0 },
+        ],
+      },
+    ]);
+    expect(readTopology(plainJson).components.map(({ id }) => id)).toEqual(['component:node-0']);
 
     const project = async (handle: typeof edged.handle, includeEdges: boolean) => {
       const result = await definition.render!(
@@ -850,9 +910,10 @@ color("red") {
     );
     const plainExportJson = readGlbJson(plainExport.files[0].bytes);
     const edgedExportJson = readGlbJson(edgedExport.files[0].bytes);
-    expect(edgedExportJson.nodes).toEqual(plainExportJson.nodes);
-    expect(plainExportJson.meshes?.[0]?.primitives.map((primitive) => primitive.mode ?? 4)).toEqual([4]);
-    expect(edgedExportJson.meshes?.[0]?.primitives.map((primitive) => primitive.mode ?? 4)).toEqual([4, 1]);
+    expect(edgedExportJson.nodes?.[0]).toEqual({ ...plainExportJson.nodes?.[0], children: [1] });
+    expect(meshModes(plainExportJson)).toEqual([[4]]);
+    expect(meshModes(edgedExportJson)).toEqual([[4], [1]]);
+    expect(readTopology(edgedExportJson)).toEqual(readTopology(edgedJson));
     expect(repeatedEdgedExport.files[0].bytes).toEqual(edgedExport.files[0].bytes);
   });
 
@@ -871,7 +932,9 @@ color("red") {
         entryPath: 'project/model.scad',
         content: { includeEdges },
       });
-      const modes = readGlbJson(geometry.content).meshes?.[0]?.primitives.map((primitive) => primitive.mode ?? 4);
+      const modes = readGlbJson(geometry.content).meshes?.flatMap((mesh) =>
+        mesh.primitives.map((primitive) => primitive.mode ?? 4),
+      );
       return { calls: renderToGlb.mock.calls.length, modes };
     };
 
@@ -963,7 +1026,7 @@ translate([0, 0, 4]) color("blue") cube(2);
     const roundtripReport = await getInspectReport(roundtrip.geometry.content);
     expect(getBoundingBoxFromInspect(roundtripReport)?.size).toEqual([0.002, 0.006, 0.002]);
     await expect(readGltfNamingSummary(roundtrip.geometry.content)).resolves.toMatchObject({
-      nodeNames: ['#0000FFFF Shape 1', '#FF0000FF Shape 1'],
+      nodeNames: ['#FF0000FF Shape', '#0000FFFF Shape'],
     });
   });
 
@@ -1059,13 +1122,38 @@ roof_frame();
     const archIndex = roofFrame?.children?.[0] ?? -1;
     const arch = json.nodes?.[archIndex];
     expect(arch?.name).toBe('Arch Hoop');
-    const archMesh = json.meshes?.[arch?.mesh ?? -1];
-    const archSurface = archMesh?.primitives.find((primitive) => (primitive.mode ?? 4) === 4);
-    const archPositions = json.accessors?.[archSurface?.attributes?.POSITION ?? -1];
+    // The module is a mesh-less node; each of its five disjoint hoops is one closed solid below it.
+    expect(arch?.mesh).toBeUndefined();
+    const archSurfaces = (arch?.children ?? []).flatMap(
+      (child) =>
+        json.meshes?.[json.nodes?.[child]?.mesh ?? -1]?.primitives.filter((primitive) => (primitive.mode ?? 4) === 4) ??
+        [],
+    );
+    expect(archSurfaces).toHaveLength(5);
+    expect(archSurfaces.every((primitive) => isRecordOwner(primitive.extras, archIndex))).toBe(true);
+    const archPositions = archSurfaces.map((primitive) => json.accessors?.[primitive.attributes?.POSITION ?? -1]);
     const round = (value: number): number => Math.round(value * 1_000_000) / 1_000_000;
-    expect(archPositions?.min?.map(round)).toEqual([-6.22e-2, 0.07, -0.092145]);
-    expect(archPositions?.max?.map(round)).toEqual([6.22e-2, 0.131859, 0.092145]);
-    expect((json.accessors?.[archSurface?.indices ?? -1]?.count ?? 0) / 3).toBe(1100);
+    const extreme = (
+      pick: (accessor: (typeof archPositions)[number]) => number[] | undefined,
+      reduce: (...values: number[]) => number,
+    ) =>
+      [0, 1, 2].map((axis) => round(reduce(...archPositions.map((accessor) => pick(accessor)?.[axis] ?? Number.NaN))));
+    expect(extreme((accessor) => accessor?.min, Math.min)).toEqual([-6.22e-2, 0.07, -0.092145]);
+    expect(extreme((accessor) => accessor?.max, Math.max)).toEqual([6.22e-2, 0.131859, 0.092145]);
+    expect(
+      archSurfaces.reduce((total, primitive) => total + (json.accessors?.[primitive.indices ?? -1]?.count ?? 0) / 3, 0),
+    ).toBe(1100);
+    // Explorer: the roof frame selects all five hoops through the arch module's part rows.
+    const topology = readTopology(json);
+    const roofFrameComponent = topology.components.find((component) => component.name === 'Roof Frame');
+    const archComponent = topology.components.find((component) => component.name === 'Arch Hoop');
+    expect(roofFrameComponent?.childIds).toEqual([archComponent?.id]);
+    expect(archComponent?.kind).toBe('assembly');
+    expect(
+      archComponent?.childIds?.map((id) => topology.components.find((component) => component.id === id)?.primitiveRefs),
+    ).toEqual(
+      arch?.children?.map((child) => [{ nodeIndex: child, meshIndex: json.nodes?.[child]?.mesh, primitiveIndex: 0 }]),
+    );
     expect(arch?.extras?.openrscad).toMatchObject({
       attribution: 'exact',
       moduleName: 'arch_hoop',
@@ -1113,13 +1201,21 @@ roof_frame();
       throw new TypeError('Expected edged greenhouse GLB');
     }
     const edgedJson = readGlbJson(edged.content);
-    expect(edgedJson.nodes).toEqual(json.nodes);
+    // Edges add a LINES-only mesh to each module that owns triangles; no node is added and manifold meshes stay TRIANGLES.
+    expect(edgedJson.nodes?.map(({ name, children }) => ({ name, children }))).toEqual(
+      json.nodes?.map(({ name, children }) => ({ name, children })),
+    );
+    const owners = new Set(
+      (json.meshes ?? []).flatMap((mesh) => mesh.primitives.flatMap((primitive) => ownerOf(primitive.extras) ?? [])),
+    );
+    expect(owners.size).toBeGreaterThan(0);
     expect(
-      edgedJson.nodes
-        ?.filter((node) => node.mesh !== undefined)
-        .every((node) => edgedJson.meshes?.[node.mesh!]?.primitives.some((primitive) => primitive.mode === 1)),
+      [...owners].every((owner) =>
+        edgedJson.meshes?.[edgedJson.nodes?.[owner]?.mesh ?? -1]?.primitives.every((primitive) => primitive.mode === 1),
+      ),
     ).toBe(true);
     expect(readSemanticManifest(edgedJson)).toEqual(expected);
+    expect(readTopology(edgedJson).components.map(({ id }) => id)).toEqual(topology.components.map(({ id }) => id));
   }, 30_000);
 
   it('draws each edge-topology fixture exactly as its defect requires', async () => {
@@ -1182,7 +1278,7 @@ roof_frame();
       content: { includeEdges: true },
     });
     const json = readGlbJson(rendered.geometry.content);
-    const linePrimitive = json.meshes?.[0]?.primitives.find((primitive) => primitive.mode === 1);
+    const linePrimitive = json.meshes?.flatMap((mesh) => mesh.primitives).find((primitive) => primitive.mode === 1);
     const material = json.materials?.[linePrimitive?.material ?? -1];
 
     // Grey edges shipped for as long as this was 15 %-alpha black in BLEND: the
@@ -1319,6 +1415,11 @@ roof_frame();
       context,
     );
     expect(glb.issues).toEqual([
+      // The open triangle's solid cannot declare EXT_mesh_manifold, so the engine exports it without and says so.
+      expect.objectContaining({
+        severity: 'warning',
+        message: expect.stringContaining('was exported without EXT_mesh_manifold'),
+      }),
       expect.objectContaining({
         severity: 'error',
         message: expect.stringContaining('union'),

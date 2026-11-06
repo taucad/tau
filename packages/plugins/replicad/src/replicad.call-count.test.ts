@@ -254,13 +254,12 @@ describe('Replicad STEP interface export call counts', () => {
     }
   };
 
-  it('should record a face walk per interface', async () => {
+  it('should walk the product faces once per export, however many interfaces it has', async () => {
     const steps = [await measureStep(0), await measureStep(1), await measureStep(2)];
 
-    // Blueprint A18 (WP9, charter B9): each face interface walks the product's faces with a new
-    // `TopExp_Explorer` to find its `faceIndex`, so the walk repeats per interface. B9 walks the
-    // faces once per export into a cached list.
-    // No interface, the top face (index 5), then the top and the bottom face (index 4): one walk each.
-    expect(steps).toEqual([0, 5, 9]);
+    // Blueprint A18 (WP9, charter B9): one `TopExp_Explorer` walk per product collects every
+    // interface face, stopping at the highest `faceIndex`. No interface makes no walk; the top
+    // face (index 5) and then the top and the bottom face (index 4) both stop at index 5.
+    expect(steps).toEqual([0, 5, 5]);
   });
 });

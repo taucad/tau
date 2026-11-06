@@ -22,6 +22,8 @@ export type {
   ExposeFileSystemHandle,
   FileSystemBridge,
   FileSystemBridgeConnection,
+  FileSystemBridgeEventSubscription,
+  FileSystemBridgeHostOptions,
   FileSystemBridgePort,
   FileSystemBridgeProxy,
   FileSystemBridgeProxyTransport,
@@ -52,6 +54,7 @@ export type {
   ApplyOptions,
   FileSystemBridgeChangeset,
   FileSystemBridgeChangesetEntry,
+  FileSystemBridgeEvent,
   FileSystemBridgeHashFiles,
   FileSystemBridgeHello,
   FileSystemBridgeRootedCalls,
@@ -59,6 +62,7 @@ export type {
   FileSystemBridgeRuntimeService,
   FileSystemBridgeService,
   FileSystemBridgeUnrootedCalls,
+  FileSystemBridgeWireEvent,
   FileSystemBridgeWorkspaceService,
   GlobOptions,
   GrepMatch,
@@ -91,3 +95,13 @@ export type { FileSystemBridgeCrossings, FileSystemBridgeCrossingsObserver } fro
 export { slowFileSystemBridgeCalls, slowFileSystemBridgeCallThreshold } from '#filesystem-bridge-slow-calls.js';
 
 export type { SlowFileSystemBridgeCall } from '#filesystem-bridge-slow-calls.js';
+
+export { superviseWorker } from '#filesystem-bridge-supervisor.js';
+
+export type {
+  ComputeEventSource,
+  ComputeRestartedEvent,
+  SupervisedWorker,
+  WorkerSupervisor,
+  WorkerSupervisorOptions,
+} from '#filesystem-bridge-supervisor.js';

@@ -29,6 +29,7 @@ import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { maxGrepLineCharacters } from '#filesystem-bridge-protocol.js';
 import { grepMatchDeadline } from '#filesystem-bridge-grep-matcher.js';
 import type {
+  FileSystemBridgeEvent,
   FileSystemBridgeRuntimeService,
   GrepMatch,
   GrepOptions,
@@ -38,6 +39,7 @@ import type { Changeset, ChangesetEntry } from '@taucad/filesystem';
 import { observeFileSystemBridgeCrossings } from '#filesystem-bridge-crossings.js';
 import type { FileSystemBridgeCrossings } from '#filesystem-bridge-crossings.js';
 import {
+  computeEventEmitter,
   nodeGrepMatcherWorker,
   conformanceProjectRoot,
   rootedHandlersFor,
@@ -63,6 +65,12 @@ type Opened = {
   readonly proxy: FileSystemBridgeRootedProxy;
   /** The host side's I2 crossings since the transport opened. */
   hostCrossings(): Promise<ReadonlyMap<string, FileSystemBridgeCrossings>>;
+  /** Write a root file on the authority itself, not through any connection. */
+  externalWrite(path: string, content: string): Promise<void>;
+  /** Report a compute restart on the authority, as its supervisor would. */
+  computeRestarted(failed: readonly number[]): void;
+  /** Take the authority away from under the connection. */
+  killAuthority(): Promise<void>;
   close(): Promise<void>;
 };
 
@@ -76,13 +84,21 @@ const inProcessPort: Transport = {
   async open(seed, consumer) {
     const { service, handlers } = await rootedWorkspaceHandlers(seed, consumer);
     const crossings = observeFileSystemBridgeCrossings();
-    const proxy = createFileSystemBridgeProxy(
-      createFileSystemBridgePort(handlers, { grepMatcherWorker: nodeGrepMatcherWorker }),
-    );
+    const compute = computeEventEmitter();
+    const connection = createFileSystemBridgePort(handlers, {
+      grepMatcherWorker: nodeGrepMatcherWorker,
+      computeEvents: compute.source,
+    });
+    const proxy = createFileSystemBridgeProxy(connection);
     await proxy.ready;
     return {
       proxy,
       hostCrossings: async () => crossings.snapshot(),
+      externalWrite: async (path, content) => service.writeFile(`${conformanceProjectRoot}/${path}`, content),
+      computeRestarted: compute.emit,
+      async killAuthority() {
+        connection.dispose();
+      },
       async close() {
         crossings.stop();
         proxy.dispose();
@@ -97,10 +113,12 @@ const authorityConnection: Transport = {
   async open(seed, consumer) {
     const service = await seededWorkspace(seed);
     const crossings = observeFileSystemBridgeCrossings();
+    const compute = computeEventEmitter();
     const boundary = new MessageChannel();
     const exposed = exposeFileSystem(workspaceBridgeService(service), {
       policy: tauPathPolicy,
       grepMatcherWorker: nodeGrepMatcherWorker,
+      computeEvents: compute.source,
       handlerForRoot: (root, context, rootConsumer) =>
         rootedHandlersFor({ service, root, context, consumer: rootConsumer }),
       messageSource: boundary.port2,
@@ -111,6 +129,11 @@ const authorityConnection: Transport = {
     return {
       proxy,
       hostCrossings: async () => crossings.snapshot(),
+      externalWrite: async (path, content) => service.writeFile(`${conformanceProjectRoot}/${path}`, content),
+      computeRestarted: compute.emit,
+      async killAuthority() {
+        exposed.cleanup();
+      },
       async close() {
         crossings.stop();
         proxy.dispose();
@@ -151,6 +174,17 @@ const workerPort: Transport = {
         worker.postMessage({ type: 'crossings' });
         const { crossings } = await reply;
         return new Map(crossings);
+      },
+      async externalWrite(path, content) {
+        const written = workerMessage(worker, 'written');
+        worker.postMessage({ type: 'external-write', path, content });
+        await written;
+      },
+      computeRestarted(failed) {
+        worker.postMessage({ type: 'compute-restarted', failed });
+      },
+      async killAuthority() {
+        await worker.terminate();
       },
       async close() {
         proxy.dispose();
@@ -459,6 +493,108 @@ describe.each([inProcessPort, authorityConnection, workerPort])('rooted bridge c
     });
   });
 
+  describe('the event channel', () => {
+    /** Every event a subscriber hears, and a wait for the next that matches. */
+    const listen = (proxy: FileSystemBridgeRootedProxy) => {
+      const heard: FileSystemBridgeEvent[] = [];
+      const waiters = new Set<() => void>();
+      const subscription = proxy.events((event) => {
+        heard.push(event);
+        for (const wake of waiters) {
+          wake();
+        }
+      });
+      const until = async (found: (events: readonly FileSystemBridgeEvent[]) => boolean): Promise<void> => {
+        while (!found(heard)) {
+          // oxlint-disable-next-line no-await-in-loop -- each event wakes the wait once.
+          await new Promise<void>((resolve) => {
+            waiters.add(resolve);
+          });
+        }
+      };
+      return { heard, subscription, until };
+    };
+
+    const changedPaths = (events: readonly FileSystemBridgeEvent[]): string[] =>
+      events.flatMap((event) => (event.kind === 'changeSet' ? event.set.entries.map((entry) => entry.path) : []));
+
+    it('carries each change set of the root once to every subscriber, in its own namespace', async () => {
+      const host = await open(transport);
+      const first = listen(host.proxy);
+      const second = listen(host.proxy);
+      await first.subscription.ready;
+      await second.subscription.ready;
+      await host.externalWrite('lib/new.ts', 'x');
+      await first.until((events) => changedPaths(events).includes('lib/new.ts'));
+      await second.until((events) => changedPaths(events).includes('lib/new.ts'));
+      expect(first.heard.filter((event) => event.kind === 'changeSet')).toHaveLength(1);
+      // One subscriber leaving keeps the channel open for the other.
+      first.subscription.unsubscribe();
+      await host.externalWrite('docs/later.md', 'later');
+      await second.until((events) => changedPaths(events).includes('docs/later.md'));
+      expect(changedPaths(first.heard)).not.toContain('docs/later.md');
+      second.subscription.unsubscribe();
+    });
+
+    it("does not echo the connection's own writes", async () => {
+      const host = await open(transport);
+      const events = listen(host.proxy);
+      await events.subscription.ready;
+      await host.proxy.apply({ entries: [{ op: 'write', path: 'own.ts', data: 'x' }] });
+      await host.externalWrite('external.ts', 'x');
+      await events.until((heard) => changedPaths(heard).includes('external.ts'));
+      expect(changedPaths(events.heard)).not.toContain('own.ts');
+      events.subscription.unsubscribe();
+    });
+
+    it("keeps a masked view's hidden paths out of its channel", async () => {
+      const agent = await open(transport, 'agent');
+      const events = listen(agent.proxy);
+      await events.subscription.ready;
+      await agent.externalWrite('.tau/project.json', '{"name":"renamed"}');
+      await agent.externalWrite('visible.ts', 'x');
+      await events.until((heard) => changedPaths(heard).includes('visible.ts'));
+      expect(changedPaths(events.heard)).not.toContain('.tau/project.json');
+      events.subscription.unsubscribe();
+    });
+
+    it("carries the authority's compute restarts", async () => {
+      const host = await open(transport);
+      const events = listen(host.proxy);
+      await events.subscription.ready;
+      host.computeRestarted([3, 4]);
+      await events.until((heard) => heard.some((event) => event.kind === 'compute-restarted'));
+      expect(events.heard).toContainEqual({ kind: 'compute-restarted', failed: [3, 4] });
+      events.subscription.unsubscribe();
+    });
+
+    it('tells every subscriber, once, that the authority is lost when the connection dies', async () => {
+      const host = await open(transport);
+      const events = listen(host.proxy);
+      await events.subscription.ready;
+      await host.killAuthority();
+      await events.until((heard) => heard.some((event) => event.kind === 'authority-lost'));
+      await host.proxy.closed;
+      // A subscriber that arrives afterwards hears it too.
+      const late = listen(host.proxy);
+      await late.until((heard) => heard.length > 0);
+      expect(events.heard.filter((event) => event.kind === 'authority-lost')).toHaveLength(1);
+      expect(late.heard).toEqual([{ kind: 'authority-lost' }]);
+    });
+
+    it('says nothing is lost when the caller disposes its own connection', async () => {
+      const { proxy } = await open(transport);
+      const events = listen(proxy);
+      await events.subscription.ready;
+      proxy.dispose();
+      await proxy.closed;
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+      expect(events.heard).toEqual([]);
+    });
+  });
+
   describe('a masked consumer', () => {
     it("answers glob and grep through the view's mask", async () => {
       const working = await open(transport, 'working-copy');
@@ -544,6 +680,9 @@ describe('rooted bridge conformance: apply outlives the ordinary deadline (W10, 
     opened.push({
       proxy,
       hostCrossings: async () => new Map(),
+      externalWrite: async () => undefined,
+      computeRestarted: () => undefined,
+      killAuthority: async () => undefined,
       async close() {
         proxy.dispose();
         service.dispose();

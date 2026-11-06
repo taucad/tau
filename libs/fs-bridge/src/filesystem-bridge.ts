@@ -9,6 +9,7 @@ import {
   policyAtRoot,
   RootedFileSystemError,
 } from '@taucad/filesystem';
+import { Topic } from '@taucad/events';
 import { safeDispose } from '@taucad/utils/dispose';
 import { wrapMessagePort } from '@taucad/rpc';
 import type { MessagePortLike } from '@taucad/rpc';
@@ -41,6 +42,7 @@ import {
   FileSystemBridgeProtocolVersionError,
 } from '#filesystem-bridge-protocol.js';
 import type {
+  FileSystemBridgeEvent,
   FileSystemBridgeHello,
   FileSystemBridgeRuntimeService,
   LongCall,
@@ -55,6 +57,7 @@ import type {
 import { nextFileSystemBridgeConnectionId, timeFileSystemBridgeCall } from '#filesystem-bridge-slow-calls.js';
 import { bindFileSystemLongCall, withHostContentCalls } from '#filesystem-bridge-host-calls.js';
 import type { HostContentCallOptions } from '#filesystem-bridge-host-calls.js';
+import type { ComputeEventSource } from '#filesystem-bridge-supervisor.js';
 import { recordFileSystemBridgeCrossing } from '#filesystem-bridge-crossings.js';
 import { prepareApplyCall, rangeStream, receiptFromWire } from '#filesystem-bridge-client-calls.js';
 import type { ReadStreamOptions } from '#filesystem-bridge-client-calls.js';
@@ -127,6 +130,16 @@ export type FileSystemBridgeProxyTransport = {
     request: ChangeSetWatchRequest,
     handler: (set: ChangeSet) => void,
   ): { unsubscribe: () => void; ready: Promise<void>; closed: Promise<void> };
+  /**
+   * The connection's event channel (charter D14): every change set of the
+   * root as this connection's view sees it, `compute-restarted` when the
+   * authority's compute worker was replaced, and `authority-lost` once when
+   * the connection closes under its subscribers. However many subscribe, the
+   * connection holds one channel on the wire. The connection's own writes are
+   * not echoed back (each has its receipt). A rooted connection over the
+   * authority serves it; elsewhere `ready` rejects with `ENOTSUP`.
+   */
+  events(handler: (event: FileSystemBridgeEvent) => void): FileSystemBridgeEventSubscription;
 };
 
 /**
@@ -169,6 +182,32 @@ export type FileSystemBridgeRootedProxy = FileSystemBridgeService &
  * @public
  */
 export type FileSystemBridgeProxy = FileSystemBridgeRootedProxy;
+
+/**
+ * What a host tells the bridge about itself beyond its handlers.
+ *
+ * @public
+ */
+export type FileSystemBridgeHostOptions = HostContentCallOptions & {
+  /**
+   * The authority's supervised compute worker, whose `compute-restarted`
+   * events every rooted connection's event channel carries.
+   */
+  readonly computeEvents?: ComputeEventSource;
+};
+
+/**
+ * A subscription to a connection's event channel.
+ *
+ * @public
+ */
+export type FileSystemBridgeEventSubscription = {
+  /** Settles when the authority has registered the channel. */
+  readonly ready: Promise<void>;
+  /** Settles when the channel closes. */
+  readonly closed: Promise<void>;
+  unsubscribe(): void;
+};
 
 const isFileSystemBridgeConnection = (
   bridge: FileSystemBridge | FileSystemBridgeConnection,
@@ -687,10 +726,18 @@ const serializeRootedResults = (handlers: StringKeyedObject): StringKeyedObject 
  * client knows to keep the per-path form. Any other request is the handler
  * set's own `watch`.
  *
+ * A request with `form: 'events'` is the connection's event channel (charter
+ * D14): every change set of the whole root, as its view sees it, plus the
+ * authority's compute news from `options.computeEvents`, on one stream.
+ *
  * @param handlers - The handlers one connection is served.
+ * @param options - Where the authority's compute events come from, if it has any.
  * @returns The same handlers, answering the change-set form when they can.
  */
-const withChangeSetWatch = <Handlers extends StringKeyedObject>(handlers: Handlers): Handlers => {
+const withChangeSetWatch = <Handlers extends StringKeyedObject>(
+  handlers: Handlers,
+  options?: Pick<FileSystemBridgeHostOptions, 'computeEvents'>,
+): Handlers => {
   const { watch, watchChangeSets } = handlers as Partial<Record<string, unknown>>;
   if (typeof watch !== 'function' && typeof watchChangeSets !== 'function') {
     return handlers;
@@ -706,6 +753,25 @@ const withChangeSetWatch = <Handlers extends StringKeyedObject>(handlers: Handle
     handler: (frame: FileSystemBridgeWatchFrame) => void,
   ): (() => void) | Promise<() => void> => {
     const { form, coalesce, ...rest } = request;
+    if (form === 'events') {
+      if (changeSets === undefined) {
+        throw Object.assign(new Error('This connection serves no event channel.'), { code: 'ENOTSUP' });
+      }
+      const unsubscribeSets = changeSets.call(
+        handlers,
+        { paths: [''], recursive: true, ...(coalesce === undefined ? {} : { coalesce }) },
+        (set) => {
+          handler({ kind: 'changeSet', set });
+        },
+      );
+      const unsubscribeCompute = options?.computeEvents?.subscribe((event) => {
+        handler(event);
+      });
+      return () => {
+        unsubscribeSets();
+        unsubscribeCompute?.();
+      };
+    }
     if (form === 'change-sets') {
       if (changeSets === undefined) {
         throw Object.assign(new Error('This connection serves no change-set watch.'), { code: 'ENOTSUP' });
@@ -1043,7 +1109,7 @@ const createUnavailableHandlers = (error: unknown): StringKeyedObject =>
  * @public
  */
 type InternalExposeFileSystemOptions = FileSystemBridgeOptions &
-  HostContentCallOptions & {
+  FileSystemBridgeHostOptions & {
     // oxlint-disable-next-line max-params -- mirrors RootedFileSystemHandlerFactory.
     handlerForRoot?: (
       root: string,
@@ -1232,7 +1298,10 @@ function exposeFileSystemHandlers(
       }
       scopedPorts.set(port, { root: rooted.data.root, consumer: rooted.data.consumer });
       return {
-        portHandlers: withChangeSetWatch(withHostContentCalls(serializeRootedResults(rootedHandlers), options)),
+        portHandlers: withChangeSetWatch(
+          withHostContentCalls(serializeRootedResults(rootedHandlers), options),
+          options,
+        ),
       };
     } catch (error) {
       /* The refusal the hello states is the refusal the caller gets: a
@@ -1451,7 +1520,7 @@ export function workspaceBridgeService(service: WorkspaceFileService): FileSyste
 export function exposeFileSystem(
   handlers: FileSystemBridgeWorkspaceService | FileSystemBridgeRuntimeService,
   options?: FileSystemBridgeOptions &
-    HostContentCallOptions & {
+    FileSystemBridgeHostOptions & {
       handlerForRoot?: RootedFileSystemHandlerFactory;
       /**
        * The reserved layout this server enforces on the change stream (D6).
@@ -1591,9 +1660,9 @@ const runtimeFileSystemBridgeOptions = (handlers: FileSystemBridgeRuntimeService
 export function serveFileSystemBridgePort(
   handlers: FileSystemBridgeRuntimeService,
   port: Port<unknown>,
-  options?: HostContentCallOptions,
+  options?: FileSystemBridgeHostOptions,
 ): BridgeServerHandle {
-  const served = withChangeSetWatch(withHostContentCalls(handlers, options));
+  const served = withChangeSetWatch(withHostContentCalls(handlers, options), options);
   return createBridgeServer(served, port, runtimeFileSystemBridgeOptions(served));
 }
 
@@ -1606,9 +1675,9 @@ export function serveFileSystemBridgePort(
  */
 export function createFileSystemBridgePort(
   handlers: FileSystemBridgeRuntimeService,
-  options?: HostContentCallOptions,
+  options?: FileSystemBridgeHostOptions,
 ): FileSystemBridgeConnection {
-  const served = withChangeSetWatch(withHostContentCalls(handlers, options));
+  const served = withChangeSetWatch(withHostContentCalls(handlers, options), options);
   const bridge = createBridgePort(served, runtimeFileSystemBridgeOptions(served));
   return {
     port: asFileSystemBridgePort(bridge.port),
@@ -1644,6 +1713,65 @@ export function createFileSystemBridge(
 }
 
 /**
+ * One connection's event channel, fanned out: the first subscriber opens it
+ * on the wire, the last one to leave closes it, and every subscriber hears
+ * `authority-lost` once if the connection closes while the proxy is live.
+ */
+const eventChannel = ({
+  watchReady,
+  closed,
+  isDisposed,
+}: {
+  readonly watchReady: ReturnType<
+    typeof createBridgeCall<FileSystemBridgeWatchRequest, FileSystemBridgeWatchFrame, FileSystemBridgeHello>
+  >['watchReady'];
+  readonly closed: Promise<void>;
+  readonly isDisposed: () => boolean;
+}): ((handler: (event: FileSystemBridgeEvent) => void) => FileSystemBridgeEventSubscription) => {
+  const topic = new Topic<FileSystemBridgeEvent>({ name: 'FileSystemBridge.events' });
+  let wire: ReturnType<typeof watchReady> | undefined;
+  let lost = false;
+  const announceLost = async (): Promise<void> => {
+    await closed;
+    if (!isDisposed()) {
+      lost = true;
+      topic.emit({ kind: 'authority-lost' });
+    }
+  };
+  // async-iife: bootstrap -- `closed` only resolves; the announcement is the outcome.
+  void announceLost();
+  return (handler) => {
+    const leave = topic.subscribe(handler);
+    let subscribed = true;
+    if (lost) {
+      queueMicrotask(() => {
+        handler({ kind: 'authority-lost' });
+      });
+    }
+    wire ??= watchReady({ paths: [''], recursive: true, form: 'events' }, (frame) => {
+      topic.emit(frame as FileSystemBridgeEvent);
+    });
+    const opened = wire;
+    return {
+      unsubscribe() {
+        if (!subscribed) {
+          return;
+        }
+        subscribed = false;
+        leave();
+        if (topic.size > 0 || wire !== opened) {
+          return;
+        }
+        wire = undefined;
+        opened.unsubscribe();
+      },
+      ready: opened.ready,
+      closed: opened.closed,
+    };
+  };
+};
+
+/**
  * Create a typed proxy over a filesystem bridge.
  *
  * @param bridge - Bridge returned from {@link createFileSystemBridge} or raw connection from {@link openFileSystemBridge}.
@@ -1674,6 +1802,7 @@ export function createFileSystemBridgeProxy(
   });
   const connectionId = nextFileSystemBridgeConnectionId();
   let isDisposed = false;
+  const events = eventChannel({ watchReady, closed, isDisposed: () => isDisposed });
 
   return new Proxy({} as FileSystemBridgeProxy, {
     get(_target, property, receiver: FileSystemBridgeRootedProxy): unknown {
@@ -1699,6 +1828,9 @@ export function createFileSystemBridgeProxy(
       }
       if (property === 'watchReady') {
         return watchReady;
+      }
+      if (property === 'events') {
+        return events;
       }
       if (property === 'watchChangeSets') {
         return (

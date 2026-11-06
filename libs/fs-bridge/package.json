@@ -45,6 +45,7 @@
     "#*": "./src/*"
   },
   "dependencies": {
+    "@taucad/events": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/parameters": "workspace:*",
     "@taucad/rpc": "workspace:*",

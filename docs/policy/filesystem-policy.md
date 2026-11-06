@@ -482,6 +482,14 @@ await Promise.race([authorityMutation(), rejectAfter(30_000)]);
 
 **Why**: A client-only deadline creates split truth: durable storage may commit after the journal owner has already classified the same operation as failed.
 
+### Rule 36: One event channel per connection, and a supervised compute worker
+
+A rooted connection hears the authority through one event channel (charter D14): `proxy.events(handler)`. It carries every change set of the root as that connection's view sees it (`changeSet`, masked by the same policy as its reads, never echoing the connection's own writes), `compute-restarted` when the authority's compute worker was replaced, and `authority-lost` once when the connection closes under its subscribers. However many subscribers there are, the connection holds one channel on the wire: the first subscriber opens it and the last to leave closes it. A subscriber that arrives after the loss still hears `authority-lost`. A caller disposing its own connection hears nothing. Do not open a second per-path watch for news the event channel already carries.
+
+The authority's compute worker holds no storage handles and no durable state, so it is supervised, not trusted (`superviseWorker`). When it dies, or a call overruns its deadline, every call in flight fails typed: `COMPUTE_RESTARTED`, or `ETIMEDOUT` for the call that overran. The supervisor then starts a fresh worker and reports `{ kind: 'compute-restarted', failed }` to every rooted connection (`computeEvents` on `exposeFileSystem`, `serveFileSystemBridgePort` and `createFileSystemBridgePort`). The restart budget is 5 restarts in 60 s. Past the budget, the supervisor stops, and every call fails `COMPUTE_UNAVAILABLE`.
+
+**Why**: A worker death must never look like a hung call or a silent wrong answer. Callers learn which calls failed and retry them on the new worker. One channel per port keeps the wire cost of listening constant however many components subscribe.
+
 ## Provider Performance Rules
 
 ### Rule 33: The Project Index answers metadata, and metadata never reads content

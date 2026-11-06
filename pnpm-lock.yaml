@@ -3544,6 +3544,9 @@ importers:
 
   libs/fs-bridge:
     dependencies:
+      '@taucad/events':
+        specifier: workspace:*
+        version: link:../events
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../../packages/filesystem

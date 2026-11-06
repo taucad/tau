@@ -830,19 +830,48 @@ const projectRootDiscoveryStatusSchema: z.ZodType<ProjectRootDiscoveryStatus> = 
  * @public
  */
 export type FileSystemBridgeWatchRequest = WatchRequest & {
-  readonly form?: 'change-sets';
+  readonly form?: 'change-sets' | 'events';
   readonly coalesce?: ChangeSetWatchRequest['coalesce'];
 };
 
-/** One frame of a bridge watch: a per-path event, or a change set for a `form: 'change-sets'` request. @public */
-export type FileSystemBridgeWatchFrame = WatchEvent | ChangeSet;
+/**
+ * One frame of a rooted connection's event channel (charter D14): the one
+ * channel per port that carries the root's change sets and the authority's
+ * own news.
+ *
+ * - `changeSet`: one committed changeset as the connection's view sees it.
+ * - `compute-restarted`: the authority's compute worker died and was
+ *   restarted; `failed` names the compute calls that failed typed. No file
+ *   state was lost: the compute worker holds none.
+ * - `authority-lost`: the authority itself is gone. Never sent on the wire —
+ *   a dead authority sends nothing — the client says it when the connection
+ *   closes under it. Nothing the authority had not receipted may be claimed
+ *   saved; the recovery path is a reload.
+ *
+ * @public
+ */
+export type FileSystemBridgeEvent =
+  | Readonly<{ kind: 'changeSet'; set: ChangeSet }>
+  | Readonly<{ kind: 'compute-restarted'; failed: readonly number[] }>
+  | Readonly<{ kind: 'authority-lost' }>;
+
+/** The event frames the wire carries: every {@link FileSystemBridgeEvent} but `authority-lost`. @public */
+export type FileSystemBridgeWireEvent = Exclude<FileSystemBridgeEvent, { kind: 'authority-lost' }>;
+
+/**
+ * One frame of a bridge watch: a per-path event, a change set for a
+ * `form: 'change-sets'` request, or an event for a `form: 'events'` request.
+ *
+ * @public
+ */
+export type FileSystemBridgeWatchFrame = WatchEvent | ChangeSet | FileSystemBridgeWireEvent;
 
 const watchRequestSchema: z.ZodType<FileSystemBridgeWatchRequest> = z.looseObject({
   paths: z.array(z.string()),
   recursive: z.boolean().optional(),
   includes: z.array(z.string()).optional(),
   excludes: z.array(z.string()).optional(),
-  form: z.literal('change-sets').optional(),
+  form: z.enum(['change-sets', 'events']).optional(),
   coalesce: z.enum(['immediate', 'frame']).optional(),
 });
 const watchEventSchema: z.ZodType<WatchEvent> = z.discriminatedUnion('type', [
@@ -874,7 +903,15 @@ const changeSetSchema: z.ZodType<ChangeSet> = z.looseObject({
     })
     .optional(),
 });
-const watchFrameSchema: z.ZodType<FileSystemBridgeWatchFrame> = z.union([watchEventSchema, changeSetSchema]);
+const wireEventSchema: z.ZodType<FileSystemBridgeWireEvent> = z.discriminatedUnion('kind', [
+  z.looseObject({ kind: z.literal('changeSet'), set: changeSetSchema }),
+  z.looseObject({ kind: z.literal('compute-restarted'), failed: z.array(z.number().int().nonnegative()) }),
+]);
+const watchFrameSchema: z.ZodType<FileSystemBridgeWatchFrame> = z.union([
+  watchEventSchema,
+  changeSetSchema,
+  wireEventSchema,
+]);
 const changeEventStatSchema = z.looseObject({
   type: z.enum(['file', 'dir']),
   size: z.number(),

@@ -6,6 +6,7 @@
  * the read content operations served over it.
  */
 import { Worker as NodeWorker } from 'node:worker_threads';
+import { Topic } from '@taucad/events';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import type { WorkspaceMutationContext } from '@taucad/filesystem';
 import { composeView } from '@taucad/filesystem/composed-view';
@@ -14,6 +15,30 @@ import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { RootedBridgeConsumer } from '#filesystem-bridge.js';
 import type { FileSystemBridgeRuntimeService } from '#filesystem-bridge-protocol.js';
 import type { GrepMatcherWorkerFactory } from '#filesystem-bridge-grep-matcher.js';
+import type { ComputeEventSource, ComputeRestartedEvent } from '#filesystem-bridge-supervisor.js';
+
+/**
+ * A compute event source the test drives by hand: what an authority's
+ * supervisor reports, without a compute worker to kill.
+ *
+ * @returns The source to hand the bridge, and the trigger.
+ */
+export const computeEventEmitter = (): {
+  readonly source: ComputeEventSource;
+  emit(failed: readonly number[]): void;
+} => {
+  const topic = new Topic<ComputeRestartedEvent>({ name: 'ComputeEventEmitter' });
+  return {
+    source: {
+      subscribe(listener) {
+        return topic.subscribe(listener);
+      },
+    },
+    emit(failed) {
+      topic.emit({ kind: 'compute-restarted', failed });
+    },
+  };
+};
 
 /**
  * A classic web-worker script made runnable on a `worker_threads` thread:

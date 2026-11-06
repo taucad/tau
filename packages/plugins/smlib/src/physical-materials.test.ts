@@ -15,6 +15,7 @@ import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import type { Material } from '#model.js';
 import { smlibKernel } from '#smlib.kernel.js';
 import { normalizeRenderShapes, render } from '#utils/render-output.js';
+import { loadSmlibKernel } from '#utils/smlib-kernel.js';
 import { convertSmlibGeometriesToGltf } from '#utils/smlib-to-gltf.js';
 
 const copper: Material = {
@@ -202,6 +203,7 @@ describe('standard physical materials through SMLib and the runtime', () => {
 
     const geometries = render(restored.shapes, {
       library,
+      kernel: await loadSmlibKernel(),
       tessellation: { linearTolerance: 0.1, angularTolerance: 15 },
     });
     const { json } = await new NodeIO().binaryToJSON(convertSmlibGeometriesToGltf({ ...restored, geometries }));

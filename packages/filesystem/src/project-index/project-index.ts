@@ -262,6 +262,8 @@ export class ProjectIndex {
   private _observing = 0;
   /** Paths an external fact left unknown; the next refresh re-observes them. */
   private readonly _stale = new Set<string>();
+  /** Write-path mtimes an observation adopted since {@link ProjectIndex.takeAdoptedMtimes} last ran. */
+  private _adoptedMtimes = 0;
   /** The entries a tree write announced and has not landed yet (D10); `undefined` while no write expects any. */
   private _arriving: Map<string, ExpectedEntry> | undefined;
 
@@ -276,6 +278,20 @@ export class ProjectIndex {
   /** Monotonic per root; bumped by every change the index records. */
   public get generation(): number {
     return this._generation;
+  }
+
+  /**
+   * How many write-path mtimes observations adopted since the last call, and
+   * reset. Adopting one changes no entry's generation (its bytes are the ones
+   * recorded), but a snapshot stored before it holds the write's clock instead
+   * of the provider's mtime, so every later load would find the file changed.
+   *
+   * @returns The count since the last call.
+   */
+  public takeAdoptedMtimes(): number {
+    const adopted = this._adoptedMtimes;
+    this._adoptedMtimes = 0;
+    return adopted;
   }
 
   /** Whether an observation of the whole root has completed (a scan, or a load and its compare). */
@@ -893,6 +909,7 @@ export class ProjectIndex {
           if (node.pendingMtime === true) {
             node.mtimeMs = row.mtimeMs;
             delete node.pendingMtime;
+            this._adoptedMtimes += 1;
             if (node.factsAt !== undefined) {
               node.factsAt = { ...node.factsAt, mtimeMs: row.mtimeMs };
               /* Bytes modified after the writer measured them are not the

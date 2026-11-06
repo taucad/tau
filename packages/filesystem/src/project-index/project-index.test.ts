@@ -843,6 +843,40 @@ describe('ProjectIndexes', () => {
     expect(reads()).toBe(readsBefore);
   });
 
+  it('should store the provider mtime a compare adopted, so the next load matches every write (W3.2)', async () => {
+    const { provider } = await durableRoot();
+    const first = new ProjectIndexes({
+      resolve: () => ({ provider, path: 'project', persist: { lockName: 'tau-index:test:project' } }),
+      policy: tauPathPolicy,
+      tab: () => defaultTab,
+      persistDelayMilliseconds: 10,
+    });
+    await first.ready('/p');
+    await provider.writeFile('project/a.ts', 'a');
+    const { mtimeMs } = await provider.stat('project/a.ts');
+    /* The write path records its file before the provider's mtime is known. */
+    await vi.waitFor(() => {
+      expect(Date.now()).toBeGreaterThan(mtimeMs);
+    });
+    first.addFile('/p/a.ts', { size: 1 });
+    expect(await first.persist('/p')).toBe('written');
+    const written = vi.spyOn(provider, 'writeFile');
+
+    /* The compare adopts the provider's mtime and stores it. */
+    const adopted = await first.compare('/p');
+    expect(adopted.mismatched).toEqual([]);
+    await vi.waitFor(() => {
+      expect(written.mock.calls.some(([path]) => String(path).includes('.tau/index'))).toBe(true);
+    });
+    written.mockRestore();
+
+    const reload = indexesOver(provider, { tabId: 'tab-b', seq: 0 });
+    /* A cold root's compare is its load's. */
+    const loaded = await reload.compare('/p');
+    expect(loaded.mismatched).toEqual([]);
+    expect(reload.get('/p')?.entry('a.ts')).toMatchObject({ size: 1, mtimeMs });
+  });
+
   it('should never let a tab that is behind overwrite a newer snapshot', async () => {
     const { provider } = await durableRoot();
     await provider.writeFile('project/a.ts', 'a');

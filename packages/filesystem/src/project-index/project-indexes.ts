@@ -859,7 +859,9 @@ export class ProjectIndexes {
     if (state !== undefined && prefix === '') {
       state.lastCompare = result;
     }
-    if (result.mismatched.length > 0) {
+    /* An adopted mtime changes what the snapshot must hold, not the generation. */
+    const adopted = index.takeAdoptedMtimes();
+    if (result.mismatched.length > 0 || adopted > 0) {
       this._schedulePersist(root);
     }
     return result;

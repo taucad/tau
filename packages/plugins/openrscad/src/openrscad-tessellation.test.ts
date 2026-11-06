@@ -1,26 +1,16 @@
 // @vitest-environment node
 /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- vitest asymmetric matchers return any */
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import type { ExportResult, Rendering } from '@taucad/runtime';
 import { assertRenderingSuccess, createTestRuntimeClient } from '@taucad/runtime-testing';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { openrscadKernel, openrscadRenderSchema } from '#openrscad.kernel.js';
 import {
-  createOpenrscadTessellationBudgetExceededIssue,
-  meshWithinOpenrscadBudget,
   openrscadTessellationQualities,
   resolveOpenrscadRequest,
   resolveOpenrscadTessellation,
   scriptOwnedResolution,
 } from '#openrscad-tessellation.js';
-import type * as TessellationModule from '#openrscad-tessellation.js';
-
-const budgets = vi.hoisted(() => ({ preview: 2_000_000, export: 20_000_000 }));
-
-vi.mock('#openrscad-tessellation.js', async (importOriginal) => {
-  const original = await importOriginal<typeof TessellationModule>();
-  return { ...original, openrscadTriangleBudgets: budgets };
-});
 
 const sphere = (radius: number): string => `sphere(${String(radius)});`;
 
@@ -155,71 +145,24 @@ describe('OpenSCAD tessellation presets (P2)', () => {
   });
 });
 
-describe('OpenSCAD triangle budget (P4)', () => {
-  it('coarsens one step at a time, at most three times, and stops when nothing is left to coarsen', async () => {
-    const seen: Array<number | undefined> = [];
-    const outcome = await meshWithinOpenrscadBudget({
-      resolution: { segments: 64, linearTolerance: 1, angularTolerance: 2 },
-      budget: 10,
-      async mesh(resolution) {
-        seen.push(resolution.angularTolerance);
-        return { triangles: 100 };
-      },
-    });
-    expect(seen).toEqual([2, 6, 10, 14]);
-    expect(outcome.effective).toEqual({ segments: 8, linearTolerance: 8, angularTolerance: 14 });
-    expect(outcome.downgraded).toBe(3);
-
-    const scriptOwned = await meshWithinOpenrscadBudget({
-      resolution: {},
-      budget: 10,
-      mesh: async () => ({ triangles: 100 }),
-    });
-    expect(scriptOwned.downgraded).toBe(0);
+describe('OpenSCAD without a triangle budget', () => {
+  it('renders a preview once at the requested values, never coarser', async () => {
+    const rendering = await renderModel(sphere(50), { tessellation: 'high' });
+    const report = reportOf(rendering);
+    const medium = reportOf(await renderModel(sphere(50), { tessellation: 'medium' }));
+    expect(report.requested).toBe('high');
+    expect(report.triangles).toBeGreaterThan(medium.triangles);
+    expect(report).not.toHaveProperty('downgraded');
+    assertRenderingSuccess(rendering);
+    expect(rendering.issues).not.toContainEqual(expect.objectContaining({ code: 'TESSELLATION_DOWNGRADED' }));
   });
 
-  it('downgrades an over-budget preview and reports it', async () => {
-    const fitted = reportOf(await renderModel(sphere(50), { tessellation: 'high' }));
-    budgets.preview = Math.floor(fitted.triangles / 2);
-    try {
-      const rendering = await renderModel(sphere(50), { tessellation: 'high' });
-      const report = reportOf(rendering);
-      expect(report.downgraded).toBeGreaterThanOrEqual(1);
-      expect(report.triangles).toBeLessThanOrEqual(budgets.preview);
-      assertRenderingSuccess(rendering);
-      expect(rendering.issues).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            code: 'TESSELLATION_DOWNGRADED',
-            severity: 'warning',
-            details: expect.objectContaining({ producer: 'openrscad', downgraded: report.downgraded }),
-          }),
-        ]),
-      );
-    } finally {
-      budgets.preview = 2_000_000;
+  it('exports glb and 3mf at the requested values with no triangle check', async () => {
+    for (const format of ['glb', '3mf'] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one export at a time keeps the client count small.
+      const exported = await exportModel(sphere(50), format, { tessellation: 'extra-high' });
+      expect(issueText(exported)).toBe('');
+      expect(exported.success).toBe(true);
     }
-  });
-
-  it('refuses an over-budget export instead of coarsening it', async () => {
-    budgets.export = 100;
-    try {
-      for (const format of ['glb', '3mf'] as const) {
-        // oxlint-disable-next-line no-await-in-loop -- one export at a time keeps the budget override scoped.
-        const exported = await exportModel(sphere(50), format, { tessellation: 'high' });
-        expect(exported.success).toBe(false);
-        // The kernel throws a `RESOURCE_LIMIT` issue; the runtime's export boundary keeps only its message.
-        expect(issueText(exported)).toContain('over the 100-triangle export budget');
-      }
-    } finally {
-      budgets.export = 20_000_000;
-    }
-    const issue = createOpenrscadTessellationBudgetExceededIssue({
-      requested: { requested: 'explicit', segments: 64 },
-      triangles: 30_000_000,
-      budget: 20_000_000,
-    });
-    expect(issue.code).toBe('RESOURCE_LIMIT');
-    expect(issue.details).toMatchObject({ suggested: { segments: 32 } });
   });
 });

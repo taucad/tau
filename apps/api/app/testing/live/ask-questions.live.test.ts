@@ -26,7 +26,7 @@ import {
   startLiveGateway,
 } from '#testing/live/live-gateway.harness.js';
 import type { LiveGateway } from '#testing/live/live-gateway.harness.js';
-import { expectCompleted, toolCalls } from '#testing/live/live-assertions.js';
+import { expectCompleted, runUsage, toolCalls, usageBeforeFirstCall } from '#testing/live/live-assertions.js';
 
 /**
  * Agent questions on a live Haiku turn (agent questions blueprint W5).
@@ -85,6 +85,27 @@ const stopHere: HostToolResult = {
     message: 'This check ends before modelling. Reply with your one-sentence plan and stop.',
   },
   isError: true,
+};
+
+/**
+ * Print one row's metric line: output tokens (reasoning included) of every step
+ * up to the one that made the first `ask_questions` call, the hard-fork latency
+ * finding P1 of the deploy-cut investigation measured, and the row's spend.
+ */
+const reportUsage = (row: string, snapshot: HostRunSnapshot): void => {
+  const beforeAsk = usageBeforeFirstCall(snapshot.messages, toolName.askQuestions);
+  const run = runUsage(snapshot);
+  console.log(
+    `[questions-live] metric ${JSON.stringify({
+      row,
+      modelId,
+      tokensBeforeFirstAsk: beforeAsk?.outputTokens ?? null,
+      stepsBeforeFirstAsk: beforeAsk?.steps ?? null,
+      runSteps: run.steps,
+      runOutputTokens: run.outputTokens,
+      runCostUsd: run.costUsd,
+    })}`,
+  );
 };
 
 describe.skipIf(!hasLiveCredential(modelId))(
@@ -173,6 +194,7 @@ describe.skipIf(!hasLiveCredential(modelId))(
       );
       expect(JSON.stringify(answered?.content)).toContain('"source":"person"');
       console.log(`[questions-live] ${modelId} asked: ${JSON.stringify(input.questions)}`);
+      reportUsage('questions-open-form', snapshot);
     });
 
     it('builds a precise request without asking', async () => {
@@ -183,6 +205,7 @@ describe.skipIf(!hasLiveCredential(modelId))(
 
       expectCompleted(snapshot);
       expect(toolCalls(snapshot.messages, toolName.askQuestions)).toEqual([]);
+      reportUsage('questions-precise', snapshot);
     });
   },
 );

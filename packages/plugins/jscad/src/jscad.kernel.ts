@@ -31,12 +31,8 @@ import modelingPackage from '@jscad/modeling/package.json' with { type: 'json' }
 
 import { jscadExportSchemas, jscadRenderSchema } from '#jscad.schemas.js';
 import {
-  createJscadTessellationBudgetExceededIssue,
-  createJscadTessellationDowngradedIssue,
   createJscadTessellationReport,
   jscadDefaultSegments,
-  jscadTriangleBudgets,
-  meshWithinJscadBudget,
   resolveJscadTessellation,
   withDefaultSegments,
 } from '#jscad-tessellation.js';
@@ -515,39 +511,18 @@ export const jscadKernel = defineKernel({
     }
     const { program } = handle;
     const requested = resolveJscadTessellation(options.tessellation);
-    const budget = jscadTriangleBudgets.preview;
-    const { result, segments, downgraded } = await meshWithinJscadBudget({
-      segments: requested.segments,
-      budget,
-      async mesh(count) {
-        const parts = await partsAt({ handle, program, segments: count, runtime, modeling: context.modeling });
-        if (!parts.some((part) => isRenderableJscadPart(part, context.modeling))) {
-          return { content: asBuffer(createEmptyGlb()), issues: [], triangles: 0, vertices: 0 };
-        }
-        return jscadToGltf(parts, { includeEdges }, context.modeling);
-      },
-    });
+    // One evaluation at the requested count: nothing coarsens a mesh (no triangle budget).
+    const parts = await partsAt({ handle, program, segments: requested.segments, runtime, modeling: context.modeling });
+    const result = parts.some((part) => isRenderableJscadPart(part, context.modeling))
+      ? jscadToGltf(parts, { includeEdges }, context.modeling)
+      : { content: asBuffer(createEmptyGlb()), issues: [], triangles: 0, vertices: 0 };
     const tessellation = createJscadTessellationReport({
       requested,
-      downgraded,
       triangles: result.triangles,
       vertices: result.vertices,
       elapsed: performance.now() - started,
     });
-    const issues =
-      downgraded === 0
-        ? result.issues
-        : [
-            ...result.issues,
-            createJscadTessellationDowngradedIssue({
-              requested,
-              segments,
-              downgraded,
-              triangles: result.triangles,
-              budget,
-            }),
-          ];
-    return { content: result.content, tessellation, issues };
+    return { content: result.content, tessellation, issues: result.issues };
   },
 
   serializeHandle({ handle }, _runtime, context) {
@@ -665,12 +640,6 @@ export const jscadKernel = defineKernel({
           },
           context.modeling,
         );
-        const budget = jscadTriangleBudgets.export;
-        if (handle.program !== undefined && gltf.triangles > budget) {
-          throw new JscadBuildError([
-            createJscadTessellationBudgetExceededIssue({ requested, triangles: gltf.triangles, budget }),
-          ]);
-        }
         return { files: [createExportFile('glb', 'model.glb', asBuffer(gltf.content))], issues: gltf.issues };
       }
 

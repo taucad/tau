@@ -1,25 +1,12 @@
 // @vitest-environment node
 /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- vitest asymmetric matchers return any */
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import type { ExportResult, Rendering } from '@taucad/runtime';
 import { assertRenderingSuccess, createTestRuntimeClient } from '@taucad/runtime-testing';
 import { esbuildBundler } from '@taucad/esbuild';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { manifoldKernel } from '#manifold.kernel.js';
-import {
-  createManifoldTessellationBudgetExceededIssue,
-  manifoldTessellationQualities,
-  meshWithinManifoldBudget,
-  resolveManifoldTessellation,
-} from '#manifold-tessellation.js';
-import type * as TessellationModule from '#manifold-tessellation.js';
-
-const budgets = vi.hoisted(() => ({ preview: 2_000_000, export: 20_000_000 }));
-
-vi.mock('#manifold-tessellation.js', async (importOriginal) => {
-  const original = await importOriginal<typeof TessellationModule>();
-  return { ...original, manifoldTriangleBudgets: budgets };
-});
+import { manifoldTessellationQualities, resolveManifoldTessellation } from '#manifold-tessellation.js';
 
 const sphere = (radius: number): string =>
   `import { Manifold } from 'manifold-3d/manifoldCAD'; export default () => Manifold.sphere(${String(radius)});`;
@@ -125,7 +112,8 @@ describe('Manifold tessellation presets (P2)', () => {
 
   it('reports the requested form and the effective detail', async () => {
     const report = reportOf(await renderModel(sphere(5)));
-    expect(report).toMatchObject({ requested: 'medium', downgraded: 0 });
+    expect(report).toMatchObject({ requested: 'medium' });
+    expect(report).not.toHaveProperty('downgraded');
     expect(report.linearTolerance).toBeCloseTo((10 * Math.sqrt(3)) / 2000, 6);
     expect(report.triangles).toBeGreaterThan(0);
     expect(report.vertices).toBeGreaterThan(0);
@@ -151,64 +139,21 @@ describe('Manifold tessellation presets (P2)', () => {
   });
 });
 
-describe('Manifold triangle budget (P4)', () => {
-  it('coarsens one step at a time, at most three times', async () => {
-    const seen: number[] = [];
-    const outcome = await meshWithinManifoldBudget({
-      detail: { linearTolerance: 1, angularTolerance: 2, segments: 64 },
-      budget: 10,
-      async mesh(detail) {
-        seen.push(detail.angularTolerance);
-        return { triangles: 100 };
-      },
-    });
-    expect(seen).toEqual([2, 6, 10, 14]);
-    expect(outcome).toEqual({
-      result: { triangles: 100 },
-      effective: { segments: 8, linearTolerance: 8, angularTolerance: 14 },
-      downgraded: 3,
-    });
+describe('Manifold without a triangle budget', () => {
+  it('renders a preview once at the requested detail, never coarser', async () => {
+    const rendering = await renderModel(sphere(50), { tessellation: 'high' });
+    const report = reportOf(rendering);
+    const medium = reportOf(await renderModel(sphere(50), { tessellation: 'medium' }));
+    expect(report.requested).toBe('high');
+    expect(report.triangles).toBeGreaterThan(medium.triangles);
+    expect(report).not.toHaveProperty('downgraded');
+    assertRenderingSuccess(rendering);
+    expect(rendering.issues).toEqual([]);
   });
 
-  it('downgrades an over-budget preview and reports it', async () => {
-    const fitted = reportOf(await renderModel(sphere(50), { tessellation: 'high' }));
-    budgets.preview = Math.floor(fitted.triangles / 2);
-    try {
-      const rendering = await renderModel(sphere(50), { tessellation: 'high' });
-      const report = reportOf(rendering);
-      expect(report.downgraded).toBeGreaterThanOrEqual(1);
-      expect(report.triangles).toBeLessThanOrEqual(budgets.preview);
-      expect(report.angularTolerance).toBeCloseTo(fitted.angularTolerance! + 4 * report.downgraded!, 9);
-      assertRenderingSuccess(rendering);
-      expect(rendering.issues).toEqual([
-        expect.objectContaining({
-          code: 'TESSELLATION_DOWNGRADED',
-          severity: 'warning',
-          details: expect.objectContaining({ producer: 'manifold', downgraded: report.downgraded }),
-        }),
-      ]);
-    } finally {
-      budgets.preview = 2_000_000;
-    }
-  });
-
-  it('refuses an over-budget export with RESOURCE_LIMIT instead of coarsening it', async () => {
-    budgets.export = 100;
-    try {
-      const exported = await exportModel(sphere(50), { tessellation: 'high' });
-      expect(exported.success).toBe(false);
-      // The kernel throws a `RESOURCE_LIMIT` issue; the runtime's export boundary keeps only its message.
-      expect(issueText(exported)).toContain('over the 100-triangle export budget');
-      expect(issueText(exported)).toContain('Exports are never coarsened silently');
-    } finally {
-      budgets.export = 20_000_000;
-    }
-    const issue = createManifoldTessellationBudgetExceededIssue({
-      requested: { requested: 'explicit', linearTolerance: 1, angularTolerance: 10 },
-      triangles: 30_000_000,
-      budget: 20_000_000,
-    });
-    expect(issue.code).toBe('RESOURCE_LIMIT');
-    expect(issue.details).toMatchObject({ suggested: { linearTolerance: 2, angularTolerance: 14 } });
+  it('exports at the requested detail with no triangle check', async () => {
+    const exported = await exportModel(sphere(50), { tessellation: 'extra-high' });
+    expect(issueText(exported)).toBe('');
+    expect(exported.success).toBe(true);
   });
 });

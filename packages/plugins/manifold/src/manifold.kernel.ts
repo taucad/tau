@@ -33,14 +33,7 @@ import {
 import type { KernelServices } from '@taucad/runtime/kernel';
 
 import { manifoldOptionsSchema, manifoldExportSchemas, manifoldRenderSchema } from '#manifold.schemas.js';
-import {
-  createManifoldTessellationBudgetExceededIssue,
-  createManifoldTessellationDowngradedIssue,
-  createManifoldTessellationReport,
-  manifoldTriangleBudgets,
-  meshWithinManifoldBudget,
-  resolveManifoldTessellation,
-} from '#manifold-tessellation.js';
+import { createManifoldTessellationReport, resolveManifoldTessellation } from '#manifold-tessellation.js';
 import type { ManifoldCircularDetail } from '#manifold-tessellation.js';
 
 import { initManifoldWasm } from '#init-manifold.js';
@@ -803,33 +796,15 @@ export const manifoldKernel = defineKernel({
     }
     const started = performance.now();
     const requested = resolveManifoldTessellation(tessellation, program.diagonal);
-    const budget = manifoldTriangleBudgets.preview;
-    const { result, effective, downgraded } = await meshWithinManifoldBudget({
-      detail: requested,
-      budget,
-      mesh: async (detail) => meshProgram({ program, detail, services, context }),
-    });
+    // One evaluation at the requested detail: nothing coarsens a mesh (no triangle budget).
+    const result = await meshProgram({ program, detail: requested, services, context });
     const report: TessellationReport = createManifoldTessellationReport({
       requested,
-      effective,
-      downgraded,
       triangles: result.triangles,
       vertices: result.vertices,
       elapsed: performance.now() - started,
     });
-    const issues =
-      downgraded === 0
-        ? []
-        : [
-            createManifoldTessellationDowngradedIssue({
-              requested,
-              effective,
-              downgraded,
-              triangles: result.triangles,
-              budget,
-            }),
-          ];
-    return { content: result.glb, tessellation: report, issues };
+    return { content: result.glb, tessellation: report, issues: [] };
   },
 
   async export(input, services, context) {
@@ -846,12 +821,6 @@ export const manifoldKernel = defineKernel({
         if (handle.program) {
           const requested = resolveManifoldTessellation(options.tessellation, handle.program.diagonal);
           const mesh = await meshProgram({ program: handle.program, detail: requested, services, context });
-          const budget = manifoldTriangleBudgets.export;
-          if (mesh.triangles > budget) {
-            throw new ManifoldBuildError([
-              createManifoldTessellationBudgetExceededIssue({ requested, triangles: mesh.triangles, budget }),
-            ]);
-          }
           source = mesh.glb;
         }
         const transformedGlb = await transformGltfExportBytes(source, {

@@ -110,8 +110,7 @@ Under data protection laws, we rely on the following legal bases:
 |---------------|------------------|
 | **Account Data** | While account is active, plus 90 days after deletion request |
 | **Usage & Analytics Data** | According to the current service-side retention configuration; contact privacy@tau.new for the current schedule |
-| **AI Prompts & Designs** | 12 months for service improvement; deleted upon opt-out |
-| **Agent Task Recordings** | Up to 180 days from capture; deleted sooner when you delete the project or your account |
+| **AI Prompts, Designs & Agent Task Recordings** (service improvement) | Up to 180 days from capture; deleted sooner when you delete the project or your account. Turning off "Improve Tau for everyone" stops new recording |
 | **Support Communications** | 3 years from communication |
 | **Financial Records** | 7 years (as required by law) |
 | **Security Logs** | 12 months |
@@ -175,7 +174,6 @@ We may use your prompts and generated designs to improve our AI features. This i
 
 - **PostHog (Cloud)**: Web product analytics and session replay after consent, and desktop app product analytics (USA). [Privacy Policy](https://posthog.com/privacy)
 - **Sentry (Functional Software, Inc.)**: Error and crash reporting for the web app, desktop app and API (USA). [Privacy Policy](https://sentry.io/privacy/)
-- **LangSmith**: AI feature monitoring. [Privacy Policy](https://www.langchain.com/privacy)
 - **Langfuse (Langfuse GmbH)**: Storage of agent task recordings you allow under Agent recording (USA, Oregon). [Privacy Policy](https://langfuse.com/privacy)
 
 ### 9.4 Payment Processing

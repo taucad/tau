@@ -1,6 +1,6 @@
 # Sub-processors - TauCAD Limited
 
-*Effective date: October 25, 2026*
+*Effective date: November 6, 2026*
 
 This page lists all third-party service providers (sub-processors) that process personal data on behalf of TauCAD Limited in connection with our Service. This list is maintained in accordance with our [Privacy Policy](/legal/privacy) and applicable data protection laws.
 
@@ -39,7 +39,7 @@ When you use AI-assisted CAD features, your prompts and relevant context may be 
 |---------------|---------|----------------|----------|----------------|
 | **PostHog** | Product analytics (with consent on the web; always in the desktop app) | Usage data, device info, interaction patterns | USA | SOC 2 Type II |
 | **Sentry** (Functional Software, Inc.) | Error and crash reporting for the web app, desktop app and API | Error messages, stack traces, app version, page route, browser, OS and device information, desktop crash memory snapshots | USA | SOC 2 Type II, ISO 27001 |
-| **LangSmith** | AI feature observability | AI interaction logs, prompt/response metadata | USA | SOC 2 Type II |
+| **Langfuse** (Langfuse GmbH) | Storage of agent task recordings users allow under Agent recording | Agent task summaries, ratings and, where allowed, prompts, designs, tool calls and replies, under a pseudonymous account id | USA (Oregon) | SOC 2 Type II, ISO 27001 |
 
 ## Payment Processing
 

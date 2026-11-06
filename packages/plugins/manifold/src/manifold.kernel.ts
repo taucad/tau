@@ -29,8 +29,10 @@ import {
   parseStackTrace,
   resolveSourcePath,
   deriveLocationFromFrames,
+  createKernelLibraryTracer,
+  defineLibraryTracePolicy,
 } from '@taucad/runtime/kernel';
-import type { KernelServices } from '@taucad/runtime/kernel';
+import type { KernelLibraryTraceHandle, KernelLibraryTraceMode, KernelServices } from '@taucad/runtime/kernel';
 
 import { manifoldOptionsSchema, manifoldExportSchemas, manifoldRenderSchema } from '#manifold.schemas.js';
 import { createManifoldTessellationReport, resolveManifoldTessellation } from '#manifold-tessellation.js';
@@ -180,7 +182,37 @@ function deleteLiveHandles(): void {
   liveHandles.clear();
 }
 
-async function registerManifoldModules(services: KernelServices): Promise<Record<string, unknown>> {
+/**
+ * Library tracing for user code: counts each `manifold-3d/manifoldCAD` class's static and constructor calls
+ * (`Manifold.cube`, `new CrossSection`), named by class.
+ *
+ * Only functions are wrapped. Manifold and CrossSection instances are embind handles that model code passes back
+ * into manifold-3d, which reads their native pointers, so they stay raw and their methods are not counted.
+ */
+const manifoldLibraryTracePolicy = defineLibraryTracePolicy({
+  library: 'manifold',
+  spanPrefix: 'manifold.library',
+  summarySpanName: 'manifold.library.summary',
+  traceCall(context) {
+    if (context.scope !== 'user-main') {
+      return { type: 'ignore' };
+    }
+    return { type: 'trace', operation: context.memberPath.slice('manifold.'.length) };
+  },
+  shouldWrapValue(context) {
+    return typeof context.value === 'function';
+  },
+});
+
+/** Kernel state: the library tracer over the manifoldCAD module user code imports. */
+type ManifoldContext = {
+  libraryTrace: KernelLibraryTraceHandle<Record<string, unknown>>;
+};
+
+async function registerManifoldModules(
+  services: KernelServices,
+  libraryTracing: KernelLibraryTraceMode,
+): Promise<ManifoldContext> {
   const [manifoldRoot, manifoldCad, gltfNodeModule] = await Promise.all([
     import('manifold-3d'),
     import('manifold-3d/manifoldCAD'),
@@ -212,14 +244,22 @@ async function registerManifoldModules(services: KernelServices): Promise<Record
     globalName: 'manifold3d',
   });
 
+  const libraryTrace = createKernelLibraryTracer<Record<string, unknown>>({
+    library: patchedManifoldCad,
+    tracer: services.tracer,
+    mode: libraryTracing,
+    policy: manifoldLibraryTracePolicy,
+    defaultScope: 'kernel-setup',
+  });
+
   registerKernelModule(services, {
     name: 'manifold-3d/manifoldCAD',
-    exports: patchedManifoldCad,
+    exports: libraryTrace.tracedLibrary,
     package: manifoldPackage,
     globalName: 'manifoldCAD',
   });
 
-  return patchedManifoldCad;
+  return { libraryTrace };
 }
 
 // =============================================================================
@@ -266,6 +306,31 @@ async function runMain(
   }
 
   return defaultExport(parameters);
+}
+
+/**
+ * Run the model's `main` with library tracing scoped to user code, and emit the tracing summary after it.
+ *
+ * @param module - The executed model module.
+ * @param parameters - Resolved model parameters.
+ * @param context - The kernel context holding the library tracer.
+ * @returns What `main` returned, with any traced library value unwrapped.
+ */
+async function runTracedMain(
+  module: Record<string, unknown>,
+  parameters: Record<string, unknown>,
+  context: Readonly<ManifoldContext>,
+): Promise<unknown> {
+  const { libraryTrace } = context;
+  try {
+    const model = await libraryTrace.runInScope({
+      scope: 'user-main',
+      operation: async () => runMain(module, parameters, libraryTrace.tracedLibrary),
+    });
+    return libraryTrace.unwrap(model);
+  } finally {
+    libraryTrace.emitSummary();
+  }
 }
 
 // ponytail: one Manifold operation at a time per realm. manifold-3d keeps realm-global live-object and glTF-node
@@ -567,6 +632,8 @@ async function createGlbFromManifoldOutput(output: unknown): Promise<ManifoldMes
 export type ManifoldOptions = {
   /** Override the default Manifold WASM URL for custom builds or benchmarking. */
   wasmUrl?: string;
+  /** Library call tracing mode for user code (`manifold.library.summary`). Defaults to `off`. */
+  libraryTracing?: KernelLibraryTraceMode;
 };
 
 /** What re-running a model at another circular detail needs: its bundle, its parameters and its size. */
@@ -594,7 +661,7 @@ async function meshProgram(input: {
   program: ManifoldProgram;
   detail: ManifoldCircularDetail;
   services: KernelServices;
-  context: Readonly<{ manifoldCadModule: Record<string, unknown> }>;
+  context: Readonly<ManifoldContext>;
 }): Promise<ManifoldMesh> {
   const { program, detail, services, context } = input;
   return exclusive(async () => {
@@ -610,7 +677,7 @@ async function meshProgram(input: {
       if (!executeResult.success) {
         throw new ManifoldBuildError(executeResult.issues);
       }
-      const model = await runMain(resolveModule(executeResult.value), program.parameters, context.manifoldCadModule);
+      const model = await runTracedMain(resolveModule(executeResult.value), program.parameters, context);
       if (model === undefined || (Array.isArray(model) && model.length === 0)) {
         return { glb: asBuffer(createEmptyGlb()), triangles: 0, vertices: 0, diagonal: Number.NaN };
       }
@@ -659,9 +726,10 @@ export const manifoldKernel = defineKernel({
 
   async initialize(options, services) {
     initManifoldWasm(options.wasmUrl);
-    const manifoldCadModule = await registerManifoldModules(services);
-    services.logger.debug('Initialized Manifold kernel with manifold-3d modules');
-    return { manifoldCadModule };
+    const libraryTracing = options.libraryTracing ?? 'off';
+    const context = await registerManifoldModules(services, libraryTracing);
+    services.logger.debug(`Initialized Manifold kernel with manifold-3d modules (libraryTracing: ${libraryTracing})`);
+    return context;
   },
 
   async resolve({ entryPath }, services) {
@@ -731,7 +799,7 @@ export const manifoldKernel = defineKernel({
 
       let model: unknown;
       try {
-        model = await runMain(module, parameters, context.manifoldCadModule);
+        model = await runTracedMain(module, parameters, context);
       } catch (error) {
         const stackFrames = parseStackTrace(error, {
           classifyFrame: createFrameClassifier(),

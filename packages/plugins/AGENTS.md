@@ -12,6 +12,7 @@ Each package here is a standalone runtime capability authored with `@taucad/runt
 - Put reusable black-box plugin-author tests in `@taucad/runtime-testing`; keep owner-specific white-box fixtures local.
 - Keep generated C++ binding logic generic at the type-system level. Infer from templates, typedefs, inheritance, and signatures rather than enumerating domain classes.
 - Emit provider-neutral runtime issue codes at the kernel source and put kernel identity in `details.producer`.
+- Calls into a wasm or native library follow [CAD performance](../../docs/policy/cad-performance-policy.md) Rule 3: once per operation per shape.
 - For plugin-owned generated WASM assets, keep `src/**/wasm/` payloads ignored and populate them through the package's Nx `copy-assets` target and `copy-files-from-to.cjson`; update the target and manifest together.
 - Optional upstream checkouts under `repos/` are maintenance evidence, never install or runtime dependencies. Follow the Tau-side references under `docs/architecture/dependency-maintenance/` and use the `repos` skill.
 

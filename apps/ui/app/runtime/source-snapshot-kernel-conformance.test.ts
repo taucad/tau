@@ -8,7 +8,6 @@ import { manifoldKernel } from '@taucad/manifold';
 import { opencascadeKernel } from '@taucad/opencascade';
 import { openrscadKernel } from '@taucad/openrscad';
 import { replicadKernel } from '@taucad/replicad';
-import { rhinoKernel } from '@taucad/rhino';
 import { zooKernel } from '@taucad/zoo';
 
 describe('portable source snapshot kernel conformance', () => {
@@ -22,7 +21,6 @@ describe('portable source snapshot kernel conformance', () => {
       opencascadeKernel(),
       openrscadKernel(),
       replicadKernel(),
-      rhinoKernel(),
       zooKernel(),
     ];
 

@@ -33,7 +33,7 @@ const tauRepository = /github\.com[/:]taucad\/tau(?:\.git)?$/u;
  * Superseded Package Deprecations). `@taucad/testing` has no one-to-one replacement and is omitted.
  */
 export const supersededPackages: Readonly<Record<string, string>> = {
-  '@taucad/converter@0.1.0-beta.0': 'Use @taucad/assimp, @taucad/brep, @taucad/gltf, or @taucad/rhino.',
+  '@taucad/converter@0.1.0-beta.0': 'Use @taucad/assimp, @taucad/brep, or @taucad/gltf.',
   '@taucad/events@0.1.0-beta.0': 'Bundled into @taucad/runtime.',
   '@taucad/memory@0.1.0-beta.0': 'Bundled into @taucad/runtime.',
   '@taucad/types@0.1.0-beta.0': 'Use @taucad/runtime/types.',

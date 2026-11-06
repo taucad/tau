@@ -31,7 +31,7 @@ including how it builds and links OCCT, is at [github.com/taucad/geospec](https:
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 863 packages, with the license each declares.
+The web and desktop apps include the following 862 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -751,7 +751,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [retry](https://github.com/tim-kos/node-retry) | 0.12.0 | MIT |
 | [retry](https://github.com/tim-kos/node-retry) | 0.13.1 | MIT |
 | [rfdc](https://github.com/davidmarkclements/rfdc) | 1.4.1 | MIT |
-| [rhino3dm](https://github.com/mcneel/rhino3dm) | 8.35.0 | MIT |
 | [rou3](https://github.com/h3js/rou3) | 0.9.2 | MIT |
 | [router](https://github.com/pillarjs/router) | 2.2.0 | MIT |
 | [run-applescript](https://github.com/sindresorhus/run-applescript) | 7.1.0 | MIT |

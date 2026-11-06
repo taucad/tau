@@ -27,8 +27,7 @@
     "@taucad/assimp": "workspace:*",
     "@taucad/brep": "workspace:*",
     "@taucad/gltf": "workspace:*",
-    "@taucad/image": "workspace:*",
-    "@taucad/rhino": "workspace:*"
+    "@taucad/image": "workspace:*"
   },
   "exports": {
     ".": "./src/contracts.ts",

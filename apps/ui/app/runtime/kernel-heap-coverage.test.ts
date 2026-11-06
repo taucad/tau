@@ -27,7 +27,6 @@ const expectedHeapHooks: Record<string, ReadonlyArray<(typeof heapHooks)[number]
   jscad: [],
   manifold: [],
   openrscad: [],
-  rhino: [],
   smlib: [],
   tscircuit: [],
 };

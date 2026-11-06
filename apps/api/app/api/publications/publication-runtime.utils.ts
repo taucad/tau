@@ -17,7 +17,6 @@ export const publicationKernelExtensions = [
   { id: 'jscad', extensions: ['ts', 'js'] },
   { id: 'gltf', extensions: ['glb', 'gltf'] },
   { id: 'brep', extensions: ['step', 'stp', 'iges', 'igs', 'brep'] },
-  { id: 'rhino', extensions: ['3dm'] },
   {
     id: 'assimp',
     extensions: [

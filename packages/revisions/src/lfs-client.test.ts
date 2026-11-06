@@ -372,6 +372,66 @@ describe('bounded private transfers', () => {
     expect(request).toHaveBeenCalledTimes(2);
     expect(transfer).toHaveBeenCalledTimes(2);
   });
+
+  /* I10: a transfer that hangs is abandoned and retried, so a fill fails and can be retried rather than waiting forever. */
+  it('abandons a transfer that goes without a byte for its stall bound, before its first byte or mid-stream', async () => {
+    const request = vi
+      .fn<RevisionHttpClient['request']>()
+      .mockImplementation(async () => batchResponse([answer({ actions: { download: action } })]));
+    const hanging = async (): Promise<Response> =>
+      new Promise<Response>(() => {
+        /* Never answers, and ignores its signal. */
+      });
+    const client = (transfer: typeof fetch) =>
+      createLfsClient({
+        url: 'https://api.tau.test/git',
+        http: { request },
+        fetch: transfer,
+        transferStallMilliseconds: 40,
+      });
+
+    /* Hung before its first byte, then answered: the retry delivers. */
+    const recovering = vi.fn<typeof fetch>().mockImplementationOnce(hanging).mockResolvedValueOnce(new Response(bytes));
+    await expect(client(recovering).download(pointer)).resolves.toEqual(bytes);
+    expect(recovering).toHaveBeenCalledTimes(2);
+
+    /* Hung mid-stream every time: it fails after its attempts instead of living on. */
+    const stalling = vi.fn<typeof fetch>().mockImplementation(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(bytes.slice(0, 4));
+            },
+          }),
+        ),
+    );
+    await expect(client(stalling).download(pointer)).rejects.toThrow('failed after three attempts');
+    expect(stalling).toHaveBeenCalledTimes(3);
+
+    /* A slow transfer that keeps sending bytes is never cut off, however long it takes in all. */
+    let sent = 0;
+    const slow = vi.fn<typeof fetch>().mockImplementation(
+      async () =>
+        new Response(
+          new ReadableStream({
+            async pull(controller) {
+              await new Promise((resolve) => {
+                setTimeout(resolve, 20);
+              });
+              if (sent >= bytes.byteLength) {
+                controller.close();
+                return;
+              }
+              controller.enqueue(bytes.slice(sent, sent + 2));
+              sent += 2;
+            },
+          }),
+        ),
+    );
+    await expect(client(slow).download(pointer)).resolves.toEqual(bytes);
+    expect(slow).toHaveBeenCalledTimes(1);
+  });
 });
 
 /* F5: a push's large objects upload a few at a time, not one after another. */

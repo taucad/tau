@@ -805,6 +805,52 @@ describe('the entry closure of a tree write (D10)', () => {
     expect(published.indexOf('a/new.scad')).toBeGreaterThan(published.indexOf('zz/main.scad'));
   });
 
+  /* I8: closure-first costs a cold open no changeset: every file is created, and the closure is first in the one changeset. */
+  it('should land a cold open with its closure in one changeset, closure first', async () => {
+    const context = await project({});
+    const writes: string[][] = [];
+    const { checkout } = context;
+    const watched: RevisionFileSystem = Object.assign(Object.create(checkout) as RevisionFileSystem, {
+      applyBatch: async (entries: readonly BatchEntry[], batchOptions?: BatchOptions): Promise<BatchReceipt[]> => {
+        writes.push(entries.flatMap((entry) => (entry.op === 'write' ? [entry.path] : [])));
+        return checkout.applyBatch!(entries, batchOptions);
+      },
+    });
+    await materializer(watched)(
+      liveCheckout,
+      new ImmutableRevisionTree([
+        ['a.scad', 'a\n'],
+        ['tau.json', '{}\n'],
+        ['b.scad', 'b\n'],
+      ]),
+      { before: new ImmutableRevisionTree([]), purpose: 'tree' },
+    );
+    expect(writes.filter((paths) => paths.length > 0)).toEqual([['tau.json', 'a.scad', 'b.scad']]);
+  });
+
+  it('should write the tree when the index cannot learn it, leaving its reading late', async () => {
+    const context = await project({});
+    const endExpectation = vi.fn();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const watched: RevisionFileSystem = Object.assign(Object.create(context.checkout) as RevisionFileSystem, {
+      expectEntries: async () => {
+        throw new Error('the index could not open');
+      },
+      endExpectation,
+    });
+    try {
+      await materializer(watched)(liveCheckout, new ImmutableRevisionTree([['tau.json', '{}\n']]), {
+        before: new ImmutableRevisionTree([]),
+        purpose: 'tree',
+      });
+      await expect(context.tree.readFile('tau.json', 'utf8')).resolves.toBe('{}\n');
+      expect(warn).toHaveBeenCalled();
+      expect(endExpectation).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('should end the expectation even when the bracket throws, and tell a failed write as failed', async () => {
     const context = await project({});
     const target = new ImmutableRevisionTree([
@@ -838,9 +884,31 @@ describe('the entry closure of a tree write (D10)', () => {
         outcomes.push(outcome);
       })(liveCheckout, target, { before: new ImmutableRevisionTree([]), purpose: 'tree', signal: controller.signal }),
     ).rejects.toThrow();
-    /* The recovery that puts the prior files back is a write of its own, and it lands. */
+    /* It tore the checkout, so it is told failed, and the recovery that puts the prior files back lands. */
     expect(outcomes).toEqual([{ failed: true }, { failed: false }]);
     expect(endExpectation).toHaveBeenCalledTimes(3);
+
+    /* One that fails before any byte lands leaves the checkout whole: it is not told failed, and nothing recovers. */
+    outcomes.length = 0;
+    const refusing: RevisionFileSystem = Object.assign(Object.create(watched) as RevisionFileSystem, {
+      applyBatch: async (): Promise<BatchReceipt[]> => {
+        throw new Error('The disk went away.');
+      },
+      apply: async () => {
+        throw new Error('The disk went away.');
+      },
+    });
+    await expect(
+      materializer(refusing, undefined, () => (outcome) => {
+        outcomes.push(outcome);
+      })(liveCheckout, new ImmutableRevisionTree([['b.scad', 'b\n']]), {
+        before: await captureRevisionTree(context.checkout, {
+          exclude: (path) => !tauRevisionPolicy.policy.classify(path).versioned,
+        }),
+        purpose: 'tree',
+      }),
+    ).rejects.toThrow('The disk went away.');
+    expect(outcomes).toEqual([{ failed: false }]);
   });
 
   it('should tell nothing for a fill flush', async () => {

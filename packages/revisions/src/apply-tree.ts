@@ -20,11 +20,15 @@ import { RevisionPortError } from '#revision-port.js';
 import type { Checkout } from '#revision-port.js';
 import { parseTemporarySibling } from '#revision-temporary-sibling.js';
 import type {
+  ApplyingTreeOutcome,
   ApplyingTreePurpose,
   RevisionActorsOptions,
   RevisionFileSystem,
   UseCheckoutFileSystem,
 } from '#revision-effects.types.js';
+
+/* A failed write's bracket release, held for the caller that learns whether the write left the checkout torn. */
+type HeldRelease = { release?: ((outcome?: ApplyingTreeOutcome) => void) | undefined };
 
 /**
  * Recover a checkout an apply died in: put back every backup sibling whose
@@ -360,7 +364,13 @@ export const createApplyTreeEffects = (
   const applyTree = async (
     place: Checkout,
     target: ImmutableRevisionTree,
-    applyOptions: Readonly<{ from: ImmutableRevisionTree; signal?: AbortSignal; purpose?: ApplyingTreePurpose }>,
+    applyOptions: Readonly<{
+      from: ImmutableRevisionTree;
+      signal?: AbortSignal;
+      purpose?: ApplyingTreePurpose;
+      /* Where a failed write leaves its bracket's release, for the caller to tell once it knows the checkout's state. */
+      held?: HeldRelease;
+    }>,
   ): Promise<readonly string[]> =>
     useFileSystem(place, async (live) => {
       const { from, signal, purpose = 'apply' } = applyOptions;
@@ -382,6 +392,7 @@ export const createApplyTreeEffects = (
        */
       const closure = purpose === 'fill' ? undefined : entryClosurePaths(targetFiles.get('tau.json')?.content);
       const first = new Set(closure);
+      changedFiles.sort(([left], [right]) => Number(first.has(right)) - Number(first.has(left)));
       const writtenPaths = changedFiles.map(([path]) => path);
       let release: ReturnType<NonNullable<typeof onApplyingTree>> | undefined;
       let failed = true;
@@ -394,17 +405,22 @@ export const createApplyTreeEffects = (
         if (closure !== undefined) {
           const arriving = new Set(writtenPaths);
           const placeholders = largeObjectPlaceholders(target);
-          await live.expectEntries?.(
-            target.entries().map(({ path, content }) => {
-              const pending = placeholders.get(path);
-              return {
-                path,
-                size: content.byteLength,
-                ...(pending === undefined ? {} : { pending: { oid: pending.oid, size: pending.size } }),
-                arriving: arriving.has(path),
-              };
-            }),
-          );
+          try {
+            await live.expectEntries?.(
+              target.entries().map(({ path, content }) => {
+                const pending = placeholders.get(path);
+                return {
+                  path,
+                  size: content.byteLength,
+                  ...(pending === undefined ? {} : { pending: { oid: pending.oid, size: pending.size } }),
+                  arriving: arriving.has(path),
+                };
+              }),
+            );
+          } catch (error) {
+            /* An index that cannot open leaves the reading at treeReady until the write ends: late, never wrong. */
+            console.warn('[revisions] the checkout index could not learn this tree write', error);
+          }
         }
         /* Removals: every removed file moves aside, its moved bytes prove it
          * was the file this apply meant to remove, and the backups go — a
@@ -429,7 +445,13 @@ export const createApplyTreeEffects = (
         await pruneEmptiedDirectories(live, removedPaths, targetFiles.keys());
         signal?.throwIfAborted();
 
-        /* D10: the entry closure lands first, created and replaced alike, then the rest. */
+        /*
+         * D10: the entry closure lands first, created and replaced alike, then
+         * the rest. When every closure file it changes is created, sorted
+         * first it already does within one pass, created files landing before
+         * any replacement: a cold open keeps its one changeset per bound (I8).
+         * A replaced closure file is its own pass, published before the rest.
+         */
         const land = async (files: typeof changedFiles): Promise<void> => {
           /* A path the checkout did not hold has nothing to move aside or verify:
            * it is one `create` write with its mode at its final path, refused if
@@ -557,8 +579,15 @@ export const createApplyTreeEffects = (
             );
           }
         };
-        await land(changedFiles.filter(([path]) => first.has(path)));
-        await land(changedFiles.filter(([path]) => !first.has(path)));
+        if (
+          changedFiles.some(([path]) => first.has(path) && liveFiles.has(path)) &&
+          changedFiles.some(([path]) => !first.has(path))
+        ) {
+          await land(changedFiles.filter(([path]) => first.has(path)));
+          await land(changedFiles.filter(([path]) => !first.has(path)));
+        } else {
+          await land(changedFiles);
+        }
         signal?.throwIfAborted();
         const reread = await capture(place, target);
         const verified = new Map(reread.entries().map((entry) => [entry.path, entry]));
@@ -588,7 +617,11 @@ export const createApplyTreeEffects = (
         if (closure !== undefined) {
           live.endExpectation?.();
         }
-        release?.({ failed });
+        if (failed && applyOptions.held !== undefined && typeof release === 'function') {
+          applyOptions.held.release = release;
+        } else {
+          release?.({ failed });
+        }
       }
     });
 
@@ -643,6 +676,7 @@ export const createApplyTreeEffects = (
       };
       materialization.signal?.throwIfAborted();
       const recoveryTarget = prepared.tree;
+      const held: HeldRelease = {};
       try {
         /* `applyTree` verifies the paths it wrote by re-reading them (C3); that
          * re-read is the settlement's second and last walk, so nothing here
@@ -651,22 +685,33 @@ export const createApplyTreeEffects = (
           from: before,
           ...(materialization.signal === undefined ? {} : { signal: materialization.signal }),
           ...(materialization.purpose === undefined ? {} : { purpose: materialization.purpose }),
+          held,
         });
         materialization.signal?.throwIfAborted();
         await prepared.verify?.();
         materialization.signal?.throwIfAborted();
         return { paths, result: await materialization.publish?.() };
       } catch (error) {
+        /* A failed write is told as failed only when it left the checkout torn: one that changed nothing, or undid
+         * itself, left it whole (D10, I7). */
+        const tell = (failed: boolean): void => {
+          const { release } = held;
+          held.release = undefined;
+          release?.({ failed });
+        };
         try {
           const current = await capture(place, before);
           const recovery = recoveryTree(before, recoveryTarget, current);
-          if ((await checkoutTreeId(place.id, current)) !== (await checkoutTreeId(place.id, recovery))) {
+          const torn = (await checkoutTreeId(place.id, current)) !== (await checkoutTreeId(place.id, recovery));
+          tell(torn);
+          if (torn) {
             await applyTree(place, recovery, {
               from: current,
               ...(materialization.purpose === undefined ? {} : { purpose: materialization.purpose }),
             });
           }
         } catch (recoveryError) {
+          tell(true);
           const reason = error instanceof Error ? error.message : String(error);
           throw new AggregateError(
             [error, recoveryError],

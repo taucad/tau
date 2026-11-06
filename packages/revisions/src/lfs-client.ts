@@ -86,7 +86,49 @@ export type LfsClientOptions = Readonly<{
   uploadConcurrency?: number;
   /** How many objects download at once. Defaults to {@link lfsDownloadConcurrency}, at most {@link lfsDownloadConcurrencyMaximum}; `1` is serial. */
   downloadConcurrency?: number;
+  /** Milliseconds one download may go without a byte before it is retried; {@link lfsTransferStallMilliseconds} by default. */
+  transferStallMilliseconds?: number;
 }>;
+
+/**
+ * How long one large-object download may go without receiving a byte,
+ * waiting for its first one included, before it is abandoned and retried
+ * (I10: the same order as a read's stall bound). A transfer that hangs fails
+ * after its attempts, so the fill can be retried instead of waiting on it
+ * until the project closes. Milliseconds.
+ *
+ * @public
+ */
+export const lfsTransferStallMilliseconds = 60_000;
+
+/* A timer that aborts one transfer when it goes `milliseconds` without progress; `touch` restarts it. */
+const transferStall = (
+  milliseconds: number,
+  signal: AbortSignal | undefined,
+): Readonly<{ signal: AbortSignal; stalled: Promise<never>; touch: () => void; clear: () => void }> => {
+  const controller = new AbortController();
+  const stalled = Promise.withResolvers<never>();
+  // oxlint-disable-next-line promise/prefer-await-to-then -- marks the rejection handled; the transfer races it.
+  stalled.promise.catch(() => undefined);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const touch = (): void => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      const reason = new Error(`No bytes arrived for ${String(milliseconds)} ms.`);
+      controller.abort(reason);
+      stalled.reject(reason);
+    }, milliseconds);
+  };
+  touch();
+  return {
+    signal: signal === undefined ? controller.signal : AbortSignal.any([signal, controller.signal]),
+    stalled: stalled.promise,
+    touch,
+    clear: () => {
+      clearTimeout(timer);
+    },
+  };
+};
 
 /**
  * How many large objects one push uploads at once (F5).
@@ -119,8 +161,9 @@ export const lfsUploadResidentBytes = 64 * 1024 * 1024;
  * HTTP/2 or HTTP/3 connection, so 24 in flight cut a 300-object open to about
  * a dozen round trips (files service blueprint §4). Against an HTTP/1.1 object
  * store the browser queues the surplus behind its six connections, which costs
- * nothing. {@link lfsDownloadResidentBytes} bounds memory whatever the count,
- * and no transfer carries its own timer, so the count changes no deadline.
+ * nothing. {@link lfsDownloadResidentBytes} bounds memory whatever the count.
+ * Each transfer's only timer is its no-progress stall
+ * ({@link lfsTransferStallMilliseconds}), never a deadline.
  *
  * @public
  */
@@ -676,13 +719,17 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
         throw new Error(`The remote has no large object ${pointer.oid}.`);
       }
       let response: Response | undefined;
+      const stall = transferStall(options.transferStallMilliseconds ?? lfsTransferStallMilliseconds, signal);
       try {
-        response = await transfer(action.href, {
-          headers: action.header ?? {},
-          signal,
-          credentials: 'omit',
-          redirect: 'error',
-        });
+        response = await Promise.race([
+          transfer(action.href, {
+            headers: action.header ?? {},
+            signal: stall.signal,
+            credentials: 'omit',
+            redirect: 'error',
+          }),
+          stall.stalled,
+        ]);
       } catch {
         signal?.throwIfAborted();
       }
@@ -696,7 +743,8 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
           let complete = false;
           while (!complete) {
             signal?.throwIfAborted();
-            const chunk = await reader?.read();
+            stall.touch();
+            const chunk = await Promise.race([reader?.read(), stall.stalled]);
             complete = chunk === undefined || chunk.done;
             if (chunk === undefined || chunk.done) {
               break;
@@ -715,6 +763,7 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
           }
           interrupted = true;
         } finally {
+          stall.clear();
           await reader?.cancel().catch(() => undefined);
           reader?.releaseLock();
         }
@@ -725,6 +774,7 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
           return { content, transfer: { transport: lfsTransportOf(action.href) } };
         }
       } else {
+        stall.clear();
         await response?.body?.cancel();
         /* An action from the batch answer may have lapsed while it queued behind
          * the transfers ahead of it (a relay that never said when it expires,

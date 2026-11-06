@@ -13,7 +13,7 @@ import { createWorkspaceFileService } from '#testing/workspace-service-harness.j
 import { ProjectIndex, timestampGranularityMilliseconds } from '#project-index/project-index.js';
 import type { ObservedRow } from '#project-index/project-index.js';
 import { ProjectIndexes } from '#project-index/project-indexes.js';
-import { readIndexSnapshot, snapshotPath } from '#project-index/index-snapshot.js';
+import { parseIndexSnapshot, readIndexSnapshot, snapshotPath } from '#project-index/index-snapshot.js';
 import { tauPathPolicy } from '#path-registry.js';
 import type { WorkspaceFileService } from '#workspace-file-service.js';
 
@@ -887,6 +887,22 @@ describe('ProjectIndexes', () => {
     expect(reloaded.pendingAt('/p/part.step')).toEqual(object);
     expect(reloaded.pendingAt('/p/main.scad')).toBeUndefined();
     expect(reads()).toBe(0);
+  });
+
+  it('should keep each well-formed pending entry when another in the stored map is malformed', () => {
+    const object = { oid: 'c'.repeat(64), size: 7 };
+    const parsed = parseIndexSnapshot(
+      JSON.stringify({
+        format: 'tau-project-index',
+        version: 1,
+        vector: { generation: 1, seqByTab: {} },
+        rescan: false,
+        writtenAt: 1,
+        entries: [],
+        pending: { 'part.step': object, 'bad.step': { oid: 'not-an-oid', size: 7 }, 'odd.step': 3 },
+      }),
+    );
+    expect(parsed?.pending).toEqual({ 'part.step': object });
   });
 
   it('should re-observe what a notice left unknown before storing a snapshot that claims it', async () => {

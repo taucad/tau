@@ -161,18 +161,18 @@ export const parseIndexSnapshot = (text: string): IndexSnapshot | undefined => {
   ) {
     return undefined;
   }
-  /* A malformed pending map is dropped, not the snapshot: a read marks the entry again. */
-  const pendingObjects =
-    isRecord(pending) &&
-    Object.values(pending).every(
-      (object) =>
-        isRecord(object) &&
-        typeof object['oid'] === 'string' &&
-        pendingOid.test(object['oid']) &&
-        isCount(object['size']),
-    )
-      ? (pending as Record<string, PendingObject>)
-      : undefined;
+  /* A malformed pending entry is dropped, not the map or the snapshot: a read marks it again. */
+  const pendingObjects = isRecord(pending)
+    ? Object.fromEntries(
+        Object.entries(pending).filter(
+          (entry): entry is [string, PendingObject] =>
+            isRecord(entry[1]) &&
+            typeof entry[1]['oid'] === 'string' &&
+            pendingOid.test(entry[1]['oid']) &&
+            isCount(entry[1]['size']),
+        ),
+      )
+    : undefined;
   return {
     vector: { generation: vector['generation'], seqByTab: vector['seqByTab'] as Record<string, number> },
     rescan,

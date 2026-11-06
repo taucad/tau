@@ -8,7 +8,7 @@ import { cadEdgeOverlayMaterialDefaults } from '@taucad/runtime/types';
 import { glbToDocument } from '@taucad/runtime-testing';
 import type { OpenCascadeInstance } from 'libcascade/init';
 import { extractShapeEdges } from '#opencascade-edges.js';
-import { countGlbMesh, countStlTriangles, finishShapesGlb, writeShapesGlb } from '#opencascade-mesh.js';
+import { countGlbMesh, finishShapesGlb, writeShapesGlb } from '#opencascade-mesh.js';
 import type { ShapeEntry } from '#opencascade.types.js';
 
 /** The glTF position attribute, whose name glTF fixes in upper case. */
@@ -48,23 +48,6 @@ describe('countGlbMesh', () => {
       triangles: 0,
       vertices: 0,
     });
-  });
-});
-
-describe('countStlTriangles', () => {
-  it('reads the triangle count of a binary STL from its header', () => {
-    const stl = new Uint8Array(84 + 2 * 50);
-    new DataView(stl.buffer).setUint32(80, 2, true);
-    expect(countStlTriangles(stl)).toBe(2);
-  });
-
-  it('counts the facets of an ASCII STL', () => {
-    const facet =
-      'facet normal 0 0 1\n outer loop\n  vertex 0 0 0\n  vertex 1 0 0\n  vertex 0 1 0\n endloop\nendfacet\n';
-    const ascii = `solid shape\n${facet.repeat(3)}endsolid shape\n`;
-    expect(countStlTriangles(new TextEncoder().encode(ascii))).toBe(3);
-    expect(countStlTriangles(new TextEncoder().encode('solid empty\nendsolid empty\n'))).toBe(0);
-    expect(countStlTriangles(new Uint8Array())).toBe(0);
   });
 });
 

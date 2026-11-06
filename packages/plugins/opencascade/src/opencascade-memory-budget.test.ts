@@ -2,7 +2,6 @@
 /* oxlint-disable typescript/no-unsafe-assignment -- Vitest asymmetric matchers are typed as any. */
 import { describe, expect, it } from 'vitest';
 import { esbuildBundler } from '@taucad/esbuild';
-import { occtTriangleBudgets } from '@taucad/occt-core';
 import { assertRenderingSuccess, createMockKernelRuntime, createTestGeometry } from '@taucad/runtime-testing';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { defineRuntime } from '@taucad/runtime/worker';
@@ -12,13 +11,14 @@ import { opencascadeOptionsSchema } from '#opencascade.schemas.js';
 const sphere = `import { BRepPrimAPI_MakeSphere } from 'libcascade';
 export default function main() { return new BRepPrimAPI_MakeSphere(5).Shape(); }`;
 
-// D-RT-05 / D-GFX-10: the preview budget was the same 2,000,000 triangles on a phone as on a desktop.
+// D1 (kernel budget program): no preview budget on any device. A host that still passes the deprecated option
+// gets the requested tessellation, never a coarsened one.
 describe('OpenCascade host memory budget', { timeout: 120_000 }, () => {
-  it('defaults to the policy preview budget', () => {
-    expect(opencascadeOptionsSchema.parse({})).toMatchObject({ previewTriangleBudget: occtTriangleBudgets.preview });
+  it('has no default preview triangle budget', () => {
+    expect(opencascadeOptionsSchema.parse({})).not.toHaveProperty('previewTriangleBudget');
   });
 
-  it("coarsens a preview to the host's previewTriangleBudget and reports it", async () => {
+  it('renders a preview over the former previewTriangleBudget at the requested tessellation', async () => {
     const previewTriangleBudget = 200;
     const rendering = await createTestGeometry({
       runtime: defineRuntime({
@@ -29,13 +29,11 @@ describe('OpenCascade host memory budget', { timeout: 120_000 }, () => {
       open: { source: { path: 'main.ts' } },
     });
     assertRenderingSuccess(rendering);
-    expect(rendering.artifact.tessellation?.downgraded).toBeGreaterThanOrEqual(1);
-    expect(rendering.issues).toContainEqual(
-      expect.objectContaining({
-        code: 'TESSELLATION_DOWNGRADED',
-        details: expect.objectContaining({ budget: previewTriangleBudget }),
-      }),
-    );
+    const { tessellation } = rendering.artifact;
+    expect(tessellation?.triangles).toBeGreaterThan(previewTriangleBudget);
+    expect(tessellation).toMatchObject({ requested: 'medium' });
+    expect(tessellation).not.toHaveProperty('downgraded');
+    expect(rendering.issues).not.toContainEqual(expect.objectContaining({ code: 'TESSELLATION_DOWNGRADED' }));
   });
 
   // D-RT-03: a host can recycle a worker past its device's threshold only if each rendering says how large the

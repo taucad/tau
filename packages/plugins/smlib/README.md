@@ -13,7 +13,7 @@ SMLib kernel plugin for Tau
 - **A NURBS B-rep kernel in the browser** — author `.ts`/`.js` models against
   [`@classcad/smlibwasm`](https://www.npmjs.com/package/@classcad/smlibwasm), the WebAssembly build of
   SMLib from NVIDIA's USD BRep with a build123d-style API (`Box`, `fillet`, `GridLocations`).
-- **Exact exports** — STEP keeps each body's name and color; STL, GLB, and glTF follow Tau's tessellation presets and budgets.
+- **Exact exports** — STEP keeps each body's name and color; STL, GLB, and glTF follow Tau's tessellation presets at the requested tolerance, with no triangle budget.
 - **Physical materials and mechanisms** — `@taucad/smlib/model` returns glTF PBR materials and textures; an
   exported `mechanism` animates the model through `@taucad/kinematics`.
 - **No module-scope work** — the library and its WebAssembly load in `initialize()`, one instance per worker.

@@ -1,12 +1,8 @@
 import type { AnyShape, Drawing } from 'replicad';
 import type { OpenCascadeInstance } from 'replicad-opencascadejs';
 import type { SetRequired } from 'type-fest';
-import type { GeometrySvg, KernelIssue, RuntimeSpanTracer, TessellationReport } from '@taucad/runtime/types';
-import {
-  createTessellationDowngradedIssue,
-  resolveOcctTessellation,
-  tessellateWithinOcctBudget,
-} from '@taucad/occt-core';
+import type { GeometrySvg, RuntimeSpanTracer, TessellationReport } from '@taucad/runtime/types';
+import { resolveOcctTessellation } from '@taucad/occt-core';
 import type { OcctResolvedTessellation, OcctTessellation, OcctTessellationTolerances } from '@taucad/occt-core';
 import type { ShapeConfig } from '#model.js';
 import { addSurfaceCoordinates } from '#utils/surface-coordinates.js';
@@ -809,7 +805,7 @@ export function resolveReplicadTessellation(
  * @param geometries - Rendered geometries; drawings count nothing.
  * @returns Triangle and vertex counts.
  */
-export function countMesh(geometries: ReadonlyArray<GeometrySvg | GeometryReplicad>): {
+function countMesh(geometries: ReadonlyArray<GeometrySvg | GeometryReplicad>): {
   triangles: number;
   vertices: number;
 } {
@@ -824,65 +820,38 @@ export function countMesh(geometries: ReadonlyArray<GeometrySvg | GeometryReplic
   return { triangles, vertices };
 }
 
-/** A rendering within a triangle budget, with its cost report and any downgrade warning. */
-export type BudgetedRender = {
+/** A rendering at the requested tessellation, with its cost report. */
+export type TessellatedRender = {
   geometries: Array<GeometrySvg | GeometryReplicad>;
   tessellation: TessellationReport;
-  issues: KernelIssue[];
 };
 
 /**
- * Render a preview within a triangle budget. The request resolves to absolute tolerances; while
- * the mesh exceeds the budget it is re-tessellated one step coarser, at most three times, and a
- * `TESSELLATION_DOWNGRADED` warning names the requested and effective tolerances.
+ * Render at the requested tessellation, once. The request resolves to absolute tolerances and
+ * the mesh is never coarsened; the report carries its triangles, vertices, elapsed time and the
+ * tolerances it was produced at.
  *
  * @param shapes - The shapes to render.
- * @param options - Request, budget, and the {@link render} options other than tessellation.
- * @returns Geometries, the tessellation report and the downgrade warning when one was taken.
+ * @param options - Request and the {@link render} options other than tessellation.
+ * @returns Geometries and the tessellation report.
  */
-export function renderWithinBudget(
+export function renderTessellated(
   shapes: NamedInputShape[],
-  options: Omit<RenderOptions, 'tessellation'> & {
-    request: ReplicadTessellationRequest;
-    budget: number;
-  },
-): BudgetedRender {
-  const { request, budget, ...renderOptions } = options;
+  options: Omit<RenderOptions, 'tessellation'> & { request: ReplicadTessellationRequest },
+): TessellatedRender {
+  const { request, ...renderOptions } = options;
   const started = performance.now();
   const requested = resolveReplicadTessellation(shapes, request);
-  const { result, effective, downgraded } = tessellateWithinOcctBudget({
-    tolerances: requested,
-    budget,
-    tessellate(tolerances) {
-      const geometries = render(shapes, { ...renderOptions, tessellation: tolerances });
-      return { geometries, ...countMesh(geometries) };
-    },
-  });
-  const elapsed = performance.now() - started;
+  const geometries = render(shapes, { ...renderOptions, tessellation: requested });
   return {
-    geometries: result.geometries,
+    geometries,
     tessellation: {
-      triangles: result.triangles,
-      vertices: result.vertices,
-      elapsed,
+      ...countMesh(geometries),
+      elapsed: performance.now() - started,
       requested: requested.requested,
-      linearTolerance: effective.linearTolerance,
-      angularTolerance: effective.angularTolerance,
-      downgraded,
+      linearTolerance: requested.linearTolerance,
+      angularTolerance: requested.angularTolerance,
     },
-    issues:
-      downgraded === 0
-        ? []
-        : [
-            createTessellationDowngradedIssue({
-              producer: 'replicad',
-              requested,
-              effective,
-              downgraded,
-              triangles: result.triangles,
-              budget,
-            }),
-          ],
   };
 }
 

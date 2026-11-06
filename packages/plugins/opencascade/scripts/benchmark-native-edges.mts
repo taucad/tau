@@ -16,7 +16,7 @@ import { gltfEdgeDetection } from '@taucad/middleware';
 import { initOcct, occtExplicitTessellationDefaults } from '@taucad/occt-core';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import type { OpenCascadeInstance } from 'libcascade/init';
-import { renderShapesWithinBudget } from '#opencascade-mesh.js';
+import { renderShapesTessellated } from '#opencascade-mesh.js';
 import type { ShapeEntry } from '#opencascade.types.js';
 
 const { values } = parseArgs({ options: { iterations: { type: 'string', default: '5' } } });
@@ -94,7 +94,7 @@ const main = async (): Promise<void> => {
   let report = { triangles: 0, fallbackLines: 0, nativeLines: 0 };
   for (let iteration = 0; iteration < iterations; iteration++) {
     let started = performance.now();
-    const plain = await renderShapesWithinBudget(oc, shapes, { request, budget: Number.POSITIVE_INFINITY });
+    const plain = await renderShapesTessellated(oc, shapes, { request });
     render.push(performance.now() - started);
     started = performance.now();
     const detected = await detector.wrapRender!(
@@ -105,11 +105,7 @@ const main = async (): Promise<void> => {
     detection.push(performance.now() - started);
 
     started = performance.now();
-    const drawn = await renderShapesWithinBudget(oc, shapes, {
-      request,
-      budget: Number.POSITIVE_INFINITY,
-      includeEdges: true,
-    });
+    const drawn = await renderShapesTessellated(oc, shapes, { request, includeEdges: true });
     native.push(performance.now() - started);
 
     if (!detected.success || !(detected.data.content instanceof Uint8Array)) {

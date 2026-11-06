@@ -33,12 +33,7 @@ import {
   toVmEntryPath,
 } from '@taucad/runtime/kernel';
 import type { KernelLibraryTraceHandle, KernelServices } from '@taucad/runtime/kernel';
-import {
-  createTessellationBudgetExceededIssue,
-  occtExplicitTessellationDefaults,
-  occtTriangleBudgets,
-} from '@taucad/occt-core';
-import type { OcctResolvedTessellation } from '@taucad/occt-core';
+import { occtExplicitTessellationDefaults } from '@taucad/occt-core';
 import {
   createEmptyGlb,
   createEmptyGltf,
@@ -52,12 +47,11 @@ import type { ShapeConfig } from '#model.js';
 import { smlibDetectPattern, smlibModuleName } from '#smlib.constants.js';
 import { smlibExportSchemas, smlibOptionsSchema, smlibRenderSchema } from '#smlib.schemas.js';
 import {
-  countMesh,
   isDrawingShape,
   normalizeRenderShapes,
   render,
   renderDrawing,
-  renderWithinBudget,
+  renderTessellated,
   resolveSmlibTessellation,
   sampleDrawing,
 } from '#utils/render-output.js';
@@ -446,21 +440,19 @@ export const smlibKernel = defineKernel({
       const includeEdges = content?.includeEdges === true;
       const includeTopology = content?.includeTopology === true;
       let mechanismIssues: KernelIssue[] = [];
-      // The render hook cannot tell a viewer preview from a capture, so every render takes the
-      // preview budget.
-      const budgeted = await tracedPhase(tracer, 'mesh.renderDisplayTessellation', () => {
+      // One pass at the requested tessellation: nothing coarsens a mesh (no triangle budget).
+      const rendered = await tracedPhase(tracer, 'mesh.renderDisplayTessellation', () => {
         const span = tracer.startSpan('smlib.render-output', { phase: 'computingGeometry', stage: 'render-output' });
         try {
           return context.libraryTrace.runInScope({
             scope: 'render-output',
             operation: () =>
-              renderWithinBudget(modelShapes, {
+              renderTessellated(modelShapes, {
                 library,
                 request: {
                   tessellation: options.tessellation,
                   explicitDefaults: occtExplicitTessellationDefaults.preview,
                 },
-                budget: occtTriangleBudgets.preview,
                 collectBrepEdges: includeEdges || includeTopology,
                 tracer,
               }),
@@ -473,7 +465,7 @@ export const smlibKernel = defineKernel({
 
       const gltf = await tracedPhase(tracer, 'mesh.packGltf', () => {
         const span = tracer.startSpan('smlib.mesh-to-gltf', {
-          shapeCount: budgeted.geometries.length,
+          shapeCount: rendered.geometries.length,
           phase: 'computingGeometry',
           stage: 'gltf-pack',
         });
@@ -483,8 +475,8 @@ export const smlibKernel = defineKernel({
             textures: handle.textures,
             samplers: handle.samplers,
             geometries: includeEdges
-              ? budgeted.geometries
-              : budgeted.geometries.map((geometry) => ({ ...geometry, edges: { ...geometry.edges, lines: [] } })),
+              ? rendered.geometries
+              : rendered.geometries.map((geometry) => ({ ...geometry, edges: { ...geometry.edges, lines: [] } })),
             format: 'glb',
             includeTauTopology: includeTopology,
             logger: runtime.logger,
@@ -499,8 +491,8 @@ export const smlibKernel = defineKernel({
       });
       return {
         content: gltf,
-        tessellation: budgeted.tessellation,
-        issues: [...budgeted.issues, ...mechanismIssues],
+        tessellation: rendered.tessellation,
+        issues: mechanismIssues,
       };
     } catch (error) {
       if (error instanceof SmlibBuildError || runtime.signal.aborted) {
@@ -549,7 +541,6 @@ export const smlibKernel = defineKernel({
                 tracer: runtime.tracer,
               }),
             );
-            assertWithinExportBudget(requested, countMesh(geometries).triangles);
             let mechanismIssues: KernelIssue[] = [];
             const gltf = await tracedPhase(runtime.tracer, 'export.packGltf', () =>
               convertSmlibGeometriesToGltf({
@@ -635,10 +626,6 @@ export const smlibKernel = defineKernel({
                 new Uint8Array(bytes),
               );
             });
-            assertWithinExportBudget(
-              requested,
-              files.reduce((total, file) => total + countStlTriangles(file.bytes, options.binary), 0),
-            );
             return { files: nonemptyExportFiles(files) };
           }
 
@@ -734,37 +721,6 @@ const serializeSmlibHandle = (library: SmlibLibrary, handle: NativeHandle): Seri
     return { kind: 'brep', smb: new Uint8Array(library.toSmb(body)), metadata };
   }),
 });
-
-const binaryStlHeaderBytes = 80;
-
-/**
- * Triangles in an STL file: the binary header count, or the ASCII facet count.
- * @param bytes - STL file bytes.
- * @param binary - Whether the file is binary STL.
- * @returns The triangle count.
- */
-function countStlTriangles(bytes: Uint8Array<ArrayBuffer>, binary: boolean): number {
-  if (!binary) {
-    return new TextDecoder().decode(bytes).match(/^\s*facet\b/gm)?.length ?? 0;
-  }
-  return bytes.byteLength < binaryStlHeaderBytes + 4
-    ? 0
-    : new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(binaryStlHeaderBytes, true);
-}
-
-/**
- * Exports refuse instead of coarsening: an over-budget mesh fails with a suggested tessellation.
- * @param requested - The resolved request the export meshed with.
- * @param triangles - Triangles the export produced.
- */
-function assertWithinExportBudget(requested: OcctResolvedTessellation, triangles: number): void {
-  const budget = occtTriangleBudgets.export;
-  if (triangles > budget) {
-    throw new SmlibBuildError([
-      createTessellationBudgetExceededIssue({ producer: kernelId, requested, triangles, budget }),
-    ]);
-  }
-}
 
 class SmlibBuildError extends Error {
   public readonly issues: KernelIssue[];

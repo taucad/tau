@@ -39,22 +39,18 @@ import {
   resolveOcctModuleFactory,
   wrapOcForExceptions,
   wrapOcWithTracing,
-  createTessellationBudgetExceededIssue,
   occtExplicitTessellationDefaults,
-  occtTriangleBudgets,
 } from '@taucad/occt-core';
 
 import { opencascadeOptionsSchema, opencascadeRenderSchema, opencascadeExportSchemas } from '#opencascade.schemas.js';
 
-import type { OcctModuleFactory, OcctResolvedTessellation, OcTracingSummary } from '@taucad/occt-core';
+import type { OcctModuleFactory, OcTracingSummary } from '@taucad/occt-core';
 
 import {
-  countGlbMesh,
-  countStlTriangles,
   createIncrementalMesh,
   finishShapesGlb,
   parseHexColor,
-  renderShapesWithinBudget,
+  renderShapesTessellated,
   resolveOpencascadeTessellation,
   toMeshTolerances,
   writeShapesGlb,
@@ -110,10 +106,9 @@ export type OpenCascadeOptions = {
   /** OC API call tracing mode. `'summary'` (default) emits aggregated stats, `'per-call'` emits individual spans. */
   ocTracing?: 'off' | 'summary' | 'per-call';
   /**
-   * Triangles a preview may carry before it is coarsened one step at a time (and a `TESSELLATION_DOWNGRADED`
-   * warning reported). A host on a memory-constrained device passes a smaller budget.
+   * Ignored: previews are never coarsened, so there is no triangle budget. Kept until hosts stop passing it.
    *
-   * @default occtTriangleBudgets.preview (2,000,000)
+   * @deprecated No effect; previews mesh at the requested tessellation.
    */
   previewTriangleBudget?: number;
 };
@@ -127,8 +122,6 @@ type OpenCascadeContext = {
   /** This kernel's share of the realm's one libcascade instance. */
   occt: RealmHold<OpenCascadeInstance>;
   isParallelMeshing: boolean;
-  /** Triangles a preview may carry before it is coarsened. */
-  previewTriangleBudget: number;
   tracingSummary?: OcTracingSummary;
   /** Unique MEMFS scratch path per snapshot write, owned by this kernel instance. */
   nextSnapshotPath: (index: number) => string;
@@ -694,7 +687,6 @@ export const opencascadeKernel = defineKernel({
         oc,
         occt,
         isParallelMeshing: resolved.variant === 'multi',
-        previewTriangleBudget: options.previewTriangleBudget,
         tracingSummary,
         nextSnapshotPath: createSnapshotPathAllocator(),
       } satisfies OpenCascadeContext;
@@ -828,11 +820,9 @@ export const opencascadeKernel = defineKernel({
       });
 
       try {
-        // The render hook cannot tell a viewer preview from a capture, so every render takes the
-        // preview budget.
-        return await renderShapesWithinBudget(context.oc, handle, {
+        // One pass at the requested tessellation: nothing coarsens a mesh (no triangle budget).
+        return await renderShapesTessellated(context.oc, handle, {
           request: { tessellation: options.tessellation, explicitDefaults: occtExplicitTessellationDefaults.preview },
-          budget: context.previewTriangleBudget,
           inParallel: context.isParallelMeshing,
           includeEdges: content?.includeEdges === true,
         });
@@ -875,7 +865,6 @@ export const opencascadeKernel = defineKernel({
           coordinateSystem,
           unit,
         });
-        assertWithinExportBudget(requested, countGlbMesh(rawGlb).triangles);
         const edges =
           content?.includeEdges === true
             ? handle.map((entry) => extractShapeEdges(context.oc, entry.shape, toMeshTolerances(requested)))
@@ -918,10 +907,6 @@ export const opencascadeKernel = defineKernel({
             inParallel: context.isParallelMeshing,
             coordinateSystem,
           }),
-        );
-        assertWithinExportBudget(
-          requested,
-          results.reduce((total, file) => total + countStlTriangles(file.bytes), 0),
         );
 
         return { files: nonemptyExportFiles(results) };
@@ -969,21 +954,6 @@ export const opencascadeKernel = defineKernel({
     context.occt.release();
   },
 });
-
-/**
- * Exports refuse instead of coarsening: an over-budget mesh fails with a suggested tessellation.
- *
- * @param requested - The resolved request the export meshed with.
- * @param triangles - Triangles the export produced.
- */
-function assertWithinExportBudget(requested: OcctResolvedTessellation, triangles: number): void {
-  const budget = occtTriangleBudgets.export;
-  if (triangles > budget) {
-    throw new OcctBuildError([
-      createTessellationBudgetExceededIssue({ producer: 'opencascade', requested, triangles, budget }),
-    ]);
-  }
-}
 
 class OcctBuildError extends Error {
   public readonly issues: KernelIssue[];

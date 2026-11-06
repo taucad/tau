@@ -1,5 +1,11 @@
 # Deploy Fly's log shipper (`infra/fly-log-shipper`, launch gate OBS-5).
 #
+# The image is the pinned upstream shipper plus Tau's Loki sink (the Dockerfile
+# there). The run first builds it, renders the sink the way the image's start
+# script does and runs `vector validate` and the `vector-tests/` unit tests with
+# the image's own Vector, so a broken config never replaces a working shipper;
+# then Fly's remote builder builds and deploys it with the same token.
+#
 # Manual only, in the `production` environment (admits `main` only, and its
 # reviewer approves the run). The shipper is org-wide, so one deploy covers
 # staging and production. Its secrets are written by tau-cloud
@@ -41,6 +47,23 @@ jobs:
           persist-credentials: false
           sparse-checkout: infra/fly-log-shipper
 
+      - name: Validate the Vector config
+        working-directory: infra/fly-log-shipper
+        # Placeholder values only: validation reads no secret and dials nothing.
+        run: |
+          docker build --tag tau-log-shipper:check .
+          docker run --rm \
+            -e LOKI_URL=http://127.0.0.1:3100 -e LOKI_USERNAME=check -e LOKI_PASSWORD=check -e ACCESS_TOKEN=check \
+            -v "$PWD/vector-tests:/vector-tests:ro" \
+            tau-log-shipper:check bash -c '
+              set -euo pipefail
+              sed "/^exec vector/d" /start-fly-log-transporter.sh > /tmp/render.sh
+              bash /tmp/render.sh
+              test -f /etc/vector/sinks/loki.toml
+              vector validate --no-environment /etc/vector/vector.toml /etc/vector/sinks/loki.toml
+              vector test /etc/vector/vector.toml /etc/vector/sinks/loki.toml /vector-tests/loki-service.toml
+            '
+
       - name: Setup Fly.io CLI
         uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # master
 
@@ -54,7 +77,8 @@ jobs:
           exit "$missing"
 
       - name: Deploy
-        run: flyctl deploy --config infra/fly-log-shipper/fly.toml --app "$FLY_APP" --ha=false --yes
+        working-directory: infra/fly-log-shipper
+        run: flyctl deploy --config fly.toml --app "$FLY_APP" --remote-only --ha=false --yes
 
       - name: Machine state
         run: flyctl machine list --app "$FLY_APP"

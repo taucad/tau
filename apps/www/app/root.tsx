@@ -21,7 +21,7 @@ import type { SiteConfiguration } from '#app/config.server.js';
 import { siteConfiguration } from '#app/config.server.js';
 import type { Route } from './+types/root.js';
 import siteCss from '#www/site.css?inline';
-import { appOrigin } from '#www/environment.js';
+import { appHref } from '#www/environment.js';
 
 export function loader(): SiteConfiguration & { nonce: string } {
   return { ...siteConfiguration(), nonce: randomUuid() };
@@ -73,7 +73,7 @@ function Navigation({ label }: { label: string }) {
         </Link>
       ))}
       <a href='https://docs.tau.new/'>Docs ↗</a>
-      {label === 'Mobile navigation' ? <a href={`${appOrigin}/auth/sign-in`}>Sign in ↗</a> : null}
+      {label === 'Mobile navigation' ? <a href={appHref('/auth/sign-in')}>Sign in ↗</a> : null}
     </nav>
   );
 }
@@ -117,11 +117,11 @@ function SiteShell({ children }: { children?: React.ReactNode }) {
             <Navigation label='Main navigation' />
           </div>
           <div className='header-actions'>
-            <a className='signin' href={`${appOrigin}/auth/sign-in`}>
+            <a className='signin' href={appHref('/auth/sign-in')}>
               Sign in
             </a>
             <Button asChild size='sm'>
-              <a href='https://tau.new/projects/new' data-event='cta' data-placement='header'>
+              <a href={appHref('/projects/new')} data-event='cta' data-placement='header'>
                 Start designing ↗
               </a>
             </Button>
@@ -271,7 +271,7 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps): React.JSX.El
             <Button asChild size='lg'>
               <a href='/'>Go to the homepage</a>
             </Button>
-            <a className='text-link' href={`${appOrigin}/projects`}>
+            <a className='text-link' href={appHref('/projects')}>
               Open projects ↗
             </a>
           </div>

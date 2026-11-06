@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { FileTreeService } from '#file-tree-service.js';
 import type { ExternalPollTelemetry } from '#file-tree-service.js';
-import type { FileTreeNode, HeadFileStat, WatchEvent } from '@taucad/filesystem';
+import type { FileTreeNode, WatchEvent } from '@taucad/filesystem';
 import type { ChangeEvent, FileEntry, FileProvenance, FileStat } from '@taucad/types';
 import { WorkerChangeChannel } from '#worker-change-channel.js';
 import type { WorkerChangeChannelTransport } from '#worker-change-channel.js';
@@ -309,21 +309,7 @@ const dependencyMountView = (): ComposedViewProxy => {
     ['', [{ name: 'three', type: 'dir', size: 0, mtimeMs: 0 }]],
     ['three', [{ name: 'index.d.ts', ...textStat() }]],
   ]);
-  function readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>>;
-  function readdirWithStats(
-    path: string,
-    options: { readonly content: 'head' },
-  ): Promise<Array<{ name: string } & HeadFileStat>>;
-  async function readdirWithStats(path: string, options?: { readonly content: 'head' }) {
-    const entries = rows.get(path) ?? [];
-    return options === undefined
-      ? entries
-      : entries.map((row) =>
-          row.type === 'file' && row.contentKind === 'text'
-            ? { name: row.name, type: row.type, size: row.size, mtimeMs: row.mtimeMs, contentKind: row.contentKind }
-            : row,
-        );
-  }
+  const readdirWithStats = async (path: string): Promise<Array<{ name: string } & FileStat>> => rows.get(path) ?? [];
   const view = mock<ComposedViewProxy>({
     readdirWithStats,
     readdir: vi.fn().mockResolvedValue([]),
@@ -376,7 +362,7 @@ describe('FileTreeService dependency mount row (close-out W3)', () => {
       /* The resync walks resolved directories root-first, so the mount's own arm
        * runs only while the row survived the root's merge. */
       await vi.waitFor(() => {
-        expect(dependencies.readdirWithStats).toHaveBeenCalledWith('', { content: 'head' });
+        expect(dependencies.readdirWithStats).toHaveBeenCalledWith('');
       });
 
       expect(tree.getTreeSnapshot().has('node_modules')).toBe(true);

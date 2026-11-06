@@ -34,6 +34,7 @@ import type {
   ExportFile,
   FileContentMetadata,
   FileProvenance,
+  StatContentMetadata,
 } from '@taucad/types';
 import type { KernelIssue } from '@taucad/runtime';
 import type { WorkbenchView } from '@taucad/workbench';
@@ -53,7 +54,9 @@ export type RpcInvocationContext = Readonly<{
 export type RpcProgressReport = Readonly<{ progress: number; total?: number; message?: string }>;
 /**
  * One direct child returned by {@link RpcFileSystem.readdir}.
- * `name` is a basename, never a path.
+ * `name` is a basename, never a path. A file carries its kind, and a text
+ * file its exact line count, where a listing could measure them within its
+ * byte cap (charter D4, EQ15); otherwise its size alone.
  *
  * @public
  */
@@ -75,7 +78,21 @@ export type RpcDirectoryEntry =
       modifiedAt?: string;
       /** What the composed view says about this entry. */
       provenance?: FileProvenance;
-    } & FileContentMetadata);
+    } & StatContentMetadata);
+
+/**
+ * Options for {@link RpcFileSystem.readdir}.
+ *
+ * @public
+ */
+export type RpcReaddirOptions = Readonly<{
+  /**
+   * False when the caller needs names, types and sizes only — a walk that
+   * reads every file anyway (`grep`) — so the listing measures no content
+   * facts. Defaults to true.
+   */
+  contentFacts?: boolean;
+}>;
 
 /**
  * Abstract filesystem for RPC handlers.
@@ -111,7 +128,7 @@ export type RpcFileSystem = {
   }): Promise<CheckedFileWriteResult>;
   writeBinaryFile(path: string, data: Uint8Array<ArrayBuffer>): Promise<void>;
   deleteFile(path: string): Promise<void>;
-  readdir(path: string): Promise<RpcDirectoryEntry[]>;
+  readdir(path: string, options?: RpcReaddirOptions): Promise<RpcDirectoryEntry[]>;
   exists(path: string): Promise<boolean>;
   appendFile(path: string, content: string): Promise<void>;
   editFile(input: DeterministicEditFileInput): Promise<{
@@ -153,7 +170,7 @@ export type RpcFileStat =
       modifiedAt: string;
       /** What the composed view says about this path. */
       provenance?: FileProvenance;
-    } & FileContentMetadata);
+    } & StatContentMetadata);
 
 /**
  * Abstract runtime client for getting compilation results.

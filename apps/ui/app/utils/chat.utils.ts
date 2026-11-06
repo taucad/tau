@@ -50,16 +50,12 @@ const validationLine = ({ units, triangles, watertight, solids }: ExportValidati
 /* A job on a simulator reads as one in Copy and export, as the job card says it. */
 const simulatedMark = (simulated: boolean | undefined): string => (simulated === true ? ' (simulated)' : '');
 
-type SerializableFileMetadata =
-  | {
-      readonly size: number;
-      readonly contentKind: 'text';
-      readonly lineCount: number;
-    }
-  | {
-      readonly size: number;
-      readonly contentKind: 'binary';
-    };
+/* A listing reports a file by size alone where its kind or line count was not measured. */
+type SerializableFileMetadata = {
+  readonly size: number;
+  readonly contentKind?: 'text' | 'binary';
+  readonly lineCount?: number;
+};
 
 const formatSerializedFileSize = (bytes: number): string => {
   if (bytes < 1024) {
@@ -74,6 +70,9 @@ const formatSerializedFileSize = (bytes: number): string => {
 const formatSerializedFileMetadata = (metadata: SerializableFileMetadata): string => {
   if (metadata.contentKind === 'binary') {
     return `binary, ${formatSerializedFileSize(metadata.size)}`;
+  }
+  if (metadata.contentKind === undefined || metadata.lineCount === undefined) {
+    return formatSerializedFileSize(metadata.size);
   }
   const lineLabel = metadata.lineCount === 1 ? '1 line' : `${metadata.lineCount} lines`;
   return `${lineLabel}, ${formatSerializedFileSize(metadata.size)}`;

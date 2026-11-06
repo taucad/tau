@@ -24,7 +24,8 @@ async function collectFilePaths(
   includeExplicitOnly: boolean,
 ): Promise<string[]> {
   const paths: string[] = [];
-  const entries = await fileSystem.readdir(basePath);
+  /* Grep reads every file it finds, which already measures it: the walk needs names and types only. */
+  const entries = await fileSystem.readdir(basePath, { contentFacts: false });
 
   for (const entry of entries) {
     const fullPath = joinRelativePath(basePath, entry.name);

@@ -169,6 +169,8 @@ describe('handleCaptureImages', () => {
         message: 'Workbench view front-cut shows main.ts, not other.ts. Omit targetFile to capture the view.',
       });
       expect(images.captureImages).not.toHaveBeenCalled();
+      /* W3 a4: naming saved views needs their names only, never their content facts. */
+      expect(project.readdir.mock.calls.map(([, options]) => options)).toStrictEqual([{ contentFacts: false }]);
     });
   });
 });

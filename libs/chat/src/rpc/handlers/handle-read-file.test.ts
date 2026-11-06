@@ -14,6 +14,26 @@ const textStat = (size: number, lineCount: number): RpcFileStat => ({
 });
 
 describe('handleReadFile', () => {
+  /* W3 a4: a stat that could not measure a file within its cap reports the size alone. */
+  it('should refuse an unbounded read of a file whose stat reports its size alone', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+    fileSystem.stat.mockResolvedValue({
+      size: 5_000_000,
+      isDirectory: false,
+      createdAt: '2026-01-15T10:00:00.000Z',
+      modifiedAt: '2026-01-20T14:30:00.000Z',
+    });
+
+    const result = await handleReadFile({ targetFile: 'logs/large.log' }, fileSystem);
+
+    expect(result).toStrictEqual({
+      success: false,
+      errorCode: rpcClientErrorCode.resultTooLarge,
+      message: 'File is 4883 KB. Use offset and limit to read in 2000-line chunks, or grep for specific content.',
+    });
+    expect(fileSystem.readFile).not.toHaveBeenCalled();
+  });
+
   it('should pass a canonical rooted path through unchanged', async () => {
     const fileSystem = mock<RpcFileSystem>();
     fileSystem.stat.mockResolvedValue(textStat(1, 1));

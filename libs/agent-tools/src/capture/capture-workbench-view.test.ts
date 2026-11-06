@@ -151,7 +151,7 @@ describe('buildCaptureExportOptions with a workbench view', () => {
     expect(buildCaptureExportOptions({ mode: 'single', size: 1600, workbench })).toStrictEqual({
       width: 1600,
       height: 1600,
-      ...buildViewerCaptureImageOptions({ width: 1600, height: 1600, colorScheme: 'dark' }),
+      ...buildViewerCaptureImageOptions({ width: 1600, height: 1600, colorScheme: 'light' }),
       background: '#242424',
       lines: false,
       world: { up: '+z', forward: '-y', unit: 'meter' },

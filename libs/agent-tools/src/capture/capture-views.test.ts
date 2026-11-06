@@ -11,10 +11,10 @@ import { buildViewerCaptureImageOptions } from '#capture/viewer-capture-options.
 /* The literals the three call sites carried before this module existed
  * (`apps/ui/app/workers/agent-host.impl.ts`, `packages/host/src/agent-tools.ts`,
  * `apps/ui/app/services/retained-workspace-rpc-handler.ts`), with the viewer's
- * dark-scheme look (`buildViewerCaptureImageOptions`) in place of their edge
+ * light-scheme look (`buildViewerCaptureImageOptions`) in place of their edge
  * width. A capture is only host-neutral if the recipe is byte-identical, so the
  * values are pinned here rather than described. */
-const viewerLookAt1600 = buildViewerCaptureImageOptions({ width: 1600, height: 1600, colorScheme: 'dark' });
+const viewerLookAt1600 = buildViewerCaptureImageOptions({ width: 1600, height: 1600, colorScheme: 'light' });
 
 const previousCommon = {
   width: 1600,

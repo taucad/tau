@@ -104,8 +104,8 @@ const sectionPlanes = (section: ScreenshotSection) => {
 
 const buildOptions = (options: CaptureExportOptionsInput) => {
   const { workbench } = options;
-  // The agent sees the dark-scheme viewer on its background.
-  const look = buildViewerCaptureImageOptions({ width: options.size, height: options.size, colorScheme: 'dark' });
+  // The agent sees the light-scheme viewer's look, chosen by the operator on 2026-11-05 for black edges, on its background.
+  const look = buildViewerCaptureImageOptions({ width: options.size, height: options.size, colorScheme: 'light' });
   if (workbench !== undefined) {
     const lines = options.includeEdges ?? workbench.display.lines;
     return {

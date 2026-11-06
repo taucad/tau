@@ -73,7 +73,7 @@ import type { ResourceQueue } from '#resource-queue.js';
 import type { CrossTabCoordinator, PhysicalAuthority } from '#cross-tab-coordinator.js';
 import type { MutationPipeline } from '#mutation-pipeline.js';
 import { isProjectDirectoryPath } from '#mutation-pipeline.js';
-import type { TreeIndexes } from '#tree-index.js';
+import type { ProjectIndexes } from '#project-index/project-indexes.js';
 import { readDirectoryEntries } from '#backend/directory-entries.js';
 import { isDurableScope, projectLocatorFor } from '#backend/scope.js';
 import { isNotFoundError } from '#workspace-errors.js';
@@ -308,7 +308,7 @@ export class ProjectDirectories {
   private readonly _resourceQueue: ResourceQueue;
   private readonly _crossTabCoordinator: CrossTabCoordinator;
   private readonly _pipeline: MutationPipeline;
-  private readonly _treeIndexes: TreeIndexes;
+  private readonly _projectIndexes: ProjectIndexes;
   /** The configured discovery roots, owned by the authority's mount lifecycle. */
   private readonly _discoveryRoots: () => readonly ResolvedDiscoveryRoot[];
   private readonly _filePool: () => SharedPool | undefined;
@@ -325,7 +325,7 @@ export class ProjectDirectories {
     resourceQueue: ResourceQueue;
     crossTabCoordinator: CrossTabCoordinator;
     pipeline: MutationPipeline;
-    treeIndexes: TreeIndexes;
+    projectIndexes: ProjectIndexes;
     discoveryRoots: () => readonly ResolvedDiscoveryRoot[];
     filePool: () => SharedPool | undefined;
     revokeProjectRoute: (path: string, notifyPeers: boolean) => void;
@@ -355,7 +355,7 @@ export class ProjectDirectories {
     this._resourceQueue = options.resourceQueue;
     this._crossTabCoordinator = options.crossTabCoordinator;
     this._pipeline = options.pipeline;
-    this._treeIndexes = options.treeIndexes;
+    this._projectIndexes = options.projectIndexes;
     this._discoveryRoots = options.discoveryRoots;
     this._filePool = options.filePool;
     this._revokeProjectRoute = options.revokeProjectRoute;
@@ -607,7 +607,7 @@ export class ProjectDirectories {
           await this._deleteProjectDirectory({ provider, directoryPath: path, manifest, identity: identityBytes });
         } finally {
           this._filePool()?.clear();
-          this._treeIndexes.clear();
+          this._projectIndexes.clear();
           this._pipeline.emitChangeEvent({ type: 'directoryChanged', path: authorityParent, backend: scope.backend });
           this._crossTabCoordinator.notifyDirectoryChange(authorityParent, parentAuthority);
         }
@@ -687,7 +687,7 @@ export class ProjectDirectories {
           mutationBegan = true;
           await provider.mkdir(path, { recursive: true });
           this._filePool()?.clear();
-          this._treeIndexes.removeDirectory(logicalRoot);
+          this._projectIndexes.removeDirectory(logicalRoot);
           const identity = await this._resolveIdentity({
             provider,
             directory: path,
@@ -729,7 +729,7 @@ export class ProjectDirectories {
         } catch (error) {
           if (mutationBegan) {
             this._filePool()?.clear();
-            this._treeIndexes.removeDirectory(logicalRoot);
+            this._projectIndexes.removeDirectory(logicalRoot);
             this._crossTabCoordinator.notifyDirectoryChange(logicalRoot, this._scopedPhysicalAuthority(scope, path));
           }
           throw error;
@@ -910,7 +910,7 @@ export class ProjectDirectories {
       const relativePath = input.path.slice(input.directory.length + 1);
       const logicalPath = `${projectRoute(input.projectId)}/${relativePath}`;
       this._filePool()?.invalidate(logicalPath);
-      this._treeIndexes.evict(logicalPath);
+      this._projectIndexes.invalidate(logicalPath);
       if (input.alreadyLocked !== true) {
         this._pipeline.emitChangeEvent({ type: 'fileWritten', path: logicalPath, backend: input.scope.backend });
         this._crossTabCoordinator.notifyDirectoryChange('/', this._scopedPhysicalAuthority(input.scope, ''));

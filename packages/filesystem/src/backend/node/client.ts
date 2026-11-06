@@ -18,9 +18,7 @@ import type {
   ExternalChangeFact,
   FileMode,
   FileReadStreamOptions,
-  FileStatOptions,
   FileStat,
-  HeadFileStat,
   ProviderCapabilities,
   WatchRequest,
 } from '#types.js';
@@ -294,15 +292,13 @@ export class NodeFsChannel {
  * @public
  */
 export class NodeFsProviderClient extends AbstractFileSystemProvider {
-  /** @returns `true` for the supported head listing mode. */
-  public get supportsHeadListing(): true {
-    return true;
-  }
   public readonly capabilities: ProviderCapabilities = {
     persistent: true,
     writable: true,
     quotaBased: false,
     durability: 'transactional-rewrite',
+    trustworthyMtime: true,
+    externallyEdited: true,
   };
 
   private readonly _channel: NodeFsChannel;
@@ -430,28 +426,14 @@ export class NodeFsProviderClient extends AbstractFileSystemProvider {
    * @param path - Absolute directory path to enumerate.
    * @returns Each entry's name paired with its stat metadata.
    */
-  public readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>>;
-  public readdirWithStats(
-    path: string,
-    options: { readonly content: 'head' },
-  ): Promise<Array<{ name: string } & HeadFileStat>>;
-  public async readdirWithStats(
-    path: string,
-    options?: { readonly content: 'head' },
-  ): Promise<Array<{ name: string } & (FileStat | HeadFileStat)>> {
+  public async readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>> {
     this._assertRootedPath(path);
-    return options === undefined
-      ? this._channel.request({ root: this._root, op: 'readdirWithStats', path })
-      : this._channel.request({ root: this._root, op: 'readdirHeadWithStats', path });
+    return this._channel.request({ root: this._root, op: 'readdirWithStats', path });
   }
 
-  public async stat(path: string): Promise<FileStat>;
-  public async stat(path: string, options: FileStatOptions): Promise<FileStat | HeadFileStat>;
-  public async stat(path: string, options?: FileStatOptions): Promise<FileStat | HeadFileStat> {
+  public async stat(path: string): Promise<FileStat> {
     this._assertRootedPath(path);
-    return options?.content === 'head'
-      ? this._channel.request({ root: this._root, op: 'headStat', path })
-      : this._channel.request({ root: this._root, op: 'stat', path });
+    return this._channel.request({ root: this._root, op: 'stat', path });
   }
 
   public async getFileMode(path: string): Promise<FileMode> {

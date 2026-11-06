@@ -3,7 +3,7 @@ import { parseFileLinkPath } from '#path.js';
 import type { FileLinkLocation } from '#path.js';
 import {
   fileLinkClockSkewSeconds,
-  fileLinkMaximumBytes,
+  fileLinkMaximumBytesFor,
   fileLinkMaximumLifetimeSeconds,
   fileLinkMessage,
 } from '#sign.js';
@@ -60,7 +60,7 @@ export type VerifyFileLinkInput = Readonly<{
   keyFor: (kid: string) => CryptoKey | undefined;
 }>;
 
-const sizePattern = /^(?:0|[1-9]\d{0,8})$/u;
+const sizePattern = /^(?:0|[1-9]\d{0,9})$/u;
 const expiryPattern = /^[1-9]\d{0,10}$/u;
 const signaturePattern = /^[A-Za-z0-9_-]{43}$/u;
 const parameterNames: ReadonlySet<string> = new Set(['n', 'x', 'k', 's']);
@@ -127,7 +127,7 @@ const readClaims = (
     !fileLinkKeyIdPattern.test(kid) ||
     signature?.byteLength !== 32 ||
     encodeBase64Url(signature) !== signatureText ||
-    Number(sizeText) > fileLinkMaximumBytes
+    Number(sizeText) > fileLinkMaximumBytesFor(location)
   ) {
     return undefined;
   }

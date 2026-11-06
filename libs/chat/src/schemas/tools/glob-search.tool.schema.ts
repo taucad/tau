@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { binaryFileContentMetadataSchema, textFileContentMetadataSchema } from '#schemas/file-metadata.schema.js';
+import { binaryFileContentMetadataSchema, listedTextFileContentMetadataSchema } from '#schemas/file-metadata.schema.js';
 import { rootedPathSchema } from '#schemas/rooted-path.schema.js';
 
 /** @public */
@@ -21,11 +21,14 @@ export const globEntrySchema = z.union([
   }),
   baseGlobEntrySchema.extend({
     isDirectory: z.literal(false).optional().describe('This match is a file.'),
-    ...textFileContentMetadataSchema.shape,
+    ...listedTextFileContentMetadataSchema.shape,
   }),
   baseGlobEntrySchema.extend({
     isDirectory: z.literal(false).optional().describe('This match is a file.'),
     ...binaryFileContentMetadataSchema.shape,
+  }),
+  baseGlobEntrySchema.extend({
+    isDirectory: z.literal(false).optional().describe('This match is a file whose kind was not measured.'),
   }),
 ]);
 

@@ -274,8 +274,8 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
   const common = {
     width,
     height,
-    // The dark-scheme viewer, which the capture background matches.
-    ...buildViewerCaptureImageOptions({ width, height, colorScheme: 'dark' }),
+    // The light-scheme viewer's look, chosen by the operator on 2026-11-05 for black edges, on the dark capture background.
+    ...buildViewerCaptureImageOptions({ width, height, colorScheme: 'light' }),
     background: captureBackground,
     ...(presentation?.enableSurfaces === false ? { surfaces: false } : {}),
     ...(!includeEdges || presentation?.enableLines === false ? { lines: false } : {}),

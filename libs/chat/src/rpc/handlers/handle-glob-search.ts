@@ -2,7 +2,8 @@ import type { GlobSearchRpcInput, GlobSearchRpcResult } from '#schemas/rpc.schem
 import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { toRpcError } from '#rpc/rpc-error.js';
 import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
-import type { FileContentMetadata } from '@taucad/types';
+import type { StatContentMetadata } from '@taucad/types';
+import { listedFileMetadataFields } from '#rpc/listed-file-metadata.js';
 
 type GlobSearchEntry = Extract<GlobSearchRpcResult, { success: true }>['entries'][number];
 
@@ -11,7 +12,7 @@ type CollectedEntry = {
   isDirectory: false;
   size: number;
   modifiedAt?: string;
-} & FileContentMetadata;
+} & StatContentMetadata;
 
 async function collectFileEntries(
   fileSystem: RpcFileSystem,
@@ -24,24 +25,13 @@ async function collectFileEntries(
   for (const entry of entries) {
     const fullPath = joinRelativePath(basePath, entry.name);
     if (entry.type === 'file') {
-      if (entry.contentKind === 'text') {
-        result.push({
-          path: fullPath,
-          isDirectory: false,
-          size: entry.size,
-          contentKind: 'text',
-          lineCount: entry.lineCount,
-          ...(entry.modifiedAt ? { modifiedAt: entry.modifiedAt } : {}),
-        });
-      } else {
-        result.push({
-          path: fullPath,
-          isDirectory: false,
-          size: entry.size,
-          contentKind: 'binary',
-          ...(entry.modifiedAt ? { modifiedAt: entry.modifiedAt } : {}),
-        });
-      }
+      result.push({
+        path: fullPath,
+        isDirectory: false,
+        size: entry.size,
+        ...listedFileMetadataFields(entry),
+        ...(entry.modifiedAt ? { modifiedAt: entry.modifiedAt } : {}),
+      });
     } else if (includeExplicitOnly || entry.traverseOnImplicitSearch !== false) {
       // oxlint-disable-next-line no-await-in-loop -- recursive traversal
       const subEntries = await collectFileEntries(fileSystem, fullPath, includeExplicitOnly);
@@ -66,24 +56,13 @@ export async function handleGlobSearch(
     const matched = allEntries.filter((entry) => minimatch(entry.path, input.pattern, { matchBase: true, dot: true }));
 
     const files = matched.map((entry) => entry.path);
-    const entries: GlobSearchEntry[] = matched.map((entry) =>
-      entry.contentKind === 'text'
-        ? {
-            path: entry.path,
-            isDirectory: entry.isDirectory,
-            size: entry.size,
-            contentKind: 'text',
-            lineCount: entry.lineCount,
-            ...(entry.modifiedAt ? { modifiedAt: entry.modifiedAt } : {}),
-          }
-        : {
-            path: entry.path,
-            isDirectory: entry.isDirectory,
-            size: entry.size,
-            contentKind: 'binary',
-            ...(entry.modifiedAt ? { modifiedAt: entry.modifiedAt } : {}),
-          },
-    );
+    const entries: GlobSearchEntry[] = matched.map((entry) => ({
+      path: entry.path,
+      isDirectory: entry.isDirectory,
+      size: entry.size,
+      ...listedFileMetadataFields(entry),
+      ...(entry.modifiedAt ? { modifiedAt: entry.modifiedAt } : {}),
+    }));
 
     return { success: true, files, entries, totalFiles: files.length };
   } catch (error) {

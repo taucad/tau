@@ -19,9 +19,12 @@ const thumbnailMargin = 0.1;
 /** A card thumbnail is shown at a third of its width (512 CSS px); a featured card at two thirds. */
 export const cardDisplayWidth = 512;
 export const featuredCardDisplayWidth = 1024;
-/** The dark-scheme viewer's look on a card shown `displayWidth` CSS px wide: the card edge weight, the viewer's rest. */
+/**
+ * The light-scheme viewer's look on a card shown `displayWidth` CSS px wide: the card edge weight, the viewer's rest.
+ * Captures use the light scheme's look, chosen by the operator on 2026-11-05 for black edges.
+ */
 const cardLook = (displayWidth: number) =>
-  buildViewerCaptureImageOptions({ ...thumbnailOptions, colorScheme: 'dark', displayWidth });
+  buildViewerCaptureImageOptions({ ...thumbnailOptions, colorScheme: 'light', displayWidth });
 
 export const isWebp = (bytes: Uint8Array<ArrayBuffer>): boolean =>
   bytes.byteLength >= 12 &&

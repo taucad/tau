@@ -1,5 +1,6 @@
 import { ENV } from '#environment.config.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { pageOrigin } from '#lib/website-origin.js';
 
 /**
  * The origin every link the client mints for someone *else* is built from.
@@ -16,3 +17,23 @@ import { isDesktopTarget } from '#lib/build-target.js';
  */
 export const shareOrigin = (): string =>
   isDesktopTarget() ? new URL(ENV.TAU_FRONTEND_URL).origin : globalThis.location.origin;
+
+/**
+ * The origin auth return links point at: sign-in and OAuth callbacks, and the password reset and
+ * email change redirects the API sends a visitor back to.
+ *
+ * On the web that is the page's own origin, so signing in on `tau.new`, `taucad.dev`, a site's
+ * netlify.app address or local development returns to the same host. The API admits these through
+ * Better Auth's `trustedOrigins`. A server render has no page, and desktop's `app://tau` cannot
+ * receive a redirect, so both use `TAU_FRONTEND_URL`.
+ *
+ * @returns The `scheme://host` auth returns to.
+ */
+export const authReturnOrigin = (): string => {
+  const origin = isDesktopTarget() ? undefined : pageOrigin();
+  if (origin?.startsWith('http')) {
+    return origin;
+  }
+  // The desktop SPA prerender runs without a frontend URL; pass it through as before rather than throw.
+  return URL.canParse(ENV.TAU_FRONTEND_URL) ? new URL(ENV.TAU_FRONTEND_URL).origin : ENV.TAU_FRONTEND_URL;
+};

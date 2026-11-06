@@ -16,6 +16,8 @@ import { manifoldTessellationSchema } from '#manifold-tessellation.js';
  */
 export const manifoldOptionsSchema = z.object({
   wasmUrl: z.string().optional(),
+  /** Library call tracing mode for user code; left out, tracing is off. */
+  libraryTracing: z.enum(['off', 'summary', 'per-call']).optional(),
 });
 
 /**

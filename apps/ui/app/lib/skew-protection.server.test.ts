@@ -1,16 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { skewProtectionCookie, skewProtectionCookieName } from '#lib/skew-protection.server.js';
+import { skewProtectionCookie, skewProtectionCookieName, skewProtectionToken } from '#lib/skew-protection.server.js';
 import { skewProtectionConfig } from '#scripts/write-skew-protection-config.mts';
 
 /* eslint-disable @typescript-eslint/naming-convention -- environment variable keys are uppercase by contract. */
 describe('skewProtectionCookie', () => {
   it('sets nothing where Netlify provides no token (local, desktop, tau serve)', () => {
-    expect(skewProtectionCookie({})).toBeUndefined();
-    expect(skewProtectionCookie({ NETLIFY_SKEW_PROTECTION_TOKEN: '' })).toBeUndefined();
+    expect(skewProtectionCookie(skewProtectionToken(undefined, {}))).toBeUndefined();
+    expect(skewProtectionCookie(skewProtectionToken({}, { NETLIFY_SKEW_PROTECTION_TOKEN: '' }))).toBeUndefined();
+  });
+
+  it('reads the token from the function context, where a deployed Netlify function gets it', () => {
+    const netlify = { context: { deploy: { skewProtectionToken: 'ctx' } } };
+    expect(skewProtectionToken(netlify, {})).toBe('ctx');
+    expect(skewProtectionToken(netlify, { NETLIFY_SKEW_PROTECTION_TOKEN: 'env' })).toBe('ctx');
+    expect(skewProtectionToken({ context: { deploy: {} } }, { NETLIFY_SKEW_PROTECTION_TOKEN: 'env' })).toBe('env');
   });
 
   it('pins later requests with the token the build config reads', () => {
-    const cookie = skewProtectionCookie({ NETLIFY_SKEW_PROTECTION_TOKEN: 'a b' });
+    const cookie = skewProtectionCookie('a b');
     expect(cookie).toBe(`${skewProtectionCookieName}=a%20b; Path=/; Secure; HttpOnly; SameSite=Lax`);
     expect(skewProtectionConfig.sources).toStrictEqual([{ type: 'cookie', name: skewProtectionCookieName }]);
   });

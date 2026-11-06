@@ -915,8 +915,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const plans = createHandles<{
     checkoutId: string;
     revisionId: string;
-    /** An undo's merged tree; a restore of a recorded revision is written by oid diff from the head instead (D10). */
-    tree?: ImmutableRevisionTree;
+    /**
+     * An undo: the paths its operation changed, merged onto the head (D10).
+     * A restore of a recorded revision is written by oid diff from the head instead.
+     */
+    undo?: Readonly<{ paths: readonly string[]; tree: ImmutableRevisionTree; fillFrom: string | undefined }>;
     /** The operation this plan reverses, when it is an undo (D15) or D2's *Undo restore*. */
     undoes?: string;
   }>('plan');
@@ -1610,6 +1613,21 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   /* The project directory's own placeholders, checked as the root starts: a reload that never captures still resumes. */
   fillLater(undefined);
 
+  /* `before` with `paths` as `written` holds them: a path `written` lacks is removed, every other path kept. */
+  const overlay = (
+    before: ImmutableRevisionTree,
+    paths: readonly string[],
+    written: ImmutableRevisionTree,
+  ): ImmutableRevisionTree => {
+    const touched = new Set(paths);
+    return new ImmutableRevisionTree(
+      [
+        ...before.entries().filter(({ path }) => !touched.has(path)),
+        ...written.entries().filter(({ path }) => touched.has(path)),
+      ].map(({ path, content, mode }): RevisionTreeInput => [path, content, mode]),
+    );
+  };
+
   /**
    * The tree `to` names, as a checkout holding `from`'s tree comes to hold it
    * (D10): only the paths an oid diff of the two says changed are read, their
@@ -1627,21 +1645,19 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     before: ImmutableRevisionTree,
   ): Promise<ImmutableRevisionTree> => {
     const changes = await port.diff({ from, to });
-    const touched = new Set(changes.map(({ path }) => path));
     const changed = changes.filter(({ kind }) => kind !== 'deleted').map(({ path }) => path);
-    const read = changed.length === 0 ? undefined : await port.readTree(to, { largeObjects: 'local', paths: changed });
-    const kept = before
-      .entries()
-      .filter(({ path }) => !touched.has(path))
-      .map(({ path, content, mode }): RevisionTreeInput => [path, content, mode]);
-    const written = changed.map((path): RevisionTreeInput => {
-      const content = read?.get(path);
-      if (content === undefined) {
-        throw new RevisionPortError('UNKNOWN_REVISION', `The store holds no ${path} for ${to}.`);
-      }
-      return [path, content, read?.mode(path) ?? '100644'];
-    });
-    return new ImmutableRevisionTree([...kept, ...written]);
+    const read =
+      changed.length === 0
+        ? new ImmutableRevisionTree([])
+        : await port.readTree(to, { largeObjects: 'local', paths: changed });
+    if (read === undefined || changed.some((path) => !read.has(path))) {
+      throw new RevisionPortError('UNKNOWN_REVISION', `The store holds no tree for ${to}.`);
+    }
+    return overlay(
+      before,
+      changes.map(({ path }) => path),
+      read,
+    );
   };
 
   /**
@@ -2827,19 +2843,24 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const place = await placeOf(checkoutId);
     const head = await headOf(place);
     const empty = new ImmutableRevisionTree([]);
-    const ours = head === undefined ? undefined : await port.readTree(revisionId(head));
     const entries = await opsLog.read(options.actor?.({ runId: undefined, trigger: 'restore' }));
     const candidates =
-      place.branch === undefined || ours === undefined
+      place.branch === undefined || head === undefined
         ? []
         : undoCandidates(entries, `refs/heads/${place.branch}`, skip);
-    const headTreeId = await treeIdOf(head);
     for (const operation of candidates) {
+      const { from, to } = operation;
+      if (to === undefined) {
+        continue;
+      }
+      /* By oid diff (D10): only the paths the operation changed can differ from the head, so only they are read and merged. */
       // oxlint-disable-next-line no-await-in-loop -- newest first; almost always the first candidate answers.
-      const [base, theirs] = await Promise.all([
-        port.readTree(revisionId(operation.to ?? '')),
-        operation.from === undefined ? empty : port.readTree(revisionId(operation.from)),
-      ]);
+      const changes = await port.diff({ from: from === undefined ? undefined : revisionId(from), to: revisionId(to) });
+      const paths = changes.map(({ path }) => path);
+      const scoped = async (id: string | undefined): Promise<ImmutableRevisionTree | undefined> =>
+        id === undefined ? empty : port.readTree(revisionId(id), { largeObjects: 'local', paths });
+      // oxlint-disable-next-line no-await-in-loop -- as above.
+      const [base, theirs, ours] = await Promise.all([scoped(to), scoped(from), scoped(head)]);
       if (base === undefined || theirs === undefined || ours === undefined) {
         continue;
       }
@@ -2853,7 +2874,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       }
       const merged = mergeRevisionTrees(base, ours, theirs, mergeOptions);
       // oxlint-disable-next-line no-await-in-loop -- as above.
-      const number = await ordinalOnLine(place, operation.to ?? '');
+      const number = await ordinalOnLine(place, to);
       if (merged.status === 'conflicted') {
         const code: RestoreFailureCode = 'UNDO_CONFLICT';
         const name = number === undefined ? 'that revision' : `Rev ${String(number)}`;
@@ -2864,18 +2885,19 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           { code, ...(number === undefined ? {} : { revisionNumber: number }) },
         );
       }
+      /* Already undone: the merge leaves every path it read as the head has it. */
       // oxlint-disable-next-line no-await-in-loop -- as above.
-      if ((await checkoutTreeId(place.id, merged.tree)) === headTreeId) {
+      if ((await checkoutTreeId(place.id, merged.tree)) === (await checkoutTreeId(place.id, ours))) {
         continue;
       }
       return {
         planId: plans.put(checkoutId, {
           checkoutId,
-          revisionId: operation.to ?? '',
-          tree: merged.tree,
-          undoes: operation.to ?? '',
+          revisionId: to,
+          undo: { paths, tree: merged.tree, fillFrom: from },
+          undoes: to,
         }),
-        revisionId: operation.to ?? '',
+        revisionId: to,
         revisionNumber: number,
         /* Step 1 minted the files, so the head's tree is what they are. */
         removedPathCount: ours.entries().filter(({ path }) => !merged.tree.has(path)).length,
@@ -3277,10 +3299,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       return { status: 'merged', revisionId: theirs, checkoutId: target.id };
     }
 
+    /* By oid diff (D10): a path `theirs` left as the base had it merges to ours, so only what it changed is read. */
+    const theirsChanged = await port.diff({ from: base, to: theirs });
+    const paths = theirsChanged.map(({ path }) => path);
+    const scoped = { largeObjects: 'local', paths } as const;
     const [baseTree, oursTree, theirsTree] = await Promise.all([
-      base === undefined ? new ImmutableRevisionTree([]) : port.readTree(base),
-      port.readTree(ours),
-      port.readTree(theirs),
+      base === undefined ? new ImmutableRevisionTree([]) : port.readTree(base, scoped),
+      port.readTree(ours, scoped),
+      port.readTree(theirs, scoped),
     ]);
     if (baseTree === undefined || oursTree === undefined || theirsTree === undefined) {
       throw new RevisionPortError('UNKNOWN_REVISION', 'This project no longer holds both sides of that merge.');
@@ -3300,13 +3326,19 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       return { status: 'conflicted', line, paths: merged.conflicts.map((conflict) => conflict.path) };
     }
 
+    /* The merged paths over ours as a whole: the files, proven to be ours, unless the checkout is on another line. */
+    const oursFiles = (await headOf(target)) === ours ? live : await port.readTree(ours, { largeObjects: 'local' });
+    if (oursFiles === undefined) {
+      throw new RevisionPortError('UNKNOWN_REVISION', 'This project no longer holds both sides of that merge.');
+    }
+    const tree = overlay(oursFiles, paths, merged.tree);
     const receipt = await port.writeRevision({
       parents: [ours, theirs],
-      tree: merged.tree,
+      tree,
       provenance: provenanceOf('merge', []),
       summary: Object.freeze({ generated: `Merged ${sourceLabel} into ${input.into}` }),
     });
-    await writeRevisionTree(target, merged.tree, {
+    await writeRevisionTree(target, tree, {
       fillFrom: revisionId(receipt.commitId),
       validate: validateTarget,
       publish: async () => landMerge(ours, revisionId(receipt.commitId)),
@@ -3984,16 +4016,21 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             );
           /* The head `validate` proved the files equal, which the oid diff starts from. */
           let proven: string | undefined;
-          const target: MaterializeTarget =
-            plan.tree ??
-            (async (before) => {
-              if (proven === undefined) {
-                throw changedMeanwhile();
-              }
-              return treeFrom(revisionId(proven), revisionId(plan.revisionId), before);
-            });
+          let built: ImmutableRevisionTree | undefined;
+          const { undo } = plan;
+          const target = async (before: ImmutableRevisionTree): Promise<ImmutableRevisionTree> => {
+            if (proven === undefined) {
+              throw changedMeanwhile();
+            }
+            built =
+              undo === undefined
+                ? await treeFrom(revisionId(proven), revisionId(plan.revisionId), before)
+                : overlay(before, undo.paths, undo.tree);
+            return built;
+          };
+          const fillFrom = undo === undefined ? plan.revisionId : undo.fillFrom;
           await writeRevisionTree(place, target, {
-            fillFrom: plan.tree === undefined ? revisionId(plan.revisionId) : undefined,
+            fillFrom: fillFrom === undefined ? undefined : revisionId(fillFrom),
             /*
              * A3: the pre-restore cut and this write are two fenced sections, so
              * the head is proven again inside this one — the files equal the
@@ -4023,10 +4060,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             return { revisionId: plan.revisionId, treeId: treeId ?? '' };
           }
           /* The next `restore` cut of exactly this tree is the undo (D15). */
-          const treeId =
-            plan.tree === undefined
-              ? ((await treeIdOf(plan.revisionId)) ?? '')
-              : await checkoutTreeId(place.id, plan.tree);
+          const treeId = built === undefined ? '' : await checkoutTreeId(place.id, built);
           pendingUndos.set(place.id, { treeId, undoes: plan.undoes });
           return { revisionId: plan.revisionId, treeId };
         },
@@ -4484,7 +4518,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             }
           };
           await refuseHeld(await captureFresh(place));
-          await writeRevisionTree(place, tree, {
+          /* `refuseHeld` proves the files are `head`'s, so only what the decision changed is written (D10). */
+          const decided = async (before: ImmutableRevisionTree): Promise<ImmutableRevisionTree> =>
+            treeFrom(revisionId(head), revisionId(receipt.commitId), before);
+          await writeRevisionTree(place, decided, {
             fillFrom: revisionId(receipt.commitId),
             validate: refuseHeld,
             publish: async () => {

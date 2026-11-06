@@ -205,6 +205,31 @@ const startTree = async (
 };
 
 describe('Undo through the tree (D15)', () => {
+  /* D10: an undo reads only the paths its operation changed, never the head's whole tree. */
+  it('row 1b: an undo reads and writes by oid diff', async () => {
+    const target = await project('oid-undo', { 'main.ts': 'export const size = 1;\n', 'other.ts': 'export {};\n' });
+    const asked: Array<readonly string[] | undefined> = [];
+    const port: RevisionPort = {
+      ...target.port,
+      readTree: async (id, options) => {
+        asked.push(options?.paths);
+        return target.port.readTree(id, options);
+      },
+    };
+    const tree = await startTree(target, { port });
+    await tree.save();
+    await target.filesystem.writeFile('main.ts', 'export const size = 2;\n');
+    await tree.save();
+    await expect.poll(() => tree.actor.getSnapshot().children.restore?.getSnapshot().context.canUndo).toBe(true);
+    asked.length = 0;
+    expect(await tree.undo()).toMatchObject({ type: 'toast.undone' });
+    expect(await target.filesystem.readFile('main.ts', 'utf8')).toBe('export const size = 1;\n');
+    /* The undo's plan reads main.ts alone from each side, and its write reads nothing. A whole read here is
+     * a capture's mode basis for a new head (once per head, around the cuts), which the index replaces. */
+    expect(asked.filter((paths) => paths !== undefined)).toStrictEqual([['main.ts'], ['main.ts'], ['main.ts']]);
+    tree.actor.stop();
+  }, 60_000);
+
   it('row 1: restore → save → undo → undo leaves four rows and the pre-restore tree', async () => {
     const target = await project('four-rows', { 'main.ts': 'export const size = 1;\n' });
     const tree = await startTree(target);

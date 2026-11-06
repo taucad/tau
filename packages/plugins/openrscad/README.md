@@ -13,7 +13,7 @@ OpenRSCAD Rust WebAssembly kernel for OpenSCAD language models
 - **OpenSCAD language, Rust engine** — `.scad` models, including nested `use`/`include` dependencies.
 - **Customizer parameters** — OpenSCAD customizer annotations become the parameter schema a host renders.
 - **Deterministic exports** — authored-scene GLB for preview, GLB and object-aware 3MF for download.
-- **Readable scene graph** — user module calls become nested named nodes; anonymous geometry falls back to hex material names.
+- **Readable scene graph** — user module calls become nested named nodes, each closed solid is one `EXT_mesh_manifold` mesh below them, and a `TAU_cad_topology` payload maps every module to the triangles it made; anonymous geometry falls back to hex material names.
 
 ## Install
 

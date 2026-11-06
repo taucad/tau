@@ -274,8 +274,8 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@tanstack/react-store](https://github.com/TanStack/store) | 0.11.2 | MIT |
 | [@tanstack/store](https://github.com/TanStack/store) | 0.11.2 | MIT |
 | [@taucad/kcl-wasm-lib](https://github.com/taucad/modeling-app) | 0.1.192 | MIT |
-| [@taulabs/openrscad-engine](https://github.com/taucad/openrscad) | 0.11.0-beta.4 | Apache-2.0 OR MIT |
-| [@taulabs/openrscad-engine-{platform}](https://github.com/taucad/openrscad) | 0.11.0-beta.4 | Apache-2.0 OR MIT |
+| [@taulabs/openrscad-engine](https://github.com/taucad/openrscad) | 0.11.0-beta.5 | Apache-2.0 OR MIT |
+| [@taulabs/openrscad-engine-{platform}](https://github.com/taucad/openrscad) | 0.11.0-beta.5 | Apache-2.0 OR MIT |
 | [@taulabs/replicad](https://github.com/taucad/replicad) | 1.1.0-taulabs.1 | MIT |
 | [@taulabs/replicad-opencascadejs](https://github.com/taucad/replicad) | 0.23.0-beta.0 | MIT |
 | [@taulabs/three-viewport-gizmo](https://github.com/taucad/three-viewport-gizmo) | 2.2.4 | MIT |

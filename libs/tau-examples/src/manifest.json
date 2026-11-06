@@ -297,6 +297,18 @@
     "kind": "model",
     "geometry": "3d",
     "kernel": "openscad",
+    "name": "chamfered-cutout-cube",
+    "mainFile": "main.scad",
+    "files": [
+      "main.geospec.ts",
+      "main.scad",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "openscad",
     "name": "cyber-chess-set",
     "mainFile": "main.scad",
     "files": [

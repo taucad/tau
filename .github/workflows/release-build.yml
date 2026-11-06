@@ -1445,6 +1445,18 @@ jobs:
       environment: production
     secrets: inherit
 
+  # The marketing pages tau.new's edge proxies (prod `MARKETING_ORIGIN`).
+  production-www:
+    needs: [production-ui]
+    name: Production marketing site
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy-www-review.yml
+    with:
+      alias: prod
+    secrets: inherit
+
   production-docs:
     needs: [resolve, verify-app, app-release]
     if: >-

@@ -40,8 +40,11 @@ export class PendingError extends Error {
   public readonly size: number;
   public readonly reason: PendingReason;
 
-  public constructor(pending: Readonly<{ path: string; oid: string; size: number; reason: PendingReason }>) {
-    super(`The large object of ${pending.path} is not here yet (${pending.reason}).`);
+  public constructor(
+    pending: Readonly<{ path: string; oid: string; size: number; reason: PendingReason }>,
+    options?: ErrorOptions,
+  ) {
+    super(`The large object of ${pending.path} is not here yet (${pending.reason}).`, options);
     this.name = 'PendingError';
     this.path = pending.path;
     this.oid = pending.oid;
@@ -299,7 +302,7 @@ export const createContentReads = (dependencies: ContentReadsDependencies): Cont
    * @param path - A checkout-relative path.
    * @param request - See {@link PlaceholderRequest}.
    * @returns The bytes, or `undefined` when the path holds no placeholder.
-   * @throws {PendingError} When the object could not be had.
+   * @throws {PendingError} When the object could not be had, its failed transfer the cause.
    */
   const resolvePlaceholder = async (
     place: Checkout,
@@ -316,7 +319,18 @@ export const createContentReads = (dependencies: ContentReadsDependencies): Cont
     let data = fill.look(place.id, pointer.oid)?.bytes ?? (await readStoredObject(pointer));
     if (data === undefined && request?.localOnly !== true) {
       fill.prioritize?.(place.id, [path]);
-      data = await dependencies.fetchObject?.(pointer, request?.onProgress);
+      try {
+        data = await dependencies.fetchObject?.(pointer, request?.onProgress);
+      } catch (error) {
+        /* A transfer that failed or stalled leaves the object not here, said as such; an abort stays an abort. */
+        if ((error as { name?: unknown } | undefined)?.name === 'AbortError') {
+          throw error;
+        }
+        throw new PendingError(
+          { path, ...pointer, reason: reasonOf(fill.look(place.id, pointer.oid)) },
+          { cause: error },
+        );
+      }
     }
     if (data === undefined) {
       throw new PendingError({ path, ...pointer, reason: reasonOf(fill.look(place.id, pointer.oid)) });

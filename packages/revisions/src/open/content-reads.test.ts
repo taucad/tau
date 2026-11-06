@@ -230,6 +230,18 @@ describe('resolvePlaceholder (slice a)', () => {
     await expect(reads.resolvePlaceholder(place, 'models/part.step')).rejects.toBeInstanceOf(PendingError);
   });
 
+  it('answers PendingError, its reason kept and the failed transfer its cause, when the fetch rejects', async () => {
+    const failure = new Error('LFS download failed with 503.');
+    const { reads } = setup({
+      fetchObject: async () => {
+        throw failure;
+      },
+    });
+    const refusal: unknown = await reads.resolvePlaceholder(place, 'models/part.step').catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(PendingError);
+    expect(refusal).toMatchObject({ code: 'PENDING', path: 'models/part.step', reason: 'not-fetched', cause: failure });
+  });
+
   it('moves the path to the front of the fill and hears the transfer progress, without a signal of its own', async () => {
     const fetchObject = vi.fn<NonNullable<ContentReadsDependencies['fetchObject']>>(async (_pointer, onProgress) => {
       onProgress?.();

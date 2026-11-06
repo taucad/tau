@@ -72,3 +72,54 @@ export const expectPairedToolMessages = (snapshot: HostRunSnapshot): void => {
   ).toEqual([]);
   expect(toolCalls(snapshot.messages).length, `the model made no tool call: ${refusal(snapshot)}`).toBeGreaterThan(0);
 };
+
+/** What the model steps of a stretch of history produced, from each assistant row's provider usage. */
+export type StepUsage = Readonly<{
+  /** Assistant rows (model steps) counted. */
+  steps: number;
+  /** Output tokens, reasoning included: the provider bills thinking as output. */
+  outputTokens: number;
+  /** The provider-priced cost of those steps, in US dollars. */
+  costUsd: number;
+}>;
+
+const sumUsage = (messages: readonly ProviderMessage[]): StepUsage => {
+  const steps = messages.filter((message) => message.role === 'assistant');
+  return {
+    steps: steps.length,
+    outputTokens: steps.reduce((total, message) => total + (message.metadata?.usage?.output ?? 0), 0),
+    costUsd: steps.reduce((total, message) => total + (message.metadata?.usage?.cost.total ?? 0), 0),
+  };
+};
+
+/** @returns What every model step of a run produced, for the spend a live run reports. */
+export const runUsage = (snapshot: HostRunSnapshot): StepUsage => sumUsage(snapshot.messages);
+
+/** @returns Whether an assistant row's content carries the tool call `toolCallId`. */
+const carriesCall = (message: ProviderMessage, toolCallId: string): boolean =>
+  message.role === 'assistant' &&
+  Array.isArray(message.content) &&
+  message.content.some(
+    (block) =>
+      block !== null &&
+      typeof block === 'object' &&
+      !Array.isArray(block) &&
+      block['type'] === 'toolCall' &&
+      block['id'] === toolCallId,
+  );
+
+/**
+ * Tokens spent before the first call of one tool: every model step up to and
+ * including the step that made it (deploy-cut charter W7, finding P1, where a
+ * hard-fork question came only after an 11k-token reasoning stream).
+ *
+ * @returns The steps' usage, or `undefined` when the tool was never called.
+ */
+export const usageBeforeFirstCall = (messages: readonly ProviderMessage[], name: string): StepUsage | undefined => {
+  const call = toolCalls(messages, name)[0];
+  if (!call) {
+    return undefined;
+  }
+  const step = messages.findIndex((message) => carriesCall(message, call.toolCallId));
+  return sumUsage(messages.slice(0, step === -1 ? messages.indexOf(call) : step + 1));
+};

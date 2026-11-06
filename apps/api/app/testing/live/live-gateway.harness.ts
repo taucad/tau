@@ -92,6 +92,9 @@ export const liveCredentialName = (modelId: string): string => {
   return name;
 };
 
+/** Variables only `apps/api/.env.test` set, whose values are placeholders (`vitest.live.config.ts`). */
+const testDefaulted = new Set((process.env['TAU_LIVE_TEST_DEFAULTED'] ?? '').split(','));
+
 /**
  * Whether this checkout can run a live turn on one catalog row.
  *
@@ -99,10 +102,12 @@ export const liveCredentialName = (modelId: string): string => {
  * so a skipped run says which credential is missing.
  *
  * @param modelId - Tau catalog model id.
- * @returns True when the row's provider credential is present.
+ * @returns True when the row's provider credential is present and not a `.env.test` placeholder.
  */
-export const hasLiveCredential = (modelId: string): boolean =>
-  (process.env[liveCredentialName(modelId)] ?? '').length > 0;
+export const hasLiveCredential = (modelId: string): boolean => {
+  const name = liveCredentialName(modelId);
+  return (process.env[name] ?? '').length > 0 && !testDefaulted.has(name);
+};
 
 const configuredRepeats = Number(process.env['TAU_LIVE_REPEATS'] ?? '0');
 

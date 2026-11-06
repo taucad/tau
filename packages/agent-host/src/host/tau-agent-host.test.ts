@@ -5498,6 +5498,79 @@ describe('model attempts: charge and proceed (RA-S11, EQ1)', () => {
       await survivor.close();
     });
 
+    it('should release a Resume waiting on a future settlesBy within one poll when the person stops the run', async () => {
+      const sim = gateway(['hang', 'complete']);
+      const file = await diedMidCall(sim, 'chat-w2-stop');
+      const clock = new StepClock();
+      const { transport, asked } = pendingUntil({
+        sim,
+        clock,
+        settlesBy: settlesByAhead(10 * 60_000),
+        settleAt: 10 * 60_000,
+      });
+      const survivor = steppedHostOn({ file, transport, idPrefix: 'w2-stop', clock });
+      await survivor.markAbandoned('chat-w2-stop');
+      const before = await readLog(file);
+      asked.length = 0;
+      let answered: number | undefined;
+      const resumed = (async () => {
+        try {
+          return await survivor.command({
+            type: 'resume',
+            commandId: 'resume-w2-stop',
+            payload: { chatId: 'chat-w2-stop', runId: 'run-1' },
+          });
+        } finally {
+          answered = clock.now();
+        }
+      })();
+      await vi.waitFor(() => {
+        expect(asked.length).toBeGreaterThan(0);
+      });
+      // Past the short waits, the Resume polls the gateway every 8 s.
+      await step(clock, 20_000);
+      expect(answered).toBeUndefined();
+      const stoppedAt = clock.now();
+
+      const cancelled = survivor.command({
+        type: 'cancel',
+        commandId: 'cancel-w2-stop',
+        payload: { chatId: 'chat-w2-stop', runId: 'run-1' },
+      });
+      await step(clock, 8000);
+
+      // The Resume is refused within one poll, as a Resume the gateway has not answered is refused today.
+      expect(answered).toBeDefined();
+      expect(answered! - stoppedAt).toBeLessThanOrEqual(8000);
+      await expect(resumed).resolves.toMatchObject({ status: 'refused', code: 'MODEL_ATTEMPT_PENDING' });
+      // The held Stop is answered as after any refused Resume: the abandoned run stays as it was, resumable.
+      await expect(cancelled).resolves.toMatchObject({ status: 'applied', details: { state: 'failed' } });
+      expect(await readLog(file)).toEqual(before);
+      // Nothing was prepared or sent past the attempt the gateway still owns.
+      expect(invocationRows(await readLog(file))).toEqual(['prepared run-1:1:0']);
+      expect(sim.attempts).toEqual(['run-1:1:0']);
+
+      // Once the gateway finishes it, a Resume records its charge before the next prepared row (ChargeAfterRecordedLoss).
+      sim.keys.set('run-1:1:0', 'charged');
+      await step(clock, 10 * 60_000 - clock.now());
+      const again = survivor.command({
+        type: 'resume',
+        commandId: 'resume-w2-stop-again',
+        payload: { chatId: 'chat-w2-stop', runId: 'run-1' },
+      });
+      await step(clock, 1000);
+      await expect(again).resolves.toMatchObject({ status: 'applied' });
+      await vi.waitFor(async () => {
+        expect(await survivor.snapshot('chat-w2-stop')).toMatchObject({ state: 'completed' });
+      });
+      expect(invocationRows(await readLog(file))).toEqual([
+        'prepared run-1:1:0',
+        'settled run-1:1:0 settled',
+        'prepared run-1:2:0',
+      ]);
+      await survivor.close();
+    });
+
     it('should refuse a Resume MODEL_ATTEMPT_PENDING after the short waits, as today, once settlesBy is past', async () => {
       const sim = gateway(['hang']);
       const file = await diedMidCall(sim, 'chat-w2-past');

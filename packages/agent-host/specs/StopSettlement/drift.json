@@ -4,10 +4,10 @@
     "src/harness/session.ts#pendingAttemptWaits": "ee80ddcf01eee2bba2b1c3dbc3ec1b048ee261e26f957fa1327a7fe95a1a33e6",
     "src/harness/session.ts#prepareInvocation": "b679fdd5aaeaa48d1926ec69239fa8d8007971d3e6502cae862fe92f6d998072",
     "src/harness/session.ts#settledInvocation": "e8521790a4d2c28101ff015d23ba9bafcbd7ae22eb909c145f0788fa666a605d",
-    "src/host/tau-agent-host.ts#resolveInvocations": "a1fcbdeef80641ab5c4276cb98e8aace07832ac60e31843dd4554b2f56df1604"
+    "src/host/tau-agent-host.ts#resolveInvocations": "049962067520c0f715338f81f5b4a4526b173455bb9c9b9557eddacbdbe01529"
   },
   "specs": {
-    "StopSettlement.tla": "c922480cdbe5019f5345704019131a85ffc85eb6e3f41a28a8db5fe2707825f5"
+    "StopSettlement.tla": "c40f5c93d72f2deccd1b10acc017103260508929f362a9491bdf69f39e5fee98"
   },
   "tables": {}
 }

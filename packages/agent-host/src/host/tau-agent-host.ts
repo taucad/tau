@@ -89,6 +89,7 @@ import type {
 import type { AgentChannelAdmissionConfig } from '#wire/admission.schema.js';
 import type { CommandAnswer, CommandPayload, HostCommand } from '#wire/commands.schema.js';
 import type { ReadAnswer, ReadInput } from '#wire/frames.schema.js';
+import type { InvocationResolution } from '#wire/gateway.js';
 import { refusalOf } from '#wire/refusals.js';
 import type { RefusalCode } from '#wire/refusals.js';
 import { turnSettlementSchema } from '#wire/settlement.schema.js';
@@ -318,6 +319,8 @@ type Dispatch = { refreshed?: DurableEventLog; admitted?: true; admission?: numb
 
 type ChatStore = {
   log?: Promise<DurableEventLog> | undefined;
+  /** A Resume's wait on its open model attempts (W2): a Stop for that run aborts it, as Stop aborts a run's own wait. */
+  resumeWait?: Readonly<{ runId: string; stop: AbortController }> | undefined;
   ledger?: ChatLedger | undefined;
   /** Every write and every open/close of this chat, in order: one sequence counter, one fold (I2). */
   chain: Promise<unknown>;
@@ -2300,11 +2303,12 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   /**
    * Resolve every unresolved model attempt in the chat before a Resume prepares anything (RA-S11, EQ1): each terminal
    * or voided answer becomes a settled row; a pending one is asked again within the run's waits (a Resume right after
-   * Stop finds the cut call still settling, StopSettlement), then refuses `MODEL_ATTEMPT_PENDING`; an attempt another
-   * account funded (or any, on an unfunded transport) refuses `MODEL_ATTEMPT_OTHER_ACCOUNT` before any lookup, and is
-   * neither voided nor recorded (RV5-F2).
+   * Stop finds the cut call still settling, StopSettlement; until the gateway's `settlesBy` when it states one, W2),
+   * then refuses `MODEL_ATTEMPT_PENDING`; a Stop during the wait (`stop`) refuses it the same way at once, and the held
+   * cancel then stops the paused run. An attempt another account funded (or any, on an unfunded transport) refuses
+   * `MODEL_ATTEMPT_OTHER_ACCOUNT` before any lookup, and is neither voided nor recorded (RV5-F2).
    */
-  const resolveInvocations = async (ledger: ChatLedger): Promise<LogRowBody[]> => {
+  const resolveInvocations = async (ledger: ChatLedger, stop: AbortSignal): Promise<LogRowBody[]> => {
     const open = unresolvedInvocations(ledger);
     if (open.length === 0) {
       return [];
@@ -2328,13 +2332,17 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     }
     const rows: LogRowBody[] = [];
     for (const attemptId of open) {
-      // oxlint-disable-next-line no-await-in-loop -- one lookup at a time, in preparation order.
-      const resolution = await settledInvocation({
-        funding,
-        attemptId,
-        clock: options.clock ?? globalThis,
-        signal: new AbortController().signal,
-      });
+      let resolution: InvocationResolution;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one lookup at a time, in preparation order.
+        resolution = await settledInvocation({ funding, attemptId, clock: options.clock ?? globalThis, signal: stop });
+      } catch (error) {
+        if (!stop.aborted) {
+          throw error;
+        }
+        /* Stopped while it waited: refused as a Resume the gateway has not answered is. */
+        resolution = { status: 'pending' };
+      }
       if (resolution.status === 'pending' || resolution.status === 'unavailable') {
         throw coded(
           'MODEL_ATTEMPT_PENDING' satisfies RefusalCode,
@@ -2578,7 +2586,17 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       const ledger = await ledgerOf(chatId);
       const entry = ledger.runs[runId];
       const events = await log.read();
-      const settled = await resolveInvocations(ledger);
+      const store = storeOf(chatId);
+      const resumeWait = { runId, stop: new AbortController() };
+      store.resumeWait = resumeWait;
+      let settled: LogRowBody[];
+      try {
+        settled = await resolveInvocations(ledger, resumeWait.stop.signal);
+      } finally {
+        if (store.resumeWait === resumeWait) {
+          store.resumeWait = undefined;
+        }
+      }
       const selection = resume.selection === undefined ? {} : { selection: resume.selection };
       const running = { type: 'run.lifecycle', state: 'running', ...selection } as unknown as LogRowBody;
       if (entry?.kind === 'external' || externalTurnOf(events) !== undefined) {
@@ -2994,6 +3012,14 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           endCursor: ledger.position.cursor,
         },
       };
+    }
+    if (command.type === 'cancel') {
+      /* W2: a Stop for a run whose Resume waits on the gateway ends that wait now; a replayed cancel never does. */
+      const store = stores.get(command.payload.chatId);
+      const waiting = store?.resumeWait;
+      if (waiting?.runId === command.payload.runId && store?.ledger?.applied[command.commandId] === undefined) {
+        waiting.stop.abort(new DOMException('The run was stopped.', 'AbortError'));
+      }
     }
     if (command.type === 'start') {
       /* Known before any row, so a legacy cancel of a reserving run finds its chat. */

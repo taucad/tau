@@ -740,7 +740,7 @@
     "StopSettlement.target.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "R1: a stop's cut settles when the API notices it, both resolve-first lookups wait (until the gateway's settlesBy when it states one, W2 I3), a user who keeps resuming proceeds"
+      "ref": "R1: a stop's cut settles when the API notices it, both resolve-first lookups wait (until the gateway's settlesBy when it states one, W2 I3) and a Stop ends any wait at once, a user who keeps resuming proceeds"
     },
     "StopSettlement.wait-only-StopNeverPauses.cfg": {
       "tier": "pr",

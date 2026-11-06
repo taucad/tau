@@ -26,7 +26,8 @@
 (*            offers Resume. After a refused Resume the run's own card     *)
 (*            ("Chat paused", "You stopped this turn") outranks the        *)
 (*            pending refusal (`selectVisibleChatError`) and offers Resume *)
-(*            again; `pending` marks that refusal.                         *)
+(*            again; `pending` marks that refusal. A Stop during any      *)
+(*            lookup's wait ends it at once (`StopLookup`, W2).            *)
 (*                                                                         *)
 (* Time is a tick counter from A's start; one wait is one tick. ASSUME     *)
 (* Notice < Budget < Due: the API notices a cut well inside the host's     *)
@@ -91,8 +92,9 @@ LoseReply ==   \* the reply never arrives while A stays pending; the live run re
     /\ att' = "lost" /\ cause' = "loss" /\ req' = "retry" /\ first' = clock /\ last' = -1
     /\ UNCHANGED <<noticed, cutAt, clock, page>>
 
-StopRetry ==   \* Stop while the live run waits on A: the wait is aborted, A stays as it is
-    /\ req = "retry"
+StopLookup ==   \* Stop while a lookup waits on A (a start, the live retry, or a Resume, W2): the wait ends
+    \* at once, A stays as it is, and the page offers Resume again
+    /\ req # "none"
     /\ page' = "stopped" /\ req' = "none" /\ last' = -1
     /\ UNCHANGED <<att, noticed, cutAt, cause, clock, first>>
 
@@ -141,13 +143,13 @@ Done ==   \* the run proceeded: nothing left to model
     /\ page = "proceeded"
     /\ UNCHANGED vars
 
-Next == Stop \/ LoseReply \/ StopRetry \/ ApiNotice \/ Recover \/ Tick \/ Send \/ Resume \/ Lookup \/ Done
+Next == Stop \/ LoseReply \/ StopLookup \/ ApiNotice \/ Recover \/ Tick \/ Send \/ Resume \/ Lookup \/ Done
 
 \* The system's processes are weakly fair; the user is not.
 Spec == Init /\ [][Next]_vars /\ WF_vars(ApiNotice) /\ WF_vars(Recover) /\ WF_vars(Tick) /\ WF_vars(Lookup)
 
-\* A user who keeps taking the action the page offers.
-LiveSpec == Spec /\ WF_vars(Resume)
+\* A user who keeps taking the action the page offers, and in the end stops pressing Stop.
+LiveSpec == Spec /\ WF_vars(Resume) /\ <>[][~StopLookup]_vars
 
 \* ---------------- properties ----------------
 
@@ -160,6 +162,9 @@ StopNeverRefuses == page = "pending" => cause = "loss"
 \* I3 (W2): no run ends on a wait code, and no Resume is refused one, while the gateway's
 \* stated settlement time (Due) is still ahead.
 NoWaitEndBeforeSettlesBy == page \in {"paused", "pending"} => clock >= Due
+
+\* W2: however long the gateway's settlesBy, a Stop ends every lookup's wait at once.
+StopReleasesLookup == req # "none" => ENABLED StopLookup
 
 \* Every lookup the host starts is answered: a successor leaves admission.
 LookupAnswered == (req # "none") ~> (req = "none")

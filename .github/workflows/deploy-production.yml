@@ -191,6 +191,10 @@ jobs:
               gh workflow run deploy-ui.yml --ref "$RELEASE" -f environment=production
             fi
             gh workflow run deploy-docs.yml --ref "$RELEASE" -f environment=production
+            # The marketing pages; a tag from before the `alias` input has no prod publish.
+            if git show "refs/tags/$RELEASE:.github/workflows/deploy-www-review.yml" | grep -q 'options: \[staging, prod\]'; then
+              gh workflow run deploy-www-review.yml --ref "$RELEASE" -f alias=prod
+            fi
           fi
 
       - name: Summarise

@@ -1695,13 +1695,20 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
   };
   /*
    * The server's own compare-and-set refusing a command: the ref was not at
-   * the old value this push sent. Git's receive-pack says `failed to update
-   * ref` (or `failed to lock`, `cannot lock ref`, `stale info`, and newer Git
-   * `incorrect old value provided`), and an atomic push's other commands
-   * `atomic transaction failed`.
+   * the old value this push sent, so another writer moved it. Git's
+   * receive-pack reports every failed ref transaction as `failed to update
+   * ref` (an atomic push's other commands as `atomic transaction failed`), so
+   * the form is read from what it said about that ref: `cannot lock ref
+   * '<ref>': is at <oid> but expected <oid>`, `reference already exists` for a
+   * create, `unable to resolve reference` for a ref removed since, or
+   * reftable's `incorrect old value provided`. A lock another process holds
+   * (`Unable to create '<ref>.lock': File exists`) says the same `failed to
+   * update ref` and is contention, not a moved ref: it keeps git's own text.
    */
-  const serverLockRefusal =
-    /failed to (?:update|lock) ref|cannot lock ref|stale info|is at [\da-f]+ but expected|incorrect old value provided|atomic transaction failed/iu;
+  const movedRefSaying =
+    /is at [\da-f]+ but expected [\da-f]+|reference already exists|unable to resolve reference|incorrect old value provided/iu;
+  const refMoved = (remoteName: string, reason: string, said: readonly string[]): boolean =>
+    movedRefSaying.test(reason) || said.some((line) => line.includes(`'${remoteName}'`) && movedRefSaying.test(line));
 
   const requireHttp = (): RevisionHttpClient => {
     if (options.http === undefined) {
@@ -2518,13 +2525,23 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
             throw http.refused(error, input.remote);
           },
         );
+        /* Whether the server's compare-and-set refused any command of this push. */
+        const movedAny = commands.some((command) => {
+          const answer = report.refs.get(command.remoteName);
+          return answer?.ok === false && refMoved(command.remoteName, answer.reason, report.said);
+        });
         for (const command of commands) {
           const answer = report.refs.get(command.remoteName);
           if (answer?.ok !== true) {
-            /* An old value from an earlier push's advertisement that the server's
-             * compare-and-set refused means another writer moved the ref in
-             * between: the remote moved, which is a lost lease (D39), not raw git text. */
-            const moved = advertisement.reused === true && serverLockRefusal.test(answer?.reason ?? '');
+            /* An old value the server's compare-and-set refused means another
+             * writer moved the ref after the advertisement this push planned
+             * from, a kept one or this push's own: the remote moved, which is a
+             * lost lease (D39), not raw git text. An atomic push's other
+             * commands fall with it. */
+            const moved =
+              answer !== undefined &&
+              (refMoved(command.remoteName, answer.reason, report.said) ||
+                (movedAny && /atomic transaction failed/iu.test(answer.reason)));
             results.set(
               command.name,
               refused(

@@ -1123,6 +1123,80 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
     180_000,
   );
 
+  /* W6.2: the compare-and-set refusing a push planned from its own fresh advertisement is a lost lease too. */
+  it.skipIf(leg.name === 'native git')(
+    'row 9e: a ref another writer moved between a fresh advertisement and the receive is refused as leaseLost',
+    async () => {
+      const remote = await startGitHttpBackend({
+        root: await temporaryRoot('remote-fresh-moved'),
+        /* Moves `main` after the advertisement, inside the receive, before its compare-and-set. */
+        preReceive: [
+          'if [ -f tau-move-main ]; then',
+          '  env -u GIT_QUARANTINE_PATH git update-ref refs/heads/main "$(cat tau-move-main)"',
+          '  rm tau-move-main',
+          'fi',
+        ],
+      });
+      try {
+        const one = await device({ leg, label: 'a-fresh-moved', remoteUrl: remote.url, files: { 'a.ts': '1\n' } });
+        const first = await record({ device: one, files: { 'a.ts': '1\n' }, summary: 'First' });
+        const pushed = await one.port.push({ remote: 'tau', refs: [{ name: mainRef }] });
+        expect(pushed.refs[0]).toMatchObject({ status: 'updated', head: first });
+        await record({ device: one, files: { 'a.ts': '2\n' }, summary: 'Second', parent: first });
+        const other = await remote.git([
+          '-c',
+          'user.name=Another writer',
+          '-c',
+          'user.email=another@example.test',
+          'commit-tree',
+          await remote.git(['rev-parse', `${first}^{tree}`]),
+          '-p',
+          first,
+          '-m',
+          'Another writer',
+        ]);
+        await writeFile(join(remote.repositoryPath, 'tau-move-main'), `${other}\n`);
+
+        const moved = await one.port.push({ remote: 'tau', refs: [{ name: mainRef }] });
+        expect(moved.refs[0]).toMatchObject({ status: 'rejected', reason: 'leaseLost' });
+        await expect(remote.git(['rev-parse', mainRef])).resolves.toBe(other);
+      } finally {
+        await remote.close();
+      }
+    },
+    180_000,
+  );
+
+  /* W6.2: a ref whose lock another process holds is contention, not a moved ref: git's own words, never leaseLost. */
+  it.skipIf(leg.name === 'native git')(
+    "row 9f: a ref locked by another process on the server is refused in git's words, not as leaseLost",
+    async () => {
+      const remote = await startGitHttpBackend({
+        root: await temporaryRoot('remote-locked'),
+        preReceive: ['if [ -f tau-lock-main ]; then', '  : > refs/heads/main.lock', '  rm tau-lock-main', 'fi'],
+      });
+      try {
+        const one = await device({ leg, label: 'a-locked', remoteUrl: remote.url, files: { 'a.ts': '1\n' } });
+        const first = await record({ device: one, files: { 'a.ts': '1\n' }, summary: 'First' });
+        const session: RevisionPushSession = {};
+        const pushed = await one.port.push({ remote: 'tau', refs: [{ name: mainRef }], session });
+        expect(pushed.refs[0]).toMatchObject({ status: 'updated', head: first });
+        await record({ device: one, files: { 'a.ts': '2\n' }, summary: 'Second', parent: first });
+        await writeFile(join(remote.repositoryPath, 'tau-lock-main'), '');
+
+        /* Over the kept advertisement, which once made any lock refusal a lost lease. */
+        const locked = await one.port.push({ remote: 'tau', refs: [{ name: mainRef }], session });
+        expect(locked.refs[0]).toMatchObject({ status: 'rejected' });
+        expect(locked.refs[0]?.reason).not.toBe('leaseLost');
+        expect(locked.refs[0]?.reason).toMatch(/failed to update ref/u);
+        await expect(remote.git(['rev-parse', mainRef])).resolves.toBe(first);
+      } finally {
+        await remote.close();
+      }
+    },
+    180_000,
+  );
+
   /* Review: a kept copy saying a ref is already there is read again, since nothing sent would find out. */
   it.skipIf(leg.name === 'native git')(
     'row 9d: a session reads the remote again before calling a ref another writer moved up to date',

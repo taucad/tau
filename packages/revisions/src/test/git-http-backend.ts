@@ -68,6 +68,14 @@ export type GitHttpBackendOptions = Readonly<{
   /** What the hook prints when it refuses {@link GitHttpBackendOptions.refusedRef}, one line per entry. */
   refusedSaying?: readonly string[];
   /**
+   * Shell lines a `pre-receive` hook runs before receive-pack updates any ref,
+   * with the bare repository as its working directory: how a test moves or
+   * locks a ref between the advertisement a push planned from and the
+   * server's compare-and-set. The hook runs inside git's object quarantine,
+   * so a line that updates a ref clears `GIT_QUARANTINE_PATH` itself.
+   */
+  preReceive?: readonly string[];
+  /**
    * Set, the LFS batch endpoint answers `413` instead of issuing transfers.
    *
    * The object list is filled from the request, exactly as the Tau API does:
@@ -189,6 +197,12 @@ export const startGitHttpBackend = async (options: GitHttpBackendOptions): Promi
         '',
       ].join('\n'),
     );
+    await chmod(hook, 0o755);
+  }
+
+  if (options.preReceive !== undefined) {
+    const hook = join(repositoryPath, 'hooks', 'pre-receive');
+    await writeFile(hook, ['#!/bin/sh', 'cat > /dev/null', ...options.preReceive, 'exit 0', ''].join('\n'));
     await chmod(hook, 0o755);
   }
 

@@ -222,11 +222,51 @@ describe('NodeFsProvider atomic writes', () => {
       await drainNodeFsProviderWatchClosures(provider);
       onEvents?.(null, [{ path: join(root, 'gone.txt'), type: 'delete' }]);
       await drainNodeFsProviderWatchClosures(provider);
+      /* The event the handler dropped is owed back as a reset, so the consumer resyncs rather than stays stale. */
       expect(events).toEqual([
         { type: 'change', path: 'target.txt', kind: 'file' },
+        { type: 'reset' },
         { type: 'delete', path: 'gone.txt' },
       ]);
       expect(reported).toHaveBeenCalledWith(expect.stringContaining('watch handler threw'), expect.any(Error));
+    } finally {
+      stop();
+      await drainNodeFsProviderWatchClosures(provider);
+    }
+  });
+
+  it('delivers a dropped reset again, ahead of the next event when its retry throws too', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const close = vi.fn(async () => undefined);
+    let onEvents: Parameters<typeof parcelWatcher.subscribe>[1] | undefined;
+    vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(async (_directory, callback) => {
+      onEvents = callback;
+      return { unsubscribe: close };
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const events: unknown[] = [];
+    let failures = 2;
+    const stop = await provider.watch({ paths: [''], recursive: true }, (event) => {
+      events.push(event);
+      if (event.type === 'reset' && failures > 0) {
+        failures -= 1;
+        throw new Error('handler broke');
+      }
+    });
+    try {
+      onEvents?.(new Error('native stream lost'), []);
+      await drainNodeFsProviderWatchClosures(provider);
+      /* The reset, then its one retry, both dropped: still owed, and never retried in a loop. */
+      expect(events).toEqual([{ type: 'reset' }, { type: 'reset' }]);
+      onEvents?.(null, [{ path: join(root, 'target.txt'), type: 'update' }]);
+      await drainNodeFsProviderWatchClosures(provider);
+      expect(events).toEqual([
+        { type: 'reset' },
+        { type: 'reset' },
+        { type: 'reset' },
+        { type: 'change', path: 'target.txt', kind: 'file' },
+      ]);
     } finally {
       stop();
       await drainNodeFsProviderWatchClosures(provider);

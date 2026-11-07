@@ -752,6 +752,24 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
 
     const ignored = (rootedPath: string): boolean =>
       isExcluded(rootedPath, excludes) || inFlightTemporaryName.test(path.basename(rootedPath));
+    let classifying: Promise<void> = Promise.resolve();
+    /*
+     * A handler that throws loses its event, never the stream (D16). What it
+     * lost leaves the consumer stale, so a reset is owed: retried once, in
+     * order, after what is already queued, and, if that throws too, delivered
+     * ahead of the next event, until one lands.
+     */
+    let owedReset = false;
+    let retryingReset = false;
+    const deliver = (event: NodeFsWatchEvent): boolean => {
+      try {
+        handler(event);
+        return true;
+      } catch (error) {
+        console.error('[filesystem] A watch handler threw; a reset follows so its consumer resyncs.', error);
+        return false;
+      }
+    };
     const emit = (event: NodeFsWatchEvent): void => {
       if (unsubscribed) {
         return;
@@ -759,12 +777,32 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       if (event.type !== 'reset' && ignored(event.path)) {
         return;
       }
-      /* A handler that throws loses its own event, never the stream: the next one is still delivered in order. */
-      try {
-        handler(event);
-      } catch (error) {
-        console.error('[filesystem] A watch handler threw; later events are still delivered.', error);
+      if (owedReset && event.type !== 'reset') {
+        owedReset = !deliver({ type: 'reset' });
       }
+      if (deliver(event)) {
+        if (event.type === 'reset') {
+          owedReset = false;
+        }
+        return;
+      }
+      owedReset = true;
+      if (retryingReset) {
+        return;
+      }
+      retryingReset = true;
+      const previous = classifying;
+      classifying = (async (): Promise<void> => {
+        await previous;
+        retryingReset = false;
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- an event delivered meanwhile may have paid it.
+        if (owedReset) {
+          retryingReset = true;
+          emit({ type: 'reset' });
+          retryingReset = false;
+        }
+      })();
+      trackWatchAdmission(this, classifying);
     };
     /*
      * Classified off the event loop (D16): a native callback's events are
@@ -774,7 +812,6 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
      * kind from one asynchronous `stat`, never a synchronous one per event.
      * Callbacks emit in the order they arrived, each as one run of events.
      */
-    let classifying: Promise<void> = Promise.resolve();
     const classify = (batch: readonly ObservedEvent[]): void => {
       const admitted = batch.filter((event) => event === 'reset' || !ignored(event.rootedPath));
       if (admitted.length === 0) {
@@ -963,15 +1000,8 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       }
       throw new Error('Native watch admission failed.', { cause: failure.reason });
     }
-    /* What admission reconciled is delivered before the watch is acknowledged. */
-    try {
-      await classifying;
-    } catch (error) {
-      /* A watch that fails here still releases what it opened. */
-      unsubscribe();
-      await drainNodeFsProviderWatchClosures(this);
-      throw error;
-    }
+    /* What admission reconciled is delivered before the watch is acknowledged; no run rejects (`emit` keeps a throw). */
+    await classifying;
     if (!this._openSubscriptions.has(unsubscribe)) {
       throw new Error('Node filesystem observation was cancelled during admission.');
     }

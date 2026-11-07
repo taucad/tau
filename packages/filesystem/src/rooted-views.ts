@@ -833,8 +833,9 @@ export class RootedViews {
     const privateStore: PrivateStore = {
       readFile: readPrivateFile,
       ...(captured.provider.readFileStream === undefined ? {} : { readRange: readPrivateRange }),
-      /* A streamed write commits whole or not at all, by the provider's own staging (W6.3). */
-      ...(captured.provider.writeFileStream === undefined
+      /* A streamed write commits whole or not at all, by the provider's own staging (W6.3); offered
+       * only where the provider holds a chunk at a time, so streaming never costs the object twice (W6.4). */
+      ...(captured.provider.writeFileStream === undefined || captured.provider.capabilities.streamsWrites !== true
         ? {}
         : {
             writeFileStream: async (path: string, source: ReadableStream<Uint8Array<ArrayBuffer>>) => {

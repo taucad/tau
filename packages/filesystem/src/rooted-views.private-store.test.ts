@@ -82,7 +82,9 @@ describe('rooted privateStore', () => {
 
   /* W6.3: a large object streams into the store through the provider's own staging, with no claim and no event. */
   it('should stream a control-plane file through the provider, with no change event and no mutation claim', async () => {
-    const { service, eventBus, resourceQueue } = await createWorkspaceFileService();
+    const { service, eventBus, resourceQueue, provider } = await createWorkspaceFileService();
+    /* Memory gathers a stream; here it stands in for a provider that holds a chunk at a time. */
+    Object.assign(provider, { capabilities: { ...provider.capabilities, streamsWrites: true } });
     const store = service.createRootedFileSystem('/').privateStore!;
     const events: ChangeEvent[] = [];
     eventBus.subscribe((event) => {
@@ -114,6 +116,14 @@ describe('rooted privateStore', () => {
     ).rejects.toThrow(TypeError);
     /* Refused before any provider saw it: the store releases the source itself. */
     expect(cancel).toHaveBeenCalledWith(expect.any(TypeError));
+  });
+
+  /* W6.4: a provider that would gather the stream offers no streamed write, so a consumer writes the bytes it holds. */
+  it('should offer no streamed write over a provider that gathers the stream', async () => {
+    const { service, provider } = await createWorkspaceFileService();
+
+    expect(provider.writeFileStream).toBeDefined();
+    expect(service.createRootedFileSystem('/').privateStore!.writeFileStream).toBeUndefined();
   });
 
   it('should offer no range read over a provider that cannot stream ranges', async () => {

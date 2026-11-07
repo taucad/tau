@@ -80,6 +80,7 @@ export class OPFSProvider extends FileSystemAccessProvider {
     quotaBased: true,
     durability: 'exclusive-append',
     trustworthyMtime: true,
+    streamsWrites: true,
   };
 
   private _initialized = false;

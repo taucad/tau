@@ -30,6 +30,7 @@ describe('FileSystemAccessProvider', () => {
         durability: 'stream-append',
         trustworthyMtime: true,
         externallyEdited: true,
+        streamsWrites: true,
       });
     });
   });

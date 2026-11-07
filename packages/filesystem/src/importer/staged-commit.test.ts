@@ -250,7 +250,7 @@ describe('commitPendingProjectDirectory from a staged import', () => {
     expect(digest.mock.calls.length).toBe(staged);
   });
 
-  it('should keep the facts the decode measured beside the project, for its first revision', async () => {
+  it('should keep the facts the decode measured beside the project, with the mtime of each placed file', async () => {
     await stage(directory);
 
     await commit();
@@ -263,6 +263,9 @@ describe('commitPendingProjectDirectory from a staged import', () => {
     expect(record.entries).toHaveLength(302);
     expect(main?.facts.blobOid).toBe(gitBlobOid('main'));
     expect(main?.facts.sha256).toMatch(/^[0-9a-f]{64}$/u);
+    /* Each entry carries the mtime its file had once placed, which the index matches exactly. */
+    const placed = await provider.stat(`${directory}/src/main.ts`);
+    expect(main?.mtimeMs).toBe(placed.mtimeMs);
     expect(tauPathPolicy.classify(importFactsPath).versioned).toBe(false);
   });
 

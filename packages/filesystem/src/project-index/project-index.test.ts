@@ -13,6 +13,7 @@ import { createWorkspaceFileService } from '#testing/workspace-service-harness.j
 import { ProjectIndex, timestampGranularityMilliseconds } from '#project-index/project-index.js';
 import type { ObservedRow } from '#project-index/project-index.js';
 import { ProjectIndexes } from '#project-index/project-indexes.js';
+import { importFactsFreshMilliseconds } from '#importer/facts.js';
 import { parseIndexSnapshot, readIndexSnapshot, snapshotPath } from '#project-index/index-snapshot.js';
 import { tauPathPolicy } from '#path-registry.js';
 import type { WorkspaceFileService } from '#workspace-file-service.js';
@@ -1447,16 +1448,17 @@ describe('ProjectIndexes import facts (D12)', () => {
   const sha256 = (character: string): string => character.repeat(64);
   const recordOf = (
     at: number,
-    entries: ReadonlyArray<Readonly<{ path: string; size: number; oid: string }>>,
+    entries: ReadonlyArray<Readonly<{ path: string; size: number; oid: string; mtimeMs?: number }>>,
   ): string =>
     JSON.stringify({
       version: 1,
       operationId: 'req_import',
       pin: { kind: 'zip', name: 'x', size: 1, entries: entries.length },
       at,
-      entries: entries.map(({ path, size, oid }) => ({
+      entries: entries.map(({ path, size, oid, mtimeMs = 1_000_000 }) => ({
         path,
         size,
+        mtimeMs,
         facts: { contentKind: 'text', blobOid: oid, sha256: sha256('e') },
       })),
     });
@@ -1496,6 +1498,65 @@ describe('ProjectIndexes import facts (D12)', () => {
     const measured = await indexes.facts('/project', ['edited.txt', 'resized.txt'], { digests: ['blobOid'] });
     expect(measured.get('edited.txt')?.blobOid).not.toBe('b'.repeat(40));
     expect(measured.get('resized.txt')?.blobOid).not.toBe('c'.repeat(40));
+  });
+
+  it('should measure a same-size replacement that carries an older mtime (cp -p, rsync -t, unzip)', async () => {
+    const { provider } = await durableRoot();
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    await provider.writeFile('project/kept.txt', 'kept');
+    vi.setSystemTime(1_010_000);
+    await provider.writeFile(
+      'project/.tau/import.json',
+      recordOf(1_010_000, [{ path: 'kept.txt', size: 4, oid: 'a'.repeat(40) }]),
+    );
+    /* Replaced at the same size with an mtime older than the one the commit observed. */
+    vi.setSystemTime(990_000);
+    await provider.writeFile('project/kept.txt', 'KEPT');
+    vi.setSystemTime(1_020_000);
+
+    const facts = await indexesOver(provider).facts('/project', ['kept.txt'], { digests: ['blobOid'] });
+
+    expect(facts.get('kept.txt')?.blobOid).toBeDefined();
+    expect(facts.get('kept.txt')?.blobOid).not.toBe('a'.repeat(40));
+  });
+
+  it('should seed from a record once, never again on a later rescan', async () => {
+    const { provider } = await durableRoot();
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    await provider.writeFile('project/kept.txt', 'kept');
+    vi.setSystemTime(1_010_000);
+    await provider.writeFile(
+      'project/.tau/import.json',
+      recordOf(1_010_000, [{ path: 'kept.txt', size: 4, oid: 'a'.repeat(40) }]),
+    );
+    const indexes = indexesOver(provider);
+    const seeded = await indexes.facts('/project', ['kept.txt'], { digests: ['blobOid'] });
+    expect(seeded.get('kept.txt')?.blobOid).toBe('a'.repeat(40));
+    /* Rewritten to other bytes at the very (size, mtime) recorded, then rescanned. */
+    vi.setSystemTime(1_000_000);
+    await provider.writeFile('project/kept.txt', 'KEPT');
+    vi.setSystemTime(1_020_000);
+    indexes.evict('/project');
+
+    const facts = await indexes.facts('/project', ['kept.txt'], { digests: ['blobOid'] });
+
+    expect(facts.get('kept.txt')?.blobOid).not.toBe('a'.repeat(40));
+  });
+
+  it('should take nothing from a record written longer ago than the first open after an import', async () => {
+    const { provider } = await durableRoot();
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    await provider.writeFile('project/kept.txt', 'kept');
+    vi.setSystemTime(1_010_000);
+    await provider.writeFile(
+      'project/.tau/import.json',
+      recordOf(1_010_000, [{ path: 'kept.txt', size: 4, oid: 'a'.repeat(40) }]),
+    );
+    vi.setSystemTime(1_010_000 + importFactsFreshMilliseconds + 1);
+
+    const facts = await indexesOver(provider).facts('/project', ['kept.txt'], { digests: ['blobOid'] });
+
+    expect(facts.get('kept.txt')?.blobOid).not.toBe('a'.repeat(40));
   });
 
   it('should take nothing from a record whose mtime disagrees with when it says it was written', async () => {

@@ -388,10 +388,10 @@ export const planImport = async (
     limits?: ImportLimits;
     signal?: AbortSignal;
     /**
-     * A folder inside the source, relative to its content root (after the
-     * shared top folders a source strips, such as a repository archive's
-     * `<repo>-<sha>/`): only what is under it is imported, and it becomes the
-     * project root.
+     * A folder inside the source, relative to its one shared top folder
+     * when it has one (a repository archive's `<repo>-<sha>/`): only what is
+     * under it is imported, and it becomes the project root. `.` or an empty
+     * root is the whole source.
      */
     root?: string;
   }>,
@@ -438,19 +438,16 @@ export const planImport = async (
       break;
     }
   }
-  const root = options.root === undefined || options.root === '' ? [] : normalizeImportPath(options.root).split('/');
+  /* `.`, `./` and `` name the whole content root. */
+  const rootPath = options.root === undefined ? '' : normalizeImportPath(options.root);
+  const root = rootPath === '' ? [] : rootPath.split('/');
   if (root.length > 0) {
-    /* The shared folders stop where the root begins, so a root that is itself the only folder is still found. */
-    const startsAt = (depth: number): boolean =>
-      listed.some(({ source: path }) => {
-        const segments = path.split('/');
-        return (
-          segments.length > depth + root.length && root.every((segment, index) => segments[depth + index] === segment)
-        );
-      });
-    while (strip > 0 && !startsAt(strip)) {
-      strip -= 1;
-    }
+    /*
+     * A root is relative to the archive's one top folder (`<repo>-<sha>/`),
+     * never to however many folders happen to be shared: with `a/a/x` and
+     * `a/y` under the top folder, root `a` is `a/`, not `a/a/`.
+     */
+    strip = Math.min(strip, 1);
   }
   const underRoot = (path: string): boolean => {
     const segments = path.split('/');

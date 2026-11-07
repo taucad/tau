@@ -50,6 +50,7 @@ export type {
   PlannedImportEntry,
 } from '#importer/sources.js';
 export {
+  importFactsFreshMilliseconds,
   importFactsMaximumBytes,
   importFactsPath,
   importFactsSkewMilliseconds,
@@ -57,7 +58,7 @@ export {
   parseImportFacts,
   verifiedImportFacts,
 } from '#importer/facts.js';
-export type { ImportFactsRecord, StagedImportEntry } from '#importer/facts.js';
+export type { ImportFactsRecord, RecordedImportEntry, StagedImportEntry } from '#importer/facts.js';
 export {
   discardStagedImport,
   importOwnerPath,

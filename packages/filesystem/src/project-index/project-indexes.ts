@@ -154,6 +154,9 @@ export class ProjectIndexes {
   /** Roots opened by a scan whose import facts, if any, no digest request has taken yet (D12). */
   private readonly _importFactsPending = new Set<string>();
 
+  /** The records already taken, by root and operation: a record seeds once, never again on a later rescan. */
+  private readonly _importFactsTaken = new Set<string>();
+
   /**
    * @param options - Mount boundaries, provider resolution, path policy and tab identity.
    */
@@ -807,13 +810,13 @@ export class ProjectIndexes {
       /* A rename whose source the scan had not reached yet. */
       await this._refreshStale(root, index);
     }
-    if (!usable) {
-      /* A first scan may be of a project an import just committed: its first digest request seeds from the record. */
-      this._importFactsPending.add(root);
-    }
     if (this._states.get(root) !== state) {
       /* Evicted while opening: answer this caller, keep nothing. */
       return index;
+    }
+    if (!usable) {
+      /* A first scan may be of a project an import just committed: its first digest request seeds from the record. */
+      this._importFactsPending.add(root);
     }
     this._schedulePersist(root);
     return index;
@@ -825,7 +828,8 @@ export class ProjectIndexes {
    * without hashing the import again. Asked once, by the first digest request
    * after a scan, so opening a root costs nothing more. Only on a provider
    * whose mtimes are trustworthy, and only what {@link verifiedImportFacts}
-   * holds to the file: anything else is measured like any file. The record
+   * holds to the file: anything else is measured like any file. A record
+   * seeds once: a later rescan of the root measures its files. The record
    * is trusted as of its own mtime, so a file written within the racy window
    * of it stays untrusted (EQ7).
    */
@@ -848,10 +852,12 @@ export class ProjectIndexes {
     } catch {
       return;
     }
-    if (record === undefined) {
+    const taken = `${root}\0${record?.operationId ?? ''}`;
+    if (record === undefined || this._importFactsTaken.has(taken)) {
       return;
     }
-    const seeded = verifiedImportFacts(record, recordMtime, (entryPath) => {
+    this._importFactsTaken.add(taken);
+    const seeded = verifiedImportFacts(record, { recordMtime, now: Date.now() }, (entryPath) => {
       const entry = index.settled(entryPath) ? index.entry(entryPath) : undefined;
       return entry === undefined || entry.kind === 'dir'
         ? undefined

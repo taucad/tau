@@ -529,6 +529,23 @@ describe('planImport', () => {
     expect(judged.entries.map(({ path }) => path).toSorted()).toEqual(['b.scad', 'main.scad']);
   });
 
+  it('should resolve a root from the top folder, not from every shared folder', async () => {
+    const source = zipImportSource(await zipOf({ 'repo-abc/a/a/x.scad': 'x', 'repo-abc/a/y.scad': 'y' }));
+
+    const judged = await planImport(source, { policy: tauPathPolicy, root: 'a' });
+
+    expect(judged.entries.map(({ path }) => path).toSorted()).toEqual(['a/x.scad', 'y.scad']);
+  });
+
+  it.each(['.', '', './'])('should import the whole repository for root %j', async (root) => {
+    const source = zipImportSource(await zipOf({ 'repo-abc/main.scad': 'm', 'repo-abc/lib/b.scad': 'b' }));
+
+    const judged = await planImport(source, { policy: tauPathPolicy, root });
+
+    expect(judged.entries.map(({ path }) => path).toSorted()).toEqual(['lib/b.scad', 'main.scad']);
+    expect(judged.pin.root).toBeUndefined();
+  });
+
   it('should name a folder pick after its shared folder', async () => {
     const judged = await plan(
       fileListImportSource([

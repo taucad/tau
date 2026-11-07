@@ -3,10 +3,10 @@
  *
  * The decode measured every entry's blob id, SHA-256 and kind once. The
  * commit writes them to {@link importFactsPath}, and the Project Index takes
- * them when it first opens the project, so neither it nor the first revision
- * hashes the files again. They are hints, not truth: nothing in the record
- * is believed until {@link verifiedImportFacts} has held each entry to the
- * file the index sees now.
+ * them when it first opens the project, so it does not hash the files again.
+ * They are hints, not truth: nothing in the record is believed until
+ * {@link verifiedImportFacts} has held each entry to the file the index sees
+ * now, by the exact size and mtime the commit observed after placing it.
  *
  * @module
  */
@@ -36,6 +36,13 @@ export type StagedImportEntry = Readonly<{
 }>;
 
 /**
+ * One recorded entry: a staged entry and the mtime its file had once placed.
+ *
+ * @public
+ */
+export type RecordedImportEntry = StagedImportEntry & Readonly<{ mtimeMs: number }>;
+
+/**
  * The record at {@link importFactsPath}.
  *
  * @public
@@ -46,7 +53,7 @@ export type ImportFactsRecord = Readonly<{
   pin: ImportSourcePin;
   /** When the commit wrote the record (milliseconds since the epoch). */
   at?: number;
-  entries: readonly StagedImportEntry[];
+  entries: readonly RecordedImportEntry[];
 }>;
 
 /** The largest record a reader parses: 50,000 entries at a few hundred bytes each, with room. @public */
@@ -54,6 +61,14 @@ export const importFactsMaximumBytes = 64 * 1024 * 1024;
 
 /** How far the record's own mtime may stand from the time it says it was written. @public */
 export const importFactsSkewMilliseconds = 2 * 60 * 1000;
+
+/**
+ * How long after its commit a record is still taken. The record serves the
+ * first open after an import; a later scan measures the files like any.
+ *
+ * @public
+ */
+export const importFactsFreshMilliseconds = 10 * 60 * 1000;
 
 const hexOf = (length: number): RegExp => new RegExp(`^[0-9a-f]{${String(length)}}$`, 'u');
 const sha1Hex = hexOf(40);
@@ -102,38 +117,53 @@ export const parseImportFacts = (bytes: Uint8Array<ArrayBuffer>): ImportFactsRec
   ) {
     return undefined;
   }
-  return { ...(parsed as ImportFactsRecord), entries: parsed.entries.filter(isStagedImportEntry) };
+  return {
+    ...(parsed as ImportFactsRecord),
+    entries: parsed.entries.filter(
+      (entry: unknown): entry is RecordedImportEntry =>
+        isStagedImportEntry(entry) && Number.isFinite((entry as Partial<RecordedImportEntry>).mtimeMs),
+    ),
+  };
 };
 
 /**
  * The record's facts that still describe the files, each held to the file the
- * index sees now: the same size, last written no later than the record itself
- * (so no edit since the import), with ids of the right form, and only from a
- * record whose own mtime agrees with when it says it was written (so it is
- * the commit's, not one copied in or rewritten later). Everything else is
- * dropped and measured again like any file.
+ * index sees now: exactly the size and mtime the commit observed after it
+ * placed the file (so a same-size replacement carrying an older mtime, as
+ * `cp -p` or `rsync -t` leave, is measured again), with ids of the right
+ * form. Only from a record whose own mtime agrees with when it says it was
+ * written (so it is the commit's, not one copied in or rewritten later), and
+ * only while that is recent ({@link importFactsFreshMilliseconds}). Everything
+ * else is dropped and measured again like any file.
  *
  * @param record - The parsed record.
- * @param recordMtime - The record file's mtime, from a provider whose mtimes are trustworthy.
+ * @param times - The record file's mtime, from a provider whose mtimes are trustworthy, and the time now.
+ * @param times.recordMtime - The record file's mtime.
+ * @param times.now - The time now (milliseconds since the epoch).
  * @param current - What the index holds at a path now.
  * @returns The facts to seed, by path.
  * @public
  */
 export const verifiedImportFacts = (
   record: ImportFactsRecord,
-  recordMtime: number,
+  { recordMtime, now }: Readonly<{ recordMtime: number; now: number }>,
   current: (path: string) => Readonly<{ kind: 'file' | 'dir'; size: number; mtimeMs: number }> | undefined,
 ): Map<string, Readonly<{ facts: ContentFacts; size: number; mtimeMs: number }>> => {
   const seeded = new Map<string, Readonly<{ facts: ContentFacts; size: number; mtimeMs: number }>>();
-  if (record.at === undefined || Math.abs(recordMtime - record.at) > importFactsSkewMilliseconds) {
+  if (
+    record.at === undefined ||
+    Math.abs(recordMtime - record.at) > importFactsSkewMilliseconds ||
+    now - record.at > importFactsFreshMilliseconds ||
+    record.at - now > importFactsSkewMilliseconds
+  ) {
     return seeded;
   }
   for (const entry of record.entries) {
-    const now = current(entry.path);
+    const held = current(entry.path);
     if (
-      now?.kind !== 'file' ||
-      now.size !== entry.size ||
-      now.mtimeMs > recordMtime ||
+      held?.kind !== 'file' ||
+      held.size !== entry.size ||
+      held.mtimeMs !== entry.mtimeMs ||
       !sha1Hex.test(entry.facts.blobOid) ||
       !sha256Hex.test(entry.facts.sha256)
     ) {
@@ -146,8 +176,8 @@ export const verifiedImportFacts = (
         sha256: entry.facts.sha256,
         ...(entry.facts.lineCount === undefined ? {} : { lineCount: entry.facts.lineCount }),
       },
-      size: now.size,
-      mtimeMs: now.mtimeMs,
+      size: held.size,
+      mtimeMs: held.mtimeMs,
     });
   }
   return seeded;

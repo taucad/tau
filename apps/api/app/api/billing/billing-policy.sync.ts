@@ -9,7 +9,6 @@ import {
 import {
   commercialPolicySchema,
   validateCommercialPolicy,
-  validatePolicyActivationNotice,
 } from '#api/billing/billing-policy.js';
 import type { CommercialPolicy, FinancialEnvironment, ValidatedCommercialPolicy } from '#api/billing/billing-policy.js';
 import type { BillingPolicyService, PolicyReplica } from '#api/billing/billing-policy.service.js';
@@ -137,13 +136,8 @@ const headRowSchema = z.object({
   pendingActivationId: z.string().nullable(),
 });
 
-const noticeMessage = 'retail rate increase requires 30 days notice';
-const noticeMilliseconds = 30 * 24 * 60 * 60 * 1000 + 60_000;
-/* Both losable races. The second only happens on a scheduled rise: the two racers derive the same
- * activation id from the content and the head, but each computes `effectiveAt` from its own reading
- * of the database clock, so their request hashes differ and the loser is refused as a job-key
- * conflict rather than a lost compare-and-swap. Its retry finds the winner's pending activation
- * carrying the same content and reports `unchanged`. */
+/* Both losable races. A racer that lost the compare-and-swap retries; a job-key conflict means a peer
+ * published the same activation id with a different request, and the retry reports `unchanged`. */
 const retryableMessages = new Set([
   'policy publication head compare-and-swap failed',
   'policy publication job key conflicts with prior payload',
@@ -255,22 +249,9 @@ export const syncPolicy = async (
       return { status: 'unchanged', activationId: effective.activationId, contentHash: candidate.contentHash };
     }
 
-    const databaseNow = await readDatabaseNow(database);
-    let effectiveAt: Date | undefined;
-    try {
-      validatePolicyActivationNotice({
-        previous: effective?.policy,
-        next: candidate.policy,
-        announcedAt: databaseNow,
-        effectiveAt: databaseNow,
-      });
-    } catch (error) {
-      if (!(error instanceof Error) || error.message !== noticeMessage) {
-        throw error;
-      }
-      effectiveAt = new Date(databaseNow.getTime() + noticeMilliseconds);
-    }
 
+    // Third-party model prices pass through as they change, rises included (operator ruling 2026-11-07).
+    const databaseNow = await readDatabaseNow(database);
     const activationId = `sync-${candidate.contentHash.slice(0, 12)}-r${head.revision + 1n}`;
     try {
       const published = await service.publishPolicy({
@@ -280,7 +261,6 @@ export const syncPolicy = async (
         jobKey: activationId,
         expectedHeadRevision: head.revision,
         ...(head.currentActivationId === null ? {} : { expectedPredecessorActivationId: head.currentActivationId }),
-        ...(effectiveAt === undefined ? {} : { effectiveAt }),
         replica: input.replica,
       });
       return {
@@ -288,7 +268,7 @@ export const syncPolicy = async (
         activationId: published.activationId,
         headRevision: published.headRevision,
         contentHash: candidate.contentHash,
-        effectiveAt: effectiveAt ?? databaseNow,
+        effectiveAt: databaseNow,
       };
     } catch (error) {
       if (!(error instanceof Error) || !retryableMessages.has(error.message)) {

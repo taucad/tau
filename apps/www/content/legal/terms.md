@@ -38,7 +38,7 @@ Many features of our Service are available for free without a Subscription. For 
 - **Annual Subscriptions**: Billed annually with a discount compared to monthly rates
 - **Usage Credits**: Pay-per-use credits for AI features and API calls, purchased separately or included in subscription tiers
 
-Your Subscription will automatically renew at the end of each billing period unless you cancel before the renewal date. You authorize us to charge your payment method for the Subscription fee at the beginning of each billing period. Prices are subject to change with at least 30 days' notice.
+Your Subscription will automatically renew at the end of each billing period unless you cancel before the renewal date. You authorize us to charge your payment method for the Subscription fee at the beginning of each billing period. Subscription prices are subject to change with at least 30 days' notice, and a change takes effect at your next renewal. The credit cost of AI models supplied by third-party providers follows those providers' prices and changes when they change, without advance notice; the rate in effect when you use a model applies.
 
 ### 3.3 Cancellation & Refunds
 

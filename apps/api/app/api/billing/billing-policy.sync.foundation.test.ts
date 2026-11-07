@@ -109,45 +109,16 @@ describe.runIf(databaseUrl !== undefined)('billing policy sync PostgreSQL founda
     expect(afterRetirement.policy.fleet.meterContractIds).not.toContain(dropped.meterContractId);
   });
 
-  it('schedules a rate rise 30 days out, then replaces that pending activation with a newer one', async () => {
-    const effectiveBefore = await service.selectEffectivePolicy({ environment, replica });
-    const clockRows = await database.execute(sql`select transaction_timestamp() as "now"`);
-    const { now: databaseNow } = z.object({ now: z.coerce.date() }).parse(clockRows[0]);
-
-    const scheduled = await sync(raiseFirstRate(retired, 2n));
-    expect(scheduled.status).toBe('published');
-    if (scheduled.status !== 'published') {
-      throw new Error('expected a publication');
-    }
-    expect(scheduled.effectiveAt.getTime()).toBeGreaterThanOrEqual(databaseNow.getTime() + 30 * 24 * 60 * 60 * 1000);
-    const pendingHead = await readHead();
-    expect(pendingHead.pendingActivationId).toBe(scheduled.activationId);
-    // The rise is announced, not applied: reads still see the policy it will replace.
-    const duringNotice = await service.selectEffectivePolicy({ environment, replica });
-    expect(duringNotice.activationId).toBe(effectiveBefore.activationId);
-
-    const replaced = await sync(raiseFirstRate(retired, 3n));
-    expect(replaced.status).toBe('published');
-    expect(replaced.activationId).not.toBe(scheduled.activationId);
-    const replacedHead = await readHead();
-    expect(replacedHead.pendingActivationId).toBe(replaced.activationId);
-    const cancellations = await database.execute(sql`
-      select activation_id as "activationId" from billing.billing_policy_activation_cancellation
-      where environment = ${environment} and activation_id = ${scheduled.activationId}
-    `);
-    expect(cancellations).toHaveLength(1);
-    const afterReplacement = await service.selectEffectivePolicy({ environment, replica });
-    expect(afterReplacement.activationId).toBe(effectiveBefore.activationId);
-
-    // Leave the head without a pending activation for the suites that follow.
-    await service.cancelPendingActivation({
-      environment,
-      activationId: replaced.activationId,
-      jobKey: `cleanup-${replaced.activationId}`,
-      expectedHeadRevision: replacedHead.revision,
-    });
-    const cleanHead = await readHead();
-    expect(cleanHead.pendingActivationId).toBeNull();
+  /* Third-party model prices pass through as they change (operator ruling 2026-11-07): a rise is
+   * effective on publication, with no notice window and no pending activation. */
+  it('publishes a rate rise immediately', async () => {
+    const risen = await sync(raiseFirstRate(retired, 2n));
+    expect(risen.status).toBe('published');
+    const head = await readHead();
+    expect(head.pendingActivationId).toBeNull();
+    const effective = await service.selectEffectivePolicy({ environment, replica });
+    expect(effective.activationId).toBe(risen.activationId);
+    expect(effective.contentHash).toBe(composeTariff({ overlay, routes: raiseFirstRate(retired, 2n) }).contentHash);
   });
 
   it('lets exactly one of two concurrent syncs publish', async () => {
@@ -173,37 +144,6 @@ describe.runIf(databaseUrl !== undefined)('billing policy sync PostgreSQL founda
       where activation.environment = ${environment} and policy.content_hash = ${contentHash}
     `);
     expect(activations[0]?.['count']).toBe(1);
-  });
-
-  /* A concurrent *rise* collides on the job key rather than on the head: each racer reads the
-   * database clock for itself, so their `effectiveAt` values and request hashes differ. */
-  it('lets exactly one of two concurrent syncs schedule the same rate rise', async () => {
-    const routes = raiseFirstRate(catalogue.slice(0, -2), 2n);
-    const [left, right] = await Promise.all([
-      sync(routes),
-      syncPolicy(peer(), peerDatabase(), { environment, overlay, replica, routes }),
-    ]);
-
-    const { contentHash } = composeTariff({ overlay, routes });
-    expect([left.status, right.status]).toContain('published');
-    expect(left.activationId).toBe(right.activationId);
-    expect(left.contentHash).toBe(contentHash);
-    expect(right.contentHash).toBe(contentHash);
-    const scheduledHead = await readHead();
-    expect(scheduledHead.pendingActivationId).toBe(left.activationId);
-    const activations = await database.execute(sql`
-      select count(*)::int as count from billing.billing_policy_activation activation
-      join billing.billing_policy policy on policy.id = activation.policy_id
-      where activation.environment = ${environment} and policy.content_hash = ${contentHash}
-    `);
-    expect(activations[0]?.['count']).toBe(1);
-
-    await service.cancelPendingActivation({
-      environment,
-      activationId: left.activationId,
-      jobKey: `cleanup-race-${left.activationId}`,
-      expectedHeadRevision: scheduledHead.revision,
-    });
   });
 
   /* The head keeps naming a scheduled activation after it matures. Before this was filtered by time,
@@ -242,11 +182,24 @@ describe.runIf(databaseUrl !== undefined)('billing policy sync PostgreSQL founda
     expect(clearedHead.currentActivationId).toBe(superseded.activationId);
   });
 
-  it('cancels a scheduled rise that the code table reverts before it activates', async () => {
+  it('cancels a pending activation when the code table matches the effective tariff', async () => {
     const reverted = catalogue.slice(0, -4);
     const effectiveBefore = await service.selectEffectivePolicy({ environment, replica });
-    const scheduled = await sync(raiseFirstRate(reverted, 4n));
-    expect(scheduled.status).toBe('published');
+    const pending = composeTariff({ overlay, routes: raiseFirstRate(reverted, 4n) });
+    const head = await readHead();
+    const clockRows = await database.execute(sql`select transaction_timestamp() as "now"`);
+    const { now: databaseNow } = z.object({ now: z.coerce.date() }).parse(clockRows[0]);
+    const scheduled = { activationId: `pending-${pending.contentHash.slice(0, 12)}` };
+    await service.publishPolicy({
+      policyJson: pending.canonicalContent,
+      environment,
+      activationId: scheduled.activationId,
+      jobKey: scheduled.activationId,
+      expectedHeadRevision: head.revision,
+      ...(head.currentActivationId === null ? {} : { expectedPredecessorActivationId: head.currentActivationId }),
+      effectiveAt: new Date(databaseNow.getTime() + 60 * 60 * 1000),
+      replica,
+    });
     const scheduledHead = await readHead();
     expect(scheduledHead.pendingActivationId).toBe(scheduled.activationId);
 

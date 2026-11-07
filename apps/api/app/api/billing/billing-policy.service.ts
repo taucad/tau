@@ -12,7 +12,6 @@ import {
   qualifiedMeterContracts,
   resolvePolicyRoute,
   validateCommercialPolicy,
-  validatePolicyActivationNotice,
 } from '#api/billing/billing-policy.js';
 import type { CommercialPolicy, EffectivePolicyRate, FinancialEnvironment } from '#api/billing/billing-policy.js';
 
@@ -262,22 +261,12 @@ export class BillingPolicyService {
         throw new Error('a future policy activation is already pending');
       }
 
-      /* The predecessor is only read to compare terms for the notice rule, through the lenient read
-       * path above, so a predecessor gone stale under the current catalogue no longer blocks the
-       * publication that would replace it. The new document above is still fully validated. */
-      let previous: CommercialPolicy | undefined;
-      try {
-        const effective = await this.selectEffectivePolicy(
-          { environment: input.environment, replica: input.replica },
-          transaction,
-        );
-        previous = effective.policy;
-      } catch (error) {
-        if (!(error instanceof Error) || error.message !== 'no effective billing policy') {
-          throw error;
-        }
+      /* Third-party model prices pass through as they change (operator ruling 2026-11-07): a rate
+       * rise takes effect when published. Only the Pro subscription price carries notice, and it lives
+       * in the Stripe catalog, not in this tariff. */
+      if (effectiveAt < databaseNow) {
+        throw new Error('policy effective time precedes announcement');
       }
-      validatePolicyActivationNotice({ previous, next: validated.policy, announcedAt: databaseNow, effectiveAt });
 
       const policyRows = await transaction.execute(sql`
         insert into billing.billing_policy

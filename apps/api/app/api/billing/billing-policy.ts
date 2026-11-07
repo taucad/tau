@@ -304,7 +304,6 @@ export const validateCommercialPolicy = (input: unknown): ValidatedCommercialPol
 export const parseCommercialPolicyDocument = (input: unknown): ValidatedCommercialPolicy =>
   hashCommercialPolicy(commercialPolicyDocumentSchema.parse(asPolicyInput(input)));
 
-const noticeDuration = 30 * 24 * 60 * 60 * 1000;
 const picoUsdPerUsd = 1_000_000_000_000n;
 const creditAtomsPerUsd = 1_000_000n;
 const basisPoints = 10_000n;
@@ -375,53 +374,6 @@ export const resolvePolicyRoute = (
   };
 };
 
-export const validatePolicyActivationNotice = (input: {
-  previous?: CommercialPolicy;
-  next: CommercialPolicy;
-  announcedAt: Date;
-  effectiveAt: Date;
-}): void => {
-  if (input.effectiveAt < input.announcedAt) {
-    throw new Error('policy effective time precedes announcement');
-  }
-  if (input.previous === undefined) {
-    return;
-  }
-
-  /* The key is the customer-visible term alone. `meterContractId` is deliberately absent: it is a
-   * code-owned versioning handle, and keying on it let an ordinary `model-meter-v1` -> `v2` rename
-   * make every term of every route new at once and silently void the notice gate for the catalogue. */
-  const activeTerms = (policy: CommercialPolicy) =>
-    policy.routes.flatMap((route) => {
-      const resolved = resolvePolicyRoute(policy, route.sku);
-      return resolved === undefined
-        ? []
-        : resolved.rates.map((rate) => ({
-            sku: route.sku,
-            term: `${rate.dimension}:${rate.tier ?? ''}:${rate.unit}`,
-            rate,
-          }));
-    });
-  const previousRates = new Map(activeTerms(input.previous).map(({ sku, term, rate }) => [`${sku}:${term}`, rate]));
-  /* Q3 governs increases to terms customers already consume. A sku the previous policy never
-   * published is judged against its parent sku — `model:X:long-context` against the old `model:X`,
-   * which carried the premium rates the sibling now carries — so a tier split activates
-   * immediately while re-pointing a route at `model:X:v2` for more money still buys no notice. */
-  const hasIncrease = activeTerms(input.next).some(({ sku, term, rate }) => {
-    const parent = sku.lastIndexOf(':');
-    const prior =
-      previousRates.get(`${sku}:${term}`) ??
-      (parent <= 0 ? undefined : previousRates.get(`${sku.slice(0, parent)}:${term}`));
-    return (
-      prior !== undefined &&
-      BigInt(rate.numeratorCreditAtoms) * BigInt(prior.publicDenominatorUnits) >
-        BigInt(prior.numeratorCreditAtoms) * BigInt(rate.publicDenominatorUnits)
-    );
-  });
-  if (hasIncrease && input.effectiveAt.getTime() - input.announcedAt.getTime() < noticeDuration) {
-    throw new Error('retail rate increase requires 30 days notice');
-  }
-};
 
 /** The read-time half: a document this replica's code cannot interpret at all is still fatal. */
 export const assertPolicySchemaCompatibility = (policy: CommercialPolicy, schemaVersion: number): void => {

@@ -1,8 +1,9 @@
 import { presentMachine } from '#components/machines/machine-presentation.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { isOpenJob } from '#hooks/use-machines-jobs.js';
 import { memo, useMemo } from 'react';
 import { Link } from 'react-router';
-import { ExternalLink, CircleAlert, LoaderCircle, OctagonX, Printer, RefreshCw } from 'lucide-react';
+import { ExternalLink, CircleAlert, OctagonX, Printer, RefreshCw } from 'lucide-react';
 import {
   FailureEvidence,
   Activities,
@@ -186,7 +187,7 @@ function StopButton({ control }: { readonly control: MachineControl }): React.JS
           void control.stop();
         }}
       >
-        {control.isStopping ? <LoaderCircle aria-hidden className='spin-glyph' /> : <OctagonX aria-hidden />}
+        {control.isStopping ? <Loader /> : <OctagonX aria-hidden />}
         Stop
       </Button>
       {/* Neither done nor failed: the machine has not said yet. Stop stays pressable meanwhile. */}

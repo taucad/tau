@@ -552,8 +552,37 @@ export type ReadTreeOptions = Readonly<{
   paths?: readonly string[];
   /** Told about each large object as the remote delivers it, while a fetching read runs. */
   onLargeObject?: (oid: string, content: Uint8Array<ArrayBuffer>) => void;
+  /**
+   * Large objects to fetch before the rest, asked again before each transfer
+   * starts, so an oid added while the read runs goes next (D10). A host that
+   * cannot order its transfers may ignore it.
+   */
+  firstLargeObjects?: () => ReadonlySet<string>;
+  /**
+   * Told whenever bytes of one of this read's large objects arrive, by its
+   * oid, including a transfer another reader started and this one joined.
+   */
+  onTransferProgress?: (oid: string) => void;
   /** Stops a fetching read's transfers; the read then rejects. */
   signal?: AbortSignal;
+}>;
+
+/**
+ * One file of a revision's tree, as its tree objects name it: no blob is read
+ * to list it (D10).
+ *
+ * @public
+ */
+export type RevisionTreeListing = Readonly<{
+  path: string;
+  /** The blob's id. */
+  oid: string;
+  /** A regular or an executable file: a tree's other entries are not checkout files. */
+  mode: '100644' | '100755';
+  /** The blob's size, when the store knows it without reading the blob (a head listing, or the engine's own). */
+  size?: number;
+  /** The large object a pointer blob names, when the store knows it without reading the pointer. */
+  largeObject?: Readonly<{ oid: string; size: number }>;
 }>;
 
 /**
@@ -568,6 +597,34 @@ export type RevisionPort = Readonly<{
   readRevision(id: RevisionId): Promise<RevisionRecord | undefined>;
   /** The tree; a host without large objects, or with its own smudge, may ignore `options`. */
   readTree(id: RevisionId, options?: ReadTreeOptions): Promise<ImmutableRevisionTree | undefined>;
+  /**
+   * Every file of one revision's tree by path, from its tree objects alone:
+   * what a viewer-first open lists before any file is written (D10).
+   * `undefined` when the store does not hold the revision.
+   */
+  listTree?(id: RevisionId): Promise<readonly RevisionTreeListing[] | undefined>;
+  /**
+   * One large object from this store alone, or `undefined` when it is not
+   * here; nothing is fetched. A host whose checkouts never hold a placeholder
+   * may leave it out (D9).
+   */
+  readLargeObject?(pointer: Readonly<{ oid: string; size: number }>): Promise<Uint8Array<ArrayBuffer> | undefined>;
+  /**
+   * Put one large object in this store under its pointer: written to a
+   * `.partial` and renamed into place, so the store never names a torn object
+   * (D9 adoption). A repeat writes nothing. Optional, like `readLargeObject`.
+   */
+  storeLargeObject?(pointer: Readonly<{ oid: string; size: number }>, content: Uint8Array<ArrayBuffer>): Promise<void>;
+  /**
+   * Large objects by their pointers alone, from this store or else the
+   * remote, whether or not any revision names them: a placeholder an undo or
+   * merge wrote is filled by its own oid (D10 `filled`). Answers every
+   * object's bytes by oid; rejects as a fetching `readTree` does.
+   */
+  fetchLargeObjects?(
+    pointers: ReadonlyArray<Readonly<{ oid: string; size: number }>>,
+    options?: Pick<ReadTreeOptions, 'onLargeObject' | 'firstLargeObjects' | 'onTransferProgress' | 'signal'>,
+  ): Promise<ReadonlyMap<string, Uint8Array<ArrayBuffer>>>;
   writeRevision(input: WriteRevisionInput): Promise<RevisionReceipt>;
   /** A branch by name, or any other ref spelled in full. */
   readRef(name: string): Promise<RevisionId | undefined>;
@@ -785,22 +842,25 @@ export class RevisionPortError extends Error {
    * A wait, not a failure to back off from (W13d).
    */
   public readonly retryAfterMilliseconds: number | undefined;
+  /** The HTTP status a remote answered with, where one did (a `404` and a `410` share `REMOTE_NOT_FOUND`). */
+  public readonly status: number | undefined;
 
   /**
    * Create a stable port failure.
    *
    * @param code - Machine-readable failure category.
    * @param message - Safe diagnostic without remote credentials or command arguments.
-   * @param options - Optional cause, and a rate limit's wait.
+   * @param options - Optional cause, a rate limit's wait, and the HTTP status.
    */
   public constructor(
     code: RevisionPortErrorCode,
     message: string,
-    options?: ErrorOptions & Readonly<{ retryAfterMilliseconds?: number }>,
+    options?: ErrorOptions & Readonly<{ retryAfterMilliseconds?: number; status?: number }>,
   ) {
     super(message, options);
     this.name = 'RevisionPortError';
     this.code = code;
     this.retryAfterMilliseconds = options?.retryAfterMilliseconds;
+    this.status = options?.status;
   }
 }

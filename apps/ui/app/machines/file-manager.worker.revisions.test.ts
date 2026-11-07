@@ -13,14 +13,16 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createIsomorphicGitRevisionPort, lfsObjectPath, lfsPointerFor } from '@taucad/revisions';
+import { createIsomorphicGitRevisionPort, lfsObjectPath, lfsPointerFor, RevisionPortError } from '@taucad/revisions';
 import type { RevisionPort, RevisionStatusProjection } from '@taucad/revisions';
 import { revisionId } from '@taucad/revisions/algorithms';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import type { RootedFileSystem } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
+import { projectManifestSchemaUrl, serializeProjectManifest } from '@taucad/types';
 import {
   createCheckoutRoutes,
+  createPendingObjectSource,
   createRemoteAttention,
   createWorkerRevisionRegistry,
   versionedChangePaths,
@@ -142,7 +144,7 @@ const harness = (
       extra.onCreatePort?.();
       return wrapPort(
         createIsomorphicGitRevisionPort({
-          filesystem: service.createRootedFileSystem(`/projects/${projectId}`),
+          filesystem: service.createRootedFileSystem(`/projects/${projectId}`, undefined, { placeholders: 'raw' }),
           /* Exactly what `file-manager.worker.ts` gives the real port, so a branch
            * created here is created the way the browser creates one (P24). */
           checkouts: checkoutRoutes(projectId),
@@ -150,7 +152,7 @@ const harness = (
       );
     },
     filesystem: (root) => {
-      const filesystem = service.createRootedFileSystem(root);
+      const filesystem = service.createRootedFileSystem(root, undefined, { placeholders: 'raw' });
       return extra.wrapFileSystem?.(filesystem) ?? filesystem;
     },
     observe: (root, onChanged) => {
@@ -858,6 +860,8 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     await project.unlink(objectFile);
 
     const second = await fixture.open('alpha');
+    /* Slice (a): the worker's own wiring, so the authority reads a pending entry through the revisions. */
+    fixture.service.setPendingObjectSource(createPendingObjectSource(fixture.registry.roots));
     /* The first capture of the session picks the placeholder up; with no remote, the transfer fails. */
     fixture.announce('alpha', ['main.scad']);
     await vi.waitFor(
@@ -872,9 +876,49 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       },
       { timeout: 10_000 },
     );
-    expect(await project.readFile('models/part.step')).toStrictEqual(bytes);
+    /* D10: every authored file is here, the large object is not. */
+    expect(second.frames.findLast((frame) => frame.type === 'status')?.status.readiness).toBe('materialized');
+    /* D9: the page reads it as pending, never as its pointer, and a materialize that cannot fetch says so. */
+    second.send({ command: 'readContent', id: 71, path: 'models/part.step' });
+    second.send({ command: 'materialize', id: 72, paths: ['models/part.step'] });
+    await vi.waitFor(() => {
+      expect(second.frames.filter((frame) => 'id' in frame && (frame.id === 71 || frame.id === 72))).toHaveLength(2);
+    });
+    expect(second.frames.find((frame) => 'id' in frame && frame.id === 71)).toMatchObject({
+      type: 'result',
+      result: { kind: 'content', content: { outcome: 'pending', size: part.length, reason: 'not-fetched' } },
+    });
+    expect(second.frames.find((frame) => 'id' in frame && frame.id === 72)).toMatchObject({
+      type: 'error',
+      code: 'PENDING',
+    });
+    /* W4 review 7: a comparison against the checkout reads through a placeholder too, never its pointer text. */
+    const head = second.frames.findLast((frame) => frame.type === 'status')?.status.headRevisionId;
+    await project.writeFile('models/copy.step', bytes);
+    second.send({ command: 'compare', id: 73, revisionId: head!, path: 'models/copy.step', against: 'checkout' });
+    await vi.waitFor(() => {
+      expect(second.frames.find((frame) => 'id' in frame && frame.id === 73)).toMatchObject({
+        type: 'error',
+        code: 'PENDING',
+      });
+    });
+    /* Slice (a): the disk keeps the pointer, and the authority's read never answers it: with no way to fetch the object it refuses. */
+    const raw = fixture.service.createRootedFileSystem('/projects/alpha', undefined, { placeholders: 'raw' });
+    expect(await raw.readFile('models/part.step')).toStrictEqual(bytes);
+    await expect(project.readFile('models/part.step')).rejects.toMatchObject({ code: 'PENDING' });
+    await project.unlink('models/copy.step');
+    /* A placeholder is the object it stands for: a diff against the checkout neither fetches it nor lists it changed. */
+    const reopened = await fixture.root('alpha');
+    const pendingDiff = await reopened.diff(head!, undefined, { against: 'checkout' });
+    expect(pendingDiff.map(({ path }) => path)).not.toContain('models/part.step');
 
     await project.writeFile(objectFile, part);
+    /* Its object on the device and the pointer still on disk: the same file, still unchanged. */
+    const landedDiff = await reopened.diff(head!, undefined, { against: 'checkout' });
+    expect(landedDiff.map(({ path }) => path)).not.toContain('models/part.step');
+    /* Once the object is on the device the authority reads through to it, before any fill has written the file. */
+    expect(await project.readFile('models/part.step', 'utf8')).toBe(part);
+    expect(await raw.readFile('models/part.step')).toStrictEqual(bytes);
     const framesBeforeFill = second.frames.length;
     second.send({ command: 'retryLargeObjects' });
     await vi.waitFor(
@@ -885,6 +929,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       { timeout: 10_000 },
     );
     expect(await project.readFile('models/part.step', 'utf8')).toBe(part);
+    expect(second.frames.findLast((frame) => frame.type === 'status')?.status.readiness).toBe('filled');
     /* The fill's flush wrote the file without holding the page's file tree. */
     expect(
       second.frames
@@ -983,6 +1028,171 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(applying.at(-1)).toBeUndefined();
     expect(root.status().applyingRoots).toBeUndefined();
     expect(await project.readFile('main.scad', 'utf8')).toBe('cube(20);');
+    /* D10, I7: the restore's write is a new tree from its start, and re-enters from there to what it leaves. */
+    const readiness = alpha.frames
+      .filter((frame) => frame.type === 'status')
+      .slice(statusesBefore)
+      .map((frame) => frame.status.readiness);
+    expect(readiness).toContain('treeReady');
+    expect(readiness.slice(readiness.indexOf('treeReady'))).not.toContain('connected');
+    expect(root.status().readiness).toBe('filled');
+  });
+
+  /*
+   * D10: a tree write tells the checkout's index every entry before any lands,
+   * and lands the entry closure first; once the index has it, the reading is
+   * `entryReady` while the rest is still being written, then moves on (I7).
+   * The index is cold: nothing lists the root first, so the write opens it.
+   */
+  it('should publish entryReady between treeReady and the end of a restore once its entry closure has landed', async () => {
+    let gate: (() => Promise<void>) | undefined;
+    const fixture = harness(['alpha'], (port) => port, {
+      observeFileEvents: true,
+      /* The write of the files outside the closure waits until the test has seen the reading. */
+      wrapFileSystem: (filesystem) => ({
+        ...filesystem,
+        ...(filesystem.apply === undefined
+          ? {}
+          : {
+              apply: async (changeset) => {
+                const held = gate;
+                if (
+                  held !== undefined &&
+                  changeset.entries.some((entry) => entry.op === 'write' && entry.path.startsWith('lib/'))
+                ) {
+                  gate = undefined;
+                  await held();
+                }
+                return filesystem.apply!(changeset);
+              },
+            }),
+      }),
+    });
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile(
+      'tau.json',
+      serializeProjectManifest({
+        $schema: projectManifestSchemaUrl,
+        name: 'Alpha',
+        description: '',
+        tags: [],
+        assets: { main: { entryPath: 'main.scad' } },
+      }),
+    );
+    await project.writeFile('main.scad', 'cube(10);');
+    await project.writeFile('lib/a.scad', 'a();');
+    const alpha = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    const session = await root.placementSession();
+    await place(session, turnKey(1));
+    await project.writeFile('main.scad', 'cube(20);');
+    await finish(session, turnKey(1));
+    await turnFinalized(alpha, 'turn-1');
+    const head = alpha.frames.findLast((frame) => frame.type === 'status')?.status.headRevisionId;
+    await settle(10);
+    const statusesBefore = alpha.frames.filter((frame) => frame.type === 'status').length;
+
+    await project.writeFile('main.scad', 'cube(30);');
+    await project.writeFile('lib/a.scad', 'b();');
+    const before = await root.log();
+    /* At the entryReady frame the closure reads its restored bytes, and the rest has not landed yet. */
+    const atEntryReady: Record<string, string> = {};
+    gate = async () => {
+      await vi.waitFor(
+        () => {
+          expect(
+            alpha.frames
+              .slice(statusesBefore)
+              .some((frame) => frame.type === 'status' && frame.status.readiness === 'entryReady'),
+          ).toBe(true);
+        },
+        { timeout: 5000 },
+      );
+      atEntryReady['main.scad'] = await project.readFile('main.scad', 'utf8');
+      atEntryReady['lib/a.scad'] = await project.readFile('lib/a.scad', 'utf8');
+    };
+    alpha.send({ command: 'restore', revisionId: head! });
+    await vi.waitFor(
+      async () => {
+        expect(await root.log()).toHaveLength(before.length + 2);
+      },
+      { timeout: 10_000 },
+    );
+    await settle(10);
+
+    const statuses = alpha.frames
+      .filter((frame) => frame.type === 'status')
+      .slice(statusesBefore)
+      .map((frame) => frame.status);
+    const readiness = statuses
+      .map((status) => status.readiness)
+      .filter((state, index, all) => index === 0 || all[index - 1] !== state);
+    const from = readiness.indexOf('treeReady');
+    expect(readiness.slice(from)).toEqual(['treeReady', 'entryReady', 'materialized', 'filled']);
+    /* Reached while the write still held the tree, not at its end. */
+    expect(statuses.find((status) => status.readiness === 'entryReady')?.applyingRoots).toEqual(['/projects/alpha']);
+    expect(atEntryReady).toEqual({ 'main.scad': 'cube(20);', 'lib/a.scad': 'b();' });
+    expect(await project.readFile('main.scad', 'utf8')).toBe('cube(20);');
+    expect(await project.readFile('lib/a.scad', 'utf8')).toBe('a();');
+  });
+
+  /* D10, I7: an aborted restore's tree is never read as written, and its rollback, which writes the checkout whole again, is. */
+  it('should reach materialized after an aborted restore rolls the checkout back', async () => {
+    let failNext = false;
+    const fixture = harness(['alpha'], (port) => port, {
+      observeFileEvents: true,
+      wrapFileSystem: (filesystem) => ({
+        ...filesystem,
+        ...(filesystem.apply === undefined
+          ? {}
+          : {
+              apply: async (changeset) => {
+                if (
+                  failNext &&
+                  changeset.entries.some((entry) => entry.op === 'write' && entry.path.startsWith('lib/'))
+                ) {
+                  failNext = false;
+                  throw new Error('The disk went away.');
+                }
+                return filesystem.apply!(changeset);
+              },
+            }),
+      }),
+    });
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    await project.writeFile('lib/a.scad', 'a();');
+    const alpha = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    const session = await root.placementSession();
+    await place(session, turnKey(1));
+    await project.writeFile('main.scad', 'cube(20);');
+    await finish(session, turnKey(1));
+    await turnFinalized(alpha, 'turn-1');
+    const head = alpha.frames.findLast((frame) => frame.type === 'status')?.status.headRevisionId;
+    await project.writeFile('main.scad', 'cube(30);');
+    await project.writeFile('lib/a.scad', 'b();');
+    await settle(10);
+    const statusesBefore = alpha.frames.filter((frame) => frame.type === 'status').length;
+
+    failNext = true;
+    alpha.send({ command: 'restore', revisionId: head! });
+    await vi.waitFor(
+      () => {
+        expect(failNext).toBe(false);
+        const statuses = alpha.frames.slice(statusesBefore).filter((frame) => frame.type === 'status');
+        expect(statuses.some((frame) => frame.status.applyingRoots !== undefined)).toBe(true);
+        expect(statuses.at(-1)?.status.applyingRoots).toBeUndefined();
+      },
+      { timeout: 10_000 },
+    );
+    await settle(10);
+
+    /* The rollback put the prior files back. */
+    expect(await project.readFile('lib/a.scad', 'utf8')).toBe('b();');
+    expect(await project.readFile('main.scad', 'utf8')).toBe('cube(30);');
+    const last = alpha.frames.findLast((frame) => frame.type === 'status');
+    expect(['materialized', 'filled']).toContain(last?.status.readiness);
   });
 
   /*
@@ -1115,7 +1325,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
 
     /* Another writer on the same store moves the line. */
     const other = createIsomorphicGitRevisionPort({
-      filesystem: fixture.service.createRootedFileSystem('/projects/alpha'),
+      filesystem: fixture.service.createRootedFileSystem('/projects/alpha', undefined, { placeholders: 'raw' }),
     });
     await other.updateRef({
       name: 'main',
@@ -1200,6 +1410,45 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     await vi.waitFor(() => {
       expect(root.status().conflicts.map((conflict) => conflict.branch)).toEqual([line]);
     });
+  });
+
+  /* S11: a one-file comparison reads that file's objects, never two whole trees. */
+  it('should read only the compared path from the store when comparing revisions (S11)', async () => {
+    const asked: Array<readonly string[] | undefined> = [];
+    const fixture = harness(['alpha'], (port) => ({
+      ...port,
+      readTree: async (id, options) => {
+        asked.push(options?.paths);
+        return port.readTree(id, options);
+      },
+    }));
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    await project.writeFile('other.scad', 'sphere(1);');
+    const alpha = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    const session = await root.placementSession();
+    await place(session, turnKey(1));
+    await project.writeFile('main.scad', 'cube(20);');
+    await finish(session, turnKey(1));
+    await turnFinalized(alpha, 'turn-1');
+    const head = root.status().headRevisionId;
+    expect(head).toBeDefined();
+    /* The turn's own reads (a capture's mode basis for its new head) settle first; under load they ran late. */
+    await expect
+      .poll(async () => {
+        const before = asked.length;
+        await new Promise((resolve) => {
+          setTimeout(resolve, 100);
+        });
+        return asked.length === before;
+      })
+      .toBe(true);
+    asked.length = 0;
+    expect(await root.compare(head!, 'main.scad')).toMatchObject({ original: 'cube(10);', modified: 'cube(20);' });
+    expect(await root.compare(head!, 'main.scad', { against: 'checkout' })).toMatchObject({ change: 'unchanged' });
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.every((paths) => paths?.length === 1 && paths[0] === 'main.scad')).toBe(true);
   });
 
   it('should compare a recorded revision against the files as they are now (S38)', async () => {
@@ -1517,18 +1766,29 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(after[0]).toMatchObject({ trigger: 'close' });
   });
 
-  it('should register the project on Tau Cloud before it asks the remote for anything (P54, W18 DEF-1)', async () => {
-    const fixture = harness(['alpha']);
-    await fixture.service
-      .createRootedFileSystem('/projects/alpha')
-      .writeFile('tau.json', JSON.stringify({ name: 'Alpha project' }));
-    const alpha = await fixture.open('alpha');
+  it('should register the project on Tau Cloud when its advertisement answers 404 (P54, W18 DEF-1, D11)', async () => {
+    const advertisements: number[] = [];
     const requests: Array<{
       method: string;
       url: string;
       credentials: string | undefined;
       body: BodyInit | undefined;
     }> = [];
+    /* Tau Cloud answers its advertisement `404` until the project is registered. */
+    const fixture = harness(['alpha'], (port) => ({
+      ...port,
+      listRemoteRefs: async () => {
+        advertisements.push(requests.length);
+        if (!requests.some((request) => request.method === 'PUT')) {
+          throw new RevisionPortError('REMOTE_NOT_FOUND', 'No repository here yet.');
+        }
+        return [];
+      },
+    }));
+    await fixture.service
+      .createRootedFileSystem('/projects/alpha')
+      .writeFile('tau.json', JSON.stringify({ name: 'Alpha project' }));
+    const alpha = await fixture.open('alpha');
     const original = globalThis.fetch;
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       requests.push({
@@ -1548,18 +1808,21 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       alpha.send({ command: 'connectRemote', kind: 'tau' });
       await alpha.settle();
 
-      /* First, and only once: a retried *Connect* is one request because the
-       * API's insert is `onConflictDoNothing` (P51). */
-      expect(requests[0]).toEqual({
-        method: 'PUT',
-        url: 'https://api.test/v1/projects/alpha',
-        credentials: 'include',
-        body: JSON.stringify({ name: 'Alpha project' }),
-      });
-      /* Before the initial sync: an advertisement asked first answers 404,
-       * because nothing has written the row the git server authorizes against. */
-      const advertisement = requests.findIndex((request) => request.url.includes('/v1/git/alpha.git'));
-      expect(advertisement === -1 || advertisement > 0).toBe(true);
+      /* Once, after the advertisement answered 404: a project Tau Cloud
+       * already holds is never registered again (D11), and a retried
+       * *Connect* is one request because the API's insert is
+       * `onConflictDoNothing` (P51). */
+      const puts = requests.filter((request) => request.method === 'PUT');
+      expect(puts).toEqual([
+        {
+          method: 'PUT',
+          url: 'https://api.test/v1/projects/alpha',
+          credentials: 'include',
+          body: JSON.stringify({ name: 'Alpha project' }),
+        },
+      ]);
+      /* The first advertisement came before the PUT, and the next after it. */
+      expect(advertisements.slice(0, 2)).toEqual([requests.indexOf(puts[0]!), requests.indexOf(puts[0]!) + 1]);
     } finally {
       globalThis.fetch = original;
     }

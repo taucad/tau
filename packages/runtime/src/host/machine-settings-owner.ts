@@ -18,7 +18,8 @@ import type { MachineSettingsRecord, MachineTypeId, SettingsDefinition, Settings
 
 import type { MachineSettingsSnapshot, MachineSettingsEdit, MachineSettingsSave } from '@taucad/types';
 
-type SettingsFileSystem = Pick<RootedFileSystem, 'readFileStream' | 'writeFileChecked'> & Pick<ComposedView, 'watch'>;
+type SettingsFileSystem = Pick<RootedFileSystem, 'readFileStream' | 'writeFileChecked'> &
+  Pick<ComposedView, 'watch' | 'watchChangeSets'>;
 
 type Entry = {
   typeId: MachineTypeId;
@@ -122,6 +123,7 @@ export class MachineSettingsOwner {
       readFileStream: filesystem.readFileStream.bind(filesystem),
       writeFileChecked: filesystem.writeFileChecked.bind(filesystem),
       ...(filesystem.watch ? { watch: filesystem.watch.bind(filesystem) } : {}),
+      ...(filesystem.watchChangeSets ? { watchChangeSets: filesystem.watchChangeSets.bind(filesystem) } : {}),
     };
     this.#definitions = input.definitions;
   }
@@ -324,23 +326,27 @@ export class MachineSettingsOwner {
       uncertain: false,
     };
     this.#entries.set(typeId, entry);
-    if (this.#filesystem.watch) {
-      const watch = this.#filesystem.watch({ paths: [machineSettingsPath({ typeId })] }, () => {
-        if (this.#closed || this.#entries.get(typeId) !== entry) {
-          return;
-        }
-        entry.dirty = true;
-        entry.epoch += 1;
-        if (entry.observers > 0 && entry.pending === 0) {
-          this.read({ typeId }).catch((error: unknown) =>
-            this.#publish(entry, {
-              status: 'unavailable',
-              code: 'SETTINGS_UNAVAILABLE',
-              message: errorMessage(error),
-            }),
-          );
-        }
-      });
+    const onChange = (): void => {
+      if (this.#closed || this.#entries.get(typeId) !== entry) {
+        return;
+      }
+      entry.dirty = true;
+      entry.epoch += 1;
+      if (entry.observers > 0 && entry.pending === 0) {
+        this.read({ typeId }).catch((error: unknown) =>
+          this.#publish(entry, {
+            status: 'unavailable',
+            code: 'SETTINGS_UNAVAILABLE',
+            message: errorMessage(error),
+          }),
+        );
+      }
+    };
+    if (this.#filesystem.watchChangeSets) {
+      /* The change-set form (D6): one wake per committed changeset that touches the file. */
+      entry.unwatch = this.#filesystem.watchChangeSets({ paths: [machineSettingsPath({ typeId })] }, onChange);
+    } else if (this.#filesystem.watch) {
+      const watch = this.#filesystem.watch({ paths: [machineSettingsPath({ typeId })] }, onChange);
       if (typeof watch === 'function') {
         entry.unwatch = watch;
       } else {

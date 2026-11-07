@@ -79,6 +79,30 @@ describe('createLfsClient batch validation', () => {
     ).rejects.toThrow(/did not hash to its own id/u);
   });
 
+  /* D9, D11: `downloadMany` checks the size and leaves the hash to the caller's
+   * read-back of what it stores, so each object is hashed once. */
+  it('hands a many-object download over at its declared size, unhashed, for the read-back', async () => {
+    const oid = 'd'.repeat(64);
+    const http: RevisionHttpClient = {
+      request: async (request) =>
+        request.url.endsWith('/batch')
+          ? response(
+              JSON.stringify({
+                objects: [{ oid, size: 3, actions: { download: { href: 'https://api.tau.test/object' } } }],
+              }),
+            )
+          : response(encoder.encode('xyz')),
+    };
+    const received: string[] = [];
+    await createLfsClient({ url: 'https://github.com/a/b.git', http }).downloadMany({
+      pointers: [{ oid, size: 3 }],
+      received: async (pointer, content) => {
+        received.push(`${pointer.oid}:${new TextDecoder().decode(content)}`);
+      },
+    });
+    expect(received).toStrictEqual([`${oid}:xyz`]);
+  });
+
   /* D53: a renamed GitHub repository serves git at its old path but redirects
    * LFS, so the batch is where the move surfaces. */
   it('should classify a refused batch as the git leg does, so a moved repository reads as moved', async () => {
@@ -371,6 +395,66 @@ describe('bounded private transfers', () => {
     ).resolves.toEqual(bytes);
     expect(request).toHaveBeenCalledTimes(2);
     expect(transfer).toHaveBeenCalledTimes(2);
+  });
+
+  /* I10: a transfer that hangs is abandoned and retried, so a fill fails and can be retried rather than waiting forever. */
+  it('abandons a transfer that goes without a byte for its stall bound, before its first byte or mid-stream', async () => {
+    const request = vi
+      .fn<RevisionHttpClient['request']>()
+      .mockImplementation(async () => batchResponse([answer({ actions: { download: action } })]));
+    const hanging = async (): Promise<Response> =>
+      new Promise<Response>(() => {
+        /* Never answers, and ignores its signal. */
+      });
+    const client = (transfer: typeof fetch) =>
+      createLfsClient({
+        url: 'https://api.tau.test/git',
+        http: { request },
+        fetch: transfer,
+        transferStallMilliseconds: 40,
+      });
+
+    /* Hung before its first byte, then answered: the retry delivers. */
+    const recovering = vi.fn<typeof fetch>().mockImplementationOnce(hanging).mockResolvedValueOnce(new Response(bytes));
+    await expect(client(recovering).download(pointer)).resolves.toEqual(bytes);
+    expect(recovering).toHaveBeenCalledTimes(2);
+
+    /* Hung mid-stream every time: it fails after its attempts instead of living on. */
+    const stalling = vi.fn<typeof fetch>().mockImplementation(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(bytes.slice(0, 4));
+            },
+          }),
+        ),
+    );
+    await expect(client(stalling).download(pointer)).rejects.toThrow('failed after three attempts');
+    expect(stalling).toHaveBeenCalledTimes(3);
+
+    /* A slow transfer that keeps sending bytes is never cut off, however long it takes in all. */
+    let sent = 0;
+    const slow = vi.fn<typeof fetch>().mockImplementation(
+      async () =>
+        new Response(
+          new ReadableStream({
+            async pull(controller) {
+              await new Promise((resolve) => {
+                setTimeout(resolve, 20);
+              });
+              if (sent >= bytes.byteLength) {
+                controller.close();
+                return;
+              }
+              controller.enqueue(bytes.slice(sent, sent + 2));
+              sent += 2;
+            },
+          }),
+        ),
+    );
+    await expect(client(slow).download(pointer)).resolves.toEqual(bytes);
+    expect(slow).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -666,6 +750,38 @@ describe('downloadMany', () => {
     expect(asked.flat()).toEqual(pointers.map((pointer) => pointer.oid));
     expect(transfer).toHaveBeenCalledTimes(pointers.length);
     expect(received).toEqual(contentOf);
+  });
+
+  /* D10: an opened path jumps the fill queue, ahead of objects already answered and of later batches. */
+  it('transfers the objects `first` names before the rest, even one named while the download runs', async () => {
+    const { request, asked } = batchEndpoint();
+    const order: string[] = [];
+    const first = new Set<string>();
+    const late = pointers[150]!.oid;
+    const answered = pointers[50]!.oid;
+    await createLfsClient({
+      url: 'https://api.tau.test/git',
+      http: { request },
+      fetch: async (url) => new Response(contentOf.get(oidOf(url))),
+      downloadConcurrency: 1,
+    }).downloadMany({
+      pointers,
+      first: () => first,
+      received: async (pointer) => {
+        order.push(pointer.oid);
+        if (order.length === 3) {
+          first.add(late);
+          first.add(answered);
+        }
+      },
+    });
+    /* At most one object was already admitted when the promotion landed. */
+    expect(order.indexOf(answered)).toBeLessThanOrEqual(4);
+    expect(order.indexOf(late)).toBeLessThanOrEqual(5);
+    /* The unasked one got a batch call of its own. */
+    expect(asked[1]).toEqual([late]);
+    expect(order).toHaveLength(pointers.length);
+    expect(new Set(order)).toEqual(new Set(contentOf.keys()));
   });
 
   it('should hand each object over with the transport its action named', async () => {

@@ -13,12 +13,8 @@ import { createExportFile } from '@taucad/runtime/types';
 import type { JSONSchema7, JSONSchema7Definition } from '@taucad/runtime/types';
 
 import {
-  createOpenrscadTessellationBudgetExceededIssue,
-  createOpenrscadTessellationDowngradedIssue,
   createOpenrscadTessellationReport,
-  meshWithinOpenrscadBudget,
   openrscadTessellationSchema,
-  openrscadTriangleBudgets,
   resolveOpenrscadRequest,
   scriptOwnedResolution,
 } from '#openrscad-tessellation.js';
@@ -27,17 +23,20 @@ import type {
   OpenrscadResolvedTessellation,
   OpenrscadTessellation,
 } from '#openrscad-tessellation.js';
+import { addOpenrscadTopology } from '#openrscad-topology.js';
 import {
   asBuffer,
   assertRootedPath,
+  createKernelLibraryTracer,
   createKernelSuccess,
   createKernelParameterDeclaration,
   defineKernel,
+  defineLibraryTracePolicy,
   gltfExportConventionSchema,
   isRecordObject,
   resolveImportPath,
 } from '@taucad/runtime/kernel';
-import type { KernelFileSystem, KernelIssue, RuntimeLogger } from '@taucad/runtime/kernel';
+import type { KernelFileSystem, KernelIssue, KernelLibraryTraceHandle, RuntimeLogger } from '@taucad/runtime/kernel';
 
 const maxIncludeDepth = 50;
 const useIncludePattern = /^\s*(?:use|include)\s*["<]([^">]+)[">]/gm;
@@ -52,9 +51,28 @@ type OpenRscadBackend = typeof OpenRscadModule;
 const geometryCacheByteCap = 64 * 1024 * 1024;
 
 type OpenRscadContext = {
+  /** The engine, behind the library tracer when tracing is on. */
   backend: OpenRscadBackend;
+  libraryTrace: KernelLibraryTraceHandle<OpenRscadBackend>;
   entryPath: string | undefined;
 };
+
+/**
+ * Library tracing for the engine: counts every call the kernel makes into it (`renderToGlb`, `exportShape3D`,
+ * `cacheStats`, …) in an `openrscad.library.summary` span after each engine call. Only functions are wrapped; the
+ * engine's results are plain data.
+ */
+const openrscadLibraryTracePolicy = defineLibraryTracePolicy({
+  library: 'openrscad',
+  spanPrefix: 'openrscad.library',
+  summarySpanName: 'openrscad.library.summary',
+  traceCall() {
+    return { type: 'trace' };
+  },
+  shouldWrapValue(context) {
+    return typeof context.value === 'function';
+  },
+});
 
 /**
  * Render-time OpenSCAD tessellation options. Left out, previews use the `medium` preset for whatever the script does
@@ -73,6 +91,15 @@ const exportTessellationSchema = z.object({
     .optional()
     .meta({ default: 'high' })
     .describe("Tessellation quality for mesh-based exports; left out, the script's own $fn, $fa and $fs are kept"),
+});
+
+/**
+ * OpenRSCAD kernel options.
+ * @public
+ */
+export const openrscadOptionsSchema = z.object({
+  /** Engine call tracing mode (`openrscad.library.summary`); left out, tracing is off. */
+  libraryTracing: z.enum(['off', 'summary', 'per-call']).optional(),
 });
 
 /** Native OpenRSCAD 3D export options; left out, mesh exports use the `high` preset where the script sets nothing. @public */
@@ -536,7 +563,13 @@ class OpenRscadExportError extends Error {
 }
 
 /** Engine version this kernel is authored against. @public */
-const engineVersion = '0.11.0-beta.4';
+const engineVersion = '0.11.0-beta.5';
+
+/**
+ * Build metadata for changes in this kernel's own meshing, which the engine release does not capture.
+ * `tessellation1`: previews and exports mesh once, with no triangle budget (kernel budget program D1).
+ */
+const kernelMeshing = 'tessellation1';
 
 /** Options for {@link createOpenrscadKernel}. @public */
 export type CreateOpenrscadKernelOptions = {
@@ -556,7 +589,7 @@ export type CreateOpenrscadKernelOptions = {
   loadBackend?: () => Promise<OpenRscadBackend>;
   /**
    * Kernel version, and with it the runtime's build-cache namespace. It is the
-   * *engine release*, not the backend: one release's addon and WebAssembly
+   * *engine release* with this kernel's meshing as build metadata, not the backend: one release's addon and WebAssembly
    * build are byte-identical artifacts, gated per release, so they share one
    * cache key deliberately. Override this only for an engine build that is not
    * that release.
@@ -574,13 +607,14 @@ export type CreateOpenrscadKernelOptions = {
  */
 export const createOpenrscadKernel = ({
   loadBackend = async () => import('@taulabs/openrscad-engine'),
-  version = engineVersion,
+  version = `${engineVersion}+${kernelMeshing}`,
 }: CreateOpenrscadKernelOptions = {}) =>
   defineKernel({
     id: 'openrscad',
     extensions: ['scad'],
     name: 'OpenRSCADKernel',
     version,
+    optionsSchema: openrscadOptionsSchema,
     evaluateOptionsSchema: z.object({}),
     views: {
       model: {
@@ -606,7 +640,7 @@ export const createOpenrscadKernel = ({
       },
     },
 
-    async initialize(_options, { logger }) {
+    async initialize(options, { logger, tracer }) {
       const backend = await loadBackend();
       // Which payload the engine's export map actually bound. A Node host that
       // no platform package covers still renders — through the WebAssembly
@@ -621,7 +655,14 @@ export const createOpenrscadKernel = ({
           data: backend.backendCause,
         });
       }
-      const context: OpenRscadContext = { backend, entryPath: undefined };
+      // A plain-object facade: the engine may be a module namespace, whose bindings a tracing proxy cannot replace.
+      const libraryTrace = createKernelLibraryTracer<OpenRscadBackend>({
+        library: { ...backend },
+        tracer,
+        mode: options.libraryTracing ?? 'off',
+        policy: openrscadLibraryTracePolicy,
+      });
+      const context: OpenRscadContext = { backend: libraryTrace.tracedLibrary, libraryTrace, entryPath: undefined };
       return context;
     },
 
@@ -636,7 +677,13 @@ export const createOpenrscadKernel = ({
 
     async describe({ entryPath }, { filesystem }, context) {
       const source = await filesystem.readFile(entryPath, 'utf8');
-      const { defaultParameters, jsonSchema } = await parseCustomizer(source, context.backend.parameters);
+      let customizer: Awaited<ReturnType<typeof parseCustomizer>>;
+      try {
+        customizer = await parseCustomizer(source, context.backend.parameters);
+      } finally {
+        context.libraryTrace.emitSummary();
+      }
+      const { defaultParameters, jsonSchema } = customizer;
       return createKernelSuccess({
         parameters: createKernelParameterDeclaration(defaultParameters, jsonSchema, {
           id: 'urn:taucad:openrscad:parameters',
@@ -679,13 +726,14 @@ export const createOpenrscadKernel = ({
           ),
         );
       } finally {
+        context.libraryTrace.emitSummary();
         span.end();
       }
       if (result.echo) {
         logger.debug(result.echo);
       }
       const issues = collectIssues(result, bundle.source, normalizedEntryPath);
-      const preview = await markClosedGlbMeshesSingleSided(asBuffer(result.bytes));
+      const preview = addOpenrscadTopology(await markClosedGlbMeshesSingleSided(asBuffer(result.bytes)));
       const nativeHandle: OpenRscadNativeHandle = {
         previewGlb: preview,
         previewGlbTessellation: resolutionKey(scriptResolution),
@@ -719,7 +767,6 @@ export const createOpenrscadKernel = ({
         diagonal: nativeHandle.diagonal ?? Number.NaN,
         owned: scriptOwnedResolution([nativeHandle.source, ...Object.values(nativeHandle.files)]),
       });
-      const budget = openrscadTriangleBudgets.preview;
       const meshAt = async (
         resolution: OpenrscadResolution,
       ): Promise<{ content: Uint8Array<ArrayBuffer>; issues: KernelIssue[]; triangles: number; vertices: number }> => {
@@ -753,42 +800,25 @@ export const createOpenrscadKernel = ({
             ),
           );
         } finally {
+          context.libraryTrace.emitSummary();
           span.end();
         }
         return {
-          content: await markClosedGlbMeshesSingleSided(asBuffer(result.bytes)),
+          content: addOpenrscadTopology(await markClosedGlbMeshesSingleSided(asBuffer(result.bytes))),
           issues: collectIssues(result, nativeHandle.source, nativeHandle.entryPath),
           triangles: result.triangleCount,
           vertices: result.vertexCount,
         };
       };
-      const { result, effective, downgraded } = await meshWithinOpenrscadBudget({
-        resolution: requested,
-        budget,
-        mesh: meshAt,
-      });
+      // One OpenSCAD run at the requested values: nothing coarsens a mesh (no triangle budget).
+      const result = await meshAt(requested);
       const tessellation = createOpenrscadTessellationReport({
         requested,
-        effective,
-        downgraded,
         triangles: result.triangles,
         vertices: result.vertices,
         elapsed: performance.now() - started,
       });
-      const issues =
-        downgraded === 0
-          ? result.issues
-          : [
-              ...result.issues,
-              createOpenrscadTessellationDowngradedIssue({
-                requested,
-                effective,
-                downgraded,
-                triangles: result.triangles,
-                budget,
-              }),
-            ];
-      return { content: result.content, tessellation, issues };
+      return { content: result.content, tessellation, issues: result.issues };
     },
 
     async export(input, { tracer }, context) {
@@ -810,19 +840,14 @@ export const createOpenrscadKernel = ({
         try {
           return await exportArtifact();
         } finally {
+          context.libraryTrace.emitSummary();
           span.end();
         }
       };
-      const checked = (result: ExportShape3DOutput, requested: OpenrscadResolvedTessellation): KernelIssue[] => {
+      const checked = (result: ExportShape3DOutput): KernelIssue[] => {
         const issues = collectIssues(result, nativeHandle.source, nativeHandle.entryPath);
         if (!result.ok) {
           throw new OpenRscadExportError(issues);
-        }
-        const budget = openrscadTriangleBudgets.export;
-        if (result.triangleCount > budget) {
-          throw new OpenRscadExportError([
-            createOpenrscadTessellationBudgetExceededIssue({ requested, triangles: result.triangleCount, budget }),
-          ]);
         }
         return issues;
       };
@@ -847,8 +872,12 @@ export const createOpenrscadKernel = ({
               }),
             ),
           );
-          const issues = checked(result, requested);
-          return { files: [createExportFile('glb', 'model.glb', asBuffer(result.bytes))], issues };
+          const issues = checked(result);
+          // Explorer and a downloaded GLB read the same module components.
+          return {
+            files: [createExportFile('glb', 'model.glb', addOpenrscadTopology(asBuffer(result.bytes)))],
+            issues,
+          };
         }
         case '3mf': {
           const { options } = input;
@@ -866,7 +895,7 @@ export const createOpenrscadKernel = ({
               }),
             ),
           );
-          const issues = checked(result, requested);
+          const issues = checked(result);
           return { files: [createExportFile('3mf', 'model.3mf', asBuffer(result.bytes))], issues };
         }
         default: {

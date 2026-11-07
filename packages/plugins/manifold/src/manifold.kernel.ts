@@ -29,18 +29,13 @@ import {
   parseStackTrace,
   resolveSourcePath,
   deriveLocationFromFrames,
+  createKernelLibraryTracer,
+  defineLibraryTracePolicy,
 } from '@taucad/runtime/kernel';
-import type { KernelServices } from '@taucad/runtime/kernel';
+import type { KernelLibraryTraceHandle, KernelLibraryTraceMode, KernelServices } from '@taucad/runtime/kernel';
 
 import { manifoldOptionsSchema, manifoldExportSchemas, manifoldRenderSchema } from '#manifold.schemas.js';
-import {
-  createManifoldTessellationBudgetExceededIssue,
-  createManifoldTessellationDowngradedIssue,
-  createManifoldTessellationReport,
-  manifoldTriangleBudgets,
-  meshWithinManifoldBudget,
-  resolveManifoldTessellation,
-} from '#manifold-tessellation.js';
+import { createManifoldTessellationReport, resolveManifoldTessellation } from '#manifold-tessellation.js';
 import type { ManifoldCircularDetail } from '#manifold-tessellation.js';
 
 import { initManifoldWasm } from '#init-manifold.js';
@@ -187,7 +182,37 @@ function deleteLiveHandles(): void {
   liveHandles.clear();
 }
 
-async function registerManifoldModules(services: KernelServices): Promise<Record<string, unknown>> {
+/**
+ * Library tracing for user code: counts each `manifold-3d/manifoldCAD` class's static and constructor calls
+ * (`Manifold.cube`, `new CrossSection`), named by class.
+ *
+ * Only functions are wrapped. Manifold and CrossSection instances are embind handles that model code passes back
+ * into manifold-3d, which reads their native pointers, so they stay raw and their methods are not counted.
+ */
+const manifoldLibraryTracePolicy = defineLibraryTracePolicy({
+  library: 'manifold',
+  spanPrefix: 'manifold.library',
+  summarySpanName: 'manifold.library.summary',
+  traceCall(context) {
+    if (context.scope !== 'user-main') {
+      return { type: 'ignore' };
+    }
+    return { type: 'trace', operation: context.memberPath.slice('manifold.'.length) };
+  },
+  shouldWrapValue(context) {
+    return typeof context.value === 'function';
+  },
+});
+
+/** Kernel state: the library tracer over the manifoldCAD module user code imports. */
+type ManifoldContext = {
+  libraryTrace: KernelLibraryTraceHandle<Record<string, unknown>>;
+};
+
+async function registerManifoldModules(
+  services: KernelServices,
+  libraryTracing: KernelLibraryTraceMode,
+): Promise<ManifoldContext> {
   const [manifoldRoot, manifoldCad, gltfNodeModule] = await Promise.all([
     import('manifold-3d'),
     import('manifold-3d/manifoldCAD'),
@@ -219,14 +244,22 @@ async function registerManifoldModules(services: KernelServices): Promise<Record
     globalName: 'manifold3d',
   });
 
+  const libraryTrace = createKernelLibraryTracer<Record<string, unknown>>({
+    library: patchedManifoldCad,
+    tracer: services.tracer,
+    mode: libraryTracing,
+    policy: manifoldLibraryTracePolicy,
+    defaultScope: 'kernel-setup',
+  });
+
   registerKernelModule(services, {
     name: 'manifold-3d/manifoldCAD',
-    exports: patchedManifoldCad,
+    exports: libraryTrace.tracedLibrary,
     package: manifoldPackage,
     globalName: 'manifoldCAD',
   });
 
-  return patchedManifoldCad;
+  return { libraryTrace };
 }
 
 // =============================================================================
@@ -273,6 +306,31 @@ async function runMain(
   }
 
   return defaultExport(parameters);
+}
+
+/**
+ * Run the model's `main` with library tracing scoped to user code, and emit the tracing summary after it.
+ *
+ * @param module - The executed model module.
+ * @param parameters - Resolved model parameters.
+ * @param context - The kernel context holding the library tracer.
+ * @returns What `main` returned, with any traced library value unwrapped.
+ */
+async function runTracedMain(
+  module: Record<string, unknown>,
+  parameters: Record<string, unknown>,
+  context: Readonly<ManifoldContext>,
+): Promise<unknown> {
+  const { libraryTrace } = context;
+  try {
+    const model = await libraryTrace.runInScope({
+      scope: 'user-main',
+      operation: async () => runMain(module, parameters, libraryTrace.tracedLibrary),
+    });
+    return libraryTrace.unwrap(model);
+  } finally {
+    libraryTrace.emitSummary();
+  }
 }
 
 // ponytail: one Manifold operation at a time per realm. manifold-3d keeps realm-global live-object and glTF-node
@@ -375,6 +433,9 @@ async function addMissingNormals(nodes: readonly BaseGLTFNode[]): Promise<void> 
 
   // Shared sources stay shared, so manifold-3d's per-source node cache behaves as before.
   const withNormals = new Map<Manifold, Manifold>();
+  // One `getMesh()` copy and one `numProp()` read per source, however many nodes share it.
+  const runIdsBySource = new Map<Manifold, readonly number[]>();
+  const propertyCountBySource = new Map<Manifold, number>();
   const labelledMaterials = new Map<GLTFMaterial, Map<string, GLTFMaterial>>();
   for (const node of scene) {
     if (!(node instanceof gltfNodeModule.GLTFNode) || node.manifold === undefined) {
@@ -382,7 +443,12 @@ async function addMissingNormals(nodes: readonly BaseGLTFNode[]): Promise<void> 
     }
     const { manifold } = node;
     const material = getBackupMaterial(node);
-    const runMaterials = [...new Set(manifold.getMesh().runOriginalID)].flatMap((id) => {
+    let runIds = runIdsBySource.get(manifold);
+    if (!runIds) {
+      runIds = [...new Set(manifold.getMesh().runOriginalID)];
+      runIdsBySource.set(manifold, runIds);
+    }
+    const runMaterials = runIds.flatMap((id) => {
       const runMaterial = getMaterialById(id);
       return runMaterial ? [{ id, runMaterial }] : [];
     });
@@ -403,7 +469,11 @@ async function addMissingNormals(nodes: readonly BaseGLTFNode[]): Promise<void> 
       continue;
     }
 
-    const propertyCount = manifold.numProp();
+    let propertyCount = propertyCountBySource.get(manifold);
+    if (propertyCount === undefined) {
+      propertyCount = manifold.numProp();
+      propertyCountBySource.set(manifold, propertyCount);
+    }
     const labels: GLTFAttribute[] = [...authored];
     let labelledChannels = 0;
     for (const attribute of authored) {
@@ -574,6 +644,8 @@ async function createGlbFromManifoldOutput(output: unknown): Promise<ManifoldMes
 export type ManifoldOptions = {
   /** Override the default Manifold WASM URL for custom builds or benchmarking. */
   wasmUrl?: string;
+  /** Library call tracing mode for user code (`manifold.library.summary`). Defaults to `off`. */
+  libraryTracing?: KernelLibraryTraceMode;
 };
 
 /** What re-running a model at another circular detail needs: its bundle, its parameters and its size. */
@@ -601,7 +673,7 @@ async function meshProgram(input: {
   program: ManifoldProgram;
   detail: ManifoldCircularDetail;
   services: KernelServices;
-  context: Readonly<{ manifoldCadModule: Record<string, unknown> }>;
+  context: Readonly<ManifoldContext>;
 }): Promise<ManifoldMesh> {
   const { program, detail, services, context } = input;
   return exclusive(async () => {
@@ -617,7 +689,7 @@ async function meshProgram(input: {
       if (!executeResult.success) {
         throw new ManifoldBuildError(executeResult.issues);
       }
-      const model = await runMain(resolveModule(executeResult.value), program.parameters, context.manifoldCadModule);
+      const model = await runTracedMain(resolveModule(executeResult.value), program.parameters, context);
       if (model === undefined || (Array.isArray(model) && model.length === 0)) {
         return { glb: asBuffer(createEmptyGlb()), triangles: 0, vertices: 0, diagonal: Number.NaN };
       }
@@ -652,7 +724,7 @@ export const manifoldKernel = defineKernel({
   builtinModuleNames: ['manifold-3d', 'manifold-3d/manifoldCAD'],
   builtinPackages: { 'manifold-3d': manifoldPackage },
   name: 'ManifoldKernel',
-  version: '1.2.0',
+  version: '1.3.0',
   optionsSchema: manifoldOptionsSchema,
   views: { model: { title: 'Model', mimeType: 'model/gltf-binary', optionsSchema: manifoldRenderSchema } },
   exports: {
@@ -666,9 +738,10 @@ export const manifoldKernel = defineKernel({
 
   async initialize(options, services) {
     initManifoldWasm(options.wasmUrl);
-    const manifoldCadModule = await registerManifoldModules(services);
-    services.logger.debug('Initialized Manifold kernel with manifold-3d modules');
-    return { manifoldCadModule };
+    const libraryTracing = options.libraryTracing ?? 'off';
+    const context = await registerManifoldModules(services, libraryTracing);
+    services.logger.debug(`Initialized Manifold kernel with manifold-3d modules (libraryTracing: ${libraryTracing})`);
+    return context;
   },
 
   async resolve({ entryPath }, services) {
@@ -738,7 +811,7 @@ export const manifoldKernel = defineKernel({
 
       let model: unknown;
       try {
-        model = await runMain(module, parameters, context.manifoldCadModule);
+        model = await runTracedMain(module, parameters, context);
       } catch (error) {
         const stackFrames = parseStackTrace(error, {
           classifyFrame: createFrameClassifier(),
@@ -803,33 +876,15 @@ export const manifoldKernel = defineKernel({
     }
     const started = performance.now();
     const requested = resolveManifoldTessellation(tessellation, program.diagonal);
-    const budget = manifoldTriangleBudgets.preview;
-    const { result, effective, downgraded } = await meshWithinManifoldBudget({
-      detail: requested,
-      budget,
-      mesh: async (detail) => meshProgram({ program, detail, services, context }),
-    });
+    // One evaluation at the requested detail: nothing coarsens a mesh (no triangle budget).
+    const result = await meshProgram({ program, detail: requested, services, context });
     const report: TessellationReport = createManifoldTessellationReport({
       requested,
-      effective,
-      downgraded,
       triangles: result.triangles,
       vertices: result.vertices,
       elapsed: performance.now() - started,
     });
-    const issues =
-      downgraded === 0
-        ? []
-        : [
-            createManifoldTessellationDowngradedIssue({
-              requested,
-              effective,
-              downgraded,
-              triangles: result.triangles,
-              budget,
-            }),
-          ];
-    return { content: result.glb, tessellation: report, issues };
+    return { content: result.glb, tessellation: report, issues: [] };
   },
 
   async export(input, services, context) {
@@ -846,12 +901,6 @@ export const manifoldKernel = defineKernel({
         if (handle.program) {
           const requested = resolveManifoldTessellation(options.tessellation, handle.program.diagonal);
           const mesh = await meshProgram({ program: handle.program, detail: requested, services, context });
-          const budget = manifoldTriangleBudgets.export;
-          if (mesh.triangles > budget) {
-            throw new ManifoldBuildError([
-              createManifoldTessellationBudgetExceededIssue({ requested, triangles: mesh.triangles, budget }),
-            ]);
-          }
           source = mesh.glb;
         }
         const transformedGlb = await transformGltfExportBytes(source, {

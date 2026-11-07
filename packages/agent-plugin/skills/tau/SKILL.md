@@ -46,7 +46,7 @@ The entry's extension picks the kernel. A `.ts` or `.js` entry runs on the kerne
 
 A `.py` or `.cs` entry answers `KERNEL_NOT_PREPARED` until its runtime is prepared: ask the user before calling `prepare_kernel`, which downloads it once. A `.py` entry runs on SMLibPy when a top-level line imports `smlibpy`, and on build123d otherwise.
 
-The kernels' libraries come with the server: do not install them or add a `package.json` for them. Existing STEP, IGES, BREP, 3DM, glTF and mesh files (STL, OBJ, 3MF, FBX and more) open for evaluation, screenshots and conversion, not for authoring.
+The kernels' libraries come with the server: do not install them or add a `package.json` for them. Existing STEP, IGES, BREP, glTF and mesh files (STL, OBJ, 3MF, FBX and more) open for evaluation, screenshots and conversion, not for authoring.
 
 ## The loop
 

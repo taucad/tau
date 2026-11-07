@@ -54,12 +54,17 @@ export type GatewayErrorCode = (typeof gatewayErrorCodes)[number];
  * The host's reader-side projection of the gateway's attempt lookup, `GET v1/billing/attempts/:surface/:attemptKey`.
  * `z.looseObject` keeps fields this build does not read (D16) without reshaping them, so the receipt can grow.
  * `voided: true` on `not_found` means the gateway voided the key before answering (GI-R3); a bare `not_found` comes
- * from an image older than that.
+ * from an image older than that. `settlesBy` on `pending` is the instant by which the gateway settles the attempt on
+ * its own (the hold's `due_at` plus the recovery grace, W2); an image older than that omits it.
  *
  * @public
  */
 export const attemptReceiptSchema = z.discriminatedUnion('state', [
-  z.looseObject({ state: z.literal('pending'), operationId: z.string().min(1) }),
+  z.looseObject({
+    state: z.literal('pending'),
+    operationId: z.string().min(1),
+    settlesBy: z.iso.datetime().optional(),
+  }),
   z.looseObject({
     state: z.literal('terminal'),
     operationId: z.string().min(1),
@@ -76,7 +81,7 @@ export const attemptReceiptSchema = z.discriminatedUnion('state', [
  * The gateway's answer for one prepared attempt. No variant carries consent: under EQ1 the host acts on the answer
  * alone.
  *
- * - `pending`: the gateway still owns the attempt. Wait (`MODEL_ATTEMPT_PENDING`).
+ * - `pending`: the gateway still owns the attempt. Wait, until `settlesBy` when it is stated (`MODEL_ATTEMPT_PENDING`).
  * - `unavailable`: no answer now (network, 5xx, timeout, or an image older than the void). Wait.
  * - `terminal`: the row left `pending`. Record it (`model.invocation-settled`), then proceed under a new key.
  * - `voided`: never admitted, and never will be. Record it, then proceed under a new key.
@@ -84,7 +89,14 @@ export const attemptReceiptSchema = z.discriminatedUnion('state', [
  * @public
  */
 export type InvocationResolution =
-  | { readonly status: 'pending' }
+  | {
+      readonly status: 'pending';
+      /**
+       * The ISO instant by which the gateway settles the attempt on its own (W2): the host keeps asking until then.
+       * Absent when the gateway did not say, and the host waits only its own short budget.
+       */
+      readonly settlesBy?: string | undefined;
+    }
   | { readonly status: 'unavailable' }
   | {
       readonly status: 'terminal';

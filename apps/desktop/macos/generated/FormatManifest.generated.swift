@@ -21,7 +21,6 @@ enum TauQuickLookManifest {
     Format(extensions: ["step", "stp"], identifiers: ["com.taucad.step", "com.shapr3d.step", "com.shapr3d.stp"], includesSidecars: false),
     Format(extensions: ["iges", "igs"], identifiers: ["com.taucad.iges", "com.shapr3d.iges", "com.shapr3d.igs"], includesSidecars: false),
     Format(extensions: ["brep"], identifiers: ["com.taucad.brep"], includesSidecars: false),
-    Format(extensions: ["3dm"], identifiers: ["com.mcneel.rhinoceros.3dm", "com.shapr3d.rhino.3dm"], includesSidecars: false),
     Format(extensions: ["3mf"], identifiers: ["com.taucad.3mf", "com.shapr3d.3d-manufacturing.3mf"], includesSidecars: false),
     Format(extensions: ["ac"], identifiers: ["com.taucad.ac3d"], includesSidecars: true),
     Format(extensions: ["amf"], identifiers: ["com.taucad.amf"], includesSidecars: false),

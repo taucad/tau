@@ -2,56 +2,12 @@ import type { Transferable } from 'node:worker_threads';
 import { Worker } from 'node:worker_threads';
 import { describe, expect, it, vi } from 'vitest';
 
-import { SharedPool } from '@taucad/memory';
-import { joinPath } from '@taucad/utils/path';
-
 import { slotIndex, syncState } from '#sync/sync-fs-protocol.js';
 import type { SyncFsProbe } from '#sync/sync-fs-client.js';
 import { createSyncFsClient } from '#sync/sync-fs-client.js';
 import { attachSyncFsServer } from '#sync/sync-fs-server.js';
 
 describe('createSyncFsClient', () => {
-  it('short-circuits readFileText when bytes are in the file pool (Tier 0)', () => {
-    const root = '/projects/p1';
-    const relativePath = 'lib/hidden.ts';
-    const abs = joinPath(root, relativePath);
-    const poolBuffer = new SharedArrayBuffer(256 * 1024);
-    const poolWriter = new SharedPool(poolBuffer, { maxEntries: 32 });
-    const bytes = new TextEncoder().encode('export const x = 1;\n');
-    expect(poolWriter.store(abs, bytes)).toBe(true);
-
-    const { port1 } = new MessageChannel();
-    const client = createSyncFsClient({
-      port: port1,
-      slotSab: new SharedArrayBuffer(16),
-      arenaSab: new SharedArrayBuffer(64),
-      filePoolBuffer: poolBuffer,
-      workspaceRootAbsolute: root,
-    });
-
-    expect(client.readFileText(`file:///${relativePath}`)).toBe('export const x = 1;\n');
-  });
-
-  it('short-circuits fileExists for Tier 0 pool hits', () => {
-    const root = '/w';
-    const relativePath = 'a.ts';
-    const abs = joinPath(root, relativePath);
-    const poolBuffer = new SharedArrayBuffer(256 * 1024);
-    const poolWriter = new SharedPool(poolBuffer, { maxEntries: 8 });
-    expect(poolWriter.store(abs, new Uint8Array([32]))).toBe(true);
-
-    const { port1 } = new MessageChannel();
-    const client = createSyncFsClient({
-      port: port1,
-      slotSab: new SharedArrayBuffer(16),
-      arenaSab: new SharedArrayBuffer(64),
-      filePoolBuffer: poolBuffer,
-      workspaceRootAbsolute: root,
-    });
-
-    expect(client.fileExists(`file:///${relativePath}`)).toBe(true);
-  });
-
   it('round-trips readFile, listDirectories, and statMtimeVersion via Tier 2 (worker + Atomics.wait)', async () => {
     const root = '/root';
     const { port1, port2 } = new MessageChannel();
@@ -171,37 +127,6 @@ describe('createSyncFsClient', () => {
     expect(slotProbes.some((p) => p.op === 'readFile' && p.outcome === 'ok')).toBe(true);
     expect(slotProbes.some((p) => p.op === 'statMtimeVersion' && p.outcome === 'ok')).toBe(true);
     expect(slotProbes.some((p) => p.op === 'listDirectories' && p.outcome === 'ok')).toBe(true);
-  });
-
-  it('emits onProbe with raw -> relative -> absolute path translation for pool hits', () => {
-    const root = '/projects/p1';
-    const relativePath = 'lib/cube.ts';
-    const abs = joinPath(root, relativePath);
-    const poolBuffer = new SharedArrayBuffer(256 * 1024);
-    const poolWriter = new SharedPool(poolBuffer, { maxEntries: 8 });
-    expect(poolWriter.store(abs, new TextEncoder().encode('hi'))).toBe(true);
-
-    const probes: SyncFsProbe[] = [];
-    const { port1 } = new MessageChannel();
-    const client = createSyncFsClient({
-      port: port1,
-      slotSab: new SharedArrayBuffer(16),
-      arenaSab: new SharedArrayBuffer(64),
-      filePoolBuffer: poolBuffer,
-      workspaceRootAbsolute: root,
-      onProbe: (probe) => probes.push(probe),
-    });
-
-    client.readFileText(`file:///${relativePath}`);
-    expect(probes).toHaveLength(1);
-    expect(probes[0]).toMatchObject({
-      op: 'readFile',
-      tier: 'pool',
-      outcome: 'ok',
-      fileName: 'file:///lib/cube.ts',
-      relativePath: 'lib/cube.ts',
-      absolutePath: abs,
-    });
   });
 
   it('emits a translation-failure probe when the URI scheme is not file:', () => {

@@ -35,8 +35,6 @@ export type KclLspWorkerOptions = {
   apiBaseUrl: string;
   /** Workspace root path (same string as file manager {@link WorkspacePathResolver.root}) */
   workspaceRootPath: string;
-  /** Optional shared file pool for Tier 0 reads */
-  filePoolBuffer?: SharedArrayBuffer;
 };
 
 export type SetDocumentContextPayload = Readonly<{

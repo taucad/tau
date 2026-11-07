@@ -13,7 +13,7 @@ OpenRSCAD Rust WebAssembly kernel for OpenSCAD language models
 - **OpenSCAD language, Rust engine** — `.scad` models, including nested `use`/`include` dependencies.
 - **Customizer parameters** — OpenSCAD customizer annotations become the parameter schema a host renders.
 - **Deterministic exports** — authored-scene GLB for preview, GLB and object-aware 3MF for download.
-- **Readable scene graph** — user module calls become nested named nodes; anonymous geometry falls back to hex material names.
+- **Readable scene graph** — user module calls become nested named nodes, each closed solid is one `EXT_mesh_manifold` mesh below them, and a `TAU_cad_topology` payload maps every module to the triangles it made; anonymous geometry falls back to hex material names.
 
 ## Install
 
@@ -38,15 +38,16 @@ Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, o
 
 ## API
 
-| Export                         | Kind            | Use                                                                              |
-| ------------------------------ | --------------- | -------------------------------------------------------------------------------- |
-| `openrscad`                    | toolkit factory | package-named authoring factory; presets select capabilities                     |
-| `plugin`                       | toolkit factory | the same factory under its mechanical name, for loaders that read a fixed key    |
-| `openrscadKernel`              | kernel factory  | direct `kernels` composition; reads `scad`                                       |
-| `createOpenrscadKernel`        | kernel builder  | the same kernel with an injected engine binding, for hosts that supply their own |
-| `openrscadRenderSchema`        | zod schema      | preview render options                                                           |
-| `openrscadExportSchemas`       | zod schemas     | per-target export options (`glb`, `3mf`)                                         |
-| `CreateOpenrscadKernelOptions` | type            | `{ loadBackend?, version? }` — a host recipe's backend choice, never a probe     |
+| Export                         | Kind            | Use                                                                                 |
+| ------------------------------ | --------------- | ----------------------------------------------------------------------------------- |
+| `openrscad`                    | toolkit factory | package-named authoring factory; presets select capabilities                        |
+| `plugin`                       | toolkit factory | the same factory under its mechanical name, for loaders that read a fixed key       |
+| `openrscadKernel`              | kernel factory  | direct `kernels` composition; reads `scad`                                          |
+| `createOpenrscadKernel`        | kernel builder  | the same kernel with an injected engine binding, for hosts that supply their own    |
+| `openrscadOptionsSchema`       | zod schema      | kernel options: `libraryTracing` (`'off'` when left out, `'summary'`, `'per-call'`) |
+| `openrscadRenderSchema`        | zod schema      | preview render options                                                              |
+| `openrscadExportSchemas`       | zod schemas     | per-target export options (`glb`, `3mf`)                                            |
+| `CreateOpenrscadKernelOptions` | type            | `{ loadBackend?, version? }` — a host recipe's backend choice, never a probe        |
 
 One preset, `default`, selecting `kernels.default`.
 

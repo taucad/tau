@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RpcFileSystem, RpcGeoSpecClient, RpcGraphicsClient, RpcRuntimeClient } from '@taucad/chat/rpc';
 import { toRpcError } from '@taucad/chat/rpc';
@@ -28,6 +28,8 @@ const filesystem = (): Readonly<{ files: Map<string, Uint8Array<ArrayBuffer>>; f
   const fileSystem = mock<RpcFileSystem>();
   fileSystem.readFile.mockImplementation(async (path) => decoder.decode(read(path)));
   fileSystem.readBinaryFile.mockImplementation(async (path) => read(path));
+  /* The index's answer: which files are still placeholders, known without a read. */
+  fileSystem.pendingPaths = async (paths) => paths.filter((path) => files.get(path) === placeholder);
   fileSystem.writeFile.mockImplementation(async (path, content) => {
     files.set(path, encoder.encode(content));
   });
@@ -84,6 +86,8 @@ describe('the agent tools while large objects download', () => {
       guarded.writeFileChecked({ path: '/models/part.step', data: 'x', preconditions: [] }),
     ).rejects.toMatchObject({ retryable: true });
     expect(files.get('/models/part.step')).toStrictEqual(placeholder);
+    /* Decided from the index: a read of a pending entry would fetch its object. */
+    expect(fileSystem.readBinaryFile).not.toHaveBeenCalled();
     expect(fileSystem.editFile).not.toHaveBeenCalled();
     expect(fileSystem.writeFileChecked).not.toHaveBeenCalled();
 
@@ -94,6 +98,47 @@ describe('the agent tools while large objects download', () => {
     /* Deleting one is the person's call, not a read of its pointer. */
     await guarded.deleteFile('/models/part.step');
     expect(files.has('/models/part.step')).toBe(false);
+  });
+
+  it('refuses a write, retryably, when the index cannot say whether the file is pending', async () => {
+    const { files, fileSystem } = filesystem();
+    fileSystem.pendingPaths = async () => {
+      throw new Error('The project index could not open.');
+    };
+    const guarded = guardLargeObjectFiles(fileSystem);
+    await expect(guarded.writeFile('/models/part.step', 'solid mine')).rejects.toMatchObject({
+      code: 'OPERATION_TIMEOUT',
+      retryable: true,
+    });
+    expect(files.get('/models/part.step')).toStrictEqual(placeholder);
+    expect(fileSystem.readBinaryFile).not.toHaveBeenCalled();
+  });
+
+  /* A host that predates the index query: the guard checks the bytes, and refuses on anything but absence. */
+  it('checks the bytes when the host cannot answer, and refuses unless the file is absent', async () => {
+    const { files, fileSystem } = filesystem();
+    fileSystem.pendingPaths = async () => {
+      throw Object.assign(new Error('This workspace bridge cannot say which files are pending.'), {
+        code: 'PENDING_PATHS_UNSUPPORTED',
+      });
+    };
+    const guarded = guardLargeObjectFiles(fileSystem);
+    await expect(guarded.writeFile('/models/part.step', 'solid mine')).rejects.toMatchObject({ retryable: true });
+    expect(files.get('/models/part.step')).toStrictEqual(placeholder);
+    await guarded.writeFile('/new.scad', 'cube(2);\n');
+    expect(decoder.decode(files.get('/new.scad'))).toBe('cube(2);\n');
+
+    /* Such a host's read of a pending entry refuses with PENDING rather than answer its pointer. */
+    vi.mocked(fileSystem.readBinaryFile).mockRejectedValueOnce(
+      Object.assign(new Error('The large object of models/part.step is not here yet.'), { code: 'PENDING' }),
+    );
+    await expect(guarded.writeFile('/models/part.step', 'solid mine')).rejects.toThrow('still downloading from');
+    vi.mocked(fileSystem.stat).mockRejectedValueOnce(Object.assign(new Error('The storage is busy.'), { code: 'EIO' }));
+    await expect(guarded.writeFile('/models/part.step', 'solid mine')).rejects.toMatchObject({
+      code: 'OPERATION_TIMEOUT',
+      retryable: true,
+    });
+    expect(files.get('/models/part.step')).toStrictEqual(placeholder);
   });
 
   it('answers kernel calls with a retryable wait until every object has landed', async () => {

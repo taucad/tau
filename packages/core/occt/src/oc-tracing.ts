@@ -209,11 +209,47 @@ function isEmscriptenRecord(value: unknown): value is Record<string, unknown> & 
   return typeof value === 'object' && value !== null && 'delete' in value && typeof value.delete === 'function';
 }
 
+/**
+ * OCCT `gp` value types: points, vectors, directions, coordinates, axes and transforms. Hot paths
+ * return them by the thousand, and their accessors (`X()`, `Coord()`, `Value()` and the like) do
+ * not throw, so they are returned unproxied. Overloaded constructors (`gp_Pnt_3`) share the base
+ * class's name.
+ */
+const valueTypeNames: ReadonlySet<string> = new Set([
+  'gp_Pnt',
+  'gp_Vec',
+  'gp_Dir',
+  'gp_XYZ',
+  'gp_XY',
+  'gp_Pnt2d',
+  'gp_Vec2d',
+  'gp_Dir2d',
+  'gp_Trsf',
+  'gp_Trsf2d',
+  'gp_Ax1',
+  'gp_Ax2',
+  'gp_Ax3',
+  'gp_Ax2d',
+  'gp_Mat',
+  'gp_Quaternion',
+]);
+
+/**
+ * Whether an Emscripten object is an OCCT value type that is returned without an exception proxy.
+ *
+ * @param value - The Emscripten object.
+ * @returns `true` for a `gp` value type such as `gp_Pnt`.
+ */
+function isValueType(value: Record<string, unknown>): boolean {
+  const name = (value as { constructor?: { name?: unknown } }).constructor?.name;
+  return typeof name === 'string' && valueTypeNames.has(name.replace(/_\d+$/, ''));
+}
+
 function createEmscriptenWrapper(rethrowIfWasmException: (error: unknown) => never): (value: unknown) => unknown {
   const wrappedObjects = new WeakSet<Record<string, unknown>>();
 
   function wrapEmscriptenResult(value: unknown): unknown {
-    if (!isEmscriptenRecord(value) || wrappedObjects.has(value)) {
+    if (!isEmscriptenRecord(value) || wrappedObjects.has(value) || isValueType(value)) {
       return value;
     }
 

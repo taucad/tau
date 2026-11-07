@@ -7,8 +7,6 @@
 import type { JSONRPCRequest, JSONRPCResponse } from 'json-rpc-2.0';
 import { attachLanguageFsClient } from '@taucad/lsp-fs/client';
 import type { LanguageFsClient } from '@taucad/lsp-fs/client';
-import { languageFileUriToWorkspaceRelative } from '@taucad/lsp-fs/uri';
-import { joinPath } from '@taucad/utils/path';
 import { loadCsharpServer } from '#dotnet-host.js';
 import type { CsharpServerExports } from '#dotnet-host.js';
 import { csharpWorkspaceLimits } from '#protocol.js';
@@ -83,8 +81,6 @@ const guard = async (work: () => Promise<void>): Promise<void> => {
 
 const initialize = async (command: Extract<CsharpWorkerCommand, { type: 'init' }>): Promise<void> => {
   fs = attachLanguageFsClient({
-    filePoolBuffer: command.filePoolBuffer,
-    absolutePathForUri: (uri) => joinPath(command.rootDirectory, languageFileUriToWorkspaceRelative(uri)),
     sendJsonRpc: async (request: JSONRPCRequest) =>
       new Promise<JSONRPCResponse | undefined>((resolve) => {
         pendingFs.set(request.id ?? '', resolve);

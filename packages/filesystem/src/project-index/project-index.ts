@@ -26,6 +26,8 @@
  */
 
 import type { StatContentMetadata } from '@taucad/types';
+import { randomUuid } from '@taucad/utils/id';
+import type { PendingObject } from '#pending-content.js';
 import type { ContentFacts, FileStatEntry } from '#types.js';
 
 /** The coarsest modification time a filesystem we index reports: FAT's two seconds. @public */
@@ -53,6 +55,60 @@ export type IndexEntry = Readonly<{
   generation: number;
   facts?: ContentFacts;
   factsAt?: FactsAt;
+  /**
+   * Present on a pending entry: the file holds the pointer of this large
+   * object, which has not reached the device yet. Reads go through to the
+   * object (see `pending-content.ts`); a write, or an observation that finds
+   * the bytes changed, ends it.
+   */
+  pending?: PendingObject;
+}>;
+
+/**
+ * How many removals an index remembers (S10). Past it the oldest is dropped,
+ * and a caller whose `since` is older than the dropped one is told to rescan.
+ *
+ * @public
+ */
+export const indexRemovalLimit = 4096;
+
+/**
+ * One path an index stopped holding, and the generation that removed it: the
+ * path and everything that was under it are gone. A path removed and then
+ * written again is listed both here and among the changed entries.
+ *
+ * @public
+ */
+export type IndexRemoval = Readonly<{ path: string; kind: IndexEntryKind; generation: number }>;
+
+/**
+ * What changed in an index after a generation: the index's generation and
+ * epoch now, which the caller passes as `since` and `epoch` next time, every
+ * entry it still holds whose generation is newer, and every path it removed
+ * since (S10). With `rescan`, the index cannot say what changed since then —
+ * its removal record no longer reaches back that far, or the `epoch` is not
+ * one this index continues — and both lists are empty: the caller walks.
+ *
+ * @public
+ */
+export type IndexChanges = Readonly<{
+  generation: number;
+  epoch: string;
+  entries: readonly IndexEntry[];
+  removed: readonly IndexRemoval[];
+  rescan?: true;
+}>;
+
+/**
+ * The removal record as a snapshot stores it (S10): the epoch that wrote it,
+ * the generation it is complete from, and each removal as `[path, kind, generation]`.
+ *
+ * @internal
+ */
+export type RemovalSnapshot = Readonly<{
+  epoch: string;
+  floor: number;
+  removed: ReadonlyArray<readonly [path: string, kind: 'f' | 'd', generation: number]>;
 }>;
 
 /** Options for a {@link ProjectIndex}. @public */
@@ -67,6 +123,15 @@ export type ProjectIndexOptions = Readonly<{
   trustworthyMtime?: boolean;
 }>;
 
+/**
+ * One entry of a tree being written, known before its bytes land (D10): its
+ * size, the large object it is a placeholder for where it is one, and whether
+ * this write lands it (`false` for an entry the checkout already holds).
+ *
+ * @public
+ */
+export type ExpectedEntry = Readonly<{ path: string; size: number; pending?: PendingObject; arriving: boolean }>;
+
 /** One row an observation of the provider listed: head metadata only. @public */
 export type ObservedRow = Readonly<{ path: string; kind: IndexEntryKind; size: number; mtimeMs: number }>;
 
@@ -78,6 +143,8 @@ export type IndexSearchOptions = {
   readonly maxResults?: number;
   readonly includeDirectories?: boolean;
   readonly admits?: IndexAdmits;
+  /** Stops a query still waiting for its root's index to open. */
+  readonly signal?: AbortSignal;
 };
 
 /** What one head-metadata compare found (D5). @public */
@@ -109,12 +176,49 @@ type Node = {
   pendingMtime?: boolean;
   facts?: ContentFacts;
   factsAt?: FactsAt;
+  pending?: PendingObject;
   children?: Map<string, Node>;
 };
 
 const defaultSearchMaxResults = 100;
 
 const segmentsOf = (path: string): string[] => path.split('/').filter(Boolean);
+
+/**
+ * How a search query matches a path: a substring, or a glob when it holds `*` or `?` (D18).
+ *
+ * @param query - The query as typed.
+ * @returns A case-insensitive matcher over an entry's relative path and name.
+ */
+const searchMatcher = (query: string): ((path: string, name: string) => boolean) => {
+  const lower = query.toLowerCase();
+  if (!/[*?]/u.test(lower)) {
+    return (path) => path.toLowerCase().includes(lower);
+  }
+  let source = '';
+  for (let index = 0; index < lower.length; index++) {
+    const character = lower[index]!;
+    if (character === '*' && lower[index + 1] === '*') {
+      if (lower[index + 2] === '/') {
+        source += '(?:.*/)?';
+        index += 2;
+      } else {
+        source += '.*';
+        index++;
+      }
+    } else if (character === '*') {
+      source += '[^/]*';
+    } else if (character === '?') {
+      source += '[^/]';
+    } else {
+      source += String.raw`\^$.*+?()[]{}|`.includes(character) ? `\\${character}` : character;
+    }
+  }
+  const pattern = new RegExp(`^${source}$`, 'u');
+  return lower.includes('/')
+    ? (path) => pattern.test(path.toLowerCase())
+    : (_path, name) => pattern.test(name.toLowerCase());
+};
 
 const joinPath = (prefix: string, name: string): string => (prefix === '' ? name : `${prefix}/${name}`);
 
@@ -158,18 +262,50 @@ export class ProjectIndex {
    * Rebuild an index from a persisted snapshot. It is not complete until a
    * compare has validated it against the provider. Only a root whose mtime can
    * key facts keeps a snapshot, so the index trusts its provider's mtime.
+   * Every loaded row carries `generation`, as the snapshot does not keep each
+   * row's own, so a caller continuing the snapshot's epoch from an earlier
+   * generation is answered the whole tree as changed (S10).
    *
    * @param rows - Serialized entries.
    * @param generation - The snapshot's generation.
+   * @param stored - What the snapshot kept beside its rows: the pending entries by path (D9), as
+   *   {@link ProjectIndex.pendingSnapshot} gave them, and the removal record (S10), as
+   *   {@link ProjectIndex.removalSnapshot} gave it.
    * @returns The index.
    */
-  public static fromSnapshot(rows: readonly SnapshotRow[], generation: number): ProjectIndex {
+  public static fromSnapshot(
+    rows: readonly SnapshotRow[],
+    generation: number,
+    stored?: Readonly<{ pending?: Readonly<Record<string, PendingObject>>; removals?: RemovalSnapshot }>,
+  ): ProjectIndex {
+    const { pending, removals } = stored ?? {};
     const index = new ProjectIndex({ generation, trustworthyMtime: true });
+    /* The snapshot is the writer's state at `generation`, so a `since` it
+     * issued up to there is answered here; one past it may name generations
+     * the writer issued after storing, which this index issues again: rescan. */
+    if (removals !== undefined && removals.floor <= generation) {
+      index._inherited = { epoch: removals.epoch, generation };
+      index._removedFloor = removals.floor;
+      for (const [path, kind, removedAt] of removals.removed) {
+        if (removedAt > removals.floor && removedAt <= generation) {
+          index._removed.delete(path);
+          index._removed.set(path, { kind: kind === 'd' ? 'dir' : 'file', generation: removedAt });
+        }
+      }
+    }
     for (const [path, kind, size, mtimeMs, facts, factsAt] of rows) {
+      const object = kind === 'f' && pending !== undefined && Object.hasOwn(pending, path) ? pending[path] : undefined;
       const node: Node =
         kind === 'd'
           ? directoryNode(generation, mtimeMs)
-          : { kind: 'file', size, mtimeMs, generation, ...(facts === undefined ? {} : { facts, factsAt }) };
+          : {
+              kind: 'file',
+              size,
+              mtimeMs,
+              generation,
+              ...(facts === undefined ? {} : { facts, factsAt }),
+              ...(object === undefined ? {} : { pending: object }),
+            };
       index._place(path, node, false);
     }
     return index;
@@ -184,18 +320,50 @@ export class ProjectIndex {
   private _observing = 0;
   /** Paths an external fact left unknown; the next refresh re-observes them. */
   private readonly _stale = new Set<string>();
+  /** Write-path mtimes an observation adopted since {@link ProjectIndex.takeAdoptedMtimes} last ran. */
+  private _adoptedMtimes = 0;
+  /** The entries a tree write announced and has not landed yet (D10); `undefined` while no write expects any. */
+  private _arriving: Map<string, ExpectedEntry> | undefined;
+  /** This index's lineage of generations: a `since` from another epoch names other changes. */
+  private readonly _epoch = randomUuid();
+  /** The epoch and generation of the snapshot this index was loaded from, whose `since` it continues. */
+  private _inherited: Readonly<{ epoch: string; generation: number }> | undefined;
+  /** Removed paths by path, oldest first (S10). */
+  private readonly _removed = new Map<string, Readonly<{ kind: IndexEntryKind; generation: number }>>();
+  /** The record holds every removal after this generation. */
+  private _removedFloor: number;
 
   /**
    * @param options - The generation to continue from, and whether the provider's mtime can key facts.
    */
   public constructor(options: ProjectIndexOptions = {}) {
     this._generation = options.generation ?? 0;
+    this._removedFloor = this._generation;
     this._trustworthyMtime = options.trustworthyMtime === true;
+  }
+
+  /** This index's lineage, which {@link ProjectIndex.changes} answers `since` in. */
+  public get epoch(): string {
+    return this._epoch;
   }
 
   /** Monotonic per root; bumped by every change the index records. */
   public get generation(): number {
     return this._generation;
+  }
+
+  /**
+   * How many write-path mtimes observations adopted since the last call, and
+   * reset. Adopting one changes no entry's generation (its bytes are the ones
+   * recorded), but a snapshot stored before it holds the write's clock instead
+   * of the provider's mtime, so every later load would find the file changed.
+   *
+   * @returns The count since the last call.
+   */
+  public takeAdoptedMtimes(): number {
+    const adopted = this._adoptedMtimes;
+    this._adoptedMtimes = 0;
+    return adopted;
   }
 
   /** Whether an observation of the whole root has completed (a scan, or a load and its compare). */
@@ -206,6 +374,21 @@ export class ProjectIndex {
   /** Paths an external fact left unknown since the last refresh. */
   public get stalePaths(): readonly string[] {
     return [...this._stale];
+  }
+
+  /**
+   * Pending entries a write recorded before the provider reported their mtime
+   * (D9). A snapshot would store a guessed mtime for them, which the reload's
+   * compare takes for a change and drops the entry's pending object with.
+   */
+  public get unmeasuredPendingPaths(): readonly string[] {
+    const paths: string[] = [];
+    for (const entry of this.walk('', { kinds: ['file'] })) {
+      if (entry.pending !== undefined && this._resolve(segmentsOf(entry.path))?.pendingMtime === true) {
+        paths.push(entry.path);
+      }
+    }
+    return paths;
   }
 
   /**
@@ -290,11 +473,84 @@ export class ProjectIndex {
   /**
    * Entries changed after a generation, for incremental capture and watch catch-up.
    *
+   * Only entries the index still holds: a removal leaves nothing to list.
+   *
    * @param since - A generation this index reported earlier.
-   * @returns Every entry whose generation is newer.
+   * @param options - Optional mask, asked before a descent.
+   * @returns Every admitted entry whose generation is newer.
    */
-  public changedSince(since: number): readonly IndexEntry[] {
-    return [...this.walk('')].filter((entry) => entry.generation > since);
+  public changedSince(since: number, options?: { readonly admits?: IndexAdmits }): readonly IndexEntry[] {
+    return [...this.walk('', { admits: options?.admits })].filter((entry) => entry.generation > since);
+  }
+
+  /**
+   * Everything that changed after a generation: entries and removals (S10).
+   * Reads no content (I3).
+   *
+   * `since` means something only with the epoch it was reported in, so a
+   * caller without one is answered `rescan` unless it starts from `0`: a
+   * reload or a new lineage could otherwise read an old generation as recent
+   * and miss what was removed in between. After a reload every loaded row
+   * carries the snapshot's generation, so a caller that continues the
+   * snapshot's epoch from before it gets the whole tree as changed, with the
+   * removals the snapshot kept: more than changed, never less.
+   *
+   * The mask is asked about each removal's ancestors, as directories, and then
+   * the removal itself, as {@link walk} asks before each descent, so entries
+   * and removals agree for one mask.
+   *
+   * @param since - A generation this index, or the snapshot it was loaded from, reported.
+   * @param options - Optional mask, and the epoch `since` was reported in.
+   * @returns The changes, or `rescan` when they cannot be told.
+   */
+  public changes(
+    since: number,
+    options?: { readonly admits?: IndexAdmits; readonly epoch?: string | undefined },
+  ): IndexChanges {
+    const epoch = options?.epoch ?? (since === 0 ? this._epoch : undefined);
+    const inherited = this._inherited;
+    const continued =
+      epoch === this._epoch || (inherited !== undefined && epoch === inherited.epoch && since <= inherited.generation);
+    if (!continued || since < this._removedFloor || since > this._generation) {
+      return { generation: this._generation, epoch: this._epoch, entries: [], removed: [], rescan: true };
+    }
+    const admits = options?.admits;
+    const admitted = (path: string, kind: IndexEntryKind): boolean => {
+      if (admits === undefined) {
+        return true;
+      }
+      for (let at = path.indexOf('/'); at !== -1; at = path.indexOf('/', at + 1)) {
+        if (!admits(path.slice(0, at), 'dir')) {
+          return false;
+        }
+      }
+      return admits(path, kind);
+    };
+    const removed: IndexRemoval[] = [];
+    for (const [path, { kind, generation }] of this._removed) {
+      if (generation > since && admitted(path, kind)) {
+        removed.push({ path, kind, generation });
+      }
+    }
+    return {
+      generation: this._generation,
+      epoch: this._epoch,
+      entries: this.changedSince(since, options),
+      removed,
+    };
+  }
+
+  /**
+   * The removal record as a snapshot stores it, under this index's epoch.
+   *
+   * @returns The record.
+   */
+  public removalSnapshot(): RemovalSnapshot {
+    return {
+      epoch: this._epoch,
+      floor: this._removedFloor,
+      removed: [...this._removed].map(([path, { kind, generation }]) => [path, kind === 'dir' ? 'd' : 'f', generation]),
+    };
   }
 
   /**
@@ -326,24 +582,26 @@ export class ProjectIndex {
   }
 
   /**
-   * Case-insensitive substring search over paths.
+   * Case-insensitive search over paths: a substring, or, when the query holds a
+   * glob character (`*`, `?`), a glob (D18). `**` spans directories, `*` and `?`
+   * stay inside one segment, and a pattern without a `/` matches the entry's name.
    *
-   * @param query - Substring to match.
+   * @param query - Substring or glob to match.
    * @param options - Result cap, whether directories match, and the mask.
    * @returns Matches relative to the root.
    */
   public search(query: string, options?: IndexSearchOptions): FileStatEntry[] {
     const maxResults = options?.maxResults ?? defaultSearchMaxResults;
-    const lowerQuery = query.toLowerCase();
+    const matches = searchMatcher(query);
     const results: FileStatEntry[] = [];
     for (const entry of this.walk('', { admits: options?.admits })) {
       if (results.length >= maxResults) {
         break;
       }
-      if (!entry.path.toLowerCase().includes(lowerQuery)) {
+      const name = entry.path.split('/').at(-1) ?? entry.path;
+      if (!matches(entry.path, name)) {
         continue;
       }
-      const name = entry.path.split('/').at(-1) ?? entry.path;
       if (entry.kind === 'file') {
         results.push({
           path: entry.path,
@@ -390,6 +648,7 @@ export class ProjectIndex {
       },
       true,
     );
+    this._land(path);
   }
 
   /**
@@ -410,10 +669,9 @@ export class ProjectIndex {
    * @param path - Root-relative path.
    */
   public remove(path: string): void {
-    this._bump(path);
-    const segments = segmentsOf(path);
-    const parent = this._resolve(segments.slice(0, -1));
-    parent?.children?.delete(segments.at(-1)!);
+    const kind = this._resolve(segmentsOf(path))?.kind ?? 'file';
+    this._removedAt(path, kind, this._bump(path));
+    this._detach(path);
   }
 
   /**
@@ -429,7 +687,7 @@ export class ProjectIndex {
   public move(from: string, to: string): void {
     const fromSegments = segmentsOf(from);
     const node = this._resolve(fromSegments);
-    this._bump(from);
+    this._removedAt(from, node?.kind ?? 'file', this._bump(from));
     const generation = this._bump(to);
     if (node === undefined) {
       this._stale.add(to);
@@ -447,6 +705,7 @@ export class ProjectIndex {
     if (this._observing > 0 || !this._complete) {
       this._stale.add(to);
     }
+    this._land(to);
   }
 
   /**
@@ -523,10 +782,16 @@ export class ProjectIndex {
         if (node !== undefined) {
           this._detach(path);
           this._generation += 1;
+          this._removedAt(path, node.kind, this._generation);
         }
         return;
       }
-      if (node?.kind === row.kind && (row.kind === 'dir' || (node.size === row.size && node.mtimeMs === row.mtimeMs))) {
+      if (
+        node?.kind === row.kind &&
+        (row.kind === 'dir' || (node.size === row.size && (node.mtimeMs === row.mtimeMs || node.pendingMtime === true)))
+      ) {
+        /* A write's own entry learns the provider's mtime, keeping what the write knew (its pending object, D9). */
+        this._adoptMtime(node, row.mtimeMs);
         if (!this._trustworthyMtime) {
           this._dropFacts(node);
         }
@@ -606,6 +871,9 @@ export class ProjectIndex {
       return;
     }
     if (node.size !== at.size || node.mtimeMs !== at.mtimeMs || node.pendingMtime === true) {
+      if (node.size !== at.size) {
+        delete node.pending;
+      }
       node.size = at.size;
       node.mtimeMs = at.mtimeMs;
       delete node.pendingMtime;
@@ -615,6 +883,86 @@ export class ProjectIndex {
     node.facts = merged ? { ...node.facts, ...facts } : facts;
     node.factsAt = { size: at.size, mtimeMs: at.mtimeMs, observedAt: at.observedAt };
     this._stale.delete(path);
+  }
+
+  /**
+   * Make one file a pending entry: it holds the pointer of `object`. A write
+   * over it, or an observation that finds its bytes changed, ends it. Not
+   * persisted: the revision layer's first read of the checkout marks it again.
+   *
+   * @param path - Root-relative file path.
+   * @param object - The large object its pointer names.
+   * @param observed - The size the pointer was read at, and the entry's generation before the read: a write
+   *   that landed since (another size, or a later generation) is not the pointer, and is left as it is.
+   */
+  public markPending(
+    path: string,
+    object: PendingObject,
+    observed?: Readonly<{ size: number; generation?: number | undefined }>,
+  ): void {
+    const node = this._resolve(segmentsOf(path));
+    if (
+      node?.kind !== 'file' ||
+      (node.pending?.oid === object.oid && node.pending.size === object.size) ||
+      (observed !== undefined &&
+        (node.size !== observed.size || (observed.generation !== undefined && node.generation > observed.generation)))
+    ) {
+      return;
+    }
+    node.pending = object;
+    node.generation = this._bump(path);
+  }
+
+  /**
+   * Know a tree's entries before its write lands them (D10). Each one the
+   * checkout already holds is known now, a placeholder among them as a pending
+   * entry; each one the write lands stays arriving until a write or a move puts
+   * it at its path. A placeholder is not readable as its pointer: it stays
+   * arriving, pending once its pointer lands, until its object's bytes do.
+   * Replaces whatever an earlier write expected.
+   *
+   * @param entries - Every entry of the tree.
+   */
+  public expect(entries: readonly ExpectedEntry[]): void {
+    this._arriving = new Map();
+    for (const entry of entries) {
+      if (entry.arriving || entry.pending !== undefined) {
+        this._arriving.set(entry.path, entry);
+      }
+      if (!entry.arriving) {
+        this._land(entry.path);
+      }
+    }
+  }
+
+  /** Whether a tree write expects entries now. */
+  public get expecting(): boolean {
+    return this._arriving !== undefined;
+  }
+
+  /**
+   * Whether a path of the expected tree has not landed yet.
+   *
+   * @param path - Root-relative file path.
+   * @returns `true` while it is arriving.
+   */
+  public arriving(path: string): boolean {
+    return this._arriving?.has(path) === true;
+  }
+
+  /** End the expectation: the tree write is over, landed or not. */
+  public endExpectation(): void {
+    this._arriving = undefined;
+  }
+
+  /**
+   * The large object a pending entry names.
+   *
+   * @param path - Root-relative file path.
+   * @returns The object, or `undefined` when the path is not pending.
+   */
+  public pendingFor(path: string): PendingObject | undefined {
+    return this._resolve(segmentsOf(path))?.pending;
   }
 
   /**
@@ -639,6 +987,36 @@ export class ProjectIndex {
     return rows;
   }
 
+  /**
+   * Every pending entry by path, stored beside the snapshot rows so a reload
+   * knows them without reading a file (D9, I3).
+   *
+   * @returns The pending objects by path.
+   */
+  public pendingSnapshot(): Record<string, PendingObject> {
+    const pending: Record<string, PendingObject> = {};
+    for (const entry of this.walk('', { kinds: ['file'] })) {
+      if (entry.pending !== undefined) {
+        pending[entry.path] = entry.pending;
+      }
+    }
+    return pending;
+  }
+
+  /* An arriving entry lands: its bytes are at its path now, pending when they are its placeholder's. */
+  private _land(path: string): void {
+    const expected = this._arriving?.get(path);
+    if (expected === undefined) {
+      return;
+    }
+    const size = this._resolve(segmentsOf(path))?.size;
+    if (expected.pending === undefined || size === expected.pending.size) {
+      this._arriving!.delete(path);
+    } else if (size === expected.size) {
+      this.markPending(path, expected.pending);
+    }
+  }
+
   private _merge(start: number, prefix: string, rows: readonly ObservedRow[]): IndexCompareResult {
     const touchedSince = (path: string): boolean => this._touchedSince(path, start);
     const mismatched: string[] = [];
@@ -654,9 +1032,11 @@ export class ProjectIndex {
     /* Detached after the walk, which a live detach would cut short; a gone
      * directory takes its gone descendants with it. */
     for (const path of gone) {
-      if (this._resolve(segmentsOf(path)) !== undefined) {
+      const node = this._resolve(segmentsOf(path));
+      if (node !== undefined) {
         this._detach(path);
         this._generation += 1;
+        this._removedAt(path, node.kind, this._generation);
         mismatched.push(path);
       }
     }
@@ -673,6 +1053,7 @@ export class ProjectIndex {
           if (node.pendingMtime === true) {
             node.mtimeMs = row.mtimeMs;
             delete node.pendingMtime;
+            this._adoptedMtimes += 1;
             if (node.factsAt !== undefined) {
               node.factsAt = { ...node.factsAt, mtimeMs: row.mtimeMs };
               /* Bytes modified after the writer measured them are not the
@@ -699,6 +1080,7 @@ export class ProjectIndex {
         delete node.facts;
         delete node.factsAt;
         delete node.pendingMtime;
+        delete node.pending;
         this._generation += 1;
         node.generation = this._generation;
         mismatched.push(row.path);
@@ -756,6 +1138,16 @@ export class ProjectIndex {
     return facts;
   }
 
+  /* A node a write recorded before the provider reported its mtime takes the provider's; its facts are re-measured. */
+  private _adoptMtime(node: Node, mtimeMs: number): void {
+    if (node.pendingMtime !== true) {
+      return;
+    }
+    node.mtimeMs = mtimeMs;
+    delete node.pendingMtime;
+    this._dropFacts(node);
+  }
+
   private _entryOf(path: string, node: Node): IndexEntry {
     return {
       path,
@@ -765,6 +1157,7 @@ export class ProjectIndex {
       generation: node.generation,
       ...(node.facts === undefined ? {} : { facts: node.facts }),
       ...(node.factsAt === undefined ? {} : { factsAt: node.factsAt }),
+      ...(node.pending === undefined ? {} : { pending: node.pending }),
     };
   }
 
@@ -814,10 +1207,15 @@ export class ProjectIndex {
       return;
     }
     let current = this._root;
-    for (const segment of segments.slice(0, -1)) {
+    for (const [at, segment] of segments.slice(0, -1).entries()) {
       let child = current.children!.get(segment);
       if (child?.children === undefined) {
-        child = directoryNode(mutation ? this._generation : node.generation, child === undefined ? 0 : Date.now());
+        const generation = mutation ? this._generation : node.generation;
+        if (child !== undefined) {
+          /* A file where a directory now stands: that file is gone. */
+          this._removedAt(segments.slice(0, at + 1).join('/'), 'file', generation);
+        }
+        child = directoryNode(generation, child === undefined ? 0 : Date.now());
         current.children!.set(segment, child);
       }
       current = child;
@@ -828,6 +1226,21 @@ export class ProjectIndex {
       existing.generation = node.generation;
       return;
     }
+    /* What stood here and is not kept under the new node is gone: another kind, or a directory's other children. */
+    if (existing !== undefined && existing !== node && (existing.kind !== node.kind || existing.kind === 'dir')) {
+      this._removedAt(path, existing.kind, node.generation);
+    }
     current.children!.set(name, node);
+  }
+
+  /* Remember one removal, newest last, dropping the oldest past the limit (S10). */
+  private _removedAt(path: string, kind: IndexEntryKind, generation: number): void {
+    this._removed.delete(path);
+    this._removed.set(path, { kind, generation });
+    while (this._removed.size > indexRemovalLimit) {
+      const [oldest, record] = this._removed.entries().next().value!;
+      this._removed.delete(oldest);
+      this._removedFloor = Math.max(this._removedFloor, record.generation);
+    }
   }
 }

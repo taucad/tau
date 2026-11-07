@@ -51,8 +51,11 @@ import { bufferToStream } from '#backend/stream-utils.js';
 import { factsConcurrency, measureContentFacts } from '#content-metadata.js';
 import { mapConcurrent } from '#concurrency.js';
 import { workerTimings } from '#worker-timings.js';
-import type { IndexAdmits, IndexSearchOptions } from '#project-index/project-index.js';
+import type { IndexAdmits, IndexChanges, IndexSearchOptions } from '#project-index/project-index.js';
 import type { IndexFactsOptions } from '#project-index/project-indexes.js';
+import type { AppendFence, Changeset, ChangesetEntry, ChangesetReceipt } from '#changeset.js';
+import type { ChangeSet, ChangeSetEntry } from '#change-event-bus.js';
+import type { ChangeSetWatchRequest } from '#watch-registry.js';
 import type { RootedPorcelain } from '#rooted-views.js';
 import type { WorkspaceMutationError } from '#workspace-errors.js';
 
@@ -102,6 +105,8 @@ export type ComposedViewOverlay = Readonly<{
 /** Optional watch surface a rooted filesystem brings to the view. @public */
 type WatchableFileSystem = {
   watch(request: WatchRequest, handler: (event: WatchEvent) => void): (() => void) | Promise<() => void>;
+  /** The change-set form (D6): one {@link ChangeSet} per committed changeset, masked like `watch`. */
+  watchChangeSets(request: ChangeSetWatchRequest, handler: (set: ChangeSet) => void): () => void;
 };
 
 /**
@@ -113,8 +118,14 @@ type WatchableFileSystem = {
  */
 type IndexedFileSystem = {
   search(query: string, options?: IndexSearchOptions): Promise<FileStatEntry[]>;
-  statTree(path: string, options?: { admits?: IndexAdmits }): Promise<FileStatEntry[]>;
+  statTree(path: string, options?: { admits?: IndexAdmits; signal?: AbortSignal }): Promise<FileStatEntry[]>;
   facts(paths: readonly string[], options?: IndexFactsOptions): Promise<ReadonlyMap<string, ContentFacts>>;
+  changedSince(
+    since: number,
+    options?: { admits?: IndexAdmits; signal?: AbortSignal; epoch?: string },
+  ): Promise<IndexChanges>;
+  /** Which of these files are pending entries: from the index, or a pointer-sized file read raw (D9). */
+  pendingPaths(paths: readonly string[]): Promise<readonly string[]>;
 };
 
 /**
@@ -132,7 +143,9 @@ export type ComposedViewCheckout = Readonly<{
     RecursiveRmdir &
     Partial<WatchableFileSystem> &
     Partial<IndexedFileSystem> &
-    Partial<RootedPorcelain>;
+    Partial<RootedPorcelain> & {
+      appendFileFenced?(path: string, data: Uint8Array<ArrayBuffer> | string, fence: AppendFence): Promise<void>;
+    };
   /** Stable checkout id, reported as the `identity` of project entries. */
   id?: string;
 }>;
@@ -169,6 +182,8 @@ export type ComposedView = Omit<FileSystemProvider, 'rmdir'> &
   Partial<WatchableFileSystem> &
   Partial<IndexedFileSystem> &
   Partial<RootedPorcelain> & {
+    /** A fenced record-log append (D23), mask-checked like `appendFile`. */
+    appendFileFenced?(path: string, data: Uint8Array<ArrayBuffer> | string, fence: AppendFence): Promise<void>;
     /** What this view knows about one checkout-relative path. */
     provenance(path: string): Promise<FileProvenance>;
     /** One directory's immediate children with head metadata and provenance (I3). */
@@ -310,6 +325,61 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
       return { type: 'change', path: to };
     }
     return from === undefined ? undefined : { type: 'delete', path: from };
+  };
+
+  /** One change-set fact as this view serves it: a move with one hidden edge is the other edge's arrival or departure. */
+  const visibleEntry = (entry: ChangeSetEntry): ChangeSetEntry | undefined => {
+    if (entry.op !== 'moved' || entry.oldPath === undefined) {
+      return hidden(entry.path) ? undefined : entry;
+    }
+    const to = !hidden(entry.path);
+    const from = !hidden(entry.oldPath);
+    if (to && from) {
+      return entry;
+    }
+    if (to) {
+      return {
+        op: 'created',
+        path: entry.path,
+        kind: entry.kind,
+        ...(entry.target === undefined ? {} : { target: entry.target }),
+      };
+    }
+    return from ? { op: 'deleted', path: entry.oldPath, kind: entry.kind } : undefined;
+  };
+
+  /** The nearest ancestor-or-self of `path` this view shows, so a reset never names a hidden directory. */
+  const visibleAncestor = (path: string): string => {
+    let current = path;
+    while (current !== '' && current !== '/' && hidden(current)) {
+      const separator = current.lastIndexOf('/');
+      current = separator > 0 ? current.slice(0, separator) : current.startsWith('/') ? '/' : '';
+    }
+    return current;
+  };
+
+  /** A change set with every hidden fact removed; `undefined` when nothing visible is left. */
+  const visibleSet = (set: ChangeSet): ChangeSet | undefined => {
+    if (set.reset !== undefined) {
+      const prefix = visibleAncestor(set.reset.prefix);
+      return prefix === set.reset.prefix ? set : { ...set, reset: { ...set.reset, prefix } };
+    }
+    const entries = set.entries.flatMap((entry) => visibleEntry(entry) ?? []);
+    if (entries.length === 0) {
+      return undefined;
+    }
+    if (entries.length === set.entries.length && entries.every((entry, index) => entry === set.entries[index])) {
+      return set;
+    }
+    const segments = set.segments?.filter((segment) => !hidden(segment.path));
+    return {
+      generation: set.generation,
+      ...(set.origin === undefined ? {} : { origin: set.origin }),
+      ...(set.backend === undefined ? {} : { backend: set.backend }),
+      entries,
+      touchedDirectories: set.touchedDirectories.filter((directory) => directory === '' || !hidden(directory)),
+      ...(segments === undefined || segments.length === 0 ? {} : { segments }),
+    };
   };
 
   const writablePath = (path: string): string => {
@@ -780,11 +850,60 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
    * under the project root is a records row. The control plane needs no such
    * care — it is the control plane at any depth (path policy contract, PP3).
    */
+  /**
+   * One changeset through the mask (charter D2): every entry's paths answered
+   * before the pipeline sees any of them, so a masked entry refuses the whole
+   * changeset with the masked-path error and nothing is applied. A recursive
+   * delete and a move's source reach paths nobody named, so their subtrees are
+   * walked as `rmdir` and `rename` walk them.
+   *
+   * A `lifecycle` changeset takes the project token exclusively: the fence a
+   * project create, delete, adoption or topology replacement needs (D3). That
+   * is the authority's own work, never a masked consumer's, so the view
+   * refuses it with `EPERM` before anything is asked or applied.
+   */
+  const maskedApply = async (
+    apply: (changeset: Changeset) => Promise<ChangesetReceipt>,
+    changeset: Changeset,
+  ): Promise<ChangesetReceipt> => {
+    if (changeset.lifecycle === true) {
+      fileSystemError('EPERM', `EPERM: the ${options.consumer} view may not apply a lifecycle changeset.`);
+    }
+    const named = changeset.entries.flatMap((entry) => (entry.op === 'move' ? [entry.from, entry.to] : [entry.path]));
+    const targets = await writableTargets(named);
+    let at = 0;
+    const entries = changeset.entries.map((entry): ChangesetEntry => {
+      if (entry.op === 'move') {
+        at += 2;
+        return { ...entry, from: targets[at - 2]!, to: targets[at - 1]! };
+      }
+      at += 1;
+      return { ...entry, path: targets[at - 1]! };
+    });
+    await Promise.all(
+      entries.map(async (entry) => {
+        if (entry.op === 'move') {
+          await refuseHiddenSubtree(entry.from);
+        } else if (entry.op === 'delete' && entry.recursive === true) {
+          await refuseHiddenSubtree(entry.path);
+        }
+      }),
+    );
+    return apply({ ...changeset, entries });
+  };
+
   const porcelain = (base: Partial<RootedPorcelain>): Partial<RootedPorcelain> => ({
+    ...(base.apply === undefined
+      ? {}
+      : { apply: async (changeset: Changeset) => maskedApply(base.apply!.bind(base), changeset) }),
     ...(base.copyTree === undefined
       ? {}
       : {
-          copyTree: async (source: string, target: string, options?: { admits?: IndexAdmits }) => {
+          copyTree: async (
+            source: string,
+            target: string,
+            options?: { admits?: IndexAdmits; signal?: AbortSignal },
+          ) => {
             const from = await readableSource(source);
             const [to] = await writableTargets([target]);
             /* Every entry a copy writes is a target too: `notes/exports` is
@@ -797,16 +916,17 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
             const visible = admitsVisible(from, options?.admits);
             return base.copyTree!(from, to!, {
               admits: (relativePath, kind) => visible(relativePath, kind) && writableBelow(relativePath),
+              ...(options?.signal === undefined ? {} : { signal: options.signal }),
             });
           },
         }),
     ...(base.duplicate === undefined
       ? {}
       : {
-          duplicate: async (source: string, target: string) => {
+          duplicate: async (source: string, target: string, options?: { signal?: AbortSignal }) => {
             const from = await readableSource(source);
             const [to] = await writableTargets([target]);
-            return base.duplicate!(from, to!);
+            return base.duplicate!(from, to!, options);
           },
         }),
     ...(base.move === undefined
@@ -981,6 +1101,15 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
           appendFile: async (path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> =>
             mutate(path, async (target) => base.appendFile!(target, data)),
         }),
+    ...(base.appendFileFenced === undefined
+      ? {}
+      : {
+          appendFileFenced: async (
+            path: string,
+            data: Uint8Array<ArrayBuffer> | string,
+            fence: AppendFence,
+          ): Promise<void> => mutate(path, async (target) => base.appendFileFenced!(target, data, fence)),
+        }),
     ...(base.watch === undefined
       ? {}
       : {
@@ -993,6 +1122,20 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
               { ...request, paths: request.paths.map((path) => readablePath(canonical(path))) },
               (event: WatchEvent) => {
                 const visible = visibleEvent(event);
+                if (visible !== undefined) {
+                  handler(visible);
+                }
+              },
+            ),
+        }),
+    ...(base.watchChangeSets === undefined
+      ? {}
+      : {
+          watchChangeSets: (request: ChangeSetWatchRequest, handler: (set: ChangeSet) => void): (() => void) =>
+            base.watchChangeSets!(
+              { ...request, paths: request.paths.map((path) => readablePath(canonical(path))) },
+              (set: ChangeSet) => {
+                const visible = visibleSet(set);
                 if (visible !== undefined) {
                   handler(visible);
                 }
@@ -1063,9 +1206,34 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     ...(base.statTree === undefined
       ? {}
       : {
-          statTree: async (path: string, statOptions?: { admits?: IndexAdmits }): Promise<FileStatEntry[]> => {
+          statTree: async (
+            path: string,
+            statOptions?: { admits?: IndexAdmits; signal?: AbortSignal },
+          ): Promise<FileStatEntry[]> => {
             const target = readablePath(canonical(path));
-            return base.statTree!(target, { admits: admitsVisible(target, statOptions?.admits) });
+            return base.statTree!(target, { ...statOptions, admits: admitsVisible(target, statOptions?.admits) });
+          },
+        }),
+    /* Overlay entries never change, so what changed is the checkout's index, masked. */
+    ...(base.changedSince === undefined
+      ? {}
+      : {
+          changedSince: async (
+            since: number,
+            changedOptions?: { admits?: IndexAdmits; signal?: AbortSignal; epoch?: string },
+          ): Promise<IndexChanges> =>
+            base.changedSince!(since, { ...changedOptions, admits: admitsVisible('', changedOptions?.admits) }),
+        }),
+    /* An overlay entry is never pending: only project files are asked about, masked like `readFile`. */
+    ...(base.pendingPaths === undefined
+      ? {}
+      : {
+          pendingPaths: async (paths: readonly string[]): Promise<readonly string[]> => {
+            const targets = paths.map((path) => readablePath(canonical(path)));
+            const routes = await Promise.all(targets.map(async (target) => routeFor(target)));
+            const asked = targets.filter((_, index) => routes[index]!.kind !== 'overlay');
+            const pending = new Set(asked.length === 0 ? [] : await base.pendingPaths!(asked));
+            return paths.filter((_, index) => pending.has(targets[index]!));
           },
         }),
     /*

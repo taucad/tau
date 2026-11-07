@@ -3,7 +3,6 @@ import type { JSONRPCRequest, JSONRPCResponse, JSONRPCServer } from 'json-rpc-2.
 import type { FileStat as TauFileStat } from '@taucad/types';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import type { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
-import { SharedPool } from '@taucad/memory';
 import {
   encodeFsContentWire,
   fileType,
@@ -32,7 +31,6 @@ export type ServeLanguageFileSystemOptions = Readonly<{
   fileManager: LanguageFsBridgeFileManager;
   treeService: FileTreeService;
   paths: WorkspacePathResolver;
-  filePoolBuffer?: SharedArrayBuffer;
 }>;
 
 /** @public */
@@ -79,7 +77,6 @@ function toWireFileStat(stat: TauFileStat): WireFileStat {
 
 /**
  * Register `fs/*` JSON-RPC handlers on a {@link JSONRPCServer} instance.
- * Tier 0: `SharedPool` copy for `fs/content` when the buffer is supplied.
  *
  * @public
  */
@@ -87,8 +84,6 @@ export function serveLanguageFileSystemRequests(
   server: JSONRPCServer,
   options: ServeLanguageFileSystemOptions,
 ): LanguageFsBridgeDisposable {
-  const pool = options.filePoolBuffer ? new SharedPool(options.filePoolBuffer) : undefined;
-
   server.addMethodAdvanced(fsContentRequest.method, async (request) => {
     const parsed = parseFsRequestParams(request, fsContentParamsSchema, 'fs/content');
     if (!parsed.ok) {
@@ -97,14 +92,6 @@ export function serveLanguageFileSystemRequests(
 
     try {
       const relative = languageFileUriToWorkspaceRelative(parsed.params.uri);
-      const absolute = options.paths.toAbsolutePath(relative);
-      if (pool) {
-        const cached = pool.resolveCopy(absolute);
-        if (cached) {
-          return { jsonrpc: '2.0', id: parsed.id, result: encodeFsContentWire(cached) };
-        }
-      }
-
       const bytes = await options.fileManager.readFile(relative);
       return { jsonrpc: '2.0', id: parsed.id, result: encodeFsContentWire(bytes) };
     } catch (error) {

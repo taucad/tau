@@ -49,6 +49,7 @@ Then follow the [AGENTS policy](../../../docs/policy/agents-md-policy.md), the [
 - [Runtime architecture policy](../../../docs/policy/runtime-architecture-policy.md)
 - [Library API policy](../../../docs/policy/library-api-policy.md)
 - [Testing policy](../../../docs/policy/testing-policy.md)
+- [CAD performance policy](../../../docs/policy/cad-performance-policy.md) Rule 3 for every call into smlibwasm
 
 Keep this file limited to verified local entrypoints, invariants and checks. Put cross-project standards in their policy owner and repeatable procedures in a shared skill.
 
@@ -60,4 +61,5 @@ Record durable project-specific facts here after verifying them in current sourc
 - Its shape constructors are functions (`Box(...)`, `Pos(...).mul(...)`), not classes; `Mesh` is the one class authors construct.
 - Bodies are tessellated whole so faces share boundary samples; face groups come from the contiguous per-face triangle runs (`findFaceRuns`). Since 0.6 a moved torus's body mesh closes, so there is no per-face fallback.
 - Edges and wires are sampled into `DrawingEntry` polylines at evaluation, so drawings survive the msgpack handle snapshot; bodies snapshot losslessly through `toSmb`/`fromSmb`.
+- Whole-body edge and curve reads use the raw `@classcad/smlibwasm/kernel` layer (`ext.brep_dump`, `ext.edge_indices`, `ext.seam_edges`, `k.tessellate_boundaries`, `ext.curve_data`) through `src/utils/smlib-kernel.ts` only; it is no stable API, so `smlibwasm-raw-api.test.ts` pins each call and the private shape fields it reads. Edge and drawing paths make no per-edge or per-sample shape-API call (`smlib.call-count.test.ts`).
 - Library tracing wraps values built in `user-main` (shapes have no private fields); the tracer unwraps `main`'s result before the kernel reads it.

@@ -68,8 +68,6 @@ export class CsharpLanguageClient {
     this.#post({
       type: 'init',
       assets: options.assets,
-      rootDirectory: options.fs.paths.toAbsolutePath(''),
-      filePoolBuffer: options.fs.filePoolBuffer,
     });
   }
 

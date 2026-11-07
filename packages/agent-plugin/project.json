@@ -47,10 +47,7 @@
     },
     "test:e2e": {
       "executor": "nx:run-commands",
-      "dependsOn": [
-        "build-app",
-        { "projects": ["brep", "esbuild", "image", "replicad", "rhino"], "target": "copy-assets" }
-      ],
+      "dependsOn": ["build-app", { "projects": ["brep", "esbuild", "image", "replicad"], "target": "copy-assets" }],
       "metadata": {
         "description": "The built viewer page in Chromium: the ext-apps basic-host harness (AppBridge, sandboxed frame, declared CSP) and the loopback page, against a real tau mcp. The tau mcp it spawns runs the CLI from source, so the plugins' copied wasm (STEP import's occt-import-js among them) is staged first. Named test:e2e so the nightly lane that installs Chromium selects it."
       },

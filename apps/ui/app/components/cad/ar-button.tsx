@@ -1,5 +1,6 @@
 import { memo, useEffect, useId, useRef } from 'react';
-import { Loader2, Scan } from 'lucide-react';
+import { Loader } from '@taucad/ui/components/loader';
+import { Scan } from 'lucide-react';
 import type { Artifact } from '@taucad/runtime';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
@@ -124,7 +125,7 @@ export function ArControl({
         }
       }}
     >
-      {isPreparing ? <Loader2 className='size-4 spin-glyph' /> : <ArIcon className='size-4' />}
+      {isPreparing ? <Loader className='size-4' /> : <ArIcon className='size-4' />}
     </Button>
   );
 

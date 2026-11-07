@@ -72,19 +72,6 @@
     </dict>
     <dict>
       <key>CFBundleTypeName</key>
-      <string>Rhino 3D model</string>
-      <key>CFBundleTypeRole</key>
-      <string>Viewer</string>
-      <key>LSHandlerRank</key>
-      <string>Alternate</string>
-      <key>LSItemContentTypes</key>
-      <array>
-        <string>com.mcneel.rhinoceros.3dm</string>
-        <string>com.shapr3d.rhino.3dm</string>
-      </array>
-    </dict>
-    <dict>
-      <key>CFBundleTypeName</key>
       <string>3D Manufacturing Format model</string>
       <key>CFBundleTypeRole</key>
       <string>Viewer</string>
@@ -843,27 +830,6 @@
         <key>public.mime-type</key>
         <array>
           <string>model/gltf+json</string>
-        </array>
-      </dict>
-    </dict>
-    <dict>
-      <key>UTTypeIdentifier</key>
-      <string>com.mcneel.rhinoceros.3dm</string>
-      <key>UTTypeDescription</key>
-      <string>Rhino 3D model</string>
-      <key>UTTypeConformsTo</key>
-      <array>
-        <string>public.data</string>
-      </array>
-      <key>UTTypeTagSpecification</key>
-      <dict>
-        <key>public.filename-extension</key>
-        <array>
-          <string>3dm</string>
-        </array>
-        <key>public.mime-type</key>
-        <array>
-          <string>model/vnd.rhino.3dm</string>
         </array>
       </dict>
     </dict>

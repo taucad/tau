@@ -1,3 +1,4 @@
+import { refusalOf } from '@taucad/agent-host/wire';
 import type { Evidence } from '#contract.js';
 import { canonicalEvidence, contractId, evidenceDigest, sha256Hex } from '#identity.js';
 
@@ -54,7 +55,17 @@ export type ProjectedRun = Readonly<{
   intervals: ReadonlyArray<
     Readonly<{ phase: 'admission' | 'tool' | 'approval'; start: number; end: number | undefined }>
   >;
-  ending: Readonly<{ source: ProjectedSource; at: number }> | undefined;
+  /**
+   * The run's ending row. A failed ending that recorded a code names it, never its message: `wrapped` is the code a
+   * `RUN_ABANDONED` ending carried in `details.code`.
+   */
+  ending:
+    | Readonly<{
+        source: ProjectedSource;
+        at: number;
+        failure?: Readonly<{ code: string; wrapped: string | undefined }> | undefined;
+      }>
+    | undefined;
   /** Every row the observation was built from, in log order; it locates a run's tail. */
   sources?: readonly ProjectedSource[];
   /** When this device's UI first showed the run's model text, if it was watching while the run streamed. */
@@ -119,11 +130,34 @@ export type RunProjection = Readonly<{
 }>;
 
 /** Bumped whenever the facts written for the same rows change. @public */
-export const hostTurnMapper = 'host-turn-v3';
+export const hostTurnMapper = 'host-turn-v4';
 
 const retentionMilliseconds = 180 * 86_400_000;
 
 type Fact = Extract<Evidence['payload'], { plane: 'summary' }>['fact'];
+type OutcomeFact = Fact & { kind: 'outcome' };
+
+/* A refusal code is a SCREAMING_SNAKE vocabulary value; anything else is not sent, though its class still is. */
+const refusalCodeShape = /^[A-Z][A-Z\d_]{0,63}$/u;
+
+/**
+ * What a failed run's ending code says about it: the code, the wrapped one when the ending was a `RUN_ABANDONED`
+ * rewrite of a `wait`-class code (that code names the cause), with its owner and retry class from the refusal registry.
+ * A code this build does not know reads as the registry's unknown entry rather than being dropped.
+ *
+ * @param failure - The ending row's codes.
+ * @returns The outcome fact's failure fields, or none for an ending without a code.
+ */
+const failureFields = (
+  failure: NonNullable<ProjectedRun['ending']>['failure'],
+): Pick<OutcomeFact, 'failureClass' | 'code'> => {
+  if (failure === undefined) {
+    return {};
+  }
+  const code = failure.wrapped ?? failure.code;
+  const { owner, retry } = refusalOf(code);
+  return { failureClass: { owner, retry }, ...(refusalCodeShape.test(code) ? { code } : {}) };
+};
 type FeedbackFact = Extract<Evidence['payload'], { plane: 'feedback' }>['fact'];
 
 /** The rating scale a run's reply is rated on: one positive or negative answer. @public */
@@ -400,7 +434,13 @@ export const projectRun = async (run: ProjectedRun, context: ProjectionContext):
       semantic: await contractId('run', run.runId),
       payload: {
         plane: 'summary',
-        fact: { kind: 'outcome', termination: run.termination, success: 'unknown', assessment: null },
+        fact: {
+          kind: 'outcome',
+          termination: run.termination,
+          success: 'unknown',
+          assessment: null,
+          ...failureFields(run.ending.failure),
+        },
       },
       occurredAt: run.ending.at,
       events: 'complete',

@@ -22,7 +22,7 @@ Object.defineProperty(document, 'elementFromPoint', {
 function createMockTreeService(fileTree: Map<string, FileEntry>): FileTreeService {
   return {
     getTreeSnapshot: () => fileTree,
-    searchFiles: vi.fn().mockResolvedValue([]),
+    searchFilesDebounced: vi.fn().mockResolvedValue([]),
   } as unknown as FileTreeService;
 }
 

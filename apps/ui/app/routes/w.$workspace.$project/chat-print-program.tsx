@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { FileCode, LoaderCircle, Send } from 'lucide-react';
+import { Loader } from '@taucad/ui/components/loader';
+import { FileCode, Send } from 'lucide-react';
 import type {
   MachineAcceptedContainer,
   MachineArtifactReference,
@@ -350,7 +351,7 @@ export function ProgramStage({
             void send();
           }}
         >
-          {isSending ? <LoaderCircle aria-hidden className='spin-glyph' /> : <Send aria-hidden />}
+          {isSending ? <Loader /> : <Send aria-hidden />}
           Review job
         </Button>
       </div>

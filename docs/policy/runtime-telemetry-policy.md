@@ -3,9 +3,10 @@ title: 'Kernel Telemetry Policy'
 description: 'Kernel worker telemetry: span naming, hierarchy rules, attribute conventions, and performance contracts. Covers RuntimeTracer, OC API tracing, and WorkerTelemetryCollector.'
 status: active
 created: '2026-02-20'
-updated: '2026-10-25'
+updated: '2026-11-06'
 related:
   - docs/policy/runtime-api-policy.md
+  - docs/policy/cad-performance-policy.md
   - docs/research/realtime-cad-performance-charter.md
   - docs/research/first-party-runtime-library-tracing-blueprint.md
   - docs/research/replicad-native-batch-operations-performance-blueprint.md
@@ -222,7 +223,7 @@ Spans describe how an operation ran; an observation says what happened to it. Ev
 
 ## OC API Call Tracing
 
-The Replicad kernel supports automatic OpenCASCADE API call tracing via a JavaScript Proxy that wraps the OC WASM instance. Controlled by the `ocTracing` kernel option.
+The Replicad and OpenCascade kernels support automatic OpenCASCADE API call tracing via a JavaScript Proxy that wraps the OC WASM instance. Controlled by the `ocTracing` kernel option. Its summary is how a reviewer sees per-element calls on a render or export path (`docs/policy/cad-performance-policy.md` Rule 3).
 
 ### Modes
 
@@ -269,9 +270,28 @@ kernel.compute
     └── oc.summary   (attributes: per-class counts and durations)
 ```
 
+The OpenCascade kernel flushes a summary when each operation settles, so render and export calls are counted in their own span rather than in the next evaluation's:
+
+| Operation | Flush point                                   | Parent span                |
+| --------- | --------------------------------------------- | -------------------------- |
+| Evaluate  | After `opencascade.run-main` ends             | `kernel.compute`           |
+| Render    | Before `opencascade.mesh-to-gltf` ends        | `opencascade.mesh-to-gltf` |
+| Export    | As the export settles (`flushOcTracingAfter`) | `kernel.export-compute`    |
+
+`opencascade.call-count.test.ts` asserts these parents and the per-class counts for a render with edges and a GLB export.
+
 ## First-Party Library Tracing
 
 Kernel-owned JavaScript libraries registered through Tau's built-in module registry may use the first-party library tracer. This is for Tau-controlled kernel libraries such as Replicad, not arbitrary user dependencies.
+
+Each kernel opts in through a `libraryTracing` option (`off` by default, which wraps nothing):
+
+| Kernel    | What is counted                                                                                                                          | Summary emitted                                                                             |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Replicad  | Replicad calls from user code, including methods on the shapes it builds                                                                 | `replicad.library.summary` before `replicad.run-main` closes                                |
+| SMLib     | smlibwasm calls from user code, including methods on the shapes it builds                                                                | `smlib.library.summary` before `smlib.run-main` closes                                      |
+| Manifold  | manifold-3d functions and constructors user code calls; `Manifold` and `CrossSection` handles stay raw, so their methods are not counted | `manifold.library.summary` after each run of `main`, at evaluation and again at render      |
+| OpenRSCAD | Every engine call the kernel makes (`parameters`, `renderToGlb`, `exportShape3D`, `cacheStats`, …)                                       | `openrscad.library.summary` after describe and inside each `openrscad.export-*` engine span |
 
 ### Rules
 

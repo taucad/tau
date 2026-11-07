@@ -1,4 +1,5 @@
 import { useFeature } from '#flags/use-feature.js';
+import { Loader } from '@taucad/ui/components/loader';
 import { MachinesDisabled } from '#components/machines/machines-disabled.js';
 import { memo, useCallback, useMemo } from 'react';
 import { Button } from '@taucad/ui/components/button';
@@ -8,7 +9,7 @@ import { searchParameterName } from '#constants/search-parameter.constants.js';
 import { stringParameter } from '#utils/search-parameter.codecs.js';
 
 import { useSelector } from '@xstate/react';
-import { LoaderCircle, Printer } from 'lucide-react';
+import { Printer } from 'lucide-react';
 import { fffProcessOf } from '@taucad/runtime/machine';
 import type { MachineClient, MachineDirectoryEntry, MachineJob } from '@taucad/runtime/machine';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
@@ -231,7 +232,7 @@ function ConnectedPrintPanel({
                 className='grid min-h-full place-items-center text-sm text-muted-foreground'
               >
                 <span className='flex items-center gap-2'>
-                  <LoaderCircle aria-hidden className='size-4 spin-glyph' />
+                  <Loader className='size-4' />
                   Loading machines
                 </span>
               </div>

@@ -1,0 +1,70 @@
+# Cancel workflow runs left behind by merge-queue groups that no longer exist.
+#
+# When `main` moves outside the queue, GitHub rebuilds every queued group on a new
+# `gh-readonly-queue/main/pr-<n>-<sha>` branch and deletes the old ones. The old groups'
+# runs keep going: each group has its own ref, so `ci.yml`'s concurrency never cancels
+# them. On 2026-11-06, 40 of 45 unfinished merge-group runs belonged to deleted queue
+# branches and held the hosted runner pool for hours
+# (Brain research/ci-runner-backlog-merge-queue-churn.md).
+#
+# The sweep runs when a queue branch is deleted and when a new group's CI run is
+# requested, whichever reaches it first. A `workflow_run` trigger rather than
+# `merge_group`, so no check of its own appears on the queue entries. It lists the
+# unfinished merge-group runs before it lists the live queue branches, so a group
+# created while it runs is never mistaken for a dead one. Concurrency sits on the job,
+# so the skipped runs for ordinary CI requests never cancel a sweep in progress.
+name: Merge queue sweep
+
+on:
+  delete:
+  workflow_run:
+    workflows: [CI]
+    types: [requested]
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  sweep:
+    name: Cancel runs of deleted merge-queue groups
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'merge_group') ||
+      (github.event_name == 'delete' && github.event.ref_type == 'branch' &&
+       startsWith(github.event.ref, 'gh-readonly-queue/'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    concurrency:
+      group: merge-queue-sweep
+      cancel-in-progress: true
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Cancel unfinished merge-group runs whose queue branch is gone
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          runs=$(for status in queued in_progress waiting pending requested; do
+            gh api --paginate "repos/${GH_REPO}/actions/runs?event=merge_group&status=${status}&per_page=100" \
+              --jq '.workflow_runs[] | "\(.id) \(.head_branch)"'
+          done | sort -u)
+          live=$(gh api --paginate "repos/${GH_REPO}/git/matching-refs/heads/gh-readonly-queue" \
+            --jq '.[].ref | select(startswith("refs/heads/gh-readonly-queue/")) | sub("^refs/heads/"; "")')
+          cancelled=0
+          while read -r id branch; do
+            [ -n "$id" ] || continue
+            [ "$id" = "$GITHUB_RUN_ID" ] && continue
+            if grep -qxF -- "$branch" <<< "$live"; then
+              continue
+            fi
+            if gh api -X POST "repos/${GH_REPO}/actions/runs/${id}/cancel" > /dev/null; then
+              echo "Cancelled run ${id} of deleted queue branch ${branch}"
+              cancelled=$((cancelled + 1))
+            else
+              echo "::warning::Could not cancel run ${id} (${branch}); it may have just finished"
+            fi
+          done <<< "$runs"
+          echo "Cancelled ${cancelled} run(s) of deleted merge-queue groups."

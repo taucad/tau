@@ -47,7 +47,7 @@ client.terminate();
 
 The transport owns and disposes each connection the factory returns. The runtime does not know whether the authority is a Worker, iframe, Electron utility process, or another port broker, and it receives no project id, authority-global path, rights object, or mount table — it renders local paths only. Here the host-owned authority path `/projects/widget/main.ts` becomes runtime `main.ts`; kernels and bundlers see only the latter. See [Path Namespaces](../concepts/path-namespaces) for the equivalent Node, browser-handle, memory, and inline-source mappings.
 
-Do not pass the authority's shared file pool to a rooted runtime: a pool hit can return authority-global bytes before the scoped bridge handles the read, bypassing the filesystem boundary. Runtime file content always travels the rooted bridge's transfer path.
+Runtime file content always travels the rooted bridge's transfer path; no shared memory carries authority-global bytes past the filesystem boundary.
 
 ### Deferred client creation
 

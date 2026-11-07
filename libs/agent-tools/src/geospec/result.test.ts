@@ -784,7 +784,8 @@ describe('failure categories and suggestions', () => {
     }
     return failure;
   };
-  const weakening = /update the model or expected geometry assertion|weaken|relax the tolerance/iu;
+  const weakening =
+    /update the model or expected geometry assertion|weaken|relax the tolerance|widen|raise the claim's tolerance/iu;
   const reducing = /\b(?:coarsen|coarser export|shrink|crop the|smaller part)\b/iu;
   const limitRows: ReadonlySet<string> = new Set(['analysis-limit', 'resource-limit', 'work-budget']);
   /** One row of every failure category, each with the next step its suggestion must lead with. */
@@ -808,6 +809,15 @@ describe('failure categories and suggestions', () => {
       message: "connectedComponents payload has unknown field 'counts'.",
       category: 'invalid-expectation',
       next: /^Not a geometry verdict: the engine refused this claim because its expectation is malformed[^]*Keep the assertion/u,
+    },
+    {
+      code: 'GEOSPEC_ACCURACY_INSUFFICIENT',
+      message:
+        "GeoSpec matcher 'toHaveVolume' measured 1000 within ±0.02, which straddles the claim's tolerance 0.01; the claim can neither pass nor fail.",
+      suggestion:
+        "Widen the claim's tolerance beyond the fact's bound, or correct the model so the measurement clears the boundary.",
+      category: 'accuracy',
+      next: /^Not decided: the measurement's error bound straddles the claim's tolerance[^]*Keep the assertion and its tolerance/u,
     },
     {
       code: 'GEOSPEC_ANALYSIS_LIMIT',
@@ -878,6 +888,108 @@ describe('failure categories and suggestions', () => {
     expect(new Set(categoryRows.map((row) => row.category))).toStrictEqual(
       new Set(geoSpecFailureCategorySchema.options),
     );
+  });
+
+  describe('accuracy refusals', () => {
+    const accuracyRefusals: ReadonlyArray<{
+      readonly code: string;
+      readonly message: string;
+      readonly suggestion: string;
+      readonly details: Readonly<Record<string, unknown>>;
+      readonly next: RegExp;
+    }> = [
+      {
+        code: 'GEOSPEC_ACCURACY_INSUFFICIENT',
+        message:
+          "GeoSpec matcher 'toHaveVolume' measured 1000 within ±0.02, which straddles the claim's tolerance 0.01; the claim can neither pass nor fail.",
+        suggestion:
+          "Widen the claim's tolerance beyond the fact's bound, or correct the model so the measurement clears the boundary.",
+        details: { matcher: 'toHaveVolume', measured: 1000, bound: 0.02, tolerance: 0.01 },
+        next: /straddles the claim's tolerance[^]*report the claim as not decided\.$/u,
+      },
+      {
+        code: 'GEOSPEC_FILE_TOLERANCE_EXCEEDS_CLAIM',
+        message:
+          "GeoSpec matcher 'toHaveVolume' was asked for tolerance 0.001, tighter than the file defines the geometry (0.5 at the file's tolerance).",
+        suggestion:
+          "Raise the claim's tolerance to at least the file's gap, or export the model at a tighter tolerance.",
+        details: { matcher: 'toHaveVolume', tolerance: 0.001, gapBound: 0.5, fileTolerance: 0.0001 },
+        next: /more coarsely than the claim's tolerance[^]*export the model at a tighter modelling tolerance/u,
+      },
+      {
+        code: 'GEOSPEC_SUBJECT_NOT_CLOSED',
+        message:
+          "GeoSpec matcher 'toHaveVolume' measures a fact of closed shells only, and the subject has an open shell.",
+        suggestion: 'Close the shells in the model, or claim a fact open shells define.',
+        details: { matcher: 'toHaveVolume' },
+        next: /closed shells only[^]*close the open shells in the model/u,
+      },
+    ];
+
+    it.each(accuracyRefusals)(
+      'should keep a negated claim refused with $code undecided, never passed, with its tolerance kept',
+      ({ code, message, suggestion, details, next }) => {
+        const diagnostic: GeometryDiagnostic = { code, severity: 'error', message, suggestion, details };
+        const test = refused(diagnostic);
+        const [assertion] = test.assertions;
+        if (assertion === undefined) {
+          throw new Error('Expected one assertion.');
+        }
+        test.assertions[0] = {
+          ...assertion,
+          kind: 'volume',
+          expected: { value: 1000, tolerance: 0.01 },
+          report: claimReport({ claimId: 'claim-1', polarity: 'negative', seed: 1, status: 'refused' }),
+        };
+        const failure = failureOf(test);
+        expect(failure).toMatchObject({
+          status: 'inconclusive',
+          category: 'accuracy',
+          diagnostics: [{ code, details }],
+        });
+        expect(failure.suggestion).toMatch(next);
+        expect(failure.suggestion).toContain('Keep the assertion');
+        expect(failure.suggestion).not.toMatch(weakening);
+        expect(failure.suggestion).not.toMatch(/claim a fact open shells define/u);
+        expect(failure).not.toHaveProperty('limit');
+      },
+    );
+
+    it('should keep a decided false sibling as geometry over an accuracy refusal', () => {
+      const [first] = accuracyRefusals;
+      if (first === undefined) {
+        throw new Error('Expected an accuracy refusal row.');
+      }
+      const test = refused({ code: first.code, severity: 'error', message: first.message });
+      test.status = 'failed';
+      test.assertions.push({
+        kind: 'watertight',
+        subject: {},
+        expected: true,
+        passed: false,
+        loadId: 'load-1',
+        diagnostics: [{ code: 'GEOSPEC_NOT_WATERTIGHT', severity: 'error', message: 'The mesh has 4 open edges.' }],
+        report: claimReport({ claimId: 'claim-2', polarity: 'positive', seed: 7, status: 'failed' }),
+      });
+      expect(failureOf(test)).toMatchObject({ status: 'failed', category: 'geometry' });
+    });
+
+    it('should not pass an engine suggestion to raise the tolerance through a geometry row', () => {
+      const failure = failureOf(
+        refused(
+          {
+            code: 'GEOSPEC_VOLUME_MISMATCH',
+            severity: 'error',
+            message: 'Expected volume 1000, measured 1004.',
+            suggestion: "Raise the claim's tolerance to at least the file's gap.",
+          },
+          'failed',
+        ),
+      );
+      expect(failure.category).toBe('geometry');
+      expect(failure.suggestion).not.toMatch(weakening);
+      expect(failure.suggestion).toContain('Keep the assertion and its tolerance');
+    });
   });
 
   it('should drop an engine suggestion that reduces the model to fit a limit', () => {

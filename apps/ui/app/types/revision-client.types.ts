@@ -84,6 +84,12 @@ export type RevisionClient = Readonly<{
    */
   saveRevision: (trigger?: 'save' | 'hidden' | 'close') => Promise<void>;
   /**
+   * Make these paths of the selected checkout physical files, their large objects fetched
+   * first (D9). Rejects with code `PENDING` for one whose object could not be
+   * fetched. Absent on a host whose checkouts never hold a placeholder.
+   */
+  materialize?: (paths: readonly string[]) => Promise<void>;
+  /**
    * Make a branch and wait for the checkout it was made on (P4).
    *
    * The correlated form of `send({ command: 'createBranch' })`. Rejects with

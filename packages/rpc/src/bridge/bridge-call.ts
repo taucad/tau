@@ -2,6 +2,8 @@ import { safeDispose, Topic } from '#topic.js';
 import { createChannelClient } from '#channel.js';
 import type { Port } from '#port.js';
 import {
+  bridgeCallLivenessTimeout,
+  bridgeProgressSchema,
   broadcastEvent,
   isBridgeWatchReadyFrame,
   isBridgeErrorWire,
@@ -11,7 +13,12 @@ import {
   wrapAsTransferables,
 } from '#bridge/bridge-internal.js';
 import type { BroadcastFrame } from '#bridge/bridge-internal.js';
-import type { BridgeCallOptions, BridgeWatchEvent, BridgeWatchRequest } from '#bridge/bridge-protocol.js';
+import type {
+  BridgeCallOptions,
+  BridgeLongCall,
+  BridgeWatchEvent,
+  BridgeWatchRequest,
+} from '#bridge/bridge-protocol.js';
 import { createBridgeChannelSchemas } from '#bridge/bridge-schemas.js';
 import type { BridgeRpcProtocol } from '#bridge/bridge-schemas.js';
 
@@ -23,7 +30,8 @@ const bridgeClosedError = (): Error => Object.assign(new Error('Bridge proxy clo
  *
  * @param port - RPC {@link Port} ({@link wrapMessagePort} wraps raw `MessagePort`s).
  * @param options - Optional call-argument and timeout hooks.
- * @returns Object with call, listen, watch, and dispose methods.
+ * @returns Object with call, listen, watch, and dispose methods. `call`'s third
+ * argument carries a long call's abort signal and progress observer.
  * @public
  */
 export function createBridgeCall<
@@ -34,7 +42,7 @@ export function createBridgeCall<
   port: Port<unknown>,
   options?: BridgeCallOptions<HelloPayload, WatchRequestPayload, WatchEventPayload>,
 ): {
-  call: (method: string, args: unknown[]) => Promise<unknown>;
+  call: (method: string, args: unknown[], longCall?: BridgeLongCall) => Promise<unknown>;
   listen: (event: string, handler: (data: unknown) => void) => () => void;
   watch: (request: WatchRequestPayload, handler: (event: WatchEventPayload) => void) => () => void;
   watchReady: (
@@ -116,28 +124,52 @@ export function createBridgeCall<
     });
   };
 
-  const callMethod = async (method: string, args: unknown[]): Promise<unknown> => {
+  const callMethod = async (method: string, args: unknown[], longCall?: BridgeLongCall): Promise<unknown> => {
     if (disposed) {
       throw bridgeClosedError();
+    }
+    const callerSignal = longCall?.signal;
+    if (callerSignal?.aborted) {
+      throw new DOMException('The operation was aborted.', 'AbortError');
     }
 
     const preparedArgs = options?.prepareCallArgs ? options.prepareCallArgs(method, args) : args;
     const callArgs = wrapAsTransferables(preparedArgs);
     const resolvedTimeout = options?.resolveCallTimeout?.(method);
     const callTimeout = resolvedTimeout ?? messagePortCallTimeout;
-    if (callTimeout !== 'none' && (!Number.isFinite(callTimeout) || callTimeout < 0)) {
+    if (callTimeout !== 'none' && callTimeout !== 'liveness' && (!Number.isFinite(callTimeout) || callTimeout < 0)) {
       throw new RangeError(
-        `Bridge call timeout must be a finite non-negative number or 'none': ${String(callTimeout)}`,
+        `Bridge call timeout must be a finite non-negative number, 'none' or 'liveness': ${String(callTimeout)}`,
       );
     }
     const ac = new AbortController();
+    /* The caller's abort cancels the remote call (`rc`); the channel rejects it as an AbortError. */
+    const forwardAbort = (): void => {
+      ac.abort();
+    };
+    callerSignal?.addEventListener('abort', forwardAbort, { once: true });
+    const onProgress = longCall?.onProgress;
+    const channelCallOptions = {
+      ...(callTimeout === 'liveness' ? { livenessTimeout: bridgeCallLivenessTimeout } : {}),
+      ...(onProgress === undefined
+        ? {}
+        : {
+            onProgress(data: unknown): void {
+              const progress = bridgeProgressSchema.safeParse(data);
+              /* A malformed report is dropped, never delivered and never fatal: progress is advisory. */
+              if (progress.success) {
+                onProgress(progress.data);
+              }
+            },
+          }),
+    };
     let timer: ReturnType<typeof setTimeout> | undefined;
     let entry: { reject: (error: Error) => void; ac: AbortController } | undefined;
     try {
       return await new Promise<unknown>((resolve, reject) => {
         entry = { reject, ac };
         pendingCalls.add(entry);
-        if (callTimeout !== 'none') {
+        if (callTimeout !== 'none' && callTimeout !== 'liveness') {
           timer = setTimeout(() => {
             if (pendingCalls.delete(entry!)) {
               ac.abort();
@@ -151,7 +183,7 @@ export function createBridgeCall<
         }
         const settleCall = async (): Promise<void> => {
           try {
-            const result = await channelClient.call(method, callArgs, ac.signal);
+            const result = await channelClient.call(method, callArgs, ac.signal, channelCallOptions);
             if (!pendingCalls.delete(entry!)) {
               return;
             }
@@ -170,6 +202,7 @@ export function createBridgeCall<
         trackBackgroundTask(settleCall());
       });
     } finally {
+      callerSignal?.removeEventListener('abort', forwardAbort);
       if (timer !== undefined) {
         clearTimeout(timer);
       }

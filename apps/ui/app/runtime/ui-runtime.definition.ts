@@ -12,7 +12,6 @@ import { opencascade } from '@taucad/opencascade';
 import { picogk } from '@taucad/picogk/browser';
 import { picovoxel } from '@taucad/picovoxel';
 import { replicad } from '@taucad/replicad';
-import { rhino } from '@taucad/rhino';
 import { tscircuit } from '@taucad/tscircuit';
 import { slicer } from '@taucad/slicer';
 import { smlib } from '@taucad/smlib';
@@ -36,15 +35,9 @@ type UiRuntimeOptions = {
  * worker is cross-origin isolated (a pinned 'multi' fails on plain-http LAN origins without SharedArrayBuffer).
  */
 /*
- * D-RT-05 / D-GFX-10: the policy's 2,000,000-triangle preview costs a phone ~230 MiB steady in the viewer, ~420 MiB
- * while re-rendering and over 1 GiB with Section armed. A memory-constrained device previews within 400k triangles
- * (the audit's 300-500k band); exports keep their own budget.
- */
-const constrainedPreviewTriangleBudget = 400_000;
-/*
  * D-RT-03: WebAssembly memory never shrinks, and iOS kills a tab at roughly 1.5-2 GB across the page, its workers and
  * their heaps. PicoVoxel's own recycle threshold (1.5 GiB) is lowered to the audit's 512 MiB on a phone. The voxel
- * size stays the model's (graphics-backend policy rule 17); only its display mesh is simplified to the budget above.
+ * size stays the model's (graphics-backend policy rule 17).
  * The CAD machine recycles the editor runtime at the same threshold.
  */
 const constrainedRecycleHeapBytes = runtimeRecycleHeapBytes(true);
@@ -52,12 +45,9 @@ const constrainedRecycleHeapBytes = runtimeRecycleHeapBytes(true);
 const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptions = {}) => ({
   plugins: [
     esbuild({ bundlers: { default: { acquisition: config.acquisition } } }),
-    // Single-threaded 'full' build by default on every device.
-    opencascade(
-      config.memoryConstrained
-        ? { kernels: { default: { previewTriangleBudget: constrainedPreviewTriangleBudget } } }
-        : undefined,
-    ),
+    // Single-threaded 'full' build by default on every device. Previews mesh at the requested tessellation on every
+    // device too: there is no preview triangle budget (kernel budget program D1).
+    opencascade(),
     openrscad(),
     picogk({
       kernels: {
@@ -80,7 +70,6 @@ const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptio
     smlib(),
     gltf(),
     brep(),
-    rhino(),
     image(),
     slicer(),
     assimp({ preset: 'all' }),
@@ -90,9 +79,7 @@ const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptio
           wasm: config.memoryConstrained ? 'single' : 'auto',
           // D-RT-01: semantic reuse keeps serialized BRep per operation (measured ~10 MB per edit on the iPhone
           // profile) up to its 64 MiB resident bound; a phone renders without it until that bound is qualified there.
-          ...(config.memoryConstrained
-            ? { computeReuse: false, previewTriangleBudget: constrainedPreviewTriangleBudget }
-            : {}),
+          ...(config.memoryConstrained ? { computeReuse: false } : {}),
           withSourceMapping: options.withSourceMapping === true,
         },
       },

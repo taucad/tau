@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Loader2 } from 'lucide-react';
+import { Loader } from '@taucad/ui/components/loader';
+import { Check } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Input } from '@taucad/ui/components/input';
@@ -119,7 +120,7 @@ function ShareLinkActionIcon({
   readonly icon: ShareLinkMethod['action']['icon'];
 }): React.JSX.Element {
   if (isBusy) {
-    return <Loader2 className='size-4 spin-glyph' aria-hidden />;
+    return <Loader className='size-4' />;
   }
   return isCopied ? <Check className='size-3.5' aria-hidden /> : <Icon className='size-3.5' aria-hidden />;
 }

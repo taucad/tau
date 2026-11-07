@@ -27,7 +27,8 @@ function LearnMore(): React.JSX.Element {
 
 /**
  * The recording purposes this one switch grants. Ratings are asked for when the user rates, and incident review per
- * support report, so neither rides on it; turning the switch off also withdraws the rating grant.
+ * support report, so neither rides on it; turning the switch off also withdraws the rating grant, and the rating
+ * control only shows while the switch is on.
  */
 const improvementPurposes: readonly TelemetryPurpose[] = ['summary', 'content', 'reuse', 'training'];
 

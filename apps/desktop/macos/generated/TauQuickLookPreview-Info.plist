@@ -35,8 +35,6 @@
         <string>com.shapr3d.iges</string>
         <string>com.shapr3d.igs</string>
         <string>com.taucad.brep</string>
-        <string>com.mcneel.rhinoceros.3dm</string>
-        <string>com.shapr3d.rhino.3dm</string>
         <string>com.taucad.3mf</string>
         <string>com.shapr3d.3d-manufacturing.3mf</string>
         <string>com.taucad.ac3d</string>

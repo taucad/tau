@@ -6,6 +6,7 @@ import {
   markClosedGlbMeshesSingleSided,
   markClosedMeshesSingleSided,
 } from '#utils/closed-mesh.js';
+import { readGlbJson, writeGlbJson } from '#utils/gltf-geometry-name-normalizer.js';
 
 // A unit cube, outward counter-clockwise faces, shared corners.
 const cubePositions = new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1]);
@@ -147,5 +148,71 @@ describe('markClosedGlbMeshesSingleSided', () => {
     // A material shared with an open surface would need a copy, which the GLB's own JSON has no index for.
     const shared = await glbOf(cubeIndices, cubeIndices.slice(6));
     expect(await markClosedGlbMeshesSingleSided(shared)).toBe(shared);
+  });
+});
+
+describe('markClosedGlbMeshesSingleSided on an OpenRSCAD solid', () => {
+  /**
+   * The OpenRSCAD 0.11.0-beta.5 layout of a module-built part: mesh-less module nodes over one solid node whose
+   * `EXT_mesh_manifold` mesh holds one primitive per owning module, sharing one `POSITION` accessor. The earlier
+   * layout put each module's primitive on its own node and mesh.
+   */
+  const openrscadGlb = async (layout: 'solid-mesh' | 'module-meshes'): Promise<Uint8Array<ArrayBuffer>> => {
+    const document = new Document();
+    const buffer = document.createBuffer();
+    const material = document.createMaterial('#F5A523FF Material').setDoubleSided(true);
+    const positions = document.createAccessor().setType('VEC3').setArray(cubePositions).setBuffer(buffer);
+    const primitive = (indices: Uint32Array<ArrayBuffer>, owner: number) =>
+      document
+        .createPrimitive()
+        .setAttribute('POSITION', positions)
+        .setIndices(document.createAccessor().setType('SCALAR').setArray(indices).setBuffer(buffer))
+        .setMaterial(material)
+        .setExtras({ openrscad: { displayMode: 'solid', owner } });
+    const bore = primitive(cubeIndices.slice(0, 12), 0);
+    const block = primitive(cubeIndices.slice(12), 1);
+    const cutout = document.createNode('Chamfered Cube Cutout');
+    const blockNode = document.createNode('Chamfered Block');
+    document.createScene().addChild(cutout.addChild(blockNode));
+    if (layout === 'solid-mesh') {
+      cutout.addChild(
+        document
+          .createNode('Chamfered Cube Cutout Solid')
+          .setMesh(document.createMesh('Chamfered Cube Cutout Solid').addPrimitive(bore).addPrimitive(block)),
+      );
+    } else {
+      cutout.setMesh(document.createMesh('Chamfered Cube Cutout').addPrimitive(bore));
+      blockNode.setMesh(document.createMesh('Chamfered Block').addPrimitive(block));
+    }
+    const manifoldIndices = document.createAccessor().setType('SCALAR').setArray(cubeIndices).setBuffer(buffer);
+    const glb = await new WebIO().writeBinary(document);
+    if (layout === 'module-meshes') {
+      return glb;
+    }
+    const json = readGlbJson(glb);
+    const accessors = json.accessors ?? [];
+    json.extensionsUsed = ['EXT_mesh_manifold'];
+    json.meshes![0]!.extensions = {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- glTF extension name
+      EXT_mesh_manifold: {
+        manifoldPrimitive: {
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- glTF attribute semantic
+          attributes: { POSITION: accessors.findIndex(({ type }) => type === 'VEC3') },
+          indices: accessors.findLastIndex(({ count }) => count === manifoldIndices.getCount()),
+          mode: 4,
+        },
+      },
+    };
+    return writeGlbJson(glb, json);
+  };
+
+  it('draws the one-mesh solid one-sided, where no module mesh of the earlier layout was closed alone', async () => {
+    const solid = await openrscadGlb('solid-mesh');
+    const marked = await markClosedGlbMeshesSingleSided(solid);
+    expect(readGlbJson(marked).materials?.map(({ doubleSided }) => doubleSided)).toEqual([false]);
+    expect(readGlbJson(marked).meshes?.[0]?.extensions).toEqual(readGlbJson(solid).meshes?.[0]?.extensions);
+
+    const split = await openrscadGlb('module-meshes');
+    expect(await markClosedGlbMeshesSingleSided(split)).toBe(split);
   });
 });

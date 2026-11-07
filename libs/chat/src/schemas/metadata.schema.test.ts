@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { messageMetadataSchema, snapshotSchema } from '#schemas/metadata.schema.js';
+import { maxSnapshotFileTreeEntries, messageMetadataSchema, snapshotSchema } from '#schemas/metadata.schema.js';
 
 describe('messageMetadataSchema', () => {
   it('should accept a row carrying the live createdAt + status fields', () => {
@@ -40,6 +40,17 @@ describe('snapshotSchema', () => {
         fileTree: [{ path: 'main.ts', name: 'main.ts', type: 'file', size: 5, contentKind: 'text' }],
       }).success,
     ).toBe(false);
+  });
+
+  it("accepts an older client's unbounded file tree rather than refusing the turn", () => {
+    const fileTree = Array.from({ length: maxSnapshotFileTreeEntries + 1 }, (_, index) => ({
+      path: `src/f-${String(index)}.ts`,
+      name: `f-${String(index)}.ts`,
+      type: 'file',
+      size: 1,
+    }));
+
+    expect(snapshotSchema.safeParse({ fileTree }).success).toBe(true);
   });
 });
 

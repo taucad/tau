@@ -303,10 +303,30 @@ const main = async (): Promise<void> => {
           throw new Error('The source editor did not keep focus');
         }
       }
-      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+a' : 'Control+a');
       // This disposable host may have no clipboard owner. Keep the paste payload until save is verified.
-      await page.evaluate(async (text) => navigator.clipboard.writeText(text), source);
-      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+v' : 'Control+v');
+      // A paste can land as nothing (run 42157906680 ubuntu2604-apt-x11 stage A selected all, pasted an empty
+      // buffer and saved an empty main.py), so prove the editor shows the source's last line before saving,
+      // and select, write and paste again until it does. The bytes check after the save is unchanged.
+      const lastLine = source.trimEnd().split('\n').at(-1)?.trim() ?? '';
+      const editorShowsSource = async (): Promise<boolean> =>
+        ((await editor.textContent().catch(() => '')) ?? '').includes(lastLine);
+      const pasteDeadline = Date.now() + 30_000;
+      for (;;) {
+        await page.keyboard.press(process.platform === 'darwin' ? 'Meta+a' : 'Control+a');
+        await page.evaluate(async (text) => navigator.clipboard.writeText(text), source);
+        await page.keyboard.press(process.platform === 'darwin' ? 'Meta+v' : 'Control+v');
+        const pasteSettled = Date.now() + 3000;
+        while (!(await editorShowsSource()) && Date.now() < pasteSettled) {
+          await wait(250);
+        }
+        if (await editorShowsSource()) {
+          break;
+        }
+        if (Date.now() > pasteDeadline) {
+          throw new Error('The source editor did not show the pasted source');
+        }
+        await editor.focus();
+      }
       await page.keyboard.press(process.platform === 'darwin' ? 'Meta+s' : 'Control+s');
     }
     const projectMatch = /^\/w\/home\/([a-z0-9-]+)$/u.exec(new URL(page.url()).pathname);

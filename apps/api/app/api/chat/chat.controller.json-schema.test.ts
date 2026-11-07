@@ -462,6 +462,11 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                   },
                   "type": "array",
                 },
+                "fileTreeOmitted": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer",
+                },
                 "openFiles": {
                   "items": {
                     "anyOf": [

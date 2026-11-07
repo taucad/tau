@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowDownToLine, ArrowUpFromLine, ChevronLeft, ChevronRight, Layers, LoaderCircle } from 'lucide-react';
+import { Loader } from '@taucad/ui/components/loader';
+import { ArrowDownToLine, ArrowUpFromLine, ChevronLeft, ChevronRight, Layers } from 'lucide-react';
 import type {
   CalibrationProfile,
   MachineDirectoryEntry,
@@ -229,7 +230,7 @@ function MaterialForm({
       )}
       <div className='flex flex-wrap gap-2'>
         <Button type='submit' size='sm' disabled={!isValid || control.pending !== undefined}>
-          {control.pending === `${systemId}:material.set` ? <LoaderCircle aria-hidden className='spin-glyph' /> : null}
+          {control.pending === `${systemId}:material.set` ? <Loader /> : null}
           Save
         </Button>
         <Button type='button' size='sm' variant='outline' onClick={onClose}>
@@ -367,7 +368,7 @@ function SlotDetail({
       </dl>
       {waiting === undefined ? null : (
         <p role='status' className='flex min-w-0 items-center gap-2 text-xs text-muted-foreground'>
-          <LoaderCircle aria-hidden className='size-3.5 shrink-0 spin-glyph' />
+          <Loader className='size-3.5 shrink-0' />
           {waiting.state === 'attention'
             ? `${entry.name} has not confirmed “${waiting.action?.label ?? 'the change'}”. Check its screen; nothing was resent.`
             : `Waiting for ${entry.name} to confirm “${waiting.action?.label ?? 'the change'}”…`}
@@ -610,7 +611,7 @@ export function MaterialSlots({
                     {slotName(candidate, isExternalSlot(system, candidate.slot))}
                   </span>
                   {isChanging ? (
-                    <LoaderCircle aria-label='Changing' className='size-3.5 shrink-0 spin-glyph text-information' />
+                    <Loader aria-label='Changing' className='size-3.5 shrink-0 text-information' />
                   ) : isCurrent ? (
                     <Badge variant='outline' className='shrink-0'>
                       In use

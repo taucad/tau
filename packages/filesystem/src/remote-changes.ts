@@ -15,7 +15,6 @@
  */
 
 import type { FileSystemBackend } from '@taucad/types';
-import type { SharedPool } from '@taucad/memory';
 import type { FileSystemProvider, PathChangeEvent } from '#types.js';
 import type { MountEntry, MountResolution, MountTable } from '#mount-table.js';
 import type { ChangeNotice, ChangeNotification, PhysicalAuthority } from '#cross-tab-coordinator.js';
@@ -64,8 +63,6 @@ export class RemoteChanges {
   private readonly _pipeline: MutationPipeline;
   private readonly _projectIndexes: ProjectIndexes;
   private readonly _watchRegistry: WatchRegistry;
-  /** Read through a function: the writer-side pool arrives after construction. */
-  private readonly _filePool: () => SharedPool | undefined;
   /** Read through a function: the authority replaces the array on every topology pass. */
   private readonly _discoveryRoots: () => readonly ResolvedDiscoveryRoot[];
   private readonly _revokeProjectRoute: (path: string, notifyPeers: boolean) => void;
@@ -82,7 +79,6 @@ export class RemoteChanges {
     pipeline: MutationPipeline;
     projectIndexes: ProjectIndexes;
     watchRegistry: WatchRegistry;
-    filePool: () => SharedPool | undefined;
     discoveryRoots: () => readonly ResolvedDiscoveryRoot[];
     revokeProjectRoute: (path: string, notifyPeers: boolean) => void;
   }) {
@@ -91,7 +87,6 @@ export class RemoteChanges {
     this._pipeline = options.pipeline;
     this._projectIndexes = options.projectIndexes;
     this._watchRegistry = options.watchRegistry;
-    this._filePool = options.filePool;
     this._discoveryRoots = options.discoveryRoots;
     this._revokeProjectRoute = options.revokeProjectRoute;
   }
@@ -183,7 +178,6 @@ export class RemoteChanges {
       ...owned.map((storageRootKey) => this._backendForPhysicalAuthority({ storageRootKey, providerBasePath: '' })),
       ...facts.map(({ authority }) => this._backendForPhysicalAuthority(authority)),
     ]);
-    this._filePool()?.clear();
     this._projectIndexes.invalidate('/');
     if (backends.size === 0) {
       this._watchRegistry.emitResetAll();
@@ -252,11 +246,6 @@ export class RemoteChanges {
       const isCurrent = resolution !== undefined && this._pipeline.isCurrentResolution(notification.path, resolution);
       if (!isCurrent && !isDiscoveryRootChange) {
         continue;
-      }
-      if (notification.type === 'write' || notification.type === 'delete') {
-        this._filePool()?.invalidate(notification.path);
-      } else if (notification.type !== 'mkdir') {
-        this._filePool()?.clear();
       }
       /* Scoped (D5): only the named path is unknown, re-observed at the next answer. */
       this._projectIndexes.invalidate(isDiscoveryRootChange ? '/' : notification.path);
@@ -331,7 +320,6 @@ export class RemoteChanges {
   }
 
   private _handleRemoteFailure(notification: ChangeNotification, backend?: FileSystemBackend): void {
-    this._filePool()?.clear();
     this._projectIndexes.invalidate('/');
     if (notification.type === 'project-unavailable') {
       this._watchRegistry.emitResetAll();

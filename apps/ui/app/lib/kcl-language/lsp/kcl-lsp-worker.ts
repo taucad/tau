@@ -12,13 +12,11 @@ import type { JSONRPCRequest, JSONRPCResponse } from 'json-rpc-2.0';
 import init, { Context, LspServerConfig, lsp_run_kcl, parse_wasm } from '@taucad/kcl-wasm-lib';
 import wasmPath from '@taucad/kcl-wasm-lib/kcl.wasm?url';
 import { attachLanguageFsClient } from '@taucad/lsp-fs/client';
-import { joinPath } from '@taucad/utils/path';
 import { URI, Utils } from 'vscode-uri';
 import { Queue } from '#lib/kcl-language/lsp/codec/queue.js';
 import { StreamDemuxer } from '#lib/kcl-language/lsp/codec/stream-demuxer.js';
 import { createKclLogger } from '#lib/kcl-language/lsp/kcl-logs.js';
 import { lspWorkerEventType, kclWorkerType } from '#lib/kcl-language/lsp/kcl-lsp-types.js';
-import { kclUriToWorkspacePath } from '#lib/kcl-language/kcl-register-paths.js';
 import type {
   KclLspWorkerOptions,
   KclSymbolRequest,
@@ -171,10 +169,6 @@ function initLanguageFsBridge(init: KclLspWorkerOptions): void {
   workerFsState = { workspaceRootPath: init.workspaceRootPath, documentUri: undefined };
 
   languageFs = attachLanguageFsClient({
-    filePoolBuffer: init.filePoolBuffer,
-    absolutePathForUri(uri: string): string {
-      return joinPath(workerFsState.workspaceRootPath, kclUriToWorkspacePath(uri));
-    },
     sendJsonRpc: async (payload) => {
       return new Promise<JSONRPCResponse>((resolve, reject) => {
         const request = payload;

@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
+import { Loader } from '@taucad/ui/components/loader';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import { EllipsisVertical, Loader2, RefreshCw, Trash2 } from 'lucide-react';
+import { EllipsisVertical, RefreshCw, Trash2 } from 'lucide-react';
 import { formatShareUrl } from '@taucad/share/locator';
 import type { ShareLocator } from '@taucad/share/locator';
 import { isShareError } from '@taucad/share/provider';
@@ -208,7 +209,7 @@ export function GithubGistManagement({
     return (
       <div className='flex items-center gap-1'>
         <span role='status' className='flex items-center gap-1.5 px-1 text-xs text-muted-foreground'>
-          <Loader2 className='size-3.5 spin-glyph' aria-hidden />
+          <Loader className='size-3.5' />
           Finish in your browser
         </span>
         <Button type='button' size='sm' variant='ghost' className='h-8 px-2.5 text-xs' onClick={cancelBrowserConsent}>
@@ -266,11 +267,7 @@ export function GithubGistManagement({
             className='h-8 px-2.5 text-xs max-md:size-8 max-md:px-0'
             disabled={status === undefined || busy}
           >
-            {busy ? (
-              <Loader2 className='size-3.5 spin-glyph' aria-hidden />
-            ) : (
-              <EllipsisVertical className='size-3.5' aria-hidden />
-            )}
+            {busy ? <Loader className='size-3.5' /> : <EllipsisVertical className='size-3.5' aria-hidden />}
             <span className='hidden md:inline'>Manage</span>
           </Button>
         </DropdownMenuTrigger>
@@ -312,7 +309,7 @@ export function GithubGistManagement({
                 void unpublish();
               }}
             >
-              {busy ? <Loader2 className='size-4 spin-glyph' aria-hidden /> : null}
+              {busy ? <Loader className='size-4' /> : null}
               Unpublish Gist
             </Button>
           </AlertDialogFooter>

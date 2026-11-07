@@ -172,6 +172,15 @@ describe('runtime.operation (T10)', () => {
     });
   });
 
+  it.each(['desktop', 'cli', 'mcp', 'daemon', 'cloud'])(
+    'D-T12-3: should admit a machine entry from the %s Node host route',
+    (route) => {
+      expect(
+        parseRuntimeEntry(operation({ operation: 'machine', route, machineKind: 'stop', caller: 'agent' }))?.detail,
+      ).toMatchObject({ operation: 'machine', route });
+    },
+  );
+
   it('should admit machine entries from a Node machine host', () => {
     expect(
       parseRuntimeEntry(

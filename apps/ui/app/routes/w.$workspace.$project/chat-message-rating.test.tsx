@@ -32,6 +32,7 @@ const store = {
 let allowed = true;
 let refusal: string | undefined;
 let canDecide = true;
+let allowsAiTraining: boolean | undefined = true;
 const decide = vi.fn(async () => ({}));
 
 vi.mock('#hooks/use-chat.js', () => ({
@@ -39,6 +40,11 @@ vi.mock('#hooks/use-chat.js', () => ({
   useChatSelector<T>(selector: (current: SelectorState) => T): T {
     return selector(state);
   },
+}));
+vi.mock('#hooks/use-privacy-preferences.js', () => ({
+  usePrivacyPreferences: () => ({
+    preferences: allowsAiTraining === undefined ? undefined : { allowsAiTraining, allowsUsageMetrics: true },
+  }),
 }));
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'project-1' }) }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: () => store }));
@@ -57,6 +63,7 @@ describe('ChatMessageRating', () => {
     allowed = true;
     refusal = undefined;
     canDecide = true;
+    allowsAiTraining = true;
     decide.mockClear();
     store.ratableRun.mockReset().mockReturnValue('run-1');
     store.ratingOf.mockReset().mockReturnValue(undefined);
@@ -129,6 +136,20 @@ describe('ChatMessageRating', () => {
     rerender(<ChatMessageRating messageId='reply-1' />);
     expect(container.childElementCount).toBe(0);
     expect(store.rateRun).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['is switched off, even when a rating would ask for consent', false, 'withdrawn'],
+    ['is switched off, even when feedback is allowed', false, undefined],
+    ['has not loaded', undefined, undefined],
+  ])('shows nothing while "Improve Tau for everyone" %s', (_case, improve, reason) => {
+    allowsAiTraining = improve;
+    allowed = reason === undefined;
+    refusal = reason;
+    const { container } = render(<ChatMessageRating messageId='reply-2' />);
+
+    expect(container.childElementCount).toBe(0);
+    expect(decide).not.toHaveBeenCalled();
   });
 
   it('shows a rating this page already gave', () => {

@@ -1,5 +1,5 @@
 import { isFeatureEnabled } from '#flags/feature-flags.js';
-import { useLargeObjectPending, useProjectAvailability } from '#hooks/use-project-availability.js';
+import { useOpenedLargeObjectPending, useProjectAvailability } from '#hooks/use-project-availability.js';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { BrowserPane } from '#components/browser/browser-pane.js';
 import { getBrowserBridge } from '#components/browser/browser-bridge.js';
@@ -1333,8 +1333,9 @@ export const FileEditor = memo(function ({
           },
     [fileContent, virtualDeclaration],
   );
-  /* A file whose large object has not arrived holds its pointer: shown loading, never as text, so nothing edits or saves it. */
-  const isAwaitingLargeObject = useLargeObjectPending(filePath);
+  /* A file whose large object has not arrived holds its pointer: shown loading, never as text, so nothing edits or saves it.
+     Being open, its object is fetched and written first (D10). */
+  const isAwaitingLargeObject = useOpenedLargeObjectPending(filePath);
 
   const handleFileSelectorSelect = useCallback(
     (path: string) => {

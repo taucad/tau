@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
@@ -9,6 +9,8 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../.
 
 const pluginPackages = readdirSync(resolve(repositoryRoot, 'packages/plugins'), { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
+  // A removed plugin leaves its untracked node_modules behind in existing checkouts; only manifests name packages.
+  .filter((entry) => existsSync(resolve(repositoryRoot, 'packages/plugins', entry.name, 'package.json')))
   .map((entry) => ({
     name: JSON.parse(readFileSync(resolve(repositoryRoot, 'packages/plugins', entry.name, 'package.json'), 'utf8'))
       .name as string,
@@ -248,15 +250,12 @@ describe('Tau-owned plugin alias surface', () => {
 });
 
 describe('Tau-owned kernel assertion surface', () => {
-  it('should keep only the documented rhino3dm declaration adapter', () => {
+  it('should keep no non-literal type assertions in kernel modules', () => {
     const assertions = pluginSourceRoots
       .map((root) => `${root}/${packageNameOf(root)}.kernel.ts`)
       .filter((path) => collectSourceFiles(path.slice(0, path.lastIndexOf('/'))).includes(path))
       .flatMap((path) => collectNonLiteralKernelAssertions(readSourceFile(path)));
 
-    expect(assertions).toEqual([
-      'packages/plugins/rhino/src/rhino.kernel.ts: importedFactory as unknown as RhinoFactory',
-      'packages/plugins/rhino/src/rhino.kernel.ts: importedFactory as unknown',
-    ]);
+    expect(assertions).toEqual([]);
   });
 });

@@ -6,10 +6,14 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
 import { attemptReceiptSchema } from '@taucad/agent-host/wire';
 import type { Auth } from 'better-auth';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, expectTypeOf, it } from 'vitest';
 import { mock, mockDeep } from 'vitest-mock-extended';
+import type { z } from 'zod';
 import { BillingAttemptController } from '#api/billing/billing-attempt.controller.js';
+import type { AttemptLookupAnswer } from '#api/billing/billing-attempt.controller.js';
 import { BillingUsageService } from '#api/billing/billing-usage.service.js';
+import { recoveryGraceMinutes } from '#api/billing/credit-ledger.service.js';
+import { environmentSchemaBase } from '#config/environment.config.js';
 import { HostsService } from '#api/hosts/hosts.service.js';
 import { LlmGatewayAuthGuard } from '#api/llm/llm-gateway.guard.js';
 import { authInstanceKey } from '#constants/auth.constant.js';
@@ -89,6 +93,45 @@ describe('billing attempt lookup route (GI-S3b)', () => {
 
     expect(answer.statusCode).toBe(200);
     expect(usage.getAttemptReceipt).toHaveBeenCalledWith(expect.objectContaining({ authUserId: 'owner-session' }));
+  });
+
+  it('should serve a pending attempt with the settlement instant the host reads (W2)', async () => {
+    const { app, usage } = await createApp({ sessionUserId: 'owner-pending' });
+    apps.push(app);
+    const admittedAt = '2026-11-06T00:00:00.000000Z';
+    const deadline = environmentSchemaBase.shape.BILLING_INVOCATION_DEADLINE.parse(undefined);
+    const settlesBy = new Date(Date.parse(admittedAt) + deadline + recoveryGraceMinutes * 60_000).toISOString();
+    usage.getAttemptReceipt.mockResolvedValue({
+      state: 'pending',
+      schemaVersion: 1,
+      environment: 'staging',
+      ownerId: 'owner-pending',
+      subjectId: 'account-pending',
+      snapshotRevision: '3',
+      asOf: admittedAt,
+      operationId: 'operation-pending',
+      admittedAt,
+      dispatchState: 'accepted',
+      authorizedMaxCreditAtoms: '1200',
+      settlesBy,
+    });
+
+    const answer = await app.inject({ method: 'GET', url: '/v1/billing/attempts/gateway/attempt-pending' });
+
+    expect(answer.statusCode).toBe(200);
+    expect(attemptReceiptSchema.parse(answer.json())).toMatchObject({
+      state: 'pending',
+      operationId: 'operation-pending',
+      settlesBy,
+    });
+  });
+
+  it('should type every pending answer with the settlesBy the wire reads (D11)', () => {
+    type WirePending = Extract<z.input<typeof attemptReceiptSchema>, { state: 'pending' }>;
+    // The wire keeps `settlesBy` optional for older images; this API always states it, in the wire's type.
+    expectTypeOf<Extract<AttemptLookupAnswer, { state: 'pending' }>>().toExtend<
+      Required<Pick<WirePending, 'settlesBy'>>
+    >();
   });
 
   it('should refuse a lookup on a closed account as BILLING_ACCOUNT_CLOSED, not as a sign-in failure', async () => {

@@ -64,7 +64,6 @@ try {
 | `occtTessellationSchema`                   | schema    | a quality preset (`low` to `extra-high`) or explicit `{ linearTolerance?, angularTolerance? }`, never both; `OcctTessellation`               |
 | `occtQualityRenderOptionSchema`            | schema    | render options with that union, default `medium`; `occtQualityStlExportSchema` and `occtQualityGltfExportSchema` default to `high`           |
 | `resolveOcctTessellation`                  | function  | a preset to absolute tolerances from the bounding-box diagonal; explicit tolerances pass through whole                                       |
-| `tessellateWithinOcctBudget`               | function  | coarsen one step at a time while over `occtTriangleBudgets`; `createTessellationDowngradedIssue`, `createTessellationBudgetExceededIssue`    |
 
 ## Environment
 

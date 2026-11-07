@@ -13,8 +13,6 @@ import {
   fsStatRequest,
 } from '#protocol.js';
 
-import { SharedPool } from '@taucad/memory';
-
 import { base64WireToBytes } from '#base64-wire.js';
 
 /**
@@ -65,8 +63,8 @@ async function jsonRpcRequest<Output>({
 }
 
 /**
- * Consumer-side filesystem API (runs in a worker or main thread). Tier 0 hits
- * `SharedPool`; Tier 1 issues JSON-RPC `fs/*` requests via {@link JSONRPCClient}.
+ * Consumer-side filesystem API (runs in a worker or main thread): JSON-RPC
+ * `fs/*` requests via {@link JSONRPCClient}.
  *
  * @public
  */
@@ -81,24 +79,15 @@ export type LanguageFsClient = Readonly<{
  * @public
  */
 export type AttachLanguageFsClientOptions = Readonly<{
-  filePoolBuffer?: SharedArrayBuffer;
-  /**
-   * Maps absolute filesystem paths (same key shape the FM worker uses in
-   * `SharedPool.store`) to tier-0 lookups. When omitted, pool reads are skipped.
-   */
-  absolutePathForUri: (uri: string) => string;
   sendJsonRpc: (request: JSONRPCRequest) => Promise<JSONRPCResponse | undefined>;
 }>;
 
 /**
- * Attach a lazy filesystem reader that prefers the shared file pool, then
- * falls back to `fs/*` JSON-RPC requests.
+ * Attach a lazy filesystem reader over `fs/*` JSON-RPC requests.
  *
  * @public
  */
 export function attachLanguageFsClient(options: AttachLanguageFsClientOptions): LanguageFsClient {
-  const pool: SharedPool | undefined = options.filePoolBuffer ? new SharedPool(options.filePoolBuffer) : undefined;
-
   const jsonRpcClient = new JSONRPCClient(async (payload) => {
     const response = await options.sendJsonRpc(payload as JSONRPCRequest);
     if (response !== undefined) {
@@ -108,12 +97,6 @@ export function attachLanguageFsClient(options: AttachLanguageFsClientOptions): 
 
   return {
     readFile: async (uri: string): Promise<Uint8Array<ArrayBuffer>> => {
-      const poolKey = options.absolutePathForUri(uri);
-      const cached = pool?.resolveCopy(poolKey);
-      if (cached) {
-        return cached;
-      }
-
       const wire = await jsonRpcRequest({
         client: jsonRpcClient,
         method: fsContentRequest.method,

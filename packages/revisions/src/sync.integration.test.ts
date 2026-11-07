@@ -1123,6 +1123,172 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
     180_000,
   );
 
+  /* W6.2: the compare-and-set refusing a push planned from its own fresh advertisement is a lost lease too. */
+  it.skipIf(leg.name === 'native git')(
+    'row 9e: a ref another writer moved between a fresh advertisement and the receive is refused as leaseLost',
+    async () => {
+      const remote = await startGitHttpBackend({
+        root: await temporaryRoot('remote-fresh-moved'),
+        /* Moves `main` after the advertisement, inside the receive, before its compare-and-set. */
+        preReceive: [
+          'if [ -f tau-move-main ]; then',
+          '  env -u GIT_QUARANTINE_PATH git update-ref refs/heads/main "$(cat tau-move-main)"',
+          '  rm tau-move-main',
+          'fi',
+        ],
+      });
+      try {
+        const one = await device({ leg, label: 'a-fresh-moved', remoteUrl: remote.url, files: { 'a.ts': '1\n' } });
+        const first = await record({ device: one, files: { 'a.ts': '1\n' }, summary: 'First' });
+        const pushed = await one.port.push({ remote: 'tau', refs: [{ name: mainRef }] });
+        expect(pushed.refs[0]).toMatchObject({ status: 'updated', head: first });
+        await record({ device: one, files: { 'a.ts': '2\n' }, summary: 'Second', parent: first });
+        const other = await remote.git([
+          '-c',
+          'user.name=Another writer',
+          '-c',
+          'user.email=another@example.test',
+          'commit-tree',
+          await remote.git(['rev-parse', `${first}^{tree}`]),
+          '-p',
+          first,
+          '-m',
+          'Another writer',
+        ]);
+        await writeFile(join(remote.repositoryPath, 'tau-move-main'), `${other}\n`);
+
+        const moved = await one.port.push({ remote: 'tau', refs: [{ name: mainRef }] });
+        expect(moved.refs[0]).toMatchObject({ status: 'rejected', reason: 'leaseLost' });
+        await expect(remote.git(['rev-parse', mainRef])).resolves.toBe(other);
+      } finally {
+        await remote.close();
+      }
+    },
+    180_000,
+  );
+
+  /* W6.2: a ref whose lock another process holds is contention, not a moved ref: git's own words, never leaseLost. */
+  it.skipIf(leg.name === 'native git')(
+    "row 9f: a ref locked by another process on the server is refused in git's words, not as leaseLost",
+    async () => {
+      const remote = await startGitHttpBackend({
+        root: await temporaryRoot('remote-locked'),
+        preReceive: ['if [ -f tau-lock-main ]; then', '  : > refs/heads/main.lock', '  rm tau-lock-main', 'fi'],
+      });
+      try {
+        const one = await device({ leg, label: 'a-locked', remoteUrl: remote.url, files: { 'a.ts': '1\n' } });
+        const first = await record({ device: one, files: { 'a.ts': '1\n' }, summary: 'First' });
+        const session: RevisionPushSession = {};
+        const pushed = await one.port.push({ remote: 'tau', refs: [{ name: mainRef }], session });
+        expect(pushed.refs[0]).toMatchObject({ status: 'updated', head: first });
+        await record({ device: one, files: { 'a.ts': '2\n' }, summary: 'Second', parent: first });
+        await writeFile(join(remote.repositoryPath, 'tau-lock-main'), '');
+
+        /* Over the kept advertisement, which once made any lock refusal a lost lease. */
+        const locked = await one.port.push({ remote: 'tau', refs: [{ name: mainRef }], session });
+        expect(locked.refs[0]).toMatchObject({ status: 'rejected' });
+        expect(locked.refs[0]?.reason).not.toBe('leaseLost');
+        /* Git's own status: 2.43 says `failed to update ref`, and the batched
+         * receive-pack of 2.51 and later says `reference already exists` for a
+         * held lock; the sideband's `Unable to create … File exists` tells it apart. */
+        expect(locked.refs[0]?.reason).toMatch(/failed to update ref|reference already exists/u);
+        await expect(remote.git(['rev-parse', mainRef])).resolves.toBe(first);
+      } finally {
+        await remote.close();
+      }
+    },
+    180_000,
+  );
+
+  /* W6.2 review: in an atomic push, a moved ref takes the other command with it; a held lock takes neither. */
+  it.skipIf(leg.name === 'native git')(
+    'row 9e2: an atomic push whose one ref moved inside the receive refuses both as leaseLost, and a held lock as git said',
+    async () => {
+      const remote = await startGitHttpBackend({
+        root: await temporaryRoot('remote-atomic-moved'),
+        preReceive: [
+          'if [ -f tau-move-main ]; then',
+          '  env -u GIT_QUARANTINE_PATH git update-ref refs/heads/main "$(cat tau-move-main)"',
+          '  rm tau-move-main',
+          'fi',
+          'if [ -f tau-lock-main ]; then',
+          '  : > refs/heads/main.lock',
+          '  rm tau-lock-main',
+          'fi',
+        ],
+      });
+      try {
+        const one = await device({ leg, label: 'a-atomic-moved', remoteUrl: remote.url, files: { 'a.ts': '1\n' } });
+        const first = await record({ device: one, files: { 'a.ts': '1\n' }, summary: 'First' });
+        const featureRef = 'refs/heads/feature';
+        await one.port.updateRef({ name: featureRef, expectedHead: undefined, head: revisionId(first) });
+        const both = [{ name: mainRef }, { name: featureRef }];
+        const pushed = await one.port.push({ remote: 'tau', refs: both, atomic: true });
+        expect(pushed.refs.map((entry) => entry.status)).toEqual(['updated', 'updated']);
+        const second = await record({ device: one, files: { 'a.ts': '2\n' }, summary: 'Second', parent: first });
+        await one.port.updateRef({ name: featureRef, expectedHead: revisionId(first), head: revisionId(second) });
+        const other = await remote.git([
+          'commit-tree',
+          await remote.git(['rev-parse', `${first}^{tree}`]),
+          '-p',
+          first,
+          '-m',
+          'Another writer',
+        ]);
+        await writeFile(join(remote.repositoryPath, 'tau-move-main'), `${other}\n`);
+
+        const moved = await one.port.push({ remote: 'tau', refs: both, atomic: true });
+        expect(moved.refs).toEqual([
+          expect.objectContaining({ name: mainRef, status: 'rejected', reason: 'leaseLost' }),
+          expect.objectContaining({ name: featureRef, status: 'rejected', reason: 'leaseLost' }),
+        ]);
+        await expect(remote.git(['rev-parse', featureRef])).resolves.toBe(first);
+
+        /* Back where this device has it, then only a lock in the way. */
+        await remote.git(['update-ref', mainRef, first]);
+        await writeFile(join(remote.repositoryPath, 'tau-lock-main'), '');
+        const locked = await one.port.push({ remote: 'tau', refs: both, atomic: true });
+        expect(locked.refs.map((entry) => entry.status)).toEqual(['rejected', 'rejected']);
+        for (const entry of locked.refs) {
+          expect(entry.reason).not.toBe('leaseLost');
+          expect(entry.reason).toMatch(/failed to update ref|atomic transaction failed/u);
+        }
+        await expect(remote.git(['rev-parse', mainRef])).resolves.toBe(first);
+      } finally {
+        await remote.close();
+      }
+    },
+    180_000,
+  );
+
+  /* W6.2 review: a ref the server cannot read is the server's fault, not a moved ref, so it is never retried as one. */
+  it.skipIf(leg.name === 'native git')(
+    "row 9g: a ref broken on the server is refused in git's words, not as leaseLost",
+    async () => {
+      const remote = await startGitHttpBackend({
+        root: await temporaryRoot('remote-broken'),
+        /* Git then says `cannot lock ref '<ref>': unable to resolve reference '<ref>': reference broken`. */
+        preReceive: ['if [ -f tau-break-main ]; then', '  echo garbage > refs/heads/main', '  rm tau-break-main', 'fi'],
+      });
+      try {
+        const one = await device({ leg, label: 'a-broken', remoteUrl: remote.url, files: { 'a.ts': '1\n' } });
+        const first = await record({ device: one, files: { 'a.ts': '1\n' }, summary: 'First' });
+        const pushed = await one.port.push({ remote: 'tau', refs: [{ name: mainRef }] });
+        expect(pushed.refs[0]).toMatchObject({ status: 'updated', head: first });
+        await record({ device: one, files: { 'a.ts': '2\n' }, summary: 'Second', parent: first });
+        await writeFile(join(remote.repositoryPath, 'tau-break-main'), '');
+
+        const broken = await one.port.push({ remote: 'tau', refs: [{ name: mainRef }] });
+        expect(broken.refs[0]).toMatchObject({ status: 'rejected' });
+        expect(broken.refs[0]?.reason).not.toBe('leaseLost');
+        expect(broken.refs[0]?.reason).toMatch(/failed to update ref/u);
+      } finally {
+        await remote.close();
+      }
+    },
+    180_000,
+  );
+
   /* Review: a kept copy saying a ref is already there is read again, since nothing sent would find out. */
   it.skipIf(leg.name === 'native git')(
     'row 9d: a session reads the remote again before calling a ref another writer moved up to date',

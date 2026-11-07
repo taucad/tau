@@ -11,11 +11,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import type { ComponentProps } from 'react';
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { FileEntry } from '@taucad/types';
 import type * as HighlightTextModule from '@taucad/ui/components/highlight-text';
 import { FileTreePanelBody } from '#routes/w.$workspace.$project/chat-file-tree.js';
+import { rowWindowThreshold } from '#routes/w.$workspace.$project/use-row-window.js';
 
 /** Row renders, counted where each file or folder row draws its name. */
 const renders = vi.hoisted(() => ({ row: 0 }));
@@ -185,5 +186,87 @@ describe('Files tree row renders', () => {
     });
 
     expect(renders.row).toBeGreaterThan(0);
+  });
+});
+
+describe('Files tree row window', () => {
+  it('should render a window of rows, not one per entry, for a long listing', () => {
+    store.snapshot = new Map(
+      Array.from({ length: 1000 }, (_, index) => file(`part-${String(index).padStart(4, '0')}.scad`)),
+    );
+    render(
+      <TooltipProvider>
+        <FileTreePanelBody />
+      </TooltipProvider>,
+    );
+
+    const rendered = screen.getAllByRole('treeitem');
+    expect(rendered.length).toBeGreaterThan(0);
+    expect(rendered.length).toBeLessThanOrEqual(rowWindowThreshold);
+    expect(screen.getByRole('treeitem', { name: 'part-0000.scad' })).toBeInTheDocument();
+    expect(screen.queryByRole('treeitem', { name: 'part-0999.scad' })).not.toBeInTheDocument();
+    expect(document.querySelectorAll('[data-row-window-space]')).toHaveLength(1);
+  });
+
+  it('should keep the focused row rendered and focused when it leaves the window (a11y)', async () => {
+    store.snapshot = new Map(
+      Array.from({ length: 1000 }, (_, index) => file(`part-${String(index).padStart(4, '0')}.scad`)),
+    );
+    render(
+      <TooltipProvider>
+        <FileTreePanelBody />
+      </TooltipProvider>,
+    );
+    const first = screen.getByRole('treeitem', { name: 'part-0000.scad' });
+    act(() => {
+      first.focus();
+    });
+
+    fireEvent.keyDown(first, { key: 'End', code: 'End' });
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(screen.getByRole('treeitem', { name: 'part-0999.scad' }));
+    });
+    /* The jsdom environment lays nothing out, so the window stays at the head: the focused row renders only because it is pinned. */
+    expect(screen.queryByRole('treeitem', { name: 'part-0500.scad' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('treeitem')).toHaveLength(rowWindowThreshold + 1);
+    act(() => {
+      store.publish(new Map([...store.snapshot, file('part-0999.scad', 40)]));
+    });
+    expect(document.activeElement).toBe(screen.getByRole('treeitem', { name: 'part-0999.scad' }));
+  });
+
+  it('should measure the row height from a plain row, not one holding an inline input', () => {
+    const offsetHeight = vi
+      .spyOn(HTMLElement.prototype, 'offsetHeight', 'get')
+      .mockImplementation(function (this: HTMLElement) {
+        return this.querySelector('input') === null ? 28 : 56;
+      });
+    try {
+      store.snapshot = new Map(
+        Array.from({ length: 1000 }, (_, index) => file(`part-${String(index).padStart(4, '0')}.scad`)),
+      );
+      render(
+        <TooltipProvider>
+          <FileTreePanelBody />
+        </TooltipProvider>,
+      );
+      const second = screen.getByRole('treeitem', { name: 'part-0001.scad' });
+      fireEvent.doubleClick(second);
+      expect(screen.getByDisplayValue('part-0001.scad')).toBeInTheDocument();
+
+      /* The row being renamed becomes the first rendered row: it is taller, and must not set the height. */
+      act(() => {
+        const next = new Map(store.snapshot);
+        next.delete('part-0000.scad');
+        store.publish(next);
+      });
+
+      expect(screen.getByDisplayValue('part-0001.scad')).toBeInTheDocument();
+      const spaces = [...document.querySelectorAll<HTMLElement>('[data-row-window-space]')];
+      expect(spaces.map((space) => space.style.height)).toEqual([`${String((999 - rowWindowThreshold) * 28)}px`]);
+    } finally {
+      offsetHeight.mockRestore();
+    }
   });
 });

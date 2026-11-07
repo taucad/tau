@@ -86,7 +86,49 @@ export type LfsClientOptions = Readonly<{
   uploadConcurrency?: number;
   /** How many objects download at once. Defaults to {@link lfsDownloadConcurrency}, at most {@link lfsDownloadConcurrencyMaximum}; `1` is serial. */
   downloadConcurrency?: number;
+  /** Milliseconds one download may go without a byte before it is retried; {@link lfsTransferStallMilliseconds} by default. */
+  transferStallMilliseconds?: number;
 }>;
+
+/**
+ * How long one large-object download may go without receiving a byte,
+ * waiting for its first one included, before it is abandoned and retried
+ * (I10: the same order as a read's stall bound). A transfer that hangs fails
+ * after its attempts, so the fill can be retried instead of waiting on it
+ * until the project closes. Milliseconds.
+ *
+ * @public
+ */
+export const lfsTransferStallMilliseconds = 60_000;
+
+/* A timer that aborts one transfer when it goes `milliseconds` without progress; `touch` restarts it. */
+const transferStall = (
+  milliseconds: number,
+  signal: AbortSignal | undefined,
+): Readonly<{ signal: AbortSignal; stalled: Promise<never>; touch: () => void; clear: () => void }> => {
+  const controller = new AbortController();
+  const stalled = Promise.withResolvers<never>();
+  // oxlint-disable-next-line promise/prefer-await-to-then -- marks the rejection handled; the transfer races it.
+  stalled.promise.catch(() => undefined);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const touch = (): void => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      const reason = new Error(`No bytes arrived for ${String(milliseconds)} ms.`);
+      controller.abort(reason);
+      stalled.reject(reason);
+    }, milliseconds);
+  };
+  touch();
+  return {
+    signal: signal === undefined ? controller.signal : AbortSignal.any([signal, controller.signal]),
+    stalled: stalled.promise,
+    touch,
+    clear: () => {
+      clearTimeout(timer);
+    },
+  };
+};
 
 /**
  * How many large objects one push uploads at once (F5).
@@ -119,8 +161,9 @@ export const lfsUploadResidentBytes = 64 * 1024 * 1024;
  * HTTP/2 or HTTP/3 connection, so 24 in flight cut a 300-object open to about
  * a dozen round trips (files service blueprint §4). Against an HTTP/1.1 object
  * store the browser queues the surplus behind its six connections, which costs
- * nothing. {@link lfsDownloadResidentBytes} bounds memory whatever the count,
- * and no transfer carries its own timer, so the count changes no deadline.
+ * nothing. {@link lfsDownloadResidentBytes} bounds memory whatever the count.
+ * Each transfer's only timer is its no-progress stall
+ * ({@link lfsTransferStallMilliseconds}), never a deadline.
  *
  * @public
  */
@@ -206,11 +249,21 @@ export type LfsDownloadManyInput = Readonly<{
   /** Cancel this operation, including batch calls and capability refresh. */
   signal?: AbortSignal;
   /**
-   * Take one verified object, in the order they arrive. Its bytes count against
+   * Take one object of its declared size, in the order they arrive, for the
+   * caller to verify by reading back what it stores (D9, D11): this client does
+   * not hash it, so it is hashed once. Its bytes count against
    * the resident budget until this settles, so a caller that stores them here
    * keeps the whole download bounded. A rejection stops the rest.
    */
   received: (pointer: LfsPointer, content: Uint8Array<ArrayBuffer>, transfer: LfsDownloadTransfer) => Promise<void>;
+  /**
+   * Oids to transfer before the rest (D10: an opened path jumps the fill
+   * queue). Asked before each object is handed out, so an oid named while the
+   * download runs goes next, behind only the transfers already in flight.
+   */
+  first?: () => ReadonlySet<string>;
+  /** Told whenever bytes of an object arrive, by its oid (I10: a read's stall bound restarts on progress). */
+  progress?: (oid: string) => void;
 }>;
 
 /** One project's LFS transport. @public */
@@ -651,8 +704,14 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
   const downloadObject = async (
     pointer: LfsPointer,
     initial: BatchObject,
-    signal?: AbortSignal,
+    transferOptions?: Readonly<{
+      signal?: AbortSignal | undefined;
+      progress?: (() => void) | undefined;
+      /** Set where the caller verifies the bytes by reading back what it stores (D9, D11). */
+      unhashed?: boolean;
+    }>,
   ): Promise<Readonly<{ content: Uint8Array<ArrayBuffer>; transfer: LfsDownloadTransfer }>> => {
+    const signal = transferOptions?.signal;
     if (initial.error !== undefined) {
       throw new Error(`The remote refused large object ${pointer.oid}.`);
     }
@@ -667,13 +726,17 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
         throw new Error(`The remote has no large object ${pointer.oid}.`);
       }
       let response: Response | undefined;
+      const stall = transferStall(options.transferStallMilliseconds ?? lfsTransferStallMilliseconds, signal);
       try {
-        response = await transfer(action.href, {
-          headers: action.header ?? {},
-          signal,
-          credentials: 'omit',
-          redirect: 'error',
-        });
+        response = await Promise.race([
+          transfer(action.href, {
+            headers: action.header ?? {},
+            signal: stall.signal,
+            credentials: 'omit',
+            redirect: 'error',
+          }),
+          stall.stalled,
+        ]);
       } catch {
         signal?.throwIfAborted();
       }
@@ -687,7 +750,8 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
           let complete = false;
           while (!complete) {
             signal?.throwIfAborted();
-            const chunk = await reader?.read();
+            stall.touch();
+            const chunk = await Promise.race([reader?.read(), stall.stalled]);
             complete = chunk === undefined || chunk.done;
             if (chunk === undefined || chunk.done) {
               break;
@@ -697,6 +761,7 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
             }
             content.set(chunk.value, received);
             received += chunk.value.byteLength;
+            transferOptions?.progress?.();
           }
         } catch (error) {
           signal?.throwIfAborted();
@@ -705,16 +770,21 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
           }
           interrupted = true;
         } finally {
+          stall.clear();
           await reader?.cancel().catch(() => undefined);
           reader?.releaseLock();
         }
         if (!interrupted && content !== undefined) {
-          if (received !== pointer.size || lfsPointerFor(content).pointer.oid !== pointer.oid) {
+          if (
+            received !== pointer.size ||
+            (transferOptions?.unhashed !== true && lfsPointerFor(content).pointer.oid !== pointer.oid)
+          ) {
             throw new Error(`Large object ${pointer.oid} did not hash to its own id.`);
           }
           return { content, transfer: { transport: lfsTransportOf(action.href) } };
         }
       } else {
+        stall.clear();
         await response?.body?.cancel();
         /* An action from the batch answer may have lapsed while it queued behind
          * the transfers ahead of it (a relay that never said when it expires,
@@ -775,11 +845,9 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
     },
 
     download: async (pointer: LfsDownloadInput): Promise<Uint8Array<ArrayBuffer>> => {
-      const { content } = await downloadObject(
-        pointer,
-        await refresh('download', pointer, pointer.signal),
-        pointer.signal,
-      );
+      const { content } = await downloadObject(pointer, await refresh('download', pointer, pointer.signal), {
+        signal: pointer.signal,
+      });
       return content;
     },
 
@@ -790,12 +858,33 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
      * when it expired while it waited, and handed over as soon as it arrives,
      * so a reload part-way through keeps what was already stored.
      */
-    downloadMany: async ({ pointers, received, signal }: LfsDownloadManyInput): Promise<void> => {
+    downloadMany: async ({ pointers, received, signal, first, progress }: LfsDownloadManyInput): Promise<void> => {
       signal?.throwIfAborted();
-      const unique = [...new Map(pointers.map((pointer) => [pointer.oid, pointer] as const)).values()];
+      /* Not yet asked of the batch endpoint, in tree order. */
+      const queued = new Map(pointers.map((pointer) => [pointer.oid, pointer] as const));
       const answered = async function* (batchSignal: AbortSignal): AsyncGenerator<BatchObject> {
-        for (let start = 0; start < unique.length; start += lfsDownloadBatchSize) {
-          yield* await batch('download', unique.slice(start, start + lfsDownloadBatchSize), batchSignal);
+        const ready: BatchObject[] = [];
+        while (queued.size > 0 || ready.length > 0) {
+          const promoted = first?.() ?? new Set<string>();
+          const at = ready.findIndex(({ oid }) => promoted.has(oid));
+          const jumping = [...promoted].flatMap((oid) => queued.get(oid) ?? []);
+          if (at === -1 && (jumping.length > 0 || ready.length === 0)) {
+            const asked = (jumping.length > 0 ? jumping : [...queued.values()]).slice(0, lfsDownloadBatchSize);
+            for (const { oid } of asked) {
+              queued.delete(oid);
+            }
+            const answers = await batch('download', asked, batchSignal);
+            if (jumping.length > 0) {
+              ready.unshift(...answers);
+            } else {
+              ready.push(...answers);
+            }
+            continue;
+          }
+          const [next] = ready.splice(Math.max(at, 0), 1);
+          if (next !== undefined) {
+            yield next;
+          }
         }
       };
       await pool(
@@ -812,7 +901,16 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
         },
         async (answer, transferSignal) => {
           const pointer = { oid: answer.oid, size: answer.size };
-          const { content, transfer } = await downloadObject(pointer, answer, transferSignal);
+          const { content, transfer } = await downloadObject(pointer, answer, {
+            signal: transferSignal,
+            unhashed: true,
+            progress:
+              progress === undefined
+                ? undefined
+                : () => {
+                    progress(pointer.oid);
+                  },
+          });
           await received(pointer, content, transfer);
         },
       );

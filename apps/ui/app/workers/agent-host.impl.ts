@@ -38,7 +38,7 @@ import { connectTurnPlacementChannel } from '@taucad/agent-host/channel-client';
 import type { TurnPlacementChannel, TurnPlacementToolPort } from '@taucad/agent-host/channel-client';
 import { createAgentLauncher, serveAgentChannel } from '@taucad/agent-host/launcher';
 import type { AgentLauncher, AgentLauncherOptions } from '@taucad/agent-host/launcher';
-import { createBrowserChatStore } from '@taucad/agent-host/browser';
+import { createBrowserChatStore, createRootedLogObserver } from '@taucad/agent-host/browser';
 import type { BrowserChatStoreOptions } from '@taucad/agent-host/browser';
 import { createConfiguredGatewayModelTransport } from '#cloud/gateway-model-transport.js';
 import { createDefaultKernelOptions } from '#constants/kernel-worker.constants.js';
@@ -52,12 +52,12 @@ import type { AgentHostProjectProvide, AgentHostProjectRebridge } from '#workers
 import { closeProvidedPorts, createDisposers } from '#workers/agent-host-projects.js';
 import { createResidentPlacement } from '#workers/agent-host-placement.js';
 import { createPortRevisionsClient } from '#workers/agent-host-revisions.js';
-import { guardLargeObjectFiles, guardLargeObjectKernel } from '#lib/large-object-guard.js';
+import { guardLargeObjectFiles, guardLargeObjectKernel, pendingPathsUnsupportedCode } from '#lib/large-object-guard.js';
 import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 import { createIdleRuntimeClient } from '#workers/idle-runtime-client.js';
 import { createWorkerEvidence } from '#workers/agent-host-evidence.js';
 import type { HostEvidence, RunRating } from '@taucad/agent-observability/host-evidence';
-import { readBuildRelease } from '#lib/build-identity.js';
+import { readBuildRelease, unknownBuildRelease } from '#lib/build-identity.js';
 import { forwardOperations } from '#telemetry/worker-forwarding.js';
 import type { ForwardEntry, WorkerTelemetry } from '#telemetry/worker-forwarding.js';
 import type { IdleRuntimeClient } from '#workers/idle-runtime-client.js';
@@ -71,6 +71,7 @@ type ProjectFileSystemBridge = Pick<
   | 'writeFileChecked'
   | 'deleteFileChecked'
   | 'appendFile'
+  | 'appendFileFenced'
   | 'readdir'
   | 'stat'
   | 'lstat'
@@ -80,8 +81,10 @@ type ProjectFileSystemBridge = Pick<
   | 'rename'
   | 'exists'
   | 'watchReady'
+  | 'watchChangeSets'
   | 'hello'
   | 'dispose'
+  | 'pendingPaths'
 >;
 
 /** What the worker as a whole gives each project host. */
@@ -286,7 +289,9 @@ const swappable = <Target extends object>(
  * @returns The provider every tool call and the GeoSpec bridge read through.
  * @internal
  */
-export const createRelayedFileSystemProvider = (proxy: ProjectFileSystemBridge): FileSystemProvider => {
+export const createRelayedFileSystemProvider = (
+  proxy: ProjectFileSystemBridge,
+): FileSystemProvider & Pick<ComposedView, 'pendingPaths'> => {
   const { payload } = proxy.hello;
   if (payload.state !== 'ready') {
     throw Object.assign(new Error(`Workspace filesystem bridge is ${payload.state}.`), {
@@ -335,6 +340,22 @@ export const createRelayedFileSystemProvider = (proxy: ProjectFileSystemBridge):
     rename: proxy.rename.bind(proxy),
     exists: proxy.exists.bind(proxy),
     lstat: proxy.lstat.bind(proxy),
+    /* A host that predates the call cannot say, which is not "none": its callers check another way (reads refuse with PENDING). */
+    pendingPaths: async (paths) => {
+      try {
+        return await proxy.pendingPaths(paths);
+      } catch (error) {
+        if (error instanceof Error && error.message === 'Unknown method: pendingPaths') {
+          throw Object.assign(
+            new Error('This workspace bridge cannot say which files are pending.', { cause: error }),
+            {
+              code: pendingPathsUnsupportedCode,
+            },
+          );
+        }
+        throw error;
+      }
+    },
     dispose: () => undefined,
   };
 };
@@ -499,6 +520,19 @@ export const openBrowserProjectHost = async (
   }
 };
 
+/**
+ * The build the host's evidence reports: the page's release label from the provide message, since a worker reads
+ * neither the define nor `window.ENV` and its own read is always the unknown label. The unknown label is no build, so
+ * it is reported as none and the observation shows `unknown` (I7), never `0000000`.
+ *
+ * @param release - The page's label, absent from an older page.
+ * @returns The build label, or `undefined`.
+ */
+export const hostBuildOf = (release: string | undefined): string | undefined => {
+  const label = release ?? readBuildRelease();
+  return label === unknownBuildRelease ? undefined : label;
+};
+
 const composeProjectHost = async (
   provide: AgentHostProjectProvide,
   worker: ResidentWorkerContext,
@@ -661,7 +695,7 @@ const composeProjectHost = async (
   });
   /* The registry over one filesystem: the project's own, or an attempt's checkout its placement granted (W8 G09). */
   const toolRegistryOver = (
-    provider: FileSystemProvider,
+    provider: FileSystemProvider & Pick<ComposedView, 'pendingPaths'>,
     preferences: Pick<ProjectFileSystemBridge, 'readMachineSettings'>,
   ): ToolRegistry => {
     const view = composeView(
@@ -801,6 +835,9 @@ const composeProjectHost = async (
                 readFile: async (path) => projectRoot.readFile(path),
                 writeFile: async (path, bytes) => projectRoot.writeFile(path, bytes),
                 appendFile: async (path, bytes) => projectRoot.appendFile(path, bytes),
+                // The authority fences each append by the length the log last read (D23), so a writer this
+                // tab's Web Lock cannot see is refused instead of interleaved.
+                appendFileFenced: async (path, bytes, fence) => projectRoot.appendFileFenced(path, bytes, fence),
                 unlink: async (path) => projectRoot.unlink(path),
                 // The durable rooted bridge owns canonical metadata; log allocation only needs size.
                 stat: async (path) => projectRoot.stat(path),
@@ -810,42 +847,8 @@ const composeProjectHost = async (
               durability,
             }
           : { kind: 'opfs', directory: opfs },
-      observeLog: async ({ path, signal, onChange, onError }) => {
-        let released = false;
-        const subscription = projectRoot.watchReady({ paths: [path] }, onChange);
-        const release = (): void => {
-          if (!released) {
-            released = true;
-            signal.removeEventListener('abort', release);
-            subscription.unsubscribe();
-          }
-        };
-        signal.addEventListener('abort', release, { once: true });
-        // async-iife: bootstrap
-        // The observation owns its closure monitor until release; stale callbacks are fenced.
-        void (async () => {
-          try {
-            await subscription.closed;
-            // oxlint-disable-next-line typescript/no-unnecessary-condition -- Release may run while the observation closure is awaited.
-            if (!released && !signal.aborted) {
-              onError(new Error(`Chat log observation closed for ${path}.`));
-            }
-          } catch (error) {
-            // oxlint-disable-next-line typescript/no-unnecessary-condition -- Release may run while the observation closure is awaited.
-            if (!released && !signal.aborted) {
-              onError(error);
-            }
-          }
-        })();
-        try {
-          await subscription.ready;
-          signal.throwIfAborted();
-          return release;
-        } catch (error) {
-          release();
-          throw error;
-        }
-      },
+      /* A peer's append storm on this log arrives once per committed changeset (D6, D23). */
+      observeLog: createRootedLogObserver(projectRoot),
       visibility: worker.visibility,
     }),
     modelTransport: createConfiguredGatewayModelTransport(gatewayOptions),
@@ -881,7 +884,7 @@ const composeProjectHost = async (
       apiBaseUrl: provide.gatewayBaseUrl.replace(/\/+$/u, ''),
       principal: provide.principal,
       projectId: provide.authority.projectId,
-      hostBuild: readBuildRelease(),
+      hostBuild: hostBuildOf(provide.release),
       readEvents: async (input) => launcher.host.readEvents(input),
     });
     opened(() => evidence?.close());

@@ -47,6 +47,9 @@ import type {
   IsomorphicGitCheckoutOptions,
   KeepalivePushOutcome,
   LargeObjectsReport,
+  PlaceholderRequest,
+  ProjectReadinessReading,
+  ReadOutcome,
   PublishDraft,
   RevisionDiffEntry,
   RevisionDivergence,
@@ -61,20 +64,30 @@ import type {
 } from '@taucad/revisions';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import {
+  cleanLargeObjects,
+  PendingError,
   publishFailureMessage,
   publishOverHttp,
   readRemoteStorageOverHttp,
   readRevisionDiff,
   readRevisionLog,
+  readinessOf,
   registerProjectFailureMessage,
   registerProjectOverHttp,
+  settleReadiness,
   tauRemoteUrl,
   watchRevisionStream,
 } from '@taucad/revisions';
 import { requireParameterRecord, serializeParameterRecord } from '@taucad/parameters';
 import { revisionId, compareRevisionFile, captureRevisionTree, diffRevisionTrees } from '@taucad/revisions/algorithms';
 import type { RevisionFileComparison } from '@taucad/revisions/algorithms';
-import type { FileMode, MountTable, RootedFileSystem, WorkspaceFileService } from '@taucad/filesystem';
+import type {
+  FileMode,
+  MountTable,
+  PendingObjectSource,
+  RootedFileSystem,
+  WorkspaceFileService,
+} from '@taucad/filesystem';
 import { workerTimings } from '@taucad/filesystem';
 import type { ActorOptions, AnyActorLogic } from 'xstate';
 import type { ChangeEvent } from '@taucad/types';
@@ -104,6 +117,9 @@ import { fetchGeoSpecCandidates, publishGeoSpecCandidate } from '#lib/geospec-ca
  */
 export const versionedChangePaths = (event: ChangeEvent, projectRoot: string): readonly string[] =>
   classifiedChangePaths(event, projectRoot, tauPathPolicy);
+
+/** How long a comparison against the checkout waits for a large object a running fill is fetching (D9). */
+const compareWaitMilliseconds = 10_000;
 
 /** The sentence a lost compare-and-swap reads as, in the log (the page's words come from its code). */
 const casLostMessage = 'Something else changed this project first. Try again.';
@@ -166,6 +182,8 @@ export type WorkerRevisionCommand =
   | Readonly<{ command: 'syncNow' }>
   /* The viewer's *Try again* after a large-object transfer failed; the files are already open. */
   | Readonly<{ command: 'retryLargeObjects' }>
+  /* An opened file still holding its pointer: its object jumps the fill queue (D10). */
+  | Readonly<{ command: 'prioritizeLargeObjects'; paths: readonly string[] }>
   /**
    * Pull the remote now (XD3, round 18): another device's run on one of this project's chats has been quiet here a
    * while, and only pulls show whether it stayed quiet there. A question since round 27: answered `pulled`, with
@@ -270,7 +288,17 @@ export type WorkerRevisionCommand =
   | Readonly<{ command: 'diff'; revisionId: string; from?: string; against?: 'checkout' }>
   | Readonly<{ command: 'compare'; revisionId: string; path: string; from?: string; against?: 'checkout' }>
   /** Both sides of one conflicted revision as text, for the agent's `revisions` tool (rule 8). */
-  | Readonly<{ command: 'readConflict'; revisionId: string }>;
+  | Readonly<{ command: 'readConflict'; revisionId: string }>
+  /** One file with its large-object placeholder resolved, or `pending` (D9); the project directory when no checkout is named. */
+  | Readonly<{
+      command: 'readContent';
+      checkoutId?: string;
+      path: string;
+      /** Milliseconds to wait for an object a running fill is fetching. */
+      wait?: number;
+    }>
+  /** Make these paths physical files, their objects fetched first (D9). */
+  | Readonly<{ command: 'materialize'; checkoutId?: string; paths: readonly string[] }>;
 
 /**
  * One settled signal from the worker revision root.
@@ -409,10 +437,61 @@ export const createCheckoutRoutes = (options: {
           class: 'authored',
         });
       }
-      return fileService.createRootedFileSystem(prefix);
+      /* The revision layer owns the pointers: its views read placeholders as they are (slice a). */
+      return fileService.createRootedFileSystem(prefix, undefined, { placeholders: 'raw' });
     },
   });
 };
+
+/**
+ * The authority's source for pending entries (slice a): a read that meets a
+ * placeholder goes through to its object, fetched by oid through the project's
+ * revisions and written nowhere. A project root is its live checkout; a
+ * `/checkouts/<id>` mount belongs to whichever open project knows that
+ * checkout. No open project serving it rejects, which the authority answers
+ * with `PENDING`, never pointer text.
+ *
+ * @param roots - The registry's live roots.
+ * @returns The source to hand `WorkspaceFileService.setPendingObjectSource`.
+ * @public
+ */
+export const createPendingObjectSource =
+  (roots: () => ReadonlyMap<string, Promise<WorkerProjectRevisions>>): PendingObjectSource =>
+  async ({ root, path, pointer, localOnly }, signal, progress) => {
+    /* The reader's signal only says it stopped waiting: the fetch it joins is the fill's too, and runs on (I10). */
+    const request: PlaceholderRequest = {
+      signal,
+      onProgress: progress,
+      ...(pointer === undefined ? {} : { pointer }),
+      ...(localOnly === undefined ? {} : { localOnly }),
+    };
+    const open = roots();
+    const projectRoot = /^\/projects\/([^/]+)$/u.exec(root);
+    const live = projectRoot === null ? undefined : open.get(projectRoot[1]!);
+    if (live !== undefined) {
+      const revisions = await live;
+      return revisions.resolvePlaceholder(undefined, path, request);
+    }
+    const checkoutId = /^\/checkouts\/([^/]+)$/u.exec(root)?.[1];
+    if (checkoutId !== undefined) {
+      for (const pending of open.values()) {
+        let resolved: Uint8Array<ArrayBuffer> | undefined;
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- the one project that knows the checkout answers
+          const revisions = await pending;
+          // oxlint-disable-next-line no-await-in-loop -- as above
+          resolved = await revisions.resolvePlaceholder(checkoutId, path, request);
+        } catch (error) {
+          if (error instanceof PendingError) {
+            throw error;
+          }
+          continue;
+        }
+        return resolved;
+      }
+    }
+    throw new Error(`No open project serves the large object of ${root}/${path}.`);
+  };
 
 /** One project's revision root, as the worker's port protocol drives it. @public */
 export type WorkerProjectRevisions = Readonly<{
@@ -449,6 +528,20 @@ export type WorkerProjectRevisions = Readonly<{
   recordEditorConflict: (input: EditorConflictInput) => Promise<EditorConflictOutcome>;
   /** Both sides of one conflicted revision as text (rule 8). */
   readConflict: (revision: string) => Promise<RevisionConflictRead>;
+  /** One file with its large-object placeholder resolved to its object, or `pending` (D9). */
+  readContent: (
+    checkoutId: string | undefined,
+    path: string,
+    options?: Readonly<{ wait?: number }>,
+  ) => Promise<ReadOutcome>;
+  /** Make these paths physical files; rejects with code `PENDING` for one whose object could not be fetched (D9). */
+  materialize: (checkoutId: string | undefined, paths: readonly string[]) => Promise<void>;
+  /** A placeholder's object for the authority's read-through, fetched by oid and written nowhere (slice a). */
+  resolvePlaceholder: (
+    checkoutId: string | undefined,
+    path: string,
+    request?: PlaceholderRequest,
+  ) => Promise<Uint8Array<ArrayBuffer> | undefined>;
   /** One content-change event on a checkout, already filtered to versioned paths. */
   changed: (checkoutId: string, paths: readonly string[]) => void;
   /** Name one revision, or re-point an existing name (S31). */
@@ -714,6 +807,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   const toasts = new Topic<RevisionToast>({ name: 'WorkerProjectRevisionToasts' });
   /* Each checkout's large-object fill, as the effects last told it; the selected one rides the projection. */
   const largeObjects = new Map<string, LargeObjectsReport>();
+  /* Checkouts whose fill has given its word; until then an absent facet is silence, not "filled" (D10). */
+  const largeObjectsTold = new Set<string>();
   /* Each checkout's running fill: when it began and how many objects it fetches, for its timing line at the end. */
   const fillWindows = new Map<string, Readonly<{ startedAt: number; objects: number }>>();
   const timeFill = (report: LargeObjectsReport): void => {
@@ -732,12 +827,52 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   };
   /* How many applies are writing each checkout root, as `onApplyingTree` brackets them; rides the projection. */
   const applying = new Map<string, number>();
+  /* How many writes of another revision's tree each checkout has begun: each is a new tree for readiness (D10, I7). */
+  const treeWrites = new Map<string, number>();
   /* How many host writes (applies and fill flushes) are open on each checkout root. */
   const writing = new Map<string, number>();
+  /*
+   * D10: each root's tree write in progress, with the entry closure it lands
+   * first, and the view whose index answers when that closure has landed.
+   * `landed` is set once the index says so, and stays until the write ends.
+   */
+  const entryClosures = new Map<string, { closure: readonly string[]; view?: RootedFileSystem; landed: boolean }>();
+  const entryClosureLanded = (root: string | undefined): boolean => {
+    const entry = root === undefined ? undefined : entryClosures.get(root);
+    if (entry !== undefined && !entry.landed && entry.view?.entriesLanded?.(entry.closure) === true) {
+      entry.landed = true;
+    }
+    return entry?.landed === true;
+  };
+  const watchEntryClosure = async (root: string, closure: readonly string[]): Promise<void> => {
+    const entry: { closure: readonly string[]; view?: RootedFileSystem; landed: boolean } = { closure, landed: false };
+    entryClosures.set(root, entry);
+    try {
+      entry.view = await options.filesystem(root);
+    } catch (error) {
+      /* Without the view the reading stays at treeReady until the write ends: late, never wrong (I7). */
+      console.warn('[revisions] the entry closure cannot be watched', error);
+      return;
+    }
+    republish();
+  };
+  /* Checkouts whose last write of another revision's tree failed: that tree is never read as written (D10, I7). */
+  /* The head each was at when the reading first saw the failure: a new head ends it. */
+  const failedTreeWrites = new Map<string, Readonly<{ seen: boolean; head?: string | undefined }>>();
   /* Each checkout's changes observed while a host write held its root: raised once, together, when the last closes. */
   const deferredChanges = new Map<string, Readonly<{ root: string; paths: Set<string> }>>();
 
-  const { actor, settled, turns, recordEditorConflict, readConflict, pullsChats } = createProjectRevisionsActor({
+  const {
+    actor,
+    settled,
+    turns,
+    recordEditorConflict,
+    readConflict,
+    readContent,
+    materialize,
+    resolvePlaceholder,
+    pullsChats,
+  } = createProjectRevisionsActor({
     port: options.port,
     projectId,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
@@ -844,6 +979,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     /* Files open before their large objects arrive (the operator's "open the UI, model waits"): the page's viewer waits on this. */
     onLargeObjects: (report) => {
       timeFill(report);
+      largeObjectsTold.add(report.checkoutId);
       if (report.facet === undefined) {
         largeObjects.delete(report.checkoutId);
       } else {
@@ -857,20 +993,38 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
      * placeholders in place, once a second for minutes, and a hold taken and
      * released per flush re-listed every directory it touched each time.
      */
-    onApplyingTree: ({ root }, paths, bracket) => {
+    onApplyingTree: ({ id, root }, paths, bracket) => {
       const holdsTree = bracket?.purpose !== 'fill';
       const startedAt = workerTimings.now();
+      /* A new tree: the old one's fill has ended silently, and the reading waits for the new one's word. */
+      if (bracket?.purpose === 'tree') {
+        treeWrites.set(id, (treeWrites.get(id) ?? 0) + 1);
+        failedTreeWrites.delete(id);
+        largeObjectsTold.delete(id);
+        largeObjects.delete(id);
+        fillWindows.delete(id);
+      }
       if (holdsTree) {
         applying.set(root, (applying.get(root) ?? 0) + 1);
+      }
+      if (bracket?.closure !== undefined) {
+        // async-iife: bootstrap -- the view is opened once per write; the reading follows as it lands.
+        void watchEntryClosure(root, bracket.closure);
       }
       writing.set(root, (writing.get(root) ?? 0) + 1);
       republish();
       let released = false;
-      return () => {
+      return (outcome) => {
         if (released) {
           return;
         }
         released = true;
+        if (bracket?.purpose === 'tree' && outcome?.failed === true) {
+          failedTreeWrites.set(id, { seen: false });
+        } else if (holdsTree && outcome?.failed !== true) {
+          /* A later write that held the tree and landed (a rollback, say) wrote the checkout whole again. */
+          failedTreeWrites.delete(id);
+        }
         closeWrite(root);
         if (!holdsTree) {
           return;
@@ -882,6 +1036,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         const remaining = (applying.get(root) ?? 1) - 1;
         if (remaining === 0) {
           applying.delete(root);
+          entryClosures.delete(root);
         } else {
           applying.set(root, remaining);
         }
@@ -890,15 +1045,38 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     },
   });
 
+  /* The last readiness reading: settled here, where the fill and the apply bracket are merged (D10, I7). */
+  let readiness: ProjectReadinessReading | undefined;
   const statusOf = (snapshot: ReturnType<typeof actor.getSnapshot>): RevisionStatusProjection => {
     const status = selectRevisionStatus(snapshot);
     const facet = status.checkoutId === undefined ? undefined : largeObjects.get(status.checkoutId)?.facet;
     const applyingRoots = [...applying.keys()].toSorted();
-    return {
+    const merged = {
       ...status,
       ...(facet === undefined ? {} : { largeObjects: facet }),
       ...(applyingRoots.length === 0 ? {} : { applyingRoots }),
     };
+    if (status.checkoutId !== undefined && failedTreeWrites.has(status.checkoutId)) {
+      const failedAt = failedTreeWrites.get(status.checkoutId);
+      if (failedAt?.seen === false) {
+        failedTreeWrites.set(status.checkoutId, { seen: true, head: status.headRevisionId });
+      } else if (failedAt?.head !== status.headRevisionId) {
+        failedTreeWrites.delete(status.checkoutId);
+      }
+    }
+    readiness = settleReadiness(
+      readiness,
+      readinessOf(
+        {
+          ...merged,
+          entryClosureLanded: entryClosureLanded(status.checkoutRoot),
+          treeWriteFailed: status.checkoutId !== undefined && failedTreeWrites.has(status.checkoutId),
+        },
+        status.checkoutId !== undefined && largeObjectsTold.has(status.checkoutId),
+        status.checkoutId === undefined ? 0 : (treeWrites.get(status.checkoutId) ?? 0),
+      ),
+    );
+    return { ...merged, readiness: readiness.state };
   };
   let published: RevisionStatusProjection = statusOf(actor.getSnapshot());
   const republish = (): void => {
@@ -964,6 +1142,10 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     if ((writing.get(root) ?? 0) === 0) {
       changed(checkoutId, paths);
       return;
+    }
+    /* A tree write's own files: the reading may reach `entryReady` as its closure lands (D10). */
+    if (entryClosures.get(root)?.landed === false) {
+      republish();
     }
     const held = deferredChanges.get(checkoutId) ?? { root, paths: new Set<string>() };
     for (const path of paths) {
@@ -1337,7 +1519,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     }
   };
 
-  const comparisonCheckout = async () => {
+  /* The checkout a comparison reads, and its head's modes: of `paths` only when it compares those (S11). */
+  const comparisonCheckout = async (paths?: readonly string[]) => {
     const snapshot = actor.getSnapshot();
     const status = selectRevisionStatus(snapshot);
     const checkout = snapshot.context.checkouts.find((entry) => entry.id === status.checkoutId);
@@ -1346,12 +1529,18 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     }
     const [filesystem, basis] = await Promise.all([
       options.filesystem(checkout.root),
-      status.headRevisionId === undefined ? undefined : options.port.readTree(revisionId(status.headRevisionId)),
+      status.headRevisionId === undefined
+        ? undefined
+        : options.port.readTree(revisionId(status.headRevisionId), {
+            largeObjects: 'local',
+            ...(paths === undefined ? {} : { paths }),
+          }),
     ]);
     if (status.headRevisionId !== undefined && basis === undefined) {
       throw new Error('The checkout head tree is unavailable.');
     }
     return {
+      id: checkout.id,
       filesystem,
       mode: (path: string): FileMode => basis?.mode(path) ?? '100644',
     };
@@ -1450,6 +1639,10 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         }
         case 'retryLargeObjects': {
           largeObjects.get(selectRevisionStatus(actor.getSnapshot()).checkoutId ?? '')?.retry();
+          return;
+        }
+        case 'prioritizeLargeObjects': {
+          largeObjects.get(selectRevisionStatus(actor.getSnapshot()).checkoutId ?? '')?.prioritize(command.paths);
           return;
         }
         case 'recordsChanged': {
@@ -1611,6 +1804,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         case 'diff':
         case 'compare':
         case 'readConflict':
+        case 'readContent':
+        case 'materialize':
         case 'recordEditorConflict':
         case 'pullRemote': {
           break;
@@ -1638,7 +1833,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     divergence: async (head, base) => options.port.divergence({ head: revisionId(head), base: revisionId(base) }),
     diff: async (revision, from, compareOptions) => {
       if (compareOptions?.against === 'checkout') {
-        const original = await options.port.readTree(revisionId(revision));
+        /* From this device alone: a large object is compared by its pointer, so nothing is fetched to list paths. */
+        const original = await options.port.readTree(revisionId(revision), { largeObjects: 'local' });
         if (original === undefined) {
           throw new Error('The selected revision is unavailable.');
         }
@@ -1648,7 +1844,11 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           exclude: (path) => !tauPathPolicy.classify(path).versioned,
           inheritedMode: checkout.mode,
         });
-        return diffRevisionTrees({ original, modified });
+        /* Both sides as a cut records them (D9): a placeholder and the object it stands for are one file, unchanged. */
+        return diffRevisionTrees({
+          original: cleanLargeObjects(original).tree,
+          modified: cleanLargeObjects(modified).tree,
+        });
       }
       /* Against the revision's own first parent by default, which the store
        * knows: a caller that remembered a base would diff the wrong tree when a
@@ -1660,31 +1860,24 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       /* S38's second half: the right-hand side is the working copy rather than
        * another revision, so a reader can see what they have changed since the
        * revision they are looking at. One round trip, same viewer. */
+      /* One path's objects, never two whole trees (S11): the store reads only the compared path. */
       if (compareOptions?.against === 'checkout') {
-        const tree = await options.port.readTree(revisionId(revision));
+        const tree = await options.port.readTree(revisionId(revision), { paths: [path] });
         if (tree === undefined) {
           throw new Error('The selected revision is unavailable.');
         }
-        const checkout = await comparisonCheckout();
+        const checkout = await comparisonCheckout([path]);
         const { filesystem } = checkout;
         const recorded = tree.get(path);
-        let working: Uint8Array<ArrayBuffer> | undefined;
         let mode = checkout.mode(path);
-        try {
-          working = await filesystem.readFile(path);
+        /* Through the content read, so a placeholder compares as its object, never as its pointer text (D9). */
+        const read = await readContent(checkout.id, path, { wait: compareWaitMilliseconds });
+        if (read.outcome === 'pending') {
+          throw Object.assign(new Error(`The large object of ${path} is not on this device yet.`), { code: 'PENDING' });
+        }
+        const working = read.outcome === 'bytes' ? read.data : undefined;
+        if (working !== undefined) {
           mode = (await filesystem.getFileMode?.(path)) ?? mode;
-        } catch (error) {
-          if (
-            !(
-              typeof error === 'object' &&
-              error !== null &&
-              (('code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR' || error.code === 'EISDIR')) ||
-                ('name' in error && error.name === 'NotFoundError'))
-            )
-          ) {
-            throw error;
-          }
-          working = undefined;
         }
         return compareRevisionFile({
           original: recorded === undefined ? undefined : { content: recorded, mode: tree.mode(path) ?? '100644' },
@@ -1697,8 +1890,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       }
       const base = compareOptions?.from ?? record.parents[0];
       const [before, after] = await Promise.all([
-        base === undefined ? undefined : options.port.readTree(revisionId(base)),
-        options.port.readTree(revisionId(revision)),
+        base === undefined ? undefined : options.port.readTree(revisionId(base), { paths: [path] }),
+        options.port.readTree(revisionId(revision), { paths: [path] }),
       ]);
       if (after === undefined || (base !== undefined && before === undefined)) {
         throw new Error('The selected revision tree is unavailable.');
@@ -1730,6 +1923,9 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     saveRevision,
     recordEditorConflict,
     readConflict,
+    readContent,
+    materialize,
+    resolvePlaceholder,
     createBranch,
     pullRemote: async (chatId) => {
       const answer = await session?.pull({ requestId: `page-pull:${chatId}:${String(Date.now())}`, chatId });
@@ -1836,6 +2032,8 @@ export type WorkerRevisionResult =
   | Readonly<{ kind: 'diff'; entries: readonly RevisionDiffEntry[] }>
   | Readonly<{ kind: 'comparison'; comparison: RevisionFileComparison }>
   | Readonly<{ kind: 'conflict'; conflict: RevisionConflictRead }>
+  | Readonly<{ kind: 'content'; content: ReadOutcome }>
+  | Readonly<{ kind: 'materialized' }>
   | Readonly<{ kind: 'geoSpecCandidates'; candidates: ReadonlyArray<Uint8Array<ArrayBuffer>> }>
   | Readonly<{ kind: 'geoSpecCandidatePublication'; status: 'updated' | 'upToDate' | 'rejected' }>
   /** `tag` answers with the named version; `deleteTag` answers with nothing. */
@@ -2058,6 +2256,14 @@ const answerOf = (
     }
     case 'readConflict': {
       return tree.readConflict(request.revisionId).then((conflict) => ({ kind: 'conflict', conflict }) as const);
+    }
+    case 'readContent': {
+      return tree
+        .readContent(request.checkoutId, request.path, request.wait === undefined ? {} : { wait: request.wait })
+        .then((content) => ({ kind: 'content', content }) as const);
+    }
+    case 'materialize': {
+      return tree.materialize(request.checkoutId, request.paths).then(() => ({ kind: 'materialized' }) as const);
     }
     case 'fetchGeoSpecCandidates': {
       return tree.fetchGeoSpecCandidates().then((candidates) => ({ kind: 'geoSpecCandidates', candidates }) as const);

@@ -2498,7 +2498,6 @@ describe('effective tessellation on the render span', () => {
       requested: 'medium',
       linearTolerance: 0.1,
       angularTolerance: 17,
-      downgraded: 0,
     });
 
     expect(detail).toMatchObject({
@@ -2508,7 +2507,6 @@ describe('effective tessellation on the render span', () => {
       'tessellation.effective.angularTolerance': 17,
       'tessellation.effective.triangles': 56_240,
       'tessellation.effective.elapsed': 4700,
-      'tessellation.effective.downgraded': false,
     });
   });
 

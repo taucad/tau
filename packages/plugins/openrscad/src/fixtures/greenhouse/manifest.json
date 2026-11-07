@@ -24,22 +24,30 @@
   {
     "name": "Base Frame",
     "parent": "Greenhouse",
-    "children": [],
+    "children": ["Base Frame 1", "Base Frame 2", "Base Frame 3", "Base Frame 4"],
     "moduleName": "base_frame",
     "definitionSource": "<main>",
     "attribution": "exact",
-    "triangleCount": 48,
-    "materialNames": ["#8A9297FF Material"]
+    "triangleCount": 0,
+    "materialNames": []
   },
   {
     "name": "Upright Frame",
     "parent": "Greenhouse",
-    "children": [],
+    "children": [
+      "Upright Frame 1",
+      "Upright Frame 2",
+      "Upright Frame 3",
+      "Upright Frame 4",
+      "Upright Frame 5",
+      "Upright Frame 6",
+      "Upright Frame 7"
+    ],
     "moduleName": "upright_frame",
     "definitionSource": "<main>",
     "attribution": "exact",
-    "triangleCount": 132,
-    "materialNames": ["#8A9297FF Material"]
+    "triangleCount": 0,
+    "materialNames": []
   },
   {
     "name": "Roof Frame",
@@ -54,42 +62,42 @@
   {
     "name": "Arch Hoop",
     "parent": "Roof Frame",
-    "children": [],
+    "children": ["Arch Hoop 1", "Arch Hoop 2", "Arch Hoop 3", "Arch Hoop 4", "Arch Hoop 5"],
     "moduleName": "arch_hoop",
     "definitionSource": "<main>",
     "attribution": "exact",
-    "triangleCount": 1100,
-    "materialNames": ["#8A9297FF Material"]
+    "triangleCount": 0,
+    "materialNames": []
   },
   {
     "name": "Side Panels",
     "parent": "Greenhouse",
-    "children": [],
+    "children": ["Side Panels 1", "Side Panels 2"],
     "moduleName": "side_panels",
     "definitionSource": "<main>",
     "attribution": "exact",
-    "triangleCount": 24,
-    "materialNames": ["#B7E4F042 Material"]
+    "triangleCount": 0,
+    "materialNames": []
   },
   {
     "name": "End Panel 1",
     "parent": "Greenhouse",
-    "children": [],
+    "children": ["End Panel 1"],
     "moduleName": "end_panel",
     "definitionSource": "<main>",
     "attribution": "exact",
-    "triangleCount": 56,
-    "materialNames": ["#B7E4F04D Material"]
+    "triangleCount": 0,
+    "materialNames": []
   },
   {
     "name": "End Panel 2",
     "parent": "Greenhouse",
-    "children": [],
+    "children": ["End Panel 2"],
     "moduleName": "end_panel",
     "definitionSource": "<main>",
     "attribution": "exact",
-    "triangleCount": 40,
-    "materialNames": ["#B7E4F04D Material"]
+    "triangleCount": 0,
+    "materialNames": []
   },
   {
     "name": "Roof Panels",
@@ -104,51 +112,552 @@
   {
     "name": "Roof Panel Strip",
     "parent": "Roof Panels",
-    "children": [],
+    "children": [
+      "Roof Panel Strip 1",
+      "Roof Panel Strip 2",
+      "Roof Panel Strip 3",
+      "Roof Panel Strip 4",
+      "Roof Panel Strip 5",
+      "Roof Panel Strip 6",
+      "Roof Panel Strip 7",
+      "Roof Panel Strip 8"
+    ],
     "moduleName": "roof_panel_strip",
     "definitionSource": "<main>",
     "attribution": "exact",
-    "triangleCount": 96,
-    "materialNames": ["#B7E4F03D Material"]
+    "triangleCount": 0,
+    "materialNames": []
   },
   {
     "name": "Door Assembly",
     "parent": "Greenhouse",
-    "children": [],
+    "children": [
+      "Door Assembly 1",
+      "Door Assembly 2",
+      "Door Assembly 3",
+      "Door Assembly 4",
+      "Door Assembly 5",
+      "Door Assembly 6",
+      "Door Assembly 7",
+      "Door Assembly 8",
+      "Door Assembly 9"
+    ],
     "moduleName": "door_assembly",
     "definitionSource": "<main>",
     "attribution": "exact",
-    "triangleCount": 124,
-    "materialNames": ["#6F787DFF Material", "#A9DCE861 Material", "#B2B8BBFF Material"]
+    "triangleCount": 0,
+    "materialNames": []
   },
   {
     "name": "Bench 1",
     "parent": "Greenhouse",
-    "children": [],
+    "children": ["Bench 1", "Bench 2", "Bench 3", "Bench 4", "Bench 9", "Bench 11", "Bench 12", "Bench 13", "Bench 17"],
     "moduleName": "bench",
     "definitionSource": "<main>",
     "attribution": "exact",
-    "triangleCount": 108,
-    "materialNames": ["#6F7475FF Material", "#8B5A2BFF Material"]
+    "triangleCount": 0,
+    "materialNames": []
   },
   {
     "name": "Bench 2",
     "parent": "Greenhouse",
-    "children": [],
+    "children": [
+      "Bench 5",
+      "Bench 6",
+      "Bench 7",
+      "Bench 8",
+      "Bench 10",
+      "Bench 14",
+      "Bench 15",
+      "Bench 16",
+      "Bench 18"
+    ],
     "moduleName": "bench",
     "definitionSource": "<main>",
     "attribution": "exact",
-    "triangleCount": 108,
-    "materialNames": ["#6F7475FF Material", "#8B5A2BFF Material"]
+    "triangleCount": 0,
+    "materialNames": []
   },
   {
     "name": "Roof Vent",
     "parent": "Greenhouse",
-    "children": [],
+    "children": ["Roof Vent 1", "Roof Vent 2", "Roof Vent 3", "Roof Vent 4"],
     "moduleName": "roof_vent",
     "definitionSource": "<main>",
     "attribution": "exact",
-    "triangleCount": 48,
-    "materialNames": ["#667176FF Material", "#9FD7DE73 Material"]
+    "triangleCount": 0,
+    "materialNames": []
+  },
+  {
+    "name": "Base Frame 1",
+    "parent": "Base Frame",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#8A9297FF Material"]
+  },
+  {
+    "name": "Upright Frame 1",
+    "parent": "Upright Frame",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 24,
+    "materialNames": ["#8A9297FF Material"]
+  },
+  {
+    "name": "Upright Frame 2",
+    "parent": "Upright Frame",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 24,
+    "materialNames": ["#8A9297FF Material"]
+  },
+  {
+    "name": "Base Frame 2",
+    "parent": "Base Frame",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#8A9297FF Material"]
+  },
+  {
+    "name": "End Panel 1",
+    "parent": "End Panel 1",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 56,
+    "materialNames": ["#B7E4F04D Material"]
+  },
+  {
+    "name": "Base Frame 3",
+    "parent": "Base Frame",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#8A9297FF Material"]
+  },
+  {
+    "name": "End Panel 2",
+    "parent": "End Panel 2",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 40,
+    "materialNames": ["#B7E4F04D Material"]
+  },
+  {
+    "name": "Bench 1",
+    "parent": "Bench 1",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#6F7475FF Material"]
+  },
+  {
+    "name": "Bench 2",
+    "parent": "Bench 1",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#6F7475FF Material"]
+  },
+  {
+    "name": "Bench 3",
+    "parent": "Bench 1",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#6F7475FF Material"]
+  },
+  {
+    "name": "Bench 4",
+    "parent": "Bench 1",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#6F7475FF Material"]
+  },
+  {
+    "name": "Door Assembly 1",
+    "parent": "Door Assembly",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#6F787DFF Material"]
+  },
+  {
+    "name": "Door Assembly 2",
+    "parent": "Door Assembly",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#6F787DFF Material"]
+  },
+  {
+    "name": "Bench 5",
+    "parent": "Bench 2",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#6F7475FF Material"]
+  },
+  {
+    "name": "Bench 6",
+    "parent": "Bench 2",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#6F7475FF Material"]
+  },
+  {
+    "name": "Bench 7",
+    "parent": "Bench 2",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#6F7475FF Material"]
+  },
+  {
+    "name": "Bench 8",
+    "parent": "Bench 2",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#6F7475FF Material"]
+  },
+  {
+    "name": "Base Frame 4",
+    "parent": "Base Frame",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#8A9297FF Material"]
+  },
+  {
+    "name": "Upright Frame 3",
+    "parent": "Upright Frame",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 24,
+    "materialNames": ["#8A9297FF Material"]
+  },
+  {
+    "name": "Upright Frame 4",
+    "parent": "Upright Frame",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 24,
+    "materialNames": ["#8A9297FF Material"]
+  },
+  {
+    "name": "Door Assembly 3",
+    "parent": "Door Assembly",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#A9DCE861 Material"]
+  },
+  {
+    "name": "Side Panels 1",
+    "parent": "Side Panels",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#B7E4F042 Material"]
+  },
+  {
+    "name": "Side Panels 2",
+    "parent": "Side Panels",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#B7E4F042 Material"]
+  },
+  {
+    "name": "Bench 9",
+    "parent": "Bench 1",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#6F7475FF Material"]
+  },
+  {
+    "name": "Bench 10",
+    "parent": "Bench 2",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#6F7475FF Material"]
+  },
+  {
+    "name": "Door Assembly 4",
+    "parent": "Door Assembly",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 16,
+    "materialNames": ["#B2B8BBFF Material"]
+  },
+  {
+    "name": "Bench 11",
+    "parent": "Bench 1",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#8B5A2BFF Material"]
+  },
+  {
+    "name": "Bench 12",
+    "parent": "Bench 1",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#8B5A2BFF Material"]
+  },
+  {
+    "name": "Bench 13",
+    "parent": "Bench 1",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#8B5A2BFF Material"]
+  },
+  {
+    "name": "Bench 14",
+    "parent": "Bench 2",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#8B5A2BFF Material"]
+  },
+  {
+    "name": "Bench 15",
+    "parent": "Bench 2",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#8B5A2BFF Material"]
+  },
+  {
+    "name": "Bench 16",
+    "parent": "Bench 2",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#8B5A2BFF Material"]
+  },
+  {
+    "name": "Bench 17",
+    "parent": "Bench 1",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#8B5A2BFF Material"]
+  },
+  {
+    "name": "Bench 18",
+    "parent": "Bench 2",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#8B5A2BFF Material"]
+  },
+  {
+    "name": "Door Assembly 5",
+    "parent": "Door Assembly",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 16,
+    "materialNames": ["#B2B8BBFF Material"]
+  },
+  {
+    "name": "Door Assembly 6",
+    "parent": "Door Assembly",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 16,
+    "materialNames": ["#B2B8BBFF Material"]
+  },
+  {
+    "name": "Door Assembly 7",
+    "parent": "Door Assembly",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#B2B8BBFF Material"]
+  },
+  {
+    "name": "Door Assembly 8",
+    "parent": "Door Assembly",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 16,
+    "materialNames": ["#B2B8BBFF Material"]
+  },
+  {
+    "name": "Door Assembly 9",
+    "parent": "Door Assembly",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#6F787DFF Material"]
+  },
+  {
+    "name": "Upright Frame 5",
+    "parent": "Upright Frame",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#8A9297FF Material"]
+  },
+  {
+    "name": "Upright Frame 6",
+    "parent": "Upright Frame",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#8A9297FF Material"]
+  },
+  {
+    "name": "Arch Hoop 1",
+    "parent": "Arch Hoop",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 220,
+    "materialNames": ["#8A9297FF Material"]
+  },
+  {
+    "name": "Arch Hoop 2",
+    "parent": "Arch Hoop",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 220,
+    "materialNames": ["#8A9297FF Material"]
+  },
+  {
+    "name": "Arch Hoop 3",
+    "parent": "Arch Hoop",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 220,
+    "materialNames": ["#8A9297FF Material"]
+  },
+  {
+    "name": "Arch Hoop 4",
+    "parent": "Arch Hoop",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 220,
+    "materialNames": ["#8A9297FF Material"]
+  },
+  {
+    "name": "Arch Hoop 5",
+    "parent": "Arch Hoop",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 220,
+    "materialNames": ["#8A9297FF Material"]
+  },
+  {
+    "name": "Roof Panel Strip 1",
+    "parent": "Roof Panel Strip",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#B7E4F03D Material"]
+  },
+  {
+    "name": "Roof Panel Strip 2",
+    "parent": "Roof Panel Strip",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#B7E4F03D Material"]
+  },
+  {
+    "name": "Roof Panel Strip 3",
+    "parent": "Roof Panel Strip",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#B7E4F03D Material"]
+  },
+  {
+    "name": "Roof Panel Strip 4",
+    "parent": "Roof Panel Strip",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#B7E4F03D Material"]
+  },
+  {
+    "name": "Roof Panel Strip 5",
+    "parent": "Roof Panel Strip",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#B7E4F03D Material"]
+  },
+  {
+    "name": "Roof Panel Strip 6",
+    "parent": "Roof Panel Strip",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#B7E4F03D Material"]
+  },
+  {
+    "name": "Roof Vent 1",
+    "parent": "Roof Vent",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#667176FF Material"]
+  },
+  {
+    "name": "Roof Panel Strip 7",
+    "parent": "Roof Panel Strip",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#B7E4F03D Material"]
+  },
+  {
+    "name": "Roof Panel Strip 8",
+    "parent": "Roof Panel Strip",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#B7E4F03D Material"]
+  },
+  {
+    "name": "Roof Vent 2",
+    "parent": "Roof Vent",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#9FD7DE73 Material"]
+  },
+  {
+    "name": "Upright Frame 7",
+    "parent": "Upright Frame",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#8A9297FF Material"]
+  },
+  {
+    "name": "Roof Vent 3",
+    "parent": "Roof Vent",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#667176FF Material"]
+  },
+  {
+    "name": "Roof Vent 4",
+    "parent": "Roof Vent",
+    "children": [],
+    "attribution": "exact",
+    "triangleCount": 12,
+    "materialNames": ["#667176FF Material"]
   }
 ]

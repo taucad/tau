@@ -11,9 +11,10 @@
 # Each application has its own standing release pull request, so each ships on
 # its own merge (docs/research/monorepo-app-release-practice.md, R2). On every
 # push to `main`:
-#   - A release commit (subject `chore(release): <project> v<version>`, the
-#     squash merge of one of those pull requests) creates the application's
-#     GitHub Release as a draft and then its tag. The tag's push is what starts
+#   - A push that carries a release commit (subject `chore(release): <project>
+#     v<version>`, the squash merge of one of those pull requests; a merge
+#     queue may batch several) creates, for every application whose manifest
+#     version is not yet tagged, its GitHub Release as a draft and then its tag. The tag's push is what starts
 #     `release-build.yml`, which builds and verifies what the release ships,
 #     attaches its assets, publishes the release (immutable from then on) and
 #     deploys it to production.
@@ -55,16 +56,23 @@ jobs:
     outputs:
       release-commit: ${{ steps.subject.outputs.release-commit }}
     steps:
-      - name: Classify the head commit
+      - name: Classify the pushed commits
         id: subject
         env:
-          SUBJECT: ${{ github.event.head_commit.message }}
+          # Every commit in the push, not only the head: a merge queue can land
+          # several release pull requests in one push. A manual run always
+          # checks for owed tags, which recovers a release a run missed.
+          EVENT_NAME: ${{ github.event_name }}
+          MESSAGES: ${{ toJSON(github.event.commits.*.message) }}
         run: |
           set -euo pipefail
-          first_line=${SUBJECT%%$'\n'*}
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            echo "release-commit=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           # The application release subject names a project before its version;
           # the npm train's `chore(release): v<version>` does not match.
-          if [[ "$first_line" =~ ^chore\(release\):\ [a-z0-9-]+\ v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+          if jq -e 'map(split("\n")[0]) | any(test("^chore\\(release\\): [a-z0-9-]+ v[0-9]+\\.[0-9]+\\.[0-9]+"))' <<< "$MESSAGES" > /dev/null; then
             echo "release-commit=true" >> "$GITHUB_OUTPUT"
           else
             echo "release-commit=false" >> "$GITHUB_OUTPUT"

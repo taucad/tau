@@ -161,6 +161,19 @@ export type EventLogAppender = {
 };
 
 /**
+ * Whether an append failed because the authority's fence refused it (D23), not because the write broke.
+ *
+ * @param error - What the port's append rejected with.
+ * @returns Whether the code is `EAPPENDSTALE` or `EFENCED`.
+ */
+const isAuthorityFenceRefusal = (error: unknown): boolean => {
+  if (error === null || typeof error !== 'object' || !('code' in error)) {
+    return false;
+  }
+  return error.code === 'EAPPENDSTALE' || error.code === 'EFENCED';
+};
+
+/**
  * Storage primitives used by environment-specific appenders.
  *
  * The fence is not the port's: the appender checks the log's length inside `exclusive`, so the port supplies only a
@@ -169,8 +182,21 @@ export type EventLogAppender = {
  * @internal
  */
 export type EventLogStorage = {
+  /**
+   * Whether `append` fences at the authority (D23). Then `exclusive` is not the authority's lock, so another
+   * writer may append between this append and a rollback, and a failed append whose outcome is unknown (a bridge
+   * timeout after the authority committed) is never rolled back: the truncate would delete this writer's line and
+   * the other writer's. The handle is poisoned instead, and a reopen reads what the log really holds.
+   */
+  readonly fencesAppends?: boolean;
   read(): Promise<Uint8Array<ArrayBuffer>>;
-  append(bytes: Uint8Array<ArrayBuffer>): Promise<void>;
+  /**
+   * Append `bytes`. `expectedLength` is the length the appender checked inside `exclusive`; a port that can fence
+   * at the authority (D23) refuses with `EAPPENDSTALE` or `EFENCED`, writing nothing, when the log is no longer
+   * that length, which closes the window a lock that is not the authority's leaves open. A port that cannot fence
+   * ignores it.
+   */
+  append(bytes: Uint8Array<ArrayBuffer>, expectedLength?: number): Promise<void>;
   truncate(size: number): Promise<void>;
   close(): Promise<void>;
   /** Current byte length of the log. */
@@ -847,8 +873,24 @@ export const createEventLogAppender = async (
       }
       tornTail = undefined;
       try {
-        await storage.append(bytes);
+        await storage.append(bytes, byteLength);
       } catch (appendError) {
+        /* D23: the authority refused the append because another writer's bytes landed first. Nothing of this
+         * append was written, and everything past `byteLength` is that writer's, so a rollback would delete it. */
+        if (isAuthorityFenceRefusal(appendError)) {
+          fenced = true;
+          throw fencedError();
+        }
+        /* A fencing port's append may have committed before it failed, and `exclusive` does not keep another
+         * writer out of the authority, so the bytes past `byteLength` may not all be this append's. */
+        if (storage.fencesAppends === true) {
+          poisoned = true;
+          throw new EventLogError(
+            'LOG_POISONED',
+            'The event-log append failed with an unknown outcome; nothing was rolled back. Reopen the log to read what it holds.',
+            { cause: appendError },
+          );
+        }
         // Safe: no other writer can append inside this section, so the bytes past `byteLength` are this append's.
         try {
           await storage.truncate(byteLength);

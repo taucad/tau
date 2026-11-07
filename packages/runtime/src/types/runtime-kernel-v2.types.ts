@@ -53,12 +53,10 @@ export type TessellationReport = Readonly<{
   relax?: boolean;
   /** The requested tessellation form: a quality preset name, or `'explicit'` for explicit tolerances. */
   requested?: 'low' | 'medium' | 'high' | 'extra-high' | 'explicit';
-  /** Absolute chordal deviation in millimetres the mesh was produced at, after any downgrade. */
+  /** Absolute chordal deviation in millimetres the mesh was produced at. */
   linearTolerance?: number;
-  /** Angular tolerance in degrees the mesh was produced at, after any downgrade. */
+  /** Angular tolerance in degrees the mesh was produced at. */
   angularTolerance?: number;
-  /** Coarser steps taken because the requested mesh exceeded the triangle budget; zero when none. */
-  downgraded?: number;
 }>;
 /** A single rendered view with its declared media type, optional units and mesh cost. @public */
 export type Artifact = Readonly<{

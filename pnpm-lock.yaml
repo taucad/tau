@@ -331,8 +331,8 @@ catalogs:
       specifier: 0.1.192
       version: 0.1.192
     '@taulabs/openrscad-engine':
-      specifier: 0.11.0-beta.4
-      version: 0.11.0-beta.4
+      specifier: 0.11.0-beta.5
+      version: 0.11.0-beta.5
     '@testing-library/jest-dom':
       specifier: 6.6.3
       version: 6.6.3
@@ -649,11 +649,11 @@ catalogs:
       specifier: ^1.7.2
       version: 1.7.2
     geospec:
-      specifier: 0.5.1
-      version: 0.5.1
+      specifier: 0.6.0
+      version: 0.6.0
     geospec-engine:
-      specifier: 0.5.1
-      version: 0.5.1
+      specifier: 0.6.0
+      version: 0.6.0
     graphics-debug:
       specifier: 0.0.100
       version: 0.0.100
@@ -1582,6 +1582,9 @@ importers:
       '@taucad/fs-bridge':
         specifier: workspace:*
         version: link:libs/fs-bridge
+      '@taucad/fs-client':
+        specifier: workspace:*
+        version: link:apps/libs/fs-client
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:packages/core/geometry
@@ -1719,10 +1722,10 @@ importers:
         version: 63.0.0(eslint@9.32.0(jiti@2.7.0))
       geospec:
         specifier: 'catalog:'
-        version: 0.5.1(vitest@4.1.11)
+        version: 0.6.0(vitest@4.1.11)
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.5.1
+        version: 0.6.0
       gray-matter:
         specifier: 'catalog:'
         version: 4.0.3
@@ -1921,10 +1924,10 @@ importers:
         version: link:../../libs/vite
       geospec:
         specifier: 'catalog:'
-        version: 0.5.1(vitest@4.1.11)
+        version: 0.6.0(vitest@4.1.11)
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.5.1
+        version: 0.6.0
       pino-pretty:
         specifier: 'catalog:'
         version: 13.2.0
@@ -2036,9 +2039,6 @@ importers:
       '@taucad/replicad':
         specifier: workspace:*
         version: link:../../packages/plugins/replicad
-      '@taucad/rhino':
-        specifier: workspace:*
-        version: link:../../packages/plugins/rhino
       '@taucad/rpc':
         specifier: workspace:*
         version: link:../../packages/rpc
@@ -2068,7 +2068,7 @@ importers:
         version: link:../../packages/plugins/zoo
       '@taulabs/openrscad-engine':
         specifier: 'catalog:'
-        version: 0.11.0-beta.4
+        version: 0.11.0-beta.5
       electron-updater:
         specifier: 'catalog:'
         version: 6.8.11
@@ -2080,7 +2080,7 @@ importers:
         version: 0.8.3
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.5.1
+        version: 0.6.0
       libassimp:
         specifier: 'catalog:'
         version: 0.4.1
@@ -2305,9 +2305,6 @@ importers:
       '@taucad/image':
         specifier: workspace:*
         version: link:../../../packages/plugins/image
-      '@taucad/rhino':
-        specifier: workspace:*
-        version: link:../../../packages/plugins/rhino
     devDependencies:
       '@taucad/runtime':
         specifier: workspace:*
@@ -2355,9 +2352,6 @@ importers:
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../../../packages/filesystem
-      '@taucad/memory':
-        specifier: workspace:*
-        version: link:../../../libs/memory
       '@taucad/types':
         specifier: workspace:*
         version: link:../../../libs/types
@@ -2395,9 +2389,6 @@ importers:
       '@taucad/lsp-fs':
         specifier: workspace:*
         version: link:../lsp-fs
-      '@taucad/memory':
-        specifier: workspace:*
-        version: link:../../../libs/memory
       '@taucad/types':
         specifier: workspace:*
         version: link:../../../libs/types
@@ -2426,9 +2417,6 @@ importers:
       '@taucad/fs-bridge':
         specifier: workspace:*
         version: link:../../../libs/fs-bridge
-      '@taucad/memory':
-        specifier: workspace:*
-        version: link:../../../libs/memory
       '@taucad/utils':
         specifier: workspace:*
         version: link:../../../libs/utils
@@ -2707,16 +2695,16 @@ importers:
         version: link:../../libs/types
       '@taulabs/openrscad-engine':
         specifier: 'catalog:'
-        version: 0.11.0-beta.4
+        version: 0.11.0-beta.5
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.2
       geospec:
         specifier: 'catalog:'
-        version: 0.5.1(vitest@4.1.11)
+        version: 0.6.0(vitest@4.1.11)
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.5.1
+        version: 0.6.0
       ws:
         specifier: 'catalog:'
         version: 8.22.0
@@ -2885,9 +2873,6 @@ importers:
       '@taucad/manifold':
         specifier: workspace:*
         version: link:../../packages/plugins/manifold
-      '@taucad/memory':
-        specifier: workspace:*
-        version: link:../../libs/memory
       '@taucad/middleware':
         specifier: workspace:*
         version: link:../../packages/plugins/middleware
@@ -2921,9 +2906,6 @@ importers:
       '@taucad/revisions':
         specifier: workspace:*
         version: link:../../packages/revisions
-      '@taucad/rhino':
-        specifier: workspace:*
-        version: link:../../packages/plugins/rhino
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
@@ -2983,7 +2965,7 @@ importers:
         version: link:../../packages/plugins/zoo
       '@taulabs/openrscad-engine':
         specifier: 'catalog:'
-        version: 0.11.0-beta.4
+        version: 0.11.0-beta.5
       '@vscode/codicons':
         specifier: 'catalog:'
         version: 0.0.46-24
@@ -3016,10 +2998,10 @@ importers:
         version: 5.3.0
       geospec:
         specifier: 'catalog:'
-        version: 0.5.1(vitest@4.1.11)
+        version: 0.6.0(vitest@4.1.11)
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.5.1
+        version: 0.6.0
       isbot:
         specifier: 'catalog:'
         version: 5.2.2
@@ -3475,7 +3457,7 @@ importers:
         version: link:../../packages/workbench
       geospec:
         specifier: 'catalog:'
-        version: 0.5.1(vitest@4.1.11)
+        version: 0.6.0(vitest@4.1.11)
     devDependencies:
       '@gltf-transform/core':
         specifier: 'catalog:'
@@ -3562,6 +3544,9 @@ importers:
 
   libs/fs-bridge:
     dependencies:
+      '@taucad/events':
+        specifier: workspace:*
+        version: link:../events
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../../packages/filesystem
@@ -3577,6 +3562,9 @@ importers:
       '@taucad/utils':
         specifier: workspace:*
         version: link:../utils
+      minimatch:
+        specifier: ^10.2.5
+        version: 10.2.6
     devDependencies:
       zod:
         specifier: 'catalog:'
@@ -3717,7 +3705,7 @@ importers:
         version: link:../../packages/runtime-testing
       geospec:
         specifier: 'catalog:'
-        version: 0.5.1(vitest@4.1.11)
+        version: 0.6.0(vitest@4.1.11)
       libcascade:
         specifier: 'catalog:'
         version: 3.1.0
@@ -4015,9 +4003,6 @@ importers:
       '@taucad/replicad':
         specifier: workspace:*
         version: link:../plugins/replicad
-      '@taucad/rhino':
-        specifier: workspace:*
-        version: link:../plugins/rhino
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../runtime
@@ -4047,10 +4032,10 @@ importers:
         version: 3.4.2
       geospec:
         specifier: 'catalog:'
-        version: 0.5.1(vitest@4.1.11)
+        version: 0.6.0(vitest@4.1.11)
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.5.1
+        version: 0.6.0
       ink:
         specifier: 'catalog:'
         version: 6.8.0(@types/react@19.2.17)(react@19.3.1)
@@ -4283,9 +4268,6 @@ importers:
       '@taucad/events':
         specifier: workspace:*
         version: link:../../libs/events
-      '@taucad/memory':
-        specifier: workspace:*
-        version: link:../../libs/memory
       '@taucad/nx':
         specifier: workspace:*
         version: link:../../tools/nx
@@ -4424,10 +4406,10 @@ importers:
         version: 8.18.2
       geospec:
         specifier: 'catalog:'
-        version: 0.5.1(vitest@4.1.11)
+        version: 0.6.0(vitest@4.1.11)
       geospec-engine:
         specifier: 'catalog:'
-        version: 0.5.1
+        version: 0.6.0
       xstate:
         specifier: 'catalog:'
         version: 6.0.0-alpha.59
@@ -4925,7 +4907,7 @@ importers:
         version: link:../../core/geometry
       '@taulabs/openrscad-engine':
         specifier: 'catalog:'
-        version: 0.11.0-beta.4
+        version: 0.11.0-beta.5
     devDependencies:
       '@gltf-transform/core':
         specifier: 'catalog:'
@@ -5086,28 +5068,6 @@ importers:
       type-fest:
         specifier: 'catalog:'
         version: 4.41.0
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
-
-  packages/plugins/rhino:
-    dependencies:
-      '@gltf-transform/core':
-        specifier: 'catalog:'
-        version: 4.5.1
-      '@taucad/geometry-core':
-        specifier: workspace:*
-        version: link:../../core/geometry
-      rhino3dm:
-        specifier: ^8.17.0
-        version: 8.35.0
-    devDependencies:
-      '@taucad/runtime':
-        specifier: workspace:*
-        version: link:../../runtime
-      '@taucad/runtime-testing':
-        specifier: workspace:*
-        version: link:../../runtime-testing
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
@@ -5586,6 +5546,9 @@ importers:
       electron:
         specifier: '>=37.0.0'
         version: 43.7.9
+      minimatch:
+        specifier: ^10.2.5
+        version: 10.2.6
       nanoid:
         specifier: 'catalog:'
         version: 5.1.16
@@ -5725,7 +5688,7 @@ importers:
         version: link:../plugins/zoo
       geospec:
         specifier: 'catalog:'
-        version: 0.5.1(vitest@4.1.11)
+        version: 0.6.0(vitest@4.1.11)
     devDependencies:
       '@taucad/telemetry':
         specifier: workspace:*
@@ -6025,7 +5988,7 @@ importers:
         version: link:../../libs/types
       geospec:
         specifier: 'catalog:'
-        version: 0.5.1(vitest@4.1.11)
+        version: 0.6.0(vitest@4.1.11)
       replicad:
         specifier: npm:@taulabs/replicad@1.1.0-taulabs.1
         version: '@taulabs/replicad@1.1.0-taulabs.1'
@@ -6164,7 +6127,7 @@ importers:
         version: link:../packages/ui
       '@taulabs/openrscad-engine':
         specifier: 'catalog:'
-        version: 0.11.0-beta.4
+        version: 0.11.0-beta.5
       ink:
         specifier: 'catalog:'
         version: 6.8.0(@types/react@19.2.17)(react@19.3.1)
@@ -13514,7 +13477,9 @@ packages:
   '@smithy/core@3.35.2':
     resolution: {integrity: sha512-ejTukBuP/Pg3t9N8Ux+0zKsXeHWm7p6W3HbXFOyltKasSxZwCFmvTut7kBdZSCF3m9y1bXXyVu6p2xuMFcsTyQ==}
     engines: {node: '>=18.0.0'}
-    deprecated: Deprecated due to a bug in custom logger data redaction. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
+    deprecated: |-
+      Deprecated due to a bug in custom logger data redaction. Upgrade to the latest version. If you used a custom logger with this
+        version, review your logs and rotate any credentials or other secrets. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
 
   '@smithy/credential-provider-imds@4.5.2':
     resolution: {integrity: sha512-A9uSdn72ozbRUSit0eib0TW7nXuNPlaeM0zcGkJ+nE6tFcSDbnmtwoxbTCFBukVQcszDAyvsd7+rTduPTXpygg==}
@@ -13908,40 +13873,40 @@ packages:
     peerDependencies:
       '@langchain/core': ^1.2.1
 
-  '@taulabs/openrscad-engine-darwin-arm64@0.11.0-beta.4':
-    resolution: {integrity: sha512-+Gsg7cdlz4k6RJEsIW3M+eC9soK+2X5Xl+TBmzOJzXy+RjmJYgjt3H0JTh30dPkG3M88gbYdmZscT1T8kIeZ4A==}
+  '@taulabs/openrscad-engine-darwin-arm64@0.11.0-beta.5':
+    resolution: {integrity: sha512-gZIHet+Qi6bzCXu5uXg+RMLkwFsyLsHq7ok4S4HSE+PrqqC3tcPIk1a689HHCOmmYOoZoBnH32pvPDZmScOjXw==}
     engines: {node: '>=20'}
     cpu: [arm64]
     os: [darwin]
 
-  '@taulabs/openrscad-engine-darwin-x64@0.11.0-beta.4':
-    resolution: {integrity: sha512-F3MBAQfGCpb5tHo6LTNYAxmODCje4LkXwP3X6W0iI+FhyknpjnrWBwR/UC7U4RPeZZQFLnnRLnYLB3ebHmJ95g==}
+  '@taulabs/openrscad-engine-darwin-x64@0.11.0-beta.5':
+    resolution: {integrity: sha512-kJlJe/B0PQ/lPRP/dELxYfvQZTMsYVbSzDt7MjjqvgwjmKtQ79FfjuNUQz+16Jc+Hdb8MMuPuIIZW9td9TsLhg==}
     engines: {node: '>=20'}
     cpu: [x64]
     os: [darwin]
 
-  '@taulabs/openrscad-engine-linux-arm64-gnu@0.11.0-beta.4':
-    resolution: {integrity: sha512-xFw+didDcTalHseQFolq+xoFDsx65U4gqZ5PW5SCqR8IRi9yHhZWzVswqR2bXuVEG3zA81eSjrSLmmcF7oFCsw==}
+  '@taulabs/openrscad-engine-linux-arm64-gnu@0.11.0-beta.5':
+    resolution: {integrity: sha512-uFgmvmgYcdPAFdvSPL8YO33fGAmXXPYLSYZb8v7mzdzPKMuyNdCEH838s3t5kqo+wUwWZRJY0H4bIPucCbj2fw==}
     engines: {node: '>=20'}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  '@taulabs/openrscad-engine-linux-x64-gnu@0.11.0-beta.4':
-    resolution: {integrity: sha512-mEewSFU/x0s5nPEBpYg5c264cDFpAZ0Vr7wY9q7k/LgIKqCjKXmED/t0ApGZ1CDhv5+e+AGyOpTodtA9EA8Qyw==}
+  '@taulabs/openrscad-engine-linux-x64-gnu@0.11.0-beta.5':
+    resolution: {integrity: sha512-KMlqDc4fr15DcQNZ98MQ6EM1+cBk2VaD5hEdN1uBwllZfE3yjnsh4X4Za3SFw6KFgPmpwsV6/LUahdSQonbyhA==}
     engines: {node: '>=20'}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  '@taulabs/openrscad-engine-win32-x64-msvc@0.11.0-beta.4':
-    resolution: {integrity: sha512-Y68hcr1t22NPWT+gwP7vxZxQSXUOrCDffBwVlMp5ugKd7RQpRdbO9mF/WXhpD0p+MOET/6VhNgmDZHTe0wm5MQ==}
+  '@taulabs/openrscad-engine-win32-x64-msvc@0.11.0-beta.5':
+    resolution: {integrity: sha512-DMvPAhglGV5nMlLx5F19IQA3gQsCusOphR1K4zzR22ShMnTgLEBNcOdr7YIJDDDL26tjwVHxbtHdWVqQ6BRHWQ==}
     engines: {node: '>=20'}
     cpu: [x64]
     os: [win32]
 
-  '@taulabs/openrscad-engine@0.11.0-beta.4':
-    resolution: {integrity: sha512-bmtPUwTJT34lU2bNoUVyX61GKpGGF9V4KtFerHsS2eawkWzakIbztMCcPAExRx+WI0dxK+Vgp394hPM4gV9JRA==}
+  '@taulabs/openrscad-engine@0.11.0-beta.5':
+    resolution: {integrity: sha512-jXQwh6NYfgpKh+eQMR/8hVYUuvbaH5zISD02T8o0atRQoV9w+4F8D7enfAYgejEJtbGJVr5J+/zzTzf7QJqgWw==}
     engines: {node: '>=20'}
 
   '@taulabs/replicad-opencascadejs@0.23.0-beta.0':
@@ -18913,32 +18878,32 @@ packages:
     resolution: {integrity: sha512-3hN7NaskYvMDLQY55gnW3NQ+mesEAepTqlg+VEbj7zzqEMBVNhzcGYYeqFo/TlYz6eQiFcp1HcsCZO+nGgS8zg==}
     engines: {node: '>=6.9.0'}
 
-  geospec-engine-darwin-arm64@0.5.1:
-    resolution: {integrity: sha512-dZxSC7CFRr28K0BS3oknqwJFsXnm40mIM71GkrqUH8LYh/wBUjWpX+WXS74vnkaPDL87KMbvF3fUuVja2PlWlA==}
+  geospec-engine-darwin-arm64@0.6.0:
+    resolution: {integrity: sha512-EbAVEISTD8DH8axYRLXWOIWN3p75pPTRRXnWzjq8IrDlsS4q/ADipsE/W8lpdwmFNt6Xdt5xObQqihuiTVv+Kg==}
     engines: {node: '>=24.0.0'}
     cpu: [arm64]
     os: [darwin]
 
-  geospec-engine-linux-arm64-gnu@0.5.1:
-    resolution: {integrity: sha512-e7z7lIqWZgwqPZg/1NgLy95yFj8BSTuCLkdCPfbLfTpzWR6F+XRa5Xtyb5lfXmPNPkZGNVVsB4ITJ2nhjGC8Xw==}
+  geospec-engine-linux-arm64-gnu@0.6.0:
+    resolution: {integrity: sha512-UJquuCto3DVfasAxQ8T2ih5b+nzJUbacprWgTD+5GMwr2qD3jRbUo5jr8sMR7/38u4F0fumgsuJ8gnARMEBRiw==}
     engines: {node: '>=24.0.0'}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  geospec-engine-linux-x64-gnu@0.5.1:
-    resolution: {integrity: sha512-uI9YliOySuQg+X8XyrPeSXdLtjYYgzbPQQIbFShezX1u/6fJK5oG2sW8uZZWSbEin8V1Ll7Ug0oAlS5c4VIHxQ==}
+  geospec-engine-linux-x64-gnu@0.6.0:
+    resolution: {integrity: sha512-0+SY1bMtxNulERHGBuH9khi439EJIenowznfIfJKHUfNHooj0+A8BdS/LabeymtF05T++w1RlysV3FKKsqyPYQ==}
     engines: {node: '>=24.0.0'}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  geospec-engine@0.5.1:
-    resolution: {integrity: sha512-neYSq3H2WjgQ/bLSNEFGvkxX98ZQtuYqTb+VdyocJ7TtXyBS7jEF1I/JugrRWY7x1v5Ljoa2Cc69F5YukZT3Tw==}
+  geospec-engine@0.6.0:
+    resolution: {integrity: sha512-S0QkW9G6TifdL21rYIulM4zpTtJnxV9xlyf0FAQQlNr6VHCw5H7QXlfkrqY7gMRb5avAPDRw/jfL4iR+R8x3FA==}
     engines: {node: '>=24.0.0'}
 
-  geospec@0.5.1:
-    resolution: {integrity: sha512-r3bg3cjzArKALfO+4p5RKMR1YsN+7EYkbeVeRg/eBwlLl1d9/Nb8/8BKKKp172cl8KYq5AN/4B2DzTK87msxUw==}
+  geospec@0.6.0:
+    resolution: {integrity: sha512-QY21NEjibfEmH3BqgMXFlo4zBmOjfu830pvvpVg8qG35uoPkreBKy6NLeR6WrcD+o1O4gZX+ePl3h69J9SZFow==}
     engines: {node: '>=24.0.0'}
     hasBin: true
     peerDependencies:
@@ -19475,6 +19440,7 @@ packages:
   image-size@0.5.5:
     resolution: {integrity: sha512-6TDAlDPZxUFCv+fuOkIoXT/V/f3Qbq8e37p+YOiYrUv3v9cc3/6x78VdfPgFVaB9dZYeLUfKgHRebpkm/oP2VQ==}
     engines: {node: '>=0.10.0'}
+    deprecated: Please migrate to image-size@2.x
     hasBin: true
 
   image-ssim@0.2.0:
@@ -23750,9 +23716,6 @@ packages:
 
   rfdc@1.4.1:
     resolution: {integrity: sha512-q1b3N5QkRUWUl7iyylaaj3kOpIT0N2i9MqIEQXP73GVsN9cw3fdx8X63cEmWhJGi2PPCF23Ijp7ktmd39rawIA==}
-
-  rhino3dm@8.35.0:
-    resolution: {integrity: sha512-YcMDgOT7m132Zd/Nw1AAMFkrtpx2SD30V7Mq3P7jfab6ItURXCOdS8dHe+bMGiNQPRJuYEX+Nvos6c9T1xJ6tA==}
 
   rimraf@2.6.3:
     resolution: {integrity: sha512-mwqeW5XsA2qAejG46gYdENaxXjx9onRNCfn7L0duuP4hCuTIi/QO7PDK07KJfp1d+izWPrzEJDcSqBa0OZQriA==}
@@ -35019,28 +34982,28 @@ snapshots:
     dependencies:
       '@langchain/core': 1.2.17(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.223.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.12.0(@opentelemetry/api@1.9.1))(openai@7.32.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/signature-v4@5.7.4)(undici@8.11.2)(ws@8.22.0)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(ws@8.22.0)
 
-  '@taulabs/openrscad-engine-darwin-arm64@0.11.0-beta.4':
+  '@taulabs/openrscad-engine-darwin-arm64@0.11.0-beta.5':
     optional: true
 
-  '@taulabs/openrscad-engine-darwin-x64@0.11.0-beta.4':
+  '@taulabs/openrscad-engine-darwin-x64@0.11.0-beta.5':
     optional: true
 
-  '@taulabs/openrscad-engine-linux-arm64-gnu@0.11.0-beta.4':
+  '@taulabs/openrscad-engine-linux-arm64-gnu@0.11.0-beta.5':
     optional: true
 
-  '@taulabs/openrscad-engine-linux-x64-gnu@0.11.0-beta.4':
+  '@taulabs/openrscad-engine-linux-x64-gnu@0.11.0-beta.5':
     optional: true
 
-  '@taulabs/openrscad-engine-win32-x64-msvc@0.11.0-beta.4':
+  '@taulabs/openrscad-engine-win32-x64-msvc@0.11.0-beta.5':
     optional: true
 
-  '@taulabs/openrscad-engine@0.11.0-beta.4':
+  '@taulabs/openrscad-engine@0.11.0-beta.5':
     optionalDependencies:
-      '@taulabs/openrscad-engine-darwin-arm64': 0.11.0-beta.4
-      '@taulabs/openrscad-engine-darwin-x64': 0.11.0-beta.4
-      '@taulabs/openrscad-engine-linux-arm64-gnu': 0.11.0-beta.4
-      '@taulabs/openrscad-engine-linux-x64-gnu': 0.11.0-beta.4
-      '@taulabs/openrscad-engine-win32-x64-msvc': 0.11.0-beta.4
+      '@taulabs/openrscad-engine-darwin-arm64': 0.11.0-beta.5
+      '@taulabs/openrscad-engine-darwin-x64': 0.11.0-beta.5
+      '@taulabs/openrscad-engine-linux-arm64-gnu': 0.11.0-beta.5
+      '@taulabs/openrscad-engine-linux-x64-gnu': 0.11.0-beta.5
+      '@taulabs/openrscad-engine-win32-x64-msvc': 0.11.0-beta.5
 
   '@taulabs/replicad-opencascadejs@0.23.0-beta.0': {}
 
@@ -40783,25 +40746,25 @@ snapshots:
 
   gensync@1.0.0-beta.2: {}
 
-  geospec-engine-darwin-arm64@0.5.1:
+  geospec-engine-darwin-arm64@0.6.0:
     optional: true
 
-  geospec-engine-linux-arm64-gnu@0.5.1:
+  geospec-engine-linux-arm64-gnu@0.6.0:
     optional: true
 
-  geospec-engine-linux-x64-gnu@0.5.1:
+  geospec-engine-linux-x64-gnu@0.6.0:
     optional: true
 
-  geospec-engine@0.5.1:
+  geospec-engine@0.6.0:
     optionalDependencies:
-      geospec-engine-darwin-arm64: 0.5.1
-      geospec-engine-linux-arm64-gnu: 0.5.1
-      geospec-engine-linux-x64-gnu: 0.5.1
+      geospec-engine-darwin-arm64: 0.6.0
+      geospec-engine-linux-arm64-gnu: 0.6.0
+      geospec-engine-linux-x64-gnu: 0.6.0
 
-  geospec@0.5.1(vitest@4.1.11):
+  geospec@0.6.0(vitest@4.1.11):
     dependencies:
       esbuild: 0.28.2
-      geospec-engine: 0.5.1
+      geospec-engine: 0.6.0
       zod: 4.6.7
     optionalDependencies:
       vitest: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
@@ -46777,8 +46740,6 @@ snapshots:
   reusify@1.1.0: {}
 
   rfdc@1.4.1: {}
-
-  rhino3dm@8.35.0: {}
 
   rimraf@2.6.3:
     dependencies:

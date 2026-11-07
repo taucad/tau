@@ -8,7 +8,9 @@ import { composeView, maskedPathCode } from '#composed-view.js';
 import { tauPathPolicy } from '#path-registry.js';
 import { createWorkspaceFileService } from '#testing/workspace-service-harness.js';
 import type { ComposedViewOverlay } from '#composed-view.js';
+import type { Changeset, ChangesetEntryReceipt, ChangesetReceipt } from '#changeset.js';
 import type { FileReadStreamOptions, WatchEvent, WatchRequest } from '#types.js';
+import type { IndexChanges } from '#project-index/project-index.js';
 
 const encoder = new TextEncoder();
 const contents = {
@@ -625,6 +627,20 @@ describe('composeView index-backed reads', () => {
           .filter(({ path }) => path.includes(query))
           .slice(0, options?.maxResults ?? 100),
       statTree: async (path: string, options?: { admits?: Admits }) => admitted(path, options?.admits),
+      changedSince: async (since: number, options?: { admits?: Admits }): Promise<IndexChanges> => ({
+        generation: since + rows.length,
+        entries: admitted('', options?.admits).map(({ path, type, size, mtimeMs }) => ({
+          path,
+          kind: type,
+          size,
+          mtimeMs,
+          generation: since + 1,
+        })),
+        removed: ['.git/old', 'src/gone.ts']
+          .filter((path) => options?.admits?.(path, 'file') !== false)
+          .map((path) => ({ path, kind: 'file', generation: since + 1 })),
+        epoch: 'fixture',
+      }),
     });
   };
 
@@ -667,11 +683,31 @@ describe('composeView index-backed reads', () => {
     await expect(view.statTree!('.git')).rejects.toMatchObject({ code: 'EPERM' });
   });
 
+  it('masks what the index changed and removed, before the descent', async () => {
+    const view = composeView(
+      {
+        filesystem: indexed([
+          { path: '.git', type: 'dir' },
+          { path: '.git/HEAD', type: 'file' },
+          { path: 'src', type: 'dir' },
+          { path: 'src/main.ts', type: 'file' },
+        ]),
+      },
+      { consumer: 'agent', policy: tauPathPolicy },
+    );
+
+    const changes = await view.changedSince!(3);
+    expect(changes.generation).toBe(7);
+    expect(changes.entries.map(({ path }) => path)).toEqual(['src', 'src/main.ts']);
+    expect(changes.removed.map(({ path }) => path)).toEqual(['src/gone.ts']);
+  });
+
   it('offers neither read when the composed filesystem has no index', async () => {
     const view = composeView({ filesystem: provider }, { consumer: 'user', policy: tauPathPolicy });
 
     expect(view.search).toBeUndefined();
     expect(view.statTree).toBeUndefined();
+    expect(view.changedSince).toBeUndefined();
   });
 });
 
@@ -820,6 +856,115 @@ describe('composeView mutating porcelain', () => {
  * connection, and on the node composed views (host daemon, desktop) it is the
  * only stream there is, with no bridge in front of it.
  */
+describe('composeView masked apply', () => {
+  const receipt = (count: number): ChangesetReceipt => ({
+    entries: Array.from({ length: count }, (_, index): ChangesetEntryReceipt => ({ index, outcome: 'applied' })),
+    applied: count,
+    failed: 0,
+    uncertain: 0,
+    skipped: 0,
+    state: 'applied',
+  });
+
+  /** A checkout whose rooted surface applies changesets, recording each one. */
+  const applying = () =>
+    Object.assign(new MemoryProvider(), {
+      apply: vi.fn(async (changeset: Changeset) => receipt(changeset.entries.length)),
+    });
+
+  it('should hand a changeset of visible paths to the pipeline, entry for entry', async () => {
+    const base = applying();
+    const view = composeView({ filesystem: base }, { consumer: 'agent', policy: tauPathPolicy });
+    const changeset: Changeset = {
+      entries: [
+        { op: 'write', path: 'src/a.ts', data: 'a' },
+        { op: 'move', from: 'src/b.ts', to: 'src/c.ts' },
+        { op: 'delete', path: 'old', recursive: true },
+        { op: 'mkdir', path: 'out' },
+        { op: 'append', path: 'log.txt', data: 'x' },
+      ],
+      lifecycle: false,
+    };
+
+    await expect(view.apply!(changeset)).resolves.toMatchObject({ state: 'applied', applied: 5 });
+    expect(base.apply).toHaveBeenCalledWith(changeset);
+  });
+
+  it.each(['agent', 'user'] as const)(
+    'should refuse the whole changeset for the %s when one entry names a hidden path, applying nothing',
+    async (consumer) => {
+      const base = applying();
+      const view = composeView({ filesystem: base }, { consumer, policy: tauPathPolicy });
+
+      await expect(
+        view.apply!({
+          entries: [
+            { op: 'write', path: 'src/a.ts', data: 'a' },
+            { op: 'write', path: '.git/HEAD', data: 'ref' },
+          ],
+        }),
+      ).rejects.toMatchObject({ code: 'EPERM', reason: maskedPathCode });
+      await expect(
+        view.apply!({ entries: [{ op: 'move', from: 'src/a.ts', to: '.tau/project.json' }] }),
+      ).rejects.toMatchObject({ code: 'EPERM', reason: maskedPathCode });
+      expect(base.apply).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['agent', 'user'] as const)(
+    'should refuse a lifecycle changeset for the %s before asking about any path',
+    async (consumer) => {
+      const base = applying();
+      const view = composeView({ filesystem: base }, { consumer, policy: tauPathPolicy });
+
+      await expect(
+        view.apply!({ entries: [{ op: 'write', path: 'src/a.ts', data: 'a' }], lifecycle: true }),
+      ).rejects.toMatchObject({ code: 'EPERM' });
+      expect(base.apply).not.toHaveBeenCalled();
+    },
+  );
+
+  it('should refuse a records entry for an agent and admit it for a person', async () => {
+    const agentBase = applying();
+    const userBase = applying();
+    const changeset: Changeset = { entries: [{ op: 'write', path: '.tau/chats/c1.json', data: '{}' }] };
+
+    await expect(
+      composeView({ filesystem: agentBase }, { consumer: 'agent', policy: tauPathPolicy }).apply!(changeset),
+    ).rejects.toMatchObject({ code: 'EROFS', reason: maskedPathCode });
+    expect(agentBase.apply).not.toHaveBeenCalled();
+
+    await composeView({ filesystem: userBase }, { consumer: 'user', policy: tauPathPolicy }).apply!(changeset);
+    expect(userBase.apply).toHaveBeenCalledOnce();
+  });
+
+  it('should refuse a recursive delete or a move whose subtree holds a hidden path', async () => {
+    const base = applying();
+    await base.writeFile('vendor/.git/HEAD', 'ref');
+    await base.writeFile('vendor/lib.ts', 'x');
+    const agent = composeView({ filesystem: base }, { consumer: 'agent', policy: tauPathPolicy });
+
+    await expect(agent.apply!({ entries: [{ op: 'delete', path: 'vendor', recursive: true }] })).rejects.toMatchObject({
+      code: 'EPERM',
+      reason: maskedPathCode,
+    });
+    await expect(agent.apply!({ entries: [{ op: 'move', from: 'vendor', to: 'moved' }] })).rejects.toMatchObject({
+      code: 'EPERM',
+      reason: maskedPathCode,
+    });
+    expect(base.apply).not.toHaveBeenCalled();
+
+    // A non-recursive delete removes only an empty directory, so it reaches nothing unnamed.
+    await agent.apply!({ entries: [{ op: 'delete', path: 'vendor/lib.ts' }] });
+    expect(base.apply).toHaveBeenCalledOnce();
+  });
+
+  it('should serve no apply over a checkout that has none', () => {
+    const view = composeView({ filesystem: new MemoryProvider() }, { consumer: 'agent', policy: tauPathPolicy });
+    expect(view.apply).toBeUndefined();
+  });
+});
+
 describe('composeView watch mask', () => {
   /** The memory provider with a watch surface, so the mask is the only variable. */
   const watchable = () => {

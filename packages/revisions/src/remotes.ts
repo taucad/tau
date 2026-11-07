@@ -66,6 +66,37 @@ export const tauRemoteUrl = (apiBaseUrl: string, projectId: string): string => {
 };
 
 /**
+ * Where the hosted catalogue of a Tau repository is (charter D8).
+ *
+ * Only a project's own Tau Cloud repository on the API's origin has one; any
+ * other URL — a third-party remote, another origin — answers `undefined`, and
+ * a fetch from it goes over smart HTTP as before.
+ *
+ * @param apiBaseUrl - Origin the Tau API is reachable at, or `undefined` before the page has said.
+ * @param remoteUrl - A remote's smart-HTTP URL.
+ * @returns `GET /v1/projects/<projectId>/git/catalogue` on that origin, or `undefined`.
+ * @public
+ *
+ * @example <caption>A project's catalogue, from its remote</caption>
+ * ```typescript
+ * import { tauCatalogueUrl } from '@taucad/revisions';
+ *
+ * tauCatalogueUrl('https://api.tau.new', 'https://api.tau.new/v1/git/p1.git');
+ * // 'https://api.tau.new/v1/projects/p1/git/catalogue'
+ * ```
+ */
+export const tauCatalogueUrl = (apiBaseUrl: string | undefined, remoteUrl: string): string | undefined => {
+  if (apiBaseUrl === undefined || !isTauApiUrl(apiBaseUrl, remoteUrl)) {
+    return undefined;
+  }
+  const base = apiBaseUrl.replace(/\/+$/u, '');
+  const projectId = /\/v1\/git\/([\w-]+)\.git\/?$/u.exec(remoteUrl)?.[1];
+  return projectId === undefined || remoteUrl.replace(/\/+$/u, '') !== tauRemoteUrl(base, projectId)
+    ? undefined
+    : `${base}/v1/projects/${projectId}/git/catalogue`;
+};
+
+/**
  * One remote record from a name and a URL.
  *
  * @param name - Name git's config holds this remote under.
@@ -681,6 +712,7 @@ export const remoteTransportError = (error: unknown, context: RemoteTransportCon
   const sentence = code === 'REMOTE_REAUTHORIZATION_REQUIRED' && status === 401 ? undefined : answered.message;
   return new RevisionPortError(code, sentence ?? refusalSentence(code, context.remote), {
     cause: error,
+    status,
     ...(status === 429
       ? { retryAfterMilliseconds: retryAfterMilliseconds(context.retryAfter) ?? defaultRateLimitWaitMilliseconds }
       : {}),

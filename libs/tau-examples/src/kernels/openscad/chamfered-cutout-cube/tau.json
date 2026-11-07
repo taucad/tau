@@ -1,0 +1,12 @@
+{
+  "$schema": "https://tau.new/schemas/tau-v1.json",
+  "name": "Chamfered Cutout Cube",
+  "description": "A 40 mm cube with every edge chamfered 3 mm and a 20 mm through-bore, built from nested OpenSCAD modules. Its GeoSpec suite checks that the modules export one watertight solid.",
+  "tags": ["csg", "modules", "openscad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.scad",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

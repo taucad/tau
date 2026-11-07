@@ -11,23 +11,18 @@ import { replicadOptionsSchema } from '#replicad.schemas.js';
 const sphere = `import { makeSphere } from 'replicad';
 export default function main() { return makeSphere(5); }`;
 
-// D1 (kernel budget program): no preview budget on any device. A host that still passes the deprecated option
-// gets the requested tessellation, never a coarsened one.
+// D1 (kernel budget program): no preview budget on any device, so every preview meshes at the requested
+// tessellation.
 describe('Replicad host memory budget', { timeout: 120_000 }, () => {
-  it('has no default preview triangle budget', () => {
-    expect(replicadOptionsSchema.parse({})).not.toHaveProperty('previewTriangleBudget');
-  });
-
-  it('renders a preview over the former previewTriangleBudget at the requested tessellation', async () => {
-    const previewTriangleBudget = 200;
+  it('renders a preview at the requested tessellation, never coarsened', async () => {
     const rendering = await createTestGeometry({
-      runtime: defineRuntime({ kernels: [replicadKernel({ previewTriangleBudget })], bundlers: [esbuildBundler()] }),
+      runtime: defineRuntime({ kernels: [replicadKernel()], bundlers: [esbuildBundler()] }),
       files: { 'main.ts': sphere },
       open: { source: { path: 'main.ts' } },
     });
     assertRenderingSuccess(rendering);
     const { tessellation } = rendering.artifact;
-    expect(tessellation?.triangles).toBeGreaterThan(previewTriangleBudget);
+    expect(tessellation?.triangles).toBeGreaterThan(0);
     expect(tessellation).toMatchObject({ requested: 'medium' });
     expect(tessellation).not.toHaveProperty('downgraded');
     expect(rendering.issues).not.toContainEqual(expect.objectContaining({ code: 'TESSELLATION_DOWNGRADED' }));

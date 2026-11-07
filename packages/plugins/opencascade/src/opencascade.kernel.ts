@@ -105,12 +105,6 @@ export type OpenCascadeOptions = {
   wasm?: 'auto' | 'full' | 'multi' | OpenCascadeWasmConfig;
   /** OC API call tracing mode. `'summary'` (default) emits aggregated stats, `'per-call'` emits individual spans. */
   ocTracing?: 'off' | 'summary' | 'per-call';
-  /**
-   * Ignored: previews are never coarsened, so there is no triangle budget. Kept until hosts stop passing it.
-   *
-   * @deprecated No effect; previews mesh at the requested tessellation.
-   */
-  previewTriangleBudget?: number;
 };
 
 // =============================================================================
@@ -596,6 +590,25 @@ function exportOpencascadeStepAssembly(
 // Kernel definition
 // =============================================================================
 
+/**
+ * Flush the OC call-tracing summary when an operation settles, so render and export calls are counted in their own
+ * `oc.summary` span rather than in the next evaluation's.
+ *
+ * @param operation - A kernel operation whose context may hold a tracing summary.
+ * @returns The operation, flushing the summary after it resolves or throws.
+ */
+function flushOcTracingAfter<Input, Runtime, Context extends { tracingSummary?: OcTracingSummary }, Result>(
+  operation: (input: Input, runtime: Runtime, context: Context) => Promise<Result>,
+): (input: Input, runtime: Runtime, context: Context) => Promise<Result> {
+  return async (input, runtime, context) => {
+    try {
+      return await operation(input, runtime, context);
+    } finally {
+      context.tracingSummary?.flush();
+    }
+  };
+}
+
 /** @public */
 export const opencascadeKernel = defineKernel({
   id: 'opencascade',
@@ -606,7 +619,7 @@ export const opencascadeKernel = defineKernel({
   name: 'OpenCascadeKernel',
   // 1.3.0: the model view and GLB export claim `includeEdges` and draw B-rep edge lines themselves,
   // so a render cached by 1.2.0 with fallback overlay lines stops matching and ages out.
-  version: '1.3.0',
+  version: '1.4.0',
   optionsSchema: opencascadeOptionsSchema,
   views: {
     model: {
@@ -827,6 +840,7 @@ export const opencascadeKernel = defineKernel({
           includeEdges: content?.includeEdges === true,
         });
       } finally {
+        context.tracingSummary?.flush();
         meshSpan.end();
       }
     } catch (error) {
@@ -835,7 +849,7 @@ export const opencascadeKernel = defineKernel({
     }
   },
 
-  async export(input, _runtime, context) {
+  export: flushOcTracingAfter(async (input, _runtime, context) => {
     const { exportId, handle, options } = input;
     const emptyGlbExport = () => ({
       files: [createExportFile('glb', 'model.glb', asBuffer(createEmptyGlb()))] as const,
@@ -924,7 +938,7 @@ export const opencascadeKernel = defineKernel({
         ]);
       }
     }
-  },
+  }),
 
   releaseHandle({ handle }) {
     releaseShapeEntries(handle);

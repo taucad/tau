@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { workbenchRecords } from '@taucad/workbench';
-import { snapshotSchema } from '@taucad/chat';
+import { maxSnapshotFileTreeEntries, snapshotSchema } from '@taucad/chat';
 import type { FileEntry, FileProvenance, GeometryComponentManifest } from '@taucad/types';
-import { projectFileTree, projectViewerSelection, projectWorkbenchSnapshot } from '#hooks/use-chat-snapshot.js';
+import {
+  boundedProjectFileTree,
+  projectFileTree,
+  projectViewerSelection,
+  projectWorkbenchSnapshot,
+} from '#hooks/use-chat-snapshot.js';
 import type { WorkbenchLayoutSnapshot } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 
 describe('projectWorkbenchSnapshot', () => {
@@ -223,5 +228,36 @@ describe('projectFileTree', () => {
       { path: 'models/a.step', name: 'a.step', type: 'file', size: 12, contentKind: 'binary' },
     ]);
     expect(snapshotSchema.safeParse({ fileTree: rows }).success).toBe(true);
+  });
+});
+
+describe('boundedProjectFileTree', () => {
+  const file = (path: string): FileEntry => ({
+    path,
+    name: path.split('/').pop()!,
+    type: 'file',
+    size: 1,
+    contentKind: 'binary',
+    mtimeMs: 1,
+    isLoaded: false,
+  });
+
+  it('lists every file of a small project, shallowest first, with no omission count', () => {
+    const bounded = boundedProjectFileTree([file('b/z.ts'), file('main.ts'), file('a/y.ts')]);
+
+    expect(bounded.fileTree.map(({ path }) => path)).toEqual(['main.ts', 'a/y.ts', 'b/z.ts']);
+    expect(bounded.fileTreeOmitted).toBeUndefined();
+  });
+
+  it('cuts a large project at the bound, the same way whatever order the tree yields (D18)', () => {
+    const paths = Array.from({ length: maxSnapshotFileTreeEntries + 120 }, (_, index) => `src/f-${String(index)}.ts`);
+    const forward = boundedProjectFileTree([...paths.map((path) => file(path)), file('tau.json')]);
+    const backward = boundedProjectFileTree([file('tau.json'), ...paths.toReversed().map((path) => file(path))]);
+
+    expect(forward.fileTree).toHaveLength(maxSnapshotFileTreeEntries);
+    expect(forward.fileTreeOmitted).toBe(121);
+    expect(forward.fileTree[0]!.path).toBe('tau.json');
+    expect(backward).toStrictEqual(forward);
+    expect(snapshotSchema.safeParse(forward).success).toBe(true);
   });
 });

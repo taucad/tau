@@ -5,7 +5,10 @@ import * as smlib from '@classcad/smlibwasm';
 import type { Part } from '@classcad/smlibwasm';
 
 import { render } from '#utils/render-output.js';
+import { loadSmlibKernel } from '#utils/smlib-kernel.js';
 import type { GeometrySmlib } from '#smlib.types.js';
+
+const kernel = await loadSmlibKernel();
 
 /** A spline-toothed wheel on a boss: curved edges whose own samples cut across the faceted surface. */
 function wheel(): Part {
@@ -48,6 +51,7 @@ describe('B-rep edge lines', () => {
     const shape = wheel();
     const [geometry] = render([{ shape, name: 'wheel' }], {
       library: smlib,
+      kernel,
       tessellation: { linearTolerance: tolerance, angularTolerance: 20 },
       collectBrepEdges: true,
     });

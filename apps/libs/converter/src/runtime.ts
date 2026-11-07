@@ -5,11 +5,10 @@ import { assimp } from '@taucad/assimp';
 import { brep } from '@taucad/brep';
 import { gltf } from '@taucad/gltf';
 import { image } from '@taucad/image';
-import { rhino } from '@taucad/rhino';
 
 /** @public */
 export const converterRuntime = defineRuntime({
-  plugins: [gltf(), brep(), rhino(), assimp({ preset: 'all' }), image()],
+  plugins: [gltf(), brep(), assimp({ preset: 'all' }), image()],
 });
 
 /** @public */

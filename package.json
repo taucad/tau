@@ -240,6 +240,7 @@
     "@taucad/filesystem": "workspace:*",
     "@taucad/formal": "workspace:*",
     "@taucad/fs-bridge": "workspace:*",
+    "@taucad/fs-client": "workspace:*",
     "@taucad/geometry-core": "workspace:*",
     "@taucad/nx": "workspace:*",
     "@taucad/oxlint": "workspace:*",

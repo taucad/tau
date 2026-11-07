@@ -11,6 +11,7 @@ import { WorkerTelemetryCollector } from '#framework/worker-telemetry.js';
 import { defineMiddlewareV2 } from '#middleware/runtime-middleware-v2.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
 import { defineKernelV2, nonemptyExportFiles } from '#types/runtime-kernel-v2.types.js';
+import { defineTranscoder } from '#types/runtime-transcoder.types.js';
 import type { RuntimeOperationObservation } from '#types/runtime-observation.types.js';
 import type { TelemetryEntry } from '#types/runtime-wire.types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
@@ -611,4 +612,103 @@ describe('operation observation over the in-process transport', () => {
       await client.shutdown();
     }
   });
+
+  it.each(['off', 'facts'] as const)(
+    'should stamp the transcoder on an export exported before the document is described, with observation %s',
+    async (mode) => {
+      /* The CLI's shape: several kernels, one of which writes the target natively, and an export requested right
+       * after `open`, before the worker has said which kernel owns the document. */
+      const nativeStl = defineKernelV2({
+        id: 'native-stl',
+        extensions: ['native'] as const,
+        name: 'Native STL',
+        version: '1.0.0',
+        views: {},
+        exports: { stl: { title: 'STL', mimeType: 'model/stl', extension: 'stl' } },
+        async initialize() {
+          return {};
+        },
+        async resolve({ entryPath }) {
+          return { resolved: [entryPath], unresolved: [] };
+        },
+        async describe() {
+          return createKernelSuccess({ parameters });
+        },
+        async evaluate() {
+          return { handle: {}, views: [] as const, exports: ['stl'] as const };
+        },
+        async export() {
+          return {
+            files: nonemptyExportFiles([{ name: 'model.stl', mimeType: 'model/stl', bytes: new Uint8Array([1]) }]),
+          };
+        },
+      })();
+      const meshOnly = defineKernelV2({
+        id: 'mesh-only',
+        extensions: ['mesh'] as const,
+        name: 'Mesh only',
+        version: '1.0.0',
+        views: {},
+        exports: { glb: { title: 'GLB', mimeType: 'model/gltf-binary', extension: 'glb' } },
+        async initialize() {
+          return {};
+        },
+        async resolve({ entryPath }) {
+          return { resolved: [entryPath], unresolved: [] };
+        },
+        async describe() {
+          return createKernelSuccess({ parameters });
+        },
+        async evaluate() {
+          return { handle: {}, views: [] as const, exports: ['glb'] as const };
+        },
+        async export() {
+          return {
+            files: nonemptyExportFiles([
+              { name: 'model.glb', mimeType: 'model/gltf-binary', bytes: new Uint8Array([1]) },
+            ]),
+          };
+        },
+      })();
+      const converter = defineTranscoder({
+        id: 'converter',
+        name: 'Converter',
+        version: '1.0.0',
+        edges: [{ from: 'glb', to: 'stl', fidelity: 'mesh' }],
+        async initialize() {
+          return {};
+        },
+        async transcode() {
+          return {
+            success: true,
+            data: [{ name: 'model.stl', mimeType: 'model/stl', bytes: new Uint8Array([2]) }],
+            issues: [],
+          };
+        },
+      })();
+      const runtime = defineRuntime({ kernels: [nativeStl, meshOnly], transcoders: [converter] });
+      const client = createRuntimeClient({ transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs({}) }) });
+      const seen: RuntimeOperationObservation[] = [];
+      client.on('operation', (observation) => seen.push(observation));
+      client.observe(mode);
+      const document = client.open({ source: { files: { 'model.mesh': 'mesh' } }, watch: false });
+      try {
+        await expect(document.export('stl')).resolves.toMatchObject({ success: true });
+        await vi.waitFor(() => {
+          expect(byOperation(seen, 'export')[0]?.facts).toBe(mode === 'facts' ? 'joined' : 'not-observed');
+        });
+        expect(byOperation(seen, 'export')[0]).toMatchObject({
+          operation: 'export',
+          transport: 'in-process',
+          kernel: 'mesh-only',
+          format: 'stl',
+          plugin: 'converter',
+          sourceFormat: 'glb',
+        });
+      } finally {
+        document.close();
+        await client.shutdown();
+      }
+    },
+  );
 });

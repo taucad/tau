@@ -31,9 +31,6 @@ export type OpenscadWorkerCommand =
   | Readonly<{
       type: 'init';
       assets: OpenscadLanguageAssets;
-      /** Absolute workspace root, for Tier 0 file-pool keys. */
-      rootDirectory: string;
-      filePoolBuffer?: SharedArrayBuffer;
     }>
   | Readonly<{ type: 'lsp'; message: string }>
   | Readonly<{ type: 'fs-response'; response: JSONRPCResponse }>

@@ -430,6 +430,36 @@ describe('environmentSchema', () => {
     expect(result.success).toBe(false);
   });
 
+  describe('BILLING_INVOCATION_DEADLINE', () => {
+    const parseDeadline = (value: string | undefined) =>
+      environmentSchema.safeParse({ ...baseEnvironment(), BILLING_INVOCATION_DEADLINE: value });
+
+    it('should default to 300 000 ms', () => {
+      const result = parseDeadline(undefined);
+
+      expect(result.success && result.data.BILLING_INVOCATION_DEADLINE).toBe(300_000);
+    });
+
+    it('should accept the 600 000 ms schema maximum', () => {
+      const result = parseDeadline('600000');
+
+      expect(result.success && result.data.BILLING_INVOCATION_DEADLINE).toBe(600_000);
+    });
+
+    it.each(['600001', '0'])('should refuse %s', (value) => {
+      expect(parseDeadline(value).success).toBe(false);
+    });
+
+    it('should leave production on the default while staging sets the maximum', () => {
+      const apiRoot = new URL('../../', import.meta.url);
+
+      expect(readFileSync(new URL('fly.prod.toml', apiRoot), 'utf8')).not.toContain('BILLING_INVOCATION_DEADLINE');
+      expect(readFileSync(new URL('fly.staging.toml', apiRoot), 'utf8')).toMatch(
+        /^BILLING_INVOCATION_DEADLINE = '600000'$/mu,
+      );
+    });
+  });
+
   it('should require a de-privileged runtime role in production', () => {
     const base = {
       ...baseEnvironment(),

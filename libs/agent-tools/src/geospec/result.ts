@@ -172,6 +172,25 @@ const resourceLimitCodes = new Set(['GEOSPEC_RESOURCE_LIMIT', 'LIMIT_EXCEEDED', 
 const workBudgetCodes = new Set(['MATCHER_TIMEOUT', 'GEOSPEC_WORK_BUDGET_EXHAUSTED']);
 /** The engine refuses one claim, and runs its siblings, when that claim's expectation payload is malformed. */
 const invalidExpectationCode = 'GEOSPEC_INVALID_EXPECTATION';
+/**
+ * The accuracy contract's refusals, each a claim the engine can neither pass nor fail in either polarity: the fact's
+ * error bound straddles the claim's tolerance, the file defines its geometry more coarsely than that tolerance, or a
+ * bounded fact needs closed shells.
+ */
+const accuracySuggestions: ReadonlyMap<string, string> = new Map([
+  [
+    'GEOSPEC_ACCURACY_INSUFFICIENT',
+    "Not decided: the measurement's error bound straddles the claim's tolerance, so the engine can neither pass nor fail it (the diagnostic details give measured, bound and tolerance). Keep the assertion and its tolerance as designed and report the claim as not decided.",
+  ],
+  [
+    'GEOSPEC_FILE_TOLERANCE_EXCEEDS_CLAIM',
+    "Not decided: the model file defines its geometry more coarsely than the claim's tolerance (the diagnostic details give tolerance, gapBound and fileTolerance). Keep the assertion and its tolerance; export the model at a tighter modelling tolerance and re-run, or report the claim as not decided.",
+  ],
+  [
+    'GEOSPEC_SUBJECT_NOT_CLOSED',
+    'Not decided: this fact is defined for closed shells only, and the subject has an open shell. Keep the assertion; close the open shells in the model and re-run, or report the claim as not decided.',
+  ],
+]);
 const evidenceCodes = new Set([
   'GEOSPEC_UNSUPPORTED_EVIDENCE',
   'GEOSPEC_EVIDENCE_UNSUPPORTED',
@@ -180,7 +199,7 @@ const evidenceCodes = new Set([
   geoSpecRegionWholeModelClaimCode,
 ]);
 const weakeningSuggestion =
-  /\b(?:update|weaken|relax|loosen|remove|delete|drop|change)\b[^.]{0,60}\b(?:assertion|expectation|expected|tolerance|test)\b/iu;
+  /\b(?:update|weaken|relax|loosen|widen|remove|delete|drop|change)\b[^.]{0,60}\b(?:assertion|expectation|expected|tolerance|test)\b|\b(?:raise|increase)\b[^.]{0,60}\btolerance\b/iu;
 /** Advice to reduce the design to fit a limit; a limit is met with resources, never less geometry. */
 const reducingSuggestion =
   /\b(?:coarsen|coarser|shrink|crop|simplify|decimate)\b|\bsmaller (?:part|model|subject|export)\b|\blower (?:the )?resolution\b/iu;
@@ -218,6 +237,9 @@ const diagnosticCategory = (diagnostic: GeometryDiagnostic): FailureCategory | u
   if (codes.includes(invalidExpectationCode)) {
     return 'invalid-expectation';
   }
+  if (codes.some((code) => accuracySuggestions.has(code))) {
+    return 'accuracy';
+  }
   if (codes.some((code) => analysisLimitCodes.has(code))) {
     return 'analysis-limit';
   }
@@ -243,6 +265,7 @@ const diagnosticCategory = (diagnostic: GeometryDiagnostic): FailureCategory | u
 const categoryPriority: readonly FailureCategory[] = [
   'geometry',
   'invalid-expectation',
+  'accuracy',
   'timeout',
   'resource-limit',
   'analysis-limit',
@@ -292,6 +315,24 @@ const invalidExpectationSuggestion = (diagnostics: readonly GeometryDiagnostic[]
   const where =
     field === undefined ? 'the field the diagnostic names' : `'${field}'${path === undefined ? '' : ` at ${path}`}`;
   return `Not a geometry verdict: the engine refused this claim because its expectation is malformed (${where}); its other claims still ran. Keep the assertion and the requirement it states: correct the expectation to the matcher's documented fields and values, then re-run.`;
+};
+
+/**
+ * Advice for a claim the accuracy contract refused: the claim stands undecided and its tolerance stays as authored.
+ *
+ * @param diagnostics - The row's diagnostics; the first accuracy refusal among them names the cause.
+ * @returns The next step for the row, never an engine suggestion to loosen the claim.
+ */
+const accuracySuggestion = (diagnostics: readonly GeometryDiagnostic[]): string => {
+  for (const diagnostic of diagnostics) {
+    for (const code of diagnosticCodes(diagnostic)) {
+      const suggestion = accuracySuggestions.get(code);
+      if (suggestion !== undefined) {
+        return suggestion;
+      }
+    }
+  }
+  return `Not decided: the engine cannot decide this claim at its tolerance. ${notDecided}`;
 };
 
 const evidenceSuggestion = (
@@ -456,6 +497,9 @@ const categorySuggestion = (options: {
     }
     case 'invalid-expectation': {
       return invalidExpectationSuggestion(diagnostics);
+    }
+    case 'accuracy': {
+      return accuracySuggestion(diagnostics);
     }
     case 'timeout': {
       return (

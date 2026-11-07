@@ -3,6 +3,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProject } from '#hooks/use-project.js';
 import { getRevisionClient } from '#hooks/use-revision-status.js';
+import { peekRevisionClient } from '#services/revision-client-registry.js';
+import { readLfsPointer } from '@taucad/revisions';
 import { EditorDocumentSession } from '#lib/editor-document-session.js';
 import type { EditorDocument } from '#lib/editor-document.js';
 import { clearEditorNavigation } from '#lib/editor-navigation-service.js';
@@ -55,8 +57,22 @@ export function EditorDocumentSessionProvider({ children }: { readonly children:
   }, [contentService, editorRef, fileManagerRef, projectId]);
 
   const fileManager = useMemo(
-    () => ({ readFile, exists, readdir, getDirectoryStat }),
-    [readFile, exists, readdir, getDirectoryStat],
+    () => ({
+      /* The language services read through placeholders (D9, D10): a pointer is made its file first, never parsed. */
+      readFile: async (path: string): Promise<Uint8Array<ArrayBuffer>> => {
+        const data = await readFile(path);
+        const client = peekRevisionClient(projectId);
+        if (client?.materialize === undefined || readLfsPointer(data) === undefined) {
+          return data;
+        }
+        await client.materialize([path.replace(/^\/+/u, '')]);
+        return readFile(path);
+      },
+      exists,
+      readdir,
+      getDirectoryStat,
+    }),
+    [projectId, readFile, exists, readdir, getDirectoryStat],
   );
   const navigate = useCallback(
     async (target: EditorNavigationTarget): Promise<void> => {

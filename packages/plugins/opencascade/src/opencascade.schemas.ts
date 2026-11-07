@@ -40,12 +40,6 @@ export const opencascadeOptionsSchema = z.object({
     .describe(
       'OC API call tracing mode. "off" (default) avoids proxy overhead, "summary" emits aggregated stats, and "per-call" emits individual spans.',
     ),
-  previewTriangleBudget: z
-    .number()
-    .int()
-    .positive()
-    .optional()
-    .describe('Deprecated and ignored: previews are never coarsened, so there is no triangle budget.'),
 });
 
 /**

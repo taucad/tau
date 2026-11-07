@@ -99,23 +99,6 @@
       }
     },
     {
-      "extensions": ["3dm"],
-      "identifier": "com.mcneel.rhinoceros.3dm",
-      "declaration": "imported",
-      "aliases": ["com.shapr3d.rhino.3dm"],
-      "description": "Rhino 3D model",
-      "mimeTypes": ["model/vnd.rhino.3dm"],
-      "sidecars": false,
-      "systemPreview": false,
-      "utiOwner": "Robert McNeel & Associates",
-      "utiSource": "McNeel Rhino 3DM application registration",
-      "fixture": {
-        "entry": "packages/plugins/rhino/src/fixtures/cube-mesh.3dm",
-        "files": ["packages/plugins/rhino/src/fixtures/cube-mesh.3dm"],
-        "expectedGeometry": { "minimumTriangles": 12, "bounds": "finite-nonzero" }
-      }
-    },
-    {
       "extensions": ["3mf"],
       "identifier": "com.taucad.3mf",
       "declaration": "exported",

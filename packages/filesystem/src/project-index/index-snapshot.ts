@@ -14,7 +14,8 @@
  */
 
 import type { ContentFacts, FileSystemProvider } from '#types.js';
-import type { FactsAt, SnapshotRow } from '#project-index/project-index.js';
+import type { FactsAt, RemovalSnapshot, SnapshotRow } from '#project-index/project-index.js';
+import type { PendingObject } from '#pending-content.js';
 
 /** The reserved directory, relative to its root, every indexed root keeps its snapshot in. @public */
 export const projectIndexDirectory = '.tau/index';
@@ -40,6 +41,18 @@ export type IndexSnapshot = Readonly<{
   rescan: boolean;
   writtenAt: number;
   entries: readonly SnapshotRow[];
+  /**
+   * The pending entries by path (D9), so a reload knows them without reading
+   * a file. Beside the rows, not in them: a client that predates it ignores
+   * the field instead of refusing the snapshot.
+   */
+  pending?: Readonly<Record<string, PendingObject>>;
+  /**
+   * The removal record (S10), so a reload still answers what was removed
+   * since a generation the writer reported. Optional for the same reason as
+   * `pending`; a snapshot without it answers `rescan` for any earlier `since`.
+   */
+  removals?: RemovalSnapshot;
 }>;
 
 /** How one vector relates to another. @internal */
@@ -96,6 +109,7 @@ const isCount = (value: unknown): value is number =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 const isTime = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 const hex = /^[\da-f]+$/u;
+const pendingOid = /^[\da-f]{64}$/u;
 
 const isFacts = (value: unknown): value is ContentFacts =>
   isRecord(value) &&
@@ -123,6 +137,22 @@ const isRow = (value: unknown): value is SnapshotRow => {
   );
 };
 
+/* A malformed record is dropped whole, never in part: a gap in it would be a silent one. */
+const isRemovals = (value: unknown): value is RemovalSnapshot =>
+  isRecord(value) &&
+  typeof value['epoch'] === 'string' &&
+  isCount(value['floor']) &&
+  Array.isArray(value['removed']) &&
+  value['removed'].every(
+    (row: unknown) =>
+      Array.isArray(row) &&
+      row.length === 3 &&
+      typeof row[0] === 'string' &&
+      row[0] !== '' &&
+      (row[1] === 'f' || row[1] === 'd') &&
+      isCount(row[2]),
+  );
+
 /**
  * Parse stored snapshot bytes, refusing anything malformed (a refusal means a scan).
  *
@@ -140,7 +170,7 @@ export const parseIndexSnapshot = (text: string): IndexSnapshot | undefined => {
   if (!isRecord(value) || value['format'] !== snapshotFormat || value['version'] !== snapshotVersion) {
     return undefined;
   }
-  const { vector, rescan, writtenAt, entries } = value;
+  const { vector, rescan, writtenAt, entries, pending, removals } = value;
   if (
     !isRecord(vector) ||
     !isCount(vector['generation']) ||
@@ -153,11 +183,25 @@ export const parseIndexSnapshot = (text: string): IndexSnapshot | undefined => {
   ) {
     return undefined;
   }
+  /* A malformed pending entry is dropped, not the map or the snapshot: a read marks it again. */
+  const pendingObjects = isRecord(pending)
+    ? Object.fromEntries(
+        Object.entries(pending).filter(
+          (entry): entry is [string, PendingObject] =>
+            isRecord(entry[1]) &&
+            typeof entry[1]['oid'] === 'string' &&
+            pendingOid.test(entry[1]['oid']) &&
+            isCount(entry[1]['size']),
+        ),
+      )
+    : undefined;
   return {
     vector: { generation: vector['generation'], seqByTab: vector['seqByTab'] as Record<string, number> },
     rescan,
     writtenAt,
     entries,
+    ...(pendingObjects === undefined ? {} : { pending: pendingObjects }),
+    ...(isRemovals(removals) ? { removals } : {}),
   };
 };
 

@@ -297,4 +297,41 @@ describe('projectRun', () => {
       foreignTails: [{ epoch: epochB, facts: 0, through: 2, open: true }],
     });
   });
+
+  it('names a failed run’s ending code, the wrapped one first, with its owner and retry class (W5)', async () => {
+    const outcomeOf = async (failure: NonNullable<ProjectedRun['ending']>['failure']) => {
+      const projection = await projectRun(
+        run({ termination: 'failed', ending: { source: row(6), at: at + 6000, failure } }),
+        context(),
+      );
+      const evidence = projection.evidence.find((item) => item.semantic.kind === 'outcome')!;
+      expect(evidenceSchema.safeParse(evidence).success).toBe(true);
+      expect(evidence.versions.mapper).toBe('host-turn-v4');
+      return evidence.payload.plane === 'summary' ? evidence.payload.fact : undefined;
+    };
+
+    expect(await outcomeOf({ code: 'RUN_ABANDONED', wrapped: 'MODEL_ATTEMPT_PENDING' })).toEqual({
+      kind: 'outcome',
+      termination: 'failed',
+      success: 'unknown',
+      assessment: null,
+      failureClass: { owner: 'host', retry: 'wait' },
+      code: 'MODEL_ATTEMPT_PENDING',
+    });
+    expect(await outcomeOf({ code: 'INSUFFICIENT_CREDIT', wrapped: undefined })).toMatchObject({
+      failureClass: { owner: 'gateway', retry: 'resume' },
+      code: 'INSUFFICIENT_CREDIT',
+    });
+    /* A code this build does not know reads as the registry's unknown entry; one that is not a code is not sent. */
+    expect(await outcomeOf({ code: 'A_NEWER_CODE', wrapped: undefined })).toMatchObject({
+      failureClass: { owner: 'unknown', retry: 'never' },
+      code: 'A_NEWER_CODE',
+    });
+    const malformed = await outcomeOf({ code: 'not a code: user text', wrapped: undefined });
+    expect(malformed).toMatchObject({ failureClass: { owner: 'unknown', retry: 'never' } });
+    expect(malformed).not.toHaveProperty('code');
+    const uncoded = await outcomeOf(undefined);
+    expect(uncoded).not.toHaveProperty('failureClass');
+    expect(uncoded).not.toHaveProperty('code');
+  });
 });

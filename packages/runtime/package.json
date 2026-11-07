@@ -318,6 +318,7 @@
     "@types/json-schema": "catalog:",
     "cdn-resolve": "catalog:",
     "deepmerge": "catalog:",
+    "minimatch": "^10.2.5",
     "nanoid": "catalog:",
     "source-map-js": "catalog:",
     "strip-literal": "catalog:",

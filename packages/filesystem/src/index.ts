@@ -38,6 +38,8 @@ export {
 } from '#changeset.js';
 export { applyChangesetToProvider } from '#changeset-provider.js';
 export type {
+  AppendDurability,
+  AppendFence,
   BatchEntry,
   BatchOptions,
   BatchReceipt,
@@ -82,13 +84,18 @@ export {
 export type { CapacityDecision, CapacityDomain, CapacityMeasurement, CapacityRequest } from '#capacity-domain.js';
 
 export { BoundedFileCache } from '#bounded-file-cache.js';
-export { ProjectIndex, timestampGranularityMilliseconds } from '#project-index/project-index.js';
+export { indexRemovalLimit, ProjectIndex, timestampGranularityMilliseconds } from '#project-index/project-index.js';
+export { PendingContentError, pendingObjectOf, pendingStallMilliseconds } from '#pending-content.js';
+export type { PendingObject, PendingObjectRequest, PendingObjectSource } from '#pending-content.js';
 export type {
+  ExpectedEntry,
   FactsAt,
   IndexAdmits,
+  IndexChanges,
   IndexCompareResult,
   IndexEntry,
   IndexEntryKind,
+  IndexRemoval,
   IndexSearchOptions,
   ObservedRow,
   ProjectIndexOptions,
@@ -117,12 +124,28 @@ export type {
   WorkerTimingSummary,
   WorkerTimings,
 } from '#worker-timings.js';
-export { ChangeEventBus } from '#change-event-bus.js';
-export { EventCoalescer, coalesceChangeEvents } from '#event-coalescer.js';
-export type { CoalescerOptions } from '#event-coalescer.js';
+export { ChangeEventBus, toChangeSet, touchedDirectoriesOf, watchEventsOfChangeSet } from '#change-event-bus.js';
+export { watchByChangeSets } from '#change-set-watch.js';
+export type { BridgeWatchHandle, ChangeSetChannelEvent, ChangeSetWatchSource } from '#change-set-watch.js';
+export type {
+  ChangeSet,
+  ChangeSetEntry,
+  ChangeSetOp,
+  ChangeSetReset,
+  ChangeSetResetReason,
+  ChangeSetSegment,
+} from '#change-event-bus.js';
+export {
+  EventCoalescer,
+  coalesceChangeEvents,
+  ChangeSetCoalescer,
+  mergeChangeSets,
+  nextFrame,
+} from '#event-coalescer.js';
+export type { CoalescerOptions, ChangeSetCoalescerOptions, FrameScheduler } from '#event-coalescer.js';
 export { tagEventOrigin, getEventOrigin, isEventGloballyVisible } from '#event-origin-registry.js';
-export { WatchRegistry } from '#watch-registry.js';
-export type { WatchRegistryOptions } from '#watch-registry.js';
+export { WatchRegistry, watchEventsOfChangeSetFor } from '#watch-registry.js';
+export type { ChangeSetWatchRequest, WatchRegistryOptions } from '#watch-registry.js';
 export { streamChunkSize, bufferToStream } from '#backend/stream-utils.js';
 export { CrossTabCoordinator } from '#cross-tab-coordinator.js';
 export { mapConcurrent } from '#concurrency.js';

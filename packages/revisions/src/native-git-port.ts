@@ -1115,7 +1115,9 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         const { oid, size } = next;
         // oxlint-disable-next-line no-await-in-loop -- one object after another in this worker.
         const result = await run(['-c', `remote.lfsdefault=${remote.name}`, 'lfs', 'smudge'], {
-          input: [textEncoder.encode(`version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize ${String(size)}\n`)],
+          input: [
+            textEncoder.encode(`version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize ${String(size)}\n`),
+          ],
           deadline: transferDeadline,
           env,
           ...(signal === undefined ? {} : { signal }),
@@ -1127,7 +1129,9 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         }
         /* Content-addressed: bytes that are not the object are no answer at all. */
         if (result.stdout.byteLength !== size || digestHex('sha256', result.stdout) !== oid) {
-          verdicts.push(new RevisionPortError('ENGINE_FAILED', 'A large object arrived with bytes that are not its own.'));
+          verdicts.push(
+            new RevisionPortError('ENGINE_FAILED', 'A large object arrived with bytes that are not its own.'),
+          );
           continue;
         }
         // oxlint-disable-next-line no-await-in-loop -- stored before it is delivered, so a crash keeps it.

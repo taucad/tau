@@ -153,7 +153,10 @@ process.exit(result.status ?? 1);
     /* Now no remote has the other one, and both reads that share the fill are told so. */
     const other = await fetchedProject({ cloneGit: chatty });
     other.forget(other.oid);
-    const [left, right] = await Promise.allSettled([other.clone.readTree(other.head), other.clone.readTree(other.head)]);
+    const [left, right] = await Promise.allSettled([
+      other.clone.readTree(other.head),
+      other.clone.readTree(other.head),
+    ]);
     expect(left).toMatchObject({ status: 'rejected', reason: { code: 'MISSING_LARGE_OBJECT' } });
     expect(right).toMatchObject({ status: 'rejected', reason: { code: 'MISSING_LARGE_OBJECT' } });
   }, 120_000);

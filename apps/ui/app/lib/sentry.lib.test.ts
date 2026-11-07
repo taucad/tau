@@ -326,4 +326,24 @@ describe('sentryIntegrations', () => {
     expect(integrations.at(-1)?.name).toBe('BrowserSession');
     expect(integrations).toHaveLength(defaults.length);
   });
+
+  it('should keep the same session across a client-side navigation', async () => {
+    Sentry.init({
+      dsn: 'https://public@o0.ingest.sentry.io/0',
+      release: 'test',
+      defaultIntegrations: false,
+      integrations: sentryIntegrations([]),
+      transport: () => ({ send: async () => ({}), flush: async () => true }),
+    });
+    try {
+      const before = Sentry.getIsolationScope().getSession()?.sid;
+      expect(before).toBeDefined();
+
+      globalThis.history.pushState({}, '', '/elsewhere');
+
+      expect(Sentry.getIsolationScope().getSession()?.sid).toBe(before);
+    } finally {
+      await Sentry.close();
+    }
+  });
 });

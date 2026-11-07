@@ -177,8 +177,8 @@ type SentryIntegration = Parameters<typeof Sentry.addIntegration>[0];
  * SDK 10.x starts a new session on every client-side navigation by default, which would count one
  * visit as many sessions and inflate crash-free rates. `lifecycle: 'page'` keeps one session per
  * load, which is what Sentry's current docs and SDK 11 mean by a session. A session is `errored` on
- * any captured exception and `unhandled` when an error reaches the global handler; it is held in
- * memory and nothing is written to the device.
+ * any captured exception and `crashed` (shown as "unhandled" in Sentry) when an error reaches the
+ * global handler; it is held in memory and nothing is written to the device.
  *
  * @param defaults - The SDK's default integrations.
  * @returns The integrations to install.

@@ -22,6 +22,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor } from 'xstate';
 
+import { AbstractFileSystemProvider } from '@taucad/filesystem/backend';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { walk } from '@taucad/filesystem/content-ops';
 import type {
@@ -188,11 +189,12 @@ const countingCheckout = (
     ...(options.statAge === undefined ? {} : { statTree }),
   };
   const checkout: RevisionFileSystem = Object.assign(Object.create(real) as RevisionFileSystem, counted, {
-    /* The provider's own batch, run over this surface so every primitive it takes is counted. */
+    /* The primitives' batch, run over this surface so every primitive it takes is counted. Node's own batch
+     * (D16) stages and syncs below the primitives, so it would count nothing here. */
     applyBatch: async (entries: readonly BatchEntry[], batchOptions?: BatchOptions): Promise<BatchReceipt[]> => {
       counts.batches += 1;
       await options.beforeBatch?.(entries);
-      return real.applyBatch.call(checkout, entries, batchOptions);
+      return AbstractFileSystemProvider.prototype.applyBatch.call(checkout, entries, batchOptions);
     },
   });
   return {

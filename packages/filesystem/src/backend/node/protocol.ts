@@ -14,15 +14,17 @@ import type { CheckedFileWriteResult } from '@taucad/types';
 import { assertRootedPath } from '@taucad/utils/path';
 import type { FileMode, FileStat } from '#types.js';
 import { streamChunkSize } from '#backend/stream-utils.js';
+import { maximumChangesetEntries } from '#changeset.js';
 
 /**
  * Wire version. Version 7 carries directory entry kinds without per-child stat
  * requests; version 8 adds `hashFiles`, digests computed beside the bytes;
  * version 9 drops the head-only stat and listing modes, and a stat or listing
- * row carries content facts only when already known (I3).
+ * row carries content facts only when already known (I3); version 10 adds
+ * `applyBatch`, one changeset phase per request, fsynced once per directory (D16).
  * @public
  */
-export const nodeFsProtocolVersion = 9;
+export const nodeFsProtocolVersion = 10;
 
 /**
  * Most watch events one frame carries. The host sends what one native callback reported as one frame, so a bulk
@@ -80,6 +82,29 @@ const watchRequestSchema = z.object({
   recursive: z.boolean().optional(),
   excludes: z.array(z.string()).optional(),
 });
+
+const fileModeEnum = z.enum(['100644', '100755']);
+/* One provider batch entry as it crosses the port: bytes in hand, since a staged `Blob` is read before it is sent. */
+const batchEntrySchema = z.discriminatedUnion('op', [
+  z.object({
+    op: z.literal('write'),
+    path: rootedPathSchema,
+    data: bytesSchema,
+    mode: fileModeEnum.optional(),
+    create: z.boolean().optional(),
+  }),
+  z.object({ op: z.literal('append'), path: rootedPathSchema, data: bytesSchema }),
+  z.object({
+    op: z.literal('delete'),
+    path: rootedPathSchema,
+    kind: z.enum(['file', 'dir']).optional(),
+    recursive: z.boolean().optional(),
+  }),
+  z.object({ op: z.literal('move'), from: rootedPathSchema, to: rootedPathSchema, replace: z.boolean().optional() }),
+  z.object({ op: z.literal('mkdir'), path: rootedPathSchema, recursive: z.boolean().optional() }),
+]);
+/** Entries one `applyBatch` request may carry: a changeset's own ceiling. @internal */
+export const maximumBatchRequestEntries = maximumChangesetEntries;
 
 const versioned = { v: z.literal(nodeFsProtocolVersion), id: z.number().int() };
 const rooted = { ...versioned, root: z.string() };
@@ -153,6 +178,11 @@ export const nodeFsRequestSchema = z.discriminatedUnion('op', [
   checkedWriteRequestSchema,
   checkedDeleteRequestSchema,
   z.object({ ...rooted, op: z.literal('hashFiles'), paths: z.array(rootedPathSchema).max(maximumHashFilesPaths) }),
+  z.object({
+    ...rooted,
+    op: z.literal('applyBatch'),
+    entries: z.array(batchEntrySchema).max(maximumBatchRequestEntries),
+  }),
   z.object({ ...rooted, op: z.literal('readdir'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('readdirEntries'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('readdirWithStats'), path: z.string() }),
@@ -175,7 +205,18 @@ const fileStatSchema = z.union([
   z.object({ type: z.literal('dir'), size: z.number(), mtimeMs: z.number() }),
   z.object({ type: z.literal('file'), size: z.number(), mtimeMs: z.number() }),
 ]) as z.ZodType<FileStat>;
-const fileModeSchema = z.enum(['100644', '100755']) as z.ZodType<FileMode>;
+const fileModeSchema = fileModeEnum as z.ZodType<FileMode>;
+
+/* A batch receipt's error, reduced to what a refusal is told apart by. */
+const batchReceiptSchema = z.object({
+  outcome: z.enum(['applied', 'failed', 'uncertain']),
+  kind: z.enum(['file', 'dir']).optional(),
+  created: z.boolean().optional(),
+  error: z.object({ message: z.string(), code: z.string().optional(), name: z.string().optional() }).optional(),
+});
+
+/** One batch receipt as it crosses the port. @internal */
+export type NodeFsBatchReceipt = z.infer<typeof batchReceiptSchema>;
 
 const watchEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('change'), path: z.string(), kind: z.enum(['file', 'dir']) }),
@@ -217,6 +258,7 @@ export const nodeFsResultSchemas = {
   writeFile: z.undefined(),
   writeFileChecked: checkedWriteResultSchema,
   deleteFileChecked: checkedWriteResultSchema,
+  applyBatch: z.array(batchReceiptSchema),
   hashFiles: z.record(z.string(), z.union([z.string().regex(/^[0-9a-f]{64}$/u), z.literal('missing')])),
   readdir: z.array(z.string()),
   readdirEntries: z.array(z.object({ name: z.string(), kind: z.enum(['file', 'dir']) })),

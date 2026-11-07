@@ -11,6 +11,8 @@
 import type { z } from 'zod';
 import { Topic } from '@taucad/events';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
+import { batchBytes } from '#backend/batch.js';
+import type { BatchEntry, BatchOptions, BatchReceipt } from '#changeset.js';
 import type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
 import { streamChunkSize, validateFileReadStreamOptions } from '#backend/stream-utils.js';
 import type {
@@ -332,6 +334,43 @@ export class NodeFsProviderClient extends AbstractFileSystemProvider {
   public async writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> {
     this._assertRootedPath(path);
     await this._channel.request({ root: this._root, op: 'writeFile', path, data });
+  }
+
+  /**
+   * One changeset phase in one request (D16): the host stages, renames and
+   * fsyncs it once per directory, under one authority claim, instead of paying
+   * a round trip and two fsyncs per entry. A staged `Blob` is read here, since
+   * its bytes cross the port either way. An abort stops the phase only before
+   * it is sent: the host then applies all of it and answers each entry.
+   *
+   * @param entries - One phase's entries, in provider paths.
+   * @param options - The changeset's abort signal.
+   * @returns One receipt per entry, in entry order.
+   */
+  public override async applyBatch(entries: readonly BatchEntry[], options?: BatchOptions): Promise<BatchReceipt[]> {
+    if (options?.signal?.aborted === true) {
+      const { reason } = options.signal as { reason: unknown };
+      return entries.map(() => ({ outcome: 'failed', error: reason }));
+    }
+    const wire = await Promise.all(
+      entries.map(async (entry) =>
+        entry.op === 'write' && !(entry.data instanceof Uint8Array)
+          ? { ...entry, data: await batchBytes(entry.data) }
+          : entry,
+      ),
+    );
+    const receipts = await this._channel.request({ root: this._root, op: 'applyBatch', entries: wire });
+    return receipts.map(({ error, ...receipt }) =>
+      error === undefined
+        ? receipt
+        : {
+            ...receipt,
+            error: Object.assign(new Error(error.message), {
+              ...(error.code === undefined ? {} : { code: error.code }),
+              ...(error.name === undefined ? {} : { name: error.name }),
+            }),
+          },
+    );
   }
 
   public async writeFileChecked(input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult> {

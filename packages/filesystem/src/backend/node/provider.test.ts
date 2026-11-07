@@ -14,9 +14,10 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { NodeFsProvider, drainNodeFsProviderWatchClosures } from '#backend/node/provider.js';
 import { tauPathPolicy } from '#path-registry.js';
+import type { BatchEntry } from '#changeset.js';
 import parcelWatcher from '@parcel/watcher';
 import type { Event as ParcelEvent } from '@parcel/watcher';
 
@@ -225,10 +226,59 @@ describe('NodeFsProvider atomic writes', () => {
       const updated: ParcelEvent = { path: join(directory, 'target.txt'), type: 'update' };
       const burst = [...Array.from({ length: 50 }, (_, index) => created(index)), updated];
       statted.paths.length = 0;
+      const stat = vi.spyOn(fs, 'stat');
       onEvents?.(null, burst);
+      await drainNodeFsProviderWatchClosures(provider);
       expect(events).toEqual([{ type: 'change', path: 'target.txt', kind: 'file' }]);
       /* A bulk change under an excluded tree costs no syscall on the services utility's event loop. */
-      expect(statted.paths.filter((statPath) => statPath.includes(join('.tau', 'cache')))).toEqual([]);
+      expect(stat.mock.calls.map(([statPath]) => String(statPath))).toEqual([join(directory, 'target.txt')]);
+      /* No event is classified by a synchronous `stat` (D16). */
+      expect(statted.paths.filter((statPath) => statPath.startsWith(`${directory}${sep}`))).toEqual([]);
+    } finally {
+      stop();
+      await drainNodeFsProviderWatchClosures(provider);
+    }
+  });
+
+  it('should trust a native delete and classify a burst in arrival order without a synchronous stat (D16)', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    let onEvents: Parameters<typeof parcelWatcher.subscribe>[1] | undefined;
+    const subscribe = vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(async (_directory, callback) => {
+      onEvents = callback;
+      return { unsubscribe: async () => undefined };
+    });
+    const events: unknown[] = [];
+    const stop = await provider.watch({ paths: [''], recursive: true }, (event) => events.push(event));
+    try {
+      const [[directory]] = subscribe.mock.calls as unknown as [[string]];
+      mkdirSync(join(directory, 'made'));
+      writeFileSync(join(directory, 'made', 'a.txt'), 'a');
+      const stat = vi.spyOn(fs, 'stat');
+      statted.paths.length = 0;
+      const removed = Array.from(
+        { length: 100 },
+        (_, index): ParcelEvent => ({
+          path: join(directory, 'gone', `${String(index)}.txt`),
+          type: 'delete',
+        }),
+      );
+      onEvents?.(null, [
+        { path: join(directory, 'made'), type: 'create' },
+        { path: join(directory, 'made', 'a.txt'), type: 'create' },
+        ...removed,
+      ]);
+      onEvents?.(null, [{ path: join(directory, 'target.txt'), type: 'update' }]);
+      await drainNodeFsProviderWatchClosures(provider);
+      expect(events).toEqual([
+        { type: 'change', path: 'made', kind: 'dir' },
+        { type: 'change', path: 'made/a.txt', kind: 'file' },
+        ...removed.map((_, index) => ({ type: 'delete', path: `gone/${String(index)}.txt` })),
+        { type: 'change', path: 'target.txt', kind: 'file' },
+      ]);
+      /* One asynchronous stat per create or update, none per delete, and no synchronous one at all. */
+      expect(stat).toHaveBeenCalledTimes(3);
+      expect(statted.paths.filter((statPath) => statPath.startsWith(`${directory}${sep}`))).toEqual([]);
     } finally {
       stop();
       await drainNodeFsProviderWatchClosures(provider);
@@ -652,5 +702,203 @@ describe('NodeFsProvider head listing', () => {
     expect(stat).toStrictEqual({ type: 'file', size: 1028, mtimeMs: stat.mtimeMs });
     expect(fullRead).not.toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
+  });
+});
+
+describe('NodeFsProvider head listing cost (D16)', () => {
+  it('lists a directory with one lstat per row and no per-row realpath', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root, { policy: tauPathPolicy });
+    mkdirSync(join(root, 'parts'));
+    for (let index = 0; index < 20; index += 1) {
+      writeFileSync(join(root, 'parts', `${String(index)}.step`), String(index));
+    }
+    mkdirSync(join(root, 'parts', 'sub'));
+    const realpath = vi.spyOn(fs, 'realpath');
+    const lstat = vi.spyOn(fs, 'lstat');
+    const stat = vi.spyOn(fs, 'stat');
+
+    const rows = await provider.readdirWithStats('parts');
+
+    expect(rows).toHaveLength(21);
+    expect(rows.find(({ name }) => name === 'sub')).toMatchObject({ type: 'dir' });
+    expect(rows.find(({ name }) => name === '7.step')).toMatchObject({ type: 'file', size: 1 });
+    /* The root's and the directory's admission, a constant three, then one lstat per row: no row repeats them. */
+    expect(realpath.mock.calls.length).toBeLessThanOrEqual(3);
+    expect(lstat.mock.calls.filter(([entry]) => String(entry).startsWith(`${join(root, 'parts')}${sep}`))).toHaveLength(
+      21,
+    );
+    expect(stat).not.toHaveBeenCalled();
+  });
+
+  it('still stats a row through its link, and refuses one that launders the mask', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root, { policy: tauPathPolicy });
+    mkdirSync(join(root, 'real'));
+    writeFileSync(join(root, 'real', 'a.txt'), 'abc');
+    symlinkSync(join(root, 'real', 'a.txt'), join(root, 'link.txt'));
+    mkdirSync(join(root, '.git'));
+    writeFileSync(join(root, '.git', 'config'), 'secret');
+    symlinkSync(join(root, '.git', 'config'), join(root, 'notes'));
+
+    const rows = await provider.readdirWithStats('');
+
+    expect(rows.find(({ name }) => name === 'link.txt')).toMatchObject({ type: 'file', size: 3 });
+    expect(rows.map(({ name }) => name)).not.toContain('notes');
+  });
+
+  it('lists through a linked directory by resolving each row', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root, { policy: tauPathPolicy });
+    mkdirSync(join(root, 'real'));
+    writeFileSync(join(root, 'real', 'a.txt'), 'abcd');
+    symlinkSync(join(root, 'real'), join(root, 'alias'));
+    const stat = vi.spyOn(fs, 'stat');
+
+    const rows = await provider.readdirWithStats('alias');
+
+    expect(rows.map(({ name, type, size }) => ({ name, type, size }))).toEqual([
+      { name: 'a.txt', type: 'file', size: 4 },
+    ]);
+    expect(stat).toHaveBeenCalled();
+  });
+});
+
+describe('NodeFsProvider applyBatch (D16)', () => {
+  /** Count every fsync any file handle makes, file or directory, from here on. */
+  const countSyncs = async (root: string): Promise<{ count(): number }> => {
+    const probe = await fs.open(join(root, 'target.txt'), 'r');
+    const prototype = Object.getPrototypeOf(probe) as { sync(): Promise<void> };
+    await probe.close();
+    const sync = vi.spyOn(prototype, 'sync');
+    return { count: () => sync.mock.calls.length };
+  };
+
+  it('fsyncs a changeset at most once per file plus once per directory', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const directories = ['a', 'b', 'c/d'];
+    const entries = directories.flatMap((directory) =>
+      Array.from(
+        { length: 10 },
+        (_, index): Extract<BatchEntry, { op: 'write' }> & { data: Uint8Array<ArrayBuffer> } => ({
+          op: 'write',
+          path: `${directory}/${String(index)}.txt`,
+          data: new TextEncoder().encode(`${directory} ${String(index)}`),
+        }),
+      ),
+    );
+    const syncs = await countSyncs(root);
+
+    const receipts = await provider.applyBatch(entries);
+
+    expect(receipts).toEqual(entries.map(() => ({ outcome: 'applied', kind: 'file' })));
+    /* 30 files in 3 directories: 33, where one write at a time pays 60. Windows cannot sync a directory, so each
+     * file there syncs its own handle again after its rename. */
+    expect(syncs.count()).toBe(process.platform === 'win32' ? 2 * entries.length : entries.length + directories.length);
+    for (const entry of entries) {
+      expect(readFileSync(join(root, entry.path), 'utf8')).toBe(new TextDecoder().decode(entry.data));
+    }
+    expect(directories.flatMap((directory) => temporaryFiles(join(root, directory)))).toEqual([]);
+  });
+
+  it('reads each written file back once and never re-reads an unwritten one (I2)', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const open = vi.spyOn(fs, 'open');
+    await provider.applyBatch([
+      { op: 'write', path: 'one.txt', data: new TextEncoder().encode('1') },
+      { op: 'write', path: 'two.txt', data: new Blob(['2']) },
+    ]);
+    const verifications = open.mock.calls.filter(([, flags]) => typeof flags === 'number');
+    expect(verifications.map(([opened]) => String(opened)).toSorted()).toEqual([
+      join(root, 'one.txt'),
+      join(root, 'two.txt'),
+    ]);
+    expect(readFileSync(join(root, 'two.txt'), 'utf8')).toBe('2');
+  });
+
+  it('answers each entry truthfully beside the others', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    mkdirSync(join(root, 'folder'));
+    writeFileSync(join(root, 'moved.txt'), 'm');
+    writeFileSync(join(root, 'removed.txt'), 'r');
+
+    const receipts = await provider.applyBatch([
+      { op: 'write', path: 'target.txt', data: new TextEncoder().encode('kept'), create: true },
+      { op: 'write', path: 'folder', data: new TextEncoder().encode('x') },
+      { op: 'write', path: 'fresh.sh', data: new TextEncoder().encode('#!/bin/sh\n'), mode: '100755', create: true },
+      { op: 'write', path: 'target.txt.copy', data: new TextEncoder().encode('new') },
+      { op: 'move', from: 'moved.txt', to: 'arrived.txt' },
+      { op: 'delete', path: 'removed.txt' },
+      { op: 'mkdir', path: 'made', recursive: true },
+    ]);
+
+    expect(receipts.map(({ outcome }) => outcome)).toEqual([
+      'failed',
+      'failed',
+      'applied',
+      'applied',
+      'applied',
+      'applied',
+      'applied',
+    ]);
+    expect((receipts[0]!.error as NodeJS.ErrnoException).code).toBe('EEXIST');
+    expect((receipts[1]!.error as NodeJS.ErrnoException).code).toBe('EISDIR');
+    expect(receipts[2]).toEqual({ outcome: 'applied', kind: 'file', created: true });
+    expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('old');
+    expect(await provider.getFileMode('fresh.sh')).toBe(process.platform === 'win32' ? '100644' : '100755');
+    expect(readFileSync(join(root, 'arrived.txt'), 'utf8')).toBe('m');
+    expect(lstatSync(join(root, 'made')).isDirectory()).toBe(true);
+    expect(readdirSync(root).toSorted()).toEqual(
+      ['arrived.txt', 'folder', 'fresh.sh', 'made', 'target.txt', 'target.txt.copy'].toSorted(),
+    );
+  });
+
+  it('keeps an existing file mode unless the entry names one', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    writeFileSync(join(root, 'run.sh'), 'old', { mode: 0o755 });
+    await provider.applyBatch([{ op: 'write', path: 'run.sh', data: new TextEncoder().encode('new') }]);
+    expect(await provider.getFileMode('run.sh')).toBe(process.platform === 'win32' ? '100644' : '100755');
+    await provider.applyBatch([{ op: 'write', path: 'run.sh', data: new TextEncoder().encode('x'), mode: '100644' }]);
+    expect(await provider.getFileMode('run.sh')).toBe('100644');
+  });
+
+  it('reports a write uncertain when its directory fsync fails after the rename', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    injectFailureAfter('post-rename-fsync');
+    const receipts = await provider.applyBatch([
+      { op: 'write', path: 'target.txt', data: new TextEncoder().encode('new') },
+    ]);
+    expect(receipts[0]?.outcome).toBe('uncertain');
+    expect(temporaryFiles(root)).toEqual([]);
+  });
+
+  it('reports a write failed and leaves its target untouched when staging fails', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    injectFailureAfter('file-fsync');
+    const receipts = await provider.applyBatch([
+      { op: 'write', path: 'target.txt', data: new TextEncoder().encode('new') },
+    ]);
+    expect(receipts[0]?.outcome).toBe('failed');
+    expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('old');
+    expect(temporaryFiles(root)).toEqual([]);
+  });
+
+  it('starts no write once the changeset is aborted', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const controller = new AbortController();
+    controller.abort(new DOMException('stopped', 'AbortError'));
+    const receipts = await provider.applyBatch(
+      [{ op: 'write', path: 'target.txt', data: new TextEncoder().encode('new') }],
+      { signal: controller.signal },
+    );
+    expect(receipts[0]?.outcome).toBe('failed');
+    expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('old');
   });
 });

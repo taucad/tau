@@ -120,7 +120,10 @@ type IndexedFileSystem = {
   search(query: string, options?: IndexSearchOptions): Promise<FileStatEntry[]>;
   statTree(path: string, options?: { admits?: IndexAdmits; signal?: AbortSignal }): Promise<FileStatEntry[]>;
   facts(paths: readonly string[], options?: IndexFactsOptions): Promise<ReadonlyMap<string, ContentFacts>>;
-  changedSince(since: number, options?: { admits?: IndexAdmits; signal?: AbortSignal }): Promise<IndexChanges>;
+  changedSince(
+    since: number,
+    options?: { admits?: IndexAdmits; signal?: AbortSignal; epoch?: string },
+  ): Promise<IndexChanges>;
   /** Which of these files are pending entries: from the index, or a pointer-sized file read raw (D9). */
   pendingPaths(paths: readonly string[]): Promise<readonly string[]>;
 };
@@ -1217,7 +1220,7 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
       : {
           changedSince: async (
             since: number,
-            changedOptions?: { admits?: IndexAdmits; signal?: AbortSignal },
+            changedOptions?: { admits?: IndexAdmits; signal?: AbortSignal; epoch?: string },
           ): Promise<IndexChanges> =>
             base.changedSince!(since, { ...changedOptions, admits: admitsVisible('', changedOptions?.admits) }),
         }),

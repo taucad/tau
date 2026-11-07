@@ -58,7 +58,6 @@ const pathAuthorityRank: Readonly<Record<PathAgentAccess, number>> = Object.free
   'read-write': 2,
 });
 
-/** The name `_atomicWrite` gives its temp file: `.<target>.<pid>.<uuid>.tmp`. */
 /**
  * Files one `hashFiles` call digests at once. Each holds a descriptor and at
  * most one bounded chunk, and the call is not nested in a tree walk, so this
@@ -66,7 +65,42 @@ const pathAuthorityRank: Readonly<Record<PathAgentAccess, number>> = Object.free
  */
 const hashConcurrency = 32;
 
+/** The name `_atomicWrite` gives its temp file: `.<target>.<pid>.<uuid>.tmp`. */
 const inFlightTemporaryName = /^\..+\.\d+\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/u;
+
+/** The writer's pid in a temp sibling's name. */
+const temporaryWriterPid = /\.(\d+)\.[\da-f-]{36}\.tmp$/u;
+/** A temp sibling whose writer is gone is swept once it has been idle this long. */
+const orphanedTemporaryMilliseconds = 60_000;
+/** A temp sibling idle this long is swept whoever wrote it: no write stalls for a day. */
+const abandonedTemporaryMilliseconds = 24 * 60 * 60 * 1000;
+/** Directories one provider remembers having swept before it forgets them all and sweeps again. */
+const sweptDirectoryLimit = 1024;
+
+/* The directories a recursive `mkdir` made, deepest first, each removed only while it is empty. */
+const removeCreatedParents = async ({ first, last }: Readonly<{ first: string; last: string }>): Promise<void> => {
+  for (let directory: string | undefined = last; directory !== undefined; ) {
+    // oxlint-disable-next-line no-await-in-loop -- a parent is removed after its child.
+    const removed: boolean = await fs.rmdir(directory).then(
+      () => true,
+      () => false,
+    );
+    directory = removed && directory !== first ? path.dirname(directory) : undefined;
+  }
+};
+
+/* Whether a process with this pid exists: `EPERM` means it does, under another user. */
+const isProcessAlive = (pid: number): boolean => {
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+};
 
 /**
  * The POSIX `open` hardening flag `flag`, or `0` where the platform omits it.
@@ -109,6 +143,60 @@ const isEntryStillAt = async (target: string, written: BigIntStats): Promise<boo
   }
   const current = await fs.lstat(target, { bigint: true }).catch(() => undefined);
   return current !== undefined && current.dev === written.dev && current.ino === written.ino;
+};
+
+/* Every chunk of a stream written at the handle's position, and the size and SHA-256 of what was written. */
+const writeStreamTo = async (
+  handle: FileHandle,
+  source: ReadableStream<Uint8Array<ArrayBuffer>>,
+): Promise<Readonly<{ size: number; sha256: string }>> => {
+  const digest = createHash('sha256');
+  let size = 0;
+  const reader = source.getReader();
+  try {
+    // oxlint-disable-next-line no-await-in-loop -- a stream is written one chunk after another.
+    for (let read = await reader.read(); !read.done; read = await reader.read()) {
+      for (let written = 0; written < read.value.byteLength; ) {
+        // oxlint-disable-next-line no-await-in-loop -- as above.
+        const { bytesWritten } = await handle.write(
+          read.value,
+          written,
+          read.value.byteLength - written,
+          size + written,
+        );
+        written += bytesWritten;
+      }
+      digest.update(read.value);
+      size += read.value.byteLength;
+    }
+  } catch (error) {
+    await reader.cancel(error).catch(() => undefined);
+    throw error;
+  }
+  return { size, sha256: digest.digest('hex') };
+};
+
+/* Whether the published file is exactly `size` bytes hashing to `sha256`, read one chunk at a time. */
+const publishedDigestEquals = async (
+  handle: FileHandle,
+  expected: Readonly<{ size: number; sha256: string }>,
+): Promise<boolean> => {
+  const digest = createHash('sha256');
+  const chunk = Buffer.alloc(streamChunkSize);
+  let size = 0;
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- a file is read one chunk after another.
+    const { bytesRead } = await handle.read(chunk, 0, chunk.byteLength, size);
+    if (bytesRead === 0) {
+      break;
+    }
+    digest.update(chunk.subarray(0, bytesRead));
+    size += bytesRead;
+    if (size > expected.size) {
+      return false;
+    }
+  }
+  return size === expected.size && digest.digest('hex') === expected.sha256;
 };
 
 const bytesEqual = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
@@ -280,6 +368,8 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
   private _realBaseCache: Promise<string> | undefined;
 
   private readonly _openSubscriptions = new Set<() => void>();
+  /** Directories whose crashed temp siblings this provider has swept. */
+  private readonly _sweptDirectories = new Set<string>();
 
   /**
    * @param basePath - Host directory mapped to this provider's root. It must
@@ -356,6 +446,40 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     await this._atomicWrite(path_, target, {
       data: typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data),
     });
+  }
+
+  /**
+   * Write `path` from a stream (W6.3): each chunk goes to the same temp
+   * sibling `writeFile` uses, which is synced and renamed over the path only
+   * once the stream ends, and the published entry is verified by its SHA-256
+   * read back in chunks. Never more than a chunk is held.
+   *
+   * @param path_ - Rooted file path to write.
+   * @param source - The file's bytes, in order.
+   */
+  public override async writeFileStream(path_: string, source: ReadableStream<Uint8Array<ArrayBuffer>>): Promise<void> {
+    let created: Readonly<{ first: string; last: string }> | undefined;
+    try {
+      this._assertRootedPath(path_);
+      if (path_ === '') {
+        throw this._eisdir(path_);
+      }
+      const target = await this._resolve(path_, 'mutate');
+      const existingEntry = await this._lstatOrUndefined(target);
+      if (existingEntry?.isDirectory() === true) {
+        throw this._eisdir(path_);
+      }
+      const first = await fs.mkdir(path.dirname(target), { recursive: true });
+      created = first === undefined ? undefined : { first, last: path.dirname(target) };
+      await this._atomicWrite(path_, target, { source });
+    } catch (error) {
+      /* Harmless once the stream was read or cancelled: a locked or closed stream refuses. */
+      await source.cancel(error).catch(() => undefined);
+      if (created !== undefined) {
+        await removeCreatedParents(created);
+      }
+      throw error;
+    }
   }
 
   /** Direct providers do not own the cross-client authority needed for checked replacement. */
@@ -1053,24 +1177,68 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     return target;
   }
 
+  /**
+   * Remove the temp siblings a crashed write left in one directory, the first
+   * time this provider writes there (W6.3). A sibling goes when its writer's
+   * process is gone and it has not been written for a minute, or when it has
+   * not been written for a day whoever wrote it; one still being written is
+   * touched by every chunk, so it stays. Failures are ignored: the next
+   * provider to write there tries again.
+   *
+   * @param directory - The admitted real directory a write is about to use.
+   */
+  private async _sweepTemporarySiblings(directory: string): Promise<void> {
+    if (this._sweptDirectories.has(directory)) {
+      return;
+    }
+    if (this._sweptDirectories.size >= sweptDirectoryLimit) {
+      this._sweptDirectories.clear();
+    }
+    this._sweptDirectories.add(directory);
+    const names = await fs.readdir(directory).catch((): string[] => []);
+    const now = Date.now();
+    await Promise.all(
+      names
+        .filter((name) => inFlightTemporaryName.test(name))
+        .map(async (name) => {
+          const entry = path.join(directory, name);
+          const stats = await fs.lstat(entry).catch(() => undefined);
+          if (stats?.isFile() !== true) {
+            return;
+          }
+          const idle = now - stats.mtimeMs;
+          const pid = Number(temporaryWriterPid.exec(name)?.[1]);
+          if (
+            idle > abandonedTemporaryMilliseconds ||
+            (idle > orphanedTemporaryMilliseconds && pid !== process.pid && !isProcessAlive(pid))
+          ) {
+            await fs.unlink(entry).catch(() => undefined);
+          }
+        }),
+    );
+  }
+
   /** Temp file + fsync + rename, refusing to replace a symlink or a swapped parent. */
   private async _atomicWrite(
     rootedPath: string,
     targetPath: string,
-    options: { data: Uint8Array<ArrayBuffer>; beforeReplace?: () => Promise<void> },
+    options: (
+      | { data: Uint8Array<ArrayBuffer>; source?: undefined }
+      | { data?: undefined; source: ReadableStream<Uint8Array<ArrayBuffer>> }
+    ) & { beforeReplace?: () => Promise<void> },
   ): Promise<void> {
-    const { data, beforeReplace } = options;
+    const { data, source, beforeReplace } = options;
     const realBase = await this._realBase;
     const admittedDirectory = await fs.realpath(path.dirname(targetPath));
     if (!isContained(realBase, admittedDirectory)) {
       throw new VirtualPathError('PATH_OUTSIDE_ROOT', rootedPath);
     }
+    await this._sweepTemporarySiblings(admittedDirectory);
     const admittedTarget = path.join(admittedDirectory, path.basename(targetPath));
     const temporaryPath = path.join(
       admittedDirectory,
       `.${path.basename(targetPath)}.${process.pid}.${randomUUID()}.tmp`,
     );
-    const bytes = data;
     const existing = await this._lstatOrUndefined(admittedTarget);
     if (existing?.isSymbolicLink() === true) {
       throw this._errno('ELOOP', 'refusing to replace symbolic link', rootedPath);
@@ -1078,6 +1246,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     const existingMode = existing === undefined ? undefined : existing.mode % 0o1000;
 
     let replaced = false;
+    let streamed: Readonly<{ size: number; sha256: string }> | undefined;
     let failure: unknown;
     let retainedHandle: FileHandle | undefined;
     try {
@@ -1086,7 +1255,11 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
         retainedHandle = handle;
       }
       try {
-        await handle.writeFile(bytes);
+        if (data === undefined) {
+          streamed = await writeStreamTo(handle, source);
+        } else {
+          await handle.writeFile(data);
+        }
         if (existingMode !== undefined) {
           await handle.chmod(existingMode);
         }
@@ -1129,8 +1302,11 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
 
       const verification = await fs.open(admittedTarget, verificationReadFlags);
       try {
-        const committed = await readPublishedDescriptor(verification, bytes.byteLength);
-        if (!bytesEqual(committed, bytes)) {
+        const verified =
+          data === undefined
+            ? streamed !== undefined && (await publishedDigestEquals(verification, streamed))
+            : bytesEqual(await readPublishedDescriptor(verification, data.byteLength), data);
+        if (!verified) {
           throw this._errno('WRITE_VERIFICATION_FAILED', 'committed bytes could not be verified', rootedPath);
         }
       } catch (error) {

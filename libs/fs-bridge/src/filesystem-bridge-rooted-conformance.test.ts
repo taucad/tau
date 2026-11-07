@@ -556,12 +556,30 @@ describe.each([inProcessPort, authorityConnection, workerPort])('rooted bridge c
       const first = await proxy.changedSince(0);
       expect(first.entries.map(({ path }) => path)).toEqual(expect.arrayContaining(['lib/part.ts', 'main.ts']));
       expect(first.entries.every((entry) => !('factsAt' in entry))).toBe(true);
+      expect(first.rescan).toBeUndefined();
       await proxy.writeFile('lib/new.ts', 'export {};\n');
-      const next = await proxy.changedSince(first.generation);
+      await proxy.unlink('main.ts');
+      const next = await proxy.changedSince(first.generation, { epoch: first.epoch });
+      expect(next.rescan).toBeUndefined();
+      expect(next.epoch).toBe(first.epoch);
       expect(next.generation).toBeGreaterThan(first.generation);
       expect(next.entries.map(({ path }) => path)).toContain('lib/new.ts');
       expect(next.entries.map(({ path }) => path)).not.toContain('lib/part.ts');
-      await expect(proxy.changedSince(next.generation)).resolves.toMatchObject({ entries: [] });
+      expect(next.removed.map(({ path }) => path)).toEqual(['main.ts']);
+      await expect(proxy.changedSince(next.generation, { epoch: next.epoch })).resolves.toMatchObject({
+        entries: [],
+        removed: [],
+      });
+      /* A since without the epoch it came with is never read as nothing changed. */
+      await expect(proxy.changedSince(first.generation)).resolves.toMatchObject({
+        rescan: true,
+        epoch: first.epoch,
+        entries: [],
+        removed: [],
+      });
+      await expect(proxy.changedSince(first.generation, { epoch: 'another-lineage' })).resolves.toMatchObject({
+        rescan: true,
+      });
       await expect(proxy.changedSince(0, { signal: AbortSignal.abort() })).rejects.toMatchObject({
         name: 'AbortError',
       });

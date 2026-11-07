@@ -8,6 +8,7 @@ import type {
   ContentFacts,
   IndexChanges,
   IndexEntry,
+  IndexRemoval,
   ProviderCapabilities,
   FileSystemProvider,
   FileTreeNode,
@@ -80,10 +81,13 @@ const discriminatedResultUnion = <
  * changeset over the wire), `glob`, `grep` and `indexStats` — calls a v9 peer
  * either serves or refuses, so the slices share one bump (D20). So does the
  * third: the index queries `facts` and `changedSince`, and
- * `pendingPaths` (D9, W4).
+ * `pendingPaths` (D9, W4). Version 10 changes the answer of an existing
+ * call: `changedSince` takes the caller's index `epoch` and answers `epoch`,
+ * `removed` and `rescan` (W6.3), which a v9 authority does not send, so a v9
+ * peer is refused at the handshake rather than failing that call's schema.
  * @public
  */
-export const fileSystemBridgeProtocolVersion = 9;
+export const fileSystemBridgeProtocolVersion = 10;
 
 /**
  * Caller-side controls of a long bridge call (charter D14): an `AbortSignal`
@@ -292,15 +296,26 @@ export type FactsWireRows = Array<[string, ContentFacts]>;
 export type IndexChangedEntry = Omit<IndexEntry, 'factsAt'>;
 
 /**
- * What a root's index changed after a generation (charter D3): its generation
- * now, which the caller passes as `since` next time, and every entry it still
- * holds that changed later. A removal leaves no entry; generations are one
- * index's own, so a caller that sees `generation` go backwards starts over
- * from `0`.
+ * What a root's index changed after a generation (charter D3, S10): its
+ * generation and epoch now, which the caller passes back as `since` and
+ * `epoch` next time, every entry it still holds that changed later, and every
+ * path it removed since. `rescan` means the index cannot tell from that
+ * `since` (another epoch, no epoch, or a removal record that no longer reaches
+ * back), so both lists are empty and the caller walks the tree: an empty
+ * answer never means nothing changed while `rescan` is set.
  *
  * @public
  */
-export type IndexChangedSince = Readonly<{ generation: number; entries: readonly IndexChangedEntry[] }>;
+export type IndexChangedSince = Readonly<{
+  generation: number;
+  epoch: string;
+  entries: readonly IndexChangedEntry[];
+  removed: readonly IndexRemoval[];
+  rescan?: true;
+}>;
+
+/** What a `changedSince` caller passes beside `since`: the epoch it was reported in. @public */
+export type IndexChangedSinceOptions = Readonly<{ epoch?: string }>;
 
 /** Matches a `grep` returns when the caller names no cap. @public */
 export const defaultGrepResults = 250;
@@ -465,7 +480,7 @@ export type FileSystemBridgeRuntimeService = FileSystemProvider &
      * refuses both with `ENOTSUP`.
      */
     facts?: (paths: readonly string[], options?: FactsOptions & LongCall) => Promise<ReadonlyMap<string, ContentFacts>>;
-    changedSince?: (since: number, options?: LongCall) => Promise<IndexChanges>;
+    changedSince?: (since: number, options?: IndexChangedSinceOptions & LongCall) => Promise<IndexChanges>;
     /*
      * The mutating porcelain is the rooted surface's too (charter D4): one batch
      * in the mutation pipeline, mask-checked by the composed view above it. A
@@ -627,10 +642,12 @@ export type FileSystemBridgeRootedCalls = MachineSettingsService &
      */
     facts(paths: readonly string[], options?: FactsOptions & LongCall): Promise<ReadonlyMap<string, ContentFacts>>;
     /**
-     * What the root's index changed after `since` (charter D3), masked by the
-     * connection's view; a connection with no index refuses with `ENOTSUP`.
+     * What the root's index changed after `since` (charter D3, S10), masked by
+     * the connection's view: pass the `epoch` the `since` came with, or only
+     * `since` `0` is answered and any other is `rescan`. A connection with no
+     * index refuses with `ENOTSUP`.
      */
-    changedSince(since: number, options?: LongCall): Promise<IndexChangedSince>;
+    changedSince(since: number, options?: IndexChangedSinceOptions & LongCall): Promise<IndexChangedSince>;
     /**
      * Which of these files the root's index holds as pending entries (D9),
      * answered without a read. A long call: a cold index opens first.
@@ -1258,8 +1275,12 @@ const factsOptionsSchema = z.looseObject({
   byteCap: countSchema.max(maxFactsByteCap).optional(),
   digests: z.array(z.enum(['sha256', 'blobOid'])).optional(),
 });
+const indexEpochSchema = z.string().min(1).max(64);
 const indexChangedSinceSchema: z.ZodType<IndexChangedSince> = z.looseObject({
   generation: countSchema,
+  epoch: indexEpochSchema,
+  rescan: z.literal(true).optional(),
+  removed: z.array(z.looseObject({ path: z.string(), kind: z.enum(['file', 'dir']), generation: countSchema })),
   entries: z.array(
     z.looseObject({
       path: z.string(),
@@ -1550,7 +1571,10 @@ const callSchemas = {
     args: z.tuple([z.array(rootedPathSchema).max(maxReadManyPaths), factsOptionsSchema.optional()]),
     result: z.array(z.tuple([z.string(), contentFactsSchema])),
   },
-  changedSince: { args: z.tuple([countSchema]), result: indexChangedSinceSchema },
+  changedSince: {
+    args: z.tuple([countSchema, z.looseObject({ epoch: indexEpochSchema.optional() }).optional()]),
+    result: indexChangedSinceSchema,
+  },
   pendingPaths: { args: z.tuple([z.array(rootedPathSchema)]), result: z.array(z.string()) },
 } satisfies FileSystemBridgeCallSchemas;
 

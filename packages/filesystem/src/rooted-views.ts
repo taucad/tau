@@ -84,7 +84,7 @@ const privateStoreDirectory = '.git';
  */
 export type PrivateStore = Pick<
   FileSystemProvider,
-  'readFile' | 'writeFile' | 'readdir' | 'stat' | 'exists' | 'mkdir' | 'unlink' | 'rmdir' | 'rename'
+  'readFile' | 'writeFile' | 'writeFileStream' | 'readdir' | 'stat' | 'exists' | 'mkdir' | 'unlink' | 'rmdir' | 'rename'
 > & {
   /**
    * Bytes `[offset, offset + length)` of one file, clamped to its end: a
@@ -234,11 +234,16 @@ export type RootedFileSystem = Omit<FileSystemProvider, 'writeFileChecked' | 'de
      */
     compareIndex?(): Promise<IndexCompareResult>;
     /**
-     * What this root's index changed after `since` (D3): its generation now,
-     * and every entry it still holds that changed later. Unmasked here, like
-     * `statTree`; a removal leaves no entry.
+     * What this root's index changed after `since` (D3, S10): its generation
+     * and epoch now, every entry it still holds that changed later, and every
+     * path it removed since; or `rescan` when it cannot tell. Pass the `epoch`
+     * the `since` came with: without one only `since` `0` is answered, and any
+     * other is `rescan`. Unmasked here, like `statTree`.
      */
-    changedSince?(since: number, options?: { admits?: IndexAdmits; signal?: AbortSignal }): Promise<IndexChanges>;
+    changedSince?(
+      since: number,
+      options?: { admits?: IndexAdmits; signal?: AbortSignal; epoch?: string },
+    ): Promise<IndexChanges>;
   };
 
 /**
@@ -828,6 +833,22 @@ export class RootedViews {
     const privateStore: PrivateStore = {
       readFile: readPrivateFile,
       ...(captured.provider.readFileStream === undefined ? {} : { readRange: readPrivateRange }),
+      /* A streamed write commits whole or not at all, by the provider's own staging (W6.3). */
+      ...(captured.provider.writeFileStream === undefined
+        ? {}
+        : {
+            writeFileStream: async (path: string, source: ReadableStream<Uint8Array<ArrayBuffer>>) => {
+              let target: ReturnType<typeof resolvePrivate>;
+              try {
+                target = resolvePrivate(path);
+              } catch (error) {
+                /* Refused before the provider saw it: nothing else will release the source. */
+                await source.cancel(error).catch(() => undefined);
+                throw error;
+              }
+              await target.provider.writeFileStream!(target.path, source);
+            },
+          }),
       writeFile: async (path, data) => {
         const target = resolvePrivate(path);
         await target.provider.writeFile(target.path, data);
@@ -896,13 +917,13 @@ export class RootedViews {
     };
     const changedSince = async (
       since: number,
-      options?: { admits?: IndexAdmits; signal?: AbortSignal },
+      options?: { admits?: IndexAdmits; signal?: AbortSignal; epoch?: string },
     ): Promise<IndexChanges> => {
       assertCurrent();
       const index = await this._projectIndexes.ready(root);
       assertCurrent();
       options?.signal?.throwIfAborted();
-      return { generation: index.generation, entries: index.changedSince(since, options) };
+      return index.changes(since, options);
     };
     const compareIndex = async (): Promise<IndexCompareResult> => {
       assertCurrent();

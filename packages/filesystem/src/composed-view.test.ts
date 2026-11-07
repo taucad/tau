@@ -10,6 +10,7 @@ import { createWorkspaceFileService } from '#testing/workspace-service-harness.j
 import type { ComposedViewOverlay } from '#composed-view.js';
 import type { Changeset, ChangesetEntryReceipt, ChangesetReceipt } from '#changeset.js';
 import type { FileReadStreamOptions, WatchEvent, WatchRequest } from '#types.js';
+import type { IndexChanges } from '#project-index/project-index.js';
 
 const encoder = new TextEncoder();
 const contents = {
@@ -626,7 +627,7 @@ describe('composeView index-backed reads', () => {
           .filter(({ path }) => path.includes(query))
           .slice(0, options?.maxResults ?? 100),
       statTree: async (path: string, options?: { admits?: Admits }) => admitted(path, options?.admits),
-      changedSince: async (since: number, options?: { admits?: Admits }) => ({
+      changedSince: async (since: number, options?: { admits?: Admits }): Promise<IndexChanges> => ({
         generation: since + rows.length,
         entries: admitted('', options?.admits).map(({ path, type, size, mtimeMs }) => ({
           path,
@@ -635,6 +636,10 @@ describe('composeView index-backed reads', () => {
           mtimeMs,
           generation: since + 1,
         })),
+        removed: ['.git/old', 'src/gone.ts']
+          .filter((path) => options?.admits?.(path, 'file') !== false)
+          .map((path) => ({ path, kind: 'file', generation: since + 1 })),
+        epoch: 'fixture',
       }),
     });
   };
@@ -678,7 +683,7 @@ describe('composeView index-backed reads', () => {
     await expect(view.statTree!('.git')).rejects.toMatchObject({ code: 'EPERM' });
   });
 
-  it('masks what the index changed, before the descent', async () => {
+  it('masks what the index changed and removed, before the descent', async () => {
     const view = composeView(
       {
         filesystem: indexed([
@@ -694,6 +699,7 @@ describe('composeView index-backed reads', () => {
     const changes = await view.changedSince!(3);
     expect(changes.generation).toBe(7);
     expect(changes.entries.map(({ path }) => path)).toEqual(['src', 'src/main.ts']);
+    expect(changes.removed.map(({ path }) => path)).toEqual(['src/gone.ts']);
   });
 
   it('offers neither read when the composed filesystem has no index', async () => {

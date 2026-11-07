@@ -420,6 +420,7 @@ export class ProjectIndexes {
           writtenAt: Date.now(),
           entries: state.index.toSnapshot(),
           ...(Object.keys(pending).length === 0 ? {} : { pending }),
+          removals: state.index.removalSnapshot(),
         };
       },
     });
@@ -778,7 +779,10 @@ export class ProjectIndexes {
       resolution.persist === undefined ? undefined : await readIndexSnapshot(resolution.provider, resolution.path);
     const usable = snapshot !== undefined && !snapshot.rescan;
     const index = usable
-      ? ProjectIndex.fromSnapshot(snapshot.entries, snapshot.vector.generation, snapshot.pending)
+      ? ProjectIndex.fromSnapshot(snapshot.entries, snapshot.vector.generation, {
+          ...(snapshot.pending === undefined ? {} : { pending: snapshot.pending }),
+          ...(snapshot.removals === undefined ? {} : { removals: snapshot.removals }),
+        })
       : new ProjectIndex({
           trustworthyMtime:
             resolution.persist !== undefined || resolution.provider.capabilities.trustworthyMtime === true,

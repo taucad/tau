@@ -202,6 +202,25 @@ export type FileSystemProvider = {
   }): Promise<CheckedFileWriteResult>;
   /** Append bytes in enqueue order, creating the file and missing parent directories when absent. */
   appendFile?(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
+  /**
+   * Write one file from a stream of its bytes, creating missing parents (W6.3).
+   *
+   * An existing file keeps its old bytes until the stream ends, and then holds
+   * all the new ones: chunks land in a staged file that is moved or closed over
+   * the path only once the stream is done (I1). A new file never holds part of
+   * the stream at its path. Where the provider cannot stage it elsewhere (a
+   * picked folder, or OPFS without sync handles and a native move) it is
+   * recorded as an uncommitted create and reads as empty until the stream
+   * ends; a crash leaves that empty file for the root's recovery to remove, or,
+   * on a root that keeps no record, a temporary sibling for the sweep. A stream
+   * that errors, or a write that fails, leaves the path as it was and nothing
+   * staged behind, and the source is cancelled whenever the write stops before
+   * reading it to the end. File System Access, OPFS and Node providers hold
+   * one chunk at a time (a picked folder without a native move copies a staged
+   * sibling into place); a provider whose storage keeps a file whole (memory,
+   * IndexedDB) gathers it first.
+   */
+  writeFileStream?(path: string, source: ReadableStream<Uint8Array<ArrayBuffer>>): Promise<void>;
   readdir(path: string): Promise<string[]>;
   /** Head metadata of one path: kind, size and time, reading no file content (I3). */
   stat(path: string): Promise<FileStat>;

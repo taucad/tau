@@ -71,7 +71,7 @@ export function CrashReportPrompt(): React.JSX.Element | undefined {
       className='fixed inset-x-4 top-auto bottom-4 z-50 mx-auto my-0 flex h-auto w-auto max-w-md flex-col gap-3 overflow-visible rounded-md border bg-background p-4 text-foreground shadow-lg'
     >
       <h2 id={headingId} className='text-sm font-medium'>
-        Tau reloaded because the page ran out of memory
+        Tau reloaded after the page stopped unexpectedly
       </h2>
       <p className='text-sm text-muted-foreground'>Telling us what you were doing helps us fix it. This is optional.</p>
       <Label htmlFor={messageId} className='text-sm'>

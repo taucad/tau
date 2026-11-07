@@ -31,7 +31,7 @@ import type {
 import { projectIndexDirectory, readIndexSnapshot, writeIndexSnapshot } from '#project-index/index-snapshot.js';
 import type { IndexVector } from '#project-index/index-snapshot.js';
 import type { PendingObject } from '#pending-content.js';
-import { importFactsPath, parseImportFacts, verifiedImportFacts } from '#importer/facts.js';
+import { importFactsMaximumBytes, importFactsPath, parseImportFacts, verifiedImportFacts } from '#importer/facts.js';
 
 /** Reserved root paths no index ever holds (I9): its own snapshot, and import staging. @public */
 export const reservedIndexPaths: readonly string[] = Object.freeze([projectIndexDirectory, '.tau-staging']);
@@ -839,7 +839,8 @@ export class ProjectIndexes {
     let recordMtime: number;
     try {
       const stat = await provider.stat(recordPath);
-      if (stat.type !== 'file') {
+      /* A record for the largest import admitted is a few megabytes; anything far past that is not one. */
+      if (stat.type !== 'file' || stat.size > importFactsMaximumBytes) {
         return;
       }
       recordMtime = stat.mtimeMs;

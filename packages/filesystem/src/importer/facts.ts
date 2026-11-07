@@ -49,6 +49,9 @@ export type ImportFactsRecord = Readonly<{
   entries: readonly StagedImportEntry[];
 }>;
 
+/** The largest record a reader parses: 50,000 entries at a few hundred bytes each, with room. @public */
+export const importFactsMaximumBytes = 64 * 1024 * 1024;
+
 /** How far the record's own mtime may stand from the time it says it was written. @public */
 export const importFactsSkewMilliseconds = 2 * 60 * 1000;
 

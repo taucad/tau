@@ -50,6 +50,7 @@ export type {
   PlannedImportEntry,
 } from '#importer/sources.js';
 export {
+  importFactsMaximumBytes,
   importFactsPath,
   importFactsSkewMilliseconds,
   isStagedImportEntry,

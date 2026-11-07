@@ -280,10 +280,11 @@ export class GitLfsService {
    * At the tenant key the store has already verified them (D11, EQ12): every
    * writer of that key — the presigned PUT this batch signs, relocation and the
    * mirror restore — pins `x-amz-checksum-sha256` to the oid as a signed header,
-   * and the store refuses a body that does not hash to it. So a HEAD that finds
-   * the declared size and an identity is the proof, and the bytes are not read
-   * back. An object still at its pre-D24 legacy key was never pinned, so it is
-   * read and hashed as before.
+   * and the store refuses a body that does not hash to it. So the HEAD asks for
+   * that stored checksum, and when it is the oid's own digest the bytes are not
+   * read back; a different one refuses. An object the store holds no whole
+   * SHA-256 for — a pre-D24 legacy key, a writer that did not pin one, a store
+   * that does not report it — is read and hashed as before.
    */
   public async verify(args: { access: GitAccess; oid: string; size: number }): Promise<boolean> {
     await this.repositories.resolveActiveLocator(args.access);
@@ -292,11 +293,15 @@ export class GitLfsService {
     }
     // Verified without occupying a pooled database connection or the owner's retirement lock.
     const signal = AbortSignal.timeout(120_000);
-    const stored = await this.#storedAt(args.access, args.oid, signal);
+    const stored = await this.#storedAt(args.access, args.oid, { signal, checksum: true });
     if (stored === undefined || stored.size !== args.size) {
       return false;
     }
-    const etag = stored.location.namespace === 'tenants' ? stored.etag : await this.#hashedEtag(stored, args, signal);
+    const { checksumSha256 } = stored;
+    if (checksumSha256 !== undefined && checksumSha256 !== Buffer.from(args.oid, 'hex').toString('base64')) {
+      return false;
+    }
+    const etag = checksumSha256 === undefined ? await this.#hashedEtag(stored, args, signal) : stored.etag;
     if (etag === undefined || etag === '') {
       return false;
     }
@@ -304,7 +309,7 @@ export class GitLfsService {
       ...args,
       verifyContent: async () => {
         // Re-resolve under the lock: a tenant copy may now shadow the hashed legacy object.
-        const current = await this.#storedAt(args.access, args.oid, AbortSignal.timeout(5000));
+        const current = await this.#storedAt(args.access, args.oid, { signal: AbortSignal.timeout(5000) });
         return (
           current !== undefined &&
           current.size === args.size &&
@@ -390,18 +395,21 @@ export class GitLfsService {
    *
    * @param access - The authorized request, which names the owner and project.
    * @param oid - git-lfs's own SHA-256 object identity.
+   * @param options - `signal` bounds the lookups; `checksum` also asks the store
+   *   for the SHA-256 it verified on write.
    * @returns The location holding the bytes and their stored length.
    */
   async #storedAt(
     access: GitAccess,
     oid: string,
-    signal?: AbortSignal,
-  ): Promise<{ location: LfsObjectLocation; size: number; etag: string } | undefined> {
+    options: { signal?: AbortSignal; checksum?: boolean } = {},
+  ): Promise<{ location: LfsObjectLocation; size: number; etag: string; checksumSha256?: string } | undefined> {
     return resolveLfsObjectLocation(this.objectStorage, {
       ownerId: access.ownerId,
       projectId: access.projectId,
       oid,
-      ...(signal === undefined ? {} : { signal }),
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      ...(options.checksum === true ? { checksum: true } : {}),
     });
   }
 

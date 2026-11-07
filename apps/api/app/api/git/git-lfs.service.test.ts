@@ -33,16 +33,27 @@ describe('GitLfsService finalized-object boundary', () => {
   /* Which key actually holds the bytes: `tenants` since D24, `blobs` for a
      project whose objects were written before the move. */
   let storedNamespace: 'tenants' | 'blobs' = 'tenants';
+  /* The SHA-256 a `ChecksumMode: ENABLED` HEAD reports: the store's own digest of
+     the bytes at a pinned tenant key, a fixed one, or none at a legacy key. */
+  let storedChecksum: 'digest' | 'none' | { fixed: string } = 'digest';
   /** Whether the reservation the repository answers with is already finalized. */
   let reservedFinalized = false;
   const objectStorage = {
-    headBlob: vi.fn(async (args: { namespace: string }) =>
+    headBlob: vi.fn(async (args: { namespace: string; checksum?: boolean }) =>
       args.namespace === storedNamespace
         ? {
             contentType: 'application/octet-stream',
             size: stored.current.byteLength,
             etag: 'etag',
             cacheControl: '',
+            ...(args.checksum !== true || storedChecksum === 'none' || args.namespace !== 'tenants'
+              ? {}
+              : {
+                  checksumSha256:
+                    storedChecksum === 'digest'
+                      ? createHash('sha256').update(stored.current).digest('base64')
+                      : storedChecksum.fixed,
+                }),
           }
         : undefined,
     ),
@@ -83,6 +94,7 @@ describe('GitLfsService finalized-object boundary', () => {
     vi.clearAllMocks();
     stored.current = bytes;
     storedNamespace = 'tenants';
+    storedChecksum = 'digest';
     reservedFinalized = false;
     rowSurvivesClear = true;
     deleting = false;
@@ -499,14 +511,38 @@ describe('GitLfsService finalized-object boundary', () => {
 
   /* D11, EQ12: every writer of the tenant key pins the body's SHA-256 to the
      oid, so the store has refused any other bytes and verify reads none back. */
-  it('should verify a tenant object by its size and identity alone, reading no bytes', async () => {
+  it('should verify a tenant object by the checksum the store holds for it, reading no bytes', async () => {
     await expect(service().verify({ access, oid, size: bytes.byteLength })).resolves.toBe(true);
 
     expect(objectStorage.getBlob).not.toHaveBeenCalled();
     expect(objectStorage.headBlob).toHaveBeenCalledWith(
-      expect.objectContaining({ namespace: 'tenants', key: tenantLfsObjectKey(access.ownerId, access.projectId, oid) }),
+      expect.objectContaining({
+        namespace: 'tenants',
+        key: tenantLfsObjectKey(access.ownerId, access.projectId, oid),
+        checksum: true,
+      }),
     );
     expect(repositories.finalizeLfsObject).toHaveBeenCalledOnce();
+  });
+
+  it('should refuse a tenant object whose stored checksum is not its oid, reading no bytes', async () => {
+    storedChecksum = { fixed: createHash('sha256').update('other bytes').digest('base64') };
+
+    await expect(service().verify({ access, oid, size: bytes.byteLength })).resolves.toBe(false);
+    expect(objectStorage.getBlob).not.toHaveBeenCalled();
+    expect(repositories.finalizeLfsObject).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { label: 'whole and correct', current: bytes, verified: true },
+    { label: 'corrupt at the same size', current: new Uint8Array(bytes.byteLength).fill(9), verified: false },
+  ])('should hash a tenant object the store reports no checksum for, $label', async ({ current, verified }) => {
+    storedChecksum = 'none';
+    stored.current = current;
+
+    await expect(service().verify({ access, oid, size: bytes.byteLength })).resolves.toBe(verified);
+    expect(objectStorage.getBlob).toHaveBeenCalledOnce();
+    expect(repositories.finalizeLfsObject).toHaveBeenCalledTimes(verified ? 1 : 0);
   });
 
   it.each([
@@ -516,6 +552,7 @@ describe('GitLfsService finalized-object boundary', () => {
     objectStorage.headBlob.mockResolvedValueOnce({
       contentType: 'application/octet-stream',
       cacheControl: '',
+      checksumSha256: Buffer.from(oid, 'hex').toString('base64'),
       ...head,
     });
 

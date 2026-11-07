@@ -43,12 +43,20 @@ export function ImportMainFileView({
 }: ImportMainFileViewProperties): React.JSX.Element {
   const mainFileLabelId = useId();
   const fileNames = useMemo(() => files.map(({ path }) => path), [files]);
-  /* The preview asks only for what a kernel reads: the CAD sources, the main file first. Stable while the listing is. */
   const cadSources = useMemo(
     () =>
       fileNames.filter((path) => supportedKernelExtensions.some((extension) => path.toLowerCase().endsWith(extension))),
     [fileNames],
   );
+  /*
+   * The preview asks for the CAD sources first, then every other file a model
+   * may read beside them (a mesh, a data file), all within the loader's byte
+   * budget; the viewer puts the main file ahead of both. Stable while the listing is.
+   */
+  const previewPaths = useMemo(() => {
+    const cad = new Set(cadSources);
+    return [...cadSources, ...fileNames.filter((path) => !cad.has(path))];
+  }, [cadSources, fileNames]);
   const cadSourceCount = cadSources.length;
   const byteLength = files.reduce((sum, { size }) => sum + size, 0);
   const dataSource = useMemo(() => createStaticDataSource(files.map(({ path }) => ({ path }))), [files]);
@@ -76,7 +84,7 @@ export function ImportMainFileView({
           {/* Left: CAD Preview */}
           <div className='h-[60vh] min-h-0 min-w-0 overflow-hidden rounded-lg border bg-muted'>
             <ImportViewer
-              paths={cadSources}
+              paths={previewPaths}
               loadPreview={loadPreview}
               mainFile={selectedMainFile}
               owner={owner}

@@ -31,7 +31,9 @@ const emptyState = (message: string): React.JSX.Element => (
 export function ImportViewer({ paths, loadPreview, mainFile, owner, repo }: ImportViewerProperties): React.JSX.Element {
   const projectId = `import-preview-${owner}-${repo}`;
   const [loaded, setLoaded] = useState<
-    { mainFile: string; files: Record<string, { content: Uint8Array<ArrayBuffer> }> } | undefined
+    | { mainFile: string; files: Record<string, { content: Uint8Array<ArrayBuffer> }>; failed?: false }
+    | { mainFile: string; failed: true }
+    | undefined
   >(undefined);
 
   useEffect(() => {
@@ -49,8 +51,9 @@ export function ImportViewer({ paths, loadPreview, mainFile, owner, repo }: Impo
           setLoaded({ mainFile, files });
         }
       } catch {
+        /* A load that failed is not a file too large; one dropped for a newer choice is neither. */
         if (!current.signal.aborted) {
-          setLoaded({ mainFile, files: {} });
+          setLoaded({ mainFile, failed: true });
         }
       }
     })();
@@ -64,6 +67,9 @@ export function ImportViewer({ paths, loadPreview, mainFile, owner, repo }: Impo
   }
   if (loaded?.mainFile !== mainFile) {
     return emptyState('Loading preview');
+  }
+  if (loaded.failed === true) {
+    return emptyState('The preview could not be loaded');
   }
   if (!Object.hasOwn(loaded.files, mainFile)) {
     return emptyState('This file is too large to preview');

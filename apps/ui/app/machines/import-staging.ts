@@ -12,11 +12,13 @@
  * carries the staging locator, not the bytes.
  *
  * A staging belongs to the session that made it until the page hands it off
- * to a create. The worker holds a lock named for it meanwhile, so a sweep in
- * any tab can tell a live staging from an abandoned one, and when the session
- * closes (the route unmounts, the review is cancelled) it removes every
- * staging it still owns. What a crash leaves, {@link ImportSession.sweep}
- * removes.
+ * to a create. The worker holds a lock named for it from the first write until
+ * the create has journaled it (or it is removed), so a sweep in any tab can
+ * tell a live staging from an abandoned one; on a host without Web Locks it
+ * writes a heartbeat beside the staging instead, which the sweep reads. When
+ * the session closes (the route unmounts, the review is cancelled) it removes
+ * every staging it still owns and has not handed off. What a crash leaves,
+ * {@link ImportSession.sweep} removes.
  *
  * @module
  */
@@ -32,6 +34,7 @@ import {
   readImportEntry,
   stageImport,
   sweepStagedImports,
+  touchStagedImport,
   zipImportSource,
 } from '@taucad/filesystem/importer';
 import type {
@@ -72,12 +75,14 @@ export type ImportListing = Readonly<{
 }>;
 
 /**
- * What a staging run produced: its size, and whether the entries were written
- * straight into the project directory (where a move would copy them).
+ * What a staging run produced: its size, whether the entries were written
+ * straight into the project directory (where a move would copy them), and the
+ * project directory the create must commit: the one asked for, or the first
+ * free name after it (`name-2`…) when something already holds it.
  *
  * @public
  */
-export type ImportStaged = Readonly<{ files: number; bytes: number; inPlace: boolean }>;
+export type ImportStaged = Readonly<{ files: number; bytes: number; inPlace: boolean; target: string }>;
 
 /**
  * The page's half of one import.
@@ -97,8 +102,13 @@ export type ImportSession = Readonly<{
     scope: StorageRootConfig,
     options: Readonly<{ target: string; onProgress?: (progress: ImportStagingProgress) => void }>,
   ) => Promise<ImportStaged>;
-  /** Hand a staging to the create that will journal it: the session no longer removes it when it closes. */
+  /**
+   * Hand a staging to the create that will journal it: the session no longer
+   * removes it when it closes, but still holds its lease until {@link release}.
+   */
   handOff: (operationId: string) => Promise<void>;
+  /** Drop a handed-off staging's lease, once the create's journal row owns it (or nothing will). */
+  release: (operationId: string) => Promise<void>;
   /** The bytes of some planned files, in the order asked, for the review's preview, up to a byte budget. */
   preview: (
     paths: readonly string[],
@@ -116,6 +126,7 @@ type Request =
   | Readonly<{ id: number; type: 'plan'; source: ImportSourceDescriptor }>
   | Readonly<{ id: number; type: 'stage'; operationId: string; scope: StorageRootConfig; target: string }>
   | Readonly<{ id: number; type: 'handOff'; operationId: string }>
+  | Readonly<{ id: number; type: 'release'; operationId: string }>
   | Readonly<{ id: number; type: 'preview'; paths: readonly string[]; maximumBytes: number }>
   | Readonly<{ id: number; type: 'discard'; operationId: string; scope: StorageRootConfig }>
   | Readonly<{ id: number; type: 'sweep'; scope: StorageRootConfig; owned: readonly string[] }>
@@ -168,18 +179,46 @@ const sourceOf = (descriptor: ImportSourceDescriptor): ImportSource => {
   }
 };
 
-/* Stagings some session in this worker is running or holds, for a host with no Web Locks. */
+/* Stagings some session in this worker is running or holds: live even before, or without, a lock. */
 const liveInThisWorker = new Set<string>();
 
-/* The lock a live staging holds until it is handed off or removed: what tells a sweep in another tab it is alive. */
-const holdLease = async (operationId: string): Promise<() => void> => {
+/** Milliseconds between heartbeats, well inside the sweep's still period. */
+const heartbeatEvery = 60 * 1000;
+
+/**
+ * Hold a live staging's lease until it is released: the lock a sweep in
+ * another tab asks about, or, on a host without Web Locks, a heartbeat
+ * written beside the staging that a sweep in any worker reads. Releasing
+ * stops the heartbeat and waits for one in flight, so none lands after a
+ * discard.
+ *
+ * @param operationId - The staging.
+ * @param touch - Write the staging's heartbeat.
+ * @returns The release.
+ */
+export const holdLease = async (operationId: string, touch: () => Promise<void>): Promise<() => Promise<void>> => {
   const locks = (globalThis.navigator as Navigator | undefined)?.locks;
   liveInThisWorker.add(operationId);
   const done = (): void => {
     liveInThisWorker.delete(operationId);
   };
   if (locks === undefined) {
-    return done;
+    let beating: Promise<void> = Promise.resolve();
+    const beat = async (): Promise<void> => {
+      try {
+        await touch();
+      } catch {
+        /* A missed beat is retried by the next one, well inside the still period. */
+      }
+    };
+    const timer = setInterval(() => {
+      beating = beat();
+    }, heartbeatEvery);
+    return async () => {
+      clearInterval(timer);
+      await beating;
+      done();
+    };
   }
   const acquired = Promise.withResolvers<void>();
   const released = Promise.withResolvers<void>();
@@ -194,8 +233,14 @@ const holdLease = async (operationId: string): Promise<() => void> => {
       acquired.reject(error);
     }
   })();
-  await acquired.promise;
-  return () => {
+  try {
+    await acquired.promise;
+  } catch (error) {
+    /* No lease, so no live staging: the sweep must not keep treating it as one. */
+    done();
+    throw error;
+  }
+  return async () => {
     done();
     released.resolve();
   };
@@ -235,15 +280,21 @@ export const serveImportChannel = (
 ): void => {
   let plan: ImportPlan | undefined;
   let abort = new AbortController();
-  /* What this session staged and has not handed off: removed when it closes. */
-  const owned = new Map<string, Readonly<{ scope: StorageRootConfig; release: () => void }>>();
+  /* What this session staged and still leases; `kept` once handed off, so closing leaves it for its create. */
+  const owned = new Map<string, { scope: StorageRootConfig; release: () => Promise<void>; kept: boolean }>();
   const running = new Set<Promise<unknown>>();
   const answer = (message: Answer, transfer: Transferable[] = []): void => {
     port.postMessage(message, transfer);
   };
-  const release = (operationId: string): void => {
-    owned.get(operationId)?.release();
+  const release = async (operationId: string): Promise<void> => {
+    const held = owned.get(operationId);
     owned.delete(operationId);
+    await held?.release();
+  };
+  /* A request leaves the running set once it settled (it never rejects: every failure is answered). */
+  const forget = async (work: Promise<void>): Promise<void> => {
+    await work;
+    running.delete(work);
   };
   const run = async (request: Request): Promise<void> => {
     switch (request.type) {
@@ -264,11 +315,14 @@ export const serveImportChannel = (
         if (plan === undefined) {
           throw new Error('Nothing is planned to stage.');
         }
+        const staging = await dependencies.importStaging(request.scope);
         if (!owned.has(request.operationId)) {
-          owned.set(request.operationId, { scope: request.scope, release: await holdLease(request.operationId) });
+          const { operationId } = request;
+          const lease = await holdLease(operationId, async () => touchStagedImport(staging, operationId));
+          owned.set(operationId, { scope: request.scope, release: lease, kept: false });
         }
         const staged = await stageImport({
-          port: await dependencies.importStaging(request.scope),
+          port: staging,
           operationId: request.operationId,
           plan,
           decode: dependencies.decode,
@@ -284,12 +338,21 @@ export const serveImportChannel = (
             files: staged.entries.length,
             bytes: staged.bytes,
             inPlace: staged.inPlace !== undefined,
+            target: staged.target ?? request.target,
           } satisfies ImportStaged,
         });
         return;
       }
       case 'handOff': {
-        release(request.operationId);
+        const held = owned.get(request.operationId);
+        if (held !== undefined) {
+          held.kept = true;
+        }
+        answer({ id: request.id, result: undefined });
+        return;
+      }
+      case 'release': {
+        await release(request.operationId);
         answer({ id: request.id, result: undefined });
         return;
       }
@@ -313,8 +376,11 @@ export const serveImportChannel = (
         return;
       }
       case 'discard': {
+        /* The heartbeat stops first, so none recreates the staging after it is gone. */
+        const lease = owned.get(request.operationId);
+        owned.delete(request.operationId);
+        await lease?.release();
         await discardStagedImport(await dependencies.importStaging(request.scope), request.operationId);
-        release(request.operationId);
         answer({ id: request.id, result: undefined });
         return;
       }
@@ -333,10 +399,13 @@ export const serveImportChannel = (
         if (request.close === true) {
           /* Whatever was running stops first, so nothing writes into a staging after it is removed. */
           await Promise.allSettled(running);
-          for (const [operationId, { scope }] of owned) {
-            // oxlint-disable-next-line no-await-in-loop -- a closing session removes its few stagings in turn.
-            await discardStagedImport(await dependencies.importStaging(scope), operationId).catch(() => undefined);
-            release(operationId);
+          for (const [operationId, { scope, kept }] of owned) {
+            // oxlint-disable-next-line no-await-in-loop -- a closing session lets go of its few stagings in turn.
+            await release(operationId);
+            if (!kept) {
+              // oxlint-disable-next-line no-await-in-loop -- one staging is removed at a time.
+              await discardStagedImport(await dependencies.importStaging(scope), operationId).catch(() => undefined);
+            }
           }
           port.close();
           return;
@@ -356,12 +425,11 @@ export const serveImportChannel = (
         const message = error instanceof Error ? error.message : String(error);
         const reason = isImportRefusal(error) ? (error as { reason?: ImportRefusalReason }).reason : undefined;
         answer({ id: request.id, error: { message, ...(reason === undefined ? {} : { reason }) } });
-      } finally {
-        running.delete(work);
       }
     })();
     if (tracked) {
       running.add(work);
+      void forget(work);
     }
   });
   port.start();
@@ -383,8 +451,10 @@ export type ImportCreationTarget<Location> = Readonly<{
  * Stage a planned import and create its project from the staging, removing
  * the staging on every path that will not commit it: a sweep of what earlier
  * imports on the root left first, then the staging, the hand-off, and the
- * create. A create that failed after journaling its staging keeps it for the
- * journal's recovery; any other failure discards it.
+ * create into the folder the staging chose. A create that failed after
+ * journaling its staging keeps it for the journal's recovery; any other
+ * failure discards it. The staging's lease is held until the create is done,
+ * so no sweep removes it before its journal row exists.
  *
  * @param input - The session, the resolved target, a fresh operation id, the
  *   create (given the staging locator), whether the journal owns a staging,
@@ -397,7 +467,7 @@ export const createFromStagedImport = async <Location, Created>(
     session: ImportSession;
     target: ImportCreationTarget<Location>;
     operationId: string;
-    create: (staging: Readonly<{ operationId: string; providerBasePath?: string }>) => Promise<Created>;
+    create: (staging: Readonly<{ operationId: string; providerBasePath: string }>) => Promise<Created>;
     owns: (operationId: string) => Promise<boolean>;
     onProgress?: (progress: ImportStagingProgress) => void;
   }>,
@@ -416,16 +486,15 @@ export const createFromStagedImport = async <Location, Created>(
     throw error;
   }
   try {
-    return await input.create({
-      operationId,
-      ...(staged.inPlace ? { providerBasePath: target.providerBasePath } : {}),
-    });
+    return await input.create({ operationId, providerBasePath: staged.target });
   } catch (error) {
     /* A journal row that names the staging recovers from it later; with none, nothing will commit it. */
     if (!(await input.owns(operationId).catch(() => true))) {
       await session.discard(operationId, target.scope).catch(() => undefined);
     }
     throw error;
+  } finally {
+    await session.release(operationId).catch(() => undefined);
   }
 };
 
@@ -463,10 +532,15 @@ export const openImportSession = (worker: Pick<Worker, 'postMessage'>): ImportSe
     }
   });
   port.start();
+  let closed = false;
   const ask = async <Result>(
     request: Request extends infer Each ? (Each extends { id: number } ? Omit<Each, 'id'> : never) : never,
     onProgress?: (progress: ImportStagingProgress) => void,
   ): Promise<Result> => {
+    /* A closed port never answers: what is asked after close is refused at once (the close removed the stagings). */
+    if (closed) {
+      throw new ImportChannelError('The import was closed.');
+    }
     const id = next;
     next += 1;
     const call = Promise.withResolvers<unknown>();
@@ -479,11 +553,16 @@ export const openImportSession = (worker: Pick<Worker, 'postMessage'>): ImportSe
     stage: async (operationId, scope, { target, onProgress }) =>
       ask<ImportStaged>({ type: 'stage', operationId, scope, target }, onProgress),
     handOff: async (operationId) => ask<undefined>({ type: 'handOff', operationId }),
+    release: async (operationId) => ask<undefined>({ type: 'release', operationId }),
     preview: async (paths, maximumBytes) =>
       ask<Record<string, { content: Uint8Array<ArrayBuffer> }>>({ type: 'preview', paths, maximumBytes }),
     discard: async (operationId, scope) => ask<undefined>({ type: 'discard', operationId, scope }),
     sweep: async (scope, owned) => ask<readonly string[]>({ type: 'sweep', scope, owned }),
     close: () => {
+      if (closed) {
+        return;
+      }
+      closed = true;
       /* The worker removes what this session still owns once what runs has stopped, then closes its end. */
       port.postMessage({ type: 'cancel', close: true, id: -1 });
       for (const [id, held] of waiting) {

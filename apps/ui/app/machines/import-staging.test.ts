@@ -6,6 +6,9 @@ import {
   createInlineImportDecoder,
   importStagingDirectory,
   importStagingStaleMilliseconds,
+  planImport,
+  stageImport,
+  zipImportSource,
 } from '@taucad/filesystem/importer';
 import type { ImportDecoder, ImportStagingPort } from '@taucad/filesystem/importer';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
@@ -13,6 +16,7 @@ import type { BatchEntry } from '@taucad/filesystem';
 import {
   ImportChannelError,
   createFromStagedImport,
+  holdLease,
   importConnectMessageType,
   openImportSession,
   serveImportChannel,
@@ -26,6 +30,7 @@ afterEach(() => {
     session.close();
   }
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 const scope = { backend: 'indexeddb' } as const;
@@ -66,23 +71,25 @@ const settle = async (check: () => Promise<boolean>): Promise<void> => {
   throw new Error('The worker did not settle.');
 };
 
+const portOf = (provider: MemoryProvider): ImportStagingPort => ({
+  provider,
+  apply: async (entries: readonly BatchEntry[]): Promise<Array<{ outcome: 'applied' }>> => {
+    for (const entry of entries) {
+      if (entry.op === 'write') {
+        // oxlint-disable-next-line no-await-in-loop -- a test port writes in order.
+        await provider.writeFile(entry.path, entry.data as Uint8Array<ArrayBuffer>);
+      } else if (entry.op === 'delete') {
+        // oxlint-disable-next-line no-await-in-loop -- a test port removes in order.
+        await removeTree(provider, entry.path);
+      }
+    }
+    return entries.map(() => ({ outcome: 'applied' }));
+  },
+});
+
 /* The worker's half served behind a fake worker, the page's half opened on it: one real message channel. */
 const connect = (provider: MemoryProvider, decode: ImportDecoder = createInlineImportDecoder()): ImportSession => {
-  const port: ImportStagingPort = {
-    provider,
-    apply: async (entries: readonly BatchEntry[]): Promise<Array<{ outcome: 'applied' }>> => {
-      for (const entry of entries) {
-        if (entry.op === 'write') {
-          // oxlint-disable-next-line no-await-in-loop -- a test port writes in order.
-          await provider.writeFile(entry.path, entry.data as Uint8Array<ArrayBuffer>);
-        } else if (entry.op === 'delete') {
-          // oxlint-disable-next-line no-await-in-loop -- a test port removes in order.
-          await removeTree(provider, entry.path);
-        }
-      }
-      return entries.map(() => ({ outcome: 'applied' }));
-    },
-  };
+  const port = portOf(provider);
   const session = openImportSession({
     postMessage: (message: { type: string; port: MessagePort }) => {
       expect(message.type).toBe(importConnectMessageType);
@@ -117,7 +124,7 @@ describe('the import channel', () => {
     });
 
     /* A memory root's rename is not declared free, so the files are written into the project folder itself. */
-    expect(staged).toStrictEqual({ files: 1, bytes: 8, inPlace: true });
+    expect(staged).toStrictEqual({ files: 1, bytes: 8, inPlace: true, target: 'gear' });
     expect(progress.at(-1)).toBe(1);
     expect(new TextDecoder().decode(await provider.readFile('gear/main.scad'))).toBe('cube(1);');
 
@@ -222,6 +229,9 @@ describe('the import channel', () => {
     await first.handOff('req_crashed');
     await first.stage('req_journaled', scope, { target: 'journaled' });
     await first.handOff('req_journaled');
+    /* Their creates are done: the one journaled, the other's tab gone before it could be. */
+    await first.release('req_crashed');
+    await first.release('req_journaled');
     await first.stage('req_live', scope, { target: 'live' });
     const second = connect(provider);
 
@@ -235,6 +245,56 @@ describe('the import channel', () => {
     expect(await provider.exists(importStagingDirectory('req_live'))).toBe(true);
   });
 
+  it('refuses at once what is asked after the session closed, instead of waiting on a closed port', async () => {
+    const session = connect(new MemoryProvider());
+    sessions.splice(sessions.indexOf(session), 1);
+    session.close();
+
+    await expect(session.discard('req_late', scope)).rejects.toThrow('The import was closed.');
+  });
+
+  it('counts a staging whose lease was refused as live nowhere, so a sweep may remove it', async () => {
+    const provider = new MemoryProvider();
+    vi.stubGlobal('navigator', {
+      locks: {
+        request: async () => {
+          throw new Error('denied');
+        },
+        query: async () => ({ held: [], pending: [] }),
+      },
+    });
+
+    await expect(holdLease('req_refused', async () => undefined)).rejects.toThrow('denied');
+
+    /* The same operation's staging, left by a crash: nothing holds it now. */
+    const judged = await planImport(zipImportSource(await zipOf({ 'a.scad': 'a' })), { policy: tauPathPolicy });
+    await stageImport({
+      port: portOf(provider),
+      operationId: 'req_refused',
+      plan: judged,
+      decode: createInlineImportDecoder(),
+    });
+    vi.useFakeTimers({ now: Date.now() + importStagingStaleMilliseconds + 1000, toFake: ['Date'] });
+
+    expect(await connect(provider).sweep(scope, [])).toStrictEqual(['req_refused']);
+  });
+
+  it('beats where no Web Locks exist, and stops before it is released', async () => {
+    vi.stubGlobal('navigator', {});
+    vi.useFakeTimers();
+    const touch = vi.fn(async () => undefined);
+
+    const release = await holdLease('req_beating', touch);
+    await vi.advanceTimersByTimeAsync(2 * 60 * 1000);
+
+    expect(touch).toHaveBeenCalledTimes(2);
+
+    await release();
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+
+    expect(touch).toHaveBeenCalledTimes(2);
+  });
+
   describe('creating from a staged import', () => {
     const target = { location: 'home', scope, providerBasePath: 'gear', owned: [] as string[] };
 
@@ -243,6 +303,29 @@ describe('the import channel', () => {
       await session.plan({ kind: 'zip', file: await zipOf({ 'gear/main.scad': 'cube(1);' }) });
       return session;
     };
+
+    it('holds the staging live until the create is done, so no sweep removes it before its journal row', async () => {
+      const provider = new MemoryProvider();
+      const sweeper = connect(provider);
+      let swept: readonly string[] | undefined;
+
+      await createFromStagedImport({
+        session: await planned(provider),
+        target,
+        operationId: 'req_creating',
+        create: async () => {
+          /* Another tab sweeps, long after the staging went still, while this create has not journaled it. */
+          vi.useFakeTimers({ now: Date.now() + importStagingStaleMilliseconds + 1000, toFake: ['Date'] });
+          swept = await sweeper.sweep(scope, []);
+          vi.useRealTimers();
+          return { id: 'proj_1' };
+        },
+        owns: async () => true,
+      });
+
+      expect(swept).toStrictEqual([]);
+      expect(await provider.exists('gear/main.scad')).toBe(true);
+    });
 
     it('creates from the staging, telling the create where it was written in place', async () => {
       const provider = new MemoryProvider();
@@ -298,24 +381,38 @@ describe('the import channel', () => {
       expect(await provider.exists(importStagingDirectory('req_journaled'))).toBe(true);
     });
 
-    it('discards a staging that failed partway', async () => {
+    it('creates into the next free folder when a plain folder holds the name', async () => {
       const provider = new MemoryProvider();
       await provider.writeFile('gear/existing.txt', 'mine');
+      const create = vi.fn(async () => ({ id: 'proj_1' }));
+
+      await createFromStagedImport({
+        session: await planned(provider),
+        target,
+        operationId: 'req_suffixed',
+        create,
+        owns: async () => false,
+      });
+
+      expect(create).toHaveBeenCalledWith({ operationId: 'req_suffixed', providerBasePath: 'gear-2' });
+      expect(await provider.readdir('gear')).toStrictEqual(['existing.txt']);
+    });
+
+    it('discards a staging that failed partway', async () => {
+      const provider = new MemoryProvider();
+      const session = connect(provider, async () => {
+        throw new Error('decode failed');
+      });
+      await session.plan({ kind: 'zip', file: await zipOf({ 'gear/main.scad': 'cube(1);' }) });
       const create = vi.fn();
 
       await expect(
-        createFromStagedImport({
-          session: await planned(provider),
-          target,
-          operationId: 'req_refused',
-          create,
-          owns: async () => false,
-        }),
-      ).rejects.toThrow('already exists');
+        createFromStagedImport({ session, target, operationId: 'req_refused', create, owns: async () => false }),
+      ).rejects.toThrow('decode failed');
 
       expect(create).not.toHaveBeenCalled();
       expect(await provider.exists(importStagingDirectory('req_refused'))).toBe(false);
-      expect(await provider.exists('gear/existing.txt')).toBe(true);
+      expect(await provider.exists('gear')).toBe(false);
     });
   });
 });

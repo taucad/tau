@@ -143,6 +143,25 @@ describe('with a Sentry client', () => {
     expect(second?.tags ?? {}).not.toHaveProperty('request_id');
   });
 
+  it('should file a server error under the browser trace that caused it, and not the next one (SB17)', async () => {
+    const traceId = '0af7651916cd43dd8448eb211c80319c';
+    reportServerError(new Error('traced'), 'req_traced', `${traceId}-b7ad6b7169203331-1`);
+    reportServerError(new Error('untraced'));
+
+    const [traced, untraced] = await captured();
+    expect(traced?.contexts?.trace?.trace_id).toBe(traceId);
+    expect(traced?.contexts?.trace?.parent_span_id).toBe('b7ad6b7169203331');
+    expect(traced?.tags).toStrictEqual({ request_id: 'req_traced' });
+    expect(untraced?.contexts?.trace?.trace_id).not.toBe(traceId);
+  });
+
+  it('should ignore a malformed trace header and still report the error', async () => {
+    reportServerError(new Error('garbled'), undefined, ['not-a-trace', 'x']);
+
+    const [event] = await captured();
+    expect(event?.exception?.values?.[0]?.value).toBe('garbled');
+  });
+
   it('should not leave readiness fields on the current scope for a later direct capture', async () => {
     reportReadinessFailure({ indicator: 'redis' });
     Sentry.captureMessage('unrelated');

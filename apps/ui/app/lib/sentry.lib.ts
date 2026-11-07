@@ -168,11 +168,32 @@ export const scrubSentryBreadcrumb = (breadcrumb: Breadcrumb): Breadcrumb => {
   return { ...breadcrumb, data };
 };
 
+/** An SDK integration, as `@sentry/react` accepts one (it does not re-export the type). */
+type SentryIntegration = Parameters<typeof Sentry.addIntegration>[0];
+
+/**
+ * The SDK's default integrations, with release health counted once per page load (SB8, D2).
+ *
+ * SDK 10.x starts a new session on every client-side navigation by default, which would count one
+ * visit as many sessions and inflate crash-free rates. `lifecycle: 'page'` keeps one session per
+ * load, which is what Sentry's current docs and SDK 11 mean by a session. A session is `errored` on
+ * any captured exception and `unhandled` when an error reaches the global handler; it is held in
+ * memory and nothing is written to the device.
+ *
+ * @param defaults - The SDK's default integrations.
+ * @returns The integrations to install.
+ * @public
+ */
+export const sentryIntegrations = (defaults: SentryIntegration[]): SentryIntegration[] => [
+  ...defaults.filter((integration) => integration.name !== 'BrowserSession'),
+  Sentry.browserSessionIntegration({ lifecycle: 'page' }),
+];
+
 /**
  * Start browser error reporting (launch gate OBS-7) when the host injected `SENTRY_DSN`.
  *
- * Errors only: no tracing, no replay, no session tracking and no default PII. Unlike PostHog it writes nothing to
- * the visitor's device, which is why it does not wait for cookie consent. On the web, envelopes go through the
+ * Errors and release health only: no tracing, no replay and no default PII. Unlike PostHog it writes nothing to
+ * the visitor's device, which is why it does not wait for cookie consent: sessions live in memory (SB8). On the web, envelopes go through the
  * same-origin tunnel (`sentryTunnelPath`, SB5); desktop posts to the DSN directly. Every event gets the Tau
  * context (`applyTauEventContext`, SB1) before `beforeSend` scrubs it, and activity breadcrumbs reach the trail.
  */
@@ -187,7 +208,7 @@ export const initSentry = (): void => {
     release: sentryRelease(readBuildId()),
     sendDefaultPii: false,
     ...(usesSentryTunnel() ? { tunnel: sentryTunnelPath } : {}),
-    integrations: (defaults) => defaults.filter((integration) => integration.name !== 'BrowserSession'),
+    integrations: sentryIntegrations,
     beforeSend: createBeforeSend(classifyStaleBuildFailure),
     beforeBreadcrumb: scrubSentryBreadcrumb,
   });

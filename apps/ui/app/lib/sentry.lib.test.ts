@@ -10,6 +10,7 @@ import {
   isUnhandledAbortRejection,
   scrubSelectorText,
   scrubSentryBreadcrumb,
+  sentryIntegrations,
 } from '#lib/sentry.lib.js';
 import {
   automatedRunEnvironment,
@@ -311,5 +312,18 @@ describe('sentryRelease', () => {
 
   it('should leave the release unset for a bundle without a build id', () => {
     expect(sentryRelease(0)).toBeUndefined();
+  });
+});
+
+describe('sentryIntegrations', () => {
+  it('should count one release-health session per page load, replacing the default per-navigation one', () => {
+    const defaults = Sentry.getDefaultIntegrations({});
+    expect(defaults.some((integration) => integration.name === 'BrowserSession')).toBe(true);
+
+    const integrations = sentryIntegrations(defaults);
+
+    expect(integrations.filter((integration) => integration.name === 'BrowserSession')).toHaveLength(1);
+    expect(integrations.at(-1)?.name).toBe('BrowserSession');
+    expect(integrations).toHaveLength(defaults.length);
   });
 });

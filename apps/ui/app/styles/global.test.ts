@@ -337,6 +337,32 @@ describe('action cursor contract', () => {
     expect(appStyles).toContain('[data-sonner-toast] [data-button]');
     expect(appStyles).toContain('#profiler-toggle');
   });
+
+  it("gives the Terminal the editor theme's 16 ANSI colours in light and dark", () => {
+    const block = (selector: RegExp): string => syntaxStyles.match(selector)?.[1] ?? '';
+    const ansi = (css: string): Map<string, string> =>
+      new Map([...css.matchAll(/--terminal-ansi-([a-z-]+):\s*([^;]+);/gu)].map((match) => [match[1]!, match[2]!]));
+    const names = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'];
+    for (const css of [block(/:root \{([^}]*)\}/u), block(/\.dark \{([^}]*)\}/u)]) {
+      const colours = ansi(css);
+      expect([...colours.keys()].toSorted()).toEqual([...names, ...names.map((name) => `bright-${name}`)].toSorted());
+      for (const name of names) {
+        expect(parse(colours.get(name)!)).toBeDefined();
+        expect(colours.get(`bright-${name}`)).not.toBe(colours.get(name));
+      }
+    }
+    /* Red is the editor's keyword red and magenta its function purple, in both themes. */
+    const light = ansi(block(/:root \{([^}]*)\}/u));
+    const dark = ansi(block(/\.dark \{([^}]*)\}/u));
+    const oklch = (value: string | undefined) => toOklch(parse(value!)!)!;
+    for (const [palette, css] of [
+      [light, block(/:root \{([^}]*)\}/u)],
+      [dark, block(/\.dark \{([^}]*)\}/u)],
+    ] as const) {
+      const keyword = /--cm-keyword:\s*([^;]+);/u.exec(css)?.[1];
+      expect(oklch(palette.get('red')).h).toBeCloseTo(oklch(keyword).h!, 0);
+    }
+  });
 });
 
 describe('increased contrast palettes', () => {

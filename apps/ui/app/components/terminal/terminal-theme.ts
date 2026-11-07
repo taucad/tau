@@ -1,14 +1,17 @@
 /**
- * The Terminal pane's colours from Tau's semantic tokens (blueprint Terminal pane: Geist Mono, existing tokens).
+ * The Terminal pane's colours: the editor's surface tokens and its syntax theme's ANSI palette.
  *
  * AurigaX parses hex and `rgb()` only, not the `oklch()` Tau's tokens are written in, so each token is resolved by
- * the browser: painted on a one-pixel canvas and read back as sRGB. Each ANSI colour names the token whose meaning it
- * carries (red is destructive, green success, and so on), so a theme or high-contrast change re-themes the shell.
+ * the browser: painted on a one-pixel canvas and read back as sRGB. The ANSI colours follow the editor's syntax theme
+ * in light and dark, so a theme change re-themes the shell with the editor.
  */
 
 import type { TerminalTheme } from '#components/terminal/aurigax-ghostty-web';
 
-/** The token behind each theme slot. Bright variants share their base token; contrast comes from the ratio below. */
+/**
+ * The token behind each theme slot. Surface colours are the editor's; the 16 ANSI colours are the editor theme's
+ * terminal palette (`--terminal-ansi-*` in `syntax-highlight.css`), each bright variant distinct from its base.
+ */
 const themeTokens = {
   background: '--background',
   foreground: '--foreground',
@@ -16,22 +19,22 @@ const themeTokens = {
   cursorAccent: '--background',
   selectionBackground: '--accent',
   selectionForeground: '--accent-foreground',
-  black: '--muted-foreground',
-  red: '--destructive',
-  green: '--success',
-  yellow: '--warning',
-  blue: '--information',
-  magenta: '--feature',
-  cyan: '--stable',
-  white: '--foreground',
-  brightBlack: '--muted-foreground',
-  brightRed: '--destructive',
-  brightGreen: '--success',
-  brightYellow: '--warning',
-  brightBlue: '--information',
-  brightMagenta: '--feature',
-  brightCyan: '--stable',
-  brightWhite: '--foreground',
+  black: '--terminal-ansi-black',
+  red: '--terminal-ansi-red',
+  green: '--terminal-ansi-green',
+  yellow: '--terminal-ansi-yellow',
+  blue: '--terminal-ansi-blue',
+  magenta: '--terminal-ansi-magenta',
+  cyan: '--terminal-ansi-cyan',
+  white: '--terminal-ansi-white',
+  brightBlack: '--terminal-ansi-bright-black',
+  brightRed: '--terminal-ansi-bright-red',
+  brightGreen: '--terminal-ansi-bright-green',
+  brightYellow: '--terminal-ansi-bright-yellow',
+  brightBlue: '--terminal-ansi-bright-blue',
+  brightMagenta: '--terminal-ansi-bright-magenta',
+  brightCyan: '--terminal-ansi-bright-cyan',
+  brightWhite: '--terminal-ansi-bright-white',
 } as const satisfies Record<keyof TerminalTheme, `--${string}`>;
 
 /** Used where a token does not resolve (no canvas, or a token this build lacks): legible on either theme. */

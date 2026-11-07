@@ -6,7 +6,8 @@
  * The staging directory is the import's journal. `intent.json` holds the
  * operation and the source pin, written before any entry; `ledger/<n>.json`
  * holds, for each batch once its writes are durable, every entry's path, size,
- * mode and the facts (blob id, SHA-256, kind) the decode measured. No record
+ * mode and the facts (blob id, SHA-256, kind) measured from one read-back of
+ * what the batch wrote (EQ6: the decode checks only the zip CRC). No record
  * holds bytes: the bytes are the staged files under `tree/`, written once.
  * An import that stops — a crash, a closed tab, a cancelled review — resumes
  * from the ledger: the same source pin skips every entry a record covers and
@@ -43,12 +44,15 @@
 
 import { maximumChangesetBytes, maximumChangesetEntries } from '#changeset.js';
 import type { BatchEntry, BatchReceipt } from '#changeset.js';
-import type { ContentFacts, FileMode, FileSystemProvider } from '#types.js';
+import type { FileSystemProvider } from '#types.js';
 import { ImportRefusedError, isImportRefusal } from '#importer/limits.js';
 import type { ImportRefusalReason } from '#importer/limits.js';
-import type { ImportDecodedEntry, ImportDecoder } from '#importer/decode.js';
+import { createInlineImportMeasurer } from '#importer/decode.js';
+import type { ImportDecodedEntry, ImportDecoder, ImportMeasuredFacts, ImportMeasurer } from '#importer/decode.js';
 import type { ImportPlan, ImportSourcePin, PlannedImportEntry } from '#importer/sources.js';
 import { foldPathSpelling } from '#path-fold.js';
+import { isStagedImportEntry } from '#importer/facts.js';
+import type { StagedImportEntry } from '#importer/facts.js';
 
 /** The storage root's reserved staging folder (I9). @public */
 export const importStagingFolder = '.tau-staging';
@@ -72,18 +76,6 @@ export const importStagingDirectory = (operationId: string): string => {
   }
   return `${importStagingFolder}/${importStagingPrefix}${operationId}`;
 };
-
-/**
- * One staged entry: where it goes, and the facts measured as it was decoded.
- *
- * @public
- */
-export type StagedImportEntry = Readonly<{
-  path: string;
-  size: number;
-  mode?: FileMode;
-  facts: ContentFacts & Readonly<{ blobOid: string; sha256: string }>;
-}>;
 
 /**
  * A staged import: the pin it was staged from, and every entry it holds.
@@ -197,16 +189,6 @@ export const importResidentBytes = 64 * 1024 * 1024;
 /** How long a staging nobody owns must have been still before a sweep removes it. @public */
 export const importStagingStaleMilliseconds = 10 * 60 * 1000;
 
-/**
- * Where a committed import keeps the facts its decode measured (every entry's
- * blob id, SHA-256, kind and mode), so the first revision and the Project
- * Index build from them instead of hashing the files again. A member of `.tau`
- * that no registry row names, so it is never versioned.
- *
- * @public
- */
-export const importFactsPath = '.tau/import.json';
-
 /* Run under the port's directory lock where it has one. */
 const exclusively = async <Result>(
   port: ImportStagingPort,
@@ -231,18 +213,6 @@ export const ownsImportTarget = async (
   const marker = (await readJson(provider, `${directory}/${importOwnerPath}`)) as { operationId?: unknown } | undefined;
   return marker?.operationId === operationId;
 };
-
-/**
- * The record at {@link importFactsPath}.
- *
- * @public
- */
-export type ImportFactsRecord = Readonly<{
-  version: 1;
-  operationId: string;
-  pin: ImportSourcePin;
-  entries: readonly StagedImportEntry[];
-}>;
 
 /**
  * The name of the lock a live staging session holds, so a sweep in another
@@ -271,17 +241,6 @@ const readJson = async (provider: FileSystemProvider, path: string): Promise<unk
 
 const samePin = (left: ImportSourcePin, right: ImportSourcePin): boolean =>
   JSON.stringify(left, Object.keys(left).sort()) === JSON.stringify(right, Object.keys(right).sort());
-
-const isStagedEntry = (value: unknown): value is StagedImportEntry => {
-  const entry = value as Partial<StagedImportEntry> | undefined;
-  return (
-    typeof entry?.path === 'string' &&
-    typeof entry.size === 'number' &&
-    typeof entry.facts?.blobOid === 'string' &&
-    typeof entry.facts.sha256 === 'string' &&
-    ['text', 'binary'].includes(String(entry.facts.contentKind))
-  );
-};
 
 const applied = async (port: ImportStagingPort, entries: readonly BatchEntry[]): Promise<void> => {
   const receipts = await port.apply(entries);
@@ -327,7 +286,7 @@ export const readStagedImport = async (
   const byPath = new Map<string, StagedImportEntry>();
   for (const record of records) {
     for (const entry of ledgerEntries(record)) {
-      if (isStagedEntry(entry)) {
+      if (isStagedImportEntry(entry)) {
         byPath.set(entry.path, entry);
       }
     }
@@ -735,9 +694,17 @@ const isRefusalReason = (value: unknown): value is ImportRefusalReason =>
  * (created exclusively, with an owner marker, where the entries go in place),
  * and returned as {@link StagedImport.target}.
  *
+ * Each batch is written, then read back, and its facts (blob id, SHA-256,
+ * content kind) are measured from that read-back by `measure`, the compute
+ * worker's where there is one, so the ledger holds the facts of the bytes on
+ * disk and each file is hashed once (EQ6, I2). The decode only checks the
+ * zip CRC-32. A read-back holds at most the batch's largest file beside the
+ * decode budget.
+ *
  * @param input - The storage root, the operation, the plan, the decoder, the
- *   pending project directory, and optional decode concurrency, resident byte
- *   budget, signal and progress callback.
+ *   read-back measurer (inline WebCrypto by default), the pending project
+ *   directory, and optional decode concurrency, resident byte budget, signal
+ *   and progress callback.
  * @returns Every staged entry, in plan order.
  * @throws ImportRefusedError when an entry does not decode to its declared bytes.
  * @public
@@ -748,6 +715,7 @@ export const stageImport = async (
     operationId: string;
     plan: ImportPlan;
     decode: ImportDecoder;
+    measure?: ImportMeasurer;
     target?: string;
     concurrency?: number;
     residentBytes?: number;
@@ -756,6 +724,7 @@ export const stageImport = async (
   }>,
 ): Promise<StagedImport> => {
   const { port, operationId, plan, decode } = input;
+  const measure = input.measure ?? createInlineImportMeasurer();
   const directory = importStagingDirectory(operationId);
   if (input.target !== undefined && !isProjectDirectory(input.target)) {
     throw new TypeError(`Not a project directory: ${input.target}`);
@@ -877,6 +846,58 @@ export const stageImport = async (
       return { error };
     }
   };
+  /*
+   * The facts of what a batch wrote, from one read-back of each file (EQ6):
+   * at most the batch's largest file is held at a time beyond the decode
+   * budget, and the bytes are handed to the measurer, never kept.
+   */
+  /* Past a compute supervisor's default three restarts, so a worker that never loads ends in its inline fallback. */
+  const measureAttempts = 6;
+  const readBack = async (window: readonly PlannedImportEntry[]): Promise<Array<StagedImportEntry['facts']>> => {
+    const held = byteBudget(Math.max(0, ...window.map(({ size }) => size)));
+    /* Only the caller stops it: a later batch's failed decode still lets this written batch keep its record. */
+    const stop = input.signal ?? new AbortController().signal;
+    const measureOnce = async (entry: PlannedImportEntry): Promise<ImportMeasuredFacts> => {
+      const bytes = await port.provider.readFile(stagedEntryLocation({ directory, inPlace }, entry.path));
+      if (bytes.byteLength !== entry.size) {
+        throw new ImportRefusedError('corrupt', {
+          path: entry.path,
+          message: 'A staged file did not read back as it was written.',
+        });
+      }
+      return measure(bytes, entry.size);
+    };
+    return bounded(window, concurrency, async (entry) => {
+      await held.acquire(entry.size, stop);
+      try {
+        /*
+         * A measurer that died took the bytes it was handed with it: they are read from disk again. A worker
+         * that never loads dies once per spawn until its supervisor gives up and measures inline, so the
+         * read is retried past that point, never without bound.
+         */
+        const measureRetrying = async (attempt: number): Promise<ImportMeasuredFacts> => {
+          try {
+            return await measureOnce(entry);
+          } catch (error) {
+            if (!(error instanceof Error && error.name === 'ComputeWorkerCrashedError') || attempt >= measureAttempts) {
+              throw error;
+            }
+            return measureRetrying(attempt + 1);
+          }
+        };
+        const measured = await measureRetrying(1);
+        const { size, ...facts } = measured;
+        if (size !== entry.size) {
+          throw new Error(
+            `A staged file was measured at ${String(size)} bytes, not the ${String(entry.size)} written: ${entry.path}`,
+          );
+        }
+        return facts;
+      } finally {
+        held.release(entry.size);
+      }
+    });
+  };
   /* Two windows fit the budget, one writing while the next decodes; an entry larger than that is a window alone. */
   const windows = windowsOf(remaining, Math.min(maximumChangesetBytes, Math.floor(residentBytes / 2)));
   /* One batch decodes while the one before it writes, both inside the byte budget. */
@@ -922,14 +943,19 @@ export const stageImport = async (
               }
               await applied(port, batch);
             }));
+        /* Written: the decoded bytes go, so the read-back is all this batch still holds. */
+        decoded.length = 0;
+        batch.length = 0;
       } finally {
         budget.release(windowBytes);
       }
+      // oxlint-disable-next-line no-await-in-loop -- a batch's facts come from its own read-back, before its record.
+      const measured = await readBack(window);
       const records: StagedImportEntry[] = window.map((entry, at) => ({
         path: entry.path,
         size: entry.size,
         ...(entry.mode === undefined ? {} : { mode: entry.mode }),
-        facts: decoded[at]!.facts,
+        facts: measured[at]!,
       }));
       const ledgerStem = `${directory}/ledger/${String(ledgerSequence).padStart(6, '0')}`;
       /* The record replaces its announcement: it names the same paths, with their facts. */

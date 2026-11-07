@@ -6,8 +6,9 @@
  * reads a byte of it. The worker plans the import (the zip's central
  * directory by range, the folder's listing, the path policy and the limits),
  * answers the review screen with paths and sizes, and on confirm stages the
- * entries on the creation root: each one decoded and digested on the compute
- * worker, written once, recorded in the staging ledger. The project is then
+ * entries on the creation root: each one decoded and CRC-checked on the
+ * compute worker, written once, read back and hashed once on the compute
+ * worker (EQ6), recorded in the staging ledger. The project is then
  * committed from that staging by the ordinary pending-create journal, which
  * carries the staging locator, not the bytes.
  *
@@ -29,9 +30,11 @@ import {
   fileListImportSource,
   handleListImportSource,
   importStagingLeaseName,
+  ImportRefusedError,
   isImportRefusal,
   planImport,
   readImportEntry,
+  spoolImportArchive,
   stageImport,
   sweepStagedImports,
   touchStagedImport,
@@ -39,6 +42,7 @@ import {
 } from '@taucad/filesystem/importer';
 import type {
   ImportDecoder,
+  ImportMeasurer,
   ImportPlan,
   ImportRefusalReason,
   ImportSource,
@@ -59,7 +63,23 @@ export type ImportSourceDescriptor =
   | Readonly<{ kind: 'zip'; file: File }>
   | Readonly<{ kind: 'files'; files: ReadonlyArray<Readonly<{ file: File; path: string }>>; name?: string }>
   | Readonly<{ kind: 'directory'; handle: FileSystemDirectoryHandle }>
-  | Readonly<{ kind: 'handles'; handles: readonly FileSystemHandle[] }>;
+  | Readonly<{ kind: 'handles'; handles: readonly FileSystemHandle[] }>
+  /**
+   * A repository archive the worker downloads itself, so the page never holds
+   * it: the Tau API's archive gateway, which GitHub's own archive hosts need
+   * because they answer no cross-origin read. No credential travels with it.
+   */
+  | Readonly<{
+      kind: 'archive';
+      url: string;
+      name: string;
+      headers?: Readonly<Record<string, string>>;
+      /** The host the archive comes from: a GitHub archive is pinned at its top folder's sha when the gateway names no commit. */
+      provider?: 'github';
+    }>;
+
+/** How much of an archive download has arrived. @public */
+export type ImportDownloadProgress = Readonly<{ loaded: number; total: number }>;
 
 /**
  * What the review screen shows: a name, every kept path with its size, and
@@ -90,8 +110,21 @@ export type ImportStaged = Readonly<{ files: number; bytes: number; inPlace: boo
  * @public
  */
 export type ImportSession = Readonly<{
-  /** Plan a source. Replaces any earlier plan of this session. */
-  plan: (source: ImportSourceDescriptor) => Promise<ImportListing>;
+  /**
+   * Plan a source. Replaces any earlier plan of this session: a plan still
+   * running when a newer one is asked stops, and never becomes the plan.
+   * `root` imports only a folder inside it, as the project root; an archive
+   * reports its download as it arrives. Aborting `signal` stops the plan in
+   * the worker (its download with it) and rejects at once.
+   */
+  plan: (
+    source: ImportSourceDescriptor,
+    options?: Readonly<{
+      root?: string;
+      onDownload?: (progress: ImportDownloadProgress) => void;
+      signal?: AbortSignal;
+    }>,
+  ) => Promise<ImportListing>;
   /**
    * Stage the planned source on a durable storage root, resuming a staging of
    * the same source. `target` is the project directory the create will
@@ -123,18 +156,19 @@ export type ImportSession = Readonly<{
 }>;
 
 type Request =
-  | Readonly<{ id: number; type: 'plan'; source: ImportSourceDescriptor }>
+  | Readonly<{ id: number; type: 'plan'; source: ImportSourceDescriptor; root?: string }>
   | Readonly<{ id: number; type: 'stage'; operationId: string; scope: StorageRootConfig; target: string }>
   | Readonly<{ id: number; type: 'handOff'; operationId: string }>
   | Readonly<{ id: number; type: 'release'; operationId: string }>
   | Readonly<{ id: number; type: 'preview'; paths: readonly string[]; maximumBytes: number }>
   | Readonly<{ id: number; type: 'discard'; operationId: string; scope: StorageRootConfig }>
   | Readonly<{ id: number; type: 'sweep'; scope: StorageRootConfig; owned: readonly string[] }>
-  | Readonly<{ id: number; type: 'cancel'; close?: boolean }>;
+  | Readonly<{ id: number; type: 'cancel'; close?: boolean; plan?: number }>;
 
 type Answer = Readonly<{
   id: number;
   progress?: ImportStagingProgress;
+  downloaded?: ImportDownloadProgress;
   result?: unknown;
   error?: Readonly<{ message: string; reason?: ImportRefusalReason }>;
 }>;
@@ -162,8 +196,147 @@ export class ImportChannelError extends Error {
   }
 }
 
-const sourceOf = (descriptor: ImportSourceDescriptor): ImportSource => {
+/**
+ * The sentence a refused archive download carries, so the import says why (E14).
+ * The archive gateway answers in plain text; API refusals answer `{ error, code }`.
+ *
+ * @param response - The refused archive response.
+ * @returns The server's sentence, or the status when it gave none.
+ * @public
+ */
+export const downloadRefusal = async (response: Response): Promise<string> => {
+  const text = await response.text();
+  const body = text.trim();
+  try {
+    const { error } = JSON.parse(body) as { error?: unknown };
+    if (typeof error === 'string' && error !== '') {
+      return error;
+    }
+  } catch {
+    /* A plain-text sentence from the archive gateway. */
+  }
+  return body === '' ? `Download failed: ${String(response.status)} ${response.statusText}` : body;
+};
+
+/*
+ * Download an archive into a Blob in the worker, under the import's archive
+ * limit as it arrives: never on the page, never whole in the heap (the
+ * browser keeps a large Blob out of it), and sent with no cookie or token.
+ */
+const downloadArchive = async (
+  descriptor: Extract<ImportSourceDescriptor, { kind: 'archive' }>,
+  control: Readonly<{ signal: AbortSignal; onDownload: (progress: ImportDownloadProgress) => void }>,
+): Promise<Readonly<{ archive: Blob; commit?: string }>> => {
+  const url = new URL(descriptor.url);
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    throw new TypeError(`An archive downloads over HTTP only: ${url.protocol}`);
+  }
+  const response = await fetch(url, {
+    signal: control.signal,
+    credentials: 'omit',
+    redirect: 'follow',
+    ...(descriptor.headers === undefined ? {} : { headers: { ...descriptor.headers } }),
+  });
+  if (response.status === 413) {
+    await response.body?.cancel();
+    throw new ImportRefusedError('archiveTooLarge', {
+      message: 'The repository download is larger than the gateway admits.',
+    });
+  }
+  if (!response.ok) {
+    throw new Error(await downloadRefusal(response));
+  }
+  if (response.body === null) {
+    throw new Error('The archive download has no body.');
+  }
+  /* An encoded body's length is not the archive's, so only an unencoded one is held to. */
+  const declared = Number(response.headers.get('content-length') ?? Number.NaN);
+  const declaredSize =
+    Number.isSafeInteger(declared) && declared > 0 && !response.headers.has('content-encoding') ? declared : undefined;
+  const total = declaredSize ?? 0;
+  let last = 0;
+  let archive: Blob;
+  try {
+    archive = await spoolImportArchive(response.body, {
+      ...(declaredSize === undefined ? {} : { declaredSize }),
+      signal: control.signal,
+      onProgress: (loaded) => {
+        const now = Date.now();
+        if (now - last >= 100) {
+          last = now;
+          control.onDownload({ loaded, total });
+        }
+      },
+    });
+  } catch (error) {
+    /* A transfer that failed partway (the gateway ends one that spends its hourly allowance with an error) is not damage. */
+    if (error instanceof ImportRefusedError || control.signal.aborted) {
+      throw error;
+    }
+    throw new Error(downloadInterrupted, { cause: error });
+  }
+  control.onDownload({ loaded: archive.size, total: archive.size });
+  /* The gateway names the commit it resolved the ref to; anything but 40 hex is no commit. */
+  const commit = response.headers.get(importCommitHeader)?.trim().toLowerCase();
+  return { archive, ...(commit !== undefined && commitPattern.test(commit) ? { commit } : {}) };
+};
+
+/** What an archive download that failed partway says: it may be the gateway's rate limit, not damage. @public */
+export const downloadInterrupted =
+  'The repository download stopped partway. Tau may be limiting downloads from your network for now: try again later.';
+
+/** The header the archive gateway names the resolved commit in. @public */
+export const importCommitHeader = 'X-Tau-Commit';
+
+const commitPattern = /^[0-9a-f]{40}$/u;
+
+/* A GitHub archive's one top folder is `<owner>-<repo>-<short sha>/`. */
+const topFolderRevision = (path: string): string | undefined => /^[^/]+-([0-9a-f]{7,40})\//u.exec(path)?.[1];
+
+/*
+ * An archive pinned at the commit the gateway named or, when it named none,
+ * at the short sha of its top folder, read from the first entry as it lists.
+ */
+const pinnedArchive = (base: ImportSource, commit: string | undefined, github: boolean): ImportSource => {
+  if (commit !== undefined) {
+    return { ...base, revision: commit };
+  }
+  /* Only GitHub names its top folder after the commit. */
+  if (!github) {
+    return base;
+  }
+  let revision: string | undefined;
+  let seen = false;
+  return {
+    ...base,
+    get revision() {
+      return revision;
+    },
+    async *list(control) {
+      for await (const entry of base.list(control)) {
+        if (!seen) {
+          seen = true;
+          revision = topFolderRevision(entry.source);
+        }
+        yield entry;
+      }
+    },
+  };
+};
+
+const sourceOf = async (
+  descriptor: ImportSourceDescriptor,
+  control: Readonly<{ signal: AbortSignal; onDownload: (progress: ImportDownloadProgress) => void }>,
+): Promise<ImportSource> => {
   switch (descriptor.kind) {
+    case 'archive': {
+      const { archive, commit } = await downloadArchive(descriptor, control);
+      return pinnedArchive(
+        zipImportSource(archive, { name: descriptor.name, kind: 'archive' }),
+        commit,
+        descriptor.provider === 'github',
+      );
+    }
     case 'zip': {
       return zipImportSource(descriptor.file);
     }
@@ -275,10 +448,16 @@ export const serveImportChannel = (
   dependencies: Readonly<{
     importStaging: (scope: StorageRootConfig) => Promise<ImportStagingPort>;
     decode: ImportDecoder;
+    /** The read-back measure: the compute worker's, or inline WebCrypto where there is none. */
+    measure?: ImportMeasurer;
     policy: PathPolicy;
   }>,
 ): void => {
   let plan: ImportPlan | undefined;
+  const measuring = dependencies.measure === undefined ? {} : { measure: dependencies.measure };
+  /* The newest plan request: only it may become the plan, so a slower earlier one never replaces it. */
+  let latestPlan: number | undefined;
+  const planning = new Map<number, AbortController>();
   let abort = new AbortController();
   /* What this session staged and still leases; `kept` once handed off, so closing leaves it for its create. */
   const owned = new Map<string, { scope: StorageRootConfig; release: () => Promise<void>; kept: boolean }>();
@@ -296,10 +475,49 @@ export const serveImportChannel = (
     await work;
     running.delete(work);
   };
+  const planOf = async (request: Extract<Request, { type: 'plan' }>, signal: AbortSignal): Promise<ImportPlan> => {
+    const source = await sourceOf(request.source, {
+      signal,
+      onDownload: (downloaded) => {
+        answer({ id: request.id, downloaded });
+      },
+    });
+    return planImport(source, {
+      policy: dependencies.policy,
+      signal,
+      ...(request.root === undefined || request.root === '' ? {} : { root: request.root }),
+    });
+  };
+  /* A plan stops every earlier one still running, and becomes the plan only while no newer one or cancel came. */
+  const newestPlan = async (request: Extract<Request, { type: 'plan' }>): Promise<ImportPlan> => {
+    latestPlan = request.id;
+    for (const earlier of planning.values()) {
+      earlier.abort(new Error('A newer import replaced this one.'));
+    }
+    const own = new AbortController();
+    planning.set(request.id, own);
+    let planned: ImportPlan;
+    try {
+      planned = await planOf(request, AbortSignal.any([abort.signal, own.signal]));
+    } finally {
+      planning.delete(request.id);
+    }
+    if (latestPlan !== request.id) {
+      throw new Error('A newer import replaced this one.');
+    }
+    return planned;
+  };
+  /* One plan stops: its download aborts, and it never becomes the plan. */
+  const cancelPlan = (id: number): void => {
+    planning.get(id)?.abort(new Error('The import was cancelled.'));
+    if (latestPlan === id) {
+      latestPlan = undefined;
+    }
+  };
   const run = async (request: Request): Promise<void> => {
     switch (request.type) {
       case 'plan': {
-        plan = await planImport(sourceOf(request.source), { policy: dependencies.policy, signal: abort.signal });
+        plan = await newestPlan(request);
         answer({
           id: request.id,
           result: {
@@ -326,6 +544,7 @@ export const serveImportChannel = (
           operationId: request.operationId,
           plan,
           decode: dependencies.decode,
+          ...measuring,
           target: request.target,
           signal: abort.signal,
           onProgress: (progress) => {
@@ -394,6 +613,12 @@ export const serveImportChannel = (
         return;
       }
       case 'cancel': {
+        if (request.plan !== undefined) {
+          cancelPlan(request.plan);
+          answer({ id: request.id, result: undefined });
+          return;
+        }
+        latestPlan = undefined;
         abort.abort(new Error('The import was cancelled.'));
         abort = new AbortController();
         if (request.close === true) {
@@ -510,18 +735,23 @@ export const openImportSession = (worker: Pick<Worker, 'postMessage'>): ImportSe
   worker.postMessage({ type: importConnectMessageType, port: channel.port1 }, [channel.port1]);
   const { port2: port } = channel;
   let next = 0;
-  const waiting = new Map<
-    number,
-    Readonly<{ call: PromiseWithResolvers<unknown>; onProgress?: (progress: ImportStagingProgress) => void }>
-  >();
+  type Listeners = Readonly<{
+    onProgress?: (progress: ImportStagingProgress) => void;
+    onDownload?: (progress: ImportDownloadProgress) => void;
+  }>;
+  const waiting = new Map<number, Readonly<{ call: PromiseWithResolvers<unknown>; listeners: Listeners }>>();
   port.addEventListener('message', (event: MessageEvent<Answer>) => {
-    const { id, progress, result, error } = event.data;
+    const { id, progress, downloaded, result, error } = event.data;
     const held = waiting.get(id);
     if (held === undefined) {
       return;
     }
     if (progress !== undefined) {
-      held.onProgress?.(progress);
+      held.listeners.onProgress?.(progress);
+      return;
+    }
+    if (downloaded !== undefined) {
+      held.listeners.onDownload?.(downloaded);
       return;
     }
     waiting.delete(id);
@@ -535,7 +765,7 @@ export const openImportSession = (worker: Pick<Worker, 'postMessage'>): ImportSe
   let closed = false;
   const ask = async <Result>(
     request: Request extends infer Each ? (Each extends { id: number } ? Omit<Each, 'id'> : never) : never,
-    onProgress?: (progress: ImportStagingProgress) => void,
+    listeners: Listeners = {},
   ): Promise<Result> => {
     /* A closed port never answers: what is asked after close is refused at once (the close removed the stagings). */
     if (closed) {
@@ -544,14 +774,43 @@ export const openImportSession = (worker: Pick<Worker, 'postMessage'>): ImportSe
     const id = next;
     next += 1;
     const call = Promise.withResolvers<unknown>();
-    waiting.set(id, { call, ...(onProgress === undefined ? {} : { onProgress }) });
+    waiting.set(id, { call, listeners });
     port.postMessage({ ...request, id });
     return call.promise as Promise<Result>;
   };
   return Object.freeze({
-    plan: async (source) => ask<ImportListing>({ type: 'plan', source }),
+    plan: async (source, options = {}) => {
+      const { signal } = options;
+      if (signal?.aborted === true) {
+        throw new ImportChannelError('The import was cancelled.');
+      }
+      const id = next;
+      const planned = ask<ImportListing>(
+        { type: 'plan', source, ...(options.root === undefined ? {} : { root: options.root }) },
+        options.onDownload === undefined ? {} : { onDownload: options.onDownload },
+      );
+      if (signal === undefined) {
+        return planned;
+      }
+      const cancel = (): void => {
+        const held = waiting.get(id);
+        if (held === undefined || closed) {
+          return;
+        }
+        waiting.delete(id);
+        /* The worker stops the plan and its download; no answer is awaited. */
+        port.postMessage({ type: 'cancel', plan: id, id: -1 });
+        held.call.reject(new ImportChannelError('The import was cancelled.'));
+      };
+      signal.addEventListener('abort', cancel, { once: true });
+      try {
+        return await planned;
+      } finally {
+        signal.removeEventListener('abort', cancel);
+      }
+    },
     stage: async (operationId, scope, { target, onProgress }) =>
-      ask<ImportStaged>({ type: 'stage', operationId, scope, target }, onProgress),
+      ask<ImportStaged>({ type: 'stage', operationId, scope, target }, onProgress === undefined ? {} : { onProgress }),
     handOff: async (operationId) => ask<undefined>({ type: 'handOff', operationId }),
     release: async (operationId) => ask<undefined>({ type: 'release', operationId }),
     preview: async (paths, maximumBytes) =>

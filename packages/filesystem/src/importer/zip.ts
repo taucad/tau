@@ -15,6 +15,7 @@
 import { ImportRefusedError } from '#importer/limits.js';
 import type { FileMode } from '#types.js';
 import { crc32Update } from '#importer/crc32.js';
+import { decodeZipName } from '#importer/zip-names.js';
 
 /**
  * Bytes at a range of something larger than memory should hold: a `Blob`
@@ -45,7 +46,7 @@ export const blobRangeSource = (blob: Blob): RangeSource => ({
  * @public
  */
 export type ZipEntry = Readonly<{
-  /** The name as stored, decoded as UTF-8. */
+  /** The name as stored: UTF-8 when flagged or valid, else CP437 (see `decodeZipName`). */
   name: string;
   method: 'stored' | 'deflate';
   compressedSize: number;
@@ -255,7 +256,6 @@ export const readZipDirectory = async (
     }
     return new DataView(window.buffer, window.byteOffset + (at - windowStart), length);
   };
-  const decoder = new TextDecoder();
   const entries: Array<Omit<ZipEntry, 'extentEnd'>> = [];
   let at = directory.offset;
   for (let index = 0; index < directory.entries; index += 1) {
@@ -283,7 +283,12 @@ export const readZipDirectory = async (
     const variableLength = nameLength + extraLength + commentLength;
     // oxlint-disable-next-line no-await-in-loop -- the entry's name and extra field follow its header.
     const variable = await ensure(at + centralHeaderBytes, variableLength);
-    const name = decoder.decode(new Uint8Array(variable.buffer, variable.byteOffset, nameLength));
+    /* UTF-8 when flagged, else the Unicode Path field, else UTF-8 when it is valid, else CP437. */
+    const name = decodeZipName(
+      Uint8Array.from(new Uint8Array(variable.buffer, variable.byteOffset, nameLength)),
+      flags,
+      new DataView(variable.buffer, variable.byteOffset + nameLength, extraLength),
+    );
     if (size === 0xff_ff_ff_ff || compressedSize === 0xff_ff_ff_ff || localHeaderOffset === 0xff_ff_ff_ff) {
       const wide = zip64Values(
         variable,

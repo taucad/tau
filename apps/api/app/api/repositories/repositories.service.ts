@@ -21,6 +21,7 @@ import type {
   RepositoryProviderId,
 } from '@taucad/share/repository-target';
 import type { Environment } from '#config/environment.config.js';
+import { corsBaseConfiguration } from '#constants/cors.constant.js';
 import { RedisService } from '#redis/redis.service.js';
 import type { ArchiveQueryDto, BranchesQueryDto, GithubBranchesResponse } from '#api/repositories/repositories.dto.js';
 
@@ -307,7 +308,7 @@ const githubImportArchiveUrl = async ({
   readonly ref: string;
   readonly signal: AbortSignal;
   readonly githubToken?: string;
-}): Promise<URL> => {
+}): Promise<Readonly<{ url: URL; commit: string }>> => {
   if (
     !githubOwnerPattern.test(owner) ||
     !githubRepositoryPattern.test(repository) ||
@@ -337,10 +338,19 @@ const githubImportArchiveUrl = async ({
   if (typeof commit['sha'] !== 'string' || !/^[0-9a-f]{40}$/u.test(commit['sha'])) {
     throw new GatewayError(502, 'GitHub returned an invalid commit identity.');
   }
-  return new URL(
-    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/zipball/${commit['sha']}`,
-  );
+  return {
+    url: new URL(
+      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/zipball/${commit['sha']}`,
+    ),
+    commit: commit['sha'],
+  };
 };
+
+/**
+ * The header naming the commit an import archive was resolved to (40 hex), so
+ * the client pins the revision it imported rather than the ref it asked for.
+ */
+const importCommitHeader = 'X-Tau-Commit';
 
 const contentTypeIsArchive = (response: Response): boolean => {
   const contentType = response.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
@@ -357,17 +367,29 @@ const timeoutError = (): DOMException => new DOMException('The repository provid
  * The chunk that crosses the limit is forwarded and the body ends: the import
  * worker applies the same limit and refuses what it received as too large.
  * A body that stalls or outlasts its deadline aborts the upstream request.
+ * Its bytes are spent from the caller's hourly byte budget as they pass, a
+ * flush at a time. A body that spends the last of it, or whose spending
+ * cannot be counted, fails with an error (never a clean end that would pass
+ * for a whole archive), and the upstream request is cancelled and aborted.
  *
  * @param source - The provider's archive body.
  * @param abortUpstream - Aborts the provider request with a reason.
+ * @param spend - Spends bytes from the caller's budget, answering whether any is left.
  * @returns The bounded body to send.
  */
 const boundedImportBody = (
   source: ReadableStream<Uint8Array<ArrayBuffer>>,
   abortUpstream: (reason: DOMException) => void,
+  spend: (bytes: number) => Promise<boolean>,
 ): ReadableStream<Uint8Array<ArrayBuffer>> => {
   const reader = source.getReader();
   let received = 0;
+  let unspent = 0;
+  const flush = async (): Promise<boolean> => {
+    const bytes = unspent;
+    unspent = 0;
+    return bytes === 0 ? true : spend(bytes);
+  };
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   const deadlineTimer = setTimeout(() => {
     abortUpstream(timeoutError());
@@ -383,31 +405,65 @@ const boundedImportBody = (
     }, importBodyIdleMilliseconds);
   };
   restartIdleTimer();
+  /* Ends the upstream whatever happens to the budget's last flush, which never rejects past here. */
+  const release = async (reason: unknown): Promise<void> => {
+    stopTimers();
+    try {
+      await flush().catch(() => false);
+    } finally {
+      await reader.cancel(reason).catch(() => undefined);
+      abortUpstream(new DOMException('The import body ended.', 'AbortError'));
+    }
+  };
   return new ReadableStream<Uint8Array<ArrayBuffer>>({
     async pull(controller) {
+      let read: ReadableStreamReadResult<Uint8Array<ArrayBuffer>>;
       try {
-        const { done, value } = await reader.read();
-        if (done) {
-          stopTimers();
-          controller.close();
-          return;
-        }
-        restartIdleTimer();
-        received += value.byteLength;
-        controller.enqueue(value);
-        if (received > repositoryImportLimits.maxArchiveBytes) {
-          stopTimers();
-          controller.close();
-          await reader.cancel();
-        }
+        read = await reader.read();
       } catch (error) {
+        /* The provider failed mid-body: what it sent is still spent. */
         stopTimers();
+        await flush().catch(() => false);
         controller.error(error);
+        return;
+      }
+      if (read.done) {
+        stopTimers();
+        /* The whole archive went: a failed last flush does not take it back. */
+        await flush().catch(() => false);
+        controller.close();
+        return;
+      }
+      const { value } = read;
+      restartIdleTimer();
+      received += value.byteLength;
+      unspent += value.byteLength;
+      controller.enqueue(value);
+      let withinBudget: boolean;
+      try {
+        withinBudget = unspent >= importBudgetFlushBytes ? await flush() : true;
+      } catch (error) {
+        /* The budget cannot be counted (Redis failed): the body fails, and the upstream goes with it. */
+        await release(error);
+        controller.error(error);
+        return;
+      }
+      if (!withinBudget) {
+        /* An error, not an end: the browser sees a failed transfer, never a short archive that looks whole. */
+        const spent = new Error('The hourly repository import allowance ran out during the download.');
+        await release(spent);
+        controller.error(spent);
+        return;
+      }
+      if (received > repositoryImportLimits.maxArchiveBytes) {
+        stopTimers();
+        await flush().catch(() => false);
+        controller.close();
+        await reader.cancel().catch(() => undefined);
       }
     },
     async cancel(reason) {
-      stopTimers();
-      await reader.cancel(reason);
+      await release(reason);
     },
   });
 };
@@ -417,13 +473,29 @@ const boundedImportBody = (
  *
  * @param response - The provider's archive response.
  * @param abortUpstream - Aborts the provider request with a reason.
+ * @param pinned - The commit the ref resolved to, sent as {@link importCommitHeader}, and the
+ *   caller's hourly byte budget: what is left, and how to spend from it.
+ * @param pinned.commit - The resolved commit.
+ * @param pinned.budget - The byte budget.
  * @returns The streamed, uncached response.
  */
-const streamImportArchive = (response: Response, abortUpstream: (reason: DOMException) => void): Response => {
+const streamImportArchive = (
+  response: Response,
+  abortUpstream: (reason: DOMException) => void,
+  {
+    commit,
+    budget,
+  }: Readonly<{ commit: string; budget: Readonly<{ left: number; spend: (bytes: number) => Promise<boolean> }> }>,
+): Response => {
   const declared = Number(response.headers.get('content-length') ?? Number.NaN);
   if (Number.isFinite(declared) && declared > repositoryImportLimits.maxArchiveBytes) {
     void response.body?.cancel();
     throw new GatewayError(413, 'The repository archive exceeds the import size limit.');
+  }
+  /* A declared archive larger than what is left of the hour's budget is refused before a byte is sent. */
+  if (Number.isFinite(declared) && declared > budget.left) {
+    void response.body?.cancel();
+    throw importBudgetSpent();
   }
   if (!response.body) {
     throw new GatewayError(502, 'The repository provider returned an unreadable response.');
@@ -432,12 +504,15 @@ const streamImportArchive = (response: Response, abortUpstream: (reason: DOMExce
     'Content-Type': 'application/zip',
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
+    [importCommitHeader]: commit,
+    /* The reply's own list replaces the CORS plugin's, so it names every exposed header, the commit among them. */
+    'Access-Control-Expose-Headers': corsBaseConfiguration.exposedHeaders.join(', '),
   });
   /* A decoded body no longer matches an encoded length, so only an unencoded length is forwarded. */
   if (Number.isSafeInteger(declared) && declared > 0 && !response.headers.has('content-encoding')) {
     headers.set('Content-Length', String(declared));
   }
-  return new Response(boundedImportBody(response.body, abortUpstream), { headers });
+  return new Response(boundedImportBody(response.body, abortUpstream, budget.spend), { headers });
 };
 
 type BranchNode = {
@@ -471,6 +546,28 @@ type BranchesGraphqlResponse = {
 const rateLimitWindowSeconds = 3600;
 const branchesPerIpPerHour = 300;
 const archivesPerIpPerHour = 60;
+/** Archive bytes one network may download for imports in an hour: two imports at the 1 GiB limit. */
+const archiveBytesPerIpPerHour = 2 * 1024 * 1024 * 1024;
+/** Streamed bytes are spent from the budget in steps of this, and once more at the end. */
+const importBudgetFlushBytes = 8 * 1024 * 1024;
+
+const incrByAmountExpireLua = `
+local current = redis.call('INCRBY', KEYS[1], ARGV[2])
+if redis.call('TTL', KEYS[1]) < 0 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return current
+`;
+
+/* Seconds until the hour's bucket ends and the budget starts over. */
+const secondsLeftInHour = (): number => 3600 - Math.floor((Date.now() / 1000) % 3600);
+
+const importBudgetSpent = (): GatewayError =>
+  new GatewayError(
+    429,
+    'This network has downloaded its hourly allowance of repository imports. Try again later.',
+    String(secondsLeftInHour()),
+  );
 
 const incrByExpireLua = `
 local current = redis.call('INCR', KEYS[1])
@@ -553,19 +650,26 @@ export class RepositoriesService {
       const reference = query.target ?? null;
       const isShareRequest = reference !== null;
       let targetUrl: URL;
+      let importCommit = '';
+      let left = 0;
       let root = '';
       if (reference) {
         const target = parseRepositoryTarget(providerId, reference);
         root = target.root;
         targetUrl = await archiveUrl({ providerId, target, signal, githubToken });
       } else if (providerId === 'github') {
-        targetUrl = await githubImportArchiveUrl({
+        /* Imports spend an hourly byte budget per network; one already spent is refused before GitHub is asked. */
+        left = archiveBytesPerIpPerHour - (await this.spendArchiveBytes(ip, 0));
+        if (left <= 0) {
+          throw importBudgetSpent();
+        }
+        ({ url: targetUrl, commit: importCommit } = await githubImportArchiveUrl({
           owner: query.owner ?? '',
           repository: query.repo ?? '',
           ref: query.ref ?? '',
           signal,
           githubToken,
-        });
+        }));
       } else {
         throw new GatewayError(400, 'The repository share target is missing.');
       }
@@ -576,7 +680,13 @@ export class RepositoriesService {
       if (!isShareRequest) {
         /* The provider has answered; from here the body has its own idle and overall bounds. */
         clearTimeout(responseTimer);
-        return streamImportArchive(response, abortUpstream);
+        return streamImportArchive(response, abortUpstream, {
+          commit: importCommit,
+          budget: {
+            left,
+            spend: async (bytes) => (await this.spendArchiveBytes(ip, bytes)) < archiveBytesPerIpPerHour,
+          },
+        });
       }
       const archive = await readBounded(response, shareArtifactLimits.maxArchiveBytes);
       const { archive: body } = await normalizeRepositoryArchive(archive, root);
@@ -683,6 +793,19 @@ export class RepositoriesService {
     if (Number(raw) > branchesPerIpPerHour) {
       throw repositoryRateLimited();
     }
+  }
+
+  /** Spend bytes from this network's hourly import budget (0 reads it), answering the hour's total. */
+  private async spendArchiveBytes(ip: string, bytes: number): Promise<number> {
+    const key = `tau:repositories:archive-bytes:${hourBucket()}:${ip}`;
+    const raw = await this.redisService.client.eval(
+      incrByAmountExpireLua,
+      1,
+      key,
+      String(rateLimitWindowSeconds),
+      String(bytes),
+    );
+    return Number(raw);
   }
 
   private async consumeArchiveSlot(ip: string): Promise<void> {

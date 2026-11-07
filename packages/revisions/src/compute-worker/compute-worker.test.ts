@@ -164,7 +164,7 @@ describe('the compute worker seam', () => {
     expect(packIndex.offsetOf(built.entries[0]!.oid)).toBe(12);
   });
 
-  it('decodes an import entry from the Blob it is handed and digests it in the same pass (W7)', async () => {
+  it('decodes an import entry from the Blob it is handed, CRC-checked and hashed by nothing (W7)', async () => {
     const remote = remoteCompute();
     const body = encoder.encode('cube(2);\n'.repeat(512));
     const blob = new Blob([body]);
@@ -172,16 +172,30 @@ describe('the compute worker seam', () => {
     const decoded = await remote.decodeImportEntry({ blob, path: 'part.scad', size: body.byteLength });
 
     expect(decoded.data).toStrictEqual(body);
-    expect(decoded.facts.blobOid).toBe(
-      digestHex('sha1', new Uint8Array([...encoder.encode(`blob ${String(body.byteLength)}\0`), ...body])),
-    );
-    expect(decoded.facts.sha256).toBe(digestHex('sha256', body));
+    expect(Object.keys(decoded)).toStrictEqual(['data']);
     await expect(remote.decodeImportEntry({ blob, path: 'part.scad', size: 1 })).rejects.toThrow(/changed/u);
     /* The refusal keeps its name and reason across the port, so the import reports the policy's verdict. */
     await expect(remote.decodeImportEntry({ blob, path: 'part.scad', size: 1 })).rejects.toMatchObject({
       workerErrorName: 'ImportRefusedError',
       reason: 'corrupt',
     });
+  });
+
+  it("measures an import's read-back once, taking the bytes rather than copying them (EQ6, I2)", async () => {
+    const remote = remoteCompute();
+    const body = encoder.encode('cube(2);\n'.repeat(512));
+    const readBack = new Uint8Array(body);
+
+    const facts = await remote.measureImportBytes(readBack, body.byteLength);
+
+    expect(facts.blobOid).toBe(
+      digestHex('sha1', new Uint8Array([...encoder.encode(`blob ${String(body.byteLength)}\0`), ...body])),
+    );
+    expect(facts.sha256).toBe(digestHex('sha256', body));
+    expect(facts.contentKind).toBe('text');
+    expect(facts.size).toBe(body.byteLength);
+    /* Transferred to the worker: the caller's copy is gone. */
+    expect(readBack.byteLength).toBe(0);
   });
 
   it('carries a failure back as a rejection', async () => {

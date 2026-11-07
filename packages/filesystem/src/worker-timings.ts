@@ -55,6 +55,7 @@ export type WorkerTimingSpan = (typeof workerTimingSpans)[number];
  * - `index.scan`: Project Index roots opened with no trustworthy snapshot.
  * - `index.compare`: head-metadata observations of an index root or subtree (0 bytes read, I3).
  * - `index.facts.bytes`: file bytes a lazy `facts` request read through a root's index (D4).
+ * - `index.importFacts`: files whose recorded import facts a first scan took, verified, instead of hashing them (D12).
  * - `view.facts.bytes`: file bytes a composed view's own `facts` read, over a base with no index.
  * - `locks.set`: ordered Web Lock sets a mutation acquired (one per `withCrossTabLocks` call).
  * - `locks.token`: the tokens those sets named, so `locks.token / locks.set` is the mean set size.
@@ -77,6 +78,7 @@ export const workerTimingCounters = [
   'index.scan',
   'index.compare',
   'index.facts.bytes',
+  'index.importFacts',
   'view.facts.bytes',
   'locks.set',
   'locks.token',

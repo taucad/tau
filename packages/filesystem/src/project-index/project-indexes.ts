@@ -31,6 +31,7 @@ import type {
 import { projectIndexDirectory, readIndexSnapshot, writeIndexSnapshot } from '#project-index/index-snapshot.js';
 import type { IndexVector } from '#project-index/index-snapshot.js';
 import type { PendingObject } from '#pending-content.js';
+import { importFactsMaximumBytes, importFactsPath, parseImportFacts, verifiedImportFacts } from '#importer/facts.js';
 
 /** Reserved root paths no index ever holds (I9): its own snapshot, and import staging. @public */
 export const reservedIndexPaths: readonly string[] = Object.freeze([projectIndexDirectory, '.tau-staging']);
@@ -149,6 +150,12 @@ export class ProjectIndexes {
    * read began. No write hook needs to forget them: a write changes the mtime.
    */
   private readonly _readFacts = new Map<string, Map<string, ReadFacts>>();
+
+  /** Roots opened by a scan whose import facts, if any, no digest request has taken yet (D12). */
+  private readonly _importFactsPending = new Set<string>();
+
+  /** The records already taken, by root and operation: a record seeds once, never again on a later rescan. */
+  private readonly _importFactsTaken = new Set<string>();
 
   /**
    * @param options - Mount boundaries, provider resolution, path policy and tab identity.
@@ -269,6 +276,9 @@ export class ProjectIndexes {
       return this._coldFacts(key, paths, { lineCount, byteCap, signal: options?.signal, listed: options?.listed });
     }
     const index = await this.ready(key);
+    if (digests.length > 0 && this._importFactsPending.delete(key)) {
+      await this._seedImportFacts(key, index);
+    }
     const resolution = this._resolve(key);
     const trustworthy = resolution.persist !== undefined;
     const answers = (path: string, known: ContentFacts | undefined): known is ContentFacts => {
@@ -681,6 +691,7 @@ export class ProjectIndexes {
   /** Drop every index: disposal, or a reset fact that may have moved the whole tree. */
   public clear(): void {
     this._readFacts.clear();
+    this._importFactsPending.clear();
     for (const state of this._states.values()) {
       clearTimeout(state.persistTimer);
     }
@@ -803,8 +814,59 @@ export class ProjectIndexes {
       /* Evicted while opening: answer this caller, keep nothing. */
       return index;
     }
+    if (!usable) {
+      /* A first scan may be of a project an import just committed: its first digest request seeds from the record. */
+      this._importFactsPending.add(root);
+    }
     this._schedulePersist(root);
     return index;
+  }
+
+  /**
+   * Take a committed import's recorded facts (charter D12) for every file
+   * they still describe, so a digest request finds blob ids and SHA-256
+   * without hashing the import again. Asked once, by the first digest request
+   * after a scan, so opening a root costs nothing more. Only on a provider
+   * whose mtimes are trustworthy, and only what {@link verifiedImportFacts}
+   * holds to the file: anything else is measured like any file. A record
+   * seeds once: a later rescan of the root measures its files. The record
+   * is trusted as of its own mtime, so a file written within the racy window
+   * of it stays untrusted (EQ7).
+   */
+  private async _seedImportFacts(root: string, index: ProjectIndex): Promise<void> {
+    if (!this._trustsMtime(root)) {
+      return;
+    }
+    const { provider, path } = this._resolve(root);
+    const recordPath = joinRelativePath(path, importFactsPath);
+    let record: ReturnType<typeof parseImportFacts>;
+    let recordMtime: number;
+    try {
+      const stat = await provider.stat(recordPath);
+      /* A record for the largest import admitted is a few megabytes; anything far past that is not one. */
+      if (stat.type !== 'file' || stat.size > importFactsMaximumBytes) {
+        return;
+      }
+      recordMtime = stat.mtimeMs;
+      record = parseImportFacts(await provider.readFile(recordPath));
+    } catch {
+      return;
+    }
+    const taken = `${root}\0${record?.operationId ?? ''}`;
+    if (record === undefined || this._importFactsTaken.has(taken)) {
+      return;
+    }
+    this._importFactsTaken.add(taken);
+    const seeded = verifiedImportFacts(record, { recordMtime, now: Date.now() }, (entryPath) => {
+      const entry = index.settled(entryPath) ? index.entry(entryPath) : undefined;
+      return entry === undefined || entry.kind === 'dir'
+        ? undefined
+        : { kind: 'file', size: entry.size, mtimeMs: entry.mtimeMs };
+    });
+    for (const [entryPath, { facts, size, mtimeMs }] of seeded) {
+      index.recordFacts(entryPath, facts, { size, mtimeMs, observedAt: recordMtime });
+    }
+    workerTimings.count('index.importFacts', seeded.size);
   }
 
   /**

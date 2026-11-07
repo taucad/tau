@@ -131,7 +131,7 @@ describe('repository archive normalization', () => {
 describe('repository import extraction', () => {
   it('uses the import limits the operator ruled, not the portable-share limits', () => {
     expect(repositoryImportLimits).toStrictEqual({
-      maxArchiveBytes: 256 * mebibyte,
+      maxArchiveBytes: 1024 * mebibyte,
       maxEntries: 100_000,
       maxFiles: 100_000,
       maxEntryBytes: 25 * mebibyte,

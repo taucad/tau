@@ -26,6 +26,7 @@
  */
 
 import type { StatContentMetadata } from '@taucad/types';
+import { randomUuid } from '@taucad/utils/id';
 import type { PendingObject } from '#pending-content.js';
 import type { ContentFacts, FileStatEntry } from '#types.js';
 
@@ -64,13 +65,51 @@ export type IndexEntry = Readonly<{
 }>;
 
 /**
- * What changed in an index after a generation: the index's generation now,
- * which the caller passes as `since` next time, and every entry it still
- * holds whose generation is newer. A removal leaves no entry.
+ * How many removals an index remembers (S10). Past it the oldest is dropped,
+ * and a caller whose `since` is older than the dropped one is told to rescan.
  *
  * @public
  */
-export type IndexChanges = Readonly<{ generation: number; entries: readonly IndexEntry[] }>;
+export const indexRemovalLimit = 4096;
+
+/**
+ * One path an index stopped holding, and the generation that removed it: the
+ * path and everything that was under it are gone. A path removed and then
+ * written again is listed both here and among the changed entries.
+ *
+ * @public
+ */
+export type IndexRemoval = Readonly<{ path: string; kind: IndexEntryKind; generation: number }>;
+
+/**
+ * What changed in an index after a generation: the index's generation and
+ * epoch now, which the caller passes as `since` and `epoch` next time, every
+ * entry it still holds whose generation is newer, and every path it removed
+ * since (S10). With `rescan`, the index cannot say what changed since then —
+ * its removal record no longer reaches back that far, or the `epoch` is not
+ * one this index continues — and both lists are empty: the caller walks.
+ *
+ * @public
+ */
+export type IndexChanges = Readonly<{
+  generation: number;
+  epoch: string;
+  entries: readonly IndexEntry[];
+  removed: readonly IndexRemoval[];
+  rescan?: true;
+}>;
+
+/**
+ * The removal record as a snapshot stores it (S10): the epoch that wrote it,
+ * the generation it is complete from, and each removal as `[path, kind, generation]`.
+ *
+ * @internal
+ */
+export type RemovalSnapshot = Readonly<{
+  epoch: string;
+  floor: number;
+  removed: ReadonlyArray<readonly [path: string, kind: 'f' | 'd', generation: number]>;
+}>;
 
 /** Options for a {@link ProjectIndex}. @public */
 export type ProjectIndexOptions = Readonly<{
@@ -223,18 +262,37 @@ export class ProjectIndex {
    * Rebuild an index from a persisted snapshot. It is not complete until a
    * compare has validated it against the provider. Only a root whose mtime can
    * key facts keeps a snapshot, so the index trusts its provider's mtime.
+   * Every loaded row carries `generation`, as the snapshot does not keep each
+   * row's own, so a caller continuing the snapshot's epoch from an earlier
+   * generation is answered the whole tree as changed (S10).
    *
    * @param rows - Serialized entries.
    * @param generation - The snapshot's generation.
-   * @param pending - The pending entries by path (D9), as {@link ProjectIndex.pendingSnapshot} gave them.
+   * @param stored - What the snapshot kept beside its rows: the pending entries by path (D9), as
+   *   {@link ProjectIndex.pendingSnapshot} gave them, and the removal record (S10), as
+   *   {@link ProjectIndex.removalSnapshot} gave it.
    * @returns The index.
    */
   public static fromSnapshot(
     rows: readonly SnapshotRow[],
     generation: number,
-    pending?: Readonly<Record<string, PendingObject>>,
+    stored?: Readonly<{ pending?: Readonly<Record<string, PendingObject>>; removals?: RemovalSnapshot }>,
   ): ProjectIndex {
+    const { pending, removals } = stored ?? {};
     const index = new ProjectIndex({ generation, trustworthyMtime: true });
+    /* The snapshot is the writer's state at `generation`, so a `since` it
+     * issued up to there is answered here; one past it may name generations
+     * the writer issued after storing, which this index issues again: rescan. */
+    if (removals !== undefined && removals.floor <= generation) {
+      index._inherited = { epoch: removals.epoch, generation };
+      index._removedFloor = removals.floor;
+      for (const [path, kind, removedAt] of removals.removed) {
+        if (removedAt > removals.floor && removedAt <= generation) {
+          index._removed.delete(path);
+          index._removed.set(path, { kind: kind === 'd' ? 'dir' : 'file', generation: removedAt });
+        }
+      }
+    }
     for (const [path, kind, size, mtimeMs, facts, factsAt] of rows) {
       const object = kind === 'f' && pending !== undefined && Object.hasOwn(pending, path) ? pending[path] : undefined;
       const node: Node =
@@ -266,13 +324,27 @@ export class ProjectIndex {
   private _adoptedMtimes = 0;
   /** The entries a tree write announced and has not landed yet (D10); `undefined` while no write expects any. */
   private _arriving: Map<string, ExpectedEntry> | undefined;
+  /** This index's lineage of generations: a `since` from another epoch names other changes. */
+  private readonly _epoch = randomUuid();
+  /** The epoch and generation of the snapshot this index was loaded from, whose `since` it continues. */
+  private _inherited: Readonly<{ epoch: string; generation: number }> | undefined;
+  /** Removed paths by path, oldest first (S10). */
+  private readonly _removed = new Map<string, Readonly<{ kind: IndexEntryKind; generation: number }>>();
+  /** The record holds every removal after this generation. */
+  private _removedFloor: number;
 
   /**
    * @param options - The generation to continue from, and whether the provider's mtime can key facts.
    */
   public constructor(options: ProjectIndexOptions = {}) {
     this._generation = options.generation ?? 0;
+    this._removedFloor = this._generation;
     this._trustworthyMtime = options.trustworthyMtime === true;
+  }
+
+  /** This index's lineage, which {@link ProjectIndex.changes} answers `since` in. */
+  public get epoch(): string {
+    return this._epoch;
   }
 
   /** Monotonic per root; bumped by every change the index records. */
@@ -412,6 +484,76 @@ export class ProjectIndex {
   }
 
   /**
+   * Everything that changed after a generation: entries and removals (S10).
+   * Reads no content (I3).
+   *
+   * `since` means something only with the epoch it was reported in, so a
+   * caller without one is answered `rescan` unless it starts from `0`: a
+   * reload or a new lineage could otherwise read an old generation as recent
+   * and miss what was removed in between. After a reload every loaded row
+   * carries the snapshot's generation, so a caller that continues the
+   * snapshot's epoch from before it gets the whole tree as changed, with the
+   * removals the snapshot kept: more than changed, never less.
+   *
+   * The mask is asked about each removal's ancestors, as directories, and then
+   * the removal itself, as {@link walk} asks before each descent, so entries
+   * and removals agree for one mask.
+   *
+   * @param since - A generation this index, or the snapshot it was loaded from, reported.
+   * @param options - Optional mask, and the epoch `since` was reported in.
+   * @returns The changes, or `rescan` when they cannot be told.
+   */
+  public changes(
+    since: number,
+    options?: { readonly admits?: IndexAdmits; readonly epoch?: string | undefined },
+  ): IndexChanges {
+    const epoch = options?.epoch ?? (since === 0 ? this._epoch : undefined);
+    const inherited = this._inherited;
+    const continued =
+      epoch === this._epoch || (inherited !== undefined && epoch === inherited.epoch && since <= inherited.generation);
+    if (!continued || since < this._removedFloor || since > this._generation) {
+      return { generation: this._generation, epoch: this._epoch, entries: [], removed: [], rescan: true };
+    }
+    const admits = options?.admits;
+    const admitted = (path: string, kind: IndexEntryKind): boolean => {
+      if (admits === undefined) {
+        return true;
+      }
+      for (let at = path.indexOf('/'); at !== -1; at = path.indexOf('/', at + 1)) {
+        if (!admits(path.slice(0, at), 'dir')) {
+          return false;
+        }
+      }
+      return admits(path, kind);
+    };
+    const removed: IndexRemoval[] = [];
+    for (const [path, { kind, generation }] of this._removed) {
+      if (generation > since && admitted(path, kind)) {
+        removed.push({ path, kind, generation });
+      }
+    }
+    return {
+      generation: this._generation,
+      epoch: this._epoch,
+      entries: this.changedSince(since, options),
+      removed,
+    };
+  }
+
+  /**
+   * The removal record as a snapshot stores it, under this index's epoch.
+   *
+   * @returns The record.
+   */
+  public removalSnapshot(): RemovalSnapshot {
+    return {
+      epoch: this._epoch,
+      floor: this._removedFloor,
+      removed: [...this._removed].map(([path, { kind, generation }]) => [path, kind === 'dir' ? 'd' : 'f', generation]),
+    };
+  }
+
+  /**
    * Every file below a directory as stat rows relative to it: what the rooted
    * `statTree` answers, with content facts only where known (I3).
    *
@@ -527,10 +669,9 @@ export class ProjectIndex {
    * @param path - Root-relative path.
    */
   public remove(path: string): void {
-    this._bump(path);
-    const segments = segmentsOf(path);
-    const parent = this._resolve(segments.slice(0, -1));
-    parent?.children?.delete(segments.at(-1)!);
+    const kind = this._resolve(segmentsOf(path))?.kind ?? 'file';
+    this._removedAt(path, kind, this._bump(path));
+    this._detach(path);
   }
 
   /**
@@ -546,7 +687,7 @@ export class ProjectIndex {
   public move(from: string, to: string): void {
     const fromSegments = segmentsOf(from);
     const node = this._resolve(fromSegments);
-    this._bump(from);
+    this._removedAt(from, node?.kind ?? 'file', this._bump(from));
     const generation = this._bump(to);
     if (node === undefined) {
       this._stale.add(to);
@@ -641,6 +782,7 @@ export class ProjectIndex {
         if (node !== undefined) {
           this._detach(path);
           this._generation += 1;
+          this._removedAt(path, node.kind, this._generation);
         }
         return;
       }
@@ -890,9 +1032,11 @@ export class ProjectIndex {
     /* Detached after the walk, which a live detach would cut short; a gone
      * directory takes its gone descendants with it. */
     for (const path of gone) {
-      if (this._resolve(segmentsOf(path)) !== undefined) {
+      const node = this._resolve(segmentsOf(path));
+      if (node !== undefined) {
         this._detach(path);
         this._generation += 1;
+        this._removedAt(path, node.kind, this._generation);
         mismatched.push(path);
       }
     }
@@ -1063,10 +1207,15 @@ export class ProjectIndex {
       return;
     }
     let current = this._root;
-    for (const segment of segments.slice(0, -1)) {
+    for (const [at, segment] of segments.slice(0, -1).entries()) {
       let child = current.children!.get(segment);
       if (child?.children === undefined) {
-        child = directoryNode(mutation ? this._generation : node.generation, child === undefined ? 0 : Date.now());
+        const generation = mutation ? this._generation : node.generation;
+        if (child !== undefined) {
+          /* A file where a directory now stands: that file is gone. */
+          this._removedAt(segments.slice(0, at + 1).join('/'), 'file', generation);
+        }
+        child = directoryNode(generation, child === undefined ? 0 : Date.now());
         current.children!.set(segment, child);
       }
       current = child;
@@ -1077,6 +1226,21 @@ export class ProjectIndex {
       existing.generation = node.generation;
       return;
     }
+    /* What stood here and is not kept under the new node is gone: another kind, or a directory's other children. */
+    if (existing !== undefined && existing !== node && (existing.kind !== node.kind || existing.kind === 'dir')) {
+      this._removedAt(path, existing.kind, node.generation);
+    }
     current.children!.set(name, node);
+  }
+
+  /* Remember one removal, newest last, dropping the oldest past the limit (S10). */
+  private _removedAt(path: string, kind: IndexEntryKind, generation: number): void {
+    this._removed.delete(path);
+    this._removed.set(path, { kind, generation });
+    while (this._removed.size > indexRemovalLimit) {
+      const [oldest, record] = this._removed.entries().next().value!;
+      this._removed.delete(oldest);
+      this._removedFloor = Math.max(this._removedFloor, record.generation);
+    }
   }
 }

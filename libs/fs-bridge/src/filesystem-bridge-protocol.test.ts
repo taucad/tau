@@ -48,8 +48,8 @@ describe('metadata-only stats (I3)', () => {
 /* A literal, so a bump is a deliberate edit to this line and not a silent one:
  * every other assertion in the suite now reads the constant (G0-11). */
 describe('filesystem bridge protocol version', () => {
-  it('should be 9', () => {
-    expect(fileSystemBridgeProtocolVersion).toBe(9);
+  it('should be 10', () => {
+    expect(fileSystemBridgeProtocolVersion).toBe(10);
   });
 
   it('rejects a version 4 peer', () => {
@@ -76,7 +76,11 @@ describe('filesystem bridge protocol version', () => {
 
   it('rejects a version 8 hello, the protocol before long calls', () => {
     expect(() => fileSystemBridgeSchemas.hello.parse(helloAt(8))).toThrow(FileSystemBridgeProtocolVersionError);
-    expect(fileSystemBridgeSchemas.hello.parse(helloAt(fileSystemBridgeProtocolVersion))).toMatchObject({ v: 9 });
+    expect(fileSystemBridgeSchemas.hello.parse(helloAt(fileSystemBridgeProtocolVersion))).toMatchObject({ v: 10 });
+  });
+
+  it('rejects a version 9 hello, whose changedSince answers no epoch or removals', () => {
+    expect(() => fileSystemBridgeSchemas.hello.parse(helloAt(9))).toThrow(FileSystemBridgeProtocolVersionError);
   });
 
   it('refuses a connection whose authority answers with a version 8 hello', async () => {
@@ -89,7 +93,7 @@ describe('filesystem bridge protocol version', () => {
         (error: unknown) => error,
       );
       expect(refusal).toBeInstanceOf(FileSystemBridgeProtocolVersionError);
-      expect(refusal).toMatchObject({ expected: 9, received: 8, code: 'FILESYSTEM_BRIDGE_PROTOCOL_VERSION_MISMATCH' });
+      expect(refusal).toMatchObject({ expected: 10, received: 8, code: 'FILESYSTEM_BRIDGE_PROTOCOL_VERSION_MISMATCH' });
     } finally {
       proxy.dispose();
       channel.port1.close();

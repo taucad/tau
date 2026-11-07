@@ -72,6 +72,7 @@ export type {
   FactsOptions,
   IndexChangedEntry,
   IndexChangedSince,
+  IndexChangedSinceOptions,
   LongCall,
   LongCallProgress,
   ReadManyResult,

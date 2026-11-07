@@ -225,7 +225,7 @@ describe('derived apply', () => {
 describe('derived index queries', () => {
   type IndexQueries = {
     facts(paths: readonly string[]): Promise<Array<[string, unknown]>>;
-    changedSince(since: number): Promise<{ generation: number; entries: ReadonlyArray<Record<string, unknown>> }>;
+    changedSince(since: number, options?: { epoch?: string }): Promise<Record<string, unknown>>;
   };
   const queries = (handlers: StringKeyedObject): IndexQueries => served(handlers) as unknown as IndexQueries;
 
@@ -241,9 +241,16 @@ describe('derived index queries', () => {
     await expect(queries({ readFile: vi.fn() }).facts(['b.ts'])).rejects.toMatchObject({ code: 'ENOTSUP' });
   });
 
-  it("keeps each changed entry's measurement record on the authority", async () => {
-    const changedSince = async () => ({
+  it("keeps each changed entry's measurement record on the authority, and carries epoch, removals and rescan", async () => {
+    const asked: unknown[] = [];
+    const changedSince = async (since: number, options?: { epoch?: string }) => {
+      asked.push([since, options?.epoch]);
+      return since === 0 ? { generation: 9, epoch: 'e', entries: [], removed: [], rescan: true } : changes;
+    };
+    const changes = {
       generation: 9,
+      epoch: 'e',
+      removed: [{ path: 'gone.ts', kind: 'file', generation: 8 }],
       entries: [
         {
           path: 'a.ts',
@@ -255,11 +262,24 @@ describe('derived index queries', () => {
           factsAt: { size: 1, mtimeMs: 2, observedAt: 3 },
         },
       ],
-    });
-    await expect(queries({ readFile: vi.fn(), changedSince }).changedSince(4)).resolves.toEqual({
+    };
+    await expect(queries({ readFile: vi.fn(), changedSince }).changedSince(4, { epoch: 'e' })).resolves.toEqual({
       generation: 9,
+      epoch: 'e',
       entries: [{ path: 'a.ts', kind: 'file', size: 1, mtimeMs: 2, generation: 9, facts: { contentKind: 'text' } }],
+      removed: [{ path: 'gone.ts', kind: 'file', generation: 8 }],
     });
+    await expect(queries({ readFile: vi.fn(), changedSince }).changedSince(0)).resolves.toEqual({
+      generation: 9,
+      epoch: 'e',
+      entries: [],
+      removed: [],
+      rescan: true,
+    });
+    expect(asked).toEqual([
+      [4, 'e'],
+      [0, undefined],
+    ]);
     await expect(queries({ readFile: vi.fn() }).changedSince(4)).rejects.toMatchObject({ code: 'ENOTSUP' });
   });
 });

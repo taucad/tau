@@ -101,6 +101,8 @@ type StagedWrite = {
   streamed?: Readonly<{ size: number; sha256: string }>;
   retainedHandle?: FileHandle;
   written?: BigIntStats;
+  /** Set once the rename is attempted: a rename that throws may still have published (rename-then-throw). */
+  renaming?: boolean;
   replaced: boolean;
 };
 
@@ -757,7 +759,12 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       if (event.type !== 'reset' && ignored(event.path)) {
         return;
       }
-      handler(event);
+      /* A handler that throws loses its own event, never the stream: the next one is still delivered in order. */
+      try {
+        handler(event);
+      } catch (error) {
+        console.error('[filesystem] A watch handler threw; later events are still delivered.', error);
+      }
     };
     /*
      * Classified off the event loop (D16): a native callback's events are
@@ -779,6 +786,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       const previous = classifying;
       classifying = (async (): Promise<void> => {
         await previous;
+        /* `entryKindAt` answers every failure as a kind and `emit` keeps a handler's throw, so no run rejects. */
         const resolved = await kinds;
         for (const [index, event] of admitted.entries()) {
           const kind = resolved[index];
@@ -956,7 +964,14 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       throw new Error('Native watch admission failed.', { cause: failure.reason });
     }
     /* What admission reconciled is delivered before the watch is acknowledged. */
-    await classifying;
+    try {
+      await classifying;
+    } catch (error) {
+      /* A watch that fails here still releases what it opened. */
+      unsubscribe();
+      await drainNodeFsProviderWatchClosures(this);
+      throw error;
+    }
     if (!this._openSubscriptions.has(unsubscribe)) {
       throw new Error('Node filesystem observation was cancelled during admission.');
     }
@@ -1352,9 +1367,9 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
 
   /**
    * The write half of {@link applyBatch}: stage, rename, one fsync per
-   * directory, read back. A write that fails before its rename is `failed`
-   * (its target is untouched) unless it had already made a parent directory;
-   * one that fails after is `uncertain`.
+   * directory, read back. A refusal is `failed`, and so is a write that fails
+   * before its rename is attempted (its target is untouched) unless it had
+   * already made a parent directory; any other failure is `uncertain`.
    *
    * @param writes - The batch's writes with their entry indexes.
    * @param receipts - Filled in at each write's index.
@@ -1365,9 +1380,11 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     receipts: BatchReceipt[],
     signal: AbortSignal | undefined,
   ): Promise<void> {
-    type Pending = { index: number; entry: BatchWrite; staged: StagedWrite; failure?: unknown };
-    const refuse = (index: number, error: unknown, madeParent: boolean): void => {
-      receipts[index] = { outcome: madeParent && !isRefusal(error) ? 'uncertain' : 'failed', error };
+    type Pending = { index: number; entry: BatchWrite; staged: StagedWrite; madeParent: boolean; failure?: unknown };
+    /* The primitive batch's rule (`batch.ts`): a refusal is `failed`, and so is any failure before anything moved;
+     * once a parent was made or a rename attempted, anything else is `uncertain`. */
+    const refuse = (index: number, error: unknown, moved: boolean): void => {
+      receipts[index] = { outcome: moved && !isRefusal(error) ? 'uncertain' : 'failed', error };
     };
     const staged = await mapRolling(writes, batchWriteConcurrency, async ({ index, entry }) => {
       if (signal?.aborted === true) {
@@ -1395,7 +1412,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
           prepared,
           entry.data instanceof Uint8Array ? { data: entry.data } : { source: entry.data.stream() },
         );
-        const write: Pending = { index, entry, staged: prepared };
+        const write: Pending = { index, entry, staged: prepared, madeParent };
         return write;
       } catch (error) {
         let failure = error;
@@ -1455,7 +1472,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
           ...(write.entry.create === true ? { created: true } : {}),
         };
       } catch (error) {
-        receipts[write.index] = { outcome: write.staged.replaced ? 'uncertain' : 'failed', error };
+        refuse(write.index, error, write.madeParent || write.staged.renaming === true);
       }
     });
   }
@@ -1577,6 +1594,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     /* Rename keeps the inode, so this identifies the entry the rename is about
      * to publish — and tells a later writer's entry apart from ours below. */
     staged.written = await fs.lstat(temporaryPath, { bigint: true });
+    staged.renaming = true;
     await fs.rename(temporaryPath, admittedTarget);
     staged.replaced = true;
   }

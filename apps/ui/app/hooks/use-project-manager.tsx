@@ -243,11 +243,26 @@ type CreateProjectFromData = CreateProjectChatOptions & {
     operationId: string;
     /** The import carries its own workbench layout, so none is seeded beside it. */
     carriesWorkbenchLayout?: boolean;
+    /**
+     * The project directory the entries were written straight into (where
+     * the root's rename copies): the create commits there instead of
+     * allocating another.
+     */
+    providerBasePath?: string;
   }>;
 };
 
-/** Where an import stages before its project is created: the location, and its storage root (W7). */
-export type ImportStagingTarget = Readonly<{ location: ProjectCreationLocation; scope: StorageRootConfig }>;
+/**
+ * Where an import stages before its project is created (W7): the location,
+ * its storage root, the project directory a create there would take, and the
+ * stagings the journal already owns on this device, which a sweep keeps.
+ */
+export type ImportStagingTarget = Readonly<{
+  location: ProjectCreationLocation;
+  scope: StorageRootConfig;
+  providerBasePath: string;
+  owned: readonly string[];
+}>;
 
 /**
  * Options for creating a project with an associated chat.
@@ -282,8 +297,10 @@ type ProjectManagerContextType = {
   refreshWorkspaceCatalog: () => Promise<void>;
   repairWorkspaceBindings: (workspaceId: string) => Promise<WorkspaceBindingRepairResult>;
   createProject: (options: CreateProjectOptions) => Promise<CreatedProject>;
-  /** Resolve where a new project would be created, so an import can stage on that storage root first (W7). */
-  prepareImportStaging: (location?: ProjectCreationLocation) => Promise<ImportStagingTarget>;
+  /** Resolve where a new project named `name` would be created, so an import can stage on that storage root first (W7). */
+  prepareImportStaging: (name: string, location?: ProjectCreationLocation) => Promise<ImportStagingTarget>;
+  /** Whether a journal row owns an import staging, so a failed create must leave it for its recovery (W7). */
+  ownsImportStaging: (operationId: string) => Promise<boolean>;
   /** Rejects while `tau.json` is degraded: the normalized view is lossy (blueprint R4). */
   updateProject: (projectId: string, update: PartialDeep<ProjectManifest>) => Promise<Project | undefined>;
   /** Rewrite a degraded `tau.json` as its normalized strict manifest; refuses a JSON syntax error. */
@@ -1649,7 +1666,10 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       }
 
       const manifest = projectToManifest(projectData);
-      const providerBasePath = await allocateProjectBasePath(fileManager.client, storageRoot, manifest.name);
+      /* An import written straight into its project directory commits there; anything else allocates now. */
+      const stagedBasePath = 'staging' in options ? options.staging?.providerBasePath : undefined;
+      const providerBasePath =
+        stagedBasePath ?? (await allocateProjectBasePath(fileManager.client, storageRoot, manifest.name));
       const pendingStorage: PendingProjectStorage = { ...storageRoot, providerBasePath };
 
       // The initial homepage prompt remains a normal pending user message
@@ -2158,12 +2178,37 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
      any journal row another tab left since. Its directory is quarantined from
      the library meanwhile, so a caller asking again cannot tell it is there. */
   /* Resolved the way a create resolves it, so the staging lands on the storage root the commit moves it from. */
+  const importStagingOwners = useCallback(async (): Promise<string[]> => {
+    const worker = await getReadiedWorker();
+    const operations = await worker.getPendingProjectOperations();
+    return operations.flatMap((operation) =>
+      operation.kind === 'create' && operation.staging !== undefined ? [operation.staging.operationId] : [],
+    );
+  }, [getReadiedWorker]);
+
   const prepareImportStaging = useCallback(
-    async (requested?: ProjectCreationLocation): Promise<ImportStagingTarget> => {
+    async (name: string, requested?: ProjectCreationLocation): Promise<ImportStagingTarget> => {
       const { location, storageRoot } = await resolveCreationStorage(requested);
-      return { location, scope: await pendingStorageToScope({ ...storageRoot, providerBasePath: '' }) };
+      const [providerBasePath, owned] = await Promise.all([
+        allocateProjectBasePath(fileManager.client, storageRoot, name),
+        importStagingOwners(),
+      ]);
+      return {
+        location,
+        scope: await pendingStorageToScope({ ...storageRoot, providerBasePath: '' }),
+        providerBasePath,
+        owned,
+      };
     },
-    [],
+    [fileManager.client, importStagingOwners],
+  );
+
+  const ownsImportStaging = useCallback(
+    async (operationId: string): Promise<boolean> => {
+      const owners = await importStagingOwners();
+      return owners.includes(operationId);
+    },
+    [importStagingOwners],
   );
 
   const createProject = useCallback(
@@ -3219,6 +3264,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       repairWorkspaceBindings,
       createProject,
       prepareImportStaging,
+      ownsImportStaging,
       updateProject,
       repairProject,
       touchProject,
@@ -3274,6 +3320,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     repairWorkspaceBindings,
     createProject,
     prepareImportStaging,
+    ownsImportStaging,
     updateProject,
     repairProject,
     touchProject,

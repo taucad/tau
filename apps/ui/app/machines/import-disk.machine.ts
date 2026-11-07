@@ -78,11 +78,11 @@ const readFilesActor = fromSafeAsync<FilesReadResult, { files: FileList | File[]
   async ({ input }) => planned(input.plan, { kind: 'files', files: listFileList(input.files) }),
 );
 
-/** A drop: its entries are taken while the event lasts, then walked for references. */
+/** A drop: its items are taken while the event lasts, then handed over as handles or walked for references. */
 const readDataTransferActor = fromSafeAsync<
   FilesReadResult,
-  { files: Promise<Awaited<ReturnType<typeof listDataTransfer>>>; plan: ImportPlanner }
->(async ({ input }) => planned(input.plan, { kind: 'files', files: await input.files }));
+  { source: Promise<ImportSourceDescriptor>; plan: ImportPlanner }
+>(async ({ input }) => planned(input.plan, await input.source));
 
 /** A zip: its central directory is read by range in the worker. */
 const extractZipActor = fromSafeAsync<FilesReadResult, { file: File; plan: ImportPlanner }>(async ({ input }) =>
@@ -254,7 +254,7 @@ export const importDiskMachine = setup({
           assertEvent(event, 'processDataTransfer');
 
           /* Listed now, while the drop's items are still readable. */
-          return { files: listDataTransfer(event.items), plan: context.plan };
+          return { source: listDataTransfer(event.items), plan: context.plan };
         },
         onDone: {
           target: 'selectingMainFile',

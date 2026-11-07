@@ -1,13 +1,18 @@
 // @vitest-environment node
 import JSZip from 'jszip';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryProvider } from '@taucad/filesystem/backend';
-import { createInlineImportDecoder, importStagingDirectory } from '@taucad/filesystem/importer';
-import type { ImportStagingPort } from '@taucad/filesystem/importer';
+import {
+  createInlineImportDecoder,
+  importStagingDirectory,
+  importStagingStaleMilliseconds,
+} from '@taucad/filesystem/importer';
+import type { ImportDecoder, ImportStagingPort } from '@taucad/filesystem/importer';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { BatchEntry } from '@taucad/filesystem';
 import {
   ImportChannelError,
+  createFromStagedImport,
   importConnectMessageType,
   openImportSession,
   serveImportChannel,
@@ -20,7 +25,10 @@ afterEach(() => {
   for (const session of sessions.splice(0)) {
     session.close();
   }
+  vi.useRealTimers();
 });
+
+const scope = { backend: 'indexeddb' } as const;
 
 const zipOf = async (files: Record<string, string>): Promise<File> => {
   const zip = new JSZip();
@@ -44,8 +52,22 @@ const removeTree = async (provider: MemoryProvider, path: string): Promise<void>
   await provider.unlink(path);
 };
 
+const settle = async (check: () => Promise<boolean>): Promise<void> => {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- polled until the worker's half settles.
+    if (await check()) {
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- a short pause between polls.
+    await new Promise((resolve) => {
+      setTimeout(resolve, 5);
+    });
+  }
+  throw new Error('The worker did not settle.');
+};
+
 /* The worker's half served behind a fake worker, the page's half opened on it: one real message channel. */
-const connect = (provider: MemoryProvider): ImportSession => {
+const connect = (provider: MemoryProvider, decode: ImportDecoder = createInlineImportDecoder()): ImportSession => {
   const port: ImportStagingPort = {
     provider,
     apply: async (entries: readonly BatchEntry[]): Promise<Array<{ outcome: 'applied' }>> => {
@@ -64,11 +86,7 @@ const connect = (provider: MemoryProvider): ImportSession => {
   const session = openImportSession({
     postMessage: (message: { type: string; port: MessagePort }) => {
       expect(message.type).toBe(importConnectMessageType);
-      serveImportChannel(message.port, {
-        importStaging: async () => port,
-        decode: createInlineImportDecoder(),
-        policy: tauPathPolicy,
-      });
+      serveImportChannel(message.port, { importStaging: async () => port, decode, policy: tauPathPolicy });
     },
   } as unknown as Pick<Worker, 'postMessage'>);
   sessions.push(session);
@@ -91,21 +109,36 @@ describe('the import channel', () => {
     });
 
     const progress: number[] = [];
-    const staged = await session.stage('req_channel', { backend: 'indexeddb' }, ({ files }) => {
-      progress.push(files);
+    const staged = await session.stage('req_channel', scope, {
+      target: 'gear',
+      onProgress: ({ files }) => {
+        progress.push(files);
+      },
     });
 
-    expect(staged).toStrictEqual({ files: 1, bytes: 8 });
+    /* A memory root's rename is not declared free, so the files are written into the project folder itself. */
+    expect(staged).toStrictEqual({ files: 1, bytes: 8, inPlace: true });
     expect(progress.at(-1)).toBe(1);
-    const tree = `${importStagingDirectory('req_channel')}/tree`;
-    expect(new TextDecoder().decode(await provider.readFile(`${tree}/main.scad`))).toBe('cube(1);');
+    expect(new TextDecoder().decode(await provider.readFile('gear/main.scad'))).toBe('cube(1);');
 
     const preview = await session.preview(['main.scad'], 1024);
     expect(new TextDecoder().decode(preview['main.scad']!.content)).toBe('cube(1);');
     expect(await session.preview(['main.scad'], 4)).toStrictEqual({});
 
-    await session.discard('req_channel', { backend: 'indexeddb' });
+    await session.discard('req_channel', scope);
     expect(await provider.exists(importStagingDirectory('req_channel'))).toBe(false);
+    expect(await provider.exists('gear')).toBe(false);
+  });
+
+  it('spends the preview budget in the order asked, and never hashes a preview', async () => {
+    const decode = vi.fn(createInlineImportDecoder());
+    const session = connect(new MemoryProvider(), decode);
+    await session.plan({ kind: 'zip', file: await zipOf({ 'a.scad': 'aaaa', 'b.scad': 'bbbb', 'c.scad': 'cccc' }) });
+
+    const preview = await session.preview(['c.scad', 'a.scad', 'b.scad'], 8);
+
+    expect(Object.keys(preview)).toStrictEqual(['c.scad', 'a.scad']);
+    expect(decode).not.toHaveBeenCalled();
   });
 
   it('carries the policy reason of a refusal to the page', async () => {
@@ -124,6 +157,165 @@ describe('the import channel', () => {
   it('refuses to stage before anything is planned', async () => {
     const session = connect(new MemoryProvider());
 
-    await expect(session.stage('req_none', { backend: 'indexeddb' })).rejects.toThrow('Nothing is planned');
+    await expect(session.stage('req_none', scope, { target: 'none' })).rejects.toThrow('Nothing is planned');
+  });
+
+  it('removes a staging still running when the page closes the session (the route unmounts)', async () => {
+    const provider = new MemoryProvider();
+    const inline = createInlineImportDecoder();
+    const started = Promise.withResolvers<void>();
+    const decode: ImportDecoder = async (request, options) => {
+      started.resolve();
+      await new Promise<void>((resolve) => {
+        options?.signal?.addEventListener(
+          'abort',
+          () => {
+            resolve();
+          },
+          { once: true },
+        );
+      });
+      return inline(request, options);
+    };
+    const session = connect(provider, decode);
+    await session.plan({ kind: 'zip', file: await zipOf({ 'gear/main.scad': 'cube(1);' }) });
+    const staging = (async (): Promise<unknown> => {
+      try {
+        return await session.stage('req_unmount', scope, { target: 'gear' });
+      } catch (error) {
+        return error;
+      }
+    })();
+    await started.promise;
+    expect(await provider.exists(importStagingDirectory('req_unmount'))).toBe(true);
+
+    sessions.splice(sessions.indexOf(session), 1);
+    session.close();
+
+    expect(await staging).toBeInstanceOf(ImportChannelError);
+    await settle(async () => !(await provider.exists(importStagingDirectory('req_unmount'))));
+    expect(await provider.exists('gear')).toBe(false);
+  });
+
+  it('keeps a staging it handed off to a create when it closes', async () => {
+    const provider = new MemoryProvider();
+    const session = connect(provider);
+    await session.plan({ kind: 'zip', file: await zipOf({ 'gear/main.scad': 'cube(1);' }) });
+    await session.stage('req_kept', scope, { target: 'gear' });
+    await session.handOff('req_kept');
+    await session.stage('req_dropped', scope, { target: 'other' });
+
+    sessions.splice(sessions.indexOf(session), 1);
+    session.close();
+
+    await settle(async () => !(await provider.exists(importStagingDirectory('req_dropped'))));
+    expect(await provider.exists(importStagingDirectory('req_kept'))).toBe(true);
+    expect(await provider.exists('gear/main.scad')).toBe(true);
+    expect(await provider.exists('other')).toBe(false);
+  });
+
+  it('sweeps what no journal row or live session owns once it is still, and keeps a live staging', async () => {
+    const provider = new MemoryProvider();
+    const first = connect(provider);
+    await first.plan({ kind: 'zip', file: await zipOf({ 'gear/main.scad': 'cube(1);' }) });
+    await first.stage('req_crashed', scope, { target: 'crashed' });
+    await first.handOff('req_crashed');
+    await first.stage('req_journaled', scope, { target: 'journaled' });
+    await first.handOff('req_journaled');
+    await first.stage('req_live', scope, { target: 'live' });
+    const second = connect(provider);
+
+    expect(await second.sweep(scope, ['req_journaled'])).toStrictEqual([]);
+
+    vi.useFakeTimers({ now: Date.now() + importStagingStaleMilliseconds + 1000, toFake: ['Date'] });
+
+    expect(await second.sweep(scope, ['req_journaled'])).toStrictEqual(['req_crashed']);
+    expect(await provider.exists('crashed')).toBe(false);
+    expect(await provider.exists(importStagingDirectory('req_journaled'))).toBe(true);
+    expect(await provider.exists(importStagingDirectory('req_live'))).toBe(true);
+  });
+
+  describe('creating from a staged import', () => {
+    const target = { location: 'home', scope, providerBasePath: 'gear', owned: [] as string[] };
+
+    const planned = async (provider: MemoryProvider): Promise<ImportSession> => {
+      const session = connect(provider);
+      await session.plan({ kind: 'zip', file: await zipOf({ 'gear/main.scad': 'cube(1);' }) });
+      return session;
+    };
+
+    it('creates from the staging, telling the create where it was written in place', async () => {
+      const provider = new MemoryProvider();
+      const create = vi.fn(async () => ({ id: 'proj_1' }));
+
+      await expect(
+        createFromStagedImport({
+          session: await planned(provider),
+          target,
+          operationId: 'req_ok',
+          create,
+          owns: async () => false,
+        }),
+      ).resolves.toStrictEqual({ id: 'proj_1' });
+
+      expect(create).toHaveBeenCalledWith({ operationId: 'req_ok', providerBasePath: 'gear' });
+    });
+
+    it('discards the staging when the create fails before any journal row names it', async () => {
+      const provider = new MemoryProvider();
+
+      await expect(
+        createFromStagedImport({
+          session: await planned(provider),
+          target,
+          operationId: 'req_failed',
+          create: async () => {
+            throw new Error('quota');
+          },
+          owns: async () => false,
+        }),
+      ).rejects.toThrow('quota');
+
+      expect(await provider.exists(importStagingDirectory('req_failed'))).toBe(false);
+      expect(await provider.exists('gear')).toBe(false);
+    });
+
+    it('keeps the staging for its recovery when the create failed after journaling it', async () => {
+      const provider = new MemoryProvider();
+
+      await expect(
+        createFromStagedImport({
+          session: await planned(provider),
+          target,
+          operationId: 'req_journaled',
+          create: async () => {
+            throw new Error('commit failed');
+          },
+          owns: async (operationId) => operationId === 'req_journaled',
+        }),
+      ).rejects.toThrow('commit failed');
+
+      expect(await provider.exists(importStagingDirectory('req_journaled'))).toBe(true);
+    });
+
+    it('discards a staging that failed partway', async () => {
+      const provider = new MemoryProvider();
+      await provider.writeFile('gear/existing.txt', 'mine');
+      const create = vi.fn();
+
+      await expect(
+        createFromStagedImport({
+          session: await planned(provider),
+          target,
+          operationId: 'req_refused',
+          create,
+          owns: async () => false,
+        }),
+      ).rejects.toThrow('already exists');
+
+      expect(create).not.toHaveBeenCalled();
+      expect(await provider.exists(importStagingDirectory('req_refused'))).toBe(false);
+      expect(await provider.exists('gear/existing.txt')).toBe(true);
+    });
   });
 });

@@ -12,7 +12,7 @@ import type { Route } from './+types/route.js';
 import type { Handle } from '#types/matches.types.js';
 import { ImportGitHubError, importGitHubMachine } from '#machines/import-github.machine.js';
 import { importDiskMachine } from '#machines/import-disk.machine.js';
-import { openImportSession } from '#machines/import-staging.js';
+import { createFromStagedImport, openImportSession } from '#machines/import-staging.js';
 import type { ImportSession } from '#machines/import-staging.js';
 import { useOptionalFileManager, waitForFileManagerServices } from '#hooks/use-file-manager.js';
 import { PageNotice } from '#components/layout/page-notice.js';
@@ -314,35 +314,37 @@ export default function ImportRoute(): React.JSX.Element {
             throw new Error(`The selected main file "${input.mainFile}" is not present in the imported files.`);
           }
           try {
-            /* The files stage on the storage root the project is created on, then move in at commit (D12). */
-            const target = await projectManager.prepareImportStaging();
-            const session = await importSession();
-            const operationId = generatePrefixedId(idPrefix.request);
-            try {
-              await session.stage(operationId, target.scope, (progress) => {
+            /* The files stage on the storage root the project is created on, then land in it at commit (D12). */
+            const target = await projectManager.prepareImportStaging(input.importName);
+            const project = await createFromStagedImport({
+              session: await importSession(),
+              target,
+              operationId: generatePrefixedId(idPrefix.request),
+              owns: projectManager.ownsImportStaging,
+              onProgress: (progress) => {
                 input.onProgress(progress.files, progress.totalFiles);
-              });
-            } catch (error) {
-              await session.discard(operationId, target.scope).catch(() => undefined);
-              throw error;
-            }
-            const project = await projectManager.createProject({
-              project: {
-                name: input.importName,
-                description: `Imported from disk`,
-                tags: [],
-                assets: {
-                  main: {
-                    entryPath: input.mainFile,
+              },
+              create: async (staging) =>
+                projectManager.createProject({
+                  project: {
+                    name: input.importName,
+                    description: `Imported from disk`,
+                    tags: [],
+                    assets: {
+                      main: {
+                        entryPath: input.mainFile,
+                      },
+                    },
                   },
-                },
-              },
-              files: {},
-              location: target.location,
-              staging: {
-                operationId,
-                carriesWorkbenchLayout: input.listing.files.some(({ path: listed }) => listed === workbenchLayoutPath),
-              },
+                  files: {},
+                  location: target.location,
+                  staging: {
+                    ...staging,
+                    carriesWorkbenchLayout: input.listing.files.some(
+                      ({ path: listed }) => listed === workbenchLayoutPath,
+                    ),
+                  },
+                }),
             });
 
             return { type: 'projectCreated', projectId: project.id };

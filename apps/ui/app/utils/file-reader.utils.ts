@@ -5,6 +5,7 @@
 
 import { classify } from '@taucad/filesystem/path-registry';
 import { joinRelativePath } from '@taucad/utils/path';
+import type { ImportSourceDescriptor } from '#machines/import-staging.js';
 
 export type FileData = {
   filename: string;
@@ -94,21 +95,48 @@ const childrenOf = async (directory: FileSystemDirectoryEntry): Promise<FileSyst
   }
 };
 
+/* A folder an import leaves behind whole (`.git`, `node_modules`): its children are never walked or listed. */
+const isLeftBehindFolder = (path: string): boolean => isExcludedImportPath(joinRelativePath(path, '_'));
+
+/* Whether any folder above this path is left behind. */
+const isUnderLeftBehindFolder = (path: string): boolean => {
+  const segments = path.split('/');
+  for (let depth = 1; depth < segments.length; depth += 1) {
+    if (isLeftBehindFolder(segments.slice(0, depth).join('/'))) {
+      return true;
+    }
+  }
+  return false;
+};
+
 /**
- * The files a drop carries, with their paths, without reading a byte of them
- * (charter D12: the import worker reads them, on the compute worker).
+ * What a drop carries, without reading a byte of it (charter D12: the import
+ * worker reads it, on the compute worker).
  *
- * The entries are taken from the drop synchronously, before the first await,
- * because a `DataTransferItemList` is only readable during its event; the
- * folders are walked afterwards.
+ * Where the browser hands a drop over as handles
+ * (`DataTransferItem.getAsFileSystemHandle`), the handles go to the worker,
+ * which walks the folders itself, so the page walks nothing. Elsewhere the
+ * page walks the drop's entries for references, never entering a folder the
+ * import leaves behind. Either way the items are taken synchronously, before
+ * the first await, because a `DataTransferItemList` is only readable during
+ * its event.
  *
  * @param items - The drop's items.
- * @returns Each file and its path.
+ * @returns The drop as an import source.
  */
-export async function listDataTransfer(items: DataTransferItemList): Promise<ImportFileReference[]> {
+export async function listDataTransfer(items: DataTransferItemList): Promise<ImportSourceDescriptor> {
+  const all = [...items].filter((item) => item.kind === 'file');
+  /* Chromium's handle getter answers `null` for an item that is not a file or folder; typed loosely for it. */
+  const withHandles = all as Array<DataTransferItem & { getAsFileSystemHandle?: () => Promise<unknown> }>;
+  if (all.length > 0 && withHandles.every((item) => typeof item.getAsFileSystemHandle === 'function')) {
+    const pending = withHandles.map(async (item) => item.getAsFileSystemHandle!());
+    const settled = await Promise.all(pending);
+    const handles = settled.filter((handle): handle is FileSystemHandle => Boolean(handle));
+    return { kind: 'handles', handles };
+  }
   const roots: FileSystemEntry[] = [];
-  for (const item of items) {
-    const entry = item.kind === 'file' ? item.webkitGetAsEntry() : null;
+  for (const item of all) {
+    const entry = item.webkitGetAsEntry();
     if (entry) {
       roots.push(entry);
     }
@@ -120,7 +148,7 @@ export async function listDataTransfer(items: DataTransferItemList): Promise<Imp
       files.push({ file: await fileOfEntry(entry as FileSystemFileEntry), path });
       return;
     }
-    if (entry.isDirectory) {
+    if (entry.isDirectory && !isLeftBehindFolder(path)) {
       for (const child of await childrenOf(entry as FileSystemDirectoryEntry)) {
         // oxlint-disable-next-line no-await-in-loop -- a folder is walked one child after another.
         await walk(child, path);
@@ -131,18 +159,21 @@ export async function listDataTransfer(items: DataTransferItemList): Promise<Imp
     // oxlint-disable-next-line no-await-in-loop -- each dropped root is walked in turn.
     await walk(root, '');
   }
-  return files;
+  return { kind: 'files', files };
 }
 
 /**
  * The files of an `<input>` pick, with their paths: a folder pick's
- * `webkitRelativePath`, else the file's name.
+ * `webkitRelativePath`, else the file's name. What sits under a folder the
+ * import leaves behind is dropped here, so it never counts toward the limits.
  *
  * @param fileList - The picked files.
  * @returns Each file and its path.
  */
 export const listFileList = (fileList: FileList | readonly File[]): ImportFileReference[] =>
-  [...fileList].map((file) => ({ file, path: file.webkitRelativePath || file.name }));
+  [...fileList]
+    .map((file) => ({ file, path: file.webkitRelativePath || file.name }))
+    .filter(({ path }) => !isUnderLeftBehindFolder(path));
 
 /**
  * Check if a file is a ZIP archive based on extension or MIME type.

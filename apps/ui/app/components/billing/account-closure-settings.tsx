@@ -263,7 +263,7 @@ export function AccountClosureSettings({
             <AlertDialogTitle>Close your account?</AlertDialogTitle>
             <AlertDialogDescription>
               Paid usage stops and your plan is cancelled right away. To keep your plan until the end of your billing
-              period, cancel it in Billing instead.
+              period, cancel it in Billing instead. Remaining credits are not refunded.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className='flex items-start gap-2 text-sm'>

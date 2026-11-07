@@ -233,7 +233,21 @@ type CreateProjectFromData = CreateProjectChatOptions & {
   project: Omit<ProjectManifest, '$schema'>;
   /** The files for the project */
   files: Record<string, { content: Uint8Array<ArrayBuffer>; mode?: '100644' | '100755' }>;
+  /**
+   * An import already staged on the creation location's storage root (W7,
+   * charter D12): its files move into the project at commit, so the journal
+   * holds this locator instead of their bytes. `files` then holds only what
+   * the create adds. Pass the `location` the staging was prepared for.
+   */
+  staging?: Readonly<{
+    operationId: string;
+    /** The import carries its own workbench layout, so none is seeded beside it. */
+    carriesWorkbenchLayout?: boolean;
+  }>;
 };
+
+/** Where an import stages before its project is created: the location, and its storage root (W7). */
+export type ImportStagingTarget = Readonly<{ location: ProjectCreationLocation; scope: StorageRootConfig }>;
 
 /**
  * Options for creating a project with an associated chat.
@@ -268,6 +282,8 @@ type ProjectManagerContextType = {
   refreshWorkspaceCatalog: () => Promise<void>;
   repairWorkspaceBindings: (workspaceId: string) => Promise<WorkspaceBindingRepairResult>;
   createProject: (options: CreateProjectOptions) => Promise<CreatedProject>;
+  /** Resolve where a new project would be created, so an import can stage on that storage root first (W7). */
+  prepareImportStaging: (location?: ProjectCreationLocation) => Promise<ImportStagingTarget>;
   /** Rejects while `tau.json` is degraded: the normalized view is lossy (blueprint R4). */
   updateProject: (projectId: string, update: PartialDeep<ProjectManifest>) => Promise<Project | undefined>;
   /** Rewrite a degraded `tau.json` as its normalized strict manifest; refuses a JSON syntax error. */
@@ -652,6 +668,40 @@ const pendingStorageToScope = async (storage: PendingProjectStorage): Promise<St
     directoryHandle: entry.handle,
     workspaceId: storage.workspaceId,
   };
+};
+
+/**
+ * Where a new project is created: the explicit location, or the last
+ * successful one, and the storage root it names. The workspace is resolved
+ * here, so a create can carry the canonical URL its caller navigates to
+ * instead of riding an id-addressed redirect.
+ */
+const resolveCreationStorage = async (
+  explicitLocation: ProjectCreationLocation | undefined,
+): Promise<{ location: ProjectCreationLocation; storageRoot: PersistentStorageRoot; workspaceSlug: string }> => {
+  let location = explicitLocation;
+  if (!location) {
+    const { location: preferredLocation } = await getProjectCreationLocation({
+      webAccessSupported: directoryPicker().available,
+    });
+    location = preferredLocation;
+  }
+  if (location.kind === 'workspace') {
+    const picked = await getWorkspaceMetadata(location.workspaceId);
+    if (picked && isNodeWorkspace(picked)) {
+      if (!(await isNodeWorkspaceConnected(picked))) {
+        throw new WorkspaceDirectoryRequiredError('disconnected', { workspaceId: picked.workspaceId });
+      }
+      return { location, storageRoot: { backend: 'node', path: picked.path }, workspaceSlug: picked.slug };
+    }
+    const entry = await resolveWorkspaceForWrite(location.workspaceId);
+    return {
+      location,
+      storageRoot: { backend: 'webaccess', workspaceId: entry.workspace.workspaceId },
+      workspaceSlug: entry.workspace.slug,
+    };
+  }
+  return { location, storageRoot: { backend: await getHomeStorageBackend() }, workspaceSlug: homeWorkspaceSlug };
 };
 
 /** Retain actual owner I/O, whose lifetime Query cancellation cannot shorten. */
@@ -1459,6 +1509,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           scope,
           files: Object.fromEntries(Object.entries(operation.files).filter(([path]) => path !== 'tau.json')),
           manifest: serializeProjectManifest(operation.manifest),
+          ...(operation.kind === 'create' && operation.staging !== undefined ? { staging: operation.staging } : {}),
         };
         result = await fileManager.client.commitPendingProjectDirectory(
           Object.assign(input, { [consumableBytes]: true }),
@@ -1551,38 +1602,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       }
       const worker = await getReadiedWorker();
 
-      const { location: explicitLocation } = options;
-      let location = explicitLocation;
-      if (!location) {
-        const { location: preferredLocation } = await getProjectCreationLocation({
-          webAccessSupported: directoryPicker().available,
-        });
-        location = preferredLocation;
-      }
-      let storageRoot: PersistentStorageRoot;
-      // The workspace is resolved here, so the result can carry the canonical
-      // URL its caller navigates to instead of riding an id-addressed redirect.
-      let workspaceSlug: string;
-      if (location.kind === 'workspace') {
-        const picked = await getWorkspaceMetadata(location.workspaceId);
-        if (picked && isNodeWorkspace(picked)) {
-          if (!(await isNodeWorkspaceConnected(picked))) {
-            throw new WorkspaceDirectoryRequiredError('disconnected', { workspaceId: picked.workspaceId });
-          }
-          storageRoot = { backend: 'node', path: picked.path };
-          workspaceSlug = picked.slug;
-        } else {
-          const entry = await resolveWorkspaceForWrite(location.workspaceId);
-          storageRoot = {
-            backend: 'webaccess',
-            workspaceId: entry.workspace.workspaceId,
-          };
-          workspaceSlug = entry.workspace.slug;
-        }
-      } else {
-        storageRoot = { backend: await getHomeStorageBackend() };
-        workspaceSlug = homeWorkspaceSlug;
-      }
+      const { location, storageRoot, workspaceSlug } = await resolveCreationStorage(options.location);
 
       const projectId = options.id ?? generatePrefixedId(idPrefix.project);
 
@@ -1683,6 +1703,12 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         editorState: options.editorState,
         deferInitialView: 'project' in options && options.deferInitialView,
         files,
+        ...('staging' in options && options.staging !== undefined
+          ? {
+              staging: { operationId: options.staging.operationId },
+              seedWorkbench: options.staging.carriesWorkbenchLayout !== true,
+            }
+          : {}),
         storage: pendingStorage,
       });
       await resumePendingProjectOperation(operation, worker);
@@ -2131,6 +2157,15 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
      finished here rather than repeated: this page's own recovery first, then
      any journal row another tab left since. Its directory is quarantined from
      the library meanwhile, so a caller asking again cannot tell it is there. */
+  /* Resolved the way a create resolves it, so the staging lands on the storage root the commit moves it from. */
+  const prepareImportStaging = useCallback(
+    async (requested?: ProjectCreationLocation): Promise<ImportStagingTarget> => {
+      const { location, storageRoot } = await resolveCreationStorage(requested);
+      return { location, scope: await pendingStorageToScope({ ...storageRoot, providerBasePath: '' }) };
+    },
+    [],
+  );
+
   const createProject = useCallback(
     async (options: CreateProjectOptions): Promise<CreatedProject> => {
       const { id } = options;
@@ -3183,6 +3218,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       refreshWorkspaceCatalog,
       repairWorkspaceBindings,
       createProject,
+      prepareImportStaging,
       updateProject,
       repairProject,
       touchProject,
@@ -3237,6 +3273,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     refreshWorkspaceCatalog,
     repairWorkspaceBindings,
     createProject,
+    prepareImportStaging,
     updateProject,
     repairProject,
     touchProject,

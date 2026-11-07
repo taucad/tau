@@ -2929,6 +2929,37 @@ describe('useProjectManager.createProject', () => {
     expect(mockSetProjectCreationLocation).toHaveBeenCalledWith({ kind: 'home' });
   });
 
+  /* W7 (charter D12): a staged import's journal holds its locator, and the commit moves the staging in. */
+  it('journals a staged import by its locator and commits it from the staging', async () => {
+    const staged = { ...pendingCreate, files: {}, staging: { operationId: 'req_staged' } };
+    mockPrepareProjectCreation.mockImplementationOnce(async () => {
+      phaseOrder.push('pending');
+      return staged;
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    const target = await result.current.prepareImportStaging({ kind: 'home' });
+
+    expect(target).toStrictEqual({ location: { kind: 'home' }, scope: { backend: 'opfs' } });
+
+    await act(async () =>
+      result.current.createProject({
+        project: { name: fakeProject.name, description: '', tags: [], assets: { main: { entryPath: 'main.ts' } } },
+        files: {},
+        location: target.location,
+        staging: { operationId: 'req_staged', carriesWorkbenchLayout: true },
+      }),
+    );
+
+    const prepared = mockPrepareProjectCreation.mock.calls.at(-1)?.[0] as unknown as Record<string, unknown>;
+    expect(prepared['staging']).toStrictEqual({ operationId: 'req_staged' });
+    expect(prepared['seedWorkbench']).toBe(false);
+    expect(prepared['files']).toStrictEqual({});
+    expect(mockCommitPendingProjectDirectory).toHaveBeenLastCalledWith(
+      expect.objectContaining({ files: {}, staging: { operationId: 'req_staged' }, scope: { backend: 'opfs' } }),
+    );
+  });
+
   it('waits for pre-commit discovery before publishing a new project to an immediate route', async () => {
     const { wrapper, queryClient } = createInspectableWrapper();
     const { result } = renderHook(

@@ -1,33 +1,31 @@
 import { assertEvent, setup, types } from 'xstate';
 import type { AnyActorRef, EnqueueObject } from 'xstate';
-import JSZip from 'jszip';
 import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
-import type { FileMap } from '#utils/file-reader.utils.js';
-import {
-  readFromFileList,
-  readFromDataTransfer,
-  readFromDirectoryHandle,
-  normalizeFilePaths,
-  getImportName,
-  isExcludedImportPath,
-} from '#utils/file-reader.utils.js';
+import { listDataTransfer, listFileList } from '#utils/file-reader.utils.js';
+import type { ImportListing, ImportSourceDescriptor } from '#machines/import-staging.js';
 import { findMainFile } from '#routes/import.$/import.utils.js';
 
 /**
- * What {@link isExcludedImportPath} leaves behind, dropped at the one place
- * every read actor's result enters the machine — so the repository a zip
- * carried reaches neither the main-file picker, nor `filesReady`, nor
- * `createProject`.
+ * Plans one source in the file-manager worker: paths and sizes come back,
+ * never bytes (charter D12). The route supplies it from its import session.
  */
-const withoutExcludedImportPaths = (files: FileMap): FileMap =>
-  new Map([...files].filter(([path]) => !isExcludedImportPath(path)));
+export type ImportPlanner = (source: ImportSourceDescriptor) => Promise<ImportListing>;
+
+const emptyListing: ImportListing = {
+  name: 'Uploaded Files',
+  files: [],
+  bytes: 0,
+  skipped: { excluded: 0, reserved: 0, symlinks: 0 },
+};
 
 /**
  * Import Disk Machine Context
  */
 export type ImportDiskContext = {
   parentRef: AnyActorRef | undefined;
-  files: FileMap;
+  plan: ImportPlanner;
+  /** What the source holds once the policy and limits judged it: the review's paths and sizes. */
+  listing: ImportListing;
   importName: string;
   selectedMainFile: string | undefined;
   error: Error | undefined;
@@ -40,6 +38,7 @@ export type ImportDiskContext = {
  */
 type ImportDiskInput = {
   parentRef?: AnyActorRef;
+  plan?: ImportPlanner;
 };
 
 /**
@@ -62,92 +61,52 @@ type ImportDiskEventInternal =
  */
 type ImportDiskEmitted =
   | { type: 'progress'; processed: number; total: number }
-  | { type: 'filesReady'; files: FileMap; importName: string }
+  | { type: 'filesReady'; listing: ImportListing; importName: string }
   | { type: 'error'; error: Error };
 
 // Actor output types
-type FilesReadResult = { type: 'filesRead'; files: FileMap; importName: string };
+type FilesReadResult = { type: 'filesRead'; listing: ImportListing; importName: string };
 type ProjectCreatedResult = { type: 'projectCreated'; projectId: string };
 
-/**
- * Read files actor - reads files from FileList
- */
-const readFilesActor = fromSafeAsync<
-  FilesReadResult,
-  { files: FileList | File[]; onProgress: (processed: number, total: number) => void }
->(async ({ input }) => {
-  const files = await readFromFileList(input.files, input.onProgress);
-  const importName = getImportName(files);
+const planned = async (plan: ImportPlanner, source: ImportSourceDescriptor): Promise<FilesReadResult> => {
+  const listing = await plan(source);
+  return { type: 'filesRead', listing, importName: listing.name };
+};
 
-  return { type: 'filesRead', files, importName };
-});
+/** Picked files (or a folder pick): handed over by reference. */
+const readFilesActor = fromSafeAsync<FilesReadResult, { files: FileList | File[]; plan: ImportPlanner }>(
+  async ({ input }) => planned(input.plan, { kind: 'files', files: listFileList(input.files) }),
+);
 
-/**
- * Read data transfer actor - reads files from DataTransferItemList (drag-drop)
- */
+/** A drop: its entries are taken while the event lasts, then walked for references. */
 const readDataTransferActor = fromSafeAsync<
   FilesReadResult,
-  { items: DataTransferItemList; onProgress: (processed: number, total: number) => void }
->(async ({ input }) => {
-  const files = await readFromDataTransfer(input.items, input.onProgress);
-  const importName = getImportName(files);
+  { files: Promise<Awaited<ReturnType<typeof listDataTransfer>>>; plan: ImportPlanner }
+>(async ({ input }) => planned(input.plan, { kind: 'files', files: await input.files }));
 
-  return { type: 'filesRead', files, importName };
-});
+/** A zip: its central directory is read by range in the worker. */
+const extractZipActor = fromSafeAsync<FilesReadResult, { file: File; plan: ImportPlanner }>(async ({ input }) =>
+  planned(input.plan, { kind: 'zip', file: input.file }),
+);
 
-/**
- * Extract ZIP actor - extracts files from a ZIP blob with smart path normalization
- */
-const extractZipActor = fromSafeAsync<
-  FilesReadResult,
-  { file: File; onProgress: (processed: number, total: number) => void }
->(async ({ input }) => {
-  const zip = await JSZip.loadAsync(input.file);
-  const files: FileMap = new Map();
-
-  const fileEntries = Object.entries(zip.files).filter(([, file]) => !file.dir);
-  const totalFiles = fileEntries.length;
-  let processedFiles = 0;
-
-  for (const [path, file] of fileEntries) {
-    // oxlint-disable-next-line no-await-in-loop -- processing files sequentially for progress tracking
-    const content = (await file.async('uint8array')) as Uint8Array<ArrayBuffer>;
-    files.set(path, {
-      filename: path,
-      content,
-    });
-
-    processedFiles++;
-    input.onProgress(processedFiles, totalFiles);
-  }
-
-  const normalizedFiles = normalizeFilePaths(files);
-  const importName = getImportName(normalizedFiles, input.file.name);
-
-  return { type: 'filesRead', files: normalizedFiles, importName };
-});
-
-/**
- * Read directory handle actor - recursively reads files from a FileSystemDirectoryHandle.
- * Used for the File System Access API import flow.
- */
+/** A picked folder: the handle crosses to the worker, which walks it. */
 const readDirectoryHandleActor = fromSafeAsync<
   FilesReadResult,
-  { handle: FileSystemDirectoryHandle; onProgress: (processed: number, total: number) => void }
->(async ({ input }) => {
-  const files = await readFromDirectoryHandle(input.handle, input.onProgress);
-  const normalizedFiles = normalizeFilePaths(files);
-  const importName = getImportName(normalizedFiles, input.handle.name);
-
-  return { type: 'filesRead', files: normalizedFiles, importName };
-});
+  { handle: FileSystemDirectoryHandle; plan: ImportPlanner }
+>(async ({ input }) => planned(input.plan, { kind: 'directory', handle: input.handle }));
 
 /**
- * Create project actor - placeholder that should be provided by the route
+ * Create project actor - placeholder that should be provided by the route:
+ * it stages the planned source and creates the project from the staging.
  */
 const createProjectActor = fromSafeAsync<
   ProjectCreatedResult,
-  { importName: string; mainFile: string; files: FileMap }
+  {
+    importName: string;
+    mainFile: string;
+    listing: ImportListing;
+    onProgress: (processed: number, total: number) => void;
+  }
 >(async () => {
   throw new Error('createProjectActor must be provided by the route');
 });
@@ -165,7 +124,7 @@ type ImportDiskEvent = ImportDiskEventInternal | FilesReadResult | ProjectCreate
 type ImportDiskEnqueue = EnqueueObject<ImportDiskEvent, ImportDiskEmitted>;
 
 const reset = {
-  files: new Map(),
+  listing: emptyListing,
   importName: 'Uploaded Files',
   selectedMainFile: undefined,
   error: undefined,
@@ -186,9 +145,15 @@ const readingHandlers = {
     { event }: Readonly<{ event: Extract<ImportDiskEvent, { type: 'filesRead' }> }>,
     enq: ImportDiskEnqueue,
   ) => {
-    const files = withoutExcludedImportPaths(event.files);
-    enq.emit({ type: 'filesReady', files, importName: event.importName });
-    return { context: { files, importName: event.importName, selectedMainFile: findMainFile([...files.keys()]) } };
+    const { listing } = event;
+    enq.emit({ type: 'filesReady', listing, importName: event.importName });
+    return {
+      context: {
+        listing,
+        importName: event.importName,
+        selectedMainFile: findMainFile(listing.files.map(({ path }) => path)),
+      },
+    };
   },
   updateProgress: (
     { event }: Readonly<{ event: Extract<ImportDiskEvent, { type: 'updateProgress' }> }>,
@@ -202,14 +167,16 @@ const readingHandlers = {
 /**
  * Import Disk Machine
  *
- * Manages importing files from disk (files, folders, or ZIP archives).
+ * Manages importing files from disk (files, folders, or ZIP archives). The
+ * page hands every source to the file-manager worker by reference and gets
+ * back paths and sizes; it never holds the files' bytes (charter D12).
  *
  * States:
  * - idle: Waiting for files to process
- * - reading: Reading files from File API
- * - extracting: Extracting files from ZIP archive
+ * - reading / readingDataTransfer / readingDirectoryHandle: Planning picked files, a drop or a folder
+ * - extracting: Planning a ZIP archive from its central directory
  * - selectingMainFile: User selects the main file
- * - creating: Creating the project
+ * - creating: Staging the files and creating the project from the staging
  * - success: Import completed successfully
  * - error: An error occurred during import
  */
@@ -229,7 +196,12 @@ export const importDiskMachine = setup({
   id: 'importDisk',
   context: ({ input }) => ({
     parentRef: input.parentRef,
-    files: new Map(),
+    plan:
+      input.plan ??
+      (async () => {
+        throw new Error('An import needs the file manager to plan its files.');
+      }),
+    listing: emptyListing,
     importName: 'Uploaded Files',
     selectedMainFile: undefined,
     error: undefined,
@@ -262,15 +234,10 @@ export const importDiskMachine = setup({
       entry: () => ({ context: { error: undefined } }),
       invoke: {
         src: 'readFilesActor',
-        input({ event, self }) {
+        input({ event, context }) {
           assertEvent(event, 'processFiles');
 
-          return {
-            files: event.files,
-            onProgress(processed: number, total: number) {
-              self.send({ type: 'updateProgress', processed, total });
-            },
-          };
+          return { files: event.files, plan: context.plan };
         },
         onDone: {
           target: 'selectingMainFile',
@@ -283,15 +250,11 @@ export const importDiskMachine = setup({
       entry: () => ({ context: { error: undefined } }),
       invoke: {
         src: 'readDataTransferActor',
-        input({ event, self }) {
+        input({ event, context }) {
           assertEvent(event, 'processDataTransfer');
 
-          return {
-            items: event.items,
-            onProgress(processed: number, total: number) {
-              self.send({ type: 'updateProgress', processed, total });
-            },
-          };
+          /* Listed now, while the drop's items are still readable. */
+          return { files: listDataTransfer(event.items), plan: context.plan };
         },
         onDone: {
           target: 'selectingMainFile',
@@ -304,15 +267,10 @@ export const importDiskMachine = setup({
       entry: () => ({ context: { error: undefined } }),
       invoke: {
         src: 'readDirectoryHandleActor',
-        input({ event, self }) {
+        input({ event, context }) {
           assertEvent(event, 'processDirectoryHandle');
 
-          return {
-            handle: event.handle,
-            onProgress(processed: number, total: number) {
-              self.send({ type: 'updateProgress', processed, total });
-            },
-          };
+          return { handle: event.handle, plan: context.plan };
         },
         onDone: {
           target: 'selectingMainFile',
@@ -325,15 +283,10 @@ export const importDiskMachine = setup({
       entry: () => ({ context: { error: undefined } }),
       invoke: {
         src: 'extractZipActor',
-        input({ event, self }) {
+        input({ event, context }) {
           assertEvent(event, 'processZip');
 
-          return {
-            file: event.file,
-            onProgress(processed: number, total: number) {
-              self.send({ type: 'updateProgress', processed, total });
-            },
-          };
+          return { file: event.file, plan: context.plan };
         },
         onDone: {
           target: 'selectingMainFile',
@@ -358,10 +311,13 @@ export const importDiskMachine = setup({
     creating: {
       invoke: {
         src: 'createProjectActor',
-        input: ({ context }) => ({
+        input: ({ context, self }) => ({
           importName: context.importName,
           mainFile: context.selectedMainFile!,
-          files: context.files,
+          listing: context.listing,
+          onProgress(processed: number, total: number) {
+            self.send({ type: 'updateProgress', processed, total });
+          },
         }),
         onDone: {
           target: 'success',
@@ -372,6 +328,7 @@ export const importDiskMachine = setup({
         projectCreated: {
           context: ({ event }) => ({ projectId: event.projectId }),
         },
+        updateProgress: readingHandlers.updateProgress,
       },
     },
     success: {

@@ -1110,6 +1110,50 @@ describe('settling a turn', () => {
     ).rejects.toThrow(/did not keep the paths this change wrote: notes\.md/u);
   }, 30_000);
 
+  /* EQ6, D11: the apply reads back what it wrote and compares the bytes, so a
+   * write that landed at the right size with the wrong bytes is caught — no
+   * receipt or size and mtime compare could see it. */
+  it('refuses to publish when an applied write landed same-size but corrupt', async () => {
+    const corrupted = new Set(['notes.md']);
+    const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' }, (real) =>
+      Object.assign(Object.create(real) as RevisionFileSystem, {
+        writeFile: async (path: string, data: Parameters<RevisionFileSystem['writeFile']>[1]) => {
+          if (!corrupted.has(path) || typeof data === 'string') {
+            return real.writeFile(path, data);
+          }
+          const flipped = Uint8Array.from(data);
+          flipped[0] = (flipped[0] ?? 0) ^ 1;
+          return real.writeFile(path, flipped);
+        },
+      }),
+    );
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const base = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
+      checkoutId: 'live',
+      trigger: 'save',
+    });
+    const baseRevision = await run<{ revisionId: string }>(actors.checkout.writeRevision, {
+      checkoutId: 'live',
+      cutId: base.cutId,
+      treeId: base.treeId,
+      parents: [],
+      trigger: 'save',
+      leaseIds: [],
+    });
+
+    await filesystem.writeFile('notes.md', 'the turn wrote this\n');
+    const captured = await run<{ captureId: string }>(actors.turn.capture, { checkoutId: 'live', turnId: 'turn-1' });
+    await filesystem.unlink('notes.md');
+
+    await expect(
+      run(actors.turn.merge, {
+        checkoutId: 'live',
+        captureId: captured.captureId,
+        baseRevisionId: baseRevision.revisionId,
+      }),
+    ).rejects.toThrow(/did not keep the paths this change wrote: notes\.md/u);
+  }, 30_000);
+
   it('settles when something else writes its own files between the merge and its verification', async () => {
     const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' }, (real) =>
       Object.assign(Object.create(real) as RevisionFileSystem, {

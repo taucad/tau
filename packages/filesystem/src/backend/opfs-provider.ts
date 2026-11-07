@@ -11,6 +11,7 @@ import { RootedFileSystemError } from '#workspace-errors.js';
 import { holdRealmOwner, liveRealmOwners, realmOwnerId } from '#backend/uncommitted-changesets.js';
 import type { UncommittedChangesetStore, UncommittedRecord } from '#backend/uncommitted-changesets.js';
 import { randomUuid } from '@taucad/utils/id';
+import { importStagingPrefix } from '#importer/staging.js';
 
 /**
  * Subset of `FileSystemSyncAccessHandle` this provider uses. Declared locally
@@ -81,6 +82,7 @@ export class OPFSProvider extends FileSystemAccessProvider {
     durability: 'exclusive-append',
     trustworthyMtime: true,
     streamsWrites: true,
+    movesInPlace: true,
   };
 
   private _initialized = false;
@@ -382,7 +384,8 @@ export class OPFSProvider extends FileSystemAccessProvider {
     }
     await Promise.all(
       owners
-        .filter((owner) => owner !== realmOwnerId && !live.has(owner))
+        /* An import's staging is its journal, kept until its operation commits or is discarded (D12). */
+        .filter((owner) => owner !== realmOwnerId && !live.has(owner) && !owner.startsWith(importStagingPrefix))
         .map(async (owner) => staging?.removeEntry(owner, { recursive: true }).catch(() => undefined)),
     );
     await this._verifyUncommitted(live, records);

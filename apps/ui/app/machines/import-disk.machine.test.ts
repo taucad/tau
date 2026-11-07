@@ -2,75 +2,50 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { createActor, waitFor } from 'xstate';
 import { importDiskMachine } from '#machines/import-disk.machine.js';
+import type { ImportPlanner } from '#machines/import-disk.machine.js';
+import type { ImportListing, ImportSourceDescriptor } from '#machines/import-staging.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
-import type * as FileReaderUtilities from '#utils/file-reader.utils.js';
-
-vi.mock('#utils/file-reader.utils.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof FileReaderUtilities>()),
-  readFromFileList: vi.fn(async () => new Map([['main.ts', { filename: 'main.ts', content: new Uint8Array([1]) }]])),
-  readFromDataTransfer: vi.fn(
-    async () => new Map([['main.ts', { filename: 'main.ts', content: new Uint8Array([1]) }]]),
-  ),
-  readFromDirectoryHandle: vi.fn(
-    async () => new Map([['main.ts', { filename: 'main.ts', content: new Uint8Array([1]) }]]),
-  ),
-  normalizeFilePaths: vi.fn((files: unknown) => files),
-  getImportName: vi.fn(() => 'Test Import'),
-}));
 
 vi.mock('#routes/import.$/import.utils.js', () => ({
   findMainFile: vi.fn(() => 'main.ts'),
 }));
 
-vi.mock('jszip', () => ({
-  default: {
-    loadAsync: vi.fn(async () => ({ files: {} })),
-  },
-}));
+const listing: ImportListing = {
+  name: 'Test Import',
+  files: [
+    { path: 'main.ts', size: 1 },
+    { path: 'src/part.ts', size: 2 },
+  ],
+  bytes: 3,
+  skipped: { excluded: 2, reserved: 0, symlinks: 0 },
+};
 
-const mockFiles = new Map([['main.ts', { filename: 'main.ts', content: new Uint8Array([1]) }]]);
-
-/** A zip a person exported from a checkout: working tree plus the repository. */
-const repositoryFiles = new Map([
-  ['main.ts', { filename: 'main.ts', content: new Uint8Array([1]) }],
-  ['src/part.ts', { filename: 'src/part.ts', content: new Uint8Array([2]) }],
-  ['.git/HEAD', { filename: '.git/HEAD', content: new Uint8Array([3]) }],
-  ['.git/objects/ab/cdef', { filename: '.git/objects/ab/cdef', content: new Uint8Array([4]) }],
-  ['.tau/binding.json', { filename: '.tau/binding.json', content: new Uint8Array([5]) }],
-  ['node_modules/replicad/index.js', { filename: 'node_modules/replicad/index.js', content: new Uint8Array([6]) }],
-  /* The control plane at any depth: a vendored repository goes with the project's own. */
-  ['vendor/dep/.git/HEAD', { filename: 'vendor/dep/.git/HEAD', content: new Uint8Array([7]) }],
-]);
-
-type OnProgress = (processed: number, total: number) => void;
-
-type FilesReadEvent = { type: 'filesRead'; files: typeof mockFiles; importName: string };
-
-function createReadActor<Input>() {
-  return fromSafeAsync<FilesReadEvent, Input>(async () => {
-    return { type: 'filesRead', files: mockFiles, importName: 'Test Import' };
-  });
-}
-
-function createTestActor(options?: { throwOnRead?: boolean; files?: typeof mockFiles }) {
+function createTestActor(options?: {
+  throwOnRead?: boolean;
+  plan?: ImportPlanner;
+  onCreate?: (input: { listing: ImportListing; onProgress: (processed: number, total: number) => void }) => void;
+}) {
+  const plan: ImportPlanner =
+    options?.plan ??
+    (async () => {
+      if (options?.throwOnRead) {
+        throw new Error('read failed');
+      }
+      return listing;
+    });
   const machine = importDiskMachine.provide({
     actors: {
-      readFilesActor: fromSafeAsync(async () => {
-        if (options?.throwOnRead) {
-          throw new Error('read failed');
-        }
-        return { type: 'filesRead', files: options?.files ?? mockFiles, importName: 'Test Import' };
-      }),
-      readDataTransferActor: createReadActor<{ items: DataTransferItemList; onProgress: OnProgress }>(),
-      readDirectoryHandleActor: createReadActor<{ handle: FileSystemDirectoryHandle; onProgress: OnProgress }>(),
-      extractZipActor: createReadActor<{ file: File; onProgress: OnProgress }>(),
-      createProjectActor: fromSafeAsync(async () => {
+      createProjectActor: fromSafeAsync<
+        { type: 'projectCreated'; projectId: string },
+        { listing: ImportListing; onProgress: (processed: number, total: number) => void }
+      >(async ({ input }) => {
+        options?.onCreate?.(input);
         return { type: 'projectCreated', projectId: 'proj_123' };
       }),
     },
   });
 
-  return createActor(machine, { input: {} });
+  return createActor(machine, { input: { plan } });
 }
 
 describe('importDiskMachine', () => {
@@ -90,7 +65,7 @@ describe('importDiskMachine', () => {
       const actor = createTestActor();
       actor.start();
       const { context } = actor.getSnapshot();
-      expect(context.files.size).toBe(0);
+      expect(context.listing.files).toHaveLength(0);
       expect(context.importName).toBe('Uploaded Files');
       expect(context.selectedMainFile).toBeUndefined();
       expect(context.error).toBeUndefined();
@@ -99,71 +74,76 @@ describe('importDiskMachine', () => {
     });
   });
 
-  describe('reading files', () => {
-    it('should transition to reading on processFiles', () => {
-      const actor = createTestActor();
+  /* W7 (charter D12): the page hands each source over by reference and reads none of its bytes. */
+  describe('planning in the worker', () => {
+    it('hands picked files over with their paths, never their bytes', async () => {
+      const sources: ImportSourceDescriptor[] = [];
+      const actor = createTestActor({
+        plan: async (source) => {
+          sources.push(source);
+          return listing;
+        },
+      });
+      const file = new File(['x'], 'main.ts');
       actor.start();
-      actor.send({ type: 'processFiles', files: mock<FileList>() });
+      actor.send({ type: 'processFiles', files: [file] });
       expect(actor.getSnapshot().value).toBe('reading');
+      await waitFor(actor, (s) => s.value === 'selectingMainFile');
+
+      /* The very File, by reference: the page never read it. */
+      expect(sources).toStrictEqual([{ kind: 'files', files: [{ file, path: 'main.ts' }] }]);
+      expect((sources[0] as Extract<ImportSourceDescriptor, { kind: 'files' }>).files[0]!.file).toBe(file);
       actor.stop();
     });
 
-    it('should transition to selectingMainFile after reading completes', async () => {
+    it('hands a zip and a picked folder over as they are', async () => {
+      const sources: ImportSourceDescriptor[] = [];
+      const plan: ImportPlanner = async (source) => {
+        sources.push(source);
+        return listing;
+      };
+      const file = new File(['zip'], 'gear.zip');
+      const handle = mock<FileSystemDirectoryHandle>();
+      const zipActor = createTestActor({ plan });
+      zipActor.start();
+      zipActor.send({ type: 'processZip', file });
+      await waitFor(zipActor, (s) => s.value === 'selectingMainFile');
+      const folderActor = createTestActor({ plan });
+      folderActor.start();
+      folderActor.send({ type: 'processDirectoryHandle', handle });
+      await waitFor(folderActor, (s) => s.value === 'selectingMainFile');
+
+      expect(sources).toStrictEqual([
+        { kind: 'zip', file },
+        { kind: 'directory', handle },
+      ]);
+      zipActor.stop();
+      folderActor.stop();
+    });
+
+    it('should keep the listing and its name, and auto-select the main file', async () => {
       const actor = createTestActor();
-      actor.start();
-      actor.send({ type: 'processFiles', files: mock<FileList>() });
-      await waitFor(actor, (s) => s.value === 'selectingMainFile');
-      expect(actor.getSnapshot().value).toBe('selectingMainFile');
-      actor.stop();
-    });
-
-    it('should set files and importName in context', async () => {
-      const actor = createTestActor();
-      actor.start();
-      actor.send({ type: 'processFiles', files: mock<FileList>() });
-      await waitFor(actor, (s) => s.value === 'selectingMainFile');
-      const { context } = actor.getSnapshot();
-      expect(context.files.size).toBe(1);
-      expect(context.files.has('main.ts')).toBe(true);
-      expect(context.importName).toBe('Test Import');
-      actor.stop();
-    });
-
-    it('should auto-select main file', async () => {
-      const actor = createTestActor();
-      actor.start();
-      actor.send({ type: 'processFiles', files: mock<FileList>() });
-      await waitFor(actor, (s) => s.value === 'selectingMainFile');
-      expect(actor.getSnapshot().context.selectedMainFile).toBe('main.ts');
-      actor.stop();
-    });
-  });
-
-  /* D29/ND23: the project's own repository lives at `.git` in the same
-   * filesystem as its working tree, so an imported `.git` would be written over
-   * it. The import carries the tree and drops the repository that came with it. */
-  describe('an import that carries its own repository', () => {
-    it('imports the working tree and drops what no import carries', async () => {
-      const actor = createTestActor({ files: repositoryFiles });
-      actor.start();
-      actor.send({ type: 'processFiles', files: mock<FileList>() });
-      await waitFor(actor, (s) => s.value === 'selectingMainFile');
-
-      expect([...actor.getSnapshot().context.files.keys()]).toStrictEqual(['main.ts', 'src/part.ts']);
-      actor.stop();
-    });
-
-    it('never emits the dropped bytes to the route that creates the project', async () => {
-      const actor = createTestActor({ files: repositoryFiles });
-      const ready: string[][] = [];
+      const ready: ImportListing[] = [];
       actor.on('filesReady', (event) => {
-        ready.push([...event.files.keys()]);
+        ready.push(event.listing);
       });
       actor.start();
-      actor.send({ type: 'processFiles', files: mock<FileList>() });
+      actor.send({ type: 'processFiles', files: [new File(['x'], 'main.ts')] });
       await waitFor(actor, (s) => s.value === 'selectingMainFile');
+      const { context } = actor.getSnapshot();
+      expect(context.listing).toBe(listing);
+      expect(context.importName).toBe('Test Import');
+      expect(context.selectedMainFile).toBe('main.ts');
+      expect(ready).toStrictEqual([listing]);
+      actor.stop();
+    });
 
-      expect(ready).toStrictEqual([['main.ts', 'src/part.ts']]);
+    it('should fail plainly without a planner', async () => {
+      const actor = createActor(importDiskMachine, { input: {} });
+      actor.start();
+      actor.send({ type: 'processZip', file: new File([''], 'a.zip') });
+      await waitFor(actor, (s) => s.value === 'error');
+      expect(actor.getSnapshot().context.error?.message).toMatch(/file manager/u);
       actor.stop();
     });
   });
@@ -172,7 +152,7 @@ describe('importDiskMachine', () => {
     it('should accept selectMainFile event', async () => {
       const actor = createTestActor();
       actor.start();
-      actor.send({ type: 'processFiles', files: mock<FileList>() });
+      actor.send({ type: 'processFiles', files: [new File(['x'], 'main.ts')] });
       await waitFor(actor, (s) => s.value === 'selectingMainFile');
       actor.send({ type: 'selectMainFile', file: 'other.ts' });
       expect(actor.getSnapshot().context.selectedMainFile).toBe('other.ts');
@@ -184,21 +164,31 @@ describe('importDiskMachine', () => {
     it('should transition to creating on confirmImport', async () => {
       const actor = createTestActor();
       actor.start();
-      actor.send({ type: 'processFiles', files: mock<FileList>() });
+      actor.send({ type: 'processFiles', files: [new File(['x'], 'main.ts')] });
       await waitFor(actor, (s) => s.value === 'selectingMainFile');
       actor.send({ type: 'confirmImport' });
       expect(actor.getSnapshot().value).toBe('creating');
       actor.stop();
     });
 
-    it('should transition to success after project creation', async () => {
-      const actor = createTestActor();
+    it('should stage from the listing, report staging progress, and finish with the project', async () => {
+      const progress: Array<{ processed: number; total: number }> = [];
+      const actor = createTestActor({
+        onCreate: (input) => {
+          expect(input.listing).toBe(listing);
+          input.onProgress(1, 2);
+        },
+      });
+      actor.on('progress', ({ processed, total }) => {
+        progress.push({ processed, total });
+      });
       actor.start();
-      actor.send({ type: 'processFiles', files: mock<FileList>() });
+      actor.send({ type: 'processFiles', files: [new File(['x'], 'main.ts')] });
       await waitFor(actor, (s) => s.value === 'selectingMainFile');
       actor.send({ type: 'confirmImport' });
       await waitFor(actor, (s) => s.value === 'success');
       expect(actor.getSnapshot().context.projectId).toBe('proj_123');
+      expect(progress).toStrictEqual([{ processed: 1, total: 2 }]);
       actor.stop();
     });
   });
@@ -207,7 +197,7 @@ describe('importDiskMachine', () => {
     it('should go to error on read failure', async () => {
       const actor = createTestActor({ throwOnRead: true });
       actor.start();
-      actor.send({ type: 'processFiles', files: mock<FileList>() });
+      actor.send({ type: 'processFiles', files: [new File(['x'], 'main.ts')] });
       await waitFor(actor, (s) => s.value === 'error');
       expect(actor.getSnapshot().context.error?.message).toBe('read failed');
       actor.stop();
@@ -216,7 +206,7 @@ describe('importDiskMachine', () => {
     it('should recover from error with retry', async () => {
       const actor = createTestActor({ throwOnRead: true });
       actor.start();
-      actor.send({ type: 'processFiles', files: mock<FileList>() });
+      actor.send({ type: 'processFiles', files: [new File(['x'], 'main.ts')] });
       await waitFor(actor, (s) => s.value === 'error');
       actor.send({ type: 'retry' });
       expect(actor.getSnapshot().value).toBe('idle');
@@ -227,7 +217,7 @@ describe('importDiskMachine', () => {
     it('should reset from error state', async () => {
       const actor = createTestActor({ throwOnRead: true });
       actor.start();
-      actor.send({ type: 'processFiles', files: mock<FileList>() });
+      actor.send({ type: 'processFiles', files: [new File(['x'], 'main.ts')] });
       await waitFor(actor, (s) => s.value === 'error');
       actor.send({ type: 'reset' });
       expect(actor.getSnapshot().value).toBe('idle');
@@ -241,7 +231,7 @@ describe('importDiskMachine', () => {
       actor.start();
       actor.send({ type: 'reset' });
       const { context } = actor.getSnapshot();
-      expect(context.files.size).toBe(0);
+      expect(context.listing.files).toHaveLength(0);
       expect(context.error).toBeUndefined();
       expect(context.projectId).toBeUndefined();
       actor.stop();

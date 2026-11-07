@@ -3,8 +3,9 @@
  * the importer and search, and nothing that touches storage (charter D1, D7).
  *
  * Inflate, deflate, delta resolution, hashing and pack indexing take bytes in
- * and hand bytes back (zip decode and grep join with W7 and W9, which use them); the authority does every read and
- * write. A host gives the store a dedicated worker through
+ * and hand bytes back; an import's entry decode reads the `Blob` it is handed
+ * and hands the bytes back with their digests (W7; grep joins with W9). The
+ * authority does every write. A host gives the store a dedicated worker through
  * {@link createSupervisedComputeWorker} (`supervisor.ts`), which that worker
  * serves with {@link serveComputeWorker}; {@link createInlineCompute} runs the
  * same work in the caller's realm where no worker can be spawned. Each
@@ -25,6 +26,8 @@
  */
 
 import { indexPack } from 'isomorphic-git';
+import { decodeImportEntry } from '@taucad/filesystem/importer';
+import type { ImportDecodeRequest, ImportDecodedEntry } from '@taucad/filesystem/importer';
 import { bytesToHex, digest } from '#object-hash.js';
 import { CorruptBytesError } from '#compute-worker/errors.js';
 import type { ComputeMethod } from '#compute-worker/errors.js';
@@ -69,6 +72,15 @@ export type ComputeWorker = Readonly<{
     declared: number,
     base: Uint8Array<ArrayBuffer>,
   ) => Promise<Uint8Array<ArrayBuffer>>;
+  /**
+   * One import entry read from the `Blob` it was handed (by reference, never
+   * copied), inflated, CRC-checked against its zip entry and digested — blob
+   * id and SHA-256 — in the same pass (charter D12, I2). The bytes come back
+   * transferred, with their facts.
+   *
+   * @throws ImportRefusedError (revived by name) when the bytes do not decode to the declared size and CRC.
+   */
+  decodeImportEntry: (request: ImportDecodeRequest) => Promise<ImportDecodedEntry>;
 }>;
 
 const drain = async (stream: ReadableStream<Uint8Array<ArrayBuffer>>): Promise<Uint8Array<ArrayBuffer>> => {
@@ -206,6 +218,7 @@ export const createInlineCompute = (): ComputeWorker => {
       }
       return new Uint8Array(written);
     },
+    decodeImportEntry: async (request) => decodeImportEntry(request, hashHex),
     resolveDelta: async (compressed, declared, base) => {
       const delta = await inflate(compressed);
       if (delta.byteLength !== declared) {
@@ -229,6 +242,7 @@ export const computeMethods: ReadonlyArray<keyof ComputeWorker & ComputeMethod> 
   'sha256Kept',
   'indexPack',
   'resolveDelta',
+  'decodeImportEntry',
 ];
 
 /** One request over the seam. */
@@ -238,7 +252,8 @@ export type ComputeRequest = Readonly<{ id: number; method: ComputeMethod; args:
 export type ComputeAnswer = Readonly<{
   id: number;
   result?: unknown;
-  error?: Readonly<{ name: string; message: string }>;
+  /** A refusal's `reason` travels with it, so the import's limits verdict survives the boundary. */
+  error?: Readonly<{ name: string; message: string; reason?: string }>;
   started?: true;
   pong?: true;
 }>;
@@ -295,7 +310,11 @@ export const serveComputeWorker = (port: ComputePort, compute: ComputeWorker = c
         port.postMessage({ id, result } satisfies ComputeAnswer, [...new Set(transferablesOf(result))]);
       } catch (error) {
         const { name, message } = error instanceof Error ? error : new Error(String(error));
-        port.postMessage({ id, error: { name, message } } satisfies ComputeAnswer, []);
+        const reason = (error as { reason?: unknown } | undefined)?.reason;
+        port.postMessage(
+          { id, error: { name, message, ...(typeof reason === 'string' ? { reason } : {}) } } satisfies ComputeAnswer,
+          [],
+        );
       }
     })();
   });
@@ -303,10 +322,13 @@ export const serveComputeWorker = (port: ComputePort, compute: ComputeWorker = c
 };
 
 /* The error a worker threw: a verdict on the bytes as one, anything else as an error that judges nothing. */
-const reviveError = (error: Readonly<{ name: string; message: string }>): Error =>
+const reviveError = (error: Readonly<{ name: string; message: string; reason?: string }>): Error =>
   error.name === 'CorruptBytesError'
     ? new CorruptBytesError(error.message)
-    : Object.assign(new Error(error.message), { workerErrorName: error.name });
+    : Object.assign(new Error(error.message), {
+        workerErrorName: error.name,
+        ...(error.reason === undefined ? {} : { reason: error.reason }),
+      });
 
 /** The caller's half of one connection: the contract, and what fails every call it holds. */
 export type ComputeConnection = Readonly<{

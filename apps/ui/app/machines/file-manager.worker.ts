@@ -64,6 +64,7 @@ import { summarizeLast, withPendingGauge, workerSpanTotals } from '#lib/worker-t
 import { createProjectOpenTimer, markProjectOpen } from '#machines/project-open-timer.js';
 import type { ProjectOpenTimer } from '#machines/project-open-timer.js';
 import { createRevisionCompute } from '#machines/revision-compute.js';
+import { importConnectMessageType, serveImportChannel } from '#machines/import-staging.js';
 import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
 
 /**
@@ -729,6 +730,16 @@ self.addEventListener(
       } else {
         revisionRegistry.connectReader(data.port, data.projectId);
       }
+      return;
+    }
+
+    /* W7: a streaming import plans, stages and decodes here, off the page (D12). */
+    if (data.type === importConnectMessageType && data.port instanceof MessagePort) {
+      serveImportChannel(data.port, {
+        importStaging: async (scope) => fileService.importStaging(scope),
+        decode: async (request) => revisionCompute.decodeImportEntry(request),
+        policy: tauPathPolicy,
+      });
       return;
     }
 

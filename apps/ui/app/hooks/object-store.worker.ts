@@ -124,6 +124,10 @@ const objectStoreWorker = {
     editorState?: InitialEditorState;
     deferInitialView?: boolean;
     files: Record<string, { content: Uint8Array<ArrayBuffer>; mode?: '100644' | '100755' }>;
+    /** A staged import's locator, journaled in place of its bytes (W7). */
+    staging?: { readonly operationId: string };
+    /** `false` when the staged import carries its own workbench layout. */
+    seedWorkbench?: boolean;
     storage: PendingProjectStorage;
   }): Promise<PendingCreateProjectOperation> {
     const timestamp = Date.now();
@@ -147,10 +151,14 @@ const objectStoreWorker = {
       ...options.storage,
       manifest: project,
       library: { projectId: options.projectId, lastActivityAt: timestamp },
-      files: seedInitialWorkbenchFiles(
-        options.files,
-        options.deferInitialView ? undefined : project.assets.main.entryPath,
-      ),
+      files:
+        options.seedWorkbench === false
+          ? options.files
+          : seedInitialWorkbenchFiles(
+              options.files,
+              options.deferInitialView ? undefined : project.assets.main.entryPath,
+            ),
+      ...(options.staging === undefined ? {} : { staging: options.staging }),
       ...(chat === undefined ? {} : { chat }),
       ...(options.attachmentSource === undefined ? {} : { attachmentSource: options.attachmentSource }),
       editorState: createInitialEditorState({

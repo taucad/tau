@@ -54,6 +54,7 @@ import type {
 /* The project-directory lifecycle is its own module (D5/W7); the authority
  * keeps the four public calls and owns nothing of the manifest. */
 import { ProjectDirectories } from '#project-directories.js';
+import type { ImportStagingPort } from '#importer/staging.js';
 import type { ProjectDiscoveryResult, ResolvedDiscoveryRoot } from '#project-directories.js';
 import { assertRootedPath, joinRelativePath, parentDirectory, resolveAuthorityPath } from '@taucad/utils/path';
 import { MissingWorkspaceHandleError, WorkspaceMutationError } from '#workspace-errors.js';
@@ -1140,6 +1141,17 @@ export class WorkspaceFileService {
     context?: WorkspaceMutationContext,
   ): Promise<CommitPendingProjectDirectoryResult> {
     return this._projectDirectories.commitPendingProjectDirectory(input, context);
+  }
+
+  /**
+   * Where an import stages on one durable storage root (in process only: the
+   * import runs in the authority, so no wire carries this).
+   *
+   * @param scope - A durable storage root.
+   * @returns The staging port.
+   */
+  public async importStaging(scope: StorageRootConfig): Promise<ImportStagingPort> {
+    return this._projectDirectories.importStaging(scope);
   }
 
   /**

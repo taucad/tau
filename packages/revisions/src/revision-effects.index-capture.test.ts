@@ -68,7 +68,11 @@ const fixture = async (files: Readonly<Record<string, string>>) => {
   await port.init({ author });
   const actors = createRevisionActors({ port, projectId: 'project-1', filesystem: async () => indexed });
   /* The same store captured by walking: what every incremental cut must hash to. */
-  const walking = createRevisionActors({ port, projectId: 'project-1', filesystem: async () => filesystem });
+  const walking = createRevisionActors({
+    port,
+    projectId: 'project-1',
+    filesystem: async () => Object.create(filesystem) as RevisionFileSystem,
+  });
   const write = async (path: string, content: string): Promise<void> => {
     await filesystem.writeFile(path, content);
     feed.generation += 1;

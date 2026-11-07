@@ -346,7 +346,7 @@ describe('ImportRoute GitHub card', () => {
     ).toBeInTheDocument();
   });
 
-  it('should import the folder named in the address', async () => {
+  it('should import the folder named in the address, and stop its download when cancelled', async () => {
     importChannel.plan.mockReturnValueOnce(
       new Promise(() => {
         /* The download is still running when the test looks. */
@@ -382,6 +382,14 @@ describe('ImportRoute GitHub card', () => {
         },
         expect.objectContaining({ root: 'public/kcl-samples' }),
       );
+    });
+
+    /* Cancelling the download ends the actor, which stops the plan in the worker. */
+    const [, { signal }] = importChannel.plan.mock.calls.at(-1) as [unknown, { signal: AbortSignal }];
+    expect(signal.aborted).toBe(false);
+    await user.click(await screen.findByRole('button', { name: 'Cancel import' }));
+    await waitFor(() => {
+      expect(signal.aborted).toBe(true);
     });
   });
 

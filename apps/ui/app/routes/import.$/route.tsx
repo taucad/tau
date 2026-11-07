@@ -292,6 +292,8 @@ export default function ImportRoute(): React.JSX.Element {
                 },
                 {
                   root: input.root,
+                  /* The actor's end cancels the plan in the worker: its download stops, and it never becomes the plan. */
+                  signal: closed.signal,
                   onDownload: ({ loaded, total }) => {
                     if (!closed.signal.aborted) {
                       sendBack({ type: 'updateDownloadProgress', loaded, total });

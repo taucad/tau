@@ -222,7 +222,7 @@ class GitHubApiClient {
 
   /**
    * Get the proxied archive download URL for a repository.
-   * Intended for use by the import worker which fetches off the main thread.
+   * The file-manager worker's import channel downloads it off the main thread.
    */
   public getArchiveUrl({ owner, repo, ref }: { owner: string; repo: string; ref: string }): string {
     return `${ENV.TAU_API_URL}/v1/repositories/archive?${new URLSearchParams({ provider: 'github', owner, repo, ref })}`;

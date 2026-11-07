@@ -102,13 +102,19 @@ export type ImportStaged = Readonly<{ files: number; bytes: number; inPlace: boo
  */
 export type ImportSession = Readonly<{
   /**
-   * Plan a source. Replaces any earlier plan of this session. `root` imports
-   * only a folder inside it, as the project root; an archive reports its
-   * download as it arrives.
+   * Plan a source. Replaces any earlier plan of this session: a plan still
+   * running when a newer one is asked stops, and never becomes the plan.
+   * `root` imports only a folder inside it, as the project root; an archive
+   * reports its download as it arrives. Aborting `signal` stops the plan in
+   * the worker (its download with it) and rejects at once.
    */
   plan: (
     source: ImportSourceDescriptor,
-    options?: Readonly<{ root?: string; onDownload?: (progress: ImportDownloadProgress) => void }>,
+    options?: Readonly<{
+      root?: string;
+      onDownload?: (progress: ImportDownloadProgress) => void;
+      signal?: AbortSignal;
+    }>,
   ) => Promise<ImportListing>;
   /**
    * Stage the planned source on a durable storage root, resuming a staging of
@@ -148,7 +154,7 @@ type Request =
   | Readonly<{ id: number; type: 'preview'; paths: readonly string[]; maximumBytes: number }>
   | Readonly<{ id: number; type: 'discard'; operationId: string; scope: StorageRootConfig }>
   | Readonly<{ id: number; type: 'sweep'; scope: StorageRootConfig; owned: readonly string[] }>
-  | Readonly<{ id: number; type: 'cancel'; close?: boolean }>;
+  | Readonly<{ id: number; type: 'cancel'; close?: boolean; plan?: number }>;
 
 type Answer = Readonly<{
   id: number;
@@ -378,6 +384,9 @@ export const serveImportChannel = (
   }>,
 ): void => {
   let plan: ImportPlan | undefined;
+  /* The newest plan request: only it may become the plan, so a slower earlier one never replaces it. */
+  let latestPlan: number | undefined;
+  const planning = new Map<number, AbortController>();
   let abort = new AbortController();
   /* What this session staged and still leases; `kept` once handed off, so closing leaves it for its create. */
   const owned = new Map<string, { scope: StorageRootConfig; release: () => Promise<void>; kept: boolean }>();
@@ -395,23 +404,49 @@ export const serveImportChannel = (
     await work;
     running.delete(work);
   };
-  const planOf = async (request: Extract<Request, { type: 'plan' }>): Promise<ImportPlan> => {
+  const planOf = async (request: Extract<Request, { type: 'plan' }>, signal: AbortSignal): Promise<ImportPlan> => {
     const source = await sourceOf(request.source, {
-      signal: abort.signal,
+      signal,
       onDownload: (downloaded) => {
         answer({ id: request.id, downloaded });
       },
     });
     return planImport(source, {
       policy: dependencies.policy,
-      signal: abort.signal,
+      signal,
       ...(request.root === undefined || request.root === '' ? {} : { root: request.root }),
     });
+  };
+  /* A plan stops every earlier one still running, and becomes the plan only while no newer one or cancel came. */
+  const newestPlan = async (request: Extract<Request, { type: 'plan' }>): Promise<ImportPlan> => {
+    latestPlan = request.id;
+    for (const earlier of planning.values()) {
+      earlier.abort(new Error('A newer import replaced this one.'));
+    }
+    const own = new AbortController();
+    planning.set(request.id, own);
+    let planned: ImportPlan;
+    try {
+      planned = await planOf(request, AbortSignal.any([abort.signal, own.signal]));
+    } finally {
+      planning.delete(request.id);
+    }
+    if (latestPlan !== request.id) {
+      throw new Error('A newer import replaced this one.');
+    }
+    return planned;
+  };
+  /* One plan stops: its download aborts, and it never becomes the plan. */
+  const cancelPlan = (id: number): void => {
+    planning.get(id)?.abort(new Error('The import was cancelled.'));
+    if (latestPlan === id) {
+      latestPlan = undefined;
+    }
   };
   const run = async (request: Request): Promise<void> => {
     switch (request.type) {
       case 'plan': {
-        plan = await planOf(request);
+        plan = await newestPlan(request);
         answer({
           id: request.id,
           result: {
@@ -506,6 +541,12 @@ export const serveImportChannel = (
         return;
       }
       case 'cancel': {
+        if (request.plan !== undefined) {
+          cancelPlan(request.plan);
+          answer({ id: request.id, result: undefined });
+          return;
+        }
+        latestPlan = undefined;
         abort.abort(new Error('The import was cancelled.'));
         abort = new AbortController();
         if (request.close === true) {
@@ -666,11 +707,36 @@ export const openImportSession = (worker: Pick<Worker, 'postMessage'>): ImportSe
     return call.promise as Promise<Result>;
   };
   return Object.freeze({
-    plan: async (source, options = {}) =>
-      ask<ImportListing>(
+    plan: async (source, options = {}) => {
+      const { signal } = options;
+      if (signal?.aborted === true) {
+        throw new ImportChannelError('The import was cancelled.');
+      }
+      const id = next;
+      const planned = ask<ImportListing>(
         { type: 'plan', source, ...(options.root === undefined ? {} : { root: options.root }) },
         options.onDownload === undefined ? {} : { onDownload: options.onDownload },
-      ),
+      );
+      if (signal === undefined) {
+        return planned;
+      }
+      const cancel = (): void => {
+        const held = waiting.get(id);
+        if (held === undefined || closed) {
+          return;
+        }
+        waiting.delete(id);
+        /* The worker stops the plan and its download; no answer is awaited. */
+        port.postMessage({ type: 'cancel', plan: id, id: -1 });
+        held.call.reject(new ImportChannelError('The import was cancelled.'));
+      };
+      signal.addEventListener('abort', cancel, { once: true });
+      try {
+        return await planned;
+      } finally {
+        signal.removeEventListener('abort', cancel);
+      }
+    },
     stage: async (operationId, scope, { target, onProgress }) =>
       ask<ImportStaged>({ type: 'stage', operationId, scope, target }, onProgress === undefined ? {} : { onProgress }),
     handOff: async (operationId) => ask<undefined>({ type: 'handOff', operationId }),

@@ -183,6 +183,26 @@ describe('NodeFsProvider atomic writes', () => {
     }
   });
 
+  it('reports a change whose kind a failed stat cannot tell as a reset', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    let onEvents: Parameters<typeof parcelWatcher.subscribe>[1] | undefined;
+    vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(async (_directory, callback) => {
+      onEvents = callback;
+      return { unsubscribe: async () => undefined };
+    });
+    vi.spyOn(fs, 'stat').mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'EACCES' }));
+    const events: unknown[] = [];
+    const stop = await provider.watch({ paths: [''], recursive: true }, (event) => events.push(event));
+    onEvents?.(null, [{ type: 'update', path: join(root, 'target.txt') }]);
+    await drainNodeFsProviderWatchClosures(provider);
+    await vi.waitFor(() => {
+      expect(events).toEqual([{ type: 'reset' }]);
+    });
+    stop();
+    await drainNodeFsProviderWatchClosures(provider);
+  });
+
   it('reports native stream loss as a whole-subscription reset', async () => {
     const provider = new NodeFsProvider(createRoot());
     const close = vi.fn(async () => undefined);

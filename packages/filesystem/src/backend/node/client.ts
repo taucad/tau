@@ -341,7 +341,8 @@ export class NodeFsProviderClient extends AbstractFileSystemProvider {
    * fsyncs it once per directory, under one authority claim, instead of paying
    * a round trip and two fsyncs per entry. A staged `Blob` is read here, since
    * its bytes cross the port either way. An abort stops the phase only before
-   * it is sent: the host then applies all of it and answers each entry.
+   * it is sent: the host then applies all of it and answers each entry. A
+   * reply lost to a closed channel answers every entry `uncertain`.
    *
    * @param entries - One phase's entries, in provider paths.
    * @param options - The changeset's abort signal.
@@ -359,8 +360,15 @@ export class NodeFsProviderClient extends AbstractFileSystemProvider {
           : entry,
       ),
     );
-    const receipts = await this._channel.request({ root: this._root, op: 'applyBatch', entries: wire });
-    return receipts.map(({ error, ...receipt }) =>
+    /* A lost reply may follow entries the host applied, so each is answered uncertain, never thrown. */
+    const answered = await this._channel.request({ root: this._root, op: 'applyBatch', entries: wire }).then(
+      (receipts) => ({ receipts }),
+      (error: unknown) => ({ lost: error }),
+    );
+    if ('lost' in answered) {
+      return entries.map(() => ({ outcome: 'uncertain', error: answered.lost }));
+    }
+    return answered.receipts.map(({ error, ...receipt }) =>
       error === undefined
         ? receipt
         : {

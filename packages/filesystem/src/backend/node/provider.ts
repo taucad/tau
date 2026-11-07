@@ -836,6 +836,9 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
             emit({ type: 'delete', path: rootedPath });
           } else if (kind === 'file' || kind === 'dir') {
             emit({ type: 'change', path: rootedPath, kind });
+          } else {
+            /* A change whose kind a failed `stat` cannot tell is unnameable: the consumer resyncs. */
+            emit({ type: 'reset' });
           }
         }
       })();

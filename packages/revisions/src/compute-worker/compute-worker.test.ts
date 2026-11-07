@@ -177,6 +177,11 @@ describe('the compute worker seam', () => {
     );
     expect(decoded.facts.sha256).toBe(digestHex('sha256', body));
     await expect(remote.decodeImportEntry({ blob, path: 'part.scad', size: 1 })).rejects.toThrow(/changed/u);
+    /* The refusal keeps its name and reason across the port, so the import reports the policy's verdict. */
+    await expect(remote.decodeImportEntry({ blob, path: 'part.scad', size: 1 })).rejects.toMatchObject({
+      workerErrorName: 'ImportRefusedError',
+      reason: 'corrupt',
+    });
   });
 
   it('carries a failure back as a rejection', async () => {

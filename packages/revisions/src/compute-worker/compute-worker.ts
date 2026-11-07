@@ -252,7 +252,8 @@ export type ComputeRequest = Readonly<{ id: number; method: ComputeMethod; args:
 export type ComputeAnswer = Readonly<{
   id: number;
   result?: unknown;
-  error?: Readonly<{ name: string; message: string }>;
+  /** A refusal's `reason` travels with it, so the import's limits verdict survives the boundary. */
+  error?: Readonly<{ name: string; message: string; reason?: string }>;
   started?: true;
   pong?: true;
 }>;
@@ -309,7 +310,11 @@ export const serveComputeWorker = (port: ComputePort, compute: ComputeWorker = c
         port.postMessage({ id, result } satisfies ComputeAnswer, [...new Set(transferablesOf(result))]);
       } catch (error) {
         const { name, message } = error instanceof Error ? error : new Error(String(error));
-        port.postMessage({ id, error: { name, message } } satisfies ComputeAnswer, []);
+        const reason = (error as { reason?: unknown } | undefined)?.reason;
+        port.postMessage(
+          { id, error: { name, message, ...(typeof reason === 'string' ? { reason } : {}) } } satisfies ComputeAnswer,
+          [],
+        );
       }
     })();
   });
@@ -317,10 +322,13 @@ export const serveComputeWorker = (port: ComputePort, compute: ComputeWorker = c
 };
 
 /* The error a worker threw: a verdict on the bytes as one, anything else as an error that judges nothing. */
-const reviveError = (error: Readonly<{ name: string; message: string }>): Error =>
+const reviveError = (error: Readonly<{ name: string; message: string; reason?: string }>): Error =>
   error.name === 'CorruptBytesError'
     ? new CorruptBytesError(error.message)
-    : Object.assign(new Error(error.message), { workerErrorName: error.name });
+    : Object.assign(new Error(error.message), {
+        workerErrorName: error.name,
+        ...(error.reason === undefined ? {} : { reason: error.reason }),
+      });
 
 /** The caller's half of one connection: the contract, and what fails every call it holds. */
 export type ComputeConnection = Readonly<{

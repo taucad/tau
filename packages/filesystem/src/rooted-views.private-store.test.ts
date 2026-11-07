@@ -108,9 +108,12 @@ describe('rooted privateStore', () => {
     expect(decoder.decode(await store.readFile(object))).toBe('solid part');
     expect(claims).not.toHaveBeenCalled();
     expect(events).toStrictEqual([]);
+    const cancel = vi.fn();
     await expect(
-      store.writeFileStream!('models/a.step', new ReadableStream<Uint8Array<ArrayBuffer>>()),
+      store.writeFileStream!('models/a.step', new ReadableStream<Uint8Array<ArrayBuffer>>({ cancel })),
     ).rejects.toThrow(TypeError);
+    /* Refused before any provider saw it: the store releases the source itself. */
+    expect(cancel).toHaveBeenCalledWith(expect.any(TypeError));
   });
 
   it('should offer no range read over a provider that cannot stream ranges', async () => {

@@ -838,7 +838,14 @@ export class RootedViews {
         ? {}
         : {
             writeFileStream: async (path: string, source: ReadableStream<Uint8Array<ArrayBuffer>>) => {
-              const target = resolvePrivate(path);
+              let target: ReturnType<typeof resolvePrivate>;
+              try {
+                target = resolvePrivate(path);
+              } catch (error) {
+                /* Refused before the provider saw it: nothing else will release the source. */
+                await source.cancel(error).catch(() => undefined);
+                throw error;
+              }
               await target.provider.writeFileStream!(target.path, source);
             },
           }),

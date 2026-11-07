@@ -58,7 +58,6 @@ const pathAuthorityRank: Readonly<Record<PathAgentAccess, number>> = Object.free
   'read-write': 2,
 });
 
-/** The name `_atomicWrite` gives its temp file: `.<target>.<pid>.<uuid>.tmp`. */
 /**
  * Files one `hashFiles` call digests at once. Each holds a descriptor and at
  * most one bounded chunk, and the call is not nested in a tree walk, so this
@@ -66,7 +65,42 @@ const pathAuthorityRank: Readonly<Record<PathAgentAccess, number>> = Object.free
  */
 const hashConcurrency = 32;
 
+/** The name `_atomicWrite` gives its temp file: `.<target>.<pid>.<uuid>.tmp`. */
 const inFlightTemporaryName = /^\..+\.\d+\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/u;
+
+/** The writer's pid in a temp sibling's name. */
+const temporaryWriterPid = /\.(\d+)\.[\da-f-]{36}\.tmp$/u;
+/** A temp sibling whose writer is gone is swept once it has been idle this long. */
+const orphanedTemporaryMilliseconds = 60_000;
+/** A temp sibling idle this long is swept whoever wrote it: no write stalls for a day. */
+const abandonedTemporaryMilliseconds = 24 * 60 * 60 * 1000;
+/** Directories one provider remembers having swept before it forgets them all and sweeps again. */
+const sweptDirectoryLimit = 1024;
+
+/* The directories a recursive `mkdir` made, deepest first, each removed only while it is empty. */
+const removeCreatedParents = async ({ first, last }: Readonly<{ first: string; last: string }>): Promise<void> => {
+  for (let directory: string | undefined = last; directory !== undefined; ) {
+    // oxlint-disable-next-line no-await-in-loop -- a parent is removed after its child.
+    const removed: boolean = await fs.rmdir(directory).then(
+      () => true,
+      () => false,
+    );
+    directory = removed && directory !== first ? path.dirname(directory) : undefined;
+  }
+};
+
+/* Whether a process with this pid exists: `EPERM` means it does, under another user. */
+const isProcessAlive = (pid: number): boolean => {
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+};
 
 /**
  * The POSIX `open` hardening flag `flag`, or `0` where the platform omits it.
@@ -334,6 +368,8 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
   private _realBaseCache: Promise<string> | undefined;
 
   private readonly _openSubscriptions = new Set<() => void>();
+  /** Directories whose crashed temp siblings this provider has swept. */
+  private readonly _sweptDirectories = new Set<string>();
 
   /**
    * @param basePath - Host directory mapped to this provider's root. It must
@@ -422,17 +458,28 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
    * @param source - The file's bytes, in order.
    */
   public override async writeFileStream(path_: string, source: ReadableStream<Uint8Array<ArrayBuffer>>): Promise<void> {
-    this._assertRootedPath(path_);
-    if (path_ === '') {
-      throw this._eisdir(path_);
+    let created: Readonly<{ first: string; last: string }> | undefined;
+    try {
+      this._assertRootedPath(path_);
+      if (path_ === '') {
+        throw this._eisdir(path_);
+      }
+      const target = await this._resolve(path_, 'mutate');
+      const existingEntry = await this._lstatOrUndefined(target);
+      if (existingEntry?.isDirectory() === true) {
+        throw this._eisdir(path_);
+      }
+      const first = await fs.mkdir(path.dirname(target), { recursive: true });
+      created = first === undefined ? undefined : { first, last: path.dirname(target) };
+      await this._atomicWrite(path_, target, { source });
+    } catch (error) {
+      /* Harmless once the stream was read or cancelled: a locked or closed stream refuses. */
+      await source.cancel(error).catch(() => undefined);
+      if (created !== undefined) {
+        await removeCreatedParents(created);
+      }
+      throw error;
     }
-    const target = await this._resolve(path_, 'mutate');
-    const existingEntry = await this._lstatOrUndefined(target);
-    if (existingEntry?.isDirectory() === true) {
-      throw this._eisdir(path_);
-    }
-    await fs.mkdir(path.dirname(target), { recursive: true });
-    await this._atomicWrite(path_, target, { source });
   }
 
   /** Direct providers do not own the cross-client authority needed for checked replacement. */
@@ -1130,6 +1177,47 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     return target;
   }
 
+  /**
+   * Remove the temp siblings a crashed write left in one directory, the first
+   * time this provider writes there (W6.3). A sibling goes when its writer's
+   * process is gone and it has not been written for a minute, or when it has
+   * not been written for a day whoever wrote it; one still being written is
+   * touched by every chunk, so it stays. Failures are ignored: the next
+   * provider to write there tries again.
+   *
+   * @param directory - The admitted real directory a write is about to use.
+   */
+  private async _sweepTemporarySiblings(directory: string): Promise<void> {
+    if (this._sweptDirectories.has(directory)) {
+      return;
+    }
+    if (this._sweptDirectories.size >= sweptDirectoryLimit) {
+      this._sweptDirectories.clear();
+    }
+    this._sweptDirectories.add(directory);
+    const names = await fs.readdir(directory).catch((): string[] => []);
+    const now = Date.now();
+    await Promise.all(
+      names
+        .filter((name) => inFlightTemporaryName.test(name))
+        .map(async (name) => {
+          const entry = path.join(directory, name);
+          const stats = await fs.lstat(entry).catch(() => undefined);
+          if (stats?.isFile() !== true) {
+            return;
+          }
+          const idle = now - stats.mtimeMs;
+          const pid = Number(temporaryWriterPid.exec(name)?.[1]);
+          if (
+            idle > abandonedTemporaryMilliseconds ||
+            (idle > orphanedTemporaryMilliseconds && pid !== process.pid && !isProcessAlive(pid))
+          ) {
+            await fs.unlink(entry).catch(() => undefined);
+          }
+        }),
+    );
+  }
+
   /** Temp file + fsync + rename, refusing to replace a symlink or a swapped parent. */
   private async _atomicWrite(
     rootedPath: string,
@@ -1145,6 +1233,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     if (!isContained(realBase, admittedDirectory)) {
       throw new VirtualPathError('PATH_OUTSIDE_ROOT', rootedPath);
     }
+    await this._sweepTemporarySiblings(admittedDirectory);
     const admittedTarget = path.join(admittedDirectory, path.basename(targetPath));
     const temporaryPath = path.join(
       admittedDirectory,

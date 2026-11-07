@@ -66,7 +66,12 @@ export abstract class AbstractFileSystemProvider implements FileSystemProvider {
    * @param source - The file's bytes, in order.
    */
   public async writeFileStream(path: string, source: ReadableStream<Uint8Array<ArrayBuffer>>): Promise<void> {
-    this._assertRootedPath(path);
+    try {
+      this._assertRootedPath(path);
+    } catch (error) {
+      await source.cancel(error).catch(() => undefined);
+      throw error;
+    }
     const chunks: Array<Uint8Array<ArrayBuffer>> = [];
     let size = 0;
     const reader = source.getReader();

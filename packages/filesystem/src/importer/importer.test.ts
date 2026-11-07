@@ -62,6 +62,12 @@ type RawEntry = Readonly<{
   sameOffsetAs?: number;
   /** Declare this many extra-field bytes in the local header without writing them, so its data seems to start later. */
   localExtra?: number;
+  /** The stored name's exact bytes, in place of `name` encoded as UTF-8. */
+  nameBytes?: Uint8Array<ArrayBuffer>;
+  /** General-purpose flags for the central record (bit 11: the name is UTF-8). */
+  flags?: number;
+  /** A central extra field, in place of the ZIP64 one. */
+  extra?: Uint8Array<ArrayBuffer>;
 }>;
 
 /* A stored zip written field by field, for archives JSZip never writes: ZIP64 records, shared ranges, padded directories. */
@@ -71,7 +77,7 @@ const rawZip = (entries: readonly RawEntry[], options: Readonly<{ directoryPaddi
   const offsets: number[] = [];
   let offset = 0;
   for (const entry of entries) {
-    const name = encoder.encode(entry.name);
+    const name = entry.nameBytes ?? encoder.encode(entry.name);
     const local = new Uint8Array(30 + name.byteLength + entry.data.byteLength);
     const view = new DataView(local.buffer);
     view.setUint32(0, 0x04_03_4b_50, true);
@@ -89,9 +95,10 @@ const rawZip = (entries: readonly RawEntry[], options: Readonly<{ directoryPaddi
   }
   const centrals: Array<Uint8Array<ArrayBuffer>> = [];
   for (const [index, entry] of entries.entries()) {
-    const name = encoder.encode(entry.name);
+    const name = entry.nameBytes ?? encoder.encode(entry.name);
     const localOffset = offsets[entry.sameOffsetAs ?? index]!;
-    const extra = entry.zip64 === true ? new Uint8Array(entry.shortZip64 === true ? 12 : 28) : new Uint8Array(0);
+    const extra =
+      entry.extra ?? (entry.zip64 === true ? new Uint8Array(entry.shortZip64 === true ? 12 : 28) : new Uint8Array(0));
     if (entry.zip64 === true) {
       const view = new DataView(extra.buffer);
       view.setUint16(0, 0x00_01, true);
@@ -107,6 +114,7 @@ const rawZip = (entries: readonly RawEntry[], options: Readonly<{ directoryPaddi
     view.setUint32(0, 0x02_01_4b_50, true);
     view.setUint16(4, (3 << 8) | 20, true);
     view.setUint16(6, 20, true);
+    view.setUint16(8, entry.flags ?? 0, true);
     view.setUint32(16, crc32(entry.data), true);
     const wide = entry.zip64 === true ? 0xff_ff_ff_ff : undefined;
     view.setUint32(20, wide ?? entry.data.byteLength, true);
@@ -262,6 +270,43 @@ describe('readZipDirectory', () => {
     await expect(decodeImportEntry({ blob, path: 'a.txt', size: first!.size, zip: first! })).rejects.toThrow(
       'overlaps the next one',
     );
+  });
+
+  it('should read an unflagged name as CP437 unless it is valid UTF-8, and a flagged one as UTF-8', async () => {
+    const blob = rawZip([
+      /* "Ärger.txt" as DOS wrote it: 0x8e is Ä in CP437 and no valid UTF-8. */
+      { name: '', nameBytes: new Uint8Array([0x8e, ...text('rger.txt')]), data: text('a') },
+      /* The macOS archiver: UTF-8 without the flag. */
+      { name: 'café.txt', data: text('b') },
+      { name: 'flagged-é.txt', data: text('c'), flags: 0x08_00 },
+    ]);
+
+    const { entries } = await readZipDirectory(blobRangeSource(blob));
+
+    expect(entries.map(({ name }) => name)).toEqual(['Ärger.txt', 'café.txt', 'flagged-é.txt']);
+  });
+
+  it('should take an Info-ZIP Unicode Path field only when its CRC names the stored bytes', async () => {
+    const stored = new Uint8Array([0x84, ...text('.txt')]);
+    const unicodeField = (crc: number): Uint8Array<ArrayBuffer> => {
+      const unicode = text('ü-unicode.txt');
+      const field = new Uint8Array(4 + 5 + unicode.byteLength);
+      const view = new DataView(field.buffer);
+      view.setUint16(0, 0x70_75, true);
+      view.setUint16(2, 5 + unicode.byteLength, true);
+      view.setUint8(4, 1);
+      view.setUint32(5, crc, true);
+      field.set(unicode, 9);
+      return field;
+    };
+    const blob = rawZip([
+      { name: '', nameBytes: stored, data: text('a'), extra: unicodeField(crc32(stored)) },
+      { name: '', nameBytes: new Uint8Array([0x84, ...text('2.txt')]), data: text('b'), extra: unicodeField(1) },
+    ]);
+
+    const { entries } = await readZipDirectory(blobRangeSource(blob));
+
+    expect(entries.map(({ name }) => name)).toEqual(['ü-unicode.txt', 'ä2.txt']);
   });
 
   it('should give a directory an identity its bytes decide', async () => {
@@ -458,6 +503,30 @@ describe('planImport', () => {
 
     expect(first.pin.identity).toBeDefined();
     expect(first.pin.identity).not.toBe(second.pin.identity);
+  });
+
+  it('should import only a chosen folder of an archive, as the project root, and pin it', async () => {
+    const source = zipImportSource(
+      await zipOf({
+        'repo-abc/README.md': 'r',
+        'repo-abc/parts/gear/main.scad': 'g',
+        'repo-abc/parts/gear/lib/a.scad': 'a',
+      }),
+    );
+
+    const judged = await planImport(source, { policy: tauPathPolicy, root: 'parts/gear' });
+
+    expect(judged.entries.map(({ path }) => path).toSorted()).toEqual(['lib/a.scad', 'main.scad']);
+    expect(judged.pin.root).toBe('parts/gear');
+    expect(await refusal(planImport(source, { policy: tauPathPolicy, root: 'missing' }))).toBe('empty');
+  });
+
+  it('should find a root that is the only folder an archive holds', async () => {
+    const source = zipImportSource(await zipOf({ 'repo-abc/gear/main.scad': 'g', 'repo-abc/gear/b.scad': 'b' }));
+
+    const judged = await planImport(source, { policy: tauPathPolicy, root: 'gear' });
+
+    expect(judged.entries.map(({ path }) => path).toSorted()).toEqual(['b.scad', 'main.scad']);
   });
 
   it('should name a folder pick after its shared folder', async () => {

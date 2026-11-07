@@ -50,8 +50,15 @@ export type {
   PlannedImportEntry,
 } from '#importer/sources.js';
 export {
-  discardStagedImport,
   importFactsPath,
+  importFactsSkewMilliseconds,
+  isStagedImportEntry,
+  parseImportFacts,
+  verifiedImportFacts,
+} from '#importer/facts.js';
+export type { ImportFactsRecord, StagedImportEntry } from '#importer/facts.js';
+export {
+  discardStagedImport,
   importOwnerPath,
   importResidentBytes,
   importStagingDirectory,
@@ -67,10 +74,4 @@ export {
   sweepStagedImports,
   touchStagedImport,
 } from '#importer/staging.js';
-export type {
-  ImportFactsRecord,
-  ImportStagingPort,
-  ImportStagingProgress,
-  StagedImport,
-  StagedImportEntry,
-} from '#importer/staging.js';
+export type { ImportStagingPort, ImportStagingProgress, StagedImport } from '#importer/staging.js';

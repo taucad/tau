@@ -1442,3 +1442,75 @@ describe('WorkspaceFileService', () => {
     });
   });
 });
+
+describe('ProjectIndexes import facts (D12)', () => {
+  const sha256 = (character: string): string => character.repeat(64);
+  const recordOf = (
+    at: number,
+    entries: ReadonlyArray<Readonly<{ path: string; size: number; oid: string }>>,
+  ): string =>
+    JSON.stringify({
+      version: 1,
+      operationId: 'req_import',
+      pin: { kind: 'zip', name: 'x', size: 1, entries: entries.length },
+      at,
+      entries: entries.map(({ path, size, oid }) => ({
+        path,
+        size,
+        facts: { contentKind: 'text', blobOid: oid, sha256: sha256('e') },
+      })),
+    });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('should take the facts a committed import recorded for every file they still describe, without reading it', async () => {
+    const { provider, reads } = await durableRoot();
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    await provider.writeFile('project/kept.txt', 'kept');
+    await provider.writeFile('project/edited.txt', 'edit');
+    await provider.writeFile('project/resized.txt', 'size');
+    vi.setSystemTime(1_010_000);
+    await provider.writeFile(
+      'project/.tau/import.json',
+      recordOf(1_010_000, [
+        { path: 'kept.txt', size: 4, oid: 'a'.repeat(40) },
+        { path: 'edited.txt', size: 4, oid: 'b'.repeat(40) },
+        { path: 'resized.txt', size: 99, oid: 'c'.repeat(40) },
+        { path: 'malformed.txt', size: 4, oid: 'not-an-oid' },
+      ]),
+    );
+    /* Edited after the import, at the same size. */
+    vi.setSystemTime(1_020_000);
+    await provider.writeFile('project/edited.txt', 'EDIT');
+    const before = reads();
+
+    const indexes = indexesOver(provider);
+    const facts = await indexes.facts('/project', ['kept.txt'], { digests: ['blobOid', 'sha256'] });
+
+    expect(facts.get('kept.txt')).toMatchObject({ blobOid: 'a'.repeat(40), sha256: sha256('e') });
+    /* The record and nothing else was read. */
+    expect(reads() - before).toBe(1);
+
+    const measured = await indexes.facts('/project', ['edited.txt', 'resized.txt'], { digests: ['blobOid'] });
+    expect(measured.get('edited.txt')?.blobOid).not.toBe('b'.repeat(40));
+    expect(measured.get('resized.txt')?.blobOid).not.toBe('c'.repeat(40));
+  });
+
+  it('should take nothing from a record whose mtime disagrees with when it says it was written', async () => {
+    const { provider } = await durableRoot();
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    await provider.writeFile('project/kept.txt', 'kept');
+    /* Rewritten long after the time it carries. */
+    vi.setSystemTime(2_000_000);
+    await provider.writeFile(
+      'project/.tau/import.json',
+      recordOf(1_000_500, [{ path: 'kept.txt', size: 4, oid: 'a'.repeat(40) }]),
+    );
+
+    const facts = await indexesOver(provider).facts('/project', ['kept.txt'], { digests: ['blobOid'] });
+
+    expect(facts.get('kept.txt')?.blobOid).not.toBe('a'.repeat(40));
+  });
+});

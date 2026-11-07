@@ -9,16 +9,12 @@ import { tauPathPolicy } from '#path-registry.js';
 import { createWorkspaceFileService, decoder, encoder } from '#testing/workspace-service-harness.js';
 import type { FileSystemProvider } from '#types.js';
 import type { WorkspaceFileService } from '#workspace-file-service.js';
-import { createInlineImportDecoder } from '#importer/decode.js';
+import { createInlineImportDecoder, subtleImportHash } from '#importer/decode.js';
 import { planImport, zipImportSource } from '#importer/sources.js';
-import {
-  importFactsPath,
-  importOwnerPath,
-  importStagingDirectory,
-  readStagedImport,
-  stageImport,
-} from '#importer/staging.js';
-import type { ImportFactsRecord, ImportStagingPort } from '#importer/staging.js';
+import { importOwnerPath, importStagingDirectory, readStagedImport, stageImport } from '#importer/staging.js';
+import type { ImportStagingPort } from '#importer/staging.js';
+import { importFactsPath } from '#importer/facts.js';
+import type { ImportFactsRecord } from '#importer/facts.js';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
 
 const projectId = 'proj_iiiiiiiiiiiiiiiiiiiii';
@@ -87,7 +83,11 @@ describe('commitPendingProjectDirectory from a staged import', () => {
   let provider: FileSystemProvider;
   let harness: Awaited<ReturnType<typeof createWorkspaceFileService>>;
 
-  const stage = async (target?: string, port?: ImportStagingPort): Promise<void> => {
+  const stage = async (
+    target?: string,
+    port?: ImportStagingPort,
+    decode = createInlineImportDecoder(),
+  ): Promise<void> => {
     const zip = new JSZip();
     for (const [name, content] of Object.entries({
       ...files,
@@ -103,7 +103,7 @@ describe('commitPendingProjectDirectory from a staged import', () => {
       port: port ?? { provider, apply: async (entries) => applyBatchWithPrimitives(provider, entries) },
       operationId,
       plan,
-      decode: createInlineImportDecoder(),
+      decode,
       ...(target === undefined ? {} : { target }),
     });
   };
@@ -231,6 +231,23 @@ describe('commitPendingProjectDirectory from a staged import', () => {
     expect(counted.renames.filter((path) => path.startsWith(`${directory}/src/`))).toHaveLength(301);
     expect(counted.last()).toBe(`${directory}/tau.json`);
     expect(await provider.exists(importStagingDirectory(operationId))).toBe(false);
+  });
+
+  it('should hash each file once from source to committed project (S6: one hash pass)', async () => {
+    const hashed = { sha1: 0, sha256: 0 };
+    const counting = createInlineImportDecoder(async (algorithm, bytes) => {
+      hashed[algorithm] += 1;
+      return subtleImportHash(algorithm, bytes);
+    });
+    const digest = vi.spyOn(globalThis.crypto.subtle, 'digest');
+
+    await stage(directory, undefined, counting);
+    const staged = digest.mock.calls.length;
+    await expect(commit()).resolves.toEqual({ status: 'committed' });
+
+    /* 302 entries: one SHA-1 and one SHA-256 each, in the decode, and nothing more at commit. */
+    expect(hashed).toEqual({ sha1: 302, sha256: 302 });
+    expect(digest.mock.calls.length).toBe(staged);
   });
 
   it('should keep the facts the decode measured beside the project, for its first revision', async () => {

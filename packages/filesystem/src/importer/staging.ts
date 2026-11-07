@@ -43,12 +43,14 @@
 
 import { maximumChangesetBytes, maximumChangesetEntries } from '#changeset.js';
 import type { BatchEntry, BatchReceipt } from '#changeset.js';
-import type { ContentFacts, FileMode, FileSystemProvider } from '#types.js';
+import type { FileSystemProvider } from '#types.js';
 import { ImportRefusedError, isImportRefusal } from '#importer/limits.js';
 import type { ImportRefusalReason } from '#importer/limits.js';
 import type { ImportDecodedEntry, ImportDecoder } from '#importer/decode.js';
 import type { ImportPlan, ImportSourcePin, PlannedImportEntry } from '#importer/sources.js';
 import { foldPathSpelling } from '#path-fold.js';
+import { isStagedImportEntry } from '#importer/facts.js';
+import type { StagedImportEntry } from '#importer/facts.js';
 
 /** The storage root's reserved staging folder (I9). @public */
 export const importStagingFolder = '.tau-staging';
@@ -72,18 +74,6 @@ export const importStagingDirectory = (operationId: string): string => {
   }
   return `${importStagingFolder}/${importStagingPrefix}${operationId}`;
 };
-
-/**
- * One staged entry: where it goes, and the facts measured as it was decoded.
- *
- * @public
- */
-export type StagedImportEntry = Readonly<{
-  path: string;
-  size: number;
-  mode?: FileMode;
-  facts: ContentFacts & Readonly<{ blobOid: string; sha256: string }>;
-}>;
 
 /**
  * A staged import: the pin it was staged from, and every entry it holds.
@@ -197,16 +187,6 @@ export const importResidentBytes = 64 * 1024 * 1024;
 /** How long a staging nobody owns must have been still before a sweep removes it. @public */
 export const importStagingStaleMilliseconds = 10 * 60 * 1000;
 
-/**
- * Where a committed import keeps the facts its decode measured (every entry's
- * blob id, SHA-256, kind and mode), so the first revision and the Project
- * Index build from them instead of hashing the files again. A member of `.tau`
- * that no registry row names, so it is never versioned.
- *
- * @public
- */
-export const importFactsPath = '.tau/import.json';
-
 /* Run under the port's directory lock where it has one. */
 const exclusively = async <Result>(
   port: ImportStagingPort,
@@ -231,18 +211,6 @@ export const ownsImportTarget = async (
   const marker = (await readJson(provider, `${directory}/${importOwnerPath}`)) as { operationId?: unknown } | undefined;
   return marker?.operationId === operationId;
 };
-
-/**
- * The record at {@link importFactsPath}.
- *
- * @public
- */
-export type ImportFactsRecord = Readonly<{
-  version: 1;
-  operationId: string;
-  pin: ImportSourcePin;
-  entries: readonly StagedImportEntry[];
-}>;
 
 /**
  * The name of the lock a live staging session holds, so a sweep in another
@@ -271,17 +239,6 @@ const readJson = async (provider: FileSystemProvider, path: string): Promise<unk
 
 const samePin = (left: ImportSourcePin, right: ImportSourcePin): boolean =>
   JSON.stringify(left, Object.keys(left).sort()) === JSON.stringify(right, Object.keys(right).sort());
-
-const isStagedEntry = (value: unknown): value is StagedImportEntry => {
-  const entry = value as Partial<StagedImportEntry> | undefined;
-  return (
-    typeof entry?.path === 'string' &&
-    typeof entry.size === 'number' &&
-    typeof entry.facts?.blobOid === 'string' &&
-    typeof entry.facts.sha256 === 'string' &&
-    ['text', 'binary'].includes(String(entry.facts.contentKind))
-  );
-};
 
 const applied = async (port: ImportStagingPort, entries: readonly BatchEntry[]): Promise<void> => {
   const receipts = await port.apply(entries);
@@ -327,7 +284,7 @@ export const readStagedImport = async (
   const byPath = new Map<string, StagedImportEntry>();
   for (const record of records) {
     for (const entry of ledgerEntries(record)) {
-      if (isStagedEntry(entry)) {
+      if (isStagedImportEntry(entry)) {
         byPath.set(entry.path, entry);
       }
     }

@@ -38,6 +38,8 @@ export type ImportSourcePin = Readonly<{
   revision?: string;
   /** What the source's own bytes say it is, when it can say cheaply: a zip's central-directory identity. */
   identity?: string;
+  /** The folder inside the source that became the project root, when one was chosen. */
+  root?: string;
 }>;
 
 /**
@@ -381,7 +383,18 @@ export const spoolImportArchive = async (
  */
 export const planImport = async (
   source: ImportSource,
-  options: Readonly<{ policy: PathPolicy; limits?: ImportLimits; signal?: AbortSignal }>,
+  options: Readonly<{
+    policy: PathPolicy;
+    limits?: ImportLimits;
+    signal?: AbortSignal;
+    /**
+     * A folder inside the source, relative to its content root (after the
+     * shared top folders a source strips, such as a repository archive's
+     * `<repo>-<sha>/`): only what is under it is imported, and it becomes the
+     * project root.
+     */
+    root?: string;
+  }>,
 ): Promise<ImportPlan> => {
   const limits = options.limits ?? importLimits;
   const meter = new ImportMeter(limits);
@@ -425,12 +438,34 @@ export const planImport = async (
       break;
     }
   }
-  const admission = new ImportPathAdmission(options.policy, meter, { stripSegments: strip });
+  const root = options.root === undefined || options.root === '' ? [] : normalizeImportPath(options.root).split('/');
+  if (root.length > 0) {
+    /* The shared folders stop where the root begins, so a root that is itself the only folder is still found. */
+    const startsAt = (depth: number): boolean =>
+      listed.some(({ source: path }) => {
+        const segments = path.split('/');
+        return (
+          segments.length > depth + root.length && root.every((segment, index) => segments[depth + index] === segment)
+        );
+      });
+    while (strip > 0 && !startsAt(strip)) {
+      strip -= 1;
+    }
+  }
+  const underRoot = (path: string): boolean => {
+    const segments = path.split('/');
+    return segments.length > strip + root.length && root.every((segment, index) => segments[strip + index] === segment);
+  };
+  const admission = new ImportPathAdmission(options.policy, meter, { stripSegments: strip + root.length });
   const entries: PlannedImportEntry[] = [];
   let excluded = 0;
   let reserved = 0;
   let lastModified = 0;
   for (const entry of listed) {
+    /* What lies outside the root is not the project's: never admitted, never counted against it. */
+    if (!underRoot(entry.source)) {
+      continue;
+    }
     const verdict = admission.admit(entry.source);
     if (verdict.kind === 'skip') {
       if (verdict.why === 'excluded') {
@@ -466,6 +501,7 @@ export const planImport = async (
       ...(lastModified === 0 ? {} : { lastModified }),
       ...(source.revision === undefined ? {} : { revision: source.revision }),
       ...(identity === undefined ? {} : { identity }),
+      ...(root.length === 0 ? {} : { root: root.join('/') }),
     },
     entries,
     bytes: meter.declaredBytes,

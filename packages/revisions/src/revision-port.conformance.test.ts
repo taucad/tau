@@ -2054,6 +2054,70 @@ describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
     }
   }, 180_000);
 
+  /* D11, S9: a push discovers its large objects from the commits it sends, so
+   * an edit after a history of large files lists only the new object in its
+   * batch, reads none of the old ones, and a push with nothing to send asks
+   * the LFS endpoint nothing at all. */
+  it('lists only the new large objects of the commits a push sends', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-lfs-diff-'));
+    const fixture = await startGitHttpBackend({ root });
+    const writer = await isomorphicHarness();
+    try {
+      const port = writer.withTransport();
+      await port.init({ author });
+      const variant = (seed: number): Uint8Array<ArrayBuffer> => large.map((byte) => (byte + seed) % 256);
+      let head: RevisionId | undefined;
+      const commit = async (files: Readonly<Record<string, string | Uint8Array<ArrayBuffer>>>): Promise<void> => {
+        const receipt = await port.writeRevision({
+          parents: head === undefined ? [] : [head],
+          tree: tree(files),
+          provenance: provenance('user'),
+          summary: summary('Revision'),
+        });
+        const next = revisionId(receipt.commitId);
+        await port.updateRef({ name: 'main', expectedHead: head, head: next });
+        head = next;
+      };
+      await commit({ 'models/a.step': large, 'main.ts': 'one\n' });
+      await commit({ 'models/a.step': large, 'models/b.step': variant(1), 'main.ts': 'two\n' });
+      await port.setRemote({ name: 'tau', url: fixture.url });
+      await port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] });
+      // A remote with no history is sent every commit, so both objects.
+      expect(fixture.batches().map((batch) => batch.oids.toSorted())).toStrictEqual([
+        [lfsPointerFor(large).pointer.oid, lfsPointerFor(variant(1)).pointer.oid].toSorted(),
+      ]);
+
+      await commit({
+        'models/a.step': large,
+        'models/b.step': variant(1),
+        'models/c.step': variant(2),
+        'main.ts': 'two\n',
+      });
+      await port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] });
+      expect(fixture.batches().slice(1)).toStrictEqual([
+        { operation: 'upload', oids: [lfsPointerFor(variant(2)).pointer.oid] },
+      ]);
+
+      // An edit to a text file sends no large object, so no batch call.
+      await commit({
+        'models/a.step': large,
+        'models/b.step': variant(1),
+        'models/c.step': variant(2),
+        'main.ts': 'three\n',
+      });
+      await port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] });
+      // Nor does a push the remote is already up to date with.
+      await port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] });
+      expect(fixture.batches()).toHaveLength(2);
+      expect(fixture.uploadCount()).toBe(3);
+      expect(await fixture.git(['rev-parse', 'refs/heads/main'])).toBe(head);
+    } finally {
+      await fixture.close();
+      await writer.dispose();
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 120_000);
+
   /* Load-path audit fix 1: opening a project read its large objects one batch
    * call and one transfer at a time. A store that fetched only pointers now
    * hydrates the tree in one batch call, and a second read asks the remote

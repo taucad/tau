@@ -1295,37 +1295,24 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     }
   };
 
-  const offeredPointers = async (
-    offered: readonly RevisionPushRef[],
+  /*
+   * Which path each large object among the blobs a push sends is at (D11): the
+   * blobs the diff of the commits being sent names, so an unchanged blob is
+   * never read and the batch lists only what is new to the remote. A remote
+   * with no history at all is sent every commit, and so every old pointer.
+   */
+  const pointersAmong = async (
+    blobs: ReadonlyMap<string, string>,
   ): Promise<ReadonlyMap<string, Readonly<{ path: string; size: number }>>> => {
     const paths = new Map<string, Readonly<{ path: string; size: number }>>();
-    const heads = [] as RevisionId[];
-    for (const ref of offered) {
-      // eslint-disable-next-line no-await-in-loop -- one ref resolution per offered name.
-      const head = await tryResolve(ref.name);
-      if (head !== undefined) {
-        heads.push(revisionId(head));
-      }
-    }
-    const revisions = await port.log({ heads });
-    for (const revision of revisions) {
-      // eslint-disable-next-line no-await-in-loop -- each reachable tree is inspected once before transfer.
-      const commit = await commitOf(revision.id);
-      if (commit === undefined) {
-        continue;
-      }
-      // eslint-disable-next-line no-await-in-loop -- see above.
-      const entries = await flatTree(commit.tree);
-      // eslint-disable-next-line no-await-in-loop -- see above.
-      await Promise.all(
-        [...entries].map(async ([path, { oid }]) => {
-          const pointer = readLfsPointer(await blobOf(oid));
-          if (pointer !== undefined) {
-            paths.set(pointer.oid, { path, size: pointer.size });
-          }
-        }),
-      );
-    }
+    await Promise.all(
+      [...blobs].map(async ([oid, path]) => {
+        const pointer = readLfsPointer(await blobOf(oid));
+        if (pointer !== undefined) {
+          paths.set(pointer.oid, { path, size: pointer.size });
+        }
+      }),
+    );
     return paths;
   };
 
@@ -1456,14 +1443,18 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    * @param haves - Every object id the remote advertised.
    * @returns The ids to pack.
    */
-  const missingObjects = async (tips: readonly string[], haves: ReadonlySet<string>): Promise<readonly string[]> => {
+  const missingObjects = async (
+    tips: readonly string[],
+    haves: ReadonlySet<string>,
+  ): Promise<Readonly<{ oids: readonly string[]; blobs: ReadonlyMap<string, string> }>> => {
     const shallow = await readShallow();
     const send = new Set<string>();
+    const blobs = new Map<string, string>();
     const entriesOf = async (oid: string): Promise<ReadonlyMap<string, TreeCodecEntry>> => {
       const entries = await treeEntries(oid);
       return new Map(entries.map((entry) => [entry.path, entry]));
     };
-    const treeObjects = async (oid: string, base: string | undefined): Promise<void> => {
+    const treeObjects = async (oid: string, base: string | undefined, prefix = ''): Promise<void> => {
       if (oid === base || send.has(oid)) {
         return;
       }
@@ -1476,9 +1467,10 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
             return;
           }
           if (entry.type === 'tree') {
-            await treeObjects(entry.oid, was?.type === 'tree' ? was.oid : undefined);
-          } else if (entry.type === 'blob') {
+            await treeObjects(entry.oid, was?.type === 'tree' ? was.oid : undefined, `${prefix}${entry.path}/`);
+          } else if (entry.type === 'blob' && !send.has(entry.oid)) {
             send.add(entry.oid);
+            blobs.set(entry.oid, prefix + entry.path);
           }
         }),
       );
@@ -1507,7 +1499,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       // eslint-disable-next-line no-await-in-loop -- tips share history; one walk at a time dedupes it.
       await visit(tip);
     }
-    return [...send];
+    return { oids: [...send], blobs };
   };
 
   /*
@@ -2419,7 +2411,19 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       const configuredRemote = configuredRemotes.find((remote) => remote.name === input.remote);
       /* An unconfigured name has no provider to ask, and no URL to push to either. */
       if (configuredRemote === undefined || !remoteCarriesLargeObjects(configuredRemote)) {
-        const large = await offeredPointers(input.refs);
+        /* What this host last saw there stands in for the advertisement it has not read. */
+        const known = await Promise.all(
+          input.refs.map(async (ref) => tryResolve(remoteTrackingRef(input.remote, ref.remoteName ?? ref.name))),
+        );
+        const heads = await Promise.all(input.refs.map(async (ref) => tryResolve(ref.name)));
+        const large = await pointersAmong(
+          (
+            await missingObjects(
+              heads.filter((head) => head !== undefined),
+              new Set(known.filter((head) => head !== undefined)),
+            )
+          ).blobs,
+        );
         if (large.size > 0) {
           throw new RevisionPortError(
             'LFS_REMOTE_UNSUPPORTED',
@@ -2439,34 +2443,6 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       const ordered = [...input.refs].toSorted(
         (left, right) => Number(left.name === refOf(defaultBranch)) - Number(right.name === refOf(defaultBranch)),
       );
-      /* Objects before the refs that name them (A39): a pointer whose object
-       * never arrived is a file nobody can open. The batch call skips what the
-       * remote already holds, so this is one upload per object (V13) — and only
-       * those are read, because an object fetched from this remote is still a
-       * pointer here until somebody opens it. */
-      const client = await lfsClient(configuredRemote ?? remoteOf(input.remote, url));
-      /* Uploads can take minutes, so an advertisement read before them is not kept for the session's next push. */
-      let uploaded = false;
-      if (client !== undefined) {
-        const pointers = await offeredPointers(ordered);
-        try {
-          const sent = await client.upload({
-            signal: input.signal,
-            pointers: [...pointers].map(([oid, { size }]) => ({ oid, size })),
-            read: async (oid) => localLfsObject(oid, pointers.get(oid)?.path),
-          });
-          uploaded = sent.length > 0;
-        } catch (error) {
-          /* The server counts in object ids; the person reads paths (D16). */
-          if (error instanceof LfsQuotaError) {
-            throw new LfsQuotaError(
-              withQuotaPaths(error.refusal, new Map([...pointers].map(([oid, { path }]) => [oid, path]))),
-            );
-          }
-          throw error;
-        }
-      }
-      input.signal?.throwIfAborted();
       const atomic = input.atomic === true;
       let { results, commands } = await planPush(ordered, advertisement.advertised, atomic);
       /* A reused copy that says a ref is already there may only mean another writer moved it
@@ -2475,6 +2451,8 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         advertisement = await takeAdvertisement(http, url, { ...input, session: undefined });
         ({ results, commands } = await planPush(ordered, advertisement.advertised, atomic));
       }
+      /* Uploads can take minutes, so an advertisement read before them is not kept for the session's next push. */
+      let uploaded = false;
       const { advertised } = advertisement;
       if (commands.length > 0) {
         const capabilities = ['report-status', 'side-band-64k', ...(atomic ? ['atomic'] : [])].filter(
@@ -2487,11 +2465,38 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
             }\n`,
           ),
         );
-        const oids = await missingObjects(
+        const sent = await missingObjects(
           commands.map((command) => command.head),
           new Set(advertised.values()),
         );
-        const packfile = await objects.packObjects(oids);
+        /* Objects before the refs that name them (A39): a pointer whose object
+         * never arrived is a file nobody can open. Only the pointers among the
+         * blobs this pack sends are offered (D11), the batch call skips what the
+         * remote already holds, so this is one upload per new object (V13) —
+         * and only those are read, because an object fetched from this remote
+         * is still a pointer here until somebody opens it. */
+        const client = await lfsClient(configuredRemote ?? remoteOf(input.remote, url));
+        if (client !== undefined) {
+          const pointers = await pointersAmong(sent.blobs);
+          try {
+            const uploads = await client.upload({
+              signal: input.signal,
+              pointers: [...pointers].map(([oid, { size }]) => ({ oid, size })),
+              read: async (oid) => localLfsObject(oid, pointers.get(oid)?.path),
+            });
+            uploaded = uploads.length > 0;
+          } catch (error) {
+            /* The server counts in object ids; the person reads paths (D16). */
+            if (error instanceof LfsQuotaError) {
+              throw new LfsQuotaError(
+                withQuotaPaths(error.refusal, new Map([...pointers].map(([oid, { path }]) => [oid, path]))),
+              );
+            }
+            throw error;
+          }
+          input.signal?.throwIfAborted();
+        }
+        const packfile = await objects.packObjects(sent.oids);
         const body = concatBytes(...lines, pktEncoder.encode('0000'), packfile);
         /* Seam 3 of 3 (N1): the remote answering with a status — 401, `403
          * GIT_SYNC_NOT_ENTITLED`, 404, 413 — is the classifier's question, and

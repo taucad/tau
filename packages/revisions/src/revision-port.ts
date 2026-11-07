@@ -842,22 +842,25 @@ export class RevisionPortError extends Error {
    * A wait, not a failure to back off from (W13d).
    */
   public readonly retryAfterMilliseconds: number | undefined;
+  /** The HTTP status a remote answered with, where one did (a `404` and a `410` share `REMOTE_NOT_FOUND`). */
+  public readonly status: number | undefined;
 
   /**
    * Create a stable port failure.
    *
    * @param code - Machine-readable failure category.
    * @param message - Safe diagnostic without remote credentials or command arguments.
-   * @param options - Optional cause, and a rate limit's wait.
+   * @param options - Optional cause, a rate limit's wait, and the HTTP status.
    */
   public constructor(
     code: RevisionPortErrorCode,
     message: string,
-    options?: ErrorOptions & Readonly<{ retryAfterMilliseconds?: number }>,
+    options?: ErrorOptions & Readonly<{ retryAfterMilliseconds?: number; status?: number }>,
   ) {
     super(message, options);
     this.name = 'RevisionPortError';
     this.code = code;
     this.retryAfterMilliseconds = options?.retryAfterMilliseconds;
+    this.status = options?.status;
   }
 }

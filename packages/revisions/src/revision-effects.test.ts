@@ -30,7 +30,7 @@ import { writeChatRef } from '#chat-ref.js';
 import { materializeConflict, readConflictTerms } from '#revision-conflict.js';
 import { RevisionPortError } from '#revision-port.js';
 import { remoteTrackingRef } from '#remotes.js';
-import type { Checkout, ConflictRecord, RemoteRef, RevisionPort } from '#revision-port.js';
+import type { Checkout, ConflictRecord, RemoteRef, RevisionPort, RevisionPushInput } from '#revision-port.js';
 import { gitToolchainOnPath, nativeHarness } from '#test/native-git-harness.js';
 import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
 import { createOpsLog, opsRefName } from '#ops-ref.js';
@@ -1097,6 +1097,50 @@ describe('settling a turn', () => {
 
     /* The turn adds a file; the live tree does not have it, so settling has to
      * write it — and this checkout accepts the call and keeps nothing. */
+    await filesystem.writeFile('notes.md', 'the turn wrote this\n');
+    const captured = await run<{ captureId: string }>(actors.turn.capture, { checkoutId: 'live', turnId: 'turn-1' });
+    await filesystem.unlink('notes.md');
+
+    await expect(
+      run(actors.turn.merge, {
+        checkoutId: 'live',
+        captureId: captured.captureId,
+        baseRevisionId: baseRevision.revisionId,
+      }),
+    ).rejects.toThrow(/did not keep the paths this change wrote: notes\.md/u);
+  }, 30_000);
+
+  /* EQ6, D11: the apply reads back what it wrote and compares the bytes, so a
+   * write that landed at the right size with the wrong bytes is caught — no
+   * receipt or size and mtime compare could see it. */
+  it('refuses to publish when an applied write landed same-size but corrupt', async () => {
+    const corrupted = new Set(['notes.md']);
+    const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' }, (real) =>
+      Object.assign(Object.create(real) as RevisionFileSystem, {
+        writeFile: async (path: string, data: Parameters<RevisionFileSystem['writeFile']>[1]) => {
+          if (!corrupted.has(path) || typeof data === 'string') {
+            return real.writeFile(path, data);
+          }
+          const flipped = Uint8Array.from(data);
+          flipped[0] = ((flipped[0] ?? 0) + 1) % 256;
+          return real.writeFile(path, flipped);
+        },
+      }),
+    );
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const base = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
+      checkoutId: 'live',
+      trigger: 'save',
+    });
+    const baseRevision = await run<{ revisionId: string }>(actors.checkout.writeRevision, {
+      checkoutId: 'live',
+      cutId: base.cutId,
+      treeId: base.treeId,
+      parents: [],
+      trigger: 'save',
+      leaseIds: [],
+    });
+
     await filesystem.writeFile('notes.md', 'the turn wrote this\n');
     const captured = await run<{ captureId: string }>(actors.turn.capture, { checkoutId: 'live', turnId: 'turn-1' });
     await filesystem.unlink('notes.md');
@@ -3643,6 +3687,43 @@ describe('independent sync record failures', () => {
     expect(handed.at(-1)).toBe(listings.at(-1));
   }, 30_000);
 
+  /* D11, S9: a connect whose branch the remote already holds at this head pushes nothing, so it costs one `info/refs`. */
+  it('pushes nothing at connect when the remote already advertises the branch at this head', async () => {
+    const context = await fixture({ 'main.ts': 'base\n' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['main.ts', 'base\n']]),
+      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      summary: { generated: 'Main' },
+    });
+    const head = revisionId(receipt.commitId);
+    await context.port.updateRef({ name: 'main', expectedHead: undefined, head });
+    await context.port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+    let remoteHead: RevisionId | undefined = head;
+    const pushed: RevisionPushInput[] = [];
+    const actors = createRevisionActors({
+      port: {
+        ...context.port,
+        listRemoteRefs: async () => (remoteHead === undefined ? [] : [{ name: 'refs/heads/main', head: remoteHead }]),
+        fetch: async () => ({ refs: [] }),
+        push: async (input) => {
+          pushed.push(input);
+          return { refs: input.refs.map((ref) => ({ name: ref.name, status: 'updated', head })) };
+        },
+      },
+      projectId: 'project-1',
+      filesystem: () => context.filesystem,
+    });
+
+    await run(actors.remote.initialSync, { remote: 'tau', branch: 'main' });
+    expect(pushed).toHaveLength(0);
+
+    remoteHead = undefined;
+    await run(actors.remote.initialSync, { remote: 'tau', branch: 'main' });
+    expect(pushed.map((input) => input.refs.map((ref) => ref.name))).toEqual([['refs/heads/main']]);
+  }, 30_000);
+
   /* R6 review: only a validation that finished as the current, unstopped one leaves its listing behind. */
   it('keeps no listing from a stopped or overtaken validation', async () => {
     const context = await fixture({ 'main.ts': 'base\n' });
@@ -4816,6 +4897,10 @@ describe('connecting a remote', () => {
         ...port,
         listRemoteRefs: async (remote) => {
           asked.push(remote);
+          /* Tau Cloud answers `404` until the project is registered (P51). */
+          if (JSON.stringify(remote).includes('api.tau.new') && registerRemoteProject.mock.calls.length === 0) {
+            throw new RevisionPortError('REMOTE_NOT_FOUND', 'No repository here yet.');
+          }
           return [];
         },
       },
@@ -4841,7 +4926,9 @@ describe('connecting a remote', () => {
       { name: 'github-22', url: 'https://github.com/new/project.git' },
       { name: 'origin', url: 'https://gitlab.example.com/o/r.git' },
       { name: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' },
+      { name: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' },
     ]);
+    expect(registerRemoteProject).toHaveBeenCalledOnce();
     expect(registerRemoteProject).toHaveBeenCalledWith('project-1');
     expect(await port.listRemotes()).toStrictEqual(before);
   });
@@ -4871,18 +4958,48 @@ describe('connecting a remote', () => {
     expect(await port.listRemotes()).toStrictEqual(before);
   });
 
-  it('registers the project on Tau Cloud, and only on Tau Cloud', async () => {
+  /* P51, D11: the registering PUT is conditional on the remote's `404`, so a reconnect sends none. */
+  it('registers the project on Tau Cloud only when it answers 404, and only on Tau Cloud', async () => {
     const registered: string[] = [];
     const registerRemoteProject = vi.fn(async (id: string) => {
       registered.push(id);
     });
-    const { actors } = await fixture({}, (filesystem) => filesystem, { registerRemoteProject });
+    const listed: string[] = [];
+    const { port, filesystem } = await fixture();
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    await port.setRemote({ name: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' });
+    await port.setRemote({ name: 'origin', url: 'https://github.com/owner/repository.git' });
+    const actors = createRevisionActors({
+      port: {
+        ...port,
+        listRemoteRefs: async (remote) => {
+          listed.push(typeof remote === 'string' ? remote : remote.name);
+          if (registered.length === 0) {
+            throw new RevisionPortError('REMOTE_NOT_FOUND', 'No repository here yet.');
+          }
+          return [];
+        },
+      },
+      projectId: 'project-1',
+      filesystem: async () => filesystem,
+      registerRemoteProject,
+    });
+
+    await expect(
+      run(actors.remote.validate, { remote: 'origin', url: 'https://github.com/owner/repository.git' }),
+    ).rejects.toThrow('No repository here yet.');
+    expect(registered).toEqual([]);
 
     await run(actors.remote.authorize, { kind: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' });
+    expect(registered).toEqual([]);
+    await run(actors.remote.validate, { remote: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' });
     expect(registered).toEqual(['project-1']);
+    expect(listed).toEqual(['origin', 'tau', 'tau']);
 
-    await run(actors.remote.authorize, { kind: 'git', url: 'https://github.com/owner/repository.git' });
+    /* Registered: a reconnect lists once and sends no PUT. */
+    await run(actors.remote.validate, { remote: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' });
     expect(registered).toEqual(['project-1']);
+    expect(listed).toEqual(['origin', 'tau', 'tau', 'tau']);
   });
 
   it('connects without a host that can register, as every host did before P51', async () => {
@@ -4892,14 +5009,51 @@ describe('connecting a remote', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('fails the connection when Tau Cloud refuses the registration', async () => {
+  it('fails the connection with the listing’s refusal when Tau Cloud refuses the registration', async () => {
     const registerRemoteProject = vi.fn(async () => {
       throw new Error('That project id already belongs to another account.');
     });
-    const { actors } = await fixture({}, (filesystem) => filesystem, { registerRemoteProject });
+    const { port, filesystem } = await fixture();
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    await port.setRemote({ name: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' });
+    const actors = createRevisionActors({
+      port: {
+        ...port,
+        listRemoteRefs: async () => {
+          throw new RevisionPortError('REMOTE_NOT_FOUND', 'No repository here yet.');
+        },
+      },
+      projectId: 'project-1',
+      filesystem: async () => filesystem,
+      registerRemoteProject,
+    });
     await expect(
-      run(actors.remote.authorize, { kind: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' }),
-    ).rejects.toThrow('another account');
+      run(actors.remote.validate, { remote: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' }),
+    ).rejects.toThrow('No repository here yet.');
+    expect(registerRemoteProject).toHaveBeenCalledOnce();
+  });
+
+  /* A `410` is a tombstoned project, which a registration cannot bring back. */
+  it('does not register a project Tau Cloud answers 410 for', async () => {
+    const registerRemoteProject = vi.fn(async () => undefined);
+    const { port, filesystem } = await fixture();
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    await port.setRemote({ name: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' });
+    const actors = createRevisionActors({
+      port: {
+        ...port,
+        listRemoteRefs: async () => {
+          throw new RevisionPortError('REMOTE_NOT_FOUND', 'This project was deleted.', { status: 410 });
+        },
+      },
+      projectId: 'project-1',
+      filesystem: async () => filesystem,
+      registerRemoteProject,
+    });
+    await expect(
+      run(actors.remote.validate, { remote: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' }),
+    ).rejects.toThrow('This project was deleted.');
+    expect(registerRemoteProject).not.toHaveBeenCalled();
   });
 });
 

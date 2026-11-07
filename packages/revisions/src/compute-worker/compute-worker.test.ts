@@ -7,7 +7,12 @@ import { MessageChannel } from 'node:worker_threads';
 import type { Transferable as NodeTransferable } from 'node:worker_threads';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { afterEach, describe, expect, it } from 'vitest';
-import { connectComputeWorker, createInlineCompute, serveComputeWorker } from '#compute-worker/compute-worker.js';
+import {
+  connectComputeWorker,
+  createInlineCompute,
+  openComputeConnection,
+  serveComputeWorker,
+} from '#compute-worker/compute-worker.js';
 import type { ComputePort, ComputeWorker } from '#compute-worker/compute-worker.js';
 import { readPackIndex } from '#pack-reader/pack-index.js';
 import { createObjectStore, gitFilesOf } from '#object-store/object-store.js';
@@ -166,5 +171,17 @@ describe('the compute worker seam', () => {
     const remote = connectComputeWorker(domPort(channel.port1));
 
     await expect(remote.inflate(encoder.encode('not zlib'))).rejects.toThrow();
+  });
+
+  it('waits for nothing when a call cannot be posted', async () => {
+    const connection = openComputeConnection({
+      postMessage: () => {
+        throw new Error('This argument could not be cloned.');
+      },
+      addEventListener: () => undefined,
+    });
+
+    await expect(connection.compute.sha1(encoder.encode('body'))).rejects.toThrow(/could not be cloned/u);
+    expect(connection.pending()).toBe(0);
   });
 });

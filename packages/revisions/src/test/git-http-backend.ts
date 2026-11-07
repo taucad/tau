@@ -43,6 +43,8 @@ export type GitHttpBackendFixture = Readonly<{
   authorizations: () => readonly string[];
   /** Object ids a client verified, which is what the server counts against a plan (W11a §9.6). */
   verified: () => readonly string[];
+  /** The object ids each batch call listed, in order, which is what "new oids only" is read from (D11, S9). */
+  batches: () => ReadonlyArray<Readonly<{ operation: 'upload' | 'download'; oids: readonly string[] }>>;
   close: () => Promise<void>;
 }>;
 
@@ -194,6 +196,7 @@ export const startGitHttpBackend = async (options: GitHttpBackendOptions): Promi
   const trail: string[] = [];
   const authorizations: string[] = [];
   const verifiedOids: string[] = [];
+  const batchCalls: Array<Readonly<{ operation: 'upload' | 'download'; oids: readonly string[] }>> = [];
   /* Per-fixture nonces: a client that echoes what the batch issued gets them
    * right, and a client that invents its own headers cannot. */
   const transferToken = `transfer-${String(Date.now())}`;
@@ -208,6 +211,7 @@ export const startGitHttpBackend = async (options: GitHttpBackendOptions): Promi
         operation: 'upload' | 'download';
         objects: ReadonlyArray<Readonly<{ oid: string; size: number }>>;
       }>;
+      batchCalls.push({ operation: body.operation, oids: body.objects.map((object) => object.oid) });
       if (options.quotaRefusal !== undefined && body.operation === 'upload') {
         response.writeHead(413, { 'Content-Type': 'application/vnd.git-lfs+json' });
         response.end(
@@ -405,6 +409,7 @@ export const startGitHttpBackend = async (options: GitHttpBackendOptions): Promi
     trail: () => [...trail],
     authorizations: () => [...authorizations],
     verified: () => [...verifiedOids],
+    batches: () => [...batchCalls],
     close: async () =>
       new Promise<void>((resolve) => {
         server.close(() => {

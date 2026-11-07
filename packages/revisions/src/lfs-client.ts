@@ -249,7 +249,9 @@ export type LfsDownloadManyInput = Readonly<{
   /** Cancel this operation, including batch calls and capability refresh. */
   signal?: AbortSignal;
   /**
-   * Take one verified object, in the order they arrive. Its bytes count against
+   * Take one object of its declared size, in the order they arrive, for the
+   * caller to verify by reading back what it stores (D9, D11): this client does
+   * not hash it, so it is hashed once. Its bytes count against
    * the resident budget until this settles, so a caller that stores them here
    * keeps the whole download bounded. A rejection stops the rest.
    */
@@ -702,7 +704,12 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
   const downloadObject = async (
     pointer: LfsPointer,
     initial: BatchObject,
-    transferOptions?: Readonly<{ signal?: AbortSignal | undefined; progress?: (() => void) | undefined }>,
+    transferOptions?: Readonly<{
+      signal?: AbortSignal | undefined;
+      progress?: (() => void) | undefined;
+      /** Set where the caller verifies the bytes by reading back what it stores (D9, D11). */
+      unhashed?: boolean;
+    }>,
   ): Promise<Readonly<{ content: Uint8Array<ArrayBuffer>; transfer: LfsDownloadTransfer }>> => {
     const signal = transferOptions?.signal;
     if (initial.error !== undefined) {
@@ -768,7 +775,10 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
           reader?.releaseLock();
         }
         if (!interrupted && content !== undefined) {
-          if (received !== pointer.size || lfsPointerFor(content).pointer.oid !== pointer.oid) {
+          if (
+            received !== pointer.size ||
+            (transferOptions?.unhashed !== true && lfsPointerFor(content).pointer.oid !== pointer.oid)
+          ) {
             throw new Error(`Large object ${pointer.oid} did not hash to its own id.`);
           }
           return { content, transfer: { transport: lfsTransportOf(action.href) } };
@@ -893,6 +903,7 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
           const pointer = { oid: answer.oid, size: answer.size };
           const { content, transfer } = await downloadObject(pointer, answer, {
             signal: transferSignal,
+            unhashed: true,
             progress:
               progress === undefined
                 ? undefined

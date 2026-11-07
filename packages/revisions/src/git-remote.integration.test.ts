@@ -333,7 +333,10 @@ describe.runIf(gitToolchainOnPath)('AC18 — a Git remote, from both legs', () =
  * remote's LFS server with the user's own credential helper. So the two legs
  * disagreed about what a push means, which is the A15 problem P20 exists to
  * close. What is asserted here is the agreement, not the refusal: same code,
- * same file list, nothing offered on either leg.
+ * same file list, no object offered on either leg. The disk leg refuses before it
+ * spawns `git push`, from `git lfs ls-files` over the pushed tip's tree; the
+ * browser leg reads the advertisement and refuses on the pointers among the
+ * blobs it would send.
  */
 describe.runIf(gitToolchainOnPath)('P20 — large objects and a third-party remote', () => {
   let root: string;
@@ -344,7 +347,7 @@ describe.runIf(gitToolchainOnPath)('P20 — large objects and a third-party remo
   const large = ((): string => 'x'.repeat(largeObjectThresholdBytes + 1024))();
   const files = { 'models/housing.step': large, 'readme.md': 'small\n' };
 
-  /* Each row owns its backend (L2-F13): both rows assert the trail is empty, so
+  /* Each row owns its backend (L2-F13): both rows assert what the trail holds, so
    * a shared one made the second fail on the first's traffic whenever the first
    * leg pushed at all. */
   beforeEach(async () => {
@@ -403,8 +406,12 @@ describe.runIf(gitToolchainOnPath)('P20 — large objects and a third-party remo
 
     expect(error).toMatchObject({ code: 'LFS_REMOTE_UNSUPPORTED' });
     expect((error as Error).message).toContain('models/housing.step');
-    // Not one batch call, not one ref: the refusal is before the wire.
-    expect(remote.trail()).toStrictEqual([]);
+    /* The browser leg reads the advertisement first, because it refuses on the
+     * pointers it would actually send (tracking refs can outlive a re-pointed
+     * remote); but no batch call and no receive-pack follow it. */
+    expect(remote.trail().length).toBeGreaterThan(0);
+    expect(remote.trail().every((line) => line.startsWith('GET ') && line.endsWith('/info/refs'))).toBe(true);
+    expect(remote.batches()).toStrictEqual([]);
     expect(remote.uploadCount()).toBe(0);
   }, 180_000);
 });

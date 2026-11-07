@@ -9,9 +9,11 @@
  * `jj:conflict-labels`. One encoder, two object stores, one identity — which is
  * what the conformance suite's cross-adapter test measures (I4).
  *
- * Trees go in through one `fast-import` rather than a process per blob: it is
- * binary-safe, quotes paths itself, and is the path {@link createNativeGitAdapter}
- * already proved against real repositories.
+ * Trees go in incrementally (D16): the store's tree-id memo names every
+ * object a tree needs, digesting only what changed since the last mint, and
+ * only the objects the store lacks are written — changed blobs through one
+ * blob-only `fast-import`, changed trees through one `mktree --batch` — so a
+ * save streams the paths it changed, never the whole project.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -26,7 +28,9 @@ import { decodeCommit, decodeTag, encodeCommit, encodeTag } from '#git-objects.j
 import type { DecodedCommit } from '#git-objects.js';
 import { CommandAbortedError, runGitCommand } from '#git-command.js';
 import type { GitCommandResult } from '#git-command.js';
-import { parseTransportValue, quoteFastImportPath } from '#native-git-adapter.js';
+import { parseTransportValue } from '#native-git-adapter.js';
+import { createTreeIdMemo } from '#tree-id-memo.js';
+import type { TreeObject } from '#tree-id-memo.js';
 import { NativeGitError } from '#native-git.types.js';
 import { checkoutIdOfBranch } from '#checkout-id.js';
 import type { ObjectFormat } from '#object-hash.js';
@@ -694,46 +698,149 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     }
   };
 
+  /*
+   * Objects this store is known to hold, so a mint walks only what changed
+   * (D16). A tree is written only after everything it names, so a held tree
+   * proves its whole subtree is held. Forgotten wholesale every hour and past a
+   * bound: an object a mint wrote but no ref reached is garbage to `git gc`
+   * after its two-week expiry, and must never be trusted that long.
+   */
+  const heldObjects = new Set<string>();
+  let heldSince = Date.now();
+  const heldObjectLimit = 262_144;
+  const heldObjectMilliseconds = 60 * 60 * 1000;
+  const forgetStaleHeldObjects = (): void => {
+    if (Date.now() - heldSince > heldObjectMilliseconds || heldObjects.size > heldObjectLimit) {
+      heldObjects.clear();
+      heldSince = Date.now();
+    }
+  };
+  /* Large objects this store holds already: a repeat cut opens nothing for them. */
+  const storedLargeObjects = new Set<string>();
+  /* Tree and blob ids for this store's successive mints, digesting only what changed (E3). */
+  const treeIds = createTreeIdMemo();
+
   /**
-   * Write one tree through a single `fast-import`, then drop the staging ref.
+   * Which of `oids` the object store holds, from their headers alone: no
+   * object's content is read.
    *
-   * The commit `fast-import` writes is a throwaway: this port needs the *tree*
-   * it produced, and writes Tau's own commit over it.
+   * @param oids - Candidate object ids.
+   * @returns The ones present.
+   */
+  const presentObjects = async (oids: readonly string[]): Promise<ReadonlySet<string>> => {
+    if (oids.length === 0) {
+      return new Set();
+    }
+    const stdout = await output(['cat-file', '--batch-check=%(objectname)'], {
+      input: [textEncoder.encode(`${oids.join('\n')}\n`)],
+    });
+    return new Set(
+      textDecoder
+        .decode(stdout)
+        .split('\n')
+        .filter((line) => line !== '' && !line.endsWith(' missing')),
+    );
+  };
+
+  /**
+   * Store one tree incrementally (D16): the tree's objects are named by the
+   * store's own memo, which digests only blobs and directories that changed
+   * since the last mint, and only what the store lacks is written — the
+   * changed blobs through one blob-only `fast-import`, the changed trees through
+   * one `mktree --batch`, children first. A one-file save streams that file and
+   * the trees on its path to Git, never the project.
    *
    * @param tree - The tree to store.
    * @param largeObjects - Whether the clean step runs; `false` stores it verbatim.
    * @returns The root tree's object id.
    */
   const writeTreeObject = async (tree: ImmutableRevisionTree, largeObjects: boolean): Promise<string> => {
-    /* `fast-import` stores `inline` data verbatim, so git's own clean filter
-     * never runs on this path and the pointer decision is Tau's. It is made by
-     * the host-neutral cut (`lfs.ts`) that the cut's `treeId` is computed from,
-     * so the id this engine records is the id the host predicted. */
+    /* The pointer decision is Tau's, made by the host-neutral cut (`lfs.ts`) that the cut's `treeId` is
+     * computed from, so the id this engine records is the id the host predicted; Git's clean filter never runs. */
     const recorded = largeObjects
       ? cleanLargeObjects(tree)
       : { tree, objects: new Map<string, Uint8Array<ArrayBuffer>>() };
-    await Promise.all([...recorded.objects].map(async ([oid, content]) => storeLfsObject(oid, content)));
-    const stagingRef = `${stagingRefPrefix}-${randomUUID()}`;
-    const chunks: Array<Uint8Array<ArrayBuffer>> = [
-      textEncoder.encode(`commit ${stagingRef}\n`),
-      textEncoder.encode('author Tau Revision <tau@local.invalid> 0 +0000\n'),
-      textEncoder.encode('committer Tau Revision <tau@local.invalid> 0 +0000\n'),
-      textEncoder.encode('data 0\n'),
-      textEncoder.encode('deleteall\n'),
-    ];
-    for (const entry of recorded.tree.entries()) {
-      chunks.push(
-        textEncoder.encode(`M ${entry.mode} inline ${quoteFastImportPath(entry.path)}\n`),
-        textEncoder.encode(`data ${entry.content.byteLength}\n`),
-        entry.content,
-        textEncoder.encode('\n'),
-      );
+    await Promise.all(
+      [...recorded.objects]
+        .filter(([oid]) => !storedLargeObjects.has(oid))
+        .map(async ([oid, content]) => {
+          await storeLfsObject(oid, content);
+          storedLargeObjects.add(oid);
+        }),
+    );
+    const root = treeIds.treeObject(recorded.tree, await format());
+    forgetStaleHeldObjects();
+    if (heldObjects.has(root.oid)) {
+      return root.oid;
     }
-    chunks.push(textEncoder.encode('done\n'));
-    await output(['fast-import', '--quiet', '--date-format=raw'], { input: chunks });
-    const treeId = await text(['rev-parse', `${stagingRef}^{tree}`]);
-    await run(['update-ref', '-d', stagingRef]);
-    return treeId;
+    /* Children before their parents, and nothing under a tree already held. */
+    const trees: TreeObject[] = [];
+    const blobs = new Map<string, Uint8Array<ArrayBuffer>>();
+    const visited = new Set<string>();
+    const visit = (node: TreeObject): void => {
+      if (heldObjects.has(node.oid) || visited.has(node.oid)) {
+        return;
+      }
+      visited.add(node.oid);
+      for (const entry of node.entries) {
+        if (entry.type === 'tree') {
+          visit(entry.tree);
+        } else if (!heldObjects.has(entry.oid)) {
+          blobs.set(entry.oid, entry.content);
+        }
+      }
+      trees.push(node);
+    };
+    visit(root);
+    const present = await presentObjects([...trees.map(({ oid }) => oid), ...blobs.keys()]);
+    const missingBlobs = [...blobs].filter(([oid]) => !present.has(oid));
+    if (missingBlobs.length > 0) {
+      const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+      for (const [, content] of missingBlobs) {
+        chunks.push(
+          textEncoder.encode(`blob\ndata ${String(content.byteLength)}\n`),
+          content,
+          textEncoder.encode('\n'),
+        );
+      }
+      chunks.push(textEncoder.encode('done\n'));
+      await output(['fast-import', '--quiet'], { input: chunks });
+    }
+    /* Git answers the empty tree as present whether or not it is stored, so it is always written. */
+    const missingTrees = trees.filter(({ oid, entries }) => entries.length === 0 || !present.has(oid));
+    if (missingTrees.length > 0) {
+      const listing = (node: TreeObject): string =>
+        node.entries
+          .map((entry) =>
+            entry.type === 'tree'
+              ? `040000 tree ${entry.oid}\t${entry.name}\0`
+              : `${entry.mode} blob ${entry.oid}\t${entry.name}\0`,
+          )
+          .join('');
+      /* An empty root is the one tree with no entries; batch mode cannot spell it, so it goes alone. */
+      const written =
+        missingTrees.length === 1 && missingTrees[0]!.entries.length === 0
+          ? [await text(['mktree', '-z'])]
+          : textDecoder
+              .decode(
+                await output(['mktree', '-z', '--batch'], {
+                  input: [textEncoder.encode(`${missingTrees.map((node) => `${listing(node)}\0`).join('')}`)],
+                }),
+              )
+              .split(/\s+/u)
+              .filter((line) => line !== '');
+      /* Git's ids are the memo's ids, or this engine and the host disagree on identity (I4). */
+      if (written.length !== missingTrees.length || written.some((oid, index) => oid !== missingTrees[index]!.oid)) {
+        throw new RevisionPortError('ENGINE_FAILED', 'Native Git recorded a tree under an unexpected id.');
+      }
+    }
+    for (const node of trees) {
+      heldObjects.add(node.oid);
+    }
+    for (const oid of blobs.keys()) {
+      heldObjects.add(oid);
+    }
+    return root.oid;
   };
 
   /* A branch name is spelled short and everything else is spelled in full: the

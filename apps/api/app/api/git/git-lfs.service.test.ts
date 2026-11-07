@@ -34,7 +34,7 @@ describe('GitLfsService finalized-object boundary', () => {
      project whose objects were written before the move. */
   let storedNamespace: 'tenants' | 'blobs' = 'tenants';
   /* The SHA-256 a `ChecksumMode: ENABLED` HEAD reports: the store's own digest of
-     the bytes at a pinned tenant key, a fixed one, or none at a legacy key. */
+     the bytes, a fixed one, or none. */
   let storedChecksum: 'digest' | 'none' | { fixed: string } = 'digest';
   /** Whether the reservation the repository answers with is already finalized. */
   let reservedFinalized = false;
@@ -46,7 +46,7 @@ describe('GitLfsService finalized-object boundary', () => {
             size: stored.current.byteLength,
             etag: 'etag',
             cacheControl: '',
-            ...(args.checksum !== true || storedChecksum === 'none' || args.namespace !== 'tenants'
+            ...(args.checksum !== true || storedChecksum === 'none'
               ? {}
               : {
                   checksumSha256:
@@ -530,6 +530,16 @@ describe('GitLfsService finalized-object boundary', () => {
 
     await expect(service().verify({ access, oid, size: bytes.byteLength })).resolves.toBe(false);
     expect(objectStorage.getBlob).not.toHaveBeenCalled();
+    expect(repositories.finalizeLfsObject).not.toHaveBeenCalled();
+  });
+
+  it('should hash a legacy object whatever checksum it reports', async () => {
+    storedNamespace = 'blobs';
+    storedChecksum = { fixed: Buffer.from(oid, 'hex').toString('base64') };
+    stored.current = new Uint8Array(bytes.byteLength).fill(9);
+
+    await expect(service().verify({ access, oid, size: bytes.byteLength })).resolves.toBe(false);
+    expect(objectStorage.getBlob).toHaveBeenCalledOnce();
     expect(repositories.finalizeLfsObject).not.toHaveBeenCalled();
   });
 

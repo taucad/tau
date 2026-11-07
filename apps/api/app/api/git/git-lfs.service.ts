@@ -282,9 +282,10 @@ export class GitLfsService {
    * mirror restore — pins `x-amz-checksum-sha256` to the oid as a signed header,
    * and the store refuses a body that does not hash to it. So the HEAD asks for
    * that stored checksum, and when it is the oid's own digest the bytes are not
-   * read back; a different one refuses. An object the store holds no whole
-   * SHA-256 for — a pre-D24 legacy key, a writer that did not pin one, a store
-   * that does not report it — is read and hashed as before.
+   * read back; a different one refuses. An object at a pre-D24 legacy key is
+   * always read and hashed, whatever checksum it reports, and so is a tenant
+   * object the store holds no whole SHA-256 for (a store that does not report
+   * one, a multipart composite).
    */
   public async verify(args: { access: GitAccess; oid: string; size: number }): Promise<boolean> {
     await this.repositories.resolveActiveLocator(args.access);
@@ -297,7 +298,8 @@ export class GitLfsService {
     if (stored === undefined || stored.size !== args.size) {
       return false;
     }
-    const { checksumSha256 } = stored;
+    /* Only a tenant key's writers pin the checksum; a legacy key's is never trusted. */
+    const checksumSha256 = stored.location.namespace === 'tenants' ? stored.checksumSha256 : undefined;
     if (checksumSha256 !== undefined && checksumSha256 !== Buffer.from(args.oid, 'hex').toString('base64')) {
       return false;
     }

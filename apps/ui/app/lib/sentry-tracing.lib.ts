@@ -1,6 +1,7 @@
 import * as Sentry from '@sentry/react';
 import type { Event } from '@sentry/react';
 import { readRouteId } from '#lib/sentry-context.lib.js';
+import { redactInvitationTokens } from '#lib/invitation-token.lib.js';
 import { scrubUrl } from '#lib/sentry-event.lib.js';
 
 /**
@@ -86,6 +87,19 @@ export const nameSpansByRoute = (attempt = 0): void => {
   router.subscribe(nameActiveRootSpan);
 };
 
+/** A query string or fragment inside free text: up to the next space, quote, bracket or parenthesis. */
+const embeddedQueryPattern = /[?#][^\s"'()<>[\]]*/gu;
+
+/**
+ * Scrub a span description however a URL sits in it (`GET https://…?x`, `fetch("/v1/…?x")`): every query string
+ * and fragment removed, then invitation tokens redacted, as error events are.
+ *
+ * @param description - The span description.
+ * @returns The scrubbed description.
+ */
+const scrubDescription = (description: string): string =>
+  redactInvitationTokens(description.replaceAll(embeddedQueryPattern, ''));
+
 /** The span data keys whose values can be URLs. */
 const urlDataKeys = ['url', 'http.url', 'url.full', 'http.request.url'] as const;
 
@@ -103,10 +117,7 @@ export const scrubTransaction = <TransactionEvent extends Event>(event: Transact
   }
   for (const span of event.spans ?? []) {
     if (span.description !== undefined) {
-      span.description = span.description
-        .split(' ')
-        .map((part) => (/^[a-z]+:\/\//iu.test(part) || part.startsWith('/') ? scrubUrl(part) : part))
-        .join(' ');
+      span.description = scrubDescription(span.description);
     }
     for (const key of urlDataKeys) {
       const value: unknown = span.data[key];

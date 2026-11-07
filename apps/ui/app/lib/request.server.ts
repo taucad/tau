@@ -1,10 +1,14 @@
 /* Helpers for the same-origin ingest routes (`/api/monitoring`, `/api/reports`). */
 
-/** The address a request came from: Netlify's client connection IP, else the first forwarded hop. */
-export const clientOf = (request: Request): string =>
-  request.headers.get('x-nf-client-connection-ip') ??
-  request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-  'unknown';
+/**
+ * The address a request came from: Netlify's client connection IP, which the edge sets and a caller cannot. Without
+ * it every caller shares one `unknown` bucket: a caller-set `X-Forwarded-For` would let one client rotate past its
+ * limit and evict others' windows.
+ *
+ * @param request - The request.
+ * @returns The client address, or `unknown`.
+ */
+export const clientOf = (request: Request): string => request.headers.get('x-nf-client-connection-ip') ?? 'unknown';
 
 /**
  * Read a request body up to `limit` bytes, without buffering more than that.
@@ -45,4 +49,38 @@ export const readCapped = async (request: Request, limit: number): Promise<strin
     offset += chunk.byteLength;
   }
   return new TextDecoder().decode(bytes);
+};
+
+/** Client addresses tracked at once, at most; the oldest window is forgotten first. */
+const trackedClientLimit = 10_000;
+
+/** A fixed-window counter per client address, bounded in the addresses it remembers. */
+export type ClientRateLimiter = (client: string, now: number) => boolean;
+
+/**
+ * Create a per-client fixed-window limiter, per server instance: a best effort bound, not a global quota.
+ *
+ * @param limit - Requests per window and the window's length.
+ * @returns `true` while a client is within its window's allowance.
+ */
+export const createClientRateLimiter = (
+  limit: Readonly<{ envelopes: number; windowMilliseconds: number }>,
+): ClientRateLimiter => {
+  const windows = new Map<string, { start: number; count: number }>();
+  return (client, now) => {
+    const current = windows.get(client);
+    if (current === undefined || now - current.start >= limit.windowMilliseconds) {
+      windows.delete(client);
+      if (windows.size >= trackedClientLimit) {
+        const oldest = windows.keys().next();
+        if (oldest.done !== true) {
+          windows.delete(oldest.value);
+        }
+      }
+      windows.set(client, { start: now, count: 1 });
+      return true;
+    }
+    current.count += 1;
+    return current.count <= limit.envelopes;
+  };
 };

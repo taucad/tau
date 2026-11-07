@@ -44,6 +44,31 @@ describe('tracePropagationTargets', () => {
 });
 
 describe('scrubTransaction', () => {
+  it('should scrub a URL wherever it sits in a span description', () => {
+    const event = {
+      type: 'transaction',
+      spans: [
+        {
+          span_id: '1',
+          trace_id: '2',
+          start_timestamp: 0,
+          data: {},
+          description: 'fetch("https://api.taucad.dev/v1/x?token=secret#frag")',
+        },
+        { span_id: '3', trace_id: '2', start_timestamp: 0, data: {}, description: "GET '/v1/y?code=secret'" },
+        { span_id: '4', trace_id: '2', start_timestamp: 0, data: {}, description: 'routes/w.$workspace.$project' },
+      ],
+    } as unknown as Event;
+
+    const descriptions = scrubTransaction(event).spans?.map((span) => span.description);
+
+    expect(descriptions).toStrictEqual([
+      'fetch("https://api.taucad.dev/v1/x")',
+      "GET '/v1/y'",
+      'routes/w.$workspace.$project',
+    ]);
+  });
+
   it('should drop query strings and fragments from the request and every span', () => {
     const event = {
       type: 'transaction',

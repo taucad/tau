@@ -1,7 +1,8 @@
 import type { Route } from './+types/route.js';
 import { getEnvironment } from '#environment.config.js';
 import { sentryEnvelopeUrl } from '#lib/sentry-event.lib.js';
-import { clientOf, readCapped } from '#lib/request.server.js';
+import { clientOf, createClientRateLimiter, readCapped } from '#lib/request.server.js';
+import type { ClientRateLimiter } from '#lib/request.server.js';
 
 /**
  * Same-origin tunnel for Sentry envelopes (browser observability SB5), so a content blocker that
@@ -21,39 +22,18 @@ export const tunnelBodyLimit = 1024 * 1024;
 /** Envelopes one client address may send per window, and the window in milliseconds. */
 export const tunnelRateLimit = { envelopes: 60, windowMilliseconds: 60_000 } as const;
 
-/** Client addresses tracked at once, at most; the oldest window is forgotten first. */
-const trackedClientLimit = 10_000;
-
-/** A fixed-window counter per client address, bounded in the addresses it remembers. */
-export type TunnelRateLimiter = (client: string, now: number) => boolean;
+/** A fixed-window counter per client address (see {@link createClientRateLimiter}). */
+export type TunnelRateLimiter = ClientRateLimiter;
 
 /**
- * Create a per-client fixed-window limiter.
+ * Create the tunnel's per-client limiter.
  *
  * @param limit - Envelopes per window and the window's length.
  * @returns `true` while a client is within its window's allowance.
  */
 export const createTunnelRateLimiter = (
   limit: Readonly<{ envelopes: number; windowMilliseconds: number }> = tunnelRateLimit,
-): TunnelRateLimiter => {
-  const windows = new Map<string, { start: number; count: number }>();
-  return (client, now) => {
-    const current = windows.get(client);
-    if (current === undefined || now - current.start >= limit.windowMilliseconds) {
-      windows.delete(client);
-      if (windows.size >= trackedClientLimit) {
-        const oldest = windows.keys().next();
-        if (oldest.done !== true) {
-          windows.delete(oldest.value);
-        }
-      }
-      windows.set(client, { start: now, count: 1 });
-      return true;
-    }
-    current.count += 1;
-    return current.count <= limit.envelopes;
-  };
-};
+): TunnelRateLimiter => createClientRateLimiter(limit);
 
 /** The host, path prefix and project of a DSN, as the envelope endpoint is built from them. */
 const dsnTarget = (dsn: string): { readonly host: string; readonly path: string } | undefined => {

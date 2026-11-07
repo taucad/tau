@@ -4,10 +4,9 @@ import { getEnvironment } from '#environment.config.js';
 import { readBuildId } from '#lib/build-identity.js';
 import { browserCrashFromReport, isFromOrigin, parseReports, scrubCspReport } from '#lib/browser-reports.server.js';
 import type { BrowserCrash } from '#lib/browser-reports.server.js';
-import { clientOf, readCapped } from '#lib/request.server.js';
+import { clientOf, createClientRateLimiter, readCapped } from '#lib/request.server.js';
+import type { ClientRateLimiter } from '#lib/request.server.js';
 import { sentryEnvelopeUrl, sentryEnvironment, sentryRelease, sentrySecurityUrl } from '#lib/sentry-event.lib.js';
-import { createTunnelRateLimiter } from '#routes/api.monitoring/route.js';
-import type { TunnelRateLimiter } from '#routes/api.monitoring/route.js';
 
 /**
  * Reporting API receiver (browser observability SB6): the `default` endpoint every document names in
@@ -38,7 +37,7 @@ type ReportsOptions = Readonly<{
   dsn: string | undefined;
   environment: string | undefined;
   release: string | undefined;
-  isAllowed: TunnelRateLimiter;
+  isAllowed: ClientRateLimiter;
   now?: () => number;
   newEventId?: () => string;
   fetchUpstream?: typeof fetch;
@@ -171,7 +170,7 @@ export const browserReports = async (
 };
 
 /** This server process's limiter: per instance, so a best effort bound, not a global quota. */
-const isAllowed = createTunnelRateLimiter(reportsRateLimit);
+const isAllowed = createClientRateLimiter(reportsRateLimit);
 
 export async function action({ request }: Route.ActionArgs): Promise<Response> {
   const environment = await getEnvironment();

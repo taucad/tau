@@ -5,13 +5,23 @@ import type * as SentryReact from '@sentry/react';
 import type * as StaleBuildRecovery from '#lib/stale-build-recovery.js';
 import type { StaleBuildOutcome, StaleBuildTag } from '#lib/stale-build-recovery.js';
 
-const mocks = vi.hoisted(() => ({
-  init: vi.fn(),
-  addEventProcessor: vi.fn(),
-  addBreadcrumb: vi.fn(),
-  recoverFromStaleBuild: vi.fn(async (_failure: unknown): Promise<StaleBuildOutcome> => 'reloading'),
-  classifyStaleBuildFailure: vi.fn(async (_failure: unknown): Promise<StaleBuildTag> => 'superseded'),
-}));
+const mocks = vi.hoisted(() => {
+  /** A mutable stand-in for the injected environment. */
+  const env: Record<string, string> = {
+    SENTRY_DSN: 'https://public@o0.ingest.sentry.io/0',
+    SENTRY_ENVIRONMENT: 'staging',
+    NODE_ENV: 'production',
+    TAU_API_URL: 'https://api.taucad.dev',
+  };
+  return {
+    init: vi.fn(),
+    addEventProcessor: vi.fn(),
+    addBreadcrumb: vi.fn(),
+    recoverFromStaleBuild: vi.fn(async (_failure: unknown): Promise<StaleBuildOutcome> => 'reloading'),
+    classifyStaleBuildFailure: vi.fn(async (_failure: unknown): Promise<StaleBuildTag> => 'superseded'),
+    env,
+  };
+});
 
 vi.mock('@sentry/react', async (importOriginal) => ({
   ...(await importOriginal<typeof SentryReact>()),
@@ -19,9 +29,7 @@ vi.mock('@sentry/react', async (importOriginal) => ({
   addEventProcessor: mocks.addEventProcessor,
   addBreadcrumb: mocks.addBreadcrumb,
 }));
-vi.mock('#environment.config.js', () => ({
-  ENV: { SENTRY_DSN: 'https://public@o0.ingest.sentry.io/0', SENTRY_ENVIRONMENT: 'staging', NODE_ENV: 'production' },
-}));
+vi.mock('#environment.config.js', () => ({ ENV: mocks.env }));
 vi.mock('#lib/stale-build-recovery.js', async (importOriginal) => ({
   ...(await importOriginal<typeof StaleBuildRecovery>()),
   recoverFromStaleBuild: mocks.recoverFromStaleBuild,
@@ -48,14 +56,30 @@ describe('initSentry', () => {
     expect(mocks.recoverFromStaleBuild).not.toHaveBeenCalled();
   });
 
-  it('should send through the same-origin tunnel without default PII, replay or tracing', () => {
+  it('should send through the same-origin tunnel without default PII or replay, tracing staging to the API only', () => {
     mocks.init.mockClear();
     initSentry();
     const [options] = mocks.init.mock.calls[0] as [Record<string, unknown>];
 
-    expect(options).toMatchObject({ tunnel: '/api/monitoring', sendDefaultPii: false });
-    expect(options).not.toHaveProperty('tracesSampleRate');
+    expect(options).toMatchObject({ tunnel: '/api/monitoring', sendDefaultPii: false, tracesSampleRate: 1 });
+    expect(options['tracePropagationTargets']).toStrictEqual([/^https:\/\/api\.taucad\.dev(?:\/|$)/u]);
+    expect(options['beforeSendTransaction']).toBeTypeOf('function');
     expect(options).not.toHaveProperty('replaysSessionSampleRate');
+  });
+
+  it('should not trace production until the staging cost is measured (SB17)', () => {
+    mocks.init.mockClear();
+    mocks.env['SENTRY_ENVIRONMENT'] = 'production';
+    try {
+      initSentry();
+    } finally {
+      mocks.env['SENTRY_ENVIRONMENT'] = 'staging';
+    }
+    const [options] = mocks.init.mock.calls[0] as [Record<string, unknown>];
+
+    expect(options).not.toHaveProperty('tracesSampleRate');
+    expect(options).not.toHaveProperty('tracePropagationTargets');
+    expect(options).not.toHaveProperty('beforeSendTransaction');
   });
 
   it('should post to the DSN directly on desktop', () => {

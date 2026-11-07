@@ -851,21 +851,40 @@ export const stageImport = async (
    * at most the batch's largest file is held at a time beyond the decode
    * budget, and the bytes are handed to the measurer, never kept.
    */
-  const readBack = async (window: readonly PlannedImportEntry[]): Promise<ImportMeasuredFacts[]> => {
+  const readBack = async (window: readonly PlannedImportEntry[]): Promise<Array<StagedImportEntry['facts']>> => {
     const held = byteBudget(Math.max(0, ...window.map(({ size }) => size)));
     /* Only the caller stops it: a later batch's failed decode still lets this written batch keep its record. */
     const stop = input.signal ?? new AbortController().signal;
+    const measureOnce = async (entry: PlannedImportEntry): Promise<ImportMeasuredFacts> => {
+      const bytes = await port.provider.readFile(stagedEntryLocation({ directory, inPlace }, entry.path));
+      if (bytes.byteLength !== entry.size) {
+        throw new ImportRefusedError('corrupt', {
+          path: entry.path,
+          message: 'A staged file did not read back as it was written.',
+        });
+      }
+      return measure(bytes, entry.size);
+    };
     return bounded(window, concurrency, async (entry) => {
       await held.acquire(entry.size, stop);
       try {
-        const bytes = await port.provider.readFile(stagedEntryLocation({ directory, inPlace }, entry.path));
-        if (bytes.byteLength !== entry.size) {
-          throw new ImportRefusedError('corrupt', {
-            path: entry.path,
-            message: 'A staged file did not read back as it was written.',
-          });
+        let measured: ImportMeasuredFacts;
+        try {
+          measured = await measureOnce(entry);
+        } catch (error) {
+          /* A measurer that died took the bytes it was handed with it: they are read from disk again, once. */
+          if (!(error instanceof Error && error.name === 'ComputeWorkerCrashedError')) {
+            throw error;
+          }
+          measured = await measureOnce(entry);
         }
-        return await measure(bytes);
+        const { size, ...facts } = measured;
+        if (size !== entry.size) {
+          throw new Error(
+            `A staged file was measured at ${String(size)} bytes, not the ${String(entry.size)} written: ${entry.path}`,
+          );
+        }
+        return facts;
       } finally {
         held.release(entry.size);
       }

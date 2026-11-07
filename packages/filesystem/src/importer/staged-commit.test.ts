@@ -241,9 +241,9 @@ describe('commitPendingProjectDirectory from a staged import', () => {
       hashed[algorithm] += 1;
       return subtleImportHash(algorithm, bytes);
     });
-    const counting = async (bytes: Uint8Array<ArrayBuffer>) => {
+    const counting = async (bytes: Uint8Array<ArrayBuffer>, expected: number) => {
       measured.push(decoder.decode(bytes));
-      return inline(bytes);
+      return inline(bytes, expected);
     };
     const digest = vi.spyOn(globalThis.crypto.subtle, 'digest');
 

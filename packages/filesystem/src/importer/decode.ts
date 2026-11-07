@@ -52,7 +52,13 @@ export type ImportDecodedEntry = Readonly<{
  *
  * @public
  */
-export type ImportMeasuredFacts = ContentFacts & Readonly<{ blobOid: string; sha256: string }>;
+export type ImportMeasuredFacts = ContentFacts &
+  Readonly<{
+    blobOid: string;
+    sha256: string;
+    /** How many bytes were measured, so a caller sees bytes lost on the way (a detached buffer) as a mismatch. */
+    size: number;
+  }>;
 
 /**
  * Measure one written file's read-back: the compute worker's
@@ -60,7 +66,7 @@ export type ImportMeasuredFacts = ContentFacts & Readonly<{ blobOid: string; sha
  *
  * @public
  */
-export type ImportMeasurer = (bytes: Uint8Array<ArrayBuffer>) => Promise<ImportMeasuredFacts>;
+export type ImportMeasurer = (bytes: Uint8Array<ArrayBuffer>, expectedSize: number) => Promise<ImportMeasuredFacts>;
 
 /**
  * The largest read-back measured in one shot: the per-file limit (EQ14), so
@@ -214,18 +220,31 @@ export const decodeImportEntry = async (
  * larger than {@link importMeasureMaximumBytes}), and the content kind. This
  * is the one hash pass a file costs an import (I2).
  *
+ * One-shot SHA-1 over the git header and the bytes needs them contiguous,
+ * so the bytes are copied once behind the header: a file costs twice its
+ * size while it is measured. Avoiding it would need a read-back into a
+ * buffer framed in advance, which no provider read offers.
+ *
  * @param bytes - The file's bytes as read back.
+ * @param expectedSize - The size the file was written at: bytes of another length are refused, never measured.
  * @param hash - The digest to use; WebCrypto's by default.
- * @returns The facts.
- * @throws RangeError when the bytes are larger than one shot admits.
+ * @returns The facts, with the size measured.
+ * @throws RangeError when the bytes are larger than one shot admits, or are not the size expected (a detached buffer).
  * @public
  */
 export const measureImportBytes = async (
   bytes: Uint8Array<ArrayBuffer>,
+  expectedSize: number,
   hash: ImportHash = subtleImportHash,
 ): Promise<ImportMeasuredFacts> => {
   if (bytes.byteLength > importMeasureMaximumBytes) {
     throw new RangeError(`An imported file is larger than ${String(importMeasureMaximumBytes)} bytes.`);
+  }
+  /* A transferred buffer reads as empty once detached: its digests would be the empty blob's. */
+  if (bytes.byteLength !== expectedSize || (expectedSize > 0 && bytes.buffer.byteLength === 0)) {
+    throw new RangeError(
+      `Measured ${String(bytes.byteLength)} bytes of a file written at ${String(expectedSize)}: they were lost on the way.`,
+    );
   }
   /* The git object header and the bytes in one buffer, so the blob id is one digest call. */
   const prefix = new TextEncoder().encode(`blob ${String(bytes.byteLength)}\0`);
@@ -234,7 +253,7 @@ export const measureImportBytes = async (
   framed.set(bytes, prefix.byteLength);
   const data = framed.subarray(prefix.byteLength);
   const [blobOid, sha256] = await Promise.all([hash('sha1', framed), hash('sha256', data)]);
-  return { ...getFileContentMetadata(data), blobOid, sha256 };
+  return { ...getFileContentMetadata(data), blobOid, sha256, size: data.byteLength };
 };
 
 /**
@@ -273,5 +292,5 @@ export const createInlineImportDecoder = (): ImportDecoder => async (request, op
  */
 export const createInlineImportMeasurer =
   (hash: ImportHash = subtleImportHash): ImportMeasurer =>
-  async (bytes) =>
-    measureImportBytes(bytes, hash);
+  async (bytes, expectedSize) =>
+    measureImportBytes(bytes, expectedSize, hash);

@@ -10,6 +10,7 @@ import { ImportRefusedError, importLimits } from '#importer/limits.js';
 import { readZipDirectory, blobRangeSource } from '#importer/zip.js';
 import {
   createInlineImportDecoder,
+  createInlineImportMeasurer,
   decodeImportEntry,
   importMeasureMaximumBytes,
   measureImportBytes,
@@ -359,11 +360,12 @@ describe('decodeImportEntry', () => {
     const content = text('x'.repeat(10_000));
     const digest = vi.spyOn(globalThis.crypto.subtle, 'digest');
 
-    const facts = await measureImportBytes(content);
+    const facts = await measureImportBytes(content, content.byteLength);
 
     expect(facts.blobOid).toBe(gitBlobOid(content));
     expect(facts.sha256).toBe(createHash('sha256').update(content).digest('hex'));
     expect(facts.contentKind).toBe('text');
+    expect(facts.size).toBe(content.byteLength);
     expect(digest).toHaveBeenCalledTimes(2);
     digest.mockRestore();
   });
@@ -372,7 +374,15 @@ describe('decodeImportEntry', () => {
     /* A length past the limit, without allocating it. */
     const tooLarge = Object.defineProperty(new Uint8Array(1), 'byteLength', { value: importMeasureMaximumBytes + 1 });
 
-    await expect(measureImportBytes(tooLarge)).rejects.toThrow(RangeError);
+    await expect(measureImportBytes(tooLarge, tooLarge.byteLength)).rejects.toThrow(RangeError);
+  });
+
+  it('should refuse to measure bytes lost on the way (a detached buffer), never answering the empty blob', async () => {
+    const bytes = text('cube(1);');
+    structuredClone(bytes.buffer, { transfer: [bytes.buffer] });
+
+    expect(bytes.byteLength).toBe(0);
+    await expect(measureImportBytes(bytes, 8)).rejects.toThrow(/lost on the way/u);
   });
 
   it('should refuse an entry whose bytes inflate past the size its header declares (a lying bomb)', async () => {
@@ -678,6 +688,49 @@ describe('stageImport', () => {
 
     expect(staged.entries[0]!.facts.blobOid).toBe(gitBlobOid(text('wrong')));
     expect(staged.entries[0]!.facts.blobOid).not.toBe(gitBlobOid(text('right')));
+  });
+
+  it('should refuse a measure that answers another size than the file was written at', async () => {
+    const provider = new MemoryProvider();
+    const judged = await plan(zipImportSource(await zipOf({ 'p/a.ts': 'right' })));
+    const inline = createInlineImportMeasurer();
+
+    const refused = stageImport({
+      port: port(provider),
+      operationId,
+      plan: judged,
+      decode: createInlineImportDecoder(),
+      measure: async (bytes, expected) => ({ ...(await inline(bytes, expected)), size: 0 }),
+    });
+
+    await expect(refused).rejects.toThrow(/measured at 0 bytes/u);
+  });
+
+  it('should read a file again when the measurer died holding its bytes, and record the real facts', async () => {
+    const provider = new MemoryProvider();
+    const judged = await plan(zipImportSource(await zipOf({ 'p/a.ts': 'right' })));
+    const inline = createInlineImportMeasurer();
+    let calls = 0;
+
+    const staged = await stageImport({
+      port: port(provider),
+      operationId,
+      plan: judged,
+      decode: createInlineImportDecoder(),
+      measure: async (bytes, expected) => {
+        calls += 1;
+        if (calls === 1) {
+          /* As a worker that died after the bytes were transferred to it. */
+          structuredClone(bytes.buffer, { transfer: [bytes.buffer] });
+          throw Object.assign(new Error('The compute worker stopped.'), { name: 'ComputeWorkerCrashedError' });
+        }
+        return inline(bytes, expected);
+      },
+    });
+
+    expect(calls).toBe(2);
+    expect(staged.entries[0]!.facts.blobOid).toBe(gitBlobOid(text('right')));
+    expect(staged.entries[0]!.facts).not.toHaveProperty('size');
   });
 
   it('should refuse a staged file that reads back at another size than it was written', async () => {

@@ -116,7 +116,11 @@ import { readWindowState, writeWindowState } from '#main/window-state.js';
 import { isRendererTelemetryConsent, writeRendererTelemetryConsent } from '#main/telemetry-consent.js';
 import { prepareOtaProbe } from '#main/ota-probe.js';
 import { updaterFailureSignal } from '#main/desktop-signals.js';
-import { initializeDesktopErrorReporting, reportDesktopSignal } from '#main/error-reporting.js';
+import {
+  initializeDesktopErrorReporting,
+  rendererErrorReportingEnvironment,
+  reportDesktopSignal,
+} from '#main/error-reporting.js';
 import { prepareRouteQualificationProbe } from '#main/route-qualification-probe.js';
 import { linuxInstallation } from '#shared/linux-installation.js';
 import { parseDesktopInstallation } from '#main/update-identity.js';
@@ -1724,7 +1728,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
         preload: join(import.meta.dirname, '../preload/preload.cjs'),
         additionalArguments: [
           `${bootstrapArgumentPrefix}${JSON.stringify({
-            env: clientEnvironment(environment),
+            env: { ...clientEnvironment(environment), ...rendererErrorReportingEnvironment() },
             homeRoot,
             runtimeKernelIds: desktopNativeKernelIds(),
           })}`,

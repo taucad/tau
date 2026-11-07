@@ -31,6 +31,9 @@ import type { BrowserBridge, BrowserSnapshot } from '@taucad/types/browser';
  */
 
 import { contextBridge, ipcRenderer } from 'electron';
+/* Exposes `__SENTRY_IPC__` so the renderer SDK sends its events to main over IPC (SB11). */
+// oxlint-disable-next-line import/no-unassigned-import -- the SDK's preload hookup is a side effect.
+import '@sentry/electron/preload';
 import { exposeElectronRuntime, relayElectronPorts } from '@taucad/runtime/electron/preload';
 
 import {

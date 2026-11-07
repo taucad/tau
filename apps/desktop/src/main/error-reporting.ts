@@ -39,9 +39,23 @@ export const initializeDesktopErrorReporting = (channel: 'staging' | 'production
       environment: automated ? `${channel}-e2e` : channel,
       sendDefaultPii: false,
       beforeSend: scrubDesktopEvent,
+      /* Renderer events arrive over IPC from the preload's own hookup (SB11): no privileged `sentry-ipc://` scheme
+       * that bypasses the page's CSP, and no injected preload, which cannot be found in a bundled main anyway. */
+      ipcMode: Sentry.IPCMode.Classic,
+      integrations: (defaults) => defaults.filter((integration) => integration.name !== 'PreloadInjection'),
     });
   }
 };
+
+/**
+ * What the renderer needs to report its own errors through main (SB11): the DSN that gates its SDK, only once main's
+ * SDK is running to receive them. The renderer never posts to it; its events cross IPC and leave from main.
+ *
+ * @returns `{ SENTRY_DSN }` for the renderer's `window.ENV`, or nothing.
+ */
+export const rendererErrorReportingEnvironment = (): { readonly SENTRY_DSN?: string } =>
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- An environment name.
+  tauSentryDsn && Sentry.isInitialized() ? { SENTRY_DSN: tauSentryDsn } : {};
 
 /**
  * Send one main-process failure signal (SB11), beside the local diagnostics log. A no-op while Sentry is not

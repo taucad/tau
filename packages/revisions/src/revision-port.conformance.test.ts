@@ -2254,6 +2254,66 @@ describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
     }
   }, 120_000);
 
+  /* D9: another writer's same-size copy landing mid-download does not let the
+   * download's own bytes through unread: corrupt on the wire, they are refused. */
+  it('refuses corrupt downloaded bytes when another writer stores a same-size copy meanwhile', async () => {
+    let fetchSpy: { mockRestore: () => void } | undefined;
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-lfs-raced-'));
+    const fixture = await startGitHttpBackend({ root });
+    const writer = await isomorphicHarness();
+    try {
+      const port = writer.withTransport();
+      await port.init({ author });
+      const receipt = await port.writeRevision({
+        parents: [],
+        tree: tree({ 'models/bracket.step': large }),
+        provenance: provenance('user'),
+        summary: summary('Large object'),
+      });
+      const head = revisionId(receipt.commitId);
+      await port.updateRef({ name: 'main', expectedHead: undefined, head });
+      await port.setRemote({ name: 'tau', url: fixture.url });
+      await port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] });
+      const { oid } = lfsPointerFor(large).pointer;
+      (fixture.objects as Map<string, Uint8Array<ArrayBuffer>>).set(
+        oid,
+        large.map((byte, index) => (index === 0 ? (byte + 1) % 256 : byte)),
+      );
+
+      const files = await createMemoryProvider();
+      const stored = `.git/${lfsObjectPath(oid)}`;
+      const reader = createIsomorphicGitRevisionPort({
+        filesystem: files,
+        http: createRevisionHttpClient({ authorization: () => 'Bearer session-token' }),
+      });
+      await reader.init({ author });
+      await reader.setRemote({ name: 'tau', url: fixture.url });
+      await reader.fetch({ remote: 'tau' });
+      /* A Tau Cloud transfer goes through the page's own fetch: the object's answer
+       * arrives, and only then does the other tab's whole copy land. */
+      const pageFetch = globalThis.fetch.bind(globalThis);
+      let raced = 0;
+      fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+        const response = await pageFetch(input, init);
+        if ((input instanceof Request ? input.url : String(input)).endsWith(`/lfs/${oid}`)) {
+          raced += 1;
+          await files.mkdir(stored.slice(0, stored.lastIndexOf('/')), { recursive: true });
+          await files.writeFile(stored, large);
+        }
+        return response;
+      });
+
+      await expect(reader.readTree(head)).rejects.toThrow(/did not hash to its own id/u);
+      expect(raced).toBe(1);
+      await expect(keptUnder(files, oid)).resolves.toStrictEqual([oid]);
+    } finally {
+      fetchSpy?.mockRestore();
+      await fixture.close();
+      await writer.dispose();
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 60_000);
+
   /* D9: a read-back that throws — here the hash itself — keeps no `.partial`. */
   it('keeps no partial download when hashing the read-back throws', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tau-revisions-lfs-hash-throws-'));

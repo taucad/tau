@@ -357,10 +357,16 @@ export const openComputeConnection = (port: ComputePort, now: () => number = Dat
      * writer reads an object again after deflating it, a loose writer hashes then deflates),
      * unless it hands them over as consumed. */
     const [bytes, consumed] = args;
-    port.postMessage(
-      { id, method, args } satisfies ComputeRequest,
-      method === 'sha256' && consumed === true ? [(bytes as Uint8Array<ArrayBuffer>).buffer] : [],
-    );
+    try {
+      port.postMessage(
+        { id, method, args } satisfies ComputeRequest,
+        method === 'sha256' && consumed === true ? [(bytes as Uint8Array<ArrayBuffer>).buffer] : [],
+      );
+    } catch (error) {
+      /* A call that never left (an uncloneable argument, a detached buffer) waits for nothing. */
+      waiting.delete(id);
+      throw error;
+    }
     return call.promise;
   };
   const compute = Object.fromEntries(

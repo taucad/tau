@@ -409,6 +409,7 @@ describe.runIf(gitToolchainOnPath)('P20 — large objects and a third-party remo
     /* The browser leg reads the advertisement first, because it refuses on the
      * pointers it would actually send (tracking refs can outlive a re-pointed
      * remote); but no batch call and no receive-pack follow it. */
+    expect(remote.trail().length).toBeGreaterThan(0);
     expect(remote.trail().every((line) => line.startsWith('GET ') && line.endsWith('/info/refs'))).toBe(true);
     expect(remote.batches()).toStrictEqual([]);
     expect(remote.uploadCount()).toBe(0);

@@ -961,8 +961,9 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
   ): Promise<void> => {
     const file = lfsObjectFile(oid);
     const size = content.byteLength;
-    /* Another writer's whole copy is kept. */
-    if ((await lfsObjectSize(file)) === size) {
+    /* Another writer's whole copy is kept, unless these bytes are a download still to be verified:
+     * those are delivered after this returns, so they are read back first whatever is already here. */
+    if (!readBack && (await lfsObjectSize(file)) === size) {
       return;
     }
     await gitFiles.mkdir(file.slice(0, file.lastIndexOf('/')), { recursive: true });

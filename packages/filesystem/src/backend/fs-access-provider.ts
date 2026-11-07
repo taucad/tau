@@ -210,7 +210,9 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    * Fenced like {@link FileSystemAccessProvider._handleCache}: a refresh, a
    * prefix invalidation, or a removal, rename or batch through this provider
    * forgets the paths it names, and a handle that no longer resolves (gone,
-   * replaced, now a directory) falls back to the lookup.
+   * replaced, now a directory) falls back to the lookup. It assumes a handle
+   * locates its entry by path, so a move another context makes without
+   * announcing it is seen only through `refresh(prefixes)`.
    */
   private readonly _fileHandleCache = new Map<string, FileSystemFileHandle>();
   private readonly _pendingDirectoryHandles = new Map<string, Promise<FileSystemDirectoryHandle>>();
@@ -396,12 +398,13 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     if (known !== undefined) {
       try {
         const file = await known.getFile();
+        this._touchFileHandleCache(path, known);
         return { type: 'file', size: file.size, mtimeMs: file.lastModified };
-      } catch (error) {
-        /* Gone or replaced by a directory since: forget it and look the path up. */
-        this._fileHandleCache.delete(path);
-        if (!hasDomName(error, 'NotFoundError') && !hasDomName(error, 'TypeMismatchError')) {
-          throw error;
+      } catch {
+        /* Gone, replaced by a directory, or refused since: forget it and look
+         * the path up, which reports whatever the path holds now. */
+        if (this._fileHandleCache.get(path) === known) {
+          this._fileHandleCache.delete(path);
         }
       }
     }
@@ -548,7 +551,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       return;
     }
     await this._moveFile(from, to);
-    this._invalidateHandleCachePrefix(from);
+    this._invalidateHandleCachePrefix(from, 'file');
     this._fileHandleCache.delete(to);
   }
 
@@ -1218,7 +1221,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
   ): Promise<void> {
     if (created.createdFile) {
       try {
-        await this._removeEntry(path, false);
+        await this._removeEntry(path, false, 'file');
       } catch {
         return;
       }
@@ -1449,7 +1452,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       await this._moveFile(siblingPath, entry.path);
       return { outcome: 'applied', kind: 'file', created: true };
     } catch (error) {
-      await this._removeEntry(siblingPath, false).catch(() => undefined);
+      await this._removeEntry(siblingPath, false, 'file').catch(() => undefined);
       return moving ? { outcome: 'uncertain', error } : { outcome: 'failed', error };
     }
   }
@@ -1523,7 +1526,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
         return false;
       }
       try {
-        await this._removeEntry(entry.path, false);
+        await this._removeEntry(entry.path, false, 'file');
         return true;
       } catch {
         return false;
@@ -1592,7 +1595,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     } catch (error) {
       if (opened.createdFile) {
         try {
-          await this._removeEntry(entry.path, false);
+          await this._removeEntry(entry.path, false, 'file');
           return { outcome: 'failed', error };
         } catch {
           return { outcome: 'uncertain', error };
@@ -1743,7 +1746,14 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     return undefined;
   }
 
-  private async _removeEntry(path: string, recursive: boolean): Promise<void> {
+  /**
+   * Remove one entry and forget the handles kept for it.
+   *
+   * @param path - Where the entry sits, relative to the root.
+   * @param recursive - Remove a directory's contents too.
+   * @param kind - `'file'` when the entry is known to be a file, so only its own kept handle is forgotten.
+   */
+  private async _removeEntry(path: string, recursive: boolean, kind?: 'file'): Promise<void> {
     const segments = this._splitPath(path);
     if (segments.length === 0) {
       return;
@@ -1751,7 +1761,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     const name = segments.pop()!;
     const parent = await this._resolveDirectoryHandle(segments.join('/'));
     await parent.removeEntry(name, { recursive });
-    this._invalidateHandleCachePrefix(path);
+    this._invalidateHandleCachePrefix(path, kind);
   }
 
   private async _missingDirectoryPaths(path: string): Promise<string[]> {
@@ -1778,8 +1788,17 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     return missing;
   }
 
+  /**
+   * Keep `handle` for `key` as the most recently used; a new key past the
+   * bound evicts the least recently used, a known key only moves.
+   *
+   * @param key - The file's path.
+   * @param handle - Its handle, from a listing or a lookup.
+   */
   private _setFileHandleCache(key: string, handle: FileSystemFileHandle): void {
-    if (this._fileHandleCache.size >= this._handleCacheMax) {
+    if (this._fileHandleCache.has(key)) {
+      this._fileHandleCache.delete(key);
+    } else if (this._fileHandleCache.size >= this._handleCacheMax) {
       const firstKey = this._fileHandleCache.keys().next().value;
       if (firstKey !== undefined) {
         this._fileHandleCache.delete(firstKey);
@@ -1788,24 +1807,53 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     this._fileHandleCache.set(key, handle);
   }
 
-  /** Forget the file handles of every path a batch names; a directory entry forgets its subtree. */
+  /**
+   * Move a kept file handle that just answered to the most recently used end,
+   * unless it was forgotten meanwhile.
+   *
+   * @param key - The file's path.
+   * @param handle - The handle that answered.
+   */
+  private _touchFileHandleCache(key: string, handle: FileSystemFileHandle): void {
+    if (this._fileHandleCache.get(key) === handle) {
+      this._fileHandleCache.delete(key);
+      this._fileHandleCache.set(key, handle);
+    }
+  }
+
+  /**
+   * Forget the file handles of the paths a batch's writes name. Its moves and
+   * deletes go through rename, unlink and rmdir, which forget their own paths.
+   *
+   * @param entries - The batch that was applied.
+   */
   private _forgetBatchFileHandles(entries: readonly BatchEntry[]): void {
     for (const entry of entries) {
-      if (entry.op === 'move') {
-        this._forgetFileHandlesUnder(entry.from);
-        this._forgetFileHandlesUnder(entry.to);
-      } else if (entry.op === 'delete' && entry.kind !== 'file') {
-        this._forgetFileHandlesUnder(entry.path);
-      } else {
+      if (entry.op === 'write' || entry.op === 'append') {
         this._fileHandleCache.delete(entry.path);
       }
     }
   }
 
-  /** Forget `path` and everything under it; the root forgets every kept handle. */
-  private _forgetFileHandlesUnder(path: string): void {
+  /**
+   * Forget the kept file handle at `path`, and for a path that may be a
+   * directory every one under it; the root forgets them all.
+   *
+   * @param path - The file or directory whose handles go, relative to the root.
+   * @param kind - `'file'` when `path` is known to be a file: only its own key is forgotten, without a scan.
+   */
+  private _forgetFileHandlesUnder(path: string, kind?: 'file'): void {
+    if (kind === 'file') {
+      this._fileHandleCache.delete(path);
+      return;
+    }
+    if (path === '') {
+      this._fileHandleCache.clear();
+      return;
+    }
+    const prefix = `${path}/`;
     for (const key of this._fileHandleCache.keys()) {
-      if (path === '' || key === path || key.startsWith(`${path}/`)) {
+      if (key === path || key.startsWith(prefix)) {
         this._fileHandleCache.delete(key);
       }
     }
@@ -1834,10 +1882,10 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     }
   }
 
-  private _invalidateHandleCachePrefix(path: string): void {
+  private _invalidateHandleCachePrefix(path: string, kind?: 'file'): void {
     this._handleGeneration++;
     this._pendingDirectoryHandles.clear();
-    this._forgetFileHandlesUnder(path);
+    this._forgetFileHandlesUnder(path, kind);
     if (path === '') {
       this._handleCache.clear();
       return;

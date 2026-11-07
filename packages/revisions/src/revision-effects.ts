@@ -1902,14 +1902,20 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     try {
       return await list();
     } catch (error) {
+      /* A `410` is a project Tau Cloud tombstoned: registering cannot bring it back. */
       if (
         kind !== 'tau' ||
         options.registerRemoteProject === undefined ||
-        !(error instanceof RevisionPortError && error.code === 'REMOTE_NOT_FOUND')
+        !(error instanceof RevisionPortError && error.code === 'REMOTE_NOT_FOUND' && error.status !== 410)
       ) {
         throw error;
       }
-      await options.registerRemoteProject(projectId);
+      /* A refused registration is reported as the listing's own refusal, which says what the remote answered. */
+      try {
+        await options.registerRemoteProject(projectId);
+      } catch {
+        throw error;
+      }
       return list();
     }
   };

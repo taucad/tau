@@ -5009,7 +5009,7 @@ describe('connecting a remote', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('fails the connection when Tau Cloud refuses the registration', async () => {
+  it('fails the connection with the listing’s refusal when Tau Cloud refuses the registration', async () => {
     const registerRemoteProject = vi.fn(async () => {
       throw new Error('That project id already belongs to another account.');
     });
@@ -5029,7 +5029,31 @@ describe('connecting a remote', () => {
     });
     await expect(
       run(actors.remote.validate, { remote: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' }),
-    ).rejects.toThrow('another account');
+    ).rejects.toThrow('No repository here yet.');
+    expect(registerRemoteProject).toHaveBeenCalledOnce();
+  });
+
+  /* A `410` is a tombstoned project, which a registration cannot bring back. */
+  it('does not register a project Tau Cloud answers 410 for', async () => {
+    const registerRemoteProject = vi.fn(async () => undefined);
+    const { port, filesystem } = await fixture();
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    await port.setRemote({ name: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' });
+    const actors = createRevisionActors({
+      port: {
+        ...port,
+        listRemoteRefs: async () => {
+          throw new RevisionPortError('REMOTE_NOT_FOUND', 'This project was deleted.', { status: 410 });
+        },
+      },
+      projectId: 'project-1',
+      filesystem: async () => filesystem,
+      registerRemoteProject,
+    });
+    await expect(
+      run(actors.remote.validate, { remote: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' }),
+    ).rejects.toThrow('This project was deleted.');
+    expect(registerRemoteProject).not.toHaveBeenCalled();
   });
 });
 

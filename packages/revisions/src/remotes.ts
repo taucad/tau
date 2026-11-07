@@ -712,6 +712,7 @@ export const remoteTransportError = (error: unknown, context: RemoteTransportCon
   const sentence = code === 'REMOTE_REAUTHORIZATION_REQUIRED' && status === 401 ? undefined : answered.message;
   return new RevisionPortError(code, sentence ?? refusalSentence(code, context.remote), {
     cause: error,
+    status,
     ...(status === 429
       ? { retryAfterMilliseconds: retryAfterMilliseconds(context.retryAfter) ?? defaultRateLimitWaitMilliseconds }
       : {}),

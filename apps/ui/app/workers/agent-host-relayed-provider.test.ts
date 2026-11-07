@@ -83,4 +83,45 @@ describe('createRelayedFileSystemProvider', () => {
       code: 'PENDING_PATHS_UNSUPPORTED',
     });
   });
+
+  /* D13: the agent's grep and glob read the root's index in one call; the view's mask, which cannot cross the wire, applies here. */
+  it('should relay statTree with the mask applied to each row and its directories', async () => {
+    const rows = [
+      { path: 'main.ts', name: 'main.ts', type: 'file', size: 1, mtimeMs: 1 },
+      { path: '.tau/project.json', name: 'project.json', type: 'file', size: 1, mtimeMs: 1 },
+      { path: 'src/hidden/a.ts', name: 'a.ts', type: 'file', size: 1, mtimeMs: 1 },
+    ];
+    const statTree = vi.fn(async () => rows);
+    const bridge = new Proxy(
+      { hello: { payload: { state: 'ready', capabilities: {} } }, statTree } as Record<PropertyKey, unknown>,
+      { get: (target, property) => target[property] ?? vi.fn() },
+    ) as unknown as RelayedBridge;
+    const admits = (path: string, kind: 'file' | 'dir'): boolean =>
+      path !== '.tau/project.json' && !(kind === 'dir' && path === 'src/hidden');
+
+    const listed = await createRelayedFileSystemProvider(bridge).statTree('', { admits });
+
+    expect(listed.map((row) => row.path)).toEqual(['main.ts']);
+    expect(statTree).toHaveBeenCalledWith('', undefined);
+  });
+
+  /* A bridge whose far end holds no index: the agent's search walks instead. */
+  it('should refuse statTree and facts as unsupported where the bridge serves no index', async () => {
+    const unknown = (method: string) =>
+      vi.fn(async () => {
+        throw new Error(`Unknown method: ${method}`);
+      });
+    const bridge = new Proxy(
+      {
+        hello: { payload: { state: 'ready', capabilities: {} } },
+        statTree: unknown('statTree'),
+        facts: unknown('facts'),
+      } as Record<PropertyKey, unknown>,
+      { get: (target, property) => target[property] ?? vi.fn() },
+    ) as unknown as RelayedBridge;
+    const provider = createRelayedFileSystemProvider(bridge);
+
+    await expect(provider.statTree('')).rejects.toMatchObject({ code: 'ENOTSUP' });
+    await expect(provider.facts(['main.ts'])).rejects.toMatchObject({ code: 'ENOTSUP' });
+  });
 });

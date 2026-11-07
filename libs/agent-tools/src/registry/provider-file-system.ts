@@ -26,7 +26,7 @@
  */
 
 import { fileMetadataFields, getFileContentMetadata, lineCountByteCap } from '@taucad/filesystem';
-import type { ContentFacts, DirectoryStatRow, ResourceQueue } from '@taucad/filesystem';
+import type { ContentFacts, DirectoryStatRow, FileStatEntry, ResourceQueue } from '@taucad/filesystem';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
 import type { CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
 import { applyClientTextMutation, createExactReplacementPlan } from '@taucad/chat/rpc';
@@ -45,6 +45,11 @@ const manifestPath = 'tau.json';
 const maximumCheckedPreconditions = 32;
 const maximumCheckedBytes = 8 * 1024 * 1024;
 const maximumReadBytes = 256 * 1024 * 1024;
+/**
+ * Largest file a kind-only facts request may read whole: only a source with no
+ * ranged read does, and a search reads a file that size in full anyway.
+ */
+const contentKindByteCap = 4 * 1024 * 1024;
 
 const manifestRefusal = (message: string): Error =>
   Object.assign(new Error(message), { code: rpcClientErrorCode.validationError });
@@ -289,8 +294,69 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
     };
   };
 
-  const { pendingPaths } = provider;
+  const { pendingPaths, statTree, facts } = provider;
   return {
+    /*
+     * The index answers a whole subtree in one call (charter D13): what grep
+     * and glob search instead of a walk. The view passes its mask down as
+     * `admits` and the index never holds an ignored directory, so an empty
+     * answer for a named directory may be one it does not hold (a
+     * `node_modules`); the handlers walk that one instead.
+     */
+    ...(statTree === undefined
+      ? {}
+      : {
+          indexedFiles: async (path: string) => {
+            assertNotAborted(signal);
+            const directory = assertRootedPath(path);
+            let rows: readonly FileStatEntry[];
+            try {
+              rows = await statTree.call(provider, directory, signal === undefined ? undefined : { signal });
+            } catch (error) {
+              /* A view over a connection that serves no index: the handlers walk. */
+              if (getErrno(error) === 'ENOTSUP') {
+                return undefined;
+              }
+              throw error;
+            }
+            if (rows.length === 0 && directory !== '') {
+              return undefined;
+            }
+            /* The index lists files only; a directory row would be no file to search. */
+            return rows.flatMap((row) =>
+              row.type === 'file'
+                ? [
+                    {
+                      path: directory === '' ? row.path : `${directory}/${row.path}`,
+                      size: row.size,
+                      ...fileMetadataFields(row),
+                      ...(row.mtimeMs > 0 ? { modifiedAt: new Date(row.mtimeMs).toISOString() } : {}),
+                    },
+                  ]
+                : [],
+            );
+          },
+        }),
+    /* Kinds only, from each file's head where the index has not measured one (D4): no line count, no full read. */
+    contentKinds: async (paths: readonly string[]) => {
+      const targets = paths.map((path) => assertRootedPath(path));
+      let measured: ReadonlyMap<string, ContentFacts>;
+      try {
+        measured = await facts.call(provider, targets, { lineCount: false, byteCap: contentKindByteCap });
+      } catch (error) {
+        /* No index to ask: the search reads these files and learns their kind from the bytes. */
+        if (getErrno(error) === 'ENOTSUP') {
+          return new Map();
+        }
+        throw error;
+      }
+      return new Map(
+        paths.flatMap((path, index) => {
+          const kind = measured.get(targets[index]!)?.contentKind;
+          return kind === undefined ? [] : [[path, kind] as const];
+        }),
+      );
+    },
     /* Pending entries come from the view's index, so a search learns them without a read (D9). */
     ...(pendingPaths === undefined
       ? {}

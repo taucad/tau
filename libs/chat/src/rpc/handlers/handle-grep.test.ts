@@ -494,4 +494,96 @@ describe('handleGrep', () => {
     expect(result).toMatchObject({ success: true, totalMatches: 0 });
     expect(result.success && 'pendingFiles' in result).toBe(false);
   });
+
+  describe('over the Project Index (D13)', () => {
+    it('should search the index rows with no walk and leave binaries and oversized files unread', async () => {
+      const fileSystem = mock<RpcFileSystem>();
+      const indexedFiles = vi.fn<NonNullable<RpcFileSystem['indexedFiles']>>(async () => [
+        { path: 'main.ts', size: 20, contentKind: 'text', lineCount: 1 },
+        { path: 'models/part.step', size: 4096, contentKind: 'binary' },
+        { path: 'dist/bundle.js', size: 5 * 1024 * 1024, contentKind: 'text' },
+        { path: 'src/new.ts', size: 30 },
+        { path: 'src/blob.bin', size: 900 },
+      ]);
+      fileSystem.indexedFiles = indexedFiles;
+      const contentKinds = vi.fn<NonNullable<RpcFileSystem['contentKinds']>>(
+        async () =>
+          new Map([
+            ['src/new.ts', 'text'],
+            ['src/blob.bin', 'binary'],
+          ]),
+      );
+      fileSystem.contentKinds = contentKinds;
+      fileSystem.readFile.mockImplementation(async (path) => `marker in ${path}\n`);
+
+      const result = await handleGrep({ pattern: 'marker', path: '' }, fileSystem);
+
+      expect(fileSystem.readdir).not.toHaveBeenCalled();
+      expect(contentKinds).toHaveBeenCalledWith(['src/new.ts', 'src/blob.bin']);
+      expect(fileSystem.readFile.mock.calls.map(([path]) => path)).toStrictEqual(['main.ts', 'src/new.ts']);
+      expect(result.success && result.matches.map(({ file }) => file)).toStrictEqual(['main.ts', 'src/new.ts']);
+    });
+
+    it('should filter the index rows by the glob before asking for kinds', async () => {
+      const fileSystem = mock<RpcFileSystem>();
+      fileSystem.stat.mockResolvedValue({
+        size: 0,
+        isDirectory: true,
+        createdAt: '2026-05-12T00:00:00.000Z',
+        modifiedAt: '2026-05-12T00:00:00.000Z',
+      });
+      const indexedFiles = vi.fn<NonNullable<RpcFileSystem['indexedFiles']>>(async () => [
+        { path: 'src/a.ts', size: 10 },
+        { path: 'src/b.md', size: 10 },
+      ]);
+      fileSystem.indexedFiles = indexedFiles;
+      const contentKinds = vi.fn<NonNullable<RpcFileSystem['contentKinds']>>(async () => new Map());
+      fileSystem.contentKinds = contentKinds;
+      fileSystem.readFile.mockResolvedValue('marker');
+
+      await handleGrep({ pattern: 'marker', path: 'src', glob: '*.ts' }, fileSystem);
+
+      expect(indexedFiles).toHaveBeenCalledWith('src');
+      expect(contentKinds).toHaveBeenCalledWith(['src/a.ts']);
+      expect(fileSystem.readFile.mock.calls.map(([path]) => path)).toStrictEqual(['src/a.ts']);
+    });
+
+    it('should walk a directory the index cannot answer for', async () => {
+      const fileSystem = mock<RpcFileSystem>();
+      fileSystem.stat.mockResolvedValue({
+        size: 0,
+        isDirectory: true,
+        createdAt: '2026-05-12T00:00:00.000Z',
+        modifiedAt: '2026-05-12T00:00:00.000Z',
+      });
+      const indexedFiles = vi.fn<NonNullable<RpcFileSystem['indexedFiles']>>(async () => undefined);
+      fileSystem.indexedFiles = indexedFiles;
+      fileSystem.readdir.mockResolvedValue([textEntry('index.d.ts', 20)]);
+      fileSystem.readFile.mockResolvedValue('marker');
+
+      const result = await handleGrep({ pattern: 'marker', path: 'node_modules' }, fileSystem);
+
+      expect(fileSystem.readdir).toHaveBeenCalledWith('node_modules', { contentFacts: false });
+      expect(result.success && result.matches.map(({ file }) => file)).toStrictEqual(['node_modules/index.d.ts']);
+    });
+
+    it('should walk an explicit skills scope, whose composed skills no index holds', async () => {
+      const fileSystem = mock<RpcFileSystem>();
+      fileSystem.stat.mockResolvedValue({
+        size: 0,
+        isDirectory: true,
+        createdAt: '2026-05-12T00:00:00.000Z',
+        modifiedAt: '2026-05-12T00:00:00.000Z',
+      });
+      const indexedFiles = vi.fn<NonNullable<RpcFileSystem['indexedFiles']>>(async () => []);
+      fileSystem.indexedFiles = indexedFiles;
+      fileSystem.readdir.mockResolvedValue([textEntry('SKILL.md', 20)]);
+      fileSystem.readFile.mockResolvedValue('marker');
+
+      await handleGrep({ pattern: 'marker', path: '.agents/skills' }, fileSystem);
+
+      expect(indexedFiles).not.toHaveBeenCalled();
+      expect(fileSystem.readdir).toHaveBeenCalledWith('.agents/skills', { contentFacts: false });
+    });
+  });
 });

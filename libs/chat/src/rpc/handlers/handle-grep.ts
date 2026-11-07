@@ -1,9 +1,10 @@
 import type { GrepRpcInput, GrepRpcResult } from '#schemas/rpc.schema.js';
 import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { toRpcError } from '#rpc/rpc-error.js';
-import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
+import { assertRootedPath } from '@taucad/utils/path';
 import { getErrno } from '@taucad/utils/error';
 import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
+import { contentKindsOf, indexedFilesUnder, isExplicitSkillsScope, walkFiles } from '#rpc/search-files.js';
 
 /**
  * Default `headLimit` when the caller omits one. Mirrors claude-code's
@@ -19,28 +20,13 @@ const defaultGrepHeadLimit = 50;
  */
 const maxGrepLineChars = 500;
 
-async function collectFilePaths(
-  fileSystem: RpcFileSystem,
-  basePath: string,
-  includeExplicitOnly: boolean,
-): Promise<string[]> {
-  const paths: string[] = [];
-  /* Grep reads every file it finds, which already measures it: the walk needs names and types only. */
-  const entries = await fileSystem.readdir(basePath, { contentFacts: false });
-
-  for (const entry of entries) {
-    const fullPath = joinRelativePath(basePath, entry.name);
-    if (entry.type === 'file') {
-      paths.push(fullPath);
-    } else if (includeExplicitOnly || entry.traverseOnImplicitSearch !== false) {
-      // oxlint-disable-next-line no-await-in-loop -- recursive traversal
-      const subPaths = await collectFilePaths(fileSystem, fullPath, includeExplicitOnly);
-      paths.push(...subPaths);
-    }
-  }
-
-  return paths;
-}
+/**
+ * Largest file an index-backed grep reads (charter D13): a larger one is
+ * generated output or data, not source, and its bytes would become one string.
+ * The same default as the authority's own `grep`. A file named as the grep's
+ * path is always read.
+ */
+const maxIndexedGrepFileBytes = 4 * 1024 * 1024;
 
 type GrepMatch = { file: string; line: number; content: string; before?: string[]; after?: string[] };
 
@@ -95,16 +81,51 @@ function truncateMatchLine(line: string): string {
   return line.slice(0, maxGrepLineChars);
 }
 
-async function resolveSearchPaths(fileSystem: RpcFileSystem, basePath: string): Promise<string[]> {
+/** A glob over project-relative paths: a pattern without `/` matches a basename at any depth. */
+const globFilter = async (glob: string): Promise<(path: string) => boolean> => {
+  const { minimatch } = await import('minimatch');
+  return (path) => minimatch(path, glob, { matchBase: true, dot: true });
+};
+
+/**
+ * The files one grep reads. The index answers a directory's subtree in one
+ * call, and every file it already knows is binary or above the size cap is
+ * left unread; a file whose kind it has not measured is classified from its
+ * head (D4) before any read. Without an index the directory is walked and
+ * every file it lists is read, as before.
+ */
+async function resolveSearchFiles(
+  fileSystem: RpcFileSystem,
+  basePath: string,
+  glob: string | undefined,
+): Promise<string[]> {
   // Stat first so we can distinguish file vs directory and emit a clean
   // FILE_NOT_FOUND when the caller types a wrong path (no thrown
   // `Grep search failed` exception, mirrors claude-code's GrepTool.validateInput).
-  if (basePath === '') {
-    return collectFilePaths(fileSystem, '', false);
+  const matchesGlob = glob ? await globFilter(glob) : undefined;
+  if (basePath !== '') {
+    const stat = await fileSystem.stat(basePath);
+    if (!stat.isDirectory) {
+      return matchesGlob?.(basePath) === false ? [] : [basePath];
+    }
   }
-  const stat = await fileSystem.stat(basePath);
-  const explicitlyScopedToSkills = basePath === '.agents/skills' || basePath.startsWith('.agents/skills/');
-  return stat.isDirectory ? collectFilePaths(fileSystem, basePath, explicitlyScopedToSkills) : [basePath];
+  const indexed = await indexedFilesUnder(fileSystem, basePath);
+  if (indexed === undefined) {
+    const walked = await walkFiles(fileSystem, basePath, {
+      contentFacts: false,
+      includeExplicitOnly: isExplicitSkillsScope(basePath),
+    });
+    return walked.map(({ path }) => path).filter((path) => matchesGlob?.(path) !== false);
+  }
+  const candidates = indexed.filter(
+    (file) =>
+      file.contentKind !== 'binary' && file.size <= maxIndexedGrepFileBytes && matchesGlob?.(file.path) !== false,
+  );
+  const kinds = await contentKindsOf(
+    fileSystem,
+    candidates.filter((file) => file.contentKind === undefined).map((file) => file.path),
+  );
+  return candidates.filter((file) => (file.contentKind ?? kinds.get(file.path)) !== 'binary').map(({ path }) => path);
 }
 
 /** @public */
@@ -119,7 +140,7 @@ export async function handleGrep(input: GrepRpcInput, fileSystem: RpcFileSystem)
 
     let filesToSearch: string[];
     try {
-      filesToSearch = await resolveSearchPaths(fileSystem, basePath);
+      filesToSearch = await resolveSearchFiles(fileSystem, basePath, input.glob);
     } catch (error) {
       const errno = (error as NodeJS.ErrnoException | undefined)?.code;
       if (errno === 'ENOENT' || (error instanceof Error && /enoent|no such/i.test(error.message))) {
@@ -130,11 +151,6 @@ export async function handleGrep(input: GrepRpcInput, fileSystem: RpcFileSystem)
         };
       }
       throw error;
-    }
-
-    if (input.glob) {
-      const { minimatch } = await import('minimatch');
-      filesToSearch = filesToSearch.filter((path) => minimatch(path, input.glob!, { matchBase: true, dot: true }));
     }
 
     const pending = new Set<string>(await knownPending(fileSystem, filesToSearch));

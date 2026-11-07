@@ -22,6 +22,7 @@ import type {
   GrepOptions,
   GrepResult,
   IndexChangedSince,
+  IndexChangedSinceOptions,
   IndexStats,
   LongCall,
   ReadManyWireRows,
@@ -50,7 +51,7 @@ type Facts = (
   paths: readonly string[],
   options?: FactsOptions & LongCall,
 ) => Promise<ReadonlyMap<string, ContentFacts>>;
-type ChangedSince = (since: number, options?: LongCall) => Promise<IndexChanges>;
+type ChangedSince = (since: number, options?: IndexChangedSinceOptions & LongCall) => Promise<IndexChanges>;
 type ReadStream = (
   path: string,
   options: { readonly position: number; readonly length: number },
@@ -424,15 +425,18 @@ const hostFacts =
     return [...(await facts(paths, options))];
   };
 
-/** What changed, with each entry's measurement record left on the authority. */
+/** What changed, with each entry's measurement record left on the authority; `rescan` and removals carried whole (S10). */
 const hostChangedSince =
   (changedSince: ChangedSince) =>
-  async (since: number, options?: LongCall): Promise<IndexChangedSince> => {
+  async (since: number, options?: IndexChangedSinceOptions & LongCall): Promise<IndexChangedSince> => {
     throwIfAborted(options?.signal);
-    const changes = await changedSince(since, options);
+    const { generation, epoch, entries, removed, rescan } = await changedSince(since, options);
     return {
-      generation: changes.generation,
-      entries: changes.entries.map(({ factsAt: _factsAt, ...entry }) => entry),
+      generation,
+      epoch,
+      entries: entries.map(({ factsAt: _factsAt, ...entry }) => entry),
+      removed,
+      ...(rescan === true ? { rescan } : {}),
     };
   };
 

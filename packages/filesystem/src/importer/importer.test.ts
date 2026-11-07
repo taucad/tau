@@ -21,11 +21,15 @@ import {
 } from '#importer/sources.js';
 import {
   discardStagedImport,
+  importOwnerPath,
   importStagingDirectory,
   importStagingStaleMilliseconds,
+  ownsImportTarget,
   readStagedImport,
+  releaseStagedImport,
   stageImport,
   sweepStagedImports,
+  touchStagedImport,
 } from '#importer/staging.js';
 import type { ImportStagingPort } from '#importer/staging.js';
 
@@ -56,6 +60,8 @@ type RawEntry = Readonly<{
   shortZip64?: boolean;
   /** Point the central record at another entry's local header. */
   sameOffsetAs?: number;
+  /** Declare this many extra-field bytes in the local header without writing them, so its data seems to start later. */
+  localExtra?: number;
 }>;
 
 /* A stored zip written field by field, for archives JSZip never writes: ZIP64 records, shared ranges, padded directories. */
@@ -74,6 +80,7 @@ const rawZip = (entries: readonly RawEntry[], options: Readonly<{ directoryPaddi
     view.setUint32(18, entry.data.byteLength, true);
     view.setUint32(22, entry.data.byteLength, true);
     view.setUint16(26, name.byteLength, true);
+    view.setUint16(28, entry.localExtra ?? 0, true);
     local.set(name, 30);
     local.set(entry.data, 30 + name.byteLength);
     offsets.push(offset);
@@ -219,7 +226,10 @@ describe('readZipDirectory', () => {
     const blob = rawZip([{ name: 'a.txt', data: text('alpha') }], { directoryPadding: 4096 });
     const read = vi.fn(blobRangeSource(blob).read);
 
-    expect(await refusal(readZipDirectory({ size: blob.size, read }, { maximumPathBytes: 1024 }))).toBe('corrupt');
+    /* A limit an import sets, not damage: the reason says so. */
+    expect(await refusal(readZipDirectory({ size: blob.size, read }, { maximumPathBytes: 1024 }))).toBe(
+      'archiveTooLarge',
+    );
     /* The tail alone: the directory itself is never read. */
     expect(read).toHaveBeenCalledTimes(1);
   });
@@ -237,6 +247,21 @@ describe('readZipDirectory', () => {
     ]);
 
     expect(await refusal(readZipDirectory(blobRangeSource(blob)))).toBe('corrupt');
+  });
+
+  it("should refuse an entry whose local header's name and extra field carry its data into the next entry", async () => {
+    const blob = rawZip([
+      { name: 'a.txt', data: text('kernel'), localExtra: 4 },
+      { name: 'b.txt', data: text('other!') },
+    ]);
+    /* The directory alone sees no overlap: the fixed header and the data fit before the next entry. */
+    const { entries } = await readZipDirectory(blobRangeSource(blob));
+    const [first, second] = entries;
+
+    expect(first!.extentEnd).toBe(second!.localHeaderOffset);
+    await expect(decodeImportEntry({ blob, path: 'a.txt', size: first!.size, zip: first! })).rejects.toThrow(
+      'overlaps the next one',
+    );
   });
 
   it('should give a directory an identity its bytes decide', async () => {
@@ -736,7 +761,7 @@ describe('stageImport', () => {
     expect(await provider.exists(importStagingDirectory(operationId))).toBe(false);
   });
 
-  it('should stage under its own folder where a move is free, and refuse an in-place folder that exists', async () => {
+  it('should stage under its own folder where a move is free, and take the next free name for an in-place folder', async () => {
     const moving = new MemoryProvider();
     Object.defineProperty(moving, 'capabilities', { value: { ...moving.capabilities, movesInPlace: true } });
     const judged = await plan(zipImportSource(await zipOf({ 'a.ts': 'a' })));
@@ -750,21 +775,182 @@ describe('stageImport', () => {
     });
 
     expect(staged.inPlace).toBeUndefined();
+    expect(staged.target).toBe('gear');
     expect(await moving.exists('gear')).toBe(false);
+
+    /* Staged to move, the commit creates the folder: a name a plain folder holds is passed over too. */
+    await moving.writeFile('gear/keep.txt', 'mine');
+    const again = await stageImport({
+      port: port(moving),
+      operationId: 'op_moving',
+      plan: judged,
+      decode: createInlineImportDecoder(),
+      target: 'gear',
+    });
+
+    expect(again.target).toBe('gear-2');
 
     const copying = new MemoryProvider();
     await copying.writeFile('gear/keep.txt', 'mine');
 
+    const suffixed = await stageImport({
+      port: port(copying),
+      operationId,
+      plan: judged,
+      decode: createInlineImportDecoder(),
+      target: 'gear',
+    });
+
+    /* A folder someone else holds is never written into: the import takes `gear-2`. */
+    expect(suffixed.inPlace).toBe('gear-2');
+    expect(suffixed.target).toBe('gear-2');
+    expect(await copying.readdir('gear')).toEqual(['keep.txt']);
+    expect(new TextDecoder().decode(await copying.readFile('gear-2/a.ts'))).toBe('a');
+    expect(await ownsImportTarget(copying, 'gear-2', operationId)).toBe(true);
+  });
+
+  it('should claim an in-place folder, and write every batch into it, under the directory lock', async () => {
+    const provider = new MemoryProvider();
+    const files = Object.fromEntries(Array.from({ length: 300 }, (_, index) => [`${String(index)}.txt`, 'x']));
+    const judged = await plan(zipImportSource(await zipOf(files)));
+    const locked: string[] = [];
+    let holding = false;
+    const base = port(provider);
+    const staging: ImportStagingPort = {
+      ...base,
+      apply: async (entries) => {
+        if (entries.some((entry) => entry.op === 'write' && entry.path.startsWith('gear/'))) {
+          expect(holding).toBe(true);
+        }
+        return base.apply(entries);
+      },
+      exclusive: async (path, work) => {
+        locked.push(path);
+        holding = true;
+        try {
+          return await work();
+        } finally {
+          holding = false;
+        }
+      },
+    };
+
+    await stageImport({
+      port: staging,
+      operationId,
+      plan: judged,
+      decode: createInlineImportDecoder(),
+      target: 'gear',
+    });
+
+    /* The claim, then each of the two batches. */
+    expect(locked).toEqual(['gear', 'gear', 'gear']);
+  });
+
+  it('should stop writing into an in-place folder whose owner marker stops naming the import', async () => {
+    const provider = new MemoryProvider();
+    const files = Object.fromEntries(Array.from({ length: 300 }, (_, index) => [`${String(index)}.txt`, 'x']));
+    const judged = await plan(zipImportSource(await zipOf(files)));
+    const inline = createInlineImportDecoder();
+    let decodes = 0;
+    const decode: ImportDecoder = async (request, options) => {
+      decodes += 1;
+      if (decodes === 257) {
+        /* Someone else takes the folder between the first batch and the second. */
+        await provider.writeFile(`gear/${importOwnerPath}`, JSON.stringify({ operationId: 'someone_else' }));
+      }
+      return inline(request, options);
+    };
+
     await expect(
-      stageImport({
-        port: port(copying),
-        operationId,
-        plan: judged,
-        decode: createInlineImportDecoder(),
-        target: 'gear',
-      }),
-    ).rejects.toThrow('already exists');
-    expect(new TextDecoder().decode(await copying.readFile('gear/keep.txt'))).toBe('mine');
+      stageImport({ port: port(provider), operationId, plan: judged, decode, target: 'gear' }),
+    ).rejects.toThrow('no longer belongs to this import');
+    expect(await provider.exists('gear/299.txt')).toBe(false);
+  });
+
+  it('should discard only what its ledger wrote into the folder, and leave a file anyone else put there', async () => {
+    const provider = new MemoryProvider();
+    const judged = await plan(zipImportSource(await zipOf({ 'p/a.ts': 'a', 'p/lib/b.ts': 'b' })));
+    await stageImport({
+      port: port(provider),
+      operationId,
+      plan: judged,
+      decode: createInlineImportDecoder(),
+      target: 'gear',
+    });
+    await provider.writeFile('gear/lib/notes.txt', 'mine');
+
+    await discardStagedImport(port(provider), operationId);
+
+    expect(await provider.exists('gear/a.ts')).toBe(false);
+    expect(await provider.exists('gear/lib/b.ts')).toBe(false);
+    expect(await provider.exists(`gear/${importOwnerPath}`)).toBe(false);
+    expect(new TextDecoder().decode(await provider.readFile('gear/lib/notes.txt'))).toBe('mine');
+    expect(await provider.exists(importStagingDirectory(operationId))).toBe(false);
+  });
+
+  it('should leave a folder whose owner marker names another operation whole', async () => {
+    const provider = new MemoryProvider();
+    const judged = await plan(zipImportSource(await zipOf({ 'a.ts': 'a' })));
+    await stageImport({
+      port: port(provider),
+      operationId,
+      plan: judged,
+      decode: createInlineImportDecoder(),
+      target: 'gear',
+    });
+    await provider.writeFile(`gear/${importOwnerPath}`, JSON.stringify({ operationId: 'someone_else' }));
+
+    await discardStagedImport(port(provider), operationId);
+
+    expect(await provider.exists('gear/a.ts')).toBe(true);
+    expect(await provider.exists(importStagingDirectory(operationId))).toBe(false);
+  });
+
+  it('should remove the files of a batch it announced but never recorded', async () => {
+    const provider = new MemoryProvider();
+    const judged = await plan(zipImportSource(await zipOf({ 'a.ts': 'a' })));
+    const base = port(provider);
+    /* The batch lands, then the tab dies before its ledger record. */
+    const crashing: ImportStagingPort = {
+      ...base,
+      apply: async (entries) => {
+        if (entries.some((entry) => entry.op === 'write' && /ledger\/\d+\.json$/u.test(entry.path))) {
+          throw new Error('closed');
+        }
+        return base.apply(entries);
+      },
+    };
+    await expect(
+      stageImport({ port: crashing, operationId, plan: judged, decode: createInlineImportDecoder(), target: 'gear' }),
+    ).rejects.toThrow('closed');
+    expect(await provider.exists('gear/a.ts')).toBe(true);
+
+    await discardStagedImport(port(provider), operationId);
+
+    expect(await provider.exists('gear')).toBe(false);
+  });
+
+  it('should let go of its folder on release, so no later discard touches the project', async () => {
+    const provider = new MemoryProvider();
+    const judged = await plan(zipImportSource(await zipOf({ 'a.ts': 'a' })));
+    await stageImport({
+      port: port(provider),
+      operationId,
+      plan: judged,
+      decode: createInlineImportDecoder(),
+      target: 'gear',
+    });
+
+    await releaseStagedImport(port(provider), operationId);
+
+    const released = await readStagedImport(provider, operationId);
+    expect(released?.inPlace).toBeUndefined();
+    expect(await provider.exists(`gear/${importOwnerPath}`)).toBe(false);
+
+    await discardStagedImport(port(provider), operationId);
+
+    expect(await provider.exists('gear/a.ts')).toBe(true);
   });
 
   it('should refuse an operation id that is not a plain token', () => {
@@ -812,6 +998,33 @@ describe('sweepStagedImports', () => {
     expect(await provider.exists(importStagingDirectory('orphan'))).toBe(false);
     expect(await provider.exists(importStagingDirectory('owned'))).toBe(true);
     expect(await provider.exists('.tau-staging/other-owner/x')).toBe(true);
+  });
+
+  it('should judge stillness by the times its records carry where the provider keeps no mtime', async () => {
+    const provider = new MemoryProvider();
+    /* IndexedDB answers a stat with an mtime of 0. */
+    const stat = provider.stat.bind(provider);
+    vi.spyOn(provider, 'stat').mockImplementation(async (path) => ({ ...(await stat(path)), mtimeMs: 0 }));
+    await stageOne(provider, 'fresh');
+
+    const now = await sweepStagedImports({ port: port(provider), owned: new Set() });
+
+    expect(now).toEqual({ removed: [], kept: ['fresh'] });
+
+    const after = await sweepStagedImports({ port: port(provider), owned: new Set(), now: later() });
+
+    expect(after).toEqual({ removed: ['fresh'], kept: [] });
+  });
+
+  it('should keep a staging whose session still beats, where no lock can say it is live', async () => {
+    const provider = new MemoryProvider();
+    await stageOne(provider, 'beating');
+    const at = later();
+    await touchStagedImport(port(provider), 'beating', at);
+
+    const swept = await sweepStagedImports({ port: port(provider), owned: new Set(), now: at + 1000 });
+
+    expect(swept.kept).toEqual(['beating']);
   });
 
   it("should take an in-place staging's folder with it, unless the commit made that folder a project", async () => {

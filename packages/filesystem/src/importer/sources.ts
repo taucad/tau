@@ -168,6 +168,7 @@ export const zipImportSource = (
           blob,
           zip: {
             localHeaderOffset: entry.localHeaderOffset,
+            extentEnd: entry.extentEnd,
             compressedSize: entry.compressedSize,
             method: entry.method,
             crc32: entry.crc32,

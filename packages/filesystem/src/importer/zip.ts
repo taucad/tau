@@ -52,6 +52,12 @@ export type ZipEntry = Readonly<{
   size: number;
   crc32: number;
   localHeaderOffset: number;
+  /**
+   * Where the next entry's local header (or the directory) begins: the entry's
+   * header, name, extra field and data must all end by here, which the decode
+   * checks once it has read the local header's own name and extra lengths.
+   */
+  extentEnd: number;
   directory: boolean;
   /** A Unix symbolic link: an import never follows or writes one. */
   symlink: boolean;
@@ -201,7 +207,8 @@ export type ZipDirectory = Readonly<{ entries: ZipEntry[]; identity: string }>;
  * @param source - The archive's ranges.
  * @param options - `maximumEntries` and `maximumPathBytes`, past which the directory is refused.
  * @returns The entries in directory order, and the directory's identity.
- * @throws ImportRefusedError `corrupt`, `encrypted`, `unsupported`, `tooManyEntries` or `pathTooLong`.
+ * @throws ImportRefusedError `corrupt`, `encrypted`, `unsupported`, `tooManyEntries`, `pathTooLong`, or
+ *   `archiveTooLarge` for a directory larger than its entry count can need.
  * @public
  */
 export const readZipDirectory = async (
@@ -221,7 +228,10 @@ export const readZipDirectory = async (
   }
   const maximumNameBytes = options.maximumPathBytes ?? 0xff_ff;
   if (directory.size > directory.entries * (centralHeaderBytes + maximumNameBytes + zipEntryAllowanceBytes)) {
-    throw corrupt('The archive directory is larger than its entries can need.');
+    /* A limit, not damage: a directory this large is one no import admits, whatever it holds. */
+    throw new ImportRefusedError('archiveTooLarge', {
+      message: 'The archive directory is larger than an import admits for its entry count.',
+    });
   }
   const end = directory.offset + directory.size;
   let window = new Uint8Array(0);
@@ -246,7 +256,7 @@ export const readZipDirectory = async (
     return new DataView(window.buffer, window.byteOffset + (at - windowStart), length);
   };
   const decoder = new TextDecoder();
-  const entries: ZipEntry[] = [];
+  const entries: Array<Omit<ZipEntry, 'extentEnd'>> = [];
   let at = directory.offset;
   for (let index = 0; index < directory.entries; index += 1) {
     // oxlint-disable-next-line no-await-in-loop -- the directory is parsed in order, a window at a time.
@@ -317,22 +327,31 @@ export const readZipDirectory = async (
     });
     at += centralHeaderBytes + variableLength;
   }
-  refuseOverlaps(entries);
   return {
-    entries,
+    entries: withExtents(entries, directory.offset),
     identity: `${crc.toString(16).padStart(8, '0')}-${String(directory.size)}-${String(directory.offset)}`,
   };
 };
 
-/* Every entry's local header and data must end before the next one begins: overlapping ranges decode one byte many times. */
-const refuseOverlaps = (entries: readonly ZipEntry[]): void => {
+/*
+ * Every entry's local header and data must end before the next one begins:
+ * overlapping ranges decode one byte many times. The directory alone gives
+ * the fixed header and the data; each entry also carries where the next one
+ * begins, so the decode, once it has read the local header's own name and
+ * extra lengths, refuses an entry whose data runs past it.
+ */
+const withExtents = (entries: ReadonlyArray<Omit<ZipEntry, 'extentEnd'>>, directoryOffset: number): ZipEntry[] => {
   const byOffset = [...entries].sort((left, right) => left.localHeaderOffset - right.localHeaderOffset);
-  for (let index = 1; index < byOffset.length; index += 1) {
-    const previous = byOffset[index - 1]!;
-    if (previous.localHeaderOffset + localHeaderBytes + previous.compressedSize > byOffset[index]!.localHeaderOffset) {
+  const extents = new Map<Omit<ZipEntry, 'extentEnd'>, number>();
+  for (const [index, entry] of byOffset.entries()) {
+    const next = byOffset[index + 1];
+    const extentEnd = next === undefined ? directoryOffset : next.localHeaderOffset;
+    if (entry.localHeaderOffset + localHeaderBytes + entry.compressedSize > extentEnd) {
       throw corrupt('Two archive entries share their bytes.');
     }
+    extents.set(entry, extentEnd);
   }
+  return entries.map((entry) => ({ ...entry, extentEnd: extents.get(entry)! }));
 };
 
 /**

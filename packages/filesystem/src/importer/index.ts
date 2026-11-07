@@ -52,15 +52,20 @@ export type {
 export {
   discardStagedImport,
   importFactsPath,
+  importOwnerPath,
   importResidentBytes,
   importStagingDirectory,
   importStagingFolder,
   importStagingLeaseName,
   importStagingPrefix,
   importStagingStaleMilliseconds,
+  importTargetAttempts,
+  ownsImportTarget,
   readStagedImport,
+  releaseStagedImport,
   stageImport,
   sweepStagedImports,
+  touchStagedImport,
 } from '#importer/staging.js';
 export type {
   ImportFactsRecord,

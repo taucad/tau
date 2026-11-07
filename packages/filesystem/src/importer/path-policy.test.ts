@@ -67,6 +67,14 @@ describe('ImportPathAdmission', () => {
     expect(admission().admit(path)).toEqual({ kind: 'skip', path, why: 'reserved' });
   });
 
+  it.each(['.tau/import.json', '.TAU/Import.json.', '.tau-import-owner.json', '.TAU-Import-Owner.json:x'])(
+    "should reserve %j, where the commit keeps an import's facts or its folder's owner marker",
+    (path) => {
+      expect(isReservedImportPath(path)).toBe(true);
+      expect(admission().admit(path)).toEqual({ kind: 'skip', path, why: 'reserved' });
+    },
+  );
+
   it("should keep a name that only contains the manifest's", () => {
     expect(isReservedImportPath('tau.json.bak')).toBe(false);
     expect(isReservedImportPath('mytau.json')).toBe(false);

@@ -11,8 +11,14 @@ import type { FileSystemProvider } from '#types.js';
 import type { WorkspaceFileService } from '#workspace-file-service.js';
 import { createInlineImportDecoder } from '#importer/decode.js';
 import { planImport, zipImportSource } from '#importer/sources.js';
-import { importFactsPath, importStagingDirectory, stageImport } from '#importer/staging.js';
-import type { ImportFactsRecord } from '#importer/staging.js';
+import {
+  importFactsPath,
+  importOwnerPath,
+  importStagingDirectory,
+  readStagedImport,
+  stageImport,
+} from '#importer/staging.js';
+import type { ImportFactsRecord, ImportStagingPort } from '#importer/staging.js';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
 
 const projectId = 'proj_iiiiiiiiiiiiiiiiiiiii';
@@ -79,16 +85,22 @@ const contentBytes = Object.values(files).reduce((sum, content) => sum + encoder
 describe('commitPendingProjectDirectory from a staged import', () => {
   let service: WorkspaceFileService;
   let provider: FileSystemProvider;
+  let harness: Awaited<ReturnType<typeof createWorkspaceFileService>>;
 
-  const stage = async (target?: string): Promise<void> => {
+  const stage = async (target?: string, port?: ImportStagingPort): Promise<void> => {
     const zip = new JSZip();
-    for (const [name, content] of Object.entries({ ...files, 'repo/src/main.ts': 'main', 'repo/tau.json': '{}' })) {
+    for (const [name, content] of Object.entries({
+      ...files,
+      'repo/src/main.ts': 'main',
+      'repo/tau.json': '{}',
+      'repo/.tau/workbench/layout.json': '{"panes":[]}',
+    })) {
       zip.file(name, content);
     }
     const blob = new Blob([(await zip.generateAsync({ type: 'uint8array' })) as Uint8Array<ArrayBuffer>]);
     const plan = await planImport(zipImportSource(blob), { policy: tauPathPolicy });
     await stageImport({
-      port: { provider, apply: async (entries) => applyBatchWithPrimitives(provider, entries) },
+      port: port ?? { provider, apply: async (entries) => applyBatchWithPrimitives(provider, entries) },
       operationId,
       plan,
       decode: createInlineImportDecoder(),
@@ -112,7 +124,7 @@ describe('commitPendingProjectDirectory from a staged import', () => {
   };
 
   beforeEach(async () => {
-    const harness = await createWorkspaceFileService();
+    harness = await createWorkspaceFileService();
     ({ service } = harness);
     provider = await harness.providerRegistry.getProvider(scope);
   });
@@ -132,17 +144,79 @@ describe('commitPendingProjectDirectory from a staged import', () => {
     expect(await provider.exists(`${directory}/tau.json`)).toBe(false);
     const discovered = await service.listProjectManifests();
     expect(discovered.entries).toEqual([]);
+    /* Its `.tau` waits in staging: a folder holding `.tau` without a manifest would be offered for adoption. */
+    expect(await provider.exists(`${directory}/.tau`)).toBe(false);
 
     await expect(commit()).resolves.toEqual({ status: 'committed' });
 
     expect(decoder.decode(await provider.readFile(`${directory}/src/main.ts`))).toBe('main');
+    expect(decoder.decode(await provider.readFile(`${directory}/.tau/workbench/layout.json`))).toBe('{"panes":[]}');
     /* Every content byte was put down exactly once, and nothing was renamed into the project. */
     expect(counted.content(`${directory}/src/`)).toBe(contentBytes);
-    expect(counted.renames.filter((path) => path.startsWith(`${directory}/`))).toEqual([]);
+    /* Only Tau's own `.tau` file waited in staging, and moved in. */
+    expect(counted.renames.filter((path) => path.startsWith(`${directory}/`))).toEqual([
+      `${directory}/.tau/workbench/layout.json`,
+    ]);
     expect(counted.streams()).toBe(0);
     expect(counted.last()).toBe(`${directory}/tau.json`);
     expect(await provider.exists(importStagingDirectory(operationId))).toBe(false);
+    expect(await provider.exists(`${directory}/${importOwnerPath}`)).toBe(false);
     await expect(commit()).resolves.toEqual({ status: 'already-committed' });
+  });
+
+  it('should let go of the folder before the manifest, so no staging ever names a committed project', async () => {
+    await stage(directory);
+    const writeFile = provider.writeFile.bind(provider);
+    const atManifest: Array<Readonly<{ inPlace: string | undefined; marker: boolean }>> = [];
+    vi.spyOn(provider, 'writeFile').mockImplementation(async (path, data) => {
+      if (path === `${directory}/tau.json`) {
+        const staged = await readStagedImport(provider, operationId);
+        atManifest.push({
+          inPlace: staged?.inPlace,
+          marker: await provider.exists(`${directory}/${importOwnerPath}`),
+        });
+      }
+      await writeFile(path, data);
+    });
+
+    await expect(commit()).resolves.toEqual({ status: 'committed' });
+
+    expect(atManifest).toEqual([{ inPlace: undefined, marker: false }]);
+  });
+
+  it('should replay a commit that stopped after letting go of its folder', async () => {
+    await stage(directory);
+    const writeFile = provider.writeFile.bind(provider);
+    const spy = vi.spyOn(provider, 'writeFile').mockImplementation(async (path, data) => {
+      if (path === `${directory}/tau.json`) {
+        throw new Error('tab closed');
+      }
+      await writeFile(path, data);
+    });
+
+    await expect(commit()).rejects.toThrow();
+    spy.mockRestore();
+
+    await expect(commit()).resolves.toEqual({ status: 'committed' });
+    expect(decoder.decode(await provider.readFile(`${directory}/src/part-7.ts`))).toBe('export const p = 7;');
+  });
+
+  it('should refuse to commit into a folder whose owner marker names another import', async () => {
+    await stage(directory);
+    await provider.writeFile(`${directory}/${importOwnerPath}`, JSON.stringify({ operationId: 'req_other' }));
+
+    await expect(commit()).rejects.toThrow('no longer belongs to the import');
+    expect(await provider.exists(`${directory}/tau.json`)).toBe(false);
+  });
+
+  it("should claim and write an in-place folder under the lock the folder's commit takes", async () => {
+    const queued = vi.spyOn(harness.resourceQueue, 'queueForMany');
+
+    await stage(directory, await service.importStaging(scope));
+
+    const locks = queued.mock.calls.map(([names]) => [...names]);
+    expect(locks.some((names) => names.length === 1 && names[0]!.endsWith(`:${directory}`))).toBe(true);
+    await expect(commit()).resolves.toEqual({ status: 'committed' });
   });
 
   it('should move every staged file into the project where a move is free, never writing its bytes again', async () => {
@@ -169,7 +243,7 @@ describe('commitPendingProjectDirectory from a staged import', () => {
     ) as ImportFactsRecord;
     const main = record.entries.find(({ path }) => path === 'src/main.ts');
 
-    expect(record.entries).toHaveLength(301);
+    expect(record.entries).toHaveLength(302);
     expect(main?.facts.blobOid).toBe(gitBlobOid('main'));
     expect(main?.facts.sha256).toMatch(/^[0-9a-f]{64}$/u);
     expect(tauPathPolicy.classify(importFactsPath).versioned).toBe(false);

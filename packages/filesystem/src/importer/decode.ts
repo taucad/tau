@@ -32,7 +32,7 @@ export type ImportDecodeRequest = Readonly<{
   /** The size the source declares; the decoded bytes must match it exactly. */
   size: number;
   /** Present for a zip entry: where its local header is and how it is stored. */
-  zip?: Readonly<Pick<ZipEntry, 'localHeaderOffset' | 'compressedSize' | 'method' | 'crc32'>>;
+  zip?: Readonly<Pick<ZipEntry, 'localHeaderOffset' | 'extentEnd' | 'compressedSize' | 'method' | 'crc32'>>;
 }>;
 
 /**
@@ -115,6 +115,10 @@ const inflate = async (
     const start = zipEntryDataOffset(header, { ...zip, name: path, size, directory: false, symlink: false });
     if (start + zip.compressedSize > blob.size) {
       throw damaged(path);
+    }
+    /* The local header's own name and extra field count too: its data may not reach the next entry. */
+    if (start + zip.compressedSize > zip.extentEnd) {
+      throw new ImportRefusedError('corrupt', { path, message: 'An archive entry overlaps the next one.' });
     }
     range = blob.slice(start, start + zip.compressedSize);
   }

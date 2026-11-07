@@ -25,7 +25,13 @@
  * (IndexedDB, a picked folder) a move would write every byte again, so the
  * entries are written straight into the pending project directory instead,
  * once; that directory has no `tau.json` until the commit writes it last, so
- * no discovery sees the project before it is whole (I1).
+ * no discovery sees the project before it is whole (I1). Entries under `.tau`
+ * still stage under `tree/` there, and move in at commit: a folder holding
+ * `.tau` without a manifest is one discovery offers for adoption, and adopting
+ * a half-written import would make the staging write into a real project.
+ * Such a folder is claimed exclusively and carries an owner marker
+ * ({@link importOwnerPath}); a removal deletes only what the ledger names, and
+ * only while the marker names the operation.
  *
  * A staging nobody will commit is removed: by the session that made it on
  * every failure, cancel and close, and otherwise by
@@ -42,6 +48,7 @@ import { ImportRefusedError, isImportRefusal } from '#importer/limits.js';
 import type { ImportRefusalReason } from '#importer/limits.js';
 import type { ImportDecodedEntry, ImportDecoder } from '#importer/decode.js';
 import type { ImportPlan, ImportSourcePin, PlannedImportEntry } from '#importer/sources.js';
+import { foldPathSpelling } from '#path-fold.js';
 
 /** The storage root's reserved staging folder (I9). @public */
 export const importStagingFolder = '.tau-staging';
@@ -87,10 +94,19 @@ export type StagedImport = Readonly<{
   operationId: string;
   /** The staging directory, relative to the storage root. */
   directory: string;
-  /** Where the staged files are: `<directory>/tree`, or the project directory they were written into. */
+  /**
+   * Where the staged files are: `<directory>/tree`, or the project directory
+   * they were written into (all but `.tau`, see {@link stagedEntryLocation}).
+   */
   tree: string;
   /** The project directory the entries were written straight into, where a move would copy them. */
   inPlace?: string;
+  /**
+   * The project directory the commit should create: the in-place folder, or,
+   * staged to move, the first of the names asked for that nothing holds yet.
+   * Present when the stage was given a `target`.
+   */
+  target?: string;
   pin: ImportSourcePin;
   entries: readonly StagedImportEntry[];
   bytes: number;
@@ -106,6 +122,13 @@ export type StagedImport = Readonly<{
 export type ImportStagingPort = Readonly<{
   provider: FileSystemProvider;
   apply: (entries: readonly BatchEntry[]) => Promise<readonly BatchReceipt[]>;
+  /**
+   * Run `work` holding the lock a commit of the project directory `path`
+   * holds, in every tab, so claiming an in-place folder, each batch written
+   * into it and its removal never interleave with a create of the same
+   * directory. A port without it (a test's) runs `work` directly.
+   */
+  exclusive?: <Result>(path: string, work: () => Promise<Result>) => Promise<Result>;
 }>;
 
 /**
@@ -115,7 +138,58 @@ export type ImportStagingPort = Readonly<{
  */
 export type ImportStagingProgress = Readonly<{ files: number; bytes: number; totalFiles: number; totalBytes: number }>;
 
-type Intent = Readonly<{ version: 1; operationId: string; pin: ImportSourcePin; inPlace?: string }>;
+type Intent = Readonly<{
+  version: 1;
+  operationId: string;
+  pin: ImportSourcePin;
+  /** The project directory the entries are written into, while the import owns it. */
+  inPlace?: string;
+  /** When the intent was written (milliseconds since the epoch), what a sweep reads where mtimes are not kept. */
+  at?: number;
+}>;
+
+/**
+ * The owner marker an in-place import writes into the project directory it
+ * creates, naming its operation. Every write into the directory, and every
+ * removal from it, first checks that the marker still names the operation;
+ * the commit removes it before the manifest. It sits beside `.tau`, never in
+ * it: discovery offers a folder holding `.tau` but no manifest for adoption.
+ *
+ * @public
+ */
+export const importOwnerPath = '.tau-import-owner.json';
+
+/**
+ * Whether a staged entry belongs under `.tau` (in any spelling a filesystem
+ * folds onto it). An in-place import keeps those entries in its staging tree
+ * until the commit moves them in, so its pending folder never holds a `.tau`
+ * that discovery would offer for adoption.
+ *
+ * @param path - A project-relative path.
+ * @returns Whether the entry is Tau's own.
+ * @public
+ */
+export const isTauControlPath = (path: string): boolean => {
+  const [first = ''] = foldPathSpelling(path).split('/');
+  return first === '.tau';
+};
+
+/**
+ * Where one staged entry's bytes are: in the in-place folder, or (staged to
+ * move, or under `.tau`) in the staging directory's `tree/`.
+ *
+ * @param staged - The staged import.
+ * @param path - The entry's project-relative path.
+ * @returns Its path on the storage root.
+ * @public
+ */
+export const stagedEntryLocation = (staged: Pick<StagedImport, 'directory' | 'inPlace'>, path: string): string =>
+  staged.inPlace === undefined || isTauControlPath(path)
+    ? `${staged.directory}/tree/${path}`
+    : `${staged.inPlace}/${path}`;
+
+/** How many names an in-place import tries for its folder: the one asked, then `-2` up to this suffix. @public */
+export const importTargetAttempts = 20;
 
 /** Bytes of decoded entries an import holds at once, beyond a single entry larger than it (S6). @public */
 export const importResidentBytes = 64 * 1024 * 1024;
@@ -132,6 +206,31 @@ export const importStagingStaleMilliseconds = 10 * 60 * 1000;
  * @public
  */
 export const importFactsPath = '.tau/import.json';
+
+/* Run under the port's directory lock where it has one. */
+const exclusively = async <Result>(
+  port: ImportStagingPort,
+  path: string,
+  work: () => Promise<Result>,
+): Promise<Result> => (port.exclusive === undefined ? work() : port.exclusive(path, work));
+
+/**
+ * Whether the in-place folder's owner marker names this operation.
+ *
+ * @param provider - The storage root's provider.
+ * @param directory - The project directory.
+ * @param operationId - The import operation.
+ * @returns Whether the import owns the folder.
+ * @public
+ */
+export const ownsImportTarget = async (
+  provider: FileSystemProvider,
+  directory: string,
+  operationId: string,
+): Promise<boolean> => {
+  const marker = (await readJson(provider, `${directory}/${importOwnerPath}`)) as { operationId?: unknown } | undefined;
+  return marker?.operationId === operationId;
+};
 
 /**
  * The record at {@link importFactsPath}.
@@ -227,7 +326,7 @@ export const readStagedImport = async (
   );
   const byPath = new Map<string, StagedImportEntry>();
   for (const record of records) {
-    for (const entry of Array.isArray(record) ? (record as unknown[]) : []) {
+    for (const entry of ledgerEntries(record)) {
       if (isStagedEntry(entry)) {
         byPath.set(entry.path, entry);
       }
@@ -244,6 +343,50 @@ export const readStagedImport = async (
     bytes: entries.reduce((sum, { size }) => sum + size, 0),
   };
 };
+
+/* A ledger record's entries: `{ at, entries }`, or the bare array an earlier build wrote. */
+const ledgerEntries = (record: unknown): unknown[] => {
+  if (Array.isArray(record)) {
+    return record as unknown[];
+  }
+  const entries = (record as { entries?: unknown } | undefined)?.entries;
+  return Array.isArray(entries) ? (entries as unknown[]) : [];
+};
+
+/* Every path a ledger names, the batches announced before their writes included: all an in-place import may remove. */
+const recordedPaths = async (provider: FileSystemProvider, operationId: string): Promise<string[]> => {
+  const directory = importStagingDirectory(operationId);
+  let names: string[];
+  try {
+    names = await provider.readdir(`${directory}/ledger`);
+  } catch (error) {
+    if (isMissing(error)) {
+      return [];
+    }
+    throw error;
+  }
+  const records = await Promise.all(
+    names
+      .filter((name) => /^\d+(?:\.pending)?\.json$/u.test(name))
+      .map(async (name) => readJson(provider, `${directory}/ledger/${name}`)),
+  );
+  const paths = new Set<string>();
+  for (const record of records) {
+    for (const entry of ledgerEntries(record)) {
+      const path = typeof entry === 'string' ? entry : (entry as { path?: unknown } | undefined)?.path;
+      if (typeof path === 'string' && isSafeRecordedPath(path)) {
+        paths.add(path);
+      }
+    }
+  }
+  return [...paths];
+};
+
+/* A recorded path is removed only when it is a plain relative path inside the folder. */
+const isSafeRecordedPath = (path: string): boolean =>
+  path !== '' &&
+  !path.startsWith('/') &&
+  path.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..');
 
 const readIntent = async (provider: FileSystemProvider, operationId: string): Promise<Intent | undefined> => {
   const intent = (await readJson(provider, `${importStagingDirectory(operationId)}/intent.json`)) as Intent | undefined;
@@ -264,7 +407,12 @@ const isClaimedByProject = async (provider: FileSystemProvider, directory: strin
   (await provider.exists(`${directory}/tau.json`)) || provider.exists(`${directory}/.tau/project.json`);
 
 /**
- * Remove a staging directory and everything in it.
+ * Remove an import's staging. Entries it wrote into a project directory are
+ * removed one by one, and only those its ledger names, then each directory
+ * they leave empty, and only while the folder's owner marker still names the
+ * operation and no manifest or identity has claimed it: a file anyone else
+ * put there, and the folder holding it, stay. The staging directory itself
+ * is private to the operation and goes whole.
  *
  * @param port - The storage root.
  * @param operationId - The import operation.
@@ -272,17 +420,103 @@ const isClaimedByProject = async (provider: FileSystemProvider, directory: strin
  */
 export const discardStagedImport = async (port: ImportStagingPort, operationId: string): Promise<void> => {
   const directory = importStagingDirectory(operationId);
-  /* Entries written in place go first, while the staging still names their folder. */
+  /* Entries written in place go first, while the staging still names them. */
   const intent = await readIntent(port.provider, operationId);
-  if (
-    intent?.inPlace !== undefined &&
-    (await port.provider.exists(intent.inPlace)) &&
-    !(await isClaimedByProject(port.provider, intent.inPlace))
-  ) {
-    await applied(port, [{ op: 'delete', path: intent.inPlace, kind: 'dir', recursive: true }]);
+  if (intent?.inPlace !== undefined) {
+    await removeOwnedEntries(port, intent.inPlace, operationId);
   }
   if (await port.provider.exists(directory)) {
     await applied(port, [{ op: 'delete', path: directory, kind: 'dir', recursive: true }]);
+  }
+};
+
+const removeOwnedEntries = async (port: ImportStagingPort, target: string, operationId: string): Promise<void> => {
+  const { provider } = port;
+  await exclusively(port, target, async () => {
+    if (!(await ownsImportTarget(provider, target, operationId)) || (await isClaimedByProject(provider, target))) {
+      return;
+    }
+    /* Entries under `.tau` stage in the staging tree, never here: a `.tau` in the folder is not the import's. */
+    const recorded = await recordedPaths(provider, operationId);
+    const paths = recorded.filter((path) => !isTauControlPath(path));
+    const present = await bounded(paths, 16, async (path) => {
+      const stat = await provider.stat(`${target}/${path}`).catch(() => undefined);
+      return stat?.type === 'file';
+    });
+    const files = paths.filter((_, index) => present[index] === true);
+    for (let offset = 0; offset < files.length; offset += maximumChangesetEntries) {
+      // oxlint-disable-next-line no-await-in-loop -- removals go in bounded changesets, one after another.
+      await applied(
+        port,
+        files
+          .slice(offset, offset + maximumChangesetEntries)
+          .map((path): BatchEntry => ({ op: 'delete', path: `${target}/${path}`, kind: 'file' })),
+      );
+    }
+    await applied(port, [{ op: 'delete', path: `${target}/${importOwnerPath}`, kind: 'file' }]);
+    /* Then every folder those files leave empty, deepest first, the project folder last: never a recursive delete. */
+    const folders = new Set<string>();
+    for (const path of paths) {
+      const segments = path.split('/');
+      for (let depth = 1; depth < segments.length; depth += 1) {
+        folders.add(segments.slice(0, depth).join('/'));
+      }
+    }
+    const deepestFirst = [...folders].sort((left, right) => right.split('/').length - left.split('/').length);
+    for (const folder of [...deepestFirst.map((relative) => `${target}/${relative}`), target]) {
+      // oxlint-disable-next-line no-await-in-loop -- a folder is removed only once its children are.
+      const children = await provider.readdir(folder).catch(() => undefined);
+      if (children?.length === 0) {
+        // oxlint-disable-next-line no-await-in-loop -- one empty folder at a time.
+        await applied(port, [{ op: 'delete', path: folder, kind: 'dir', recursive: false }]);
+      }
+    }
+  });
+};
+
+/**
+ * Let go of an in-place import's project directory before its manifest is
+ * written: the intent is rewritten without it and the owner marker removed,
+ * so no staging left behind, by a crash or a removal that failed, ever names
+ * a committed project. The ledger stays, so a replay still checks every entry
+ * at the directory.
+ *
+ * @param port - The storage root.
+ * @param operationId - The import operation.
+ * @public
+ */
+export const releaseStagedImport = async (port: ImportStagingPort, operationId: string): Promise<void> => {
+  const intent = await readIntent(port.provider, operationId);
+  if (intent?.inPlace === undefined) {
+    return;
+  }
+  const { inPlace, ...released } = intent;
+  await applied(port, [
+    { op: 'write', path: `${importStagingDirectory(operationId)}/intent.json`, data: encode(released) },
+  ]);
+  if (await ownsImportTarget(port.provider, inPlace, operationId)) {
+    await applied(port, [{ op: 'delete', path: `${inPlace}/${importOwnerPath}`, kind: 'file' }]);
+  }
+};
+
+/**
+ * Record that a live session still holds a staging, for a sweep on a host
+ * that has no Web Locks to ask: a heartbeat beside the intent, written only
+ * while the staging exists.
+ *
+ * @param port - The storage root.
+ * @param operationId - The import operation.
+ * @param now - The clock.
+ * @public
+ */
+export const touchStagedImport = async (
+  port: ImportStagingPort,
+  operationId: string,
+  now: number = Date.now(),
+): Promise<void> => {
+  const directory = importStagingDirectory(operationId);
+  if (await port.provider.exists(`${directory}/intent.json`)) {
+    await applied(port, [{ op: 'write', path: `${directory}/heartbeat.json`, data: encode({ at: now }) }]);
   }
 };
 
@@ -327,12 +561,13 @@ export const sweepStagedImports = async (
     if (!name.startsWith(importStagingPrefix) || !operationIdPattern.test(operationId)) {
       continue;
     }
+    if (owned.has(operationId) || input.held?.has(operationId) === true) {
+      kept.push(operationId);
+      continue;
+    }
     // oxlint-disable-next-line no-await-in-loop -- stagings are judged one at a time; a root holds few.
-    if (
-      owned.has(operationId) ||
-      input.held?.has(operationId) === true ||
-      (await stillFor(port.provider, name, now)) < staleAfter
-    ) {
+    const still = await stillFor(port.provider, name, now);
+    if (still < staleAfter) {
       kept.push(operationId);
       continue;
     }
@@ -343,22 +578,37 @@ export const sweepStagedImports = async (
   return { removed, kept };
 };
 
-/* How long a staging has gone unwritten: since its newest ledger record, its intent or the directory itself. */
+/*
+ * How long a staging has gone unwritten: since the newest time its intent,
+ * ledger or heartbeat recorded, by the writer's clock. A provider that keeps
+ * no mtime (IndexedDB answers 0) cannot say, so the records carry their own;
+ * a file's mtime counts only where the provider declares it trustworthy.
+ */
 const stillFor = async (provider: FileSystemProvider, name: string, now: number): Promise<number> => {
   const directory = `${importStagingFolder}/${name}`;
   const sequence = await lastLedgerSequence(provider, directory);
-  /* Files only: a directory's mtime is synthesized by some providers. */
-  const candidates = [`${directory}/intent.json`];
+  const candidates = [`${directory}/intent.json`, `${directory}/heartbeat.json`];
   if (sequence > 0) {
-    candidates.push(`${directory}/ledger/${String(sequence).padStart(6, '0')}.json`);
+    const stem = `${directory}/ledger/${String(sequence).padStart(6, '0')}`;
+    candidates.push(`${stem}.json`, `${stem}.pending.json`);
   }
+  const trustworthy = provider.capabilities.trustworthyMtime === true;
   const times = await Promise.all(
-    candidates.map(async (path) =>
-      provider
-        .stat(path)
-        .then(({ mtimeMs }) => mtimeMs)
-        .catch(() => 0),
-    ),
+    candidates.map(async (path) => {
+      const recorded = ((await readJson(provider, path)) as { at?: unknown } | undefined)?.at;
+      if (typeof recorded === 'number' && Number.isFinite(recorded)) {
+        return recorded;
+      }
+      if (!trustworthy) {
+        return 0;
+      }
+      try {
+        const { mtimeMs } = await provider.stat(path);
+        return mtimeMs;
+      } catch {
+        return 0;
+      }
+    }),
   );
   return now - Math.max(0, ...times);
 };
@@ -480,7 +730,10 @@ const isRefusalReason = (value: unknown): value is ImportRefusalReason =>
  * With a `target` (the pending project directory the commit will create) on
  * a provider whose rename copies, the entries are written straight into that
  * directory; otherwise they stage under the staging directory's `tree/` for
- * the commit to move. A fresh in-place staging refuses a target that exists.
+ * the commit to move. A target someone already holds is never written into or
+ * committed over: the first of `target`, `target-2` … that is free is taken
+ * (created exclusively, with an owner marker, where the entries go in place),
+ * and returned as {@link StagedImport.target}.
  *
  * @param input - The storage root, the operation, the plan, the decoder, the
  *   pending project directory, and optional decode concurrency, resident byte
@@ -507,30 +760,57 @@ export const stageImport = async (
   if (input.target !== undefined && !isProjectDirectory(input.target)) {
     throw new TypeError(`Not a project directory: ${input.target}`);
   }
-  const inPlace =
-    input.target !== undefined && port.provider.capabilities.movesInPlace !== true ? input.target : undefined;
-  const tree = inPlace ?? `${directory}/tree`;
+  const writesInPlace = input.target !== undefined && port.provider.capabilities.movesInPlace !== true;
+  const candidates = writesInPlace ? targetCandidates(input.target) : [];
   let staged = await readStagedImport(port.provider, operationId);
-  if (staged !== undefined && (!samePin(staged.pin, plan.pin) || staged.inPlace !== inPlace)) {
+  /* A resumed in-place staging keeps its folder only while the folder's marker still names it. */
+  if (
+    staged !== undefined &&
+    (!samePin(staged.pin, plan.pin) ||
+      (staged.inPlace === undefined) === writesInPlace ||
+      (staged.inPlace !== undefined &&
+        (!candidates.includes(staged.inPlace) ||
+          !(await ownsImportTarget(port.provider, staged.inPlace, operationId)))))
+  ) {
     await discardStagedImport(port, operationId);
     staged = undefined;
   }
-  if (inPlace !== undefined && staged !== undefined && (await isClaimedByProject(port.provider, inPlace))) {
-    throw new Error(`The project folder ${inPlace} is already a project.`);
-  }
+  let inPlace = staged?.inPlace;
   if (staged === undefined) {
     await discardStagedImport(port, operationId);
-    if (inPlace !== undefined && (await port.provider.exists(inPlace))) {
-      throw new Error(`The project folder ${inPlace} already exists.`);
+    const intentOf = (folder: string | undefined): BatchEntry => ({
+      op: 'write',
+      path: `${directory}/intent.json`,
+      data: encode({
+        version: 1,
+        operationId,
+        pin: plan.pin,
+        ...(folder === undefined ? {} : { inPlace: folder }),
+        at: Date.now(),
+      } satisfies Intent),
+    });
+    if (writesInPlace) {
+      /* The intent names the folder before the folder exists, so a crash after the claim leaves it findable. */
+      for (const candidate of candidates) {
+        // oxlint-disable-next-line no-await-in-loop -- one name is tried at a time, in order.
+        await applied(port, [intentOf(candidate)]);
+        // oxlint-disable-next-line no-await-in-loop -- the claim decides whether the next name is tried.
+        if (await claimImportTarget(port, candidate, operationId)) {
+          inPlace = candidate;
+          break;
+        }
+      }
+      if (inPlace === undefined) {
+        await discardStagedImport(port, operationId);
+        throw new Error(
+          `No free folder for ${input.target}: every name up to ${String(importTargetAttempts)} is taken.`,
+        );
+      }
+    } else {
+      await applied(port, [intentOf(undefined)]);
     }
-    await applied(port, [
-      {
-        op: 'write',
-        path: `${directory}/intent.json`,
-        data: encode({ version: 1, operationId, pin: plan.pin, ...(inPlace === undefined ? {} : { inPlace }) }),
-      },
-    ]);
   }
+  const tree = inPlace ?? `${directory}/tree`;
   const planned = new Map(plan.entries.map((entry) => [entry.path, entry]));
   /* A recorded entry counts only while its staged file still has its size: a stat, never a read (I3). */
   const kept = new Map<string, StagedImportEntry>();
@@ -540,7 +820,7 @@ export const stageImport = async (
       return;
     }
     try {
-      const stat = await port.provider.stat(`${tree}/${entry.path}`);
+      const stat = await port.provider.stat(stagedEntryLocation({ directory, inPlace }, entry.path));
       if (stat.type === 'file' && stat.size === entry.size) {
         kept.set(entry.path, entry);
       }
@@ -615,15 +895,33 @@ export const stageImport = async (
       try {
         signal.throwIfAborted();
         decoding = index + 1 < windows.length ? settled(windows[index + 1]!) : undefined;
-        // oxlint-disable-next-line no-await-in-loop -- the ledger record follows its batch's durable writes.
-        await applied(
-          port,
-          window.map((entry, at) => ({
+        const ledgerStem = `${directory}/ledger/${String(ledgerSequence).padStart(6, '0')}`;
+        /* Announced before written: a crash between the two still leaves every path it wrote named. */
+        // oxlint-disable-next-line no-await-in-loop -- the announcement precedes its batch.
+        await applied(port, [
+          {
             op: 'write',
-            path: `${tree}/${entry.path}`,
+            path: `${ledgerStem}.pending.json`,
+            data: encode({ at: Date.now(), entries: window.map(({ path }) => path) }),
+          },
+        ]);
+        const batch = window.map(
+          (entry, at): BatchEntry => ({
+            op: 'write',
+            path: stagedEntryLocation({ directory, inPlace }, entry.path),
             data: decoded[at]!.data,
-          })),
+          }),
         );
+        // oxlint-disable-next-line no-await-in-loop -- the ledger record follows its batch's durable writes.
+        await (inPlace === undefined
+          ? applied(port, batch)
+          : exclusively(port, inPlace, async () => {
+              /* Every batch asks again: a folder whose marker names another owner is not written into. */
+              if (!(await ownsImportTarget(port.provider, inPlace, operationId))) {
+                throw new Error(`The project folder ${inPlace} no longer belongs to this import.`);
+              }
+              await applied(port, batch);
+            }));
       } finally {
         budget.release(windowBytes);
       }
@@ -633,13 +931,12 @@ export const stageImport = async (
         ...(entry.mode === undefined ? {} : { mode: entry.mode }),
         facts: decoded[at]!.facts,
       }));
+      const ledgerStem = `${directory}/ledger/${String(ledgerSequence).padStart(6, '0')}`;
+      /* The record replaces its announcement: it names the same paths, with their facts. */
       // oxlint-disable-next-line no-await-in-loop -- one record per batch, after it.
       await applied(port, [
-        {
-          op: 'write',
-          path: `${directory}/ledger/${String(ledgerSequence).padStart(6, '0')}.json`,
-          data: encode(records),
-        },
+        { op: 'write', path: `${ledgerStem}.json`, data: encode({ at: Date.now(), entries: records }) },
+        { op: 'delete', path: `${ledgerStem}.pending.json`, kind: 'file' },
       ]);
       ledgerSequence += 1;
       for (const record of records) {
@@ -656,16 +953,53 @@ export const stageImport = async (
     throw error;
   }
   const entries = plan.entries.map((entry) => kept.get(entry.path)!);
+  /* Staged to move, the commit creates the folder: the first name nothing holds now (it still refuses one taken later). */
+  const target = inPlace ?? (input.target === undefined ? undefined : await firstFree(port.provider, input.target));
   return {
     operationId,
     directory,
     tree,
     ...(inPlace === undefined ? {} : { inPlace }),
+    ...(target === undefined ? {} : { target }),
     pin: plan.pin,
     entries,
     bytes: plan.bytes,
   };
 };
+
+/* The folder asked for, then `name-2`, `name-3`… so an import never fails on a name someone else holds. */
+const targetCandidates = (target: string): string[] => [
+  target,
+  ...Array.from({ length: importTargetAttempts - 1 }, (_, index) => `${target}-${String(index + 2)}`),
+];
+
+const firstFree = async (provider: FileSystemProvider, target: string): Promise<string> => {
+  for (const candidate of targetCandidates(target)) {
+    // oxlint-disable-next-line no-await-in-loop -- names are tried in order.
+    if (!(await provider.exists(candidate))) {
+      return candidate;
+    }
+  }
+  throw new Error(`No free folder for ${target}: every name up to ${String(importTargetAttempts)} is taken.`);
+};
+
+/*
+ * Create an in-place import's folder exclusively, under the directory's lock:
+ * only when nothing is there, and with the owner marker inside before any
+ * entry. A folder that exists (someone's own, a project, another import's) is
+ * never written into.
+ */
+const claimImportTarget = async (port: ImportStagingPort, target: string, operationId: string): Promise<boolean> =>
+  exclusively(port, target, async () => {
+    if (await port.provider.exists(target)) {
+      return false;
+    }
+    await applied(port, [
+      { op: 'mkdir', path: target, recursive: true },
+      { op: 'write', path: `${target}/${importOwnerPath}`, data: encode({ operationId, at: Date.now() }) },
+    ]);
+    return true;
+  });
 
 const lastLedgerSequence = async (provider: FileSystemProvider, directory: string): Promise<number> => {
   try {

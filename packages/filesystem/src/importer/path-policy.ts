@@ -57,12 +57,15 @@ export const normalizeImportPath = (raw: string): string => {
   return segments.join('/');
 };
 
+/* What Tau writes into a project beside the manifest: its identity, an import's facts and an in-place import's owner marker. */
+const reservedTauMembers = ['.tau/project.json', '.tau/import.json', '.tau-import-owner.json'];
+
 /**
  * Whether the commit writes this path itself, so neither an import nor a
- * staged ledger may carry it: the manifest at any depth and the identity
- * record, in every spelling a filesystem resolves onto them (case, trailing
- * dots and spaces, an NTFS `:stream` suffix: `TAU.JSON`, `tau.json.`,
- * `.tau/project.json `).
+ * staged ledger may carry it: the manifest at any depth, the identity
+ * record, an import's facts and an in-place import's owner marker, in every
+ * spelling a filesystem resolves onto them (case, trailing dots and spaces,
+ * an NTFS `:stream` suffix: `TAU.JSON`, `tau.json.`, `.tau/project.json `).
  *
  * @param path - A normalized project-relative path.
  * @returns Whether it is reserved.
@@ -74,8 +77,7 @@ export const isReservedImportPath = (path: string): boolean => {
     folded === 'tau.json' ||
     folded.endsWith('/tau.json') ||
     folded === '.tau' ||
-    folded === '.tau/project.json' ||
-    folded.startsWith('.tau/project.json/')
+    reservedTauMembers.some((member) => folded === member || folded.startsWith(`${member}/`))
   );
 };
 

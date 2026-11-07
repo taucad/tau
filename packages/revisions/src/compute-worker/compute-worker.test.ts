@@ -164,6 +164,21 @@ describe('the compute worker seam', () => {
     expect(packIndex.offsetOf(built.entries[0]!.oid)).toBe(12);
   });
 
+  it('decodes an import entry from the Blob it is handed and digests it in the same pass (W7)', async () => {
+    const remote = remoteCompute();
+    const body = encoder.encode('cube(2);\n'.repeat(512));
+    const blob = new Blob([body]);
+
+    const decoded = await remote.decodeImportEntry({ blob, path: 'part.scad', size: body.byteLength });
+
+    expect(decoded.data).toStrictEqual(body);
+    expect(decoded.facts.blobOid).toBe(
+      digestHex('sha1', new Uint8Array([...encoder.encode(`blob ${String(body.byteLength)}\0`), ...body])),
+    );
+    expect(decoded.facts.sha256).toBe(digestHex('sha256', body));
+    await expect(remote.decodeImportEntry({ blob, path: 'part.scad', size: 1 })).rejects.toThrow(/changed/u);
+  });
+
   it('carries a failure back as a rejection', async () => {
     const channel = new MessageChannel();
     channels.push(channel);

@@ -1122,7 +1122,7 @@ describe('settling a turn', () => {
             return real.writeFile(path, data);
           }
           const flipped = Uint8Array.from(data);
-          flipped[0] = (flipped[0] ?? 0) ^ 1;
+          flipped[0] = ((flipped[0] ?? 0) + 1) % 256;
           return real.writeFile(path, flipped);
         },
       }),
@@ -3709,7 +3709,7 @@ describe('independent sync record failures', () => {
         fetch: async () => ({ refs: [] }),
         push: async (input) => {
           pushed.push(input);
-          return { refs: input.refs.map((ref) => ({ name: ref.name, status: 'updated' as const, head })) };
+          return { refs: input.refs.map((ref) => ({ name: ref.name, status: 'updated', head })) };
         },
       },
       projectId: 'project-1',
@@ -4973,7 +4973,7 @@ describe('connecting a remote', () => {
       port: {
         ...port,
         listRemoteRefs: async (remote) => {
-          listed.push(String(remote));
+          listed.push(typeof remote === 'string' ? remote : remote.name);
           if (registered.length === 0) {
             throw new RevisionPortError('REMOTE_NOT_FOUND', 'No repository here yet.');
           }

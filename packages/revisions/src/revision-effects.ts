@@ -1898,8 +1898,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const listRegistered = async (
     kind: string | undefined,
     list: () => Promise<readonly RemoteRef[]>,
-  ): Promise<readonly RemoteRef[]> =>
-    list().catch(async (error: unknown) => {
+  ): Promise<readonly RemoteRef[]> => {
+    try {
+      return await list();
+    } catch (error) {
       if (
         kind !== 'tau' ||
         options.registerRemoteProject === undefined ||
@@ -1909,7 +1911,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       }
       await options.registerRemoteProject(projectId);
       return list();
-    });
+    }
+  };
 
   const evidenceRefName = 'refs/tau/evidence/exports';
   const candidateRefName = 'refs/tau/artifacts/geospec-candidates';
@@ -4706,7 +4709,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
        * remote answers `404` (D11).
        *
        * W12 replaces this actor for a GitHub remote, where consent is a popup. */
-      authorize: fromAuthorityPromise<void, RemoteAuthorizeActorInput>(async () => {}),
+      authorize: fromAuthorityPromise<void, RemoteAuthorizeActorInput>(async () => undefined),
 
       /*
        * R2: *Change backup* asks the new remote `validate`'s question before
@@ -4730,7 +4733,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         const validation = validations;
         validatedListing = undefined;
         const identity = await remoteIdentity(input.remote);
-        const kind = (await port.listRemotes()).find((remote) => remote.name === input.remote)?.kind;
+        const remotes = await port.listRemotes();
+        const kind = remotes.find((remote) => remote.name === input.remote)?.kind;
         const listed = await listRegistered(kind, async () => port.listRemoteRefs(input.remote));
         if (!signal.aborted && validation === validations) {
           validatedListing = { remote: input.remote, identity, refs: listed };

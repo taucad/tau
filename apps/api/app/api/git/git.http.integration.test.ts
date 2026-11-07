@@ -978,14 +978,14 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
       };
       return body.objects[0]?.actions?.upload;
     };
-    const verify = async (): Promise<number> =>
-      (
-        await fetch(`${baseUrl}/v1/git/${projectId}.git/info/lfs/objects/verify`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${callers.owner.token}`, 'content-type': 'application/vnd.git-lfs+json' },
-          body: JSON.stringify({ oid, size: bytes.byteLength }),
-        })
-      ).status;
+    const verify = async (): Promise<number> => {
+      const answered = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/lfs/objects/verify`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${callers.owner.token}`, 'content-type': 'application/vnd.git-lfs+json' },
+        body: JSON.stringify({ oid, size: bytes.byteLength }),
+      });
+      return answered.status;
+    };
     const reads = vi.spyOn(storage, 'getBlob');
     try {
       const action = await batch();

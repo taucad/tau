@@ -2141,13 +2141,12 @@ describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
       /* Right bytes in hand, wrong bytes on disk: only the read-back sees it. */
       const provider = await createMemoryProvider();
       const corrupting = Object.assign(Object.create(provider) as typeof provider, {
-        writeFile: async (path: string, data: Parameters<typeof provider.writeFile>[1], ...rest: unknown[]) =>
+        writeFile: async (path: string, data: Parameters<typeof provider.writeFile>[1]) =>
           provider.writeFile(
             path,
             path.endsWith('.partial') && data instanceof Uint8Array
-              ? data.map((byte, index) => (index === 0 ? byte ^ 1 : byte))
+              ? data.map((byte, index) => (index === 0 ? (byte + 1) % 256 : byte))
               : data,
-            ...(rest as []),
           ),
       });
       const tearing = createIsomorphicGitRevisionPort({
@@ -2162,7 +2161,7 @@ describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
       const served = fixture.objects as Map<string, Uint8Array<ArrayBuffer>>;
       served.set(
         oid,
-        large.map((byte, index) => (index === 0 ? byte ^ 1 : byte)),
+        large.map((byte, index) => (index === 0 ? (byte + 1) % 256 : byte)),
       );
 
       const reader = createIsomorphicGitRevisionPort({
@@ -2175,7 +2174,8 @@ describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
       await expect(reader.readTree(head)).rejects.toThrow(/did not hash to its own id/u);
 
       served.set(oid, large);
-      expect((await reader.readTree(head))?.get('models/bracket.step')).toStrictEqual(large);
+      const healed = await reader.readTree(head);
+      expect(healed?.get('models/bracket.step')).toStrictEqual(large);
     } finally {
       await fixture.close();
       await writer.dispose();

@@ -948,6 +948,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    *
    * @param oid - The pointer's object id.
    * @param content - The object's real bytes.
+   * @param readBack - A download's bytes, verified by hashing what landed before it is renamed into place.
    * @returns Once the object is in the store.
    */
   const storeLfsObject = async (oid: string, content: Uint8Array<ArrayBuffer>, readBack?: boolean): Promise<void> =>
@@ -2436,14 +2437,11 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           input.refs.map(async (ref) => tryResolve(remoteTrackingRef(input.remote, ref.remoteName ?? ref.name))),
         );
         const heads = await Promise.all(input.refs.map(async (ref) => tryResolve(ref.name)));
-        const large = await pointersAmong(
-          (
-            await missingObjects(
-              heads.filter((head) => head !== undefined),
-              new Set(known.filter((head) => head !== undefined)),
-            )
-          ).blobs,
+        const unsent = await missingObjects(
+          heads.filter((head) => head !== undefined),
+          new Set(known.filter((head) => head !== undefined)),
         );
+        const large = await pointersAmong(unsent.blobs);
         if (large.size > 0) {
           throw new RevisionPortError(
             'LFS_REMOTE_UNSUPPORTED',

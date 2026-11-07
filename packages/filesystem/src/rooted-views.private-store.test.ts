@@ -80,6 +80,39 @@ describe('rooted privateStore', () => {
     expect(ranges).toHaveLength(2);
   });
 
+  /* W6.3: a large object streams into the store through the provider's own staging, with no claim and no event. */
+  it('should stream a control-plane file through the provider, with no change event and no mutation claim', async () => {
+    const { service, eventBus, resourceQueue } = await createWorkspaceFileService();
+    const store = service.createRootedFileSystem('/').privateStore!;
+    const events: ChangeEvent[] = [];
+    eventBus.subscribe((event) => {
+      events.push(event);
+    });
+    const claims = vi.spyOn(resourceQueue, 'queueFor');
+    const object = '.git/lfs/objects/ab/cd/abcd.partial';
+    const chunks = ['solid ', 'part'];
+    await store.writeFileStream!(
+      object,
+      new ReadableStream<Uint8Array<ArrayBuffer>>({
+        pull: (controller) => {
+          const chunk = chunks.shift();
+          if (chunk === undefined) {
+            controller.close();
+          } else {
+            controller.enqueue(encoder.encode(chunk));
+          }
+        },
+      }),
+    );
+
+    expect(decoder.decode(await store.readFile(object))).toBe('solid part');
+    expect(claims).not.toHaveBeenCalled();
+    expect(events).toStrictEqual([]);
+    await expect(
+      store.writeFileStream!('models/a.step', new ReadableStream<Uint8Array<ArrayBuffer>>()),
+    ).rejects.toThrow(TypeError);
+  });
+
   it('should offer no range read over a provider that cannot stream ranges', async () => {
     const { service } = await createWorkspaceFileService();
 

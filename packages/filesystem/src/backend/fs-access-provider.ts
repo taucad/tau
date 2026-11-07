@@ -258,6 +258,60 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     }
   }
 
+  /**
+   * Write `path` from a stream without holding the file (W6.3). A provider
+   * that stages ({@link FileSystemAccessProvider._stageStream}) moves the
+   * finished file into place; otherwise the writable stream writes Chromium's
+   * swap file and replaces the target only on close, and an error aborts it
+   * (I1). Either way the path holds its old bytes or all the new ones; a create
+   * that fails removes the file and directories it made.
+   *
+   * @param path - Absolute file path to write.
+   * @param source - The file's bytes, in order.
+   */
+  public override async writeFileStream(path: string, source: ReadableStream<Uint8Array<ArrayBuffer>>): Promise<void> {
+    this._assertReady();
+    this._assertRootedPath(path);
+    const segments = this._splitPath(path);
+    const name = segments.pop();
+    if (name === undefined) {
+      throw this._eisdir(path);
+    }
+    const { directoryHandle, createdDirectories } = await this._openDirectoryForWrite(segments.join('/'));
+    try {
+      await directoryHandle.getFileHandle(name).catch((error: unknown) => {
+        if (hasDomName(error, 'TypeMismatchError')) {
+          throw this._eisdir(path);
+        }
+      });
+      if (await this._stageStream(source, { directory: directoryHandle, name })) {
+        return;
+      }
+    } catch (error) {
+      await this._cleanupCreatedDirectories(createdDirectories);
+      throw error;
+    } finally {
+      this._forgetFileHandlesUnder(path, 'file');
+    }
+    const created = await this._createFileHandle(path);
+    const reader = source.getReader();
+    let writable: FileSystemWritableFileStream | undefined;
+    try {
+      writable = await created.fileHandle.createWritable();
+      // oxlint-disable-next-line no-await-in-loop -- a stream is written one chunk after another.
+      for (let read = await reader.read(); !read.done; read = await reader.read()) {
+        // oxlint-disable-next-line no-await-in-loop -- as above.
+        await writable.write(read.value);
+      }
+      await writable.close();
+    } catch (error) {
+      await writable?.abort(error).catch(() => undefined);
+      await reader.cancel(error).catch(() => undefined);
+      await this._cleanupFailedFileCreation(path, created);
+      throw error;
+    }
+  }
+
   /** Append with an exclusive positional writable when the browser proves support. */
   public override async appendFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> {
     this._assertReady();
@@ -1210,6 +1264,22 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    */
   protected async _stageCreate(
     _data: Uint8Array<ArrayBuffer> | Blob,
+    _destination: Readonly<{ directory: FileSystemDirectoryHandle; name: string }>,
+  ): Promise<boolean> {
+    return false;
+  }
+
+  /**
+   * Write a stream to a staged file and move it into place (W6.3). A provider
+   * that cannot answers `false` before it reads the stream, and the writable
+   * stream's swap file is used instead.
+   *
+   * @param _source - The bytes, in order.
+   * @param _destination - The target's directory and name.
+   * @returns Whether the file now holds the bytes.
+   */
+  protected async _stageStream(
+    _source: ReadableStream<Uint8Array<ArrayBuffer>>,
     _destination: Readonly<{ directory: FileSystemDirectoryHandle; name: string }>,
   ): Promise<boolean> {
     return false;

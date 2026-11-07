@@ -202,6 +202,19 @@ export type FileSystemProvider = {
   }): Promise<CheckedFileWriteResult>;
   /** Append bytes in enqueue order, creating the file and missing parent directories when absent. */
   appendFile?(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
+  /**
+   * Write one file from a stream of its bytes, creating missing parents (W6.3).
+   *
+   * The path holds its old bytes, or none, until the stream ends, and then all
+   * the new ones: chunks land in a staged file that is moved or closed over the
+   * path only once the stream is done (I1). A stream that errors, or a write
+   * that fails, leaves the path as it was and no staged file behind; a crash
+   * leaves a staged sibling the provider's own sweep removes, never partial
+   * bytes at the path. File System Access, OPFS and Node providers hold one
+   * chunk at a time; a provider whose storage keeps a file whole (memory,
+   * IndexedDB) gathers it first.
+   */
+  writeFileStream?(path: string, source: ReadableStream<Uint8Array<ArrayBuffer>>): Promise<void>;
   readdir(path: string): Promise<string[]>;
   /** Head metadata of one path: kind, size and time, reading no file content (I3). */
   stat(path: string): Promise<FileStat>;

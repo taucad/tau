@@ -111,6 +111,60 @@ const isEntryStillAt = async (target: string, written: BigIntStats): Promise<boo
   return current !== undefined && current.dev === written.dev && current.ino === written.ino;
 };
 
+/* Every chunk of a stream written at the handle's position, and the size and SHA-256 of what was written. */
+const writeStreamTo = async (
+  handle: FileHandle,
+  source: ReadableStream<Uint8Array<ArrayBuffer>>,
+): Promise<Readonly<{ size: number; sha256: string }>> => {
+  const digest = createHash('sha256');
+  let size = 0;
+  const reader = source.getReader();
+  try {
+    // oxlint-disable-next-line no-await-in-loop -- a stream is written one chunk after another.
+    for (let read = await reader.read(); !read.done; read = await reader.read()) {
+      for (let written = 0; written < read.value.byteLength; ) {
+        // oxlint-disable-next-line no-await-in-loop -- as above.
+        const { bytesWritten } = await handle.write(
+          read.value,
+          written,
+          read.value.byteLength - written,
+          size + written,
+        );
+        written += bytesWritten;
+      }
+      digest.update(read.value);
+      size += read.value.byteLength;
+    }
+  } catch (error) {
+    await reader.cancel(error).catch(() => undefined);
+    throw error;
+  }
+  return { size, sha256: digest.digest('hex') };
+};
+
+/* Whether the published file is exactly `size` bytes hashing to `sha256`, read one chunk at a time. */
+const publishedDigestEquals = async (
+  handle: FileHandle,
+  expected: Readonly<{ size: number; sha256: string }>,
+): Promise<boolean> => {
+  const digest = createHash('sha256');
+  const chunk = Buffer.alloc(streamChunkSize);
+  let size = 0;
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- a file is read one chunk after another.
+    const { bytesRead } = await handle.read(chunk, 0, chunk.byteLength, size);
+    if (bytesRead === 0) {
+      break;
+    }
+    digest.update(chunk.subarray(0, bytesRead));
+    size += bytesRead;
+    if (size > expected.size) {
+      return false;
+    }
+  }
+  return size === expected.size && digest.digest('hex') === expected.sha256;
+};
+
 const bytesEqual = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
   left.byteLength === right.byteLength &&
   Buffer.from(left.buffer, left.byteOffset, left.byteLength).equals(
@@ -356,6 +410,29 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     await this._atomicWrite(path_, target, {
       data: typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data),
     });
+  }
+
+  /**
+   * Write `path` from a stream (W6.3): each chunk goes to the same temp
+   * sibling `writeFile` uses, which is synced and renamed over the path only
+   * once the stream ends, and the published entry is verified by its SHA-256
+   * read back in chunks. Never more than a chunk is held.
+   *
+   * @param path_ - Rooted file path to write.
+   * @param source - The file's bytes, in order.
+   */
+  public override async writeFileStream(path_: string, source: ReadableStream<Uint8Array<ArrayBuffer>>): Promise<void> {
+    this._assertRootedPath(path_);
+    if (path_ === '') {
+      throw this._eisdir(path_);
+    }
+    const target = await this._resolve(path_, 'mutate');
+    const existingEntry = await this._lstatOrUndefined(target);
+    if (existingEntry?.isDirectory() === true) {
+      throw this._eisdir(path_);
+    }
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await this._atomicWrite(path_, target, { source });
   }
 
   /** Direct providers do not own the cross-client authority needed for checked replacement. */
@@ -1057,9 +1134,12 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
   private async _atomicWrite(
     rootedPath: string,
     targetPath: string,
-    options: { data: Uint8Array<ArrayBuffer>; beforeReplace?: () => Promise<void> },
+    options: (
+      | { data: Uint8Array<ArrayBuffer>; source?: undefined }
+      | { data?: undefined; source: ReadableStream<Uint8Array<ArrayBuffer>> }
+    ) & { beforeReplace?: () => Promise<void> },
   ): Promise<void> {
-    const { data, beforeReplace } = options;
+    const { data, source, beforeReplace } = options;
     const realBase = await this._realBase;
     const admittedDirectory = await fs.realpath(path.dirname(targetPath));
     if (!isContained(realBase, admittedDirectory)) {
@@ -1070,7 +1150,6 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       admittedDirectory,
       `.${path.basename(targetPath)}.${process.pid}.${randomUUID()}.tmp`,
     );
-    const bytes = data;
     const existing = await this._lstatOrUndefined(admittedTarget);
     if (existing?.isSymbolicLink() === true) {
       throw this._errno('ELOOP', 'refusing to replace symbolic link', rootedPath);
@@ -1078,6 +1157,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     const existingMode = existing === undefined ? undefined : existing.mode % 0o1000;
 
     let replaced = false;
+    let streamed: Readonly<{ size: number; sha256: string }> | undefined;
     let failure: unknown;
     let retainedHandle: FileHandle | undefined;
     try {
@@ -1086,7 +1166,11 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
         retainedHandle = handle;
       }
       try {
-        await handle.writeFile(bytes);
+        if (data === undefined) {
+          streamed = await writeStreamTo(handle, source);
+        } else {
+          await handle.writeFile(data);
+        }
         if (existingMode !== undefined) {
           await handle.chmod(existingMode);
         }
@@ -1129,8 +1213,11 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
 
       const verification = await fs.open(admittedTarget, verificationReadFlags);
       try {
-        const committed = await readPublishedDescriptor(verification, bytes.byteLength);
-        if (!bytesEqual(committed, bytes)) {
+        const verified =
+          data === undefined
+            ? streamed !== undefined && (await publishedDigestEquals(verification, streamed))
+            : bytesEqual(await readPublishedDescriptor(verification, data.byteLength), data);
+        if (!verified) {
           throw this._errno('WRITE_VERIFICATION_FAILED', 'committed bytes could not be verified', rootedPath);
         }
       } catch (error) {

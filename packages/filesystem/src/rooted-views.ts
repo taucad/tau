@@ -84,7 +84,7 @@ const privateStoreDirectory = '.git';
  */
 export type PrivateStore = Pick<
   FileSystemProvider,
-  'readFile' | 'writeFile' | 'readdir' | 'stat' | 'exists' | 'mkdir' | 'unlink' | 'rmdir' | 'rename'
+  'readFile' | 'writeFile' | 'writeFileStream' | 'readdir' | 'stat' | 'exists' | 'mkdir' | 'unlink' | 'rmdir' | 'rename'
 > & {
   /**
    * Bytes `[offset, offset + length)` of one file, clamped to its end: a
@@ -832,6 +832,15 @@ export class RootedViews {
     const privateStore: PrivateStore = {
       readFile: readPrivateFile,
       ...(captured.provider.readFileStream === undefined ? {} : { readRange: readPrivateRange }),
+      /* A streamed write commits whole or not at all, by the provider's own staging (W6.3). */
+      ...(captured.provider.writeFileStream === undefined
+        ? {}
+        : {
+            writeFileStream: async (path: string, source: ReadableStream<Uint8Array<ArrayBuffer>>) => {
+              const target = resolvePrivate(path);
+              await target.provider.writeFileStream!(target.path, source);
+            },
+          }),
       writeFile: async (path, data) => {
         const target = resolvePrivate(path);
         await target.provider.writeFile(target.path, data);

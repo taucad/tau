@@ -84,6 +84,9 @@ const fakeWorker = (crashOn?: string, compute: ComputeWorker = createInlineCompu
       }
       if (!terminated && !frozen) {
         port.postMessage(message, transfer);
+      } else if (transfer.length > 0) {
+        /* A worker that never loaded still took what was transferred to it: the caller's buffer is detached. */
+        structuredClone(message, { transfer });
       }
     },
     addEventListener: (type: 'message' | 'error' | 'messageerror', listener: (event: Event) => void) => {
@@ -293,6 +296,36 @@ describe('the supervised compute worker (W5)', () => {
     gate.resolve(undefined);
     expect(await Promise.all(calls)).toEqual(Array.from({ length: 5 }, () => digestHex('sha1', body)));
     expect(workers[0]?.sent()).toBe(5);
+  });
+
+  it('never sends a call whose bytes the dead worker took to the fallback, which would measure nothing', async () => {
+    /* A worker that never loaded, as above: the bytes were transferred to it before it died. */
+    const spawnUnloadable = (): FakeWorker => {
+      const worker = fakeWorker();
+      worker.freeze();
+      queueMicrotask(() => {
+        worker.crash();
+      });
+      return worker;
+    };
+    const inline = createInlineCompute();
+    const measured = vi.fn(inline.measureImportBytes);
+    const kept = vi.fn(inline.sha256Kept);
+    const fallback: ComputeWorker = { ...inline, measureImportBytes: measured, sha256Kept: kept };
+    const compute = createSupervisedComputeWorker({ spawn: spawnUnloadable, maxRestarts: 5, fallback });
+    const body = encoder.encode('sphere(1);\n');
+
+    const handed = new Uint8Array(body);
+    await expect(compute.measureImportBytes(handed, body.byteLength)).rejects.toMatchObject({
+      name: 'ComputeWorkerCrashedError',
+      method: 'measureImportBytes',
+    });
+    expect(handed.byteLength).toBe(0);
+    await expect(compute.sha256Kept(new Uint8Array(body))).rejects.toMatchObject({ method: 'sha256Kept' });
+    expect(measured).not.toHaveBeenCalled();
+    expect(kept).not.toHaveBeenCalled();
+    /* A call that keeps its bytes still goes on to the fallback. */
+    expect(await compute.sha1(body)).toBe(digestHex('sha1', body));
   });
 
   it('counts a spawn that throws as a crash, and past the budget sends calls to the fallback', async () => {

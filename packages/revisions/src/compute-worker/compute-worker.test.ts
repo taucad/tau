@@ -186,13 +186,14 @@ describe('the compute worker seam', () => {
     const body = encoder.encode('cube(2);\n'.repeat(512));
     const readBack = new Uint8Array(body);
 
-    const facts = await remote.measureImportBytes(readBack);
+    const facts = await remote.measureImportBytes(readBack, body.byteLength);
 
     expect(facts.blobOid).toBe(
       digestHex('sha1', new Uint8Array([...encoder.encode(`blob ${String(body.byteLength)}\0`), ...body])),
     );
     expect(facts.sha256).toBe(digestHex('sha256', body));
     expect(facts.contentKind).toBe('text');
+    expect(facts.size).toBe(body.byteLength);
     /* Transferred to the worker: the caller's copy is gone. */
     expect(readBack.byteLength).toBe(0);
   });

@@ -26,7 +26,7 @@
  * @module
  */
 
-import { computeMethods, openComputeConnection } from '#compute-worker/compute-worker.js';
+import { computeMethods, openComputeConnection, transfersArguments } from '#compute-worker/compute-worker.js';
 import type { ComputeConnection, ComputePort, ComputeWorker } from '#compute-worker/compute-worker.js';
 import { ComputeWorkerCrashedError } from '#compute-worker/errors.js';
 import type { ComputeMethod } from '#compute-worker/errors.js';
@@ -265,11 +265,17 @@ export const createSupervisedComputeWorker = (options: SupervisorOptions): Super
         if (current?.connection.compute === compute) {
           watch();
         }
+        /* What a transferring call handed over: once sent, the caller's buffer is detached. */
+        const handed = transfersArguments(method, args) ? (args[0] as Uint8Array<ArrayBuffer>).byteLength : undefined;
         try {
           return await (compute[method] as (...input: readonly unknown[]) => Promise<unknown>)(...args);
         } catch (error) {
           const { fallback } = options;
           if (fallback === undefined || !(error instanceof Error) || !unloaded.has(error)) {
+            throw error;
+          }
+          /* Bytes the dead worker took are gone: the fallback would measure an empty buffer, so the call fails typed. */
+          if (handed !== undefined && (args[0] as Uint8Array<ArrayBuffer>).byteLength !== handed) {
             throw error;
           }
           return await (fallback[method] as (...input: readonly unknown[]) => Promise<unknown>)(...args);

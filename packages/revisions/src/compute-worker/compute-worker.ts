@@ -84,9 +84,10 @@ export type ComputeWorker = Readonly<{
   /**
    * The facts of one file an import wrote, from its read-back: blob id and
    * SHA-256 by one-shot WebCrypto digests, and its content kind (EQ6, I2).
-   * The bytes are transferred to the worker, not cloned, and are unusable after.
+   * The bytes are transferred to the worker, not cloned, and are unusable
+   * after; bytes of another length than `expectedSize` are refused, never measured.
    */
-  measureImportBytes: (bytes: Uint8Array<ArrayBuffer>) => Promise<ImportMeasuredFacts>;
+  measureImportBytes: (bytes: Uint8Array<ArrayBuffer>, expectedSize: number) => Promise<ImportMeasuredFacts>;
 }>;
 
 const drain = async (stream: ReadableStream<Uint8Array<ArrayBuffer>>): Promise<Uint8Array<ArrayBuffer>> => {
@@ -225,7 +226,7 @@ export const createInlineCompute = (): ComputeWorker => {
       return new Uint8Array(written);
     },
     decodeImportEntry: async (request) => decodeImportEntry(request),
-    measureImportBytes: async (bytes) => measureImportBytes(bytes, hashHex),
+    measureImportBytes: async (bytes, expectedSize) => measureImportBytes(bytes, expectedSize, hashHex),
     resolveDelta: async (compressed, declared, base) => {
       const delta = await inflate(compressed);
       if (delta.byteLength !== declared) {
@@ -252,6 +253,18 @@ export const computeMethods: ReadonlyArray<keyof ComputeWorker & ComputeMethod> 
   'decodeImportEntry',
   'measureImportBytes',
 ];
+
+/**
+ * Whether a call hands its first argument's buffer over to the worker
+ * (transferred, so the caller's copy is detached once it is sent), not a clone.
+ *
+ * @param method - The call.
+ * @param args - Its arguments.
+ * @returns Whether the bytes are transferred.
+ * @public
+ */
+export const transfersArguments = (method: ComputeMethod, args: readonly unknown[]): boolean =>
+  (method === 'sha256' && args[1] === true) || method === 'sha256Kept' || method === 'measureImportBytes';
 
 /** One request over the seam. */
 export type ComputeRequest = Readonly<{ id: number; method: ComputeMethod; args: readonly unknown[] }>;
@@ -397,13 +410,11 @@ export const openComputeConnection = (port: ComputePort, now: () => number = Dat
     /* Cloned, not transferred: the caller keeps its own bytes, whole and usable (a pack
      * writer reads an object again after deflating it, a loose writer hashes then deflates),
      * unless it hands them over as consumed. */
-    const [bytes, consumed] = args;
+    const [bytes] = args;
     try {
       port.postMessage(
         { id, method, args } satisfies ComputeRequest,
-        (method === 'sha256' && consumed === true) || method === 'sha256Kept' || method === 'measureImportBytes'
-          ? [(bytes as Uint8Array<ArrayBuffer>).buffer]
-          : [],
+        transfersArguments(method, args) ? [(bytes as Uint8Array<ArrayBuffer>).buffer] : [],
       );
     } catch (error) {
       /* A call that never left (an uncloneable argument, a detached buffer) waits for nothing. */

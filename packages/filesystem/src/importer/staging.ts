@@ -851,6 +851,8 @@ export const stageImport = async (
    * at most the batch's largest file is held at a time beyond the decode
    * budget, and the bytes are handed to the measurer, never kept.
    */
+  /* Past a compute supervisor's default three restarts, so a worker that never loads ends in its inline fallback. */
+  const measureAttempts = 6;
   const readBack = async (window: readonly PlannedImportEntry[]): Promise<Array<StagedImportEntry['facts']>> => {
     const held = byteBudget(Math.max(0, ...window.map(({ size }) => size)));
     /* Only the caller stops it: a later batch's failed decode still lets this written batch keep its record. */
@@ -868,16 +870,22 @@ export const stageImport = async (
     return bounded(window, concurrency, async (entry) => {
       await held.acquire(entry.size, stop);
       try {
-        let measured: ImportMeasuredFacts;
-        try {
-          measured = await measureOnce(entry);
-        } catch (error) {
-          /* A measurer that died took the bytes it was handed with it: they are read from disk again, once. */
-          if (!(error instanceof Error && error.name === 'ComputeWorkerCrashedError')) {
-            throw error;
+        /*
+         * A measurer that died took the bytes it was handed with it: they are read from disk again. A worker
+         * that never loads dies once per spawn until its supervisor gives up and measures inline, so the
+         * read is retried past that point, never without bound.
+         */
+        const measureRetrying = async (attempt: number): Promise<ImportMeasuredFacts> => {
+          try {
+            return await measureOnce(entry);
+          } catch (error) {
+            if (!(error instanceof Error && error.name === 'ComputeWorkerCrashedError') || attempt >= measureAttempts) {
+              throw error;
+            }
+            return measureRetrying(attempt + 1);
           }
-          measured = await measureOnce(entry);
-        }
+        };
+        const measured = await measureRetrying(1);
         const { size, ...facts } = measured;
         if (size !== entry.size) {
           throw new Error(

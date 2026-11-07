@@ -733,6 +733,52 @@ describe('stageImport', () => {
     expect(staged.entries[0]!.facts).not.toHaveProperty('size');
   });
 
+  it('should keep reading a file again while a worker that never loads dies with its bytes, until one measures it', async () => {
+    const provider = new MemoryProvider();
+    const judged = await plan(zipImportSource(await zipOf({ 'p/a.ts': 'right' })));
+    const inline = createInlineImportMeasurer();
+    let calls = 0;
+
+    const staged = await stageImport({
+      port: port(provider),
+      operationId,
+      plan: judged,
+      decode: createInlineImportDecoder(),
+      measure: async (bytes, expected) => {
+        calls += 1;
+        if (calls <= 4) {
+          /* As a supervisor whose worker dies on every spawn until it gives up and measures inline. */
+          structuredClone(bytes.buffer, { transfer: [bytes.buffer] });
+          throw Object.assign(new Error('The compute worker stopped.'), { name: 'ComputeWorkerCrashedError' });
+        }
+        return inline(bytes, expected);
+      },
+    });
+
+    expect(calls).toBe(5);
+    expect(staged.entries[0]!.facts.blobOid).toBe(gitBlobOid(text('right')));
+  });
+
+  it('should fail an import whose measurer keeps dying past its retries', async () => {
+    const provider = new MemoryProvider();
+    const judged = await plan(zipImportSource(await zipOf({ 'p/a.ts': 'right' })));
+    let calls = 0;
+
+    await expect(
+      stageImport({
+        port: port(provider),
+        operationId,
+        plan: judged,
+        decode: createInlineImportDecoder(),
+        measure: async () => {
+          calls += 1;
+          throw Object.assign(new Error('The compute worker stopped.'), { name: 'ComputeWorkerCrashedError' });
+        },
+      }),
+    ).rejects.toThrow(/compute worker stopped/u);
+    expect(calls).toBe(6);
+  });
+
   it('should refuse a staged file that reads back at another size than it was written', async () => {
     const provider = new MemoryProvider();
     const judged = await plan(zipImportSource(await zipOf({ 'p/a.ts': 'right', 'p/b.ts': 'b' })));

@@ -1188,7 +1188,10 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
         const locked = await one.port.push({ remote: 'tau', refs: [{ name: mainRef }], session });
         expect(locked.refs[0]).toMatchObject({ status: 'rejected' });
         expect(locked.refs[0]?.reason).not.toBe('leaseLost');
-        expect(locked.refs[0]?.reason).toMatch(/failed to update ref/u);
+        /* Git's own status: 2.43 says `failed to update ref`, and the batched
+         * receive-pack of 2.51 and later says `reference already exists` for a
+         * held lock; the sideband's `Unable to create … File exists` tells it apart. */
+        expect(locked.refs[0]?.reason).toMatch(/failed to update ref|reference already exists/u);
         await expect(remote.git(['rev-parse', mainRef])).resolves.toBe(first);
       } finally {
         await remote.close();

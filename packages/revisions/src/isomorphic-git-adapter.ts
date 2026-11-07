@@ -1695,24 +1695,31 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
   };
   /*
    * The server's own compare-and-set refusing a command: the ref was not at
-   * the old value this push sent, so another writer moved it. Git's
-   * receive-pack reports every failed ref transaction as `failed to update
-   * ref` (an atomic push's other commands as `atomic transaction failed`), so
-   * the form is read from what it said about that ref: `cannot lock ref
-   * '<ref>': is at <oid> but expected <oid>`, `reference already exists` for a
-   * create, a bare `unable to resolve reference '<ref>'` for a ref removed
-   * since (or, from reftable and batched receive-pack, `reference is missing
-   * but expected <oid>` and `reference does not exist`), or reftable's
-   * `incorrect old value provided`. A lock another process holds (`Unable to
-   * create '<ref>.lock': File exists`) says the same `failed to update ref` and
-   * is contention, not a moved ref; so is a ref the server cannot read
-   * (`unable to resolve reference '<ref>': reference broken`, or a permission
-   * or I/O error after it): both keep git's own text.
+   * the old value this push sent, so another writer moved it. What git says
+   * about that ref on the sideband decides: `cannot lock ref '<ref>': is at
+   * <oid> but expected <oid>`, `reference already exists` for a create, a bare
+   * `unable to resolve reference '<ref>'` for a ref removed since, or
+   * reftable's `reference is missing but expected <oid>` and `incorrect old
+   * value provided`. A lock another process holds (`Unable to create
+   * '<ref>.lock': File exists`) is contention, not a moved ref, and so is a ref
+   * the server cannot read (`…: reference broken`, or a permission or I/O
+   * error): both keep git's own text.
+   *
+   * The per-ref status cannot decide while the sideband names the ref: git
+   * 2.43 reports every failed transaction as `failed to update ref`, and the
+   * batched receive-pack of git 2.51 and later reports a held lock as
+   * `reference already exists`, the same words as a create that lost. Only a
+   * server that said nothing about the ref is read from its status, and then
+   * `reference already exists` is not taken as moved.
    */
   const movedRefSaying =
     /is at [\da-f]+ but expected [\da-f]+|reference is missing but expected [\da-f]+|reference already exists|reference does not exist|unable to resolve reference '[^']*'$|incorrect old value provided/iu;
-  const refMoved = (remoteName: string, reason: string, said: readonly string[]): boolean =>
-    movedRefSaying.test(reason) || said.some((line) => line.includes(`'${remoteName}'`) && movedRefSaying.test(line));
+  const refMoved = (remoteName: string, reason: string, said: readonly string[]): boolean => {
+    const about = said.filter((line) => line.includes(`'${remoteName}'`));
+    return about.length > 0
+      ? about.some((line) => movedRefSaying.test(line))
+      : movedRefSaying.test(reason) && !/already exists/iu.test(reason);
+  };
 
   const requireHttp = (): RevisionHttpClient => {
     if (options.http === undefined) {

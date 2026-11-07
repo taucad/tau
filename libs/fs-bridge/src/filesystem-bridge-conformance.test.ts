@@ -210,9 +210,9 @@ const track = (pending: Promise<unknown>): { readonly settled: () => boolean } =
 };
 
 describe.each([inProcessPort, authorityConnection, workerPort])('bridge conformance: $name', (transport) => {
-  it('says protocol version 9 in its ready hello', async () => {
+  it('says protocol version 10 in its ready hello', async () => {
     const { proxy } = await open(transport);
-    expect(proxy.hello.payload).toMatchObject({ v: 9, state: 'ready' });
+    expect(proxy.hello.payload).toMatchObject({ v: 10, state: 'ready' });
   });
 
   it('reads many files in one call: bytes or missing, in request order, once per path', async () => {

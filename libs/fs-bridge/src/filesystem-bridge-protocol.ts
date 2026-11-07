@@ -81,10 +81,13 @@ const discriminatedResultUnion = <
  * changeset over the wire), `glob`, `grep` and `indexStats` — calls a v9 peer
  * either serves or refuses, so the slices share one bump (D20). So does the
  * third: the index queries `facts` and `changedSince`, and
- * `pendingPaths` (D9, W4).
+ * `pendingPaths` (D9, W4). Version 10 changes the answer of an existing
+ * call: `changedSince` takes the caller's index `epoch` and answers `epoch`,
+ * `removed` and `rescan` (W6.3), which a v9 authority does not send, so a v9
+ * peer is refused at the handshake rather than failing that call's schema.
  * @public
  */
-export const fileSystemBridgeProtocolVersion = 9;
+export const fileSystemBridgeProtocolVersion = 10;
 
 /**
  * Caller-side controls of a long bridge call (charter D14): an `AbortSignal`

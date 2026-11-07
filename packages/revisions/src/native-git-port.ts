@@ -17,7 +17,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { access, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { access, mkdir, open, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { ResourceQueue } from '@taucad/filesystem';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
@@ -63,6 +63,7 @@ import type {
   RevisionLogEntry,
   RevisionLogInput,
   RevisionPort,
+  ReadTreeOptions,
   RevisionReceipt,
   RevisionRecord,
   RevisionFetchInput,
@@ -664,15 +665,31 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     );
   };
 
+  /* Written to a synced `.partial` sibling and renamed into place (I1), so the store never names a torn object;
+   * content-addressed, so a rename over a concurrent writer's copy replaces identical bytes. */
   const storeLfsObject = async (oid: string, content: Uint8Array<ArrayBuffer>): Promise<void> => {
     const file = lfsObjectFile(oid);
+    const held = await access(file).then(
+      () => true,
+      () => false,
+    );
+    if (held) {
+      return;
+    }
     await mkdir(dirname(file), { recursive: true });
-    await writeFile(file, content, { flag: 'wx' }).catch((error: unknown) => {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
-        // oxlint-disable-next-line @typescript-eslint/only-throw-error -- re-raising exactly what the write threw.
-        throw error;
+    const partial = `${file}.${String(process.pid)}.${randomUUID()}.partial`;
+    try {
+      const handle = await open(partial, 'wx');
+      try {
+        await handle.writeFile(content);
+        await handle.sync();
+      } finally {
+        await handle.close();
       }
-    });
+      await rename(partial, file);
+    } finally {
+      await rm(partial, { force: true });
+    }
   };
 
   /**
@@ -695,6 +712,71 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         'A large object this revision references could not be read on this machine.',
         { cause: error },
       );
+    }
+  };
+
+  /**
+   * One blob as a `local` read answers it: the content when the large object
+   * is here, else the pointer itself.
+   *
+   * @param content - Bytes as the object store holds them.
+   * @returns The real bytes, or the pointer.
+   */
+  const smudgedIfHere = async (content: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> => {
+    try {
+      return await smudged(content);
+    } catch (error) {
+      if (error instanceof RevisionPortError && error.code === 'MISSING_LARGE_OBJECT') {
+        return content;
+      }
+      throw error;
+    }
+  };
+
+  /**
+   * Fetch the large objects one read needs and this store lacks (D16): one
+   * `git lfs fetch` of that commit's objects from each remote that carries
+   * large objects, in turn, until none is missing. A read with none missing
+   * spawns nothing; one whose objects no remote has fails as the read did
+   * before, `MISSING_LARGE_OBJECT`, from `smudged`.
+   *
+   * @param commit - The commit whose tree is being read.
+   * @param pointers - The pointers the read holds.
+   * @param signal - Stops the transfer; the read then rejects.
+   */
+  const fillLargeObjects = async (
+    commit: string,
+    pointers: ReadonlyArray<Readonly<{ oid: string }>>,
+    signal: AbortSignal | undefined,
+  ): Promise<void> => {
+    const missing = async (): Promise<boolean> => {
+      const present = await Promise.all(
+        pointers.map(async ({ oid }) =>
+          access(lfsObjectFile(oid)).then(
+            () => true,
+            () => false,
+          ),
+        ),
+      );
+      return present.includes(false);
+    };
+    if (!(await missing())) {
+      return;
+    }
+    const configuredRemotes = await port.listRemotes();
+    for (const remote of configuredRemotes.filter((candidate) => remoteCarriesLargeObjects(candidate))) {
+      // oxlint-disable-next-line no-await-in-loop -- one remote after another, until every object is here.
+      await output(['lfs', 'fetch', '--', remote.name, commit], {
+        deadline: transferDeadline,
+        // oxlint-disable-next-line no-await-in-loop -- the credentials belong to this remote.
+        env: await remoteEnvironment(remote.name, configuredRemotes),
+        ...(signal === undefined ? {} : { signal }),
+        remote: remote.name,
+      });
+      // oxlint-disable-next-line no-await-in-loop -- the next remote is asked only for what is still missing.
+      if (!(await missing())) {
+        return;
+      }
     }
   };
 
@@ -1511,20 +1593,37 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
 
     /* Three processes whatever the tree holds: the commit, its paths, and one
      * `cat-file --batch` for every blob in it (rule 20's `readTree` cost). */
-    readTree: async (id: RevisionId): Promise<ImmutableRevisionTree | undefined> => {
+    /* Large objects fill lazily (D16): a fetch moves refs only, and a read
+     * that needs a large object this store lacks fetches that one commit's
+     * objects then, never every fetched ref's. `local` leaves it its pointer. */
+    readTree: async (id: RevisionId, readOptions?: ReadTreeOptions): Promise<ImmutableRevisionTree | undefined> => {
       const commit = await readCommitObject(id);
       if (commit === undefined) {
         return undefined;
       }
-      const paths = await listTree(commit.tree);
+      const listed = await listTree(commit.tree);
+      const wanted = readOptions?.paths === undefined ? undefined : new Set(readOptions.paths);
+      const paths = wanted === undefined ? [...listed] : [...listed].filter(([path]) => wanted.has(path));
       const blobs = await readObjects(
-        [...paths.values()].map((entry) => entry.oid),
+        paths.map(([, entry]) => entry.oid),
         'blob',
       );
+      const pointers = paths.flatMap(([, { oid }]) => {
+        const pointer = readLfsPointer(blobs.get(oid)!);
+        return pointer === undefined ? [] : [pointer];
+      });
+      if (readOptions?.largeObjects !== 'local' && pointers.length > 0) {
+        await fillLargeObjects(id, pointers, readOptions?.signal);
+      }
       const entries = await Promise.all(
-        [...paths].map(
-          async ([path, { oid, mode }]): Promise<RevisionTreeInput> => [path, await smudged(blobs.get(oid)!), mode],
-        ),
+        paths.map(async ([path, { oid, mode }]): Promise<RevisionTreeInput> => {
+          const content = blobs.get(oid)!;
+          return [
+            path,
+            readOptions?.largeObjects === 'local' ? await smudgedIfHere(content) : await smudged(content),
+            mode,
+          ];
+        }),
       );
       return new ImmutableRevisionTree(entries);
     },
@@ -1828,9 +1927,8 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       );
       /* Once per fetch (C73): `listRemotes` is `1 + 3R` processes on this leg. */
       const configuredRemotes = await port.listRemotes();
-      const configuredRemote = configuredRemotes.find((remote) => remote.name === input.remote);
-      // Tracking refs only become visible once their LFS payloads are present.
-      // Suppress the remote's configured refmap too: explicit staging refspecs
+      // Large objects are not fetched here: a read fills them lazily (D16).
+      // Suppress the remote's configured refmap: explicit staging refspecs
       // alone still allow Git to opportunistically update normal tracking refs.
       const transaction = `${stagingRefPrefix}-fetch-${randomUUID()}`;
       const references = await Promise.all(
@@ -1857,16 +1955,6 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
             remote: input.remote,
           },
         );
-        if (configuredRemote !== undefined && remoteCarriesLargeObjects(configuredRemote)) {
-          // Let LFS enumerate the pinned tips; a failed ls-files is not proof
-          // that the transfer has no large objects.
-          await output(['lfs', 'fetch', '--', input.remote, ...references.map(({ staged }) => staged)], {
-            deadline: transferDeadline,
-            env: await remoteEnvironment(input.remote, configuredRemotes),
-            signal: input.signal,
-            remote: input.remote,
-          });
-        }
         const zero = await zeroObjectId();
         const updates = await Promise.all(
           references.map(async ({ tracked, staged, previous }) => {

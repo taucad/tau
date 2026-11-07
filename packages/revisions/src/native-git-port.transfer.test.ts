@@ -10,7 +10,8 @@ import { gitToolchainOnPath } from '#test/native-git-harness.js';
 
 const author = { name: 'Transfer test', email: 'transfer@example.com' };
 
-// A real Git/LFS transfer whose start is delayed past the local plumbing budget.
+// A real Git/LFS transfer whose start is delayed past the local plumbing budget. A large-object fetch
+// covers both of its transfers, the commit's `lfs fetch` and an object's own `lfs smudge`.
 // The executable shim does not implement the protocol or the result being asserted.
 const transferFixture = async (operation: 'fetch' | 'push' | 'discovery' | 'git-fetch') => {
   const root = await mkdtemp(join(tmpdir(), 'tau-lfs-budget-'));
@@ -26,7 +27,7 @@ const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 const operation = ${JSON.stringify(operation)};
-const delayed = operation === 'discovery' ? args.includes('ls-remote') : operation === 'git-fetch' ? args.includes('fetch') && !args.includes('lfs') : args.some((arg, i) => arg === 'lfs' && args[i + 1] === operation);
+const delayed = operation === 'discovery' ? args.includes('ls-remote') : operation === 'git-fetch' ? args.includes('fetch') && !args.includes('lfs') : args.some((arg, i) => arg === 'lfs' && (args[i + 1] === operation || (operation === 'fetch' && args[i + 1] === 'smudge')));
 const start = () => {
   if (delayed && fs.existsSync(${JSON.stringify(fail)})) process.exit(1);
   const child = spawn('git', args, { stdio: 'inherit' });

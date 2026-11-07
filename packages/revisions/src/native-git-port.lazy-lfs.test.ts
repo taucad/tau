@@ -47,6 +47,8 @@ const fetchedProject = async (
     tau?: Omit<GitHttpBackendOptions, 'root' | 'name'>;
     mirror?: Omit<GitHttpBackendOptions, 'root' | 'name'>;
     remoteCredential?: (mirror: GitHttpBackendFixture) => NativeGitRemoteCredential;
+    /** A `git` the clone runs in place of the toolchain's, given the fixture's root. */
+    cloneGit?: (root: string) => Promise<string>;
   }> = {},
 ) => {
   const root = await mkdtemp(join(tmpdir(), 'tau-lazy-lfs-'));
@@ -81,6 +83,7 @@ const fetchedProject = async (
   const clone = createNativeGitRevisionPort({
     repositoryPath: clonePath,
     tauCredential,
+    ...(options.cloneGit === undefined ? {} : { gitExecutable: await options.cloneGit(root) }),
     ...(options.remoteCredential === undefined ? {} : { remoteCredential: () => options.remoteCredential?.(mirror) }),
   });
   await clone.init({ author });
@@ -118,6 +121,41 @@ describe.runIf(gitToolchainOnPath)('native lazy large objects (D16)', () => {
     expect(left).toMatchObject({ status: 'rejected', reason: { code: 'MISSING_LARGE_OBJECT' } });
     expect(right).toMatchObject({ status: 'rejected', reason: { code: 'MISSING_LARGE_OBJECT' } });
     expect(downloads(tau)).toBe(1);
+  }, 120_000);
+
+  it('reads every remote lacking the object as MISSING_LARGE_OBJECT whatever else git-lfs prints around it', async () => {
+    /* A failed `git lfs fetch` that also draws a progress meter (carriage returns, as under load) and a line this
+     * port has never seen: its words settle nothing, so each object is asked by its oid, and the verdict is theirs. */
+    const chatty = async (root: string): Promise<string> => {
+      const shim = join(root, 'git-chatty');
+      await writeFile(
+        shim,
+        `#!${process.execPath}
+const { spawnSync } = require('node:child_process');
+const args = process.argv.slice(2);
+const at = args.indexOf('lfs');
+const result = spawnSync('git', args, { stdio: ['inherit', 'inherit', 'pipe'] });
+process.stderr.write(result.stderr ?? '');
+if (at !== -1 && args[at + 1] === 'fetch' && result.status !== 0) {
+  process.stderr.write('Downloading LFS objects:   0% (0/1), 0 B | 0 B/s\\rDownloading LFS objects:   0% (0/1), 0 B | 0 B/s\\n');
+  process.stderr.write('warning: a git-lfs line this port has never seen\\n');
+}
+process.exit(result.status ?? 1);
+`,
+        { mode: 0o755 },
+      );
+      return shim;
+    };
+    const { clone, head, bytes } = await fetchedProject({ cloneGit: chatty });
+    /* The mirror lacks it and says so in words this port does not know; Tau has it. */
+    const tree = await clone.readTree(head);
+    expect(tree?.get('large.bin')).toEqual(bytes);
+    /* Now no remote has the other one, and both reads that share the fill are told so. */
+    const other = await fetchedProject({ cloneGit: chatty });
+    other.forget(other.oid);
+    const [left, right] = await Promise.allSettled([other.clone.readTree(other.head), other.clone.readTree(other.head)]);
+    expect(left).toMatchObject({ status: 'rejected', reason: { code: 'MISSING_LARGE_OBJECT' } });
+    expect(right).toMatchObject({ status: 'rejected', reason: { code: 'MISSING_LARGE_OBJECT' } });
   }, 120_000);
 
   it('keeps a remote that could not be reached visible beside one that lacks the object', async () => {

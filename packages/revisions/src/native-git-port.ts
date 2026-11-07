@@ -856,7 +856,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
 
   /* What git-lfs prints around a transfer that are no verdict on it: progress, the failure summary, the log hint. */
   const transferChatter =
-    /^(?:Downloading .*|fetch: .*|error: failed to fetch some objects from .*|Errors logged to .*|Use `git lfs logs last` to view the log\.)$/u;
+    /^(?:Downloading .*|Fetching .*|fetch: .*|(?:error: )?[Ff]ailed to fetch some objects from .*|Errors logged to .*|Use `git lfs logs last` to view the log\.)$/u;
   /* An object-level not-found for one oid, as git-lfs spells a batch API object error (`fetch`), or wraps it (`smudge`). */
   const objectAbsent =
     /^(?:Error downloading object: .*: )?\[(?<oid>[\da-f]{64})\] Object does not exist(?: on the server)?: \[404\] /u;
@@ -883,7 +883,8 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     remote: Remote,
   ): 'lacks' | RevisionPortError => {
     const stderr = textDecoder.decode(result.stderr);
-    const lines = stderr.split('\n').filter((line) => line.trim() !== '' && !transferChatter.test(line.trim()));
+    /* A progress meter redraws its line with a carriage return, so each redraw is a line of its own. */
+    const lines = stderr.split(/[\r\n]/u).filter((line) => line.trim() !== '' && !transferChatter.test(line.trim()));
     if (
       lines.length > 0 &&
       lines.every((line) => {
@@ -991,6 +992,20 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     return !present.includes(false);
   };
 
+  /**
+   * The pointers whose objects this store lacks.
+   *
+   * @param pointers - Candidate objects.
+   * @returns Those not stored, deduplicated, in order.
+   */
+  const missingOf = async (
+    pointers: ReadonlyArray<Readonly<{ oid: string; size: number }>>,
+  ): Promise<Array<Readonly<{ oid: string; size: number }>>> => {
+    const unique = [...new Map(pointers.map((pointer) => [pointer.oid, pointer])).values()];
+    const stored = await Promise.all(unique.map(async ({ oid }) => allStored([oid])));
+    return unique.filter((_pointer, index) => !stored[index]);
+  };
+
   /* One fill per commit at a time; a read that joins one shares its outcome, unless only its caller cancelled it. */
   const fillsInFlight = new Map<string, Readonly<{ fill: Promise<void>; signal: AbortSignal | undefined }>>();
 
@@ -1006,7 +1021,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    */
   const fillLargeObjects = async (
     commit: string,
-    pointers: ReadonlyArray<Readonly<{ oid: string }>>,
+    pointers: ReadonlyArray<Readonly<{ oid: string; size: number }>>,
     signal: AbortSignal | undefined,
   ): Promise<void> => {
     const oids = pointers.map(({ oid }) => oid);
@@ -1038,7 +1053,18 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
             ...(signal === undefined ? {} : { signal }),
             remote: remote.name,
           });
-          return result.exitCode === 0 ? 'done' : transferVerdict(result, asked, remote);
+          if (result.exitCode === 0) {
+            return 'done';
+          }
+          const verdict = transferVerdict(result, asked, remote);
+          if (verdict === 'lacks' || signal?.aborted === true) {
+            return verdict;
+          }
+          /* The fetch's own words did not settle it (a git-lfs whose output this port does not know, a meter drawn
+           * under load): each object still missing is asked by its oid, whose answer is that object's alone. A real
+           * refusal refuses these too, so it is never read as "lacks". */
+          const left = await missingOf(pointers);
+          return left.length === 0 ? 'done' : smudgeFromRemote(remote, left, { env, signal });
         },
         async () => !(await allStored(oids)),
         signal,
@@ -1060,6 +1086,62 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
 
   /* Objects fetched by their own oid at once, per remote: enough to hide a round trip, few enough to bound processes. */
   const fetchByOidConcurrency = 4;
+
+  /**
+   * Fetch objects by their own oid from one remote, through `git lfs smudge`
+   * with that remote as its default: each verified against its oid, stored,
+   * then handed to `arrived`. Each object's failure is its own, so the verdict
+   * is per object: `'lacks'` only when every failure was that object not found.
+   *
+   * @param remote - The remote asked.
+   * @param pointers - The objects, in the order to ask for them.
+   * @param transfer - The remote's credentials, the signal that stops the transfers, and who is told each object.
+   * @returns The remote's verdict.
+   */
+  const smudgeFromRemote = async (
+    remote: Remote,
+    pointers: ReadonlyArray<Readonly<{ oid: string; size: number }>>,
+    transfer: Readonly<{
+      env: Record<string, string | undefined>;
+      signal: AbortSignal | undefined;
+      arrived?: (oid: string, content: Uint8Array<ArrayBuffer>) => void;
+    }>,
+  ): Promise<'done' | 'lacks' | Error> => {
+    const { env, signal } = transfer;
+    const verdicts: Array<'done' | 'lacks' | Error> = [];
+    const queue = [...pointers];
+    const worker = async (): Promise<void> => {
+      for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
+        const { oid, size } = next;
+        // oxlint-disable-next-line no-await-in-loop -- one object after another in this worker.
+        const result = await run(['-c', `remote.lfsdefault=${remote.name}`, 'lfs', 'smudge'], {
+          input: [textEncoder.encode(`version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize ${String(size)}\n`)],
+          deadline: transferDeadline,
+          env,
+          ...(signal === undefined ? {} : { signal }),
+          remote: remote.name,
+        });
+        if (result.exitCode !== 0) {
+          verdicts.push(transferVerdict(result, new Set([oid]), remote));
+          continue;
+        }
+        /* Content-addressed: bytes that are not the object are no answer at all. */
+        if (result.stdout.byteLength !== size || digestHex('sha256', result.stdout) !== oid) {
+          verdicts.push(new RevisionPortError('ENGINE_FAILED', 'A large object arrived with bytes that are not its own.'));
+          continue;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- stored before it is delivered, so a crash keeps it.
+        await storeLfsObject(oid, result.stdout);
+        transfer.arrived?.(oid, result.stdout);
+        verdicts.push('done');
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(fetchByOidConcurrency, queue.length) }, worker));
+    return (
+      verdicts.find((verdict): verdict is Error => verdict instanceof Error) ??
+      (verdicts.includes('lacks') ? 'lacks' : 'done')
+    );
+  };
 
   /**
    * Large objects by their pointers alone (D10 `filled`): what this store holds
@@ -1105,47 +1187,12 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     };
     if (missing().length > 0) {
       await fromEachRemote(
-        async (remote, env) => {
-          const verdicts: Array<'done' | 'lacks' | Error> = [];
-          const queue = missing();
-          const worker = async (): Promise<void> => {
-            for (let oid = queue.shift(); oid !== undefined; oid = queue.shift()) {
-              const size = wanted.get(oid)!;
-              // oxlint-disable-next-line no-await-in-loop -- one object after another in this worker.
-              const result = await run(['-c', `remote.lfsdefault=${remote.name}`, 'lfs', 'smudge'], {
-                input: [
-                  textEncoder.encode(
-                    `version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize ${String(size)}\n`,
-                  ),
-                ],
-                deadline: transferDeadline,
-                env,
-                ...(signal === undefined ? {} : { signal }),
-                remote: remote.name,
-              });
-              if (result.exitCode !== 0) {
-                verdicts.push(transferVerdict(result, new Set([oid]), remote));
-                continue;
-              }
-              /* Content-addressed: bytes that are not the object are no answer at all. */
-              if (result.stdout.byteLength !== size || digestHex('sha256', result.stdout) !== oid) {
-                verdicts.push(
-                  new RevisionPortError('ENGINE_FAILED', 'A large object arrived with bytes that are not its own.'),
-                );
-                continue;
-              }
-              // oxlint-disable-next-line no-await-in-loop -- stored before it is delivered, so a crash keeps it.
-              await storeLfsObject(oid, result.stdout);
-              deliver(oid, result.stdout);
-              verdicts.push('done');
-            }
-          };
-          await Promise.all(Array.from({ length: Math.min(fetchByOidConcurrency, queue.length) }, worker));
-          return (
-            verdicts.find((verdict): verdict is Error => verdict instanceof Error) ??
-            (verdicts.includes('lacks') ? 'lacks' : 'done')
-          );
-        },
+        async (remote, env) =>
+          smudgeFromRemote(
+            remote,
+            missing().map((oid) => ({ oid, size: wanted.get(oid)! })),
+            { env, signal, arrived: deliver },
+          ),
         async () => missing().length > 0,
         signal,
       );

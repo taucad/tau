@@ -23,11 +23,12 @@ import type { FileSystemProvider } from '@taucad/filesystem';
 import type { RevisionId } from '#algorithms/index.js';
 import type { RevisionProvenance, RevisionSummary } from '#revision-authority.js';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { createInlineCompute } from '#compute-worker/compute-worker.js';
 import { parseChangeId } from '#git-objects.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import type { LfsFetchReport } from '#isomorphic-git-adapter.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
-import { lfsPointerFor } from '#lfs.js';
+import { lfsObjectPath, lfsPointerFor } from '#lfs.js';
 import { createRevisionHttpClient } from '#http-client.js';
 import type { Checkout, RevisionPort } from '#revision-port.js';
 import { conflictLabels, materializeConflict, readConflictTerms } from '#revision-conflict.js';
@@ -1929,6 +1930,23 @@ describe.runIf(gitToolchainOnPath)('native remote refusals (N1)', () => {
  * that only fetched pointers reads the bytes back.
  */
 describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
+  /**
+   * What a store holds under one oid's directory: the object or a partial of it.
+   *
+   * @param files - The store's filesystem.
+   * @param oid - The large object's id.
+   * @returns The entries named for the oid.
+   */
+  const keptUnder = async (files: FileSystemProvider, oid: string): Promise<readonly string[]> => {
+    const directory = `.git/${lfsObjectPath(oid).slice(0, lfsObjectPath(oid).lastIndexOf('/'))}`;
+    let entries: readonly string[];
+    try {
+      entries = await files.readdir(directory);
+    } catch {
+      return [];
+    }
+    return entries.filter((entry) => entry.startsWith(oid));
+  };
   const large = ((): Uint8Array<ArrayBuffer> => {
     const bytes = new Uint8Array(new ArrayBuffer(5 * 1024 * 1024));
     for (let index = 0; index < bytes.length; index += 1) {
@@ -1979,6 +1997,55 @@ describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
     } finally {
       await fixture.close();
       await other.close();
+      await writer.dispose();
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 60_000);
+
+  /* P20: tracking refs outlive `setRemote`, so a remote re-pointed from an LFS
+   * host to a plain Git one still has the old host's `refs/remotes/origin/*`.
+   * The refusal reads what this host would be sent, not what the old one held. */
+  it('refuses large objects to a plain Git remote re-pointed from an LFS host, by what it would send', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-lfs-repointed-'));
+    const hosted = await startGitHttpBackend({ root: join(root, 'hosted') });
+    const plain = await startGitHttpBackend({ root: join(root, 'plain'), name: 'plain' });
+    const writer = await isomorphicHarness();
+    try {
+      const port = writer.withTransport();
+      await port.init({ author });
+      const first = await port.writeRevision({
+        parents: [],
+        tree: tree({ 'models/bracket.step': large, 'main.ts': 'one\n' }),
+        provenance: provenance('user'),
+        summary: summary('Large object'),
+      });
+      await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(first.commitId) });
+      await port.setRemote({ name: 'origin', url: hosted.url, provider: 'github', repositoryId: '1' });
+      await port.push({ remote: 'origin', refs: [{ name: 'refs/heads/main' }] });
+      expect(hosted.uploadCount()).toBe(1);
+
+      // A text edit: against the stale tracking ref, it sends no large object.
+      const second = await port.writeRevision({
+        parents: [revisionId(first.commitId)],
+        tree: tree({ 'models/bracket.step': large, 'main.ts': 'two\n' }),
+        provenance: provenance('user'),
+        summary: summary('Text edit'),
+      });
+      await port.updateRef({
+        name: 'main',
+        expectedHead: revisionId(first.commitId),
+        head: revisionId(second.commitId),
+      });
+      await port.setRemote({ name: 'origin', url: plain.url });
+
+      const pushing = port.push({ remote: 'origin', refs: [{ name: 'refs/heads/main' }] });
+      await expect(pushing).rejects.toMatchObject({ code: 'LFS_REMOTE_UNSUPPORTED' });
+      await expect(pushing).rejects.toThrow(/models\/bracket\.step/u);
+      expect(plain.trail().some((entry) => entry.endsWith('/git-receive-pack'))).toBe(false);
+      expect(plain.batches()).toStrictEqual([]);
+    } finally {
+      await hosted.close();
+      await plain.close();
       await writer.dispose();
       await rm(root, { force: true, recursive: true });
     }
@@ -2053,6 +2120,333 @@ describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
       await rm(root, { force: true, recursive: true });
     }
   }, 180_000);
+
+  /* D11, S9: a push discovers its large objects from the commits it sends, so
+   * an edit after a history of large files lists only the new object in its
+   * batch, reads none of the old ones, and a push with nothing to send asks
+   * the LFS endpoint nothing at all. */
+  it('lists only the new large objects of the commits a push sends', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-lfs-diff-'));
+    const fixture = await startGitHttpBackend({ root });
+    const writer = await isomorphicHarness();
+    try {
+      const port = writer.withTransport();
+      await port.init({ author });
+      const variant = (seed: number): Uint8Array<ArrayBuffer> => large.map((byte) => (byte + seed) % 256);
+      let head: RevisionId | undefined;
+      const commit = async (files: Readonly<Record<string, string | Uint8Array<ArrayBuffer>>>): Promise<void> => {
+        const receipt = await port.writeRevision({
+          parents: head === undefined ? [] : [head],
+          tree: tree(files),
+          provenance: provenance('user'),
+          summary: summary('Revision'),
+        });
+        const next = revisionId(receipt.commitId);
+        await port.updateRef({ name: 'main', expectedHead: head, head: next });
+        head = next;
+      };
+      await commit({ 'models/a.step': large, 'main.ts': 'one\n' });
+      await commit({ 'models/a.step': large, 'models/b.step': variant(1), 'main.ts': 'two\n' });
+      await port.setRemote({ name: 'tau', url: fixture.url });
+      await port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] });
+      // A remote with no history is sent every commit, so both objects.
+      expect(fixture.batches().map((batch) => batch.oids.toSorted())).toStrictEqual([
+        [lfsPointerFor(large).pointer.oid, lfsPointerFor(variant(1)).pointer.oid].toSorted(),
+      ]);
+
+      await commit({
+        'models/a.step': large,
+        'models/b.step': variant(1),
+        'models/c.step': variant(2),
+        'main.ts': 'two\n',
+      });
+      await port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] });
+      expect(fixture.batches().slice(1)).toStrictEqual([
+        { operation: 'upload', oids: [lfsPointerFor(variant(2)).pointer.oid] },
+      ]);
+
+      // An edit to a text file sends no large object, so no batch call.
+      await commit({
+        'models/a.step': large,
+        'models/b.step': variant(1),
+        'models/c.step': variant(2),
+        'main.ts': 'three\n',
+      });
+      await port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] });
+      // Nor does a push the remote is already up to date with.
+      await port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] });
+      expect(fixture.batches()).toHaveLength(2);
+      expect(fixture.uploadCount()).toBe(3);
+      expect(await fixture.git(['rev-parse', 'refs/heads/main'])).toBe(head);
+    } finally {
+      await fixture.close();
+      await writer.dispose();
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 120_000);
+
+  /* D9, D11: a download is verified by reading back what it stored, so an
+   * object the remote serves at the right size with the wrong bytes is
+   * refused, nothing is kept under its oid, and the right bytes still land. */
+  it('refuses a same-size corrupt download, on the wire or on disk, by its read-back', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-lfs-readback-'));
+    const fixture = await startGitHttpBackend({ root });
+    const writer = await isomorphicHarness();
+    try {
+      const port = writer.withTransport();
+      await port.init({ author });
+      const receipt = await port.writeRevision({
+        parents: [],
+        tree: tree({ 'models/bracket.step': large }),
+        provenance: provenance('user'),
+        summary: summary('Large object'),
+      });
+      const head = revisionId(receipt.commitId);
+      await port.updateRef({ name: 'main', expectedHead: undefined, head });
+      await port.setRemote({ name: 'tau', url: fixture.url });
+      await port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] });
+      /* Right bytes in hand, wrong bytes on disk: only the read-back sees it. */
+      const provider = await createMemoryProvider();
+      const corrupting = Object.assign(Object.create(provider) as typeof provider, {
+        writeFile: async (path: string, data: Parameters<typeof provider.writeFile>[1]) =>
+          provider.writeFile(
+            path,
+            path.endsWith('.partial') && data instanceof Uint8Array
+              ? data.map((byte, index) => (index === 0 ? (byte + 1) % 256 : byte))
+              : data,
+          ),
+      });
+      const tearing = createIsomorphicGitRevisionPort({
+        filesystem: corrupting,
+        http: createRevisionHttpClient({ authorization: () => 'Bearer session-token' }),
+      });
+      await tearing.init({ author });
+      await tearing.setRemote({ name: 'tau', url: fixture.url });
+      await tearing.fetch({ remote: 'tau' });
+      await expect(tearing.readTree(head)).rejects.toThrow(/did not hash to its own id/u);
+      const { oid } = lfsPointerFor(large).pointer;
+      await expect(keptUnder(provider, oid)).resolves.toStrictEqual([]);
+      const served = fixture.objects as Map<string, Uint8Array<ArrayBuffer>>;
+      served.set(
+        oid,
+        large.map((byte, index) => (index === 0 ? (byte + 1) % 256 : byte)),
+      );
+
+      const readerFiles = await createMemoryProvider();
+      const reader = createIsomorphicGitRevisionPort({
+        filesystem: readerFiles,
+        http: createRevisionHttpClient({ authorization: () => 'Bearer session-token' }),
+      });
+      await reader.init({ author });
+      await reader.setRemote({ name: 'tau', url: fixture.url });
+      await reader.fetch({ remote: 'tau' });
+      await expect(reader.readTree(head)).rejects.toThrow(/did not hash to its own id/u);
+      await expect(keptUnder(readerFiles, oid)).resolves.toStrictEqual([]);
+
+      served.set(oid, large);
+      const healed = await reader.readTree(head);
+      expect(healed?.get('models/bracket.step')).toStrictEqual(large);
+      await expect(keptUnder(readerFiles, oid)).resolves.toStrictEqual([oid]);
+    } finally {
+      await fixture.close();
+      await writer.dispose();
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 120_000);
+
+  /* D9: another writer's same-size copy landing mid-download does not let the
+   * download's own bytes through unread: corrupt on the wire, they are refused. */
+  it('refuses corrupt downloaded bytes when another writer stores a same-size copy meanwhile', async () => {
+    let fetchSpy: { mockRestore: () => void } | undefined;
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-lfs-raced-'));
+    const fixture = await startGitHttpBackend({ root });
+    const writer = await isomorphicHarness();
+    try {
+      const port = writer.withTransport();
+      await port.init({ author });
+      const receipt = await port.writeRevision({
+        parents: [],
+        tree: tree({ 'models/bracket.step': large }),
+        provenance: provenance('user'),
+        summary: summary('Large object'),
+      });
+      const head = revisionId(receipt.commitId);
+      await port.updateRef({ name: 'main', expectedHead: undefined, head });
+      await port.setRemote({ name: 'tau', url: fixture.url });
+      await port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] });
+      const { oid } = lfsPointerFor(large).pointer;
+      (fixture.objects as Map<string, Uint8Array<ArrayBuffer>>).set(
+        oid,
+        large.map((byte, index) => (index === 0 ? (byte + 1) % 256 : byte)),
+      );
+
+      const files = await createMemoryProvider();
+      const stored = `.git/${lfsObjectPath(oid)}`;
+      const reader = createIsomorphicGitRevisionPort({
+        filesystem: files,
+        http: createRevisionHttpClient({ authorization: () => 'Bearer session-token' }),
+      });
+      await reader.init({ author });
+      await reader.setRemote({ name: 'tau', url: fixture.url });
+      await reader.fetch({ remote: 'tau' });
+      /* A Tau Cloud transfer goes through the page's own fetch: the object's answer
+       * arrives, and only then does the other tab's whole copy land. */
+      const pageFetch = globalThis.fetch.bind(globalThis);
+      let raced = 0;
+      fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+        const response = await pageFetch(input, init);
+        if ((input instanceof Request ? input.url : String(input)).endsWith(`/lfs/${oid}`)) {
+          raced += 1;
+          await files.mkdir(stored.slice(0, stored.lastIndexOf('/')), { recursive: true });
+          await files.writeFile(stored, large);
+        }
+        return response;
+      });
+
+      await expect(reader.readTree(head)).rejects.toThrow(/did not hash to its own id/u);
+      expect(raced).toBe(1);
+      await expect(keptUnder(files, oid)).resolves.toStrictEqual([oid]);
+    } finally {
+      fetchSpy?.mockRestore();
+      await fixture.close();
+      await writer.dispose();
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 60_000);
+
+  /* W6.4, I2: a download is streamed to its partial where the provider holds a chunk at a time, read back once and
+   * hashed once, and the read-back is what is delivered; a provider that would gather the stream is written whole. */
+  it.each([
+    { streamsWrites: true, written: 'writeFileStream object' },
+    { streamsWrites: false, written: 'writeFile object' },
+  ])(
+    'writes a download to its partial ($written), reads it back once, hashes it once, and delivers the verified bytes',
+    async ({ streamsWrites, written }) => {
+      const root = await mkdtemp(join(tmpdir(), 'tau-revisions-lfs-streamed-'));
+      const fixture = await startGitHttpBackend({ root });
+      const writer = await isomorphicHarness();
+      try {
+        const port = writer.withTransport();
+        await port.init({ author });
+        const receipt = await port.writeRevision({
+          parents: [],
+          tree: tree({ 'models/bracket.step': large }),
+          provenance: provenance('user'),
+          summary: summary('Large object'),
+        });
+        const head = revisionId(receipt.commitId);
+        await port.updateRef({ name: 'main', expectedHead: undefined, head });
+        await port.setRemote({ name: 'tau', url: fixture.url });
+        await port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] });
+
+        const files = await createMemoryProvider();
+        const { oid } = lfsPointerFor(large).pointer;
+        const calls: string[] = [];
+        const counted = Object.assign(Object.create(files) as typeof files, {
+          /* Memory gathers a stream; it stands in here for both kinds of provider. */
+          capabilities: { ...files.capabilities, streamsWrites },
+          writeFile: async (path: string, data: Uint8Array<ArrayBuffer> | string) => {
+            calls.push(path.includes(oid) ? 'writeFile object' : 'writeFile');
+            return files.writeFile(path, data);
+          },
+          writeFileStream: async (path: string, source: ReadableStream<Uint8Array<ArrayBuffer>>) => {
+            calls.push(path.includes(oid) ? 'writeFileStream object' : 'writeFileStream');
+            return files.writeFileStream(path, source);
+          },
+          readFile: (async (path: string, encoding?: 'utf8') => {
+            if (path.includes(oid)) {
+              calls.push('readFile object');
+            }
+            return encoding === 'utf8' ? files.readFile(path, 'utf8') : files.readFile(path);
+          }) as typeof files.readFile,
+        });
+        const inline = createInlineCompute();
+        const delivered: Array<Uint8Array<ArrayBuffer>> = [];
+        const reader = createIsomorphicGitRevisionPort({
+          filesystem: counted,
+          http: createRevisionHttpClient({ authorization: () => 'Bearer session-token' }),
+          compute: {
+            ...inline,
+            sha256: async (bytes, consumed) => {
+              calls.push('sha256');
+              return inline.sha256(bytes, consumed);
+            },
+            sha256Kept: async (bytes) => {
+              calls.push('sha256Kept');
+              const kept = await inline.sha256Kept(bytes);
+              delivered.push(kept.data);
+              return kept;
+            },
+          },
+        });
+        await reader.init({ author });
+        await reader.setRemote({ name: 'tau', url: fixture.url });
+        await reader.fetch({ remote: 'tau' });
+        const read = await reader.readTree(head);
+
+        expect(calls.filter((call) => call.includes('object') || call.startsWith('sha256'))).toEqual([
+          written,
+          'readFile object',
+          'sha256Kept',
+        ]);
+        expect(delivered).toHaveLength(1);
+        expect(read?.get('models/bracket.step')).toEqual(large);
+        await expect(keptUnder(files, oid)).resolves.toStrictEqual([oid]);
+      } finally {
+        await fixture.close();
+        await writer.dispose();
+        await rm(root, { force: true, recursive: true });
+      }
+    },
+    60_000,
+  );
+
+  /* D9: a read-back that throws — here the hash itself — keeps no `.partial`. */
+  it('keeps no partial download when hashing the read-back throws', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-lfs-hash-throws-'));
+    const fixture = await startGitHttpBackend({ root });
+    const writer = await isomorphicHarness();
+    try {
+      const port = writer.withTransport();
+      await port.init({ author });
+      const receipt = await port.writeRevision({
+        parents: [],
+        tree: tree({ 'models/bracket.step': large }),
+        provenance: provenance('user'),
+        summary: summary('Large object'),
+      });
+      const head = revisionId(receipt.commitId);
+      await port.updateRef({ name: 'main', expectedHead: undefined, head });
+      await port.setRemote({ name: 'tau', url: fixture.url });
+      await port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] });
+
+      const files = await createMemoryProvider();
+      const inline = createInlineCompute();
+      const reader = createIsomorphicGitRevisionPort({
+        filesystem: files,
+        http: createRevisionHttpClient({ authorization: () => 'Bearer session-token' }),
+        compute: {
+          ...inline,
+          sha256: async () => {
+            throw new Error('The hash failed.');
+          },
+          /* The read-back is hashed here, and returned: a failure leaves the partial to be swept. */
+          sha256Kept: async () => {
+            throw new Error('The hash failed.');
+          },
+        },
+      });
+      await reader.init({ author });
+      await reader.setRemote({ name: 'tau', url: fixture.url });
+      await reader.fetch({ remote: 'tau' });
+      await expect(reader.readTree(head)).rejects.toThrow(/The hash failed/u);
+      await expect(keptUnder(files, lfsPointerFor(large).pointer.oid)).resolves.toStrictEqual([]);
+    } finally {
+      await fixture.close();
+      await writer.dispose();
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 60_000);
 
   /* Load-path audit fix 1: opening a project read its large objects one batch
    * call and one transfer at a time. A store that fetched only pointers now

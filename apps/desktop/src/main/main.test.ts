@@ -130,7 +130,10 @@ const state = vi.hoisted(() => ({
   servicesPost: vi.fn(),
 }));
 
-vi.mock('#main/error-reporting.js', () => ({ initializeDesktopErrorReporting: state.initializeErrorReporting }));
+vi.mock('#main/error-reporting.js', () => ({
+  initializeDesktopErrorReporting: state.initializeErrorReporting,
+  reportDesktopSignal: vi.fn(),
+}));
 
 vi.mock('#tau/native-preparation.js', () => ({
   createDesktopKernelPreparer: (options: unknown) => {
@@ -365,6 +368,7 @@ vi.mock('#main/diagnostics.js', () => ({
   forwardRendererDiagnostics: vi.fn(),
   forwardUtilityDiagnostics: vi.fn(),
   kernelUtilityDiagnostics: vi.fn(() => ({})),
+  watchRendererHangs: vi.fn(),
 }));
 vi.mock('#main/environment.js', async (importOriginal) => ({
   /* The packaged lock (`packagedOverridesEnabled`, `stripPackagedOverrides`) runs for real. */

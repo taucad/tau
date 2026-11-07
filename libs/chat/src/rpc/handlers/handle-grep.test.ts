@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RpcDirectoryEntry, RpcFileStat, RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
@@ -382,5 +382,116 @@ describe('handleGrep', () => {
     const { grepInputSchema } = await import('#schemas/tools/grep.tool.schema.js');
 
     expect(grepInputSchema.safeParse({ pattern: 'foo', headLimit: 1001 }).success).toBe(false);
+  });
+
+  /* Slice (a): a pending file was not searched, so it is named, never reported as having no matches. */
+  it('should name a pending file as not searched, and keep an unreadable file silent', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+    fileSystem.readdir.mockResolvedValue([
+      textEntry('a.ts', 20),
+      { name: 'part.step', type: 'file', size: 130 },
+      textEntry('broken.ts', 20),
+    ]);
+    fileSystem.readFile.mockImplementation(async (path) => {
+      if (path === 'a.ts') {
+        return 'const marker = 1;';
+      }
+      if (path === 'part.step') {
+        throw Object.assign(new Error('The large object of part.step is not on this device yet.'), {
+          code: 'PENDING',
+        });
+      }
+      throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    });
+
+    const result = await handleGrep({ pattern: 'marker', path: '' }, fileSystem);
+
+    expect(result).toMatchObject({ success: true, totalMatches: 1, pendingFiles: ['part.step'] });
+    expect(result.success && result.matches).toEqual([expect.objectContaining({ file: 'a.ts', line: 1 })]);
+  });
+
+  /* A grep during a cold open asks the index first: a pending file is named at once, its object never fetched. */
+  it('should name the files the index holds as pending without reading them', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+    fileSystem.readdir.mockResolvedValue([textEntry('a.ts', 20), { name: 'part.step', type: 'file', size: 130 }]);
+    const pendingPaths = vi.fn<NonNullable<RpcFileSystem['pendingPaths']>>(async () => ['part.step']);
+    fileSystem.pendingPaths = pendingPaths;
+    fileSystem.readFile.mockResolvedValue('const marker = 1;');
+
+    const result = await handleGrep({ pattern: 'marker', path: '' }, fileSystem);
+
+    expect(pendingPaths).toHaveBeenCalledWith(['a.ts', 'part.step']);
+    expect(fileSystem.readFile).toHaveBeenCalledTimes(1);
+    expect(fileSystem.readFile).toHaveBeenCalledWith('a.ts');
+    expect(result).toMatchObject({ success: true, totalMatches: 1, pendingFiles: ['part.step'] });
+  });
+
+  it('should fail without reading a file when the index cannot say which files are pending', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+    fileSystem.readdir.mockResolvedValue([textEntry('a.ts', 20), { name: 'part.step', type: 'file', size: 130 }]);
+    fileSystem.pendingPaths = async () => {
+      throw new Error('The project index could not open.');
+    };
+    fileSystem.readFile.mockResolvedValue('const marker = 1;');
+
+    const result = await handleGrep({ pattern: 'marker', path: '' }, fileSystem);
+
+    expect(result.success).toBe(false);
+    expect(fileSystem.readFile).not.toHaveBeenCalled();
+  });
+
+  /* A relayed host that predates the call cannot say either: its reads answer `PENDING`, so the grep reads. */
+  it('should read every file when the host cannot answer which are pending', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+    fileSystem.readdir.mockResolvedValue([textEntry('a.ts', 20), { name: 'part.step', type: 'file', size: 130 }]);
+    fileSystem.pendingPaths = async () => {
+      throw Object.assign(new Error('This workspace bridge cannot say which files are pending.'), {
+        code: 'PENDING_PATHS_UNSUPPORTED',
+      });
+    };
+    fileSystem.readFile.mockImplementation(async (path) => {
+      if (path === 'part.step') {
+        throw Object.assign(new Error('The large object of part.step is not on this device yet.'), { code: 'PENDING' });
+      }
+      return 'const marker = 1;';
+    });
+
+    const result = await handleGrep({ pattern: 'marker', path: '' }, fileSystem);
+
+    expect(result).toMatchObject({ success: true, totalMatches: 1, pendingFiles: ['part.step'] });
+  });
+
+  it('should read at most 16 files at once, keeping the walk order', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+    const names = Array.from({ length: 40 }, (_, index) => `f${String(index).padStart(2, '0')}.ts`);
+    fileSystem.readdir.mockResolvedValue(names.map((name) => textEntry(name, 20)));
+    fileSystem.pendingPaths = async () => [];
+    let inFlight = 0;
+    let most = 0;
+    fileSystem.readFile.mockImplementation(async (path) => {
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      await new Promise((resolve) => {
+        setTimeout(resolve, path.endsWith('0.ts') ? 5 : 1);
+      });
+      inFlight -= 1;
+      return `marker in ${path}`;
+    });
+
+    const result = await handleGrep({ pattern: 'marker', path: '', headLimit: 100 }, fileSystem);
+
+    expect(most).toBe(16);
+    expect(result.success && result.matches.map(({ file }) => file)).toStrictEqual(names);
+  });
+
+  it('should carry no pendingFiles when every file was searched', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+    fileSystem.readdir.mockResolvedValue([textEntry('a.ts', 20)]);
+    fileSystem.readFile.mockResolvedValue('nothing here');
+
+    const result = await handleGrep({ pattern: 'marker', path: '' }, fileSystem);
+
+    expect(result).toMatchObject({ success: true, totalMatches: 0 });
+    expect(result.success && 'pendingFiles' in result).toBe(false);
   });
 });

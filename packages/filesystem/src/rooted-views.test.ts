@@ -156,6 +156,33 @@ describe('rooted porcelain', () => {
     await expect(rooted.copyTree!('../elsewhere', 'backup')).rejects.toThrow();
   });
 
+  it('should stop a copy whose signal aborts while it reads the source, writing nothing', async () => {
+    const controller = new AbortController();
+    const copied = view().copyTree!('src', 'backup', {
+      admits: () => {
+        controller.abort();
+        return true;
+      },
+      signal: controller.signal,
+    });
+
+    await expect(copied).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(view().exists('backup')).resolves.toBe(false);
+  });
+
+  it('should honour an aborted signal on duplicate, the index queries and the read content operations', async () => {
+    const signal = AbortSignal.abort();
+    const rooted = withReadContentOps(view(), tauPathPolicy);
+    const aborted = { name: 'AbortError' };
+
+    await expect(rooted.duplicate!('src/main.ts', 'copy.ts', { signal })).rejects.toMatchObject(aborted);
+    await expect(rooted.exists('copy.ts')).resolves.toBe(false);
+    await expect(rooted.search!('main', { signal })).rejects.toMatchObject(aborted);
+    await expect(rooted.statTree!('src', { signal })).rejects.toMatchObject(aborted);
+    await expect(rooted.contents('src', { signal })).rejects.toMatchObject(aborted);
+    await expect(rooted.archive('src', { signal })).rejects.toMatchObject(aborted);
+  });
+
   it('should honour the caller filter on every entry of a copy', async () => {
     await view().copyTree!('src', 'backup', { admits: (relativePath) => relativePath !== 'lib' });
 

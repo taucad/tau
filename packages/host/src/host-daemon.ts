@@ -20,6 +20,7 @@ import { createRuntimeClient } from '@taucad/runtime';
 import { MachineHostStartInFlightError } from '@taucad/runtime/host/node';
 import type { CreateNodeMachineHostInput } from '@taucad/runtime/host/node';
 import { createFileSystemBridgePort, fromFileSystemBridge } from '@taucad/runtime/filesystem';
+import { nodeGrepMatcherWorker } from '@taucad/runtime/filesystem/node';
 import { webSocketTransport } from '@taucad/runtime/transport/websocket';
 import type { RuntimeClient } from '@taucad/runtime/client';
 import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime/types';
@@ -732,7 +733,9 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
            * the agent's view of the checkout and never the working copy, which
            * only the parameter authority and the revisions engine hold
            * (invariant CI1, W14). */
-          fileSystem: fromFileSystemBridge(() => createFileSystemBridgePort(executorViewFor(workspaceRoot))),
+          fileSystem: fromFileSystemBridge(() =>
+            createFileSystemBridgePort(executorViewFor(workspaceRoot), { grepMatcherWorker: nodeGrepMatcherWorker }),
+          ),
           createSocket: (url) =>
             new WebSocket(url, { headers: { authorization: `Bearer ${child.authorizationToken}` } }),
           ...(options.agent?.compute

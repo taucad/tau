@@ -1,7 +1,7 @@
 [
   {
-    "name": "total (ESM JS) — measured 6.16 kB brotlied on 2026-10-16 (tessellation presets and budgets)",
+    "name": "total (ESM JS) — measured 6.16 kB brotlied on 2026-10-16 (tessellation presets and budgets); the `TAU_cad_topology` payload from engine 0.11 solid meshes (`openrscad-topology`) about 0.93 kB, measured 7.09 kB brotlied in CI on 2026-11-06",
     "path": "dist/**/*.mjs",
-    "limit": "6.75 kB"
+    "limit": "7.5 kB"
   }
 ]

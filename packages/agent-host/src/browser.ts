@@ -443,10 +443,12 @@ const logName = 'events.jsonl';
 export type RootedLogObserver = NonNullable<BrowserChatStoreOptions['observeLog']>;
 
 /**
- * Observe chat logs on a rooted project filesystem in the change-set form
- * (D6, D23): a peer's append storm on a log arrives once per committed
- * changeset, not once per append, and a source that refuses the form with
- * `ENOTSUP` falls back to its per-path watch. The observation resolves once
+ * Observe chat logs on a rooted project filesystem on the connection's one
+ * event channel (D14), or in the change-set form (D6, D23): a peer's append
+ * storm on a log arrives once per committed changeset, not once per append,
+ * and every log observed over one connection shares that connection's channel.
+ * A source that refuses a form with `ENOTSUP` steps down to the next, as far
+ * as its per-path watch. The observation resolves once
  * the authority acknowledges it, reports a closed or failed watch through
  * `onError`, and releases on abort.
  *

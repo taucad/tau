@@ -31,6 +31,7 @@ import {
   remoteOf,
   remoteTrackingRef,
   remoteTransportError,
+  tauCatalogueUrl,
   tauRemoteName,
   tauRemoteUrl,
 } from '#remotes.js';
@@ -68,6 +69,21 @@ describe('remotes', () => {
     expect(tauRemoteUrl('https://api.tau.new', 'p1')).toBe('https://api.tau.new/v1/git/p1.git');
     expect(tauRemoteUrl('https://api.tau.new/', 'p1')).toBe('https://api.tau.new/v1/git/p1.git');
     expect(tauRemoteUrl('https://api.tau.new///', 'p1')).toBe('https://api.tau.new/v1/git/p1.git');
+  });
+
+  it("finds a Tau repository's catalogue on the API's own origin, and no other remote's", () => {
+    const api = 'https://api.tau.new/';
+    expect(tauCatalogueUrl(api, 'https://api.tau.new/v1/git/p1.git')).toBe(
+      'https://api.tau.new/v1/projects/p1/git/catalogue',
+    );
+    expect(tauCatalogueUrl('https://tau.test/api', 'https://tau.test/api/v1/git/p-2.git/')).toBe(
+      'https://tau.test/api/v1/projects/p-2/git/catalogue',
+    );
+    expect(tauCatalogueUrl(undefined, 'https://api.tau.new/v1/git/p1.git')).toBeUndefined();
+    expect(tauCatalogueUrl(api, 'https://github.com/acme/parts.git')).toBeUndefined();
+    expect(tauCatalogueUrl(api, 'https://evil.test/v1/git/p1.git')).toBeUndefined();
+    expect(tauCatalogueUrl(api, 'https://api.tau.new/elsewhere/v1/git/p1.git')).toBeUndefined();
+    expect(tauCatalogueUrl(api, 'https://api.tau.new/v1/git/p1.git?x=1')).toBeUndefined();
   });
 
   it('refuses a project id that could leave the repository path', () => {

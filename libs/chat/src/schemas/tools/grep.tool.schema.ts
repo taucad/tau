@@ -88,6 +88,12 @@ export const grepOutputSchema = z.object({
   matches: z.array(grepMatchSchema).describe('The list of matches found.'),
   totalMatches: z.number().describe('The total number of matches found.'),
   truncated: z.boolean().optional().describe('Whether results were truncated due to too many matches.'),
+  pendingFiles: z
+    .array(z.string())
+    .optional()
+    .describe(
+      'Files that were not searched because their large object is not on this device yet. They may hold matches; search them again once their content has arrived.',
+    ),
   appliedHeadLimit: z.number().int().nonnegative().describe('The effective headLimit used to slice the matches list.'),
   appliedOffset: z.number().int().nonnegative().describe('The effective offset used to slice the matches list.'),
 });

@@ -13,6 +13,8 @@ import type {
   RpcRuntimeClient,
 } from '@taucad/chat/rpc';
 import { rpcClientErrorCode } from '@taucad/chat';
+import { getErrno } from '@taucad/utils/error';
+import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
 import type { LargeObjectsFacet } from '@taucad/revisions';
 
 /* A pointer is at most this many bytes (`@taucad/revisions` lfs.ts), and starts with its spec line. */
@@ -51,6 +53,29 @@ export const largeObjectDownloadingError = (path: string): Error =>
   );
 
 /**
+ * The code a `pendingPaths` rejects with when its host predates the call: the guard checks the file's bytes instead.
+ */
+export const pendingPathsUnsupportedCode = 'PENDING_PATHS_UNSUPPORTED';
+
+/* Unknown: the file may be a placeholder, so the write waits rather than replace its pointer. */
+const undecidedError = (path: string, cause: unknown): Error =>
+  Object.assign(new Error(`Could not tell whether ${path} is still downloading. Try again in a moment.`, { cause }), {
+    code: rpcClientErrorCode.operationTimeout,
+    retryable: true,
+  });
+
+/* Only nothing at the path lets a write through unchecked: any other failure leaves it unknown. */
+const isAbsent = (error: unknown): boolean => {
+  const code = getErrno(error);
+  return (
+    code === 'ENOENT' ||
+    code === 'ENOTDIR' ||
+    error instanceof FileNotFoundError ||
+    (error instanceof Error && error.name === 'NotFoundError')
+  );
+};
+
+/**
  * A filesystem whose reads and writes refuse a placeholder.
  *
  * Reads check what they return; writes, edits and appends check the bytes they would replace, so a placeholder is never
@@ -61,6 +86,24 @@ export const largeObjectDownloadingError = (path: string): Error =>
  */
 export const guardLargeObjectFiles = <FileSystem extends RpcFileSystem>(fileSystem: FileSystem): FileSystem => {
   const refuseIfPlaceholder = async (path: string): Promise<void> => {
+    /* The index says so without a read: a read of a pending entry would fetch its object (D9). */
+    if (fileSystem.pendingPaths !== undefined) {
+      let pending: readonly string[] | undefined;
+      try {
+        pending = await fileSystem.pendingPaths([path]);
+      } catch (error) {
+        /* A host that predates the call is checked by the file's bytes below; its reads refuse with PENDING. */
+        if (getErrno(error) !== pendingPathsUnsupportedCode) {
+          throw undecidedError(path, error);
+        }
+      }
+      if (pending !== undefined) {
+        if (pending.length > 0) {
+          throw largeObjectDownloadingError(path);
+        }
+        return;
+      }
+    }
     let current: Uint8Array<ArrayBuffer>;
     try {
       const metadata = await fileSystem.stat(path);
@@ -68,9 +111,12 @@ export const guardLargeObjectFiles = <FileSystem extends RpcFileSystem>(fileSyst
         return;
       }
       current = await fileSystem.readBinaryFile(path);
-    } catch {
-      /* Absent or unreadable: the write itself answers. */
-      return;
+    } catch (error) {
+      /* Absent: the write creates it. A pending read is the placeholder's; any other failure leaves it unknown. */
+      if (isAbsent(error)) {
+        return;
+      }
+      throw getErrno(error) === 'PENDING' ? largeObjectDownloadingError(path) : undecidedError(path, error);
     }
     if (isLargeObjectPlaceholder(current)) {
       throw largeObjectDownloadingError(path);

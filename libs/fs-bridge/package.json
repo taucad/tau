@@ -45,11 +45,13 @@
     "#*": "./src/*"
   },
   "dependencies": {
+    "@taucad/events": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/parameters": "workspace:*",
     "@taucad/rpc": "workspace:*",
     "@taucad/types": "workspace:*",
-    "@taucad/utils": "workspace:*"
+    "@taucad/utils": "workspace:*",
+    "minimatch": "^10.2.5"
   },
   "devDependencies": {
     "zod": "catalog:"

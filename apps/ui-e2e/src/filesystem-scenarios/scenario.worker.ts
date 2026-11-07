@@ -186,11 +186,15 @@ const percentile = (values: readonly number[], fraction: number): number => {
  * mode basis and case-collision check an empty target never needs), and a
  * fence that is uncontended because nothing else applies to this checkout.
  *
- * @param live - The checkout's rooted view.
- * @param projectId - Its project.
+ * The checkout is read and written raw, as `revision-effects.ts` opens it: the
+ * revision layer owns its large-object pointers, which every other view reads
+ * through to their objects (D9).
+ *
+ * @param projectId - The project.
  * @returns `materialize(entries)`, which writes the tree over an empty checkout.
  */
-const checkoutMaterializer = (live: RootedFileSystem, projectId: string) => {
+const checkoutMaterializer = (projectId: string) => {
+  const live = service.createRootedFileSystem(`/projects/${projectId}`, undefined, { placeholders: 'raw' });
   const memo = createCaptureMemo();
   const exclude = (path: string): boolean => !tauPathPolicy.classify(path).versioned;
   const capture = async (_place: Checkout, modeBasis?: ImmutableRevisionTree): Promise<ImmutableRevisionTree> => {
@@ -243,8 +247,8 @@ const checkoutMaterializer = (live: RootedFileSystem, projectId: string) => {
 };
 
 /** {@link checkoutMaterializer} over an empty checkout, writing the fixture's tree. */
-const checkoutApply = (live: RootedFileSystem, projectId: string) => {
-  const materialize = checkoutMaterializer(live, projectId);
+const checkoutApply = (projectId: string) => {
+  const materialize = checkoutMaterializer(projectId);
   return async (entries: readonly FixtureEntry[]): Promise<number> =>
     materialize(
       new ImmutableRevisionTree(entries.map((entry) => [entry.path, checkoutBytes(entry), '100644'])),
@@ -557,6 +561,8 @@ const productionTurnConsumers = async (
     transport: {
       listen: viewProxy.listen,
       closed: viewProxy.closed,
+      /* As the file manager wires it: every watch on the connection's one event channel (D14). */
+      events: (handler) => viewProxy.events(handler),
       watchChangeSets: (request, handler) => viewProxy.watchChangeSets(request, handler),
       watchReady: (request, handler) => viewProxy.watchReady(request, handler),
     },
@@ -667,7 +673,7 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
   const saveSize = parameters['saveBytes'] ?? 1024 * 1024;
   switch (runner) {
     case 'materialize': {
-      const materialize = checkoutApply(live, projectId);
+      const materialize = checkoutApply(projectId);
       const measured = await measure(async () => ({ files: await materialize(entries) }));
       await assertMaterialized(live, entries);
       return measured;
@@ -675,7 +681,7 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
     case 'materialize-with-save': {
       /* S17: a person's save to a path the apply never touches, issued once the apply is writing. */
       const savePath = 'notes/s17-save.ts';
-      const materialize = checkoutApply(live, projectId);
+      const materialize = checkoutApply(projectId);
       counters.trace(['s17-save.ts']);
       const measured = await measure(async () => {
         /* An object, so the loop below sees the apply's completion flip it. */
@@ -886,7 +892,7 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
     case 'replace-seed': {
       /* I1: the old tree the killable apply replaces. */
       return measure(async () => ({
-        files: await checkoutMaterializer(live, projectId)(replaceTree('old'), new ImmutableRevisionTree([])),
+        files: await checkoutMaterializer(projectId)(replaceTree('old'), new ImmutableRevisionTree([])),
       }));
     }
     case 'replace-killable': {
@@ -897,7 +903,7 @@ const run = async (runner: RunnerName, projectId: string, parameters: Readonly<R
        * the create changesets alone. */
       const killAfter = parameters['killAfter'] ?? Number.POSITIVE_INFINITY;
       const from = parameters['create'] === 1 ? new ImmutableRevisionTree([]) : replaceTree('old');
-      const materialize = checkoutMaterializer(live, projectId);
+      const materialize = checkoutMaterializer(projectId);
       const operations = (): number => {
         const counts = counters.read();
         return counts.writes + counts.renames + counts.removes;

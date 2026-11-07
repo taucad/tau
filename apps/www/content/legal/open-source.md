@@ -18,7 +18,7 @@ Tau makes use of, and is based in part on, facilities provided by the **Open CAS
 OCCT runs in the web and desktop apps as WebAssembly and, in the desktop app, as a native library, through these
 components:
 
-- The GeoSpec engine (`geospec-engine` 0.5.1), built from OCCT upstream
+- The GeoSpec engine (`geospec-engine` 0.6.0), built from OCCT upstream
   revision `3d097a0328e71b826377d4814ab05ec3c3d23871` ([source](https://github.com/taucad/geospec))
 - libcascade 3.1.0 ([source](https://github.com/taucad/opencascade.js))
 - occt-import-js 0.0.23 ([source](https://github.com/kovacsv/occt-import-js))
@@ -274,8 +274,8 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@tanstack/react-store](https://github.com/TanStack/store) | 0.11.2 | MIT |
 | [@tanstack/store](https://github.com/TanStack/store) | 0.11.2 | MIT |
 | [@taucad/kcl-wasm-lib](https://github.com/taucad/modeling-app) | 0.1.192 | MIT |
-| [@taulabs/openrscad-engine](https://github.com/taucad/openrscad) | 0.11.0-beta.4 | Apache-2.0 OR MIT |
-| [@taulabs/openrscad-engine-{platform}](https://github.com/taucad/openrscad) | 0.11.0-beta.4 | Apache-2.0 OR MIT |
+| [@taulabs/openrscad-engine](https://github.com/taucad/openrscad) | 0.11.0-beta.5 | Apache-2.0 OR MIT |
+| [@taulabs/openrscad-engine-{platform}](https://github.com/taucad/openrscad) | 0.11.0-beta.5 | Apache-2.0 OR MIT |
 | [@taulabs/replicad](https://github.com/taucad/replicad) | 1.1.0-taulabs.1 | MIT |
 | [@taulabs/replicad-opencascadejs](https://github.com/taucad/replicad) | 0.23.0-beta.0 | MIT |
 | [@taulabs/three-viewport-gizmo](https://github.com/taucad/three-viewport-gizmo) | 2.2.4 | MIT |
@@ -513,11 +513,11 @@ Their copyright notices and full license texts ship inside each package and are 
 | [function-bind](https://github.com/Raynos/function-bind) | 1.1.2 | MIT |
 | [gaxios](https://github.com/googleapis/google-cloud-node) | 7.3.1 | Apache-2.0 |
 | [gcp-metadata](https://github.com/googleapis/google-cloud-node-core) | 8.1.2 | Apache-2.0 |
-| [geospec](https://github.com/taucad/geospec) | 0.5.1 | Apache-2.0 |
-| [geospec-engine](https://github.com/taucad/geospec) | 0.5.1 | Apache-2.0 |
-| [geospec-engine-darwin-arm64](https://github.com/taucad/geospec) | 0.5.1 | Apache-2.0 |
-| [geospec-engine-linux-arm64-gnu](https://github.com/taucad/geospec) | 0.5.1 | Apache-2.0 |
-| [geospec-engine-linux-x64-gnu](https://github.com/taucad/geospec) | 0.5.1 | Apache-2.0 |
+| [geospec](https://github.com/taucad/geospec) | 0.6.0 | Apache-2.0 |
+| [geospec-engine](https://github.com/taucad/geospec) | 0.6.0 | Apache-2.0 |
+| [geospec-engine-darwin-arm64](https://github.com/taucad/geospec) | 0.6.0 | Apache-2.0 |
+| [geospec-engine-linux-arm64-gnu](https://github.com/taucad/geospec) | 0.6.0 | Apache-2.0 |
+| [geospec-engine-linux-x64-gnu](https://github.com/taucad/geospec) | 0.6.0 | Apache-2.0 |
 | [get-east-asian-width](https://github.com/sindresorhus/get-east-asian-width) | 1.7.0 | MIT |
 | [get-intrinsic](https://github.com/ljharb/get-intrinsic) | 1.3.0 | MIT |
 | [get-nonce](https://github.com/theKashey/get-nonce) | 1.0.1 | MIT |

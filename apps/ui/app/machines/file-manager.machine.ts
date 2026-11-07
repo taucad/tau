@@ -536,7 +536,7 @@ const initializeServicesActor = fromSafeAsync<
 
   try {
     type AuthorityWatch = ReturnType<typeof viewProxy.watchReady>;
-    /* An opt-in e2e diagnostic may wrap each actual registration, in either form. */
+    /* An opt-in e2e diagnostic may wrap each actual registration, in any form. */
     const diagnose = (request: Parameters<typeof viewProxy.watchReady>[0], watch: AuthorityWatch): AuthorityWatch => {
       if (!ENV.TAU_DEBUG) {
         return watch;
@@ -563,8 +563,17 @@ const initializeServicesActor = fromSafeAsync<
       transport: {
         listen: viewProxy.listen,
         closed: viewProxy.closed,
-        /* One wire frame per committed changeset for every watch the tree and
-         * the open documents register (charter D6, S8). */
+        /* The connection's one event channel (charter D14): every watch the
+         * tree and the open documents register listens on it, so a committed
+         * changeset reaches this connection once however many there are. */
+        ...(typeof viewProxy.events === 'function'
+          ? {
+              events: (handler) => viewProxy.events(handler),
+              observeWatch: diagnose,
+            }
+          : {}),
+        /* The older forms, for a connection that serves no event channel: one
+         * wire frame per committed changeset per watch (charter D6, S8). */
         ...(typeof viewProxy.watchChangeSets === 'function'
           ? {
               watchChangeSets: (request, handler) => diagnose(request, viewProxy.watchChangeSets(request, handler)),

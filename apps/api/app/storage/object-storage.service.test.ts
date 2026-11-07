@@ -371,7 +371,13 @@ describe('ObjectStorageService', () => {
         completed = true;
 
         const stored = await service.getBlob({ namespace: 'blobs', key, tier: 'private' });
-        await expect(collectReadable(stored.body)).resolves.toStrictEqual(payload);
+        const bytes = await collectReadable(stored.body);
+        // Compared by length and digest: `toStrictEqual` walks a typed array
+        // element by element, and over 8 MiB that exhausts the worker's heap.
+        expect({ length: bytes.byteLength, sha256: sha256HexFromBytes(bytes) }).toStrictEqual({
+          length: payload.byteLength,
+          sha256: sha256HexFromBytes(payload),
+        });
       } finally {
         if (!completed) {
           await service.abortMultipartUpload({ namespace: 'blobs', key, uploadId, tier: 'private' });

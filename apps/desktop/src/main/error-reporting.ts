@@ -9,6 +9,7 @@
  */
 import * as Sentry from '@sentry/electron/main';
 import type { ErrorEvent } from '@sentry/electron/main';
+import type { DesktopSignal } from '#main/desktop-signals.js';
 
 /**
  * Drop the user and request an event could carry.
@@ -40,4 +41,22 @@ export const initializeDesktopErrorReporting = (channel: 'staging' | 'production
       beforeSend: scrubDesktopEvent,
     });
   }
+};
+
+/**
+ * Send one main-process failure signal (SB11), beside the local diagnostics log. A no-op while Sentry is not
+ * initialized, and for no signal.
+ *
+ * @param signal - The signal a `desktop-signals.ts` builder made, if any.
+ */
+export const reportDesktopSignal = (signal: DesktopSignal | undefined): void => {
+  if (signal === undefined || !Sentry.isInitialized()) {
+    return;
+  }
+  Sentry.captureMessage(signal.message, {
+    level: signal.level,
+    fingerprint: [...signal.fingerprint],
+    tags: signal.tags,
+    ...(signal.contexts === undefined ? {} : { contexts: signal.contexts }),
+  });
 };

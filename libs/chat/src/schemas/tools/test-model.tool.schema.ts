@@ -246,6 +246,7 @@ export const geoSpecFailureCategorySchema = z
   .enum([
     'geometry',
     'invalid-expectation',
+    'accuracy',
     'unsupported-evidence',
     'analysis-limit',
     'resource-limit',
@@ -255,7 +256,7 @@ export const geoSpecFailureCategorySchema = z
     'infrastructure',
   ])
   .describe(
-    'geometry: the claim was decided false. invalid-expectation: the engine refused the claim because its expectation is malformed; fix the expectation and keep the assertion. unsupported-evidence: the loaded evidence cannot answer the matcher. analysis-limit / resource-limit: the subject exceeds an engine analysis or admission limit. work-budget: the claim exhausted its work-unit budget. timeout: a wall-clock bound expired. model-load: the model did not load. infrastructure: bundling, engine or host failure.',
+    'geometry: the claim was decided false. invalid-expectation: the engine refused the claim because its expectation is malformed; fix the expectation and keep the assertion. accuracy: the engine refused the claim because the error bound of the measured fact straddles its tolerance, the model file defines its geometry more coarsely than that tolerance, or the fact needs closed shells; keep the assertion and its tolerance. unsupported-evidence: the loaded evidence cannot answer the matcher. analysis-limit / resource-limit: the subject exceeds an engine analysis or admission limit. work-budget: the claim exhausted its work-unit budget. timeout: a wall-clock bound expired. model-load: the model did not load. infrastructure: bundling, engine or host failure.',
   );
 /** @public */
 export type GeoSpecFailureCategory = z.infer<typeof geoSpecFailureCategorySchema>;

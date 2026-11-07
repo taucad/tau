@@ -26,6 +26,7 @@ vi.mock('#environment.config.js', async (importOriginal) => {
 type AuthorityWatch = ReturnType<FsBridge.FileSystemBridgeRootedProxy['watchReady']>;
 let mockAuthorityWatch: FsBridge.FileSystemBridgeRootedProxy['watchReady'] | undefined;
 let mockAuthorityChangeSets: FsBridge.FileSystemBridgeRootedProxy['watchChangeSets'] | undefined;
+let mockAuthorityEvents: FsBridge.FileSystemBridgeRootedProxy['events'] | undefined;
 
 const workerTestState = vi.hoisted(() => {
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- recursive type cannot be expressed inline
@@ -120,6 +121,9 @@ vi.mock('@taucad/fs-bridge', () => ({
       get watchChangeSets() {
         return mockAuthorityChangeSets;
       },
+      get events() {
+        return mockAuthorityEvents;
+      },
       ready: Promise.resolve(),
       hello: { payload: { state: mockViewHelloState } },
       pollExternalChanges: vi.fn(async () => undefined),
@@ -191,6 +195,7 @@ describe('fileManagerMachine', () => {
     vi.clearAllMocks();
     mockAuthorityWatch = undefined;
     mockAuthorityChangeSets = undefined;
+    mockAuthorityEvents = undefined;
     diagnosticEnvironment.enabled = false;
     workerTestState.instances.length = 0;
     workerTestState.rootedProxyDisposals.length = 0;
@@ -2027,6 +2032,55 @@ describe('fileManagerMachine', () => {
         expect(wrapViewWatch).toHaveBeenCalledWith('/projects/proj-a', { paths: ['main.ts'] }, sets);
         watch.dispose();
         expect(unsubscribe).toHaveBeenCalledOnce();
+      } finally {
+        actor.stop();
+      }
+    });
+
+    it("registers every watch on the view's one event channel, through the same diagnostic wrapper (D14)", async () => {
+      diagnosticEnvironment.enabled = true;
+      const perPath = authority();
+      const acquireSets = vi.fn<FsBridge.FileSystemBridgeRootedProxy['watchChangeSets']>();
+      mockAuthorityChangeSets = acquireSets;
+      const unsubscribe = vi.fn();
+      const subscription: FsBridge.FileSystemBridgeEventSubscription = {
+        ready: Promise.resolve(),
+        closed: Promise.withResolvers<void>().promise,
+        unsubscribe,
+      };
+      const acquireEvents = vi.fn<FsBridge.FileSystemBridgeRootedProxy['events']>(() => subscription);
+      mockAuthorityEvents = acquireEvents;
+      const wrapViewWatch = vi.fn((_root: string, _request: unknown, watch: AuthorityWatch) => watch);
+      vi.stubGlobal('__tauE2eObservationWatch', { wrapViewWatch });
+      const { actor, channel } = await open();
+      try {
+        const handler = vi.fn();
+        const watch = channel.watchReady({ paths: ['main.ts'] }, handler);
+        await watch.ready;
+        expect(acquireEvents).toHaveBeenCalled();
+        expect(acquireSets).not.toHaveBeenCalledWith({ paths: ['main.ts'] }, expect.anything());
+        expect(perPath.acquire).not.toHaveBeenCalledWith({ paths: ['main.ts'] }, expect.anything());
+        expect(wrapViewWatch).toHaveBeenCalledWith(
+          '/projects/proj-a',
+          { paths: ['main.ts'] },
+          expect.objectContaining({ ready: watch.ready }),
+        );
+        const deliver = acquireEvents.mock.calls.at(-1)![0];
+        deliver({
+          kind: 'changeSet',
+          set: {
+            generation: 1,
+            entries: [
+              { op: 'written', path: 'main.ts', kind: 'file' },
+              { op: 'written', path: 'other.ts', kind: 'file' },
+            ],
+            touchedDirectories: [''],
+          },
+        });
+        expect(handler.mock.calls).toEqual([[{ type: 'change', path: 'main.ts' }]]);
+        const before = unsubscribe.mock.calls.length;
+        watch.dispose();
+        expect(unsubscribe.mock.calls.length).toBe(before + 1);
       } finally {
         actor.stop();
       }

@@ -131,7 +131,25 @@ export type RevisionStatusProjection = Readonly<{
    * it: the host that brackets the apply (`onApplyingTree`) merges it.
    */
   applyingRoots?: readonly string[];
+  /**
+   * How far the selected checkout's tree has arrived (D10). Absent until the
+   * host has published a reading, which reads as unknown, never as empty (I7).
+   *
+   * Like `largeObjects`, the root does not set it: the host that merges the
+   * fill and the apply bracket settles it, monotonic within one tree.
+   */
+  readiness?: ProjectReadiness;
 }>;
+
+/**
+ * The readiness vocabulary of D10: `connected → treeReady → entryReady →
+ * materialized → filled`. The editor, tree and viewer open at `treeReady` and
+ * `entryReady`; search, export, the LSP workspace and a revision cut wait for
+ * `materialized`; a model render waits for `filled`.
+ *
+ * @public
+ */
+export type ProjectReadiness = 'connected' | 'treeReady' | 'entryReady' | 'materialized' | 'filled';
 
 /**
  * The large objects one checkout is still waiting for.
@@ -162,6 +180,12 @@ export type LargeObjectsReport = Readonly<{
   facet: LargeObjectsFacet | undefined;
   /** Start the transfer again after a failure; a no-op otherwise. */
   retry: () => void;
+  /**
+   * Fetch and write these checkout-relative paths' objects before the rest:
+   * an opened path jumps the fill queue (D10). Paths that hold no placeholder
+   * are ignored.
+   */
+  prioritize: (paths: readonly string[]) => void;
 }>;
 
 /**

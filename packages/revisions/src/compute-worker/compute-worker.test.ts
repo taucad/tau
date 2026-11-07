@@ -7,7 +7,12 @@ import { MessageChannel } from 'node:worker_threads';
 import type { Transferable as NodeTransferable } from 'node:worker_threads';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { connectComputeWorker, createInlineCompute, serveComputeWorker } from '#compute-worker/compute-worker.js';
+import {
+  connectComputeWorker,
+  createInlineCompute,
+  openComputeConnection,
+  serveComputeWorker,
+} from '#compute-worker/compute-worker.js';
 import type { ComputePort, ComputeWorker } from '#compute-worker/compute-worker.js';
 import { readPackIndex } from '#pack-reader/pack-index.js';
 import { createObjectStore, gitFilesOf } from '#object-store/object-store.js';
@@ -174,6 +179,26 @@ describe('the compute worker seam', () => {
     }
   });
 
+  it('decodes an import entry from the Blob it is handed and digests it in the same pass (W7)', async () => {
+    const remote = remoteCompute();
+    const body = encoder.encode('cube(2);\n'.repeat(512));
+    const blob = new Blob([body]);
+
+    const decoded = await remote.decodeImportEntry({ blob, path: 'part.scad', size: body.byteLength });
+
+    expect(decoded.data).toStrictEqual(body);
+    expect(decoded.facts.blobOid).toBe(
+      digestHex('sha1', new Uint8Array([...encoder.encode(`blob ${String(body.byteLength)}\0`), ...body])),
+    );
+    expect(decoded.facts.sha256).toBe(digestHex('sha256', body));
+    await expect(remote.decodeImportEntry({ blob, path: 'part.scad', size: 1 })).rejects.toThrow(/changed/u);
+    /* The refusal keeps its name and reason across the port, so the import reports the policy's verdict. */
+    await expect(remote.decodeImportEntry({ blob, path: 'part.scad', size: 1 })).rejects.toMatchObject({
+      workerErrorName: 'ImportRefusedError',
+      reason: 'corrupt',
+    });
+  });
+
   it('carries a failure back as a rejection', async () => {
     const channel = new MessageChannel();
     channels.push(channel);
@@ -181,5 +206,17 @@ describe('the compute worker seam', () => {
     const remote = connectComputeWorker(domPort(channel.port1));
 
     await expect(remote.inflate(encoder.encode('not zlib'))).rejects.toThrow();
+  });
+
+  it('waits for nothing when a call cannot be posted', async () => {
+    const connection = openComputeConnection({
+      postMessage: () => {
+        throw new Error('This argument could not be cloned.');
+      },
+      addEventListener: () => undefined,
+    });
+
+    await expect(connection.compute.sha1(encoder.encode('body'))).rejects.toThrow(/could not be cloned/u);
+    expect(connection.pending()).toBe(0);
   });
 });

@@ -12,6 +12,8 @@ export { wrapMessagePort, wrapMessagePortMain, wrapWebSocket } from '#port.js';
 export type {
   Channel,
   ChannelClientOptions,
+  ChannelCallContext,
+  ChannelCallOptions,
   ChannelContext,
   ChannelServer,
   ChannelServerHandle,
@@ -44,6 +46,7 @@ export type {
   WireNotify,
   WireRequest,
   WireRequestCancel,
+  WireRequestProgress,
   WireResponse,
   WireResponseError,
   WireResponseOk,

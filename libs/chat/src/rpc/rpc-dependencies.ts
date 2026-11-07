@@ -120,6 +120,13 @@ export type RpcFileSystem = {
   readFile(path: string): Promise<string>;
   /** Exact owned bytes from a canonical rooted path; refuses files above 256 MiB. */
   readBinaryFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
+  /**
+   * Which of these files are pending entries: their large object is not on
+   * the device yet (D9). Answered from the index without reading, so a
+   * consumer that only searches never starts a download. Optional: a host
+   * without an index offers none, and its reads refuse with `PENDING`.
+   */
+  pendingPaths?(paths: readonly string[]): Promise<readonly string[]>;
   writeFile(path: string, content: string): Promise<void>;
   writeFileChecked(input: CheckedFileWrite): Promise<CheckedFileWriteResult>;
   deleteFileChecked(input: {

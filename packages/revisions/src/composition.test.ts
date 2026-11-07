@@ -674,6 +674,8 @@ const runScriptedTurn = async (set: ActorSet): Promise<Dump> => {
       projectId: 'project-1',
       filesystem: () => filesystem,
       clock: stoppedClock(),
+      /* A stopped clock never passes the floor between mints (D11). */
+      mintFloor: 0,
       actorId: 'actor-1',
       actor: () => ({ kind: 'agent', id: 'model-1', runId: 'run-1' }),
       deviceId: () => 'device-1',

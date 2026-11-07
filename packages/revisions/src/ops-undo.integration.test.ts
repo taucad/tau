@@ -22,8 +22,10 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
+import { lfsPointerFor } from '#lfs.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
 import { opsRefPrefix } from '#ops-ref.js';
+import type { LargeObjectsReport } from '#project-revisions.types.js';
 import { selectRevisionStatus } from '#project-revisions.machine.js';
 import type { RestoreMachineEmitted } from '#restore.machine.js';
 import { remoteTrackingRef } from '#remotes.js';
@@ -205,6 +207,72 @@ const startTree = async (
 };
 
 describe('Undo through the tree (D15)', () => {
+  /* D10: an undo reads only the paths its operation changed, never the head's whole tree. */
+  it('row 1b: an undo reads and writes by oid diff', async () => {
+    const target = await project('oid-undo', { 'main.ts': 'export const size = 1;\n', 'other.ts': 'export {};\n' });
+    const asked: Array<readonly string[] | undefined> = [];
+    const port: RevisionPort = {
+      ...target.port,
+      readTree: async (id, options) => {
+        asked.push(options?.paths);
+        return target.port.readTree(id, options);
+      },
+    };
+    const tree = await startTree(target, { port });
+    await tree.save();
+    await target.filesystem.writeFile('main.ts', 'export const size = 2;\n');
+    await tree.save();
+    await expect.poll(() => tree.actor.getSnapshot().children.restore?.getSnapshot().context.canUndo).toBe(true);
+    asked.length = 0;
+    expect(await tree.undo()).toMatchObject({ type: 'toast.undone' });
+    expect(await target.filesystem.readFile('main.ts', 'utf8')).toBe('export const size = 1;\n');
+    /* The undo's plan reads main.ts alone from each side, and its write reads nothing. A whole read here is
+     * a capture's mode basis for a new head (once per head, around the cuts), which the index replaces. */
+    expect(asked.filter((paths) => paths !== undefined)).toStrictEqual([['main.ts'], ['main.ts'], ['main.ts']]);
+    tree.actor.stop();
+  }, 60_000);
+
+  /*
+   * An undo writes its own paths and keeps the rest of the checkout, where a part can be a placeholder whose
+   * object no revision the undo fills from names: the fill fetches it by the pointer's own oid.
+   */
+  it('row 1c: an undo that keeps a placeholder reads filled once the network answers', async () => {
+    const two = 'solid two\n';
+    const target = await project('undo-pointer', { 'main.ts': 'export const size = 1;\n', 'part.step': 'solid one\n' });
+    const reports: LargeObjectsReport[] = [];
+    const network = Promise.withResolvers<void>();
+    const asked: string[][] = [];
+    const port: RevisionPort = {
+      ...target.port,
+      fetchLargeObjects: async (pointers, options) => {
+        asked.push(pointers.map(({ oid }) => oid));
+        await network.promise;
+        return target.port.fetchLargeObjects!(pointers, options);
+      },
+    };
+    const tree = await startTree(target, { port, onLargeObjects: (report) => reports.push(report) });
+    await tree.save();
+    await target.filesystem.writeFile('main.ts', 'export const size = 2;\n');
+    await tree.save();
+    await expect
+      .poll(() => tree.actor.getSnapshot().children.restore?.getSnapshot().context.canUndo, { timeout: 20_000 })
+      .toBe(true);
+    /* A part another device saved, opened before its bytes arrived: its pointer, and no object in this store. */
+    const { pointer, bytes } = lfsPointerFor(new TextEncoder().encode(two));
+    await target.filesystem.writeFile('part.step', bytes);
+    expect(await tree.undo()).toMatchObject({ type: 'toast.undone' });
+    expect(await target.filesystem.readFile('main.ts', 'utf8')).toBe('export const size = 1;\n');
+    /* Offline: the placeholder is still owed, never read as filled. */
+    await expect.poll(() => asked.at(-1), { timeout: 20_000 }).toStrictEqual([pointer.oid]);
+    expect(reports.at(-1)?.facet).toMatchObject({ phase: 'fetching', paths: ['part.step'] });
+    expect(await target.filesystem.readFile('part.step')).toStrictEqual(bytes);
+    await target.port.storeLargeObject!(pointer, new TextEncoder().encode(two));
+    network.resolve();
+    await expect.poll(() => reports.at(-1), { timeout: 20_000 }).toMatchObject({ facet: undefined });
+    expect(await target.filesystem.readFile('part.step', 'utf8')).toBe(two);
+    tree.actor.stop();
+  }, 60_000);
+
   it('row 1: restore → save → undo → undo leaves four rows and the pre-restore tree', async () => {
     const target = await project('four-rows', { 'main.ts': 'export const size = 1;\n' });
     const tree = await startTree(target);

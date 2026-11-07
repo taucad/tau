@@ -930,6 +930,35 @@ describe('createTurnPlacementPort (TS-S3)', () => {
     expect(syncs).toEqual([recordsChanged, recordsChanged]);
   });
 
+  /* Two chats on one checkout settle at once: another run's record is retired between this one's listing and its read. */
+  it('should retire the lease on acknowledge while another run retires its own record meanwhile', async () => {
+    const project = await createProject();
+    const { revisions } = observeSyncs(project.open().revisions);
+    const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
+    const admitted = await placement.admit({ requestId: 'admit:run-1:1', key });
+    if (admitted.status === 'refused') {
+      throw new Error(admitted.message);
+    }
+    await placement.complete({ requestId: 'complete:run-1:1', key, cut: false });
+    await firstSettlement(placement);
+    const other = '.tau/runs/run-other.json';
+    await project.filesystem.writeFile(other, '{}\n');
+    const read = project.filesystem.readFile.bind(project.filesystem);
+    /* The other run's acknowledge deletes its record after the listing named it and before it is read. */
+    vi.spyOn(project.filesystem, 'readFile').mockImplementation((async (path: string, ...rest: unknown[]) => {
+      if (path.endsWith('run-other.json')) {
+        await project.filesystem.unlink(other);
+      }
+      return (read as (...parameters: unknown[]) => Promise<unknown>)(path, ...rest);
+    }) as typeof project.filesystem.readFile);
+
+    const acknowledged = await placement.acknowledge({ requestId: 'acknowledge:run-1:1', key });
+
+    expect(acknowledged).toEqual({ requestId: 'acknowledge:run-1:1', status: 'applied' });
+    expect(await revisions.turns.leases()).toEqual([]);
+    await placement.fence();
+  });
+
   /* XD3: another device sees a run before it settles; the host's heartbeats keep it current through `publish`. */
   it('should record the chats when an attempt is admitted and each time the host publishes, never on its own', async () => {
     const project = await createProject();

@@ -341,6 +341,56 @@ type Admission =
     };
 
 /**
+ * The per-path events one watch would hear, read off a change set of the whole
+ * root (charter D14): what a client that holds one root-wide event channel per
+ * connection hands each of its watches, instead of registering each on the
+ * authority. It admits as {@link WatchRegistry} admits: an entry reaches the
+ * watch when either of its paths matches the request's paths, recursion and
+ * globs, and a directory created, deleted or moved above a watched path, or a
+ * reset over one, is a reset. A reset swallows the set's entries, as it does
+ * in a change set the authority scoped itself.
+ *
+ * A root-wide set may already be a reset where a scoped one would have named
+ * paths (a summary anywhere in the changeset resets their common ancestor), so
+ * a watch may hear a reset it would not have heard alone. It never misses a
+ * change it would have heard.
+ *
+ * @param set - One change set of the connection's whole root.
+ * @param request - The watch's paths and matching scope.
+ * @returns The events, in commit order; none when the set does not reach the watch.
+ * @public
+ */
+export const watchEventsOfChangeSetFor = (set: ChangeSet, request: WatchRequest): WatchEvent[] => {
+  const recursive = request.recursive ?? false;
+  const { paths } = request;
+  if (set.reset !== undefined) {
+    return isSummaryMatched(set.reset.prefix, paths, recursive) ? [{ type: 'reset' }] : [];
+  }
+  const admitted = (path: string): boolean =>
+    isPathMatched(path, paths, recursive) &&
+    !matchesExcludes(path, request.excludes) &&
+    matchesIncludes(path, request.includes);
+  const events: WatchEvent[] = [];
+  for (const entry of set.entries) {
+    const edges = entry.oldPath === undefined ? [entry.path] : [entry.oldPath, entry.path];
+    if (entry.kind === 'dir' && edges.some((path) => summaryContainsDescendantWatch(path, paths))) {
+      return [{ type: 'reset' }];
+    }
+    if (!edges.some((path) => admitted(path))) {
+      continue;
+    }
+    if (entry.op === 'deleted') {
+      events.push({ type: 'delete', path: entry.path });
+    } else if (entry.op === 'moved' && entry.oldPath !== undefined) {
+      events.push({ type: 'rename', oldPath: entry.oldPath, newPath: entry.path });
+    } else {
+      events.push({ type: 'change', path: entry.path });
+    }
+  }
+  return events;
+};
+
+/**
  * Optional configuration for WatchRegistry.
  * @public
  */

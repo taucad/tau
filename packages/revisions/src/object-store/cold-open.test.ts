@@ -505,6 +505,15 @@ describe.runIf(gitToolchainOnPath)('the cold open from a hosted catalogue (D8)',
     expect(served.wholePackReads()).toBe(0);
     expect(reports).toHaveLength(1);
     expect(await port.readRef('refs/remotes/origin/main')).toBe(hosted.main);
+    /* D10: the head listing's sizes ride the tree listing, with no blob read for them. */
+    const listing = await port.listTree?.(revisionId(hosted.main));
+    const sized = lines(hosted.git('ls-tree', '-r', '-l', hosted.main)).map((line) => {
+      const [meta = '', path = ''] = line.split('\t');
+      return [path, Number(meta.split(/\s+/u)[3])];
+    });
+    expect(listing?.map(({ path, size }) => [path, size])).toStrictEqual(
+      sized.toSorted(([left], [right]) => (String(left) < String(right) ? -1 : 1)),
+    );
   });
 
   it('sizes each object from the index when a head has no listing, so a batch never holds the repository', async () => {
@@ -888,7 +897,7 @@ describe.runIf(gitToolchainOnPath)('an object-by-object import of a long, wide h
 });
 
 describe.runIf(gitToolchainOnPath)('a remote no catalogue serves', () => {
-  it('reads an answer past the ceiling whole', async () => {
+  it('reads an answer past the ceiling whole, and so does a port whose catalogue does not answer', async () => {
     const own = await host();
     const root = await mkdtemp(join(tmpdir(), 'tau-w5-plain-'));
     const remote = await startGitHttpBackend({ root });
@@ -905,6 +914,20 @@ describe.runIf(gitToolchainOnPath)('a remote no catalogue serves', () => {
       await port.setRemote({ name: 'origin', url: remote.url });
       await port.fetch({ remote: 'origin', refs: ['refs/heads/main'] });
       expect(await port.readRef('refs/remotes/origin/main')).toBe(own.git('rev-parse', 'refs/heads/main'));
+
+      /* A catalogue that is configured but does not answer (not deployed yet): the answer is read whole after all. */
+      const unanswered = serve(own, { catalogueStatus: 404 });
+      const configured = createIsomorphicGitRevisionPort({
+        filesystem: await createMemoryProvider(),
+        http: createRevisionHttpClient(),
+        catalogue: { url: () => catalogueUrl, fetch: unanswered.fetch },
+      });
+      await configured.init({ author: { name: 'Tau', email: 'tau@example.com' } });
+      await configured.setRemote({ name: 'origin', url: remote.url });
+      await configured.fetch({ remote: 'origin', refs: ['refs/heads/main'] });
+      expect(await configured.readRef('refs/remotes/origin/main')).toBe(own.git('rev-parse', 'refs/heads/main'));
+      /* Asked twice: once for the cold open, once past the ceiling. */
+      expect(unanswered.catalogueQueries).toHaveLength(2);
     } finally {
       await remote.close();
       await rm(root, { recursive: true, force: true });

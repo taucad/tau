@@ -58,6 +58,38 @@ export abstract class AbstractFileSystemProvider implements FileSystemProvider {
   }
 
   /**
+   * Write `path` from a stream. This fallback gathers the stream and writes it
+   * once, so the path never holds part of it; a provider that can stage chunks
+   * outside memory overrides it.
+   *
+   * @param path - Absolute file path to write.
+   * @param source - The file's bytes, in order.
+   */
+  public async writeFileStream(path: string, source: ReadableStream<Uint8Array<ArrayBuffer>>): Promise<void> {
+    try {
+      this._assertRootedPath(path);
+    } catch (error) {
+      await source.cancel(error).catch(() => undefined);
+      throw error;
+    }
+    const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+    let size = 0;
+    const reader = source.getReader();
+    // oxlint-disable-next-line no-await-in-loop -- a stream is read one chunk after another.
+    for (let read = await reader.read(); !read.done; read = await reader.read()) {
+      chunks.push(read.value);
+      size += read.value.byteLength;
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    await this.writeFile(path, bytes);
+  }
+
+  /**
    * Append bytes to `path`, creating the file and its parents when absent.
    * Concrete providers inherit this read-concat-write fallback unless they
    * can append more efficiently.

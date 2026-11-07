@@ -385,9 +385,10 @@ export class MutationPipeline {
    * token and accepts the first token it sees per path again; it is not shared
    * between authorities, so two tabs each with their own authority do not see
    * each other's tokens. Across both, the expected-length check still refuses
-   * an append that would interleave, since it reads the file itself. Entries are
-   * never evicted: one number per log path fenced in this authority's lifetime,
-   * which is one per chat segment opened, not per append.
+   * an append that would interleave, since it stats the file's current size
+   * (metadata only, I3). Entries are never evicted: one number per log path
+   * fenced in this authority's lifetime, which is one per chat segment opened,
+   * not per append.
    */
   private readonly _appendFences = new Map<string, number>();
 
@@ -650,9 +651,12 @@ export class MutationPipeline {
     targetResolution: MountResolution;
     /** The caller's own filter, asked before every read and every descent. */
     admits?: WalkOptions['admits'];
+    /** Stops the copy before its next bounded changeset; one already applying settles. */
+    signal?: AbortSignal;
     context?: WorkspaceMutationContext;
   }): Promise<void> {
-    const { source, target: destination, sourceResolution, targetResolution, admits, context } = operands;
+    const { source, target: destination, sourceResolution, targetResolution, admits, signal, context } = operands;
+    signal?.throwIfAborted();
     this._assertNoDescendantMounts(source, 'copy');
     this._assertNoDescendantMounts(destination, 'copy');
     const snapshot = await this._withClaims(
@@ -682,7 +686,7 @@ export class MutationPipeline {
     const byEntry = new Map(entries.map((resolved) => [resolved.entry, resolved]));
     for (const changeset of splitChangeset(entries.map(({ entry }) => entry))) {
       // oxlint-disable-next-line no-await-in-loop -- bounded changesets land in order.
-      const receipt = await this.apply({ entries: changeset.map((entry) => byEntry.get(entry)!) }, context);
+      const receipt = await this.apply({ entries: changeset.map((entry) => byEntry.get(entry)!), signal }, context);
       const failure = receipt.entries.find(({ outcome }) => outcome !== 'applied');
       if (failure !== undefined) {
         throw failure.error instanceof Error ? failure.error : errnoError('EIO', `copy to '${destination}' failed`);

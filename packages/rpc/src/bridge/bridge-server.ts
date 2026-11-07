@@ -2,6 +2,7 @@ import { createChannelServer } from '#channel.js';
 import type { WithTransferables } from '#channel.js';
 import type { Port } from '#port.js';
 import {
+  bridgeCallHeartbeatInterval,
   bridgeWatchReadyMarker,
   broadcastEvent,
   serializeBridgeError,
@@ -11,6 +12,7 @@ import {
 import type { BroadcastFrame } from '#bridge/bridge-internal.js';
 import type {
   BridgeProtocolSchemas,
+  BridgeServerLongCall,
   BridgeWatchEvent,
   BridgeWatchRequest,
   StringKeyedObject,
@@ -37,7 +39,11 @@ export type BridgeServerHandle = {
  * @param port - RPC {@link Port} (typically wrap a WHATWG/Electron-compatible
  *               `MessagePort` with {@link wrapMessagePort} — the bridge layer
  *               does **not** call `wrapMessagePort` for you anymore).
- * @param options - Optional callbacks for disconnect, watch, and unwatch.
+ * @param options - Optional callbacks for disconnect, watch, and unwatch, and
+ *   `bindLongCall`, which hands a long call's abort signal and progress sink to
+ *   the handler arguments of the methods that take them. Every call still
+ *   running sends a heartbeat every {@link bridgeCallHeartbeatInterval}, so a
+ *   `'liveness'` caller keeps waiting while the handler works.
  * @returns Handle with emit function for server-to-client push messages.
  * @public
  */
@@ -55,6 +61,7 @@ export function createBridgeServer<
     onUnwatch?: (watchId: string) => void;
     hello?: HelloPayload;
     protocolSchemas?: BridgeProtocolSchemas<HelloPayload, WatchRequestPayload, WatchEventPayload>;
+    bindLongCall?: (method: string, args: unknown[], longCall: BridgeServerLongCall) => unknown[];
   },
 ): BridgeServerHandle {
   const broadcastQueues = new Set<PushQueue<BroadcastFrame>>();
@@ -78,11 +85,22 @@ export function createBridgeServer<
     sessionKey: 'bridge',
     hello: options?.hello,
     protocolSchemas: createBridgeChannelSchemas(options?.protocolSchemas),
+    callHeartbeatInterval: bridgeCallHeartbeatInterval,
     impl: {
-      call: async (_context, name, args) => {
+      // oxlint-disable-next-line max-params -- ChannelServer.call impl signature is fixed at 4 params (context, name, args, signal)
+      call: async (context, name, args, signal) => {
         try {
           const argumentList = Array.isArray(args) ? args : [];
-          return await dispatchHandler(name, argumentList);
+          const bound =
+            options?.bindLongCall === undefined
+              ? argumentList
+              : options.bindLongCall(name, argumentList, {
+                  signal,
+                  onProgress(progress) {
+                    context.progress(progress);
+                  },
+                });
+          return await dispatchHandler(name, bound);
         } catch (error) {
           return { __bridgeError: serializeBridgeError(error) };
         }

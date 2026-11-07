@@ -1,7 +1,7 @@
 import { safeDispose } from '#topic.js';
 import { wrapMessagePort } from '#port.js';
 import { createBridgeServer } from '#bridge/bridge-server.js';
-import type { BridgeProtocolSchemas, StringKeyedObject } from '#bridge/bridge-protocol.js';
+import type { BridgeProtocolSchemas, BridgeServerLongCall, StringKeyedObject } from '#bridge/bridge-protocol.js';
 
 /**
  * Handle returned by {@link createBridgePort}: client-side {@link MessagePort} for
@@ -24,7 +24,11 @@ export type BridgePort = {
  */
 export function createBridgePort<T extends StringKeyedObject, Hello = unknown>(
   handlers: T,
-  options?: { hello?: Hello; protocolSchemas?: BridgeProtocolSchemas<Hello> },
+  options?: {
+    hello?: Hello;
+    protocolSchemas?: BridgeProtocolSchemas<Hello>;
+    bindLongCall?: (method: string, args: unknown[], longCall: BridgeServerLongCall) => unknown[];
+  },
 ): BridgePort {
   const channel = new MessageChannel();
   const serverWrapped = wrapMessagePort<unknown>(channel.port1, { label: 'bridge-port-server' });
@@ -34,6 +38,7 @@ export function createBridgePort<T extends StringKeyedObject, Hello = unknown>(
   const server = createBridgeServer(handlers, serverWrapped, {
     hello: options?.hello,
     protocolSchemas: options?.protocolSchemas,
+    ...(options?.bindLongCall === undefined ? {} : { bindLongCall: options.bindLongCall }),
   });
   return {
     port: channel.port2,

@@ -28,6 +28,30 @@
       "owner": "storage-gateway W15"
     },
     {
+      "id": "STORAGE-LFS-STALL",
+      "bound": "LFS transfer no-progress stall: a download that receives no bytes for 60 s (lfsTransferStallMilliseconds, transferStallMilliseconds) is aborted; it restarts on every chunk",
+      "site": "packages/revisions/src/lfs-client.ts",
+      "token": "No bytes arrived for",
+      "class": "Liveness",
+      "owner": "viewer-first open W4 (D9, I10)"
+    },
+    {
+      "id": "STORAGE-FILL-STALL",
+      "bound": "Large-object fill waiter stall: a wait given a stall answers false once that many milliseconds pass with nothing arriving, flushed or told; it restarts on every wake",
+      "site": "packages/revisions/src/large-object-fill.ts",
+      "token": "stalled = setTimeout(",
+      "class": "Liveness",
+      "owner": "viewer-first open W4 (D9, I10)"
+    },
+    {
+      "id": "STORAGE-PENDING-ARRIVAL",
+      "bound": "Pending read arrival wait: the caller's wait, capped at the 60 s materialize stall (defaultStallMilliseconds); on expiry the read answers without the object",
+      "site": "packages/revisions/src/open/content-reads.ts",
+      "token": "arrivalTimeout = AbortSignal.timeout(wait)",
+      "class": "Liveness",
+      "owner": "viewer-first open W4 (D9, I10)"
+    },
+    {
       "id": "STORAGE-HTTP-RETRY",
       "bound": "Abortable Tau git HTTP client retry wait: a 429, or a 503 that names Retry-After, waits Retry-After plus up to 1 s of jitter (without one, 0.5 to 1 s doubling); a wait over 10 s is not taken, at most four attempts per request",
       "site": "packages/revisions/src/http-client.ts",
@@ -67,6 +91,14 @@
       "token": "idleWindow",
       "class": "Debounce",
       "owner": "W5"
+    },
+    {
+      "id": "REVISIONS-MINT-FLOOR",
+      "bound": "Floor between a checkout's published mints, 1 second (D11); requests queue meanwhile, and close and hidden cuts skip it",
+      "site": "packages/revisions/src/checkout.machine.ts",
+      "token": "mintFloor",
+      "class": "Debounce",
+      "owner": "filesystem redesign W6.4"
     },
     {
       "id": "A8",
@@ -940,6 +972,22 @@
       "token": "describeTimeout",
       "class": "Liveness",
       "owner": "tau prepare"
+    },
+    {
+      "id": "E38",
+      "bound": "rpc long-call liveness: a long call fails PEER_UNRESPONSIVE after 30 s with neither a heartbeat nor progress from the server",
+      "site": "packages/rpc/src/channel.ts",
+      "token": "callLivenessTimer",
+      "class": "Liveness",
+      "owner": "W10"
+    },
+    {
+      "id": "E39",
+      "bound": "rpc long-call heartbeat: the server sends an rp frame every 10 s for each call still running",
+      "site": "packages/rpc/src/channel.ts",
+      "token": "heartbeatTimer",
+      "class": "Liveness",
+      "owner": "W10"
     },
     {
       "id": "D25",

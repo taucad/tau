@@ -11,7 +11,15 @@
  *
  * @public
  */
-export type ComputeMethod = 'inflate' | 'deflate' | 'sha1' | 'sha256' | 'indexPack' | 'resolveDelta';
+export type ComputeMethod =
+  | 'inflate'
+  | 'deflate'
+  | 'sha1'
+  | 'sha256'
+  | 'sha256Kept'
+  | 'indexPack'
+  | 'resolveDelta'
+  | 'decodeImportEntry';
 
 /** Why a call to a compute worker failed without the work itself refusing. */
 export type ComputeWorkerFailure = 'crashed' | 'unavailable';

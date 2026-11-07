@@ -9,6 +9,7 @@
  * `module.fly_api_secrets` in tau-cloud, never values in this repository.
  */
 /* oxlint-disable typescript-eslint/dot-notation -- process.env index access required by TS4111 (verbatimModuleSyntax) */
+import { randomBytes } from 'node:crypto';
 import process from 'node:process';
 import * as Sentry from '@sentry/node';
 import type { ErrorEvent, EventHint } from '@sentry/node';
@@ -108,6 +109,32 @@ export const retryableGitRefusalCodes: ReadonlySet<string> = new Set([
 export const isRetryableGitRefusal = (statusCode: number, code: unknown): boolean =>
   statusCode === 503 && typeof code === 'string' && retryableGitRefusalCodes.has(code);
 
+/** A `sentry-trace` header: trace id, parent span id and an optional sampling flag. */
+const sentryTracePattern = /^\s*([\da-f]{32})-([\da-f]{16})(?:-[01])?\s*$/u;
+
+/**
+ * The trace context that files an error under the browser trace that caused it (SB17), or none.
+ *
+ * Read from Sentry's own `sentry-trace` header only: the browser never sends `traceparent`, so the API's
+ * OpenTelemetry sampling and its Grafana traces are unchanged. The context goes on the event, never on a scope,
+ * for the same reason as the request id (TAU-API-6), and does not depend on Sentry's OpenTelemetry setup, which
+ * this process skips.
+ *
+ * @param sentryTrace - The request's `sentry-trace` header, possibly repeated.
+ * @returns The event trace context, or undefined when the header is absent or malformed.
+ */
+export const traceContextFromHeader = (
+  sentryTrace: string | string[] | undefined,
+): { trace_id: string; parent_span_id: string; span_id: string } | undefined => {
+  const header = Array.isArray(sentryTrace) ? sentryTrace[0] : sentryTrace;
+  const match = header === undefined ? undefined : sentryTracePattern.exec(header);
+  if (!match?.[1] || !match[2]) {
+    return undefined;
+  }
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Sentry trace context wire names
+  return { trace_id: match[1], parent_span_id: match[2], span_id: randomBytes(8).toString('hex') };
+};
+
 /**
  * Report a server error. A no-op when Sentry is not configured.
  *
@@ -116,13 +143,22 @@ export const isRetryableGitRefusal = (statusCode: number, code: unknown): boolea
  *
  * @param error - The thrown value.
  * @param requestId - The `req_…` id, so an event joins the `[ERR]` log line and the error body's `requestId`.
+ * @param sentryTrace - The request's `sentry-trace` header, so the error joins the browser trace that caused it.
  */
-export const reportServerError = (error: unknown, requestId?: string): void => {
+export const reportServerError = (error: unknown, requestId?: string, sentryTrace?: string | string[]): void => {
   if (!Sentry.isInitialized()) {
     return;
   }
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- Sentry tag name joined by the [ERR] log line
-  Sentry.captureException(error, requestId ? { tags: { request_id: requestId } } : undefined);
+  const trace = traceContextFromHeader(sentryTrace);
+  if (!requestId && !trace) {
+    Sentry.captureException(error);
+    return;
+  }
+  Sentry.captureException(error, {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Sentry tag name joined by the [ERR] log line
+    ...(requestId ? { tags: { request_id: requestId } } : {}),
+    ...(trace ? { contexts: { trace } } : {}),
+  });
 };
 
 /**

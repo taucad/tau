@@ -14,7 +14,7 @@ export default defineConfig({
       provider: 'v8',
       reportsDirectory: '../../out/reports/coverage/libs/fs-bridge',
       include: ['src/**/*'],
-      exclude: ['src/**/*.{test,spec,test-d}.ts'],
+      exclude: ['src/**/*.{test,spec,test-d}.ts', 'src/**/*.test-worker.ts', 'src/**/*.test-fixture.ts'],
       thresholds: {
         statements: 100,
         branches: 100,

@@ -13,7 +13,9 @@ import { isObservabilityFailureRouteEnabled } from '#api/observability-debug/obs
 import { ObservabilityDebugModule } from '#api/observability-debug/observability-debug.module.js';
 import type * as Sentry from '#telemetry/sentry.js';
 
-const reportServerError = vi.hoisted(() => vi.fn<(error: unknown, requestId?: string) => void>());
+const reportServerError = vi.hoisted(() =>
+  vi.fn<(error: unknown, requestId?: string, sentryTrace?: string | string[]) => void>(),
+);
 vi.mock('#telemetry/sentry.js', async (importOriginal) => ({
   ...(await importOriginal<typeof Sentry>()),
   reportServerError,
@@ -91,6 +93,6 @@ describe('GET /v1/__debug/observability/failure', () => {
     expect(typeof requestId).toBe('string');
     expect(response.json()).toMatchObject({ code: 'INTERNAL_SERVER_ERROR', requestId });
     expect(reportServerError).toHaveBeenCalledOnce();
-    expect(reportServerError).toHaveBeenCalledWith(expect.any(ObservabilityHarnessFailure), requestId);
+    expect(reportServerError).toHaveBeenCalledWith(expect.any(ObservabilityHarnessFailure), requestId, undefined);
   });
 });

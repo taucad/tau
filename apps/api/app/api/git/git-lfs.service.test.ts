@@ -231,20 +231,23 @@ describe('GitLfsService finalized-object boundary', () => {
     },
     { label: 'wrong size', body: bytes, requestedOid: oid, size: bytes.byteLength + 1 },
     { label: 'truncated', body: bytes.slice(0, -1), requestedOid: oid, size: bytes.byteLength },
-  ])('refuses $label before finalization', async ({ body, requestedOid, size }) => {
+  ])('refuses $label at the legacy key before finalization', async ({ body, requestedOid, size }) => {
+    storedNamespace = 'blobs';
     stored.current = body;
     await expect(service().verify({ access, oid: requestedOid, size })).resolves.toBe(false);
     expect(repositories.finalizeLfsObject).not.toHaveBeenCalled();
   });
 
-  it('fails closed when a formerly valid object is overwritten with corrupt same-length bytes', async () => {
+  it('fails closed when a formerly valid legacy object is overwritten with corrupt same-length bytes', async () => {
+    storedNamespace = 'blobs';
     await expect(service().verify({ access, oid, size: bytes.byteLength })).resolves.toBe(true);
     stored.current = new Uint8Array(bytes.byteLength).fill(9);
     await expect(service().verify({ access, oid, size: bytes.byteLength })).resolves.toBe(false);
     expect(repositories.finalizeLfsObject).toHaveBeenCalledOnce();
   });
 
-  it('finishes streaming before entering the finalization transaction', async () => {
+  it('finishes streaming a legacy object before entering the finalization transaction', async () => {
+    storedNamespace = 'blobs';
     const entered = Promise.withResolvers<void>();
     const resume = Promise.withResolvers<void>();
     const body = Readable.from(
@@ -295,6 +298,7 @@ describe('GitLfsService finalized-object boundary', () => {
   });
 
   it('requires the GET response identity and destroys a body without one', async () => {
+    storedNamespace = 'blobs';
     const body = Readable.from([bytes]);
     objectStorage.getBlob.mockResolvedValueOnce({
       body,
@@ -491,6 +495,32 @@ describe('GitLfsService finalized-object boundary', () => {
     expect(objectStorage.getBlob).toHaveBeenCalledWith(
       expect.objectContaining({ namespace: 'blobs', key: gitLfsObjectKey(access.projectId, oid) }),
     );
+  });
+
+  /* D11, EQ12: every writer of the tenant key pins the body's SHA-256 to the
+     oid, so the store has refused any other bytes and verify reads none back. */
+  it('should verify a tenant object by its size and identity alone, reading no bytes', async () => {
+    await expect(service().verify({ access, oid, size: bytes.byteLength })).resolves.toBe(true);
+
+    expect(objectStorage.getBlob).not.toHaveBeenCalled();
+    expect(objectStorage.headBlob).toHaveBeenCalledWith(
+      expect.objectContaining({ namespace: 'tenants', key: tenantLfsObjectKey(access.ownerId, access.projectId, oid) }),
+    );
+    expect(repositories.finalizeLfsObject).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { label: 'another size', head: { size: bytes.byteLength + 1, etag: 'etag' } },
+    { label: 'no identity', head: { size: bytes.byteLength, etag: '' } },
+  ])('should refuse a tenant object with $label before finalization', async ({ head }) => {
+    objectStorage.headBlob.mockResolvedValueOnce({
+      contentType: 'application/octet-stream',
+      cacheControl: '',
+      ...head,
+    });
+
+    await expect(service().verify({ access, oid, size: bytes.byteLength })).resolves.toBe(false);
+    expect(repositories.finalizeLfsObject).not.toHaveBeenCalled();
   });
 
   it('should take no lock and clear nothing when the object is absent', async () => {

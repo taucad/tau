@@ -274,38 +274,31 @@ export class GitLfsService {
     }));
   }
 
-  /** Verify exact stored bytes before making the reserved object readable. */
+  /**
+   * Verify exact stored bytes before making the reserved object readable.
+   *
+   * At the tenant key the store has already verified them (D11, EQ12): every
+   * writer of that key — the presigned PUT this batch signs, relocation and the
+   * mirror restore — pins `x-amz-checksum-sha256` to the oid as a signed header,
+   * and the store refuses a body that does not hash to it. So a HEAD that finds
+   * the declared size and an identity is the proof, and the bytes are not read
+   * back. An object still at its pre-D24 legacy key was never pinned, so it is
+   * read and hashed as before.
+   */
   public async verify(args: { access: GitAccess; oid: string; size: number }): Promise<boolean> {
     await this.repositories.resolveActiveLocator(args.access);
     if (args.size > projectFileLimitBytes) {
       return false;
     }
-    // Hash without occupying a pooled database connection or the owner's retirement lock.
+    // Verified without occupying a pooled database connection or the owner's retirement lock.
     const signal = AbortSignal.timeout(120_000);
     const stored = await this.#storedAt(args.access, args.oid, signal);
     if (stored === undefined || stored.size !== args.size) {
       return false;
     }
-    const blob = await this.objectStorage.getBlob({ ...stored.location, signal });
-    const hash = createHash('sha256');
-    let size = 0;
-    try {
-      if (blob.etag === '') {
-        return false;
-      }
-      for await (const chunk of blob.body) {
-        const bytes = typeof chunk === 'string' ? Buffer.from(chunk) : Buffer.from(chunk as Uint8Array<ArrayBuffer>);
-        size += bytes.byteLength;
-        if (size > args.size) {
-          return false;
-        }
-        hash.update(bytes);
-      }
-      if (size !== args.size || hash.digest('hex') !== args.oid) {
-        return false;
-      }
-    } finally {
-      blob.body.destroy();
+    const etag = stored.location.namespace === 'tenants' ? stored.etag : await this.#hashedEtag(stored, args, signal);
+    if (etag === undefined || etag === '') {
+      return false;
     }
     const outcome = await this.repositories.finalizeLfsObject({
       ...args,
@@ -315,7 +308,7 @@ export class GitLfsService {
         return (
           current !== undefined &&
           current.size === args.size &&
-          current.etag === blob.etag &&
+          current.etag === etag &&
           current.location.namespace === stored.location.namespace &&
           current.location.key === stored.location.key &&
           current.location.tier === stored.location.tier
@@ -323,6 +316,40 @@ export class GitLfsService {
       },
     });
     return outcome === 'finalized' || outcome === 'already-finalized';
+  }
+
+  /**
+   * The identity of a legacy object whose bytes hash to its oid, or `undefined`.
+   *
+   * @param stored - Where the bytes are.
+   * @param args - The object's oid and declared size.
+   * @param signal - Bounds the read.
+   * @returns The GET response's ETag when the bytes verify.
+   */
+  async #hashedEtag(
+    stored: { location: LfsObjectLocation },
+    args: { oid: string; size: number },
+    signal: AbortSignal,
+  ): Promise<string | undefined> {
+    const blob = await this.objectStorage.getBlob({ ...stored.location, signal });
+    const hash = createHash('sha256');
+    let size = 0;
+    try {
+      if (blob.etag === '') {
+        return undefined;
+      }
+      for await (const chunk of blob.body) {
+        const bytes = typeof chunk === 'string' ? Buffer.from(chunk) : Buffer.from(chunk as Uint8Array<ArrayBuffer>);
+        size += bytes.byteLength;
+        if (size > args.size) {
+          return undefined;
+        }
+        hash.update(bytes);
+      }
+      return size === args.size && hash.digest('hex') === args.oid ? blob.etag : undefined;
+    } finally {
+      blob.body.destroy();
+    }
   }
 
   /**

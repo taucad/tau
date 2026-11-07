@@ -960,6 +960,53 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     lfsRows.delete(oid);
   }, 60_000);
 
+  /* D11, EQ12: verify trusts the checksum-pinned PUT, so the store itself must
+     refuse bytes that do not hash to the oid, and a verify after a refused PUT
+     finds nothing to finalize. One that landed is finalized without its bytes
+     being read back. */
+  it('refuses same-size bytes the PUT pinned to another oid, and verifies a landed object without reading it', async () => {
+    const bytes = Buffer.from('pinned bytes\n');
+    const oid = createHash('sha256').update(bytes).digest('hex');
+    const batch = async (): Promise<{ href: string; header?: Record<string, string> } | undefined> => {
+      const response = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/lfs/objects/batch`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${callers.owner.token}`, 'content-type': 'application/vnd.git-lfs+json' },
+        body: JSON.stringify({ operation: 'upload', transfers: ['basic'], objects: [{ oid, size: bytes.byteLength }] }),
+      });
+      const body = (await response.json()) as {
+        objects: Array<{ actions?: { upload?: { href: string; header?: Record<string, string> } } }>;
+      };
+      return body.objects[0]?.actions?.upload;
+    };
+    const verify = async (): Promise<number> =>
+      (
+        await fetch(`${baseUrl}/v1/git/${projectId}.git/info/lfs/objects/verify`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${callers.owner.token}`, 'content-type': 'application/vnd.git-lfs+json' },
+          body: JSON.stringify({ oid, size: bytes.byteLength }),
+        })
+      ).status;
+    const reads = vi.spyOn(storage, 'getBlob');
+    try {
+      const action = await batch();
+      const corrupt = Buffer.alloc(bytes.byteLength, 7);
+      const refused = await fetch(action?.href ?? '', { method: 'PUT', body: corrupt, headers: action?.header });
+      expect(refused.ok).toBe(false);
+      expect(await verify()).not.toBe(200);
+      expect(lfsRows.get(oid)?.finalized).toBe(false);
+
+      const landed = await fetch(action?.href ?? '', { method: 'PUT', body: bytes, headers: action?.header });
+      expect(landed.ok, `presigned PUT failed: ${String(landed.status)}`).toBe(true);
+      expect(await verify()).toBe(200);
+      expect(lfsRows.get(oid)?.finalized).toBe(true);
+      expect(reads).not.toHaveBeenCalled();
+    } finally {
+      reads.mockRestore();
+      state.lfsBytes = 0;
+      lfsRows.delete(oid);
+    }
+  }, 60_000);
+
   it('round-trips exactly 100 MiB through stock Git LFS and refuses one byte over', async () => {
     const clone = path.join(workspace, 'lfs-boundary');
     await gitOk(['clone', remoteUrl, clone], workspace);

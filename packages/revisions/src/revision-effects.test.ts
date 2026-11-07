@@ -18,9 +18,10 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor, createMachine } from 'xstate';
 
+import { AbstractFileSystemProvider } from '@taucad/filesystem/backend';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { captureRevisionTree, ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
-import type { FileMode, FileStatEntry } from '@taucad/filesystem';
+import type { BatchEntry, BatchOptions, BatchReceipt, FileMode, FileStatEntry } from '@taucad/filesystem';
 import { classify, unlistedPathClassification } from '@taucad/filesystem/path-registry';
 
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
@@ -50,6 +51,20 @@ import type { ParameterRecordCodec, RevisionId } from '#algorithms/index.js';
 import type { SyncFetchActorOutput, SyncMergeActorOutput, SyncProjectRecordsActorOutput } from '#sync.machine.js';
 import type { RevisionStreamHandlers } from '#revision-stream.js';
 import { syncPullDeadlineMilliseconds } from '#sync.machine.js';
+
+/*
+ * A surface whose primitives a test overrides is driven through them: Node's own batch (D16) stages,
+ * renames and syncs below `writeFile`, so an override there would see nothing.
+ */
+const primitiveBatch = {
+  async applyBatch(
+    this: RevisionFileSystem,
+    entries: readonly BatchEntry[],
+    options?: BatchOptions,
+  ): Promise<BatchReceipt[]> {
+    return AbstractFileSystemProvider.prototype.applyBatch.call(this, entries, options);
+  },
+};
 
 /** A clock stopped at `time`: these rows read only its `now()`. */
 const clockAt = (time: number): StepClock => {
@@ -1072,7 +1087,7 @@ describe('settling a turn', () => {
   it('refuses to publish when an applied write or deletion silently did not land', async () => {
     const swallowed = new Set(['notes.md']);
     const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' }, (real) =>
-      Object.assign(Object.create(real) as RevisionFileSystem, {
+      Object.assign(Object.create(real) as RevisionFileSystem, primitiveBatch, {
         /* A new file is written at its final path in the apply's batch, which
          * drives this surface's own primitives: the write is accepted and kept nowhere. */
         writeFile: async (path: string, data: Parameters<RevisionFileSystem['writeFile']>[1]) =>
@@ -1116,7 +1131,7 @@ describe('settling a turn', () => {
   it('refuses to publish when an applied write landed same-size but corrupt', async () => {
     const corrupted = new Set(['notes.md']);
     const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' }, (real) =>
-      Object.assign(Object.create(real) as RevisionFileSystem, {
+      Object.assign(Object.create(real) as RevisionFileSystem, primitiveBatch, {
         writeFile: async (path: string, data: Parameters<RevisionFileSystem['writeFile']>[1]) => {
           if (!corrupted.has(path) || typeof data === 'string') {
             return real.writeFile(path, data);
@@ -2269,7 +2284,7 @@ for (const actorSet of actorSets) {
     it('rolls the checkout back when application fails or the ref CAS loses', async () => {
       const context = await synchronized();
       let failWrite = true;
-      const wrapped = Object.assign(Object.create(context.filesystem) as RevisionFileSystem, {
+      const wrapped = Object.assign(Object.create(context.filesystem) as RevisionFileSystem, primitiveBatch, {
         writeFile: async (path: string, content: Parameters<RevisionFileSystem['writeFile']>[1]) => {
           if (path.includes('.main.ts.') && path.endsWith('.tmp') && failWrite) {
             failWrite = false;

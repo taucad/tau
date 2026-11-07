@@ -15,13 +15,14 @@
  * batches built from the primitives counted here.
  */
 
-import { mkdtemp, rm } from 'node:fs/promises';
+import fs, { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor } from 'xstate';
 
+import { AbstractFileSystemProvider } from '@taucad/filesystem/backend';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { walk } from '@taucad/filesystem/content-ops';
 import type {
@@ -188,11 +189,12 @@ const countingCheckout = (
     ...(options.statAge === undefined ? {} : { statTree }),
   };
   const checkout: RevisionFileSystem = Object.assign(Object.create(real) as RevisionFileSystem, counted, {
-    /* The provider's own batch, run over this surface so every primitive it takes is counted. */
+    /* The primitives' batch, run over this surface so every primitive it takes is counted. Node's own batch
+     * (D16) stages and syncs below the primitives, so it would count nothing here. */
     applyBatch: async (entries: readonly BatchEntry[], batchOptions?: BatchOptions): Promise<BatchReceipt[]> => {
       counts.batches += 1;
       await options.beforeBatch?.(entries);
-      return real.applyBatch.call(checkout, entries, batchOptions);
+      return AbstractFileSystemProvider.prototype.applyBatch.call(checkout, entries, batchOptions);
     },
   });
   return {
@@ -692,6 +694,76 @@ describe('a large apply', () => {
     expect(context.counts.calls.filter((call) => call === 'rename')).toHaveLength(0);
     await expect(context.tree.getFileMode('bin/run.sh')).resolves.toBe('100755');
     await expect(context.tree.getFileMode('bin/readme.txt')).resolves.toBe('100644');
+  });
+});
+
+describe('an apply through the Node provider’s own batch (D16)', () => {
+  /** The real provider as the checkout, its batch observed but never replaced. */
+  const nativeProject = async (files: Readonly<Record<string, string>>) => {
+    const context = await project(files);
+    const receipts: BatchReceipt[] = [];
+    const batch = vi.spyOn(context.tree, 'applyBatch');
+    const real = NodeFsProvider.prototype.applyBatch;
+    batch.mockImplementation(async (entries, batchOptions) => {
+      const answered = await real.call(context.tree, entries, batchOptions);
+      receipts.push(...answered);
+      return answered;
+    });
+    return { ...context, batch, receipts };
+  };
+
+  it('should land and read back every file of a tree, replaced or new', async () => {
+    const context = await nativeProject({ 'main.ts': 'old\n' });
+    const target = new ImmutableRevisionTree([
+      ['main.ts', 'new\n'],
+      ...Array.from({ length: 40 }, (_, index): [string, string] => [
+        `src/${String(index % 4)}/m${String(index)}.ts`,
+        `export const v = ${String(index)};\n`,
+      ]),
+    ]);
+    const before = new ImmutableRevisionTree([['main.ts', 'old\n']]);
+
+    await materializer(context.tree)(liveCheckout, target, { before });
+
+    expect(context.batch).toHaveBeenCalled();
+    expect(context.receipts.every(({ outcome }) => outcome === 'applied')).toBe(true);
+    const found = await filesOf(context.tree);
+    expect(litterIn(found)).toEqual([]);
+    expect(found).toHaveLength(41);
+    expect(revisionTreeId(await captureRevisionTree(context.tree), 'sha1')).toBe(revisionTreeId(target, 'sha1'));
+  });
+
+  it('should leave the files as they were or as wanted when a native write lands and then throws', async () => {
+    const context = await nativeProject({ 'main.ts': 'old\n', 'kept.ts': 'kept\n' });
+    const failure = Object.assign(new Error('EIO: i/o error'), { code: 'EIO' });
+    const rename = fs.rename.bind(fs);
+    /* A native write's rename lands and then throws, so its receipt is uncertain, never failed. */
+    vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      await rename(from, to);
+      if (String(to).endsWith('fresh.ts')) {
+        throw failure;
+      }
+    });
+    const before = new ImmutableRevisionTree([
+      ['main.ts', 'old\n'],
+      ['kept.ts', 'kept\n'],
+    ]);
+    const target = new ImmutableRevisionTree([
+      ['main.ts', 'new\n'],
+      ['kept.ts', 'kept\n'],
+      ['fresh.ts', 'fresh\n'],
+    ]);
+
+    await expect(materializer(context.tree)(liveCheckout, target, { before })).rejects.toBeDefined();
+
+    expect(context.receipts.some(({ outcome }) => outcome === 'uncertain')).toBe(true);
+    expect(context.receipts.some(({ outcome }) => outcome === 'failed')).toBe(false);
+    const found = await filesOf(context.tree);
+    expect(litterIn(found)).toEqual([]);
+    /* As it was, or as the revision wanted it: never a mix with a staged sibling behind. */
+    expect([revisionTreeId(before, 'sha1'), revisionTreeId(target, 'sha1')]).toContain(
+      revisionTreeId(await captureRevisionTree(context.tree), 'sha1'),
+    );
   });
 });
 

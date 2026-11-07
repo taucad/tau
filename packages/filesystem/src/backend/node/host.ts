@@ -8,7 +8,8 @@
  */
 
 import type { NodeFsPort } from '#backend/node/port.js';
-import type { NodeFsRequest, NodeFsResponse, NodeFsWatchEvent } from '#backend/node/protocol.js';
+import type { NodeFsBatchReceipt, NodeFsRequest, NodeFsResponse, NodeFsWatchEvent } from '#backend/node/protocol.js';
+import type { BatchEntry, BatchReceipt } from '#changeset.js';
 import {
   nodeFsMaxWatchBatch,
   nodeFsProtocolVersion,
@@ -948,6 +949,25 @@ const errorFrame = (id: number, error: unknown): NodeFsResponse => ({
     : {}),
 });
 
+/* A receipt as it crosses the port: its error keeps what tells a refusal apart (code, abort name). */
+const wireReceipt = ({ outcome, kind, created, error }: BatchReceipt): NodeFsBatchReceipt => {
+  const { code, name } = (error ?? {}) as { code?: unknown; name?: unknown };
+  return {
+    outcome,
+    ...(kind === undefined ? {} : { kind }),
+    ...(created === undefined ? {} : { created }),
+    ...(error === undefined
+      ? {}
+      : {
+          error: {
+            message: error instanceof Error ? error.message : typeof error === 'string' ? error : 'The entry failed.',
+            ...(typeof code === 'string' ? { code } : {}),
+            ...(typeof name === 'string' ? { name } : {}),
+          },
+        }),
+  };
+};
+
 const runOperation = async (
   provider: NodeFsProvider,
   request: NodeFsRequest,
@@ -971,6 +991,12 @@ const runOperation = async (
         filled += chunk.byteLength;
       }
       return bytes.slice(0, filled);
+    }
+    case 'applyBatch': {
+      const entries = request.entries as readonly BatchEntry[];
+      const paths = entries.flatMap((entry) => (entry.op === 'move' ? [entry.from, entry.to] : [entry.path]));
+      const receipts = await mutate(request.root, paths, async () => provider.applyBatch(entries));
+      return receipts.map((receipt) => wireReceipt(receipt));
     }
     case 'writeFile': {
       const data = typeof request.data === 'string' ? request.data : new Uint8Array(request.data);

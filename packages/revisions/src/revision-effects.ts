@@ -2589,15 +2589,26 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
     const entries = await records.readdir(leaseDirectory);
     const files = entries.filter((name) => name.endsWith('.json')).toSorted();
-    return Promise.all(
-      files.map(async (name): Promise<TurnLease> => {
-        const lease = parseLeaseRecord(name, await records.readFile(`${leaseDirectory}/${name}`, 'utf8'));
+    const leases = await Promise.all(
+      files.map(async (name): Promise<TurnLease | undefined> => {
+        let text: string;
+        try {
+          text = await records.readFile(`${leaseDirectory}/${name}`, 'utf8');
+        } catch (error) {
+          /* Listed, then retired in its own run's section before it could be read: it is gone, as if never listed. */
+          if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
+            return undefined;
+          }
+          throw error;
+        }
+        const lease = parseLeaseRecord(name, text);
         if (lease === undefined) {
           throw new RevisionPortError('INVALID_REPOSITORY', `The saved run record ${name} cannot be read safely.`);
         }
         return lease;
       }),
     );
+    return leases.filter((lease): lease is TurnLease => lease !== undefined);
   };
 
   const leaseOf = async (runId: string): Promise<TurnLease | undefined> => {

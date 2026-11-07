@@ -1019,3 +1019,19 @@ describe('checked operation allocation bounds', () => {
     expect(stats.size).toBe(checkedRenameLimits.bytes + 1);
   });
 });
+
+describe('NodeFsProviderClient.applyBatch', () => {
+  it('answers every entry uncertain when the reply is lost, since the host may have applied them', async () => {
+    const { editor } = serve();
+    const lost = new Error('channel closed before the reply');
+    vi.spyOn(NodeFsChannel.prototype, 'request').mockRejectedValueOnce(lost);
+    const receipts = await editor.applyBatch([
+      { op: 'write', path: 'one.txt', data: text('1') },
+      { op: 'delete', path: 'two.txt' },
+    ]);
+    expect(receipts).toEqual([
+      { outcome: 'uncertain', error: lost },
+      { outcome: 'uncertain', error: lost },
+    ]);
+  });
+});

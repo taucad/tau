@@ -281,6 +281,11 @@ export const startGitHttpBackend = async (options: GitHttpBackendOptions): Promi
             if (body.operation === 'upload' && held) {
               return { oid: object.oid, size: object.size };
             }
+            /* An object it does not hold is refused in the batch, per object, as the LFS batch API spells it:
+             * a download action for it would only send the client into its transfer retries. */
+            if (body.operation === 'download' && !held) {
+              return { oid: object.oid, size: object.size, error: { code: 404, message: 'Object does not exist' } };
+            }
             return {
               oid: object.oid,
               size: object.size,
@@ -370,7 +375,10 @@ export const startGitHttpBackend = async (options: GitHttpBackendOptions): Promi
     if (authorization !== undefined) {
       authorizations.push(authorization);
     }
-    if (options.requireAuthorization !== undefined && authorization !== options.requireAuthorization) {
+    /* A presigned transfer is authorized by the header its batch issued, not by the session, as storage URLs are. */
+    const presigned =
+      /^\/lfs\/[\da-f]{64}$/u.test(requested.pathname) && request.headers['x-tau-transfer'] === transferToken;
+    if (options.requireAuthorization !== undefined && authorization !== options.requireAuthorization && !presigned) {
       response.writeHead(401, { 'Content-Type': 'text/plain' });
       response.end('unauthorized');
       return;

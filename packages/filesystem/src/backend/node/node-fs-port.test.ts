@@ -18,7 +18,10 @@ import {
   unlinkSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
+import fsPromises from 'node:fs/promises';
 import { join } from 'node:path';
+import { isRefusal } from '#changeset.js';
+import type { BatchEntry } from '#changeset.js';
 import { NodeFsChannel, NodeFsChannelClosedError, NodeFsProviderClient } from '#backend/node/client.js';
 import { NodeFsAuthorityHost, serveNodeFsProvider } from '#backend/node/host.js';
 import { tauPathPolicy } from '#path-registry.js';
@@ -970,6 +973,39 @@ describe('node filesystem client/host round trip', () => {
         preconditions: [{ path: 'target.txt', expected: null }],
       }),
     ).rejects.toMatchObject({ code: 'CHECKED_WRITE_UNSUPPORTED' });
+  });
+
+  it('applies one changeset phase in one request, fsynced once per directory (D16)', async () => {
+    const { root, provider, port } = connect();
+    writeFileSync(join(root, 'kept.txt'), 'kept');
+    const posted = vi.spyOn(port, 'postMessage');
+    const probe = await fsPromises.open(join(root, 'kept.txt'), 'r');
+    const sync = vi.spyOn(Object.getPrototypeOf(probe) as { sync(): Promise<void> }, 'sync');
+    await probe.close();
+    const entries: BatchEntry[] = [
+      ...['a', 'b'].flatMap((directory) =>
+        Array.from(
+          { length: 4 },
+          (_, index): BatchEntry => ({
+            op: 'write',
+            path: `${directory}/${String(index)}.txt`,
+            data: new Blob([`${directory}${String(index)}`]),
+          }),
+        ),
+      ),
+      { op: 'write', path: 'kept.txt', data: new TextEncoder().encode('again'), create: true },
+    ];
+
+    const receipts = await provider.applyBatch(entries);
+
+    expect(posted.mock.calls.map(([frame]) => (frame as { op: string }).op)).toEqual(['applyBatch']);
+    expect(receipts.slice(0, 8)).toEqual(Array.from({ length: 8 }, () => ({ outcome: 'applied', kind: 'file' })));
+    /* A refusal keeps its code across the port, so the pipeline still reads it as known-not-applied. */
+    expect(receipts[8]?.outcome).toBe('failed');
+    expect(isRefusal(receipts[8]?.error)).toBe(true);
+    expect(readFileSync(join(root, 'b', '3.txt'), 'utf8')).toBe('b3');
+    expect(readFileSync(join(root, 'kept.txt'), 'utf8')).toBe('kept');
+    expect(sync).toHaveBeenCalledTimes(process.platform === 'win32' ? 16 : 8 + 2);
   });
 
   it('round-trips bytes through the port', async () => {

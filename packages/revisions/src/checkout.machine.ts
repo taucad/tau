@@ -42,6 +42,20 @@ export type CheckoutCutTrigger = 'turn' | 'save' | 'idle' | 'hidden' | 'close' |
 export const checkoutIdleWindowMilliseconds = 5 * 60 * 1000;
 
 /**
+ * The least time between one published mint and the next (W6, D11).
+ *
+ * The hosted remote's same-project compare-and-set ceiling is about one a
+ * second, and every mint is pushed, so mints are paced to it: a mint that
+ * published holds the checkout for this long before the next one starts, and
+ * the ambient requests that arrive meanwhile are one mint (group commit). A
+ * turn's cut still waits its turn but is never merged with another. The
+ * default of {@link CheckoutMachineInput.mintFloor}.
+ *
+ * @public
+ */
+export const checkoutMintFloorMilliseconds = 1000;
+
+/**
  * How many requests may wait behind one running mint.
  *
  * Trigger-only requests coalesce, so this bounds only turn-bearing ones, which
@@ -95,6 +109,8 @@ export type CheckoutMachineInput = Readonly<{
    * shared checkout run one window between them, not one each (S30).
    */
   idleWindow?: number;
+  /** Least milliseconds from one published mint to the next; `0` does not pace. */
+  mintFloor?: number;
   /** The `project-revisions` root, which routes outcomes back to the requester. */
   parentRef?: AnyActorRef;
 }>;
@@ -107,6 +123,8 @@ type CheckoutMachineContextFields = Readonly<{
   headTreeId: string | undefined;
   /** Quiet window before an `idle` revision, in milliseconds. */
   idleWindow: number;
+  /** Least milliseconds from one published mint to the next. */
+  mintFloor: number;
   parentRef: AnyActorRef | undefined;
   /** Monotonic counter of content-change events, supplied by the seam. */
   writeGeneration: number;
@@ -315,6 +333,14 @@ export const checkoutIgnoredEvents: ReadonlyArray<readonly [state: string, event
   ['minting.writing', 'fenceRefused'],
   ['minting.publishing', 'fenceGranted'],
   ['minting.publishing', 'fenceRefused'],
+  ['spacing', 'fenceGranted'],
+  ['spacing', 'fenceRefused'],
+  ['spacing.routing', 'fenceGranted'],
+  ['spacing.routing', 'fenceRefused'],
+  ['spacing.settled', 'fenceGranted'],
+  ['spacing.settled', 'fenceRefused'],
+  ['spacing.edited', 'fenceGranted'],
+  ['spacing.edited', 'fenceRefused'],
   ['rereading', 'fenceGranted'],
   ['rereading', 'fenceRefused'],
   ['failed', 'fenceGranted'],
@@ -326,7 +352,7 @@ export const checkoutIgnoredEvents: ReadonlyArray<readonly [state: string, event
  * its narrowed parent in alpha.59's strict setup targets, so each exit lands in
  * `minting.done` and `minting`'s own `onDone` routes it.
  */
-type MintExit = 'clean' | 'dirty' | 'stale' | 'rereading' | 'failed';
+type MintExit = 'clean' | 'dirty' | 'spacing' | 'stale' | 'rereading' | 'failed';
 
 /** Per-state context of a running mint (MC-R26): the request it serves, and where it leaves to. */
 type MintingContext = Readonly<{
@@ -603,6 +629,7 @@ const checkoutMachineDefinition = setup({
         done: { schemas: { context: types<MintingContext>() } },
       },
     },
+    spacing: { states: { routing: {}, settled: {}, edited: {} } },
     stale: {},
     rereading: {},
     failed: {},
@@ -649,6 +676,7 @@ const checkoutMachineDefinition = setup({
   },
   delays: {
     idleWindow: ({ context }) => context.idleWindow,
+    mintFloor: ({ context }) => context.mintFloor,
   },
   guards: {
     /* I5: a revision is minted only when the cut's tree differs from the head's. */
@@ -663,6 +691,7 @@ const checkoutMachineDefinition = setup({
     headRevisionId: input.headRevisionId,
     headTreeId: input.headTreeId,
     idleWindow: input.idleWindow ?? checkoutIdleWindowMilliseconds,
+    mintFloor: input.mintFloor ?? checkoutMintFloorMilliseconds,
     parentRef: input.parentRef,
     writeGeneration: 0,
     cutGeneration: 0,
@@ -949,10 +978,11 @@ const checkoutMachineDefinition = setup({
                 request: context.pending,
                 answer: { type: 'revisionMinted', revisionId: context.revisionId ?? '', branch: context.branch },
               });
-              const next = { ...context, headRevisionId: context.revisionId, headTreeId: context.cutTreeId };
-              return {
-                ...leave(afterMint(next, true), { headRevisionId: context.revisionId, headTreeId: context.cutTreeId }),
-              };
+              const published = { headRevisionId: context.revisionId, headTreeId: context.cutTreeId };
+              /* D11: a published mint holds off the next for the floor; where it goes is decided after it. */
+              return context.mintFloor > 0
+                ? leave('spacing', published)
+                : leave(afterMint({ ...context, ...published }, true), published);
             },
             onError: ({ context, event }, enq) => {
               const reason = describeFailure(event.error);
@@ -969,6 +999,41 @@ const checkoutMachineDefinition = setup({
         target: context.exit ?? 'dirty',
         ...(context.exit === 'dirty' ? { context: { comparison: 'pending' } } : {}),
       }),
+    },
+    /*
+     * The floor between published mints (D11). It runs after `minting` has
+     * released the fence, so a producer's apply is never held for it. Requests
+     * queue meanwhile through the root's `cut`, so the ambient ones are one
+     * mint and a turn's stays its own; a write or a head move only counts, and
+     * where the checkout goes is decided when the floor has passed.
+     */
+    spacing: {
+      after: {
+        mintFloor: ({ context }) => {
+          const exit = afterMint(context, true);
+          return { target: exit, ...(exit === 'dirty' ? { context: { comparison: 'pending' } } : {}) };
+        },
+      },
+      initial: 'routing',
+      states: {
+        routing: {
+          always: ({ context }) =>
+            afterMint(context, true) === 'clean' ? { target: 'settled' } : { target: 'edited' },
+        },
+        /* The files are the published tree's. */
+        settled: {
+          entry: ({ context }, enq) => {
+            reportStatus(context, enq, 'clean');
+          },
+          on: { changed: { target: 'edited', context: ({ context, event }) => recordWrite(context, event) } },
+        },
+        edited: {
+          tags: ['dirty'],
+          entry: ({ context }, enq) => {
+            reportStatus(context, enq, 'dirty');
+          },
+        },
+      },
     },
     stale: {
       tags: ['dirty'],

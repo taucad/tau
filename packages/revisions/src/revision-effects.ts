@@ -5938,6 +5938,12 @@ export type ProjectRevisionActorOptions = RevisionActorsOptions &
      */
     liveCheckoutId?: string;
     selectedCheckoutId?: string;
+    /**
+     * The least time between one checkout's published mints, in
+     * milliseconds; `checkoutMintFloorMilliseconds` when left out (D11). A
+     * host whose clock does not run, such as a test's stopped clock, passes 0.
+     */
+    mintFloor?: number;
   }>;
 
 /**
@@ -5993,6 +5999,7 @@ export const createProjectRevisionsActor = (options: ProjectRevisionActorOptions
         projectId: options.projectId,
         ...(options.liveCheckoutId === undefined ? {} : { liveCheckoutId: options.liveCheckoutId }),
         ...(options.selectedCheckoutId === undefined ? {} : { selectedCheckoutId: options.selectedCheckoutId }),
+        ...(options.mintFloor === undefined ? {} : { mintFloor: options.mintFloor }),
       },
       ...(options.clock === undefined ? {} : { clock: options.clock }),
       ...(options.inspect === undefined ? {} : { inspect: options.inspect }),

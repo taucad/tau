@@ -139,6 +139,8 @@ const harness = (
   const registry = createWorkerRevisionRegistry({
     ...(extra.servePlacement === undefined ? {} : { servePlacement: extra.servePlacement }),
     ...(extra.clock === undefined ? {} : { clock: extra.clock }),
+    /* The floor between mints is pinned in `@taucad/revisions`; here a verb runs as soon as the last mint published. */
+    mintFloor: 0,
     ...(extra.observeStatus === undefined ? {} : { observeStatus: extra.observeStatus }),
     createPort: (projectId) => {
       extra.onCreatePort?.();

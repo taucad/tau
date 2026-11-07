@@ -7,6 +7,7 @@ import * as machineModule from '#checkout.machine.js';
 import {
   checkoutIgnoredEvents,
   checkoutMachine,
+  checkoutMintFloorMilliseconds,
   checkoutQueuedCutLimit,
   satisfiesCut,
   selectCheckoutDirty,
@@ -98,7 +99,13 @@ type Harness = Readonly<{
 }>;
 
 const start = (
-  options?: Readonly<{ headTreeId?: string; branch?: string; idleWindow?: number; unborn?: boolean }>,
+  options?: Readonly<{
+    headTreeId?: string;
+    branch?: string;
+    idleWindow?: number;
+    mintFloor?: number;
+    unborn?: boolean;
+  }>,
 ): Harness => {
   const guard = guardActors({ ignore: { checkout: checkoutIgnoredEvents } });
   const promises = createFakePromiseActors();
@@ -125,6 +132,8 @@ const start = (
         headRevisionId: options?.unborn === true ? undefined : 'rev-1',
         headTreeId: options?.unborn === true ? undefined : (options?.headTreeId ?? headTreeId),
         ...(options?.idleWindow === undefined ? {} : { idleWindow: options.idleWindow }),
+        /* The floor between mints has its own tests; elsewhere a mint leaves as soon as it published. */
+        mintFloor: options?.mintFloor ?? 0,
         parentRef: parent.ref,
       },
     },
@@ -1353,6 +1362,8 @@ describe('checkoutMachine', () => {
       '{"minting":"cutting"}',
       '{"minting":"writing"}',
       '{"minting":"publishing"}',
+      '{"spacing":"settled"}',
+      '{"spacing":"edited"}',
     ]);
     const generated = new Set(paths.map((path) => JSON.stringify(path.state.value)));
 
@@ -1420,6 +1431,7 @@ describe('checkoutMachine', () => {
       'checkout.stale',
       'checkout.clean.differs',
       'checkout.dirty.matched',
+      'checkout.spacing.routing',
     ]);
     expect(unreachedStates(checkoutMachine, options).filter((id) => !transient.has(id))).toEqual([]);
   });
@@ -1516,6 +1528,135 @@ describe('checkoutMachine changed paths (E1)', () => {
 
     expect(pathsOf(harness, 'cut').at(-1)).toBeUndefined();
     expect(actor.getSnapshot().context.changedPaths).toEqual([]);
+    actor.stop();
+  });
+});
+
+describe('checkoutMachine mint floor (D11)', () => {
+  /* A published mint, with the floor running: requested by `r-1`, its cut taking `a.ts` at generation 1. */
+  const published = async (): Promise<Harness> => {
+    const harness = start({ mintFloor: checkoutMintFloorMilliseconds });
+    harness.actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
+    harness.actor.send({ type: 'cut', requestId: 'r-1', trigger: 'save', leaseIds: [] });
+    await mintToCas(harness);
+    harness.promises.settle('casHead', { output: { status: 'updated', head: 'rev-2' } });
+    await flush();
+    return harness;
+  };
+
+  it('should hold the next mint for the floor, with the fence already released', async () => {
+    const harness = await published();
+    const { actor, callbacks, clock, parent } = harness;
+
+    expect(actor.getSnapshot().matches({ spacing: 'settled' })).toBe(true);
+    expect(actor.getSnapshot().hasTag('dirty')).toBe(false);
+    expect(callbacks.active('fence')).toBe(0);
+    expect(answersOf(parent.events).map((event) => event.type)).toEqual(['revisionMinted']);
+
+    actor.send({ type: 'cut', requestId: 'r-2', trigger: 'save', leaseIds: [] });
+    clock.advance(checkoutMintFloorMilliseconds - 1);
+    expect(actor.getSnapshot().matches('spacing')).toBe(true);
+    expect(callbacks.active('fence')).toBe(0);
+
+    clock.advance(1);
+    expect(actor.getSnapshot().matches({ minting: 'acquiring' })).toBe(true);
+    expect(callbacks.active('fence')).toBe(1);
+
+    actor.stop();
+  });
+
+  it('should rest clean once the floor passes with nothing asked', async () => {
+    const harness = await published();
+    harness.clock.advance(checkoutMintFloorMilliseconds);
+
+    expect(harness.actor.getSnapshot().matches('clean')).toBe(true);
+
+    harness.actor.stop();
+  });
+
+  it('should make the ambient requests that arrive during the floor one mint, answering each', async () => {
+    const harness = await published();
+    const { actor, promises, clock, parent } = harness;
+
+    actor.send({ type: 'changed', paths: ['b.ts'], generation: 2 });
+    actor.send({ type: 'cut', requestId: 's-2', trigger: 'save', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 's-3', trigger: 'save', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 'i-1', trigger: 'idle', leaseIds: [] });
+    clock.advance(checkoutMintFloorMilliseconds);
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: 'tree-3', cutId: 'cut-2' } });
+    await flush();
+    promises.settle('writeRevision', { output: { status: 'written', revisionId: 'rev-3' } });
+    await flush();
+    promises.settle('casHead', { output: { status: 'updated', head: 'rev-3' } });
+    await flush();
+
+    expect(promises.inputsFor('cut')).toHaveLength(2);
+    expect(promises.inputsFor('casHead')).toHaveLength(2);
+    expect(answersOf(parent.events).map((event): unknown => [event['requestId'], event['revisionId']])).toEqual([
+      ['r-1', 'rev-2'],
+      ['s-2', 'rev-3'],
+      ['s-3', 'rev-3'],
+      ['i-1', 'rev-3'],
+    ]);
+
+    actor.stop();
+  });
+
+  it('should keep a turn’s cut apart from the ambient ones queued beside it during the floor', async () => {
+    const harness = await published();
+    const { actor } = harness;
+
+    actor.send({ type: 'cut', requestId: 's-2', trigger: 'save', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 't-1', trigger: 'turn', turn: turnOf('turn-1'), leaseIds: ['run-1'] });
+    actor.send({ type: 'cut', requestId: 's-3', trigger: 'save', leaseIds: [] });
+
+    expect(actor.getSnapshot().context.queued.map((request) => request.trigger)).toEqual(['save', 'turn', 'save']);
+
+    actor.stop();
+  });
+
+  it('should report a write during the floor and leave dirty, comparing it', async () => {
+    const harness = await published();
+    const { actor, clock, parent } = harness;
+
+    actor.send({ type: 'changed', paths: ['b.ts'], generation: 2 });
+    expect(actor.getSnapshot().matches({ spacing: 'edited' })).toBe(true);
+    expect(actor.getSnapshot().hasTag('dirty')).toBe(true);
+    expect(parent.events.findLast((event) => event.type === 'checkoutStatusChanged')?.['status']).toBe('dirty');
+
+    clock.advance(checkoutMintFloorMilliseconds);
+    expect(actor.getSnapshot().matches('dirty')).toBe(true);
+    expect(actor.getSnapshot().context.changedPaths).toEqual(['b.ts']);
+
+    actor.stop();
+  });
+
+  it('should re-read a head that moved during the floor once it has passed', async () => {
+    const harness = await published();
+    const { actor, clock, promises } = harness;
+
+    actor.send({ type: 'headMoved' });
+    expect(actor.getSnapshot().matches('spacing')).toBe(true);
+    expect(promises.running('readHead')).toBe(0);
+
+    clock.advance(checkoutMintFloorMilliseconds);
+    expect(actor.getSnapshot().matches('rereading')).toBe(true);
+
+    actor.stop();
+  });
+
+  it('should not wait after a mint that published nothing', async () => {
+    const harness = start({ mintFloor: checkoutMintFloorMilliseconds });
+    const { actor, promises } = harness;
+
+    actor.send({ type: 'cut', requestId: 'r-1', trigger: 'save', leaseIds: [] });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: headTreeId, cutId: 'cut-1' } });
+    await flush();
+
+    expect(actor.getSnapshot().matches('spacing')).toBe(false);
+
     actor.stop();
   });
 });

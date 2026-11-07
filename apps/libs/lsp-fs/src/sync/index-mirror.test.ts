@@ -176,6 +176,34 @@ describe('createIndexMirror', () => {
     expect(mirror.covers('vendor/lib/index.ts')).toBe(true);
   });
 
+  it('is behind from a heard change set until a message reflecting it is applied', () => {
+    const mirror = createIndexMirror();
+    mirror.receive({ ...reset([['a.ts', 'f', 1, 1, 1]]), changeSet: 4 });
+    expect(mirror.behind()).toBe(false);
+
+    mirror.noteChangeSet(5);
+    expect(mirror.behind()).toBe(true);
+    mirror.receive({ tau: 'index-mirror', kind: 'changes', generation: 2, entries: [], removed: [], changeSet: 4 });
+    expect(mirror.behind()).toBe(true);
+    mirror.receive({ tau: 'index-mirror', kind: 'changes', generation: 2, entries: [], removed: [], changeSet: 5 });
+    expect(mirror.behind()).toBe(false);
+
+    /* The feed's own notice, posted before it asks the index. */
+    mirror.receive({ tau: 'index-mirror', kind: 'ahead', generation: 2, entries: [], removed: [], changeSet: 6 });
+    expect(mirror.behind()).toBe(true);
+    expect(mirror.entry('a.ts')).toBeDefined();
+    mirror.receive({ tau: 'index-mirror', kind: 'changes', generation: 3, entries: [], removed: [], changeSet: 6 });
+    expect(mirror.behind()).toBe(false);
+  });
+
+  it('reflects no change set from changes that arrive before its first whole index', () => {
+    const mirror = createIndexMirror();
+    mirror.receive({ tau: 'index-mirror', kind: 'changes', generation: 2, entries: [], removed: [], changeSet: 3 });
+    mirror.receive({ ...reset([['a.ts', 'f', 1, 1, 1]]), changeSet: 2 });
+
+    expect(mirror.behind()).toBe(true);
+  });
+
   it('starts over on a second reset', () => {
     const mirror = createIndexMirror();
     mirror.receive(reset([['a.ts', 'f', 1, 1, 1]]));

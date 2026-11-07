@@ -22,6 +22,12 @@ export type SyncFsClient = Readonly<{
   getScriptVersionForPath(fileName: string): string | undefined;
   /** Whether the worker's index mirror has its first whole index, so presence probes stay in the worker. */
   mirrorReady(): boolean;
+  /**
+   * Tell the mirror of a D6 change set by its generation, from any change
+   * notice that reaches the worker apart from the feed. Until the mirror
+   * reflects that change set, presence and version probes go over the slot.
+   */
+  noteChangeSet(generation: number): void;
   dispose(): void;
 }>;
 
@@ -172,7 +178,8 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
    */
   // oxlint-disable-next-line typescript/no-restricted-types -- null is the mirror's definite absence, apart from "cannot answer".
   const fromMirror = (relativePath: string): IndexEntry | null | undefined => {
-    if (!mirror.ready() || !covers(relativePath) || !mirror.covers(relativePath)) {
+    /* A change set the mirror does not reflect yet may have touched this path: the slot answers until it does. */
+    if (!mirror.ready() || mirror.behind() || !covers(relativePath) || !mirror.covers(relativePath)) {
       return undefined;
     }
     if (relativePath === '') {
@@ -205,6 +212,9 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
 
   return {
     mirrorReady: () => mirror.ready(),
+    noteChangeSet: (generation) => {
+      mirror.noteChangeSet(generation);
+    },
     readFileText(fileName: string): string | undefined {
       const target = resolveTarget(fileName);
       if (target.absolutePath === undefined) {

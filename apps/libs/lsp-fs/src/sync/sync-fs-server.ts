@@ -35,8 +35,14 @@ export type SyncFsIndexSource = Readonly<{
   /** Every file of the root, from the index: what a `reset` sends. */
   statTree(path: string): Promise<readonly FileStatEntry[]>;
   changedSince(since: number, options?: { epoch?: string }): Promise<IndexChanges>;
-  /** Call `onChange` after each change set; returns the unsubscribe. */
-  watch(onChange: () => void): () => void;
+  /**
+   * Call `onChange` after each change set, with the change set when the
+   * source has it (its D6 `generation`, which lets the mirror know it is
+   * behind); returns the unsubscribe. The index must already reflect a change
+   * set when it is delivered here, as the mutation pipeline guarantees by
+   * updating the index before it emits.
+   */
+  watch(onChange: (changeSet?: Readonly<{ generation: number }>) => void): () => void;
   /**
    * Root-relative subtrees the index never holds beyond the policy's
    * unwatched rows: its reserved paths and each nested mount below the root.
@@ -101,6 +107,9 @@ export const feedIndexMirror = (port: Pick<MessagePort, 'postMessage'>, index: S
   /** Milliseconds before the next retry. */
   let retryBackoff = indexMirrorRetryBackoff;
   let retry: ReturnType<typeof setTimeout> | undefined;
+  /* The newest change set heard of, and the newest a posted message said the mirror reflects. */
+  let heard = 0;
+  let reflected = 0;
   const post = (message: TauIndexMirrorMessage): void => {
     const excluded = index.excluded?.();
     port.postMessage(excluded === undefined ? message : { ...message, excluded });
@@ -151,13 +160,20 @@ export const feedIndexMirror = (port: Pick<MessagePort, 'postMessage'>, index: S
     try {
       do {
         again = false;
+        /* Every change set heard before the ask is in the index it answers from. */
+        const reflects = heard;
         // oxlint-disable-next-line no-await-in-loop -- one ask at a time; a change set during it asks once more.
         const message = await step();
         if (stopped) {
           return;
         }
-        if (message !== undefined) {
-          post(message);
+        if (message !== undefined || reflects > reflected) {
+          /* A change set that changed nothing the index holds still lets the mirror catch up. */
+          post({
+            ...(message ?? { tau: 'index-mirror', kind: 'changes', generation: since, entries: [], removed: [] }),
+            ...(reflects > 0 ? { changeSet: reflects } : {}),
+          });
+          reflected = reflects;
         }
       } while (owed());
       retryBackoff = indexMirrorRetryBackoff;
@@ -188,7 +204,12 @@ export const feedIndexMirror = (port: Pick<MessagePort, 'postMessage'>, index: S
       }, retryDelay);
     }
   };
-  const unsubscribe = index.watch(() => {
+  const unsubscribe = index.watch((changeSet) => {
+    if (changeSet !== undefined && changeSet.generation > heard) {
+      heard = changeSet.generation;
+      /* At once, ahead of the ask: from here until the ask's answer arrives the worker's slot answers. */
+      post({ tau: 'index-mirror', kind: 'ahead', generation: since, entries: [], removed: [], changeSet: heard });
+    }
     void pump();
   });
   void pump();

@@ -154,7 +154,7 @@ describe('createSyncFsClient', () => {
   });
 
   /* S13 (charter D13): 3,000 module-resolution probes (each specifier tries three candidates; half resolve on the last) answered by the worker's index mirror, with no slot round trip and no byte read. */
-  it('answers presence and versions from the index mirror, and asks the slot only for a path the index never holds', async () => {
+  it('answers presence and versions from the index mirror, and asks the slot for a path the index never holds or while the mirror is behind', async () => {
     const { port1, port2 } = new MessageChannel();
     const slotSab = new SharedArrayBuffer(16);
     const arenaSab = new SharedArrayBuffer(512);
@@ -196,6 +196,7 @@ describe('createSyncFsClient', () => {
       directory: boolean;
       mirrorTiers: Record<string, number>;
       ignored: boolean;
+      behind: boolean;
       tiers: Record<string, number>;
     }>((resolve, reject) => {
       const worker = new Worker(new URL('sync-fs-client.mirror.tier2.worker.ts', import.meta.url), {
@@ -214,8 +215,10 @@ describe('createSyncFsClient', () => {
     expect(result.mirrorTiers).toEqual({ mirror: 3000 + 500 + 1, slot: 0, translation: 0 });
     expect(result.duration).toBeLessThanOrEqual(300);
     expect(result.ignored).toBe(true);
-    expect(result.tiers['slot']).toBe(1);
+    /* Behind a heard change set, the slot's answer (here: gone) wins over the mirror's stale entry. */
+    expect(result.behind).toBe(false);
+    expect(result.tiers['slot']).toBe(2);
     expect(workspace.readFileBytes).not.toHaveBeenCalled();
-    expect(workspace.stat).toHaveBeenCalledTimes(1);
+    expect(workspace.stat).toHaveBeenCalledTimes(2);
   });
 });

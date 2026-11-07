@@ -45,7 +45,10 @@ parentPort?.once('message', (message: MirrorWorkerMessage) => {
     const duration = performance.now() - startedAt;
     const mirrorTiers = { ...tiers };
     const ignored = client.fileExists('file:///node_modules/dep/index.d.ts');
-    parentPort?.postMessage({ duration, probes, hits, versions, directory, mirrorTiers, ignored, tiers });
+    /* A change notice the mirror does not reflect yet: the slot answers even a path the mirror holds. */
+    client.noteChangeSet(1);
+    const behind = client.fileExists('file:///src/m0/index.ts');
+    parentPort?.postMessage({ duration, probes, hits, versions, directory, mirrorTiers, ignored, behind, tiers });
     client.dispose();
   };
   run();

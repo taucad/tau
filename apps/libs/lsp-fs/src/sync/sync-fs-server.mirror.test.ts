@@ -71,9 +71,9 @@ const serve = (index: SyncFsIndexSource) => {
   return received;
 };
 
-/** An index source whose watch the test fires. */
+/** An index source whose watch the test fires, with a change set's generation when given. */
 const source = (changedSince: SyncFsIndexSource['changedSince'], rows: readonly FileStatEntry[] = []) => {
-  let fire: (() => void) | undefined;
+  let fire: ((changeSet?: Readonly<{ generation: number }>) => void) | undefined;
   const unsubscribe = vi.fn();
   const index: SyncFsIndexSource = {
     changedSince: vi.fn(changedSince),
@@ -83,7 +83,11 @@ const source = (changedSince: SyncFsIndexSource['changedSince'], rows: readonly 
       return unsubscribe;
     },
   };
-  return { index, fire: () => fire?.(), unsubscribe };
+  return {
+    index,
+    fire: (generation?: number) => fire?.(generation === undefined ? undefined : { generation }),
+    unsubscribe,
+  };
 };
 
 describe('the index mirror feed', () => {
@@ -283,6 +287,56 @@ describe('the index mirror feed', () => {
     });
 
     expect(received[0]?.entries).toEqual([['empty', 'd', 0, 0, 3]]);
+  });
+
+  it('says a heard change set is ahead at once, then names it on the answer that reflects it', async () => {
+    let release: (() => void) | undefined;
+    const { index, fire } = source(async (since) => {
+      if (since === 0) {
+        return changes(1, { entries: [entry('a.ts', 1)] });
+      }
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return changes(2, { entries: [entry('b.ts', 2)] });
+    });
+    const received = serve(index);
+    await vi.waitFor(() => {
+      expect(received).toHaveLength(1);
+    });
+
+    fire(7);
+    await vi.waitFor(() => {
+      expect(received).toHaveLength(2);
+    });
+    expect(received[1]).toMatchObject({ kind: 'ahead', changeSet: 7, entries: [] });
+    expect(release).toBeDefined();
+
+    release?.();
+    await vi.waitFor(() => {
+      expect(received).toHaveLength(3);
+    });
+    expect(received[2]).toMatchObject({ kind: 'changes', changeSet: 7, entries: [['b.ts', 'f', 1, 10, 2]] });
+  });
+
+  it('lets the mirror catch up on a change set that changed nothing the index holds', async () => {
+    const { index, fire } = source(async (since) =>
+      since === 0 ? changes(1, { entries: [entry('a.ts', 1)] }) : changes(1),
+    );
+    const received = serve(index);
+    await vi.waitFor(() => {
+      expect(received).toHaveLength(1);
+    });
+
+    fire(3);
+    await vi.waitFor(() => {
+      expect(received).toHaveLength(3);
+    });
+
+    expect(received.slice(1)).toEqual([
+      { tau: 'index-mirror', kind: 'ahead', generation: 1, entries: [], removed: [], changeSet: 3 },
+      { tau: 'index-mirror', kind: 'changes', generation: 1, entries: [], removed: [], changeSet: 3 },
+    ]);
   });
 
   it('stops asking and unsubscribes once disposed', async () => {

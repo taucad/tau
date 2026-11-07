@@ -31,6 +31,12 @@ export type IndexMirrorWireEntry = readonly [
  * the index, so the mirror knows nothing until the next `reset` and the slot
  * answers every probe.
  *
+ * `changeSet` is the D6 change-set generation the message reflects: every
+ * change set up to it is in the mirror once a `reset` or `changes` carrying it
+ * is applied. `ahead` carries no index rows; it says change set `changeSet`
+ * has committed and the mirror does not reflect it yet. The feed posts it the
+ * moment it hears the change set, before it asks the index.
+ *
  * `excluded` names the root-relative subtrees the index never holds beyond
  * the policy's unwatched rows: its reserved paths and each nested mount below
  * the root (I9). A message that carries it replaces the mirror's list.
@@ -39,10 +45,11 @@ export type IndexMirrorWireEntry = readonly [
  */
 export type TauIndexMirrorMessage = Readonly<{
   tau: 'index-mirror';
-  kind: 'reset' | 'changes' | 'stale';
+  kind: 'reset' | 'changes' | 'stale' | 'ahead';
   generation: number;
   entries: readonly IndexMirrorWireEntry[];
   removed: readonly string[];
+  changeSet?: number;
   excluded?: readonly string[];
 }>;
 
@@ -57,10 +64,11 @@ const wireEntrySchema = z.tuple([
 /** @public */
 export const tauIndexMirrorMessageSchema = z.object({
   tau: z.literal('index-mirror'),
-  kind: z.enum(['reset', 'changes', 'stale']),
+  kind: z.enum(['reset', 'changes', 'stale', 'ahead']),
   generation: z.number().int().nonnegative(),
   entries: z.array(wireEntrySchema),
   removed: z.array(z.string()),
+  changeSet: z.number().int().nonnegative().optional(),
   excluded: z.array(z.string()).optional(),
 });
 
@@ -113,6 +121,13 @@ export type WorkerIndexMirror = IndexMirror &
     ready(): boolean;
     /** Whether the index would hold `relativePath` if it existed, so a miss here is a definite absence. */
     covers(relativePath: string): boolean;
+    /**
+     * Note a D6 change set the worker has heard of, by its generation, from
+     * the feed's `ahead` or any other change notice that reaches the worker.
+     */
+    noteChangeSet(generation: number): void;
+    /** Whether a change set has been heard of that the mirror does not reflect yet: until it does, the slot answers. */
+    behind(): boolean;
     /** Apply one wire message. */
     receive(message: TauIndexMirrorMessage): void;
     /** Entries held. */
@@ -131,6 +146,9 @@ export const createIndexMirror = (): WorkerIndexMirror => {
   const children = new Map<string, Set<string>>();
   let received = false;
   let excluded: readonly string[] = [];
+  /* The newest change set heard of, and the newest the mirror reflects. */
+  let heard = 0;
+  let reflected = 0;
 
   const link = (path: string): void => {
     const parent = parentOf(path);
@@ -199,10 +217,20 @@ export const createIndexMirror = (): WorkerIndexMirror => {
     covers: (relativePath) =>
       relativePath === '' ||
       (indexMirrorCovers(relativePath) && !excluded.some((prefix) => isAtOrBelow(relativePath, prefix))),
+    noteChangeSet: (generation) => {
+      heard = Math.max(heard, generation);
+    },
+    behind: () => heard > reflected,
     size: () => entries.size,
     receive: (message) => {
       if (message.excluded !== undefined) {
         excluded = message.excluded;
+      }
+      if (message.changeSet !== undefined) {
+        heard = Math.max(heard, message.changeSet);
+      }
+      if (message.kind === 'ahead') {
+        return;
       }
       if (message.kind === 'stale') {
         entries.clear();
@@ -217,6 +245,9 @@ export const createIndexMirror = (): WorkerIndexMirror => {
       } else if (!received) {
         /* Changes before the first whole index have nothing to apply to. */
         return;
+      }
+      if (message.changeSet !== undefined) {
+        reflected = Math.max(reflected, message.changeSet);
       }
       apply([
         ...message.removed.map((path): IndexMirrorChange => ({ op: 'deleted', path })),

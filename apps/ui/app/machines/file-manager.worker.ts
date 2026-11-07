@@ -36,7 +36,7 @@ import {
   WorkspaceFileService,
   workerTimings,
 } from '@taucad/filesystem';
-import type { MountEntry, WorkspaceScope } from '@taucad/filesystem';
+import type { MountEntry, RootedFileSystem, WorkspaceScope } from '@taucad/filesystem';
 import type { MachineSettingsService } from '@taucad/types';
 
 import type { kernelTypePackageMaps as KernelTypePackageMaps } from '@taucad/api-extractor/kernel-types';
@@ -365,6 +365,24 @@ const settingsForRoot = (root: string, policy: typeof tauPathPolicy): MachineSet
       return captured.edit(input);
     },
     machineSettingsSettlement: async (operationId) => captured.settlement(operationId),
+  };
+};
+
+/**
+ * The root's index as the language worker's mirror reads it: whole once, then
+ * its changes after each change set. A rooted surface without an index offers
+ * none, and the worker's slot answers every probe.
+ */
+const languageIndexSource = (rooted: RootedFileSystem): Partial<Pick<SyncFsWorkspaceAdapter, 'index'>> => {
+  if (rooted.changedSince === undefined || rooted.statTree === undefined || rooted.watchChangeSets === undefined) {
+    return {};
+  }
+  return {
+    index: {
+      changedSince: async (since, options) => rooted.changedSince!(since, options),
+      statTree: async (path) => rooted.statTree!(path),
+      watch: (onChange) => rooted.watchChangeSets!({ paths: [''], recursive: true }, onChange),
+    },
   };
 };
 
@@ -781,6 +799,8 @@ self.addEventListener(
           return { mtimeMs: stat.mtimeMs, isDirectory: stat.type === 'dir' };
         },
         listDirectories: async (path) => listWorkspaceDirectories(rootedFileSystem, path),
+        /* The language worker mirrors this root's index (charter D13): presence and versions never cross back here. */
+        ...languageIndexSource(rootedFileSystem),
       };
       languageFsSyncDispose = attachSyncFsServer({
         port: data.port,

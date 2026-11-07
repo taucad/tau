@@ -4,6 +4,8 @@ import { createSyncRequestClient } from '@taucad/fs-bridge/sync';
 import type { SyncFsOp, TauSyncFsWireMessage } from '#sync/sync-fs-protocol.js';
 import { slotIndex, slotInt32Length, syncError } from '#sync/sync-fs-protocol.js';
 import { languageFileUriToWorkspaceRelative } from '#uri.js';
+import { createIndexMirror, indexMirrorCovers, tauIndexMirrorMessageSchema } from '#sync/index-mirror.js';
+import type { IndexEntry } from '@taucad/filesystem';
 
 /**
  * Synchronous filesystem shim used from a worker that blocks on {@link Atomics.wait}.
@@ -18,6 +20,8 @@ export type SyncFsClient = Readonly<{
   getDirectories(directoryName: string): string[];
   /** @returns String suitable for {@link ts.LanguageServiceHost.getScriptVersion}. */
   getScriptVersionForPath(fileName: string): string | undefined;
+  /** Whether the worker's index mirror has its first whole index, so presence probes stay in the worker. */
+  mirrorReady(): boolean;
   dispose(): void;
 }>;
 
@@ -42,10 +46,11 @@ export type SyncFsProbe = Readonly<{
    */
   absolutePath: string | undefined;
   /**
+   * - `mirror`      answered by the worker's index mirror, with no round trip (D13).
    * - `slot`        sent over the SAB slot to the FM worker.
    * - `translation` failed before any tier ran (URI scheme mismatch, etc.).
    */
-  tier: 'slot' | 'translation';
+  tier: 'mirror' | 'slot' | 'translation';
   /**
    * - `ok`         success.
    * - `notFound`   slot returned `syncError.notFound`.
@@ -76,6 +81,12 @@ export type CreateSyncFsClientOptions = Readonly<{
   textDecoder?: TextDecoder;
   /** Optional diagnostic sink invoked once per operation. Bound and bounded by the consumer. */
   onProbe?: (probe: SyncFsProbe) => void;
+  /**
+   * Whether the root's index would hold a root-relative path (default
+   * {@link indexMirrorCovers}): a path it never holds — under `node_modules`,
+   * say — is always asked over the slot, since a miss in the mirror says nothing.
+   */
+  indexCovers?: (relativePath: string) => boolean;
 }>;
 
 type ResolvedTarget = Readonly<
@@ -145,9 +156,55 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
     return payloadByteLength > 0 ? 'ok' : 'empty';
   };
 
+  /* The FM worker sends the root's index, then its changes, on this port (D13); until the first arrives the slot answers. */
+  const mirror = createIndexMirror();
+  const covers = options.indexCovers ?? indexMirrorCovers;
+  const receiveMirror = (event: MessageEvent): void => {
+    const message = tauIndexMirrorMessageSchema.safeParse(event.data);
+    if (message.success) {
+      mirror.receive(message.data);
+    }
+  };
+  options.port.addEventListener('message', receiveMirror);
+  /**
+   * What the mirror says about a path: its entry, `null` when the index would
+   * hold it and does not, or `undefined` when the mirror cannot answer.
+   */
+  // oxlint-disable-next-line typescript/no-restricted-types -- null is the mirror's definite absence, apart from "cannot answer".
+  const fromMirror = (relativePath: string): IndexEntry | null | undefined => {
+    if (!mirror.ready() || !covers(relativePath)) {
+      return undefined;
+    }
+    if (relativePath === '') {
+      return { path: '', kind: 'dir', size: 0, mtimeMs: 0, generation: 0 };
+    }
+    return mirror.entry(relativePath) ?? null;
+  };
+  const emitMirror = ({
+    op,
+    fileName,
+    target,
+    found,
+  }: Readonly<{
+    op: SyncFsOp;
+    fileName: string;
+    target: Extract<ResolvedTarget, { translationError: undefined }>;
+    found: boolean;
+  }>): void => {
+    onProbe?.({
+      op,
+      fileName,
+      relativePath: target.relativePath,
+      absolutePath: target.absolutePath,
+      tier: 'mirror',
+      outcome: found ? 'ok' : 'absent',
+    });
+  };
+
   options.port.start();
 
   return {
+    mirrorReady: () => mirror.ready(),
     readFileText(fileName: string): string | undefined {
       const target = resolveTarget(fileName);
       if (target.absolutePath === undefined) {
@@ -198,6 +255,12 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
         emitTranslationFailure('fileExists', fileName, target.translationError);
         return false;
       }
+      const mirrored = fromMirror(target.relativePath);
+      if (mirrored !== undefined) {
+        const exists = mirrored?.kind === 'file';
+        emitMirror({ op: 'fileExists', fileName, target, found: exists });
+        return exists;
+      }
 
       try {
         perform('fileExists', target.relativePath);
@@ -242,6 +305,12 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
       if (target.absolutePath === undefined) {
         emitTranslationFailure('directoryExists', fileName, target.translationError);
         return false;
+      }
+      const mirrored = fromMirror(target.relativePath);
+      if (mirrored !== undefined) {
+        const exists = mirrored?.kind === 'dir';
+        emitMirror({ op: 'directoryExists', fileName, target, found: exists });
+        return exists;
       }
 
       try {
@@ -368,6 +437,12 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
         emitTranslationFailure('statMtimeVersion', fileName, target.translationError);
         return undefined;
       }
+      const mirrored = fromMirror(target.relativePath);
+      if (mirrored !== undefined) {
+        const version = mirrored?.kind === 'file' ? mirror.version(target.relativePath) : undefined;
+        emitMirror({ op: 'statMtimeVersion', fileName, target, found: version !== undefined });
+        return version;
+      }
 
       try {
         perform('statMtimeVersion', target.relativePath);
@@ -428,6 +503,7 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
     },
 
     dispose(): void {
+      options.port.removeEventListener('message', receiveMirror);
       syncClient.dispose();
     },
   };

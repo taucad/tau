@@ -3,7 +3,7 @@ title: 'Language Contribution Policy'
 description: 'CodeMirror and Lezer language support, code-pane admission, shared filesystem tiers, checked edits and TypeScript worker ownership'
 status: active
 created: '2026-05-07'
-updated: '2026-10-31'
+updated: '2026-11-07'
 related:
   - docs/research/language-fs-bridge-implementation.md
   - docs/research/scalable-language-contribution-fs-architecture.md
@@ -38,11 +38,13 @@ Do not send ambiguous raw paths or probe multiple guessed workspace keys.
 
 Tier 2 is TypeScript-worker infrastructure. Other language contributions must not add blocking reads without an explicit architecture change and cross-origin-isolation support.
 
+Tier 2 answers `fileExists`, `directoryExists` and script versions from the worker's mirror of the root's Project Index (filesystem capability charter D13). The file manager sends the whole index once on attach and then the index's own changes after each change set, so these probes make no slot round trip and read no bytes. File content and directory listings still go over the slot. So does any probe of a path the index never holds (`node_modules` at any depth, and the other policy rows nothing watches), because a miss in the mirror says nothing about those paths.
+
 ### 4. Keep the file manager authoritative
 
 `serveLanguageFileSystemRequests` and `LanguageFsBridge` delegate to the current `FileManagerApi`, `FileTreeService`, and filesystem search owner. They must not fetch workspace files independently or maintain a second tree.
 
-Filesystem authority events update the pool and worker view. Polling may detect missed change signals but must remain a bounded fallback.
+Filesystem authority events update the pool and worker view. Polling may detect missed change signals but must remain a bounded fallback. The Tier 2 index mirror is not a second tree: it holds only what the authority's index sends it, and the authority's change sets drive every update.
 
 ### 5. Keep the TypeScript worker entry explicit
 

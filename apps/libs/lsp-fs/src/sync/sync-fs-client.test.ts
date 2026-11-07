@@ -6,6 +6,7 @@ import { slotIndex, syncState } from '#sync/sync-fs-protocol.js';
 import type { SyncFsProbe } from '#sync/sync-fs-client.js';
 import { createSyncFsClient } from '#sync/sync-fs-client.js';
 import { attachSyncFsServer } from '#sync/sync-fs-server.js';
+import type { SyncFsIndexSource } from '#sync/sync-fs-server.js';
 
 describe('createSyncFsClient', () => {
   it('round-trips readFile, listDirectories, and statMtimeVersion via Tier 2 (worker + Atomics.wait)', async () => {
@@ -150,5 +151,71 @@ describe('createSyncFsClient', () => {
       relativePath: undefined,
       absolutePath: undefined,
     });
+  });
+
+  /* S13 (charter D13): 3,000 module-resolution probes (each specifier tries three candidates; half resolve on the last) answered by the worker's index mirror, with no slot round trip and no byte read. */
+  it('answers presence and versions from the index mirror, and asks the slot only for a path the index never holds', async () => {
+    const { port1, port2 } = new MessageChannel();
+    const slotSab = new SharedArrayBuffer(16);
+    const arenaSab = new SharedArrayBuffer(512);
+    const files = Array.from({ length: 500 }, (_, index) => `src/m${String(index)}/index.ts`);
+    const projectIndex: SyncFsIndexSource = {
+      changedSince: async () => ({
+        generation: 3,
+        epoch: 'e',
+        entries: [
+          { path: 'src', kind: 'dir', size: 0, mtimeMs: 1, generation: 1 },
+          ...files.map((path) => ({ path, kind: 'file', size: 10, mtimeMs: 2, generation: 3 }) as const),
+        ],
+        removed: [],
+      }),
+      statTree: async () => [],
+      watch: () => () => undefined,
+    };
+    const workspace = {
+      readFileBytes: vi.fn(async () => new Uint8Array()),
+      stat: vi.fn(async (path: string) => {
+        if (path === 'node_modules/dep/index.d.ts') {
+          return { mtimeMs: 1, isDirectory: false };
+        }
+        throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+      }),
+      listDirectories: vi.fn(async () => []),
+      index: projectIndex,
+    };
+    const server = attachSyncFsServer({ port: port2, slotSab, arenaSab, workspace });
+    const specifiers = Array.from({ length: 1000 }, (_, index) =>
+      index % 2 === 0 ? `src/m${String(index % files.length)}` : `missing/m${String(index)}`,
+    );
+
+    const result = await new Promise<{
+      duration: number;
+      probes: number;
+      hits: number;
+      versions: string[];
+      directory: boolean;
+      mirrorTiers: Record<string, number>;
+      ignored: boolean;
+      tiers: Record<string, number>;
+    }>((resolve, reject) => {
+      const worker = new Worker(new URL('sync-fs-client.mirror.tier2.worker.ts', import.meta.url), {
+        execArgv: ['--import', '@oxc-node/core/register'],
+      });
+      worker.once('message', resolve);
+      worker.once('error', reject);
+      worker.postMessage({ port: port1, slotSab, arenaSab, specifiers }, [port1 as unknown as Transferable]);
+    });
+    server.dispose();
+
+    expect(result.probes).toBe(3000);
+    expect(result.hits).toBe(500);
+    expect(result.versions.every((version) => version === '3:10:2')).toBe(true);
+    expect(result.directory).toBe(true);
+    expect(result.mirrorTiers).toEqual({ mirror: 3000 + 500 + 1, slot: 0, translation: 0 });
+    expect(result.duration).toBeLessThanOrEqual(300);
+    expect(result.ignored).toBe(true);
+    expect(result.tiers['slot']).toBe(1);
+    expect(workspace.readFileBytes).not.toHaveBeenCalled();
+    expect(workspace.stat).toHaveBeenCalledTimes(1);
   });
 });

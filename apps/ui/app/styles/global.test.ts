@@ -351,16 +351,10 @@ describe('action cursor contract', () => {
         expect(colours.get(`bright-${name}`)).not.toBe(colours.get(name));
       }
     }
-    /* Red is the editor's keyword red and magenta its function purple, in both themes. */
-    const light = ansi(block(/:root \{([^}]*)\}/u));
-    const dark = ansi(block(/\.dark \{([^}]*)\}/u));
-    const oklch = (value: string | undefined) => toOklch(parse(value!)!)!;
-    for (const [palette, css] of [
-      [light, block(/:root \{([^}]*)\}/u)],
-      [dark, block(/\.dark \{([^}]*)\}/u)],
-    ] as const) {
-      const keyword = /--cm-keyword:\s*([^;]+);/u.exec(css)?.[1];
-      expect(oklch(palette.get('red')).h).toBeCloseTo(oklch(keyword).h!, 0);
+    /* Red is the editor's keyword red, in both themes. */
+    for (const css of [block(/:root \{([^}]*)\}/u), block(/\.dark \{([^}]*)\}/u)]) {
+      const hue = (value: string | undefined): number | undefined => toOklch(parse(value ?? ''))?.h;
+      expect(hue(ansi(css).get('red'))).toBeCloseTo(hue(/--cm-keyword:\s*([^;]+);/u.exec(css)?.[1]) ?? Number.NaN, 0);
     }
   });
 });

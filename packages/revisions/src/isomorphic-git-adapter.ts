@@ -950,12 +950,26 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    * @param content - The object's real bytes.
    * @returns Once the object is in the store.
    */
-  const storeLfsObject = async (oid: string, content: Uint8Array<ArrayBuffer>): Promise<void> =>
-    workerTimings.span('lfs.store', async () => storeLfsObjectBytes(oid, content));
-  const storeLfsObjectBytes = async (oid: string, content: Uint8Array<ArrayBuffer>): Promise<void> => {
+  const storeLfsObject = async (oid: string, content: Uint8Array<ArrayBuffer>, readBack?: boolean): Promise<void> =>
+    workerTimings.span('lfs.store', async () => storeLfsObjectBytes(oid, content, readBack));
+  const storeLfsObjectBytes = async (
+    oid: string,
+    content: Uint8Array<ArrayBuffer>,
+    readBack = false,
+  ): Promise<void> => {
     const file = lfsObjectFile(oid);
     const size = content.byteLength;
-    if ((await lfsObjectSize(file)) === size) {
+    /* Another writer's whole copy is kept, and a download's bytes in hand, written nowhere, are hashed instead. */
+    const kept = async (): Promise<boolean> => {
+      if ((await lfsObjectSize(file)) !== size) {
+        return false;
+      }
+      if (readBack && (await compute.sha256(content)) !== oid) {
+        throw new Error(`Large object ${oid} did not hash to its own id.`);
+      }
+      return true;
+    };
+    if (await kept()) {
       return;
     }
     await gitFiles.mkdir(file.slice(0, file.lastIndexOf('/')), { recursive: true });
@@ -964,6 +978,12 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     const discardPartial = async (): Promise<void> => {
       await gitFiles.unlink(partial).catch(() => undefined);
     };
+    /* A download is verified by the one read-back of what landed (D9, D11):
+     * the bytes on disk, not the bytes in hand, are the ones that must hash to the oid. */
+    if (readBack && (await compute.sha256(await gitFiles.readFile(partial))) !== oid) {
+      await discardPartial();
+      throw new Error(`Large object ${oid} did not hash to its own id.`);
+    }
     /* Looked at again just before anything is removed: another tab may have stored it whole meanwhile. */
     const here = await lfsObjectSize(file);
     if (here === size) {
@@ -1118,7 +1138,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         progress: progressed,
         received: async (pointer, content, { transport }) => {
           transports.set(transport, (transports.get(transport) ?? 0) + 1);
-          await storeLfsObject(pointer.oid, content);
+          await storeLfsObject(pointer.oid, content, true);
           contents.set(pointer.oid, content);
           networkBytes += content.byteLength;
           pending.get(pointer.oid)?.resolve(content);

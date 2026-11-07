@@ -1,0 +1,5 @@
+---
+revisions: minor
+---
+
+A large object downloaded in the browser is verified by reading back what was stored (D9, D11). The bytes are written beside their final name, read back once and hashed with WebCrypto on the compute worker, and only then renamed into place. A mismatch, from the wire or from the disk, discards the partial file and fails with `did not hash to its own id`. `LfsClient.downloadMany` now checks only the declared size and hands the bytes to `received` unhashed. The caller verifies them, so each object is hashed once. `LfsClient.download` still hashes the bytes it returns.

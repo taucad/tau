@@ -2118,6 +2118,71 @@ describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
     }
   }, 120_000);
 
+  /* D9, D11: a download is verified by reading back what it stored, so an
+   * object the remote serves at the right size with the wrong bytes is
+   * refused, nothing is kept under its oid, and the right bytes still land. */
+  it('refuses a same-size corrupt download, on the wire or on disk, by its read-back', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-lfs-readback-'));
+    const fixture = await startGitHttpBackend({ root });
+    const writer = await isomorphicHarness();
+    try {
+      const port = writer.withTransport();
+      await port.init({ author });
+      const receipt = await port.writeRevision({
+        parents: [],
+        tree: tree({ 'models/bracket.step': large }),
+        provenance: provenance('user'),
+        summary: summary('Large object'),
+      });
+      const head = revisionId(receipt.commitId);
+      await port.updateRef({ name: 'main', expectedHead: undefined, head });
+      await port.setRemote({ name: 'tau', url: fixture.url });
+      await port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] });
+      /* Right bytes in hand, wrong bytes on disk: only the read-back sees it. */
+      const provider = await createMemoryProvider();
+      const corrupting = Object.assign(Object.create(provider) as typeof provider, {
+        writeFile: async (path: string, data: Parameters<typeof provider.writeFile>[1], ...rest: unknown[]) =>
+          provider.writeFile(
+            path,
+            path.endsWith('.partial') && data instanceof Uint8Array
+              ? data.map((byte, index) => (index === 0 ? byte ^ 1 : byte))
+              : data,
+            ...(rest as []),
+          ),
+      });
+      const tearing = createIsomorphicGitRevisionPort({
+        filesystem: corrupting,
+        http: createRevisionHttpClient({ authorization: () => 'Bearer session-token' }),
+      });
+      await tearing.init({ author });
+      await tearing.setRemote({ name: 'tau', url: fixture.url });
+      await tearing.fetch({ remote: 'tau' });
+      await expect(tearing.readTree(head)).rejects.toThrow(/did not hash to its own id/u);
+      const { oid } = lfsPointerFor(large).pointer;
+      const served = fixture.objects as Map<string, Uint8Array<ArrayBuffer>>;
+      served.set(
+        oid,
+        large.map((byte, index) => (index === 0 ? byte ^ 1 : byte)),
+      );
+
+      const reader = createIsomorphicGitRevisionPort({
+        filesystem: await createMemoryProvider(),
+        http: createRevisionHttpClient({ authorization: () => 'Bearer session-token' }),
+      });
+      await reader.init({ author });
+      await reader.setRemote({ name: 'tau', url: fixture.url });
+      await reader.fetch({ remote: 'tau' });
+      await expect(reader.readTree(head)).rejects.toThrow(/did not hash to its own id/u);
+
+      served.set(oid, large);
+      expect((await reader.readTree(head))?.get('models/bracket.step')).toStrictEqual(large);
+    } finally {
+      await fixture.close();
+      await writer.dispose();
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 120_000);
+
   /* Load-path audit fix 1: opening a project read its large objects one batch
    * call and one transfer at a time. A store that fetched only pointers now
    * hydrates the tree in one batch call, and a second read asks the remote

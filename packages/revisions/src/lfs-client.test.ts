@@ -79,6 +79,30 @@ describe('createLfsClient batch validation', () => {
     ).rejects.toThrow(/did not hash to its own id/u);
   });
 
+  /* D9, D11: `downloadMany` checks the size and leaves the hash to the caller's
+   * read-back of what it stores, so each object is hashed once. */
+  it('hands a many-object download over at its declared size, unhashed, for the read-back', async () => {
+    const oid = 'd'.repeat(64);
+    const http: RevisionHttpClient = {
+      request: async (request) =>
+        request.url.endsWith('/batch')
+          ? response(
+              JSON.stringify({
+                objects: [{ oid, size: 3, actions: { download: { href: 'https://api.tau.test/object' } } }],
+              }),
+            )
+          : response(encoder.encode('xyz')),
+    };
+    const received: string[] = [];
+    await createLfsClient({ url: 'https://github.com/a/b.git', http }).downloadMany({
+      pointers: [{ oid, size: 3 }],
+      received: async (pointer, content) => {
+        received.push(`${pointer.oid}:${new TextDecoder().decode(content)}`);
+      },
+    });
+    expect(received).toStrictEqual([`${oid}:xyz`]);
+  });
+
   /* D53: a renamed GitHub repository serves git at its old path but redirects
    * LFS, so the batch is where the move surfaces. */
   it('should classify a refused batch as the git leg does, so a moved repository reads as moved', async () => {

@@ -110,7 +110,7 @@ const failureTextLimit = 200;
  * @returns The scrubbed text.
  */
 export const scrubFailureText = (text: string): string =>
-  text.replaceAll(/(?:[a-z]:)?[\\/](?:users|home)[\\/][^\\/\s'"]+/giu, '~').slice(0, failureTextLimit);
+  text.replaceAll(/(?:[a-z]:)?[\\/](?:users|home)[\\/][^\\/:'"\r\n]+/giu, '~').slice(0, failureTextLimit);
 
 /** The updater log events that are failures worth an event. */
 const updaterFailureEvents: Readonly<Record<string, 'check-or-download' | 'restart'>> = {

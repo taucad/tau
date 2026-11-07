@@ -98,6 +98,9 @@ describe('scrubFailureText', () => {
       String.raw`EPERM ~\AppData\Local\tau`,
     );
     expect(scrubFailureText('/home/dana/.cache/tau')).toBe('~/.cache/tau');
+    expect(scrubFailureText(String.raw`EPERM C:\Users\John Smith\AppData\Local\tau`)).toBe(
+      String.raw`EPERM ~\AppData\Local\tau`,
+    );
     expect(scrubFailureText('x'.repeat(500))).toHaveLength(200);
   });
 });

@@ -80,4 +80,45 @@ describe.runIf(gitToolchainOnPath)('close revision of an adopted repository', ()
     expect(git(project, ['log', '--format=%s', 'side'])).toBe('Mine');
     expect(git(join(root, 'mine'), ['status', '--porcelain'])).toBe('?? draft.scad');
   }, 120_000);
+
+  /* D16: the person's own `filter=lfs` attributes decide, exactly as their `git add` with git-lfs would. */
+  it('should record the paths its own LFS attributes name as pointers and never write Tau’s block', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-host-adopted-lfs-'));
+    roots.push(root);
+    process.env['TAU_CONFIG_DIR'] = join(root, 'config');
+    const project = join(root, 'project');
+    await mkdir(project);
+    git(project, ['init', '--quiet', '--initial-branch=main']);
+    git(project, ['lfs', 'install', '--local']);
+    const attributes = '*.stl filter=lfs diff=lfs merge=lfs -text\n';
+    await writeFile(join(project, '.gitattributes'), attributes);
+    await writeFile(join(project, 'part.scad'), 'cube(1);\n');
+    await writeFile(join(project, 'scan.stl'), new Uint8Array(4096).fill(3));
+    git(project, ['add', '--all']);
+    git(project, ['commit', '--quiet', '-m', 'Mine']);
+    const scan = git(project, ['rev-parse', 'HEAD:scan.stl']);
+    // The person's new work: one more part their attributes name, and a large file they do not.
+    await writeFile(join(project, 'bracket.stl'), new Uint8Array(8192).fill(4));
+    await writeFile(join(project, 'notes.bin'), new Uint8Array(2 * 1024 * 1024).fill(5));
+
+    const revisions = createProjectRevisions({ workspaceRoot: project, projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA' });
+    try {
+      await vi.waitFor(() => {
+        expect(revisions.status().registrySettled).toBe(true);
+      });
+    } finally {
+      await revisions.release();
+    }
+
+    expect(git(project, ['log', '--format=%s', 'main'])).toBe('Saved changes (close)\nMine');
+    expect(git(project, ['rev-parse', 'main:scan.stl'])).toBe(scan);
+    expect(git(project, ['cat-file', 'blob', 'main:bracket.stl'])).toMatch(
+      /^version https:\/\/git-lfs\.github\.com\/spec\/v1\n/u,
+    );
+    expect(git(project, ['cat-file', '-s', 'main:notes.bin'])).toBe(String(2 * 1024 * 1024));
+    expect(await readFile(join(project, '.gitattributes'), 'utf8')).toBe(attributes);
+    expect(git(project, ['cat-file', 'blob', 'main:.gitattributes'])).toBe(attributes.trimEnd());
+    // Their own git-lfs reads the same tree back: nothing is modified.
+    expect(git(project, ['status', '--porcelain'])).toBe('');
+  }, 120_000);
 });

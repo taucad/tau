@@ -8,7 +8,7 @@
  * store's own copy is re-made whenever a cut finds it gone.
  */
 
-import { mkdir, mkdtemp, readdir, rm, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -369,4 +369,35 @@ describe.runIf(gitToolchainOnPath)('native large-object store', () => {
     await mint(fresh, tree);
     expect(await readdir(join(stored, '..'))).toContain(oid);
   }, 60_000);
+
+  /* D9 on the native leg: a read and a store of the repository's own LFS store, never routed through a fetch. */
+  it('reads and stores one large object in place, by its pointer', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-lfs-store-'));
+    cleanups.push(async () => rm(root, { recursive: true, force: true }));
+    const port = createNativeGitRevisionPort({ repositoryPath: root });
+    await port.init({ author });
+    const bytes = new Uint8Array(4096).fill(8);
+    const { pointer } = lfsPointerFor(bytes);
+    const stored = join(root, '.git', lfsObjectPath(pointer.oid));
+
+    expect(await port.readLargeObject!(pointer)).toBeUndefined();
+    await port.storeLargeObject!(pointer, bytes);
+    expect(await port.readLargeObject!(pointer)).toStrictEqual(bytes);
+    const names = await readdir(join(stored, '..'));
+    expect(names.filter((name) => name.endsWith('.partial'))).toStrictEqual([]);
+
+    /* A repeat writes nothing; a file of the wrong size at the name is no object, and a store replaces it. */
+    const first = await stat(stored);
+    await port.storeLargeObject!(pointer, bytes);
+    const again = await stat(stored);
+    expect(again.mtimeMs).toBe(first.mtimeMs);
+    await writeFile(stored, 'torn');
+    expect(await port.readLargeObject!(pointer)).toBeUndefined();
+    await port.storeLargeObject!(pointer, bytes);
+    expect(await port.readLargeObject!(pointer)).toStrictEqual(bytes);
+
+    await expect(port.storeLargeObject!(pointer, bytes.subarray(1))).rejects.toMatchObject({ code: 'ENGINE_FAILED' });
+    const descriptor = await port.describe();
+    expect(descriptor.keepsLargeObjectFiles).toBe(true);
+  });
 });

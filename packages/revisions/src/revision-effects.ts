@@ -1189,7 +1189,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    */
   const recordedTree = async (tree: ImmutableRevisionTree): Promise<ImmutableRevisionTree> => {
     const descriptor = await describePort();
-    return descriptor.largeObjects ? cleanLargeObjects(tree).tree : tree;
+    return descriptor.largeObjects ? cleanLargeObjects(tree, descriptor.largeObjectRule).tree : tree;
   };
 
   /*
@@ -1986,8 +1986,13 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const head = await headOf(await readPlaceOf(checkoutId));
     return head === undefined ? undefined : readEntryClosure(port, revisionId(head));
   };
-  const adoptLargeObjects = async (checkoutId: string | undefined): Promise<LargeObjectAdoption> =>
-    adoption === undefined ? { adopted: [], left: [] } : adoption.adopt(await readPlaceOf(checkoutId));
+  /* A host whose checkouts keep the file beside the store (D9, desktop) never swaps it for its pointer. */
+  const adoptLargeObjects = async (checkoutId: string | undefined): Promise<LargeObjectAdoption> => {
+    const descriptor = await describePort();
+    return adoption === undefined || descriptor.keepsLargeObjectFiles === true
+      ? { adopted: [], left: [] }
+      : adoption.adopt(await readPlaceOf(checkoutId));
+  };
 
   /**
    * The project's *Sync chats* answer, read per push (D25, W17).

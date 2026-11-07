@@ -83,6 +83,7 @@ import type {
   WriteRevisionInput,
 } from '#revision-port.js';
 import { cleanLargeObjects, lfsObjectPath, readLfsPointer } from '#lfs.js';
+import type { LargeObjectRule } from '#lfs.js';
 import { digestHex } from '#object-hash.js';
 import { LfsQuotaError } from '#lfs-client.js';
 import {
@@ -808,8 +809,9 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       /* A sweep is housekeeping: one that fails never stops a store. */
     }
     const file = lfsObjectFile(oid);
-    const held = await access(file).then(
-      () => true,
+    /* A whole copy is kept; a file of another size at the object's name is not the object, and is replaced. */
+    const held = await stat(file).then(
+      (stats) => stats.isFile() && stats.size === content.byteLength,
       () => false,
     );
     if (held) {
@@ -1371,15 +1373,20 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * the trees on its path to Git, never the project.
    *
    * @param tree - The tree to store.
-   * @param largeObjects - Whether the clean step runs; `false` stores it verbatim.
+   * @param largeObjects - Whose rule the clean step runs; `undefined` stores it verbatim.
    * @returns The root tree's object id.
    */
-  const writeTreeObject = async (tree: ImmutableRevisionTree, largeObjects: boolean): Promise<string> => {
+  const writeTreeObject = async (
+    tree: ImmutableRevisionTree,
+    largeObjects: LargeObjectRule | undefined,
+  ): Promise<string> => {
     /* The pointer decision is Tau's, made by the host-neutral cut (`lfs.ts`) that the cut's `treeId` is
-     * computed from, so the id this engine records is the id the host predicted; Git's clean filter never runs. */
-    const recorded = largeObjects
-      ? cleanLargeObjects(tree)
-      : { tree, objects: new Map<string, Uint8Array<ArrayBuffer>>() };
+     * computed from, so the id this engine records is the id the host predicted; Git's clean filter never runs.
+     * An adopted repository's own attributes decide which paths it covers (D16). */
+    const recorded =
+      largeObjects === undefined
+        ? { tree, objects: new Map<string, Uint8Array<ArrayBuffer>>() }
+        : cleanLargeObjects(tree, largeObjects);
     /* Each asked of the disk, never of a memo: a pruned object is stored again. */
     await Promise.all([...recorded.objects].map(async ([oid, content]) => storeLfsObject(oid, content)));
     const root = treeIds.treeObject(recorded.tree, await format());
@@ -1840,7 +1847,8 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * `adopted` is a repository the person made: Tau writes its ignore block
    * before `git init`, so a store it created always carries one. An adopted
    * repository keeps its own ignore and attributes files, its entries keep the
-   * representation its own Git gave them, and its config is left alone
+   * representation its own Git gave them — a pointer exactly where its own
+   * attributes say `filter=lfs` (D16) — and its config is left alone
    * (revisions policy rules 5 and 13).
    */
   let opened: Promise<Readonly<{ owned: boolean; adopted: boolean }>> | undefined;
@@ -1874,31 +1882,25 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    *
    * Every path in `HEAD` must be one the registry versions and a regular file,
    * or the first revision would drop it (rule 4) or record a link as a file
-   * (rule 5). Large-file pointers are refused because an adopted entry is stored
-   * as captured, and a working copy holds their content, not the pointer: the
-   * first revision would convert every one of them (rule 13).
+   * (rule 5). Large-file pointers are carried (D16): an adopted repository's
+   * own attributes decide which paths are pointers (`largeObjectRule:
+   * 'repository'`), so an unchanged entry keeps its representation (rule 13).
    */
   const assertAdoptable = async (): Promise<void> => {
     const refuse = (reason: string): never => {
       throw new RevisionPortError('INVALID_REPOSITORY', `Tau cannot record revisions in this repository: ${reason}`);
     };
-    const usesPointers = (attributes: string): boolean => /\bfilter=lfs\b/u.test(attributes);
-    const rootAttributes = await readFile(join(repositoryPath, generatedGitattributesPath), 'utf8').catch(() => '');
-    if (usesPointers(rootAttributes)) {
-      refuse('it stores large files outside Git, and recording them would convert them.');
-    }
     const head = await run(['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']);
     if (head.exitCode !== 0) {
       return;
     }
-    const attributeBlobs: string[] = [];
     const listing = await text(['ls-tree', '-r', '-z', '--full-tree', 'HEAD']);
     for (const record of listing.split('\0')) {
       const tab = record.indexOf('\t');
       if (tab === -1) {
         continue;
       }
-      const [mode = '', , oid = ''] = record.slice(0, tab).split(' ');
+      const [mode = ''] = record.slice(0, tab).split(' ');
       const path = record.slice(tab + 1);
       if (mode !== '100644' && mode !== '100755') {
         refuse(`${path} is a link or a nested repository, which a revision cannot hold.`);
@@ -1906,13 +1908,6 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       if (!tauRevisionPolicy.policy.classify(path).versioned) {
         refuse(`${path} is a path Tau reserves for its own records.`);
       }
-      if (path === generatedGitattributesPath || path.endsWith(`/${generatedGitattributesPath}`)) {
-        attributeBlobs.push(oid);
-      }
-    }
-    const blobs = await readObjects(attributeBlobs, 'blob');
-    if ([...blobs.values()].some((bytes) => usesPointers(new TextDecoder().decode(bytes)))) {
-      refuse('it stores large files outside Git, and recording them would convert them.');
     }
   };
 
@@ -1962,8 +1957,9 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      * or somebody's own `git clone` — needs git-lfs's filters configured to
      * resolve them. Best effort: a machine without the binary still records
      * and reads revisions through this port, and `resolveGitLfs` is what tells
-     * an operator the transport half is missing. An adopted repository
-     * records no pointers, and its config is the person's. */
+     * an operator the transport half is missing. An adopted repository's
+     * config is the person's: the pointers its own attributes ask for are
+     * resolved by whatever filters they configured (D16). */
     if (!adopted) {
       await run(['lfs', 'install', '--local']);
     }
@@ -1991,7 +1987,9 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         transports: true,
         nWayMerge: false,
         checkouts: checkouts !== undefined,
-        largeObjects: !(await isAdopted()),
+        largeObjects: true,
+        ...((await isAdopted()) ? ({ largeObjectRule: 'repository' } as const) : {}),
+        keepsLargeObjectFiles: true,
       });
     },
 
@@ -2072,6 +2070,36 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      * names it, and through `fetchLargeObjects` by its oid when it does not. */
     fetchLargeObjects: async (pointers, fetchOptions) => fetchLargeObjectsByOid(pointers, fetchOptions),
 
+    /* D9 on the native leg: the repository's own LFS store, read and written in place, never through a fetch.
+     * The size is checked first, so a partial another writer left is never answered as the object. */
+    readLargeObject: async (pointer) => {
+      const file = lfsObjectFile(pointer.oid);
+      const stats = await stat(file).catch(() => undefined);
+      if (stats?.isFile() !== true || stats.size !== pointer.size) {
+        return undefined;
+      }
+      try {
+        const stored = await readFile(file);
+        return stored.byteLength === pointer.size
+          ? new Uint8Array(stored.buffer as ArrayBuffer, stored.byteOffset, stored.byteLength)
+          : undefined;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          return undefined;
+        }
+        throw error;
+      }
+    },
+    storeLargeObject: async (pointer, content) => {
+      if (content.byteLength !== pointer.size) {
+        throw new RevisionPortError(
+          'ENGINE_FAILED',
+          `Large object ${pointer.oid} is not ${String(pointer.size)} bytes.`,
+        );
+      }
+      await storeLfsObject(pointer.oid, content);
+    },
+
     readTree: async (id: RevisionId, readOptions?: ReadTreeOptions): Promise<ImmutableRevisionTree | undefined> => {
       const commit = await readCommitObject(id);
       if (commit === undefined) {
@@ -2102,7 +2130,10 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     },
 
     writeRevision: async (input: WriteRevisionInput): Promise<RevisionReceipt> => {
-      const treeId = await writeTreeObject(input.tree, input.largeObjects !== false && !(await isAdopted()));
+      const treeId = await writeTreeObject(
+        input.tree,
+        input.largeObjects === false ? undefined : (await isAdopted()) ? 'repository' : 'generated',
+      );
       const trailer: RevisionTrailer = {
         parents: [...input.parents],
         provenance: input.provenance,

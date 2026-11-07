@@ -128,6 +128,20 @@ describe('adopting a large file (D9)', () => {
     await actors.settled();
   }, 30_000);
 
+  it('leaves the file whole on a host whose checkouts keep large files (D9, desktop)', async () => {
+    const raw = await authored();
+    const port = createIsomorphicGitRevisionPort({ filesystem: raw });
+    const describe = port.describe.bind(port);
+    const keeping = Object.freeze({
+      ...port,
+      describe: async () => ({ ...(await describe()), keepsLargeObjectFiles: true }),
+    });
+    const actors = createRevisionActors({ port: keeping, projectId: 'project-1', filesystem: async () => raw });
+    expect(await actors.adoptLargeObjects(undefined)).toStrictEqual({ adopted: [], left: [] });
+    expect(await whole(raw)).toBe('file');
+    await actors.settled();
+  }, 30_000);
+
   it('adopts nothing the attributes do not track, and never a pointer', async () => {
     const raw = await authored();
     await raw.writeFile('notes.txt', 'x'.repeat(2 * 1024 * 1024));

@@ -26,9 +26,23 @@ import { digestHex } from '#object-hash.js';
 import {
   generatedGitattributesContent,
   generatedGitattributesPath,
+  isAttributesPath,
   isTrackedLargeObjectPath,
   largeObjectThresholdBytes,
+  repositoryLargeObjectMatcher,
 } from '#workspace-config.js';
+
+/**
+ * Whose rule decides which paths are large objects (D16).
+ *
+ * - `generated`: Tau's own — the families table, a line per path a cut tracks
+ *   by size, all in Tau's generated attributes block, which the cut writes.
+ * - `repository`: a repository Tau adopted — the person's own `.gitattributes`
+ *   files, honoured as `git add` would and never written.
+ *
+ * @public
+ */
+export type LargeObjectRule = 'generated' | 'repository';
 
 /** One large object, as a tree entry names it. @public */
 export type LfsPointer = Readonly<{
@@ -132,21 +146,32 @@ export const lfsObjectPath = (oid: string): string => `lfs/objects/${oid.slice(0
  * the tree's own bytes, shared rather than copied — a store writes them out
  * and must never write *into* them.
  *
+ * A repository Tau adopted runs its own rule instead (`rule: 'repository'`,
+ * D16): its attributes files alone decide, and nothing is written to them.
+ *
  * @param tree - The captured tree, with every file's real bytes.
+ * @param rule - Whose attributes decide; Tau's generated block by default.
  * @returns The tree to record, and the large objects by their oid (read-only).
  * @public
  */
 export const cleanLargeObjects = (
   tree: ImmutableRevisionTree,
+  rule: LargeObjectRule = 'generated',
 ): Readonly<{ tree: ImmutableRevisionTree; objects: ReadonlyMap<string, Uint8Array<ArrayBuffer>> }> => {
   /* One cut is cleaned twice: once by the I5 gate, to know the tree id it is
    * about to compare, and once by the port writing that exact tree. Both SHA-256
    * every large object in it, which on a project with one 5 MiB part file was
    * the whole cost of a save (L4). Keyed on the tree, which is immutable, so the
    * second answer is the first one rather than a recomputation of it. */
-  const cached = cleanedTrees.get(tree);
+  const cache = rule === 'generated' ? cleanedTrees : cleanedRepositoryTrees;
+  const cached = cache.get(tree);
   if (cached !== undefined) {
     return cached;
+  }
+  if (rule === 'repository') {
+    const recorded = cleanByRepositoryAttributes(tree);
+    cache.set(tree, recorded);
+    return recorded;
   }
   /* The tree's own records, uncopied: every file this leaves alone is shared
    * with the cleaned tree, so its blob id stays memoised across cuts (E3). */
@@ -189,11 +214,45 @@ export const cleanLargeObjects = (
   return recorded;
 };
 
-/** Cleaned cuts, held only while their caller still holds the tree. */
+/** Cleaned cuts, held only while their caller still holds the tree; one map per rule. */
 const cleanedTrees = new WeakMap<
   ImmutableRevisionTree,
   Readonly<{ tree: ImmutableRevisionTree; objects: ReadonlyMap<string, Uint8Array<ArrayBuffer>> }>
 >();
+const cleanedRepositoryTrees = new WeakMap<
+  ImmutableRevisionTree,
+  Readonly<{ tree: ImmutableRevisionTree; objects: ReadonlyMap<string, Uint8Array<ArrayBuffer>> }>
+>();
+
+/**
+ * The `repository` rule's clean (D16): exactly the paths the tree's own
+ * attributes files put on `filter=lfs` become pointers, and nothing is added
+ * to those files. A file that already is a pointer, and an attributes file
+ * itself, are stored as they are.
+ *
+ * @param tree - The captured tree.
+ * @returns The tree to record, and the large objects by their oid (read-only).
+ */
+const cleanByRepositoryAttributes = (
+  tree: ImmutableRevisionTree,
+): Readonly<{ tree: ImmutableRevisionTree; objects: ReadonlyMap<string, Uint8Array<ArrayBuffer>> }> => {
+  const files = revisionTreeFiles(tree);
+  const attributes = new Map(
+    [...files].flatMap(([path, { content }]) => (isAttributesPath(path) ? [[path, decoder.decode(content)]] : [])),
+  );
+  const isLargeObject = repositoryLargeObjectMatcher(attributes);
+  const objects = new Map<string, Uint8Array<ArrayBuffer>>();
+  const cleaned = new Map(files);
+  for (const [path, file] of files) {
+    if (isAttributesPath(path) || !isLargeObject(path) || readLfsPointer(file.content) !== undefined) {
+      continue;
+    }
+    const { oid, bytes } = pointerOf(file.content);
+    objects.set(oid, file.content);
+    cleaned.set(path, Object.freeze({ content: bytes, mode: file.mode }));
+  }
+  return Object.freeze({ tree: objects.size === 0 ? tree : adoptRevisionTree(cleaned), objects });
+};
 
 /**
  * The pointer for one large file's bytes, computed once per shared buffer (E2).

@@ -372,3 +372,154 @@ export const generatedGitattributesContent = (
 export const isTrackedLargeObjectPath = (projectRelativePath: string, attributes: string | undefined): boolean =>
   isLargeObjectPath(projectRelativePath) ||
   generatedTrackedPatterns(attributes).has(attributePattern(projectRelativePath));
+
+/**
+ * One `.gitattributes` pattern as a matcher over a path relative to the
+ * file's directory, in git's wildmatch spelling (`gitignore(5)`): `*` and `?`
+ * stop at `/`, `[...]` is a class (`!` or `^` negates), `\` escapes the next
+ * character, and `**` between slashes spans any number of directories. A
+ * pattern with no slash but a trailing one names a file at any depth by its
+ * own name.
+ *
+ * @param pattern - The pattern, unquoted, with no trailing `/`.
+ * @returns A matcher over the path relative to the attributes file's directory.
+ */
+const attributeMatcher = (pattern: string): ((relative: string) => boolean) => {
+  const anchored = pattern.includes('/');
+  const body = pattern.startsWith('/') ? pattern.slice(1) : pattern;
+  let source = '';
+  for (let index = 0; index < body.length; index += 1) {
+    const character = body[index]!;
+    if (character === '*' && body[index + 1] === '*') {
+      const atStart = index === 0 || body[index - 1] === '/';
+      const atEnd = index + 2 === body.length || body[index + 2] === '/';
+      if (atStart && atEnd) {
+        // A leading or inner double star spans zero or more directories; a trailing one, everything inside.
+        source += index + 2 === body.length ? '.*' : '(?:.*/)?';
+        index += index + 2 === body.length ? 1 : 2;
+        continue;
+      }
+    }
+    if (character === '*') {
+      source += '[^/]*';
+    } else if (character === '?') {
+      source += '[^/]';
+    } else if (character === '\\' && index + 1 < body.length) {
+      index += 1;
+      source += body[index]!.replaceAll(/[$()*+.?[\\\]^{|}]/gu, String.raw`\$&`);
+    } else if (character === '[' && body.includes(']', index + 2)) {
+      const close = body.indexOf(']', index + 2);
+      const inner = body.slice(index + 1, close);
+      const negated = inner.startsWith('!') || inner.startsWith('^');
+      const members = (negated ? inner.slice(1) : inner).replaceAll(/[\\\]^]/gu, String.raw`\$&`);
+      source += negated ? `[^/${members}]` : `[${members}]`;
+      index = close;
+    } else {
+      source += character.replaceAll(/[$()*+.?[\\\]^{|}]/gu, String.raw`\$&`);
+    }
+  }
+  const expression = new RegExp(`^${source}$`, 'u');
+  return anchored
+    ? (relative) => expression.test(relative)
+    : (relative) => expression.test(relative.slice(relative.lastIndexOf('/') + 1));
+};
+
+/** Whether one attributes line sets, unsets or leaves `filter`, and what to. */
+type FilterRule = Readonly<{ matches: (relative: string) => boolean; lfs: boolean }>;
+
+/**
+ * The `filter` rules of one attributes file, in file order.
+ *
+ * Only lines that mention `filter` count: `filter=lfs` sets it, `filter=<other>`,
+ * `-filter` and `!filter` leave the path off LFS. A negative pattern is
+ * refused by git and ignored here too, as are macro definitions (`[attr]`)
+ * and a directory pattern (`dir/`), which matches no file.
+ *
+ * ponytail: a C-quoted pattern (`"a b" filter=lfs`) is read with its quotes
+ * dropped and `\"` unescaped; octal escapes are left as written.
+ *
+ * @param content - The attributes file.
+ * @returns Its filter rules.
+ */
+const filterRules = (content: string): readonly FilterRule[] =>
+  content.split(/\r?\n/u).flatMap((raw): FilterRule[] => {
+    const line = raw.trim();
+    if (line === '' || line.startsWith('#') || line.startsWith('[attr]') || line.startsWith('!')) {
+      return [];
+    }
+    const quoted = line.startsWith('"') ? /^"((?:[^"\\]|\\.)*)"/u.exec(line) : undefined;
+    const pattern = quoted?.[1]?.replaceAll(/\\(.)/gu, '$1') ?? line.split(/\s/u, 1)[0]!;
+    const rest = line.slice(quoted ? quoted[0].length : pattern.length);
+    let lfs: boolean | undefined;
+    for (const token of rest.split(/\s+/u)) {
+      if (token === 'filter=lfs') {
+        lfs = true;
+      } else if (token.startsWith('filter=') || token === '-filter' || token === '!filter') {
+        lfs = false;
+      }
+    }
+    if (lfs === undefined || pattern === '' || pattern.endsWith('/')) {
+      return [];
+    }
+    return [{ matches: attributeMatcher(pattern), lfs }];
+  });
+
+/** Attributes files by their own project-relative path, as a tree holds them. @internal */
+export type RepositoryAttributes = ReadonlyMap<string, string>;
+
+/**
+ * Which paths a repository's own attributes files put on git LFS (D16).
+ *
+ * The rule of a repository Tau adopted: its `.gitattributes` files are the
+ * person's, so a path is a large object exactly when *they* say `filter=lfs`
+ * for it, as `git add` would decide — later lines override earlier ones, and a
+ * deeper file overrides a shallower one. Tau's families table and size
+ * threshold never apply, so nothing is converted that their Git would have
+ * stored as a blob, and no line is ever added to their files.
+ *
+ * ponytail: `$GIT_DIR/info/attributes` and `core.attributesFile` are not read:
+ * a cut has to predict the tree from the tree alone (I4), so only the
+ * versioned files decide. Case folding (`core.ignoreCase`) is not applied.
+ *
+ * @param attributes - Every attributes file the tree holds, by its path.
+ * @returns Whether one project-relative path is a large object.
+ * @internal
+ */
+export const repositoryLargeObjectMatcher = (attributes: RepositoryAttributes): ((path: string) => boolean) => {
+  const files = [...attributes]
+    .map(([file, content]) => ({
+      directory: file.slice(0, file.length - generatedGitattributesPath.length),
+      rules: filterRules(content),
+    }))
+    .filter(({ rules }) => rules.length > 0)
+    /* Shallowest first, so a deeper file's verdict is the one that stands. */
+    .toSorted((left, right) => left.directory.split('/').length - right.directory.split('/').length);
+  if (files.length === 0) {
+    return () => false;
+  }
+  return (path) => {
+    let lfs = false;
+    for (const { directory, rules } of files) {
+      if (!path.startsWith(directory)) {
+        continue;
+      }
+      const relative = path.slice(directory.length);
+      for (const rule of rules) {
+        if (rule.matches(relative)) {
+          lfs = rule.lfs;
+        }
+      }
+    }
+    return lfs;
+  };
+};
+
+/**
+ * Whether a project-relative path is an attributes file, at the root or nested.
+ *
+ * @param path - Project-relative path.
+ * @returns Whether git reads attributes from it.
+ * @internal
+ */
+export const isAttributesPath = (path: string): boolean =>
+  path === generatedGitattributesPath || path.endsWith(`/${generatedGitattributesPath}`);

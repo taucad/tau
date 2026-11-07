@@ -4,6 +4,7 @@ import { Link, useLoaderData, useLocation, useNavigate } from 'react-router';
 import type { MetaDescriptor } from 'react-router';
 import { useEffect, useId, useRef, useState, useCallback, useMemo } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
+import { createCallbackLogic } from 'xstate';
 import { ArrowRight, X } from 'lucide-react';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { MachineActors } from '#lib/xstate.lib.js';
@@ -11,8 +12,9 @@ import type { MachineActors } from '#lib/xstate.lib.js';
 import type { Route } from './+types/route.js';
 import type { Handle } from '#types/matches.types.js';
 import { ImportGitHubError, importGitHubMachine } from '#machines/import-github.machine.js';
+import type { ImportArchiveEvents, ImportArchiveInput } from '#machines/import-github.machine.js';
 import { importDiskMachine } from '#machines/import-disk.machine.js';
-import { createFromStagedImport, openImportSession } from '#machines/import-staging.js';
+import { ImportChannelError, createFromStagedImport, openImportSession } from '#machines/import-staging.js';
 import type { ImportSession } from '#machines/import-staging.js';
 import { useOptionalFileManager, waitForFileManagerServices } from '#hooks/use-file-manager.js';
 import { PageNotice } from '#components/layout/page-notice.js';
@@ -45,7 +47,7 @@ import { ImportMainFileView } from '#routes/import.$/import-main-file-view.js';
 import { inspect } from '#machines/inspector.js';
 import { CopyButton } from '@taucad/ui/components/copy-button';
 import { OpenInDesktop } from '#components/desktop/open-in-desktop.js';
-import { createImportedProjectFiles } from '#utils/file-reader.utils.js';
+import { isExcludedImportPath } from '#utils/file-reader.utils.js';
 import { projectUrl } from '#utils/project-url.utils.js';
 import { useProjectSlugs } from '#hooks/use-project-slug-route.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
@@ -128,6 +130,15 @@ const workbenchLayoutPath = workbenchPaths.layout;
 
 /** Bytes the review's preview reads of a disk import, decoded in the worker on request. */
 const previewByteBudget = 32 * 1024 * 1024;
+
+/* A refusal the person can only answer with a smaller repository: retrying the same branch cannot succeed. */
+const tooLargeReasons: ReadonlySet<string> = new Set([
+  'archiveTooLarge',
+  'expandedTooLarge',
+  'fileTooLarge',
+  'ratioTooHigh',
+  'tooManyEntries',
+]);
 
 const failureOf = (error: Error | undefined): ImportGitHubError['failure'] | undefined =>
   error instanceof ImportGitHubError ? error.failure : undefined;
@@ -265,24 +276,88 @@ export default function ImportRoute(): React.JSX.Element {
   const gitHubActorRef = useActorRef(
     importGitHubMachine.provide({
       actors: {
-        createProjectActor: fromSafeAsync(async ({ input }) => {
-          const projectFiles = createImportedProjectFiles(input.files, input.mainFile);
-
-          try {
-            const project = await projectManager.createProject({
-              project: {
-                name: `${input.owner}/${input.repo}`,
-                description: `Imported from GitHub: https://github.com/${input.owner}/${input.repo}${
-                  input.path ? `/tree/${input.ref}/${input.path}` : ''
-                }`,
-                tags: [],
-                assets: {
-                  main: {
-                    entryPath: input.mainFile,
+        /* The file-manager worker downloads the archive and plans it: the page holds paths and sizes only (D12). */
+        importWorkerActor: createCallbackLogic<ImportArchiveEvents, ImportArchiveInput>(({ sendBack, input }) => {
+          const closed = new AbortController();
+          // async-iife: bootstrap -- the plan's outcome is sent back while the actor lives.
+          void (async (): Promise<void> => {
+            try {
+              const session = await importSession();
+              const listing = await session.plan(
+                {
+                  kind: 'archive',
+                  url: input.downloadUrl,
+                  name: input.name,
+                  ...(input.headers === undefined ? {} : { headers: input.headers }),
+                },
+                {
+                  root: input.root,
+                  onDownload: ({ loaded, total }) => {
+                    if (!closed.signal.aborted) {
+                      sendBack({ type: 'updateDownloadProgress', loaded, total });
+                    }
                   },
                 },
-              },
-              files: projectFiles,
+              );
+              if (!closed.signal.aborted) {
+                sendBack({
+                  type: 'workerExtractComplete',
+                  filePaths: listing.files.map(({ path: listed }) => listed),
+                  files: [...listing.files],
+                });
+              }
+            } catch (error) {
+              if (!closed.signal.aborted) {
+                const reason = error instanceof ImportChannelError ? error.reason : undefined;
+                sendBack({
+                  type: 'workerError',
+                  message: error instanceof Error ? error.message : String(error),
+                  phase: 'download',
+                  ...(reason !== undefined && tooLargeReasons.has(reason) ? { reason: 'tooLarge' } : {}),
+                });
+              }
+            }
+          })();
+          return () => {
+            closed.abort();
+          };
+        }),
+        createProjectActor: fromSafeAsync(async ({ input }) => {
+          if (isExcludedImportPath(input.mainFile)) {
+            throw new Error(
+              "That file belongs to a repository or a cache, so it can't be the main file. Choose a design file.",
+            );
+          }
+          if (!input.files.has(input.mainFile)) {
+            throw new Error(`The selected main file "${input.mainFile}" is not present in the imported files.`);
+          }
+          const name = `${input.owner}/${input.repo}`;
+          try {
+            /* The planned archive stages on the creation root and lands in the project at commit (D12). */
+            const target = await projectManager.prepareImportStaging(name);
+            const project = await createFromStagedImport({
+              session: await importSession(),
+              target,
+              operationId: generatePrefixedId(idPrefix.request),
+              owns: projectManager.ownsImportStaging,
+              create: async (staging) =>
+                projectManager.createProject({
+                  project: {
+                    name,
+                    description: `Imported from GitHub: https://github.com/${input.owner}/${input.repo}${
+                      input.path ? `/tree/${input.ref}/${input.path}` : ''
+                    }`,
+                    tags: [],
+                    assets: {
+                      main: {
+                        entryPath: input.mainFile,
+                      },
+                    },
+                  },
+                  files: {},
+                  location: target.location,
+                  staging: { ...staging, carriesWorkbenchLayout: input.files.has(workbenchLayoutPath) },
+                }),
             });
 
             return { type: 'projectCreated', projectId: project.id };
@@ -380,13 +455,16 @@ export default function ImportRoute(): React.JSX.Element {
   const gitHubProjectId = useSelector(gitHubActorRef, (snapshot) => snapshot.context.projectId);
   const gitHubFiles = useSelector(gitHubActorRef, (snapshot) => snapshot.context.files);
   const gitHubListing = useMemo(
-    () => [...gitHubFiles].map(([listed, file]) => ({ path: listed, size: file.content.byteLength })),
+    () => [...gitHubFiles].map(([listed, file]) => ({ path: listed, size: file.size })),
     [gitHubFiles],
   );
-  /* A GitHub archive is still extracted in memory by its worker (W7 slice 2 stages it), so its preview is in hand. */
+  /* The archive is planned in the file-manager worker, which reads a preview's few files from it on request. */
   const loadGitHubPreview = useCallback(
-    async () => Object.fromEntries([...gitHubFiles].map(([listed, file]) => [listed, { content: file.content }])),
-    [gitHubFiles],
+    async (paths: readonly string[]) => {
+      const session = await importSession();
+      return session.preview(paths, previewByteBudget);
+    },
+    [importSession],
   );
   const gitHubSelectedMainFile = useSelector(gitHubActorRef, (snapshot) => snapshot.context.selectedMainFile);
   const requestedMainFile = useSelector(gitHubActorRef, (snapshot) => snapshot.context.requestedMainFile);

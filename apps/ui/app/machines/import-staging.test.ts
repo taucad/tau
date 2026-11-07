@@ -16,6 +16,7 @@ import type { BatchEntry } from '@taucad/filesystem';
 import {
   ImportChannelError,
   createFromStagedImport,
+  downloadRefusal,
   holdLease,
   importConnectMessageType,
   openImportSession,
@@ -293,6 +294,108 @@ describe('the import channel', () => {
     await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
 
     expect(touch).toHaveBeenCalledTimes(2);
+  });
+
+  describe('a repository archive', () => {
+    const archiveUrl = 'https://api.tau.test/v1/repositories/archive?owner=o&repo=r';
+    const answering = (response: Response) => {
+      const fetched = vi.fn(async (_url: URL, _init?: RequestInit) => response);
+      vi.stubGlobal('fetch', fetched);
+      return fetched;
+    };
+
+    it('downloads it in the worker with no credential, and plans only the folder asked for', async () => {
+      const zip = await zipOf({
+        'r-abc/README.md': 'r',
+        'r-abc/public/kcl-samples/gear/main.kcl': 'gear',
+        'r-abc/rust/ops.snap': 's',
+      });
+      const fetched = answering(new Response(zip, { status: 200, headers: { 'content-length': String(zip.size) } }));
+      const downloads: number[] = [];
+      const session = connect(new MemoryProvider());
+
+      const listing = await session.plan(
+        { kind: 'archive', url: archiveUrl, name: 'o/r', headers: { accept: 'application/zip' } },
+        {
+          root: 'public/kcl-samples',
+          onDownload: ({ loaded }) => {
+            downloads.push(loaded);
+          },
+        },
+      );
+
+      expect(listing.files).toStrictEqual([{ path: 'gear/main.kcl', size: 4 }]);
+      expect(listing.name).toBe('o/r');
+      expect(downloads.at(-1)).toBe(zip.size);
+      expect(fetched.mock.calls[0]![1]).toMatchObject({ credentials: 'omit', headers: { accept: 'application/zip' } });
+
+      /* What it planned stages like any other source. */
+      const staged = await session.stage('req_archive', scope, { target: 'gear' });
+      expect(staged.files).toBe(1);
+    });
+
+    it("refuses the gateway's 413 and a declared size past the limit as too large", async () => {
+      answering(new Response('The repository archive exceeds the import size limit.', { status: 413 }));
+      const session = connect(new MemoryProvider());
+
+      const refused = await session
+        .plan({ kind: 'archive', url: archiveUrl, name: 'o/r' })
+        .catch((error: unknown) => error);
+
+      expect((refused as ImportChannelError).reason).toBe('archiveTooLarge');
+
+      answering(new Response('zip', { status: 200, headers: { 'content-length': String(1024 * 1024 * 1024 + 1) } }));
+      const declared = await session
+        .plan({ kind: 'archive', url: archiveUrl, name: 'o/r' })
+        .catch((error: unknown) => error);
+
+      expect((declared as ImportChannelError).reason).toBe('archiveTooLarge');
+    });
+
+    it("says why another refusal failed, in the server's words, with no reason", async () => {
+      answering(new Response('The repository provider could not be reached.', { status: 502 }));
+      const session = connect(new MemoryProvider());
+
+      const refused = await session
+        .plan({ kind: 'archive', url: archiveUrl, name: 'o/r' })
+        .catch((error: unknown) => error);
+
+      expect(refused).toBeInstanceOf(ImportChannelError);
+      expect((refused as ImportChannelError).message).toBe('The repository provider could not be reached.');
+      expect((refused as ImportChannelError).reason).toBeUndefined();
+    });
+
+    it('downloads over HTTP only', async () => {
+      const fetched = answering(new Response('x'));
+      const session = connect(new MemoryProvider());
+
+      await expect(session.plan({ kind: 'archive', url: 'file:///etc/passwd', name: 'x' })).rejects.toThrow(
+        'An archive downloads over HTTP only',
+      );
+      expect(fetched).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [
+        'an API refusal',
+        new Response(JSON.stringify({ error: 'Too many GitHub imports.', code: 'REPOSITORY_RATE_LIMITED' }), {
+          status: 429,
+        }),
+        'Too many GitHub imports.',
+      ],
+      [
+        "the archive gateway's sentence",
+        new Response('The repository archive could not be fetched.', { status: 404 }),
+        'The repository archive could not be fetched.',
+      ],
+      [
+        'an empty body',
+        new Response('', { status: 502, statusText: 'Bad Gateway' }),
+        'Download failed: 502 Bad Gateway',
+      ],
+    ])('says why a refused download failed for %s', async (_case, response, sentence) => {
+      await expect(downloadRefusal(response)).resolves.toBe(sentence);
+    });
   });
 
   describe('creating from a staged import', () => {

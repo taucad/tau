@@ -106,7 +106,7 @@ function createTestActor(options?: {
             sendBack({
               type: 'workerExtractComplete',
               filePaths: ['main.ts'],
-              files: [{ path: 'main.ts', content: new Uint8Array([1, 2, 3]) }],
+              files: [{ path: 'main.ts', size: 3 }],
             });
           });
         }

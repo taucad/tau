@@ -29,9 +29,11 @@ import {
   fileListImportSource,
   handleListImportSource,
   importStagingLeaseName,
+  ImportRefusedError,
   isImportRefusal,
   planImport,
   readImportEntry,
+  spoolImportArchive,
   stageImport,
   sweepStagedImports,
   touchStagedImport,
@@ -59,7 +61,16 @@ export type ImportSourceDescriptor =
   | Readonly<{ kind: 'zip'; file: File }>
   | Readonly<{ kind: 'files'; files: ReadonlyArray<Readonly<{ file: File; path: string }>>; name?: string }>
   | Readonly<{ kind: 'directory'; handle: FileSystemDirectoryHandle }>
-  | Readonly<{ kind: 'handles'; handles: readonly FileSystemHandle[] }>;
+  | Readonly<{ kind: 'handles'; handles: readonly FileSystemHandle[] }>
+  /**
+   * A repository archive the worker downloads itself, so the page never holds
+   * it: the Tau API's archive gateway, which GitHub's own archive hosts need
+   * because they answer no cross-origin read. No credential travels with it.
+   */
+  | Readonly<{ kind: 'archive'; url: string; name: string; headers?: Readonly<Record<string, string>> }>;
+
+/** How much of an archive download has arrived. @public */
+export type ImportDownloadProgress = Readonly<{ loaded: number; total: number }>;
 
 /**
  * What the review screen shows: a name, every kept path with its size, and
@@ -90,8 +101,15 @@ export type ImportStaged = Readonly<{ files: number; bytes: number; inPlace: boo
  * @public
  */
 export type ImportSession = Readonly<{
-  /** Plan a source. Replaces any earlier plan of this session. */
-  plan: (source: ImportSourceDescriptor) => Promise<ImportListing>;
+  /**
+   * Plan a source. Replaces any earlier plan of this session. `root` imports
+   * only a folder inside it, as the project root; an archive reports its
+   * download as it arrives.
+   */
+  plan: (
+    source: ImportSourceDescriptor,
+    options?: Readonly<{ root?: string; onDownload?: (progress: ImportDownloadProgress) => void }>,
+  ) => Promise<ImportListing>;
   /**
    * Stage the planned source on a durable storage root, resuming a staging of
    * the same source. `target` is the project directory the create will
@@ -123,7 +141,7 @@ export type ImportSession = Readonly<{
 }>;
 
 type Request =
-  | Readonly<{ id: number; type: 'plan'; source: ImportSourceDescriptor }>
+  | Readonly<{ id: number; type: 'plan'; source: ImportSourceDescriptor; root?: string }>
   | Readonly<{ id: number; type: 'stage'; operationId: string; scope: StorageRootConfig; target: string }>
   | Readonly<{ id: number; type: 'handOff'; operationId: string }>
   | Readonly<{ id: number; type: 'release'; operationId: string }>
@@ -135,6 +153,7 @@ type Request =
 type Answer = Readonly<{
   id: number;
   progress?: ImportStagingProgress;
+  downloaded?: ImportDownloadProgress;
   result?: unknown;
   error?: Readonly<{ message: string; reason?: ImportRefusalReason }>;
 }>;
@@ -162,8 +181,88 @@ export class ImportChannelError extends Error {
   }
 }
 
-const sourceOf = (descriptor: ImportSourceDescriptor): ImportSource => {
+/**
+ * The sentence a refused archive download carries, so the import says why (E14).
+ * The archive gateway answers in plain text; API refusals answer `{ error, code }`.
+ *
+ * @param response - The refused archive response.
+ * @returns The server's sentence, or the status when it gave none.
+ * @public
+ */
+export const downloadRefusal = async (response: Response): Promise<string> => {
+  const text = await response.text();
+  const body = text.trim();
+  try {
+    const { error } = JSON.parse(body) as { error?: unknown };
+    if (typeof error === 'string' && error !== '') {
+      return error;
+    }
+  } catch {
+    /* A plain-text sentence from the archive gateway. */
+  }
+  return body === '' ? `Download failed: ${String(response.status)} ${response.statusText}` : body;
+};
+
+/*
+ * Download an archive into a Blob in the worker, under the import's archive
+ * limit as it arrives: never on the page, never whole in the heap (the
+ * browser keeps a large Blob out of it), and sent with no cookie or token.
+ */
+const downloadArchive = async (
+  descriptor: Extract<ImportSourceDescriptor, { kind: 'archive' }>,
+  control: Readonly<{ signal: AbortSignal; onDownload: (progress: ImportDownloadProgress) => void }>,
+): Promise<Blob> => {
+  const url = new URL(descriptor.url);
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    throw new TypeError(`An archive downloads over HTTP only: ${url.protocol}`);
+  }
+  const response = await fetch(url, {
+    signal: control.signal,
+    credentials: 'omit',
+    redirect: 'follow',
+    ...(descriptor.headers === undefined ? {} : { headers: { ...descriptor.headers } }),
+  });
+  if (response.status === 413) {
+    await response.body?.cancel();
+    throw new ImportRefusedError('archiveTooLarge', {
+      message: 'The repository download is larger than the gateway admits.',
+    });
+  }
+  if (!response.ok) {
+    throw new Error(await downloadRefusal(response));
+  }
+  if (response.body === null) {
+    throw new Error('The archive download has no body.');
+  }
+  /* An encoded body's length is not the archive's, so only an unencoded one is held to. */
+  const declared = Number(response.headers.get('content-length') ?? Number.NaN);
+  const declaredSize =
+    Number.isSafeInteger(declared) && declared > 0 && !response.headers.has('content-encoding') ? declared : undefined;
+  const total = declaredSize ?? 0;
+  let last = 0;
+  const archive = await spoolImportArchive(response.body, {
+    ...(declaredSize === undefined ? {} : { declaredSize }),
+    signal: control.signal,
+    onProgress: (loaded) => {
+      const now = Date.now();
+      if (now - last >= 100) {
+        last = now;
+        control.onDownload({ loaded, total });
+      }
+    },
+  });
+  control.onDownload({ loaded: archive.size, total: archive.size });
+  return archive;
+};
+
+const sourceOf = async (
+  descriptor: ImportSourceDescriptor,
+  control: Readonly<{ signal: AbortSignal; onDownload: (progress: ImportDownloadProgress) => void }>,
+): Promise<ImportSource> => {
   switch (descriptor.kind) {
+    case 'archive': {
+      return zipImportSource(await downloadArchive(descriptor, control), { name: descriptor.name, kind: 'archive' });
+    }
     case 'zip': {
       return zipImportSource(descriptor.file);
     }
@@ -296,10 +395,23 @@ export const serveImportChannel = (
     await work;
     running.delete(work);
   };
+  const planOf = async (request: Extract<Request, { type: 'plan' }>): Promise<ImportPlan> => {
+    const source = await sourceOf(request.source, {
+      signal: abort.signal,
+      onDownload: (downloaded) => {
+        answer({ id: request.id, downloaded });
+      },
+    });
+    return planImport(source, {
+      policy: dependencies.policy,
+      signal: abort.signal,
+      ...(request.root === undefined || request.root === '' ? {} : { root: request.root }),
+    });
+  };
   const run = async (request: Request): Promise<void> => {
     switch (request.type) {
       case 'plan': {
-        plan = await planImport(sourceOf(request.source), { policy: dependencies.policy, signal: abort.signal });
+        plan = await planOf(request);
         answer({
           id: request.id,
           result: {
@@ -510,18 +622,23 @@ export const openImportSession = (worker: Pick<Worker, 'postMessage'>): ImportSe
   worker.postMessage({ type: importConnectMessageType, port: channel.port1 }, [channel.port1]);
   const { port2: port } = channel;
   let next = 0;
-  const waiting = new Map<
-    number,
-    Readonly<{ call: PromiseWithResolvers<unknown>; onProgress?: (progress: ImportStagingProgress) => void }>
-  >();
+  type Listeners = Readonly<{
+    onProgress?: (progress: ImportStagingProgress) => void;
+    onDownload?: (progress: ImportDownloadProgress) => void;
+  }>;
+  const waiting = new Map<number, Readonly<{ call: PromiseWithResolvers<unknown>; listeners: Listeners }>>();
   port.addEventListener('message', (event: MessageEvent<Answer>) => {
-    const { id, progress, result, error } = event.data;
+    const { id, progress, downloaded, result, error } = event.data;
     const held = waiting.get(id);
     if (held === undefined) {
       return;
     }
     if (progress !== undefined) {
-      held.onProgress?.(progress);
+      held.listeners.onProgress?.(progress);
+      return;
+    }
+    if (downloaded !== undefined) {
+      held.listeners.onDownload?.(downloaded);
       return;
     }
     waiting.delete(id);
@@ -535,7 +652,7 @@ export const openImportSession = (worker: Pick<Worker, 'postMessage'>): ImportSe
   let closed = false;
   const ask = async <Result>(
     request: Request extends infer Each ? (Each extends { id: number } ? Omit<Each, 'id'> : never) : never,
-    onProgress?: (progress: ImportStagingProgress) => void,
+    listeners: Listeners = {},
   ): Promise<Result> => {
     /* A closed port never answers: what is asked after close is refused at once (the close removed the stagings). */
     if (closed) {
@@ -544,14 +661,18 @@ export const openImportSession = (worker: Pick<Worker, 'postMessage'>): ImportSe
     const id = next;
     next += 1;
     const call = Promise.withResolvers<unknown>();
-    waiting.set(id, { call, ...(onProgress === undefined ? {} : { onProgress }) });
+    waiting.set(id, { call, listeners });
     port.postMessage({ ...request, id });
     return call.promise as Promise<Result>;
   };
   return Object.freeze({
-    plan: async (source) => ask<ImportListing>({ type: 'plan', source }),
+    plan: async (source, options = {}) =>
+      ask<ImportListing>(
+        { type: 'plan', source, ...(options.root === undefined ? {} : { root: options.root }) },
+        options.onDownload === undefined ? {} : { onDownload: options.onDownload },
+      ),
     stage: async (operationId, scope, { target, onProgress }) =>
-      ask<ImportStaged>({ type: 'stage', operationId, scope, target }, onProgress),
+      ask<ImportStaged>({ type: 'stage', operationId, scope, target }, onProgress === undefined ? {} : { onProgress }),
     handOff: async (operationId) => ask<undefined>({ type: 'handOff', operationId }),
     release: async (operationId) => ask<undefined>({ type: 'release', operationId }),
     preview: async (paths, maximumBytes) =>

@@ -1110,37 +1110,59 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     const { env, signal } = transfer;
     const verdicts: Array<'done' | 'lacks' | Error> = [];
     const queue = [...pointers];
+    const fetchOne = async ({ oid, size }: Readonly<{ oid: string; size: number }>): Promise<void> => {
+      const result = await run(['-c', `remote.lfsdefault=${remote.name}`, 'lfs', 'smudge'], {
+        input: [
+          textEncoder.encode(`version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize ${String(size)}\n`),
+        ],
+        deadline: transferDeadline,
+        env,
+        ...(signal === undefined ? {} : { signal }),
+        remote: remote.name,
+      });
+      if (result.exitCode !== 0) {
+        verdicts.push(transferVerdict(result, new Set([oid]), remote));
+        return;
+      }
+      /* Content-addressed: bytes that are not the object are no answer at all. */
+      if (result.stdout.byteLength !== size || digestHex('sha256', result.stdout) !== oid) {
+        verdicts.push(
+          new RevisionPortError('ENGINE_FAILED', 'A large object arrived with bytes that are not its own.'),
+        );
+        return;
+      }
+      /* Stored before it is delivered, so a crash keeps it. */
+      await storeLfsObject(oid, result.stdout);
+      transfer.arrived?.(oid, result.stdout);
+      verdicts.push('done');
+    };
+    /*
+     * A worker never rejects while the others still drain: a store or a
+     * delivery that throws (a full disk) ends this remote's round, its queue
+     * emptied, so the remote's verdict is settled only once every transfer it
+     * started has ended, and none outlives it to deliver late. Aborted, that
+     * abort is what the round answers, once the rest have stopped too.
+     */
+    let abort: { error: unknown } | undefined;
     const worker = async (): Promise<void> => {
       for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
-        const { oid, size } = next;
-        // oxlint-disable-next-line no-await-in-loop -- one object after another in this worker.
-        const result = await run(['-c', `remote.lfsdefault=${remote.name}`, 'lfs', 'smudge'], {
-          input: [
-            textEncoder.encode(`version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize ${String(size)}\n`),
-          ],
-          deadline: transferDeadline,
-          env,
-          ...(signal === undefined ? {} : { signal }),
-          remote: remote.name,
-        });
-        if (result.exitCode !== 0) {
-          verdicts.push(transferVerdict(result, new Set([oid]), remote));
-          continue;
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- one object after another in this worker.
+          await fetchOne(next);
+        } catch (error) {
+          queue.length = 0;
+          if (signal?.aborted === true) {
+            abort ??= { error };
+          } else {
+            verdicts.push(error instanceof Error ? error : new Error(String(error)));
+          }
         }
-        /* Content-addressed: bytes that are not the object are no answer at all. */
-        if (result.stdout.byteLength !== size || digestHex('sha256', result.stdout) !== oid) {
-          verdicts.push(
-            new RevisionPortError('ENGINE_FAILED', 'A large object arrived with bytes that are not its own.'),
-          );
-          continue;
-        }
-        // oxlint-disable-next-line no-await-in-loop -- stored before it is delivered, so a crash keeps it.
-        await storeLfsObject(oid, result.stdout);
-        transfer.arrived?.(oid, result.stdout);
-        verdicts.push('done');
       }
     };
     await Promise.all(Array.from({ length: Math.min(fetchByOidConcurrency, queue.length) }, worker));
+    if (abort !== undefined) {
+      throw abort.error;
+    }
     return (
       verdicts.find((verdict): verdict is Error => verdict instanceof Error) ??
       (verdicts.includes('lacks') ? 'lacks' : 'done')

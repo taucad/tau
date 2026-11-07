@@ -240,6 +240,24 @@ process.exit(result.status ?? 1);
     await expect(clone.fetchLargeObjects!([olderPointer])).rejects.toMatchObject({ code: 'MISSING_LARGE_OBJECT' });
   }, 120_000);
 
+  it('settles a by-oid fetch whose delivery throws only once every transfer it started has ended', async () => {
+    const { tau, clone, bytes, older, pointer, olderPointer } = await fetchedProject();
+    const arrived: string[] = [];
+    const fetched = await clone.fetchLargeObjects!([olderPointer, pointer], {
+      onLargeObject: (oid) => {
+        arrived.push(oid);
+        if (arrived.length === 1) {
+          throw new Error('ENOSPC: no space left on device');
+        }
+      },
+    });
+    /* The other object's transfer was already running; it ended, and was delivered, before the fetch settled. */
+    expect(arrived.toSorted()).toEqual([olderPointer.oid, pointer.oid].toSorted());
+    expect(fetched.get(olderPointer.oid)).toEqual(older);
+    expect(fetched.get(pointer.oid)).toEqual(bytes);
+    expect(downloads(tau)).toBe(2);
+  }, 120_000);
+
   it('leaves no pointer text at any path once the placeholder fill completes', async () => {
     const { clone, head, pointer, olderPointer } = await fetchedProject();
     const place: Checkout = {

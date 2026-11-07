@@ -2596,7 +2596,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           text = await records.readFile(`${leaseDirectory}/${name}`, 'utf8');
         } catch (error) {
           /* Listed, then retired in its own run's section before it could be read: it is gone, as if never listed. */
-          if ((error as { code?: unknown }).code === 'ENOENT') {
+          if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
             return undefined;
           }
           throw error;

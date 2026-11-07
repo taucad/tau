@@ -764,8 +764,7 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
         projectListed.push(factsOptions?.listed?.[index]);
       }
     }
-    let measured: ReadonlyMap<string, ContentFacts>;
-    if (base.facts === undefined) {
+    const measureHere = async (): Promise<ReadonlyMap<string, ContentFacts>> => {
       const own = await mapConcurrent(project, factsConcurrency, async (target) => {
         const stat = await upperStat(target);
         if (stat?.type !== 'file') {
@@ -782,16 +781,28 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
         workerTimings.count('view.facts.bytes', bytesRead);
         return measuredFacts;
       });
-      measured = new Map(project.flatMap((target, at) => (own[at] === undefined ? [] : [[target, own[at]] as const])));
-    } else {
-      measured =
-        project.length === 0
-          ? new Map()
-          : await base.facts(project, {
-              ...factsOptions,
-              ...(factsOptions?.listed === undefined ? {} : { listed: projectListed }),
-            });
-    }
+      return new Map(project.flatMap((target, at) => (own[at] === undefined ? [] : [[target, own[at]] as const])));
+    };
+    const measureBelow = async (facts: NonNullable<typeof base.facts>): Promise<ReadonlyMap<string, ContentFacts>> => {
+      try {
+        return await facts(project, {
+          ...factsOptions,
+          ...(factsOptions?.listed === undefined ? {} : { listed: projectListed }),
+        });
+      } catch (error) {
+        /* A provider that relays the call can learn only by asking that its far
+         * end keeps no index (ENOTSUP): the view then measures, as it does over
+         * a provider with no `facts` at all. */
+        if (getErrno(error) === 'ENOTSUP') {
+          return measureHere();
+        }
+        throw error;
+      }
+    };
+    const measured =
+      project.length === 0
+        ? new Map<string, ContentFacts>()
+        : await (base.facts === undefined ? measureHere() : measureBelow(base.facts.bind(base)));
     for (const [index, target] of targets.entries()) {
       const value = routes[index]!.kind === 'overlay' ? undefined : measured.get(target);
       if (value !== undefined) {

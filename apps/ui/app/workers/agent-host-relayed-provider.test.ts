@@ -1,3 +1,7 @@
+import { createProviderRpcFileSystem } from '@taucad/agent-tools/registry';
+import { ResourceQueue } from '@taucad/filesystem';
+import { composeView } from '@taucad/filesystem/composed-view';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { describe, expect, it, vi } from 'vitest';
 import { createRelayedFileSystemProvider } from '#workers/agent-host.impl.js';
 
@@ -63,14 +67,8 @@ describe('createRelayedFileSystemProvider', () => {
         },
       ) as unknown as RelayedBridge;
 
-    /* The relayed provider always carries the call; the port type leaves it optional. */
-    const relayedPendingPaths = (bridge: RelayedBridge): ((paths: readonly string[]) => Promise<readonly string[]>) => {
-      const relayed = createRelayedFileSystemProvider(bridge).pendingPaths;
-      if (relayed === undefined) {
-        throw new Error('The relayed provider does not carry pendingPaths.');
-      }
-      return relayed;
-    };
+    const relayedPendingPaths = (bridge: RelayedBridge): ((paths: readonly string[]) => Promise<readonly string[]>) =>
+      createRelayedFileSystemProvider(bridge).pendingPaths;
 
     await expect(relayedPendingPaths(bridgeWith(pendingPaths))(['main.scad', 'models/part.step'])).resolves.toEqual([
       'models/part.step',
@@ -123,5 +121,34 @@ describe('createRelayedFileSystemProvider', () => {
 
     await expect(provider.statTree('')).rejects.toMatchObject({ code: 'ENOTSUP' });
     await expect(provider.facts(['main.ts'])).rejects.toMatchObject({ code: 'ENOTSUP' });
+  });
+
+  /* The relay always has `facts`, but only asking tells it the far end has no index: the view then measures itself. */
+  it('should let a view over a relay with no index measure facts itself, so the agent stat still answers', async () => {
+    const text = new TextEncoder().encode('one\ntwo');
+    const unknown = (method: string) =>
+      vi.fn(async () => {
+        throw new Error(`Unknown method: ${method}`);
+      });
+    const bridge = new Proxy(
+      {
+        hello: { payload: { state: 'ready', capabilities: {} } },
+        statTree: unknown('statTree'),
+        facts: unknown('facts'),
+        stat: vi.fn(async () => ({ type: 'file', size: text.byteLength, mtimeMs: 1 })),
+        readFile: vi.fn(async () => new Uint8Array(text)),
+      } as Record<PropertyKey, unknown>,
+      { get: (target, property) => target[property] ?? vi.fn() },
+    ) as unknown as RelayedBridge;
+    const view = composeView(
+      { filesystem: createRelayedFileSystemProvider(bridge) },
+      { consumer: 'agent', policy: tauPathPolicy },
+    );
+
+    await expect(view.facts(['main.ts'], { lineCount: true })).resolves.toEqual(
+      new Map([['main.ts', { contentKind: 'text', lineCount: 2 }]]),
+    );
+    const rpc = createProviderRpcFileSystem({ provider: view, mutations: new ResourceQueue() });
+    await expect(rpc.stat('main.ts')).resolves.toMatchObject({ isDirectory: false, contentKind: 'text', lineCount: 2 });
   });
 });

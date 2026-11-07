@@ -11,7 +11,12 @@ const { initialize, isInitialized, captureMessage } = vi.hoisted(() => ({
   isInitialized: vi.fn(() => false),
   captureMessage: vi.fn(),
 }));
-vi.mock('@sentry/electron/main', () => ({ init: initialize, isInitialized, captureMessage }));
+vi.mock('@sentry/electron/main', () => ({
+  init: initialize,
+  isInitialized,
+  captureMessage,
+  IPCMode: { Classic: 1, Protocol: 2, Both: 3 },
+}));
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.resetModules();
@@ -124,4 +129,28 @@ it('sends a desktop signal as one message event once Sentry is running', async (
     tags: { hang_seconds: '12' },
     contexts: { hang: { milliseconds: 12_000 } },
   });
+});
+
+it('receives renderer events over classic IPC only, without an injected preload', async () => {
+  vi.stubGlobal('tauSentryDsn', 'https://key@errors.example/1');
+  const { initializeDesktopErrorReporting } = await import('#main/error-reporting.js');
+  initializeDesktopErrorReporting('staging');
+  const options = initialize.mock.calls[0]?.[0] as {
+    ipcMode: number;
+    integrations: (defaults: Array<{ name: string }>) => Array<{ name: string }>;
+  };
+  expect(options.ipcMode).toBe(1);
+  expect(options.integrations([{ name: 'PreloadInjection' }, { name: 'ChildProcess' }])).toEqual([
+    { name: 'ChildProcess' },
+  ]);
+});
+
+it('hands the renderer the DSN only once main can receive its events', async () => {
+  vi.stubGlobal('tauSentryDsn', 'https://key@errors.example/1');
+  const { rendererErrorReportingEnvironment } = await import('#main/error-reporting.js');
+  expect(rendererErrorReportingEnvironment()).toEqual({});
+  isInitialized.mockReturnValue(true);
+  expect(rendererErrorReportingEnvironment()).toEqual({ SENTRY_DSN: 'https://key@errors.example/1' });
+  vi.stubGlobal('tauSentryDsn', '');
+  expect(rendererErrorReportingEnvironment()).toEqual({});
 });

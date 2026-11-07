@@ -2780,6 +2780,9 @@ importers:
       '@react-router/node':
         specifier: 'catalog:'
         version: 7.18.2(react-router@7.18.2(patch_hash=273b1007189eee3007a17799b583101a4fb303786d75f617016b232876c63166)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(typescript@6.0.3)
+      '@sentry/electron':
+        specifier: 'catalog:'
+        version: 7.20.0(@opentelemetry/core@2.12.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.223.0(@opentelemetry/api@1.9.1))
       '@sentry/node':
         specifier: 'catalog:'
         version: 10.75.0(@opentelemetry/core@2.12.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.223.0(@opentelemetry/api@1.9.1))

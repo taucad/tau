@@ -339,6 +339,37 @@ const initializeWithBridgeRetry = async (profile: NativeSandboxProfile): Promise
   }
 };
 
+/**
+ * How many times one launch checks the sandbox runtime's host prerequisites before reporting one as missing.
+ *
+ * @internal
+ */
+export const dependencyCheckAttempts = 3;
+
+/**
+ * The sandbox runtime's prerequisite errors that persist across {@link dependencyCheckAttempts} checks.
+ *
+ * On Linux the runtime finds `rg`, `bwrap` and `socat` with `spawnSync('which', …, { timeout: 1000 })` and reads a
+ * `which` that has not answered within that second as a missing binary, so a host busy enough to delay one spawn
+ * reports `ripgrep (rg) not found` with ripgrep installed. A binary that is really missing is missing every time; a
+ * slow spawn rarely is twice. Only the last check's errors are reported.
+ *
+ * @returns The errors of the last check; empty once any check passes.
+ */
+const missingDependencies = async (): Promise<string[]> => {
+  for (let attempt = 1; ; attempt += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- each check runs only when the previous one failed.
+    const { errors } = await SandboxManager.checkDependenciesAsync();
+    if (errors.length === 0 || attempt >= dependencyCheckAttempts) {
+      return errors;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- the pause is the point.
+    await new Promise((resolve) => {
+      setTimeout(resolve, bridgeRetryDelay * attempt);
+    });
+  }
+};
+
 const ensureInitialized = async (): Promise<void> => {
   // A launch never initializes into a runtime whose reset is still under way.
   try {
@@ -354,9 +385,9 @@ const ensureInitialized = async (): Promise<void> => {
     if (!SandboxManager.isSupportedPlatform()) {
       throw new NativeRuntimeUnavailableError(`${process.platform} has no supported sandbox backend.`);
     }
-    const dependencies = await SandboxManager.checkDependenciesAsync();
-    if (dependencies.errors.length > 0) {
-      throw new NativeRuntimeUnavailableError(dependencies.errors.join('; '));
+    const errors = await missingDependencies();
+    if (errors.length > 0) {
+      throw new NativeRuntimeUnavailableError(errors.join('; '));
     }
     const profile = nativeSandboxPolicy();
     if (profile.seccomp) {

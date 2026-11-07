@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { FileSystemAccessProvider } from '#backend/fs-access-provider.js';
+import { OPFSProvider } from '#backend/opfs-provider.js';
 import { createMockRootHandle } from '#testing/mock-handle-factory.js';
 import type { UncommittedChangesetStore, UncommittedRecord } from '#backend/uncommitted-changesets.js';
 
@@ -192,6 +193,230 @@ describe('FileSystemAccessProvider', () => {
 
     it('should throw for non-existent path', async () => {
       await expect(provider.stat('nope')).rejects.toThrow('ENOENT');
+    });
+  });
+
+  describe('stat file handle reuse', () => {
+    it('answers a stat after a listing from the listed handle, with current metadata', async () => {
+      await provider.writeFile('dir/a.txt', 'alpha');
+      await provider.refresh();
+      await provider.readdirWithStats('');
+      await provider.readdirWithStats('dir');
+      const directory = await rootHandle.getDirectoryHandle('dir');
+      const lookups = vi.spyOn(directory, 'getFileHandle');
+      const reads = vi.spyOn(Blob.prototype, 'arrayBuffer');
+      try {
+        await expect(provider.stat('dir/a.txt')).resolves.toMatchObject({ type: 'file', size: 5 });
+        expect(lookups).not.toHaveBeenCalled();
+        expect(reads).not.toHaveBeenCalled();
+      } finally {
+        reads.mockRestore();
+      }
+
+      /* A rewrite keeps the file: the kept handle answers its new metadata. */
+      await provider.writeFile('dir/a.txt', 'alphabet');
+      lookups.mockClear();
+      await expect(provider.stat('dir/a.txt')).resolves.toMatchObject({ type: 'file', size: 8 });
+      expect(lookups).not.toHaveBeenCalled();
+    });
+
+    it('looks the path up again when the kept handle no longer resolves', async () => {
+      await provider.writeFile('gone.txt', 'one');
+      await provider.writeFile('replaced.txt', 'one');
+      await provider.writeFile('now-dir', 'one');
+      await provider.readdirWithStats('');
+
+      /* Changes no authority announced: straight to the handles. */
+      await rootHandle.removeEntry('gone.txt');
+      await rootHandle.removeEntry('replaced.txt');
+      const replacement = await rootHandle.getFileHandle('replaced.txt', { create: true });
+      const writable = await replacement.createWritable();
+      await writable.write(new TextEncoder().encode('replacement'));
+      await writable.close();
+      await rootHandle.removeEntry('now-dir');
+      await rootHandle.getDirectoryHandle('now-dir', { create: true });
+
+      await expect(provider.stat('gone.txt')).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(provider.stat('replaced.txt')).resolves.toMatchObject({ type: 'file', size: 11 });
+      await expect(provider.stat('now-dir')).resolves.toMatchObject({ type: 'dir' });
+    });
+
+    /* A mock file handle's getFile fails once its entry is replaced, so a stale
+     * kept handle and a forgotten one both end in a lookup. What tells them
+     * apart is the read: a forgotten handle is never asked. */
+    type MetadataReader = { getFile(): Promise<File> };
+    type LookupParent = { getFileHandle(name: string, options?: { create?: boolean }): Promise<unknown> };
+
+    /** The prototype every mock file handle shares. */
+    const fileHandlePrototype = async (): Promise<MetadataReader> =>
+      Object.getPrototypeOf(await createMockRootHandle().getFileHandle('probe', { create: true })) as MetadataReader;
+
+    /** One stat, with the parent's handle lookups and every file handle's metadata reads during it. */
+    const statCounting = async (
+      subject: FileSystemAccessProvider,
+      parent: LookupParent,
+      path: string,
+    ): Promise<{ outcome: unknown; lookups: number; reads: number }> => {
+      const lookups = vi.spyOn(parent, 'getFileHandle');
+      const reads = vi.spyOn(await fileHandlePrototype(), 'getFile');
+      try {
+        const outcome = await subject.stat(path).then(
+          (stat) => stat,
+          (error: unknown) => error,
+        );
+        return { outcome, lookups: lookups.mock.calls.length, reads: reads.mock.calls.length };
+      } finally {
+        lookups.mockRestore();
+        reads.mockRestore();
+      }
+    };
+
+    /** Write `content` at `name` under `directory` without the provider. */
+    const writeBehind = async (directory: LookupParent, name: string, content: string): Promise<void> => {
+      const handle = (await directory.getFileHandle(name, { create: true })) as FileSystemFileHandle;
+      const writable = await handle.createWritable();
+      await writable.write(new TextEncoder().encode(content));
+      await writable.close();
+    };
+
+    it('looks the path up again when the kept handle refuses for any reason', async () => {
+      await provider.writeFile('flaky.txt', 'flaky');
+      await provider.stat('flaky.txt');
+      const refused = vi
+        .spyOn(await fileHandlePrototype(), 'getFile')
+        .mockRejectedValueOnce(new DOMException('Busy', 'NoModificationAllowedError'));
+      try {
+        await expect(provider.stat('flaky.txt')).resolves.toMatchObject({ type: 'file', size: 5 });
+        expect(refused).toHaveBeenCalledTimes(2);
+      } finally {
+        refused.mockRestore();
+      }
+      /* The refusing handle was forgotten; the lookup's handle is the one kept now. */
+      await expect(statCounting(provider, rootHandle, 'flaky.txt')).resolves.toMatchObject({ lookups: 0, reads: 1 });
+    });
+
+    it('forgets the kept handle of a file it unlinks', async () => {
+      await provider.writeFile('target.txt', 'old');
+      await provider.stat('target.txt');
+
+      await provider.unlink('target.txt');
+      await writeBehind(rootHandle, 'target.txt', 'newer');
+
+      await expect(statCounting(provider, rootHandle, 'target.txt')).resolves.toMatchObject({
+        outcome: { type: 'file', size: 5 },
+        lookups: 1,
+        reads: 1,
+      });
+    });
+
+    it('forgets the kept handles of both paths a native move names', async () => {
+      const root = createMockRootHandle({ nativeMove: true });
+      vi.stubGlobal('navigator', { storage: { getDirectory: vi.fn().mockResolvedValue(root) } });
+      try {
+        const opfs = new OPFSProvider();
+        await opfs.initialize();
+        await opfs.writeFile('from.txt', 'source');
+        await opfs.writeFile('to.txt', 'stale');
+        await opfs.stat('from.txt');
+        await opfs.stat('to.txt');
+        /* The destination goes behind the provider's back, so its handle stays kept. */
+        await root.removeEntry('to.txt');
+
+        await opfs.rename('from.txt', 'to.txt');
+
+        await expect(statCounting(opfs, root, 'from.txt')).resolves.toMatchObject({
+          outcome: { code: 'ENOENT' },
+          lookups: 1,
+          reads: 0,
+        });
+        await expect(statCounting(opfs, root, 'to.txt')).resolves.toMatchObject({
+          outcome: { type: 'file', size: 6 },
+          lookups: 1,
+          reads: 1,
+        });
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('forgets the kept handle a batch move takes away, through the move itself', async () => {
+      const root = createMockRootHandle({ nativeMove: true });
+      vi.stubGlobal('navigator', { storage: { getDirectory: vi.fn().mockResolvedValue(root) } });
+      try {
+        const opfs = new OPFSProvider();
+        await opfs.initialize();
+        await opfs.writeFile('batch/c.txt', 'c');
+        await opfs.stat('batch/c.txt');
+
+        await expect(opfs.applyBatch([{ op: 'move', from: 'batch/c.txt', to: 'batch/d.txt' }])).resolves.toEqual([
+          { outcome: 'applied', kind: 'file' },
+        ]);
+
+        const directory = await root.getDirectoryHandle('batch');
+        await expect(statCounting(opfs, directory, 'batch/c.txt')).resolves.toMatchObject({
+          outcome: { code: 'ENOENT' },
+          lookups: 1,
+          reads: 0,
+        });
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('forgets every kept handle under a directory it removes', async () => {
+      await provider.writeFile('tree/leaf.txt', 'leaf');
+      await provider.stat('tree/leaf.txt');
+      /* The file goes behind the provider's back, so the directory is empty and its handle stays kept. */
+      const tree = await rootHandle.getDirectoryHandle('tree');
+      await tree.removeEntry('leaf.txt');
+
+      await provider.rmdir('tree');
+      const recreated = await rootHandle.getDirectoryHandle('tree', { create: true });
+      await writeBehind(recreated, 'leaf.txt', 'regrown');
+
+      await expect(statCounting(provider, recreated, 'tree/leaf.txt')).resolves.toMatchObject({
+        outcome: { type: 'file', size: 7 },
+        lookups: 1,
+        reads: 1,
+      });
+    });
+
+    it('drops kept handles on refresh', async () => {
+      await provider.writeFile('kept.txt', 'kept');
+      await provider.stat('kept.txt');
+      await provider.refresh(['kept.txt']);
+      await expect(statCounting(provider, rootHandle, 'kept.txt')).resolves.toMatchObject({ lookups: 1, reads: 1 });
+
+      await provider.refresh();
+      await expect(statCounting(provider, rootHandle, 'kept.txt')).resolves.toMatchObject({ lookups: 1, reads: 1 });
+    });
+
+    it('keeps no handle from a stat a refresh overtook', async () => {
+      await provider.writeFile('kept.txt', 'kept');
+      await provider.refresh();
+      const prototype = await fileHandlePrototype();
+      const { getFile } = prototype;
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const held = vi.spyOn(prototype, 'getFile').mockImplementationOnce(async function (this: MetadataReader) {
+        await gate;
+        return getFile.call(this);
+      });
+      try {
+        const pending = provider.stat('kept.txt');
+        await vi.waitFor(() => {
+          expect(held).toHaveBeenCalled();
+        });
+        await provider.refresh();
+        release();
+        await expect(pending).resolves.toMatchObject({ type: 'file', size: 4 });
+      } finally {
+        held.mockRestore();
+      }
+
+      await expect(statCounting(provider, rootHandle, 'kept.txt')).resolves.toMatchObject({ lookups: 1, reads: 1 });
     });
   });
 

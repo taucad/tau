@@ -1,7 +1,7 @@
 [
   {
-    "name": "measure before release — placeholder budget; 97.96 kB brotli on Linux at main 011e2237b (W10), then 100.04 kB with W4's viewer-first open (D9 pending entries read through the authority under a no-progress stall, `pendingPaths` and pending rows in the index snapshot, and a tree write's expected entries known to the index before they land), about 2.1 kB (brotli on Linux, 2026-11-06; limit raised from 100 kB to 100.3 kB, within the agent band of npm-policy § 7)",
+    "name": "measure before release — placeholder budget; 97.96 kB brotli on Linux at main 011e2237b (W10), then 100.04 kB with W4's viewer-first open (D9 pending entries read through the authority under a no-progress stall, `pendingPaths` and pending rows in the index snapshot, and a tree write's expected entries known to the index before they land), about 2.1 kB (brotli on Linux, 2026-11-06; limit raised from 100 kB to 100.3 kB, within the agent band of npm-policy § 7), then 100.49 kB with W3.2's warm open (FileSystemAccessProvider keeps a bounded file-handle cache, so a warm stat is one getFile()), about 0.2 kB (brotli on Linux, 2026-11-07; limit raised from 100.3 kB to 100.5 kB, within the agent band of npm-policy § 7), then 100.53 kB with its review fixes (the cache moves a re-kept or answering handle to the most recent end, and forgets a known file by its one key), about 0.03 kB (brotli on Linux, 2026-11-07; limit raised from 100.5 kB to 100.6 kB, within the agent band of npm-policy § 7)",
     "path": "dist/**/*.mjs",
-    "limit": "100.3 kB"
+    "limit": "100.6 kB"
   }
 ]

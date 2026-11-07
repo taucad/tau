@@ -908,9 +908,11 @@ describe('NodeFsProvider applyBatch (D16)', () => {
       { op: 'write', path: 'two.txt', data: new Blob(['2']) },
     ]);
     const verifications = open.mock.calls.filter(([, flags]) => typeof flags === 'number');
+    /* The provider resolves its root natively, so on Windows it opens the long name of an 8.3 temp path. */
+    const resolved = realpathSync.native(root);
     expect(verifications.map(([opened]) => String(opened)).toSorted()).toEqual([
-      join(root, 'one.txt'),
-      join(root, 'two.txt'),
+      join(resolved, 'one.txt'),
+      join(resolved, 'two.txt'),
     ]);
     expect(readFileSync(join(root, 'two.txt'), 'utf8')).toBe('2');
   });
@@ -1061,6 +1063,7 @@ describe('NodeFsProvider applyBatch (D16)', () => {
     roots.push(outside);
     mkdirSync(join(root, 'sub'));
     const provider = new NodeFsProvider(root);
+    let swapRefusal: string | undefined;
     const open = fs.open.bind(fs);
     vi.spyOn(fs, 'open').mockImplementation(async (opened, flags, mode) => {
       const handle = await open(opened, flags, mode);
@@ -1068,7 +1071,12 @@ describe('NodeFsProvider applyBatch (D16)', () => {
         const sync = handle.sync.bind(handle);
         vi.spyOn(handle, 'sync').mockImplementation(async () => {
           await sync();
-          renameSync(join(root, 'sub'), join(root, 'sub-before'));
+          try {
+            renameSync(join(root, 'sub'), join(root, 'sub-before'));
+          } catch (error) {
+            swapRefusal = (error as NodeJS.ErrnoException).code;
+            throw error;
+          }
           symlinkSync(outside, join(root, 'sub'), 'dir');
         });
       }
@@ -1077,7 +1085,18 @@ describe('NodeFsProvider applyBatch (D16)', () => {
     const receipts = await provider.applyBatch([
       { op: 'write', path: 'sub/escape.txt', data: new TextEncoder().encode('new') },
     ]);
-    expect(receipts[0]).toMatchObject({ outcome: 'failed', error: { code: 'ELOOP' } });
+    /*
+     * Windows will not rename a directory while a file inside it is open, so there the swap itself is
+     * refused and the write fails with that refusal. Elsewhere the swap lands and the publish must
+     * refuse the symlinked parent. Either way nothing reaches the outside directory.
+     */
+    if (process.platform === 'win32') {
+      expect(swapRefusal).toBe('EPERM');
+      expect(receipts[0]).toMatchObject({ outcome: 'failed', error: { code: 'EPERM' } });
+    } else {
+      expect(swapRefusal).toBeUndefined();
+      expect(receipts[0]).toMatchObject({ outcome: 'failed', error: { code: 'ELOOP' } });
+    }
     expect(readdirSync(outside)).toEqual([]);
   });
 

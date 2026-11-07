@@ -1700,13 +1700,17 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    * ref` (an atomic push's other commands as `atomic transaction failed`), so
    * the form is read from what it said about that ref: `cannot lock ref
    * '<ref>': is at <oid> but expected <oid>`, `reference already exists` for a
-   * create, `unable to resolve reference` for a ref removed since, or
-   * reftable's `incorrect old value provided`. A lock another process holds
-   * (`Unable to create '<ref>.lock': File exists`) says the same `failed to
-   * update ref` and is contention, not a moved ref: it keeps git's own text.
+   * create, a bare `unable to resolve reference '<ref>'` for a ref removed
+   * since (or, from reftable and batched receive-pack, `reference is missing
+   * but expected <oid>` and `reference does not exist`), or reftable's
+   * `incorrect old value provided`. A lock another process holds (`Unable to
+   * create '<ref>.lock': File exists`) says the same `failed to update ref` and
+   * is contention, not a moved ref; so is a ref the server cannot read
+   * (`unable to resolve reference '<ref>': reference broken`, or a permission
+   * or I/O error after it): both keep git's own text.
    */
   const movedRefSaying =
-    /is at [\da-f]+ but expected [\da-f]+|reference already exists|unable to resolve reference|incorrect old value provided/iu;
+    /is at [\da-f]+ but expected [\da-f]+|reference is missing but expected [\da-f]+|reference already exists|reference does not exist|unable to resolve reference '[^']*'$|incorrect old value provided/iu;
   const refMoved = (remoteName: string, reason: string, said: readonly string[]): boolean =>
     movedRefSaying.test(reason) || said.some((line) => line.includes(`'${remoteName}'`) && movedRefSaying.test(line));
 

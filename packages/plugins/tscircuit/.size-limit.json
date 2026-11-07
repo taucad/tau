@@ -1,8 +1,8 @@
 [
   {
-    "name": "Tau toolkit (ESM JS) — measured 12.81 kB brotli on 2026-11-05, with the KiCad pack catalogue loading lazily from the engine",
+    "name": "Tau toolkit (ESM JS) — measured 14.02 kB brotli on 2026-11-07, after the board frees its cross-sections on a failed build, with the KiCad pack catalogue loading lazily from the engine",
     "path": ["dist/**/*.mjs", "!dist/engine/**"],
-    "limit": "14 kB"
+    "limit": "15 kB"
   },
   {
     "name": "Offline circuit engine (ESM JS) — measured 1.16 MB brotli on 2026-11-05, with no texture rasterizer",

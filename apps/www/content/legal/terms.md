@@ -78,7 +78,7 @@ If you create an account, you are responsible for:
 - All activities that occur under your account
 - Notifying us immediately of any unauthorized use of your account
 
-Accounts are for individual use only. You may not share your account credentials with others or allow multiple users to access the Service through a single account, unless you have a team or organizational Subscription that permits multiple users.
+Accounts are for individual use only. You may not share your account credentials with others or allow multiple users to access the Service through a single account, unless an Enterprise agreement permits multiple users.
 
 You agree to use the Service only for lawful purposes and in accordance with these Terms and our [Acceptable Use Policy](/legal/acceptable-use), which is incorporated by reference. Violations may result in suspension or termination of your account.
 

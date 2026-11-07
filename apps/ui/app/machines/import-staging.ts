@@ -6,8 +6,9 @@
  * reads a byte of it. The worker plans the import (the zip's central
  * directory by range, the folder's listing, the path policy and the limits),
  * answers the review screen with paths and sizes, and on confirm stages the
- * entries on the creation root: each one decoded and digested on the compute
- * worker, written once, recorded in the staging ledger. The project is then
+ * entries on the creation root: each one decoded and CRC-checked on the
+ * compute worker, written once, read back and hashed once on the compute
+ * worker (EQ6), recorded in the staging ledger. The project is then
  * committed from that staging by the ordinary pending-create journal, which
  * carries the staging locator, not the bytes.
  *
@@ -41,6 +42,7 @@ import {
 } from '@taucad/filesystem/importer';
 import type {
   ImportDecoder,
+  ImportMeasurer,
   ImportPlan,
   ImportRefusalReason,
   ImportSource,
@@ -217,7 +219,7 @@ export const downloadRefusal = async (response: Response): Promise<string> => {
 const downloadArchive = async (
   descriptor: Extract<ImportSourceDescriptor, { kind: 'archive' }>,
   control: Readonly<{ signal: AbortSignal; onDownload: (progress: ImportDownloadProgress) => void }>,
-): Promise<Blob> => {
+): Promise<Readonly<{ archive: Blob; commit?: string }>> => {
   const url = new URL(descriptor.url);
   if (url.protocol !== 'https:' && url.protocol !== 'http:') {
     throw new TypeError(`An archive downloads over HTTP only: ${url.protocol}`);
@@ -258,7 +260,44 @@ const downloadArchive = async (
     },
   });
   control.onDownload({ loaded: archive.size, total: archive.size });
-  return archive;
+  /* The gateway names the commit it resolved the ref to; anything but 40 hex is no commit. */
+  const commit = response.headers.get(importCommitHeader)?.trim().toLowerCase();
+  return { archive, ...(commit !== undefined && commitPattern.test(commit) ? { commit } : {}) };
+};
+
+/** The header the archive gateway names the resolved commit in. @public */
+export const importCommitHeader = 'X-Tau-Commit';
+
+const commitPattern = /^[0-9a-f]{40}$/u;
+
+/* A GitHub archive's one top folder is `<owner>-<repo>-<short sha>/`. */
+const topFolderRevision = (path: string): string | undefined => /^[^/]+-([0-9a-f]{7,40})\//u.exec(path)?.[1];
+
+/*
+ * An archive pinned at the commit the gateway named or, when it named none,
+ * at the short sha of its top folder, read from the first entry as it lists.
+ */
+const pinnedArchive = (base: ImportSource, commit: string | undefined): ImportSource => {
+  if (commit !== undefined) {
+    return { ...base, revision: commit };
+  }
+  let revision: string | undefined;
+  let seen = false;
+  return {
+    ...base,
+    get revision() {
+      return revision;
+    },
+    async *list(control) {
+      for await (const entry of base.list(control)) {
+        if (!seen) {
+          seen = true;
+          revision = topFolderRevision(entry.source);
+        }
+        yield entry;
+      }
+    },
+  };
 };
 
 const sourceOf = async (
@@ -267,7 +306,8 @@ const sourceOf = async (
 ): Promise<ImportSource> => {
   switch (descriptor.kind) {
     case 'archive': {
-      return zipImportSource(await downloadArchive(descriptor, control), { name: descriptor.name, kind: 'archive' });
+      const { archive, commit } = await downloadArchive(descriptor, control);
+      return pinnedArchive(zipImportSource(archive, { name: descriptor.name, kind: 'archive' }), commit);
     }
     case 'zip': {
       return zipImportSource(descriptor.file);
@@ -380,10 +420,13 @@ export const serveImportChannel = (
   dependencies: Readonly<{
     importStaging: (scope: StorageRootConfig) => Promise<ImportStagingPort>;
     decode: ImportDecoder;
+    /** The read-back measure: the compute worker's, or inline WebCrypto where there is none. */
+    measure?: ImportMeasurer;
     policy: PathPolicy;
   }>,
 ): void => {
   let plan: ImportPlan | undefined;
+  const measuring = dependencies.measure === undefined ? {} : { measure: dependencies.measure };
   /* The newest plan request: only it may become the plan, so a slower earlier one never replaces it. */
   let latestPlan: number | undefined;
   const planning = new Map<number, AbortController>();
@@ -473,6 +516,7 @@ export const serveImportChannel = (
           operationId: request.operationId,
           plan,
           decode: dependencies.decode,
+          ...measuring,
           target: request.target,
           signal: abort.signal,
           onProgress: (progress) => {

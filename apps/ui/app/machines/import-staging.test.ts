@@ -7,6 +7,7 @@ import {
   importStagingDirectory,
   importStagingStaleMilliseconds,
   planImport,
+  readStagedImport,
   stageImport,
   zipImportSource,
 } from '@taucad/filesystem/importer';
@@ -18,6 +19,7 @@ import {
   createFromStagedImport,
   downloadRefusal,
   holdLease,
+  importCommitHeader,
   importConnectMessageType,
   openImportSession,
   serveImportChannel,
@@ -443,6 +445,22 @@ describe('the import channel', () => {
         .catch((error: unknown) => error);
 
       expect((refused as ImportChannelError).reason).toBe('corrupt');
+    });
+
+    it.each([
+      ['the commit the gateway names', { [importCommitHeader]: 'B'.repeat(40) }, 'b'.repeat(40)],
+      ["the top folder's short sha when it names none", {}, 'abc1234'],
+      ["the top folder's short sha when what it names is no commit", { [importCommitHeader]: 'main' }, 'abc1234'],
+    ])('pins the archive at %s', async (_, headers: Record<string, string>, revision) => {
+      const provider = new MemoryProvider();
+      answering(new Response(await zipOf({ 'o-r-abc1234/main.kcl': 'm' }), { status: 200, headers }));
+      const session = connect(provider);
+
+      await session.plan({ kind: 'archive', url: archiveUrl, name: 'o/r' });
+      await session.stage('req_pinned', scope, { target: 'r' });
+
+      const staged = await readStagedImport(provider, 'req_pinned');
+      expect(staged?.pin.revision).toBe(revision);
     });
 
     it("refuses the gateway's 413 and a declared size past the limit as too large", async () => {

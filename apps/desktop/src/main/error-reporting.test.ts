@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention -- Sentry tag names are snake_case. */
 import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -5,12 +6,18 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
 import { prepareRouteQualificationProbe } from '#main/route-qualification-probe.js';
 
-const { initialize } = vi.hoisted(() => ({ initialize: vi.fn() }));
-vi.mock('@sentry/electron/main', () => ({ init: initialize }));
+const { initialize, isInitialized, captureMessage } = vi.hoisted(() => ({
+  initialize: vi.fn(),
+  isInitialized: vi.fn(() => false),
+  captureMessage: vi.fn(),
+}));
+vi.mock('@sentry/electron/main', () => ({ init: initialize, isInitialized, captureMessage }));
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.resetModules();
   initialize.mockReset();
+  isInitialized.mockReset();
+  captureMessage.mockReset();
 });
 
 it('imports inertly, admits a pristine profile, then lets crash reporting create its files', async () => {
@@ -92,4 +99,29 @@ it.each(['staging', 'production'] as const)('labels an automated %s run apart fr
   const { initializeDesktopErrorReporting } = await import('#main/error-reporting.js');
   initializeDesktopErrorReporting(channel, true);
   expect(initialize).toHaveBeenCalledWith(expect.objectContaining({ environment: `${channel}-e2e` }));
+});
+
+it('sends a desktop signal as one message event once Sentry is running', async () => {
+  const { reportDesktopSignal } = await import('#main/error-reporting.js');
+  const signal = {
+    message: 'Renderer unresponsive',
+    level: 'warning',
+    fingerprint: ['desktop-renderer-hang'],
+    tags: { hang_seconds: '12' },
+    contexts: { hang: { milliseconds: 12_000 } },
+  } as const;
+
+  reportDesktopSignal(signal);
+  expect(captureMessage).not.toHaveBeenCalled();
+
+  isInitialized.mockReturnValue(true);
+  reportDesktopSignal(undefined);
+  reportDesktopSignal(signal);
+  expect(captureMessage).toHaveBeenCalledTimes(1);
+  expect(captureMessage).toHaveBeenCalledWith('Renderer unresponsive', {
+    level: 'warning',
+    fingerprint: ['desktop-renderer-hang'],
+    tags: { hang_seconds: '12' },
+    contexts: { hang: { milliseconds: 12_000 } },
+  });
 });

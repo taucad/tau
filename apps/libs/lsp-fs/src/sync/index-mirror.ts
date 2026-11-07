@@ -27,16 +27,23 @@ export type IndexMirrorWireEntry = readonly [
 /**
  * What the file manager posts on the sync port to keep the worker's mirror
  * current: `reset` replaces the whole mirror, `changes` applies on top of it
- * (removals first, then entries).
+ * (removals first, then entries), and `stale` says the feed could not ask
+ * the index, so the mirror knows nothing until the next `reset` and the slot
+ * answers every probe.
+ *
+ * `excluded` names the root-relative subtrees the index never holds beyond
+ * the policy's unwatched rows: its reserved paths and each nested mount below
+ * the root (I9). A message that carries it replaces the mirror's list.
  *
  * @public
  */
 export type TauIndexMirrorMessage = Readonly<{
   tau: 'index-mirror';
-  kind: 'reset' | 'changes';
+  kind: 'reset' | 'changes' | 'stale';
   generation: number;
   entries: readonly IndexMirrorWireEntry[];
   removed: readonly string[];
+  excluded?: readonly string[];
 }>;
 
 const wireEntrySchema = z.tuple([
@@ -50,17 +57,19 @@ const wireEntrySchema = z.tuple([
 /** @public */
 export const tauIndexMirrorMessageSchema = z.object({
   tau: z.literal('index-mirror'),
-  kind: z.enum(['reset', 'changes']),
+  kind: z.enum(['reset', 'changes', 'stale']),
   generation: z.number().int().nonnegative(),
   entries: z.array(wireEntrySchema),
   removed: z.array(z.string()),
+  excluded: z.array(z.string()).optional(),
 });
 
 /**
- * Whether the root's index holds a path at all: the policy rows nothing
- * watches (`node_modules`, the control plane, caches) are never indexed (the
- * index's own scan rule, I9), so a miss there says nothing and the slot must
- * answer.
+ * Whether the policy lets the root's index hold a path at all: the rows
+ * nothing watches (`node_modules`, the control plane, caches) are never
+ * indexed (the index's own scan rule, I9), so a miss there says nothing and
+ * the slot must answer. The mirror's own `covers` adds the reserved paths and
+ * nested mounts the feed names.
  *
  * @param relativePath - Root-relative path.
  * @returns True when the index would hold the path if it existed.
@@ -95,11 +104,15 @@ const parentOf = (path: string): string => {
 
 const nameOf = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
 
+const isAtOrBelow = (path: string, prefix: string): boolean => path === prefix || path.startsWith(`${prefix}/`);
+
 /** A mirror that also takes the file manager's wire messages. @public */
 export type WorkerIndexMirror = IndexMirror &
   Readonly<{
-    /** Whether a `reset` has arrived: until then nothing is known and the slot answers. */
+    /** Whether a `reset` has arrived since the last `stale`: until then nothing is known and the slot answers. */
     ready(): boolean;
+    /** Whether the index would hold `relativePath` if it existed, so a miss here is a definite absence. */
+    covers(relativePath: string): boolean;
     /** Apply one wire message. */
     receive(message: TauIndexMirrorMessage): void;
     /** Entries held. */
@@ -117,6 +130,7 @@ export const createIndexMirror = (): WorkerIndexMirror => {
   /* Each directory's children by name, so a listing never scans the whole map. */
   const children = new Map<string, Set<string>>();
   let received = false;
+  let excluded: readonly string[] = [];
 
   const link = (path: string): void => {
     const parent = parentOf(path);
@@ -182,8 +196,20 @@ export const createIndexMirror = (): WorkerIndexMirror => {
       return entry === undefined ? '' : `${String(entry.generation)}:${String(entry.size)}:${String(entry.mtimeMs)}`;
     },
     ready: () => received,
+    covers: (relativePath) =>
+      relativePath === '' ||
+      (indexMirrorCovers(relativePath) && !excluded.some((prefix) => isAtOrBelow(relativePath, prefix))),
     size: () => entries.size,
     receive: (message) => {
+      if (message.excluded !== undefined) {
+        excluded = message.excluded;
+      }
+      if (message.kind === 'stale') {
+        entries.clear();
+        children.clear();
+        received = false;
+        return;
+      }
       if (message.kind === 'reset') {
         entries.clear();
         children.clear();

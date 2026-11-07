@@ -37,20 +37,33 @@ export type SyncFsIndexSource = Readonly<{
   changedSince(since: number, options?: { epoch?: string }): Promise<IndexChanges>;
   /** Call `onChange` after each change set; returns the unsubscribe. */
   watch(onChange: () => void): () => void;
+  /**
+   * Root-relative subtrees the index never holds beyond the policy's
+   * unwatched rows: its reserved paths and each nested mount below the root.
+   * Read again for every message, so a mount added later reaches the mirror
+   * with the next one.
+   */
+  excluded?(): readonly string[];
 }>;
 
+/** Milliseconds before the first retry after a failed ask; each further failure doubles it, up to {@link indexMirrorRetryCeiling}. */
+const indexMirrorRetryBackoff = 250;
+/** Milliseconds: the longest wait between retries. */
+const indexMirrorRetryCeiling = 8000;
+
 /**
- * The whole index as one `reset`: every file row, and each directory above
- * one. Rows carry no generation of their own, so each takes the generation the
+ * The whole index as one `reset`: every row, and each directory above a file.
+ * Rows carry no generation of their own, so each takes the generation the
  * index reported just before the listing; any later change is newer, which is
- * all a mirror version needs. A directory with no file below it is not sent:
- * the worker's slot is not asked about it either (it answers absent).
+ * all a mirror version needs. An empty directory is sent where the listing
+ * names it.
  */
 const resetMessage = (generation: number, rows: readonly FileStatEntry[]): TauIndexMirrorMessage => {
   const directories = new Set<string>();
   const entries: IndexMirrorWireEntry[] = [];
   for (const row of rows) {
-    if (row.type !== 'file') {
+    if (row.type === 'dir') {
+      directories.add(row.path);
       continue;
     }
     entries.push([row.path, 'f', row.size, row.mtimeMs, generation]);
@@ -68,8 +81,11 @@ const resetMessage = (generation: number, rows: readonly FileStatEntry[]): TauIn
  * Keep one worker's index mirror current: the whole index first, then each
  * change the index records, one `changedSince` at a time. A change set that
  * arrives while one is in flight is folded into the next ask, and an answer
- * that cannot say (`rescan`) sends the index whole again.
- * {@link attachSyncFsServer} runs it for a workspace that has an index.
+ * that cannot say (`rescan`) sends the index whole again. An ask that fails
+ * sends `stale`, so the worker's slot answers until a later ask sends the
+ * index whole: the feed retries with a doubling backoff, and a change set
+ * retries at once. {@link attachSyncFsServer} runs it for a workspace that
+ * has an index.
  *
  * @param port - The port the mirror's owner listens on the other end of.
  * @param index - The root's index.
@@ -82,6 +98,13 @@ export const feedIndexMirror = (port: Pick<MessagePort, 'postMessage'>, index: S
   let running = false;
   let again = false;
   let stopped = false;
+  /** Milliseconds before the next retry. */
+  let retryBackoff = indexMirrorRetryBackoff;
+  let retry: ReturnType<typeof setTimeout> | undefined;
+  const post = (message: TauIndexMirrorMessage): void => {
+    const excluded = index.excluded?.();
+    port.postMessage(excluded === undefined ? message : { ...message, excluded });
+  };
   const step = async (): Promise<TauIndexMirrorMessage | undefined> => {
     const changes = epoch === undefined ? undefined : await index.changedSince(since, { epoch });
     if (changes === undefined || changes.rescan === true) {
@@ -119,7 +142,12 @@ export const feedIndexMirror = (port: Pick<MessagePort, 'postMessage'>, index: S
       again = true;
       return;
     }
+    if (retry !== undefined) {
+      clearTimeout(retry);
+      retry = undefined;
+    }
     running = true;
+    let failed = false;
     try {
       do {
         again = false;
@@ -129,19 +157,35 @@ export const feedIndexMirror = (port: Pick<MessagePort, 'postMessage'>, index: S
           return;
         }
         if (message !== undefined) {
-          port.postMessage(message);
+          post(message);
         }
       } while (owed());
+      retryBackoff = indexMirrorRetryBackoff;
     } catch {
-      /* The mirror stays where it was and the next change set sends it whole;
-       * the worker's slot still answers anything the mirror cannot. */
+      /* The mirror no longer follows the index: it forgets what it holds and
+       * the worker's slot answers every probe until the next ask sends the
+       * index whole. */
+      failed = true;
       epoch = undefined;
+      if (!stopped) {
+        post({ tau: 'index-mirror', kind: 'stale', generation: since, entries: [], removed: [] });
+      }
     } finally {
       running = false;
     }
-    /* A change set that arrived during a failed ask is still owed one. */
-    if (owed() && !stopped) {
+    if (stopped) {
+      return;
+    }
+    if (owed()) {
+      /* A change set that arrived during a failed ask is still owed one. */
       void pump();
+    } else if (failed) {
+      const retryDelay = retryBackoff;
+      retryBackoff = Math.min(retryBackoff * 2, indexMirrorRetryCeiling);
+      retry = setTimeout(() => {
+        retry = undefined;
+        void pump();
+      }, retryDelay);
     }
   };
   const unsubscribe = index.watch(() => {
@@ -150,6 +194,10 @@ export const feedIndexMirror = (port: Pick<MessagePort, 'postMessage'>, index: S
   void pump();
   return () => {
     stopped = true;
+    if (retry !== undefined) {
+      clearTimeout(retry);
+      retry = undefined;
+    }
     unsubscribe();
   };
 };

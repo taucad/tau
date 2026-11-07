@@ -172,7 +172,7 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
    */
   // oxlint-disable-next-line typescript/no-restricted-types -- null is the mirror's definite absence, apart from "cannot answer".
   const fromMirror = (relativePath: string): IndexEntry | null | undefined => {
-    if (!mirror.ready() || !covers(relativePath)) {
+    if (!mirror.ready() || !covers(relativePath) || !mirror.covers(relativePath)) {
       return undefined;
     }
     if (relativePath === '') {

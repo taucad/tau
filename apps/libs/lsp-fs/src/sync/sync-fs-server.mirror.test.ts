@@ -200,7 +200,7 @@ describe('the index mirror feed', () => {
     expect(received.map((message) => message.kind)).toEqual(['reset', 'changes', 'changes']);
   });
 
-  it('sends the index whole again after a rescan answer, and after an ask that failed', async () => {
+  it('sends the index whole again after a rescan answer, and after an ask that failed (saying stale between)', async () => {
     let calls = 0;
     const { index, fire } = source(async (since) => {
       calls += 1;
@@ -227,10 +227,62 @@ describe('the index mirror feed', () => {
     });
     fire();
     await vi.waitFor(() => {
-      expect(received).toHaveLength(3);
+      expect(received).toHaveLength(4);
     });
 
-    expect(received.map((message) => message.kind)).toEqual(['reset', 'reset', 'reset']);
+    expect(received.map((message) => message.kind)).toEqual(['reset', 'reset', 'stale', 'reset']);
+  });
+
+  it('says stale on a failed ask with no change after it, then retries on its own until the index answers', async () => {
+    let calls = 0;
+    const { index } = source(async () => {
+      calls += 1;
+      if (calls <= 2) {
+        throw new Error('index not open yet');
+      }
+      return changes(4, { entries: [entry('a.ts', 4)] });
+    });
+    const received = serve(index);
+
+    await vi.waitFor(
+      () => {
+        expect(received.map((message) => message.kind)).toEqual(['stale', 'stale', 'reset']);
+      },
+      { timeout: 3000 },
+    );
+    expect(received[2]?.entries).toEqual([['a.ts', 'f', 1, 10, 4]]);
+  });
+
+  it('names what the index never holds on every message, read afresh each time', async () => {
+    const excluded = ['.tau/index', '.tau-staging'];
+    const { index, fire } = source(async (since) =>
+      since === 0 ? changes(1, { entries: [entry('a.ts', 1)] }) : changes(2, { entries: [entry('b.ts', 2)] }),
+    );
+    const received = serve({ ...index, excluded: () => excluded });
+    await vi.waitFor(() => {
+      expect(received).toHaveLength(1);
+    });
+    excluded.push('mounted');
+    fire();
+    await vi.waitFor(() => {
+      expect(received).toHaveLength(2);
+    });
+
+    expect(received[0]?.excluded).toEqual(['.tau/index', '.tau-staging']);
+    expect(received[1]?.excluded).toEqual(['.tau/index', '.tau-staging', 'mounted']);
+  });
+
+  it('sends an empty directory a listed index names', async () => {
+    const { index } = source(
+      async () => changes(3, { rescan: true }),
+      [{ path: 'empty', name: 'empty', type: 'dir', size: 0, mtimeMs: 4 }],
+    );
+    const received = serve(index);
+    await vi.waitFor(() => {
+      expect(received).toHaveLength(1);
+    });
+
+    expect(received[0]?.entries).toEqual([['empty', 'd', 0, 0, 3]]);
   });
 
   it('stops asking and unsubscribes once disposed', async () => {

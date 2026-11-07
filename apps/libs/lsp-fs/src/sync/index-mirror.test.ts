@@ -132,6 +132,50 @@ describe('createIndexMirror', () => {
     expect(mirror.version('missing.ts')).toBe('');
   });
 
+  it('forgets everything on stale, so the slot answers until the next reset', () => {
+    const mirror = createIndexMirror();
+    mirror.receive(reset([['a.ts', 'f', 1, 1, 1]]));
+    mirror.receive({ tau: 'index-mirror', kind: 'stale', generation: 1, entries: [], removed: [] });
+
+    expect(mirror.ready()).toBe(false);
+    expect(mirror.entry('a.ts')).toBeUndefined();
+
+    mirror.receive({
+      tau: 'index-mirror',
+      kind: 'changes',
+      generation: 2,
+      entries: [['b.ts', 'f', 1, 1, 2]],
+      removed: [],
+    });
+    expect(mirror.entry('b.ts')).toBeUndefined();
+
+    mirror.receive(reset([['a.ts', 'f', 1, 1, 3]], 3));
+    expect(mirror.ready()).toBe(true);
+    expect(mirror.entry('a.ts')?.generation).toBe(3);
+  });
+
+  it('does not cover the reserved paths and nested mounts the feed names, nor the unwatched rows', () => {
+    const mirror = createIndexMirror();
+    mirror.receive({ ...reset([['a.ts', 'f', 1, 1, 1]]), excluded: ['.tau/index', '.tau-staging', 'vendor/lib'] });
+
+    expect(mirror.covers('')).toBe(true);
+    expect(mirror.covers('a.ts')).toBe(true);
+    expect(mirror.covers('missing.ts')).toBe(true);
+    expect(mirror.covers('.tau/index')).toBe(false);
+    expect(mirror.covers('.tau/index/snapshot.bin')).toBe(false);
+    expect(mirror.covers('.tau-staging/import/a.ts')).toBe(false);
+    expect(mirror.covers('vendor/lib')).toBe(false);
+    expect(mirror.covers('vendor/lib/index.ts')).toBe(false);
+    expect(mirror.covers('vendor/library.ts')).toBe(true);
+    expect(mirror.covers('node_modules/x/index.d.ts')).toBe(false);
+
+    /* A message without the list keeps it; one with it replaces it. */
+    mirror.receive({ tau: 'index-mirror', kind: 'changes', generation: 2, entries: [], removed: [] });
+    expect(mirror.covers('vendor/lib/index.ts')).toBe(false);
+    mirror.receive({ tau: 'index-mirror', kind: 'changes', generation: 3, entries: [], removed: [], excluded: [] });
+    expect(mirror.covers('vendor/lib/index.ts')).toBe(true);
+  });
+
   it('starts over on a second reset', () => {
     const mirror = createIndexMirror();
     mirror.receive(reset([['a.ts', 'f', 1, 1, 1]]));

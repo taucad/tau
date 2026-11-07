@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0 (2026-11-07)
+
+### Features
+
+- feat(ui): Report release health, one session per page load (SB8) (#1513) (d9ccad9fd)
+
+### Fixes
+
+- fix(native-process-core): Check sandbox prerequisites again before reporting one missing (#1506) (14dc15837)
+
 ## 0.3.0 (2026-11-07)
 
 ### Features

@@ -63,6 +63,7 @@ import {
   receivePack,
 } from '#adapter-transport/adapter-transport.js';
 import { createInlineCompute } from '#compute-worker/compute-worker.js';
+import { settleBounded } from '#chat-projection-pool.js';
 import type { ComputeWorker } from '#compute-worker/compute-worker.js';
 import { createObjectStore, gitFilesOf, isMissing, PackCeilingError } from '#object-store/object-store.js';
 import { coldOpenFromCatalogue, importReachableFromCatalogue } from '#object-store/cold-open.js';
@@ -960,47 +961,41 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
   ): Promise<void> => {
     const file = lfsObjectFile(oid);
     const size = content.byteLength;
-    /* Another writer's whole copy is kept, and a download's bytes in hand, written nowhere, are hashed instead. */
-    const kept = async (): Promise<boolean> => {
-      if ((await lfsObjectSize(file)) !== size) {
-        return false;
-      }
-      if (readBack && (await compute.sha256(content)) !== oid) {
-        throw new Error(`Large object ${oid} did not hash to its own id.`);
-      }
-      return true;
-    };
-    if (await kept()) {
+    /* Another writer's whole copy is kept. */
+    if ((await lfsObjectSize(file)) === size) {
       return;
     }
     await gitFiles.mkdir(file.slice(0, file.lastIndexOf('/')), { recursive: true });
     const partial = `${file}.${randomUuid()}.partial`;
-    await gitFiles.writeFile(partial, content);
-    const discardPartial = async (): Promise<void> => {
-      await gitFiles.unlink(partial).catch(() => undefined);
-    };
-    /* A download is verified by the one read-back of what landed (D9, D11):
-     * the bytes on disk, not the bytes in hand, are the ones that must hash to the oid. */
-    if (readBack && (await compute.sha256(await gitFiles.readFile(partial))) !== oid) {
-      await discardPartial();
-      throw new Error(`Large object ${oid} did not hash to its own id.`);
-    }
-    /* Looked at again just before anything is removed: another tab may have stored it whole meanwhile. */
-    const here = await lfsObjectSize(file);
-    if (here === size) {
-      await discardPartial();
-      return;
-    }
-    if (here !== undefined) {
-      /* A copy cut short; not every provider's rename replaces. */
-      await gitFiles.unlink(file).catch(() => undefined);
-    }
+    let landed = false;
     try {
-      await gitFiles.rename(partial, file);
-    } catch (error) {
-      await discardPartial();
-      if ((await lfsObjectSize(file)) !== size) {
-        throw error;
+      await gitFiles.writeFile(partial, content);
+      /* A download is verified by the one read-back of what landed (D9, D11): the bytes on
+       * disk, not the bytes in hand, must hash to the oid. Transferred, as they are dropped after. */
+      if (readBack && (await compute.sha256(await gitFiles.readFile(partial), true)) !== oid) {
+        throw new Error(`Large object ${oid} did not hash to its own id.`);
+      }
+      /* Looked at again just before anything is removed: another tab may have stored it whole meanwhile. */
+      const here = await lfsObjectSize(file);
+      if (here === size) {
+        return;
+      }
+      if (here !== undefined) {
+        /* A copy cut short; not every provider's rename replaces. */
+        await gitFiles.unlink(file).catch(() => undefined);
+      }
+      try {
+        await gitFiles.rename(partial, file);
+        landed = true;
+      } catch (error) {
+        if ((await lfsObjectSize(file)) !== size) {
+          throw error;
+        }
+      }
+    } finally {
+      /* Whatever threw — the write, the read-back, the hash or the rename — leaves no partial behind. */
+      if (!landed) {
+        await gitFiles.unlink(partial).catch(() => undefined);
       }
     }
   };
@@ -1326,14 +1321,21 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     blobs: ReadonlyMap<string, string>,
   ): Promise<ReadonlyMap<string, Readonly<{ path: string; size: number }>>> => {
     const paths = new Map<string, Readonly<{ path: string; size: number }>>();
-    await Promise.all(
-      [...blobs].map(async ([oid, path]) => {
-        const pointer = readLfsPointer(await blobOf(oid));
-        if (pointer !== undefined) {
-          paths.set(pointer.oid, { path, size: pointer.size });
-        }
-      }),
-    );
+    const settled = await settleBounded([...blobs], 16, async ([oid, path]) => {
+      /* A pointer is at most 1 KiB, so deflated, framed or deltified it takes under 2 KiB: a larger blob is never inflated. */
+      if (((await objects.storedSize(oid)) ?? 0) > 2048) {
+        return;
+      }
+      const pointer = readLfsPointer(await blobOf(oid));
+      if (pointer !== undefined) {
+        paths.set(pointer.oid, { path, size: pointer.size });
+      }
+    });
+    for (const result of settled) {
+      if (result.status === 'rejected') {
+        throw result.reason instanceof Error ? result.reason : new Error(String(result.reason));
+      }
+    }
     return paths;
   };
 
@@ -2421,34 +2423,8 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           guardRef(ref.remoteName, 'remote ref');
         }
       }
-      /*
-       * P20, before the network: a remote that cannot hold large objects is
-       * refused by name, with the files, rather than by the proxy with a `400`
-       * nobody can read. The disk leg refuses the same push for the same reason
-       * and also without a request, so the two legs agree about what a push
-       * means (A15, W12 review R3).
-       */
       const configuredRemotes = await port.listRemotes();
       const configuredRemote = configuredRemotes.find((remote) => remote.name === input.remote);
-      /* An unconfigured name has no provider to ask, and no URL to push to either. */
-      if (configuredRemote === undefined || !remoteCarriesLargeObjects(configuredRemote)) {
-        /* What this host last saw there stands in for the advertisement it has not read. */
-        const known = await Promise.all(
-          input.refs.map(async (ref) => tryResolve(remoteTrackingRef(input.remote, ref.remoteName ?? ref.name))),
-        );
-        const heads = await Promise.all(input.refs.map(async (ref) => tryResolve(ref.name)));
-        const unsent = await missingObjects(
-          heads.filter((head) => head !== undefined),
-          new Set(known.filter((head) => head !== undefined)),
-        );
-        const large = await pointersAmong(unsent.blobs);
-        if (large.size > 0) {
-          throw new RevisionPortError(
-            'LFS_REMOTE_UNSUPPORTED',
-            lfsRemoteUnsupportedMessage([...large.values()].map((entry) => entry.path)),
-          );
-        }
-      }
       const url = configuredRemote?.url ?? (await remoteUrl(input.remote));
       if (input.repositoryUrl !== undefined && url !== input.repositoryUrl) {
         throw new RevisionPortError(
@@ -2487,15 +2463,32 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           commands.map((command) => command.head),
           new Set(advertised.values()),
         );
+        const pointers = await pointersAmong(sent.blobs);
+        /*
+         * P20: a remote that cannot hold large objects is refused by name, with
+         * the files, rather than by the proxy with a `400` nobody can read. It
+         * is decided on what this pack would send, after the one advertisement
+         * and before any object or ref is offered: tracking refs outlive a
+         * re-pointed remote, so they cannot say what it holds. The disk leg
+         * refuses before any request, on the large files in each offered ref's
+         * tip tree (`git lfs ls-files`), so it also refuses one the remote
+         * already has (A15, W12 review R3).
+         */
+        const destination = configuredRemote ?? remoteOf(input.remote, url);
+        if (!remoteCarriesLargeObjects(destination) && pointers.size > 0) {
+          throw new RevisionPortError(
+            'LFS_REMOTE_UNSUPPORTED',
+            lfsRemoteUnsupportedMessage([...pointers.values()].map((entry) => entry.path)),
+          );
+        }
         /* Objects before the refs that name them (A39): a pointer whose object
          * never arrived is a file nobody can open. Only the pointers among the
          * blobs this pack sends are offered (D11), the batch call skips what the
          * remote already holds, so this is one upload per new object (V13) —
          * and only those are read, because an object fetched from this remote
          * is still a pointer here until somebody opens it. */
-        const client = await lfsClient(configuredRemote ?? remoteOf(input.remote, url));
+        const client = await lfsClient(destination);
         if (client !== undefined) {
-          const pointers = await pointersAmong(sent.blobs);
           try {
             const uploads = await client.upload({
               signal: input.signal,

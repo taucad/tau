@@ -23,11 +23,12 @@ import type { FileSystemProvider } from '@taucad/filesystem';
 import type { RevisionId } from '#algorithms/index.js';
 import type { RevisionProvenance, RevisionSummary } from '#revision-authority.js';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { createInlineCompute } from '#compute-worker/compute-worker.js';
 import { parseChangeId } from '#git-objects.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import type { LfsFetchReport } from '#isomorphic-git-adapter.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
-import { lfsPointerFor } from '#lfs.js';
+import { lfsObjectPath, lfsPointerFor } from '#lfs.js';
 import { createRevisionHttpClient } from '#http-client.js';
 import type { Checkout, RevisionPort } from '#revision-port.js';
 import { conflictLabels, materializeConflict, readConflictTerms } from '#revision-conflict.js';
@@ -1929,6 +1930,23 @@ describe.runIf(gitToolchainOnPath)('native remote refusals (N1)', () => {
  * that only fetched pointers reads the bytes back.
  */
 describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
+  /**
+   * What a store holds under one oid's directory: the object or a partial of it.
+   *
+   * @param files - The store's filesystem.
+   * @param oid - The large object's id.
+   * @returns The entries named for the oid.
+   */
+  const keptUnder = async (files: FileSystemProvider, oid: string): Promise<readonly string[]> => {
+    const directory = `.git/${lfsObjectPath(oid).slice(0, lfsObjectPath(oid).lastIndexOf('/'))}`;
+    let entries: readonly string[];
+    try {
+      entries = await files.readdir(directory);
+    } catch {
+      return [];
+    }
+    return entries.filter((entry) => entry.startsWith(oid));
+  };
   const large = ((): Uint8Array<ArrayBuffer> => {
     const bytes = new Uint8Array(new ArrayBuffer(5 * 1024 * 1024));
     for (let index = 0; index < bytes.length; index += 1) {
@@ -1979,6 +1997,55 @@ describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
     } finally {
       await fixture.close();
       await other.close();
+      await writer.dispose();
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 60_000);
+
+  /* P20: tracking refs outlive `setRemote`, so a remote re-pointed from an LFS
+   * host to a plain Git one still has the old host's `refs/remotes/origin/*`.
+   * The refusal reads what this host would be sent, not what the old one held. */
+  it('refuses large objects to a plain Git remote re-pointed from an LFS host, by what it would send', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-lfs-repointed-'));
+    const hosted = await startGitHttpBackend({ root: join(root, 'hosted') });
+    const plain = await startGitHttpBackend({ root: join(root, 'plain'), name: 'plain' });
+    const writer = await isomorphicHarness();
+    try {
+      const port = writer.withTransport();
+      await port.init({ author });
+      const first = await port.writeRevision({
+        parents: [],
+        tree: tree({ 'models/bracket.step': large, 'main.ts': 'one\n' }),
+        provenance: provenance('user'),
+        summary: summary('Large object'),
+      });
+      await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(first.commitId) });
+      await port.setRemote({ name: 'origin', url: hosted.url, provider: 'github', repositoryId: '1' });
+      await port.push({ remote: 'origin', refs: [{ name: 'refs/heads/main' }] });
+      expect(hosted.uploadCount()).toBe(1);
+
+      // A text edit: against the stale tracking ref, it sends no large object.
+      const second = await port.writeRevision({
+        parents: [revisionId(first.commitId)],
+        tree: tree({ 'models/bracket.step': large, 'main.ts': 'two\n' }),
+        provenance: provenance('user'),
+        summary: summary('Text edit'),
+      });
+      await port.updateRef({
+        name: 'main',
+        expectedHead: revisionId(first.commitId),
+        head: revisionId(second.commitId),
+      });
+      await port.setRemote({ name: 'origin', url: plain.url });
+
+      const pushing = port.push({ remote: 'origin', refs: [{ name: 'refs/heads/main' }] });
+      await expect(pushing).rejects.toMatchObject({ code: 'LFS_REMOTE_UNSUPPORTED' });
+      await expect(pushing).rejects.toThrow(/models\/bracket\.step/u);
+      expect(plain.trail().some((entry) => entry.endsWith('/git-receive-pack'))).toBe(false);
+      expect(plain.batches()).toStrictEqual([]);
+    } finally {
+      await hosted.close();
+      await plain.close();
       await writer.dispose();
       await rm(root, { force: true, recursive: true });
     }
@@ -2158,30 +2225,77 @@ describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
       await tearing.fetch({ remote: 'tau' });
       await expect(tearing.readTree(head)).rejects.toThrow(/did not hash to its own id/u);
       const { oid } = lfsPointerFor(large).pointer;
+      await expect(keptUnder(provider, oid)).resolves.toStrictEqual([]);
       const served = fixture.objects as Map<string, Uint8Array<ArrayBuffer>>;
       served.set(
         oid,
         large.map((byte, index) => (index === 0 ? (byte + 1) % 256 : byte)),
       );
 
+      const readerFiles = await createMemoryProvider();
       const reader = createIsomorphicGitRevisionPort({
-        filesystem: await createMemoryProvider(),
+        filesystem: readerFiles,
         http: createRevisionHttpClient({ authorization: () => 'Bearer session-token' }),
       });
       await reader.init({ author });
       await reader.setRemote({ name: 'tau', url: fixture.url });
       await reader.fetch({ remote: 'tau' });
       await expect(reader.readTree(head)).rejects.toThrow(/did not hash to its own id/u);
+      await expect(keptUnder(readerFiles, oid)).resolves.toStrictEqual([]);
 
       served.set(oid, large);
       const healed = await reader.readTree(head);
       expect(healed?.get('models/bracket.step')).toStrictEqual(large);
+      await expect(keptUnder(readerFiles, oid)).resolves.toStrictEqual([oid]);
     } finally {
       await fixture.close();
       await writer.dispose();
       await rm(root, { force: true, recursive: true });
     }
   }, 120_000);
+
+  /* D9: a read-back that throws — here the hash itself — keeps no `.partial`. */
+  it('keeps no partial download when hashing the read-back throws', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-lfs-hash-throws-'));
+    const fixture = await startGitHttpBackend({ root });
+    const writer = await isomorphicHarness();
+    try {
+      const port = writer.withTransport();
+      await port.init({ author });
+      const receipt = await port.writeRevision({
+        parents: [],
+        tree: tree({ 'models/bracket.step': large }),
+        provenance: provenance('user'),
+        summary: summary('Large object'),
+      });
+      const head = revisionId(receipt.commitId);
+      await port.updateRef({ name: 'main', expectedHead: undefined, head });
+      await port.setRemote({ name: 'tau', url: fixture.url });
+      await port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] });
+
+      const files = await createMemoryProvider();
+      const inline = createInlineCompute();
+      const reader = createIsomorphicGitRevisionPort({
+        filesystem: files,
+        http: createRevisionHttpClient({ authorization: () => 'Bearer session-token' }),
+        compute: {
+          ...inline,
+          sha256: async () => {
+            throw new Error('The hash failed.');
+          },
+        },
+      });
+      await reader.init({ author });
+      await reader.setRemote({ name: 'tau', url: fixture.url });
+      await reader.fetch({ remote: 'tau' });
+      await expect(reader.readTree(head)).rejects.toThrow(/The hash failed/u);
+      await expect(keptUnder(files, lfsPointerFor(large).pointer.oid)).resolves.toStrictEqual([]);
+    } finally {
+      await fixture.close();
+      await writer.dispose();
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 60_000);
 
   /* Load-path audit fix 1: opening a project read its large objects one batch
    * call and one transfer at a time. A store that fetched only pointers now

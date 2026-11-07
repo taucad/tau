@@ -42,8 +42,11 @@ export type ComputeWorker = Readonly<{
   deflate: (raw: Uint8Array<ArrayBuffer>) => Promise<Uint8Array<ArrayBuffer>>;
   /** SHA-1 of the bytes, lowercase hex: WebCrypto where the origin has it. */
   sha1: (bytes: Uint8Array<ArrayBuffer>) => Promise<string>;
-  /** SHA-256 of the bytes, lowercase hex: WebCrypto where the origin has it (an LFS object's id). */
-  sha256: (bytes: Uint8Array<ArrayBuffer>) => Promise<string>;
+  /**
+   * SHA-256 of the bytes, lowercase hex: WebCrypto where the origin has it (an LFS object's id).
+   * `consumed`, the bytes are transferred to the worker rather than cloned, and are unusable after.
+   */
+  sha256: (bytes: Uint8Array<ArrayBuffer>, consumed?: boolean) => Promise<string>;
   /**
    * The version-2 `.idx` of one whole pack (≤ the store's 64 MiB ceiling).
    * `isomorphic-git`'s indexer over an in-memory file: no store is read.
@@ -351,8 +354,13 @@ export const openComputeConnection = (port: ComputePort, now: () => number = Dat
     const call = Promise.withResolvers<unknown>();
     waiting.set(id, { method, call });
     /* Cloned, not transferred: the caller keeps its own bytes, whole and usable (a pack
-     * writer reads an object again after deflating it, a loose writer hashes then deflates). */
-    port.postMessage({ id, method, args } satisfies ComputeRequest, []);
+     * writer reads an object again after deflating it, a loose writer hashes then deflates),
+     * unless it hands them over as consumed. */
+    const [bytes, consumed] = args;
+    port.postMessage(
+      { id, method, args } satisfies ComputeRequest,
+      method === 'sha256' && consumed === true ? [(bytes as Uint8Array<ArrayBuffer>).buffer] : [],
+    );
     return call.promise;
   };
   const compute = Object.fromEntries(

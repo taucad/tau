@@ -5,6 +5,7 @@ import {
   changelogNotes,
   changelogSection,
   increment,
+  owedTags,
   planRelease,
   prependChangelog,
   releaseCommitSubject,
@@ -74,6 +75,26 @@ describe('planRelease', () => {
       nextVersion: '1.4.0',
       tag: 'ui@1.4.0',
     });
+  });
+});
+
+describe('owedTags', () => {
+  it('owes a tag for every untagged manifest version, including several from one push', () => {
+    const existing = new Set(['ui@0.2.0', 'ui@0.3.0', 'api@0.2.0', 'desktop@0.1.0']);
+    expect(
+      owedTags(
+        [
+          { name: 'ui', version: '0.3.0' },
+          { name: 'api', version: '0.3.0' },
+          { name: 'desktop', version: '0.1.0' },
+        ],
+        (tag) => existing.has(tag),
+      ),
+    ).toEqual([{ name: 'api', version: '0.3.0', tag: 'api@0.3.0' }]);
+  });
+
+  it('owes nothing when every version is tagged', () => {
+    expect(owedTags([{ name: 'ui', version: '0.3.0' }], () => true)).toEqual([]);
   });
 });
 

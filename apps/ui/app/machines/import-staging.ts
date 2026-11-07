@@ -69,7 +69,14 @@ export type ImportSourceDescriptor =
    * it: the Tau API's archive gateway, which GitHub's own archive hosts need
    * because they answer no cross-origin read. No credential travels with it.
    */
-  | Readonly<{ kind: 'archive'; url: string; name: string; headers?: Readonly<Record<string, string>> }>;
+  | Readonly<{
+      kind: 'archive';
+      url: string;
+      name: string;
+      headers?: Readonly<Record<string, string>>;
+      /** The host the archive comes from: a GitHub archive is pinned at its top folder's sha when the gateway names no commit. */
+      provider?: 'github';
+    }>;
 
 /** How much of an archive download has arrived. @public */
 export type ImportDownloadProgress = Readonly<{ loaded: number; total: number }>;
@@ -248,22 +255,35 @@ const downloadArchive = async (
     Number.isSafeInteger(declared) && declared > 0 && !response.headers.has('content-encoding') ? declared : undefined;
   const total = declaredSize ?? 0;
   let last = 0;
-  const archive = await spoolImportArchive(response.body, {
-    ...(declaredSize === undefined ? {} : { declaredSize }),
-    signal: control.signal,
-    onProgress: (loaded) => {
-      const now = Date.now();
-      if (now - last >= 100) {
-        last = now;
-        control.onDownload({ loaded, total });
-      }
-    },
-  });
+  let archive: Blob;
+  try {
+    archive = await spoolImportArchive(response.body, {
+      ...(declaredSize === undefined ? {} : { declaredSize }),
+      signal: control.signal,
+      onProgress: (loaded) => {
+        const now = Date.now();
+        if (now - last >= 100) {
+          last = now;
+          control.onDownload({ loaded, total });
+        }
+      },
+    });
+  } catch (error) {
+    /* A transfer that failed partway (the gateway ends one that spends its hourly allowance with an error) is not damage. */
+    if (error instanceof ImportRefusedError || control.signal.aborted) {
+      throw error;
+    }
+    throw new Error(downloadInterrupted, { cause: error });
+  }
   control.onDownload({ loaded: archive.size, total: archive.size });
   /* The gateway names the commit it resolved the ref to; anything but 40 hex is no commit. */
   const commit = response.headers.get(importCommitHeader)?.trim().toLowerCase();
   return { archive, ...(commit !== undefined && commitPattern.test(commit) ? { commit } : {}) };
 };
+
+/** What an archive download that failed partway says: it may be the gateway's rate limit, not damage. @public */
+export const downloadInterrupted =
+  'The repository download stopped partway. Tau may be limiting downloads from your network for now: try again later.';
 
 /** The header the archive gateway names the resolved commit in. @public */
 export const importCommitHeader = 'X-Tau-Commit';
@@ -277,9 +297,13 @@ const topFolderRevision = (path: string): string | undefined => /^[^/]+-([0-9a-f
  * An archive pinned at the commit the gateway named or, when it named none,
  * at the short sha of its top folder, read from the first entry as it lists.
  */
-const pinnedArchive = (base: ImportSource, commit: string | undefined): ImportSource => {
+const pinnedArchive = (base: ImportSource, commit: string | undefined, github: boolean): ImportSource => {
   if (commit !== undefined) {
     return { ...base, revision: commit };
+  }
+  /* Only GitHub names its top folder after the commit. */
+  if (!github) {
+    return base;
   }
   let revision: string | undefined;
   let seen = false;
@@ -307,7 +331,11 @@ const sourceOf = async (
   switch (descriptor.kind) {
     case 'archive': {
       const { archive, commit } = await downloadArchive(descriptor, control);
-      return pinnedArchive(zipImportSource(archive, { name: descriptor.name, kind: 'archive' }), commit);
+      return pinnedArchive(
+        zipImportSource(archive, { name: descriptor.name, kind: 'archive' }),
+        commit,
+        descriptor.provider === 'github',
+      );
     }
     case 'zip': {
       return zipImportSource(descriptor.file);

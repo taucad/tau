@@ -376,6 +376,7 @@ describe('ImportRoute GitHub card', () => {
       expect(importChannel.plan).toHaveBeenCalledWith(
         {
           kind: 'archive',
+          provider: 'github',
           url: 'https://api.tau.test/v1/repositories/archive',
           name: 'KittyCAD/modeling-app',
           headers: {},

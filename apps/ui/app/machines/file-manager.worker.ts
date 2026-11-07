@@ -767,7 +767,7 @@ self.addEventListener(
         importStaging: async (scope) => fileService.importStaging(scope),
         decode: async (request) => revisionCompute.decodeImportEntry(request),
         /* Each written file's one hash, from its read-back, on the compute worker (EQ6, I2). */
-        measure: async (bytes) => revisionCompute.measureImportBytes(bytes),
+        measure: async (bytes, expectedSize) => revisionCompute.measureImportBytes(bytes, expectedSize),
         policy: tauPathPolicy,
       });
       return;

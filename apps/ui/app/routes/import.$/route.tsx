@@ -286,6 +286,7 @@ export default function ImportRoute(): React.JSX.Element {
               const listing = await session.plan(
                 {
                   kind: 'archive',
+                  provider: 'github',
                   url: input.downloadUrl,
                   name: input.name,
                   ...(input.headers === undefined ? {} : { headers: input.headers }),

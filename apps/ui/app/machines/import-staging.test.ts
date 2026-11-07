@@ -17,6 +17,7 @@ import type { BatchEntry } from '@taucad/filesystem';
 import {
   ImportChannelError,
   createFromStagedImport,
+  downloadInterrupted,
   downloadRefusal,
   holdLease,
   importCommitHeader,
@@ -451,16 +452,50 @@ describe('the import channel', () => {
       ['the commit the gateway names', { [importCommitHeader]: 'B'.repeat(40) }, 'b'.repeat(40)],
       ["the top folder's short sha when it names none", {}, 'abc1234'],
       ["the top folder's short sha when what it names is no commit", { [importCommitHeader]: 'main' }, 'abc1234'],
-    ])('pins the archive at %s', async (_, headers: Record<string, string>, revision) => {
+    ])('pins a GitHub archive at %s', async (_, headers: Record<string, string>, revision) => {
       const provider = new MemoryProvider();
       answering(new Response(await zipOf({ 'o-r-abc1234/main.kcl': 'm' }), { status: 200, headers }));
       const session = connect(provider);
 
-      await session.plan({ kind: 'archive', url: archiveUrl, name: 'o/r' });
+      await session.plan({ kind: 'archive', url: archiveUrl, name: 'o/r', provider: 'github' });
       await session.stage('req_pinned', scope, { target: 'r' });
 
       const staged = await readStagedImport(provider, 'req_pinned');
       expect(staged?.pin.revision).toBe(revision);
+    });
+
+    it('pins an archive from elsewhere at no revision when no commit is named, whatever its top folder says', async () => {
+      const provider = new MemoryProvider();
+      answering(new Response(await zipOf({ 'o-r-abc1234/main.kcl': 'm' }), { status: 200 }));
+      const session = connect(provider);
+
+      await session.plan({ kind: 'archive', url: archiveUrl, name: 'o/r' });
+      await session.stage('req_unpinned', scope, { target: 'r' });
+
+      const staged = await readStagedImport(provider, 'req_unpinned');
+      expect(staged?.pin.revision).toBeUndefined();
+    });
+
+    it('says a download that failed partway may be rate limited, not damaged', async () => {
+      let sent = false;
+      const body = new ReadableStream<Uint8Array<ArrayBuffer>>({
+        pull(controller) {
+          if (sent) {
+            controller.error(new TypeError('network error'));
+            return;
+          }
+          sent = true;
+          controller.enqueue(new Uint8Array(1024));
+        },
+      });
+      answering(new Response(body, { status: 200 }));
+      const session = connect(new MemoryProvider());
+
+      const refused = await outcome(session.plan({ kind: 'archive', url: archiveUrl, name: 'o/r' }));
+
+      expect(refused).toBeInstanceOf(ImportChannelError);
+      expect((refused as ImportChannelError).message).toBe(downloadInterrupted);
+      expect((refused as ImportChannelError).reason).toBeUndefined();
     });
 
     it("refuses the gateway's 413 and a declared size past the limit as too large", async () => {

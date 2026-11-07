@@ -419,7 +419,7 @@ Hold these costs, which the budgets above depend on:
 | Turn marker flips to **Saved** after settlement      | One frame, with no graph re-walk                                                        |
 | `useRevisions()` across renders with no store change | The same view reference                                                                 |
 
-Spend work once: memoize object ids across a cut, capture only the paths a complete change feed names, batch native object reads through one `cat-file --batch`, and key a derived log on its head rather than recomputing it per mint. Return a referentially stable view from every revision hook so a marker flip costs one render, not a re-walk.
+Spend work once: memoize object ids across a cut, capture only the paths a complete change feed names, and otherwise only what the checkout's Project Index changed and removed since the last capture's cursor (its epoch and generation, read before the capture began): a `rescan`, a cursor from another epoch, no cursor, a memo-bypassing capture, other ignored paths, or a head whose modes disagree with the last capture's walks everything, and an empty answer with `rescan` is never read as no change (S10). The complete feed wins where it names the paths, since it asks the index nothing; batch native object reads through one `cat-file --batch`, and key a derived log on its head rather than recomputing it per mint. Return a referentially stable view from every revision hook so a marker flip costs one render, not a re-walk.
 
 ## Summary Checklist
 

@@ -6,7 +6,7 @@ import { recordChannelDiagnostic } from '#db/channel-diagnostics.js';
  */
 
 import { ResourceQueue } from '@taucad/filesystem';
-import type { FileSystemProvider } from '@taucad/filesystem';
+import type { FileSystemProvider, IndexAdmits } from '@taucad/filesystem';
 import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { toRpcError } from '@taucad/chat/rpc';
 import { geoSpecDefaultRunBudget } from '@taucad/chat/constants';
@@ -85,6 +85,8 @@ type ProjectFileSystemBridge = Pick<
   | 'hello'
   | 'dispose'
   | 'pendingPaths'
+  | 'statTree'
+  | 'facts'
 >;
 
 /** What the worker as a whole gives each project host. */
@@ -282,6 +284,46 @@ const swappable = <Target extends object>(
 };
 
 /**
+ * Whether a mask admits one row of a subtree listing: the file itself and every
+ * directory above it, as an index walk asks before each descent.
+ *
+ * @param path - The row's path, relative to the listed directory.
+ * @param admits - The view's mask.
+ * @returns True when nothing on the path is hidden.
+ */
+const admittedRow = (path: string, admits: IndexAdmits): boolean => {
+  const segments = path.split('/');
+  for (let depth = 1; depth < segments.length; depth += 1) {
+    if (!admits(segments.slice(0, depth).join('/'), 'dir')) {
+      return false;
+    }
+  }
+  return admits(path, 'file');
+};
+
+/**
+ * Run one index query, refusing it with `ENOTSUP` where the bridge's far end
+ * serves no index (a bare provider's connection answers `Unknown method`):
+ * the agent's search then walks the tree, as it does on any host without one.
+ *
+ * @param method - The bridge call.
+ * @param call - The call itself.
+ * @returns Its answer.
+ */
+const withoutIndexAs = async <Result>(method: string, call: () => Promise<Result>): Promise<Result> => {
+  try {
+    return await call();
+  } catch (error) {
+    if (error instanceof Error && error.message === `Unknown method: ${method}`) {
+      throw Object.assign(new Error('This workspace bridge serves no index queries.', { cause: error }), {
+        code: 'ENOTSUP',
+      });
+    }
+    throw error;
+  }
+};
+
+/**
  * The workspace bridge as a `FileSystemProvider`: the one rooted provider this
  * worker hands to the GeoSpec bridge port and to the shared tool filesystem.
  *
@@ -291,7 +333,7 @@ const swappable = <Target extends object>(
  */
 export const createRelayedFileSystemProvider = (
   proxy: ProjectFileSystemBridge,
-): FileSystemProvider & Pick<ComposedView, 'pendingPaths'> => {
+): FileSystemProvider & Required<Pick<ComposedView, 'pendingPaths' | 'statTree' | 'facts'>> => {
   const { payload } = proxy.hello;
   if (payload.state !== 'ready') {
     throw Object.assign(new Error(`Workspace filesystem bridge is ${payload.state}.`), {
@@ -340,6 +382,30 @@ export const createRelayedFileSystemProvider = (
     rename: proxy.rename.bind(proxy),
     exists: proxy.exists.bind(proxy),
     lstat: proxy.lstat.bind(proxy),
+    /*
+     * The root's Project Index in one call (charter D13), so the agent's grep
+     * and glob never walk the bridge one directory at a time. The view above
+     * passes its mask as `admits`, a predicate that cannot cross the wire, so
+     * it is applied to the rows here: a hidden directory's files are dropped
+     * by the same answer that would have stopped a descent.
+     */
+    statTree: async (path, options) => {
+      const rows = await withoutIndexAs('statTree', async () =>
+        proxy.statTree(path, options?.signal === undefined ? undefined : { signal: options.signal }),
+      );
+      const { admits } = options ?? {};
+      return admits === undefined ? rows : rows.filter((row) => admittedRow(row.path, admits));
+    },
+    /* The caller's listed head metadata stays here: the authority's index holds its own. */
+    facts: async (paths, options) =>
+      withoutIndexAs('facts', async () =>
+        proxy.facts(paths, {
+          ...(options?.lineCount === undefined ? {} : { lineCount: options.lineCount }),
+          ...(options?.byteCap === undefined ? {} : { byteCap: options.byteCap }),
+          ...(options?.digests === undefined ? {} : { digests: options.digests }),
+          ...(options?.signal === undefined ? {} : { signal: options.signal }),
+        }),
+      ),
     /* A host that predates the call cannot say, which is not "none": its callers check another way (reads refuse with PENDING). */
     pendingPaths: async (paths) => {
       try {

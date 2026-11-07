@@ -242,6 +242,7 @@
     "@taucad/fs-bridge": "workspace:*",
     "@taucad/fs-client": "workspace:*",
     "@taucad/geometry-core": "workspace:*",
+    "@taucad/lsp-fs": "workspace:*",
     "@taucad/nx": "workspace:*",
     "@taucad/oxlint": "workspace:*",
     "@taucad/project-core": "workspace:*",

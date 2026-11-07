@@ -3,7 +3,7 @@ title: 'Language Contribution Policy'
 description: 'CodeMirror and Lezer language support, code-pane admission, shared filesystem tiers, checked edits and TypeScript worker ownership'
 status: active
 created: '2026-05-07'
-updated: '2026-10-31'
+updated: '2026-11-07'
 related:
   - docs/research/language-fs-bridge-implementation.md
   - docs/research/scalable-language-contribution-fs-architecture.md
@@ -38,11 +38,15 @@ Do not send ambiguous raw paths or probe multiple guessed workspace keys.
 
 Tier 2 is TypeScript-worker infrastructure. Other language contributions must not add blocking reads without an explicit architecture change and cross-origin-isolation support.
 
+Tier 2 answers `fileExists`, `directoryExists` and script versions from the worker's mirror of the root's Project Index (filesystem capability charter D13). The file manager sends the whole index once on attach and then the index's own changes after each change set, so these probes make no slot round trip and read no bytes. File content and directory listings still go over the slot. So does any probe of a path the index never holds, because a miss in the mirror says nothing about those paths. Those paths are `node_modules` at any depth, the other policy rows nothing watches, the index's reserved paths, and each nested mount below the root, which the feed names in every message.
+
+The mirror is eventually consistent. It applies a change set only after the file manager's next `changedSince` answer reaches the worker, and the worker reads its port between requests. One guard keeps that ordering from caching a stale answer. Every mirror message names the D6 change-set generation it reflects. The feed also posts an `ahead` notice with a change set's generation as soon as it hears it, before it asks the index. Any other change notice that reaches the worker must pass its generation to the client's `noteChangeSet`. While the worker has heard of a change set newer than the one the mirror reflects, `fromMirror` declines and the slot answers every presence and version probe. A language request that runs before any notice of a write reaches the worker can still see the old state. Once the change set arrives the next request sees it, because the TypeScript service asks every script's version and presence again on each program update. Code must not rely on a probe seeing a write within the same request that caused it. If the feed fails to ask the index, it sends `stale` and the slot answers every probe until the feed, retrying with backoff, sends the index whole again.
+
 ### 4. Keep the file manager authoritative
 
 `serveLanguageFileSystemRequests` and `LanguageFsBridge` delegate to the current `FileManagerApi`, `FileTreeService`, and filesystem search owner. They must not fetch workspace files independently or maintain a second tree.
 
-Filesystem authority events update the pool and worker view. Polling may detect missed change signals but must remain a bounded fallback.
+Filesystem authority events update the pool and worker view. Polling may detect missed change signals but must remain a bounded fallback. The Tier 2 index mirror is not a second tree: it holds only what the authority's index sends it, and the authority's change sets drive every update.
 
 ### 5. Keep the TypeScript worker entry explicit
 

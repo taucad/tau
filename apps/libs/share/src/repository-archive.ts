@@ -43,7 +43,8 @@ export type RepositoryArchiveLimits = {
  * @public
  */
 export const repositoryImportLimits: RepositoryArchiveLimits = {
-  maxArchiveBytes: 256 * 1024 * 1024,
+  /* The import's own archive limit (EQ14): the browser refuses a larger declared archive too. */
+  maxArchiveBytes: 1024 * 1024 * 1024,
   maxEntries: 100_000,
   maxFiles: 100_000,
   maxEntryBytes: 25 * 1024 * 1024,

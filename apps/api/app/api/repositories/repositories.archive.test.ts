@@ -211,6 +211,30 @@ describe('repository archive gateway', () => {
     expect(upstream).toHaveBeenCalledTimes(2);
   });
 
+  it('names the commit the import ref resolved to, readable cross-origin', async () => {
+    const raw = await projectZip();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof globalThis.fetch>(async (input) =>
+        inputUrl(input).pathname.includes('/commits/')
+          ? Response.json({ sha: commit })
+          : new Response(raw, { headers: { 'Content-Type': 'application/zip' } }),
+      ),
+    );
+
+    const response = await callArchive('/v1/repositories/archive?provider=github&owner=taucad&repo=tau&ref=main');
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-tau-commit')).toBe(commit);
+    const exposed = response.headers
+      .get('access-control-expose-headers')
+      ?.split(',')
+      .map((name) => name.trim().toLowerCase());
+    expect(exposed).toContain('x-tau-commit');
+    /* The reply's list replaces the plugin's, so the others stay exposed too. */
+    expect(exposed).toContain('request-id');
+  });
+
   it('sends the GitHub token only to api.github.com across redirects', async () => {
     const raw = await projectZip();
     const upstream = vi.fn<typeof globalThis.fetch>(async (input, init) => {
@@ -440,6 +464,101 @@ describe('repository import streaming', () => {
     expect(received).toBe(repositoryImportLimits.maxArchiveBytes + mebibyte);
     expect(sent).toBe(received);
     expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  describe('the hourly byte budget per network', () => {
+    const budget = 2 * 1024 * mebibyte;
+
+    /* A Redis whose import byte counter starts at `used`; the request counter stays at one. */
+    const budgeted = (used: number) => {
+      const { service, evalRedis } = createService();
+      const spent: number[] = [];
+      let total = used;
+      /* `eval(script, keys, key, ttl, amount)`: only the byte counter has an amount. */
+      evalRedis.mockImplementation(async (...args: readonly unknown[]) => {
+        const key = String(args[2]);
+        const amount = args[4];
+        if (!key.includes(':archive-bytes:')) {
+          return 1;
+        }
+        spent.push(Number(amount));
+        total += Number(amount);
+        return total;
+      });
+      const call = async (): Promise<Response> =>
+        service.getArchive(
+          Object.fromEntries(new URL(importPath, 'https://api.tau.test').searchParams),
+          '203.0.113.7',
+          new AbortController().signal,
+        );
+      return { call, spent: () => spent.reduce((sum, bytes) => sum + bytes, 0), keys: evalRedis };
+    };
+
+    it('refuses with 429 and Retry-After once the budget is spent, before GitHub is asked', async () => {
+      const upstream = vi.fn<typeof globalThis.fetch>();
+      vi.stubGlobal('fetch', upstream);
+      const { call, keys } = budgeted(budget);
+
+      const response = await call();
+
+      expect(response.status).toBe(429);
+      expect(Number(response.headers.get('retry-after'))).toBeGreaterThan(0);
+      expect(Number(response.headers.get('retry-after'))).toBeLessThanOrEqual(3600);
+      expect(upstream).not.toHaveBeenCalled();
+      expect(keys).toHaveBeenCalledWith(expect.any(String), 1, expect.stringContaining('203.0.113.7'), '3600', '0');
+    });
+
+    it('refuses a declared archive larger than what is left, without reading it', async () => {
+      const pull = vi.fn();
+      stubGithub((signal) => zipResponse(abortableBody(signal, { pull }), 20 * mebibyte));
+      const { call } = budgeted(budget - 10 * mebibyte);
+
+      const response = await call();
+
+      expect(response.status).toBe(429);
+      expect(response.headers.get('retry-after')).not.toBeNull();
+      expect(pull).not.toHaveBeenCalled();
+    });
+
+    it('spends the bytes as they stream, and ends a body that spends the last of the budget', async () => {
+      const chunk = new Uint8Array(mebibyte);
+      const cancel = vi.fn();
+      stubGithub((signal) =>
+        zipResponse(
+          abortableBody(signal, {
+            pull(controller) {
+              controller.enqueue(chunk);
+            },
+            cancel,
+          }),
+        ),
+      );
+      const { call, spent } = budgeted(budget - 12 * mebibyte);
+
+      const response = await call();
+      let received = 0;
+      for await (const value of response.body!) {
+        received += value.byteLength;
+      }
+
+      /* Spent a flush (8 MiB) at a time: the second one crosses the budget, and the body ends there. */
+      expect(response.status).toBe(200);
+      expect(received).toBe(16 * mebibyte);
+      expect(spent()).toBe(received);
+      expect(cancel).toHaveBeenCalledOnce();
+    });
+
+    it('spends exactly what a whole archive streamed', async () => {
+      const archive = new Uint8Array(9 * mebibyte + 5);
+      stubGithub(() => zipResponse(archive, archive.byteLength));
+      const { call, spent } = budgeted(0);
+
+      const response = await call();
+      await response.arrayBuffer();
+
+      expect(response.status).toBe(200);
+      expect(spent()).toBe(archive.byteLength);
+    });
   });
 
   it('answers before the archive has arrived and cancels the upstream when the caller goes away', async () => {

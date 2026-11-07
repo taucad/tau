@@ -18,6 +18,7 @@ it('should expose the durable chat run identity and bearer session token to cros
     'set-auth-token',
     'retry-after',
     'request-id',
+    'x-tau-commit',
   ]);
   expect(corsBaseConfiguration.allowedHeaders).toContain('x-tau-attempt-id');
 });

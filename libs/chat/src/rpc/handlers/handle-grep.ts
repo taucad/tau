@@ -21,12 +21,12 @@ const defaultGrepHeadLimit = 50;
 const maxGrepLineChars = 500;
 
 /**
- * Largest file an index-backed grep reads (charter D13): a larger one is
- * generated output or data, not source, and its bytes would become one string.
- * The same default as the authority's own `grep`. A file named as the grep's
- * path is always read.
+ * Largest file a directory grep reads (charter D13): a larger one is generated
+ * output or data, not source, and its bytes would become one string. The same
+ * default as the authority's own `grep`. The result names each file left
+ * unread, and a file named as the grep's path is always read.
  */
-const maxIndexedGrepFileBytes = 4 * 1024 * 1024;
+const maxGrepFileBytes = 4 * 1024 * 1024;
 
 type GrepMatch = { file: string; line: number; content: string; before?: string[]; after?: string[] };
 
@@ -88,17 +88,18 @@ const globFilter = async (glob: string): Promise<(path: string) => boolean> => {
 };
 
 /**
- * The files one grep reads. The index answers a directory's subtree in one
- * call, and every file it already knows is binary or above the size cap is
- * left unread; a file whose kind it has not measured is classified from its
- * head (D4) before any read. Without an index the directory is walked and
- * every file it lists is read, as before.
+ * The files one grep reads, and the files it leaves unread for their size.
+ * The index answers a directory's subtree in one call; without one, or for a
+ * directory it does not hold, the directory is walked. Either way every file
+ * known to be binary or above the size cap is left unread, and a file whose
+ * kind is not known is classified from its head (D4) before any read. A file
+ * named as the grep's path is always read.
  */
 async function resolveSearchFiles(
   fileSystem: RpcFileSystem,
   basePath: string,
   glob: string | undefined,
-): Promise<string[]> {
+): Promise<Readonly<{ files: string[]; oversized: string[] }>> {
   // Stat first so we can distinguish file vs directory and emit a clean
   // FILE_NOT_FOUND when the caller types a wrong path (no thrown
   // `Grep search failed` exception, mirrors claude-code's GrepTool.validateInput).
@@ -106,26 +107,26 @@ async function resolveSearchFiles(
   if (basePath !== '') {
     const stat = await fileSystem.stat(basePath);
     if (!stat.isDirectory) {
-      return matchesGlob?.(basePath) === false ? [] : [basePath];
+      return { files: matchesGlob?.(basePath) === false ? [] : [basePath], oversized: [] };
     }
   }
-  const indexed = await indexedFilesUnder(fileSystem, basePath);
-  if (indexed === undefined) {
-    const walked = await walkFiles(fileSystem, basePath, {
+  const listed =
+    (await indexedFilesUnder(fileSystem, basePath)) ??
+    (await walkFiles(fileSystem, basePath, {
       contentFacts: false,
       includeExplicitOnly: isExplicitSkillsScope(basePath),
-    });
-    return walked.map(({ path }) => path).filter((path) => matchesGlob?.(path) !== false);
-  }
-  const candidates = indexed.filter(
-    (file) =>
-      file.contentKind !== 'binary' && file.size <= maxIndexedGrepFileBytes && matchesGlob?.(file.path) !== false,
-  );
+    }));
+  const searchable = listed.filter((file) => file.contentKind !== 'binary' && matchesGlob?.(file.path) !== false);
+  const oversized = searchable.filter((file) => file.size > maxGrepFileBytes).map(({ path }) => path);
+  const candidates = searchable.filter((file) => file.size <= maxGrepFileBytes);
   const kinds = await contentKindsOf(
     fileSystem,
     candidates.filter((file) => file.contentKind === undefined).map((file) => file.path),
   );
-  return candidates.filter((file) => (file.contentKind ?? kinds.get(file.path)) !== 'binary').map(({ path }) => path);
+  return {
+    files: candidates.filter((file) => (file.contentKind ?? kinds.get(file.path)) !== 'binary').map(({ path }) => path),
+    oversized,
+  };
 }
 
 /** @public */
@@ -139,8 +140,13 @@ export async function handleGrep(input: GrepRpcInput, fileSystem: RpcFileSystem)
     const basePath = assertRootedPath(input.path ?? '');
 
     let filesToSearch: string[];
+    let oversizedFiles: string[];
     try {
-      filesToSearch = await resolveSearchFiles(fileSystem, basePath, input.glob);
+      ({ files: filesToSearch, oversized: oversizedFiles } = await resolveSearchFiles(
+        fileSystem,
+        basePath,
+        input.glob,
+      ));
     } catch (error) {
       const errno = (error as NodeJS.ErrnoException | undefined)?.code;
       if (errno === 'ENOENT' || (error instanceof Error && /enoent|no such/i.test(error.message))) {
@@ -215,6 +221,7 @@ export async function handleGrep(input: GrepRpcInput, fileSystem: RpcFileSystem)
       appliedOffset: offset,
       /* In the walk's order. */
       ...(pending.size === 0 ? {} : { pendingFiles: filesToSearch.filter((path) => pending.has(path)) }),
+      ...(oversizedFiles.length === 0 ? {} : { oversizedFiles }),
     };
   } catch (error) {
     return toRpcError(error);

@@ -23,7 +23,7 @@ type Tally = { walks: number; reads: string[]; binaryBytesRead: number };
 let service: WorkspaceFileService;
 let rooted: RootedFileSystem;
 
-const binaries = new Set(['models/part.step', 'models/mesh.glb']);
+const binaries = new Set(['models/part.step', 'models/mesh.glb', 'node_modules/dep/addon.node']);
 
 beforeEach(async () => {
   const providerRegistry = new ProviderRegistry();
@@ -45,6 +45,8 @@ beforeEach(async () => {
   await rooted.writeFile('models/mesh.glb', binaryBytes(2048));
   /* An ignored directory: never indexed, so only a search that names it walks it. */
   await rooted.writeFile('node_modules/dep/index.ts', 'export const marker = 2;\n');
+  await rooted.writeFile('node_modules/dep/addon.node', binaryBytes(1024));
+  await rooted.writeFile('node_modules/dep/bundle.js', new Uint8Array(5 * 1024 * 1024).fill(0x61));
   /* Hidden from the agent: neither listed nor read. */
   await rooted.writeFile('.tau/project.json', '{"marker":true}\n');
 });
@@ -112,13 +114,16 @@ describe('index-backed agent search (S12)', () => {
     expect(tally).toEqual({ walks: 0, reads: [], binaryBytesRead: 0 });
   });
 
-  it('greps a directory the index does not hold by walking it', async () => {
+  it('greps a directory the index does not hold by walking it, with the same binary skip and size cap', async () => {
     const tally: Tally = { walks: 0, reads: [], binaryBytesRead: 0 };
 
     const result = await handleGrep({ pattern: 'marker', path: 'node_modules' }, agentFileSystem(tally));
 
     expect(result.success && result.matches.map((match) => match.file)).toEqual(['node_modules/dep/index.ts']);
+    expect(result).toMatchObject({ oversizedFiles: ['node_modules/dep/bundle.js'] });
     expect(tally.walks).toBeGreaterThan(0);
+    expect(tally.binaryBytesRead).toBe(0);
+    expect(tally.reads).toEqual(['node_modules/dep/index.ts']);
   });
 
   it('applies the grep glob before any read', async () => {

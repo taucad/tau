@@ -295,6 +295,8 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
   };
 
   const { pendingPaths, statTree, facts } = provider;
+  /* Set once the view says it serves no index: kinds would then be measured by reading each file the search reads anyway. */
+  let indexUnavailable = statTree === undefined;
   return {
     /*
      * The index answers a whole subtree in one call (charter D13): what grep
@@ -315,6 +317,7 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
             } catch (error) {
               /* A view over a connection that serves no index: the handlers walk. */
               if (getErrno(error) === 'ENOTSUP') {
+                indexUnavailable = true;
                 return undefined;
               }
               throw error;
@@ -339,6 +342,9 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
         }),
     /* Kinds only, from each file's head where the index has not measured one (D4): no line count, no full read. */
     contentKinds: async (paths: readonly string[]) => {
+      if (indexUnavailable) {
+        return new Map();
+      }
       const targets = paths.map((path) => assertRootedPath(path));
       let measured: ReadonlyMap<string, ContentFacts>;
       try {

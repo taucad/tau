@@ -4779,9 +4779,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           const active = await port.readHead();
           const branch = active?.branch ?? input.branch;
           const head = await port.readRef(branch);
-          if (head === undefined) {
-            /* A project whose branch is unborn has nothing to back up yet; the
-             * first revision pushes on its own debounce. */
+          /* A project whose branch is unborn has nothing to back up yet; the
+           * first revision pushes on its own debounce. One whose branch the
+           * remote already advertises at this head has nothing to send, and
+           * asking costs a second `info/refs` (D11). */
+          if (
+            head === undefined ||
+            advertised.some((ref) => ref.name === `refs/heads/${branch}` && ref.head === head)
+          ) {
             return {};
           }
           const result = await (async () => {

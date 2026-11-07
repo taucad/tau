@@ -30,7 +30,7 @@ import { writeChatRef } from '#chat-ref.js';
 import { materializeConflict, readConflictTerms } from '#revision-conflict.js';
 import { RevisionPortError } from '#revision-port.js';
 import { remoteTrackingRef } from '#remotes.js';
-import type { Checkout, ConflictRecord, RemoteRef, RevisionPort } from '#revision-port.js';
+import type { Checkout, ConflictRecord, RemoteRef, RevisionPort, RevisionPushInput } from '#revision-port.js';
 import { gitToolchainOnPath, nativeHarness } from '#test/native-git-harness.js';
 import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
 import { createOpsLog, opsRefName } from '#ops-ref.js';
@@ -3641,6 +3641,43 @@ describe('independent sync record failures', () => {
     /* The pull hands its own listing to its fetch too. */
     await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
     expect(handed.at(-1)).toBe(listings.at(-1));
+  }, 30_000);
+
+  /* D11, S9: a connect whose branch the remote already holds at this head pushes nothing, so it costs one `info/refs`. */
+  it('pushes nothing at connect when the remote already advertises the branch at this head', async () => {
+    const context = await fixture({ 'main.ts': 'base\n' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['main.ts', 'base\n']]),
+      provenance: { source: 'user', actorId: 'device-a', createdAt: 1 },
+      summary: { generated: 'Main' },
+    });
+    const head = revisionId(receipt.commitId);
+    await context.port.updateRef({ name: 'main', expectedHead: undefined, head });
+    await context.port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+    let remoteHead: RevisionId | undefined = head;
+    const pushed: RevisionPushInput[] = [];
+    const actors = createRevisionActors({
+      port: {
+        ...context.port,
+        listRemoteRefs: async () => (remoteHead === undefined ? [] : [{ name: 'refs/heads/main', head: remoteHead }]),
+        fetch: async () => ({ refs: [] }),
+        push: async (input) => {
+          pushed.push(input);
+          return { refs: input.refs.map((ref) => ({ name: ref.name, status: 'updated' as const, head })) };
+        },
+      },
+      projectId: 'project-1',
+      filesystem: () => context.filesystem,
+    });
+
+    await run(actors.remote.initialSync, { remote: 'tau', branch: 'main' });
+    expect(pushed).toHaveLength(0);
+
+    remoteHead = undefined;
+    await run(actors.remote.initialSync, { remote: 'tau', branch: 'main' });
+    expect(pushed.map((input) => input.refs.map((ref) => ref.name))).toEqual([['refs/heads/main']]);
   }, 30_000);
 
   /* R6 review: only a validation that finished as the current, unstopped one leaves its listing behind. */

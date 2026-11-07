@@ -1081,6 +1081,48 @@ describe('downloadMany', () => {
     expect(streamed).toHaveBeenCalledTimes(1);
   });
 
+  /* The stall bound measures the network, not the writer: a sink slower than the bound is never cut off. */
+  it('never abandons a transfer while its sink is busy with the bytes it already has', async () => {
+    const [pointer] = pointers;
+    const content = contentOf.get(pointer!.oid)!;
+    /* The rest arrives 20 ms after the sink is done with the first chunk: well inside the bound,
+     * but long after a bound counted from the first chunk would have run out. */
+    const transfer = vi.fn<typeof fetch>(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(content.slice(0, 2));
+              setTimeout(() => {
+                controller.enqueue(content.slice(2));
+                controller.close();
+              }, 120);
+            },
+          }),
+        ),
+    );
+    let text = '';
+    await createLfsClient({
+      url: 'https://api.tau.test/git',
+      http: { request: batchEndpoint().request },
+      fetch: transfer,
+      transferStallMilliseconds: 50,
+    }).downloadMany({
+      pointers: [pointer!],
+      streamed: async (_pointer, source) => {
+        for await (const chunk of source) {
+          text += new TextDecoder().decode(chunk);
+          /* Two stall bounds spent writing each chunk. */
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, 100);
+          });
+        }
+      },
+    });
+    expect(transfer).toHaveBeenCalledTimes(1);
+    expect(text).toBe(new TextDecoder().decode(content));
+  });
+
   it('asks nothing for nothing', async () => {
     const request = vi.fn<RevisionHttpClient['request']>();
     await createLfsClient({ url: 'https://api.tau.test/git', http: { request } }).downloadMany({

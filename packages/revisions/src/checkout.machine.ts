@@ -441,6 +441,9 @@ const requestOf = (event: Extract<CheckoutMachineEvent, { type: 'cut' }>): Check
  * trigger, so it never joins one of these (D1). */
 const ambientTriggers: ReadonlySet<CheckoutCutTrigger> = new Set(['save', 'idle', 'hidden', 'close']);
 
+/* A page that is closing or hidden may be gone before the floor between mints passes (D11). */
+const leavingTriggers: ReadonlySet<CheckoutCutTrigger> = new Set(['hidden', 'close']);
+
 /* The ambient triggers by strength: a stronger one records everything a weaker one asked for (RV-W2b #4). */
 const ambientStrength = new Map<CheckoutCutTrigger, number>([
   ['idle', 0],
@@ -596,6 +599,14 @@ const captureInput = ({ context }: Readonly<{ context: CheckoutMachineContext }>
   generation: context.writeGeneration,
 });
 
+/* Where the floor between mints leaves to: the same routing as a mint that just published. */
+const spacingExit = (
+  context: CheckoutMachineContext,
+): Readonly<{ target: MintExit; context?: Readonly<{ comparison: 'pending' }> }> => {
+  const exit = afterMint(context, true);
+  return { target: exit, ...(exit === 'dirty' ? { context: { comparison: 'pending' } } : {}) };
+};
+
 type MintPatch = Partial<Omit<CheckoutMachineContext, 'reason'>> & Readonly<{ reason?: string }>;
 
 /* Settle the mint into `minting.done`, carrying where `minting.onDone` routes it (see `MintExit`). */
@@ -682,6 +693,9 @@ const checkoutMachineDefinition = setup({
     /* I5: a revision is minted only when the cut's tree differs from the head's. */
     treeUnchanged: (context: CheckoutMachineContext, treeId: string) => treeId === context.headTreeId,
     hasQueuedCut: (context: CheckoutMachineContext) => context.queued.length > 0,
+    /* The page is going: its cut cannot wait out the floor (D11). */
+    hasLeavingCut: (context: CheckoutMachineContext) =>
+      context.queued.some((request) => leavingTriggers.has(request.trigger)),
   },
 }).createMachine({
   id: 'checkout',
@@ -1005,14 +1019,13 @@ const checkoutMachineDefinition = setup({
      * released the fence, so a producer's apply is never held for it. Requests
      * queue meanwhile through the root's `cut`, so the ambient ones are one
      * mint and a turn's stays its own; a write or a head move only counts, and
-     * where the checkout goes is decided when the floor has passed.
+     * where the checkout goes is decided when the floor has passed. A close
+     * or hidden cut does not wait for it: the page may be gone by then.
      */
     spacing: {
+      always: ({ context, guards }) => (guards.hasLeavingCut(context) ? spacingExit(context) : undefined),
       after: {
-        mintFloor: ({ context }) => {
-          const exit = afterMint(context, true);
-          return { target: exit, ...(exit === 'dirty' ? { context: { comparison: 'pending' } } : {}) };
-        },
+        mintFloor: ({ context }) => spacingExit(context),
       },
       initial: 'routing',
       states: {

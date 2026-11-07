@@ -1603,15 +1603,81 @@ describe('checkoutMachine mint floor (D11)', () => {
     actor.stop();
   });
 
-  it('should keep a turn’s cut apart from the ambient ones queued beside it during the floor', async () => {
+  /* Mint the request at the head of the queue once the floor lets it start, and publish it as `revision`. */
+  const mintNext = async (harness: Harness, revision: string): Promise<void> => {
+    const { actor, callbacks, clock, promises } = harness;
+    if (actor.getSnapshot().matches('spacing')) {
+      clock.advance(checkoutMintFloorMilliseconds);
+    }
+    expect(actor.getSnapshot().matches({ minting: 'acquiring' })).toBe(true);
+    callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: `tree-${revision}`, cutId: `cut-${revision}` } });
+    await flush();
+    promises.settle('writeRevision', { output: { status: 'written', revisionId: revision } });
+    await flush();
+    promises.settle('casHead', { output: { status: 'updated', head: revision } });
+    await flush();
+  };
+
+  it('should keep a turn’s cut apart from the ambient ones queued beside it during the floor, one floor apart each', async () => {
     const harness = await published();
-    const { actor } = harness;
+    const { actor, promises, parent } = harness;
 
     actor.send({ type: 'cut', requestId: 's-2', trigger: 'save', leaseIds: [] });
     actor.send({ type: 'cut', requestId: 't-1', trigger: 'turn', turn: turnOf('turn-1'), leaseIds: ['run-1'] });
     actor.send({ type: 'cut', requestId: 's-3', trigger: 'save', leaseIds: [] });
+    await mintNext(harness, 'rev-3');
+    await mintNext(harness, 'rev-4');
+    await mintNext(harness, 'rev-5');
 
-    expect(actor.getSnapshot().context.queued.map((request) => request.trigger)).toEqual(['save', 'turn', 'save']);
+    expect(promises.inputsFor('cut').map((input) => (input as Readonly<{ trigger: string }>).trigger)).toEqual([
+      'save',
+      'save',
+      'turn',
+      'save',
+    ]);
+    expect(answersOf(parent.events).map((event): unknown => [event['requestId'], event['revisionId']])).toEqual([
+      ['r-1', 'rev-2'],
+      ['s-2', 'rev-3'],
+      ['t-1', 'rev-4'],
+      ['s-3', 'rev-5'],
+    ]);
+    expect(actor.getSnapshot().matches('spacing')).toBe(true);
+
+    actor.stop();
+  });
+
+  it.each(['close', 'hidden'] as const)(
+    'should not hold a %s cut for the floor: the page may be gone',
+    async (trigger) => {
+      const harness = await published();
+      const { actor, callbacks } = harness;
+
+      actor.send({ type: 'cut', requestId: 'leaving', trigger, leaseIds: [] });
+
+      expect(actor.getSnapshot().matches({ minting: 'acquiring' })).toBe(true);
+      expect(callbacks.active('fence')).toBe(1);
+
+      actor.stop();
+    },
+  );
+
+  it('should take the ambient requests queued before a close into the close’s own mint', async () => {
+    const harness = await published();
+    const { actor, parent } = harness;
+
+    actor.send({ type: 'cut', requestId: 's-2', trigger: 'save', leaseIds: [] });
+    expect(actor.getSnapshot().matches('spacing')).toBe(true);
+    actor.send({ type: 'cut', requestId: 'c-1', trigger: 'close', leaseIds: [] });
+    await mintNext(harness, 'rev-3');
+
+    expect(
+      answersOf(parent.events).map((event): unknown => [event['requestId'], event['trigger'], event['revisionId']]),
+    ).toEqual([
+      ['r-1', 'save', 'rev-2'],
+      ['s-2', 'save', 'rev-3'],
+      ['c-1', 'close', 'rev-3'],
+    ]);
 
     actor.stop();
   });

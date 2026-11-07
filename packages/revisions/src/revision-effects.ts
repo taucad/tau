@@ -25,8 +25,8 @@
  */
 
 import { parseProjectManifestBytes } from '@taucad/project-core';
-import { ResourceQueue, workerTimings } from '@taucad/filesystem';
-import type { WorkerTimingSpan } from '@taucad/filesystem';
+import { mapConcurrent, ResourceQueue, timestampGranularityMilliseconds, workerTimings } from '@taucad/filesystem';
+import type { FileStatEntry, IndexChanges, WorkerTimingSpan } from '@taucad/filesystem';
 import { randomUuid } from '@taucad/utils/id';
 import {
   captureRevisionTree,
@@ -676,6 +676,9 @@ const hostAuthor = Object.freeze({ name: 'Tau', email: 'noreply@tau.new' });
  */
 const divergenceWalkLimit = 1000;
 
+/* The mode reads an index-driven capture keeps in flight: each is one stat, no bytes. */
+const captureModeConcurrency = 16;
+
 const textEncoder = new TextEncoder();
 const generatedSetupTree = new ImmutableRevisionTree([
   [generatedGitattributesPath, generatedGitattributesContent(undefined)],
@@ -958,14 +961,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     comparing: Readonly<{ generation: number; tree: Promise<ImmutableRevisionTree> }> | undefined;
     /**
      * Where the checkout's index stood when `last` was observed (S10): its
-     * epoch and generation, read before the capture began, the head tree whose
-     * modes it inherited and the ignored paths it left out. A capture whose
-     * inherited modes and ignored paths agree starts from `last` and reads only
-     * what the index changed and removed since.
+     * epoch and generation, read before the capture began, the clock reading
+     * its racy guard keys on (EQ7) and the ignored paths it left out. A capture
+     * whose ignored paths and inherited modes agree starts from `last` and
+     * reads only what the D5 compare and the index changed and removed since.
      */
-    cursor:
-      | Readonly<{ epoch: string; generation: number; basis: ImmutableRevisionTree | undefined; ignored: string }>
-      | undefined;
+    cursor: Readonly<{ epoch: string; generation: number; observedAt: number; ignored: string }> | undefined;
   };
   const checkoutMemos = new Map<string, CheckoutMemos>();
   const memosOf = (checkoutId: string): CheckoutMemos => {
@@ -1415,15 +1416,16 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
        * high-water mark lies in the future of every fresh write, and a file
        * written moments ago would read as old enough to trust (RV-W4W5a #5). */
       const observedAt = clock();
-      const memoOptions = memos.capture.unchanged(
-        await rooted.statTree?.('', { admits: (path) => !exclude(path) }),
-        observedAt,
-      );
+      const stats = await rooted.statTree?.('', { admits: (path) => !exclude(path) });
+      const memoOptions = memos.capture.unchanged(stats, observedAt);
       signal?.throwIfAborted();
       const basis = await basisOf();
       signal?.throwIfAborted();
+      /* Without the index's stats the next capture could not tell which of these reads were racy. */
       cursor =
-        at === undefined ? undefined : { epoch: at.epoch, generation: at.generation, basis, ignored: ignoredKey };
+        at === undefined || stats === undefined
+          ? undefined
+          : { epoch: at.epoch, generation: at.generation, observedAt, ignored: ignoredKey };
       return captureRevisionTree(rooted, {
         exclude,
         inheritedMode: (path) => basis?.mode(path),
@@ -1437,38 +1439,81 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const since = options.completeChanges === true && changed?.paths !== undefined ? memos.last : undefined;
     const fromIndex = async (): Promise<ImmutableRevisionTree> => {
       const { last, cursor: previous } = memos;
-      if (bypassMemo || last === undefined || previous === undefined || previous.ignored !== ignoredKey) {
+      const { compareIndex, changedSince, statTree, getFileMode } = rooted;
+      if (
+        bypassMemo ||
+        last === undefined ||
+        previous === undefined ||
+        previous.ignored !== ignoredKey ||
+        compareIndex === undefined ||
+        changedSince === undefined ||
+        statTree === undefined
+      ) {
         return walk();
       }
-      const changes = await rooted.changedSince?.(previous.generation, {
-        epoch: previous.epoch,
-        admits: (path) => !exclude(path),
-      });
+      const admits = (path: string): boolean => !exclude(path);
+      const observedAt = clock();
+      let found: Readonly<{ changes: IndexChanges; racy: readonly string[]; stats: readonly FileStatEntry[] }>;
+      try {
+        /* D5 first: the index learns what no observer told it (another program, a head move, a burst
+         * past the change limit) before its changes are trusted, and names what it holds as racy. */
+        const compared = await compareIndex.call(rooted);
+        signal?.throwIfAborted();
+        const changes = await changedSince.call(rooted, previous.generation, {
+          epoch: previous.epoch,
+          admits,
+          ...(signal === undefined ? {} : { signal }),
+        });
+        signal?.throwIfAborted();
+        found = {
+          changes,
+          racy: compared.racy,
+          stats: changes.rescan === true ? [] : await statTree.call(rooted, '', { admits }),
+        };
+      } catch {
+        /* An index that cannot answer says nothing about the files: walk them. */
+        signal?.throwIfAborted();
+        return walk();
+      }
+      const { changes, racy, stats } = found;
+      /* `rescan` is never "nothing changed": the index cannot say, so everything is walked. */
+      if (changes.rescan === true) {
+        return walk();
+      }
       const basis = await basisOf();
       signal?.throwIfAborted();
-      /* `rescan` is never "nothing changed": the index cannot say, so everything is walked; and a
-       * head that moved may give the files nobody wrote other modes than `last` holds (I6). Our
-       * own mint moves it to the modes `last` already has, so only a head that disagrees walks. */
-      const inheritsAlike =
-        basis === previous.basis ||
-        last.entries().every(({ path, mode }) => {
-          const inherited = basis?.mode(path);
-          return inherited === undefined || inherited === mode;
+      const paths = new Set([
+        ...changes.entries.map(({ path }) => path),
+        ...changes.removed.map(({ path }) => path),
+        ...racy,
+        /* EQ7: a file whose timestamp was this close to the last capture's reading may have changed
+         * after it was read without changing its stats, so it is read again, as the walk would. */
+        ...stats
+          .filter(({ mtimeMs }) => previous.observedAt - mtimeMs <= timestampGranularityMilliseconds)
+          .map(({ path }) => path),
+      ]);
+      const kept = last.entries().filter(({ path }) => !paths.has(path));
+      if (getFileMode === undefined) {
+        /* A walk gives each file the head's mode, or 100644: a kept entry that disagrees walks (I6). */
+        if (kept.some(({ path, mode }) => (basis?.mode(path) ?? '100644') !== mode)) {
+          return walk();
+        }
+      } else {
+        /* A mode change moves neither size nor timestamp, so the index cannot name it: the provider's
+         * own modes are asked for every kept file, and a file whose mode moved is read again. */
+        await mapConcurrent(kept, captureModeConcurrency, async ({ path, mode }) => {
+          const now = await getFileMode.call(rooted, path).catch(() => undefined);
+          if (now !== mode) {
+            paths.add(path);
+          }
         });
-      if (changes === undefined || changes.rescan === true || !inheritsAlike) {
-        return walk();
+        signal?.throwIfAborted();
       }
-      cursor = { epoch: changes.epoch, generation: changes.generation, basis, ignored: ignoredKey };
+      cursor = { epoch: changes.epoch, generation: changes.generation, observedAt, ignored: ignoredKey };
       return captureRevisionTree(rooted, {
         exclude,
         inheritedMode: (path) => basis?.mode(path),
-        changedSince: {
-          tree: last,
-          paths: [
-            ...changes.entries.filter(({ kind }) => kind === 'file').map(({ path }) => path),
-            ...changes.removed.map(({ path }) => path),
-          ],
-        },
+        changedSince: { tree: last, paths: [...paths] },
         ...(signal === undefined ? {} : { signal }),
       });
     };

@@ -760,6 +760,9 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
         signal?.throwIfAborted();
       }
       if (response?.ok) {
+        /* The stall bound measures the network: it runs only while a read waits on it, never while
+         * the writer is busy with the chunk before (D11). */
+        stall.clear();
         const reader = response.body?.getReader();
         const transferred = { transport: lfsTransportOf(action.href) };
         let received = 0;
@@ -781,6 +784,7 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
                   throw new RangeError(`Large object ${pointer.oid} exceeds its declared size.`);
                 }
                 received += chunk.value.byteLength;
+                stall.clear();
                 transferOptions?.progress?.();
                 controller.enqueue(chunk.value);
               } catch (error) {

@@ -2314,82 +2314,92 @@ describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
     }
   }, 60_000);
 
-  /* W6.4, I2: a download is streamed to its partial, read back once and hashed once, and the read-back is what is delivered. */
-  it('streams a download to its partial, reads it back once, hashes it once, and delivers the verified bytes', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-lfs-streamed-'));
-    const fixture = await startGitHttpBackend({ root });
-    const writer = await isomorphicHarness();
-    try {
-      const port = writer.withTransport();
-      await port.init({ author });
-      const receipt = await port.writeRevision({
-        parents: [],
-        tree: tree({ 'models/bracket.step': large }),
-        provenance: provenance('user'),
-        summary: summary('Large object'),
-      });
-      const head = revisionId(receipt.commitId);
-      await port.updateRef({ name: 'main', expectedHead: undefined, head });
-      await port.setRemote({ name: 'tau', url: fixture.url });
-      await port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] });
+  /* W6.4, I2: a download is streamed to its partial where the provider holds a chunk at a time, read back once and
+   * hashed once, and the read-back is what is delivered; a provider that would gather the stream is written whole. */
+  it.each([
+    { streamsWrites: true, written: 'writeFileStream object' },
+    { streamsWrites: false, written: 'writeFile object' },
+  ])(
+    'writes a download to its partial ($written), reads it back once, hashes it once, and delivers the verified bytes',
+    async ({ streamsWrites, written }) => {
+      const root = await mkdtemp(join(tmpdir(), 'tau-revisions-lfs-streamed-'));
+      const fixture = await startGitHttpBackend({ root });
+      const writer = await isomorphicHarness();
+      try {
+        const port = writer.withTransport();
+        await port.init({ author });
+        const receipt = await port.writeRevision({
+          parents: [],
+          tree: tree({ 'models/bracket.step': large }),
+          provenance: provenance('user'),
+          summary: summary('Large object'),
+        });
+        const head = revisionId(receipt.commitId);
+        await port.updateRef({ name: 'main', expectedHead: undefined, head });
+        await port.setRemote({ name: 'tau', url: fixture.url });
+        await port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] });
 
-      const files = await createMemoryProvider();
-      const { oid } = lfsPointerFor(large).pointer;
-      const calls: string[] = [];
-      const counted = Object.assign(Object.create(files) as typeof files, {
-        writeFile: async (path: string, data: Uint8Array<ArrayBuffer> | string) => {
-          calls.push(path.includes(oid) ? 'writeFile object' : 'writeFile');
-          return files.writeFile(path, data);
-        },
-        writeFileStream: async (path: string, source: ReadableStream<Uint8Array<ArrayBuffer>>) => {
-          calls.push(path.includes(oid) ? 'writeFileStream object' : 'writeFileStream');
-          return files.writeFileStream(path, source);
-        },
-        readFile: (async (path: string, encoding?: 'utf8') => {
-          if (path.includes(oid)) {
-            calls.push('readFile object');
-          }
-          return encoding === 'utf8' ? files.readFile(path, 'utf8') : files.readFile(path);
-        }) as typeof files.readFile,
-      });
-      const inline = createInlineCompute();
-      const delivered: Array<Uint8Array<ArrayBuffer>> = [];
-      const reader = createIsomorphicGitRevisionPort({
-        filesystem: counted,
-        http: createRevisionHttpClient({ authorization: () => 'Bearer session-token' }),
-        compute: {
-          ...inline,
-          sha256: async (bytes, consumed) => {
-            calls.push('sha256');
-            return inline.sha256(bytes, consumed);
+        const files = await createMemoryProvider();
+        const { oid } = lfsPointerFor(large).pointer;
+        const calls: string[] = [];
+        const counted = Object.assign(Object.create(files) as typeof files, {
+          /* Memory gathers a stream; it stands in here for both kinds of provider. */
+          capabilities: { ...files.capabilities, streamsWrites },
+          writeFile: async (path: string, data: Uint8Array<ArrayBuffer> | string) => {
+            calls.push(path.includes(oid) ? 'writeFile object' : 'writeFile');
+            return files.writeFile(path, data);
           },
-          sha256Kept: async (bytes) => {
-            calls.push('sha256Kept');
-            const kept = await inline.sha256Kept(bytes);
-            delivered.push(kept.data);
-            return kept;
+          writeFileStream: async (path: string, source: ReadableStream<Uint8Array<ArrayBuffer>>) => {
+            calls.push(path.includes(oid) ? 'writeFileStream object' : 'writeFileStream');
+            return files.writeFileStream(path, source);
           },
-        },
-      });
-      await reader.init({ author });
-      await reader.setRemote({ name: 'tau', url: fixture.url });
-      await reader.fetch({ remote: 'tau' });
-      const read = await reader.readTree(head);
+          readFile: (async (path: string, encoding?: 'utf8') => {
+            if (path.includes(oid)) {
+              calls.push('readFile object');
+            }
+            return encoding === 'utf8' ? files.readFile(path, 'utf8') : files.readFile(path);
+          }) as typeof files.readFile,
+        });
+        const inline = createInlineCompute();
+        const delivered: Array<Uint8Array<ArrayBuffer>> = [];
+        const reader = createIsomorphicGitRevisionPort({
+          filesystem: counted,
+          http: createRevisionHttpClient({ authorization: () => 'Bearer session-token' }),
+          compute: {
+            ...inline,
+            sha256: async (bytes, consumed) => {
+              calls.push('sha256');
+              return inline.sha256(bytes, consumed);
+            },
+            sha256Kept: async (bytes) => {
+              calls.push('sha256Kept');
+              const kept = await inline.sha256Kept(bytes);
+              delivered.push(kept.data);
+              return kept;
+            },
+          },
+        });
+        await reader.init({ author });
+        await reader.setRemote({ name: 'tau', url: fixture.url });
+        await reader.fetch({ remote: 'tau' });
+        const read = await reader.readTree(head);
 
-      expect(calls.filter((call) => call.includes('object') || call.startsWith('sha256'))).toEqual([
-        'writeFileStream object',
-        'readFile object',
-        'sha256Kept',
-      ]);
-      expect(delivered).toHaveLength(1);
-      expect(read?.get('models/bracket.step')).toEqual(large);
-      await expect(keptUnder(files, oid)).resolves.toStrictEqual([oid]);
-    } finally {
-      await fixture.close();
-      await writer.dispose();
-      await rm(root, { force: true, recursive: true });
-    }
-  }, 60_000);
+        expect(calls.filter((call) => call.includes('object') || call.startsWith('sha256'))).toEqual([
+          written,
+          'readFile object',
+          'sha256Kept',
+        ]);
+        expect(delivered).toHaveLength(1);
+        expect(read?.get('models/bracket.step')).toEqual(large);
+        await expect(keptUnder(files, oid)).resolves.toStrictEqual([oid]);
+      } finally {
+        await fixture.close();
+        await writer.dispose();
+        await rm(root, { force: true, recursive: true });
+      }
+    },
+    60_000,
+  );
 
   /* D9: a read-back that throws — here the hash itself — keeps no `.partial`. */
   it('keeps no partial download when hashing the read-back throws', async () => {

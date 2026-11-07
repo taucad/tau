@@ -136,10 +136,12 @@ describe.runIf(gitToolchainOnPath)('native LFS operation bounds', () => {
         await rejection;
         if (operation === 'fetch') {
           expect(await fixture.clone.listRefs('refs/tau/transactions')).toEqual([]);
-          await writeFile(fixture.release, 'resume');
-          /* What the cancelled read could not fetch, the next read fetches: a `local` one too, never a pointer. */
+          /* What the cancelled read could not fetch stays a pointer to a `local` read. */
           const local = await fixture.clone.readTree(fixture.head, { largeObjects: 'local' });
-          expect(local?.get('large.bin')).toEqual(fixture.bytes);
+          expect(local?.get('large.bin')?.byteLength).toBeLessThan(200);
+          await writeFile(fixture.release, 'resume');
+          const recovered = await fixture.read();
+          expect(recovered?.get('large.bin')).toEqual(fixture.bytes);
         } else {
           expect(await fixture.server.git(['for-each-ref', '--format=%(refname)', 'refs/heads'])).toBe('');
           expect(fixture.server.uploadCount()).toBe(0);

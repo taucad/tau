@@ -375,7 +375,10 @@ export const startGitHttpBackend = async (options: GitHttpBackendOptions): Promi
     if (authorization !== undefined) {
       authorizations.push(authorization);
     }
-    if (options.requireAuthorization !== undefined && authorization !== options.requireAuthorization) {
+    /* A presigned transfer is authorized by the header its batch issued, not by the session, as storage URLs are. */
+    const presigned =
+      /^\/lfs\/[\da-f]{64}$/u.test(requested.pathname) && request.headers['x-tau-transfer'] === transferToken;
+    if (options.requireAuthorization !== undefined && authorization !== options.requireAuthorization && !presigned) {
       response.writeHead(401, { 'Content-Type': 'text/plain' });
       response.end('unauthorized');
       return;

@@ -83,6 +83,7 @@ import type {
   WriteRevisionInput,
 } from '#revision-port.js';
 import { cleanLargeObjects, lfsObjectPath, readLfsPointer } from '#lfs.js';
+import { digestHex } from '#object-hash.js';
 import { LfsQuotaError } from '#lfs-client.js';
 import {
   isHostLocalRef,
@@ -853,34 +854,151 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     }
   };
 
-  /**
-   * Whether one failed `git lfs fetch` said only that its remote lacks the
-   * objects asked for — an answer, not a failure of the remote.
-   *
-   * @param error - What the fetch threw.
-   * @returns `true` for a 404 or git-lfs's "does not exist" sentence.
-   */
-  const lacksLargeObjects = (error: unknown): boolean =>
-    error instanceof RevisionPortError &&
-    (error.code === 'REMOTE_NOT_FOUND' ||
-      (error.code === 'ENGINE_FAILED' &&
-        /does not exist on the server|object not found|\b404\b/iu.test(
-          String((error.cause as Error | undefined)?.message),
-        )));
+  /* What git-lfs prints around a transfer that are no verdict on it: progress, the failure summary, the log hint. */
+  const transferChatter =
+    /^(?:Downloading .*|fetch: .*|error: failed to fetch some objects from .*|Errors logged to .*|Use `git lfs logs last` to view the log\.)$/u;
+  /* An object-level not-found for one oid, as git-lfs spells a batch API object error (`fetch`), or wraps it (`smudge`). */
+  const objectAbsent =
+    /^(?:Error downloading object: .*: )?\[(?<oid>[\da-f]{64})\] Object does not exist(?: on the server)?: \[404\] /u;
 
-  /* One fill per commit at a time: a second read of the same commit waits for the first, then asks only what is left. */
-  const fillsInFlight = new Map<string, Promise<void>>();
+  /**
+   * What one remote's failed large-object transfer said (D16).
+   *
+   * It lacks the objects only when every line that is not progress names one
+   * of the objects asked for as not found there. Anything else — a repository
+   * the batch endpoint did not find, a credential it refused, a network
+   * failure, beside or instead of an object not found — is the remote's own
+   * refusal: it may hold the objects, so it is never read as "missing". GitHub
+   * answers a repository the token cannot see as not found, so on a GitHub
+   * remote that is a credential to grant again.
+   *
+   * @param result - The transfer's outcome.
+   * @param asked - The objects it was asked for.
+   * @param remote - The remote it talked to.
+   * @returns `'lacks'`, or the error to keep.
+   */
+  const transferVerdict = (
+    result: GitCommandResult,
+    asked: ReadonlySet<string>,
+    remote: Remote,
+  ): 'lacks' | RevisionPortError => {
+    const stderr = textDecoder.decode(result.stderr);
+    const lines = stderr.split('\n').filter((line) => line.trim() !== '' && !transferChatter.test(line.trim()));
+    if (
+      lines.length > 0 &&
+      lines.every((line) => {
+        const oid = objectAbsent.exec(line.trim())?.groups?.['oid'];
+        return oid !== undefined && asked.has(oid);
+      })
+    ) {
+      return 'lacks';
+    }
+    const refusal =
+      remoteRefusalOf(stderr, remote.name) ??
+      new RevisionPortError(
+        'ENGINE_FAILED',
+        'The remote could not supply this project’s large objects.',
+        stderr.trim() === '' ? undefined : { cause: new Error(stderr.trim()) },
+      );
+    if (refusal.code === 'REMOTE_NOT_FOUND' && remote.provider === 'github') {
+      return new RevisionPortError(
+        'REMOTE_REAUTHORIZATION_REQUIRED',
+        'GitHub did not find this repository for the connected account. Reconnect it in Tau.',
+        { cause: refusal },
+      );
+    }
+    return refusal;
+  };
+
+  /**
+   * Ask each remote that carries large objects, in turn, until nothing is missing (D16).
+   *
+   * A remote that fails is passed over for the next. When objects are still
+   * missing after every remote, the first refusal is thrown; with none, every
+   * remote answered that it lacks them and the caller raises
+   * `MISSING_LARGE_OBJECT`. A cancelled transfer rejects at once.
+   *
+   * @param attempt - One remote's transfer, answering its verdict.
+   * @param stillMissing - Whether anything is still missing here.
+   * @param signal - Stops the transfers.
+   */
+  const fromEachRemote = async (
+    attempt: (remote: Remote, env: Record<string, string | undefined>) => Promise<'done' | 'lacks' | Error>,
+    stillMissing: () => Promise<boolean>,
+    signal: AbortSignal | undefined,
+  ): Promise<void> => {
+    const configuredRemotes = await port.listRemotes();
+    let refusal: Error | undefined;
+    for (const remote of configuredRemotes.filter((candidate) => remoteCarriesLargeObjects(candidate))) {
+      signal?.throwIfAborted();
+      let verdict: 'done' | 'lacks' | Error;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one remote after another, until every object is here.
+        verdict = await attempt(remote, await remoteEnvironment(remote.name, configuredRemotes));
+      } catch (error) {
+        if (signal?.aborted === true) {
+          throw error;
+        }
+        verdict = error instanceof Error ? error : new Error(String(error));
+      }
+      if (verdict instanceof Error) {
+        refusal ??= verdict;
+      }
+      /* A failed transfer may still have landed some objects; the next remote is asked only for the rest. */
+      // oxlint-disable-next-line no-await-in-loop -- one remote after another, until every object is here.
+      if (!(await stillMissing())) {
+        return;
+      }
+    }
+    if (refusal !== undefined) {
+      throw refusal;
+    }
+  };
+
+  /**
+   * One blob as a `local` read answers it: the content when the large object
+   * is here, else the pointer itself. Nothing is fetched.
+   *
+   * @param content - Bytes as the object store holds them.
+   * @returns The real bytes, or the pointer.
+   */
+  const smudgedIfHere = async (content: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> => {
+    try {
+      return await smudged(content);
+    } catch (error) {
+      if (error instanceof RevisionPortError && error.code === 'MISSING_LARGE_OBJECT') {
+        return content;
+      }
+      throw error;
+    }
+  };
+
+  /**
+   * Whether every one of `oids` is in this store.
+   *
+   * @param oids - Large-object ids.
+   * @returns `true` when none is missing.
+   */
+  const allStored = async (oids: readonly string[]): Promise<boolean> => {
+    const present = await Promise.all(
+      oids.map(async (oid) =>
+        access(lfsObjectFile(oid)).then(
+          () => true,
+          () => false,
+        ),
+      ),
+    );
+    return !present.includes(false);
+  };
+
+  /* One fill per commit at a time; a read that joins one shares its outcome, unless only its caller cancelled it. */
+  const fillsInFlight = new Map<string, Readonly<{ fill: Promise<void>; signal: AbortSignal | undefined }>>();
 
   /**
    * Fetch the large objects one read needs and this store lacks (D16): one
    * `git lfs fetch` of that commit's objects from each remote that carries
-   * large objects, in turn, until none is missing. A remote that fails is
-   * passed over for the next. A read with none missing spawns nothing.
-   *
-   * When objects are still missing after every remote, the read fails as it
-   * did before, `MISSING_LARGE_OBJECT` from `smudged`, only if every remote
-   * answered that it lacks them; a remote that refused or could not be reached
-   * might hold them, so its own error (an expired credential, a 401) is thrown.
+   * large objects, in turn, until none is missing (see {@link fromEachRemote}).
+   * A read with none missing spawns nothing.
    *
    * @param commit - The commit whose tree is being read.
    * @param pointers - The pointers the read holds.
@@ -891,68 +1009,151 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     pointers: ReadonlyArray<Readonly<{ oid: string }>>,
     signal: AbortSignal | undefined,
   ): Promise<void> => {
-    const missing = async (): Promise<boolean> => {
-      const present = await Promise.all(
-        pointers.map(async ({ oid }) =>
-          access(lfsObjectFile(oid)).then(
-            () => true,
-            () => false,
-          ),
-        ),
-      );
-      return present.includes(false);
-    };
-    if (!(await missing())) {
+    const oids = pointers.map(({ oid }) => oid);
+    if (await allStored(oids)) {
       return;
     }
     const running = fillsInFlight.get(commit);
     if (running !== undefined) {
-      /* Its outcome is its caller's: this read asks again for whatever it left. */
-      await running.catch(() => undefined);
+      try {
+        await running.fill;
+      } catch (error) {
+        /* Its failure is this read's too, unless only the read that started it was cancelled. */
+        if (running.signal?.aborted !== true) {
+          throw error;
+        }
+      }
       signal?.throwIfAborted();
-      if (!(await missing())) {
+      if (await allStored(oids)) {
         return;
       }
     }
+    const asked = new Set(oids);
     const fill = (async (): Promise<void> => {
-      const configuredRemotes = await port.listRemotes();
-      let refusal: Error | undefined;
-      for (const remote of configuredRemotes.filter((candidate) => remoteCarriesLargeObjects(candidate))) {
-        try {
-          // oxlint-disable-next-line no-await-in-loop -- one remote after another, until every object is here.
-          await output(['lfs', 'fetch', '--', remote.name, commit], {
+      await fromEachRemote(
+        async (remote, env) => {
+          const result = await run(['lfs', 'fetch', '--', remote.name, commit], {
             deadline: transferDeadline,
-            // oxlint-disable-next-line no-await-in-loop -- the credentials belong to this remote.
-            env: await remoteEnvironment(remote.name, configuredRemotes),
+            env,
             ...(signal === undefined ? {} : { signal }),
             remote: remote.name,
           });
-        } catch (error) {
-          if (signal?.aborted === true) {
-            throw error;
-          }
-          if (!lacksLargeObjects(error)) {
-            refusal ??= error instanceof Error ? error : new Error(String(error));
-          }
-        }
-        /* A failed fetch may still have landed some objects; the next remote is asked only for the rest. */
-        // oxlint-disable-next-line no-await-in-loop -- one remote after another, until every object is here.
-        if (!(await missing())) {
-          return;
-        }
-      }
-      if (refusal !== undefined) {
-        throw refusal;
+          return result.exitCode === 0 ? 'done' : transferVerdict(result, asked, remote);
+        },
+        async () => !(await allStored(oids)),
+        signal,
+      );
+      /* Every remote answered that it lacks what is still missing: one verdict, for every read that joined. */
+      if (!(await allStored(oids))) {
+        throw new RevisionPortError('MISSING_LARGE_OBJECT', 'A large object this revision references is on no remote.');
       }
     })();
-    fillsInFlight.set(commit, fill);
+    fillsInFlight.set(commit, { fill, signal });
     try {
       await fill;
     } finally {
-      if (fillsInFlight.get(commit) === fill) {
+      if (fillsInFlight.get(commit)?.fill === fill) {
         fillsInFlight.delete(commit);
       }
     }
+  };
+
+  /* Objects fetched by their own oid at once, per remote: enough to hide a round trip, few enough to bound processes. */
+  const fetchByOidConcurrency = 4;
+
+  /**
+   * Large objects by their pointers alone (D10 `filled`): what this store holds
+   * is read here; the rest is fetched object by object through `git lfs
+   * smudge` with each remote that carries large objects as its default, in
+   * turn, verified against its oid and stored, whether or not any revision
+   * names it.
+   *
+   * @param pointers - The objects wanted.
+   * @param fetchOptions - The delivery callback, the order to fetch in, and the signal.
+   * @returns Every object's bytes, by oid.
+   */
+  const fetchLargeObjectsByOid = async (
+    pointers: ReadonlyArray<Readonly<{ oid: string; size: number }>>,
+    fetchOptions?: Pick<ReadTreeOptions, 'onLargeObject' | 'firstLargeObjects' | 'signal'>,
+  ): Promise<ReadonlyMap<string, Uint8Array<ArrayBuffer>>> => {
+    const signal = fetchOptions?.signal;
+    const contents = new Map<string, Uint8Array<ArrayBuffer>>();
+    const wanted = new Map(pointers.map((pointer) => [pointer.oid, pointer.size]));
+    const deliver = (oid: string, content: Uint8Array<ArrayBuffer>): void => {
+      contents.set(oid, content);
+      fetchOptions?.onLargeObject?.(oid, content);
+    };
+    const readHere = async (oid: string): Promise<Uint8Array<ArrayBuffer> | undefined> => {
+      try {
+        const stored = await readFile(lfsObjectFile(oid));
+        return new Uint8Array(stored.buffer as ArrayBuffer, stored.byteOffset, stored.byteLength);
+      } catch {
+        return undefined;
+      }
+    };
+    for (const oid of wanted.keys()) {
+      // oxlint-disable-next-line no-await-in-loop -- one local read at a time; nothing is transferred here.
+      const here = await readHere(oid);
+      if (here !== undefined) {
+        deliver(oid, here);
+      }
+    }
+    const missing = (): string[] => {
+      const first = fetchOptions?.firstLargeObjects?.() ?? new Set<string>();
+      const left = [...wanted.keys()].filter((oid) => !contents.has(oid));
+      return [...left.filter((oid) => first.has(oid)), ...left.filter((oid) => !first.has(oid))];
+    };
+    if (missing().length > 0) {
+      await fromEachRemote(
+        async (remote, env) => {
+          const verdicts: Array<'done' | 'lacks' | Error> = [];
+          const queue = missing();
+          const worker = async (): Promise<void> => {
+            for (let oid = queue.shift(); oid !== undefined; oid = queue.shift()) {
+              const size = wanted.get(oid)!;
+              // oxlint-disable-next-line no-await-in-loop -- one object after another in this worker.
+              const result = await run(['-c', `remote.lfsdefault=${remote.name}`, 'lfs', 'smudge'], {
+                input: [
+                  textEncoder.encode(
+                    `version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize ${String(size)}\n`,
+                  ),
+                ],
+                deadline: transferDeadline,
+                env,
+                ...(signal === undefined ? {} : { signal }),
+                remote: remote.name,
+              });
+              if (result.exitCode !== 0) {
+                verdicts.push(transferVerdict(result, new Set([oid]), remote));
+                continue;
+              }
+              /* Content-addressed: bytes that are not the object are no answer at all. */
+              if (result.stdout.byteLength !== size || digestHex('sha256', result.stdout) !== oid) {
+                verdicts.push(
+                  new RevisionPortError('ENGINE_FAILED', 'A large object arrived with bytes that are not its own.'),
+                );
+                continue;
+              }
+              // oxlint-disable-next-line no-await-in-loop -- stored before it is delivered, so a crash keeps it.
+              await storeLfsObject(oid, result.stdout);
+              deliver(oid, result.stdout);
+              verdicts.push('done');
+            }
+          };
+          await Promise.all(Array.from({ length: Math.min(fetchByOidConcurrency, queue.length) }, worker));
+          return (
+            verdicts.find((verdict): verdict is Error => verdict instanceof Error) ??
+            (verdicts.includes('lacks') ? 'lacks' : 'done')
+          );
+        },
+        async () => missing().length > 0,
+        signal,
+      );
+    }
+    if (missing().length > 0) {
+      throw new RevisionPortError('MISSING_LARGE_OBJECT', 'A large object this checkout holds is on no remote.');
+    }
+    return contents;
   };
 
   /*
@@ -1792,10 +1993,12 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      * `cat-file --batch` for every blob in it (rule 20's `readTree` cost). */
     /* Large objects fill lazily (D16): a fetch moves refs only, and a read
      * that needs a large object this store lacks fetches that one commit's
-     * objects then, never every fetched ref's. A `local` read is filled the
-     * same way: this port has no `fetchLargeObjects`, so a pointer it answered
-     * would be written into the working copy with nothing to fill it, and only
-     * the paths a read names are filled. */
+     * objects then, never every fetched ref's. A `local` read fetches nothing
+     * and answers a missing object with its pointer, for the placeholder fill
+     * to bring (`large-object-fill.ts`): through a fetching read when the head
+     * names it, and through `fetchLargeObjects` by its oid when it does not. */
+    fetchLargeObjects: async (pointers, fetchOptions) => fetchLargeObjectsByOid(pointers, fetchOptions),
+
     readTree: async (id: RevisionId, readOptions?: ReadTreeOptions): Promise<ImmutableRevisionTree | undefined> => {
       const commit = await readCommitObject(id);
       if (commit === undefined) {
@@ -1812,13 +2015,14 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         const pointer = readLfsPointer(blobs.get(oid)!);
         return pointer === undefined ? [] : [pointer];
       });
-      if (pointers.length > 0) {
+      const local = readOptions?.largeObjects === 'local';
+      if (!local && pointers.length > 0) {
         await fillLargeObjects(id, pointers, readOptions?.signal);
       }
       const entries = await Promise.all(
         paths.map(async ([path, { oid, mode }]): Promise<RevisionTreeInput> => {
           const content = blobs.get(oid)!;
-          return [path, await smudged(content), mode];
+          return [path, local ? await smudgedIfHere(content) : await smudged(content), mode];
         }),
       );
       return new ImmutableRevisionTree(entries);

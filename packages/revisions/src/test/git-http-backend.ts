@@ -281,6 +281,11 @@ export const startGitHttpBackend = async (options: GitHttpBackendOptions): Promi
             if (body.operation === 'upload' && held) {
               return { oid: object.oid, size: object.size };
             }
+            /* An object it does not hold is refused in the batch, per object, as the LFS batch API spells it:
+             * a download action for it would only send the client into its transfer retries. */
+            if (body.operation === 'download' && !held) {
+              return { oid: object.oid, size: object.size, error: { code: 404, message: 'Object does not exist' } };
+            }
             return {
               oid: object.oid,
               size: object.size,

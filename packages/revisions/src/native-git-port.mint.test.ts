@@ -185,8 +185,32 @@ describe.runIf(gitToolchainOnPath)('native mint reads changed paths only (D16)',
     await mint(port, removed, removedCommit);
     const unchanged = await spent();
     expect(unchanged.children.filter((command) => ['fast-import', 'mktree'].includes(command))).toEqual([]);
-    /* Only the commit object crosses: the tree is held, so not even a presence check is asked. */
+    /* The commit object and one header line: a held root is still asked about, since a prune may have taken it. */
+    expect(unchanged.children.filter((command) => command === 'cat-file')).toEqual(['cat-file']);
     expect(unchanged.stdinBytes).toBeLessThan(1024);
+  }, 120_000);
+
+  it('writes what a prune took from under the memo, never a commit over a missing tree', async () => {
+    const { repositoryPath, shim } = await countedRepository();
+    const port = createNativeGitRevisionPort({ repositoryPath, gitExecutable: shim });
+    await port.init({ author });
+    const first = project();
+    await mint(port, first);
+    /* No ref names the mint, so a prune removes everything the memo holds. */
+    await execGit('git', ['gc', '--prune=now', '--quiet'], { cwd: repositoryPath });
+    const again = await mint(port, first);
+    expect(await missingObjects(repositoryPath, again)).toEqual([]);
+    const recorded = await port.readRevision(revisionId(again));
+    expect(recorded?.treeId).toBe(revisionTreeId(first, 'sha1'));
+
+    /* A held subtree under a new root: pruned, the first write fails and the retry asks Git for everything. */
+    await execGit('git', ['gc', '--prune=now', '--quiet'], { cwd: repositoryPath });
+    const next = changed(first, { 'src/5/m5.ts': 'export const v5 = "after prune";\n' });
+    const nextCommit = await mint(port, next);
+    expect(await missingObjects(repositoryPath, nextCommit)).toEqual([]);
+    const read = await port.readTree(revisionId(nextCommit));
+    expect(read?.get('docs/base.md')?.byteLength).toBe(unchangedBytes);
+    expect(new TextDecoder().decode(read?.get('src/5/m5.ts'))).toBe('export const v5 = "after prune";\n');
   }, 120_000);
 
   it('a fresh port over a populated store asks for headers, never resends held content', async () => {

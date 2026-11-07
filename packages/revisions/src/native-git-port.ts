@@ -85,6 +85,7 @@ import {
   lfsRemoteUnsupportedMessage,
   remoteCarriesLargeObjects,
   remoteOf,
+  refMoved,
   remoteRefusalSaid,
   remoteTrackingRef,
   remoteTransportError,
@@ -1070,22 +1071,31 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * @param offered - The local refs, in the order they were offered, each with
    *   the commit it named before `git push` was spawned.
    * @param said - The server's own sideband sentence, when it sent one.
+   * @param sideband - Every `remote:` line, read by {@link refMoved} as the browser leg reads its own.
    * @returns One result per offered ref.
    */
+  // oxlint-disable-next-line max-params -- the push's output, its offer and the two readings of its sideband.
   const parsePushPorcelain = (
     stdout: string,
     offered: ReadonlyArray<Readonly<{ name: string; head: string | undefined }>>,
-    said?: string,
+    said: string | undefined,
+    sideband: readonly string[],
   ): readonly RevisionPushRefResult[] => {
-    const rows = new Map<string, Readonly<{ flag: string; summary: string }>>();
+    const rows = new Map<string, Readonly<{ flag: string; summary: string; moved: boolean }>>();
     for (const line of stdout.split('\n')) {
       const parts = line.split('\t');
       if (parts.length < 3 || parts[0] === undefined || parts[1] === undefined) {
         continue;
       }
-      const from = parts[1].split(':')[0] ?? '';
-      rows.set(from, Object.freeze({ flag: parts[0], summary: parts[2] ?? '' }));
+      const [from = '', to = ''] = parts[1].split(':');
+      const summary = parts[2] ?? '';
+      rows.set(
+        from,
+        Object.freeze({ flag: parts[0], summary, moved: parts[0] === '!' && refMoved(to, summary, sideband) }),
+      );
     }
+    /* The server's compare-and-set refused one ref of an atomic push: the others fall with it (D39). */
+    const movedAny = [...rows.values()].some(({ moved }) => moved);
     return Object.freeze(
       offered.map(({ name, head }): RevisionPushRefResult => {
         const row = rows.get(name);
@@ -1097,7 +1107,9 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
             reason:
               row === undefined
                 ? 'The remote did not report this ref.'
-                : remoteRefusalSaid(refusalReason(row.summary), said === undefined ? [] : [said]),
+                : row.moved || (movedAny && /atomic transaction failed/iu.test(row.summary))
+                  ? 'leaseLost'
+                  : remoteRefusalSaid(refusalReason(row.summary), said === undefined ? [] : [said]),
           });
         }
         return Object.freeze({
@@ -1940,6 +1952,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
          * The ceiling and the plan quota are hook sentences too, and the
          * scheduler files them as quota by their marker (FX1 N). */
         refused?.code === 'REMOTE_REJECTED' || refused?.code === 'REMOTE_QUOTA_EXCEEDED' ? refused.message : undefined,
+        [...stderr.matchAll(/^remote: (?<said>.+)$/gmu)].map((match) => match.groups?.['said']?.trim() ?? ''),
       );
       /* Where `fetch` would have put every accepted ref, as the browser leg does:
        * The destination is a pinned URL, so Git does not associate this push

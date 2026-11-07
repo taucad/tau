@@ -104,9 +104,22 @@ export type GitHttpBackendOptions = Readonly<{
  * Every git this fixture runs, the CGI included, reads no global or system
  * config and no ref-format default from the environment: a developer's
  * `core.hooksPath` would skip the fixture's hooks, and a `reftable` default
- * would change what receive-pack says about a locked or moved ref.
+ * would change what receive-pack says about a locked or moved ref. Nor does it
+ * inherit a repository: run from a hook or another git, `GIT_DIR` and its
+ * siblings would point every command at the caller's repository instead.
  */
-const { GIT_DEFAULT_REF_FORMAT: _refFormat, ...inherited } = process.env;
+const {
+  GIT_DEFAULT_REF_FORMAT: _refFormat,
+  GIT_DIR: _gitDirectory,
+  GIT_WORK_TREE: _workTree,
+  GIT_INDEX_FILE: _indexFile,
+  GIT_OBJECT_DIRECTORY: _objectDirectory,
+  GIT_ALTERNATE_OBJECT_DIRECTORIES: _alternates,
+  GIT_COMMON_DIR: _commonDirectory,
+  GIT_PREFIX: _prefix,
+  GIT_QUARANTINE_PATH: _quarantine,
+  ...inherited
+} = process.env;
 const gitEnvironment: NodeJS.ProcessEnv = { ...inherited, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
 
 const run = async (args: readonly string[], cwd: string): Promise<string> =>

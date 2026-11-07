@@ -14,6 +14,7 @@
 
 import { ImportRefusedError } from '#importer/limits.js';
 import type { FileMode } from '#types.js';
+import { crc32Update } from '#importer/crc32.js';
 
 /**
  * Bytes at a range of something larger than memory should hold: a `Blob`
@@ -139,40 +140,74 @@ const zip64Values = (
   while (at + 4 <= extraEnd) {
     const id = data.getUint16(at, true);
     const length = data.getUint16(at + 2, true);
+    const fieldEnd = at + 4 + length;
+    if (fieldEnd > extraEnd) {
+      throw corrupt('An archive entry has a damaged extra field.');
+    }
     if (id === zip64ExtraId) {
       let field = at + 4;
+      /* Each value it is asked for must lie inside the field it says it is. */
+      const take = (): number => {
+        if (field + 8 > fieldEnd) {
+          throw corrupt('The archive is missing a ZIP64 size.');
+        }
+        const value = uint64(data, field);
+        field += 8;
+        return value;
+      };
       const result: { size?: number; compressed?: number; offset?: number } = {};
       if (wanted.uncompressed) {
-        result.size = uint64(data, field);
-        field += 8;
+        result.size = take();
       }
       if (wanted.compressed) {
-        result.compressed = uint64(data, field);
-        field += 8;
+        result.compressed = take();
       }
       if (wanted.offset) {
-        result.offset = uint64(data, field);
+        result.offset = take();
       }
       return result;
     }
-    at += 4 + length;
+    at = fieldEnd;
   }
   throw corrupt('The archive is missing a ZIP64 size.');
 };
 
+/** Bytes an entry's extra field and comment may take beyond its name, when the directory's size is bounded. @public */
+export const zipEntryAllowanceBytes = 512;
+
+/* The directory is read this much at a time, so its size never sits in memory whole. */
+const directoryWindowBytes = 1024 * 1024;
+
+/**
+ * An archive's central directory: its entries, and an identity of the
+ * directory's exact bytes (their CRC-32, size and offset), which changes when
+ * any entry's name, size, CRC or position does.
+ *
+ * @public
+ */
+export type ZipDirectory = Readonly<{ entries: ZipEntry[]; identity: string }>;
+
 /**
  * Read an archive's central directory: every entry, before any is decoded.
  *
+ * The directory is read a window at a time, and its declared size is held
+ * to what its entry count can need (a header, a name of at most
+ * `maximumPathBytes`, and {@link zipEntryAllowanceBytes} of extra field and
+ * comment each), so a directory that claims more is refused before it is
+ * read. A name past `maximumPathBytes` is refused as it is met, and entries
+ * whose ranges overlap one another or the directory are refused once all are
+ * known: no two entries may decode the same bytes.
+ *
  * @param source - The archive's ranges.
- * @param options - `maximumEntries`, past which the directory is refused before it is read.
- * @returns The entries, in directory order.
- * @throws ImportRefusedError `corrupt`, `encrypted`, `unsupported` or `tooManyEntries`.
+ * @param options - `maximumEntries` and `maximumPathBytes`, past which the directory is refused.
+ * @returns The entries in directory order, and the directory's identity.
+ * @throws ImportRefusedError `corrupt`, `encrypted`, `unsupported`, `tooManyEntries` or `pathTooLong`.
  * @public
  */
 export const readZipDirectory = async (
   source: RangeSource,
-  options: Readonly<{ maximumEntries?: number }> = {},
-): Promise<ZipEntry[]> => {
+  options: Readonly<{ maximumEntries?: number; maximumPathBytes?: number }> = {},
+): Promise<ZipDirectory> => {
   const directory = await readDirectoryLocation(source);
   if (options.maximumEntries !== undefined && directory.entries > options.maximumEntries) {
     throw new ImportRefusedError('tooManyEntries', {
@@ -184,37 +219,65 @@ export const readZipDirectory = async (
   if (directory.entries * centralHeaderBytes > directory.size) {
     throw corrupt('The archive directory is shorter than its entry count.');
   }
-  const bytes = await source.read(directory.offset, directory.offset + directory.size);
-  const data = view(bytes);
+  const maximumNameBytes = options.maximumPathBytes ?? 0xff_ff;
+  if (directory.size > directory.entries * (centralHeaderBytes + maximumNameBytes + zipEntryAllowanceBytes)) {
+    throw corrupt('The archive directory is larger than its entries can need.');
+  }
+  const end = directory.offset + directory.size;
+  let window = new Uint8Array(0);
+  let windowStart = directory.offset;
+  let crc = 0;
+  /* At least `length` bytes from `at` (an archive offset) in the window, reading on as needed. */
+  const ensure = async (at: number, length: number): Promise<DataView> => {
+    if (at + length > end) {
+      throw corrupt('The archive directory is damaged.');
+    }
+    if (at + length > windowStart + window.byteLength) {
+      const keep = window.subarray(at - windowStart);
+      const readTo = Math.min(end, Math.max(at + length, windowStart + window.byteLength + directoryWindowBytes));
+      const more = await source.read(windowStart + window.byteLength, readTo);
+      crc = crc32Update(crc, more);
+      const joined = new Uint8Array(keep.byteLength + more.byteLength);
+      joined.set(keep);
+      joined.set(more, keep.byteLength);
+      window = joined;
+      windowStart = at;
+    }
+    return new DataView(window.buffer, window.byteOffset + (at - windowStart), length);
+  };
   const decoder = new TextDecoder();
   const entries: ZipEntry[] = [];
-  let at = 0;
+  let at = directory.offset;
   for (let index = 0; index < directory.entries; index += 1) {
-    if (at + centralHeaderBytes > bytes.byteLength || data.getUint32(at, true) !== centralSignature) {
+    // oxlint-disable-next-line no-await-in-loop -- the directory is parsed in order, a window at a time.
+    const head = await ensure(at, centralHeaderBytes);
+    if (head.getUint32(0, true) !== centralSignature) {
       throw corrupt('The archive directory is damaged.');
     }
-    const madeBy = data.getUint16(at + 4, true);
-    const flags = data.getUint16(at + 8, true);
-    const methodCode = data.getUint16(at + 10, true);
-    const crc32 = data.getUint32(at + 16, true);
-    let compressedSize = data.getUint32(at + 20, true);
-    let size = data.getUint32(at + 24, true);
-    const nameLength = data.getUint16(at + 28, true);
-    const extraLength = data.getUint16(at + 30, true);
-    const commentLength = data.getUint16(at + 32, true);
-    const externalAttributes = data.getUint32(at + 38, true);
-    let localHeaderOffset = data.getUint32(at + 42, true);
-    const nameStart = at + centralHeaderBytes;
-    const extraStart = nameStart + nameLength;
-    const next = extraStart + extraLength + commentLength;
-    if (next > bytes.byteLength) {
-      throw corrupt('The archive directory is damaged.');
+    const madeBy = head.getUint16(4, true);
+    const flags = head.getUint16(8, true);
+    const methodCode = head.getUint16(10, true);
+    const crc32 = head.getUint32(16, true);
+    let compressedSize = head.getUint32(20, true);
+    let size = head.getUint32(24, true);
+    const nameLength = head.getUint16(28, true);
+    const extraLength = head.getUint16(30, true);
+    const commentLength = head.getUint16(32, true);
+    const externalAttributes = head.getUint32(38, true);
+    let localHeaderOffset = head.getUint32(42, true);
+    if (nameLength > maximumNameBytes) {
+      throw new ImportRefusedError('pathTooLong', {
+        message: `An archive entry's name is longer than ${String(maximumNameBytes)} bytes.`,
+      });
     }
-    const name = decoder.decode(bytes.subarray(nameStart, extraStart));
+    const variableLength = nameLength + extraLength + commentLength;
+    // oxlint-disable-next-line no-await-in-loop -- the entry's name and extra field follow its header.
+    const variable = await ensure(at + centralHeaderBytes, variableLength);
+    const name = decoder.decode(new Uint8Array(variable.buffer, variable.byteOffset, nameLength));
     if (size === 0xff_ff_ff_ff || compressedSize === 0xff_ff_ff_ff || localHeaderOffset === 0xff_ff_ff_ff) {
       const wide = zip64Values(
-        data,
-        { start: extraStart, end: extraStart + extraLength },
+        variable,
+        { start: nameLength, end: nameLength + extraLength },
         {
           uncompressed: size === 0xff_ff_ff_ff,
           compressed: compressedSize === 0xff_ff_ff_ff,
@@ -235,9 +298,9 @@ export const readZipDirectory = async (
       if (methodCode !== 0 && methodCode !== 8) {
         throw new ImportRefusedError('unsupported', { path: name });
       }
-      if (localHeaderOffset + localHeaderBytes + compressedSize > source.size) {
-        throw corrupt('An archive entry runs past the end of the file.');
-      }
+    }
+    if (localHeaderOffset + localHeaderBytes + compressedSize > directory.offset) {
+      throw corrupt('An archive entry runs into the archive directory.');
     }
     entries.push({
       name,
@@ -252,9 +315,24 @@ export const readZipDirectory = async (
         ? {}
         : { mode: (unixMode & 0o111) === 0 ? '100644' : ('100755' as FileMode) }),
     });
-    at = next;
+    at += centralHeaderBytes + variableLength;
   }
-  return entries;
+  refuseOverlaps(entries);
+  return {
+    entries,
+    identity: `${crc.toString(16).padStart(8, '0')}-${String(directory.size)}-${String(directory.offset)}`,
+  };
+};
+
+/* Every entry's local header and data must end before the next one begins: overlapping ranges decode one byte many times. */
+const refuseOverlaps = (entries: readonly ZipEntry[]): void => {
+  const byOffset = [...entries].sort((left, right) => left.localHeaderOffset - right.localHeaderOffset);
+  for (let index = 1; index < byOffset.length; index += 1) {
+    const previous = byOffset[index - 1]!;
+    if (previous.localHeaderOffset + localHeaderBytes + previous.compressedSize > byOffset[index]!.localHeaderOffset) {
+      throw corrupt('Two archive entries share their bytes.');
+    }
+  }
 };
 
 /**

@@ -36,6 +36,8 @@ export type ImportSourcePin = Readonly<{
   lastModified?: number;
   /** An exact upstream revision (a commit) the source was fetched at, when it has one. */
   revision?: string;
+  /** What the source's own bytes say it is, when it can say cheaply: a zip's central-directory identity. */
+  identity?: string;
 }>;
 
 /**
@@ -52,6 +54,20 @@ export type ImportListedEntry = Readonly<{
   compressedSize?: number;
   /** What the decoder reads, less the path. */
   request: Omit<ImportDecodeRequest, 'path' | 'size'>;
+}>;
+
+/**
+ * What a source's listing is given: when a directory's subtree is left
+ * behind, the count of each entry as it is found, the source's own identity
+ * for its pin, and a signal.
+ *
+ * @public
+ */
+export type ImportListControl = Readonly<{
+  prunes: (path: string) => boolean;
+  listed: (path: string) => void;
+  identify?: (identity: string) => void;
+  signal?: AbortSignal;
 }>;
 
 /**
@@ -74,9 +90,7 @@ export type ImportSource = Readonly<{
    * behind, so a walk can skip it; `listed` counts each entry against the
    * limits as it is found.
    */
-  list: (
-    control: Readonly<{ prunes: (path: string) => boolean; listed: (path: string) => void; signal?: AbortSignal }>,
-  ) => AsyncIterable<ImportListedEntry>;
+  list: (control: ImportListControl) => AsyncIterable<ImportListedEntry>;
 }>;
 
 /**
@@ -128,9 +142,13 @@ export const zipImportSource = (
   ...(options.revision === undefined ? {} : { revision: options.revision }),
   stripSharedFolders: true,
   async *list(control) {
-    const entries = await readZipDirectory(blobRangeSource(blob), {
-      maximumEntries: (options.limits ?? importLimits).maximumEntries,
+    const limits = options.limits ?? importLimits;
+    const { entries, identity } = await readZipDirectory(blobRangeSource(blob), {
+      maximumEntries: limits.maximumEntries,
+      /* A raw name still carries the folder the plan strips, so the directory allows it twice the path limit. */
+      maximumPathBytes: 2 * limits.maximumPathBytes,
     });
+    control.identify?.(identity);
     for (const entry of entries) {
       control.signal?.throwIfAborted();
       if (entry.directory) {
@@ -177,13 +195,38 @@ export const fileListImportSource = (
   name: options.name ?? '',
   stripSharedFolders: true,
   async *list(control) {
+    const pruned = prunedFolders(control);
     for (const { file, path } of files) {
       control.signal?.throwIfAborted();
+      /* A picked or dropped folder arrives flat: what sits under a left-behind folder is never counted. */
+      if (pruned(path)) {
+        continue;
+      }
       control.listed(path);
       yield { source: path, size: file.size, request: { blob: file } };
     }
   },
 });
+
+/* Whether a flat path sits under a folder the walk leaves behind, each folder asked once. */
+const prunedFolders = (control: ImportListControl): ((path: string) => boolean) => {
+  const known = new Map<string, boolean>();
+  return (path) => {
+    const segments = normalizeImportPath(path).split('/');
+    for (let depth = 1; depth < segments.length; depth += 1) {
+      const folder = segments.slice(0, depth).join('/');
+      let prunes = known.get(folder);
+      if (prunes === undefined) {
+        prunes = control.prunes(folder);
+        known.set(folder, prunes);
+      }
+      if (prunes) {
+        return true;
+      }
+    }
+    return false;
+  };
+};
 
 /** The two members of a directory handle a walk uses, typed apart from DOM lib differences. */
 type WalkableDirectory = Readonly<{
@@ -193,6 +236,27 @@ type WalkableDirectory = Readonly<{
     | (WalkableDirectory & Readonly<{ kind: 'directory' }>)
   >;
 }>;
+
+/* One folder walked depth first, never entering a subtree the policy leaves behind. */
+const walkDirectory = async function* (
+  directory: WalkableDirectory,
+  prefix: string,
+  control: ImportListControl,
+): AsyncGenerator<ImportListedEntry> {
+  for await (const child of directory.values()) {
+    control.signal?.throwIfAborted();
+    const path = prefix === '' ? child.name : `${prefix}/${child.name}`;
+    if (child.kind === 'directory') {
+      if (!control.prunes(path)) {
+        yield* walkDirectory(child, path, control);
+      }
+      continue;
+    }
+    control.listed(path);
+    const file = await child.getFile();
+    yield { source: path, size: file.size, request: { blob: file } };
+  }
+};
 
 /**
  * A picked folder, walked where the import runs (a handle crosses to a worker
@@ -209,26 +273,42 @@ export const directoryHandleImportSource = (handle: FileSystemDirectoryHandle): 
     kind: 'directory',
     name: root.name,
     stripSharedFolders: true,
-    async *list(control) {
-      const walk = async function* (directory: WalkableDirectory, prefix: string): AsyncGenerator<ImportListedEntry> {
-        for await (const child of directory.values()) {
-          control.signal?.throwIfAborted();
-          const path = prefix === '' ? child.name : `${prefix}/${child.name}`;
-          if (child.kind === 'directory') {
-            if (!control.prunes(path)) {
-              yield* walk(child, path);
-            }
-            continue;
-          }
-          control.listed(path);
-          const file = await child.getFile();
-          yield { source: path, size: file.size, request: { blob: file } };
-        }
-      };
-      yield* walk(root, '');
-    },
+    list: (control) => walkDirectory(root, '', control),
   };
 };
+
+/**
+ * What a drop carries as handles (`DataTransferItem.getAsFileSystemHandle`):
+ * files and folders side by side, each folder walked under its own name where
+ * the import runs, so the page never walks the drop.
+ *
+ * @param handles - The dropped files and folders.
+ * @returns The source.
+ * @public
+ */
+export const handleListImportSource = (handles: readonly FileSystemHandle[]): ImportSource => ({
+  kind: 'files',
+  name: '',
+  stripSharedFolders: true,
+  async *list(control) {
+    for (const handle of handles as unknown as ReadonlyArray<
+      | Readonly<{ kind: 'file'; name: string; getFile: () => Promise<File> }>
+      | (WalkableDirectory & Readonly<{ kind: 'directory' }>)
+    >) {
+      control.signal?.throwIfAborted();
+      if (handle.kind === 'directory') {
+        if (!control.prunes(handle.name)) {
+          yield* walkDirectory(handle, handle.name, control);
+        }
+        continue;
+      }
+      control.listed(handle.name);
+      // oxlint-disable-next-line no-await-in-loop -- a drop's handles are listed in order.
+      const file = await handle.getFile();
+      yield { source: handle.name, size: file.size, request: { blob: file } };
+    }
+  },
+});
 
 /**
  * Spool a downloaded archive of declared size into a `Blob`, refusing it as
@@ -311,7 +391,11 @@ export const planImport = async (
   let listedCount = 0;
   const listed: ImportListedEntry[] = [];
   let symlinks = 0;
+  let identity: string | undefined;
   for await (const entry of source.list({
+    identify: (value) => {
+      identity = value;
+    },
     prunes: (path) => walkAdmission.prunes(normalizeImportPath(path)),
     listed: (path) => {
       listedCount += 1;
@@ -380,6 +464,7 @@ export const planImport = async (
       entries: listedCount,
       ...(lastModified === 0 ? {} : { lastModified }),
       ...(source.revision === undefined ? {} : { revision: source.revision }),
+      ...(identity === undefined ? {} : { identity }),
     },
     entries,
     bytes: meter.declaredBytes,

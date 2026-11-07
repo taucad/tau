@@ -1,4 +1,3 @@
-/* oxlint-disable no-bitwise -- the zip CRC is bit arithmetic. */
 /**
  * One import entry decoded and digested in a single pass (charter D12, I2).
  *
@@ -14,6 +13,7 @@
  */
 
 import { getFileContentMetadata } from '#content-metadata.js';
+import { crc32 } from '#importer/crc32.js';
 import { ImportRefusedError } from '#importer/limits.js';
 import { zipEntryDataOffset, zipLocalHeaderBytes } from '#importer/zip.js';
 import type { ZipEntry } from '#importer/zip.js';
@@ -51,7 +51,10 @@ export type ImportDecodedEntry = Readonly<{
  *
  * @public
  */
-export type ImportDecoder = (request: ImportDecodeRequest) => Promise<ImportDecodedEntry>;
+export type ImportDecoder = (
+  request: ImportDecodeRequest,
+  options?: ImportDecodeOptions,
+) => Promise<ImportDecodedEntry>;
 
 /**
  * A one-shot digest, lowercase hex.
@@ -76,37 +79,6 @@ export const subtleImportHash: ImportHash = async (algorithm, bytes) => {
   return hex(await subtle.digest(algorithm === 'sha1' ? 'SHA-1' : 'SHA-256', bytes));
 };
 
-let crcTable: Uint32Array | undefined;
-const table = (): Uint32Array => {
-  if (crcTable === undefined) {
-    crcTable = new Uint32Array(256);
-    for (let index = 0; index < 256; index += 1) {
-      let value = index;
-      for (let bit = 0; bit < 8; bit += 1) {
-        value = (value & 1) === 0 ? value >>> 1 : 0xed_b8_83_20 ^ (value >>> 1);
-      }
-      crcTable[index] = value >>> 0;
-    }
-  }
-  return crcTable;
-};
-
-/**
- * The zip CRC-32 of some bytes.
- *
- * @param bytes - The bytes.
- * @returns The unsigned CRC.
- * @public
- */
-export const crc32 = (bytes: Uint8Array<ArrayBuffer>): number => {
-  const lookup = table();
-  let crc = 0xff_ff_ff_ff;
-  for (const byte of bytes) {
-    crc = lookup[(crc ^ byte) & 0xff]! ^ (crc >>> 8);
-  }
-  return (crc ^ 0xff_ff_ff_ff) >>> 0;
-};
-
 const damaged = (path: string, cause?: unknown): ImportRefusedError =>
   new ImportRefusedError('corrupt', { path, ...(cause === undefined ? {} : { cause }) });
 
@@ -123,20 +95,14 @@ const rangeStream = (blob: Blob): ReadableStream<Uint8Array<ArrayBuffer>> => {
   });
 };
 
-/**
- * Decode one entry and digest it in the same pass.
- *
- * @param request - The entry.
- * @param hash - The digest to use; WebCrypto's by default.
- * @returns The bytes and their facts.
- * @throws ImportRefusedError `corrupt` when the bytes do not decode to exactly the declared size and CRC.
- * @public
- */
-export const decodeImportEntry = async (
+/* The entry's bytes, inflated into one buffer after `prefix` bytes, checked against the declared size and CRC. */
+const inflate = async (
   request: ImportDecodeRequest,
-  hash: ImportHash = subtleImportHash,
-): Promise<ImportDecodedEntry> => {
+  prefix: Uint8Array<ArrayBuffer>,
+  signal: AbortSignal | undefined,
+): Promise<Uint8Array<ArrayBuffer>> => {
   const { blob, path, size, zip } = request;
+  signal?.throwIfAborted();
   let range = blob;
   if (zip === undefined) {
     if (blob.size !== size) {
@@ -152,8 +118,6 @@ export const decodeImportEntry = async (
     }
     range = blob.slice(start, start + zip.compressedSize);
   }
-  /* The git object header goes first in the same buffer, so the blob id is one digest over one allocation. */
-  const prefix = new TextEncoder().encode(`blob ${String(size)}\0`);
   const framed = new Uint8Array(prefix.byteLength + size);
   framed.set(prefix);
   let written = prefix.byteLength;
@@ -170,6 +134,7 @@ export const decodeImportEntry = async (
   try {
     // oxlint-disable-next-line no-await-in-loop -- a stream is read one chunk after another.
     for (let read = await reader.read(); !read.done; read = await reader.read()) {
+      signal?.throwIfAborted();
       if (written + read.value.byteLength > framed.byteLength) {
         throw damaged(path);
       }
@@ -178,18 +143,65 @@ export const decodeImportEntry = async (
     }
   } catch (error) {
     await reader.cancel().catch(() => undefined);
-    throw error instanceof ImportRefusedError ? error : damaged(path, error);
+    throw error instanceof ImportRefusedError || signal?.aborted === true ? error : damaged(path, error);
   }
   if (written !== framed.byteLength) {
     throw damaged(path);
   }
-  const data = framed.subarray(prefix.byteLength);
-  if (zip !== undefined && crc32(data) !== zip.crc32) {
+  if (zip !== undefined && crc32(framed.subarray(prefix.byteLength)) !== zip.crc32) {
     throw damaged(path);
   }
+  return framed;
+};
+
+/**
+ * Options of one decode.
+ *
+ * @public
+ */
+export type ImportDecodeOptions = Readonly<{
+  /** Stops the decode between chunks; a decode in another realm may ignore it and finish. */
+  signal?: AbortSignal;
+}>;
+
+/**
+ * Decode one entry and digest it in the same pass.
+ *
+ * @param request - The entry.
+ * @param hash - The digest to use; WebCrypto's by default.
+ * @param options - A signal that stops the decode between chunks.
+ * @returns The bytes and their facts.
+ * @throws ImportRefusedError `corrupt` when the bytes do not decode to exactly the declared size and CRC.
+ * @public
+ */
+export const decodeImportEntry = async (
+  request: ImportDecodeRequest,
+  hash: ImportHash = subtleImportHash,
+  options: ImportDecodeOptions = {},
+): Promise<ImportDecodedEntry> => {
+  /* The git object header goes first in the same buffer, so the blob id is one digest over one allocation. */
+  const prefix = new TextEncoder().encode(`blob ${String(request.size)}\0`);
+  const framed = await inflate(request, prefix, options.signal);
+  const data = framed.subarray(prefix.byteLength);
   const [blobOid, sha256] = await Promise.all([hash('sha1', framed), hash('sha256', data)]);
   return { data, facts: { ...getFileContentMetadata(data), blobOid, sha256 } };
 };
+
+/**
+ * Read one entry's bytes without digesting them: what a review's preview
+ * shows, checked against the declared size and CRC like any decode, and
+ * hashed by nothing.
+ *
+ * @param request - The entry.
+ * @param options - A signal that stops the read between chunks.
+ * @returns The bytes.
+ * @throws ImportRefusedError `corrupt` when the bytes do not decode to exactly the declared size and CRC.
+ * @public
+ */
+export const readImportEntry = async (
+  request: ImportDecodeRequest,
+  options: ImportDecodeOptions = {},
+): Promise<Uint8Array<ArrayBuffer>> => inflate(request, new Uint8Array(0), options.signal);
 
 /**
  * The decode run in the caller's own realm, for a host with no compute worker
@@ -201,5 +213,5 @@ export const decodeImportEntry = async (
  */
 export const createInlineImportDecoder =
   (hash: ImportHash = subtleImportHash): ImportDecoder =>
-  async (request) =>
-    decodeImportEntry(request, hash);
+  async (request, options) =>
+    decodeImportEntry(request, hash, options);

@@ -146,6 +146,13 @@ export type ProviderCapabilities = {
    * streams to save memory streams only where this is set (W6.4).
    */
   readonly streamsWrites?: boolean;
+  /**
+   * Whether `rename` of a file is a metadata operation that never reads or
+   * writes its bytes (OPFS's native `move()`, Node's `rename`). A consumer
+   * that would move many files into place asks first, and writes them where
+   * they belong instead on a provider whose rename copies (W7).
+   */
+  readonly movesInPlace?: boolean;
 };
 
 /**

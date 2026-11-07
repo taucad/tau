@@ -299,6 +299,7 @@ export class NodeFsProviderClient extends AbstractFileSystemProvider {
     durability: 'transactional-rewrite',
     trustworthyMtime: true,
     externallyEdited: true,
+    movesInPlace: true,
   };
 
   private readonly _channel: NodeFsChannel;

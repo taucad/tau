@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { tauPathPolicy } from '#path-registry.js';
 import { ImportMeter, ImportRefusedError, importLimits } from '#importer/limits.js';
-import { ImportPathAdmission, normalizeImportPath, sharedLeadingFolders } from '#importer/path-policy.js';
+import {
+  ImportPathAdmission,
+  isReservedImportPath,
+  normalizeImportPath,
+  sharedLeadingFolders,
+} from '#importer/path-policy.js';
 
 const reasonOf = (work: () => unknown): string | undefined => {
   try {
@@ -46,6 +51,32 @@ describe('ImportPathAdmission', () => {
     expect(admit.admit('tau.json')).toEqual({ kind: 'skip', path: 'tau.json', why: 'reserved' });
     expect(admit.admit('sub/tau.json').kind).toBe('skip');
     expect(admit.admit('.tau/project.json').kind).toBe('skip');
+  });
+
+  it.each([
+    'TAU.JSON',
+    'tau.json.',
+    'Tau.Json ',
+    'tau.json:stream',
+    'sub/TAU.json',
+    '.TAU/Project.json.',
+    '.tau/project.json::$DATA',
+    '.Tau',
+  ])('should reserve %j, a spelling a filesystem resolves onto the manifest or identity', (path) => {
+    expect(isReservedImportPath(path)).toBe(true);
+    expect(admission().admit(path)).toEqual({ kind: 'skip', path, why: 'reserved' });
+  });
+
+  it("should keep a name that only contains the manifest's", () => {
+    expect(isReservedImportPath('tau.json.bak')).toBe(false);
+    expect(isReservedImportPath('mytau.json')).toBe(false);
+  });
+
+  it('should refuse two names a filesystem folds together by a trailing dot or a stream', () => {
+    const dotted = admission();
+    dotted.admit('notes.md');
+
+    expect(reasonOf(() => dotted.admit('notes.md.'))).toBe('collision');
   });
 
   it('should prune a left-behind directory so a walk never enters it', () => {

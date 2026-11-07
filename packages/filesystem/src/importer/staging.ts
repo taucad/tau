@@ -15,8 +15,22 @@
  *
  * Batches are at most {@link maximumChangesetEntries} entries or
  * {@link maximumChangesetBytes} bytes (a larger file is a batch of one), and
- * the next batch decodes while the last one writes, so an import holds at
- * most two batches and the largest file in memory.
+ * the next batch decodes while the last one writes, under one byte budget
+ * ({@link importResidentBytes}, or the one entry alone when it is larger), so
+ * an import holds at most that budget plus its largest file in memory.
+ *
+ * Where the bytes land depends on what a move costs. A provider whose rename
+ * is a metadata operation (`movesInPlace`: OPFS, Node) stages under `tree/`
+ * and the commit moves each file into the project. On one whose rename copies
+ * (IndexedDB, a picked folder) a move would write every byte again, so the
+ * entries are written straight into the pending project directory instead,
+ * once; that directory has no `tau.json` until the commit writes it last, so
+ * no discovery sees the project before it is whole (I1).
+ *
+ * A staging nobody will commit is removed: by the session that made it on
+ * every failure, cancel and close, and otherwise by
+ * {@link sweepStagedImports}, which removes each staging no journal row or
+ * live session owns once it has been still for a while.
  *
  * @module
  */
@@ -25,6 +39,7 @@ import { maximumChangesetBytes, maximumChangesetEntries } from '#changeset.js';
 import type { BatchEntry, BatchReceipt } from '#changeset.js';
 import type { ContentFacts, FileMode, FileSystemProvider } from '#types.js';
 import { ImportRefusedError, isImportRefusal } from '#importer/limits.js';
+import type { ImportRefusalReason } from '#importer/limits.js';
 import type { ImportDecodedEntry, ImportDecoder } from '#importer/decode.js';
 import type { ImportPlan, ImportSourcePin, PlannedImportEntry } from '#importer/sources.js';
 
@@ -72,6 +87,10 @@ export type StagedImport = Readonly<{
   operationId: string;
   /** The staging directory, relative to the storage root. */
   directory: string;
+  /** Where the staged files are: `<directory>/tree`, or the project directory they were written into. */
+  tree: string;
+  /** The project directory the entries were written straight into, where a move would copy them. */
+  inPlace?: string;
   pin: ImportSourcePin;
   entries: readonly StagedImportEntry[];
   bytes: number;
@@ -96,7 +115,45 @@ export type ImportStagingPort = Readonly<{
  */
 export type ImportStagingProgress = Readonly<{ files: number; bytes: number; totalFiles: number; totalBytes: number }>;
 
-type Intent = Readonly<{ version: 1; operationId: string; pin: ImportSourcePin }>;
+type Intent = Readonly<{ version: 1; operationId: string; pin: ImportSourcePin; inPlace?: string }>;
+
+/** Bytes of decoded entries an import holds at once, beyond a single entry larger than it (S6). @public */
+export const importResidentBytes = 64 * 1024 * 1024;
+
+/** How long a staging nobody owns must have been still before a sweep removes it. @public */
+export const importStagingStaleMilliseconds = 10 * 60 * 1000;
+
+/**
+ * Where a committed import keeps the facts its decode measured (every entry's
+ * blob id, SHA-256, kind and mode), so the first revision and the Project
+ * Index build from them instead of hashing the files again. A member of `.tau`
+ * that no registry row names, so it is never versioned.
+ *
+ * @public
+ */
+export const importFactsPath = '.tau/import.json';
+
+/**
+ * The record at {@link importFactsPath}.
+ *
+ * @public
+ */
+export type ImportFactsRecord = Readonly<{
+  version: 1;
+  operationId: string;
+  pin: ImportSourcePin;
+  entries: readonly StagedImportEntry[];
+}>;
+
+/**
+ * The name of the lock a live staging session holds, so a sweep in another
+ * tab can tell it from an abandoned one.
+ *
+ * @param operationId - The import operation.
+ * @returns The lock name.
+ * @public
+ */
+export const importStagingLeaseName = (operationId: string): string => `tau:import-staging:${operationId}`;
 
 const encode = (value: unknown): Uint8Array<ArrayBuffer> => new TextEncoder().encode(JSON.stringify(value));
 
@@ -149,8 +206,8 @@ export const readStagedImport = async (
   operationId: string,
 ): Promise<StagedImport | undefined> => {
   const directory = importStagingDirectory(operationId);
-  const intent = (await readJson(provider, `${directory}/intent.json`)) as Intent | undefined;
-  if (intent?.version !== 1 || intent.operationId !== operationId) {
+  const intent = await readIntent(provider, operationId);
+  if (intent === undefined) {
     return undefined;
   }
   let names: string[];
@@ -180,11 +237,31 @@ export const readStagedImport = async (
   return {
     operationId,
     directory,
+    tree: intent.inPlace ?? `${directory}/tree`,
+    ...(intent.inPlace === undefined ? {} : { inPlace: intent.inPlace }),
     pin: intent.pin,
     entries,
     bytes: entries.reduce((sum, { size }) => sum + size, 0),
   };
 };
+
+const readIntent = async (provider: FileSystemProvider, operationId: string): Promise<Intent | undefined> => {
+  const intent = (await readJson(provider, `${importStagingDirectory(operationId)}/intent.json`)) as Intent | undefined;
+  if (intent?.version !== 1 || intent.operationId !== operationId) {
+    return undefined;
+  }
+  return intent.inPlace === undefined || isProjectDirectory(intent.inPlace) ? intent : undefined;
+};
+
+/* A pending project directory: relative, one or more plain segments, never Tau's own dot folders. */
+const isProjectDirectory = (path: string): boolean =>
+  path !== '' &&
+  !path.startsWith('.') &&
+  path.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..');
+
+/* A directory the commit has written its identity or manifest into belongs to the project now, not the import. */
+const isClaimedByProject = async (provider: FileSystemProvider, directory: string): Promise<boolean> =>
+  (await provider.exists(`${directory}/tau.json`)) || provider.exists(`${directory}/.tau/project.json`);
 
 /**
  * Remove a staging directory and everything in it.
@@ -195,21 +272,104 @@ export const readStagedImport = async (
  */
 export const discardStagedImport = async (port: ImportStagingPort, operationId: string): Promise<void> => {
   const directory = importStagingDirectory(operationId);
+  /* Entries written in place go first, while the staging still names their folder. */
+  const intent = await readIntent(port.provider, operationId);
+  if (
+    intent?.inPlace !== undefined &&
+    (await port.provider.exists(intent.inPlace)) &&
+    !(await isClaimedByProject(port.provider, intent.inPlace))
+  ) {
+    await applied(port, [{ op: 'delete', path: intent.inPlace, kind: 'dir', recursive: true }]);
+  }
   if (await port.provider.exists(directory)) {
     await applied(port, [{ op: 'delete', path: directory, kind: 'dir', recursive: true }]);
   }
 };
 
+/**
+ * Remove every import staging on a storage root that nothing will commit: no
+ * journal row names it (`owned`), no live session holds its lease (`held`),
+ * and it has been still for {@link importStagingStaleMilliseconds}, so a
+ * staging another tab finished a moment ago and is about to journal is left
+ * alone. A staging written in place takes its project directory with it,
+ * unless the commit already made that directory a project.
+ *
+ * @param input - The storage root, the operations journal rows and live sessions own, and the clock.
+ * @returns The operations removed and those kept.
+ * @public
+ */
+export const sweepStagedImports = async (
+  input: Readonly<{
+    port: ImportStagingPort;
+    owned: ReadonlySet<string>;
+    held?: ReadonlySet<string>;
+    /** Milliseconds. */
+    staleAfter?: number;
+    now?: number;
+  }>,
+): Promise<Readonly<{ removed: string[]; kept: string[] }>> => {
+  const { port, owned } = input;
+  const now = input.now ?? Date.now();
+  const staleAfter = input.staleAfter ?? importStagingStaleMilliseconds;
+  let names: string[];
+  try {
+    names = await port.provider.readdir(importStagingFolder);
+  } catch (error) {
+    if (isMissing(error)) {
+      return { removed: [], kept: [] };
+    }
+    throw error;
+  }
+  const removed: string[] = [];
+  const kept: string[] = [];
+  for (const name of names.sort()) {
+    const operationId = name.slice(importStagingPrefix.length);
+    if (!name.startsWith(importStagingPrefix) || !operationIdPattern.test(operationId)) {
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- stagings are judged one at a time; a root holds few.
+    if (
+      owned.has(operationId) ||
+      input.held?.has(operationId) === true ||
+      (await stillFor(port.provider, name, now)) < staleAfter
+    ) {
+      kept.push(operationId);
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one staging is removed at a time.
+    await discardStagedImport(port, operationId);
+    removed.push(operationId);
+  }
+  return { removed, kept };
+};
+
+/* How long a staging has gone unwritten: since its newest ledger record, its intent or the directory itself. */
+const stillFor = async (provider: FileSystemProvider, name: string, now: number): Promise<number> => {
+  const directory = `${importStagingFolder}/${name}`;
+  const sequence = await lastLedgerSequence(provider, directory);
+  /* Files only: a directory's mtime is synthesized by some providers. */
+  const candidates = [`${directory}/intent.json`];
+  if (sequence > 0) {
+    candidates.push(`${directory}/ledger/${String(sequence).padStart(6, '0')}.json`);
+  }
+  const times = await Promise.all(
+    candidates.map(async (path) =>
+      provider
+        .stat(path)
+        .then(({ mtimeMs }) => mtimeMs)
+        .catch(() => 0),
+    ),
+  );
+  return now - Math.max(0, ...times);
+};
+
 /* Consecutive entries grouped into changesets of bounded count and bytes; a larger entry is alone. */
-const windowsOf = (entries: readonly PlannedImportEntry[]): PlannedImportEntry[][] => {
+const windowsOf = (entries: readonly PlannedImportEntry[], maximumBytes: number): PlannedImportEntry[][] => {
   const windows: PlannedImportEntry[][] = [];
   let current: PlannedImportEntry[] = [];
   let bytes = 0;
   for (const entry of entries) {
-    if (
-      current.length > 0 &&
-      (current.length >= maximumChangesetEntries || bytes + entry.size > maximumChangesetBytes)
-    ) {
+    if (current.length > 0 && (current.length >= maximumChangesetEntries || bytes + entry.size > maximumBytes)) {
       windows.push(current);
       current = [];
       bytes = 0;
@@ -243,11 +403,88 @@ const bounded = async <Item, Result>(
   return results;
 };
 
+/* A byte budget decodes wait on: one may always go when nothing is held, so the largest entry fits alone. */
+const byteBudget = (capacity: number) => {
+  let held = 0;
+  const waiting: Array<Readonly<{ bytes: number; ready: PromiseWithResolvers<void> }>> = [];
+  const admit = (): void => {
+    while (waiting.length > 0 && (held === 0 || held + waiting[0]!.bytes <= capacity)) {
+      const next = waiting.shift()!;
+      held += next.bytes;
+      next.ready.resolve();
+    }
+  };
+  return {
+    acquire: async (bytes: number, signal: AbortSignal): Promise<void> => {
+      signal.throwIfAborted();
+      const ready = Promise.withResolvers<void>();
+      const waiter = { bytes, ready };
+      waiting.push(waiter);
+      admit();
+      const stop = (): void => {
+        const at = waiting.indexOf(waiter);
+        if (at !== -1) {
+          waiting.splice(at, 1);
+          ready.reject(signal.reason);
+        }
+      };
+      signal.addEventListener('abort', stop, { once: true });
+      try {
+        await ready.promise;
+      } finally {
+        signal.removeEventListener('abort', stop);
+      }
+    },
+    release: (bytes: number): void => {
+      held -= bytes;
+      admit();
+    },
+  };
+};
+
+/* A refusal keeps its reason across the worker boundary; anything else the decoder threw stays what it was. */
+const refusalOf = (error: unknown, path: string): Error => {
+  if (error instanceof ImportRefusedError) {
+    return error;
+  }
+  if (isImportRefusal(error) || (error instanceof Error && error.name === 'CorruptBytesError')) {
+    const { reason } = error as { reason?: unknown };
+    return new ImportRefusedError(isRefusalReason(reason) ? reason : 'corrupt', { path, cause: error });
+  }
+  return asError(error);
+};
+
+const asError = (value: unknown): Error => (value instanceof Error ? value : new Error(String(value)));
+
+const refusalReasons: ReadonlySet<string> = new Set<ImportRefusalReason>([
+  'archiveTooLarge',
+  'expandedTooLarge',
+  'fileTooLarge',
+  'ratioTooHigh',
+  'pathTooLong',
+  'tooManyEntries',
+  'unsafePath',
+  'collision',
+  'encrypted',
+  'unsupported',
+  'corrupt',
+  'empty',
+]);
+
+const isRefusalReason = (value: unknown): value is ImportRefusalReason =>
+  typeof value === 'string' && refusalReasons.has(value);
+
 /**
  * Stage a planned import, or resume one staged from the same source.
  *
- * @param input - The storage root, the operation, the plan, the decoder, and
- *   optional decode concurrency, signal and progress callback.
+ * With a `target` (the pending project directory the commit will create) on
+ * a provider whose rename copies, the entries are written straight into that
+ * directory; otherwise they stage under the staging directory's `tree/` for
+ * the commit to move. A fresh in-place staging refuses a target that exists.
+ *
+ * @param input - The storage root, the operation, the plan, the decoder, the
+ *   pending project directory, and optional decode concurrency, resident byte
+ *   budget, signal and progress callback.
  * @returns Every staged entry, in plan order.
  * @throws ImportRefusedError when an entry does not decode to its declared bytes.
  * @public
@@ -258,23 +495,40 @@ export const stageImport = async (
     operationId: string;
     plan: ImportPlan;
     decode: ImportDecoder;
+    target?: string;
     concurrency?: number;
+    residentBytes?: number;
     signal?: AbortSignal;
     onProgress?: (progress: ImportStagingProgress) => void;
   }>,
 ): Promise<StagedImport> => {
-  const { port, operationId, plan, decode, signal } = input;
+  const { port, operationId, plan, decode } = input;
   const directory = importStagingDirectory(operationId);
-  const tree = `${directory}/tree`;
+  if (input.target !== undefined && !isProjectDirectory(input.target)) {
+    throw new TypeError(`Not a project directory: ${input.target}`);
+  }
+  const inPlace =
+    input.target !== undefined && port.provider.capabilities.movesInPlace !== true ? input.target : undefined;
+  const tree = inPlace ?? `${directory}/tree`;
   let staged = await readStagedImport(port.provider, operationId);
-  if (staged !== undefined && !samePin(staged.pin, plan.pin)) {
+  if (staged !== undefined && (!samePin(staged.pin, plan.pin) || staged.inPlace !== inPlace)) {
     await discardStagedImport(port, operationId);
     staged = undefined;
   }
+  if (inPlace !== undefined && staged !== undefined && (await isClaimedByProject(port.provider, inPlace))) {
+    throw new Error(`The project folder ${inPlace} is already a project.`);
+  }
   if (staged === undefined) {
     await discardStagedImport(port, operationId);
+    if (inPlace !== undefined && (await port.provider.exists(inPlace))) {
+      throw new Error(`The project folder ${inPlace} already exists.`);
+    }
     await applied(port, [
-      { op: 'write', path: `${directory}/intent.json`, data: encode({ version: 1, operationId, pin: plan.pin }) },
+      {
+        op: 'write',
+        path: `${directory}/intent.json`,
+        data: encode({ version: 1, operationId, pin: plan.pin, ...(inPlace === undefined ? {} : { inPlace }) }),
+      },
     ]);
   }
   const planned = new Map(plan.entries.map((entry) => [entry.path, entry]));
@@ -303,29 +557,36 @@ export const stageImport = async (
   let doneBytes = [...kept.values()].reduce((sum, { size }) => sum + size, 0);
   input.onProgress?.({ files: doneFiles, bytes: doneBytes, ...totals });
   const concurrency = Math.max(1, input.concurrency ?? 4);
-  const decodeWindow = async (window: readonly PlannedImportEntry[]): Promise<ImportDecodedEntry[]> =>
-    bounded(window, concurrency, async (entry) => {
-      signal?.throwIfAborted();
-      try {
-        const decoded = await decode(entry.request);
-        if (decoded.data.byteLength !== entry.size) {
-          throw new ImportRefusedError('corrupt', { path: entry.path });
+  const residentBytes = input.residentBytes ?? importResidentBytes;
+  const budget = byteBudget(residentBytes);
+  /* A failure anywhere stops every decode still queued or running, as the caller's abort does. */
+  const halt = new AbortController();
+  const signal = input.signal === undefined ? halt.signal : AbortSignal.any([input.signal, halt.signal]);
+  const decodeWindow = async (window: readonly PlannedImportEntry[]): Promise<ImportDecodedEntry[]> => {
+    let acquired = 0;
+    try {
+      return await bounded(window, concurrency, async (entry) => {
+        await budget.acquire(entry.size, signal);
+        acquired += entry.size;
+        try {
+          const decoded = await decode(entry.request, { signal });
+          signal.throwIfAborted();
+          if (decoded.data.byteLength !== entry.size) {
+            throw new ImportRefusedError('corrupt', { path: entry.path });
+          }
+          return decoded;
+        } catch (error) {
+          throw signal.aborted && !(error instanceof ImportRefusedError)
+            ? asError(signal.reason)
+            : refusalOf(error, entry.path);
         }
-        return decoded;
-      } catch (error) {
-        if (error instanceof ImportRefusedError || signal?.aborted === true) {
-          throw error;
-        }
-        /* A refusal revived from a worker keeps its sentence; anything the worker named corrupt is damage. */
-        if (
-          isImportRefusal(error) ||
-          (error instanceof Error && (error.name === 'CorruptBytesError' || error.name === 'ImportRefusedError'))
-        ) {
-          throw new ImportRefusedError('corrupt', { path: entry.path, cause: error });
-        }
-        throw error;
-      }
-    });
+      });
+    } catch (error) {
+      halt.abort(error);
+      budget.release(acquired);
+      throw error;
+    }
+  };
   /* Settled, never rejected: a later batch's failure is seen when its turn comes, not while another one writes. */
   const settled = async (
     window: readonly PlannedImportEntry[],
@@ -336,52 +597,74 @@ export const stageImport = async (
       return { error };
     }
   };
-  const windows = windowsOf(remaining);
-  /* One batch decodes while the one before it writes: at most two in hand. */
+  /* Two windows fit the budget, one writing while the next decodes; an entry larger than that is a window alone. */
+  const windows = windowsOf(remaining, Math.min(maximumChangesetBytes, Math.floor(residentBytes / 2)));
+  /* One batch decodes while the one before it writes, both inside the byte budget. */
   let decoding = windows.length === 0 ? undefined : settled(windows[0]!);
-  for (let index = 0; index < windows.length; index += 1) {
-    const window = windows[index]!;
-    // oxlint-disable-next-line no-await-in-loop -- batches are written in order, each after its decode.
-    const outcome = await decoding!;
-    if ('error' in outcome) {
-      throw outcome.error;
+  try {
+    for (let index = 0; index < windows.length; index += 1) {
+      const window = windows[index]!;
+      // oxlint-disable-next-line no-await-in-loop -- batches are written in order, each after its decode.
+      const outcome = await decoding!;
+      decoding = undefined;
+      if ('error' in outcome) {
+        throw outcome.error;
+      }
+      const { decoded } = outcome;
+      const windowBytes = window.reduce((sum, { size }) => sum + size, 0);
+      try {
+        signal.throwIfAborted();
+        decoding = index + 1 < windows.length ? settled(windows[index + 1]!) : undefined;
+        // oxlint-disable-next-line no-await-in-loop -- the ledger record follows its batch's durable writes.
+        await applied(
+          port,
+          window.map((entry, at) => ({
+            op: 'write',
+            path: `${tree}/${entry.path}`,
+            data: decoded[at]!.data,
+          })),
+        );
+      } finally {
+        budget.release(windowBytes);
+      }
+      const records: StagedImportEntry[] = window.map((entry, at) => ({
+        path: entry.path,
+        size: entry.size,
+        ...(entry.mode === undefined ? {} : { mode: entry.mode }),
+        facts: decoded[at]!.facts,
+      }));
+      // oxlint-disable-next-line no-await-in-loop -- one record per batch, after it.
+      await applied(port, [
+        {
+          op: 'write',
+          path: `${directory}/ledger/${String(ledgerSequence).padStart(6, '0')}.json`,
+          data: encode(records),
+        },
+      ]);
+      ledgerSequence += 1;
+      for (const record of records) {
+        kept.set(record.path, record);
+        doneFiles += 1;
+        doneBytes += record.size;
+      }
+      input.onProgress?.({ files: doneFiles, bytes: doneBytes, ...totals });
     }
-    const { decoded } = outcome;
-    signal?.throwIfAborted();
-    decoding = index + 1 < windows.length ? settled(windows[index + 1]!) : undefined;
-    // oxlint-disable-next-line no-await-in-loop -- the ledger record follows its batch's durable writes.
-    await applied(
-      port,
-      window.map((entry, at) => ({
-        op: 'write',
-        path: `${tree}/${entry.path}`,
-        data: decoded[at]!.data,
-      })),
-    );
-    const records: StagedImportEntry[] = window.map((entry, at) => ({
-      path: entry.path,
-      size: entry.size,
-      ...(entry.mode === undefined ? {} : { mode: entry.mode }),
-      facts: decoded[at]!.facts,
-    }));
-    // oxlint-disable-next-line no-await-in-loop -- one record per batch, after it.
-    await applied(port, [
-      {
-        op: 'write',
-        path: `${directory}/ledger/${String(ledgerSequence).padStart(6, '0')}.json`,
-        data: encode(records),
-      },
-    ]);
-    ledgerSequence += 1;
-    for (const record of records) {
-      kept.set(record.path, record);
-      doneFiles += 1;
-      doneBytes += record.size;
-    }
-    input.onProgress?.({ files: doneFiles, bytes: doneBytes, ...totals });
+  } catch (error) {
+    /* Nothing decodes on after the import stopped: the lookahead is told, and waited for. */
+    halt.abort(error);
+    await decoding;
+    throw error;
   }
   const entries = plan.entries.map((entry) => kept.get(entry.path)!);
-  return { operationId, directory, pin: plan.pin, entries, bytes: plan.bytes };
+  return {
+    operationId,
+    directory,
+    tree,
+    ...(inPlace === undefined ? {} : { inPlace }),
+    pin: plan.pin,
+    entries,
+    bytes: plan.bytes,
+  };
 };
 
 const lastLedgerSequence = async (provider: FileSystemProvider, directory: string): Promise<number> => {

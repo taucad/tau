@@ -8,20 +8,41 @@
 
 export { ImportMeter, ImportRefusedError, importLimits, isImportRefusal, ratioFloorBytes } from '#importer/limits.js';
 export type { ImportLimits, ImportRefusalReason } from '#importer/limits.js';
-export { ImportPathAdmission, normalizeImportPath, sharedLeadingFolders } from '#importer/path-policy.js';
+export {
+  ImportPathAdmission,
+  isReservedImportPath,
+  normalizeImportPath,
+  sharedLeadingFolders,
+} from '#importer/path-policy.js';
 export type { ImportPathVerdict } from '#importer/path-policy.js';
-export { blobRangeSource, readZipDirectory, zipEntryDataOffset, zipLocalHeaderBytes } from '#importer/zip.js';
-export type { RangeSource, ZipEntry } from '#importer/zip.js';
-export { crc32, createInlineImportDecoder, decodeImportEntry, subtleImportHash } from '#importer/decode.js';
-export type { ImportDecodeRequest, ImportDecodedEntry, ImportDecoder, ImportHash } from '#importer/decode.js';
+export {
+  blobRangeSource,
+  readZipDirectory,
+  zipEntryAllowanceBytes,
+  zipEntryDataOffset,
+  zipLocalHeaderBytes,
+} from '#importer/zip.js';
+export type { RangeSource, ZipDirectory, ZipEntry } from '#importer/zip.js';
+export { crc32Update } from '#importer/crc32.js';
+export { crc32 } from '#importer/crc32.js';
+export { createInlineImportDecoder, decodeImportEntry, readImportEntry, subtleImportHash } from '#importer/decode.js';
+export type {
+  ImportDecodeOptions,
+  ImportDecodeRequest,
+  ImportDecodedEntry,
+  ImportDecoder,
+  ImportHash,
+} from '#importer/decode.js';
 export {
   directoryHandleImportSource,
   fileListImportSource,
+  handleListImportSource,
   planImport,
   spoolImportArchive,
   zipImportSource,
 } from '#importer/sources.js';
 export type {
+  ImportListControl,
   ImportListedEntry,
   ImportPlan,
   ImportSource,
@@ -30,10 +51,21 @@ export type {
 } from '#importer/sources.js';
 export {
   discardStagedImport,
+  importFactsPath,
+  importResidentBytes,
   importStagingDirectory,
   importStagingFolder,
+  importStagingLeaseName,
   importStagingPrefix,
+  importStagingStaleMilliseconds,
   readStagedImport,
   stageImport,
+  sweepStagedImports,
 } from '#importer/staging.js';
-export type { ImportStagingPort, ImportStagingProgress, StagedImport, StagedImportEntry } from '#importer/staging.js';
+export type {
+  ImportFactsRecord,
+  ImportStagingPort,
+  ImportStagingProgress,
+  StagedImport,
+  StagedImportEntry,
+} from '#importer/staging.js';

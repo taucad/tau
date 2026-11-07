@@ -16,6 +16,7 @@
  */
 
 import type { PathPolicy } from '#types.js';
+import { foldPathSpelling } from '#path-fold.js';
 import { ImportRefusedError } from '#importer/limits.js';
 import type { ImportMeter } from '#importer/limits.js';
 
@@ -56,20 +57,30 @@ export const normalizeImportPath = (raw: string): string => {
   return segments.join('/');
 };
 
-/* Paths the commit writes itself: the manifest (at any depth, as the commit refuses them) and the identity record. */
-const isReservedImportPath = (path: string): boolean => {
-  const lower = path.toLowerCase();
+/**
+ * Whether the commit writes this path itself, so neither an import nor a
+ * staged ledger may carry it: the manifest at any depth and the identity
+ * record, in every spelling a filesystem resolves onto them (case, trailing
+ * dots and spaces, an NTFS `:stream` suffix: `TAU.JSON`, `tau.json.`,
+ * `.tau/project.json `).
+ *
+ * @param path - A normalized project-relative path.
+ * @returns Whether it is reserved.
+ * @public
+ */
+export const isReservedImportPath = (path: string): boolean => {
+  const folded = foldPathSpelling(path);
   return (
-    path === 'tau.json' ||
-    path.endsWith('/tau.json') ||
-    lower === '.tau' ||
-    lower === '.tau/project.json' ||
-    lower.startsWith('.tau/project.json/')
+    folded === 'tau.json' ||
+    folded.endsWith('/tau.json') ||
+    folded === '.tau' ||
+    folded === '.tau/project.json' ||
+    folded.startsWith('.tau/project.json/')
   );
 };
 
-/* Case- and accent-insensitive key, so two names one filesystem would merge are one. */
-const fold = (path: string): string => path.normalize('NFC').toLowerCase();
+/* The key two names one filesystem would merge share: the registry's fold (case, accents, trailing dots, streams). */
+const fold = (path: string): string => foldPathSpelling(path.normalize('NFC'));
 
 /**
  * One import's path admission: normalizes, classifies, length-checks and

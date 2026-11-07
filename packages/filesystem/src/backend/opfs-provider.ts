@@ -82,6 +82,7 @@ export class OPFSProvider extends FileSystemAccessProvider {
     durability: 'exclusive-append',
     trustworthyMtime: true,
     streamsWrites: true,
+    movesInPlace: true,
   };
 
   private _initialized = false;

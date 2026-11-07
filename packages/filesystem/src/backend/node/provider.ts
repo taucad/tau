@@ -362,6 +362,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     trustworthyMtime: true,
     externallyEdited: true,
     streamsWrites: true,
+    movesInPlace: true,
   };
 
   private readonly _base: string;

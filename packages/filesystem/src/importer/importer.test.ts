@@ -8,7 +8,13 @@ import type { BatchEntry } from '#changeset.js';
 import { tauPathPolicy } from '#path-registry.js';
 import { ImportRefusedError, importLimits } from '#importer/limits.js';
 import { readZipDirectory, blobRangeSource } from '#importer/zip.js';
-import { createInlineImportDecoder, decodeImportEntry, readImportEntry } from '#importer/decode.js';
+import {
+  createInlineImportDecoder,
+  decodeImportEntry,
+  importMeasureMaximumBytes,
+  measureImportBytes,
+  readImportEntry,
+} from '#importer/decode.js';
 import { crc32 } from '#importer/crc32.js';
 import type { ImportDecoder } from '#importer/decode.js';
 import {
@@ -333,19 +339,40 @@ describe('readZipDirectory', () => {
 });
 
 describe('decodeImportEntry', () => {
-  it('should inflate a deflated entry and digest exactly its bytes in the same pass', async () => {
+  it('should inflate a deflated entry, checked by its CRC, and hash nothing', async () => {
     const content = text('x'.repeat(10_000));
     const blob = await zipOf({ 'a.txt': content });
     const {
       entries: [entry],
     } = await readZipDirectory(blobRangeSource(blob));
+    const digest = vi.spyOn(globalThis.crypto.subtle, 'digest');
 
     const decoded = await decodeImportEntry({ blob, path: 'a.txt', size: entry!.size, zip: entry! });
 
     expect(decoded.data).toEqual(content);
-    expect(decoded.facts.blobOid).toBe(gitBlobOid(content));
-    expect(decoded.facts.sha256).toBe(createHash('sha256').update(content).digest('hex'));
-    expect(decoded.facts.contentKind).toBe('text');
+    expect(Object.keys(decoded)).toStrictEqual(['data']);
+    expect(digest).not.toHaveBeenCalled();
+    digest.mockRestore();
+  });
+
+  it("should measure a read-back's blob id, SHA-256 and kind, one digest call each", async () => {
+    const content = text('x'.repeat(10_000));
+    const digest = vi.spyOn(globalThis.crypto.subtle, 'digest');
+
+    const facts = await measureImportBytes(content);
+
+    expect(facts.blobOid).toBe(gitBlobOid(content));
+    expect(facts.sha256).toBe(createHash('sha256').update(content).digest('hex'));
+    expect(facts.contentKind).toBe('text');
+    expect(digest).toHaveBeenCalledTimes(2);
+    digest.mockRestore();
+  });
+
+  it('should refuse to measure more than one shot admits', async () => {
+    /* A length past the limit, without allocating it. */
+    const tooLarge = Object.defineProperty(new Uint8Array(1), 'byteLength', { value: importMeasureMaximumBytes + 1 });
+
+    await expect(measureImportBytes(tooLarge)).rejects.toThrow(RangeError);
   });
 
   it('should refuse an entry whose bytes inflate past the size its header declares (a lying bomb)', async () => {
@@ -624,6 +651,49 @@ describe('stageImport', () => {
 
     expect(ledger).not.toContain('export const');
     expect(await readStagedImport(provider, operationId)).toMatchObject({ pin: judged.pin, bytes: 24 });
+  });
+
+  /* A store that lands other bytes than it was handed for `a.ts`: the same size, or one byte short. */
+  const landing = (provider: MemoryProvider, landed: string): ImportStagingPort => ({
+    provider,
+    apply: async (entries: readonly BatchEntry[]) =>
+      applyBatchWithPrimitives(
+        provider,
+        entries.map((entry) =>
+          entry.op === 'write' && entry.path.endsWith('/tree/a.ts') ? { ...entry, data: text(landed) } : entry,
+        ),
+      ),
+  });
+
+  it('should record the facts of the bytes that landed, read back, not of those it decoded (EQ6)', async () => {
+    const provider = new MemoryProvider();
+    const judged = await plan(zipImportSource(await zipOf({ 'p/a.ts': 'right', 'p/b.ts': 'b' })));
+
+    const staged = await stageImport({
+      port: landing(provider, 'wrong'),
+      operationId,
+      plan: judged,
+      decode: createInlineImportDecoder(),
+    });
+
+    expect(staged.entries[0]!.facts.blobOid).toBe(gitBlobOid(text('wrong')));
+    expect(staged.entries[0]!.facts.blobOid).not.toBe(gitBlobOid(text('right')));
+  });
+
+  it('should refuse a staged file that reads back at another size than it was written', async () => {
+    const provider = new MemoryProvider();
+    const judged = await plan(zipImportSource(await zipOf({ 'p/a.ts': 'right', 'p/b.ts': 'b' })));
+
+    expect(
+      await refusal(
+        stageImport({
+          port: landing(provider, 'righ'),
+          operationId,
+          plan: judged,
+          decode: createInlineImportDecoder(),
+        }),
+      ),
+    ).toBe('corrupt');
   });
 
   it('should batch by entry count and decode one batch ahead of the write', async () => {

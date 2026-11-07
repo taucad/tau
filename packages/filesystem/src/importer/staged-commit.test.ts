@@ -9,7 +9,7 @@ import { tauPathPolicy } from '#path-registry.js';
 import { createWorkspaceFileService, decoder, encoder } from '#testing/workspace-service-harness.js';
 import type { FileSystemProvider } from '#types.js';
 import type { WorkspaceFileService } from '#workspace-file-service.js';
-import { createInlineImportDecoder, subtleImportHash } from '#importer/decode.js';
+import { createInlineImportDecoder, createInlineImportMeasurer, subtleImportHash } from '#importer/decode.js';
 import { planImport, zipImportSource } from '#importer/sources.js';
 import { importOwnerPath, importStagingDirectory, readStagedImport, stageImport } from '#importer/staging.js';
 import type { ImportStagingPort } from '#importer/staging.js';
@@ -86,7 +86,7 @@ describe('commitPendingProjectDirectory from a staged import', () => {
   const stage = async (
     target?: string,
     port?: ImportStagingPort,
-    decode = createInlineImportDecoder(),
+    measure = createInlineImportMeasurer(),
   ): Promise<void> => {
     const zip = new JSZip();
     for (const [name, content] of Object.entries({
@@ -103,7 +103,8 @@ describe('commitPendingProjectDirectory from a staged import', () => {
       port: port ?? { provider, apply: async (entries) => applyBatchWithPrimitives(provider, entries) },
       operationId,
       plan,
-      decode,
+      decode: createInlineImportDecoder(),
+      measure,
       ...(target === undefined ? {} : { target }),
     });
   };
@@ -233,24 +234,31 @@ describe('commitPendingProjectDirectory from a staged import', () => {
     expect(await provider.exists(importStagingDirectory(operationId))).toBe(false);
   });
 
-  it('should hash each file once from source to committed project (S6: one hash pass)', async () => {
+  it('should hash each file once, from its read-back, from source to committed project (EQ6, S6: one hash pass)', async () => {
     const hashed = { sha1: 0, sha256: 0 };
-    const counting = createInlineImportDecoder(async (algorithm, bytes) => {
+    const measured: string[] = [];
+    const inline = createInlineImportMeasurer(async (algorithm, bytes) => {
       hashed[algorithm] += 1;
       return subtleImportHash(algorithm, bytes);
     });
+    const counting = async (bytes: Uint8Array<ArrayBuffer>) => {
+      measured.push(decoder.decode(bytes));
+      return inline(bytes);
+    };
     const digest = vi.spyOn(globalThis.crypto.subtle, 'digest');
 
     await stage(directory, undefined, counting);
     const staged = digest.mock.calls.length;
     await expect(commit()).resolves.toEqual({ status: 'committed' });
 
-    /* 302 entries: one SHA-1 and one SHA-256 each, in the decode, and nothing more at commit. */
+    /* 302 entries: one SHA-1 and one SHA-256 each, over the bytes read back, none in the decode or at commit. */
     expect(hashed).toEqual({ sha1: 302, sha256: 302 });
+    expect(staged).toBe(604);
     expect(digest.mock.calls.length).toBe(staged);
+    expect(measured).toContain('main');
   });
 
-  it('should keep the facts the decode measured beside the project, with the mtime of each placed file', async () => {
+  it('should keep the facts measured from the read-back beside the project, with the mtime of each placed file', async () => {
     await stage(directory);
 
     await commit();

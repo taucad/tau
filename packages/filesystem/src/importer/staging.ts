@@ -6,7 +6,8 @@
  * The staging directory is the import's journal. `intent.json` holds the
  * operation and the source pin, written before any entry; `ledger/<n>.json`
  * holds, for each batch once its writes are durable, every entry's path, size,
- * mode and the facts (blob id, SHA-256, kind) the decode measured. No record
+ * mode and the facts (blob id, SHA-256, kind) measured from one read-back of
+ * what the batch wrote (EQ6: the decode checks only the zip CRC). No record
  * holds bytes: the bytes are the staged files under `tree/`, written once.
  * An import that stops — a crash, a closed tab, a cancelled review — resumes
  * from the ledger: the same source pin skips every entry a record covers and
@@ -46,7 +47,8 @@ import type { BatchEntry, BatchReceipt } from '#changeset.js';
 import type { FileSystemProvider } from '#types.js';
 import { ImportRefusedError, isImportRefusal } from '#importer/limits.js';
 import type { ImportRefusalReason } from '#importer/limits.js';
-import type { ImportDecodedEntry, ImportDecoder } from '#importer/decode.js';
+import { createInlineImportMeasurer } from '#importer/decode.js';
+import type { ImportDecodedEntry, ImportDecoder, ImportMeasuredFacts, ImportMeasurer } from '#importer/decode.js';
 import type { ImportPlan, ImportSourcePin, PlannedImportEntry } from '#importer/sources.js';
 import { foldPathSpelling } from '#path-fold.js';
 import { isStagedImportEntry } from '#importer/facts.js';
@@ -692,9 +694,17 @@ const isRefusalReason = (value: unknown): value is ImportRefusalReason =>
  * (created exclusively, with an owner marker, where the entries go in place),
  * and returned as {@link StagedImport.target}.
  *
+ * Each batch is written, then read back, and its facts (blob id, SHA-256,
+ * content kind) are measured from that read-back by `measure`, the compute
+ * worker's where there is one, so the ledger holds the facts of the bytes on
+ * disk and each file is hashed once (EQ6, I2). The decode only checks the
+ * zip CRC-32. A read-back holds at most the batch's largest file beside the
+ * decode budget.
+ *
  * @param input - The storage root, the operation, the plan, the decoder, the
- *   pending project directory, and optional decode concurrency, resident byte
- *   budget, signal and progress callback.
+ *   read-back measurer (inline WebCrypto by default), the pending project
+ *   directory, and optional decode concurrency, resident byte budget, signal
+ *   and progress callback.
  * @returns Every staged entry, in plan order.
  * @throws ImportRefusedError when an entry does not decode to its declared bytes.
  * @public
@@ -705,6 +715,7 @@ export const stageImport = async (
     operationId: string;
     plan: ImportPlan;
     decode: ImportDecoder;
+    measure?: ImportMeasurer;
     target?: string;
     concurrency?: number;
     residentBytes?: number;
@@ -713,6 +724,7 @@ export const stageImport = async (
   }>,
 ): Promise<StagedImport> => {
   const { port, operationId, plan, decode } = input;
+  const measure = input.measure ?? createInlineImportMeasurer();
   const directory = importStagingDirectory(operationId);
   if (input.target !== undefined && !isProjectDirectory(input.target)) {
     throw new TypeError(`Not a project directory: ${input.target}`);
@@ -834,6 +846,31 @@ export const stageImport = async (
       return { error };
     }
   };
+  /*
+   * The facts of what a batch wrote, from one read-back of each file (EQ6):
+   * at most the batch's largest file is held at a time beyond the decode
+   * budget, and the bytes are handed to the measurer, never kept.
+   */
+  const readBack = async (window: readonly PlannedImportEntry[]): Promise<ImportMeasuredFacts[]> => {
+    const held = byteBudget(Math.max(0, ...window.map(({ size }) => size)));
+    /* Only the caller stops it: a later batch's failed decode still lets this written batch keep its record. */
+    const stop = input.signal ?? new AbortController().signal;
+    return bounded(window, concurrency, async (entry) => {
+      await held.acquire(entry.size, stop);
+      try {
+        const bytes = await port.provider.readFile(stagedEntryLocation({ directory, inPlace }, entry.path));
+        if (bytes.byteLength !== entry.size) {
+          throw new ImportRefusedError('corrupt', {
+            path: entry.path,
+            message: 'A staged file did not read back as it was written.',
+          });
+        }
+        return await measure(bytes);
+      } finally {
+        held.release(entry.size);
+      }
+    });
+  };
   /* Two windows fit the budget, one writing while the next decodes; an entry larger than that is a window alone. */
   const windows = windowsOf(remaining, Math.min(maximumChangesetBytes, Math.floor(residentBytes / 2)));
   /* One batch decodes while the one before it writes, both inside the byte budget. */
@@ -879,14 +916,19 @@ export const stageImport = async (
               }
               await applied(port, batch);
             }));
+        /* Written: the decoded bytes go, so the read-back is all this batch still holds. */
+        decoded.length = 0;
+        batch.length = 0;
       } finally {
         budget.release(windowBytes);
       }
+      // oxlint-disable-next-line no-await-in-loop -- a batch's facts come from its own read-back, before its record.
+      const measured = await readBack(window);
       const records: StagedImportEntry[] = window.map((entry, at) => ({
         path: entry.path,
         size: entry.size,
         ...(entry.mode === undefined ? {} : { mode: entry.mode }),
-        facts: decoded[at]!.facts,
+        facts: measured[at]!,
       }));
       const ledgerStem = `${directory}/ledger/${String(ledgerSequence).padStart(6, '0')}`;
       /* The record replaces its announcement: it names the same paths, with their facts. */

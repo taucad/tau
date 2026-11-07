@@ -1,7 +1,8 @@
 /**
  * The facts a committed import keeps beside its project (charter D12).
  *
- * The decode measured every entry's blob id, SHA-256 and kind once. The
+ * The staging measured every entry's blob id, SHA-256 and kind once, from the
+ * read-back of what it wrote (EQ6). The
  * commit writes them to {@link importFactsPath}, and the Project Index takes
  * them when it first opens the project, so it does not hash the files again.
  * They are hints, not truth: nothing in the record is believed until
@@ -15,7 +16,7 @@ import type { ContentFacts, FileMode } from '#types.js';
 import type { ImportSourcePin } from '#importer/sources.js';
 
 /**
- * Where a committed import keeps the facts its decode measured. A member of
+ * Where a committed import keeps the facts its staging measured from its read-back. A member of
  * `.tau` that no registry row names, so it is never versioned, and a path no
  * import may carry, so a source cannot plant one.
  *

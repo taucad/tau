@@ -25,13 +25,23 @@ export {
 export type { RangeSource, ZipDirectory, ZipEntry } from '#importer/zip.js';
 export { crc32Update } from '#importer/crc32.js';
 export { crc32 } from '#importer/crc32.js';
-export { createInlineImportDecoder, decodeImportEntry, readImportEntry, subtleImportHash } from '#importer/decode.js';
+export {
+  createInlineImportDecoder,
+  createInlineImportMeasurer,
+  decodeImportEntry,
+  importMeasureMaximumBytes,
+  measureImportBytes,
+  readImportEntry,
+  subtleImportHash,
+} from '#importer/decode.js';
 export type {
   ImportDecodeOptions,
   ImportDecodeRequest,
   ImportDecodedEntry,
   ImportDecoder,
   ImportHash,
+  ImportMeasuredFacts,
+  ImportMeasurer,
 } from '#importer/decode.js';
 export {
   directoryHandleImportSource,

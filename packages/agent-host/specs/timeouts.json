@@ -93,6 +93,14 @@
       "owner": "W5"
     },
     {
+      "id": "REVISIONS-MINT-FLOOR",
+      "bound": "Floor between a checkout's published mints, 1 second (D11); requests queue meanwhile, and close and hidden cuts skip it",
+      "site": "packages/revisions/src/checkout.machine.ts",
+      "token": "mintFloor",
+      "class": "Debounce",
+      "owner": "filesystem redesign W6.4"
+    },
+    {
       "id": "A8",
       "bound": "Pull render window",
       "site": "packages/revisions/src/sync.machine.ts",

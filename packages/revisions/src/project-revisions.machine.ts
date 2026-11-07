@@ -77,6 +77,8 @@ export type ProjectRevisionsMachineInput = Readonly<{
   /** The checkout that is the project directory itself. */
   liveCheckoutId?: string;
   selectedCheckoutId?: string;
+  /** The floor between one checkout's published mints; the checkout machine's default when left out (D11). */
+  mintFloor?: number;
 }>;
 
 type Admission = Readonly<{ key: TurnAttemptKey; checkoutId?: string }>;
@@ -93,6 +95,8 @@ type ProjectRevisionsMachineContextFields = Readonly<{
   checkoutStatus: Readonly<Record<string, CheckoutStatusEntry>>;
   liveCheckoutId: string | undefined;
   selectedCheckoutId: string | undefined;
+  /** Every checkout's mint floor, when the host set one (D11). */
+  mintFloor: number | undefined;
   follow: 'chat' | 'pinned';
   followedChatId: string | undefined;
   checkoutRefs: Readonly<Record<string, ActorRefFrom<typeof checkoutMachine>>>;
@@ -785,6 +789,7 @@ const projectRevisionsMachineDefinition = setup({
     checkoutStatus: {},
     liveCheckoutId: input.liveCheckoutId,
     selectedCheckoutId: input.selectedCheckoutId ?? input.liveCheckoutId,
+    mintFloor: input.mintFloor,
     follow: 'chat',
     followedChatId: undefined,
     checkoutRefs: {},
@@ -925,6 +930,7 @@ const projectRevisionsMachineDefinition = setup({
                 ...(record.headRevisionId === undefined ? {} : { headRevisionId: record.headRevisionId }),
                 /* I5's left-hand side, so the first cut after a rehydration can be recognised as a no-op (R3). */
                 ...(record.headTreeId === undefined ? {} : { headTreeId: record.headTreeId }),
+                ...(context.mintFloor === undefined ? {} : { mintFloor: context.mintFloor }),
                 parentRef: self,
               },
             });

@@ -643,6 +643,8 @@ export type WorkerProjectRevisionsOptions = Readonly<{
   completeChanges?: boolean;
   /** Timers and time for this project's revision tree (MC-R4); tests pass a `StepClock`. */
   clock?: ActorOptions<AnyActorLogic>['clock'];
+  /** The least time between one checkout's published mints (D11); the revisions default when left out. */
+  mintFloor?: number;
   /** The tree's inspector; development passes the console inspector, tests the harness. */
   inspect?: ActorOptions<AnyActorLogic>['inspect'];
   /**
@@ -876,6 +878,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     port: options.port,
     projectId,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
+    ...(options.mintFloor === undefined ? {} : { mintFloor: options.mintFloor }),
     ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
     actorId: projectId,
     /* Only a feed that sees every write lets a cut skip the files it did not name (E1). */
@@ -2156,6 +2159,8 @@ export type WorkerRevisionRegistryOptions = Readonly<{
   ) => PlacementSessionHandle;
   /** Timers and time for every revision tree this worker opens (MC-R4). */
   clock?: ActorOptions<AnyActorLogic>['clock'];
+  /** The least time between one checkout's published mints in every tree (D11); the revisions default when left out. */
+  mintFloor?: number;
   /** The trees' inspector; development passes the console inspector, tests the harness. */
   inspect?: ActorOptions<AnyActorLogic>['inspect'];
 }>;
@@ -2348,6 +2353,7 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
         observe: options.observe,
         ...(options.completeChanges === undefined ? {} : { completeChanges: options.completeChanges }),
         ...(options.clock === undefined ? {} : { clock: options.clock }),
+        ...(options.mintFloor === undefined ? {} : { mintFloor: options.mintFloor }),
         ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
         /* The same fact the credential frame carries, read per use: a page that
          * signs in after the project opened publishes without reopening it. */

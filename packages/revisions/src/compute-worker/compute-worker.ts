@@ -48,6 +48,12 @@ export type ComputeWorker = Readonly<{
    */
   sha256: (bytes: Uint8Array<ArrayBuffer>, consumed?: boolean) => Promise<string>;
   /**
+   * SHA-256 of the bytes, and the bytes themselves: transferred to the worker
+   * and back rather than cloned, so a caller that delivers what it hashed holds
+   * one copy (I2). The bytes passed in are unusable after; use the ones returned.
+   */
+  sha256Kept: (bytes: Uint8Array<ArrayBuffer>) => Promise<Readonly<{ sha256: string; data: Uint8Array<ArrayBuffer> }>>;
+  /**
    * The version-2 `.idx` of one whole pack (≤ the store's 64 MiB ceiling).
    * `isomorphic-git`'s indexer over an in-memory file: no store is read.
    */
@@ -185,6 +191,7 @@ export const createInlineCompute = (): ComputeWorker => {
     deflate: async (raw) => through(new CompressionStream('deflate'), raw),
     sha1: async (bytes) => hashHex('sha1', bytes),
     sha256: async (bytes) => hashHex('sha256', bytes),
+    sha256Kept: async (bytes) => ({ sha256: await hashHex('sha256', bytes), data: bytes }),
     indexPack: async (pack) => {
       const { fs, files } = memoryFiles(pack);
       try {
@@ -219,6 +226,7 @@ export const computeMethods: ReadonlyArray<keyof ComputeWorker & ComputeMethod> 
   'deflate',
   'sha1',
   'sha256',
+  'sha256Kept',
   'indexPack',
   'resolveDelta',
 ];
@@ -250,6 +258,9 @@ export type ComputePort = Readonly<{
 const transferablesOf = (value: unknown): Transferable[] => {
   if (value instanceof Uint8Array) {
     return [value.buffer];
+  }
+  if ((value as { data?: unknown } | undefined)?.data instanceof Uint8Array) {
+    return [(value as { data: Uint8Array<ArrayBuffer> }).data.buffer];
   }
   if (Array.isArray(value)) {
     return value.flatMap((entry: unknown) =>
@@ -360,7 +371,9 @@ export const openComputeConnection = (port: ComputePort, now: () => number = Dat
     try {
       port.postMessage(
         { id, method, args } satisfies ComputeRequest,
-        method === 'sha256' && consumed === true ? [(bytes as Uint8Array<ArrayBuffer>).buffer] : [],
+        (method === 'sha256' && consumed === true) || method === 'sha256Kept'
+          ? [(bytes as Uint8Array<ArrayBuffer>).buffer]
+          : [],
       );
     } catch (error) {
       /* A call that never left (an uncloneable argument, a detached buffer) waits for nothing. */

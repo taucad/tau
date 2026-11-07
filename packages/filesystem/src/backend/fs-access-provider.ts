@@ -193,6 +193,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     durability: 'stream-append',
     trustworthyMtime: true,
     externallyEdited: true,
+    streamsWrites: true,
   };
 
   protected _rootHandle: FileSystemDirectoryHandle;

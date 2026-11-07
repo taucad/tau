@@ -68,6 +68,8 @@ const startHarness = (machine: CheckoutMachine) => {
         branch: 'main',
         headRevisionId: revisionOf('main', 1),
         headTreeId: 'tree-main-1',
+        /* CheckoutRequests.tla has no clock: the floor between mints is a timed wait it does not model. */
+        mintFloor: 0,
       },
       /* RM-A15: the zero-microstep inspector; a dropped event fails the test. */
       inspect: guardActors({ ignore: { checkout: checkoutIgnoredEvents } }).inspect,

@@ -25,8 +25,8 @@
  */
 
 import { parseProjectManifestBytes } from '@taucad/project-core';
-import { ResourceQueue, workerTimings } from '@taucad/filesystem';
-import type { WorkerTimingSpan } from '@taucad/filesystem';
+import { mapConcurrent, ResourceQueue, timestampGranularityMilliseconds, workerTimings } from '@taucad/filesystem';
+import type { FileStatEntry, IndexChanges, WorkerTimingSpan } from '@taucad/filesystem';
 import { randomUuid } from '@taucad/utils/id';
 import {
   captureRevisionTree,
@@ -676,6 +676,9 @@ const hostAuthor = Object.freeze({ name: 'Tau', email: 'noreply@tau.new' });
  */
 const divergenceWalkLimit = 1000;
 
+/* The mode reads an index-driven capture keeps in flight: each is one stat, no bytes. */
+const captureModeConcurrency = 16;
+
 const textEncoder = new TextEncoder();
 const generatedSetupTree = new ImmutableRevisionTree([
   [generatedGitattributesPath, generatedGitattributesContent(undefined)],
@@ -956,6 +959,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     basis: Readonly<{ revisionId: string; tree: ImmutableRevisionTree }> | undefined;
     /** The comparison still running, and the write generation it covers. */
     comparing: Readonly<{ generation: number; tree: Promise<ImmutableRevisionTree> }> | undefined;
+    /**
+     * Where the checkout's index stood when `last` was observed (S10): its
+     * epoch and generation, read before the capture began, the clock reading
+     * its racy guard keys on (EQ7) and the ignored paths it left out. A capture
+     * whose ignored paths and inherited modes agree starts from `last` and
+     * reads only what the D5 compare and the index changed and removed since.
+     */
+    cursor: Readonly<{ epoch: string; generation: number; observedAt: number; ignored: string }> | undefined;
   };
   const checkoutMemos = new Map<string, CheckoutMemos>();
   const memosOf = (checkoutId: string): CheckoutMemos => {
@@ -966,6 +977,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       lastCapture: 0,
       basis: undefined,
       comparing: undefined,
+      cursor: undefined,
     };
     checkoutMemos.set(checkoutId, memos);
     return memos;
@@ -1392,31 +1404,122 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
      * descends into an excluded directory, so the directory is enough. */
     const exclude = (path: string): boolean =>
       !policy.classify(path).versioned || ignored?.has(path) === true || ignored?.has(`${path}/`) === true;
+    const ignoredKey = ignored === undefined ? '' : [...ignored].toSorted().join('\n');
+    let cursor: CheckoutMemos['cursor'];
+    const walk = async (): Promise<ImmutableRevisionTree> => {
+      /* Where the index stands, read before anything else, so a write this walk races is named next time.
+       * A generation past any it issued answers `rescan` at once, with where it stands. */
+      const at = await rooted.changedSince?.(Number.MAX_SAFE_INTEGER).catch(() => undefined);
+      /* The reading comes first, so a file whose timestamp the stats then report
+       * as this recent is racily clean and is read rather than trusted (EQ7).
+       * The raw clock, not the monotonic `now()`: after a clock step back the
+       * high-water mark lies in the future of every fresh write, and a file
+       * written moments ago would read as old enough to trust (RV-W4W5a #5). */
+      const observedAt = clock();
+      const stats = await rooted.statTree?.('', { admits: (path) => !exclude(path) });
+      const memoOptions = memos.capture.unchanged(stats, observedAt);
+      signal?.throwIfAborted();
+      const basis = await basisOf();
+      signal?.throwIfAborted();
+      /* Without the index's stats the next capture could not tell which of these reads were racy. */
+      cursor =
+        at === undefined || stats === undefined
+          ? undefined
+          : { epoch: at.epoch, generation: at.generation, observedAt, ignored: ignoredKey };
+      return captureRevisionTree(rooted, {
+        exclude,
+        inheritedMode: (path) => basis?.mode(path),
+        reuse: bypassMemo ? undefined : memoOptions.reuse,
+        onRead: memoOptions.onRead,
+        ...(signal === undefined ? {} : { signal }),
+      });
+    };
+    /* A feed the host promised complete names the paths without asking the index, so it wins
+     * whenever it has them; the index answers every other capture that has a `last` to start from. */
     const since = options.completeChanges === true && changed?.paths !== undefined ? memos.last : undefined;
+    const fromIndex = async (): Promise<ImmutableRevisionTree> => {
+      const { last, cursor: previous } = memos;
+      const { compareIndex, changedSince, statTree, getFileMode } = rooted;
+      if (
+        bypassMemo ||
+        last === undefined ||
+        previous === undefined ||
+        previous.ignored !== ignoredKey ||
+        compareIndex === undefined ||
+        changedSince === undefined ||
+        statTree === undefined
+      ) {
+        return walk();
+      }
+      const admits = (path: string): boolean => !exclude(path);
+      const observedAt = clock();
+      let found: Readonly<{ changes: IndexChanges; racy: readonly string[]; stats: readonly FileStatEntry[] }>;
+      try {
+        /* D5 first: the index learns what no observer told it (another program, a head move, a burst
+         * past the change limit) before its changes are trusted, and names what it holds as racy. */
+        const compared = await compareIndex.call(rooted);
+        signal?.throwIfAborted();
+        const changes = await changedSince.call(rooted, previous.generation, {
+          epoch: previous.epoch,
+          admits,
+          ...(signal === undefined ? {} : { signal }),
+        });
+        signal?.throwIfAborted();
+        found = {
+          changes,
+          racy: compared.racy,
+          stats: changes.rescan === true ? [] : await statTree.call(rooted, '', { admits }),
+        };
+      } catch {
+        /* An index that cannot answer says nothing about the files: walk them. */
+        signal?.throwIfAborted();
+        return walk();
+      }
+      const { changes, racy, stats } = found;
+      /* `rescan` is never "nothing changed": the index cannot say, so everything is walked. */
+      if (changes.rescan === true) {
+        return walk();
+      }
+      const basis = await basisOf();
+      signal?.throwIfAborted();
+      const paths = new Set([
+        ...changes.entries.map(({ path }) => path),
+        ...changes.removed.map(({ path }) => path),
+        ...racy,
+        /* EQ7: a file whose timestamp was this close to the last capture's reading may have changed
+         * after it was read without changing its stats, so it is read again, as the walk would. */
+        ...stats
+          .filter(({ mtimeMs }) => previous.observedAt - mtimeMs <= timestampGranularityMilliseconds)
+          .map(({ path }) => path),
+      ]);
+      const kept = last.entries().filter(({ path }) => !paths.has(path));
+      if (getFileMode === undefined) {
+        /* A walk gives each file the head's mode, or 100644: a kept entry that disagrees walks (I6). */
+        if (kept.some(({ path, mode }) => (basis?.mode(path) ?? '100644') !== mode)) {
+          return walk();
+        }
+      } else {
+        /* A mode change moves neither size nor timestamp, so the index cannot name it: the provider's
+         * own modes are asked for every kept file, and a file whose mode moved is read again. */
+        await mapConcurrent(kept, captureModeConcurrency, async ({ path, mode }) => {
+          const now = await getFileMode.call(rooted, path).catch(() => undefined);
+          if (now !== mode) {
+            paths.add(path);
+          }
+        });
+        signal?.throwIfAborted();
+      }
+      cursor = { epoch: changes.epoch, generation: changes.generation, observedAt, ignored: ignoredKey };
+      return captureRevisionTree(rooted, {
+        exclude,
+        inheritedMode: (path) => basis?.mode(path),
+        changedSince: { tree: last, paths: [...paths] },
+        ...(signal === undefined ? {} : { signal }),
+      });
+    };
     const tree =
       since === undefined || changed?.paths === undefined
-        ? await (async () => {
-            /* The reading comes first, so a file whose timestamp the stats then report
-             * as this recent is racily clean and is read rather than trusted (EQ7).
-             * The raw clock, not the monotonic `now()`: after a clock step back the
-             * high-water mark lies in the future of every fresh write, and a file
-             * written moments ago would read as old enough to trust (RV-W4W5a #5). */
-            const observedAt = clock();
-            const memoOptions = memos.capture.unchanged(
-              await rooted.statTree?.('', { admits: (path) => !exclude(path) }),
-              observedAt,
-            );
-            signal?.throwIfAborted();
-            const basis = await basisOf();
-            signal?.throwIfAborted();
-            return captureRevisionTree(rooted, {
-              exclude,
-              inheritedMode: (path) => basis?.mode(path),
-              reuse: bypassMemo ? undefined : memoOptions.reuse,
-              onRead: memoOptions.onRead,
-              ...(signal === undefined ? {} : { signal }),
-            });
-          })()
+        ? await fromIndex()
         : /* `last` carries the modes it inherited, and a moved head empties
            * the paths, so it is still the head's (I6). */
           await captureRevisionTree(rooted, {
@@ -1432,9 +1535,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         `These paths cannot be checked out together on every computer (they differ only by letter case or accents, or one names a file another needs as a folder): ${collisions.join(', ')}`,
       );
     }
-    if (options.completeChanges === true && started > memos.lastCapture) {
+    /* A complete feed keeps its own cursor, the paths it names; an index keeps this one. A capture
+     * from the feed leaves the cursor older than `last`, which only names more paths next time. */
+    if ((options.completeChanges === true || cursor !== undefined) && started > memos.lastCapture) {
       memos.lastCapture = started;
       memos.last = heldTree(tree);
+      if (cursor !== undefined || since === undefined) {
+        memos.cursor = memos.last === undefined ? undefined : cursor;
+      }
     }
     return tree;
   };
@@ -5875,6 +5983,12 @@ export type ProjectRevisionActorOptions = RevisionActorsOptions &
      */
     liveCheckoutId?: string;
     selectedCheckoutId?: string;
+    /**
+     * The least time between one checkout's published mints, in
+     * milliseconds; `checkoutMintFloorMilliseconds` when left out (D11). A
+     * host whose clock does not run, such as a test's stopped clock, passes 0.
+     */
+    mintFloor?: number;
   }>;
 
 /**
@@ -5930,6 +6044,7 @@ export const createProjectRevisionsActor = (options: ProjectRevisionActorOptions
         projectId: options.projectId,
         ...(options.liveCheckoutId === undefined ? {} : { liveCheckoutId: options.liveCheckoutId }),
         ...(options.selectedCheckoutId === undefined ? {} : { selectedCheckoutId: options.selectedCheckoutId }),
+        ...(options.mintFloor === undefined ? {} : { mintFloor: options.mintFloor }),
       },
       ...(options.clock === undefined ? {} : { clock: options.clock }),
       ...(options.inspect === undefined ? {} : { inspect: options.inspect }),

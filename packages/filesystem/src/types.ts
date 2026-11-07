@@ -140,6 +140,12 @@ export type ProviderCapabilities = {
    * compared against the provider before a cut trusts it (D5).
    */
   readonly externallyEdited?: boolean;
+  /**
+   * Whether `writeFileStream` holds one chunk at a time rather than gathering
+   * the whole file first (File System Access, OPFS, Node). A consumer that
+   * streams to save memory streams only where this is set (W6.4).
+   */
+  readonly streamsWrites?: boolean;
 };
 
 /**

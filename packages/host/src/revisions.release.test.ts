@@ -46,9 +46,13 @@ it('should refuse release when the pending queue cannot be written and keep the 
     await filesystem.writeFile('main.ts', 'after refused close');
     revisions.changed(revisions.status().checkoutId!, ['main.ts']);
     await revisions.channel.request({ command: 'saveRevision' });
-    await vi.waitFor(() => {
-      expect(revisions.status().headRevisionId).not.toBe(before);
-    });
+    /* The close's own mint published just before: this one waits out the floor between mints (D11). */
+    await vi.waitFor(
+      () => {
+        expect(revisions.status().headRevisionId).not.toBe(before);
+      },
+      { timeout: 5000 },
+    );
   } finally {
     refuseQueue = false;
     await revisions.channel.request({ command: 'syncNow' });

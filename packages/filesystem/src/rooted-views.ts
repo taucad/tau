@@ -234,11 +234,15 @@ export type RootedFileSystem = Omit<FileSystemProvider, 'writeFileChecked' | 'de
      */
     compareIndex?(): Promise<IndexCompareResult>;
     /**
-     * What this root's index changed after `since` (D3): its generation now,
-     * and every entry it still holds that changed later. Unmasked here, like
-     * `statTree`; a removal leaves no entry.
+     * What this root's index changed after `since` (D3, S10): its generation
+     * and epoch now, every entry it still holds that changed later, and every
+     * path it removed since; or `rescan` when it cannot tell (pass the `epoch`
+     * the `since` came with). Unmasked here, like `statTree`.
      */
-    changedSince?(since: number, options?: { admits?: IndexAdmits; signal?: AbortSignal }): Promise<IndexChanges>;
+    changedSince?(
+      since: number,
+      options?: { admits?: IndexAdmits; signal?: AbortSignal; epoch?: string },
+    ): Promise<IndexChanges>;
   };
 
 /**
@@ -896,13 +900,13 @@ export class RootedViews {
     };
     const changedSince = async (
       since: number,
-      options?: { admits?: IndexAdmits; signal?: AbortSignal },
+      options?: { admits?: IndexAdmits; signal?: AbortSignal; epoch?: string },
     ): Promise<IndexChanges> => {
       assertCurrent();
       const index = await this._projectIndexes.ready(root);
       assertCurrent();
       options?.signal?.throwIfAborted();
-      return { generation: index.generation, entries: index.changedSince(since, options) };
+      return index.changes(since, options);
     };
     const compareIndex = async (): Promise<IndexCompareResult> => {
       assertCurrent();

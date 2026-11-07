@@ -3,7 +3,7 @@ title: 'Filesystem Authority Policy'
 description: 'The single-filesystem-authority invariant: one FM-worker authority per host, one provider instance per storage root, mounts as pure routing from persistent config, manifest-based discovery, cross-tab coherence, and webaccess handle lifecycle rules.'
 status: active
 created: '2026-07-13'
-updated: '2026-10-19'
+updated: '2026-11-07'
 related:
   - docs/policy/filesystem-policy.md
   - docs/policy/revisions-policy.md
@@ -168,6 +168,8 @@ Ordinary discovery MUST NOT rebind a project away from a known incomplete worksp
 ### 12. Project creation is journal → authority commit → local resources
 
 Project creation and duplication MUST first persist one pending operation containing the explicit projectId, complete id-free manifest, authored file snapshot, exact allocated physical locator, storage identity, and intended local resources. They then call `WorkspaceFileService.commitPendingProjectDirectory()` with that immutable snapshot. The command validates every path and byte payload before mutation, acquires both logical-project and physical-directory locks, replaces only an exactly reserved manifest-less target, writes files deterministically, establishes generated identity, writes `tau.json` last, and verifies the separate project ID.
+
+An import's snapshot is a **staging locator**, not its bytes (charter D12, EQ8). The import stages first, on the storage root the project is created on, under `.tau-staging/import-<operation>/`: `intent.json` holds the operation and the source pin, `tree/` holds each file written once, and a `ledger/` record after each batch holds every staged path, size, mode, blob id and SHA-256. The pending operation then carries `staging: { operationId }`, and its `files` carry only what the create adds. The commit holds the ledger's paths to the rules `files` is held to, makes the folders, moves each staged file into the project as bounded changesets (no byte is written again), writes `files`, then `tau.json` alone, and removes the staging. A replay keeps what an earlier attempt already moved: an entry no longer staged must be at the target with its recorded size, or the commit fails and keeps the pending row. The OPFS sweep of dead writers' staging leaves `import-` directories alone; only their operation removes them.
 
 An existing valid manifest with the same generated identity is an idempotent committed result: replay resumes local library/chat/editor resources without rewriting project bytes. An invalid manifest, a conflicting generated identity, an unreserved basename, or an unsafe journal path is an ownership failure and must preserve the target and the pending row. After a committed result, persist the project route, synchronize authority routes, restore local resources, remove any legacy row, and only then clear the journal.
 

@@ -13,6 +13,7 @@ const baseConfig: UserConfig = {
     'src/path-registry.ts',
     'src/backend/stream-utils.ts',
     'src/content-ops/index.ts',
+    'src/importer/index.ts',
     'src/storage-root-key.ts',
   ],
   sourcemap: false,

@@ -73,6 +73,10 @@ describe('entry.server handleRequest', () => {
       expect(staticPolicy).toContain("default-src 'self';");
       expect(response.headers.get('Content-Security-Policy-Report-Only')).toBe(staticPolicy);
       expect(response.headers.has('Content-Security-Policy')).toBe(false);
+      // SB6: violations and crash reports go to the same-origin receiver, on documents and static files alike.
+      expect(staticPolicy).toMatch(/ report-to default;$/u);
+      expect(response.headers.get('Reporting-Endpoints')).toBe('default="/api/reports"');
+      expect(/^Reporting-Endpoints = '(.+)'$/mu.exec(netlifyConfig)?.[1]).toBe('default="/api/reports"');
       expect(response.headers.get('Cross-Origin-Embedder-Policy')).toBe('require-corp');
       expect(response.status).toBe(status);
       expect(body).toBe(method === 'HEAD' ? '' : '<p>Workspace fixture</p>');

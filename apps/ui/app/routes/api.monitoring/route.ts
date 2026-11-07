@@ -1,6 +1,7 @@
 import type { Route } from './+types/route.js';
 import { getEnvironment } from '#environment.config.js';
 import { sentryEnvelopeUrl } from '#lib/sentry-event.lib.js';
+import { clientOf, readCapped } from '#lib/request.server.js';
 
 /**
  * Same-origin tunnel for Sentry envelopes (browser observability SB5), so a content blocker that
@@ -54,12 +55,6 @@ export const createTunnelRateLimiter = (
   };
 };
 
-/** The address a request came from: Netlify's client connection IP, else the first forwarded hop. */
-const clientOf = (request: Request): string =>
-  request.headers.get('x-nf-client-connection-ip') ??
-  request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-  'unknown';
-
 /** The host, path prefix and project of a DSN, as the envelope endpoint is built from them. */
 const dsnTarget = (dsn: string): { readonly host: string; readonly path: string } | undefined => {
   try {
@@ -96,41 +91,6 @@ export const isEnvelopeForDsn = (body: string, configured: string): boolean => {
     return false;
   }
   return expected.host === actual.host && expected.path === actual.path;
-};
-
-/** Read a body up to `limit` bytes; `undefined` once it is larger. */
-const readCapped = async (request: Request, limit: number): Promise<string | undefined> => {
-  const declared = Number(request.headers.get('content-length'));
-  if (Number.isFinite(declared) && declared > limit) {
-    return undefined;
-  }
-  if (request.body === null) {
-    return '';
-  }
-  const reader = request.body.getReader();
-  const chunks: Array<Uint8Array<ArrayBuffer>> = [];
-  let size = 0;
-  // oxlint-disable no-await-in-loop -- A stream is read in order, one chunk at a time.
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-    size += value.byteLength;
-    if (size > limit) {
-      await reader.cancel();
-      return undefined;
-    }
-    chunks.push(value);
-  }
-  // oxlint-enable no-await-in-loop
-  const bytes = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(bytes);
 };
 
 /** Response headers the SDK reads from Sentry's answer (its rate limits). */

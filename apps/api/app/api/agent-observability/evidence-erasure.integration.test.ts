@@ -17,6 +17,7 @@ import {
 import { erasureTiming, EvidenceErasureService } from '#api/agent-observability/evidence-erasure.service.js';
 import { sealEvidence } from '#api/agent-observability/evidence-seal.js';
 import { evidenceFixture } from '#api/agent-observability/evidence.test-fixture.js';
+import { requestProjectDeletion } from '#api/projects/project-deletion.js';
 import type { DatabaseService, DatabaseType } from '#database/database.service.js';
 import * as schema from '#database/schema.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
@@ -134,6 +135,23 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
 
     const again = await eraseProject(projectId);
     expect(again).toEqual({ erasureId: first.erasureId, fenced: 0, traces: 0 });
+  });
+
+  it("should leave a deleted project's delivered traces to expire, and admit nothing more for it", async () => {
+    const userId = await account();
+    const projectId = await ownedProject(userId);
+    const sent = await admitted(userId, projectId, 1);
+    const traceId = await delivered(sent);
+
+    await requestProjectDeletion({ database, projectId, userId, enabled: true });
+    /* Kept for debugging until Langfuse's retention expires it; only account deletion erases. */
+    expect(await outbox(sent)).toMatchObject({ state: 'confirmed', traceId });
+    const erasures = await database
+      .select()
+      .from(schema.agentEvidenceErasure)
+      .where(eq(schema.agentEvidenceErasure.subjectId, projectId));
+    expect(erasures).toEqual([]);
+    expect(await admit(userId, projectId, 2)).toEqual({ kind: 'fenced' });
   });
 
   it('should admit nothing under an erased account or project', async () => {

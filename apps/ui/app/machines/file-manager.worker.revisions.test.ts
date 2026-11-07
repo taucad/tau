@@ -13,7 +13,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createIsomorphicGitRevisionPort, lfsObjectPath, lfsPointerFor } from '@taucad/revisions';
+import { createIsomorphicGitRevisionPort, lfsObjectPath, lfsPointerFor, RevisionPortError } from '@taucad/revisions';
 import type { RevisionPort, RevisionStatusProjection } from '@taucad/revisions';
 import { revisionId } from '@taucad/revisions/algorithms';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
@@ -1766,18 +1766,29 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(after[0]).toMatchObject({ trigger: 'close' });
   });
 
-  it('should register the project on Tau Cloud before it asks the remote for anything (P54, W18 DEF-1)', async () => {
-    const fixture = harness(['alpha']);
-    await fixture.service
-      .createRootedFileSystem('/projects/alpha')
-      .writeFile('tau.json', JSON.stringify({ name: 'Alpha project' }));
-    const alpha = await fixture.open('alpha');
+  it('should register the project on Tau Cloud when its advertisement answers 404 (P54, W18 DEF-1, D11)', async () => {
+    const advertisements: number[] = [];
     const requests: Array<{
       method: string;
       url: string;
       credentials: string | undefined;
       body: BodyInit | undefined;
     }> = [];
+    /* Tau Cloud answers its advertisement `404` until the project is registered. */
+    const fixture = harness(['alpha'], (port) => ({
+      ...port,
+      listRemoteRefs: async () => {
+        advertisements.push(requests.length);
+        if (!requests.some((request) => request.method === 'PUT')) {
+          throw new RevisionPortError('REMOTE_NOT_FOUND', 'No repository here yet.');
+        }
+        return [];
+      },
+    }));
+    await fixture.service
+      .createRootedFileSystem('/projects/alpha')
+      .writeFile('tau.json', JSON.stringify({ name: 'Alpha project' }));
+    const alpha = await fixture.open('alpha');
     const original = globalThis.fetch;
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       requests.push({
@@ -1797,18 +1808,21 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       alpha.send({ command: 'connectRemote', kind: 'tau' });
       await alpha.settle();
 
-      /* First, and only once: a retried *Connect* is one request because the
-       * API's insert is `onConflictDoNothing` (P51). */
-      expect(requests[0]).toEqual({
-        method: 'PUT',
-        url: 'https://api.test/v1/projects/alpha',
-        credentials: 'include',
-        body: JSON.stringify({ name: 'Alpha project' }),
-      });
-      /* Before the initial sync: an advertisement asked first answers 404,
-       * because nothing has written the row the git server authorizes against. */
-      const advertisement = requests.findIndex((request) => request.url.includes('/v1/git/alpha.git'));
-      expect(advertisement === -1 || advertisement > 0).toBe(true);
+      /* Once, after the advertisement answered 404: a project Tau Cloud
+       * already holds is never registered again (D11), and a retried
+       * *Connect* is one request because the API's insert is
+       * `onConflictDoNothing` (P51). */
+      const puts = requests.filter((request) => request.method === 'PUT');
+      expect(puts).toEqual([
+        {
+          method: 'PUT',
+          url: 'https://api.test/v1/projects/alpha',
+          credentials: 'include',
+          body: JSON.stringify({ name: 'Alpha project' }),
+        },
+      ]);
+      /* The first advertisement came before the PUT, and the next after it. */
+      expect(advertisements.slice(0, 2)).toEqual([requests.indexOf(puts[0]!), requests.indexOf(puts[0]!) + 1]);
     } finally {
       globalThis.fetch = original;
     }

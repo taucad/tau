@@ -797,8 +797,8 @@ describe('a project on the browser client', () => {
    * DEF-1 (P51) through the product's own Connect gesture.
    *
    * `PUT /v1/projects/:projectId` creates the caller's row and its bare
-   * repository; `remote.machine`'s `authorize` calls `registerRemoteProject`
-   * for `kind: 'tau'` before `validating`; the disk host supplies it
+   * repository; `remote.machine`'s `validating` calls `registerRemoteProject`
+   * for `kind: 'tau'` when the advertisement answers `404`; the disk host supplies it
    * (`packages/host/src/revisions.ts`) and the browser worker supplies it under
    * **P54**. Nothing here seeds a row: this project has never been published
    * and the row this creates is the connect verb's own.

@@ -1893,6 +1893,24 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       : JSON.stringify([remote.name, remote.url, remote.kind, remote.provider, remote.repositoryId, remote.fetchOnly]);
   };
 
+  /* P51, D11: Tau Cloud answers `404` until the project is registered, so the
+   * registering PUT is sent only on that answer, and a reconnect costs none. */
+  const listRegistered = async (
+    kind: string | undefined,
+    list: () => Promise<readonly RemoteRef[]>,
+  ): Promise<readonly RemoteRef[]> =>
+    list().catch(async (error: unknown) => {
+      if (
+        kind !== 'tau' ||
+        options.registerRemoteProject === undefined ||
+        !(error instanceof RevisionPortError && error.code === 'REMOTE_NOT_FOUND')
+      ) {
+        throw error;
+      }
+      await options.registerRemoteProject(projectId);
+      return list();
+    });
+
   const evidenceRefName = 'refs/tau/evidence/exports';
   const candidateRefName = 'refs/tau/artifacts/geospec-candidates';
 
@@ -4683,17 +4701,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       }),
 
       /* I8: no *credential* work for Tau Cloud — the credential is the session,
-       * and the `HttpClient` sets the header from it at request time. What Tau
-       * Cloud does need is the project to exist on it (P51): connecting is the
-       * verb that registers it, and it runs here, before `validating` asks the
-       * remote for an advertisement it would otherwise answer `404`.
+       * and the `HttpClient` sets the header from it at request time. The
+       * project must exist on it (P51), and `validating` registers it when the
+       * remote answers `404` (D11).
        *
        * W12 replaces this actor for a GitHub remote, where consent is a popup. */
-      authorize: fromAuthorityPromise<void, RemoteAuthorizeActorInput>(async ({ input }) => {
-        if (input.kind === 'tau') {
-          await options.registerRemoteProject?.(projectId);
-        }
-      }),
+      authorize: fromAuthorityPromise<void, RemoteAuthorizeActorInput>(async () => {}),
 
       /*
        * R2: *Change backup* asks the new remote `validate`'s question before
@@ -4704,10 +4717,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
        */
       probe: fromAuthorityPromise<void, RemoteWriteActorInput>(async ({ input }) => {
         await ensureStore();
-        if (input.kind === 'tau') {
-          await options.registerRemoteProject?.(projectId);
-        }
-        await port.listRemoteRefs(remoteAddressOf(input));
+        await listRegistered(input.kind, async () => port.listRemoteRefs(remoteAddressOf(input)));
       }),
 
       /* The cheapest question that proves a remote is really there: what refs
@@ -4720,7 +4730,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         const validation = validations;
         validatedListing = undefined;
         const identity = await remoteIdentity(input.remote);
-        const listed = await port.listRemoteRefs(input.remote);
+        const kind = (await port.listRemotes()).find((remote) => remote.name === input.remote)?.kind;
+        const listed = await listRegistered(kind, async () => port.listRemoteRefs(input.remote));
         if (!signal.aborted && validation === validations) {
           validatedListing = { remote: input.remote, identity, refs: listed };
         }

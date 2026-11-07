@@ -4897,6 +4897,10 @@ describe('connecting a remote', () => {
         ...port,
         listRemoteRefs: async (remote) => {
           asked.push(remote);
+          /* Tau Cloud answers `404` until the project is registered (P51). */
+          if (JSON.stringify(remote).includes('api.tau.new') && registerRemoteProject.mock.calls.length === 0) {
+            throw new RevisionPortError('REMOTE_NOT_FOUND', 'No repository here yet.');
+          }
           return [];
         },
       },
@@ -4922,7 +4926,9 @@ describe('connecting a remote', () => {
       { name: 'github-22', url: 'https://github.com/new/project.git' },
       { name: 'origin', url: 'https://gitlab.example.com/o/r.git' },
       { name: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' },
+      { name: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' },
     ]);
+    expect(registerRemoteProject).toHaveBeenCalledOnce();
     expect(registerRemoteProject).toHaveBeenCalledWith('project-1');
     expect(await port.listRemotes()).toStrictEqual(before);
   });
@@ -4952,18 +4958,48 @@ describe('connecting a remote', () => {
     expect(await port.listRemotes()).toStrictEqual(before);
   });
 
-  it('registers the project on Tau Cloud, and only on Tau Cloud', async () => {
+  /* P51, D11: the registering PUT is conditional on the remote's `404`, so a reconnect sends none. */
+  it('registers the project on Tau Cloud only when it answers 404, and only on Tau Cloud', async () => {
     const registered: string[] = [];
     const registerRemoteProject = vi.fn(async (id: string) => {
       registered.push(id);
     });
-    const { actors } = await fixture({}, (filesystem) => filesystem, { registerRemoteProject });
+    const listed: string[] = [];
+    const { port, filesystem } = await fixture();
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    await port.setRemote({ name: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' });
+    await port.setRemote({ name: 'origin', url: 'https://github.com/owner/repository.git' });
+    const actors = createRevisionActors({
+      port: {
+        ...port,
+        listRemoteRefs: async (remote) => {
+          listed.push(String(remote));
+          if (registered.length === 0) {
+            throw new RevisionPortError('REMOTE_NOT_FOUND', 'No repository here yet.');
+          }
+          return [];
+        },
+      },
+      projectId: 'project-1',
+      filesystem: async () => filesystem,
+      registerRemoteProject,
+    });
+
+    await expect(
+      run(actors.remote.validate, { remote: 'origin', url: 'https://github.com/owner/repository.git' }),
+    ).rejects.toThrow('No repository here yet.');
+    expect(registered).toEqual([]);
 
     await run(actors.remote.authorize, { kind: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' });
+    expect(registered).toEqual([]);
+    await run(actors.remote.validate, { remote: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' });
     expect(registered).toEqual(['project-1']);
+    expect(listed).toEqual(['origin', 'tau', 'tau']);
 
-    await run(actors.remote.authorize, { kind: 'git', url: 'https://github.com/owner/repository.git' });
+    /* Registered: a reconnect lists once and sends no PUT. */
+    await run(actors.remote.validate, { remote: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' });
     expect(registered).toEqual(['project-1']);
+    expect(listed).toEqual(['origin', 'tau', 'tau', 'tau']);
   });
 
   it('connects without a host that can register, as every host did before P51', async () => {
@@ -4977,9 +5013,22 @@ describe('connecting a remote', () => {
     const registerRemoteProject = vi.fn(async () => {
       throw new Error('That project id already belongs to another account.');
     });
-    const { actors } = await fixture({}, (filesystem) => filesystem, { registerRemoteProject });
+    const { port, filesystem } = await fixture();
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    await port.setRemote({ name: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' });
+    const actors = createRevisionActors({
+      port: {
+        ...port,
+        listRemoteRefs: async () => {
+          throw new RevisionPortError('REMOTE_NOT_FOUND', 'No repository here yet.');
+        },
+      },
+      projectId: 'project-1',
+      filesystem: async () => filesystem,
+      registerRemoteProject,
+    });
     await expect(
-      run(actors.remote.authorize, { kind: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' }),
+      run(actors.remote.validate, { remote: 'tau', url: 'https://api.tau.new/v1/git/project-1.git' }),
     ).rejects.toThrow('another account');
   });
 });

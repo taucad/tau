@@ -31,8 +31,8 @@ import type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition } 
 import { assertRootedPath, VirtualPathError } from '@taucad/utils/path';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
 import { applyEntryWithPrimitives, mapRolling, runBatch } from '#backend/batch.js';
-import type { BatchEntry, BatchOptions, BatchReceipt } from '#changeset.js';
-import { isRefusal } from '#changeset.js';
+import type { BatchEntry, BatchOptions, BatchReceipt, LargeObjectWriteSource } from '#changeset.js';
+import { isLargeObjectSource, isRefusal } from '#changeset.js';
 import { mapConcurrent, statConcurrency } from '#concurrency.js';
 import type { NodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import type {
@@ -405,19 +405,11 @@ const nativeIgnores = (rootedPath: string, directory: string, excludes: readonly
  * @public
  */
 export class NodeFsProvider extends AbstractFileSystemProvider {
-  public readonly capabilities: ProviderCapabilities = {
-    persistent: true,
-    writable: true,
-    quotaBased: false,
-    durability: 'transactional-rewrite',
-    trustworthyMtime: true,
-    externallyEdited: true,
-    streamsWrites: true,
-    movesInPlace: true,
-  };
+  public readonly capabilities: ProviderCapabilities;
 
   private readonly _base: string;
   private readonly _policy: PathPolicy | undefined;
+  private readonly _largeObjectStore: (() => string | undefined) | undefined;
   private _realBaseCache: Promise<string> | undefined;
 
   private readonly _openSubscriptions = new Set<() => void>();
@@ -431,12 +423,34 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
    * (D6, G0-6). This backend is the only one that can hold a symlink and the
    * only layer that knows where one points, so it refuses a laundered spelling
    * for every consumer above it; the policy is injected because the core never
-   * imports the registry.
+   * imports the registry. `largeObjectStore` is the repository's LFS object
+   * directory this root's large objects come from (EQ13): given, a write may
+   * name an object by its id and it is cloned from there. A function is asked
+   * per write, so an authority that admits and releases roots answers for now.
    */
-  public constructor(basePath: string, options?: { readonly policy?: PathPolicy }) {
+  public constructor(
+    basePath: string,
+    options?: {
+      readonly policy?: PathPolicy;
+      readonly largeObjectStore?: string | (() => string | undefined);
+    },
+  ) {
     super();
     this._base = path.resolve(basePath);
     this._policy = options?.policy;
+    const store = options?.largeObjectStore;
+    this._largeObjectStore = typeof store === 'string' ? () => store : store;
+    this.capabilities = {
+      persistent: true,
+      writable: true,
+      quotaBased: false,
+      durability: 'transactional-rewrite',
+      trustworthyMtime: true,
+      externallyEdited: true,
+      streamsWrites: true,
+      movesInPlace: true,
+      ...(store === undefined ? {} : { largeObjectSources: true }),
+    };
     entryObservers.set(this, createEntryObserver({ root: this._base, policy: this._policy }));
     boundedReads.set(this, async (rooted, maximumBytes) => this._readBounded(rooted, maximumBytes));
     boundedListings.set(this, async (rooted, limits) => this._listBounded(rooted, limits));
@@ -1441,10 +1455,12 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
         }
         madeParent = (await fs.mkdir(path.dirname(target), { recursive: true })) !== undefined;
         prepared = await this._prepareWrite(entry.path, target, entry.mode);
-        await this._fillTemporary(
-          prepared,
-          entry.data instanceof Uint8Array ? { data: entry.data } : { source: entry.data.stream() },
-        );
+        await (isLargeObjectSource(entry.data)
+          ? this._cloneTemporary(prepared, entry.data)
+          : this._fillTemporary(
+              prepared,
+              entry.data instanceof Uint8Array ? { data: entry.data } : { source: entry.data.stream() },
+            ));
         const write: Pending = { index, entry, staged: prepared, madeParent };
         return write;
       } catch (error) {
@@ -1503,6 +1519,10 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
           outcome: 'applied',
           kind: 'file',
           ...(write.entry.create === true ? { created: true } : {}),
+          /* Verified by the one hashed read-back of what landed (I2). */
+          ...(isLargeObjectSource(write.entry.data)
+            ? { largeObject: { largeObject: write.entry.data.largeObject, size: write.entry.data.size } }
+            : {}),
         };
       } catch (error) {
         refuse(write.index, error, write.madeParent || write.staged.renaming === true);
@@ -1605,6 +1625,53 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
         await handle.close();
       }
     }
+  }
+
+  /**
+   * Fill the temp sibling from the repository's large-object store (EQ13):
+   * `copyFile` with `COPYFILE_FICLONE`, so the file shares the object's extents
+   * where the file system can clone (APFS, btrfs, XFS) and is copied where it
+   * cannot, then the sibling's mode and one fsync. The store is the
+   * authority's, resolved here by the object's id: no `.git` path is ever
+   * named by the caller (I6). Verification hashes what landed (I2).
+   *
+   * @param staged - The prepared write.
+   * @param source - The object's id and size.
+   */
+  private async _cloneTemporary(staged: StagedWrite, source: LargeObjectWriteSource): Promise<void> {
+    const store = this._largeObjectStore?.();
+    if (store === undefined) {
+      throw this._errno('EINVAL', 'this root has no large-object store', staged.rootedPath);
+    }
+    if (!/^[\da-f]{64}$/u.test(source.largeObject) || !Number.isSafeInteger(source.size) || source.size < 0) {
+      throw this._errno('EINVAL', 'not a large-object id and size', staged.rootedPath);
+    }
+    const object = path.join(store, source.largeObject.slice(0, 2), source.largeObject.slice(2, 4), source.largeObject);
+    const stored = await fs.stat(object).catch((error: unknown) => {
+      throw (error as NodeJS.ErrnoException).code === 'ENOENT'
+        ? this._errno('ENOENT', 'the large object is not in the store', staged.rootedPath)
+        : error;
+    });
+    if (!stored.isFile() || stored.size !== source.size) {
+      throw this._errno('EINVAL', 'the stored large object is not the size its pointer names', staged.rootedPath);
+    }
+    /* EXCL: the sibling is this write's own name. FICLONE: share extents where the file system can, else copy. */
+    // oxlint-disable-next-line eslint/no-bitwise -- copy flags are a bit set.
+    await fs.copyFile(object, staged.temporaryPath, constants.COPYFILE_EXCL | constants.COPYFILE_FICLONE);
+    const handle = await fs.open(staged.temporaryPath, 'r+');
+    if (process.platform === 'win32') {
+      staged.retainedHandle = handle;
+    }
+    try {
+      /* A copy takes the object's mode; the file takes its own, or a new file's default. */
+      await handle.chmod(staged.permissions ?? 0o644);
+      await handle.sync();
+    } finally {
+      if (staged.retainedHandle === undefined) {
+        await handle.close();
+      }
+    }
+    staged.streamed = { size: source.size, sha256: source.largeObject };
   }
 
   /**

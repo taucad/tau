@@ -1,6 +1,6 @@
 # Terms of Service - TauCAD Limited
 
-*Effective date: August 31, 2026*
+*Effective date: November 7, 2026*
 
 > **Summary:** These Terms constitute a binding legal agreement between you and TauCAD Limited. By using the Service, you agree to these Terms. If you do not agree, you may not use the Service.
 
@@ -38,11 +38,13 @@ Many features of our Service are available for free without a Subscription. For 
 - **Annual Subscriptions**: Billed annually with a discount compared to monthly rates
 - **Usage Credits**: Pay-per-use credits for AI features and API calls, purchased separately or included in subscription tiers
 
-Your Subscription will automatically renew at the end of each billing period unless you cancel before the renewal date. You authorize us to charge your payment method for the Subscription fee at the beginning of each billing period. Prices are subject to change with at least 30 days' notice.
+Your Subscription will automatically renew at the end of each billing period unless you cancel before the renewal date. You authorize us to charge your payment method for the Subscription fee at the beginning of each billing period. Subscription prices are subject to change with at least 30 days' notice. Usage Credit rates for AI models are based on the prices charged by the third-party model providers we use, and we pass changes to those prices through as they happen, without advance notice. The current rate for each model is shown in the Service before you use it, and Usage Credits you have already bought keep their value. Any increase to our own margin on those rates is made with at least 30 days' notice.
 
 ### 3.3 Cancellation & Refunds
 
 You may cancel your Subscription at any time through your account settings or by contacting us at support@tau.new. Upon cancellation, access continues until the end of your current billing period. No refunds are provided for unused portions of the billing period, except as required by applicable law (see Section 15 for consumer rights) or at our sole discretion for billing errors.
+
+You may request a refund of the unused balance of a Usage Credit purchase within 14 days of that purchase by contacting support@tau.new. Usage Credits you have already used, and credits included in a Subscription or given as a promotion, are not refundable. Refunds are made to the original payment method.
 
 ### 3.4 Taxes & Payment
 

@@ -76,7 +76,7 @@ describe('GitProtocolExceptionFilter', () => {
       filter.catch(incomplete, host as any);
 
       expect(reportServerError).toHaveBeenCalledTimes(1);
-      expect(reportServerError).toHaveBeenCalledWith(incomplete, 'req_git_1');
+      expect(reportServerError).toHaveBeenCalledWith(incomplete, 'req_git_1', undefined);
     });
 
     it('should still report a 503 whose code is not a known retryable refusal', () => {
@@ -86,7 +86,7 @@ describe('GitProtocolExceptionFilter', () => {
       filter.catch(unknown, host as any);
 
       expect(reportServerError).toHaveBeenCalledTimes(1);
-      expect(reportServerError).toHaveBeenCalledWith(unknown, 'req_git_1');
+      expect(reportServerError).toHaveBeenCalledWith(unknown, 'req_git_1', undefined);
     });
   });
 

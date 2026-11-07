@@ -77,7 +77,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     // a second reply only produces `FST_ERR_REP_ALREADY_SENT` and hides the cause.
     if (response.sent) {
       this.logger.error({ err: exception, requestId }, 'Request failed after its response was already sent');
-      reportServerError(exception, requestId);
+      reportServerError(exception, requestId, request.headers['sentry-trace']);
       return;
     }
 
@@ -170,7 +170,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       };
     }
 
-    this.recordFailure(exception, errorResponse);
+    this.recordFailure(exception, errorResponse, request.headers['sentry-trace']);
 
     // Set request ID in response header (matching middleware behavior)
     if (requestId) {
@@ -197,8 +197,13 @@ export class HttpExceptionFilter implements ExceptionFilter {
    *
    * @param exception - The thrown value.
    * @param response - The error body the request is answered with.
+   * @param sentryTrace - The request's `sentry-trace` header (SB17).
    */
-  private recordFailure(exception: unknown, { statusCode, error, code, requestId }: HttpErrorResponse): void {
+  private recordFailure(
+    exception: unknown,
+    { statusCode, error, code, requestId }: HttpErrorResponse,
+    sentryTrace: string | string[] | undefined,
+  ): void {
     // Log error details. A readiness refusal was already logged, counted and reported
     // per indicator by the health controller: it is the probe working, not a fault.
     if (exception instanceof ReadinessRefusalException) {
@@ -207,7 +212,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       this.logRetryableGitRefusal(code, statusCode, requestId);
     } else if (statusCode >= 500) {
       this.logger.error(exception, `Unhandled exception: ${error}`);
-      reportServerError(exception, requestId);
+      reportServerError(exception, requestId, sentryTrace);
 
       const span = trace.getSpan(otelContext.active());
       if (span) {

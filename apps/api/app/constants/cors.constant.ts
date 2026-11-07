@@ -7,9 +7,10 @@ import { httpHeader } from '#constants/http-header.constant.js';
 const corsMaxAge = 21_600; // 6 hours
 
 /**
- * CORS allowed headers.
+ * CORS allowed headers. `sentry-trace` and `baggage` let a traced browser request continue its Sentry trace into
+ * the error it causes here (SB17); the browser never sends `traceparent`, which would change OpenTelemetry sampling.
  */
-const corsAllowedHeaders = [...Object.values(httpHeader), 'x-tau-attempt-id'];
+const corsAllowedHeaders = [...Object.values(httpHeader), 'x-tau-attempt-id', 'sentry-trace', 'baggage'];
 
 /**
  * CORS allowed methods.

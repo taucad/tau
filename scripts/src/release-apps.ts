@@ -15,7 +15,7 @@
  *   manifest version and prepending its CHANGELOG.md section; prints the plan
  *   and the release commit subject. Each application has its own release pull
  *   request, so a release commit versions exactly one application.
- * - `tags`: on a release commit, print the tags the commit introduces with their
+ * - `tags`: print every application version that has no tag yet, with its
  *   release notes, for the release workflow to create.
  *
  * Usage: node scripts/src/release-apps.ts plan|apps|prepare <project>|tags
@@ -377,26 +377,35 @@ export const changelogNotes = (changelog: string, version: string): string => {
     .trim();
 };
 
-/** Tags introduced by HEAD: each application whose manifest version HEAD changed and is not yet tagged. */
+/**
+ * Tags owed at HEAD: each application whose manifest version has no tag yet.
+ *
+ * A manifest version changes only in a release commit, so an untagged version
+ * is a release that has not been tagged. This compares against the existing
+ * tags rather than HEAD~1 because one push can carry several release commits
+ * (a merge queue batches release pull requests) and a missed tag must still be
+ * created by a later run.
+ */
+export const owedTags = (
+  apps: ReadonlyArray<{ name: string; version: string }>,
+  tagExists: (tag: string) => boolean,
+): Array<{ name: string; version: string; tag: string }> =>
+  apps.flatMap(({ name, version }) => {
+    const tag = `${name}@${version}`;
+    return tagExists(tag) ? [] : [{ name, version, tag }];
+  });
+
 const tags = (): void => {
   const apps = releaseApps();
-  const introduced = apps.flatMap((app) => {
-    const version = manifestVersion(app.root);
-    const before = (() => {
-      try {
-        return (JSON.parse(git('show', `HEAD~1:${app.root}/package.json`)) as { version?: string }).version;
-      } catch {
-        return undefined;
-      }
-    })();
-    const tag = `${app.name}@${version}`;
-    if (before === version || git('tag', '--list', tag) !== '') {
-      return [];
-    }
-
-    const changelogPath = join(workspaceRoot, app.root, 'CHANGELOG.md');
+  const roots = new Map(apps.map((app) => [app.name, app.root]));
+  const owed = owedTags(
+    apps.map((app) => ({ name: app.name, version: manifestVersion(app.root) })),
+    (tag) => git('tag', '--list', tag) !== '',
+  );
+  const introduced = owed.map(({ name, version, tag }) => {
+    const changelogPath = join(workspaceRoot, roots.get(name) ?? '', 'CHANGELOG.md');
     const notes = existsSync(changelogPath) ? changelogNotes(readFileSync(changelogPath, 'utf8'), version) : '';
-    return [{ name: app.name, version, tag, notes }];
+    return { name, version, tag, notes };
   });
   console.log(JSON.stringify(introduced, null, 2));
 };

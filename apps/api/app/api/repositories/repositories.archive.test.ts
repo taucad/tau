@@ -470,7 +470,8 @@ describe('repository import streaming', () => {
     const budget = 2 * 1024 * mebibyte;
 
     /* A Redis whose import byte counter starts at `used`; the request counter stays at one. */
-    const budgeted = (used: number) => {
+    /* `failing` makes every spend of bytes (not the opening read) reject, as a Redis that went away. */
+    const budgeted = (used: number, failing = false) => {
       const { service, evalRedis } = createService();
       const spent: number[] = [];
       let total = used;
@@ -480,6 +481,9 @@ describe('repository import streaming', () => {
         const amount = args[4];
         if (!key.includes(':archive-bytes:')) {
           return 1;
+        }
+        if (failing && Number(amount) > 0) {
+          throw new Error('Redis connection lost');
         }
         spent.push(Number(amount));
         total += Number(amount);
@@ -520,32 +524,74 @@ describe('repository import streaming', () => {
       expect(pull).not.toHaveBeenCalled();
     });
 
-    it('spends the bytes as they stream, and ends a body that spends the last of the budget', async () => {
+    /* An endless upstream of 1 MiB chunks, and what reading the gateway's body came to. */
+    const endless = () => {
       const chunk = new Uint8Array(mebibyte);
       const cancel = vi.fn();
+      let sent = 0;
       stubGithub((signal) =>
         zipResponse(
           abortableBody(signal, {
             pull(controller) {
+              sent += chunk.byteLength;
               controller.enqueue(chunk);
             },
             cancel,
           }),
         ),
       );
+      const drain = async (response: Response): Promise<Readonly<{ received: number; failure?: unknown }>> => {
+        let received = 0;
+        try {
+          for await (const value of response.body!) {
+            received += value.byteLength;
+          }
+        } catch (error) {
+          return { received, failure: error };
+        }
+        return { received };
+      };
+      return { cancel, sent: () => sent, drain };
+    };
+
+    it('spends the bytes as they stream, and fails a body that spends the last of the budget', async () => {
+      const upstream = endless();
       const { call, spent } = budgeted(budget - 12 * mebibyte);
 
       const response = await call();
-      let received = 0;
-      for await (const value of response.body!) {
-        received += value.byteLength;
-      }
+      const { failure } = await upstream.drain(response);
 
-      /* Spent a flush (8 MiB) at a time: the second one crosses the budget, and the body ends there. */
+      /* Spent a flush (8 MiB) at a time: the second one crosses the budget, and the transfer fails there, never
+       * ending cleanly as an archive that looks whole. */
       expect(response.status).toBe(200);
-      expect(received).toBe(16 * mebibyte);
-      expect(spent()).toBe(received);
-      expect(cancel).toHaveBeenCalledOnce();
+      expect(String(failure)).toMatch(/allowance ran out/u);
+      expect(spent()).toBe(16 * mebibyte);
+      expect(upstream.sent()).toBe(16 * mebibyte);
+      expect(upstream.cancel).toHaveBeenCalledOnce();
+    });
+
+    it('fails the body and cancels the upstream when the budget cannot be counted mid-stream', async () => {
+      const upstream = endless();
+      const { call } = budgeted(0, true);
+
+      const response = await call();
+      const { failure } = await upstream.drain(response);
+
+      expect(String(failure)).toMatch(/Redis connection lost/u);
+      expect(upstream.sent()).toBe(8 * mebibyte);
+      expect(upstream.cancel).toHaveBeenCalledOnce();
+    });
+
+    it('cancels the upstream when the caller goes away, even when the last spend fails', async () => {
+      const upstream = endless();
+      const { call } = budgeted(0, true);
+
+      const response = await call();
+      const reader = response.body!.getReader();
+      await reader.read();
+      await reader.cancel();
+
+      expect(upstream.cancel).toHaveBeenCalledOnce();
     });
 
     it('spends exactly what a whole archive streamed', async () => {

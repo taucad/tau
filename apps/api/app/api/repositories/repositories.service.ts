@@ -368,7 +368,9 @@ const timeoutError = (): DOMException => new DOMException('The repository provid
  * worker applies the same limit and refuses what it received as too large.
  * A body that stalls or outlasts its deadline aborts the upstream request.
  * Its bytes are spent from the caller's hourly byte budget as they pass, a
- * flush at a time; a body that spends the last of it ends the same way.
+ * flush at a time. A body that spends the last of it, or whose spending
+ * cannot be counted, fails with an error (never a clean end that would pass
+ * for a whole archive), and the upstream request is cancelled and aborted.
  *
  * @param source - The provider's archive body.
  * @param abortUpstream - Aborts the provider request with a reason.
@@ -403,36 +405,65 @@ const boundedImportBody = (
     }, importBodyIdleMilliseconds);
   };
   restartIdleTimer();
+  /* Ends the upstream whatever happens to the budget's last flush, which never rejects past here. */
+  const release = async (reason: unknown): Promise<void> => {
+    stopTimers();
+    try {
+      await flush().catch(() => false);
+    } finally {
+      await reader.cancel(reason).catch(() => undefined);
+      abortUpstream(new DOMException('The import body ended.', 'AbortError'));
+    }
+  };
   return new ReadableStream<Uint8Array<ArrayBuffer>>({
     async pull(controller) {
+      let read: ReadableStreamReadResult<Uint8Array<ArrayBuffer>>;
       try {
-        const { done, value } = await reader.read();
-        if (done) {
-          stopTimers();
-          await flush();
-          controller.close();
-          return;
-        }
-        restartIdleTimer();
-        received += value.byteLength;
-        unspent += value.byteLength;
-        controller.enqueue(value);
-        const withinBudget = unspent >= importBudgetFlushBytes ? await flush() : true;
-        if (received > repositoryImportLimits.maxArchiveBytes || !withinBudget) {
-          stopTimers();
-          await flush();
-          controller.close();
-          await reader.cancel();
-        }
+        read = await reader.read();
       } catch (error) {
+        /* The provider failed mid-body: what it sent is still spent. */
         stopTimers();
+        await flush().catch(() => false);
         controller.error(error);
+        return;
+      }
+      if (read.done) {
+        stopTimers();
+        /* The whole archive went: a failed last flush does not take it back. */
+        await flush().catch(() => false);
+        controller.close();
+        return;
+      }
+      const { value } = read;
+      restartIdleTimer();
+      received += value.byteLength;
+      unspent += value.byteLength;
+      controller.enqueue(value);
+      let withinBudget: boolean;
+      try {
+        withinBudget = unspent >= importBudgetFlushBytes ? await flush() : true;
+      } catch (error) {
+        /* The budget cannot be counted (Redis failed): the body fails, and the upstream goes with it. */
+        await release(error);
+        controller.error(error);
+        return;
+      }
+      if (!withinBudget) {
+        /* An error, not an end: the browser sees a failed transfer, never a short archive that looks whole. */
+        const spent = new Error('The hourly repository import allowance ran out during the download.');
+        await release(spent);
+        controller.error(spent);
+        return;
+      }
+      if (received > repositoryImportLimits.maxArchiveBytes) {
+        stopTimers();
+        await flush().catch(() => false);
+        controller.close();
+        await reader.cancel().catch(() => undefined);
       }
     },
     async cancel(reason) {
-      stopTimers();
-      await flush();
-      await reader.cancel(reason);
+      await release(reason);
     },
   });
 };

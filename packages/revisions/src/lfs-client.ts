@@ -255,7 +255,19 @@ export type LfsDownloadManyInput = Readonly<{
    * the resident budget until this settles, so a caller that stores them here
    * keeps the whole download bounded. A rejection stops the rest.
    */
-  received: (pointer: LfsPointer, content: Uint8Array<ArrayBuffer>, transfer: LfsDownloadTransfer) => Promise<void>;
+  received?: (pointer: LfsPointer, content: Uint8Array<ArrayBuffer>, transfer: LfsDownloadTransfer) => Promise<void>;
+  /**
+   * In place of `received`: take one object's bytes as a stream, as they
+   * arrive, so no whole copy is held while it transfers (W6.3). Called again
+   * for a retried transfer, so it must store the stream whole or not at all,
+   * and verify what it stored, as `received` does. Its declared size counts
+   * against the resident budget until this settles.
+   */
+  streamed?: (
+    pointer: LfsPointer,
+    source: ReadableStream<Uint8Array<ArrayBuffer>>,
+    transfer: LfsDownloadTransfer,
+  ) => Promise<void>;
   /**
    * Oids to transfer before the rest (D10: an opened path jumps the fill
    * queue). Asked before each object is handed out, so an oid named while the
@@ -709,9 +721,16 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
       progress?: (() => void) | undefined;
       /** Set where the caller verifies the bytes by reading back what it stores (D9, D11). */
       unhashed?: boolean;
+      /**
+       * Where each attempt's bytes stream, in place of one buffer: called again for a retried
+       * attempt, and verified by the caller, as `unhashed` is. A rejection that is not the
+       * transfer's own ends the download.
+       */
+      sink?: (source: ReadableStream<Uint8Array<ArrayBuffer>>, transfer: LfsDownloadTransfer) => Promise<void>;
     }>,
-  ): Promise<Readonly<{ content: Uint8Array<ArrayBuffer>; transfer: LfsDownloadTransfer }>> => {
+  ): Promise<Readonly<{ content: Uint8Array<ArrayBuffer> | undefined; transfer: LfsDownloadTransfer }>> => {
     const signal = transferOptions?.signal;
+    const sink = transferOptions?.sink;
     if (initial.error !== undefined) {
       throw new Error(`The remote refused large object ${pointer.oid}.`);
     }
@@ -742,46 +761,69 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
       }
       if (response?.ok) {
         const reader = response.body?.getReader();
-        let content: Uint8Array<ArrayBuffer> | undefined;
+        const transferred = { transport: lfsTransportOf(action.href) };
         let received = 0;
-        let interrupted = false;
+        /* Set from inside the body's pull, so held in an object the narrowing below cannot see through. */
+        const broke = { interrupted: false };
+        /* The body as it arrives, held to its declared size: a transfer that breaks is `interrupted` and retried. */
+        const body = new ReadableStream<Uint8Array<ArrayBuffer>>(
+          {
+            pull: async (controller) => {
+              try {
+                signal?.throwIfAborted();
+                stall.touch();
+                const chunk = await Promise.race([reader?.read(), stall.stalled]);
+                if (chunk === undefined || chunk.done) {
+                  controller.close();
+                  return;
+                }
+                if (received + chunk.value.byteLength > pointer.size) {
+                  throw new RangeError(`Large object ${pointer.oid} exceeds its declared size.`);
+                }
+                received += chunk.value.byteLength;
+                transferOptions?.progress?.();
+                controller.enqueue(chunk.value);
+              } catch (error) {
+                broke.interrupted = !(error instanceof RangeError) && signal?.aborted !== true;
+                controller.error(error);
+              }
+            },
+          },
+          { highWaterMark: 0 },
+        );
+        let content: Uint8Array<ArrayBuffer> | undefined;
         try {
-          content = new Uint8Array(pointer.size);
-          let complete = false;
-          while (!complete) {
-            signal?.throwIfAborted();
-            stall.touch();
-            const chunk = await Promise.race([reader?.read(), stall.stalled]);
-            complete = chunk === undefined || chunk.done;
-            if (chunk === undefined || chunk.done) {
-              break;
+          if (sink === undefined) {
+            content = new Uint8Array(pointer.size);
+            const chunks = body.getReader();
+            let at = 0;
+            for (let read = await chunks.read(); !read.done; read = await chunks.read()) {
+              content.set(read.value, at);
+              at += read.value.byteLength;
             }
-            if (received + chunk.value.byteLength > pointer.size) {
-              throw new RangeError(`Large object ${pointer.oid} exceeds its declared size.`);
-            }
-            content.set(chunk.value, received);
-            received += chunk.value.byteLength;
-            transferOptions?.progress?.();
+          } else {
+            await sink(body, transferred);
           }
         } catch (error) {
           signal?.throwIfAborted();
-          if (error instanceof RangeError) {
+          if (!broke.interrupted) {
             throw error;
           }
-          interrupted = true;
         } finally {
           stall.clear();
           await reader?.cancel().catch(() => undefined);
           reader?.releaseLock();
         }
-        if (!interrupted && content !== undefined) {
+        if (!broke.interrupted) {
           if (
             received !== pointer.size ||
-            (transferOptions?.unhashed !== true && lfsPointerFor(content).pointer.oid !== pointer.oid)
+            (content !== undefined &&
+              transferOptions?.unhashed !== true &&
+              lfsPointerFor(content).pointer.oid !== pointer.oid)
           ) {
             throw new Error(`Large object ${pointer.oid} did not hash to its own id.`);
           }
-          return { content, transfer: { transport: lfsTransportOf(action.href) } };
+          return { content, transfer: transferred };
         }
       } else {
         stall.clear();
@@ -848,7 +890,7 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
       const { content } = await downloadObject(pointer, await refresh('download', pointer, pointer.signal), {
         signal: pointer.signal,
       });
-      return content;
+      return content!;
     },
 
     /*
@@ -858,7 +900,14 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
      * when it expired while it waited, and handed over as soon as it arrives,
      * so a reload part-way through keeps what was already stored.
      */
-    downloadMany: async ({ pointers, received, signal, first, progress }: LfsDownloadManyInput): Promise<void> => {
+    downloadMany: async ({
+      pointers,
+      received,
+      streamed,
+      signal,
+      first,
+      progress,
+    }: LfsDownloadManyInput): Promise<void> => {
       signal?.throwIfAborted();
       /* Not yet asked of the batch endpoint, in tree order. */
       const queued = new Map(pointers.map((pointer) => [pointer.oid, pointer] as const));
@@ -910,8 +959,16 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
                 : () => {
                     progress(pointer.oid);
                   },
+            ...(streamed === undefined
+              ? {}
+              : {
+                  sink: async (source: ReadableStream<Uint8Array<ArrayBuffer>>, transferred: LfsDownloadTransfer) =>
+                    streamed(pointer, source, transferred),
+                }),
           });
-          await received(pointer, content, transfer);
+          if (content !== undefined) {
+            await received?.(pointer, content, transfer);
+          }
         },
       );
     },

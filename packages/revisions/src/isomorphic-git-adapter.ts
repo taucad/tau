@@ -78,7 +78,7 @@ import type { LfsPointer } from '#lfs.js';
 import { createTreeIdMemo } from '#tree-id-memo.js';
 import type { TreeObject } from '#tree-id-memo.js';
 import { createLfsClient, LfsQuotaError, withQuotaPaths } from '#lfs-client.js';
-import type { LfsTransport } from '#lfs-client.js';
+import type { LfsDownloadTransfer, LfsTransport } from '#lfs-client.js';
 import {
   isHostLocalRef,
   lfsRemoteUnsupportedMessage,
@@ -948,39 +948,60 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    * so a whole copy another tab stored meanwhile is left alone, and a writer
    * that loses the rename to another keeps the other's whole copy.
    *
+   * A download streamed here (`content` a stream) is written once, read back
+   * once and hashed once (I2), and the read-back is what this returns: the
+   * verified bytes, delivered in place of the transfer's, so no second copy of
+   * an object is ever held for it.
+   *
    * @param oid - The pointer's object id.
-   * @param content - The object's real bytes.
+   * @param size - The object's declared size.
+   * @param content - The object's real bytes, in hand or as they arrive.
    * @param readBack - A download's bytes, verified by hashing what landed before it is renamed into place.
-   * @returns Once the object is in the store.
+   * @returns Once the object is in the store: the bytes read back, when they were.
    */
-  const storeLfsObject = async (oid: string, content: Uint8Array<ArrayBuffer>, readBack?: boolean): Promise<void> =>
-    workerTimings.span('lfs.store', async () => storeLfsObjectBytes(oid, content, readBack));
+  // oxlint-disable-next-line max-params -- the object's id and size, its bytes, and whether they are a download.
+  const storeLfsObject = async (
+    oid: string,
+    size: number,
+    content: Uint8Array<ArrayBuffer> | ReadableStream<Uint8Array<ArrayBuffer>>,
+    readBack?: boolean,
+  ): Promise<Uint8Array<ArrayBuffer> | undefined> =>
+    workerTimings.span('lfs.store', async () => storeLfsObjectBytes(oid, size, content, readBack));
+  // oxlint-disable-next-line max-params -- as above.
   const storeLfsObjectBytes = async (
     oid: string,
-    content: Uint8Array<ArrayBuffer>,
+    size: number,
+    content: Uint8Array<ArrayBuffer> | ReadableStream<Uint8Array<ArrayBuffer>>,
     readBack = false,
-  ): Promise<void> => {
+  ): Promise<Uint8Array<ArrayBuffer> | undefined> => {
     const file = lfsObjectFile(oid);
-    const size = content.byteLength;
     /* Another writer's whole copy is kept, unless these bytes are a download still to be verified:
      * those are delivered after this returns, so they are read back first whatever is already here. */
     if (!readBack && (await lfsObjectSize(file)) === size) {
-      return;
+      return undefined;
     }
     await gitFiles.mkdir(file.slice(0, file.lastIndexOf('/')), { recursive: true });
     const partial = `${file}.${randomUuid()}.partial`;
     let landed = false;
+    let verified: Uint8Array<ArrayBuffer> | undefined;
     try {
-      await gitFiles.writeFile(partial, content);
+      await (content instanceof ReadableStream
+        ? gitFiles.writeFileStream!(partial, content)
+        : gitFiles.writeFile(partial, content));
       /* A download is verified by the one read-back of what landed (D9, D11): the bytes on
-       * disk, not the bytes in hand, must hash to the oid. Transferred, as they are dropped after. */
-      if (readBack && (await compute.sha256(await gitFiles.readFile(partial), true)) !== oid) {
-        throw new Error(`Large object ${oid} did not hash to its own id.`);
+       * disk, not the bytes in hand, must hash to the oid. Transferred there and back, so the
+       * verified bytes are the ones delivered. */
+      if (readBack) {
+        const { sha256, data } = await compute.sha256Kept(await gitFiles.readFile(partial));
+        if (sha256 !== oid || data.byteLength !== size) {
+          throw new Error(`Large object ${oid} did not hash to its own id.`);
+        }
+        verified = data;
       }
       /* Looked at again just before anything is removed: another tab may have stored it whole meanwhile. */
       const here = await lfsObjectSize(file);
       if (here === size) {
-        return;
+        return verified;
       }
       if (here !== undefined) {
         /* A copy cut short; not every provider's rename replaces. */
@@ -1000,6 +1021,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         await gitFiles.unlink(partial).catch(() => undefined);
       }
     }
+    return verified;
   };
 
   /**
@@ -1129,20 +1151,26 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           'A large object this revision references is not in this store yet.',
         );
       }
+      const store = async (
+        pointer: LfsPointer,
+        source: Uint8Array<ArrayBuffer> | ReadableStream<Uint8Array<ArrayBuffer>>,
+        { transport }: LfsDownloadTransfer,
+      ): Promise<void> => {
+        transports.set(transport, (transports.get(transport) ?? 0) + 1);
+        const content = (await storeLfsObject(pointer.oid, pointer.size, source, true))!;
+        contents.set(pointer.oid, content);
+        networkBytes += content.byteLength;
+        pending.get(pointer.oid)?.resolve(content);
+        pending.delete(pointer.oid);
+        delivered?.(pointer.oid, content);
+      };
       await client.downloadMany({
         pointers: [...wanted.values()],
         ...(signal === undefined ? {} : { signal }),
         ...(first === undefined ? {} : { first }),
         progress: progressed,
-        received: async (pointer, content, { transport }) => {
-          transports.set(transport, (transports.get(transport) ?? 0) + 1);
-          await storeLfsObject(pointer.oid, content, true);
-          contents.set(pointer.oid, content);
-          networkBytes += content.byteLength;
-          pending.get(pointer.oid)?.resolve(content);
-          pending.delete(pointer.oid);
-          delivered?.(pointer.oid, content);
-        },
+        /* Streamed where the store can stage a stream, so the transfer holds no copy of its own (W6.3). */
+        ...(gitFiles.writeFileStream === undefined ? { received: store } : { streamed: store }),
       });
     };
     try {
@@ -1817,7 +1845,9 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     },
 
     readLargeObject: async (pointer) => readLocalLfsObject(pointer),
-    storeLargeObject: async (pointer, content) => storeLfsObject(pointer.oid, content),
+    storeLargeObject: async (pointer, content) => {
+      await storeLfsObject(pointer.oid, content.byteLength, content);
+    },
     fetchLargeObjects: async (pointers, fetchOptions) => {
       const { contents, report } = await hydrate(pointers, fetchOptions);
       if (report.networkObjects > 0) {
@@ -1884,7 +1914,9 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         input.largeObjects === false
           ? { tree: input.tree, objects: new Map<string, Uint8Array<ArrayBuffer>>() }
           : cleanLargeObjects(input.tree);
-      await Promise.all([...recorded.objects].map(async ([oid, content]) => storeLfsObject(oid, content)));
+      await Promise.all(
+        [...recorded.objects].map(async ([oid, content]) => storeLfsObject(oid, content.byteLength, content)),
+      );
       const treeId = await writeTreeGraph(treeIds.treeObject(recorded.tree, objectFormat));
       const trailer: RevisionTrailer = {
         parents: [...input.parents],

@@ -90,6 +90,12 @@ export const gitFilesOf = (
     unlink: async (path) => filesystem.unlink(path),
     rmdir: async (path) => filesystem.rmdir(path),
     rename: async (from, to) => filesystem.rename(from, to),
+    ...(filesystem.writeFileStream === undefined
+      ? {}
+      : {
+          writeFileStream: async (path: string, source: ReadableStream<Uint8Array<ArrayBuffer>>) =>
+            filesystem.writeFileStream!(path, source),
+        }),
     ...(filesystem.readFileStream === undefined
       ? {}
       : {

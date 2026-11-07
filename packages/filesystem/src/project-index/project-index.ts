@@ -262,6 +262,9 @@ export class ProjectIndex {
    * Rebuild an index from a persisted snapshot. It is not complete until a
    * compare has validated it against the provider. Only a root whose mtime can
    * key facts keeps a snapshot, so the index trusts its provider's mtime.
+   * Every loaded row carries `generation`, as the snapshot does not keep each
+   * row's own, so a caller continuing the snapshot's epoch from an earlier
+   * generation is answered the whole tree as changed (S10).
    *
    * @param rows - Serialized entries.
    * @param generation - The snapshot's generation.
@@ -484,23 +487,48 @@ export class ProjectIndex {
    * Everything that changed after a generation: entries and removals (S10).
    * Reads no content (I3).
    *
+   * `since` means something only with the epoch it was reported in, so a
+   * caller without one is answered `rescan` unless it starts from `0`: a
+   * reload or a new lineage could otherwise read an old generation as recent
+   * and miss what was removed in between. After a reload every loaded row
+   * carries the snapshot's generation, so a caller that continues the
+   * snapshot's epoch from before it gets the whole tree as changed, with the
+   * removals the snapshot kept: more than changed, never less.
+   *
+   * The mask is asked about each removal's ancestors, as directories, and then
+   * the removal itself, as {@link walk} asks before each descent, so entries
+   * and removals agree for one mask.
+   *
    * @param since - A generation this index, or the snapshot it was loaded from, reported.
-   * @param options - Optional mask, and the epoch `since` was reported in (this index's when omitted).
+   * @param options - Optional mask, and the epoch `since` was reported in.
    * @returns The changes, or `rescan` when they cannot be told.
    */
   public changes(
     since: number,
     options?: { readonly admits?: IndexAdmits; readonly epoch?: string | undefined },
   ): IndexChanges {
-    const epoch = options?.epoch ?? this._epoch;
+    const epoch = options?.epoch ?? (since === 0 ? this._epoch : undefined);
+    const inherited = this._inherited;
     const continued =
-      epoch === this._epoch || (epoch === this._inherited?.epoch && since <= this._inherited.generation);
+      epoch === this._epoch || (inherited !== undefined && epoch === inherited.epoch && since <= inherited.generation);
     if (!continued || since < this._removedFloor || since > this._generation) {
       return { generation: this._generation, epoch: this._epoch, entries: [], removed: [], rescan: true };
     }
+    const admits = options?.admits;
+    const admitted = (path: string, kind: IndexEntryKind): boolean => {
+      if (admits === undefined) {
+        return true;
+      }
+      for (let at = path.indexOf('/'); at !== -1; at = path.indexOf('/', at + 1)) {
+        if (!admits(path.slice(0, at), 'dir')) {
+          return false;
+        }
+      }
+      return admits(path, kind);
+    };
     const removed: IndexRemoval[] = [];
     for (const [path, { kind, generation }] of this._removed) {
-      if (generation > since && options?.admits?.(path, kind) !== false) {
+      if (generation > since && admitted(path, kind)) {
         removed.push({ path, kind, generation });
       }
     }

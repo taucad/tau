@@ -39,15 +39,15 @@ describe('ProjectIndex removals (S10)', () => {
     const fileGone = index.generation;
     index.remove('src');
 
-    const changes = index.changes(before);
+    const changes = index.changes(before, { epoch: index.epoch });
     expect(changes.rescan).toBeUndefined();
     expect(changes.removed).toEqual([
       { path: 'src/a.ts', kind: 'file', generation: fileGone },
       { path: 'src', kind: 'dir', generation: index.generation },
     ]);
     expect(changedPaths(changes)).toEqual([]);
-    expect(removedPaths(index.changes(fileGone))).toEqual(['src']);
-    expect(index.changes(index.generation)).toMatchObject({ entries: [], removed: [] });
+    expect(removedPaths(index.changes(fileGone, { epoch: index.epoch }))).toEqual(['src']);
+    expect(index.changes(index.generation, { epoch: index.epoch })).toMatchObject({ entries: [], removed: [] });
   });
 
   it('should list a path removed and written again both as removed and as changed', () => {
@@ -56,7 +56,7 @@ describe('ProjectIndex removals (S10)', () => {
     index.remove('a.ts');
     index.recordFile('a.ts', { size: 2 });
 
-    const changes = index.changes(before);
+    const changes = index.changes(before, { epoch: index.epoch });
     expect(removedPaths(changes)).toEqual(['a.ts']);
     expect(changedPaths(changes)).toEqual(['a.ts']);
   });
@@ -66,7 +66,7 @@ describe('ProjectIndex removals (S10)', () => {
     const before = index.generation;
     index.move('src/a.ts', 'lib/a.ts');
 
-    const changes = index.changes(before);
+    const changes = index.changes(before, { epoch: index.epoch });
     expect(removedPaths(changes)).toEqual(['src/a.ts']);
     expect(changedPaths(changes)).toEqual(['lib', 'lib/a.ts']);
   });
@@ -82,7 +82,7 @@ describe('ProjectIndex removals (S10)', () => {
     index.completeObservation(index.beginObservation(), 'src', [file('src/a.ts', 1, 1000)]);
     index.completePathObservation(index.beginObservation(), 'c.ts', undefined);
 
-    expect(removedPaths(index.changes(before))).toEqual(['src/b.ts', 'c.ts']);
+    expect(removedPaths(index.changes(before, { epoch: index.epoch }))).toEqual(['src/b.ts', 'c.ts']);
   });
 
   it('should answer whatever a write of another kind replaced as removed', () => {
@@ -92,7 +92,7 @@ describe('ProjectIndex removals (S10)', () => {
     index.recordFile('out', { size: 3 });
     index.recordFile('notes/today.md', { size: 1 });
 
-    const changes = index.changes(before);
+    const changes = index.changes(before, { epoch: index.epoch });
     expect(changes.removed.map(({ path, kind }) => [path, kind])).toEqual([
       ['out', 'dir'],
       ['notes', 'file'],
@@ -107,7 +107,32 @@ describe('ProjectIndex removals (S10)', () => {
     index.remove('b.ts');
 
     const admits = (path: string): boolean => !path.startsWith('src');
-    expect(removedPaths(index.changes(before, { admits }))).toEqual(['b.ts']);
+    expect(removedPaths(index.changes(before, { admits, epoch: index.epoch }))).toEqual(['b.ts']);
+  });
+
+  it('should ask the mask about each removal’s ancestors as directories, as the walk does', () => {
+    const index = observed([directory('src'), file('src/a.ts', 1, 1000), file('src.ts', 1, 1000)]);
+    const before = index.generation;
+    index.recordFile('src/b.ts', { size: 1 });
+    index.remove('src/a.ts');
+    index.remove('src.ts');
+
+    /* Refuses the directory alone: a walk never descends into it, so nothing under it is answered. */
+    const admits = (path: string, kind: 'file' | 'dir'): boolean => !(path === 'src' && kind === 'dir');
+    const changes = index.changes(before, { admits, epoch: index.epoch });
+    expect(changedPaths(changes)).toEqual([]);
+    expect(removedPaths(changes)).toEqual(['src.ts']);
+  });
+
+  it('should answer rescan for a caller that names no epoch, unless it starts from 0', () => {
+    const index = new ProjectIndex({ trustworthyMtime: true });
+    expect(index.changes(0).rescan).toBeUndefined();
+    index.completeObservation(index.beginObservation(), '', [file('a.ts', 1, 1000)]);
+    const since = index.generation;
+    index.remove('a.ts');
+
+    expect(index.changes(since)).toMatchObject({ rescan: true, entries: [], removed: [], epoch: index.epoch });
+    expect(removedPaths(index.changes(0))).toEqual(['a.ts']);
   });
 
   it('should answer rescan, never a gap, once a caller is older than the oldest removal it still holds', () => {
@@ -122,10 +147,10 @@ describe('ProjectIndex removals (S10)', () => {
     }
 
     /* One past the limit: the first removal is dropped, so a caller from before it cannot be answered. */
-    expect(index.changes(start)).toMatchObject({ rescan: true, entries: [], removed: [] });
-    expect(index.changes(written)).toMatchObject({ rescan: true });
+    expect(index.changes(start, { epoch: index.epoch })).toMatchObject({ rescan: true, entries: [], removed: [] });
+    expect(index.changes(written, { epoch: index.epoch })).toMatchObject({ rescan: true });
     const firstKept = written + 1;
-    const kept = index.changes(firstKept);
+    const kept = index.changes(firstKept, { epoch: index.epoch });
     expect(kept.rescan).toBeUndefined();
     expect(kept.removed).toHaveLength(indexRemovalLimit);
     expect(kept.removed[0]?.path).toBe('f1.ts');
@@ -138,7 +163,7 @@ describe('ProjectIndex removals (S10)', () => {
 
     expect(index.changes(since, { epoch: index.epoch }).rescan).toBeUndefined();
     expect(index.changes(since, { epoch: 'another-lineage' })).toMatchObject({ rescan: true, epoch: index.epoch });
-    expect(index.changes(index.generation + 1).rescan).toBe(true);
+    expect(index.changes(index.generation + 1, { epoch: index.epoch }).rescan).toBe(true);
   });
 
   it('should continue a loaded snapshot’s removals for the since it reported, and no later one', () => {
@@ -162,7 +187,7 @@ describe('ProjectIndex removals (S10)', () => {
     /* A snapshot without a record knows nothing before its own generation. */
     const bare = ProjectIndex.fromSnapshot(rows, stored);
     expect(bare.changes(since, { epoch: before.epoch }).rescan).toBe(true);
-    expect(bare.changes(stored).rescan).toBeUndefined();
+    expect(bare.changes(stored, { epoch: bare.epoch }).rescan).toBeUndefined();
   });
 });
 
@@ -193,6 +218,8 @@ describe('ProjectIndexes removal record', () => {
     expect(stored?.removals?.removed.map(([path]) => path)).toEqual(['src/a.ts']);
     const reloaded = await over().ready('/p');
     expect(removedPaths(reloaded.changes(since, { epoch }))).toEqual(['src/a.ts']);
+    /* Without its epoch the old `since` falls in the reload's range and would read as nothing removed. */
+    expect(reloaded.changes(since)).toMatchObject({ rescan: true, removed: [] });
     expect(reads.mock.calls.filter(([path]) => !String(path).includes('.tau/index'))).toStrictEqual([]);
   });
 

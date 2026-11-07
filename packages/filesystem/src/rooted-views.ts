@@ -236,8 +236,9 @@ export type RootedFileSystem = Omit<FileSystemProvider, 'writeFileChecked' | 'de
     /**
      * What this root's index changed after `since` (D3, S10): its generation
      * and epoch now, every entry it still holds that changed later, and every
-     * path it removed since; or `rescan` when it cannot tell (pass the `epoch`
-     * the `since` came with). Unmasked here, like `statTree`.
+     * path it removed since; or `rescan` when it cannot tell. Pass the `epoch`
+     * the `since` came with: without one only `since` `0` is answered, and any
+     * other is `rescan`. Unmasked here, like `statTree`.
      */
     changedSince?(
       since: number,

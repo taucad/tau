@@ -1,0 +1,55 @@
+name: 'Queue verdict'
+description: >-
+  On a push to `main`, finds the green merge-queue `ci.yml` run on the identical commit,
+  so the push run can reuse its verdict instead of running the same checks again.
+
+# The merge queue tests the exact commit that lands: `main` fast-forwards to the
+# group's commit, so a green `merge_group` run on `github.sha` already ran every
+# affected lane, the workspace validators and, when the API was affected, the API
+# tests and billing contracts on this tree. Rerunning them on the push cost about
+# 3.4 runner-hours per commit (operator decision 2026-11-08, Brain
+# research/ci-throughput-review.md). A commit that reached `main` without the queue
+# (an emergency bypass) has no such run and gets the full push run.
+
+inputs:
+  github-token:
+    description: 'Token with actions: read'
+    required: true
+
+outputs:
+  run-id:
+    description: "The green merge-group run on this commit, or '' when there is none or this is not a push to main"
+    value: ${{ steps.find.outputs.run-id }}
+  api:
+    description: "Conclusion of that run's `API tests (Postgres + MinIO)` and `Billing contracts` jobs: 'success' when both passed, otherwise 'skipped'"
+    value: ${{ steps.find.outputs.api }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Find the green merge-queue run on this commit
+      id: find
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        EVENT: ${{ github.event_name }}
+        REF: ${{ github.ref }}
+      run: |
+        set -euo pipefail
+        run_id=''
+        api=skipped
+        if [ "$EVENT" = push ] && [ "$REF" = refs/heads/main ]; then
+          run_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&event=merge_group&status=success&per_page=1" \
+            --jq '.workflow_runs[0].id // empty')
+        fi
+        if [ -n "$run_id" ]; then
+          jobs=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?per_page=100" \
+            --jq '.jobs[] | {name, conclusion}' | jq -s .)
+          api=$(jq -r '
+            [first(.[] | select(.name == "API tests (Postgres + MinIO)") | .conclusion) // "skipped",
+             first(.[] | select(.name == "Billing contracts (no Stripe credentials)") | .conclusion) // "skipped"]
+            | if all(. == "success") then "success" else "skipped" end' <<< "$jobs")
+          echo "::notice::Reusing the green merge-queue run $run_id on $GITHUB_SHA (API tests and billing contracts: $api)."
+        fi
+        echo "run-id=$run_id" >> "$GITHUB_OUTPUT"
+        echo "api=$api" >> "$GITHUB_OUTPUT"

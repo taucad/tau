@@ -11,6 +11,7 @@ The API owns HTTP authentication, billing, persistence, publication, model catal
 - Define Drizzle schema changes in `app/database/` and generate migrations with `pnpm db:generate`; do not hand-author migration SQL.
 - Changes to `fly.*.toml`, the env schema, health, process groups, storage namespaces or operator CLIs update the private handbook and its go-live checklist through `create-handbook`.
 - Register each injectable in its owning Nest module. Keep the AppModule compile guard when changing module wiring.
+- This app is the composition root and the process entries. Server capabilities that a library needs live in `apps/libs/api-*` (`@taucad/api-<name>`), which never import the app; the app binds their ports in `app/composition/`. Follow the dependency direction in [Workspace Project Policy](../../docs/policy/workspace-project-policy.md).
 - Use shared schemas and error shapes at transport boundaries; do not duplicate `@taucad/chat` request types in API DTOs.
 
 Detailed interruption semantics live in [Interrupted Tool-Call Contract Policy](../../docs/policy/interrupted-tool-call-contract.md). Publication, billing, auth, and storage incident history remains in its owning research and tests rather than this always-loaded file.

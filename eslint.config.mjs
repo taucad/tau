@@ -238,6 +238,41 @@ const memberOrdering = [
 ];
 
 /**
+ * Dependency direction between the API server libraries (`apps/libs/api-<name>`,
+ * tagged `api:<name>`). `layer:` tags leave libraries of one layer unordered, so a
+ * sideways edge such as `api-auth -> api-llm-gateway` would pass them; each library
+ * instead names the API libraries it may depend on (the "May depend on" column of
+ * docs/research/api-module-layout-blueprint.md) and may depend on any `scope:shared`
+ * project. Every edge points down `billing -> llm-gateway -> hosts -> auth ->
+ * {database, email, redis} -> lifecycle -> observability -> core`; no library may
+ * depend on the `api` app (its `type:app` tag is outside every `type:app-lib`
+ * allowlist). Entries marked "measured" are downward edges the moved code already
+ * had that the blueprint's column did not list.
+ */
+const apiLibraryDependencies = {
+  core: [],
+  observability: ['core'],
+  // measured: the WebSocket upgrade transport (from app/api/websocket) reads `Environment` and `httpBodyLimit`.
+  lifecycle: ['observability', 'core'],
+  database: ['core'],
+  redis: ['core', 'observability'],
+  email: ['core'],
+  // measured: `bearer-auth.logging.test.ts` builds the API's pino logger.
+  auth: ['database', 'email', 'core', 'observability'],
+  // measured: `HostsGateway` records WebSocket metrics through `MetricsService`.
+  hosts: ['auth', 'database', 'redis', 'lifecycle', 'core', 'observability'],
+  // measured: `LlmGatewayService` aborts streams through `ShutdownService`.
+  'llm-gateway': ['hosts', 'auth', 'core', 'observability', 'lifecycle'],
+  // measured: `createBillingTestApp` boots `RedisModule`.
+  billing: ['llm-gateway', 'hosts', 'auth', 'database', 'email', 'core', 'observability', 'lifecycle', 'redis'],
+};
+
+const apiLibraryConstraints = Object.entries(apiLibraryDependencies).map(([name, dependencies]) => ({
+  sourceTag: `api:${name}`,
+  onlyDependOnLibsWithTags: [...dependencies.map((dependency) => `api:${dependency}`), 'scope:shared'],
+}));
+
+/**
  * Nx module boundaries. The options are shared so the runtime-e2e override can add its
  * own dynamic-dependency exceptions without restating the tag constraints.
  */
@@ -340,6 +375,7 @@ const moduleBoundaryOptions = {
       sourceTag: 'layer:util',
       onlyDependOnLibsWithTags: ['layer:util', ...unlayeredTargetTypes],
     },
+    ...apiLibraryConstraints,
   ],
 };
 
@@ -1061,7 +1097,7 @@ const config = [
     },
   },
   {
-    files: ['apps/api/**/*.{ts,tsx,mts,cts}'],
+    files: ['apps/api/**/*.{ts,tsx,mts,cts}', 'apps/libs/api-*/**/*.{ts,tsx,mts,cts}'],
     rules: {
       '@typescript-eslint/no-restricted-imports': [
         'error',

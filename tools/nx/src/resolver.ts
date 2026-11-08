@@ -161,7 +161,10 @@ export const publishable = (workspaceValue: Workspace): WorkspaceProject[] =>
 /**
  * Every project carries exactly one `type:` and one `scope:` from the
  * vocabulary. Application libraries additionally carry exactly one `layer:`;
- * other projects may carry one. Host, release and deploy tags are optional but must be unique and valid.
+ * other projects may carry one. API server libraries (`scope:api type:app-lib`)
+ * also carry exactly one `api:`, which names them in the dependency-direction
+ * constraints; no other project may carry one. Host, release and deploy tags are
+ * optional but must be unique and valid.
  * The returned strings are the violations.
  *
  * @public
@@ -172,13 +175,19 @@ export const validateTags = (workspaceValue: Workspace): string[] =>
       const allowed: readonly string[] = values;
       const present = tags.filter((tag) => tag.startsWith(`${dimension}:`));
       const [tag, ...extra] = present;
+      const apiLibrary = tags.includes('scope:api') && tags.includes('type:app-lib');
       const required =
         dimension !== 'host' &&
         dimension !== 'release' &&
         dimension !== 'deploy' &&
-        (dimension !== 'layer' || tags.includes('type:app-lib'));
+        (dimension !== 'layer' || tags.includes('type:app-lib')) &&
+        (dimension !== 'api' || apiLibrary);
       if ((required && tag === undefined) || extra.length > 0) {
         return [`expected exactly one ${dimension}: tag, found ${present.join(', ') || 'none'}`];
+      }
+
+      if (dimension === 'api' && tag !== undefined && !apiLibrary) {
+        return [`unexpected tag "${tag}" (api: is only for scope:api type:app-lib projects)`];
       }
 
       if (tag === undefined) {

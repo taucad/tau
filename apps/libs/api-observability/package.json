@@ -58,14 +58,14 @@
     "@traceloop/instrumentation-langchain": "catalog:",
     "fastify": "catalog:",
     "nestjs-pino": "^4.6.1",
-    "pino-http": "^10.5.0",
-    "zod": "catalog:"
+    "pino-http": "^10.5.0"
   },
   "devDependencies": {
     "@nestjs/testing": "catalog:",
     "dotenv": "catalog:",
     "pino-pretty": "catalog:",
     "reflect-metadata": "^0.2.2",
-    "vitest-mock-extended": "catalog:"
+    "vitest-mock-extended": "catalog:",
+    "zod": "catalog:"
   }
 }

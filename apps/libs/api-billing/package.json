@@ -58,8 +58,7 @@
     "nestjs-zod": "^5.4.0",
     "postgres": "^3.4.9",
     "reflect-metadata": "^0.2.2",
-    "stripe": "catalog:",
-    "zod": "catalog:"
+    "stripe": "catalog:"
   },
   "devDependencies": {
     "@nestjs/core": "catalog:",
@@ -67,6 +66,7 @@
     "@nestjs/testing": "catalog:",
     "@taucad/formal": "workspace:*",
     "dotenv": "catalog:",
-    "vitest-mock-extended": "catalog:"
+    "vitest-mock-extended": "catalog:",
+    "zod": "catalog:"
   }
 }

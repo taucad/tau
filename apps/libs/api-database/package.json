@@ -51,8 +51,7 @@
     "@taucad/types": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "nestjs-pino": "^4.6.1",
-    "postgres": "^3.4.9",
-    "zod": "catalog:"
+    "postgres": "^3.4.9"
   },
   "devDependencies": {
     "@nestjs/testing": "catalog:",
@@ -60,6 +59,7 @@
     "dotenv": "catalog:",
     "drizzle-kit": "^0.31.10",
     "reflect-metadata": "^0.2.2",
-    "vitest-mock-extended": "catalog:"
+    "vitest-mock-extended": "catalog:",
+    "zod": "catalog:"
   }
 }

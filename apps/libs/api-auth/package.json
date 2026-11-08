@@ -49,8 +49,7 @@
     "better-auth": "catalog:",
     "drizzle-orm": "^0.45.2",
     "fastify": "catalog:",
-    "postgres": "^3.4.9",
-    "zod": "catalog:"
+    "postgres": "^3.4.9"
   },
   "devDependencies": {
     "@nestjs/testing": "catalog:",
@@ -58,6 +57,7 @@
     "dotenv": "catalog:",
     "pino-http": "^10.5.0",
     "reflect-metadata": "^0.2.2",
-    "vitest-mock-extended": "catalog:"
+    "vitest-mock-extended": "catalog:",
+    "zod": "catalog:"
   }
 }

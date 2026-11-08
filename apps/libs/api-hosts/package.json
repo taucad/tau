@@ -35,7 +35,8 @@
   "devDependencies": {
     "dotenv": "catalog:",
     "reflect-metadata": "^0.2.2",
-    "vitest-mock-extended": "catalog:"
+    "vitest-mock-extended": "catalog:",
+    "zod": "catalog:"
   },
   "dependencies": {
     "@nestjs/common": "catalog:",
@@ -52,7 +53,6 @@
     "fastify": "catalog:",
     "ioredis": "^5.11.1",
     "nestjs-zod": "^5.4.0",
-    "ws": "catalog:",
-    "zod": "catalog:"
+    "ws": "catalog:"
   }
 }

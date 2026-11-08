@@ -48,12 +48,12 @@
     "@taucad/telemetry": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",
-    "minimatch": "^10.2.5",
-    "zod": "catalog:"
+    "minimatch": "^10.2.5"
   },
   "devDependencies": {
     "dotenv": "catalog:",
     "fastify": "catalog:",
-    "reflect-metadata": "^0.2.2"
+    "reflect-metadata": "^0.2.2",
+    "zod": "catalog:"
   }
 }

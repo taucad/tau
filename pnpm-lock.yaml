@@ -2331,9 +2331,6 @@ importers:
       postgres:
         specifier: ^3.4.9
         version: 3.4.9
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
     devDependencies:
       '@nestjs/testing':
         specifier: 'catalog:'
@@ -2353,6 +2350,9 @@ importers:
       vitest-mock-extended:
         specifier: 'catalog:'
         version: 4.0.0(typescript@5.9.3)(vitest@4.1.11)
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
   apps/libs/api-billing:
     dependencies:
@@ -2413,9 +2413,6 @@ importers:
       stripe:
         specifier: 'catalog:'
         version: 22.6.2(@types/node@26.6.5)
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
     devDependencies:
       '@nestjs/core':
         specifier: 'catalog:'
@@ -2435,6 +2432,9 @@ importers:
       vitest-mock-extended:
         specifier: 'catalog:'
         version: 4.0.0(typescript@5.9.3)(vitest@4.1.11)
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
   apps/libs/api-core:
     dependencies:
@@ -2456,9 +2456,6 @@ importers:
       minimatch:
         specifier: ^10.2.5
         version: 10.2.6
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
     devDependencies:
       dotenv:
         specifier: 'catalog:'
@@ -2469,6 +2466,9 @@ importers:
       reflect-metadata:
         specifier: ^0.2.2
         version: 0.2.2
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
   apps/libs/api-database:
     dependencies:
@@ -2496,9 +2496,6 @@ importers:
       postgres:
         specifier: ^3.4.9
         version: 3.4.9
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
     devDependencies:
       '@nestjs/testing':
         specifier: 'catalog:'
@@ -2518,6 +2515,9 @@ importers:
       vitest-mock-extended:
         specifier: 'catalog:'
         version: 4.0.0(typescript@5.9.3)(vitest@4.1.11)
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
   apps/libs/api-email:
     dependencies:
@@ -2600,9 +2600,6 @@ importers:
       ws:
         specifier: 'catalog:'
         version: 8.22.0
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
     devDependencies:
       dotenv:
         specifier: 'catalog:'
@@ -2613,6 +2610,9 @@ importers:
       vitest-mock-extended:
         specifier: 'catalog:'
         version: 4.0.0(typescript@5.9.3)(vitest@4.1.11)
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
   apps/libs/api-lifecycle:
     dependencies:
@@ -2719,9 +2719,6 @@ importers:
       ollama:
         specifier: ^0.5.18
         version: 0.5.18
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
     devDependencies:
       '@nestjs/testing':
         specifier: 'catalog:'
@@ -2735,6 +2732,9 @@ importers:
       vitest-mock-extended:
         specifier: 'catalog:'
         version: 4.0.0(typescript@5.9.3)(vitest@4.1.11)
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
   apps/libs/api-observability:
     dependencies:
@@ -2792,9 +2792,6 @@ importers:
       pino-http:
         specifier: ^10.5.0
         version: 10.5.0
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
     devDependencies:
       '@nestjs/testing':
         specifier: 'catalog:'
@@ -2811,6 +2808,9 @@ importers:
       vitest-mock-extended:
         specifier: 'catalog:'
         version: 4.0.0(typescript@5.9.3)(vitest@4.1.11)
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
   apps/libs/api-redis:
     dependencies:

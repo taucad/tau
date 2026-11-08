@@ -55,13 +55,13 @@
     "ai": "catalog:",
     "better-auth": "catalog:",
     "fastify": "catalog:",
-    "ollama": "^0.5.18",
-    "zod": "catalog:"
+    "ollama": "^0.5.18"
   },
   "devDependencies": {
     "@nestjs/testing": "catalog:",
     "dotenv": "catalog:",
     "reflect-metadata": "^0.2.2",
-    "vitest-mock-extended": "catalog:"
+    "vitest-mock-extended": "catalog:",
+    "zod": "catalog:"
   }
 }

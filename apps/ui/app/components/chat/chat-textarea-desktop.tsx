@@ -14,7 +14,7 @@ import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, 
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import type { Editor } from '@tiptap/core';
 import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
-import { AtSign, Paperclip, Plus } from 'lucide-react';
+import { AtSign, Paperclip, Plus, TriangleAlert } from 'lucide-react';
 import { useDictation } from '#components/dictation/use-dictation.js';
 import { DictationControl, DictationFeedback } from '#components/dictation/dictation-controls.js';
 import type { AcpSessionData } from '@taucad/chat';
@@ -58,7 +58,11 @@ import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js
 import { createScreenshotContextHandler } from '#components/chat/screenshot-actions.utils.js';
 import { buildPastedContent, commandInvocation } from '#utils/at-reference.utils.js';
 import { skillMetadataToSlashCommand, useSkillsCatalogState } from '#hooks/use-skills-catalog.js';
+import type { SkillsCatalogState } from '#hooks/use-skills-catalog.js';
 import type { ChatContextReference } from '#components/chat/chat-context-insertion.js';
+
+/** One identity for "no skills", so an unavailable catalog does not re-derive the slash items each render. */
+const noSkills: SkillsCatalogState['commands'] = [];
 
 const dragOverlayCopy: Record<ChatTextareaDragKind, string> = {
   image: 'Add files',
@@ -270,7 +274,14 @@ export const ChatTextareaDesktop = memo(function ({
   removeAttachment,
 }: ChatTextareaDesktopProperties): React.JSX.Element {
   const catalog = useSkillsCatalogState();
-  const skillsCatalog = catalog.status === 'closed' || catalog.status === 'error' ? [] : catalog.commands;
+  /* `closed` is a real close: an absent or idle catalog reports `registering` (use-observation). */
+  const isCatalogUnavailable = catalog.status === 'closed' || catalog.status === 'error';
+  const skillsCatalog = isCatalogUnavailable ? noSkills : catalog.commands;
+  const { retry: retrySkills } = catalog;
+  const skillsRecovery = useMemo(
+    () => (acpAgentId === undefined && isCatalogUnavailable ? <ChatSkillsRecovery onRetry={retrySkills} /> : undefined),
+    [acpAgentId, isCatalogUnavailable, retrySkills],
+  );
 
   const commands = acpSessionData?.commands;
   const slashCommandItems = useMemo(
@@ -606,14 +617,6 @@ export const ChatTextareaDesktop = memo(function ({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
-        {acpAgentId === undefined && (catalog.status === 'closed' || catalog.status === 'error') ? (
-          <div role='status' className='flex items-center justify-between gap-2 px-3 pb-2 text-xs'>
-            <span>Skill updates unavailable</span>
-            <Button variant='ghost' size='sm' aria-label='Retry skill updates' onClick={catalog.retry}>
-              Retry
-            </Button>
-          </div>
-        ) : undefined}
         {/* Only a session's chat can hold a kernel this runtime cannot run. */}
         <ChatKernelFallbackNotice />
         {/* Attachments */}
@@ -658,6 +661,7 @@ export const ChatTextareaDesktop = memo(function ({
         <DictationFeedback transcript={dictation.transcript} />
         <ChatTextareaBar
           dictationControl={dictationControl}
+          skillsRecovery={skillsRecovery}
           isDictating={dictationActive}
           composerMode={mode}
           containerReference={containerReference}
@@ -802,6 +806,7 @@ function useBarCollapse(barRef: React.RefObject<HTMLDivElement | null>): void {
  */
 export const ChatTextareaBar = memo(function ({
   dictationControl,
+  skillsRecovery,
   isDictating = false,
   composerMode,
   containerReference,
@@ -826,6 +831,8 @@ export const ChatTextareaBar = memo(function ({
   handleCancelClick,
 }: {
   readonly dictationControl?: React.ReactNode;
+  /** Recovery for a failed skills catalog; a control in the bar, so it never grows the composer. */
+  readonly skillsRecovery?: React.ReactNode;
   readonly isDictating?: boolean;
   readonly composerMode: 'main' | 'edit';
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref object
@@ -912,6 +919,7 @@ export const ChatTextareaBar = memo(function ({
           data-slot='composer-collapsible'
           className={cn(chatComposerCollapsibleControlsClassName, 'gap-1 pointer-coarse:gap-3')}
         >
+          {skillsRecovery}
           <ChatContextIndicator />
           <ChatAgentSheet
             agentConfig={agentConfig}
@@ -936,6 +944,39 @@ export const ChatTextareaBar = memo(function ({
     </div>
   );
 });
+
+/**
+ * A failed skills catalog's recovery, in the bar beside the context meter. It appears only after a
+ * real failure (the catalog errored or closed; a catalog that has not started is `registering`) and
+ * never takes a row of its own, so the composer's height is the same with or without it.
+ */
+function ChatSkillsRecovery({ onRetry }: { readonly onRetry: () => void }): React.JSX.Element {
+  return (
+    <>
+      <span role='status' className='sr-only'>
+        Skill updates unavailable
+      </span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant='ghost'
+            size='sm'
+            data-slot='skills-recovery'
+            aria-label='Retry skill updates'
+            className={cn(ghostPillClass, 'gap-1.5')}
+            onClick={onRetry}
+          >
+            <TriangleAlert aria-hidden className='size-3.5 shrink-0 text-warning' />
+            <span className='text-xs'>Retry skills</span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side='top' className='text-xs'>
+          Skill updates unavailable
+        </TooltipContent>
+      </Tooltip>
+    </>
+  );
+}
 
 /** The kernel, ghost and glyph first; its label is the first to leave when the bar needs the room. */
 function ChatTextareaKernelControl({ focusEditor }: { readonly focusEditor: () => void }): React.JSX.Element {

@@ -84,7 +84,10 @@ vi.mock('#components/icons/svg-icon.js', () => ({
   SvgIcon: ({ id }: { readonly id?: string }) => <span data-testid='svg-icon' data-icon={id} />,
 }));
 
-const catalogHealth = vi.hoisted(() => ({ status: 'ready' as 'ready' | 'closed', retry: vi.fn() }));
+const catalogHealth = vi.hoisted(() => ({
+  status: 'ready' as 'registering' | 'ready' | 'error' | 'closed',
+  retry: vi.fn(),
+}));
 vi.mock('#hooks/use-skills-catalog.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useSkillsCatalog: () => [],
@@ -630,13 +633,41 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     });
   });
 
-  it('should show skill recovery in the functional composer after catalog closure', async () => {
-    catalogHealth.status = 'closed';
-    renderComposer('Keep this draft', codexSession, { useTauSkills: true });
-    expect(screen.getByText('Skill updates unavailable')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Retry skill updates' }));
-    expect(catalogHealth.retry).toHaveBeenCalledOnce();
-    expect(screen.getByRole('textbox')).toHaveTextContent('Keep this draft');
+  it.each(['closed', 'error'] as const)(
+    'should offer skill recovery inside the bar after the catalog %s',
+    async (status) => {
+      catalogHealth.status = status;
+      renderComposer('Keep this draft', codexSession, { useTauSkills: true });
+      expect(screen.getByRole('status')).toHaveTextContent('Skill updates unavailable');
+      const retry = screen.getByRole('button', { name: 'Retry skill updates' });
+      // A control in the bar, not a row of its own: the composer keeps its height.
+      expect(retry.closest('[data-slot=composer-bar]')).not.toBeNull();
+      await userEvent.click(retry);
+      expect(catalogHealth.retry).toHaveBeenCalledOnce();
+      expect(screen.getByRole('textbox')).toHaveTextContent('Keep this draft');
+    },
+  );
+
+  it('should show no skill recovery while the catalog has not started', () => {
+    catalogHealth.status = 'registering';
+    renderComposer('', codexSession, { useTauSkills: true });
+    expect(screen.queryByText('Skill updates unavailable')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry skill updates' })).not.toBeInTheDocument();
+  });
+
+  it('should keep the same bar and editor when the catalog becomes ready', async () => {
+    catalogHealth.status = 'registering';
+    const view = renderComposer('Keep this draft', codexSession, { useTauSkills: true });
+    const bar = view.container.querySelector('[data-slot=composer-bar]');
+    const editor = screen.getByRole('textbox');
+    await waitFor(() => {
+      expect(editor).toHaveTextContent('Keep this draft');
+    });
+    catalogHealth.status = 'ready';
+    view.rerenderWith(codexSession);
+    expect(view.container.querySelector('[data-slot=composer-bar]')).toBe(bar);
+    expect(screen.getByRole('textbox')).toBe(editor);
+    expect(editor).toHaveTextContent('Keep this draft');
   });
 
   it('should offer Resume through the full composer without the empty-message refusal', () => {

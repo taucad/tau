@@ -16,6 +16,8 @@ import { readConsentStatusFromHeader } from '#lib/cookie-consent.lib.js';
 import { ProductApp, RootErrorBoundary, RootLayout } from '#root-layout.js';
 import { RootCommandPaletteItems } from '#root-command-items.js';
 import type { Handle } from '#types/matches.types.js';
+import { readServerPreferences } from '#hooks/use-cookie.js';
+import { prefetchModelCatalog } from '#lib/model-catalog.server.js';
 
 // Every route mounts the palette items, so the example catalog loads on its own
 // chunk instead of joining each route's entry.
@@ -57,12 +59,17 @@ export const meta: MetaFunction = () => [
 export async function loader({ request }: LoaderFunctionArgs) {
   throwRedirectIfSubdomain(request, 'www');
   const globalPrivacyControl = request.headers.get('Sec-GPC') === '1';
+  const { pathname } = new URL(request.url);
+  /* R3: the model label is final on first paint. The offline shell is a neutral prerendered document. */
+  const queries = isOfflineShellPath(pathname) ? undefined : prefetchModelCatalog();
   return {
     consentStatus: readConsentStatusFromHeader(request.headers.get('Cookie') ?? undefined, globalPrivacyControl),
     globalPrivacyControl,
     env: await getClientEnvironment(),
-    pathname: new URL(request.url).pathname,
+    pathname,
     theme: await readThemeCookie(request),
+    preferences: readServerPreferences(request.headers.get('Cookie') ?? undefined),
+    queries: await queries,
   };
 }
 

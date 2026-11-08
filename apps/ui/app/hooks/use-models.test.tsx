@@ -236,6 +236,42 @@ describe('useModels', () => {
     });
   });
 
+  describe('model label before and after the catalog', () => {
+    const neverAnswers = async (): Promise<Response> =>
+      new Promise<Response>(() => {
+        /* The catalog is still in flight for the whole test. */
+      });
+
+    it('should mark a stored model as pending, not named by its id, while the catalog has not answered', () => {
+      vi.stubGlobal('fetch', vi.fn(neverAnswers));
+      store.update(`${metaConfig.cookiePrefix}${cookieName.chatModel}`, 'anthropic-claude-haiku-5.5');
+      const { result } = renderHook(() => useModels(), { wrapper });
+
+      expect(result.current.selectedModel.isNamePending).toBe(true);
+      expect(result.current.selectedModel.isResolved).toBe(false);
+    });
+
+    it('should mark a first visit with no model as pending rather than an empty name', () => {
+      vi.stubGlobal('fetch', vi.fn(neverAnswers));
+      const { result } = renderHook(() => useModels(), { wrapper });
+
+      expect(result.current.selectedModelId).toBe('');
+      expect(result.current.selectedModel.isNamePending).toBe(true);
+    });
+
+    it('should name a model the loaded catalog no longer offers by its id, without a pending placeholder', async () => {
+      respond([catalogRow('anthropic-claude-opus-5.5', true, true)]);
+      const { result } = renderHook(() => useModels(), { wrapper });
+      await waitFor(() => {
+        expect(result.current.catalog.status).toBe('loaded');
+      });
+
+      const retired = result.current.resolveModel('anthropic-claude-haiku-3');
+
+      expect(retired).toMatchObject({ name: 'anthropic-claude-haiku-3', isResolved: false, isNamePending: false });
+    });
+  });
+
   describe('pinned models and availability', () => {
     const pinnedKey = `${metaConfig.cookiePrefix}${cookieName.chatModelPinned}`;
     const overridesKey = `${metaConfig.cookiePrefix}${cookieName.chatModelOverrides}`;

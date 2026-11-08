@@ -107,3 +107,10 @@ export const cookieName = {
  * Union of all cookie names.
  */
 export type CookieName = ConstantRecord<typeof cookieName>;
+
+/**
+ * Preferences that decide first-paint text or geometry. `localStorage` stays their client store; each is also
+ * mirrored into a same-named first-party cookie so the server renders the visitor's value and hydration changes
+ * nothing. Keep this list short: every entry rides every document request.
+ */
+export const serverVisiblePreferences: readonly CookieName[] = [cookieName.chatModel, cookieName.chatEffort];

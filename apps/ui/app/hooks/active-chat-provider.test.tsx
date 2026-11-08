@@ -173,6 +173,7 @@ function stableResolvedModel(id: string, name: string): unknown {
       family: 'unknown',
       provider: { id: 'unknown', name: 'Unknown' },
       isResolved: true,
+      isNamePending: false,
     };
     resolvedModelCache.set(key, cached);
   }

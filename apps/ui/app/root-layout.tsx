@@ -3,7 +3,8 @@ import { onDesktopMachineNavigation } from '#filesystem/desktop-bridge.js';
 import { installLoopbackHandOff } from '#lib/agent-host-placement.js';
 import type { ComponentType, ReactNode } from 'react';
 import { Links, Meta, Scripts, ScrollRestoration, useNavigate, useRouteLoaderData, useLocation } from 'react-router';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { HydrationBoundary, QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { DehydratedState } from '@tanstack/react-query';
 import { authQueryKeys } from '@better-auth-ui/core';
 import { Fragment, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
@@ -12,7 +13,8 @@ import type { ThemeWithSystem } from '#hooks/use-theme.js';
 import type { ClientEnvironment } from '#environment.config.js';
 import { buildClientEnvScript } from '#lib/client-env-script.js';
 import { Page } from '#components/layout/page.js';
-import { useCookie } from '#hooks/use-cookie.js';
+import { ServerPreferencesProvider, useCookie } from '#hooks/use-cookie.js';
+import type { ServerPreferences } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { Toaster } from '#components/ui/sonner.js';
@@ -41,7 +43,13 @@ export type RootLoaderData = {
   readonly env: ClientEnvironment;
   readonly pathname: string;
   readonly theme: ThemeWithSystem;
+  /** The server-visible preferences the request's cookies carried; `useCookie`'s server snapshot. */
+  readonly preferences?: ServerPreferences;
+  /** Queries the server already answered (the model catalog), hydrated into the root `QueryClient`. */
+  readonly queries?: DehydratedState;
 };
+
+const noPreferences: ServerPreferences = {};
 
 export const handleQueryError = (error: unknown, metadata: Readonly<Record<string, unknown>> | undefined): void => {
   if (metadata?.['handlesErrorLocally'] === true) {
@@ -148,22 +156,30 @@ export function RootLayout({
    * bridge's `invalidateQueries` half silently no-opped and an Electron-main
    * sign-in never refreshed `useSession`. Web behaviour is unchanged — the
    * relative order of the auth, billing, and analytics providers is the same.
+   *
+   * The server renders from the same loader data the client hydrates from, so
+   * the model label and the mirrored preferences are final on first paint
+   * (R3). Hydration never replaces a newer cached catalog.
    */
   return (
     <QueryClientProvider client={queryClient}>
-      <CloudRootBoundary>
-        <AnalyticsBoundary>
-          <ThemeProvider specifiedTheme={ssrTheme} themeAction='/action/set-theme'>
-            <ColorProvider>
-              <AppViewerEnvironment>
-                <LayoutDocument env={data?.env ?? {}} ssrTheme={ssrTheme} documentChrome={documentChrome}>
-                  {application}
-                </LayoutDocument>
-              </AppViewerEnvironment>
-            </ColorProvider>
-          </ThemeProvider>
-        </AnalyticsBoundary>
-      </CloudRootBoundary>
+      <HydrationBoundary state={data?.queries}>
+        <ServerPreferencesProvider value={data?.preferences ?? noPreferences}>
+          <CloudRootBoundary>
+            <AnalyticsBoundary>
+              <ThemeProvider specifiedTheme={ssrTheme} themeAction='/action/set-theme'>
+                <ColorProvider>
+                  <AppViewerEnvironment>
+                    <LayoutDocument env={data?.env ?? {}} ssrTheme={ssrTheme} documentChrome={documentChrome}>
+                      {application}
+                    </LayoutDocument>
+                  </AppViewerEnvironment>
+                </ColorProvider>
+              </ThemeProvider>
+            </AnalyticsBoundary>
+          </CloudRootBoundary>
+        </ServerPreferencesProvider>
+      </HydrationBoundary>
     </QueryClientProvider>
   );
 }

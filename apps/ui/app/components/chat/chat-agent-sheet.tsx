@@ -398,6 +398,8 @@ type Level = Option & { readonly description?: string | undefined };
 type SheetModel = {
   readonly glyph: React.ReactNode;
   readonly name: string;
+  /** The model's display name is not known yet: the trigger holds a fixed-width placeholder instead of a label. */
+  readonly isNamePending: boolean;
   readonly levels: readonly Level[];
   readonly level: Level | undefined;
   /** An agent's own "Default" effort means the agent decides, so the trigger does not print it. */
@@ -501,6 +503,9 @@ const settingsOf = (agentConfig: AgentConfig): readonly Setting[] =>
     ];
   });
 
+/** The accessible name of a Tau model whose display name is not known yet. */
+const pendingModelName = 'Model';
+
 /**
  * The trigger's and the sheet's reading of the chat's model, from one place so
  * the two can never disagree.
@@ -518,7 +523,9 @@ const useSheetModel = (current: SheetAgent, agentConfig: AgentConfig): SheetMode
     const level = levels.find((entry) => entry.id === effort);
     return {
       glyph: <SvgIcon id={model.family} className={glyphClass} aria-hidden='true' />,
-      name: model.name,
+      // Never the raw id or an empty label: a neutral name until the catalog names the model.
+      name: model.isNamePending ? pendingModelName : model.name,
+      isNamePending: model.isNamePending,
       levels,
       level,
       isLevelShown: level !== undefined,
@@ -545,6 +552,7 @@ const useSheetModel = (current: SheetAgent, agentConfig: AgentConfig): SheetMode
   return {
     glyph: <AgentGlyph agentId={current.agentId} className={glyphClass} />,
     name,
+    isNamePending: false,
     levels,
     level,
     isLevelShown: level !== undefined && !isDefaultValue(level),
@@ -1528,9 +1536,17 @@ export function ChatAgentSheet({
       className={cn(ghostPillClass, 'max-w-64 min-w-0 shrink gap-1 pr-2 text-foreground')}
     >
       {sheetModel.glyph}
-      <span data-slot='trigger-model' className='min-w-0 truncate text-xs'>
-        {sheetModel.name}
-      </span>
+      {sheetModel.isNamePending ? (
+        <span
+          data-slot='trigger-model-placeholder'
+          aria-hidden='true'
+          className='h-3 w-20 shrink-0 rounded-sm bg-muted'
+        />
+      ) : (
+        <span data-slot='trigger-model' className='min-w-0 truncate text-xs'>
+          {sheetModel.name}
+        </span>
+      )}
       {sheetModel.isLevelShown && sheetModel.level ? (
         <span
           data-slot='trigger-level'

@@ -1,11 +1,9 @@
 /* oxlint-disable curly, no-await-in-loop, unicorn/no-await-expression-member, eslint/complexity -- sequential source pagination and explicit financial guards are intentional */
 /* eslint-disable @typescript-eslint/naming-convention, max-params-no-constructor/max-params-no-constructor -- Stripe metadata and database helper boundaries are protocol-defined */
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { ConflictException, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { and, eq, sql } from 'drizzle-orm';
 import type { Stripe } from 'stripe';
-import { z } from 'zod';
-import { financialEnvironmentSchema } from '@taucad/billing';
 import type { FinancialEnvironment } from '#api/billing/billing-policy.js';
 import type { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import { BillingTaxService } from '#api/billing/billing-tax.service.js';
@@ -17,21 +15,13 @@ import {
 import type { CashProjectionEvidence } from '#api/billing/billing-payment-contract.js';
 import { assertNewCollectionCashScope } from '#api/billing/billing-cash-reconciliation.service.js';
 import type { DatabaseService } from '#database/database.service.js';
+import { billingProviderLeg, billingRefundIntent, billingReversalCase, billingStripeSource } from '#database/schema.js';
 import {
-  billingProviderLeg,
-  billingRefundIntent,
-  billingReversalCase,
-  billingStripeSource,
-  creditAccount,
-} from '#database/schema.js';
-import {
-  createStripeRefundOnce,
   listStripeDisputePage,
   listStripeRefundPage,
   retrieveStripeCharge,
   retrieveStripeDispute,
   retrieveStripePaymentIntent,
-  retrieveStripeRefund,
 } from '#api/billing/billing-cash-stripe.js';
 
 type Database = DatabaseService['database'];
@@ -86,35 +76,11 @@ export type CashDisputeSource = Pick<
   >;
 };
 
-export type ReviewedRefundRequest = {
-  readonly environment: FinancialEnvironment;
-  readonly accountId: string;
-  readonly reversalCaseId: string;
-  readonly requestedPrincipalMinor: string;
-  readonly requestedTaxMinor: string;
-  readonly approvedMaximumGrossMinor: string;
-  readonly reviewActorId: string;
-  readonly reviewedAt: Date;
-  readonly reason: string;
-  readonly requestId: string;
-};
-
 type ChargeSourceInput = {
   readonly environment: FinancialEnvironment;
   readonly accountId: string;
   readonly reversalCaseId: string;
   readonly maximumRefundPages: number;
-};
-
-/**
- * Issued only by a composition that holds the write key for a collecting deployment: the local
- * fixture, a sandbox deployment, or a production deployment whose live collection is activated.
- */
-export type ProtectedRefundCapability = {
-  readonly qualification: 'protected-refund';
-  readonly environment: FinancialEnvironment;
-  readonly stripeAccountId: string;
-  readonly livemode: boolean;
 };
 
 export type BillingCashQualification = {
@@ -143,36 +109,6 @@ export type BillingCashQualification = {
     readonly maximumRefundPages: number;
   }): Promise<QualifiedCashSource | UnqualifiedCashSource>;
 };
-const protectedRefundCapabilitySchema = z.strictObject({
-  qualification: z.literal('protected-refund'),
-  environment: z.string().min(1),
-  stripeAccountId: z.string().min(1),
-  livemode: z.boolean(),
-});
-/** Longest operator reason a reviewed refund records; the lifecycle command enforces the same cap. */
-export const maximumRefundReasonLength = 2000;
-const reviewedRefundRequestSchema = z.strictObject({
-  // The deployment names (`prod-us`, `prod-eu`), not a generic `production`: a refund is scoped to one of them.
-  environment: financialEnvironmentSchema,
-  accountId: z.string().min(1).max(255),
-  reversalCaseId: z.string().min(1).max(255),
-  requestedPrincipalMinor: z.string().regex(/^(0|[1-9][0-9]*)$/u),
-  requestedTaxMinor: z.string().regex(/^(0|[1-9][0-9]*)$/u),
-  approvedMaximumGrossMinor: z.string().regex(/^(0|[1-9][0-9]*)$/u),
-  reviewActorId: z.string().min(1).max(255),
-  reviewedAt: z.date(),
-  reason: z.string().min(1).max(maximumRefundReasonLength),
-  requestId: z.string().min(1).max(255),
-});
-const refundLegRequestSchema = z.strictObject({
-  charge: z.string().min(1).max(255),
-  amount: z.string().regex(/^[1-9][0-9]*$/u),
-  reason: z.literal('requested_by_customer'),
-  metadata: z.strictObject({
-    tau_refund_intent_id: z.string().min(1).max(255),
-    tau_reversal_case_id: z.string().min(1).max(255),
-  }),
-});
 
 export function qualifyStripeCashProjection(input: {
   readonly stripeAccountId: string;
@@ -393,7 +329,6 @@ function taxCorrectionEvidence(
 export class BillingCashService {
   public constructor(
     private readonly databaseService: Pick<DatabaseService, 'database'>,
-    private readonly protectedStripe: Stripe,
     private readonly sourceStripe: Stripe,
     private readonly ledger: CreditLedgerService,
     private readonly config: {
@@ -504,308 +439,6 @@ export class BillingCashService {
     return qualifiedFrom(claim, result, taxEvidence);
   }
 
-  public async prepareReviewedRefund(
-    input: ReviewedRefundRequest,
-  ): Promise<{ readonly intentId: string; readonly legId: string }> {
-    reviewedRefundRequestSchema.parse(input);
-    const principal = parseUnsigned(input.requestedPrincipalMinor, 'principal');
-    const tax = parseUnsigned(input.requestedTaxMinor, 'tax');
-    const maximum = parseUnsigned(input.approvedMaximumGrossMinor, 'maximum');
-    const gross = principal + tax;
-    if (gross <= 0n || gross > maximum || input.environment !== this.config.environment)
-      throw new ConflictException('refund_scope');
-    return this.databaseService.database.transaction(async (tx) => {
-      const [existing] = await tx
-        .select({ id: billingRefundIntent.id })
-        .from(billingRefundIntent)
-        .where(
-          and(
-            eq(billingRefundIntent.reversalCaseId, input.reversalCaseId),
-            eq(billingRefundIntent.requestId, input.requestId),
-          ),
-        );
-      if (existing !== undefined) {
-        const [original] = await tx.select().from(billingRefundIntent).where(eq(billingRefundIntent.id, existing.id));
-        if (
-          original === undefined ||
-          original.accountId !== input.accountId ||
-          original.environment !== input.environment ||
-          original.requestedPrincipalMinor !== principal ||
-          original.requestedTaxMinor !== tax ||
-          original.approvedMaximumGrossMinor !== maximum ||
-          original.reviewActorId !== input.reviewActorId ||
-          original.reviewedAt.getTime() !== input.reviewedAt.getTime() ||
-          original.reason !== input.reason
-        )
-          throw new ConflictException('refund_replay_mismatch');
-        const [leg] = await tx
-          .select({ id: billingProviderLeg.id })
-          .from(billingProviderLeg)
-          .where(eq(billingProviderLeg.refundIntentId, existing.id));
-        if (leg === undefined) throw new ConflictException('refund_replay_incomplete');
-        return { intentId: existing.id, legId: leg.id };
-      }
-      const [account] = await tx
-        .select()
-        .from(creditAccount)
-        .where(eq(creditAccount.id, input.accountId))
-        .for('update');
-      if (account === undefined) throw new ConflictException('refund_account_missing');
-      const [reversal] = await tx
-        .select()
-        .from(billingReversalCase)
-        .where(
-          and(eq(billingReversalCase.id, input.reversalCaseId), eq(billingReversalCase.accountId, input.accountId)),
-        )
-        .for('update');
-      if (
-        reversal === undefined ||
-        reversal.environment !== input.environment ||
-        reversal.stripeAccountId !== this.config.stripeAccountId ||
-        reversal.livemode !== this.config.livemode ||
-        reversal.customerBindingId === null ||
-        reversal.chargeId === null ||
-        reversal.projectionDigest === null ||
-        reversal.projectionSourceGeneration === null
-      )
-        throw new ConflictException('refund_source_unqualified');
-      if (reversal.source !== 'plan' && reversal.source !== 'purchased')
-        throw new ConflictException('refund_source_unqualified');
-      const { source } = reversal;
-      const intents = await tx
-        .select()
-        .from(billingRefundIntent)
-        .where(eq(billingRefundIntent.reversalCaseId, reversal.id));
-      const pendingPrincipal = intents
-        .filter((intent) => ['prepared', 'pending', 'attention'].includes(intent.state))
-        .reduce((total, intent) => total + intent.requestedPrincipalMinor, 0n);
-      const denominator = reversal.originalPrincipalMinor ?? 0n;
-      const priorLoss = reversal.cumulativePrincipalLossMinor + pendingPrincipal;
-      if (denominator <= 0n || priorLoss + principal > denominator)
-        throw new ConflictException('refund_principal_exceeds_source');
-      const priorTarget = (reversal.originalAtoms * priorLoss) / denominator;
-      const cumulativeTarget = (reversal.originalAtoms * (priorLoss + principal)) / denominator;
-      const hold = cumulativeTarget - priorTarget;
-      const available =
-        source === 'plan'
-          ? account.planAtoms - account.planHeldAtoms
-          : account.purchasedAtoms - account.purchasedHeldAtoms;
-      if (hold < 0n || hold > available) throw new ConflictException('refund_hold_insufficient');
-      const intentId = randomUUID();
-      const legId = randomUUID();
-      const request = {
-        charge: reversal.chargeId,
-        amount: gross.toString(),
-        reason: 'requested_by_customer',
-        metadata: { tau_refund_intent_id: intentId, tau_reversal_case_id: reversal.id },
-      };
-      const requestHash = digest(request);
-      await tx.insert(billingRefundIntent).values({
-        id: intentId,
-        accountId: input.accountId,
-        environment: input.environment,
-        reversalCaseId: reversal.id,
-        requestId: input.requestId,
-        requestHash,
-        requestedPrincipalMinor: principal,
-        requestedTaxMinor: tax,
-        requestedGrossMinor: gross,
-        approvedMaximumGrossMinor: maximum,
-        targetReversedAtoms: hold,
-        holdAtoms: hold,
-        reviewActorId: input.reviewActorId,
-        reviewedAt: input.reviewedAt,
-        reason: input.reason,
-        sourceDigest: reversal.projectionDigest,
-      });
-      await tx.insert(billingProviderLeg).values({
-        id: legId,
-        accountId: input.accountId,
-        environment: input.environment,
-        customerBindingId: reversal.customerBindingId,
-        refundIntentId: intentId,
-        kind: 'refund',
-        requestId: input.requestId,
-        requestHash,
-        request,
-        idempotencyKey: `refund:${intentId}`,
-      });
-      await addSourceHold(tx, input.accountId, source, hold);
-      return { intentId, legId };
-    });
-  }
-
-  public async executeReviewedRefund(input: {
-    readonly environment: FinancialEnvironment;
-    readonly intentId: string;
-    readonly reviewActorId: string;
-    readonly capability: unknown;
-  }): Promise<{ readonly status: 'pending'; readonly refundId: string }> {
-    const capability = protectedRefundCapabilitySchema.parse(input.capability);
-    if (
-      input.environment !== this.config.environment ||
-      capability.environment !== this.config.environment ||
-      capability.livemode !== this.config.livemode ||
-      capability.stripeAccountId !== this.config.stripeAccountId
-    ) {
-      throw new ConflictException('refund_executor_unqualified');
-    }
-    const dispatch = await this.databaseService.database.transaction(async (tx) => {
-      const [intent] = await tx
-        .select()
-        .from(billingRefundIntent)
-        .where(eq(billingRefundIntent.id, input.intentId))
-        .for('update');
-      if (
-        intent === undefined ||
-        intent.environment !== input.environment ||
-        intent.reviewActorId !== input.reviewActorId ||
-        intent.state !== 'prepared'
-      )
-        throw new ConflictException('refund_not_dispatchable');
-      const [leg] = await tx
-        .select()
-        .from(billingProviderLeg)
-        .where(eq(billingProviderLeg.refundIntentId, intent.id))
-        .for('update');
-      const [reversal] = await tx
-        .select()
-        .from(billingReversalCase)
-        .where(eq(billingReversalCase.id, intent.reversalCaseId));
-      if (leg === undefined || reversal?.chargeId === null || reversal === undefined)
-        throw new ConflictException('refund_leg_missing');
-      const expectedRequest = {
-        charge: reversal.chargeId,
-        amount: intent.requestedGrossMinor.toString(),
-        reason: 'requested_by_customer',
-        metadata: { tau_refund_intent_id: intent.id, tau_reversal_case_id: intent.reversalCaseId },
-      };
-      const persistedRequest = refundLegRequestSchema.parse(leg.request);
-      if (
-        digest(expectedRequest) !== leg.requestHash ||
-        persistedRequest.charge !== expectedRequest.charge ||
-        persistedRequest.amount !== expectedRequest.amount ||
-        persistedRequest.metadata.tau_refund_intent_id !== expectedRequest.metadata.tau_refund_intent_id ||
-        persistedRequest.metadata.tau_reversal_case_id !== expectedRequest.metadata.tau_reversal_case_id
-      )
-        throw new ConflictException('refund_request_mismatch');
-      const [winner] = await tx
-        .update(billingProviderLeg)
-        .set({ state: 'dispatched', dispatchStartedAt: sql`transaction_timestamp()` })
-        .where(and(eq(billingProviderLeg.id, leg.id), eq(billingProviderLeg.state, 'prepared')))
-        .returning({ id: billingProviderLeg.id });
-      if (winner === undefined) throw new ConflictException('refund_dispatch_lost');
-      await tx
-        .update(billingRefundIntent)
-        .set({ state: 'pending', updatedAt: sql`transaction_timestamp()` })
-        .where(eq(billingRefundIntent.id, intent.id));
-      return { intent, leg, chargeId: reversal.chargeId };
-    });
-    const refund = await createStripeRefundOnce(this.protectedStripe, {
-      chargeId: dispatch.chargeId,
-      amountMinor: dispatch.intent.requestedGrossMinor,
-      reason: 'requested_by_customer',
-      metadata: { tau_refund_intent_id: dispatch.intent.id, tau_reversal_case_id: dispatch.intent.reversalCaseId },
-      idempotencyKey: dispatch.leg.idempotencyKey,
-    });
-    await this.databaseService.database
-      .update(billingProviderLeg)
-      .set({ state: 'known', providerObjectId: refund.id })
-      .where(and(eq(billingProviderLeg.id, dispatch.leg.id), eq(billingProviderLeg.state, 'dispatched')));
-    return { status: 'pending', refundId: refund.id };
-  }
-
-  public async recoverRefundIntent(input: {
-    readonly environment: FinancialEnvironment;
-    readonly intentId: string;
-    readonly maximumPages: number;
-  }): Promise<UnqualifiedCashSource | { readonly status: 'applied'; readonly refundId: string }> {
-    const [stored] = await this.databaseService.database
-      .select({ intent: billingRefundIntent, leg: billingProviderLeg, reversal: billingReversalCase })
-      .from(billingRefundIntent)
-      .innerJoin(billingProviderLeg, eq(billingProviderLeg.refundIntentId, billingRefundIntent.id))
-      .innerJoin(billingReversalCase, eq(billingReversalCase.id, billingRefundIntent.reversalCaseId))
-      .where(eq(billingRefundIntent.id, input.intentId));
-    if (
-      stored === undefined ||
-      stored.intent.environment !== input.environment ||
-      input.environment !== this.config.environment
-    ) {
-      throw new ConflictException('refund_recovery_scope');
-    }
-    let refundId = stored.leg.providerObjectId;
-    if (refundId === null) {
-      const provisionalClaim = await this.claimCanonicalSource({
-        environment: input.environment,
-        accountId: stored.intent.accountId,
-        reversalCaseId: stored.reversal.id,
-      });
-      if (stored.reversal.chargeId === null) {
-        await this.releaseClaim(provisionalClaim, 'refund_charge_missing');
-        return { status: 'attention', reason: 'refund_charge_missing' };
-      }
-      const pages = await collectRefunds(this.sourceStripe, stored.reversal.chargeId, input.maximumPages);
-      if (!pages.complete) {
-        await this.releaseClaim(provisionalClaim, 'incomplete_refund_pages');
-        return { status: 'pending', reason: 'incomplete_refund_pages' };
-      }
-      const matches = pages.refunds.filter((value) => {
-        const { metadata } = value;
-        return (
-          metadata !== null &&
-          metadata['tau_refund_intent_id'] === stored.intent.id &&
-          metadata['tau_reversal_case_id'] === stored.reversal.id &&
-          isSafeMinor(value.amount) &&
-          BigInt(value.amount) === stored.intent.requestedGrossMinor
-        );
-      });
-      if (matches.length !== 1 || matches[0] === undefined) {
-        const result =
-          matches.length === 0
-            ? ({ status: 'pending', reason: 'refund_dispatch_unknown' } satisfies UnqualifiedCashSource)
-            : ({ status: 'attention', reason: 'refund_dispatch_ambiguous' } satisfies UnqualifiedCashSource);
-        await this.releaseClaim(provisionalClaim, result.reason);
-        return result;
-      }
-      refundId = matches[0].id;
-      const [linked] = await this.databaseService.database
-        .update(billingProviderLeg)
-        .set({ state: 'known', providerObjectId: refundId })
-        .where(
-          and(
-            eq(billingProviderLeg.id, stored.leg.id),
-            eq(billingProviderLeg.state, 'dispatched'),
-            sql`${billingProviderLeg.providerObjectId} IS NULL`,
-          ),
-        )
-        .returning({ id: billingProviderLeg.id });
-      if (linked === undefined) throw new ServiceUnavailableException('refund_link_race');
-      let qualified: QualifiedCashSource | UnqualifiedCashSource;
-      try {
-        qualified = await this.qualifyChargeSourceClaimed(
-          {
-            environment: input.environment,
-            accountId: stored.intent.accountId,
-            reversalCaseId: stored.reversal.id,
-            maximumRefundPages: input.maximumPages,
-          },
-          provisionalClaim,
-        );
-      } catch (error) {
-        await this.releaseClaim(provisionalClaim, 'refund_qualification_failed');
-        throw error;
-      }
-      return this.applyRecoveredRefund(stored, refundId, qualified);
-    }
-    const qualified = await this.qualifyChargeSource({
-      environment: input.environment,
-      accountId: stored.intent.accountId,
-      reversalCaseId: stored.reversal.id,
-      maximumRefundPages: input.maximumPages,
-    });
-    return this.applyRecoveredRefund(stored, refundId, qualified);
-  }
-
   public async qualifyChargeSource(input: ChargeSourceInput): Promise<QualifiedCashSource | UnqualifiedCashSource> {
     return this.qualifyChargeSourceClaimed(input);
   }
@@ -912,160 +545,6 @@ export class BillingCashService {
       )
       .returning({ id: billingStripeSource.id });
     if (released === undefined) throw new ServiceUnavailableException('cash_source_claim_lost');
-  }
-
-  private async applyRecoveredRefund(
-    stored: {
-      readonly intent: typeof billingRefundIntent.$inferSelect;
-      readonly leg: typeof billingProviderLeg.$inferSelect;
-      readonly reversal: typeof billingReversalCase.$inferSelect;
-    },
-    refundId: string,
-    qualified: QualifiedCashSource | UnqualifiedCashSource,
-  ): Promise<UnqualifiedCashSource | { readonly status: 'applied'; readonly refundId: string }> {
-    if (qualified.status !== 'qualified' || !('sourceClaimId' in qualified)) return qualified;
-    let refund: Stripe.Refund;
-    try {
-      refund = await retrieveStripeRefund(this.sourceStripe, refundId);
-    } catch (error) {
-      await this.releaseClaim(
-        { id: qualified.sourceClaimId, generation: qualified.sourceGeneration },
-        'refund_source_read_failed',
-      );
-      throw error;
-    }
-    const refundMetadata = refund.metadata;
-    if (
-      refund.id !== refundId ||
-      refundMetadata === null ||
-      refundMetadata['tau_refund_intent_id'] !== stored.intent.id ||
-      refundMetadata['tau_reversal_case_id'] !== stored.reversal.id ||
-      !isSafeMinor(refund.amount) ||
-      !Number.isSafeInteger(refund.created) ||
-      refund.created < 1 ||
-      idOf(refund.charge) !== stored.reversal.chargeId ||
-      BigInt(refund.amount) !== stored.intent.requestedGrossMinor
-    ) {
-      await this.releaseClaim(
-        { id: qualified.sourceClaimId, generation: qualified.sourceGeneration },
-        'refund_source_changed',
-      );
-      return { status: 'attention', reason: 'refund_source_changed' };
-    }
-    if (refund.status === 'pending' || refund.status === 'requires_action') {
-      await this.releaseClaim(
-        { id: qualified.sourceClaimId, generation: qualified.sourceGeneration },
-        'refund_not_final',
-      );
-      return { status: 'pending', reason: 'refund_not_final' };
-    }
-    if (!['succeeded', 'failed', 'canceled'].includes(refund.status ?? '')) {
-      await this.releaseClaim(
-        { id: qualified.sourceClaimId, generation: qualified.sourceGeneration },
-        'unsupported_refund_status',
-      );
-      return { status: 'attention', reason: 'unsupported_refund_status' };
-    }
-    const terminalState =
-      refund.status === 'succeeded' ? 'succeeded' : refund.status === 'failed' ? 'failed' : 'canceled';
-    try {
-      await this.databaseService.database.transaction(async (tx) => {
-        const [account] = await tx
-          .select({ id: creditAccount.id })
-          .from(creditAccount)
-          .where(eq(creditAccount.id, stored.intent.accountId))
-          .for('update');
-        const [reversal] = await tx
-          .select()
-          .from(billingReversalCase)
-          .where(eq(billingReversalCase.id, stored.reversal.id))
-          .for('update');
-        const [intent] = await tx
-          .select()
-          .from(billingRefundIntent)
-          .where(eq(billingRefundIntent.id, stored.intent.id))
-          .for('update');
-        const [claim] = await tx
-          .select({ id: billingStripeSource.id })
-          .from(billingStripeSource)
-          .where(
-            and(
-              eq(billingStripeSource.id, qualified.sourceClaimId),
-              eq(billingStripeSource.generation, qualified.sourceGeneration),
-              eq(billingStripeSource.state, 'processing'),
-              sql`${billingStripeSource.leaseUntil} > clock_timestamp()`,
-            ),
-          )
-          .for('update');
-        const causeId = reversal?.purchaseId ?? reversal?.periodId;
-        if (
-          account === undefined ||
-          reversal === undefined ||
-          intent === undefined ||
-          claim === undefined ||
-          causeId === null ||
-          causeId === undefined ||
-          intent.holdState !== 'held'
-        ) {
-          throw new ServiceUnavailableException('refund_apply_fence');
-        }
-        const source = reversal.source === 'plan' ? 'plan' : 'purchased';
-        await addSourceHold(tx, intent.accountId, source, -intent.holdAtoms);
-        await this.ledger.applyCashDisposition(
-          {
-            accountId: intent.accountId,
-            causeId,
-            source,
-            sourceClaimId: qualified.sourceClaimId,
-            sourceGeneration: qualified.sourceGeneration,
-            projectionDigest: qualified.projectionDigest,
-            principalLossMinor: qualified.principalLossMinor,
-            taxLossMinor: qualified.taxLossMinor,
-            grossLossMinor: qualified.grossLossMinor,
-            evidence: qualified.evidence,
-            occurredAt: cashOccurredAt(qualified, new Date(refund.created * 1000)),
-          },
-          tx,
-        );
-        await this.tax.observeQualifiedCashCorrection({
-          transaction: tx,
-          causeId,
-          source,
-          qualified,
-        });
-        const [finished] = await tx
-          .update(billingRefundIntent)
-          .set({
-            state: terminalState,
-            holdState: terminalState === 'succeeded' ? 'applied' : 'released',
-            confirmedAt: sql`transaction_timestamp()`,
-            updatedAt: sql`transaction_timestamp()`,
-          })
-          .where(and(eq(billingRefundIntent.id, intent.id), eq(billingRefundIntent.state, intent.state)))
-          .returning({ id: billingRefundIntent.id });
-        const [sourceFinished] = await tx
-          .update(billingStripeSource)
-          .set({ state: 'done', leaseUntil: null, errorCode: null })
-          .where(
-            and(
-              eq(billingStripeSource.id, qualified.sourceClaimId),
-              eq(billingStripeSource.generation, qualified.sourceGeneration),
-              eq(billingStripeSource.state, 'processing'),
-              sql`${billingStripeSource.leaseUntil} > clock_timestamp()`,
-            ),
-          )
-          .returning({ id: billingStripeSource.id });
-        if (finished === undefined || sourceFinished === undefined)
-          throw new ServiceUnavailableException('refund_apply_fence');
-      });
-    } catch (error) {
-      await this.releaseClaim(
-        { id: qualified.sourceClaimId, generation: qualified.sourceGeneration },
-        'refund_application_failed',
-      );
-      throw error;
-    }
-    return { status: 'applied', refundId: refund.id };
   }
 
   private async releaseClaimAndRethrow(
@@ -1338,30 +817,9 @@ async function collectDisputes(
   return { disputes, complete: false };
 }
 
-async function addSourceHold(
-  tx: Transaction,
-  accountId: string,
-  source: 'plan' | 'purchased',
-  hold: bigint,
-): Promise<void> {
-  await tx
-    .update(creditAccount)
-    .set(
-      source === 'plan'
-        ? { planHeldAtoms: sql`${creditAccount.planHeldAtoms} + ${hold}` }
-        : { purchasedHeldAtoms: sql`${creditAccount.purchasedHeldAtoms} + ${hold}` },
-    )
-    .where(eq(creditAccount.id, accountId));
-}
-
 // oxlint-disable-next-line typescript/no-restricted-types -- Stripe explicitly uses null for absent expanded identities.
 function idOf(value: string | { id: string } | null): string {
   return typeof value === 'string' ? value : (value?.id ?? '');
-}
-
-function parseUnsigned(value: string, label: string): bigint {
-  if (!/^(0|[1-9][0-9]*)$/u.test(value)) throw new Error(`Invalid refund ${label}`);
-  return BigInt(value);
 }
 
 function isSafeMinor(value: number): boolean {
@@ -1384,8 +842,4 @@ function qualifiedFrom(
     evidence: result.evidence,
     taxCorrectionEvidence: taxEvidence,
   };
-}
-
-function digest(value: unknown): string {
-  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }

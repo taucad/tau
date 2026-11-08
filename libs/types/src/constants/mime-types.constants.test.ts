@@ -18,6 +18,10 @@ describe('mimeTypes', () => {
     expect(fileExtensionSet.has('txt')).toBe(true);
     expect(fileExtensionSet.has('json')).toBe(true);
   });
+
+  it('should not catalogue the Rhino 3DM format, which nothing reads or writes since the Rhino kernel was removed', () => {
+    expect(fileExtensions).not.toContain('3dm');
+  });
 });
 
 describe('lookupMimeType', () => {

@@ -2965,6 +2965,37 @@ describe('useProjectManager.createProject', () => {
     );
   });
 
+  /* W7.3: a linked repository's own tau.json is committed as authored while it declares the journaled manifest. */
+  it.each([
+    { authored: 'equal, respelled', declares: true },
+    { authored: 'different', declares: false },
+  ])('commits $authored authored manifest bytes only while they declare the manifest', async ({ declares }) => {
+    const manifest = projectToManifest(fakeProject);
+    const authored = new TextEncoder().encode(
+      JSON.stringify({ ...manifest, ...(declares ? { syncChats: true } : { name: 'Renamed' }) }, undefined, 4),
+    );
+    const staged = { ...pendingCreate, files: {}, staging: { operationId: 'req_staged' }, manifestBytes: authored };
+    mockPrepareProjectCreation.mockImplementationOnce(async () => staged);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    const target = await result.current.prepareImportStaging('Gear Box', { kind: 'home' });
+
+    await act(async () =>
+      result.current.createProject({
+        project: fakeProject,
+        files: {},
+        location: target.location,
+        staging: { operationId: 'req_staged', manifestBytes: authored },
+      }),
+    );
+
+    const prepared = mockPrepareProjectCreation.mock.calls.at(-1)?.[0] as unknown as Record<string, unknown>;
+    expect(prepared['manifestBytes']).toBe(authored);
+    const committed = mockCommitPendingProjectDirectory.mock.calls.at(-1)?.[0] as { manifest: Uint8Array<ArrayBuffer> };
+    expect(new TextDecoder().decode(committed.manifest)).toBe(
+      new TextDecoder().decode(declares ? authored : serializeProjectManifest(manifest)),
+    );
+  });
+
   /* W7: where a rename copies, an import is written into its project directory, and the create commits there. */
   it('creates an in-place import in the directory it was staged into, and names the stagings the journal owns', async () => {
     const owner = { ...pendingCreate, operationId: 'op_owner', staging: { operationId: 'req_owned' } };

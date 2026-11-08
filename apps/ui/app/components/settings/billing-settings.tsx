@@ -98,12 +98,12 @@ export function BillingSettings(): React.JSX.Element {
     <div className='flex flex-col gap-8 pb-4'>
       {entitlements.status === 'past_due' ? (
         <div className='rounded-md border border-warning/20 bg-card px-3 py-2 text-sm'>
-          Payment failed — update your card to restore Pro. Your credits are safe.
+          Payment failed — update your card within 7 days to keep Pro. Your credits are safe.
         </div>
       ) : undefined}
       {entitlements.cancelAtPeriodEnd && entitlements.paidThrough ? (
         <div className='rounded-md border border-border bg-card px-3 py-2 text-sm'>
-          Pro until {formatRenewalDate(entitlements.paidThrough)} — reactivate any time from Manage Subscription.
+          Pro until {formatRenewalDate(entitlements.paidThrough)} — reactivate any time from Manage subscription.
         </div>
       ) : undefined}
 

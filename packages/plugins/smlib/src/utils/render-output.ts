@@ -375,8 +375,16 @@ function appendEdges(
     // A body the kernel cannot measure against: every edge takes the kernel's polyline.
   }
   const kernelPolylines = (): ((edgeId: number) => number[][][]) => {
-    const { polylines, seams } = boundaryPolylines(kernel, brep, fallbackTurn(tessellation, surface.mesh));
-    const indices = edgeIndices(kernel, brep, edges);
+    let polylines: number[][][];
+    let seams: ReadonlySet<number>;
+    let indices: ReturnType<typeof edgeIndices>;
+    try {
+      ({ polylines, seams } = boundaryPolylines(kernel, brep, fallbackTurn(tessellation, surface.mesh)));
+      indices = edgeIndices(kernel, brep, edges);
+    } catch {
+      // The kernel cannot draw this body's edges either: the faces still render, without these edges.
+      return () => [];
+    }
     return (edgeId) => {
       const index = indices[edgeId]!;
       const polyline = polylines[index] ?? [];

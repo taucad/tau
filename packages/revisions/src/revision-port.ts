@@ -58,11 +58,22 @@ export type RevisionEngineDescriptor = Readonly<{
    * A caller that computes a tree id without writing it has to hash what the
    * store will record, pointers included (I5) — so the cut asks rather than
    * assumes. True on both legs since W11b: the decision is host-neutral
-   * (`lfs.ts`) and only the transport behind it differs. False for a
-   * repository a disk host adopted, whose entries keep the representation the
-   * person's own Git gave them (rule 13).
+   * (`lfs.ts`) and only the transport behind it differs.
    */
   largeObjects: boolean;
+  /**
+   * Whether the repository matches its attributes case-insensitively
+   * (`core.ignoreCase`, a native host on a case-insensitive disk). The cut's
+   * clean folds case exactly when this says so, so its prediction is the
+   * host's own tree (I5). Absent means case-sensitive, as the browser is.
+   */
+  ignoreCase?: boolean;
+  /**
+   * Whether a checkout keeps each large object's bytes as a file once the
+   * store holds it (D9: a disk host keeps a physical copy). Large-object
+   * adoption, which replaces such a file by its pointer, then adopts nothing.
+   */
+  keepsLargeObjectFiles?: boolean;
 }>;
 
 /** Durable storage evidence for one revision. `objectFormat` travels with it. @public */

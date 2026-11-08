@@ -101,12 +101,42 @@ export function subShapes(oc: Oc, shape: TopoDS_Shape, kind: ShapeKind): TopoDS_
   return out;
 }
 
+/**
+ * Sub-shapes cast to their typed wrapper; each raw wrapper is freed once its typed copy exists.
+ *
+ * @param oc - libcascade instance
+ * @param shape - shape to explore
+ * @param kind - sub-shape kind
+ * @param cast - typed cast for the kind
+ * @returns typed sub-shapes, each listed once
+ */
+const typedSubShapes = <T>(oc: Oc, shape: TopoDS_Shape, kind: ShapeKind, cast: (raw: TopoDS_Shape) => T): T[] =>
+  subShapes(oc, shape, kind).map((raw) => {
+    const typed = cast(raw);
+    raw.delete();
+    return typed;
+  });
+
 export const faces = (oc: Oc, shape: TopoDS_Shape): TopoDS_Face[] =>
-  subShapes(oc, shape, 'TopAbs_FACE').map((s) => oc.TopoDS.Face(s));
+  typedSubShapes(oc, shape, 'TopAbs_FACE', (raw) => oc.TopoDS.Face(raw));
 export const edges = (oc: Oc, shape: TopoDS_Shape): TopoDS_Edge[] =>
-  subShapes(oc, shape, 'TopAbs_EDGE').map((s) => oc.TopoDS.Edge(s));
+  typedSubShapes(oc, shape, 'TopAbs_EDGE', (raw) => oc.TopoDS.Edge(raw));
 export const vertices = (oc: Oc, shape: TopoDS_Shape): TopoDS_Vertex[] =>
-  subShapes(oc, shape, 'TopAbs_VERTEX').map((s) => oc.TopoDS.Vertex(s));
+  typedSubShapes(oc, shape, 'TopAbs_VERTEX', (raw) => oc.TopoDS.Vertex(raw));
+
+/**
+ * Frees every wrapper in a list except the ones kept.
+ *
+ * @param shapes - wrappers to free
+ * @param kept - wrappers the caller keeps
+ */
+export function deleteAllBut(shapes: ReadonlyArray<{ delete(): void }>, ...kept: readonly unknown[]): void {
+  for (const shape of shapes) {
+    if (!kept.includes(shape)) {
+      shape.delete();
+    }
+  }
+}
 
 /**
  * Membership test for sub-shapes of a shape (orientation-insensitive).

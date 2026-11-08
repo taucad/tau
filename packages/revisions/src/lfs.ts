@@ -23,11 +23,18 @@ import type { ImmutableRevisionTree } from '#algorithms/index.js';
 import { adoptRevisionTree, revisionTreeFiles } from '#algorithms/revision-tree.js';
 
 import { digestHex } from '#object-hash.js';
+import type { ObjectFormat } from '#object-hash.js';
+import { blobOid } from '#tree-id-memo.js';
 import {
   generatedGitattributesContent,
   generatedGitattributesPath,
-  isTrackedLargeObjectPath,
+  hasGeneratedAttributesBlock,
+  isAttributesPath,
+  isLargeObjectPath,
   largeObjectThresholdBytes,
+  largeObjectVerdict,
+  legacyBlockMatcher,
+  repositoryLargeObjectMatcher,
 } from '#workspace-config.js';
 
 /** One large object, as a tree entry names it. @public */
@@ -114,58 +121,181 @@ export const readLfsPointer = (content: Uint8Array<ArrayBuffer>): LfsPointer | u
 export const lfsObjectPath = (oid: string): string => `lfs/objects/${oid.slice(0, 2)}/${oid.slice(2, 4)}/${oid}`;
 
 /**
+ * What a cut's parent recorded at each path, for the clean to keep (rule 13):
+ * the blob id each path holds, from the parent's tree objects alone (a
+ * `listTree`), so no blob is read. Whether that blob was the content itself or
+ * its pointer is answered by hashing the content both ways. A cut with no
+ * parent has none.
+ *
+ * @public
+ */
+export type LargeObjectBasis = Readonly<{
+  format: ObjectFormat;
+  /** Each path's blob id in every parent that holds it, first parent first. */
+  blobs: ReadonlyMap<string, readonly string[]>;
+}>;
+
+/**
+ * A cut's basis from its parents' tree listings, first parent first: a merge
+ * keeps content that any parent holds, in that parent's representation.
+ *
+ * @param format - The store's object format.
+ * @param listings - Each parent's files, as `listTree` lists them, in parent order.
+ * @returns The basis.
+ * @public
+ */
+export const largeObjectBasisOf = (
+  format: ObjectFormat,
+  ...listings: ReadonlyArray<Iterable<Readonly<{ path: string; oid: string }>>>
+): LargeObjectBasis => {
+  const blobs = new Map<string, string[]>();
+  for (const listing of listings) {
+    for (const { path, oid } of listing) {
+      const held = blobs.get(path);
+      if (held === undefined) {
+        blobs.set(path, [oid]);
+      } else if (!held.includes(oid)) {
+        held.push(oid);
+      }
+    }
+  }
+  return Object.freeze({ format, blobs });
+};
+
+/** How one cut is cleaned: its parent's representation, and the host's case folding. @public */
+export type CleanLargeObjectsOptions = Readonly<{
+  /** The parent's entries: unchanged content keeps their representation (rule 13). */
+  basis?: LargeObjectBasis | undefined;
+  /** `core.ignoreCase`, on a native host whose repository asks for it. */
+  ignoreCase?: boolean | undefined;
+}>;
+
+/**
  * One tree as a store records it, and the objects that go beside it.
  *
- * The rule, in one place because both legs must reach the same tree (I4):
+ * The rule, in one place because both legs must reach the same tree (I4/I5),
+ * and derived from the tree and its parent alone, as stock Git derives it
+ * (D16):
  *
- * - a path `.gitattributes` tracks — by family, or by its own name — is stored
- *   as a pointer;
- * - a file at or above {@link largeObjectThresholdBytes} whose family is *not*
- *   tracked gets a line of its own appended to the generated block first, and
- *   is then stored as a pointer (P15). Size alone never pointerises: a stock
- *   clone smudges what its attributes name, so a pointer with no attribute
- *   behind it is a file a person can never read again;
- * - bytes that already *are* a pointer are stored as themselves, so a checkout
- *   holding an un-smudged pointer never becomes a pointer to a pointer.
+ * - content unchanged from the parent keeps the parent's representation — a
+ *   blob stays a blob and a pointer stays a pointer, whatever the attributes
+ *   now say — because Git cleans only what is added, and never renormalizes
+ *   on its own (rule 13);
+ * - new or changed content is a pointer exactly where the tree's own
+ *   `.gitattributes` files put it on `filter=lfs`;
+ * - when the root attributes file carries Tau's well-formed block and a new
+ *   or changed file is in a family (whatever its case) or at or above
+ *   {@link largeObjectThresholdBytes} with no attributes line speaking for it,
+ *   the cut regenerates that block in place — the current families, the
+ *   per-path lines it holds, and a line for each such file (P15). A cut that
+ *   adds no line leaves the block as it is. Size and family alone never
+ *   pointerise: a stock clone smudges what its attributes name;
+ * - a tree with no Tau block is the person's: no line is added and no
+ *   attributes file is written;
+ * - bytes that already *are* a pointer are stored as themselves.
  *
  * Pure: the objects come back for the caller's own store to write. They are
  * the tree's own bytes, shared rather than copied — a store writes them out
  * and must never write *into* them.
  *
  * @param tree - The captured tree, with every file's real bytes.
+ * @param options - The parent's basis, and case folding.
  * @returns The tree to record, and the large objects by their oid (read-only).
  * @public
  */
 export const cleanLargeObjects = (
   tree: ImmutableRevisionTree,
+  options: CleanLargeObjectsOptions = {},
 ): Readonly<{ tree: ImmutableRevisionTree; objects: ReadonlyMap<string, Uint8Array<ArrayBuffer>> }> => {
   /* One cut is cleaned twice: once by the I5 gate, to know the tree id it is
    * about to compare, and once by the port writing that exact tree. Both SHA-256
    * every large object in it, which on a project with one 5 MiB part file was
-   * the whole cost of a save (L4). Keyed on the tree, which is immutable, so the
-   * second answer is the first one rather than a recomputation of it. */
-  const cached = cleanedTrees.get(tree);
+   * the whole cost of a save (L4). Keyed on the tree, which is immutable, and
+   * on what else decides, so the second answer is the first one. */
+  const key = `${options.ignoreCase === true ? 'i' : 's'}`;
+  const byBasis = cleanedTrees.get(tree);
+  const basisKey = options.basis ?? noBasis;
+  const cached = byBasis?.get(basisKey)?.get(key);
   if (cached !== undefined) {
     return cached;
   }
+  const reading = { ignoreCase: options.ignoreCase === true };
   /* The tree's own records, uncopied: every file this leaves alone is shared
    * with the cleaned tree, so its blob id stays memoised across cuts (E3). */
   const files = revisionTreeFiles(tree);
-  const attributesFile = files.get(generatedGitattributesPath);
-  const existing = attributesFile === undefined ? undefined : decoder.decode(attributesFile.content);
-  const untracked = [...files]
-    .filter(
-      ([path, { content }]) =>
-        content.byteLength >= largeObjectThresholdBytes &&
-        !isTrackedLargeObjectPath(path, existing) &&
-        readLfsPointer(content) === undefined,
-    )
-    .map(([path]) => path);
-  const attributes = untracked.length === 0 ? existing : generatedGitattributesContent(existing, untracked);
+  const texts = new Map(
+    [...files].flatMap(([path, { content }]) => (isAttributesPath(path) ? [[path, decoder.decode(content)]] : [])),
+  );
+  /* What a parent held at a path, when this content is that very thing (rule 13): the first parent that
+   * holds it as a blob or as its pointer decides. Asked only where it decides. */
+  const kept = (path: string, content: Uint8Array<ArrayBuffer>): 'pointer' | 'blob' | undefined => {
+    const held = options.basis?.blobs.get(path);
+    if (held === undefined) {
+      return undefined;
+    }
+    const { format } = options.basis!;
+    const asBlob = blobOid(content, format);
+    for (const oid of held) {
+      if (oid === asBlob) {
+        return 'blob';
+      }
+      if (oid === blobOid(pointerOf(content).bytes, format)) {
+        return 'pointer';
+      }
+    }
+    return undefined;
+  };
+  const existing = texts.get(generatedGitattributesPath);
+  let attributes = existing;
+  if (hasGeneratedAttributesBlock(existing)) {
+    /* A line is owed for a new or changed file in a family (whatever its
+     * case) or over the threshold that no attributes line speaks for. A path
+     * the person turned off LFS for keeps their verdict. */
+    const owed = (verdict: (path: string) => boolean | undefined): string[] =>
+      [...files]
+        .filter(
+          ([path, { content }]) =>
+            !isAttributesPath(path) &&
+            (isLargeObjectPath(path) || content.byteLength >= largeObjectThresholdBytes) &&
+            verdict(path) === undefined &&
+            readLfsPointer(content) === undefined &&
+            kept(path, content) === undefined,
+        )
+        .map(([path]) => path);
+    /* Asked case-sensitively on every host, so the block Tau writes is the same
+     * text on both legs: a case-variant file gets its own line even where
+     * `core.ignoreCase` would fold it onto a family. */
+    /* An older build's unescaped per-path line no longer names its path as Git
+     * reads it, so new or changed content there is owed the escaped line too;
+     * an unchanged entry keeps its representation through the basis. */
+    const legacy = legacyBlockMatcher(existing);
+    const legacyOwed =
+      legacy !== undefined &&
+      [...files].some(
+        ([path, { content }]) =>
+          !isAttributesPath(path) &&
+          legacy(path) &&
+          readLfsPointer(content) === undefined &&
+          kept(path, content) === undefined,
+      );
+    if (legacyOwed || owed(largeObjectVerdict(texts)).length > 0) {
+      /* Only now is the block rewritten: the current families first, then a line for what they still leave out. */
+      const current = generatedGitattributesContent(existing);
+      const untracked = owed(largeObjectVerdict(new Map([...texts, [generatedGitattributesPath, current]])));
+      attributes = untracked.length === 0 ? current : generatedGitattributesContent(current, untracked);
+      texts.set(generatedGitattributesPath, attributes);
+    }
+  }
+  const matches = repositoryLargeObjectMatcher(texts, reading);
   const objects = new Map<string, Uint8Array<ArrayBuffer>>();
   const cleaned = new Map(files);
   for (const [path, file] of files) {
-    if (!isTrackedLargeObjectPath(path, attributes) || readLfsPointer(file.content) !== undefined) {
+    if (isAttributesPath(path) || readLfsPointer(file.content) !== undefined) {
+      continue;
+    }
+    /* Unchanged content keeps the parent's representation; anything else, the attributes'. Every hash is memoised. */
+    const wanted = kept(path, file.content) ?? (matches(path) ? 'pointer' : 'blob');
+    if (wanted === 'blob') {
       continue;
     }
     const { oid, bytes } = pointerOf(file.content);
@@ -178,22 +308,29 @@ export const cleanLargeObjects = (
   if (attributes !== undefined && attributes !== existing) {
     cleaned.set(
       generatedGitattributesPath,
-      Object.freeze({ content: attributesBytesOf(attributes), mode: attributesFile?.mode ?? '100644' }),
+      Object.freeze({
+        content: attributesBytesOf(attributes),
+        mode: files.get(generatedGitattributesPath)?.mode ?? '100644',
+      }),
     );
   }
   const recorded = Object.freeze({
     tree: objects.size === 0 && attributes === existing ? tree : adoptRevisionTree(cleaned),
     objects,
   });
-  cleanedTrees.set(tree, recorded);
+  const perBasis = byBasis ?? new WeakMap<LargeObjectBasis, Map<string, CleanedTree>>();
+  const perKey = perBasis.get(basisKey) ?? new Map<string, CleanedTree>();
+  perKey.set(key, recorded);
+  perBasis.set(basisKey, perKey);
+  cleanedTrees.set(tree, perBasis);
   return recorded;
 };
 
-/** Cleaned cuts, held only while their caller still holds the tree. */
-const cleanedTrees = new WeakMap<
-  ImmutableRevisionTree,
-  Readonly<{ tree: ImmutableRevisionTree; objects: ReadonlyMap<string, Uint8Array<ArrayBuffer>> }>
->();
+type CleanedTree = Readonly<{ tree: ImmutableRevisionTree; objects: ReadonlyMap<string, Uint8Array<ArrayBuffer>> }>;
+/* The basis key of a cut with no parent. */
+const noBasis: LargeObjectBasis = Object.freeze({ format: 'sha1', blobs: new Map<string, readonly string[]>() });
+/** Cleaned cuts, held only while their caller still holds the tree, by basis and case folding. */
+const cleanedTrees = new WeakMap<ImmutableRevisionTree, WeakMap<LargeObjectBasis, Map<string, CleanedTree>>>();
 
 /**
  * The pointer for one large file's bytes, computed once per shared buffer (E2).

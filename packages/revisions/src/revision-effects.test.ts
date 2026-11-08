@@ -26,6 +26,7 @@ import { classify, unlistedPathClassification } from '@taucad/filesystem/path-re
 
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { cleanLargeObjects, lfsObjectPath, lfsPointerFor } from '#lfs.js';
+import { blobOid } from '#tree-id-memo.js';
 import type { LargeObjectsReport } from '#project-revisions.types.js';
 import { writeChatRef } from '#chat-ref.js';
 import { materializeConflict, readConflictTerms } from '#revision-conflict.js';
@@ -33,7 +34,7 @@ import { RevisionPortError } from '#revision-port.js';
 import { remoteTrackingRef } from '#remotes.js';
 import type { Checkout, ConflictRecord, RemoteRef, RevisionPort, RevisionPushInput } from '#revision-port.js';
 import { gitToolchainOnPath, nativeHarness } from '#test/native-git-harness.js';
-import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
+import { generatedGitattributesContent, generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
 import { createOpsLog, opsRefName } from '#ops-ref.js';
 import { selectRevisionStatus } from '#project-revisions.machine.js';
 import {
@@ -5359,6 +5360,7 @@ describe('opening before large objects arrive', () => {
     const receipt = await real.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([
+        [generatedGitattributesPath, generatedGitattributesContent(undefined)],
         ['main.scad', 'import("models/part.step");\n'],
         ['models/part.step', part],
       ]),
@@ -5421,6 +5423,7 @@ describe('opening before large objects arrive', () => {
     const receipt = await real.writeRevision({
       parents: [],
       tree: new ImmutableRevisionTree([
+        [generatedGitattributesPath, generatedGitattributesContent(undefined)],
         ['main.scad', 'import("models/part.step");\n'],
         ['models/part.step', part],
       ]),
@@ -5568,3 +5571,69 @@ describe('opening before large objects arrive', () => {
     expect(project.signals[0]?.aborted).toBe(true);
   }, 30_000);
 });
+
+/*
+ * Rule 13 through the gate (I5): the cut predicts the tree the writer records,
+ * so both keep an entry unchanged from the checkout's head as the head holds
+ * it — here, a file committed as a blob before the attributes named it.
+ */
+for (const actorSet of actorSets) {
+  describe.runIf(actorSet.enabled)(
+    `a cut after the attributes start naming a committed blob — ${actorSet.name}`,
+    () => {
+      it('predicts the recorded tree, keeps the blob a blob and makes only new content a pointer', async () => {
+        const layer = 'layered art\n'.repeat(200);
+        const { port, actors, filesystem } = await fixture(
+          { 'main.scad': 'cube(1);\n', 'art.layer': layer },
+          undefined,
+          {
+            actorSet: actorSet.name,
+          },
+        );
+        await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+        const cutOnce = async (parents: readonly string[]) => {
+          const cut = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
+            checkoutId: 'live',
+            trigger: 'save',
+          });
+          const written = await run<{ revisionId: string }>(actors.checkout.writeRevision, {
+            checkoutId: 'live',
+            cutId: cut.cutId,
+            treeId: cut.treeId,
+            parents,
+            trigger: 'save',
+            leaseIds: [],
+          });
+          await port.updateRef({
+            name: 'main',
+            expectedHead: parents[0] === undefined ? undefined : revisionId(parents[0]),
+            head: revisionId(written.revisionId),
+          });
+          return { cut, written };
+        };
+        const first = await cutOnce([]);
+        const attributes = await filesystem.readFile(generatedGitattributesPath, 'utf8');
+        await filesystem.writeFile(
+          generatedGitattributesPath,
+          `${attributes}*.layer filter=lfs diff=lfs merge=lfs -text\n`,
+        );
+        await filesystem.writeFile('new.layer', 'new art\n'.repeat(200));
+
+        const second = await cutOnce([first.written.revisionId]);
+
+        const recorded = await port.readRevision(revisionId(second.written.revisionId));
+        expect(recorded?.treeId).toBe(second.cut.treeId);
+        const listing = new Map(
+          ((await port.listTree?.(revisionId(second.written.revisionId))) ?? []).map((entry) => [entry.path, entry]),
+        );
+        const before = new Map(
+          ((await port.listTree?.(revisionId(first.written.revisionId))) ?? []).map((entry) => [entry.path, entry]),
+        );
+        expect(listing.get('art.layer')?.oid).toBe(before.get('art.layer')?.oid);
+        expect(listing.get('new.layer')?.oid).toBe(
+          blobOid(lfsPointerFor(new TextEncoder().encode('new art\n'.repeat(200))).bytes, 'sha1'),
+        );
+      }, 30_000);
+    },
+  );
+}

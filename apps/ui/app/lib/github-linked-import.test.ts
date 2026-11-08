@@ -1,7 +1,6 @@
 import { projectManifestSchemaUrl, serializeProjectManifest, projectToManifest } from '@taucad/types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type * as Revisions from '@taucad/revisions';
-import { bootstrapRemoteRevisionStore, largeObjectThresholdBytes } from '@taucad/revisions';
+import { largeObjectThresholdBytes } from '@taucad/revisions';
 import type * as GithubConnections from '#lib/github-connections.js';
 import { githubConnections } from '#lib/github-connections.js';
 import { prepareLinkedGithubImport, readLinkedGithubManifest } from '#lib/github-linked-import.js';
@@ -9,10 +8,6 @@ import { setRevisionSessionUser } from '#lib/revision-actor.js';
 
 vi.mock('#lib/github-connections.js', () => ({
   githubConnections: { token: vi.fn() },
-}));
-vi.mock('@taucad/revisions', async (importOriginal) => ({
-  ...(await importOriginal<typeof Revisions>()),
-  bootstrapRemoteRevisionStore: vi.fn(),
 }));
 
 const selection: Parameters<typeof prepareLinkedGithubImport>[0]['selection'] = {
@@ -86,12 +81,9 @@ describe('prepareLinkedGithubImport', () => {
 
   it('records the setup revision as the signed-in Tau person with the GitHub no-reply author (D33)', async () => {
     vi.mocked(githubConnections.token).mockResolvedValue({ accessToken: 't', expiresAt: '', generation: 4 });
-    vi.mocked(bootstrapRemoteRevisionStore).mockResolvedValue({
-      tree: { entries: () => [] },
-    } as unknown as Awaited<ReturnType<typeof bootstrapRemoteRevisionStore>>);
     setRevisionSessionUser({ id: 'tau-user-1' });
 
-    await prepareLinkedGithubImport({
+    const { request, generation } = await prepareLinkedGithubImport({
       selection: { ...selection, files: [] },
       targetBranch: 'main',
       manifest: new TextEncoder().encode('{}'),
@@ -99,11 +91,62 @@ describe('prepareLinkedGithubImport', () => {
     });
 
     const noreply = { name: 'octo', email: '1+octo@users.noreply.github.com' };
-    expect(vi.mocked(bootstrapRemoteRevisionStore).mock.calls[0]?.[0]).toMatchObject({
+    expect(generation).toBe(4);
+    expect(request).toMatchObject({
       author: noreply,
       setup: { provenance: { actorId: 'tau-user-1', actor: { kind: 'user', id: 'tau-user-1', ...noreply } } },
     });
     setRevisionSessionUser(undefined);
+  });
+
+  it('should describe the pinned branch for the worker to fetch, with a credential for that repository alone (I6)', async () => {
+    vi.mocked(githubConnections.token).mockResolvedValue({ accessToken: 't', expiresAt: '', generation: 4 });
+
+    const { request } = await prepareLinkedGithubImport({
+      selection,
+      targetBranch: 'tau-main',
+      manifest: new TextEncoder().encode('{}'),
+      mainFile: 'main.scad',
+    });
+
+    expect(request).toMatchObject({
+      name: 'octo/design',
+      origin: 'https://github.com',
+      repositoryUrl: 'https://github.com/octo/design.git',
+      authorization: `Basic ${globalThis.btoa('x-access-token:t')}`,
+      remote: {
+        name: 'github-3',
+        url: 'https://github.com/octo/design.git',
+        provider: 'github',
+        repositoryId: '3',
+        fetchOnly: false,
+      },
+      sourceRef: 'refs/heads/main',
+      sourceHead: 'a'.repeat(40),
+      targetBranch: 'tau-main',
+    });
+    /* The review's own setup, and nothing of the repository: the worker fetches that. */
+    expect(request.setup.files.map(({ path }) => path)).toEqual(['tau.json']);
+    expect(vi.mocked(githubConnections.token).mock.calls.at(-1)?.[1]).toEqual({
+      repositoryId: 3,
+      operation: 'read',
+      purpose: 'import',
+    });
+  });
+
+  it('should set up an empty repository with the main file and no source pin', async () => {
+    vi.mocked(githubConnections.token).mockResolvedValue({ accessToken: 't', expiresAt: '', generation: 4 });
+
+    const { request } = await prepareLinkedGithubImport({
+      selection: { ...selection, branch: { name: 'main' } },
+      targetBranch: 'main',
+      manifest: new TextEncoder().encode('{}'),
+      mainFile: 'main.scad',
+    });
+
+    expect(request.sourceRef).toBeUndefined();
+    expect(request.sourceHead).toBeUndefined();
+    expect(request.setup.files.map(({ path }) => path)).toEqual(['tau.json', 'main.scad']);
   });
 
   describe('a GitHub account removed before Import and link (R23)', () => {

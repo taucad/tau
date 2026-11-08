@@ -394,29 +394,42 @@ export const validatePolicyActivationNotice = (input: {
   const activeTerms = (policy: CommercialPolicy) =>
     policy.routes.flatMap((route) => {
       const resolved = resolvePolicyRoute(policy, route.sku);
+      const markupBps = route.markupBps ?? policy.markupBps;
       return resolved === undefined
         ? []
         : resolved.rates.map((rate) => ({
             sku: route.sku,
             term: `${rate.dimension}:${rate.tier ?? ''}:${rate.unit}`,
             rate,
+            markupBps,
           }));
     });
-  const previousRates = new Map(activeTerms(input.previous).map(({ sku, term, rate }) => [`${sku}:${term}`, rate]));
-  /* Q3 governs increases to terms customers already consume. A sku the previous policy never
-   * published is judged against its parent sku — `model:X:long-context` against the old `model:X`,
-   * which carried the premium rates the sibling now carries — so a tier split activates
-   * immediately while re-pointing a route at `model:X:v2` for more money still buys no notice. */
-  const hasIncrease = activeTerms(input.next).some(({ sku, term, rate }) => {
+  const previousRates = new Map(
+    activeTerms(input.previous).map(({ sku, term, rate, markupBps }) => [`${sku}:${term}`, { rate, markupBps }]),
+  );
+  /* Q3 governs increases to terms customers already consume, and only the part Tau sets itself.
+   * A third-party model price is passed through as the provider changes it (terms §3.2, operator
+   * decision 2026-11-07): a rise that comes only from `referenceNumeratorPicoUsd`, at the same or a
+   * lower markup and with no retail override on either side, activates immediately. A higher markup
+   * or a retail override is Tau's own price and still needs 30 days' notice. A sku the previous
+   * policy never published is judged against its parent sku — `model:X:long-context` against the
+   * old `model:X`, which carried the premium rates the sibling now carries — so a tier split
+   * activates immediately while re-pointing a route at `model:X:v2` at a higher markup still buys
+   * no notice. */
+  const hasIncrease = activeTerms(input.next).some(({ sku, term, rate, markupBps }) => {
     const parent = sku.lastIndexOf(':');
     const prior =
       previousRates.get(`${sku}:${term}`) ??
       (parent <= 0 ? undefined : previousRates.get(`${sku.slice(0, parent)}:${term}`));
-    return (
-      prior !== undefined &&
-      BigInt(rate.numeratorCreditAtoms) * BigInt(prior.publicDenominatorUnits) >
-        BigInt(prior.numeratorCreditAtoms) * BigInt(rate.publicDenominatorUnits)
-    );
+    if (prior === undefined) {
+      return false;
+    }
+    const retailIncreased =
+      BigInt(rate.numeratorCreditAtoms) * BigInt(prior.rate.publicDenominatorUnits) >
+      BigInt(prior.rate.numeratorCreditAtoms) * BigInt(rate.publicDenominatorUnits);
+    const upstreamPassThrough =
+      rate.retailOverride === null && prior.rate.retailOverride === null && markupBps <= prior.markupBps;
+    return retailIncreased && !upstreamPassThrough;
   });
   if (hasIncrease && input.effectiveAt.getTime() - input.announcedAt.getTime() < noticeDuration) {
     throw new Error('retail rate increase requires 30 days notice');

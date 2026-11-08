@@ -4,9 +4,17 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
-import { largeObjectThresholdBytes } from '#workspace-config.js';
+import {
+  generatedGitattributesContent,
+  generatedGitattributesPath,
+  largeObjectThresholdBytes,
+} from '#workspace-config.js';
+
 import { startGitHttpBackend } from '#test/git-http-backend.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
+
+/* Tau's block, so a cut adds a line for each file over the threshold (D16). */
+const tauAttributes = [generatedGitattributesPath, generatedGitattributesContent(undefined)] as const;
 
 const author = { name: 'Transfer test', email: 'transfer@example.com' };
 
@@ -52,7 +60,7 @@ if (delayed && !fs.existsSync(${JSON.stringify(release)})) {
   const bytes = new Uint8Array(largeObjectThresholdBytes + 1024).fill(73);
   const receipt = await source.writeRevision({
     parents: [],
-    tree: new ImmutableRevisionTree([['large.bin', bytes]]),
+    tree: new ImmutableRevisionTree([tauAttributes, ['large.bin', bytes]]),
     provenance: { source: 'user', actorId: 'test', createdAt: 1 },
     summary: { generated: 'Large file' },
   });

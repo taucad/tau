@@ -244,7 +244,7 @@ describe('TerminalPane', () => {
     expect(harness.options().fontSize).toBe(14);
     expect(harness.options().lineHeight).toBe(21);
     /* The jsdom environment resolves no tokens, so the theme falls back to black and gets the dark-background blending. */
-    expect(harness.options()).toMatchObject({ textBlending: 'linear-corrected', textWeight: 1.15 });
+    expect(harness.options()).toMatchObject({ textBlending: 'linear-corrected', textWeight: 1.15, fontWeight: 400 });
     expect(harness.view.focus).toHaveBeenCalled();
   });
 

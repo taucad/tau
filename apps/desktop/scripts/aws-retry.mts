@@ -13,11 +13,11 @@
 export const awsRetryOptions = ['--cli-read-timeout', '300', '--cli-connect-timeout', '60'] as const;
 
 export function awsRetryEnvironment(environment: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
   return {
     ...environment,
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names.
     AWS_RETRY_MODE: environment['AWS_RETRY_MODE'] ?? 'standard',
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names.
     AWS_MAX_ATTEMPTS: environment['AWS_MAX_ATTEMPTS'] ?? '5',
   };
-  /* eslint-enable @typescript-eslint/naming-convention */
 }

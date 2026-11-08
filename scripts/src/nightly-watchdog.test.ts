@@ -10,7 +10,9 @@ const weekly: ScheduledWorkflow = { file: 'docs-links.yml', name: 'Docs links', 
 const run = (createdAt: string, status: string, conclusion: string | undefined): ScheduledRun => ({
   status,
   conclusion,
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- GitHub REST field.
   created_at: createdAt,
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- GitHub REST field.
   html_url: 'https://github.com/taucad/tau/actions/runs/1',
 });
 

@@ -105,9 +105,11 @@ export type AlertPayload = {
 
 /** The Grafana IRM formatted-webhook payload for one day's problems. */
 export const alertPayload = (problems: readonly Verdict[], now: Date, runUrl: string): AlertPayload => ({
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Grafana IRM formatted-webhook field.
   alert_uid: `tau-nightly-${now.toISOString().slice(0, 10)}`,
   title: `${problems.length} Tau nightly workflow${problems.length === 1 ? '' : 's'} need attention`,
   state: 'alerting',
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Grafana IRM formatted-webhook field.
   link_to_upstream_details: runUrl,
   message: problems
     .map(

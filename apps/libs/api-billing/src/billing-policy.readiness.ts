@@ -5,6 +5,7 @@ import { qualifiedMeterContracts } from '#billing-policy.js';
 import type { FinancialEnvironment } from '#billing-policy.js';
 import { registerBillableModelMeterContracts } from '#billable-model-qualification.js';
 import { composeTariff, parseCommercialOverlay } from '#billing-policy.sync.js';
+import { BillingPolicyMissingError } from '#billing-policy.service.js';
 import type { BillingPolicyService } from '#billing-policy.service.js';
 
 /** The one repair for every state this check reports; `migrate` composes `sync` when cloud is on. */
@@ -41,12 +42,12 @@ export type BillingPolicyReadinessConfig = {
 };
 
 /**
- * Fails readiness in cloud mode when this environment has no effective tariff, and warns when the
- * effective one is not what this build would derive (D5).
+ * Reports, in cloud mode, an environment with no effective tariff, and warns when the effective one
+ * is not what this build would derive (D5).
  *
- * The missing-policy half mirrors `checkSchemaCompatibility` in `database.service.ts`: a replica
- * cannot publish, so it says which job does and stops. Staleness only warns, because reads now
- * degrade per route.
+ * A missing tariff logs `billing.tariff_missing` at error level and lets the replica boot: a replica
+ * cannot publish one, and refusing to boot took the whole API down for one billing gap. Staleness
+ * only warns, because reads degrade per route.
  *
  * ponytail: the unknown-route half of D5 is already `selectEffectivePolicy`'s own per-activation
  * warning (D9), which this read triggers; the only difference left to name here is the content hash,
@@ -68,19 +69,29 @@ export class BillingPolicyReadiness implements OnModuleInit {
     }
     registerBillableModelMeterContracts();
     const { environment } = this.config;
-    const effective = await this.policy
-      .selectEffectivePolicy({
+    let effective: Awaited<ReturnType<BillingPolicyService['selectEffectivePolicy']>>;
+    try {
+      effective = await this.policy.selectEffectivePolicy({
         environment,
         replica: { schemaVersion: 1, meterContractIds: [...qualifiedMeterContracts.keys()] },
-      })
-      .catch((error: unknown) => {
-        if (error instanceof Error && error.message === 'no effective billing policy') {
-          throw new Error(`No effective billing policy for ${environment}. ${billingPolicyMigrateHint}`, {
-            cause: error,
-          });
-        }
-        throw error;
       });
+    } catch (error) {
+      if (!(error instanceof BillingPolicyMissingError)) {
+        throw error;
+      }
+      /* Boot anyway. Refusing here crash-looped every prod-us replica when Tau Cloud was first turned
+       * on through Terraform, which restarts Machines without the migration job that publishes the
+       * tariff (incident 2026-11-06). Without a tariff only billing is unavailable: funded admissions
+       * deny with `policy_unavailable`, and the rest of the API keeps serving. */
+      this.#logger.error(
+        JSON.stringify({
+          event: 'billing.tariff_missing',
+          environment,
+          message: `No effective billing policy for ${environment}; billing is unavailable until one is published. ${billingPolicyMigrateHint}`,
+        }),
+      );
+      return;
+    }
     this.#logger.log(
       JSON.stringify({
         event: 'billing.tariff_observed',

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MockInstance } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { BillingPolicyReadiness, billingPolicyMigrateHint } from '#billing-policy.readiness.js';
+import { BillingPolicyMissingError } from '#billing-policy.service.js';
 import type { BillingPolicyService } from '#billing-policy.service.js';
 import { composeTariff, parseCommercialOverlay } from '#billing-policy.sync.js';
 import { registerBillableModelMeterContracts } from '#billable-model-qualification.js';
@@ -23,7 +24,7 @@ const effectiveOf = (policy: ReturnType<typeof composeTariff>) => ({
 
 /* Nest's own `Logger.warn` is typed `(message: any, ...optionalParams: any[])`; this check only ever
    passes it one JSON line, and narrowing it here keeps the assertions free of `any`. */
-const spyOnLogger = (method: 'warn' | 'log'): MockInstance<(message: string) => void> =>
+const spyOnLogger = (method: 'warn' | 'log' | 'error'): MockInstance<(message: string) => void> =>
   vi.spyOn(Logger.prototype, method).mockReturnValue() as unknown as MockInstance<(message: string) => void>;
 
 const readinessOf = (
@@ -49,14 +50,19 @@ describe('BillingPolicyReadiness', () => {
     vi.unstubAllEnvs();
   });
 
-  it('fails readiness with the migrate hint when the environment has no tariff', async () => {
+  it('boots without a tariff and logs the gap with the migrate hint', async () => {
+    const error = spyOnLogger('error');
+    const log = spyOnLogger('log');
     const readiness = readinessOf(async () => {
-      throw new Error('no effective billing policy');
+      throw new BillingPolicyMissingError();
     });
 
-    await expect(readiness.onModuleInit()).rejects.toThrow(
-      `No effective billing policy for development. ${billingPolicyMigrateHint}`,
-    );
+    await expect(readiness.onModuleInit()).resolves.toBeUndefined();
+    expect(error).toHaveBeenCalledTimes(1);
+    const line = JSON.parse(error.mock.calls[0]![0]) as { event: string; environment: string; message: string };
+    expect(line).toMatchObject({ event: 'billing.tariff_missing', environment: 'development' });
+    expect(line.message).toContain(billingPolicyMigrateHint);
+    expect(log).not.toHaveBeenCalled();
   });
 
   it('passes a connectivity failure through untouched rather than blaming the tariff', async () => {

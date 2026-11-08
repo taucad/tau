@@ -2062,16 +2062,15 @@ export class CreditLedgerService {
       from billing.credit_account a
       where a.environment = ${input.environment}
         and a.plan_atoms > a.plan_held_atoms
-        and exists (select from billing.subscription s where s.account_id = a.id)
-        and not exists (select from billing.subscription s where s.account_id = a.id and s.slot_state <> 'ended')
+        and exists (select from public.subscription s where s.account_id = a.id)
+        and not exists (select from public.subscription s where s.account_id = a.id and s.slot_state <> 'ended')
       order by a.id
       limit ${input.limit}
     `);
     let expired = 0;
     let expiredAtoms = 0n;
     for (const row of candidates) {
-      const accountId = z.object({ accountId: z.string() }).parse(row).accountId;
-      // oxlint-disable-next-line no-await-in-loop -- each account takes its own lock in its own transaction
+      const { accountId } = z.object({ accountId: z.string() }).parse(row);
       const atoms = await this.databaseService.database.transaction(async (tx) => {
         const account = await this.lockAccount(tx, accountId);
         const live = await tx

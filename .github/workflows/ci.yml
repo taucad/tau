@@ -59,6 +59,7 @@ jobs:
       browser: ${{ steps.plan.outputs.browser }}
       browser-projects: ${{ steps.plan.outputs.browser-projects }}
       standalone: ${{ steps.plan.outputs.standalone }}
+      reused: ${{ steps.queue.outputs.run-id }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -68,8 +69,18 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
 
+      # A push to `main` whose identical commit passed the merge queue reuses that
+      # verdict: the lanes below report the queue's result instead of running again.
+      - name: Find the merge-queue verdict for this commit
+        id: queue
+        uses: ./.github/actions/queue-verdict
+        with:
+          github-token: ${{ github.token }}
+
       - name: Compute affected lanes
         id: plan
+        env:
+          REUSED: ${{ steps.queue.outputs.run-id }}
         run: |
           # `pipefail` so a failing `nx show projects` fails the step instead of
           # leaving an empty output behind `tail`. `tail -1` keeps the JSON array
@@ -91,6 +102,13 @@ jobs:
           echo "Affected with a formal target: $formal"
           echo "Affected with a test-geospec target: $geospec_examples"
           echo "Affected standalone-oracle projects: $standalone"
+          # The queue run already ran the formal, browser and GeoSpec lanes on this tree.
+          if [ -n "$REUSED" ]; then
+            formal='[]'
+            browser='[]'
+            geospec_examples='[]'
+            echo "Reusing merge-queue run $REUSED: formal, browser and GeoSpec lanes skip."
+          fi
           {
             echo "browser-projects=$browser"
             echo "apps<<EOF"
@@ -110,17 +128,30 @@ jobs:
   # project names and tags, tsgo runtime references, quickstart budget, license
   # partitions, formatting, dead code, license deps, workflows). A new validator
   # joins by adding the target — this job never changes.
+  # A push to `main` whose identical commit passed the merge queue passes on that
+  # verdict (`queue-verdict`); it still reports, so `staging.yml` reads it.
   workspace:
     name: Validate workspace
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+      - name: Find the merge-queue verdict for this commit
+        id: queue
+        uses: ./.github/actions/queue-verdict
+        with:
+          github-token: ${{ github.token }}
+
       - name: Setup Nx Environment
+        if: steps.queue.outputs.run-id == ''
         uses: ./.github/actions/setup-nx
 
       - name: Run workspace validators
+        if: steps.queue.outputs.run-id == ''
         run: pnpm nx run scripts:validate
 
   # The affected tasks run as parallel lanes on separate standard runners: lint,
@@ -133,7 +164,8 @@ jobs:
     needs: [plan]
     # Not `always()`: that also ignores a cancel, so a superseded run kept this job
     # going for its full length and held the next run in the concurrency queue.
-    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+    # A push whose commit passed the merge queue reuses that run's lanes (`plan.outputs.reused`).
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.reused == '' }}
     runs-on: ubuntu-latest
     environment: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && 'nx-cloud-write' || null }}
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
@@ -335,8 +367,13 @@ jobs:
           BROWSER_RESULT: ${{ needs.browser.result }}
           GEOSPEC_EXAMPLES_REQUIRED: ${{ needs.plan.outputs.geospec-examples }}
           GEOSPEC_EXAMPLES_RESULT: ${{ needs.geospec-examples.result }}
+          REUSED: ${{ needs.plan.outputs.reused }}
         run: |
           test "$PLAN_RESULT" = success
+          if [ -n "$REUSED" ]; then
+            echo "Merge-queue run $REUSED passed every affected lane on this commit."
+            exit 0
+          fi
           test "$LANES_RESULT" = success
           if [ "$BROWSER_REQUIRED" = true ]; then test "$BROWSER_RESULT" = success; fi
           if [ "$GEOSPEC_EXAMPLES_REQUIRED" = true ]; then test "$GEOSPEC_EXAMPLES_RESULT" = success; fi

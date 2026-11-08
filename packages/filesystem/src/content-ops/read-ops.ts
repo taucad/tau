@@ -29,7 +29,14 @@ import type { PathPolicy } from '#types.js';
  *
  * @public
  */
-export type ContentExportFilter = Readonly<{ versionedOnly?: boolean }>;
+export type ContentExportFilter = Readonly<{
+  versionedOnly?: boolean;
+  /**
+   * The caller's byte ceiling for an archive ({@link ArchiveOptions.maxBytes});
+   * `contents` ignores it. The archive itself holds no ceiling of its own.
+   */
+  maxBytes?: number;
+}>;
 
 /** What {@link withReadContentOps} adds to a view. @public */
 export type ReadContentOps = {
@@ -88,7 +95,10 @@ export const withReadContentOps = <View extends ContentFileSystem>(
 
   return Object.assign(view, {
     archive: async (path: string, filter?: ContentExportFilter & Abortable): Promise<Blob> =>
-      archive(view, path, options(path, filter)),
+      archive(view, path, {
+        ...options(path, filter),
+        ...(filter?.maxBytes === undefined ? {} : { maxBytes: filter.maxBytes }),
+      }),
     contents: async (
       path: string,
       filter?: ContentExportFilter & Abortable,

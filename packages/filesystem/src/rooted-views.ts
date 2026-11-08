@@ -25,6 +25,7 @@
  */
 
 import type {
+  AuthorityCheckedFileWrite,
   CheckedFileWrite,
   CheckedFileWriteResult,
   FileWritePrecondition,
@@ -148,6 +149,13 @@ export type RootedPorcelain = {
   move(source: string, target: string): Promise<FileStat>;
   /** Move many paths sequentially, reporting each completed and failed edit. */
   bulkMove(edits: readonly BulkMoveEdit[]): Promise<BulkMoveResult>;
+  /**
+   * The checked write whose preconditions may name a digest (charter D17): the
+   * authority reads and hashes each named file under the write's locks, and
+   * answers the digest of what it wrote. `writeFileChecked` is the same call
+   * for byte preconditions only, as a provider's own checked write is typed.
+   */
+  writeFileCheckedDigest(input: AuthorityCheckedFileWrite): Promise<CheckedFileWriteResult>;
   /** Write many files of this root as one batch. */
   writeFiles(files: Record<string, { content: Uint8Array<ArrayBuffer> | string }>): Promise<void>;
   canMove(source: string, target: string): Promise<true | WorkspaceMutationError>;
@@ -528,7 +536,7 @@ export class RootedViews {
       const { authorityPath, resolution } = resolveLocal(path);
       await this._pipeline.writeFileResolved({ path: authorityPath, resolution, data, context: mutationContext });
     };
-    const writeFileChecked = async (input: CheckedFileWrite): Promise<CheckedFileWriteResult> => {
+    const writeFileChecked = async (input: AuthorityCheckedFileWrite): Promise<CheckedFileWriteResult> => {
       const target = resolveLocal(input.path);
       const preconditions = input.preconditions.map((precondition) => {
         const resolved = resolveLocal(precondition.path);
@@ -1118,6 +1126,7 @@ export class RootedViews {
       readFileStream,
       writeFile,
       writeFileChecked,
+      writeFileCheckedDigest: writeFileChecked,
       deleteFileChecked,
       appendFile,
       appendFileFenced,

@@ -1,11 +1,18 @@
 import type { ReactNode } from 'react';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useFileManager } from '#hooks/use-file-manager.js';
+import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
+import type { FlushPhase } from '#hooks/use-flush-on-close.js';
 import { useProject } from '#hooks/use-project.js';
 import { getRevisionClient } from '#hooks/use-revision-status.js';
 import { peekRevisionClient } from '#services/revision-client-registry.js';
 import { readLfsPointer } from '@taucad/revisions';
-import { EditorDocumentSession } from '#lib/editor-document-session.js';
+import {
+  EditorDocumentSession,
+  editorConflictRecordsSettled,
+  isRecordingEditorConflict,
+} from '#lib/editor-document-session.js';
+import { confirmFlush } from '#workbench-records/record-health.js';
 import type { EditorDocument } from '#lib/editor-document.js';
 import { clearEditorNavigation } from '#lib/editor-navigation-service.js';
 import type { EditorLanguageEnvironment, EditorNavigationTarget } from '#lib/editor-language-environment.js';
@@ -42,6 +49,19 @@ export function EditorDocumentSessionProvider({ children }: { readonly children:
     });
     // oxlint-disable-next-line react/set-state-in-effect -- a session subscribes to the project filesystem only after mount.
     setSession(next);
+    /* D17's flush points outside one pane: the window losing focus, the tab hidden
+     * or switched away from, and the page going away (which cannot await the write). */
+    const flush = (): void => {
+      next.flushSaves();
+    };
+    const flushWhenHidden = (): void => {
+      if (document.visibilityState === 'hidden') {
+        next.flushSaves();
+      }
+    };
+    globalThis.addEventListener('blur', flush);
+    globalThis.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', flushWhenHidden);
     editorRef.send({
       type: 'registerMaterialiseModel',
       materialiseModel: async (path: string) => {
@@ -49,12 +69,47 @@ export function EditorDocumentSessionProvider({ children }: { readonly children:
       },
     });
     return () => {
+      globalThis.removeEventListener('blur', flush);
+      globalThis.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', flushWhenHidden);
       editorRef.send({ type: 'registerMaterialiseModel', materialiseModel: undefined });
       next.dispose();
       clearEditorNavigation(projectId);
       setSession((current) => (current === next ? undefined : current));
     };
   }, [contentService, editorRef, fileManagerRef, projectId]);
+
+  /* The close cut is a producer's: text in its debounce window, every save
+   * already queued and every overlap being recorded beside its file is settled
+   * before the session takes the close revision (D17). Bounded like the other
+   * close flushers, so a save that never settles names itself instead of
+   * holding the quit. */
+  const flushEditorAtClose = useCallback(
+    async (phase: FlushPhase): Promise<void> => {
+      if (phase !== 'hidden' || !contentService) {
+        return;
+      }
+      /* A refusal the session is answering (a conflict recorded beside the
+       * file) settles on that answer, not as an unsaved edit. */
+      const settle = async (): Promise<void> =>
+        contentService.settleEditorSaves({
+          resolution: (failure): Promise<void> | undefined => session?.conflictResolution(failure),
+        });
+      await confirmFlush(async () => {
+        await settle();
+        /* A record that ends may save its rebased text, so the saves are settled again after it. */
+        while (isRecordingEditorConflict(projectId)) {
+          // oxlint-disable-next-line no-await-in-loop -- one round per record that started meanwhile.
+          await editorConflictRecordsSettled(projectId);
+          // oxlint-disable-next-line no-await-in-loop -- the record's own save, if it made one.
+          await settle();
+        }
+        return true;
+      }, 'Editor changes are not confirmed saved.');
+    },
+    [contentService, projectId, session],
+  );
+  useFlushOnClose(flushEditorAtClose, { stage: 'producer' });
 
   const fileManager = useMemo(
     () => ({

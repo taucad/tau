@@ -17,6 +17,7 @@ import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
+import { withAuthorityDigest } from '#lib/composed-view-client.fixture.js';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
 import { ProjectProvider, useProject } from '#hooks/use-project.js';
@@ -155,7 +156,7 @@ it('reloads the physical project manifest after held retry without accepting its
   const oldBytes = serializeProjectManifest(projectToManifest(project));
   await provider.writeFile('tau.json', oldBytes);
   const paths = new WorkspacePathResolver('/project');
-  const proxy = mock<ComposedViewClient>();
+  const proxy = withAuthorityDigest(mock<ComposedViewClient>());
   proxy.readFile.mockImplementation(async (path) => {
     const relative = paths.toRelativePath(path);
     if (relative === undefined) {

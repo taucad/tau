@@ -39,7 +39,7 @@ export async function installBillingProtections(client: postgres.Sql): Promise<v
     await transaction`GRANT INSERT ON billing.billing_stripe_customer, billing.billing_provider_leg,
       billing.stripe_event_inbox, billing.billing_stripe_source TO tau_billing_runtime`;
     await transaction`GRANT INSERT ON billing.billing_reload_consent, billing.billing_reload_work,
-      billing.billing_subscription_offer, billing.billing_account_closure, billing.billing_refund_intent,
+      billing.billing_subscription_offer, billing.billing_account_closure,
       billing.billing_cash_scan, billing.billing_cash_fact, billing.billing_cash_scan_fact, billing.billing_financial_case,
       billing.billing_tax_fact, billing.billing_recovery_notice, billing.billing_journal_checkpoint TO tau_billing_runtime`;
     await transaction`GRANT UPDATE (incremental_occurred_at, incremental_transaction_id, sweep_account_id,
@@ -54,8 +54,6 @@ export async function installBillingProtections(client: postgres.Sql): Promise<v
     await transaction`GRANT UPDATE (stripe_schedule_id, schedule_evidence, state, error_code, updated_at) ON billing.billing_subscription_offer TO tau_billing_runtime`;
     await transaction`GRANT UPDATE (state, generation, lease_until, next_attempt_at, attempt_count,
       auth_deleted_at, closed_at, attention_code, updated_at) ON billing.billing_account_closure TO tau_billing_runtime`;
-    await transaction`GRANT UPDATE (hold_state, state, confirmed_at, error_code, updated_at)
-      ON billing.billing_refund_intent TO tau_billing_runtime`;
     await transaction`GRANT UPDATE (balance_cursor, payment_intent_cursor, charge_cursor, refund_cursor,
       journal_cursor, fact_cursor, balance_done, payment_intent_done, charge_done, refund_done, journal_done, fact_done,
       state, generation, lease_until, attempts, next_attempt_at, error_code, completed_at)
@@ -469,12 +467,6 @@ export async function installBillingProtections(client: postgres.Sql): Promise<v
             OR (OLD.closed_at IS NOT NULL AND NEW.closed_at IS DISTINCT FROM OLD.closed_at)
             OR (OLD.state = 'closed' AND NEW.state <> 'closed')
           THEN RAISE EXCEPTION 'closure cannot erase completed evidence' USING ERRCODE = '23514'; END IF;
-        WHEN 'billing_refund_intent' THEN
-          mutable := ARRAY['hold_state','state','confirmed_at','error_code','updated_at'];
-          IF (OLD.hold_state <> 'held' AND NEW.hold_state <> OLD.hold_state)
-            OR (OLD.confirmed_at IS NOT NULL AND NEW.confirmed_at IS DISTINCT FROM OLD.confirmed_at)
-            OR (OLD.state IN ('succeeded','failed','canceled') AND NEW.state <> OLD.state)
-          THEN RAISE EXCEPTION 'refund disposition cannot regress' USING ERRCODE = '23514'; END IF;
         WHEN 'billing_cash_scan' THEN
           mutable := ARRAY['balance_cursor','payment_intent_cursor','charge_cursor','refund_cursor','journal_cursor','fact_cursor',
             'balance_done','payment_intent_done','charge_done','refund_done','journal_done','fact_done','state','generation',
@@ -526,7 +518,6 @@ export async function installBillingProtections(client: postgres.Sql): Promise<v
         'billing_reload_work',
         'billing_subscription_offer',
         'billing_account_closure',
-        'billing_refund_intent',
         'billing_cash_scan',
         'billing_financial_case',
         'billing_recovery_notice',

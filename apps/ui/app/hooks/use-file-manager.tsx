@@ -303,7 +303,18 @@ type FileManagerContextType = {
    * for a bootstrap outside this FM's root (mount-write-unmount transactions).
    */
   writeFiles: (files: Record<string, { content: Uint8Array<ArrayBuffer> }>) => Promise<void>;
+  /**
+   * Text bytes through the editor's content cache: refuses a binary file or one
+   * past the open-time limit. A caller that wants a file's bytes as they are
+   * (an export, an artifact, an agent read) uses `readRawBytes`.
+   */
   readFile: (path: string) => Promise<Uint8Array<ArrayBuffer>>;
+  /**
+   * A file's bytes as they are, text or binary (charter D17, L3 D-3), up to
+   * `sizeLimit` (the open-time limit when omitted). An incidental read: it
+   * never enters or reorders the editor's content cache.
+   */
+  readRawBytes: (path: string, options?: { sizeLimit?: number }) => Promise<Uint8Array<ArrayBuffer>>;
   renameFile: (oldPath: string, newPath: string) => Promise<void>;
   /**
    * Move a file or directory through the per-FM `FileContentService` cache.
@@ -1172,6 +1183,14 @@ function FileManagerProviderCore({
     [whenServicesReady],
   );
 
+  const readRawBytes = useCallback(
+    async (path: string, options?: { sizeLimit?: number }): Promise<Uint8Array<ArrayBuffer>> => {
+      const { contentService } = await whenServicesReady();
+      return contentService.readRawBytes(path, options);
+    },
+    [whenServicesReady],
+  );
+
   const renameFile = useCallback(
     async (oldPath: string, newPath: string): Promise<void> => {
       if (oldPath === newPath) {
@@ -1520,6 +1539,7 @@ function FileManagerProviderCore({
       writeFile,
       writeFiles,
       readFile,
+      readRawBytes,
       renameFile,
       moveFile,
       bulkMove,
@@ -1563,6 +1583,7 @@ function FileManagerProviderCore({
       writeFile,
       writeFiles,
       readFile,
+      readRawBytes,
       renameFile,
       moveFile,
       bulkMove,

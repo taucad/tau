@@ -9,6 +9,7 @@
 import { vi } from 'vitest';
 import type { Mock } from 'vitest';
 import { Topic } from '@taucad/events';
+import { FileTooLargeError } from '@taucad/fs-client/file-content-errors';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import type { CapabilitiesManifest, ExportResult } from '@taucad/runtime';
 import { createMockRuntimeDocument } from '@taucad/runtime-testing';
@@ -227,10 +228,20 @@ export const fileManagerMock = {
     writeFiles: typeof mockWriteFiles;
     exists: ProjectFilesSeam['parameterFiles']['exists'];
     readFile: ProjectFilesSeam['parameterFiles']['readFile'];
+    readRawBytes: (path: string, options?: { sizeLimit?: number }) => Promise<Uint8Array<ArrayBuffer>>;
   } & ProjectFilesSeam => ({
     writeFiles: mockWriteFiles,
     exists: projectFiles.fileManager.parameterFiles.exists,
     readFile: projectFiles.fileManager.parameterFiles.readFile,
+    /* Raw bytes past the editor cache (D17), refused past `sizeLimit` as the content service refuses them. */
+    async readRawBytes(path, options) {
+      const data = await projectFiles.fileManager.parameterFiles.readFile(path);
+      const limit = options?.sizeLimit;
+      if (limit !== undefined && data.byteLength > limit) {
+        throw new FileTooLargeError(`${path} is past ${limit} bytes`, { path, size: data.byteLength, limit });
+      }
+      return data;
+    },
     ...projectFiles.fileManager,
   }),
 };

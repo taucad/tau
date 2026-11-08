@@ -1,5 +1,16 @@
-import { chatComposerPaddingClassName } from '#components/chat/chat-input-styles.js';
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef } from 'react';
+import {
+  chatComposerAddTriggerClassName,
+  chatComposerBarClassName,
+  chatComposerBarLeftClassName,
+  chatComposerBarRightClassName,
+  chatComposerCollapseTransitionClassName,
+  chatComposerCollapsibleControlsClassName,
+  chatComposerEditorAreaClassName,
+  chatComposerFrameClassName,
+  chatComposerMainEditorAreaClassName,
+  chatComposerShellClassName,
+} from '#components/chat/chat-input-styles.js';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import type { Editor } from '@tiptap/core';
 import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
@@ -463,6 +474,7 @@ export const ChatTextareaDesktop = memo(function ({
     };
   }, [addContextChipsRef, addContextReferencesRef, insertContextReferences]);
 
+  const [isFocusHandoverPending, setIsFocusHandoverPending] = useState(earlyInput?.focused === true);
   useEffect(() => {
     if (
       !editor ||
@@ -475,6 +487,7 @@ export const ChatTextareaDesktop = memo(function ({
     // Rehydration installs the draft in a microtask. Focus after it so opening
     // a history message keeps its first line visible instead of scrolling to the end.
     const frame = requestAnimationFrame(() => {
+      setIsFocusHandoverPending(false);
       if (!editor.isDestroyed) {
         if (earlyInput && document.activeElement !== document.body && document.activeElement !== editor.view.dom) {
           return;
@@ -572,20 +585,18 @@ export const ChatTextareaDesktop = memo(function ({
     // and intentionally takes NO `className` passthrough — see
     // ChatTextareaBorderBeam's docs for why. All layout / styling
     // overrides live on the inner border container below.
-    <div className='@container/composer relative w-full' data-chat-composer={mode}>
+    <div className={chatComposerShellClassName} data-chat-composer={mode}>
       <ChatTextareaBorderBeam isActive={isSubmitting} className={radius} />
 
       <div
         ref={containerReference}
         className={cn(
-          'group/chat-textarea @container',
-          'relative flex w-full flex-col border border-border/60 bg-background',
-          chatComposerPaddingClassName,
+          chatComposerFrameClassName,
           radius,
           collapse.composer,
-          'cursor-text overflow-hidden',
-          'shadow-sm',
           'has-[.tiptap:focus-visible]:focus-outline',
+          /* Home's native input held focus until this replaced it: keep its outline until the editor takes focus. */
+          isFocusHandoverPending && 'focus-outline',
           className,
         )}
         data-collapsed={isCollapsed ? '' : undefined}
@@ -618,8 +629,8 @@ export const ChatTextareaDesktop = memo(function ({
         {/* Editor */}
         <div
           className={cn(
-            'max-h-48 min-w-0 overflow-y-auto overscroll-contain',
-            mode === 'main' && 'max-h-[min(12rem,30cqh)]',
+            chatComposerEditorAreaClassName,
+            mode === 'main' && chatComposerMainEditorAreaClassName,
             collapse.editor,
           )}
           onClick={handleEditorAreaClick}
@@ -677,13 +688,6 @@ export const ChatTextareaDesktop = memo(function ({
 
 ChatTextareaDesktop.displayName = 'ChatTextareaDesktop';
 
-/* The collapsed composer (mobile-width surfaces): one row. The editor makes
- * room for + on the left and dictation and Send on the right; the bar rises
- * onto the editor's line, and every other control fades out in place, keeping
- * its width so the bar's measured collapse (D6) never re-runs. */
-const collapseTransition =
-  'transition-[padding,margin,border-radius,corner-shape,opacity,visibility] duration-200 ease-out motion-reduce:transition-none';
-
 /**
  * A collapsible composer's own classes: the box's corners, and the editor's
  * room for + on the left and for dictation (when offered) and Send on the right.
@@ -701,14 +705,14 @@ const collapsibleClassNames = (
   isCollapsible === true
     ? {
         composer: cn(
-          collapseTransition,
+          chatComposerCollapseTransitionClassName,
           // Half the Send diameter + its inset + the border. A finite radius interpolates without pill clamping.
           '[corner-shape:superellipse(1.5)] @max-[768px]/composer:data-[collapsed]:rounded-[calc(var(--spacing)*5.5+1px)] @max-[768px]/composer:data-[collapsed]:[corner-shape:round] @max-[768px]/composer:data-[collapsed]:pt-2.5',
         ),
         editor: cn(
-          collapseTransition,
+          chatComposerCollapseTransitionClassName,
           // Under a coarse pointer the row also clears the controls' 6px touch rings, so a tap at the
-          // editor's edge reaches the editor, not + or dictation (see `composerTouchTargetsClassName`).
+          // editor's edge reaches the editor, not + or dictation (see `chatComposerBarClassName`).
           '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pl-7 pointer-coarse:@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pl-8.5',
           '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:max-h-6 @max-[768px]/composer:group-data-[collapsed]/chat-textarea:overflow-hidden',
           hasDictation === true
@@ -717,34 +721,13 @@ const collapsibleClassNames = (
             : '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pr-7 pointer-coarse:@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pr-8.5',
         ),
         editorContent: cn(
-          collapseTransition,
+          chatComposerCollapseTransitionClassName,
           '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:[&_.tiptap]:overflow-hidden',
           // Match the collapsed editor's 24px box on fine pointers as well as touch devices.
           '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pb-0 @max-[768px]/composer:group-data-[collapsed]/chat-textarea:leading-6',
         ),
       }
     : {};
-
-/** The bar, risen onto the editor's line; taps between its controls reach the editor. */
-const collapsedBarClassName = cn(
-  collapseTransition,
-  '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:-mt-6.5 @max-[768px]/composer:group-data-[collapsed]/chat-textarea:pointer-events-none',
-);
-
-/** Controls a collapsed composer hides: every one but +, dictation and Send. */
-const collapsibleControlsClassName = cn(
-  collapseTransition,
-  'flex min-w-0 flex-row items-center empty:hidden',
-  '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:invisible @max-[768px]/composer:group-data-[collapsed]/chat-textarea:opacity-0',
-);
-
-/**
- * Touch targets (I3). The bar keeps its 28px controls, so the composer keeps its
- * geometry, but under a coarse pointer each control's hit area reaches 40px and
- * the controls sit 12px apart, so neighbouring hit areas meet without overlapping.
- */
-const composerTouchTargetsClassName =
-  "pointer-coarse:gap-3 pointer-coarse:[&_button]:relative pointer-coarse:[&_button]:after:absolute pointer-coarse:[&_button]:after:-inset-1.5 pointer-coarse:[&_button]:after:content-['']";
 
 /** Keyboard hints are for keyboards (I7). */
 const keyboardHintClassName = 'pointer-coarse:hidden';
@@ -898,19 +881,8 @@ export const ChatTextareaBar = memo(function ({
   );
 
   return (
-    <div
-      ref={barRef}
-      data-slot='composer-bar'
-      className={cn(
-        'group/bar flex items-center justify-between gap-2 px-2',
-        composerTouchTargetsClassName,
-        collapsedBarClassName,
-      )}
-    >
-      <div
-        data-slot='composer-left'
-        className='pointer-events-auto flex shrink-0 flex-row items-center gap-0.5 pointer-coarse:gap-3'
-      >
+    <div ref={barRef} data-slot='composer-bar' className={chatComposerBarClassName}>
+      <div data-slot='composer-left' className={chatComposerBarLeftClassName}>
         <ChatAddMenu
           enableContextActions={enableContextActions}
           isAttachmentSupported={attachmentInputSupported}
@@ -920,7 +892,7 @@ export const ChatTextareaBar = memo(function ({
         />
         <div
           data-slot='composer-collapsible'
-          className={cn(collapsibleControlsClassName, 'gap-0.5 pointer-coarse:gap-3')}
+          className={cn(chatComposerCollapsibleControlsClassName, 'gap-0.5 pointer-coarse:gap-3')}
         >
           <ChatAgentModeControl agentConfig={agentConfig} focusEditor={focusEditor} enableShortcut={ownsShortcuts} />
           {creationLocationControl}
@@ -935,13 +907,10 @@ export const ChatTextareaBar = memo(function ({
           onChange={handleFileChange}
         />
       </div>
-      <div
-        data-slot='composer-right'
-        className='pointer-events-auto flex min-w-0 flex-row items-center gap-1 pointer-coarse:gap-3'
-      >
+      <div data-slot='composer-right' className={chatComposerBarRightClassName}>
         <div
           data-slot='composer-collapsible'
-          className={cn(collapsibleControlsClassName, 'gap-1 pointer-coarse:gap-3')}
+          className={cn(chatComposerCollapsibleControlsClassName, 'gap-1 pointer-coarse:gap-3')}
         >
           <ChatContextIndicator />
           <ChatAgentSheet
@@ -1032,7 +1001,7 @@ function ChatAddMenu({
               size='sm'
               data-chat-textarea-focustrap
               aria-label='Add'
-              className={cn(ghostPillClass, 'w-7 shrink-0 px-0')}
+              className={chatComposerAddTriggerClassName}
             >
               <Plus className='size-4' aria-hidden='true' />
             </Button>

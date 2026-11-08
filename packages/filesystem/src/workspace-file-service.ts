@@ -1,6 +1,6 @@
 import { projectIdSchema } from '@taucad/types';
 import type {
-  CheckedFileWrite,
+  AuthorityCheckedFileWrite,
   CheckedFileWriteResult,
   FileWritePrecondition,
   FileStat,
@@ -441,7 +441,7 @@ export class WorkspaceFileService {
 
   /** Check current bytes and replace one file inside the canonical mutation fence. */
   public async writeFileChecked(
-    input: CheckedFileWrite,
+    input: AuthorityCheckedFileWrite,
     context?: WorkspaceMutationContext,
   ): Promise<CheckedFileWriteResult> {
     const path = resolveAuthorityPath(input.path);
@@ -865,13 +865,15 @@ export class WorkspaceFileService {
    * them.
    *
    * @param path    - Absolute directory path.
-   * @param options - The `{ scope }` discriminator; a routed path has a view to serve it instead.
+   * @param options - The `{ scope }` discriminator (a routed path has a view to
+   *   serve it instead), and the caller's byte ceiling, when it wants one.
    * @returns ZIP archive as a `Blob`.
    */
-  public async getZippedDirectory(path: string, options: { scope: WorkspaceScope }): Promise<Blob> {
+  public async getZippedDirectory(path: string, options: { scope: WorkspaceScope; maxBytes?: number }): Promise<Blob> {
     const { provider, path: resolvedPath } = await this._resolve(path, options);
     return archive(provider, resolvedPath, {
       admits: (relativePath) => this._policy?.classify(relativePath).agentAccess !== 'hidden',
+      ...(options.maxBytes === undefined ? {} : { maxBytes: options.maxBytes }),
     });
   }
 

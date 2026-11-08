@@ -5,11 +5,10 @@ import ollama from 'ollama';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { ToolName } from '@taucad/chat';
 import { filterProviderFacingToolNamesByModelSupport } from '@taucad/chat/schemas';
+import type { Model, ModelFamily, ModelProviderKind, ModelSupport, ProviderId } from '@taucad/chat/model-catalog';
 import type { ChatUsageCost, ChatUsageTokens } from '#chat.schema.js';
 import type { Environment } from '@taucad/api-core';
-import type { ModelFamily, ProviderId } from '#providers/provider.schema.js';
 import { ProviderService } from '#providers/provider.service.js';
-import type { Model, ModelProviderKind, ModelSupport } from '#models/model.schema.js';
 import {
   assertSingleDefaultModel,
   isModelListEntryEnabled,

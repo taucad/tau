@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { convertMessagesToResponsesInput } from '@langchain/openai';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
-import { modelFamilySchema, providerIdSchema } from '#providers/provider.schema.js';
+import { modelFamilySchema, providerIdSchema } from '@taucad/chat/model-catalog';
 
 /**
  * Regression test for @langchain/openai Responses API converter.

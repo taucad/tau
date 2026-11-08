@@ -120,6 +120,15 @@ describe('tau-maintenance image (DC4)', () => {
     expect(listeningPackages.filter((name) => graph.packages.has(name))).toEqual([]);
   });
 
+  it('should reach no billing module', () => {
+    // The maintenance entry names billing only in type imports, which are erased before run time.
+    const graph = moduleGraph(maintenanceImageEntry());
+    const billing = [...graph.modules].filter((module) => module.startsWith('../libs/api-billing/'));
+
+    expect(graph.modules.size).toBeGreaterThan(0);
+    expect(billing.map((module) => importChain(graph, module))).toEqual([]);
+  });
+
   describe('when the command module loads', () => {
     const { argv } = process;
 

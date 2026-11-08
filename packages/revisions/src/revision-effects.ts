@@ -219,6 +219,15 @@ import type {
 import type { TurnAttemptKey, TurnCutOf, TurnLease as TurnLeaseRecord } from '#turn.types.js';
 
 import type { RevisionActorsOptions, RevisionFileSystem, UseCheckoutFileSystem } from '#revision-effects.types.js';
+import { coveredByIgnoreListing } from '#git-ignore.js';
+
+/** One checkout's own Git ignore rules, as its port answers them. */
+type CaptureIgnores = Readonly<{
+  /** What the rules read besides `.gitignore` files; `undefined` where the port cannot say, so every capture lists them whole. */
+  context: string | undefined;
+  /** The ignored paths, all of them or only those covering `paths`. */
+  list: (paths?: readonly string[]) => Promise<readonly string[] | undefined>;
+}>;
 
 /* oxlint-disable no-barrel-files/no-barrel-files -- Preserve the published revision-effects contract names. */
 export type {
@@ -963,11 +972,18 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     /**
      * Where the checkout's index stood when `last` was observed (S10): its
      * epoch and generation, read before the capture began, the clock reading
-     * its racy guard keys on (EQ7) and the ignored paths it left out. A capture
-     * whose ignored paths and inherited modes agree starts from `last` and
-     * reads only what the D5 compare and the index changed and removed since.
+     * its racy guard keys on (EQ7). A capture whose ignore rules and
+     * inherited modes agree starts from `last` and reads only what the D5
+     * compare and the index changed and removed since.
      */
-    cursor: Readonly<{ epoch: string; generation: number; observedAt: number; ignored: string }> | undefined;
+    cursor: Readonly<{ epoch: string; generation: number; observedAt: number }> | undefined;
+    /**
+     * The ignored paths `last` left out, and what they were read under: the
+     * ignore context, or the listing itself where the port gives no context.
+     * While the context holds and no `.gitignore` changed, a capture asks only
+     * about the paths it reads and keeps the rest of this listing.
+     */
+    ignore: Readonly<{ key: string; listing: ReadonlySet<string> }> | undefined;
   };
   const checkoutMemos = new Map<string, CheckoutMemos>();
   const memosOf = (checkoutId: string): CheckoutMemos => {
@@ -979,6 +995,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       basis: undefined,
       comparing: undefined,
       cursor: undefined,
+      ignore: undefined,
     };
     checkoutMemos.set(checkoutId, memos);
     return memos;
@@ -1459,44 +1476,83 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       memos: CheckoutMemos;
       bypassMemo: boolean;
       changed?: Readonly<{ paths: readonly string[] | undefined }>;
-      /** Untracked paths the checkout's own Git ignore rules exclude. */
-      ignored?: ReadonlySet<string> | undefined;
+      /** The checkout's own Git ignore rules, as its port answers them. */
+      ignores?: CaptureIgnores | undefined;
       /** A comparison a newer write has made stale: the walk stops rather than finish for nobody. */
       signal?: AbortSignal | undefined;
     }>,
   ): Promise<ImmutableRevisionTree> => {
-    const { memos, bypassMemo, changed, ignored, signal } = captureOptions;
+    const { memos, bypassMemo, changed, ignores, signal } = captureOptions;
     const started = ++captureSequence;
+    /* The ignored paths this capture leaves out, and what they were read under (`CheckoutMemos.ignore`). */
+    let ignored: ReadonlySet<string> = new Set();
+    let ignoreKey = ignores === undefined ? '' : undefined;
+    let listedWhole = ignores === undefined;
     /* Git lists an ignored directory with its trailing `/`. A walk never
      * descends into one, but the index names a changed path by itself, so a
      * path under a listed directory is left out too. */
-    const isIgnored = (path: string): boolean => {
-      if (ignored === undefined || ignored.size === 0) {
-        return false;
+    const exclude = (path: string): boolean =>
+      !policy.classify(path).versioned || coveredByIgnoreListing(ignored, path);
+    const contextKey = ignores?.context === undefined ? undefined : `context:${ignores.context}`;
+    /* The whole listing: what a walk leaves out, and where the captures after it start. */
+    const listWhole = async (): Promise<void> => {
+      if (listedWhole) {
+        return;
       }
-      if (ignored.has(path) || ignored.has(`${path}/`)) {
+      const listing = new Set((await ignores?.list()) ?? []);
+      ignored = listing;
+      /* Without a context, the listing is its own key; only an entry that changes what is captured moves
+       * it, so a new generated output the registry never versions still lets the next capture start from `last`. */
+      ignoreKey =
+        contextKey ??
+        `listing:${[...listing]
+          .filter((path) => path.endsWith('/') || policy.classify(path).versioned)
+          .toSorted()
+          .join('\n')}`;
+      listedWhole = true;
+    };
+    /* The listing `last` was captured under, while it still speaks for the files. */
+    const held = contextKey !== undefined && memos.ignore?.key === contextKey ? memos.ignore.listing : undefined;
+    /*
+     * Keep the held listing current for the paths this capture reads: each is
+     * asked again (a head move can track a file inside a directory Git listed
+     * whole, so a listed directory above it is asked again too), and a removed
+     * one is forgotten. A changed `.gitignore` changes what every path under it
+     * answers, so it walks instead: `false`.
+     */
+    const askAgain = async (paths: Iterable<string>, removed: ReadonlySet<string>): Promise<boolean> => {
+      if (ignores === undefined) {
         return true;
       }
-      for (let slash = path.indexOf('/'); slash !== -1; slash = path.indexOf('/', slash + 1)) {
-        if (ignored.has(path.slice(0, slash + 1))) {
-          return true;
+      if (held === undefined || contextKey === undefined) {
+        await listWhole();
+        return true;
+      }
+      const named = [...paths];
+      if (named.some((path) => /(?:^|\/)\.gitignore$/iu.test(path))) {
+        return false;
+      }
+      const listing = new Set(held);
+      const asked = named.filter((path) => !removed.has(path) && policy.classify(path).versioned);
+      for (const path of named) {
+        listing.delete(path);
+        listing.delete(`${path}/`);
+      }
+      for (const path of asked) {
+        for (let at = path.indexOf('/'); at !== -1; at = path.indexOf('/', at + 1)) {
+          listing.delete(path.slice(0, at + 1));
         }
       }
-      return false;
+      for (const entry of asked.length === 0 ? [] : ((await ignores.list(asked)) ?? [])) {
+        listing.add(entry);
+      }
+      ignored = listing;
+      ignoreKey = contextKey;
+      return true;
     };
-    const exclude = (path: string): boolean => !policy.classify(path).versioned || isIgnored(path);
-    /* Only an entry that changes what is captured moves the key: a file the
-     * registry never versions is left out whether Git ignores it or not, so a
-     * new generated output still lets the next capture start from `last`. */
-    const ignoredKey =
-      ignored === undefined
-        ? ''
-        : [...ignored]
-            .filter((path) => path.endsWith('/') || policy.classify(path).versioned)
-            .toSorted()
-            .join('\n');
     let cursor: CheckoutMemos['cursor'];
     const walk = async (): Promise<ImmutableRevisionTree> => {
+      await listWhole();
       /* Where the index stands, read before anything else, so a write this walk races is named next time.
        * A generation past any it issued answers `rescan` at once, with where it stands. */
       const at = await rooted.changedSince?.(Number.MAX_SAFE_INTEGER).catch(() => undefined);
@@ -1515,7 +1571,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       cursor =
         at === undefined || stats === undefined
           ? undefined
-          : { epoch: at.epoch, generation: at.generation, observedAt, ignored: ignoredKey };
+          : { epoch: at.epoch, generation: at.generation, observedAt };
       const read = new Map<string, Uint8Array<ArrayBuffer>>();
       const captured = await captureRevisionTree(rooted, {
         exclude,
@@ -1540,14 +1596,29 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         bypassMemo ||
         last === undefined ||
         previous === undefined ||
-        previous.ignored !== ignoredKey ||
         compareIndex === undefined ||
         changedSince === undefined ||
         statTree === undefined
       ) {
         return walk();
       }
+      if (ignores !== undefined) {
+        if (contextKey === undefined) {
+          /* A port with no context is listed whole each time, and a capture under another listing walks. */
+          await listWhole();
+          if (memos.ignore?.key !== ignoreKey) {
+            return walk();
+          }
+        } else if (held === undefined) {
+          return walk();
+        } else {
+          ignored = held;
+        }
+      }
       const admits = (path: string): boolean => !exclude(path);
+      /* Every change the registry versions is named, one under a directory Git listed whole too: a head
+       * move can track a file there, and only asking again tells. */
+      const versioned = (path: string): boolean => policy.classify(path).versioned;
       const observedAt = clock();
       let found: Readonly<{ changes: IndexChanges; racy: readonly string[]; stats: readonly FileStatEntry[] }>;
       try {
@@ -1557,7 +1628,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         signal?.throwIfAborted();
         const changes = await changedSince.call(rooted, previous.generation, {
           epoch: previous.epoch,
-          admits,
+          admits: versioned,
           ...(signal === undefined ? {} : { signal }),
         });
         signal?.throwIfAborted();
@@ -1605,7 +1676,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         });
         signal?.throwIfAborted();
       }
-      cursor = { epoch: changes.epoch, generation: changes.generation, observedAt, ignored: ignoredKey };
+      if (!(await askAgain(paths, new Set(changes.removed.map(({ path }) => path))))) {
+        return walk();
+      }
+      cursor = { epoch: changes.epoch, generation: changes.generation, observedAt };
       return captureRevisionTree(rooted, {
         exclude,
         inheritedMode: (path) => basis?.mode(path),
@@ -1613,17 +1687,20 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         ...(signal === undefined ? {} : { signal }),
       });
     };
-    const tree =
-      since === undefined || changed?.paths === undefined
-        ? await fromIndex()
-        : /* `last` carries the modes it inherited, and a moved head empties
+    /* A complete feed names the paths: only they are asked about, unless an ignore rule changed, which walks. */
+    const fromFeed = async (from: ImmutableRevisionTree, paths: readonly string[]): Promise<ImmutableRevisionTree> =>
+      (await askAgain(paths, new Set()))
+        ? /* `last` carries the modes it inherited, and a moved head empties
            * the paths, so it is still the head's (I6). */
-          await captureRevisionTree(rooted, {
+          captureRevisionTree(rooted, {
             exclude,
-            inheritedMode: (path) => since.mode(path),
-            changedSince: { tree: since, paths: changed.paths },
+            inheritedMode: (path) => from.mode(path),
+            changedSince: { tree: from, paths },
             ...(signal === undefined ? {} : { signal }),
-          });
+          })
+        : walk();
+    const tree =
+      since === undefined || changed?.paths === undefined ? await fromIndex() : await fromFeed(since, changed.paths);
     const collisions = caseCollisions(tree);
     if (collisions.length > 0) {
       throw new RevisionPortError(
@@ -1636,6 +1713,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     if ((options.completeChanges === true || cursor !== undefined) && started > memos.lastCapture) {
       memos.lastCapture = started;
       memos.last = heldTree(tree);
+      memos.ignore =
+        memos.last === undefined || ignoreKey === undefined ? undefined : { key: ignoreKey, listing: ignored };
       if (cursor !== undefined || since === undefined) {
         memos.cursor = memos.last === undefined ? undefined : cursor;
       }
@@ -1678,13 +1757,20 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       }
       const { modeBasis, bypassMemo, changed, signal } = captureOptions;
       const memos = memosOf(place.id);
-      const ignored = await port.ignoredPaths?.(place.kind === 'live' ? undefined : place.root);
+      const ignoreRoot = place.kind === 'live' ? undefined : place.root;
+      const ignores: CaptureIgnores | undefined =
+        port.ignoredPaths === undefined
+          ? undefined
+          : {
+              context: await port.ignoreContext?.(ignoreRoot),
+              list: async (paths) => port.ignoredPaths?.(ignoreRoot, paths),
+            };
       return captureFileSystem(rooted, async () => modeBasis ?? headBasis(place, memos), {
         memos,
         bypassMemo,
         signal,
         ...(changed === undefined ? {} : { changed }),
-        ...(ignored === undefined ? {} : { ignored: new Set(ignored) }),
+        ...(ignores === undefined ? {} : { ignores }),
       });
     });
   /* The tree id of one checkout's capture, through that checkout's warm memo (E3). */

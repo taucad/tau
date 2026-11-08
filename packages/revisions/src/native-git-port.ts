@@ -215,6 +215,8 @@ const stagingRefPrefix = 'refs/tau/transactions/port';
 const initialBranch = 'main';
 /** The store this port owns, relative to the project directory. */
 const gitDirectoryName = '.git';
+/* Paths per `ls-files` when only named paths are asked: well inside any platform's command-line limit. */
+const ignorePathspecBatch = 512;
 const liveCheckoutId = 'live';
 /**
  * Configuration this port pins on every command, ahead of the subcommand.
@@ -1547,6 +1549,21 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     return ignoreCase;
   };
 
+  /* The store's own `core.ignoreCase`, never a device's (`--local`): what the browser leg reads too, so the
+   * ignore rules fold case alike on both legs. `init` forgets it with `ignoreCase`. */
+  let localIgnoreCase: Promise<boolean> | undefined;
+  const storeIgnoresCase = async (): Promise<boolean> => {
+    localIgnoreCase ??= (async () => {
+      try {
+        const result = await run(['config', '--local', '--bool', 'core.ignoreCase']);
+        return result.exitCode === 0 && textDecoder.decode(result.stdout).trim() === 'true';
+      } catch {
+        return false;
+      }
+    })();
+    return localIgnoreCase;
+  };
+
   /**
    * Every named blob, in one `cat-file --batch` (rule 20's `readTree` cost).
    *
@@ -2032,6 +2049,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       /* The store exists now: the next question reads the disk again, and reaches the answer a second session would. */
       opened = undefined;
       ignoreCase = undefined;
+      localIgnoreCase = undefined;
     }
     /* Tau's derived-content ignores go where stock Git reads them and no
      * revision records them, in every store, so the records Tau keeps under
@@ -2108,14 +2126,22 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     init: async (input: InitRevisionStoreInput): Promise<void> =>
       refQueue.queueFor(`${repositoryPath}:init`, async () => initStore(input)),
 
-    ignoredPaths: async (root?: string): Promise<readonly string[] | undefined> => {
+    ignoredPaths: async (root?: string, paths?: readonly string[]): Promise<readonly string[] | undefined> => {
       /* Git's own answer, on every repository: the checkout's nested ignore
        * files and the store's `info/exclude`. Never `core.excludesFile`,
-       * which is per device and which the browser leg cannot read, so both
-       * legs leave the same untracked paths out of a cut (I5). */
+       * which is per device and which the browser leg cannot read, and the
+       * store's own `core.ignoreCase` rather than a device's, so both legs
+       * leave the same untracked paths out of a cut (I5). Named paths are
+       * literal pathspecs, so Git reads only their own directories. */
+      if (paths?.length === 0) {
+        return [];
+      }
       const args = [
+        '--literal-pathspecs',
         '-c',
         'core.excludesFile=',
+        '-c',
+        `core.ignoreCase=${String(await storeIgnoresCase())}`,
         'ls-files',
         '-z',
         '--others',
@@ -2123,15 +2149,37 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         '--exclude-standard',
         '--directory',
       ];
-      const listed =
-        root === undefined
-          ? await output(args)
-          : // A linked worktree finds its own admin directory from its `.git` file.
-            await output(['-C', root, ...args], { env: clearedGitEnvironment() });
-      return textDecoder
-        .decode(listed)
-        .split('\0')
-        .filter((path) => path !== '');
+      const list = async (pathspecs: readonly string[]): Promise<readonly string[]> => {
+        const command = pathspecs.length === 0 ? args : [...args, '--', ...pathspecs];
+        const listed =
+          root === undefined
+            ? await output(command)
+            : // A linked worktree finds its own admin directory from its `.git` file.
+              await output(['-C', root, ...command], { env: clearedGitEnvironment() });
+        return textDecoder
+          .decode(listed)
+          .split('\0')
+          .filter((path) => path !== '');
+      };
+      if (paths === undefined) {
+        return list([]);
+      }
+      /* A command line holds so much: the paths go in batches. */
+      const listed = new Set<string>();
+      for (let index = 0; index < paths.length; index += ignorePathspecBatch) {
+        // oxlint-disable-next-line no-await-in-loop -- one Git at a time over one checkout.
+        for (const entry of await list(paths.slice(index, index + ignorePathspecBatch))) {
+          listed.add(entry);
+        }
+      }
+      return [...listed].toSorted();
+    },
+
+    ignoreContext: async (): Promise<string> => {
+      const exclude = await readFile(join(repositoryPath, gitDirectoryName, 'info', 'exclude'), 'utf8').catch(
+        () => undefined,
+      );
+      return JSON.stringify([exclude ?? null, await storeIgnoresCase()]);
     },
 
     readRevision: async (id: RevisionId): Promise<RevisionRecord | undefined> => {

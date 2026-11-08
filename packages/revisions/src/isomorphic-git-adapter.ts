@@ -73,7 +73,8 @@ import { readTreeEntries, writeTreeObject } from '#object-store/tree-codec.js';
 import type { TreeCodecEntry } from '#object-store/tree-codec.js';
 import { RevisionPortError } from '#revision-port.js';
 import { assertMaterializableRevisionTree } from '#portable-tree.js';
-import { ignoredUntrackedPaths } from '#git-ignore.js';
+import { ignoredAmong, ignoredUntrackedPaths } from '#git-ignore.js';
+import type { IgnoreWalkFiles } from '#git-ignore.js';
 import { cleanLargeObjects, largeObjectBasisOf, lfsObjectPath, readLfsPointer } from '#lfs.js';
 import type { LargeObjectBasis, LfsPointer } from '#lfs.js';
 import { createTreeIdMemo } from '#tree-id-memo.js';
@@ -620,6 +621,42 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       trackedHeld = { tree: commit.tree, paths: new Set(listing.keys()) };
     }
     return trackedHeld.paths;
+  };
+
+  /* The store's `info/exclude`, which holds Tau's derived ignores. */
+  const readExclude = async (): Promise<string | undefined> => {
+    const excludePath = `${gitdir}/info/exclude`;
+    return (await gitFiles.exists(excludePath)) ? gitFiles.readFile(excludePath, 'utf8') : undefined;
+  };
+
+  /* The store's own `core.ignoreCase` (its `config`, never a device's): how its ignore rules match. */
+  const storeIgnoresCase = async (): Promise<boolean> => {
+    try {
+      const values: unknown = await getConfigAll({ fs, gitdir, path: 'core.ignorecase' });
+      const last: unknown = Array.isArray(values) ? values.at(-1) : undefined;
+      return last === true || (typeof last === 'string' && ['true', 'yes', 'on', '1'].includes(last.toLowerCase()));
+    } catch {
+      return false;
+    }
+  };
+
+  /* One checkout's files and head, for its ignore rules. */
+  const ignoreCheckout = async (
+    root: string | undefined,
+  ): Promise<Readonly<{ files: FileSystemProvider; head: string | undefined }>> => {
+    if (root === undefined) {
+      const live = await port.readHead();
+      return { files: filesystem, head: live?.head };
+    }
+    const records = await listCheckoutRecords();
+    const record = records.find((checkout) => checkout.root === root);
+    if (record === undefined) {
+      throw new RevisionPortError('CHECKOUT_CONFLICT', 'Those files are not open in this project.');
+    }
+    return {
+      files: await requireCheckouts().root(record.id),
+      head: record.baseRevisionId ?? (record.branch === undefined ? undefined : await port.readRef(record.branch)),
+    };
   };
 
   /*
@@ -2728,43 +2765,46 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
 
     /*
      * The untracked paths this checkout's own Git rules ignore — its
-     * `.gitignore` files and the store's `info/exclude` — read as Git reads
-     * them (`git-ignore.ts`), so a browser cut leaves out what a native one
-     * does (I5). A path the checkout's head tracks is never ignored.
+     * `.gitignore` files and the store's `info/exclude`, with the store's own
+     * `core.ignoreCase` — read as Git reads them (`git-ignore.ts`), so a
+     * browser cut leaves out what a native one does (I5). A path the
+     * checkout's head tracks is never ignored. Named paths are answered alone,
+     * reading only their own directories.
      */
-    ignoredPaths: async (root?: string): Promise<readonly string[] | undefined> => {
-      let files: FileSystemProvider = filesystem;
-      let head: string | undefined;
-      if (root === undefined) {
-        const live = await port.readHead();
-        head = live?.head;
-      } else {
-        const records = await listCheckoutRecords();
-        const record = records.find((checkout) => checkout.root === root);
-        if (record === undefined) {
-          throw new RevisionPortError('CHECKOUT_CONFLICT', 'Those files are not open in this project.');
-        }
-        files = await requireCheckouts().root(record.id);
-        head = record.baseRevisionId ?? (record.branch === undefined ? undefined : await port.readRef(record.branch));
-      }
-      const excludePath = `${gitdir}/info/exclude`;
-      const exclude = (await gitFiles.exists(excludePath)) ? await gitFiles.readFile(excludePath, 'utf8') : undefined;
-      return ignoredUntrackedPaths(
-        {
-          readdir: async (path) => files.readdir(path),
-          isDirectory: async (path) => {
+    ignoredPaths: async (root?: string, paths?: readonly string[]): Promise<readonly string[] | undefined> => {
+      const { files, head } = await ignoreCheckout(root);
+      const walkFiles: IgnoreWalkFiles = {
+        readdir: async (path) => files.readdir(path),
+        kind: async (path) => {
+          try {
             const stat = await files.lstat(path);
-            return stat.type === 'dir';
-          },
-          readText: async (path) => ((await files.exists(path)) ? files.readFile(path, 'utf8') : undefined),
+            return stat.type === 'dir' ? 'directory' : 'file';
+          } catch {
+            return undefined;
+          }
         },
-        {
-          tracked: await trackedPaths(head),
-          exclude,
-          /* The store's own directory is never the checkout's. */
-          skip: (path) => path === gitdir || path === defaultGitDirectory,
+        readText: async (path) => {
+          try {
+            return await files.readFile(path, 'utf8');
+          } catch {
+            return undefined;
+          }
         },
-      );
+      };
+      const [exclude, ignoreCase, tracked] = await Promise.all([readExclude(), storeIgnoresCase(), trackedPaths(head)]);
+      /* The store's own directory is never the checkout's. */
+      const inputs = {
+        tracked,
+        exclude,
+        ignoreCase,
+        skip: (path: string) => path === gitdir || path === defaultGitDirectory,
+      };
+      return paths === undefined ? ignoredUntrackedPaths(walkFiles, inputs) : ignoredAmong(walkFiles, inputs, paths);
+    },
+
+    ignoreContext: async (): Promise<string> => {
+      const [exclude, ignoreCase] = await Promise.all([readExclude(), storeIgnoresCase()]);
+      return JSON.stringify([exclude ?? null, ignoreCase]);
     },
 
     listCheckouts: async (): Promise<readonly Checkout[]> => {

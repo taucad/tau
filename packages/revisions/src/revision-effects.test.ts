@@ -11,6 +11,7 @@
  * cut against an engine-recorded head, so the two have to be the same id.
  */
 
+import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -5789,65 +5790,81 @@ for (const actorSet of actorSets) {
  * `info/exclude`, read as Git reads them; a tracked path is never left out.
  */
 describe("a cut honours the checkout's own Git ignore rules on both legs", () => {
-  it('records the same tree on each leg, leaving out ignored untracked files and keeping tracked ones', async () => {
-    const cutTwice = async (actorSet: ActorSet['name']): Promise<readonly [string, readonly string[]]> => {
-      const { port, actors, filesystem } = await fixture({ 'main.scad': 'cube(1);\n' }, undefined, { actorSet });
-      await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
-      const cutOnce = async (parents: readonly string[]): Promise<string> => {
-        const cut = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
-          checkoutId: 'live',
-          trigger: 'save',
+  it.each([false, true])(
+    "records the same tree on each leg, leaving out ignored untracked files and keeping tracked ones (the store's core.ignoreCase %s)",
+    async (ignoreCase) => {
+      const cutTwice = async (actorSet: ActorSet['name']): Promise<readonly [string, readonly string[]]> => {
+        const { port, actors, filesystem, root } = await fixture({ 'main.scad': 'cube(1);\n' }, undefined, {
+          actorSet,
         });
-        const written = await run<{ revisionId: string }>(actors.checkout.writeRevision, {
-          checkoutId: 'live',
-          cutId: cut.cutId,
-          treeId: cut.treeId,
-          parents,
-          trigger: 'save',
-          leaseIds: [],
+        await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+        /* The store's own setting, which both legs read: the native harness keeps its repository in `project/`. */
+        execFileSync('git', ['config', 'core.ignoreCase', String(ignoreCase)], {
+          cwd: actorSet === 'native-git' ? join(root, 'project') : root,
         });
-        await port.updateRef({
-          name: 'main',
-          expectedHead: parents[0] === undefined ? undefined : revisionId(parents[0]),
-          head: revisionId(written.revisionId),
-        });
-        return written.revisionId;
+        const cutOnce = async (parents: readonly string[]): Promise<string> => {
+          const cut = await run<{ treeId: string; cutId: string }>(actors.checkout.cut, {
+            checkoutId: 'live',
+            trigger: 'save',
+          });
+          const written = await run<{ revisionId: string }>(actors.checkout.writeRevision, {
+            checkoutId: 'live',
+            cutId: cut.cutId,
+            treeId: cut.treeId,
+            parents,
+            trigger: 'save',
+            leaseIds: [],
+          });
+          await port.updateRef({
+            name: 'main',
+            expectedHead: parents[0] === undefined ? undefined : revisionId(parents[0]),
+            head: revisionId(written.revisionId),
+          });
+          return written.revisionId;
+        };
+        await filesystem.writeFile('notes.log', 'tracked before the rule\n');
+        const first = await cutOnce([]);
+        const ignore = await filesystem.readFile(generatedIgnorePath, 'utf8');
+        await filesystem.writeFile(generatedIgnorePath, `${ignore}*.log\nbuild/\n*.secret\n!keep.secret\n`);
+        await filesystem.writeFile('models/.gitignore', '/local.step\n');
+        for (const [path, content] of [
+          ['notes.log', 'tracked, and changed\n'],
+          ['new.log', 'untracked\n'],
+          ['build/out.stl', 'solid\n'],
+          ['docs/build/page.html', '<p>\n'],
+          ['a.secret', 'x\n'],
+          ['keep.secret', 'kept\n'],
+          ['models/local.step', 'solid local\n'],
+          ['models/deep/local.step', 'solid deep\n'],
+          ['Upper.LOG', 'ignored only where case folds\n'],
+          ['Build/case.stl', 'solid\n'],
+        ] as const) {
+          // oxlint-disable-next-line no-await-in-loop -- parents first, one file at a time.
+          await filesystem.writeFile(path, content);
+        }
+        const second = await cutOnce([first]);
+        const record = await port.readRevision(revisionId(second));
+        const tree = await port.readTree(revisionId(second));
+        return [record!.treeId, (tree?.entries() ?? []).map(({ path }) => path).toSorted()];
       };
-      await filesystem.writeFile('notes.log', 'tracked before the rule\n');
-      const first = await cutOnce([]);
-      const ignore = await filesystem.readFile(generatedIgnorePath, 'utf8');
-      await filesystem.writeFile(generatedIgnorePath, `${ignore}*.log\nbuild/\n*.secret\n!keep.secret\n`);
-      await filesystem.writeFile('models/.gitignore', '/local.step\n');
-      for (const [path, content] of [
-        ['notes.log', 'tracked, and changed\n'],
-        ['new.log', 'untracked\n'],
-        ['build/out.stl', 'solid\n'],
-        ['docs/build/page.html', '<p>\n'],
-        ['a.secret', 'x\n'],
-        ['keep.secret', 'kept\n'],
-        ['models/local.step', 'solid local\n'],
-        ['models/deep/local.step', 'solid deep\n'],
-      ] as const) {
-        // oxlint-disable-next-line no-await-in-loop -- parents first, one file at a time.
-        await filesystem.writeFile(path, content);
-      }
-      const second = await cutOnce([first]);
-      const record = await port.readRevision(revisionId(second));
-      const tree = await port.readTree(revisionId(second));
-      return [record!.treeId, (tree?.entries() ?? []).map(({ path }) => path).toSorted()];
-    };
 
-    const legs = await Promise.all(actorSets.filter(({ enabled }) => enabled).map(async ({ name }) => cutTwice(name)));
+      const legs = await Promise.all(
+        actorSets.filter(({ enabled }) => enabled).map(async ({ name }) => cutTwice(name)),
+      );
 
-    expect(new Set(legs.map(([treeId]) => treeId)).size).toBe(1);
-    expect(legs[0]![1]).toStrictEqual([
-      '.gitattributes',
-      '.gitignore',
-      'keep.secret',
-      'main.scad',
-      'models/.gitignore',
-      'models/deep/local.step',
-      'notes.log',
-    ]);
-  }, 60_000);
+      expect(new Set(legs.map(([treeId]) => treeId)).size).toBe(1);
+      expect(legs[0]![1]).toStrictEqual([
+        '.gitattributes',
+        '.gitignore',
+        ...(ignoreCase ? [] : ['Build/case.stl']),
+        ...(ignoreCase ? [] : ['Upper.LOG']),
+        'keep.secret',
+        'main.scad',
+        'models/.gitignore',
+        'models/deep/local.step',
+        'notes.log',
+      ]);
+    },
+    60_000,
+  );
 });

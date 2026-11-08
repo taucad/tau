@@ -55,6 +55,7 @@ import type {
   TurnLease,
 } from '@taucad/revisions/revision-effects';
 import {
+  coveredByIgnoreListing,
   generatedGitattributesPath,
   generatedIgnorePath,
   readRevisionDiff,
@@ -1311,8 +1312,9 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     return {
       filesystem,
       mode: (path: string): FileMode => basis?.mode(path) ?? '100644',
-      /* The capture's own rule: the registry, and in an adopted repository the person's ignore rules. */
-      excluded: (path: string): boolean => !classify(path).versioned || ignored.has(path) || ignored.has(`${path}/`),
+      /* The capture's own rule: the registry, and the checkout's own Git ignore rules, a path under a
+       * directory Git lists whole included. */
+      excluded: (path: string): boolean => !classify(path).versioned || coveredByIgnoreListing(ignored, path),
     };
   };
 

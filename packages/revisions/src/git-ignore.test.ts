@@ -3,13 +3,17 @@
  * `git check-ignore` and `git ls-files --others --ignored` on real repositories.
  */
 import { execFileSync } from 'node:child_process';
-import { lstat, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { ignoredUntrackedPaths, parseIgnoreRules } from '#git-ignore.js';
-import type { IgnoreWalkFiles } from '#git-ignore.js';
+import { NodeFsProvider } from '@taucad/filesystem/backend/node';
+
+import { ignoredAmong, ignoredUntrackedPaths, parseIgnoreRules } from '#git-ignore.js';
+import type { IgnoreEntryKind, IgnoreWalkFiles } from '#git-ignore.js';
+import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
+import { createNativeGitRevisionPort } from '#native-git-port.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
 
 const roots: string[] = [];
@@ -28,19 +32,22 @@ const git = (cwd: string, args: readonly string[], input?: string): string =>
 const repository = async (
   files: Readonly<Record<string, string>>,
   tracked: readonly string[],
-  exclude?: string,
+  options?: Readonly<{ exclude?: string; ignoreCase?: boolean }>,
 ): Promise<string> => {
   const root = await mkdtemp(join(tmpdir(), 'tau-git-ignore-'));
   roots.push(root);
   git(root, ['init', '--quiet']);
+  if (options?.ignoreCase !== undefined) {
+    git(root, ['config', 'core.ignoreCase', String(options.ignoreCase)]);
+  }
   for (const [path, content] of Object.entries(files)) {
     // oxlint-disable-next-line no-await-in-loop -- parents first.
     await mkdir(join(root, path, '..'), { recursive: true });
     // oxlint-disable-next-line no-await-in-loop -- see above.
     await writeFile(join(root, path), content);
   }
-  if (exclude !== undefined) {
-    await writeFile(join(root, '.git', 'info', 'exclude'), exclude);
+  if (options?.exclude !== undefined) {
+    await writeFile(join(root, '.git', 'info', 'exclude'), options.exclude);
   }
   if (tracked.length > 0) {
     git(root, ['add', '--force', '--', ...tracked]);
@@ -57,12 +64,24 @@ const readOptional = async (path: string): Promise<string | undefined> => {
   }
 };
 
+const kindOf = async (path: string): Promise<IgnoreEntryKind | undefined> => {
+  try {
+    const stat = await lstat(path);
+    if (stat.isDirectory()) {
+      return 'directory';
+    }
+    if (stat.isSymbolicLink()) {
+      return 'symlink';
+    }
+    return stat.isFile() ? 'file' : 'other';
+  } catch {
+    return undefined;
+  }
+};
+
 const nodeFiles = (root: string): IgnoreWalkFiles => ({
   readdir: async (path) => readdir(join(root, path)),
-  isDirectory: async (path) => {
-    const stat = await lstat(join(root, path));
-    return stat.isDirectory();
-  },
+  kind: async (path) => kindOf(join(root, path)),
   readText: async (path) => readOptional(join(root, path)),
 });
 
@@ -80,12 +99,36 @@ const listedByGit = (root: string): readonly string[] =>
 const excludedBy = (listing: readonly string[], paths: readonly string[]): readonly string[] =>
   paths.filter((path) => listing.some((entry) => entry === path || (entry.endsWith('/') && path.startsWith(entry))));
 
-const ours = async (root: string, tracked: readonly string[]): Promise<readonly string[]> =>
-  ignoredUntrackedPaths(nodeFiles(root), {
-    tracked: new Set(tracked),
-    exclude: await readOptional(join(root, '.git', 'info', 'exclude')),
-    skip: (path) => path === '.git',
-  });
+const inputsOf = async (root: string, tracked: readonly string[], ignoreCase?: boolean) => ({
+  tracked: new Set(tracked),
+  exclude: await readOptional(join(root, '.git', 'info', 'exclude')),
+  ignoreCase,
+  skip: (path: string) => path === '.git',
+});
+
+const ours = async (root: string, tracked: readonly string[], ignoreCase?: boolean): Promise<readonly string[]> =>
+  ignoredUntrackedPaths(nodeFiles(root), await inputsOf(root, tracked, ignoreCase));
+
+/*
+ * Every listing agrees with Git's: the walk, and the per-path answer for each
+ * path alone and for all of them at once.
+ */
+const expectGitsListing = async (
+  root: string,
+  paths: readonly string[],
+  options: Readonly<{ tracked: readonly string[]; ignoreCase?: boolean }>,
+): Promise<readonly string[]> => {
+  const { tracked, ignoreCase } = options;
+  const expected = excludedBy(listedByGit(root), paths);
+  const inputs = await inputsOf(root, tracked, ignoreCase);
+  expect(excludedBy(await ours(root, tracked, ignoreCase), paths)).toStrictEqual(expected);
+  expect(excludedBy(await ignoredAmong(nodeFiles(root), inputs, paths), paths)).toStrictEqual(expected);
+  const one = await Promise.all(
+    paths.map(async (path) => excludedBy(await ignoredAmong(nodeFiles(root), inputs, [path]), [path])),
+  );
+  expect(one.flat()).toStrictEqual(expected);
+  return expected;
+};
 
 describe.runIf(gitToolchainOnPath)('git ignore rules as Git reads them', () => {
   it('lists what `git ls-files --others --ignored --directory` lists, nested files and info/exclude included', async () => {
@@ -152,11 +195,9 @@ describe.runIf(gitToolchainOnPath)('git ignore rules as Git reads them', () => {
       'plain.txt': '',
     };
     const tracked = ['.gitignore', 'models/.gitignore', 'plain.txt', 'tracked-dir/committed.log', 'a.log'];
-    const root = await repository(files, tracked, '/excluded/\n');
-    const paths = Object.keys(files);
+    const root = await repository(files, tracked, { exclude: '/excluded/\n' });
 
-    const excluded = excludedBy(await ours(root, tracked), paths);
-    expect(excluded).toStrictEqual(excludedBy(listedByGit(root), paths));
+    const excluded = await expectGitsListing(root, Object.keys(files), { tracked });
     expect(excluded).toContain('excluded/one.txt');
     expect(excluded).not.toContain('keep.log');
     expect(excluded).not.toContain('models/wanted.stl');
@@ -209,20 +250,24 @@ describe.runIf(gitToolchainOnPath)('git ignore rules as Git reads them', () => {
         .filter((path) => path !== '')
         .map((path) => path.replace(/\/$/u, '')),
     );
+    const everything = [...paths, ...Object.keys(files)];
     const listing = await ignoredUntrackedPaths(
       {
         readdir: async (path) => {
           const prefix = path === '' ? '' : `${path}/`;
           const names = new Set(
-            [...paths, ...Object.keys(files)].flatMap((candidate) =>
+            everything.flatMap((candidate) =>
               candidate.startsWith(prefix) ? [candidate.slice(prefix.length).split('/')[0]!] : [],
             ),
           );
           return [...names];
         },
-        isDirectory: async (path) =>
-          directories.has(path) ||
-          [...paths, ...Object.keys(files)].some((candidate) => candidate.startsWith(`${path}/`)),
+        kind: async (path) =>
+          path === '' || directories.has(path) || everything.some((candidate) => candidate.startsWith(`${path}/`))
+            ? 'directory'
+            : everything.includes(path)
+              ? 'file'
+              : undefined,
         readText: async (path) => (files as Record<string, string>)[path],
       },
       { tracked: new Set(Object.keys(files)) },
@@ -233,6 +278,165 @@ describe.runIf(gitToolchainOnPath)('git ignore rules as Git reads them', () => {
       );
 
     expect(paths.map((path) => [path, covered(path)])).toStrictEqual(paths.map((path) => [path, reported.has(path)]));
+  });
+
+  /*
+   * Each pattern in a directory of its own, so one repository and one
+   * `check-ignore` per case setting answer every pattern against every path:
+   * wildmatch's corners (`**` after a literal prefix, three stars before a slash, byte-wise `?` and
+   * classes, reversed ranges, unknown and unterminated classes) and the line
+   * format's (escaped and lone trailing `\`).
+   */
+  it.each([false, true])(
+    'matches as `git check-ignore` matches, pattern by pattern (core.ignoreCase %s)',
+    async (ignoreCase) => {
+      const patterns = [
+        'a/**/b',
+        'a**/b',
+        'lib**/gen',
+        '***/c',
+        '**/**/c',
+        'a/**/**/b',
+        String.raw`\*\*/c`,
+        '/**',
+        '**/',
+        'a/**',
+        '*/b',
+        'a/*/b',
+        '?.txt',
+        '[!a].txt',
+        'é.txt',
+        '[z-a]',
+        'x[z-a]',
+        '[[:foo:]]',
+        '[[:foo:]]x',
+        '[[:upper:]]u',
+        '[[:alpha:]-z]x',
+        '[[]x',
+        '[]]x',
+        '[!]]z',
+        '[a-]y',
+        String.raw`[\-z]x`,
+        'x[]',
+        'foo\\',
+        String.raw`foo\\ `,
+        String.raw`foo\ `,
+        '*.TXT',
+        '[A-Z]u',
+        '[A]u',
+        String.raw`\Au`,
+        String.raw`a\/b`,
+        'a?b',
+        'a[/]b',
+      ];
+      const paths = [
+        'a/b',
+        'a/x/b',
+        'a/x/y/b',
+        'ab/b',
+        'axb',
+        'a-b',
+        'lib/gen',
+        'libx/y/gen',
+        'lib/a/gen',
+        'c',
+        'x/y/c',
+        '**/c',
+        'b',
+        'x/b',
+        'a.txt',
+        'b.txt',
+        'é.txt',
+        'ü.txt',
+        'A.TXT',
+        'z',
+        'w',
+        'xa',
+        'fx',
+        'Uu',
+        'uu',
+        'Au',
+        'au',
+        '-x',
+        'zx',
+        '[x',
+        ']x',
+        ']z',
+        'zz',
+        '-y',
+        'ay',
+        'x[]',
+        'foo',
+        'foo\\',
+        'foo ',
+      ];
+      const files = Object.fromEntries(
+        patterns.map((pattern, index) => [`p${String(index)}/.gitignore`, `${pattern}\n`]),
+      );
+      const root = await repository(files, [], { ignoreCase });
+      const queried = patterns.flatMap((_, index) => paths.map((path) => `p${String(index)}/${path}`));
+      const reported = new Set(
+        git(root, ['check-ignore', '--no-index', '--stdin', '-z'], `${queried.join('\0')}\0`)
+          .split('\0')
+          .filter((path) => path !== ''),
+      );
+      const listing = await ignoredAmong(
+        {
+          readdir: async () => [],
+          kind: async (path) =>
+            path === '' || queried.some((candidate) => candidate.startsWith(`${path}/`))
+              ? 'directory'
+              : queried.includes(path) || path in files
+                ? 'file'
+                : undefined,
+          readText: async (path) => files[path],
+        },
+        { tracked: new Set(), ignoreCase },
+        queried,
+      );
+
+      const verdicts = (ignored: (path: string) => boolean) =>
+        patterns.map((pattern, index) => [pattern, paths.filter((path) => ignored(`p${String(index)}/${path}`))]);
+      expect(verdicts((path) => excludedBy(listing, [path]).length > 0)).toStrictEqual(
+        verdicts((path) => reported.has(path)),
+      );
+    },
+  );
+
+  it.each([false, true])(
+    'folds case exactly where the repository’s own core.ignoreCase (%s) asks',
+    async (ignoreCase) => {
+      const files = {
+        '.gitignore': '*.LOG\nBuild/\n/Docs/Draft.md\n[A-C]*.tmp\n',
+        'a.log': '',
+        'B.Log': '',
+        'build/out.stl': '',
+        'docs/draft.md': '',
+        'b.tmp': '',
+        'D.tmp': '',
+        'plain.txt': '',
+      };
+      const root = await repository(files, ['.gitignore'], { ignoreCase });
+
+      const excluded = await expectGitsListing(root, Object.keys(files), { tracked: ['.gitignore'], ignoreCase });
+      expect(excluded.length > 0).toBe(ignoreCase);
+    },
+  );
+
+  it('drops a leading byte-order mark, as Git does', async () => {
+    const files = { '.gitignore': '﻿*.log\n', 'a.log': '', 'plain.txt': '' };
+    const root = await repository(files, ['.gitignore']);
+
+    expect(await expectGitsListing(root, Object.keys(files), { tracked: ['.gitignore'] })).toStrictEqual(['a.log']);
+  });
+
+  it('never reads a `.gitignore` that is a symbolic link, as Git refuses to', async () => {
+    const files = { 'rules.txt': '*.log\n', 'sub/a.log': '', 'b.log': '' };
+    const root = await repository(files, ['rules.txt']);
+    await symlink('../rules.txt', join(root, 'sub', '.gitignore'));
+    await symlink('rules.txt', join(root, '.gitignore'));
+
+    expect(await expectGitsListing(root, Object.keys(files), { tracked: ['rules.txt'] })).toStrictEqual([]);
   });
 
   it('never ignores a tracked path, and never looks inside an untracked repository', async () => {
@@ -249,14 +453,81 @@ describe.runIf(gitToolchainOnPath)('git ignore rules as Git reads them', () => {
     await mkdir(join(root, 'inner'));
     git(join(root, 'inner'), ['init', '--quiet']);
     await writeFile(join(root, 'inner', 'x.log'), '');
-    const paths = [...Object.keys(files), 'inner/x.log'];
 
-    const listed = await ours(root, tracked);
-    expect(excludedBy(listed, paths)).toStrictEqual(excludedBy(listedByGit(root), paths));
-    expect(excludedBy(listed, paths)).toStrictEqual(['build/new.txt', 'build/sub/x']);
+    expect(await expectGitsListing(root, [...Object.keys(files), 'inner/x.log'], { tracked })).toStrictEqual([
+      'build/new.txt',
+      'build/sub/x',
+    ]);
+  });
+
+  it('walks a directory whose gitfile names no repository, as Git does, and never one whose gitfile does', async () => {
+    const files = {
+      '.gitignore': '*.log\n',
+      'broken/.git': 'gitdir: ../nowhere\n',
+      'broken/a.log': '',
+      'linked/.git': 'gitdir: ../store\n',
+      'linked/b.log': '',
+      'garbled/.git': 'not a gitfile\n',
+      'garbled/c.log': '',
+    };
+    const root = await repository(files, ['.gitignore']);
+    git(root, ['init', '--quiet', '--bare', 'store']);
+    const paths = [...Object.keys(files).filter((path) => !path.endsWith('/.git')), 'store/HEAD'];
+
+    expect(await expectGitsListing(root, paths, { tracked: ['.gitignore'] })).toStrictEqual([
+      'broken/a.log',
+      'garbled/c.log',
+    ]);
   });
 
   it('compiles nothing for blank lines and comments', () => {
     expect(parseIgnoreRules('\n# a comment\n   \n')).toStrictEqual([]);
   });
+});
+
+/*
+ * The two ports over one real repository: the native leg asks Git, the
+ * browser leg reads the rules itself, and both answer the whole checkout and
+ * the named paths alike (I5), under the store's own `core.ignoreCase`.
+ */
+describe.runIf(gitToolchainOnPath)('both legs read a checkout’s ignore rules alike', () => {
+  it.each([false, true])(
+    'lists, answers named paths and reports its context as the other leg does (core.ignoreCase %s)',
+    async (ignoreCase) => {
+      const files = {
+        '.gitignore': '*.LOG\nBuild/\n',
+        'sub/.gitignore': '!keep.log\n',
+        'a.log': '',
+        'B.Log': '',
+        'sub/keep.log': '',
+        'sub/b.log': '',
+        'build/x.stl': '',
+        'tracked.log': '',
+        'plain.txt': '',
+        'other.txt': '',
+      };
+      const tracked = ['.gitignore', 'sub/.gitignore', 'tracked.log', 'plain.txt'];
+      const root = await repository(files, tracked, { exclude: 'other.txt\n', ignoreCase });
+      const native = createNativeGitRevisionPort({ repositoryPath: root });
+      const browser = createIsomorphicGitRevisionPort({ filesystem: new NodeFsProvider(root) });
+      const paths = Object.keys(files);
+      const expected = excludedBy(listedByGit(root), paths);
+
+      for (const port of [native, browser]) {
+        // oxlint-disable-next-line no-await-in-loop -- two ports, each asked in turn.
+        expect(excludedBy((await port.ignoredPaths?.()) ?? [], paths)).toStrictEqual(expected);
+        // oxlint-disable-next-line no-await-in-loop -- see above.
+        expect(excludedBy((await port.ignoredPaths?.(undefined, paths)) ?? [], paths)).toStrictEqual(expected);
+      }
+      expect(expected).toContain('other.txt');
+      expect(expected.includes('a.log')).toBe(ignoreCase);
+      const before = await native.ignoreContext?.();
+      expect(await browser.ignoreContext?.()).toBe(before);
+
+      await writeFile(join(root, '.git', 'info', 'exclude'), 'plain.txt\n');
+      const after = await native.ignoreContext?.();
+      expect(after).not.toBe(before);
+      expect(await browser.ignoreContext?.()).toBe(after);
+    },
+  );
 });

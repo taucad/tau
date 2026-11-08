@@ -1855,9 +1855,39 @@ importers:
       '@taucad/agent-observability':
         specifier: workspace:*
         version: link:../../libs/agent-observability
+      '@taucad/api-auth':
+        specifier: workspace:*
+        version: link:../libs/api-auth
+      '@taucad/api-billing':
+        specifier: workspace:*
+        version: link:../libs/api-billing
+      '@taucad/api-core':
+        specifier: workspace:*
+        version: link:../libs/api-core
+      '@taucad/api-database':
+        specifier: workspace:*
+        version: link:../libs/api-database
+      '@taucad/api-email':
+        specifier: workspace:*
+        version: link:../libs/api-email
       '@taucad/api-extractor':
         specifier: workspace:*
         version: link:../../libs/api-extractor
+      '@taucad/api-hosts':
+        specifier: workspace:*
+        version: link:../libs/api-hosts
+      '@taucad/api-lifecycle':
+        specifier: workspace:*
+        version: link:../libs/api-lifecycle
+      '@taucad/api-llm-gateway':
+        specifier: workspace:*
+        version: link:../libs/api-llm-gateway
+      '@taucad/api-observability':
+        specifier: workspace:*
+        version: link:../libs/api-observability
+      '@taucad/api-redis':
+        specifier: workspace:*
+        version: link:../libs/api-redis
       '@taucad/billing':
         specifier: workspace:*
         version: link:../libs/billing
@@ -2256,6 +2286,26 @@ importers:
       esbuild:
         specifier: 'catalog:'
         version: 0.28.2
+
+  apps/libs/api-auth: {}
+
+  apps/libs/api-billing: {}
+
+  apps/libs/api-core: {}
+
+  apps/libs/api-database: {}
+
+  apps/libs/api-email: {}
+
+  apps/libs/api-hosts: {}
+
+  apps/libs/api-lifecycle: {}
+
+  apps/libs/api-llm-gateway: {}
+
+  apps/libs/api-observability: {}
+
+  apps/libs/api-redis: {}
 
   apps/libs/billing:
     dependencies:

@@ -1,0 +1,7 @@
+{
+  "name": "api-email",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/libs/api-email",
+  "projectType": "library",
+  "tags": ["scope:api", "type:app-lib", "layer:data-access", "api:email"]
+}

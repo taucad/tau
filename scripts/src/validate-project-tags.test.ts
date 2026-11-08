@@ -63,6 +63,18 @@ describe('apiLibraryAppEdges()', () => {
       (name) => name.startsWith('api-') && graph.nodes[name]?.data.tags?.includes('type:app-lib'),
     );
 
+    expect(apiLibraries.toSorted()).toEqual([
+      'api-auth',
+      'api-billing',
+      'api-core',
+      'api-database',
+      'api-email',
+      'api-hosts',
+      'api-lifecycle',
+      'api-llm-gateway',
+      'api-observability',
+      'api-redis',
+    ]);
     expect(apiLibraryAppEdges(graph)).toEqual([]);
     for (const library of apiLibraries) {
       expect(graph.dependencies[library]?.map(({ target }) => target) ?? []).not.toContain('api');
